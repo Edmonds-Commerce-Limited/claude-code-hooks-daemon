@@ -1,0 +1,24 @@
+#!/bin/bash
+#
+# Claude Code Hooks - PreToolUse Forwarder
+#
+# Forwards PreToolUse hook calls to daemon via Unix socket.
+# CRITICAL: Pipes JSON directly - NEVER store in shell variables.
+# CRITICAL: All errors output valid JSON to stdout for agent visibility.
+#
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../init.sh"
+
+# Try to start daemon - if it fails, output proper JSON error to stdout
+if ! ensure_daemon; then
+    emit_hook_error "PreToolUse" "daemon_startup_failed" \
+        "Failed to start hooks daemon. Check logs with: python -m claude_code_hooks_daemon.daemon.cli logs"
+    exit 0  # Exit 0 so Claude processes the JSON response
+fi
+
+# Pipe directly from stdin through jq to daemon - no shell variable storage
+# send_request_stdin handles socket errors internally and outputs JSON on failure
+jq -c '{event: "PreToolUse", hook_input: .}' | send_request_stdin

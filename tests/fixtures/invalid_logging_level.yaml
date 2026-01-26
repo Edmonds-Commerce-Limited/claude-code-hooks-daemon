@@ -1,0 +1,5 @@
+version: "1.0"
+
+settings:
+  logging_level: TRACE  # Invalid: not in enum
+  log_file: .claude/hooks/daemon.log

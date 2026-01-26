@@ -1,0 +1,46 @@
+version: "1.0"
+
+settings:
+  logging_level: INFO
+  log_file: .claude/hooks/daemon.log
+
+handlers:
+  pre_tool_use:
+    # Block dangerous git operations
+    destructive_git:
+      enabled: true
+      priority: 10
+
+    # Discourage git stash (with escape hatch)
+    git_stash:
+      enabled: true
+      priority: 20
+      escape_hatch: "I HAVE ABSOLUTELY CONFIRMED THAT STASH IS THE ONLY OPTION"
+
+    # Enforce relative paths in tool calls
+    absolute_path:
+      enabled: true
+      priority: 12
+      blocked_prefixes:
+        - /container-mount/
+        - /tmp/claude-code/
+
+    # Ensure web searches include current year
+    web_search_year:
+      enabled: true
+      priority: 55
+
+    # Warn on American English spellings
+    british_english:
+      enabled: true
+      priority: 60
+      mode: warn  # warn or block
+      excluded_dirs:
+        - node_modules/
+        - dist/
+
+  post_tool_use:
+    enabled: false
+
+  session_start:
+    enabled: false

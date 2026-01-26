@@ -1,0 +1,20 @@
+#!/bin/bash
+#
+# Claude Code Hooks - SessionStart Forwarder
+#
+# Forwards SessionStart hook calls to daemon via Unix socket.
+# CRITICAL: Pipes JSON directly - NEVER store in shell variables.
+#
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../init.sh"
+
+ensure_daemon || {
+    echo '{"error": "Failed to start daemon"}' >&2
+    exit 1
+}
+
+# Pipe directly from stdin through jq to daemon - no shell variable storage
+jq -c '{event: "SessionStart", hook_input: .}' | send_request_stdin

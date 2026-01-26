@@ -1,0 +1,18 @@
+"""Handler missing required methods."""
+
+from claude_code_hooks_daemon.core import Handler
+
+
+class MissingMethodsHandler(Handler):
+    """Handler that doesn't implement required methods."""
+
+    def __init__(self, config=None):
+        """Initialise the handler.
+
+        Args:
+            config: Optional configuration dictionary
+        """
+        super().__init__(name="missing-methods", priority=50)
+        self.config = config
+
+    # Missing matches() and handle() methods

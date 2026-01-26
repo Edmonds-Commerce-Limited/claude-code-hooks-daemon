@@ -1,0 +1,9 @@
+# Invalid: missing required 'version' field
+settings:
+  logging_level: INFO
+  log_file: .claude/hooks/daemon.log
+
+handlers:
+  pre_tool_use:
+    destructive_git:
+      enabled: true
