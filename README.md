@@ -163,6 +163,15 @@ handlers:
         - /container-mount/
         - /tmp/claude-code/
 
+    worktree_file_copy:     # Prevent accidental worktree file copies
+      enabled: true
+      priority: 12
+
+    git_stash:              # Discourage git stash with escape hatch
+      enabled: true
+      priority: 20
+      escape_hatch: "YOLO"  # Use "YOLO" in commit message to bypass
+
     tdd_enforcement:        # Enforce TDD workflow
       enabled: true
       priority: 25
@@ -170,6 +179,26 @@ handlers:
     eslint_disable:         # Prevent ESLint rule disabling
       enabled: true
       priority: 30
+
+    markdown_organization:  # Enforce markdown organization rules
+      enabled: true
+      priority: 40
+
+    npm_command:            # Validate npm command usage
+      enabled: true
+      priority: 45
+
+    validate_plan_number:   # Validate plan numbering consistency
+      enabled: true
+      priority: 45
+
+    plan_workflow:          # Enforce planning workflow steps
+      enabled: true
+      priority: 50
+
+    plan_time_estimates:    # Prevent time estimates in plans
+      enabled: true
+      priority: 50
 
     web_search_year:        # Ensure current year in searches
       enabled: true
@@ -237,6 +266,41 @@ plugins:
       handlers: null  # Load all Handler classes found
       enabled: true
 ```
+
+### How Custom Handlers Attach to Events
+
+**CRITICAL:** The plugin system loads ALL plugins for ALL event types. The directory path (e.g., `/pre_tool_use/`) is **convention only**, not enforcement.
+
+Your handler MUST check `hook_event_name` in its `matches()` method:
+
+```python
+def matches(self, hook_input: dict) -> bool:
+    # REQUIRED: Filter by event type
+    event_name = hook_input.get("hook_event_name")
+    if event_name != "PreToolUse":  # Change to your event type
+        return False
+
+    # Your custom matching logic
+    return "my_pattern" in hook_input.get("tool_input", {}).get("command", "")
+```
+
+**Event Type Values:**
+- `"PreToolUse"` - Before tool execution
+- `"PostToolUse"` - After tool execution
+- `"SessionStart"` - Session initialization
+- `"SessionEnd"` - Session termination
+- `"PreCompact"` - Before conversation compaction
+- `"SubagentStop"` - Subagent completion
+- `"UserPromptSubmit"` - User prompt submission
+- `"Notification"` - Notification events
+- `"PermissionRequest"` - Permission requests
+- `"Stop"` - Stop events
+
+**Directory Convention:**
+- Place handlers in `.claude/hooks/handlers/{event_type}/` (convention)
+- Example: `.claude/hooks/handlers/pre_tool_use/my_handler.py`
+- The directory name does NOT enforce event filtering
+- Your `matches()` method is responsible for event filtering
 
 ---
 
