@@ -16,12 +16,33 @@ from pathlib import Path
 from datetime import datetime
 
 
-def find_project_root() -> Path:
-    """Find project root by looking for .claude directory."""
+def find_project_root(explicit_root: Path | None = None) -> Path:
+    """Find project root by looking for .claude directory.
+
+    Args:
+        explicit_root: Explicitly specified project root (overrides detection)
+
+    Returns:
+        Path to project root directory
+    """
+    if explicit_root:
+        return explicit_root.resolve()
+
     current = Path.cwd()
 
-    # Check current directory first
-    if (current / ".claude").exists():
+    # If we're inside a directory named 'hooks-daemon', assume we're in the daemon
+    # repo and should look in parent for project .claude directory
+    if current.name == "hooks-daemon" or "hooks-daemon" in current.parts:
+        # Search upward from parent, skipping any .claude inside hooks-daemon
+        for parent in current.parents:
+            # Skip if this parent is still inside hooks-daemon
+            if "hooks-daemon" in parent.parts:
+                continue
+            if (parent / ".claude").exists():
+                return parent
+
+    # Check current directory first (but only if not inside hooks-daemon)
+    if (current / ".claude").exists() and "hooks-daemon" not in current.parts:
         return current
 
     # Search upward through parents
@@ -302,7 +323,7 @@ def create_daemon_config(project_root: Path, force: bool = False) -> None:
             print("   Skipped hooks-daemon.yaml")
             return
 
-    config = """version: 1.0
+    config = """version: "1.0"
 
 # Daemon configuration
 daemon:
@@ -431,7 +452,7 @@ handlers:
 #     path: ".claude/hooks/handlers/pre_tool_use/my_handler.py"
 #     class: "MyHandler"
 #     events: ["PreToolUse"]
-plugins: []
+plugins: {}
 """
 
     config_file.write_text(config)
@@ -761,12 +782,23 @@ def main() -> int:
         action="store_true",
         help="Install hooks on the daemon repository itself (self-installation mode)"
     )
+    parser.add_argument(
+        "--project-root",
+        type=Path,
+        help="Explicitly specify the project root directory (must contain or will create .claude/)"
+    )
     args = parser.parse_args()
 
     print("🚀 Claude Code Hooks Daemon Installer\n")
 
     # Find project root
-    project_root = find_project_root()
+    project_root = find_project_root(explicit_root=args.project_root)
+
+    # Validate project root
+    if not project_root.exists():
+        print(f"❌ Error: Project root does not exist: {project_root}")
+        return 1
+
     print(f"📁 Project root: {project_root}")
 
     # Create .claude directory if it doesn't exist

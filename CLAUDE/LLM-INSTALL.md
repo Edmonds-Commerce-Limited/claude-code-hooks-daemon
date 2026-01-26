@@ -47,8 +47,13 @@ untracked/venv/bin/python -c "import claude_code_hooks_daemon; print('OK')"
 ### 3. Run Installer
 
 ```bash
+# The installer auto-detects project root by searching upward for .claude/
 # Creates .claude/hooks/, settings.json, hooks-daemon.yaml
 untracked/venv/bin/python install.py
+
+# For explicit control (optional):
+# untracked/venv/bin/python install.py --project-root /workspace
+
 cd ../..
 ```
 
@@ -177,6 +182,22 @@ grep -A 1 "destructive_git:" .claude/hooks-daemon.yaml
 
 # Test hook manually
 echo '{"tool_name": "Bash", "tool_input": {"command": "git reset --hard"}}' | .claude/hooks/pre-tool-use
+```
+
+### Files created in wrong location
+If installer created `.claude/hooks-daemon/.claude/` instead of `.claude/`:
+```bash
+# This is fixed in latest version - the installer now auto-detects correctly
+# If you hit this, update to latest version and reinstall:
+cd .claude/hooks-daemon
+git pull
+untracked/venv/bin/pip install -e .
+
+# Clean up incorrect installation
+rm -rf .claude/hooks-daemon/.claude
+
+# Reinstall with explicit project root
+untracked/venv/bin/python install.py --project-root /workspace
 ```
 
 ### Rollback to previous hooks

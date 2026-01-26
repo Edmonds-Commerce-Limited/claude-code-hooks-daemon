@@ -56,7 +56,9 @@ python3 -m venv untracked/venv
 # Install daemon dependencies into venv
 untracked/venv/bin/pip install -e .
 
-# Run automated installer (uses venv Python)
+# Run automated installer
+# The installer auto-detects project root (searches upward for .claude/)
+# For explicit control, use: --project-root /path/to/project
 untracked/venv/bin/python install.py
 
 # Return to project root
