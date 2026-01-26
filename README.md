@@ -6,7 +6,12 @@ Eliminates process spawn overhead (~21ms) with sub-millisecond response times af
 
 ---
 
-**🤖 LLM Installation Guide**: [LLM-INSTALL.md](./CLAUDE/LLM-INSTALL.md) - Complete step-by-step installation optimized for AI assistants
+**🤖 AI-Assisted Installation**: Copy and paste this into Claude Code:
+
+```
+Please read and follow the installation instructions from:
+https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-INSTALL.md
+```
 
 ---
 
@@ -34,24 +39,7 @@ Provides a daemon-based hooks system with:
 
 ## Installation
 
-> **🤖 For LLMs**: Complete step-by-step installation guide available at [LLM-INSTALL.md](./CLAUDE/LLM-INSTALL.md)
->
-> Includes: backup procedures, handler migration, verification, troubleshooting, and contributing.
-
-### AI-Assisted Installation (Easiest)
-
-**IMPORTANT**: Before running AI installation, ensure git working tree is clean and all changes are committed/pushed.
-
-Copy and paste this into Claude Code:
-
-```
-Please read and follow the installation instructions from:
-https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-INSTALL.md
-```
-
-That's it! Claude will read the guide and handle the installation automatically.
-
-### Manual Installation (Alternative)
+### Manual Installation
 
 Run from your project root:
 
