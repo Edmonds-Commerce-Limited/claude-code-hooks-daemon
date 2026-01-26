@@ -10,17 +10,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Comprehensive code review and issue fixes
 - DaemonController for multi-event dispatch
-- Python 3.8 compatibility fixes
 - LICENSE file (MIT)
 - CHANGELOG.md
 - CONTRIBUTING.md
+
+### Changed
+- **BREAKING**: Minimum Python version raised from 3.8 to 3.11
+- Installation now creates self-contained venv in `untracked/venv/` (no system pollution)
+- All documentation updated to use venv Python instead of system Python
 
 ### Fixed
 - CRIT-001: FrontController CLI constructor mismatch - daemon now starts correctly
 - CRIT-002: init.sh undefined daemon_pid variable
 - CRIT-003: Removed duplicate get_workspace_root() function
 - HIGH-001: BritishEnglishHandler now correctly set as non-terminal
-- Python 3.8 compatibility: replaced `X | Y` union syntax with `Union[X, Y]`
+- Installation instructions no longer suggest breaking system packages
 
 ## [1.0.0-alpha] - 2025-01-15
 

@@ -261,18 +261,19 @@ All QA tools are configured in `pyproject.toml`:
 ```toml
 [tool.ruff]
 line-length = 100
-target-version = "py38"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "B", "C4", "UP", "ARG", "SIM"]
-ignore = ["E501", "B008", "B905", "SIM117"]
+ignore = ["E501", "B008"]
 ```
 
 ### Mypy Configuration
 
 ```toml
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
+strict = true
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
@@ -285,7 +286,7 @@ check_untyped_defs = true
 ```toml
 [tool.black]
 line-length = 100
-target-version = ["py38", "py39", "py310", "py311", "py312"]
+target-version = ["py311", "py312", "py313"]
 ```
 
 ### Pytest Configuration

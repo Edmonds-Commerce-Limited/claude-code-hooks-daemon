@@ -26,7 +26,7 @@ git status --short
 # 4. Check you're in a Claude Code project (should have .claude directory)
 ls -la .claude/
 
-# 5. Check Python 3.8+ is available
+# 5. Check Python 3.11+ is available
 python3 --version
 
 # 6. Check you have write permissions
@@ -84,14 +84,17 @@ cd .claude
 git clone https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon.git hooks-daemon
 cd hooks-daemon
 
-# Install daemon dependencies
-pip install -e .
+# Create self-contained virtual environment (survives container restarts)
+python3 -m venv untracked/venv
+
+# Install daemon dependencies into venv (NOT system Python)
+untracked/venv/bin/pip install -e .
 ```
 
 **Verification**:
 ```bash
-# Should output module path without errors
-python3 -c "import claude_code_hooks_daemon; print(claude_code_hooks_daemon.__file__)"
+# Should output module path from venv without errors
+untracked/venv/bin/python -c "import claude_code_hooks_daemon; print(claude_code_hooks_daemon.__file__)"
 ```
 
 ### Step 3: Run Automated Installer
@@ -100,8 +103,8 @@ The installer will create all necessary files in your project.
 
 ```bash
 # Already in .claude/hooks-daemon/ from Step 2
-# Run installer
-python3 install.py
+# Run installer using venv Python
+untracked/venv/bin/python install.py
 
 # Return to project root
 cd ../..
@@ -165,11 +168,11 @@ git status --short
 Test that the daemon starts and responds correctly.
 
 ```bash
-# Test daemon can start
-python3 -m claude_code_hooks_daemon.daemon.cli start
+# Test daemon can start (use venv Python)
+.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli start
 
 # Check daemon status
-python3 -m claude_code_hooks_daemon.daemon.cli status
+.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli status
 
 # Test a hook manually (should block destructive git command)
 echo '{"tool_name": "Bash", "tool_input": {"command": "git reset --hard HEAD"}}' | .claude/hooks/pre-tool-use
@@ -222,7 +225,7 @@ handlers:
 
 After editing, restart daemon:
 ```bash
-python3 -m claude_code_hooks_daemon.daemon.cli restart
+.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
 ```
 
 ## Migrating Project-Specific Hooks
@@ -325,7 +328,7 @@ handlers:
 
 Restart daemon to load:
 ```bash
-python3 -m claude_code_hooks_daemon.daemon.cli restart
+.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
 ```
 
 ### Step 6D: Test Custom Handler
@@ -339,7 +342,7 @@ echo '{"tool_name": "Bash", "tool_input": {"command": "npm install lodash"}}' | 
 
 After installation, verify everything works:
 
-- [ ] **Daemon starts**: `python3 -m claude_code_hooks_daemon.daemon.cli status` shows "RUNNING"
+- [ ] **Daemon starts**: `.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli status` shows "RUNNING"
 - [ ] **Destructive git blocked**: Test command returns `"decision": "deny"`
 - [ ] **sed blocked**: `sed -i` command returns `"decision": "deny"`
 - [ ] **Safe commands allowed**: `echo hello` command returns `"decision": "allow"`
@@ -349,7 +352,7 @@ After installation, verify everything works:
 
 Check daemon logs if any issues:
 ```bash
-python3 -m claude_code_hooks_daemon.daemon.cli logs
+.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli logs
 ```
 
 ## Troubleshooting
@@ -359,12 +362,12 @@ python3 -m claude_code_hooks_daemon.daemon.cli logs
 **Check Python version**:
 ```bash
 python3 --version
-# Should be 3.8 or higher
+# Should be 3.11 or higher
 ```
 
 **Check installation**:
 ```bash
-python3 -c "import claude_code_hooks_daemon; print('OK')"
+.claude/hooks-daemon/untracked/venv/bin/python -c "import claude_code_hooks_daemon; print('OK')"
 ```
 
 **Check for port conflicts**:
@@ -385,7 +388,7 @@ grep -A 2 "enabled:" .claude/hooks-daemon.yaml
 
 **Check daemon logs for errors**:
 ```bash
-python3 -m claude_code_hooks_daemon.daemon.cli logs | grep ERROR
+.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli logs | grep ERROR
 ```
 
 **Verify hook_input format**:
@@ -405,13 +408,13 @@ echo '{"tool_name": "Bash", "tool_input": {"command": "git reset --hard HEAD"}}'
 **Check imports**:
 ```bash
 cd .claude/hooks/handlers/pre_tool_use
-python3 -c "from my_custom_handler import MyCustomHandler; print('OK')"
+../../../../hooks-daemon/untracked/venv/bin/python -c "from my_custom_handler import MyCustomHandler; print('OK')"
 ```
 
 **Check handler registration**:
 ```bash
 # Should list your handler
-python3 -c "
+.claude/hooks-daemon/untracked/venv/bin/python -c "
 from claude_code_hooks_daemon.daemon.controller import DaemonController
 from claude_code_hooks_daemon.config import Config
 from pathlib import Path
@@ -444,7 +447,7 @@ handlers:
 
 **Check daemon logs for slow handlers**:
 ```bash
-python3 -m claude_code_hooks_daemon.daemon.cli logs | grep "took"
+.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli logs | grep "took"
 ```
 
 ### Problem: Need to rollback to old hooks
@@ -452,7 +455,7 @@ python3 -m claude_code_hooks_daemon.daemon.cli logs | grep "took"
 **Option 1: Git Rollback (Recommended - if you committed before install)**
 ```bash
 # Stop daemon first
-python3 -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
+.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
 
 # Restore entire .claude/ directory from git
 git restore .claude/
@@ -479,7 +482,7 @@ if [ -z "$BACKUP_DIR" ]; then
 fi
 
 # Stop daemon
-python3 -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
+.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
 
 # Restore backup
 rm -rf .claude/hooks
@@ -502,7 +505,7 @@ When reporting issues, include:
 
 1. **Daemon version**:
    ```bash
-   python3 -c "import claude_code_hooks_daemon; print(claude_code_hooks_daemon.__version__)"
+   .claude/hooks-daemon/untracked/venv/bin/python -c "import claude_code_hooks_daemon; print(claude_code_hooks_daemon.__version__)"
    ```
 
 2. **Python version**:
@@ -517,7 +520,7 @@ When reporting issues, include:
 
 4. **Daemon logs**:
    ```bash
-   python3 -m claude_code_hooks_daemon.daemon.cli logs > daemon-logs.txt
+   .claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli logs > daemon-logs.txt
    ```
 
 5. **Configuration** (sanitize sensitive data):
@@ -652,7 +655,7 @@ The daemon starts automatically when first hook is called (lazy startup).
 To start manually on system boot:
 ```bash
 # Add to ~/.bashrc or project .envrc
-python3 -m claude_code_hooks_daemon.daemon.cli start 2>/dev/null || true
+.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli start 2>/dev/null || true
 ```
 
 ### Daemon Auto-Shutdown
@@ -688,4 +691,4 @@ Set to `0` to disable auto-shutdown (daemon runs indefinitely).
 ---
 
 **Installation Date**: `date +%Y-%m-%d`
-**Daemon Version**: Check with `python3 -c "import claude_code_hooks_daemon; print(claude_code_hooks_daemon.__version__)"`
+**Daemon Version**: Check with `.claude/hooks-daemon/untracked/venv/bin/python -c "import claude_code_hooks_daemon; print(claude_code_hooks_daemon.__version__)"`

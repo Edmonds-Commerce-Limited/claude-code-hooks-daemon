@@ -50,11 +50,14 @@ cd .claude
 git clone https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon.git hooks-daemon
 cd hooks-daemon
 
-# Install daemon dependencies
-pip install -e .
+# Create self-contained virtual environment
+python3 -m venv untracked/venv
 
-# Run automated installer
-python3 install.py
+# Install daemon dependencies into venv
+untracked/venv/bin/pip install -e .
+
+# Run automated installer (uses venv Python)
+untracked/venv/bin/python install.py
 
 # Return to project root
 cd ../..
@@ -88,17 +91,20 @@ Claude Code → Hook Script (forwarder) → Daemon (Unix socket) → Handlers
 ## Daemon Management
 
 ```bash
+# All commands use the venv Python (NOT system Python)
+VENV_PYTHON=.claude/hooks-daemon/untracked/venv/bin/python
+
 # Start daemon manually (usually not needed - lazy startup)
-python3 -m claude_code_hooks_daemon.daemon.cli start
+$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli start
 
 # Stop daemon
-python3 -m claude_code_hooks_daemon.daemon.cli stop
+$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli stop
 
 # Check status
-python3 -m claude_code_hooks_daemon.daemon.cli status
+$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli status
 
 # Restart
-python3 -m claude_code_hooks_daemon.daemon.cli restart
+$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli restart
 ```
 
 **Note**: Daemon starts automatically on first hook call (lazy startup).
@@ -463,25 +469,28 @@ echo '{"tool_name": "Bash", "tool_input": {"command": "ls"}}' | .claude/hooks/pr
 
 **Check daemon is importable**:
 ```bash
-cd .claude/hooks/claude-code-hooks-daemon
-python3 -c "import sys; sys.path.insert(0, 'src'); from claude_code_hooks_daemon.hooks.pre_tool_use import main; print('✅ OK')"
+.claude/hooks-daemon/untracked/venv/bin/python -c "from claude_code_hooks_daemon.hooks.pre_tool_use import main; print('✅ OK')"
 ```
 
 ### Import Errors
 
 **ModuleNotFoundError: No module named 'claude_code_hooks_daemon'**
 
-- **Solution 1**: Check `sys.path.insert(0, ...)` in your hook file points to correct path
-- **Solution 2**: Run `pip install -e .` in the daemon directory (`cd .claude/hooks/claude-code-hooks-daemon && pip install -e .`)
+- **Solution**: Ensure venv exists and dependencies are installed:
+  ```bash
+  cd .claude/hooks-daemon
+  python3 -m venv untracked/venv
+  untracked/venv/bin/pip install -e .
+  ```
 
 ### Dependencies Missing
 
 **ModuleNotFoundError: No module named 'yaml'**
 
-Install daemon dependencies:
+Install daemon dependencies into venv:
 ```bash
-cd .claude/hooks/claude-code-hooks-daemon
-pip install -e .  # Installs pyyaml, jsonschema
+cd .claude/hooks-daemon
+untracked/venv/bin/pip install -e .  # Installs pyyaml, jsonschema
 ```
 
 ### Configuration Not Loading
@@ -495,7 +504,7 @@ ls hooks-daemon.yaml          # Alternative location
 
 **Validate YAML syntax**:
 ```bash
-python3 -c "import yaml; yaml.safe_load(open('.claude/hooks-daemon.yaml'))"
+.claude/hooks-daemon/untracked/venv/bin/python -c "import yaml; yaml.safe_load(open('.claude/hooks-daemon.yaml'))"
 # Should print config or show syntax error
 ```
 

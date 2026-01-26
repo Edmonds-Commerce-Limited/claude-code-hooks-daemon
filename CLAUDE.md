@@ -73,10 +73,13 @@ handlers:
 ### CLI Commands
 
 ```bash
-python3 -m claude_code_hooks_daemon.daemon.cli start
-python3 -m claude_code_hooks_daemon.daemon.cli stop
-python3 -m claude_code_hooks_daemon.daemon.cli status
-python3 -m claude_code_hooks_daemon.daemon.cli restart
+# Use venv Python (NOT system Python)
+VENV_PYTHON=.claude/hooks-daemon/untracked/venv/bin/python
+
+$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli start
+$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli stop
+$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli status
+$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli restart
 ```
 
 ### Testing & QA
@@ -111,21 +114,21 @@ All code MUST pass:
 
 #### Type Annotations
 
-**Python 3.8+ Compatible Types Required:**
+**Python 3.11+ Type Annotations:**
 
 ```python
-# ✅ CORRECT - Use typing module imports for compatibility
-from typing import Dict, List, Optional, Any, Union
+# ✅ CORRECT - Modern Python 3.11+ syntax
+def example(data: dict[str, Any]) -> list[str] | None:
+    pass
+
+# Also acceptable - typing module imports
+from typing import Dict, List, Optional, Any
 
 def example(data: Dict[str, Any]) -> Optional[List[str]]:
     pass
-
-# ❌ WRONG - Do NOT use Python 3.9+ built-in generic types
-def example(data: dict[str, Any]) -> list[str] | None:  # Breaks Python 3.8
-    pass
 ```
 
-**Why:** This codebase supports Python 3.8-3.12. Built-in generic types (`dict[str, Any]`, `list[str]`, `X | Y`) require Python 3.9+.
+**Why:** This codebase requires Python 3.11+ (see pyproject.toml). You can use modern syntax or typing module imports.
 
 **Type Checking:**
 - MyPy configured for strict mode

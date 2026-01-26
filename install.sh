@@ -78,16 +78,16 @@ check_prerequisites() {
 
     # Check for Python 3
     if ! command -v python3 &> /dev/null; then
-        fail_fast "python3 is not installed. Please install Python 3.8+ first."
+        fail_fast "python3 is not installed. Please install Python 3.11+ first."
     fi
 
-    # Check Python version (must be 3.8+)
+    # Check Python version (must be 3.11+)
     local python_version=$(python3 -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
     local major=$(echo "$python_version" | cut -d. -f1)
     local minor=$(echo "$python_version" | cut -d. -f2)
 
-    if [[ "$major" -lt 3 ]] || [[ "$major" -eq 3 && "$minor" -lt 8 ]]; then
-        fail_fast "Python 3.8+ required. Found: $python_version"
+    if [[ "$major" -lt 3 ]] || [[ "$major" -eq 3 && "$minor" -lt 11 ]]; then
+        fail_fast "Python 3.11+ required. Found: $python_version"
     fi
     print_success "Python $python_version found"
 
