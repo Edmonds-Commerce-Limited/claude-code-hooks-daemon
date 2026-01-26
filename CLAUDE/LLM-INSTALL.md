@@ -12,9 +12,11 @@
 
 4. **PYTHON 3.11+**: Verify with `python3 --version`. Installation fails on older versions.
 
+5. **SESSION RESTART REQUIRED**: After installation completes, user MUST restart Claude session. Hooks won't activate until Claude reloads configuration. LLM MUST verify hooks work after restart.
+
 ---
 
-## Quick Install (5 Steps)
+## Quick Install (6 Steps)
 
 ### 1. Verify Prerequisites
 
@@ -64,25 +66,45 @@ cd ../..
 - `.claude/hooks-daemon.yaml` - Handler config
 - `.claude/.gitignore` - Excludes daemon from git
 
-### 4. Test Daemon
+### 4. Commit & Restart Session ⚠️ MANDATORY
+
+```bash
+# Commit installed files
+git add .claude/
+git commit -m "Install Claude Code Hooks Daemon" && git push
+```
+
+**CRITICAL**: Tell user to **restart Claude session** (exit and re-enter). Hooks won't activate until Claude reloads `.claude/settings.json`. Do NOT proceed to step 5 until session restarts.
+
+### 5. Verify Hooks Active (After Restart)
 
 ```bash
 VENV_PYTHON=.claude/hooks-daemon/untracked/venv/bin/python
 
-# Start daemon
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli start
-
-# Verify status
+# Check daemon auto-started (lazy startup on first hook call)
 $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli status
 
-# Test hook blocks destructive git
+# Test destructive git is blocked
 echo '{"tool_name": "Bash", "tool_input": {"command": "git reset --hard HEAD"}}' \
   | .claude/hooks/pre-tool-use
-
 # Expected: {"hookSpecificOutput": {"permissionDecision": "deny", ...}}
+
+# Test sed is blocked
+echo '{"tool_name": "Bash", "tool_input": {"command": "sed -i s/foo/bar/ file.txt"}}' \
+  | .claude/hooks/pre-tool-use
+# Expected: {"hookSpecificOutput": {"permissionDecision": "deny", ...}}
+
+# Test normal commands pass through
+echo '{"tool_name": "Bash", "tool_input": {"command": "ls -la"}}' \
+  | .claude/hooks/pre-tool-use
+# Expected: {} (empty = allow)
 ```
 
-### 5. Configure Handlers
+**If all tests pass**: Hooks active ✅
+
+**If tests fail**: Check troubleshooting section below.
+
+### 6. Configure Handlers (Optional)
 
 Edit `.claude/hooks-daemon.yaml`:
 
@@ -100,10 +122,12 @@ handlers:
     british_english: {enabled: false, priority: 60}  # Enable for UK spelling
 ```
 
-Restart after config changes:
+Restart daemon after config changes:
 ```bash
 .claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
 ```
+
+**Note**: Settings.json changes require Claude session restart, config.yaml changes only need daemon restart.
 
 ---
 
