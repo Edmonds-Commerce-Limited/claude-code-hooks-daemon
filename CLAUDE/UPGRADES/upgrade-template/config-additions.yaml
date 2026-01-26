@@ -1,0 +1,24 @@
+# Configuration additions for vX.Y → vX.Z upgrade
+#
+# This file contains ONLY the new configuration to add.
+# LLMs can merge this directly into existing config.
+#
+# Add this under the appropriate section in .claude/hooks-daemon.yaml
+
+# Add to handlers section:
+handlers:
+  event_type:
+    new_handler:
+      enabled: true
+      priority: 40
+      option1: value1  # Comment explaining option
+      option2: value2  # Comment explaining option
+
+# If daemon config changes, add here:
+# daemon:
+#   new_option: value
+
+# If new sections added, show complete structure:
+# new_section:
+#   subsection:
+#     field: value

@@ -411,6 +411,13 @@ handlers:
 
   # SessionStart handlers (run when session starts)
   session_start:
+    yolo_container_detection:     # Detects YOLO container environments (enabled by default)
+      enabled: true                # Set to false to disable YOLO detection
+      priority: 40                 # Workflow range priority
+      min_confidence_score: 3      # Minimum score to trigger detection (0-12 range)
+      show_detailed_indicators: true   # Show detected indicators in context
+      show_workflow_tips: true     # Show container workflow implications
+
     # workflow_state_restoration:  # Restores workflow state after compaction
     #   enabled: false              # Optional - enable for workflow state management
     #   priority: 10
@@ -446,13 +453,22 @@ handlers:
   stop: {}
 
 # Project-level handlers (custom handlers in .claude/hooks/handlers/)
-# Example:
+# Uncomment and customize to add custom handlers:
 # plugins:
-#   - type: "file"
-#     path: ".claude/hooks/handlers/pre_tool_use/my_handler.py"
-#     class: "MyHandler"
-#     events: ["PreToolUse"]
-plugins: {}
+#   paths: []  # Optional: additional Python module search paths
+#   plugins:   # List of plugin configurations
+#     # Example: Single handler from a file
+#     - path: ".claude/hooks/handlers/pre_tool_use/my_handler.py"
+#       handlers: ["MyHandler"]  # Optional: specific class names (null = load all)
+#       enabled: true
+#
+#     # Example: Load all handlers from a directory module
+#     - path: ".claude/hooks/handlers/post_tool_use/"
+#       handlers: null  # Load all Handler classes found
+#       enabled: true
+plugins:
+  paths: []
+  plugins: []
 """
 
     config_file.write_text(config)

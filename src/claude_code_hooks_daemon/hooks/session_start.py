@@ -23,6 +23,9 @@ from claude_code_hooks_daemon.handlers.session_start.hello_world import (
 from claude_code_hooks_daemon.handlers.session_start.workflow_state_restoration import (
     WorkflowStateRestorationHandler,
 )
+from claude_code_hooks_daemon.handlers.session_start.yolo_container_detection import (
+    YoloContainerDetectionHandler,
+)
 
 
 def load_config_safe(config_path: Path) -> dict[str, Any]:
@@ -66,6 +69,19 @@ def main() -> None:
     workflow_config = session_start_config.get("workflow_state_restoration", {})
     if workflow_config.get("enabled", True):
         controller.register(WorkflowStateRestorationHandler())
+
+    # YoloContainerDetectionHandler - enabled by default
+    yolo_config = session_start_config.get("yolo_container_detection", {})
+    if yolo_config.get("enabled", True):
+        handler = YoloContainerDetectionHandler()
+        # Apply configuration overrides
+        handler_settings = {
+            "min_confidence_score": yolo_config.get("min_confidence_score", 3),
+            "show_detailed_indicators": yolo_config.get("show_detailed_indicators", True),
+            "show_workflow_tips": yolo_config.get("show_workflow_tips", True),
+        }
+        handler.configure(handler_settings)
+        controller.register(handler)
 
     # 4. Run dispatcher
     controller.run()

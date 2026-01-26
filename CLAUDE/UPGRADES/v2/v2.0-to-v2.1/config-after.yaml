@@ -1,0 +1,47 @@
+# Example configuration AFTER upgrade (v2.1.0)
+#
+# This shows the configuration after adding YOLO container detection handler.
+
+version: "1.0"
+
+daemon:
+  idle_timeout_seconds: 600
+  log_level: INFO
+
+handlers:
+  pre_tool_use:
+    destructive_git:
+      enabled: true
+      priority: 10
+
+    sed_blocker:
+      enabled: true
+      priority: 10
+
+    absolute_path:
+      enabled: true
+      priority: 12
+
+    web_search_year:
+      enabled: true
+      priority: 55
+
+    british_english:
+      enabled: false
+      priority: 60
+
+  post_tool_use: {}
+
+  # NEW in v2.1: YOLO Container Detection Handler
+  session_start:
+    yolo_container_detection:     # Detects YOLO container environments
+      enabled: true                # Set to false to disable detection
+      priority: 40                 # Workflow range priority
+      min_confidence_score: 3      # Minimum score to trigger detection (0-12 range)
+      show_detailed_indicators: true   # Show detected indicators in context
+      show_workflow_tips: true     # Show container workflow implications
+
+  # Other event types...
+  pre_compact: {}
+  session_end: {}
+  subagent_stop: {}

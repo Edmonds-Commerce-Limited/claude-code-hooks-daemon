@@ -491,6 +491,358 @@ See existing handlers for reference:
 - **Advisory/warning**: `british_english.py`
 - **TDD enforcement**: `tdd_enforcement.py`
 - **Multi-tool**: `absolute_path.py`
+- **Environment detection**: `yolo_container_detection.py`
+
+### Example: Environment Detection Handler (YoloContainerDetection)
+
+**Use Case**: Detect YOLO container environments and provide informational context to Claude during SessionStart.
+
+**Handler Type**: Non-terminal, advisory (informational only)
+
+**Key Patterns**:
+- Multi-tier confidence scoring system
+- Environment variable checking
+- Filesystem checking with error handling
+- Fail-open error handling (never blocks)
+- Configurable thresholds and output
+
+**Implementation**:
+
+```python
+from claude_code_hooks_daemon.core import Handler, HookResult
+import os
+from pathlib import Path
+
+class YoloContainerDetectionHandler(Handler):
+    """Detects YOLO container environments using confidence scoring."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="yolo-container-detection",
+            priority=40,  # Workflow range
+            terminal=False  # Allow other handlers to run
+        )
+        self.config = {
+            "min_confidence_score": 3,
+            "show_detailed_indicators": True,
+            "show_workflow_tips": True,
+        }
+
+    def configure(self, config: dict[str, Any]) -> None:
+        """Apply configuration overrides."""
+        self.config.update(config)
+
+    def _calculate_confidence_score(self) -> int:
+        """
+        Calculate confidence score based on detected indicators.
+
+        Primary indicators (3 points each):
+          - CLAUDECODE=1 environment variable
+          - CLAUDE_CODE_ENTRYPOINT=cli environment variable
+          - Working directory is /workspace with .claude/ present
+
+        Secondary indicators (2 points each):
+          - DEVCONTAINER=true environment variable
+          - IS_SANDBOX=1 environment variable
+          - container=podman/docker environment variable
+
+        Tertiary indicators (1 point each):
+          - Unix socket at .claude/hooks-daemon/untracked/venv/socket
+          - Running as root user (UID 0)
+
+        Returns:
+            Confidence score (0-12 range)
+        """
+        score = 0
+
+        try:
+            # Primary indicators (3 points each)
+            if os.environ.get("CLAUDECODE") == "1":
+                score += 3
+            if os.environ.get("CLAUDE_CODE_ENTRYPOINT") == "cli":
+                score += 3
+
+            # Filesystem check with error handling
+            try:
+                if Path.cwd() == Path("/workspace"):
+                    if Path(".claude").exists():
+                        score += 3
+            except (OSError, RuntimeError):
+                pass  # Skip on filesystem errors
+
+            # Secondary indicators (2 points each)
+            if os.environ.get("DEVCONTAINER") == "true":
+                score += 2
+            if os.environ.get("IS_SANDBOX") == "1":
+                score += 2
+            if os.environ.get("container", "") in ["podman", "docker"]:
+                score += 2
+
+            # Tertiary indicators (1 point each)
+            try:
+                socket_path = Path(".claude/hooks-daemon/untracked/venv/socket")
+                if socket_path.exists():
+                    score += 1
+            except (OSError, RuntimeError):
+                pass
+
+            try:
+                if os.getuid() == 0:  # Root user
+                    score += 1
+            except AttributeError:
+                pass  # Not available on Windows
+
+        except Exception:
+            # Fail open - return 0 score on unexpected errors
+            return 0
+
+        return score
+
+    def matches(self, hook_input: dict[str, Any] | None) -> bool:
+        """Check if handler should run."""
+        if hook_input is None or not isinstance(hook_input, dict):
+            return False
+
+        # Only match SessionStart events
+        if hook_input.get("hook_event_name") != "SessionStart":
+            return False
+
+        # Check confidence score against threshold
+        try:
+            score = self._calculate_confidence_score()
+            threshold = self.config.get("min_confidence_score", 3)
+            return score >= threshold
+        except Exception:
+            return False  # Fail open
+
+    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+        """Provide YOLO container detection context."""
+        try:
+            context = [
+                "🐳 Running in YOLO container environment (Claude Code CLI in sandbox)"
+            ]
+
+            # Add detailed indicators if enabled
+            if self.config.get("show_detailed_indicators", True):
+                indicators = self._get_detected_indicators()
+                if indicators:
+                    context.append("Detected indicators:")
+                    for indicator in indicators:
+                        context.append(f"  • {indicator}")
+
+            # Add workflow tips if enabled
+            if self.config.get("show_workflow_tips", True):
+                context.append("")
+                context.append("Container workflow implications:")
+                context.append("  • Full development environment available")
+                context.append("  • Storage is ephemeral - commit and push to persist")
+                context.append("  • Running as root - install packages freely")
+                context.append("  • Fast iteration enabled (YOLO mode)")
+
+            return HookResult(decision="allow", reason=None, context=context)
+
+        except Exception:
+            # Fail open - return ALLOW with no context on errors
+            return HookResult(decision="allow", reason=None, context=[])
+```
+
+**Key Takeaways**:
+
+1. **Confidence Scoring**: Use multi-tier scoring to avoid false positives
+   - Primary indicators (strong signals): 3 points
+   - Secondary indicators (moderate signals): 2 points
+   - Tertiary indicators (weak signals): 1 point
+   - Threshold prevents single weak signal from triggering
+
+2. **Error Handling**: Fail open at every level
+   - Try/except around each indicator check
+   - Return safe defaults on errors
+   - Never crash or block on exceptions
+
+3. **Filesystem Safety**:
+   ```python
+   try:
+       if Path.cwd() == Path("/workspace"):
+           if Path(".claude").exists():
+               score += 3
+   except (OSError, RuntimeError):
+       pass  # Skip on filesystem errors
+   ```
+
+4. **Platform Compatibility**:
+   ```python
+   try:
+       if os.getuid() == 0:  # Root user check
+           score += 1
+   except AttributeError:
+       pass  # os.getuid() not available on Windows
+   ```
+
+5. **Non-Terminal Pattern**: `terminal=False` allows other handlers to run
+   - Provides context without stopping dispatch
+   - Accumulates informational messages
+   - Good for advisory/informational handlers
+
+6. **Configurable Behavior**:
+   ```yaml
+   session_start:
+     yolo_container_detection:
+       enabled: true
+       priority: 40
+       min_confidence_score: 3      # Adjust threshold
+       show_detailed_indicators: true   # Toggle detail level
+       show_workflow_tips: true     # Toggle tips
+   ```
+
+7. **Testing Pattern**: Mock environment in tests
+   ```python
+   def test_detection(self, monkeypatch):
+       # Clear all YOLO indicators first
+       for key in ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", ...]:
+           monkeypatch.delenv(key, raising=False)
+
+       # Set exactly what you want to test
+       monkeypatch.setenv("CLAUDECODE", "1")
+
+       # Mock filesystem
+       with patch("pathlib.Path.cwd", return_value=Path("/home/user")):
+           with patch("pathlib.Path.exists", return_value=False):
+               handler = YoloContainerDetectionHandler()
+               score = handler._calculate_confidence_score()
+               assert score == 3  # Exactly one primary indicator
+   ```
+
+**When to Use This Pattern**:
+- Detecting runtime environments
+- Providing contextual information
+- Advisory messages without blocking
+- Multi-signal confidence-based decisions
+- Platform-specific feature detection
+
+## Plugin Configuration
+
+### Registering Project-Level Handlers
+
+After creating a handler in `.claude/hooks/handlers/`, register it in `.claude/hooks-daemon.yaml`:
+
+```yaml
+# .claude/hooks-daemon.yaml
+version: "1.0"
+
+daemon:
+  idle_timeout_seconds: 600
+  log_level: INFO
+
+handlers:
+  pre_tool_use:
+    destructive_git:
+      enabled: true
+      priority: 10
+
+# Project-specific handlers
+plugins:
+  paths: []  # Optional: additional Python paths to search
+  plugins:   # List of plugin configurations
+    # File-based plugin (single handler)
+    - path: ".claude/hooks/handlers/pre_tool_use/my_handler.py"
+      handlers: ["MyHandler"]  # Optional: specific classes to load
+      enabled: true
+
+    # Module-based plugin (multiple handlers)
+    - path: ".claude/hooks/handlers/post_tool_use/"
+      handlers: null  # null = load all Handler classes
+      enabled: true
+
+    # External plugin (from separate package)
+    - path: "my_plugin_package.handlers"
+      handlers: ["CustomHandler"]
+      enabled: true
+```
+
+### PluginsConfig Structure
+
+**Fields**:
+- `paths`: List of additional directories to search for plugins (optional)
+- `plugins`: List of plugin configurations
+
+**Each plugin configuration**:
+- `path`: Path to Python file or module (required)
+  - File: `.claude/hooks/handlers/pre_tool_use/my_handler.py`
+  - Module: `.claude/hooks/handlers/pre_tool_use` or `package.module`
+  - Relative paths resolve from project root
+- `handlers`: List of handler class names to load (optional)
+  - `null` or omitted: Load all Handler subclasses found
+  - `["ClassName"]`: Load only specified classes
+- `enabled`: Whether to load this plugin (default: true)
+
+### Example: Project-Level Handler Registration
+
+1. **Create handler** in `.claude/hooks/handlers/pre_tool_use/project_rules.py`:
+
+```python
+from claude_code_hooks_daemon.core import Handler, HookResult
+
+class ProjectRulesHandler(Handler):
+    def __init__(self) -> None:
+        super().__init__(name="project-rules", priority=40, terminal=True)
+
+    def matches(self, hook_input: dict) -> bool:
+        # Your project-specific logic
+        return True
+
+    def handle(self, hook_input: dict) -> HookResult:
+        return HookResult(decision="allow", context="✅ Project rules OK")
+```
+
+2. **Register in config** (`.claude/hooks-daemon.yaml`):
+
+```yaml
+plugins:
+  paths: []
+  plugins:
+    - path: ".claude/hooks/handlers/pre_tool_use/project_rules.py"
+      handlers: ["ProjectRulesHandler"]
+      enabled: true
+```
+
+3. **Test handler**:
+```bash
+# Handler will now run on all PreToolUse events
+# Verify with: .claude/hooks/pre-tool-use < test-input.json
+```
+
+### Multiple Handlers in One File
+
+```python
+# .claude/hooks/handlers/pre_tool_use/my_handlers.py
+class Handler1(Handler):
+    def __init__(self) -> None:
+        super().__init__(name="handler-1", priority=30)
+    # ... implementation
+
+class Handler2(Handler):
+    def __init__(self) -> None:
+        super().__init__(name="handler-2", priority=40)
+    # ... implementation
+```
+
+```yaml
+# Load both handlers
+plugins:
+  paths: []
+  plugins:
+    - path: ".claude/hooks/handlers/pre_tool_use/my_handlers.py"
+      handlers: null  # Load all Handler subclasses
+      enabled: true
+
+# Or load selectively
+plugins:
+  paths: []
+  plugins:
+    - path: ".claude/hooks/handlers/pre_tool_use/my_handlers.py"
+      handlers: ["Handler1"]  # Only load Handler1
+      enabled: true
+```
 
 ## Questions?
 

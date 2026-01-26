@@ -1,0 +1,19 @@
+# Example configuration BEFORE upgrade (vX.Y)
+#
+# This file shows a typical configuration before the upgrade.
+# Use as reference to understand what's changing.
+
+version: "1.0"
+
+daemon:
+  idle_timeout_seconds: 600
+  log_level: INFO
+
+handlers:
+  pre_tool_use:
+    destructive_git:
+      enabled: true
+      priority: 10
+
+  # Add other existing handlers here that are relevant to this upgrade
+  # Show the state BEFORE new features are added

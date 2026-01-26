@@ -44,3 +44,18 @@ handlers:
 
   session_start:
     enabled: false
+
+# Project-specific handlers
+# Uncomment and customize to add custom handlers from .claude/hooks/handlers/
+# plugins:
+#   paths: []  # Optional: additional Python module search paths
+#   plugins:   # List of plugin configurations
+#     # Example: Single handler from a file
+#     - path: ".claude/hooks/handlers/pre_tool_use/my_handler.py"
+#       handlers: ["MyHandler"]  # Optional: specific class names (null = load all)
+#       enabled: true
+#
+#     # Example: Load all handlers from a directory module
+#     - path: ".claude/hooks/handlers/post_tool_use/"
+#       handlers: null  # Load all Handler classes found
+#       enabled: true

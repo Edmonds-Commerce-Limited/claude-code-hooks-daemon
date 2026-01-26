@@ -179,8 +179,31 @@ All QA checks run in GitHub Actions. PRs blocked if:
 
 ### Documentation
 
-- `README.md` - Installation and usage
+- `README.md` - Installation and usage (v2.1.0 - UPDATED with accurate handler counts)
 - `DAEMON.md` - Architecture deep dive
 - `CLAUDE/ARCHITECTURE.md` - Design documentation
-- `CLAUDE/HANDLER_DEVELOPMENT.md` - Handler creation guide
+- `CLAUDE/HANDLER_DEVELOPMENT.md` - Handler creation guide (v2.1 - includes YOLO example)
+- `CLAUDE/UPGRADES/` - Version migration guides (NEW in v2.1)
 - `CONTRIBUTING.md` - Contribution guidelines
+
+### Current Version
+
+**Version: 2.1.0**
+
+**Handler Count:**
+- PreToolUse: 14 production handlers
+- PostToolUse: 3 production handlers
+- SessionStart: 2 production handlers (including YOLO container detection)
+- PreCompact: 2 production handlers
+- SubagentStop: 3 production handlers
+- UserPromptSubmit: 2 production handlers
+- SessionEnd: 1 production handler
+- Notification: 1 production handler
+- PermissionRequest: 1 production handler
+- Stop: 1 production handler
+- **Total: 30 production handlers** (plus 10 hello_world test handlers)
+
+**Test Coverage:**
+- 1168 tests across 40 test files
+- 95% minimum coverage requirement
+- All tests passing

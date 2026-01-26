@@ -1,0 +1,18 @@
+{
+  "decision": "allow",
+  "reason": null,
+  "context": [
+    "🐳 Running in YOLO container environment (Claude Code CLI in sandbox)",
+    "Detected indicators:",
+    "  • CLAUDECODE=1 environment variable",
+    "  • CLAUDE_CODE_ENTRYPOINT=cli environment variable",
+    "  • Working directory is /workspace with .claude/ present",
+    "  • Running as root user (UID 0)",
+    "",
+    "Container workflow implications:",
+    "  • Full development environment available (git, gh, npm, pip)",
+    "  • Storage is ephemeral - commit and push work to persist",
+    "  • Running as root - install packages freely (apt, npm, pip)",
+    "  • Fast iteration enabled (YOLO mode, no permission prompts)"
+  ]
+}

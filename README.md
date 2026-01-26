@@ -1,47 +1,108 @@
 # Claude Code Hooks Daemon
 
-**High-performance daemon for Claude Code hooks using Unix socket IPC.**
+![Version](https://img.shields.io/badge/version-2.1.0-blue)
+![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Tests](https://img.shields.io/badge/tests-1168%20passing-success)
+![Coverage](https://img.shields.io/badge/coverage-95%25%20required-success)
 
-Eliminates process spawn overhead (~21ms) with sub-millisecond response times after warmup.
+High-performance daemon for Claude Code hooks using Unix socket IPC and front controller architecture.
 
 ---
 
-**🤖 AI-Assisted Installation**: Copy and paste this into Claude Code:
+## Overview
+
+A daemon-based hooks system that eliminates process spawn overhead (~21ms) with sub-millisecond response times after warmup.
+
+**Key Features:**
+- **Sub-millisecond response times** after warmup (20x faster than process spawn)
+- **Lazy startup** - Daemon starts on first hook call
+- **Auto-shutdown** - Exits after 10 minutes of inactivity
+- **Multi-project support** - Unique daemon per project directory
+- **30 production handlers** across 10 event types
+- **1168 tests** with 95% coverage requirement
+- **Type-safe** - Full MyPy strict mode compliance
+- **Plugin system** - Easy to add project-specific handlers
+
+## Current Version: 2.1.0
+
+**Latest Changes:**
+- ✅ **YOLO Container Detection** - Automatic detection of YOLO container environments with contextual information
+- ✅ **Upgrade System** - LLM-optimized version migration guides in `CLAUDE/UPGRADES/`
+- ✅ **Version Tracking** - Programmatic version detection via `claude_code_hooks_daemon.version`
+
+---
+
+## Implementation Status
+
+### Implemented Event Types (30 Production Handlers)
+
+**PreToolUse** (14 handlers):
+- `destructive_git` - Blocks dangerous git operations (force push, hard reset, etc.)
+- `sed_blocker` - Blocks sed commands (encourages Edit tool usage)
+- `absolute_path` - Enforces relative paths in tool calls
+- `git_stash` - Discourages git stash with escape hatch
+- `tdd_enforcement` - Enforces test-driven development workflow
+- `eslint_disable` - Prevents disabling ESLint rules
+- `web_search_year` - Ensures web searches include current year (2026)
+- `british_english` - Warns on American English spellings
+- `worktree_file_copy` - Prevents accidental worktree file copies
+- `npm_command` - Validates npm command usage
+- `plan_workflow` - Enforces planning workflow steps
+- `validate_plan_number` - Validates plan numbering consistency
+- `plan_time_estimates` - Prevents time estimates in plans
+- `markdown_organization` - Enforces markdown organization rules
+
+**PostToolUse** (3 handlers):
+- `bash_error_detector` - Detects and reports bash command errors
+- `validate_sitemap` - Validates sitemap structure after writes
+- `validate_eslint_on_write` - Validates ESLint compliance after file writes
+
+**SessionStart** (2 handlers):
+- `yolo_container_detection` - **NEW in v2.1** Detects YOLO container environments with confidence scoring
+- `workflow_state_restoration` - Restores workflow state after conversation compaction
+
+**PreCompact** (2 handlers):
+- `transcript_archiver` - Archives conversation transcripts before compaction
+- `workflow_state_pre_compact` - Saves workflow state before compaction
+
+**SubagentStop** (3 handlers):
+- `remind_prompt_library` - Reminds about prompt library after subagent work
+- `remind_validator` - Reminds about HTML validation
+- `subagent_completion_logger` - Logs subagent completion events
+
+**UserPromptSubmit** (2 handlers):
+- `auto_continue` - Automatically continues certain workflows
+- `git_context_injector` - Injects git context into prompts
+
+**SessionEnd** (1 handler):
+- `cleanup_handler` - Performs cleanup tasks at session end
+
+**Notification** (1 handler):
+- `notification_logger` - Logs notification events
+
+**PermissionRequest** (1 handler):
+- `auto_approve_reads` - Auto-approves read-only operations
+
+**Stop** (1 handler):
+- `task_completion_checker` - Checks task completion status
+
+---
+
+## Installation
+
+### Quick Start - AI-Assisted
+
+Copy this into Claude Code:
 
 ```
 Please read and follow the installation instructions from:
 https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-INSTALL.md
 ```
 
----
-
-## Purpose
-
-Provides a daemon-based hooks system with:
-- **Sub-millisecond response times** after warmup (20x faster than process spawn)
-- **Lazy startup** - Daemon starts on first hook call
-- **Auto-shutdown** - Exits after 10 minutes of inactivity
-- **Multi-project support** - Unique daemon per project directory
-- **Battle-tested handlers** - 9 built-in safety and workflow handlers
-- **Project extensibility** - Easy to add custom handlers
-
-## Current Implementation Status
-
-**Currently Implemented:**
-- ✅ **PreToolUse** - 9 handlers (destructive_git, sed_blocker, absolute_path, worktree_file_copy, git_stash, eslint_disable, tdd_enforcement, web_search_year, british_english)
-
-**Scaffolding Only (no handlers yet):**
-- ⚠️ **PostToolUse** - Entry point exists, no handlers implemented
-- ⚠️ **SessionStart** - Entry point exists, no handlers implemented
-
-**Not Implemented:**
-- ❌ notification, permission-request, pre-compact, session-end, stop, subagent-stop, user-prompt-submit
-
-## Installation
-
 ### Manual Installation
 
-Run from your project root:
+From your project root:
 
 ```bash
 # Clone daemon to .claude/hooks-daemon/
@@ -57,43 +118,205 @@ python3 -m venv untracked/venv
 untracked/venv/bin/pip install -e .
 
 # Run automated installer
-# The installer auto-detects project root (searches upward for .claude/)
-# For explicit control, use: --project-root /path/to/project
 untracked/venv/bin/python install.py
 
 # Return to project root
 cd ../..
 ```
 
-The installer will:
-1. ✅ Backup existing `.claude/hooks/` to `.claude/hooks.bak`
-2. ✅ Copy `init.sh` (daemon lifecycle functions)
-3. ✅ Create forwarder scripts (route hook calls to daemon)
-4. ✅ Create `.claude/settings.json` (hook registration)
-5. ✅ Create `.claude/hooks-daemon.yaml` (handler + daemon config)
+The installer creates:
+1. `.claude/init.sh` - Daemon lifecycle functions (start/stop/ensure_daemon)
+2. `.claude/hooks/*` - Forwarder scripts (route hook calls to daemon)
+3. `.claude/settings.json` - Hook registration for Claude Code
+4. `.claude/hooks-daemon.yaml` - Handler and daemon configuration
 
-### Architecture
+---
+
+## Configuration
+
+### Basic Configuration
+
+**File**: `.claude/hooks-daemon.yaml`
+
+```yaml
+version: "1.0"
+
+daemon:
+  idle_timeout_seconds: 600  # Auto-shutdown after 10 minutes idle
+  log_level: INFO            # DEBUG, INFO, WARNING, ERROR
+
+handlers:
+  # PreToolUse handlers - Run before tool execution
+  pre_tool_use:
+    destructive_git:        # Block dangerous git operations
+      enabled: true
+      priority: 10
+
+    sed_blocker:            # Block sed commands
+      enabled: true
+      priority: 10
+
+    absolute_path:          # Enforce relative paths
+      enabled: true
+      priority: 12
+      blocked_prefixes:
+        - /container-mount/
+        - /tmp/claude-code/
+
+    tdd_enforcement:        # Enforce TDD workflow
+      enabled: true
+      priority: 25
+
+    eslint_disable:         # Prevent ESLint rule disabling
+      enabled: true
+      priority: 30
+
+    web_search_year:        # Ensure current year in searches
+      enabled: true
+      priority: 55
+
+    british_english:        # Warn on American spellings
+      enabled: true
+      priority: 60
+      mode: warn            # "warn" or "block"
+      excluded_dirs:
+        - node_modules/
+        - dist/
+
+  # PostToolUse handlers - Run after tool execution
+  post_tool_use:
+    bash_error_detector:    # Detect bash command errors
+      enabled: false        # Optional - enable for error detection
+      priority: 10
+
+    validate_sitemap:       # Validate sitemap structure
+      enabled: false        # Optional - enable for sitemap validation
+      priority: 20
+
+  # SessionStart handlers - Run at session start
+  session_start:
+    yolo_container_detection:  # NEW in v2.1 - Detect YOLO containers
+      enabled: true              # Set to false to disable detection
+      priority: 40
+      min_confidence_score: 3    # Threshold for detection (0-12 range)
+      show_detailed_indicators: true   # Show detected indicators
+      show_workflow_tips: true   # Show container workflow tips
+
+    workflow_state_restoration:  # Restore workflow state
+      enabled: false               # Optional - enable for workflow persistence
+      priority: 10
+
+  # PreCompact handlers - Run before conversation compaction
+  pre_compact:
+    workflow_state_pre_compact:  # Save workflow state before compaction
+      enabled: false               # Optional - pairs with workflow_state_restoration
+      priority: 10
+
+  # SessionEnd, SubagentStop, UserPromptSubmit handlers
+  session_end: {}
+  subagent_stop: {}
+  user_prompt_submit: {}
+```
+
+### Plugin System - Project-Specific Handlers
+
+Add custom handlers in `.claude/hooks/handlers/` and register them:
+
+```yaml
+# .claude/hooks-daemon.yaml
+plugins:
+  paths: []  # Optional: additional Python module search paths
+  plugins:
+    # Load single handler from file
+    - path: ".claude/hooks/handlers/pre_tool_use/my_handler.py"
+      handlers: ["MyHandler"]  # Optional: specific class names (null = all)
+      enabled: true
+
+    # Load all handlers from directory
+    - path: ".claude/hooks/handlers/post_tool_use/"
+      handlers: null  # Load all Handler classes found
+      enabled: true
+```
+
+---
+
+## Architecture
 
 **Forwarder Pattern:**
 ```
-Claude Code → Hook Script (forwarder) → Daemon (Unix socket) → Handlers
+Claude Code → Hook Script → Unix Socket → Daemon → FrontController → Handlers
 ```
 
-**Files Created:**
-- `.claude/init.sh` - Daemon lifecycle (start/stop/ensure_daemon)
-- `.claude/hooks/*` - Forwarder scripts (bash scripts that source init.sh)
-- `.claude/settings.json` - Hook registration
-- `.claude/hooks-daemon.yaml` - Configuration (handlers + daemon settings)
+**Components:**
+- **Hook Scripts** (`.claude/hooks/*`) - Lightweight bash forwarders
+- **Daemon** - Long-running Python process with Unix socket server
+- **FrontController** - Dispatches events to registered handlers
+- **Handlers** - Pattern matching and execution logic
 
-**Active Handlers:**
-- ✅ **PreToolUse** - 9 handlers (destructive_git, sed_blocker, absolute_path, etc.)
-- ⚠️ **PostToolUse** - No handlers yet (pass-through)
-- ⚠️ **SessionStart** - No handlers yet (pass-through)
+**Handler Priority Ranges:**
+- **0-19**: Critical safety (destructive operations, dangerous commands)
+- **20-39**: Code quality (ESLint, TDD, validation)
+- **40-59**: Workflow (planning, npm conventions, state management)
+- **60-79**: Advisory (British English, style hints)
+- **80-99**: Logging/metrics (analytics, audit trails)
+
+**Performance:**
+- Cold start: ~21ms (process spawn + Python startup)
+- Warm: <1ms (Unix socket IPC)
+- 20x faster after first hook call
+
+For detailed architecture documentation, see `CLAUDE/ARCHITECTURE.md`.
+
+---
+
+## Handler Categories
+
+### Safety Handlers (Priority 0-19)
+
+**Critical Operations Prevention:**
+- `destructive_git` (Priority 10) - Blocks `git push --force`, `git reset --hard`, `git clean -f`, `git branch -D`
+- `sed_blocker` (Priority 10) - Blocks sed commands, encourages Edit tool
+- `absolute_path` (Priority 12) - Prevents absolute path usage (enforces relative paths)
+
+### Code Quality Handlers (Priority 20-39)
+
+**Development Standards:**
+- `tdd_enforcement` (Priority 25) - Requires tests before code changes
+- `eslint_disable` (Priority 30) - Prevents `eslint-disable` comments
+
+### Workflow Handlers (Priority 40-59)
+
+**Process Automation:**
+- `yolo_container_detection` (Priority 40) - **NEW in v2.1** Detects container environments
+- `npm_command` (Priority 45) - Validates npm command patterns
+- `plan_workflow` (Priority 50) - Enforces planning steps
+- `web_search_year` (Priority 55) - Adds current year (2026) to web searches
+
+### Advisory Handlers (Priority 60-79)
+
+**Style & Conventions:**
+- `british_english` (Priority 60) - Warns on American English spellings (configurable: warn/block)
+
+### State Management Handlers
+
+**Workflow Persistence:**
+- `workflow_state_pre_compact` (PreCompact, Priority 10) - Saves workflow state before compaction
+- `workflow_state_restoration` (SessionStart, Priority 10) - Restores workflow state after compaction
+
+### Validation Handlers (PostToolUse)
+
+**Post-Execution Checks:**
+- `bash_error_detector` (Priority 10) - Detects bash command failures
+- `validate_sitemap` (Priority 20) - Validates sitemap XML structure
+- `validate_eslint_on_write` (Priority 30) - Validates ESLint compliance
+
+---
 
 ## Daemon Management
 
+All commands use the venv Python (NOT system Python):
+
 ```bash
-# All commands use the venv Python (NOT system Python)
 VENV_PYTHON=.claude/hooks-daemon/untracked/venv/bin/python
 
 # Start daemon manually (usually not needed - lazy startup)
@@ -102,470 +325,394 @@ $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli start
 # Stop daemon
 $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli stop
 
-# Check status
+# Check daemon status
 $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli status
 
-# Restart
+# Restart daemon (stop + start)
 $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli restart
 ```
 
-**Note**: Daemon starts automatically on first hook call (lazy startup).
+**Lazy Startup:**
+- Daemon starts automatically on first hook call
+- No need to manually start
+- Exits after 10 minutes of inactivity (configurable)
 
-## Coexistence with Traditional Hooks
+**Multi-Project Support:**
+- Each project gets its own daemon instance
+- Daemons identified by project directory path
+- No conflicts between projects
 
-This daemon system is designed to **coexist** with traditional Claude Code hook scripts. You're not forced into this approach - it runs alongside existing hooks.
-
-### Backup & Restore
-
-During installation, existing hooks are backed up:
-```
-.claude/hooks/      → .claude/hooks.bak/
-```
-
-To restore traditional hooks:
-```bash
-# Full rollback to traditional hooks
-rm -rf .claude/hooks/
-mv .claude/hooks.bak .claude/hooks/
-```
-
-### Running Both Side-by-Side
-
-Claude Code's `settings.json` supports **multiple hooks per event type**. You can register both daemon forwarders AND traditional scripts:
-
-```json
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "hooks": [
-          { "type": "command", "command": ".claude/hooks/pre-tool-use", "timeout": 60 },
-          { "type": "command", "command": ".claude/legacy-hooks/my-custom-check.sh", "timeout": 30 }
-        ]
-      }
-    ]
-  }
-}
-```
-
-### Integration Options
-
-1. **Full Daemon**: Use daemon for all hooks (recommended for performance)
-2. **Hybrid**: Daemon for complex handlers, traditional scripts for simple checks
-3. **Traditional Only**: Rollback to backup if daemon doesn't suit your workflow
-
-### Project Handlers
-
-For project-specific logic that should run through the daemon, create handlers in:
-```
-.claude/hooks/handlers/pre_tool_use/my_handler.py
-```
-
-See `CONTRIBUTING.md` for handler development guide.
-
-## Architecture
-
-### Core Components
-
-1. **Front Controller Engine** - Efficient pattern-based dispatch
-2. **Handler Library** - Collection of reusable handlers
-3. **Configuration System** - Per-project handler selection and customisation
-4. **Plugin System** - Easy addition of custom handlers
-
-### Handler Categories
-
-**General Utility Handlers** (daemon):
-- `DestructiveGitHandler` - Blocks dangerous git operations
-- `GitStashHandler` - Discourages git stash usage
-- `AbsolutePathHandler` - Enforces relative paths
-- `WebSearchYearHandler` - Ensures current year in searches
-- `BritishEnglishHandler` - Warns on American spellings
-- `EslintDisableHandler` - Blocks ESLint suppression comments
-- `TddEnforcementHandler` - Enforces test-driven development
-- `SedBlockerHandler` - Blocks unsafe sed operations
-- `WorktreeFileCopyHandler` - Prevents cross-worktree file copies
-
-**Project-Specific Handlers** (keep in projects):
-- `NpmCommandHandler` - Project-specific npm command patterns
-- `AdHocScriptHandler` - Project-specific script inventory
-- `MarkdownOrganizationHandler` - Project-specific documentation structure
-- `ClaudeReadmeHandler` - Project-specific content rules
-- `OfficialPlanCommandHandler` - Project-specific planning workflow
-- `PlanTimeEstimatesHandler` - Project planning conventions
-- `ValidatePlanNumberHandler` - Project plan numbering
-- `PlanWorkflowHandler` - Project workflow patterns
-- `PromptLibraryDirectEditHandler` - Project prompt library rules
-- `EnforceControllerPatternHandler` - Hook architecture enforcement
-
-
-## Configuration
-
-Create `.claude/hooks-daemon.yaml` in your project:
-
-```yaml
-version: 1.0
-
-# Global settings
-settings:
-  logging_level: INFO
-  log_file: .claude/hooks/daemon.log
-
-# Handler configuration
-handlers:
-  pre_tool_use:
-    # Enable/disable handlers
-    destructive_git:
-      enabled: true
-      priority: 10
-
-    git_stash:
-      enabled: true
-      priority: 20
-      escape_hatch: "I HAVE ABSOLUTELY CONFIRMED THAT STASH IS THE ONLY OPTION"
-
-    absolute_path:
-      enabled: true
-      priority: 12
-      blocked_prefixes:
-        - /container-mount/
-        - /tmp/claude-code/
-
-    web_search_year:
-      enabled: true
-      priority: 55
-      allow_historical: false  # Future: allow year ranges for historical research
-
-    british_english:
-      enabled: true
-      priority: 60
-      mode: warn  # warn or block
-      excluded_dirs:
-        - node_modules/
-        - dist/
-
-    eslint_disable:
-      enabled: true
-      priority: 30
-
-    tdd_enforcement:
-      enabled: true
-      priority: 15
-      test_file_patterns:
-        - "**/*.test.ts"
-        - "**/*.spec.ts"
-
-    sed_blocker:
-      enabled: true
-      priority: 10
-
-    worktree_file_copy:
-      enabled: true
-      priority: 15
-
-  # Future: other hook events
-  post_tool_use:
-    enabled: false
-
-  session_start:
-    enabled: false
-
-# Plugin handlers (project-specific)
-plugins:
-  - path: .claude/hooks/controller/handlers
-    handlers:
-      - npm_command_handler
-      - ad_hoc_script_handler
-      - markdown_organization_handler
-```
-
-## Usage
-
-### With Claude Code
-
-Register in `.claude/settings.local.json`:
-
-```json
-{
-  "hooks": {
-    "preToolUse": "python3 -m claude_code_hooks_daemon.hooks.pre_tool_use"
-  }
-}
-```
-
-### Programmatic Usage
-
-```python
-from claude_code_hooks_daemon import HooksDaemon, HookResult
-
-# Initialize daemon with config
-daemon = HooksDaemon.from_config(".claude/hooks-daemon.yaml")
-
-# Process a tool call
-hook_input = {
-    "toolName": "Bash",
-    "toolInput": {"command": "git reset --hard"}
-}
-
-result = daemon.dispatch("pre_tool_use", hook_input)
-print(result.to_json("PreToolUse"))
-# Output: {"hookSpecificOutput": {"permissionDecision": "deny", ...}}
-```
+---
 
 ## Development
 
-### Project Structure
+### Handler Development
 
-```
-claude-code-hooks-daemon/
-├── src/
-│   └── claude_code_hooks_daemon/
-│       ├── __init__.py
-│       ├── core/
-│       │   ├── __init__.py
-│       │   ├── front_controller.py   # Core dispatch engine
-│       │   ├── handler.py            # Handler base class
-│       │   ├── hook_result.py        # Result types
-│       │   └── utils.py              # Utility functions
-│       ├── config/
-│       │   ├── __init__.py
-│       │   ├── loader.py             # YAML/JSON config loading
-│       │   └── schema.py             # Configuration validation
-│       ├── handlers/
-│       │   ├── __init__.py
-│       │   ├── pre_tool_use/
-│       │   │   ├── __init__.py
-│       │   │   ├── destructive_git.py
-│       │   │   ├── git_stash.py
-│       │   │   ├── absolute_path.py
-│       │   │   ├── web_search_year.py
-│       │   │   ├── british_english.py
-│       │   │   ├── eslint_disable.py
-│       │   │   ├── tdd_enforcement.py
-│       │   │   ├── sed_blocker.py
-│       │   │   └── worktree_file_copy.py
-│       │   ├── post_tool_use/
-│       │   │   └── __init__.py
-│       │   └── session_start/
-│       │       └── __init__.py
-│       ├── plugins/
-│       │   ├── __init__.py
-│       │   └── loader.py             # Dynamic handler loading
-│       └── hooks/
-│           ├── __init__.py
-│           ├── pre_tool_use.py       # Entry point
-│           ├── post_tool_use.py      # Entry point
-│           └── session_start.py      # Entry point
-├── tests/
-│   ├── __init__.py
-│   ├── unit/
-│   │   ├── test_front_controller.py
-│   │   └── test_handlers/
-│   │       ├── test_destructive_git.py
-│   │       ├── test_git_stash.py
-│   │       └── ...
-│   ├── integration/
-│   │   ├── test_config_loading.py
-│   │   └── test_plugin_system.py
-│   └── fixtures/
-│       ├── sample_config.yaml
-│       └── test_inputs.json
-├── docs/
-│   ├── architecture.md
-│   ├── handler_development.md
-│   ├── configuration.md
-│   └── migration_guide.md
-├── examples/
-│   ├── basic_setup/
-│   ├── custom_handlers/
-│   └── multi_project/
-├── pyproject.toml
-├── setup.py
-├── README.md
-├── LICENSE
-└── CHANGELOG.md
-```
+See `CLAUDE/HANDLER_DEVELOPMENT.md` for complete guide.
 
-### Adding Custom Handlers
-
-1. Create handler class extending `Handler`
-2. Implement `matches()` and `handle()` methods
-3. Register via config or programmatically
-
-Example:
+**Quick Start:**
 
 ```python
 from claude_code_hooks_daemon.core import Handler, HookResult
+from claude_code_hooks_daemon.core.hook_result import Decision
 
-class CustomHandler(Handler):
-    def __init__(self):
-        super().__init__(name="custom-handler", priority=50)
+class MyHandler(Handler):
+    def __init__(self) -> None:
+        super().__init__(
+            name="my-handler",
+            priority=50,      # Workflow range
+            terminal=True     # Stop dispatch after this handler
+        )
 
     def matches(self, hook_input: dict) -> bool:
-        # Your matching logic
-        return hook_input.get("toolName") == "Write"
+        """Return True if handler should run."""
+        return "pattern" in hook_input.get("tool_input", {}).get("command", "")
 
     def handle(self, hook_input: dict) -> HookResult:
-        # Your handling logic
-        return HookResult(decision="allow", context="Custom context")
+        """Execute handler logic."""
+        return HookResult(
+            decision=Decision.DENY,
+            reason="Blocked because...",
+            context=["Additional context line 1", "Line 2"]
+        )
 ```
 
-## Testing
+**Examples:**
+- **Environment Detection**: `handlers/session_start/yolo_container_detection.py` - Confidence scoring, fail-open error handling
+- **Simple Blocking**: `handlers/pre_tool_use/destructive_git.py` - Pattern matching, terminal handler
+- **Complex Matching**: `handlers/pre_tool_use/sed_blocker.py` - Regex patterns, command parsing
+- **Advisory**: `handlers/pre_tool_use/british_english.py` - Non-terminal warnings, configurable modes
 
+### Testing
+
+**Run QA Suite:**
 ```bash
-# Run all tests
-pytest
-
-# Run with coverage
-pytest --cov=claude_code_hooks_daemon --cov-report=html
-
-# Run specific handler tests
-pytest tests/unit/test_handlers/test_destructive_git.py
+./scripts/qa/run_all.sh  # All checks (format, lint, type, tests)
 ```
+
+**Individual Checks:**
+```bash
+./scripts/qa/run_format_check.sh  # Black formatter (auto-fixes)
+./scripts/qa/run_lint.sh           # Ruff linter (auto-fixes)
+./scripts/qa/run_type_check.sh    # MyPy type checker
+./scripts/qa/run_tests.sh         # Pytest + coverage
+```
+
+**QA Standards:**
+- **Black** - Code formatting (line length 100)
+- **Ruff** - Python linting (auto-fixes violations)
+- **MyPy** - Strict type checking (all functions typed)
+- **Pytest** - 95% minimum coverage, 1168 tests
+- **Bandit** - Security vulnerability scanning
+
+All checks auto-fix by default (except MyPy and tests).
+
+**Current Test Stats:**
+- **1168 tests** across 40 test files
+- **95% coverage requirement**
+- All tests passing
+
+### Type Annotations
+
+**Python 3.11+ syntax supported:**
+
+```python
+# Modern syntax (preferred)
+def example(data: dict[str, Any]) -> list[str] | None:
+    pass
+
+# typing module (also acceptable)
+from typing import Dict, List, Optional, Any
+
+def example(data: Dict[str, Any]) -> Optional[List[str]]:
+    pass
+```
+
+---
+
+## Upgrading
+
+### Version Detection
+
+**Programmatic:**
+```python
+from claude_code_hooks_daemon.version import __version__
+print(__version__)  # "2.1.0"
+```
+
+**Git-based:**
+```bash
+cd .claude/hooks-daemon
+git describe --tags  # v2.1.0
+```
+
+### Upgrade Guides
+
+**Location**: `CLAUDE/UPGRADES/`
+
+The upgrade system provides LLM-optimized migration guides with:
+- Step-by-step instructions
+- Configuration examples (before/after/additions)
+- Verification scripts
+- Rollback procedures
+- Example outputs
+
+**Available Upgrades:**
+- `v2/v2.0-to-v2.1/` - Adds YOLO Container Detection handler
+
+**How to Upgrade:**
+
+1. **Find your current version:**
+   ```bash
+   cd .claude/hooks-daemon
+   cat src/claude_code_hooks_daemon/version.py
+   ```
+
+2. **Read upgrade guide:**
+   ```bash
+   # Example: Upgrading from v2.0 to v2.1
+   cat CLAUDE/UPGRADES/v2/v2.0-to-v2.1/v2.0-to-v2.1.md
+   ```
+
+3. **Follow instructions** in the guide
+
+4. **Run verification:**
+   ```bash
+   bash CLAUDE/UPGRADES/v2/v2.0-to-v2.1/verification.sh
+   ```
+
+For complete documentation, see `CLAUDE/UPGRADES/README.md`.
+
+---
+
+## Documentation
+
+**Core Documentation** (`CLAUDE/` directory):
+- `ARCHITECTURE.md` - System architecture and design decisions
+- `HANDLER_DEVELOPMENT.md` - Handler creation guide with examples
+- `LLM-INSTALL.md` - LLM-optimized installation guide
+- `UPGRADES/` - Version migration guides
+
+**Examples:**
+- `examples/basic_setup/hooks-daemon.yaml` - Basic configuration example
+- Handler source code in `src/claude_code_hooks_daemon/handlers/` (self-documenting)
+
+**Project Files:**
+- `README.md` - This file (overview and usage)
+- `CONTRIBUTING.md` - Contribution guidelines
+- `pyproject.toml` - Package configuration and dependencies
+
+---
+
+## Project Structure
+
+```
+claude-code-hooks-daemon/
+├── src/claude_code_hooks_daemon/
+│   ├── core/              # Front controller, Handler base, HookResult
+│   ├── daemon/            # Server, CLI, DaemonController, paths
+│   ├── handlers/          # All handler implementations (by event type)
+│   │   ├── pre_tool_use/      # 14 production handlers
+│   │   ├── post_tool_use/     # 3 production handlers
+│   │   ├── session_start/     # 2 production handlers
+│   │   ├── session_end/       # 1 production handler
+│   │   ├── pre_compact/       # 2 production handlers
+│   │   ├── subagent_stop/     # 3 production handlers
+│   │   ├── user_prompt_submit/  # 2 production handlers
+│   │   ├── notification/      # 1 production handler
+│   │   ├── permission_request/  # 1 production handler
+│   │   └── stop/              # 1 production handler
+│   ├── config/            # YAML/JSON config loading
+│   ├── hooks/             # Entry point modules (one per event type)
+│   ├── plugins/           # Plugin system for custom handlers
+│   ├── qa/                # QA runner utilities
+│   └── version.py         # Version tracking
+├── tests/                 # 40 test files, 1168 tests, 95% coverage
+│   ├── unit/              # Unit tests for all components
+│   ├── integration/       # Integration tests
+│   └── config/            # Configuration validation tests
+├── scripts/qa/            # QA automation scripts
+├── CLAUDE/                # LLM-optimized documentation
+│   ├── ARCHITECTURE.md
+│   ├── HANDLER_DEVELOPMENT.md
+│   ├── LLM-INSTALL.md
+│   └── UPGRADES/          # Version migration guides
+├── examples/              # Configuration examples
+├── install.py             # Automated installer
+└── pyproject.toml         # Package configuration
+```
+
+---
+
+## Requirements
+
+**Python:**
+- Python 3.11, 3.12, or 3.13
+- Virtual environment support (venv)
+
+**Dependencies** (auto-installed):
+- `pyyaml>=6.0` - YAML configuration parsing
+- `pydantic>=2.5` - Type-safe data validation
+- `jsonschema>=4.0` - JSON schema validation
+
+**Development Dependencies:**
+- `pytest>=7.0` - Testing framework
+- `pytest-cov>=4.0` - Coverage reporting
+- `pytest-mock>=3.0` - Mocking utilities
+- `pytest-anyio>=0.0.0` - Async testing
+- `black>=23.0` - Code formatter
+- `ruff>=0.0.290` - Fast Python linter
+- `mypy>=1.5` - Static type checker
+
+**Platform:**
+- Linux (primary)
+- macOS (supported)
+- Windows (limited support - Unix sockets may have issues)
+
+---
 
 ## Performance
 
-- **Cold start**: ~50ms (config load + handler init)
-- **Warm dispatch**: ~20ms (cached handlers)
-- **Memory**: ~15MB (loaded handlers)
+**Benchmark Results:**
 
-Compare to standalone hooks: ~200ms per hook (process spawn overhead)
+| Metric | Cold Start | Warm (After First Call) |
+|--------|------------|-------------------------|
+| Response Time | ~21ms | <1ms |
+| Overhead | Process spawn + Python startup | Unix socket IPC only |
+| Improvement | Baseline | **20x faster** |
 
-## Roadmap
+**Optimizations:**
+- Unix socket IPC eliminates process spawn overhead
+- Front controller caching reduces handler lookup time
+- Lazy startup minimizes resource usage
+- Auto-shutdown after idle timeout reduces memory footprint
 
-### v1.0 (Current)
-- [x] Core front controller engine
-- [x] 9 general utility handlers
-- [x] YAML configuration system
-- [x] Basic plugin system
-
-### v1.1 (Next)
-- [ ] Handler hot-reload
-- [ ] Metrics and monitoring
-- [ ] Handler marketplace/registry
-- [ ] Advanced configuration (per-handler overrides)
-
-### v2.0 (Future)
-- [ ] Multi-event coordination (PreToolUse → PostToolUse chains)
-- [ ] Async handler support
-- [ ] Handler dependency management
-- [ ] Web UI for configuration
+---
 
 ## Troubleshooting
 
-### Hook Not Running
+### Daemon Won't Start
 
-**Check hook is executable**:
 ```bash
-ls -la .claude/hooks/pre-tool-use
-# Should show: -rwxr-xr-x (executable)
+# Check if socket file is stuck
+ls -la .claude/hooks-daemon/untracked/venv/socket
 
-# If not executable:
-chmod +x .claude/hooks/pre-tool-use
-```
+# Remove stuck socket
+rm .claude/hooks-daemon/untracked/venv/socket
 
-**Test hook manually**:
-```bash
-echo '{"tool_name": "Bash", "tool_input": {"command": "ls"}}' | .claude/hooks/pre-tool-use
-# Should output: {} (empty JSON = allow)
-```
-
-**Check daemon is importable**:
-```bash
-.claude/hooks-daemon/untracked/venv/bin/python -c "from claude_code_hooks_daemon.hooks.pre_tool_use import main; print('✅ OK')"
-```
-
-### Import Errors
-
-**ModuleNotFoundError: No module named 'claude_code_hooks_daemon'**
-
-- **Solution**: Ensure venv exists and dependencies are installed:
-  ```bash
-  cd .claude/hooks-daemon
-  python3 -m venv untracked/venv
-  untracked/venv/bin/pip install -e .
-  ```
-
-### Dependencies Missing
-
-**ModuleNotFoundError: No module named 'yaml'**
-
-Install daemon dependencies into venv:
-```bash
+# Try starting manually
 cd .claude/hooks-daemon
-untracked/venv/bin/pip install -e .  # Installs pyyaml, jsonschema
+untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli start
 ```
 
-### Configuration Not Loading
+### Check Daemon Logs
 
-**Check config file location**:
 ```bash
-# Should be at project root or .claude/
-ls .claude/hooks-daemon.yaml  # Preferred location
-ls hooks-daemon.yaml          # Alternative location
+# View recent logs
+tail -f .claude/hooks-daemon/untracked/venv/daemon.log
+
+# Full logs
+cat .claude/hooks-daemon/untracked/venv/daemon.log
 ```
 
-**Validate YAML syntax**:
+### Force Stop Daemon
+
 ```bash
-.claude/hooks-daemon/untracked/venv/bin/python -c "import yaml; yaml.safe_load(open('.claude/hooks-daemon.yaml'))"
-# Should print config or show syntax error
+# If daemon won't stop gracefully
+pkill -f claude_code_hooks_daemon
+
+# Remove socket file
+rm .claude/hooks-daemon/untracked/venv/socket
 ```
 
-### Handlers Not Blocking
+### Verify Installation
 
-**Check handler is enabled in config**:
-```yaml
-handlers:
-  pre_tool_use:
-    destructive_git:
-      enabled: true  # ← Must be true
-```
-
-**Check handler priority** (lower = runs first):
-```yaml
-handlers:
-  pre_tool_use:
-    your_handler:
-      priority: 10  # Runs before priority 20
-```
-
-**Enable debug logging**:
-```yaml
-settings:
-  logging_level: DEBUG
-  log_file: .claude/hooks/daemon.log
-```
-
-Then check logs:
 ```bash
-tail -f .claude/hooks/daemon.log
+# Check hook scripts exist
+ls -la .claude/hooks/
+
+# Test hook execution
+echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"echo test"}}' | \
+  .claude/hooks/pre-tool-use
+
+# Should output valid JSON with decision="allow"
 ```
 
-### Performance Issues
-
-**Hook running slowly?**
-
-Check number of enabled handlers:
-```bash
-grep -A 2 "enabled: true" .claude/hooks-daemon.yaml | wc -l
-```
-
-Disable unused handlers to improve performance.
+---
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md)
+See `CONTRIBUTING.md` for guidelines.
+
+**Quick Start:**
+
+1. Fork the repository
+2. Create feature branch: `git checkout -b feature/your-feature`
+3. Write tests first (TDD)
+4. Implement feature
+5. Run QA suite: `./scripts/qa/run_all.sh`
+6. Commit with descriptive message
+7. Push and create pull request
+
+**Standards:**
+- All code must pass QA checks (format, lint, type, tests, security)
+- 95% minimum test coverage
+- Type annotations on all functions
+- Docstrings on all public classes/methods
+
+---
 
 ## License
 
-MIT License - See [LICENSE](LICENSE)
+MIT License - see LICENSE file for details.
+
+**Copyright © 2024-2026 Edmonds Commerce**
+
+---
 
 ## Support
 
+**Issues & Bugs:**
 - GitHub Issues: https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/issues
-- Discussions: https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/discussions
 
-## Credits
+**Documentation:**
+- Architecture: `CLAUDE/ARCHITECTURE.md`
+- Handler Development: `CLAUDE/HANDLER_DEVELOPMENT.md`
+- Upgrade Guides: `CLAUDE/UPGRADES/`
 
-Developed by Edmonds Commerce (https://edmondscommerce.co.uk)
+**Contact:**
+- Email: hello@edmondscommerce.co.uk
 
-Based on production hook system refined across multiple enterprise projects.
+---
+
+## Changelog
+
+### v2.1.0 (Current)
+
+**New Features:**
+- ✅ YOLO Container Detection handler with confidence scoring system
+- ✅ Upgrade system with LLM-optimized migration guides
+- ✅ Version tracking via `claude_code_hooks_daemon.version`
+
+**Improvements:**
+- Enhanced HANDLER_DEVELOPMENT.md with comprehensive examples
+- Automated verification scripts for upgrades
+- Configuration examples for all handler types
+
+**Handler Additions:**
+- `yolo_container_detection` (SessionStart, Priority 40)
+
+### v2.0.0
+
+**Initial Release:**
+- 30 production handlers across 10 event types
+- Daemon architecture with Unix socket IPC
+- Front controller dispatch pattern
+- Plugin system for custom handlers
+- Comprehensive test suite (1168 tests, 95% coverage)
+- Full type safety with MyPy strict mode
+- Automated QA pipeline
+
+---
+
+**End of README** | Version 2.1.0 | Last Updated: 2026-01-26

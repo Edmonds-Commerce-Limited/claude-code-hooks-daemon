@@ -1,0 +1,21 @@
+# Configuration additions for v2.0 → v2.1 upgrade
+#
+# This file contains ONLY the new YOLO handler configuration.
+# Add this to the handlers.session_start section in .claude/hooks-daemon.yaml
+
+# Add this under handlers.session_start:
+yolo_container_detection:     # NEW in v2.1 - Detects YOLO container environments
+  enabled: true                # Set to false to disable detection
+  priority: 40                 # Workflow range priority
+  min_confidence_score: 3      # Minimum score to trigger detection (0-12 range)
+  show_detailed_indicators: true   # Show detected indicators in context
+  show_workflow_tips: true     # Show container workflow implications
+
+# If your session_start section is currently empty ({}), replace it with:
+# session_start:
+#   yolo_container_detection:
+#     enabled: true
+#     priority: 40
+#     min_confidence_score: 3
+#     show_detailed_indicators: true
+#     show_workflow_tips: true

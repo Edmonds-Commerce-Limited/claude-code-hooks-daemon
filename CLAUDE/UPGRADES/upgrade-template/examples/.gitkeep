@@ -1,0 +1,11 @@
+# Examples directory
+#
+# Place example files here:
+# - Sample JSON outputs from new features
+# - Test scripts demonstrating new functionality
+# - Expected behavior examples for validation
+#
+# Examples:
+# - new-handler-output.json
+# - test-new-feature.sh
+# - expected-behavior.md
