@@ -18,6 +18,22 @@
 
 ---
 
+## Troubleshooting & Bug Reports
+
+**If installation fails or hooks don't work:**
+
+See [BUG_REPORTING.md](../BUG_REPORTING.md) for comprehensive debugging guide.
+
+**Quick debug in client projects:**
+```bash
+# Run from your project root
+.claude/hooks-daemon/scripts/debug_info.py /tmp/debug_report.md
+```
+
+This generates a complete diagnostic report for GitHub issues.
+
+---
+
 ## Quick Install (6 Steps)
 
 ### 1. Verify Prerequisites
@@ -37,8 +53,14 @@ git add .claude/ && git commit -m "Save hooks before daemon install" && git push
 
 ```bash
 mkdir -p .claude && cd .claude
+
+# Clone and checkout latest stable release tag
 git clone https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon.git hooks-daemon
 cd hooks-daemon
+git fetch --tags
+LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "main")
+git checkout "$LATEST_TAG"
+echo "📌 Using version: $LATEST_TAG"
 
 # Create isolated venv (survives container restarts)
 python3 -m venv untracked/venv
@@ -214,49 +236,46 @@ handlers:
 
 ---
 
-## Troubleshooting
+## Troubleshooting Common Issues
 
-### Daemon won't start
+**For comprehensive troubleshooting, see [BUG_REPORTING.md](../BUG_REPORTING.md)**
+
+### Quick Diagnostics
+
+**Generate full debug report:**
 ```bash
-# Check Python version
-python3 --version  # Must be 3.11+
+.claude/hooks-daemon/scripts/debug_info.py /tmp/debug_report.md
+```
 
-# Verify import
+### Common Quick Fixes
+
+**Daemon won't start:**
+```bash
+# Check Python version (must be 3.11+)
+python3 --version
+
+# Verify installation
 .claude/hooks-daemon/untracked/venv/bin/python -c "import claude_code_hooks_daemon; print('OK')"
 
 # Check logs
 .claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli logs
 ```
 
-### Handlers not blocking
+**Handlers not blocking:**
 ```bash
-# Verify enabled in config
-grep -A 1 "destructive_git:" .claude/hooks-daemon.yaml
-
-# Check logs for errors
-.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli logs | grep ERROR
-
 # Test hook manually
 echo '{"tool_name": "Bash", "tool_input": {"command": "git reset --hard"}}' | .claude/hooks/pre-tool-use
+
+# Check handler config
+grep -A 1 "destructive_git:" .claude/hooks-daemon.yaml
 ```
 
-### Files created in wrong location
-If installer created `.claude/hooks-daemon/.claude/` instead of `.claude/`:
-```bash
-# This is fixed in latest version - the installer now auto-detects correctly
-# If you hit this, update to latest version and reinstall:
-cd .claude/hooks-daemon
-git pull
-untracked/venv/bin/pip install -e .
+**Hooks not working after install:**
+1. **Restart Claude session** (required for settings.json changes)
+2. Run debug script to see what's wrong
+3. Check [BUG_REPORTING.md](../BUG_REPORTING.md)
 
-# Clean up incorrect installation
-rm -rf .claude/hooks-daemon/.claude
-
-# Reinstall with explicit project root
-untracked/venv/bin/python install.py --project-root /workspace
-```
-
-### Rollback to previous hooks
+### Rollback to Previous Hooks
 
 **Option 1 - Git restore (if you committed before install):**
 ```bash

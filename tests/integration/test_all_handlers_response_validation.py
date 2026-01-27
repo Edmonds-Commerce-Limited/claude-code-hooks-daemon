@@ -11,6 +11,7 @@ Test case format: (hook_input_dict, expected_decision, description)
 """
 
 import pytest
+
 from claude_code_hooks_daemon.core.hook_result import Decision
 
 # =============================================================================
@@ -527,7 +528,11 @@ class TestBashErrorDetectorHandler:
             (
                 {
                     "tool_name": "Bash",
-                    "tool_result": {"exit_code": 1, "stdout": "", "stderr": "Error: file not found"},
+                    "tool_result": {
+                        "exit_code": 1,
+                        "stdout": "",
+                        "stderr": "Error: file not found",
+                    },
                 },
                 Decision.ALLOW,
                 "Allow with error context",

@@ -57,6 +57,12 @@ cd .claude
 git clone https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon.git hooks-daemon
 cd hooks-daemon
 
+# Checkout latest stable release (recommended)
+git fetch --tags
+LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "main")
+git checkout "$LATEST_TAG"
+echo "Using version: $LATEST_TAG"
+
 # Create self-contained virtual environment
 python3 -m venv untracked/venv
 

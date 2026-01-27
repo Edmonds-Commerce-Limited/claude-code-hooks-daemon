@@ -1,0 +1,459 @@
+# Release Process - Publishing New Versions
+
+## Overview
+
+This document describes how to publish a new release of the Claude Code Hooks Daemon using the automated `/release` skill.
+
+**Target Audience:** Repository maintainers publishing new versions
+
+**Prerequisites:**
+- Write access to GitHub repository
+- gh CLI authenticated (`gh auth status`)
+- Clean git state (all changes committed)
+- All QA checks passing
+
+## Quick Release
+
+```bash
+# Let agent auto-detect version bump
+/release
+
+# Or specify version explicitly
+/release 2.2.0
+
+# Or specify bump type
+/release patch
+/release minor
+/release major
+```
+
+## Process Details
+
+The `/release` skill automates the complete release workflow:
+
+### 1. Pre-Release Validation (Automated)
+
+The release agent will:
+- ✅ Verify clean git state
+- ✅ Run all QA checks (tests, lint, types, coverage)
+- ✅ Check version consistency across files
+- ✅ Confirm no existing tag for target version
+- ✅ Validate GitHub CLI authentication
+
+If any check fails, the process aborts with clear error message.
+
+### 2. Version Detection (Auto or Manual)
+
+**Automatic Detection:**
+Analyzes commits since last tag using semantic versioning rules:
+
+- **PATCH (x.y.Z)** - Bug fixes, docs, refactoring
+  - Keywords: "fix:", "bug:", "Fix ", "docs:", "refactor:"
+  - Example: "Fix daemon startup race condition"
+
+- **MINOR (x.Y.0)** - New features, backwards-compatible
+  - Keywords: "feat:", "Add ", "Implement ", "feature:"
+  - Example: "Add TDD enforcement handler"
+
+- **MAJOR (X.0.0)** - Breaking changes, incompatible API
+  - Keywords: "BREAKING", "breaking change", "incompatible"
+  - Example: "BREAKING: Change handler API signature"
+
+**Manual Override:**
+If you specify a version explicitly, auto-detection is skipped.
+
+**Agent Proposal:**
+The agent will propose a version bump with justification:
+```
+Proposed version bump: MINOR (2.1.0 → 2.2.0)
+
+Reasoning:
+- 4 new features added (3 handlers, 1 config option)
+- 2 bug fixes (non-critical)
+- No breaking changes detected
+
+Accept proposal? (yes/no/specify version)
+```
+
+### 3. Version Update (Automated)
+
+Updates version string in:
+1. `pyproject.toml` (line 7)
+2. `src/claude_code_hooks_daemon/version.py`
+3. `README.md` (badge on line 3)
+4. `CLAUDE.md` ("Current Version" section)
+5. Any version-specific upgrade docs
+
+All updates use exact string replacement - no manual editing required.
+
+### 4. Changelog Generation (Automated)
+
+Generates `CHANGELOG.md` entry following [Keep a Changelog](https://keepachangelog.com/) format:
+
+**Format:**
+```markdown
+## [X.Y.Z] - YYYY-MM-DD
+
+### Added
+- New features, handlers, capabilities
+
+### Changed
+- Modifications to existing functionality
+- **BREAKING**: Breaking changes (if any)
+
+### Fixed
+- Bug fixes
+- **SECURITY**: Security patches (if any)
+
+### Removed
+- Deprecated features removed
+```
+
+**Categorization:**
+- Parses commit messages since last tag
+- Groups by conventional commit prefixes
+- Filters out test/internal commits
+- Highlights security and breaking changes
+
+**Example Output:**
+```markdown
+## [2.2.0] - 2025-01-27
+
+### Added
+- TDD enforcement handler for pytest workflow
+- Container environment detection (YOLO mode)
+- Upgrade documentation system
+
+### Changed
+- Improved installer with backup and recovery
+- Updated LLM-INSTALL.md for clarity
+
+### Fixed
+- Fix daemon startup race condition (#23)
+- Fix hook response JSON schema validation (#24)
+
+### Security
+- **SECURITY**: Fix command injection in sed blocker (#25)
+```
+
+### 5. Release Notes Creation (Automated)
+
+Creates comprehensive release notes in `RELEASES/vX.Y.Z.md`:
+
+**Structure:**
+- Release summary and highlights
+- Full changelog (from CHANGELOG.md)
+- Upgrade instructions (if breaking changes)
+- Installation commands for new users
+- Upgrade commands for existing users
+- Test statistics and coverage
+- Contributor list
+- GitHub comparison link
+
+**Example:** See `RELEASES/v2.1.0.md` (if exists) for reference format.
+
+### 6. Opus Review (Automated)
+
+**Critical Quality Gate:**
+The agent invokes an Opus 4.5 agent to perform final review:
+
+**Review Scope:**
+- ✅ All version numbers consistent
+- ✅ Changelog entries accurate and categorized correctly
+- ✅ Release notes comprehensive and grammatically correct
+- ✅ Technical descriptions accurate
+- ✅ No missing critical changes
+- ✅ Security/breaking changes properly marked
+- ✅ Upgrade instructions clear
+
+**Outcome:**
+- **Approved**: Process continues to commit/tag/release
+- **Issues Found**: Agent fixes issues and re-submits to Opus
+- Process repeats until Opus approves with 100% confidence
+
+You'll see output like:
+```
+📋 Submitting to Opus agent for final review...
+⏳ Waiting for Opus approval...
+✅ Opus Review: APPROVED (100% confidence)
+   "All version numbers consistent, changelog accurate,
+    no issues found. Ready for release."
+```
+
+### 7. Commit & Push (Automated)
+
+Once Opus approves, the agent commits and pushes:
+
+```bash
+# Commits all version files, changelog, release notes
+git add pyproject.toml version.py README.md CLAUDE.md CHANGELOG.md RELEASES/vX.Y.Z.md
+git commit -m "Release vX.Y.Z: [Title]"
+git push origin main
+```
+
+**Commit Message Format:**
+```
+Release vX.Y.Z: [Release Title]
+
+- Updated version to X.Y.Z across all files
+- Added comprehensive changelog entry
+- Generated release notes
+
+Full changelog: RELEASES/vX.Y.Z.md
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+```
+
+### 8. Tag & GitHub Release (Automated)
+
+Creates annotated git tag and GitHub release:
+
+```bash
+# Annotated tag with full release notes
+git tag -a vX.Y.Z -m "[Full release notes from RELEASES/vX.Y.Z.md]"
+git push origin vX.Y.Z
+
+# GitHub release via gh CLI
+gh release create vX.Y.Z \
+  --title "vX.Y.Z - [Release Title]" \
+  --notes-file RELEASES/vX.Y.Z.md \
+  --latest
+```
+
+**GitHub Release Features:**
+- ✅ Full release notes attached
+- ✅ Marked as "Latest Release"
+- ✅ Auto-generated tarball/zip
+- ✅ Comparison link to previous version
+
+### 9. Post-Release Verification (Automated)
+
+The agent verifies:
+- ✅ Tag exists locally and on GitHub
+- ✅ GitHub release is published
+- ✅ Release marked as "Latest"
+- ✅ README badge renders correctly (GitHub caches clear)
+- ✅ Installation from tag works
+
+**Output:**
+```
+✅ Release v2.2.0 Complete!
+
+📦 Version: 2.2.0 (MINOR release)
+🏷️  Tag: v2.2.0
+📝 Changelog: CHANGELOG.md (lines 8-24)
+📋 Release Notes: RELEASES/v2.2.0.md
+🔗 GitHub Release: https://github.com/.../releases/tag/v2.2.0
+
+Installation command for users:
+git clone -b v2.2.0 https://github.com/.../claude-code-hooks-daemon.git
+
+Next steps:
+1. Review release at GitHub
+2. Update external documentation (if applicable)
+3. Announce release (if applicable)
+```
+
+## Error Handling & Rollback
+
+### Common Errors
+
+**1. Dirty Git State**
+```
+❌ Error: Uncommitted changes detected
+   Run: git status
+
+   Commit all changes before releasing.
+```
+**Fix:** Commit or stash changes, then retry.
+
+**2. QA Failures**
+```
+❌ Error: QA checks failed
+   Failed: Tests (3 failing), Lint (12 violations)
+
+   Fix issues and retry.
+```
+**Fix:** Run `./scripts/qa/run_all.sh`, fix issues, commit, retry.
+
+**3. Tag Already Exists**
+```
+❌ Error: Tag v2.2.0 already exists
+   This version has already been released.
+
+   Choose a different version or delete the tag.
+```
+**Fix:** Use different version or `git tag -d v2.2.0; git push origin :refs/tags/v2.2.0`
+
+**4. Opus Rejects Release**
+```
+⚠️  Opus Review: REJECTED
+   Issues found:
+   - Changelog entry missing security fix #25
+   - Version number inconsistent in CLAUDE.md
+   - Typo in release notes: "performace" → "performance"
+
+   Fixing issues and re-submitting...
+```
+**Fix:** Agent fixes automatically and re-submits. If repeated failures, manual intervention needed.
+
+### Rollback Strategy
+
+**Before Commit:**
+```bash
+# Simple restore
+git restore .
+```
+
+**After Commit (Not Pushed):**
+```bash
+# Reset last commit (keeps changes)
+git reset HEAD~1
+```
+
+**After Push (Use with Caution):**
+```bash
+# Create immediate patch release to fix issues
+# NEVER force-push tags - creates downstream problems
+```
+
+**If Tag Created:**
+```bash
+# Delete local tag
+git tag -d vX.Y.Z
+
+# Delete remote tag
+git push origin :refs/tags/vX.Y.Z
+
+# Delete GitHub release
+gh release delete vX.Y.Z --yes
+```
+
+## Manual Release (Bypass Skill)
+
+If you need to release manually without the skill:
+
+```bash
+# 1. Update versions
+# Edit: pyproject.toml, version.py, README.md, CLAUDE.md
+
+# 2. Update CHANGELOG.md
+# Add entry following Keep a Changelog format
+
+# 3. Create release notes
+# Create RELEASES/vX.Y.Z.md
+
+# 4. Run QA
+./scripts/qa/run_all.sh
+
+# 5. Commit
+git add .
+git commit -m "Release vX.Y.Z: [Title]"
+git push
+
+# 6. Tag
+git tag -a vX.Y.Z -m "Release vX.Y.Z"
+git push origin vX.Y.Z
+
+# 7. GitHub release
+gh release create vX.Y.Z \
+  --title "vX.Y.Z - [Title]" \
+  --notes-file RELEASES/vX.Y.Z.md \
+  --latest
+```
+
+## Best Practices
+
+### When to Release
+
+**PATCH (x.y.Z):**
+- Urgent bug fixes
+- Security patches
+- Documentation updates
+- No new features
+
+**MINOR (x.Y.0):**
+- New handlers
+- New features
+- Configuration options
+- Backwards-compatible changes
+
+**MAJOR (X.0.0):**
+- Breaking API changes
+- Incompatible configuration changes
+- Minimum Python version bumps
+- Removed deprecated features
+
+### Release Cadence
+
+No fixed schedule - release when ready:
+- **Critical bugs/security**: Immediate patch release
+- **Features ready**: Minor release when stable
+- **Breaking changes**: Plan ahead, communicate in advance
+
+### Pre-Release Checklist
+
+Before running `/release`:
+- [ ] All features tested manually
+- [ ] All tests passing locally
+- [ ] No known critical bugs
+- [ ] Breaking changes documented
+- [ ] Upgrade path tested (if breaking changes)
+- [ ] External docs updated (if applicable)
+
+### Post-Release
+
+After successful release:
+- [ ] Test installation from new tag
+- [ ] Verify GitHub release page
+- [ ] Update external references (if any)
+- [ ] Monitor for issues (GitHub issues, user reports)
+- [ ] Respond to installation questions
+
+## Troubleshooting
+
+### Skill Not Found
+
+```bash
+# Verify skill exists
+ls -la .claude/skills/release/
+
+# If missing, skill may need to be registered
+# Check .claude/settings.json for skill configuration
+```
+
+### Agent Hangs
+
+If agent appears stuck:
+- Check if waiting for Opus review (can take 1-2 minutes)
+- Check for prompts requiring user input
+- Cancel with Ctrl+C if truly hung
+
+### GitHub API Errors
+
+```
+Error: gh CLI not authenticated
+```
+**Fix:**
+```bash
+gh auth login
+# Follow prompts to authenticate
+```
+
+```
+Error: API rate limit exceeded
+```
+**Fix:** Wait 1 hour or authenticate with higher rate limit token.
+
+## Related Documentation
+
+- `/release` skill specification: `.claude/skills/release/skill.md`
+- Release agent: `.claude/agents/release-agent.md`
+- Contributing: `/CONTRIBUTING.md`
+- Testing: `/CLAUDE/development/TESTING.md` (TODO)
+
+## Version History
+
+This release process was introduced in v2.2.0 (2025-01-27).
+
+Previous releases were manual and may not follow this exact process.
