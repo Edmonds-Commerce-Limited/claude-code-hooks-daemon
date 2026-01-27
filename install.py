@@ -112,6 +112,92 @@ jq -c '{{event: "{event_name}", hook_input: .}}' | send_request_stdin
     hook_file.write_text(hook_content)
     hook_file.chmod(0o755)  # Make executable
 
+    return hook_file
+
+
+def check_git_filemode(project_root: Path) -> bool:
+    """Check if git core.fileMode is disabled.
+
+    Args:
+        project_root: Project root directory
+
+    Returns:
+        True if core.fileMode=false, False otherwise
+    """
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["git", "config", "--get", "core.fileMode"],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        # core.fileMode=false means git doesn't track permission changes
+        return result.returncode == 0 and result.stdout.strip().lower() == "false"
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return False
+
+
+def update_git_index_executable(project_root: Path, hook_files: list[Path]) -> tuple[bool, bool]:
+    """Update git index to mark hook files as executable.
+
+    Required when core.fileMode=false - git won't track permission changes
+    automatically, so we must explicitly update the index.
+
+    Args:
+        project_root: Project root directory
+        hook_files: List of hook file paths to mark as executable
+
+    Returns:
+        Tuple of (success, files_were_tracked)
+        - success: True if update succeeded or files aren't tracked yet
+        - files_were_tracked: True if files were already in git index
+    """
+    import subprocess
+
+    # Convert paths to relative paths from project root
+    relative_paths = []
+    for hook_file in hook_files:
+        try:
+            rel_path = hook_file.relative_to(project_root)
+            relative_paths.append(str(rel_path))
+        except ValueError:
+            # File not under project_root, skip
+            continue
+
+    if not relative_paths:
+        return False, False
+
+    try:
+        # First check if any files are actually tracked in git
+        # git ls-files returns tracked files
+        result = subprocess.run(
+            ["git", "ls-files"] + relative_paths,
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+
+        # If no tracked files found, return success but indicate files aren't tracked
+        if not result.stdout.strip():
+            return True, False
+
+        # Files are tracked, update the index
+        subprocess.run(
+            ["git", "update-index", "--chmod=+x"] + relative_paths,
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=True,
+        )
+        return True, True
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
+        return False, False
+
 
 def copy_init_script(project_root: Path, daemon_dir: Path, self_install: bool = False) -> None:
     """Copy init.sh script to .claude directory.
@@ -141,8 +227,12 @@ def copy_init_script(project_root: Path, daemon_dir: Path, self_install: bool = 
         print(f"   ✅ Copied init.sh")
 
 
-def create_all_hooks(hooks_dir: Path) -> None:
-    """Create all Claude Code hook forwarder scripts."""
+def create_all_hooks(hooks_dir: Path) -> list[Path]:
+    """Create all Claude Code hook forwarder scripts.
+
+    Returns:
+        List of created hook file paths
+    """
     print("\n📝 Creating hook forwarder scripts...")
 
     # All hooks now use daemon forwarder pattern
@@ -159,9 +249,13 @@ def create_all_hooks(hooks_dir: Path) -> None:
         "session-end": "SessionEnd",
     }
 
+    hook_files = []
     for hook_name, event_name in daemon_hooks.items():
-        create_forwarder_script(hooks_dir, hook_name, event_name)
+        hook_file = create_forwarder_script(hooks_dir, hook_name, event_name)
+        hook_files.append(hook_file)
         print(f"   ✅ {hook_name}")
+
+    return hook_files
 
 
 def create_settings_json(project_root: Path, force: bool = False) -> None:
@@ -920,7 +1014,41 @@ def main() -> int:
 
     # Create all hook files
     hooks_dir = project_root / ".claude" / "hooks"
-    create_all_hooks(hooks_dir)
+    hook_files = create_all_hooks(hooks_dir)
+
+    # Handle git core.fileMode=false (permission tracking disabled)
+    if check_git_filemode(project_root):
+        print("\n⚠️  Git Permission Tracking Disabled")
+        print("   Detected: core.fileMode=false")
+        print("   Git will NOT track executable permission changes automatically.")
+
+        success, files_tracked = update_git_index_executable(project_root, hook_files)
+
+        if files_tracked:
+            # Files are already tracked - index was updated
+            print("\n   ✅ Git index updated - hook files marked as executable")
+            print("\n   ⚠️  ACTION REQUIRED:")
+            print("      You must commit these permission changes:")
+            print("      git commit -m 'chore: Make Claude hook dispatcher scripts executable'")
+        elif success:
+            # Files not yet tracked - need to add them first
+            print("\n   ℹ️  Hook files are not yet tracked by git")
+            print("\n   ⚠️  ACTION REQUIRED:")
+            print("      1. Add hook files to git:")
+            print("         git add .claude/hooks/*")
+            print("      2. Mark as executable in git index:")
+            hook_paths = " ".join([str(f.relative_to(project_root)) for f in hook_files])
+            print(f"         git update-index --chmod=+x {hook_paths}")
+            print("      3. Commit the changes:")
+            print("         git commit -m 'chore: Add Claude hook dispatcher scripts'")
+        else:
+            # Error occurred
+            print("\n   ⚠️  Failed to check/update git index")
+            print("\n   Manual fix required:")
+            print("      1. Add hook files: git add .claude/hooks/*")
+            hook_paths = " ".join([str(f.relative_to(project_root)) for f in hook_files])
+            print(f"      2. Mark executable: git update-index --chmod=+x {hook_paths}")
+            print("      3. Commit: git commit -m 'chore: Add Claude hook dispatcher scripts'")
 
     # Create configuration files
     print("\n📝 Creating configuration files...")
