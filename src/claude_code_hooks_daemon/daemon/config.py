@@ -25,7 +25,7 @@ class DaemonConfig:
         if self.idle_timeout_seconds <= 0:
             raise ValueError("idle_timeout_seconds must be positive")
 
-        if self.log_level not in ["DEBUG", "INFO", "WARNING", "ERROR"]:
+        if self.log_level not in ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]:
             raise ValueError(f"Invalid log_level: {self.log_level}")
 
         # Convert string paths to Path objects if needed

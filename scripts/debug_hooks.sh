@@ -60,17 +60,18 @@ case "${1:-}" in
 
         echo "=== Starting debug session: $BOUNDARY_MSG ==="
 
-        # Enable DEBUG logging if not already active
+        # Enable DEBUG logging via environment variable (no config changes needed)
         if ! is_debug_active; then
-            cp "$CONFIG_FILE" "$BACKUP_FILE"
-            sed -i 's/log_level: INFO/log_level: DEBUG/' "$CONFIG_FILE"
-            echo "✓ Enabled DEBUG logging"
+            # Create marker file to track debug mode
+            touch "$BACKUP_FILE"
+            echo "✓ Enabled DEBUG logging via HOOKS_DAEMON_LOG_LEVEL"
 
             "$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
             sleep 1
-            "$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli start
+            # Start daemon with DEBUG log level via environment variable
+            HOOKS_DAEMON_LOG_LEVEL=DEBUG "$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli start
             sleep 0.5
-            echo "✓ Daemon restarted"
+            echo "✓ Daemon restarted with DEBUG logging"
         else
             echo "✓ DEBUG logging already active"
         fi
@@ -112,16 +113,14 @@ case "${1:-}" in
         ' "$TEMP_LOGS" > "$OUTPUT_FILE"
 
         # Clean up
-        rm -f "$TEMP_LOGS"
+        rm -f "$TEMP_LOGS" "$BACKUP_FILE"
 
-        # Restore INFO logging
-        mv "$BACKUP_FILE" "$CONFIG_FILE"
-
+        # Restart daemon without DEBUG env var (will use config log level)
         "$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
         sleep 1
         "$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli start
 
-        echo "✓ Restored INFO logging"
+        echo "✓ Restored config log level"
         echo "✓ Daemon restarted"
         echo ""
         echo "Debug logs saved to: $OUTPUT_FILE"

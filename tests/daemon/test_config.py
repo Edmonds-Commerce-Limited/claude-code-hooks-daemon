@@ -62,6 +62,6 @@ class TestDaemonConfig:
 
     def test_accepts_valid_log_levels(self) -> None:
         """Test that all valid log levels are accepted."""
-        for level in ["DEBUG", "INFO", "WARNING", "ERROR"]:
+        for level in ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]:
             config = DaemonConfig(socket_path=Path("/tmp/test.sock"), log_level=level)
             assert config.log_level == level

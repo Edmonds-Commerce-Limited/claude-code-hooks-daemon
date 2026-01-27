@@ -147,10 +147,33 @@ class HooksDaemon:
     def _setup_logging(self, log_level: str) -> None:
         """Configure logging with memory handler and stderr error output.
 
+        Checks HOOKS_DAEMON_LOG_LEVEL environment variable first, falls back to config.
+
         Args:
-            log_level: Log level string (DEBUG, INFO, WARNING, ERROR)
+            log_level: Log level string from config (DEBUG, INFO, WARNING, ERROR, CRITICAL)
         """
         global _memory_log_handler
+
+        # Check for environment variable override
+        env_log_level = os.environ.get("HOOKS_DAEMON_LOG_LEVEL", "").strip().upper()
+        valid_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+
+        # Use env var if valid, otherwise use config
+        if env_log_level and env_log_level in valid_levels:
+            effective_log_level = env_log_level
+            logger.debug(
+                "Using log level %s from HOOKS_DAEMON_LOG_LEVEL env var (config: %s)",
+                effective_log_level,
+                log_level,
+            )
+        else:
+            effective_log_level = log_level
+            if env_log_level:
+                logger.warning(
+                    "Invalid HOOKS_DAEMON_LOG_LEVEL value '%s', using config value '%s'",
+                    env_log_level,
+                    log_level,
+                )
 
         # Create memory handler
         _memory_log_handler = MemoryLogHandler(max_records=1000)
@@ -167,7 +190,7 @@ class HooksDaemon:
 
         # Configure root logger
         root_logger = logging.getLogger()
-        root_logger.setLevel(getattr(logging, log_level))
+        root_logger.setLevel(getattr(logging, effective_log_level))
 
         # Remove any existing handlers
         root_logger.handlers.clear()
