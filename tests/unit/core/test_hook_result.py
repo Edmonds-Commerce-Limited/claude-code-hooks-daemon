@@ -264,13 +264,36 @@ class TestToJsonEventName:
         assert output["hookSpecificOutput"]["hookEventName"] == "PreToolUse"
 
     def test_to_json_different_event_names(self):
-        """Should work with different event names."""
-        events = ["PreToolUse", "PostToolUse", "SessionStart", "PreCompact"]
+        """Should work with different event names and event-specific formats."""
+        # Test PreToolUse format (hookSpecificOutput with permissionDecision)
         result = HookResult(decision="deny", reason="Test")
+        output = result.to_json("PreToolUse")
+        assert output["hookSpecificOutput"]["hookEventName"] == "PreToolUse"
+        assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
 
-        for event in events:
-            output = result.to_json(event)
-            assert output["hookSpecificOutput"]["hookEventName"] == event
+        # Test PostToolUse format (top-level decision, hookSpecificOutput only if context present)
+        output = result.to_json("PostToolUse")
+        assert output["decision"] == "block"
+        # No hookSpecificOutput if no context (valid PostToolUse response)
+
+        # Test PostToolUse with context
+        result_with_context = HookResult(decision="deny", reason="Test", context=["Error details"])
+        output = result_with_context.to_json("PostToolUse")
+        assert output["decision"] == "block"
+        assert output["hookSpecificOutput"]["hookEventName"] == "PostToolUse"
+        assert output["hookSpecificOutput"]["additionalContext"] == "Error details"
+
+        # Test Stop format (top-level decision only, no hookSpecificOutput)
+        output = result.to_json("Stop")
+        assert output["decision"] == "block"
+        assert "hookSpecificOutput" not in output
+
+        # Test SessionStart format (hookSpecificOutput with context only, no decision)
+        result_session = HookResult(decision="allow", context=["Test context"])
+        output = result_session.to_json("SessionStart")
+        assert output["hookSpecificOutput"]["hookEventName"] == "SessionStart"
+        assert "permissionDecision" not in output["hookSpecificOutput"]
+        assert output["hookSpecificOutput"]["additionalContext"] == "Test context"
 
     def test_to_json_silent_allow_no_event_name(self):
         """Silent allow should not include hookEventName (empty dict)."""

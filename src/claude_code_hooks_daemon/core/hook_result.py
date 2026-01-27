@@ -125,16 +125,48 @@ class HookResult(BaseModel):
     def to_json(self, event_name: str) -> dict[str, Any]:
         """Convert to Claude Code hook JSON format.
 
+        Different event types require different response structures:
+        - PreToolUse: hookSpecificOutput with permissionDecision
+        - PostToolUse: Top-level decision + hookSpecificOutput
+        - Stop/SubagentStop: Top-level decision only (NO hookSpecificOutput)
+        - PermissionRequest: hookSpecificOutput with nested decision.behavior
+        - SessionStart/SessionEnd/PreCompact/UserPromptSubmit/Notification:
+          hookSpecificOutput with context only (NO decision fields)
+
         Args:
             event_name: Hook event type (PreToolUse, PostToolUse, etc.)
 
         Returns:
             Dictionary in Claude Code hook output format
         """
-        # Silent allow with no context
+        # Silent allow with no context - valid for all events
         if self.decision == Decision.ALLOW and not self.context and not self.guidance:
             return {}
 
+        # Event-specific formatting
+        if event_name in ("Stop", "SubagentStop"):
+            # Stop events: Top-level decision only, NO hookSpecificOutput
+            return self._format_stop_response()
+        elif event_name == "PostToolUse":
+            # PostToolUse: Top-level decision + hookSpecificOutput
+            return self._format_post_tool_use_response(event_name)
+        elif event_name == "PermissionRequest":
+            # PermissionRequest: Nested decision.behavior structure
+            return self._format_permission_request_response(event_name)
+        elif event_name == "PreToolUse":
+            # PreToolUse: hookSpecificOutput with permissionDecision
+            return self._format_pre_tool_use_response(event_name)
+        else:
+            # Context-only events: SessionStart, SessionEnd, PreCompact,
+            # UserPromptSubmit, Notification
+            return self._format_context_only_response(event_name)
+
+    def _format_pre_tool_use_response(self, event_name: str) -> dict[str, Any]:
+        """Format PreToolUse response (current format).
+
+        Returns:
+            hookSpecificOutput with permissionDecision
+        """
         output: dict[str, Any] = {"hookEventName": event_name}
 
         if self.decision in (Decision.DENY, Decision.ASK):
@@ -142,7 +174,6 @@ class HookResult(BaseModel):
             if self.reason:
                 output["permissionDecisionReason"] = self.reason
 
-        # Join context list into single string for Claude Code format
         if self.context:
             output["additionalContext"] = "\n\n".join(self.context)
 
@@ -150,6 +181,86 @@ class HookResult(BaseModel):
             output["guidance"] = self.guidance
 
         return {"hookSpecificOutput": output} if output else {}
+
+    def _format_post_tool_use_response(self, event_name: str) -> dict[str, Any]:
+        """Format PostToolUse response.
+
+        Returns:
+            Top-level decision + hookSpecificOutput with context
+        """
+        response: dict[str, Any] = {}
+        hook_output: dict[str, Any] = {"hookEventName": event_name}
+
+        # Top-level decision field (only for block/deny)
+        if self.decision == Decision.DENY:
+            response["decision"] = "block"
+            if self.reason:
+                response["reason"] = self.reason
+
+        # hookSpecificOutput with context only
+        if self.context:
+            hook_output["additionalContext"] = "\n\n".join(self.context)
+
+        if self.guidance:
+            hook_output["guidance"] = self.guidance
+
+        # Only include hookSpecificOutput if it has content beyond hookEventName
+        if len(hook_output) > 1:
+            response["hookSpecificOutput"] = hook_output
+
+        return response
+
+    def _format_stop_response(self) -> dict[str, Any]:
+        """Format Stop/SubagentStop response.
+
+        Returns:
+            Top-level decision only (NO hookSpecificOutput)
+        """
+        response: dict[str, Any] = {}
+
+        # Only include decision if blocking
+        if self.decision == Decision.DENY:
+            response["decision"] = "block"
+            if self.reason:
+                response["reason"] = self.reason
+
+        return response
+
+    def _format_permission_request_response(self, event_name: str) -> dict[str, Any]:
+        """Format PermissionRequest response.
+
+        Returns:
+            hookSpecificOutput with nested decision.behavior
+        """
+        hook_output: dict[str, Any] = {"hookEventName": event_name}
+
+        # Nested decision structure
+        if self.decision in (Decision.ALLOW, Decision.DENY, Decision.ASK):
+            hook_output["decision"] = {"behavior": self.decision.value}
+
+        if self.context:
+            hook_output["additionalContext"] = "\n\n".join(self.context)
+
+        if self.guidance:
+            hook_output["guidance"] = self.guidance
+
+        return {"hookSpecificOutput": hook_output} if len(hook_output) > 1 else {}
+
+    def _format_context_only_response(self, event_name: str) -> dict[str, Any]:
+        """Format context-only response for SessionStart, SessionEnd, etc.
+
+        Returns:
+            hookSpecificOutput with context only (NO decision fields)
+        """
+        hook_output: dict[str, Any] = {"hookEventName": event_name}
+
+        if self.context:
+            hook_output["additionalContext"] = "\n\n".join(self.context)
+
+        if self.guidance:
+            hook_output["guidance"] = self.guidance
+
+        return {"hookSpecificOutput": hook_output} if len(hook_output) > 1 else {}
 
     def to_response_dict(self, _event_name: str, timing_ms: float) -> dict[str, Any]:
         """Convert to full daemon response format (PRD 3.2.2).
