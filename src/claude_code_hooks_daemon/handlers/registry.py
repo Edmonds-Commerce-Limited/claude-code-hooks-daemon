@@ -172,7 +172,7 @@ class HandlerRegistry:
                 continue
 
             # Get configuration for this event type
-            event_config = (config or {}).get(dir_name, {})
+            event_config = (config or {}).get(dir_name) or {}
 
             # Extract tag filters from event config
             enable_tags = event_config.get("enable_tags")

@@ -1,9 +1,6 @@
 """Tests for log_marker system action in daemon server."""
 
-import json
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from claude_code_hooks_daemon.daemon.server import HooksDaemon
 
