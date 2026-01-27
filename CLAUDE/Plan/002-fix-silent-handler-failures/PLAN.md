@@ -8,7 +8,7 @@
 
 ## Overview
 
-Fix critical silent failures where handlers match events but fail to process them due to wrong field names, then add robust input validation to prevent this class of bug from recurring. This addresses the findings from Plan 001 (Test Fixture Validation).
+Fix critical silent failures where handlers match events but fail to process them due to wrong field names, then add robust input validation at the front controller layer to prevent this class of bug from recurring. This addresses the findings from Plan 001 (Test Fixture Validation).
 
 **Problem**: Multiple handlers are silently broken in production:
 - BashErrorDetectorHandler uses `tool_output` (real events have `tool_response`)
@@ -16,6 +16,8 @@ Fix critical silent failures where handlers match events but fail to process the
 - NotificationLoggerHandler tests use `severity` (real events have `notification_type`)
 
 **Impact**: Handlers match events, return success, but never actually process data. No errors logged. Claude Code receives success responses. Users have no indication anything is wrong.
+
+**Architecture**: Input validation will be added at the **outermost front controller layer** (server.py `_handle_client()`) to validate hook_input ONCE per event BEFORE dispatching to handlers. This ensures all handlers receive validated data.
 
 ## Goals
 
@@ -58,13 +60,14 @@ See `/workspace/CLAUDE/Plan/002-fix-silent-handler-failures/CRITICAL_ANALYSIS_SI
 - [ ] ⬜ **Task 1.1**: Research validation approaches
   - [ ] ⬜ Evaluate jsonschema performance (benchmark with 10k events)
   - [ ] ⬜ Compare: full schemas vs sanity checks vs hybrid
-  - [ ] ⬜ Determine validation points (server.py? chain.py?)
+  - [ ] ⬜ **ARCHITECTURE**: Validate at outermost layer (server.py) ONCE per event
   - [ ] ⬜ Design error handling strategy
 - [ ] ⬜ **Task 1.2**: Design input schemas structure
   - [ ] ⬜ Create `input_schemas.py` alongside `response_schemas.py`
-  - [ ] ⬜ Define schemas for each event type (PreToolUse, PostToolUse, etc.)
-  - [ ] ⬜ Document required vs optional fields
-  - [ ] ⬜ Define validation error format
+  - [ ] ⬜ Define schemas for ALL event types (PreToolUse, PostToolUse, PermissionRequest, etc.)
+  - [ ] ⬜ Document required vs optional fields per event type
+  - [ ] ⬜ Include tool-specific structures (Bash, Read, Write, etc.)
+  - [ ] ⬜ Define validation error format returned to Claude Code
 - [ ] ⬜ **Task 1.3**: Design configuration approach
   - [ ] ⬜ Add `validate_input` boolean to DaemonConfig (default: False initially)
   - [ ] ⬜ Add `HOOKS_DAEMON_VALIDATE_INPUT` env var override
@@ -84,12 +87,14 @@ See `/workspace/CLAUDE/Plan/002-fix-silent-handler-failures/CRITICAL_ANALYSIS_SI
   - [ ] ⬜ Implement validate_input(event_type, hook_input)
   - [ ] ⬜ Return validation errors list
   - [ ] ⬜ Add performance logging
-- [ ] ⬜ **Task 2.3**: Integrate into server.py
+- [ ] ⬜ **Task 2.3**: Integrate into server.py front controller layer
   - [ ] ⬜ Write tests for server validation integration
-  - [ ] ⬜ Add validation call in _handle_client() after parsing JSON
+  - [ ] ⬜ Add validation call in _handle_client() after parsing JSON, BEFORE dispatch
+  - [ ] ⬜ Validate ONCE per event at outermost layer (not in handlers/chain)
   - [ ] ⬜ Return error response to Claude Code if validation fails
-  - [ ] ⬜ Log validation failures at WARNING level
+  - [ ] ⬜ Log validation failures at WARNING level with full details
   - [ ] ⬜ Add metrics tracking (validation_failures counter)
+  - [ ] ⬜ Short-circuit: Don't dispatch to handlers if validation fails
 
 ### Phase 3: Fix BashErrorDetectorHandler (PostToolUse)
 - [ ] ⬜ **Task 3.1**: Update handler implementation
@@ -140,17 +145,18 @@ See `/workspace/CLAUDE/Plan/002-fix-silent-handler-failures/CRITICAL_ANALYSIS_SI
   - [ ] ⬜ Verify logs contain correct field names
   - [ ] ⬜ All tests passing
 
-### Phase 6: Add Sanity Checks to Handlers
-- [ ] ⬜ **Task 6.1**: Define sanity check pattern
-  - [ ] ⬜ Document: When to use .get() vs direct access vs validation
-  - [ ] ⬜ Create handler_utils.py with require_field() helper
-  - [ ] ⬜ Write tests for require_field()
-  - [ ] ⬜ Implement require_field(hook_input, field_name, field_type)
-- [ ] ⬜ **Task 6.2**: Add sanity checks to critical handlers
-  - [ ] ⬜ BashErrorDetector: require tool_response dict
-  - [ ] ⬜ DestructiveGit: require tool_input.command string
-  - [ ] ⬜ TDDEnforcement: require tool_input dict
-  - [ ] ⬜ Document pattern in HANDLER_DEVELOPMENT.md
+### Phase 6: Add Defensive Checks to Handlers (Optional)
+- [ ] ⬜ **Task 6.1**: Define defensive coding pattern for handlers
+  - [ ] ⬜ Document: Handlers can trust validated input from front controller
+  - [ ] ⬜ Document: When to add defensive checks vs trusting validation
+  - [ ] ⬜ Create handler_utils.py with helper functions if needed
+  - [ ] ⬜ Update HANDLER_DEVELOPMENT.md with best practices
+- [ ] ⬜ **Task 6.2**: Review critical handlers for defensive improvements
+  - [ ] ⬜ BashErrorDetector: Verify assumes tool_response exists
+  - [ ] ⬜ DestructiveGit: Verify assumes tool_input.command exists
+  - [ ] ⬜ Document which fields are guaranteed by validation vs optional
+
+**Note**: With front controller validation, handlers can mostly trust input structure. Defensive checks are for edge cases not caught by schema (e.g., empty strings where non-empty expected).
 
 ### Phase 7: Performance & Integration Testing
 - [ ] ⬜ **Task 7.1**: Benchmark validation performance
@@ -222,11 +228,27 @@ See `/workspace/CLAUDE/Plan/002-fix-silent-handler-failures/CRITICAL_ANALYSIS_SI
 - Backward compatibility
 - User experience
 
-### Decision 3: Error Handling
+### Decision 3: Validation Layer Location
+**Context**: Where should input validation happen?
+**Options Considered**:
+1. In individual handlers (validate per-handler) - Flexible but inefficient, validated N times
+2. In handler chain (validate per-chain) - Better but still after routing
+3. In front controller server.py (validate once per event) - Outermost layer, most efficient
+
+**Decision**: Front controller layer (server.py `_handle_client()`) - ARCHITECTURAL DECISION
+**Rationale**:
+- Validate ONCE per event, not N times per handler
+- Catch invalid data before any handler processing
+- Single source of truth for valid event structure
+- Fail fast at system boundary
+- All handlers can trust input is valid
+**Date**: 2026-01-27
+
+### Decision 4: Error Handling
 **Context**: What happens when validation fails?
 **Options Considered**:
-1. Return error to Claude Code (fail-closed)
-2. Log error and allow (fail-open)
+1. Return error to Claude Code (fail-closed for validation)
+2. Log error and allow (fail-open for validation)
 3. Configurable behavior
 
 **Decision**: TBD - Need to understand Claude Code's error handling
@@ -234,6 +256,7 @@ See `/workspace/CLAUDE/Plan/002-fix-silent-handler-failures/CRITICAL_ANALYSIS_SI
 - Impact on user experience
 - Claude Code's retry behavior
 - Debugging experience
+**Note**: Validation failures are different from handler failures - validation means malformed input from Claude Code itself
 
 ## Success Criteria
 
