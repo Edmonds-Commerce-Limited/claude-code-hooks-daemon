@@ -14,6 +14,8 @@
 
 5. **SESSION RESTART REQUIRED**: After installation completes, user MUST restart Claude session. Hooks won't activate until Claude reloads configuration. LLM MUST verify hooks work after restart.
 
+6. **GITIGNORE MANDATORY**: You MUST create `.claude/.gitignore` before committing (step 4). The installer will display the required content. Skipping this will commit generated files (hooks-daemon/, *.bak) which should NOT be in version control.
+
 ---
 
 ## Quick Install (6 Steps)
@@ -51,6 +53,7 @@ untracked/venv/bin/python -c "import claude_code_hooks_daemon; print('OK')"
 ```bash
 # The installer auto-detects project root by searching upward for .claude/
 # Creates .claude/hooks/, settings.json, hooks-daemon.yaml
+# DISPLAYS (but does not create) required .claude/.gitignore content
 untracked/venv/bin/python install.py
 
 # For explicit control (optional):
@@ -65,9 +68,22 @@ cd ../..
 - `.claude/settings.json` - Hook registration
 - `.claude/hooks-daemon.yaml` - Handler config
 
-**⚠️ CRITICAL Git Integration Step:**
-The installer will display the REQUIRED `.claude/.gitignore` content.
-YOU MUST create this file before committing - copy the displayed content exactly.
+**⚠️ CRITICAL: .gitignore Content Displayed**
+
+The installer will display a large banner with the REQUIRED `.claude/.gitignore` content:
+
+```
+======================================================================
+⚠️  CRITICAL: .claude/.gitignore MUST be created
+======================================================================
+[full template content shown here]
+======================================================================
+```
+
+**YOU MUST:**
+1. Read the displayed content carefully
+2. Create `.claude/.gitignore` in step 4 (next)
+3. Do NOT skip this - committing without it will include hooks-daemon/ in git
 
 Template source (single source of truth):
 https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/blob/main/.claude/.gitignore
