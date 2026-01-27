@@ -168,13 +168,17 @@ def create_settings_json(project_root: Path, force: bool = False) -> None:
     """Create .claude/settings.json registering all hooks."""
     settings_file = project_root / ".claude" / "settings.json"
 
-    # Check if settings.json already exists
+    # Backup existing settings.json if it exists
     if settings_file.exists() and not force:
-        print(f"\n⚠️  {settings_file.relative_to(project_root)} already exists")
-        response = input("   Overwrite? [y/N]: ").strip().lower()
-        if response != 'y':
-            print("   Skipped settings.json")
-            return
+        backup_file = project_root / ".claude" / "settings.json.bak"
+
+        # If backup already exists, add timestamp
+        if backup_file.exists():
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_file = project_root / ".claude" / f"settings.json.bak.{timestamp}"
+
+        settings_file.rename(backup_file)
+        print(f"✅ Backed up existing settings.json to {backup_file.relative_to(project_root)}")
 
     settings = {
         "hooks": {
@@ -315,13 +319,17 @@ def create_daemon_config(project_root: Path, force: bool = False) -> None:
     """Create .claude/hooks-daemon.yaml configuration."""
     config_file = project_root / ".claude" / "hooks-daemon.yaml"
 
-    # Check if config already exists
+    # Backup existing config if it exists
     if config_file.exists() and not force:
-        print(f"\n⚠️  {config_file.relative_to(project_root)} already exists")
-        response = input("   Overwrite? [y/N]: ").strip().lower()
-        if response != 'y':
-            print("   Skipped hooks-daemon.yaml")
-            return
+        backup_file = project_root / ".claude" / "hooks-daemon.yaml.bak"
+
+        # If backup already exists, add timestamp
+        if backup_file.exists():
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_file = project_root / ".claude" / f"hooks-daemon.yaml.bak.{timestamp}"
+
+        config_file.rename(backup_file)
+        print(f"✅ Backed up existing hooks-daemon.yaml to {backup_file.relative_to(project_root)}")
 
     config = """version: "1.0"
 
@@ -473,44 +481,6 @@ plugins:
 
     config_file.write_text(config)
     print(f"✅ Created {config_file.relative_to(project_root)}")
-
-
-def create_claude_gitignore(project_root: Path) -> None:
-    """Create .claude/.gitignore to exclude daemon from project git.
-
-    Args:
-        project_root: Project root directory
-    """
-    gitignore_file = project_root / ".claude" / ".gitignore"
-
-    gitignore_content = """# Claude Code Hooks Daemon
-# Exclude the cloned daemon repository (users install it themselves)
-hooks-daemon/
-
-# Backup directories created during installation
-hooks.bak/
-hooks.bak.*/
-
-# Environment files (may contain local paths)
-hooks-daemon.env
-
-# Daemon runtime files
-*.sock
-*.pid
-
-# Python cache
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-
-# Virtual environments (if created locally)
-venv/
-.venv/
-"""
-
-    gitignore_file.write_text(gitignore_content)
-    print(f"✅ Created {gitignore_file.relative_to(project_root)}")
 
 
 def create_project_handler_structure(project_root: Path) -> None:
@@ -782,6 +752,47 @@ def verify_installation(project_root: Path) -> bool:
     return all_good
 
 
+def check_root_gitignore(project_root: Path) -> None:
+    """Check if root .gitignore blocks .claude/ directory and warn if needed.
+
+    Args:
+        project_root: Project root directory
+    """
+    root_gitignore = project_root / ".gitignore"
+    claude_gitignore = project_root / ".claude" / ".gitignore"
+
+    # Check if root .gitignore blocks .claude/
+    has_blocking_pattern = False
+    if root_gitignore.exists():
+        content = root_gitignore.read_text()
+        blocking_patterns = [".claude/", ".claude/*", "/.claude/", "/.claude/*"]
+
+        for pattern in blocking_patterns:
+            if pattern in content:
+                has_blocking_pattern = True
+                print("\n⚠️  WARNING: Git Integration Issue Detected")
+                print(f"   Your root .gitignore contains: {pattern}")
+                print("   This will prevent .claude/ configuration files from being tracked.")
+                print("\n💡 Recommended Action:")
+                print("   1. Remove '.claude/' from your root .gitignore")
+                print("   2. Create .claude/.gitignore to handle selective exclusions")
+                print("   3. This allows tracking config while excluding generated content")
+                print("\n📚 See README.md 'Git Integration' section for details")
+                print()
+                break
+
+    # Recommend creating .claude/.gitignore if it doesn't exist
+    if not claude_gitignore.exists():
+        print("\n💡 Git Integration Recommendation:")
+        print("   Create .claude/.gitignore to exclude generated content from git.")
+        print("   This allows you to track hook configuration while excluding:")
+        print("   - hooks-daemon/ (users install it themselves)")
+        print("   - *.bak files (installation backups)")
+        print("   - Runtime files (*.sock, *.pid)")
+        print("\n📚 See README.md 'Git Integration' section for recommended .gitignore pattern")
+        print()
+
+
 def main() -> int:
     """Main installation function."""
     # Parse command-line arguments
@@ -824,8 +835,8 @@ def main() -> int:
     # Backup existing hooks
     backup_existing_hooks(project_root)
 
-    # Create .gitignore to exclude daemon from project git
-    create_claude_gitignore(project_root)
+    # Check for root .gitignore issues and warn (but don't modify git config)
+    check_root_gitignore(project_root)
 
     # Find daemon directory (where this script lives)
     daemon_dir = Path(__file__).parent.resolve()

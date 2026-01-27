@@ -33,12 +33,6 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.git_stash import GitStashHan
 from claude_code_hooks_daemon.handlers.pre_tool_use.go_qa_suppression_blocker import (
     GoQaSuppressionBlocker,
 )
-from claude_code_hooks_daemon.handlers.pre_tool_use.php_qa_suppression_blocker import (
-    PhpQaSuppressionBlocker,
-)
-from claude_code_hooks_daemon.handlers.pre_tool_use.python_qa_suppression_blocker import (
-    PythonQaSuppressionBlocker,
-)
 from claude_code_hooks_daemon.handlers.pre_tool_use.hello_world import (
     HelloWorldPreToolUseHandler,
 )
@@ -48,11 +42,17 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization import
 from claude_code_hooks_daemon.handlers.pre_tool_use.npm_command import (
     NpmCommandHandler,
 )
+from claude_code_hooks_daemon.handlers.pre_tool_use.php_qa_suppression_blocker import (
+    PhpQaSuppressionBlocker,
+)
 from claude_code_hooks_daemon.handlers.pre_tool_use.plan_time_estimates import (
     PlanTimeEstimatesHandler,
 )
 from claude_code_hooks_daemon.handlers.pre_tool_use.plan_workflow import (
     PlanWorkflowHandler,
+)
+from claude_code_hooks_daemon.handlers.pre_tool_use.python_qa_suppression_blocker import (
+    PythonQaSuppressionBlocker,
 )
 from claude_code_hooks_daemon.handlers.pre_tool_use.sed_blocker import SedBlockerHandler
 from claude_code_hooks_daemon.handlers.pre_tool_use.tdd_enforcement import (

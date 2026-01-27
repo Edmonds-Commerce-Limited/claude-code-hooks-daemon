@@ -64,7 +64,11 @@ cd ../..
 - `.claude/hooks/*` - Forwarder scripts
 - `.claude/settings.json` - Hook registration
 - `.claude/hooks-daemon.yaml` - Handler config
-- `.claude/.gitignore` - Excludes daemon from git
+
+**Git Integration:**
+- Installer will RECOMMEND creating `.claude/.gitignore` (does not create it automatically)
+- If installer warns about root `.gitignore`, remove `.claude/` entry from root
+- See README.md "Git Integration" section for recommended .gitignore pattern
 
 ### 4. Commit & Restart Session ⚠️ MANDATORY
 
@@ -279,7 +283,7 @@ Lower priority = runs first. Terminal handlers stop dispatch chain.
 ```
 project/
 ├── .claude/
-│   ├── .gitignore              # ✅ COMMIT - Excludes daemon from git
+│   ├── .gitignore              # ⚠️  RECOMMENDED (not auto-created) - see README.md
 │   ├── init.sh                 # ✅ COMMIT - Daemon lifecycle
 │   ├── hooks-daemon.yaml       # ✅ COMMIT - Handler config
 │   ├── settings.json           # ✅ COMMIT - Hook registration
@@ -287,10 +291,15 @@ project/
 │   │   ├── pre-tool-use
 │   │   ├── post-tool-use
 │   │   └── handlers/           # ✅ COMMIT - Custom handlers
-│   └── hooks-daemon/           # ❌ DON'T COMMIT - Excluded by .gitignore
+│   └── hooks-daemon/           # ❌ Should be excluded (create .claude/.gitignore)
 │       ├── src/
 │       └── untracked/venv/     # Isolated Python environment
 ```
+
+**Git Integration:**
+- Installer RECOMMENDS creating `.claude/.gitignore` (does not create it automatically)
+- Recommended pattern uses self-exclusion (`*` then `!pattern` to un-ignore)
+- See README.md "Git Integration" section for recommended .gitignore pattern
 
 ---
 
