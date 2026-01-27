@@ -199,6 +199,7 @@ class DaemonConfig(BaseModel):
         pid_file_path: Custom PID file path (None = auto)
         log_buffer_size: Size of in-memory log buffer
         request_timeout_seconds: Request processing timeout
+        self_install_mode: Whether daemon runs from project root (vs .claude/hooks-daemon/)
     """
 
     model_config = ConfigDict(extra="allow")
@@ -217,6 +218,10 @@ class DaemonConfig(BaseModel):
     request_timeout_seconds: Annotated[int, Field(ge=1, le=300)] = Field(
         default=30,
         description="Request timeout in seconds",
+    )
+    self_install_mode: bool = Field(
+        default=False,
+        description="Self-install mode: daemon runs from project root instead of .claude/hooks-daemon/",
     )
     enable_hello_world_handlers: bool = Field(
         default=False,

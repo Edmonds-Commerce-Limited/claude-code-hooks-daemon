@@ -4,6 +4,25 @@
 
 A high-performance daemon for Claude Code hooks using Unix socket IPC. Eliminates process spawn overhead (20x faster after warmup).
 
+## Engineering Principles
+
+**CRITICAL: Follow these principles for ALL code changes:**
+
+1. **FAIL FAST** - Detect errors early, validate at boundaries, explicit error handling
+2. **YAGNI** - You Aren't Gonna Need It - Don't build for hypothetical futures
+3. **DRY** - Don't Repeat Yourself - Single source of truth for all logic
+4. **SINGLE SOURCE OF TRUTH** - Config is truth, code reads config, never hardcode
+5. **PROPER NOT QUICK** - No workarounds, no hacks, fix root causes
+6. **TYPE SAFETY** - Full type annotations, strict mypy, no `Any` without justification
+7. **TEST COVERAGE** - 95% minimum, integration tests for all flows
+8. **SCHEMA VALIDATION** - Validate all external data (hook responses, config files)
+
+**When in doubt:**
+- Read the config, don't guess
+- Fix the root cause, don't work around it
+- Add tests first, then implement
+- Validate with schemas, don't assume
+
 ## Quick Reference
 
 ### Key Directories

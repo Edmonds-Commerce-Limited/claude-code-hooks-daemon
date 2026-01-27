@@ -23,6 +23,7 @@ import time
 from pathlib import Path
 from typing import Any, Literal, cast
 
+from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.daemon.paths import (
     cleanup_pid_file,
@@ -38,7 +39,8 @@ from .init_config import generate_config
 def get_project_path(override_path: Path | None = None) -> Path:
     """Detect project path from current working directory.
 
-    Walks up directory tree to find .claude directory with hooks-daemon installed.
+    Walks up directory tree to find .claude directory and validates installation
+    based on self_install_mode configuration.
 
     Args:
         override_path: Optional path to use instead of auto-detection
@@ -47,36 +49,78 @@ def get_project_path(override_path: Path | None = None) -> Path:
         Path to project root directory
 
     Raises:
-        SystemExit if .claude directory not found or hooks-daemon not installed
+        SystemExit if .claude directory not found or installation invalid
     """
     if override_path:
         override_path = override_path.resolve()
         if not (override_path / ".claude").is_dir():
             print(f"ERROR: No .claude directory at: {override_path}", file=sys.stderr)
             sys.exit(1)
-        if not (override_path / ".claude" / "hooks-daemon").is_dir():
-            print(f"ERROR: hooks-daemon not installed at: {override_path}", file=sys.stderr)
-            sys.exit(1)
-        return override_path
+        return _validate_installation(override_path)
 
     current = Path.cwd()
 
     while current != current.parent:
         claude_dir = current / ".claude"
         if claude_dir.is_dir():
-            # Sanity check: verify hooks-daemon is installed here
-            if (claude_dir / "hooks-daemon").is_dir():
-                return current
-            # Found .claude but no hooks-daemon - keep searching upward
+            # Validate installation based on config
+            try:
+                return _validate_installation(current)
+            except SystemExit:
+                # Invalid installation - keep searching upward
+                pass
         current = current.parent
 
     print(
-        "ERROR: Could not find .claude directory with hooks-daemon installed\n"
+        "ERROR: Could not find .claude directory with valid hooks daemon installation\n"
         "You must run this command from the project root or any subdirectory.\n"
         f"Current directory: {Path.cwd()}",
         file=sys.stderr,
     )
     sys.exit(1)
+
+
+def _validate_installation(project_root: Path) -> Path:
+    """Validate hooks daemon installation at project root.
+
+    Checks .claude/hooks-daemon/ directory exists unless in self_install_mode.
+
+    Args:
+        project_root: Path to project root with .claude directory
+
+    Returns:
+        project_root if valid
+
+    Raises:
+        SystemExit: If installation is invalid
+    """
+    claude_dir = project_root / ".claude"
+    config_file = claude_dir / "hooks-daemon.yaml"
+
+    # Load config to check self_install_mode
+    self_install = False
+    if config_file.exists():
+        try:
+            config_dict = ConfigLoader.load(config_file)
+            config = Config.model_validate(config_dict)
+            self_install = config.daemon.self_install_mode
+        except Exception:
+            # Config load failure - treat as normal install mode
+            pass
+
+    # In normal install mode, verify hooks-daemon directory exists
+    if not self_install:
+        hooks_daemon_dir = claude_dir / "hooks-daemon"
+        if not hooks_daemon_dir.is_dir():
+            print(
+                f"ERROR: hooks-daemon not installed at: {project_root}\n"
+                f"Expected directory: {hooks_daemon_dir}\n"
+                f"Hint: Run 'python install.py' or set 'self_install_mode: true' in config",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+    return project_root
 
 
 def send_daemon_request(

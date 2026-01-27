@@ -4,6 +4,7 @@ version: "1.0"
 daemon:
   idle_timeout_seconds: 600  # Auto-shutdown after 10 minutes of inactivity
   log_level: INFO
+  self_install_mode: true  # Self-install: daemon runs from project root (not .claude/hooks-daemon/)
 
   enable_hello_world_handlers: false  # Disabled - using real handlers instead
 
