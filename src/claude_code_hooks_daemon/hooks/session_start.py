@@ -28,6 +28,18 @@ from claude_code_hooks_daemon.handlers.session_start.yolo_container_detection im
 )
 
 
+def get_builtin_handlers() -> dict[str, type]:
+    """Map of built-in handler names to classes.
+
+    Returns:
+        Dictionary mapping handler names to handler classes
+    """
+    return {
+        "workflow_state_restoration": WorkflowStateRestorationHandler,
+        "yolo_container_detection": YoloContainerDetectionHandler,
+    }
+
+
 def load_config_safe(config_path: Path) -> dict[str, Any]:
     """Load configuration file with fallback to defaults.
 
@@ -62,25 +74,45 @@ def main() -> None:
     if config.get("daemon", {}).get("enable_hello_world_handlers", False):
         controller.register(HelloWorldSessionStartHandler())
 
-    # 3. Register built-in handlers
+    # 3. Register built-in handlers (if enabled)
+    builtin_handlers = get_builtin_handlers()
     session_start_config = config.get("handlers", {}).get("session_start", {})
 
-    # WorkflowStateRestorationHandler - always enabled by default
-    workflow_config = session_start_config.get("workflow_state_restoration", {})
-    if workflow_config.get("enabled", True):
-        controller.register(WorkflowStateRestorationHandler())
+    # Extract tag filters from event config
+    enable_tags = session_start_config.get("enable_tags")
+    disable_tags = session_start_config.get("disable_tags", [])
 
-    # YoloContainerDetectionHandler - enabled by default
-    yolo_config = session_start_config.get("yolo_container_detection", {})
-    if yolo_config.get("enabled", True):
-        handler = YoloContainerDetectionHandler()
-        # Apply configuration overrides
-        handler_settings = {
-            "min_confidence_score": yolo_config.get("min_confidence_score", 3),
-            "show_detailed_indicators": yolo_config.get("show_detailed_indicators", True),
-            "show_workflow_tips": yolo_config.get("show_workflow_tips", True),
-        }
-        handler.configure(handler_settings)
+    for handler_name, handler_class in builtin_handlers.items():
+        handler_config = session_start_config.get(handler_name, {})
+
+        # Default to enabled if not explicitly disabled
+        if not handler_config.get("enabled", True):
+            continue
+
+        # Instantiate handler to get its tags
+        handler = handler_class()
+
+        # Tag-based filtering
+        if enable_tags and not any(tag in handler.tags for tag in enable_tags):
+            continue  # Skip - no matching tags
+
+        if disable_tags and any(tag in handler.tags for tag in disable_tags):
+            continue  # Skip - has disabled tag
+
+        # Special configuration for YoloContainerDetectionHandler
+        if handler_name == "yolo_container_detection":
+            handler_settings = {
+                "min_confidence_score": handler_config.get("min_confidence_score", 3),
+                "show_detailed_indicators": handler_config.get("show_detailed_indicators", True),
+                "show_workflow_tips": handler_config.get("show_workflow_tips", True),
+            }
+            handler.configure(handler_settings)
+
+        # Override priority from config if specified
+        priority = handler_config.get("priority")
+        if priority is not None:
+            handler.priority = priority
+
         controller.register(handler)
 
     # 4. Run dispatcher

@@ -14,7 +14,11 @@ class AutoApproveReadsHandler(Handler):
 
     def __init__(self) -> None:
         """Initialise handler with high priority for early approval."""
-        super().__init__(name="auto-approve-safe-reads", priority=10)
+        super().__init__(
+            name="auto-approve-safe-reads",
+            priority=10,
+            tags=["workflow", "automation", "non-terminal"],
+        )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if Read tool is requesting .md or .txt file.

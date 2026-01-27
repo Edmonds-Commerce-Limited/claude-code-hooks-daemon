@@ -23,7 +23,18 @@ class ValidateEslintOnWriteHandler(Handler):
                           If None, auto-detects using get_workspace_root().
                           This allows tests to provide isolated test directories.
         """
-        super().__init__(name="validate-eslint-on-write", priority=10)
+        super().__init__(
+            name="validate-eslint-on-write",
+            priority=10,
+            tags=[
+                "validation",
+                "typescript",
+                "javascript",
+                "qa-enforcement",
+                "advisory",
+                "non-terminal",
+            ],
+        )
         self.workspace_root = Path(workspace_root) if workspace_root else get_workspace_root()
 
     def matches(self, hook_input: dict[str, Any]) -> bool:

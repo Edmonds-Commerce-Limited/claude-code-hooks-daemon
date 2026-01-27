@@ -30,7 +30,12 @@ class YoloContainerDetectionHandler(Handler):
 
     def __init__(self) -> None:
         """Initialize handler with default configuration."""
-        super().__init__(name="yolo-container-detection", priority=40, terminal=False)
+        super().__init__(
+            name="yolo-container-detection",
+            priority=40,
+            terminal=False,
+            tags=["workflow", "environment", "advisory", "non-terminal"],
+        )
 
         # Default configuration
         self.config: dict[str, Any] = {

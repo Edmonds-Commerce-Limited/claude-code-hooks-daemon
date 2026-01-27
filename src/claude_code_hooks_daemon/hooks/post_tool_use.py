@@ -17,6 +17,9 @@ if __name__ == "__main__":
 
 from claude_code_hooks_daemon.config import ConfigLoader
 from claude_code_hooks_daemon.core import FrontController
+from claude_code_hooks_daemon.handlers.post_tool_use.bash_error_detector import (
+    BashErrorDetectorHandler,
+)
 from claude_code_hooks_daemon.handlers.post_tool_use.hello_world import (
     HelloWorldPostToolUseHandler,
 )
@@ -26,6 +29,19 @@ from claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write im
 from claude_code_hooks_daemon.handlers.post_tool_use.validate_sitemap import (
     ValidateSitemapHandler,
 )
+
+
+def get_builtin_handlers() -> dict[str, type]:
+    """Map of built-in handler names to classes.
+
+    Returns:
+        Dictionary mapping handler names to handler classes
+    """
+    return {
+        "bash_error_detector": BashErrorDetectorHandler,
+        "validate_eslint_on_write": ValidateEslintOnWriteHandler,
+        "validate_sitemap": ValidateSitemapHandler,
+    }
 
 
 def load_config_safe(config_path: Path) -> dict[str, Any]:
@@ -62,18 +78,37 @@ def main() -> None:
     if config.get("daemon", {}).get("enable_hello_world_handlers", False):
         controller.register(HelloWorldPostToolUseHandler())
 
-    # 3. Register built-in handlers
+    # 3. Register built-in handlers (if enabled)
+    builtin_handlers = get_builtin_handlers()
     post_tool_use_config = config.get("handlers", {}).get("post_tool_use", {})
 
-    # ValidateEslintOnWriteHandler - enabled by default
-    eslint_config = post_tool_use_config.get("validate_eslint_on_write", {})
-    if eslint_config.get("enabled", True):
-        controller.register(ValidateEslintOnWriteHandler())
+    # Extract tag filters from event config
+    enable_tags = post_tool_use_config.get("enable_tags")
+    disable_tags = post_tool_use_config.get("disable_tags", [])
 
-    # ValidateSitemapHandler - enabled by default
-    sitemap_config = post_tool_use_config.get("validate_sitemap", {})
-    if sitemap_config.get("enabled", True):
-        controller.register(ValidateSitemapHandler())
+    for handler_name, handler_class in builtin_handlers.items():
+        handler_config = post_tool_use_config.get(handler_name, {})
+
+        # Default to enabled if not explicitly disabled
+        if not handler_config.get("enabled", True):
+            continue
+
+        # Instantiate handler to get its tags
+        handler = handler_class()
+
+        # Tag-based filtering
+        if enable_tags and not any(tag in handler.tags for tag in enable_tags):
+            continue  # Skip - no matching tags
+
+        if disable_tags and any(tag in handler.tags for tag in disable_tags):
+            continue  # Skip - has disabled tag
+
+        # Override priority from config if specified
+        priority = handler_config.get("priority")
+        if priority is not None:
+            handler.priority = priority
+
+        controller.register(handler)
 
     # 4. Run dispatcher
     controller.run()

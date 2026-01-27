@@ -18,6 +18,7 @@ class HelloWorldPreToolUseHandler(Handler):
             name="hello_world",
             priority=priority,
             terminal=False,  # Allow other handlers to run
+            tags=["test", "non-terminal"],
         )
 
     def matches(self, _hook_input: dict[str, Any]) -> bool:

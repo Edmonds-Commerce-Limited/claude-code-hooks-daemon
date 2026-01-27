@@ -16,7 +16,12 @@ class CleanupHandler(Handler):
 
     def __init__(self) -> None:
         """Initialise handler as non-terminal cleanup."""
-        super().__init__(name="session-cleanup", priority=100, terminal=False)
+        super().__init__(
+            name="session-cleanup",
+            priority=100,
+            terminal=False,
+            tags=["cleanup", "workflow", "non-terminal"],
+        )
 
     def matches(self, _hook_input: dict[str, Any]) -> bool:
         """Match all session end events.

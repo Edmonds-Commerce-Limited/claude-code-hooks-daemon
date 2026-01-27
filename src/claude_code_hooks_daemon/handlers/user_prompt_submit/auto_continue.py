@@ -59,7 +59,11 @@ class AutoContinueHandler(Handler):
     ]
 
     def __init__(self) -> None:
-        super().__init__(name="auto-continue", priority=10)
+        super().__init__(
+            name="auto-continue",
+            priority=10,
+            tags=["workflow", "automation", "ec-specific", "non-terminal"],
+        )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if this is a minimal response to a confirmation prompt."""

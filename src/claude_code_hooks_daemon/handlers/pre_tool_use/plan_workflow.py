@@ -10,7 +10,12 @@ class PlanWorkflowHandler(Handler):
     """Provide guidance when creating plan files."""
 
     def __init__(self) -> None:
-        super().__init__(name="plan-workflow-guidance", priority=45, terminal=False)
+        super().__init__(
+            name="plan-workflow-guidance",
+            priority=45,
+            terminal=False,
+            tags=["workflow", "planning", "advisory", "non-terminal"],
+        )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if writing PLAN.md in CLAUDE/Plan/ directory."""

@@ -17,9 +17,23 @@ if __name__ == "__main__":
 
 from claude_code_hooks_daemon.config import ConfigLoader
 from claude_code_hooks_daemon.core import FrontController
+from claude_code_hooks_daemon.handlers.permission_request.auto_approve_reads import (
+    AutoApproveReadsHandler,
+)
 from claude_code_hooks_daemon.handlers.permission_request.hello_world import (
     HelloWorldPermissionRequestHandler,
 )
+
+
+def get_builtin_handlers() -> dict[str, type]:
+    """Map of built-in handler names to classes.
+
+    Returns:
+        Dictionary mapping handler names to handler classes
+    """
+    return {
+        "auto_approve_reads": AutoApproveReadsHandler,
+    }
 
 
 def load_config_safe(config_path: Path) -> dict[str, Any]:
@@ -56,7 +70,37 @@ def main() -> None:
     if config.get("daemon", {}).get("enable_hello_world_handlers", False):
         controller.register(HelloWorldPermissionRequestHandler())
 
-    # 3. TODO: Register other built-in handlers when created
+    # 3. Register built-in handlers (if enabled)
+    builtin_handlers = get_builtin_handlers()
+    permission_request_config = config.get("handlers", {}).get("permission_request", {})
+
+    # Extract tag filters from event config
+    enable_tags = permission_request_config.get("enable_tags")
+    disable_tags = permission_request_config.get("disable_tags", [])
+
+    for handler_name, handler_class in builtin_handlers.items():
+        handler_config = permission_request_config.get(handler_name, {})
+
+        # Default to enabled if not explicitly disabled
+        if not handler_config.get("enabled", True):
+            continue
+
+        # Instantiate handler to get its tags
+        handler = handler_class()
+
+        # Tag-based filtering
+        if enable_tags and not any(tag in handler.tags for tag in enable_tags):
+            continue  # Skip - no matching tags
+
+        if disable_tags and any(tag in handler.tags for tag in disable_tags):
+            continue  # Skip - has disabled tag
+
+        # Override priority from config if specified
+        priority = handler_config.get("priority")
+        if priority is not None:
+            handler.priority = priority
+
+        controller.register(handler)
 
     # 4. Run dispatcher
     controller.run()

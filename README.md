@@ -19,10 +19,64 @@ A daemon-based hooks system that eliminates process spawn overhead (~21ms) with 
 - **Lazy startup** - Daemon starts on first hook call
 - **Auto-shutdown** - Exits after 10 minutes of inactivity
 - **Multi-project support** - Unique daemon per project directory
-- **30 production handlers** across 10 event types
+- **33 production handlers** across 10 event types
 - **1168 tests** with 95% coverage requirement
 - **Type-safe** - Full MyPy strict mode compliance
 - **Plugin system** - Easy to add project-specific handlers
+
+---
+
+## Installation
+
+### Quick Start - AI-Assisted (Recommended)
+
+**Copy this into Claude Code:**
+
+```
+Please read and follow the installation instructions from:
+https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-INSTALL.md
+```
+
+**Installation time:** ~30 seconds with AI assistance
+
+The AI-assisted installation will:
+1. Clone the daemon to `.claude/hooks-daemon/`
+2. Create a self-contained virtual environment
+3. Install all dependencies
+4. Run the automated installer
+5. Verify the installation with tests
+
+### Manual Installation
+
+From your project root:
+
+```bash
+# Clone daemon to .claude/hooks-daemon/
+mkdir -p .claude
+cd .claude
+git clone https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon.git hooks-daemon
+cd hooks-daemon
+
+# Create self-contained virtual environment
+python3 -m venv untracked/venv
+
+# Install daemon dependencies into venv
+untracked/venv/bin/pip install -e .
+
+# Run automated installer
+untracked/venv/bin/python install.py
+
+# Return to project root
+cd ../..
+```
+
+The installer creates:
+1. `.claude/init.sh` - Daemon lifecycle functions (start/stop/ensure_daemon)
+2. `.claude/hooks/*` - Forwarder scripts (route hook calls to daemon)
+3. `.claude/settings.json` - Hook registration for Claude Code
+4. `.claude/hooks-daemon.yaml` - Handler and daemon configuration
+
+---
 
 ## Current Version: 2.1.0
 
@@ -35,15 +89,18 @@ A daemon-based hooks system that eliminates process spawn overhead (~21ms) with 
 
 ## Implementation Status
 
-### Implemented Event Types (30 Production Handlers)
+### Implemented Event Types (33 Production Handlers)
 
-**PreToolUse** (14 handlers):
+**PreToolUse** (17 handlers):
 - `destructive_git` - Blocks dangerous git operations (force push, hard reset, etc.)
 - `sed_blocker` - Blocks sed commands (encourages Edit tool usage)
 - `absolute_path` - Enforces relative paths in tool calls
 - `git_stash` - Discourages git stash with escape hatch
 - `tdd_enforcement` - Enforces test-driven development workflow
 - `eslint_disable` - Prevents disabling ESLint rules
+- `python_qa_suppression_blocker` - Blocks Python QA suppressions (# type: ignore, # noqa, etc.)
+- `php_qa_suppression_blocker` - Blocks PHP QA suppressions (@phpstan-ignore, phpcs:ignore, etc.)
+- `go_qa_suppression_blocker` - Blocks Go QA suppressions (//nolint, //lint:ignore, etc.)
 - `web_search_year` - Ensures web searches include current year (2026)
 - `british_english` - Warns on American English spellings
 - `worktree_file_copy` - Prevents accidental worktree file copies
@@ -86,49 +143,6 @@ A daemon-based hooks system that eliminates process spawn overhead (~21ms) with 
 
 **Stop** (1 handler):
 - `task_completion_checker` - Checks task completion status
-
----
-
-## Installation
-
-### Quick Start - AI-Assisted
-
-Copy this into Claude Code:
-
-```
-Please read and follow the installation instructions from:
-https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-INSTALL.md
-```
-
-### Manual Installation
-
-From your project root:
-
-```bash
-# Clone daemon to .claude/hooks-daemon/
-mkdir -p .claude
-cd .claude
-git clone https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon.git hooks-daemon
-cd hooks-daemon
-
-# Create self-contained virtual environment
-python3 -m venv untracked/venv
-
-# Install daemon dependencies into venv
-untracked/venv/bin/pip install -e .
-
-# Run automated installer
-untracked/venv/bin/python install.py
-
-# Return to project root
-cd ../..
-```
-
-The installer creates:
-1. `.claude/init.sh` - Daemon lifecycle functions (start/stop/ensure_daemon)
-2. `.claude/hooks/*` - Forwarder scripts (route hook calls to daemon)
-3. `.claude/settings.json` - Hook registration for Claude Code
-4. `.claude/hooks-daemon.yaml` - Handler and daemon configuration
 
 ---
 
@@ -301,6 +315,268 @@ def matches(self, hook_input: dict) -> bool:
 - Example: `.claude/hooks/handlers/pre_tool_use/my_handler.py`
 - The directory name does NOT enforce event filtering
 - Your `matches()` method is responsible for event filtering
+
+### Tag-Based Handler Selection
+
+Handlers can be filtered using tags, allowing you to enable only specific categories of handlers or disable project-specific functionality.
+
+#### Using enable_tags
+
+Enable only handlers with specific tags:
+
+```yaml
+handlers:
+  pre_tool_use:
+    enable_tags: [python, typescript, safety, tdd]
+    # Only handlers with at least one of these tags will run
+```
+
+This configuration would enable:
+- All Python-related handlers (`python` tag)
+- All TypeScript/JavaScript handlers (`typescript` tag)
+- All safety handlers (`safety` tag)
+- TDD enforcement handlers (`tdd` tag)
+
+#### Using disable_tags
+
+Disable handlers with specific tags:
+
+```yaml
+handlers:
+  pre_tool_use:
+    disable_tags: [ec-specific, project-specific]
+    # Handlers with these tags will NOT run
+```
+
+This configuration would disable:
+- All Edmonds Commerce-specific handlers
+- All project-specific validation handlers
+
+#### Tag Taxonomy
+
+**Language Tags:**
+- `python` - Python-specific handlers
+- `php` - PHP-specific handlers
+- `typescript` - TypeScript-specific handlers
+- `javascript` - JavaScript-specific handlers
+- `go` - Go-specific handlers
+
+**Function Tags:**
+- `safety` - Critical safety handlers (prevent destructive operations)
+- `tdd` - Test-driven development enforcement
+- `qa-enforcement` - Code quality/linting enforcement
+- `qa-suppression-prevention` - Blocks lazy QA suppression comments
+- `workflow` - Workflow guidance and automation
+- `advisory` - Non-blocking suggestions
+- `validation` - Validates code/files
+- `logging` - Logs events
+- `cleanup` - Cleanup operations
+
+**Tool Tags:**
+- `git` - Git-related operations
+- `npm` - NPM-related operations
+- `bash` - Bash command handling
+
+**Project Specificity Tags:**
+- `ec-specific` - Edmonds Commerce-specific functionality
+- `project-specific` - Tied to specific project structures
+
+#### Combining Filters
+
+You can combine `enable_tags` with `disable_tags`:
+
+```yaml
+handlers:
+  pre_tool_use:
+    enable_tags: [python, typescript, javascript]  # Only these languages
+    disable_tags: [ec-specific]                     # But exclude EC-specific handlers
+```
+
+Individual handler `enabled: false` settings override tag filtering:
+
+```yaml
+handlers:
+  pre_tool_use:
+    enable_tags: [python]
+
+    # This handler would normally be enabled by the python tag,
+    # but we explicitly disable it
+    python_qa_suppression_blocker:
+      enabled: false
+```
+
+### Language-Specific Handlers
+
+The daemon includes language-specific handlers for common development tasks:
+
+#### Python (`python` tag)
+- **TDD Enforcement**: Requires test files for new Python modules
+- **QA Suppression Blocker**: Prevents `# type: ignore`, `# noqa`, `# pylint: disable` without justification
+
+#### TypeScript/JavaScript (`typescript`, `javascript` tags)
+- **ESLint Disable Blocker**: Prevents `eslint-disable`, `@ts-ignore`, `@ts-nocheck` without justification
+- **ESLint Validation**: Validates ESLint compliance after Write operations
+- **NPM Command Advisor**: Provides guidance on npm commands
+
+#### PHP (`php` tag)
+- **PHP QA Suppression Blocker**: Prevents `@phpstan-ignore`, `@psalm-suppress`, `phpcs:ignore` without justification
+
+#### Go (`go` tag)
+- **Go QA Suppression Blocker**: Prevents `//nolint`, `//lint:ignore` without justification
+
+#### Git (`git` tag)
+- **Destructive Git Blocker**: Prevents destructive git commands (`push --force`, `reset --hard`, etc.)
+- **Git Stash Blocker**: Warns about git stash operations
+- **Worktree File Copy Blocker**: Prevents copying files from other git worktrees
+- **Git Context Injector**: Adds git context to user prompts
+
+### QA Suppression Prevention
+
+The daemon includes handlers that prevent lazy QA tool suppression comments across multiple languages. These handlers block comments that silence static analysis tools without proper justification.
+
+#### Why Block QA Suppressions?
+
+QA suppression comments (`# type: ignore`, `@ts-ignore`, `phpcs:ignore`, etc.) hide real code quality issues. They:
+- Create technical debt
+- Mask bugs that could reach production
+- Reduce code maintainability
+- Bypass important safety checks
+
+#### What Gets Blocked
+
+**Python:**
+- `# type: ignore` (MyPy)
+- `# noqa` (Ruff/Flake8)
+- `# pylint: disable` (Pylint)
+- `# pyright: ignore` (Pyright)
+- `# mypy: ignore-errors` (MyPy module-level)
+
+**TypeScript/JavaScript:**
+- `// eslint-disable`
+- `/* eslint-disable */`
+- `// @ts-ignore`
+- `// @ts-nocheck`
+- `// @ts-expect-error` (without explanation)
+
+**PHP:**
+- `@phpstan-ignore-next-line` (PHPStan)
+- `@phpstan-ignore-line` (PHPStan)
+- `@psalm-suppress` (Psalm)
+- `phpcs:ignore` (PHP_CodeSniffer)
+- `@codingStandardsIgnoreLine` (PHPCS)
+
+**Go:**
+- `//nolint` (golangci-lint)
+- `//lint:ignore` (golint)
+
+#### Correct Approach
+
+When blocked, you should:
+
+1. **Fix the underlying issue** - Add type hints, improve code structure, fix the actual problem
+2. **Add detailed justification** - If it's a legitimate edge case:
+   ```python
+   # type: ignore[import]  # Justification: third-party library has no type stubs
+   ```
+3. **Test-specific code** - Ensure test fixtures are in `tests/fixtures/` or `testdata/` directories
+4. **Legacy code** - Document WHY in a comment and create a ticket to fix it
+
+#### Disabling QA Suppression Prevention
+
+If you need to disable these handlers:
+
+```yaml
+handlers:
+  pre_tool_use:
+    # Disable all QA suppression prevention handlers
+    disable_tags: [qa-suppression-prevention]
+
+    # Or disable individual handlers
+    python_qa_suppression_blocker:
+      enabled: false
+```
+
+### Project-Specific Handlers
+
+Some handlers in this repository are specific to Edmonds Commerce projects and may not be applicable to other codebases.
+
+#### EC-Specific Handlers
+
+The following handlers have the `ec-specific` or `project-specific` tags:
+
+**ValidateSitemap** (`post_tool_use`)
+- Validates EC sitemap architecture
+- Highly specific to EC project structure
+- **Recommendation**: Disable for non-EC projects
+
+**MarkdownOrganization** (`pre_tool_use`)
+- Enforces EC markdown file organization
+- Checks for hardcoded paths specific to EC projects
+- **Recommendation**: Disable or customize for your project
+
+**RemindValidator** (`subagent_stop`)
+- Orchestrates EC-specific validation subagents
+- References EC-specific tools and workflows
+- **Recommendation**: Disable for non-EC projects
+
+**AutoContinue** (`user_prompt_submit`)
+- EC-specific workflow automation
+- Continues execution based on EC conventions
+- **Recommendation**: Disable or customize for your workflow
+
+**BritishEnglish** (`pre_tool_use`)
+- EC organizational preference for British English spelling
+- Not project-specific but organization-specific
+- **Recommendation**: Disable if not using British English
+
+#### Disabling Project-Specific Handlers
+
+To disable all EC-specific and project-specific handlers:
+
+```yaml
+handlers:
+  pre_tool_use:
+    disable_tags: [ec-specific, project-specific]
+  post_tool_use:
+    disable_tags: [ec-specific, project-specific]
+  subagent_stop:
+    disable_tags: [ec-specific, project-specific]
+  user_prompt_submit:
+    disable_tags: [ec-specific, project-specific]
+```
+
+Or use a more concise approach:
+
+```yaml
+handlers:
+  "*":  # Apply to all event types (if supported in future versions)
+    disable_tags: [ec-specific, project-specific]
+```
+
+#### Creating Your Own Project-Specific Handlers
+
+For your own project-specific handlers, use the plugin system:
+
+1. Create a custom handler with `project-specific` tag:
+   ```python
+   class MyProjectHandler(Handler):
+       def __init__(self) -> None:
+           super().__init__(
+               name="my-project-validator",
+               priority=50,
+               tags=["project-specific", "validation"]
+           )
+   ```
+
+2. Load via plugin configuration:
+   ```yaml
+   plugins:
+     plugins:
+       - path: ./my_project_handlers
+         enabled: true
+   ```
+
+See the Plugin System documentation for details.
 
 ---
 
@@ -576,7 +852,7 @@ claude-code-hooks-daemon/
 │   ├── core/              # Front controller, Handler base, HookResult
 │   ├── daemon/            # Server, CLI, DaemonController, paths
 │   ├── handlers/          # All handler implementations (by event type)
-│   │   ├── pre_tool_use/      # 14 production handlers
+│   │   ├── pre_tool_use/      # 17 production handlers
 │   │   ├── post_tool_use/     # 3 production handlers
 │   │   ├── session_start/     # 2 production handlers
 │   │   ├── session_end/       # 1 production handler

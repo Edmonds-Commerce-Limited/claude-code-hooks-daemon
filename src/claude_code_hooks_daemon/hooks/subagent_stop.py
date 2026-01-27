@@ -26,6 +26,22 @@ from claude_code_hooks_daemon.handlers.subagent_stop.remind_prompt_library impor
 from claude_code_hooks_daemon.handlers.subagent_stop.remind_validator import (
     RemindValidatorHandler,
 )
+from claude_code_hooks_daemon.handlers.subagent_stop.subagent_completion_logger import (
+    SubagentCompletionLoggerHandler,
+)
+
+
+def get_builtin_handlers() -> dict[str, type]:
+    """Map of built-in handler names to classes.
+
+    Returns:
+        Dictionary mapping handler names to handler classes
+    """
+    return {
+        "remind_validator": RemindValidatorHandler,
+        "remind_prompt_library": RemindPromptLibraryHandler,
+        "subagent_completion_logger": SubagentCompletionLoggerHandler,
+    }
 
 
 def load_config_safe(config_path: Path) -> dict[str, Any]:
@@ -62,18 +78,37 @@ def main() -> None:
     if config.get("daemon", {}).get("enable_hello_world_handlers", False):
         controller.register(HelloWorldSubagentStopHandler())
 
-    # 3. Register built-in handlers
+    # 3. Register built-in handlers (if enabled)
+    builtin_handlers = get_builtin_handlers()
     subagent_stop_config = config.get("handlers", {}).get("subagent_stop", {})
 
-    # RemindValidatorHandler - enabled by default (priority 10)
-    validator_config = subagent_stop_config.get("remind_validator", {})
-    if validator_config.get("enabled", True):
-        controller.register(RemindValidatorHandler())
+    # Extract tag filters from event config
+    enable_tags = subagent_stop_config.get("enable_tags")
+    disable_tags = subagent_stop_config.get("disable_tags", [])
 
-    # RemindPromptLibraryHandler - enabled by default (priority 100)
-    prompt_library_config = subagent_stop_config.get("remind_prompt_library", {})
-    if prompt_library_config.get("enabled", True):
-        controller.register(RemindPromptLibraryHandler())
+    for handler_name, handler_class in builtin_handlers.items():
+        handler_config = subagent_stop_config.get(handler_name, {})
+
+        # Default to enabled if not explicitly disabled
+        if not handler_config.get("enabled", True):
+            continue
+
+        # Instantiate handler to get its tags
+        handler = handler_class()
+
+        # Tag-based filtering
+        if enable_tags and not any(tag in handler.tags for tag in enable_tags):
+            continue  # Skip - no matching tags
+
+        if disable_tags and any(tag in handler.tags for tag in disable_tags):
+            continue  # Skip - has disabled tag
+
+        # Override priority from config if specified
+        priority = handler_config.get("priority")
+        if priority is not None:
+            handler.priority = priority
+
+        controller.register(handler)
 
     # 4. Run dispatcher
     controller.run()

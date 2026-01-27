@@ -25,7 +25,11 @@ class PlanTimeEstimatesHandler(Handler):
     ]
 
     def __init__(self) -> None:
-        super().__init__(name="block-plan-time-estimates", priority=40)
+        super().__init__(
+            name="block-plan-time-estimates",
+            priority=40,
+            tags=["workflow", "planning", "advisory", "non-terminal"],
+        )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if writing time estimates to plan files."""

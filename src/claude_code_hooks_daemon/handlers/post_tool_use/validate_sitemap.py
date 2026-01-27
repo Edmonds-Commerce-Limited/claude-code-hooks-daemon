@@ -10,7 +10,11 @@ class ValidateSitemapHandler(Handler):
     """Remind to validate sitemap files after editing."""
 
     def __init__(self) -> None:
-        super().__init__(name="validate-sitemap-on-edit", priority=20)
+        super().__init__(
+            name="validate-sitemap-on-edit",
+            priority=20,
+            tags=["validation", "ec-specific", "project-specific", "advisory", "non-terminal"],
+        )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if editing sitemap markdown file."""

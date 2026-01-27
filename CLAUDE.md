@@ -191,7 +191,7 @@ All QA checks run in GitHub Actions. PRs blocked if:
 **Version: 2.1.0**
 
 **Handler Count:**
-- PreToolUse: 14 production handlers
+- PreToolUse: 17 production handlers (including 3 QA suppression blockers)
 - PostToolUse: 3 production handlers
 - SessionStart: 2 production handlers (including YOLO container detection)
 - PreCompact: 2 production handlers
@@ -201,7 +201,7 @@ All QA checks run in GitHub Actions. PRs blocked if:
 - Notification: 1 production handler
 - PermissionRequest: 1 production handler
 - Stop: 1 production handler
-- **Total: 30 production handlers** (plus 10 hello_world test handlers)
+- **Total: 33 production handlers** (plus 10 hello_world test handlers)
 
 **Test Coverage:**
 - 1168 tests across 40 test files

@@ -14,7 +14,11 @@ class AbsolutePathHandler(Handler):
     """
 
     def __init__(self) -> None:
-        super().__init__(name="prevent-absolute-workspace-paths", priority=12)
+        super().__init__(
+            name="prevent-absolute-workspace-paths",
+            priority=12,
+            tags=["safety", "bash", "advisory", "non-terminal"],
+        )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if file CONTENT contains /workspace/ absolute paths."""

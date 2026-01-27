@@ -14,7 +14,12 @@ class TaskCompletionCheckerHandler(Handler):
 
     def __init__(self) -> None:
         """Initialise handler as non-terminal reminder."""
-        super().__init__(name="task-completion-checker", priority=50, terminal=False)
+        super().__init__(
+            name="task-completion-checker",
+            priority=50,
+            terminal=False,
+            tags=["workflow", "validation", "advisory", "non-terminal"],
+        )
 
     def matches(self, _hook_input: dict[str, Any]) -> bool:
         """Match all stop events.

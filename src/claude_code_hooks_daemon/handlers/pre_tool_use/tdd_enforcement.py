@@ -11,7 +11,11 @@ class TddEnforcementHandler(Handler):
     """Enforce TDD by blocking handler file creation without corresponding test file."""
 
     def __init__(self) -> None:
-        super().__init__(name="enforce-tdd", priority=15)
+        super().__init__(
+            name="enforce-tdd",
+            priority=15,
+            tags=["tdd", "python", "qa-enforcement", "blocking", "terminal"],
+        )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if this is a Write operation to a handler file."""

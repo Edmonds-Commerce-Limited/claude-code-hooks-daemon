@@ -35,7 +35,11 @@ class NpmCommandHandler(Handler):
     }
 
     def __init__(self) -> None:
-        super().__init__(name="enforce-npm-commands", priority=50)
+        super().__init__(
+            name="enforce-npm-commands",
+            priority=50,
+            tags=["workflow", "npm", "nodejs", "javascript", "advisory", "non-terminal"],
+        )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if this is an npm run or npx command that needs validation."""

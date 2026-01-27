@@ -17,7 +17,12 @@ class SubagentCompletionLoggerHandler(Handler):
 
     def __init__(self) -> None:
         """Initialise handler as non-terminal logger."""
-        super().__init__(name="subagent-completion-logger", priority=100, terminal=False)
+        super().__init__(
+            name="subagent-completion-logger",
+            priority=100,
+            terminal=False,
+            tags=["logging", "workflow", "non-terminal"],
+        )
 
     def matches(self, _hook_input: dict[str, Any]) -> bool:
         """Match all subagent stop events.

@@ -28,7 +28,12 @@ class BritishEnglishHandler(Handler):
 
     def __init__(self) -> None:
         # Non-terminal (terminal=False) - allows operation but adds warning context
-        super().__init__(name="enforce-british-english", priority=60, terminal=False)
+        super().__init__(
+            name="enforce-british-english",
+            priority=60,
+            terminal=False,
+            tags=["advisory", "content-quality", "ec-preference", "non-terminal"],
+        )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if writing content files with potential American spellings."""

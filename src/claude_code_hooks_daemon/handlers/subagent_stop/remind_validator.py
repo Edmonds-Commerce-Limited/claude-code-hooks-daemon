@@ -78,7 +78,11 @@ class RemindValidatorHandler(Handler):
     }
 
     def __init__(self) -> None:
-        super().__init__(name="remind-validate-after-builder", priority=10)
+        super().__init__(
+            name="remind-validate-after-builder",
+            priority=10,
+            tags=["workflow", "validation", "ec-specific", "advisory", "non-terminal"],
+        )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if a builder agent just completed."""

@@ -15,7 +15,12 @@ class BashErrorDetectorHandler(Handler):
 
     def __init__(self) -> None:
         """Initialise handler as non-terminal for feedback."""
-        super().__init__(name="bash-error-detector", priority=50, terminal=False)
+        super().__init__(
+            name="bash-error-detector",
+            priority=50,
+            terminal=False,
+            tags=["validation", "bash", "advisory", "non-terminal"],
+        )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if this is a Bash tool invocation.
@@ -39,6 +44,10 @@ class BashErrorDetectorHandler(Handler):
         """
         tool_output = hook_input.get("tool_output", {})
         if not tool_output:
+            return HookResult(decision=Decision.ALLOW)
+
+        # Handle case where tool_output is a string (shouldn't happen in production)
+        if not isinstance(tool_output, dict):
             return HookResult(decision=Decision.ALLOW)
 
         exit_code = tool_output.get("exit_code", 0)

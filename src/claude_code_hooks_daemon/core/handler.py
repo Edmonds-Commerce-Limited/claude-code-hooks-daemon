@@ -23,6 +23,9 @@ class Handler(ABC):
         priority: Execution order (lower = earlier, default 50)
         terminal: If True, stops dispatch after execution (default True).
                   If False, allows subsequent handlers to run (fall-through).
+        tags: List of tags for categorizing and filtering handlers (default []).
+              Tags enable language-specific, function-specific, or project-specific
+              handler groups. Example tags: python, safety, tdd, qa-enforcement.
 
     Priority Ranges (Convention):
         0-19:  Critical safety (destructive git, dangerous commands)
@@ -32,7 +35,7 @@ class Handler(ABC):
         80-99: Logging/metrics (analytics, audit trails)
     """
 
-    __slots__ = ("name", "priority", "terminal")
+    __slots__ = ("name", "priority", "tags", "terminal")
 
     def __init__(
         self,
@@ -40,6 +43,7 @@ class Handler(ABC):
         *,
         priority: int = 50,
         terminal: bool = True,
+        tags: list[str] | None = None,
     ) -> None:
         """Initialise handler.
 
@@ -47,10 +51,12 @@ class Handler(ABC):
             name: Unique handler identifier
             priority: Execution order (lower = earlier)
             terminal: Whether to stop dispatch after execution
+            tags: List of tags for categorizing/filtering (default [])
         """
         self.name = name
         self.priority = priority
         self.terminal = terminal
+        self.tags = tags if tags is not None else []
 
     def __repr__(self) -> str:
         """Return string representation."""
@@ -58,7 +64,8 @@ class Handler(ABC):
             f"{self.__class__.__name__}("
             f"name={self.name!r}, "
             f"priority={self.priority}, "
-            f"terminal={self.terminal})"
+            f"terminal={self.terminal}, "
+            f"tags={self.tags})"
         )
 
     @abstractmethod

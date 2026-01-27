@@ -17,7 +17,12 @@ class TranscriptArchiverHandler(Handler):
 
     def __init__(self) -> None:
         """Initialise handler as non-terminal archiver."""
-        super().__init__(name="transcript-archiver", priority=10, terminal=False)
+        super().__init__(
+            name="transcript-archiver",
+            priority=10,
+            terminal=False,
+            tags=["workflow", "archiving", "non-terminal"],
+        )
 
     def matches(self, _hook_input: dict[str, Any]) -> bool:
         """Match all pre-compact events.

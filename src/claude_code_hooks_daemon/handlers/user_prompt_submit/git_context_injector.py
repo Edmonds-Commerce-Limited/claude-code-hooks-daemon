@@ -15,7 +15,12 @@ class GitContextInjectorHandler(Handler):
 
     def __init__(self) -> None:
         """Initialise handler as non-terminal context provider."""
-        super().__init__(name="git-context-injector", priority=20, terminal=False)
+        super().__init__(
+            name="git-context-injector",
+            priority=20,
+            terminal=False,
+            tags=["workflow", "git", "context-injection", "non-terminal"],
+        )
 
     def matches(self, _hook_input: dict[str, Any]) -> bool:
         """Match all user prompt submissions.

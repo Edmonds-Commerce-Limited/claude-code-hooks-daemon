@@ -20,9 +20,24 @@ from claude_code_hooks_daemon.core import FrontController
 from claude_code_hooks_daemon.handlers.pre_compact.hello_world import (
     HelloWorldPreCompactHandler,
 )
+from claude_code_hooks_daemon.handlers.pre_compact.transcript_archiver import (
+    TranscriptArchiverHandler,
+)
 from claude_code_hooks_daemon.handlers.pre_compact.workflow_state_pre_compact import (
     WorkflowStatePreCompactHandler,
 )
+
+
+def get_builtin_handlers() -> dict[str, type]:
+    """Map of built-in handler names to classes.
+
+    Returns:
+        Dictionary mapping handler names to handler classes
+    """
+    return {
+        "transcript_archiver": TranscriptArchiverHandler,
+        "workflow_state_pre_compact": WorkflowStatePreCompactHandler,
+    }
 
 
 def load_config_safe(config_path: Path) -> dict[str, Any]:
@@ -59,13 +74,37 @@ def main() -> None:
     if config.get("daemon", {}).get("enable_hello_world_handlers", False):
         controller.register(HelloWorldPreCompactHandler())
 
-    # 3. Register built-in handlers
+    # 3. Register built-in handlers (if enabled)
+    builtin_handlers = get_builtin_handlers()
     pre_compact_config = config.get("handlers", {}).get("pre_compact", {})
 
-    # WorkflowStatePreCompactHandler - always enabled by default
-    workflow_config = pre_compact_config.get("workflow_state_pre_compact", {})
-    if workflow_config.get("enabled", True):
-        controller.register(WorkflowStatePreCompactHandler())
+    # Extract tag filters from event config
+    enable_tags = pre_compact_config.get("enable_tags")
+    disable_tags = pre_compact_config.get("disable_tags", [])
+
+    for handler_name, handler_class in builtin_handlers.items():
+        handler_config = pre_compact_config.get(handler_name, {})
+
+        # Default to enabled if not explicitly disabled
+        if not handler_config.get("enabled", True):
+            continue
+
+        # Instantiate handler to get its tags
+        handler = handler_class()
+
+        # Tag-based filtering
+        if enable_tags and not any(tag in handler.tags for tag in enable_tags):
+            continue  # Skip - no matching tags
+
+        if disable_tags and any(tag in handler.tags for tag in disable_tags):
+            continue  # Skip - has disabled tag
+
+        # Override priority from config if specified
+        priority = handler_config.get("priority")
+        if priority is not None:
+            handler.priority = priority
+
+        controller.register(handler)
 
     # 4. Run dispatcher
     controller.run()

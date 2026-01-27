@@ -11,7 +11,11 @@ class DestructiveGitHandler(Handler):
     """Block destructive git commands that permanently destroy data."""
 
     def __init__(self) -> None:
-        super().__init__(name="prevent-destructive-git", priority=10)
+        super().__init__(
+            name="prevent-destructive-git",
+            priority=10,
+            tags=["safety", "git", "blocking", "terminal"],
+        )
         self.destructive_patterns = [
             r"\bgit\s+reset\s+.*--hard\b",
             r"\bgit\s+clean\s+.*-[a-z]*f",

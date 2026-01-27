@@ -15,7 +15,11 @@ class WebSearchYearHandler(Handler):
         return datetime.now().year
 
     def __init__(self) -> None:
-        super().__init__(name="validate-websearch-year", priority=55)
+        super().__init__(
+            name="validate-websearch-year",
+            priority=55,
+            tags=["workflow", "advisory", "non-terminal"],
+        )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if WebSearch query uses old year."""

@@ -28,7 +28,9 @@ class WorkflowStatePreCompactHandler(Handler):
                           If None, auto-detects using get_workspace_root().
                           This allows tests to provide isolated test directories.
         """
-        super().__init__(name="workflow-state-precompact")
+        super().__init__(
+            name="workflow-state-precompact", tags=["workflow", "state-management", "non-terminal"]
+        )
         self.workspace_root = Path(workspace_root) if workspace_root else get_workspace_root()
 
     def matches(self, hook_input: dict[str, Any]) -> bool:

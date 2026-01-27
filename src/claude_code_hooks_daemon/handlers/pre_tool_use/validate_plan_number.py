@@ -33,7 +33,12 @@ class ValidatePlanNumberHandler(Handler):
     """
 
     def __init__(self) -> None:
-        super().__init__(name="validate-plan-number", priority=30, terminal=False)
+        super().__init__(
+            name="validate-plan-number",
+            priority=30,
+            terminal=False,
+            tags=["workflow", "planning", "advisory", "non-terminal"],
+        )
         self.workspace_root = get_workspace_root()
 
     def matches(self, hook_input: dict[str, Any]) -> bool:

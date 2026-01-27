@@ -11,7 +11,9 @@ class GitStashHandler(Handler):
     """Completely block git stash - no exceptions."""
 
     def __init__(self) -> None:
-        super().__init__(name="block-git-stash", priority=20)
+        super().__init__(
+            name="block-git-stash", priority=20, tags=["safety", "git", "blocking", "terminal"]
+        )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if this is a git stash creation command."""

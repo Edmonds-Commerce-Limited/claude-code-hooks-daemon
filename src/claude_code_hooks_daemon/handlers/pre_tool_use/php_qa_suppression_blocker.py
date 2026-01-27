@@ -1,4 +1,4 @@
-"""EslintDisableHandler - blocks ESLint disable comments in code."""
+"""PhpQaSuppressionBlocker - blocks QA suppression comments in PHP code."""
 
 import re
 from typing import Any, ClassVar
@@ -7,27 +7,28 @@ from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_file_content, get_file_path
 
 
-class EslintDisableHandler(Handler):
-    """Block ESLint disable comments in code."""
+class PhpQaSuppressionBlocker(Handler):
+    """Block QA suppression comments in PHP code."""
 
     FORBIDDEN_PATTERNS: ClassVar[list[str]] = [
-        r"eslint-disable",
-        r"@ts-ignore",
-        r"@ts-nocheck",
-        r"@ts-expect-error",
+        r"@phpstan-ignore-next-line",  # PHPStan
+        r"@psalm-suppress",  # Psalm
+        r"phpcs:ignore",  # PHP_CodeSniffer
+        r"@codingStandardsIgnoreLine",  # PHPCS
+        r"@phpstan-ignore-line",  # PHPStan alternative
     ]
 
-    CHECK_EXTENSIONS: ClassVar[list[str]] = [".ts", ".tsx", ".js", ".jsx"]
+    CHECK_EXTENSIONS: ClassVar[list[str]] = [".php"]
 
     def __init__(self) -> None:
         super().__init__(
-            name="enforce-no-eslint-disable",
+            name="php-qa-suppression-blocker",
             priority=30,
-            tags=["qa-suppression-prevention", "typescript", "javascript", "blocking", "terminal"],
+            tags=["php", "qa-suppression-prevention", "blocking", "terminal"],
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """Check if writing ESLint disable comments."""
+        """Check if writing PHP QA suppression comments."""
         tool_name = hook_input.get("tool_name")
         if tool_name not in ["Write", "Edit"]:
             return False
@@ -41,8 +42,8 @@ class EslintDisableHandler(Handler):
         if not any(file_path_lower.endswith(ext) for ext in self.CHECK_EXTENSIONS):
             return False
 
-        # Skip node_modules, dist, build artifacts
-        if any(skip in file_path for skip in ["node_modules", "dist", ".build", "coverage"]):
+        # Skip test fixtures, vendor directories
+        if any(skip in file_path for skip in ["tests/fixtures/", "vendor/"]):
             return False
 
         content = get_file_content(hook_input)
@@ -60,7 +61,7 @@ class EslintDisableHandler(Handler):
         return False
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
-        """Block ESLint suppressions."""
+        """Block PHP QA suppressions."""
         file_path = get_file_path(hook_input)
         content = get_file_content(hook_input)
         if hook_input.get("tool_name") == "Edit":
@@ -78,16 +79,27 @@ class EslintDisableHandler(Handler):
         return HookResult(
             decision=Decision.DENY,
             reason=(
-                "🚫 BLOCKED: ESLint suppression comments are not allowed\n\n"
+                "🚫 BLOCKED: PHP QA suppression comments are not allowed\n\n"
                 f"File: {file_path}\n\n"
                 f"Found {len(issues)} suppression comment(s):\n"
                 + "\n".join(f"  - {issue}" for issue in issues[:5])
                 + "\n\n"
-                "WHY: Suppression comments hide real problems and create technical debt.\n\n"
+                "WHY: Suppression comments hide real problems and create technical debt.\n"
+                "Static analysis errors, type issues, and coding standard violations exist for good reason.\n\n"
                 "✅ CORRECT APPROACH:\n"
                 "  1. Fix the underlying issue (don't suppress)\n"
-                "  2. Refactor code to meet ESLint rules\n"
-                "  3. If rule is genuinely wrong, update .eslintrc.json project-wide\n\n"
-                "ESLint rules exist for good reason. Fix the code, don't silence the tool."
+                "  2. Add proper type declarations instead of using @phpstan-ignore\n"
+                "  3. Refactor code to meet coding standards (PSR-12, etc.)\n"
+                "  4. If rule is genuinely wrong for your project, update phpstan.neon or phpcs.xml\n"
+                "  5. For test-specific code, ensure file is in tests/ directory\n"
+                "  6. For legacy code requiring suppression:\n"
+                "     - Add detailed comment explaining WHY suppression is needed\n"
+                "     - Create ticket to fix properly\n"
+                "     - Link ticket in comment\n\n"
+                "Quality tools exist to prevent bugs. Fix the code, don't silence the tool.\n\n"
+                "Resources:\n"
+                "  - PHPStan: https://phpstan.org/\n"
+                "  - Psalm: https://psalm.dev/\n"
+                "  - PHP_CodeSniffer: https://github.com/squizlabs/PHP_CodeSniffer"
             ),
         )

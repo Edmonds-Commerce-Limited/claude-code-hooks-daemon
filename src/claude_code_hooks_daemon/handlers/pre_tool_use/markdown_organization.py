@@ -16,7 +16,11 @@ class MarkdownOrganizationHandler(Handler):
     """
 
     def __init__(self) -> None:
-        super().__init__(name="enforce-markdown-organization", priority=35)
+        super().__init__(
+            name="enforce-markdown-organization",
+            priority=35,
+            tags=["workflow", "markdown", "ec-specific", "blocking", "terminal"],
+        )
 
     def normalize_path(self, file_path: str) -> str:
         """Normalize file path to project-relative format.

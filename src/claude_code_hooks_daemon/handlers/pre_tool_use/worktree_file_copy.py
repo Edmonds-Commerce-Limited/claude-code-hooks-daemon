@@ -11,7 +11,11 @@ class WorktreeFileCopyHandler(Handler):
     """Prevent copying files between worktrees and main repo."""
 
     def __init__(self) -> None:
-        super().__init__(name="prevent-worktree-file-copying", priority=15)
+        super().__init__(
+            name="prevent-worktree-file-copying",
+            priority=15,
+            tags=["safety", "git", "blocking", "terminal"],
+        )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if copying between worktree and main repo."""

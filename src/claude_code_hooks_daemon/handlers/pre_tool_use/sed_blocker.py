@@ -26,7 +26,9 @@ class SedBlockerHandler(Handler):
     """
 
     def __init__(self) -> None:
-        super().__init__(name="block-sed-command", priority=10)
+        super().__init__(
+            name="block-sed-command", priority=10, tags=["safety", "bash", "blocking", "terminal"]
+        )
         # Word boundary pattern: \bsed\b matches "sed" as whole word
         self._sed_pattern = re.compile(r"\bsed\b", re.IGNORECASE)
 

@@ -174,6 +174,10 @@ class HandlerRegistry:
             # Get configuration for this event type
             event_config = (config or {}).get(dir_name, {})
 
+            # Extract tag filters from event config
+            enable_tags = event_config.get("enable_tags")
+            disable_tags = event_config.get("disable_tags", [])
+
             # Find all Python files in the directory
             for py_file in event_dir.glob("*.py"):
                 if py_file.name.startswith("_"):
@@ -213,6 +217,23 @@ class HandlerRegistry:
                             # Handler subclasses override __init__ with no args
                             instance = attr()  # type: ignore[call-arg]
 
+                            # Tag-based filtering
+                            if enable_tags and not any(tag in instance.tags for tag in enable_tags):
+                                logger.debug(
+                                    "Handler %s skipped - no matching tags in enable_tags %s",
+                                    attr.__name__,
+                                    enable_tags,
+                                )
+                                continue
+
+                            if disable_tags and any(tag in instance.tags for tag in disable_tags):
+                                logger.debug(
+                                    "Handler %s skipped - has tag in disable_tags %s",
+                                    attr.__name__,
+                                    disable_tags,
+                                )
+                                continue
+
                             # Override priority from config if specified
                             if "priority" in handler_config:
                                 instance.priority = handler_config["priority"]
@@ -220,10 +241,11 @@ class HandlerRegistry:
                             router.register(event_type, instance)
                             count += 1
                             logger.debug(
-                                "Registered %s for %s (priority=%d)",
+                                "Registered %s for %s (priority=%d, tags=%s)",
                                 attr.__name__,
                                 event_type.value,
                                 instance.priority,
+                                instance.tags,
                             )
                         except Exception as e:
                             logger.warning("Failed to instantiate %s: %s", attr.__name__, e)

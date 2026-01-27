@@ -115,6 +115,140 @@ def handle(self, hook_input: dict) -> HookResult:
     )
 ```
 
+## Handler Tagging System
+
+### Overview
+
+Handlers can be tagged with metadata that enables categorization and filtering. Tags allow users to enable/disable handler groups based on language, functionality, or project specificity.
+
+### Adding Tags to Handlers
+
+Tags are specified in the handler's `__init__` method:
+
+```python
+class MyHandler(Handler):
+    def __init__(self) -> None:
+        super().__init__(
+            name="my-handler",
+            priority=50,
+            terminal=True,
+            tags=["python", "qa-enforcement", "blocking"]
+        )
+```
+
+### Tag Taxonomy
+
+#### Language Tags
+Use language tags to identify handlers specific to programming languages:
+- `python`, `php`, `typescript`, `javascript`, `go`, `rust`, `java`, `ruby`
+
+#### Function Tags
+Describe what the handler does:
+- `safety` - Prevents destructive operations
+- `tdd` - Test-driven development enforcement
+- `qa-enforcement` - Enforces code quality standards
+- `qa-suppression-prevention` - Blocks lazy QA tool suppressions
+- `workflow` - Workflow automation/guidance
+- `advisory` - Non-blocking suggestions
+- `validation` - Validates code/files/state
+- `logging` - Logs events/actions
+- `cleanup` - Cleanup operations
+
+#### Tool Tags
+Identify which Claude Code tools the handler works with:
+- `git`, `npm`, `bash`, `write`, `edit`
+
+#### Behavior Tags
+Describe handler behavior:
+- `terminal` - Stops dispatch chain
+- `non-terminal` - Allows fall-through
+- `blocking` - Can deny operations
+
+#### Project Specificity Tags
+Indicate project-specific functionality:
+- `ec-specific` - Edmonds Commerce-specific
+- `project-specific` - Tied to specific project structures
+- `generic` - Universally applicable
+
+### Choosing Tags
+
+When creating a handler, add tags that answer:
+1. **What language?** (if applicable)
+2. **What function?** (safety, qa-enforcement, workflow, etc.)
+3. **What tool?** (if specific to git, npm, bash, etc.)
+4. **What behavior?** (terminal/non-terminal, blocking)
+5. **How specific?** (generic, project-specific, ec-specific)
+
+### Examples
+
+**Safety Handler (Git):**
+```python
+tags=["safety", "git", "blocking", "terminal"]
+```
+
+**QA Suppression Blocker (Python):**
+```python
+tags=["python", "qa-suppression-prevention", "blocking", "terminal"]
+```
+
+**Workflow Advisory (Non-blocking):**
+```python
+tags=["workflow", "planning", "advisory", "non-terminal"]
+```
+
+**Project-Specific Validator:**
+```python
+tags=["validation", "ec-specific", "project-specific", "advisory", "non-terminal"]
+```
+
+### Tag-Based Filtering
+
+Users can filter handlers using tags in configuration:
+
+```yaml
+handlers:
+  pre_tool_use:
+    enable_tags: [python, typescript, safety]  # Only these tags
+    disable_tags: [ec-specific]                 # Exclude these tags
+```
+
+**Filtering Logic:**
+- `enable_tags`: Handler must have **at least one** tag from the list
+- `disable_tags`: Handler must have **no tags** from the list
+- Per-handler `enabled: false` overrides tag filtering
+
+### Best Practices
+
+1. **Be specific**: Use multiple tags to accurately describe functionality
+2. **Language first**: Always include language tags for language-specific handlers
+3. **Function over tool**: Prioritize function tags (what it does) over tool tags (how it does it)
+4. **Document project-specific**: Always tag project-specific handlers with `project-specific` or `ec-specific`
+5. **Test filtering**: Test that your handler respects tag-based filtering
+
+### Testing Tagged Handlers
+
+Test that tags work correctly:
+
+```python
+def test_handler_tags():
+    """Verify handler has correct tags."""
+    handler = MyHandler()
+    assert "python" in handler.tags
+    assert "qa-enforcement" in handler.tags
+
+def test_tag_filtering():
+    """Verify handler respects tag filtering."""
+    handler = MyHandler()
+
+    # Should match enable_tags
+    enable_tags = ["python"]
+    assert any(tag in handler.tags for tag in enable_tags)
+
+    # Should not match disable_tags
+    disable_tags = ["ec-specific"]
+    assert not any(tag in handler.tags for tag in disable_tags)
+```
+
 ## Utility Functions
 
 ### Extracting Information from hook_input

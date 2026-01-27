@@ -72,36 +72,91 @@ class EventHandlersConfig(BaseModel):
 
 
 class HandlersConfig(BaseModel):
-    """Configuration for all handler event types."""
+    """Configuration for all handler event types.
+
+    Each event type configuration can include:
+    - enable_tags: List of tags to enable (only handlers with these tags will run)
+    - disable_tags: List of tags to disable (handlers with these tags won't run)
+    - Individual handler configs by name
+    """
 
     model_config = ConfigDict(extra="allow")
 
-    pre_tool_use: dict[str, HandlerConfig] = Field(default_factory=dict)
-    post_tool_use: dict[str, HandlerConfig] = Field(default_factory=dict)
-    session_start: dict[str, HandlerConfig] = Field(default_factory=dict)
-    session_end: dict[str, HandlerConfig] = Field(default_factory=dict)
-    pre_compact: dict[str, HandlerConfig] = Field(default_factory=dict)
-    user_prompt_submit: dict[str, HandlerConfig] = Field(default_factory=dict)
-    permission_request: dict[str, HandlerConfig] = Field(default_factory=dict)
-    notification: dict[str, HandlerConfig] = Field(default_factory=dict)
-    stop: dict[str, HandlerConfig] = Field(default_factory=dict)
-    subagent_stop: dict[str, HandlerConfig] = Field(default_factory=dict)
+    pre_tool_use: dict[str, Any] = Field(default_factory=dict)
+    post_tool_use: dict[str, Any] = Field(default_factory=dict)
+    session_start: dict[str, Any] = Field(default_factory=dict)
+    session_end: dict[str, Any] = Field(default_factory=dict)
+    pre_compact: dict[str, Any] = Field(default_factory=dict)
+    user_prompt_submit: dict[str, Any] = Field(default_factory=dict)
+    permission_request: dict[str, Any] = Field(default_factory=dict)
+    notification: dict[str, Any] = Field(default_factory=dict)
+    stop: dict[str, Any] = Field(default_factory=dict)
+    subagent_stop: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("*", mode="before")
     @classmethod
-    def coerce_handler_configs(cls, v: dict[str, Any] | None) -> dict[str, HandlerConfig]:
-        """Coerce raw dicts to HandlerConfig instances."""
+    def coerce_handler_configs(cls, v: dict[str, Any] | None) -> dict[str, Any]:
+        """Coerce raw dicts to HandlerConfig instances, preserving tag filter keys.
+
+        Special keys 'enable_tags' and 'disable_tags' are preserved as-is.
+        Other keys are converted to HandlerConfig instances.
+        """
         if v is None:
             return {}
-        result: dict[str, HandlerConfig] = {}
+        result: dict[str, Any] = {}
         for name, config in v.items():
-            if isinstance(config, HandlerConfig):
+            # Preserve tag filter keys as-is
+            if name in ("enable_tags", "disable_tags") or isinstance(config, HandlerConfig):
                 result[name] = config
             elif isinstance(config, dict):
                 result[name] = HandlerConfig.model_validate(config)
             else:
                 result[name] = HandlerConfig()
         return result
+
+    def get_enable_tags(self, event_type: str) -> list[str] | None:
+        """Get enable_tags for a specific event type.
+
+        Args:
+            event_type: Event type (e.g., 'pre_tool_use')
+
+        Returns:
+            List of tags to enable, or None if not specified
+        """
+        event_config = getattr(self, event_type, {})
+        return event_config.get("enable_tags")
+
+    def get_disable_tags(self, event_type: str) -> list[str]:
+        """Get disable_tags for a specific event type.
+
+        Args:
+            event_type: Event type (e.g., 'pre_tool_use')
+
+        Returns:
+            List of tags to disable (empty list if not specified)
+        """
+        event_config = getattr(self, event_type, {})
+        return event_config.get("disable_tags", [])
+
+    def get_handler_config(self, event_type: str, handler_name: str) -> HandlerConfig:
+        """Get configuration for a specific handler.
+
+        Args:
+            event_type: Event type (e.g., 'pre_tool_use')
+            handler_name: Handler name (snake_case)
+
+        Returns:
+            Handler configuration (defaults if not specified)
+        """
+        event_config = getattr(self, event_type, {})
+        handler_config = event_config.get(handler_name)
+        if handler_config is None or handler_name in ("enable_tags", "disable_tags"):
+            return HandlerConfig()
+        if isinstance(handler_config, HandlerConfig):
+            return handler_config
+        if isinstance(handler_config, dict):
+            return HandlerConfig.model_validate(handler_config)
+        return HandlerConfig()
 
 
 class PluginConfig(BaseModel):
@@ -343,13 +398,4 @@ class Config(BaseModel):
         Returns:
             Handler configuration (defaults if not specified)
         """
-        event_handlers = getattr(self.handlers, event_type, {})
-        if isinstance(event_handlers, dict):
-            handler_config = event_handlers.get(handler_name)
-            if handler_config is None:
-                return HandlerConfig()
-            if isinstance(handler_config, dict):
-                return HandlerConfig.model_validate(handler_config)
-            if isinstance(handler_config, HandlerConfig):
-                return handler_config
-        return HandlerConfig()
+        return self.handlers.get_handler_config(event_type, handler_name)

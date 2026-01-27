@@ -30,6 +30,15 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.eslint_disable import (
     EslintDisableHandler,
 )
 from claude_code_hooks_daemon.handlers.pre_tool_use.git_stash import GitStashHandler
+from claude_code_hooks_daemon.handlers.pre_tool_use.go_qa_suppression_blocker import (
+    GoQaSuppressionBlocker,
+)
+from claude_code_hooks_daemon.handlers.pre_tool_use.php_qa_suppression_blocker import (
+    PhpQaSuppressionBlocker,
+)
+from claude_code_hooks_daemon.handlers.pre_tool_use.python_qa_suppression_blocker import (
+    PythonQaSuppressionBlocker,
+)
 from claude_code_hooks_daemon.handlers.pre_tool_use.hello_world import (
     HelloWorldPreToolUseHandler,
 )
@@ -74,6 +83,9 @@ def get_builtin_handlers() -> dict[str, type]:
         "web_search_year": WebSearchYearHandler,
         "british_english": BritishEnglishHandler,
         "eslint_disable": EslintDisableHandler,
+        "python_qa_suppression_blocker": PythonQaSuppressionBlocker,
+        "php_qa_suppression_blocker": PhpQaSuppressionBlocker,
+        "go_qa_suppression_blocker": GoQaSuppressionBlocker,
         "tdd_enforcement": TddEnforcementHandler,
         "sed_blocker": SedBlockerHandler,
         "worktree_file_copy": WorktreeFileCopyHandler,
@@ -123,18 +135,33 @@ def main() -> None:
     builtin_handlers = get_builtin_handlers()
     pre_tool_use_config = config.get("handlers", {}).get("pre_tool_use", {})
 
+    # Extract tag filters from event config
+    enable_tags = pre_tool_use_config.get("enable_tags")
+    disable_tags = pre_tool_use_config.get("disable_tags", [])
+
     for handler_name, handler_class in builtin_handlers.items():
         handler_config = pre_tool_use_config.get(handler_name, {})
 
         # Default to enabled if not explicitly disabled
-        if handler_config.get("enabled", True):
-            priority = handler_config.get("priority")
-            handler = handler_class()
+        if not handler_config.get("enabled", True):
+            continue
 
-            if priority is not None:
-                handler.priority = priority
+        # Instantiate handler to get its tags
+        handler = handler_class()
 
-            controller.register(handler)
+        # Tag-based filtering
+        if enable_tags and not any(tag in handler.tags for tag in enable_tags):
+            continue  # Skip - no matching tags
+
+        if disable_tags and any(tag in handler.tags for tag in disable_tags):
+            continue  # Skip - has disabled tag
+
+        # Override priority from config if specified
+        priority = handler_config.get("priority")
+        if priority is not None:
+            handler.priority = priority
+
+        controller.register(handler)
 
     # 4. Load plugin handlers
     plugins_config = config.get("plugins", [])

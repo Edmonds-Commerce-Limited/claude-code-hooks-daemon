@@ -9,7 +9,11 @@ class RemindPromptLibraryHandler(Handler):
     """Remind to capture successful prompts to the library."""
 
     def __init__(self) -> None:
-        super().__init__(name="remind-capture-prompt", priority=100)
+        super().__init__(
+            name="remind-capture-prompt",
+            priority=100,
+            tags=["workflow", "advisory", "non-terminal"],
+        )
 
     def matches(self, _hook_input: dict[str, Any]) -> bool:
         """Always match - remind after every sub-agent completion."""

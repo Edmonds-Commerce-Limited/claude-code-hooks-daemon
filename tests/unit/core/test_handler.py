@@ -78,13 +78,17 @@ class TestHandlerInit:
         assert handler.name == "test-handler"
         assert handler.priority == 50  # Default
         assert handler.terminal is True  # Default
+        assert handler.tags == []  # Default
 
     def test_init_with_all_parameters(self):
         """Should initialize with all parameters."""
-        handler = ConcreteHandler(name="custom-handler", priority=25, terminal=False)
+        handler = ConcreteHandler(
+            name="custom-handler", priority=25, terminal=False, tags=["safety", "git"]
+        )
         assert handler.name == "custom-handler"
         assert handler.priority == 25
         assert handler.terminal is False
+        assert handler.tags == ["safety", "git"]
 
     def test_init_sets_default_priority(self):
         """Should set default priority to 50."""
@@ -113,6 +117,33 @@ class TestHandlerInit:
         handler = ConcreteHandler(name="test", terminal=True)
         assert handler.terminal is True
 
+    def test_init_sets_default_tags_empty_list(self):
+        """Should set default tags to empty list."""
+        handler = ConcreteHandler(name="test")
+        assert handler.tags == []
+        assert isinstance(handler.tags, list)
+
+    def test_init_with_single_tag(self):
+        """Should accept single tag in list."""
+        handler = ConcreteHandler(name="test", tags=["safety"])
+        assert handler.tags == ["safety"]
+
+    def test_init_with_multiple_tags(self):
+        """Should accept multiple tags."""
+        tags = ["safety", "git", "blocking", "terminal"]
+        handler = ConcreteHandler(name="test", tags=tags)
+        assert handler.tags == tags
+
+    def test_init_with_empty_tags_list(self):
+        """Should accept empty tags list."""
+        handler = ConcreteHandler(name="test", tags=[])
+        assert handler.tags == []
+
+    def test_init_tags_none_creates_empty_list(self):
+        """Should convert tags=None to empty list."""
+        handler = ConcreteHandler(name="test", tags=None)
+        assert handler.tags == []
+
 
 # Property Tests
 
@@ -132,21 +163,29 @@ class TestHandlerProperties:
         """Should have accessible terminal property."""
         assert concrete_handler.terminal is True
 
+    def test_tags_property(self, concrete_handler):
+        """Should have accessible tags property."""
+        assert hasattr(concrete_handler, "tags")
+        assert isinstance(concrete_handler.tags, list)
+
     def test_properties_are_instance_attributes(self, concrete_handler):
         """Properties should be instance attributes."""
         assert hasattr(concrete_handler, "name")
         assert hasattr(concrete_handler, "priority")
         assert hasattr(concrete_handler, "terminal")
+        assert hasattr(concrete_handler, "tags")
 
     def test_properties_can_be_modified(self, concrete_handler):
         """Properties should be modifiable (no read-only enforcement)."""
         concrete_handler.name = "modified-name"
         concrete_handler.priority = 99
         concrete_handler.terminal = False
+        concrete_handler.tags = ["modified", "tags"]
 
         assert concrete_handler.name == "modified-name"
         assert concrete_handler.priority == 99
         assert concrete_handler.terminal is False
+        assert concrete_handler.tags == ["modified", "tags"]
 
 
 # Abstract Method Tests
@@ -516,3 +555,112 @@ class TestHandlerDocstring:
     def test_handler_handle_has_docstring(self):
         """Handler.handle should have docstring."""
         assert Handler.handle.__doc__ is not None
+
+
+class TestHandlerTags:
+    """Test Handler tag functionality."""
+
+    def test_handler_with_language_tags(self):
+        """Handler can have language-specific tags."""
+        handler = ConcreteHandler(name="python-handler", tags=["python", "qa-enforcement"])
+        assert "python" in handler.tags
+        assert "qa-enforcement" in handler.tags
+
+    def test_handler_with_function_tags(self):
+        """Handler can have function-specific tags."""
+        handler = ConcreteHandler(name="safety-handler", tags=["safety", "blocking", "terminal"])
+        assert "safety" in handler.tags
+        assert "blocking" in handler.tags
+
+    def test_handler_with_mixed_tags(self):
+        """Handler can have mixed tag types."""
+        tags = ["python", "tdd", "qa-enforcement", "blocking", "terminal"]
+        handler = ConcreteHandler(name="tdd-handler", tags=tags)
+        assert handler.tags == tags
+
+    def test_multiple_handlers_with_different_tags(self):
+        """Multiple handlers can have different tag sets."""
+        handler1 = ConcreteHandler(name="h1", tags=["python", "safety"])
+        handler2 = ConcreteHandler(name="h2", tags=["typescript", "qa-enforcement"])
+        handler3 = ConcreteHandler(name="h3", tags=["git", "workflow"])
+
+        assert handler1.tags != handler2.tags
+        assert handler2.tags != handler3.tags
+
+    def test_tag_filtering_logic(self):
+        """Test typical tag filtering logic."""
+        handlers = [
+            ConcreteHandler(name="h1", tags=["python", "safety"]),
+            ConcreteHandler(name="h2", tags=["typescript", "qa-enforcement"]),
+            ConcreteHandler(name="h3", tags=["python", "tdd"]),
+            ConcreteHandler(name="h4", tags=["git", "workflow"]),
+        ]
+
+        # Filter by enable_tags (any match)
+        enable_tags = ["python"]
+        filtered = [h for h in handlers if any(tag in h.tags for tag in enable_tags)]
+        assert len(filtered) == 2
+        assert filtered[0].name == "h1"
+        assert filtered[1].name == "h3"
+
+    def test_tag_exclusion_logic(self):
+        """Test typical tag exclusion logic."""
+        handlers = [
+            ConcreteHandler(name="h1", tags=["python", "safety"]),
+            ConcreteHandler(name="h2", tags=["ec-specific", "validation"]),
+            ConcreteHandler(name="h3", tags=["python", "tdd"]),
+        ]
+
+        # Filter by disable_tags (exclude any match)
+        disable_tags = ["ec-specific"]
+        filtered = [h for h in handlers if not any(tag in h.tags for tag in disable_tags)]
+        assert len(filtered) == 2
+        assert filtered[0].name == "h1"
+        assert filtered[1].name == "h3"
+
+
+class TestHandlerRepr:
+    """Test Handler __repr__ method."""
+
+    def test_repr_includes_name(self):
+        """__repr__ should include handler name."""
+        handler = ConcreteHandler(name="test-handler")
+        repr_str = repr(handler)
+        assert "test-handler" in repr_str
+
+    def test_repr_includes_priority(self):
+        """__repr__ should include priority."""
+        handler = ConcreteHandler(name="test", priority=25)
+        repr_str = repr(handler)
+        assert "priority=25" in repr_str
+
+    def test_repr_includes_terminal(self):
+        """__repr__ should include terminal flag."""
+        handler = ConcreteHandler(name="test", terminal=False)
+        repr_str = repr(handler)
+        assert "terminal=False" in repr_str
+
+    def test_repr_includes_tags(self):
+        """__repr__ should include tags."""
+        handler = ConcreteHandler(name="test", tags=["safety", "git"])
+        repr_str = repr(handler)
+        assert "tags=" in repr_str
+        assert "safety" in repr_str
+        assert "git" in repr_str
+
+    def test_repr_with_empty_tags(self):
+        """__repr__ should show empty list for tags."""
+        handler = ConcreteHandler(name="test")
+        repr_str = repr(handler)
+        assert "tags=[]" in repr_str
+
+    def test_repr_format(self):
+        """__repr__ should have expected format."""
+        handler = ConcreteHandler(name="test", priority=10, terminal=True, tags=["safety"])
+        repr_str = repr(handler)
+        assert repr_str.startswith("ConcreteHandler(")
+        assert repr_str.endswith(")")
+        assert "name=" in repr_str
+        assert "priority=" in repr_str
+        assert "terminal=" in repr_str
+        assert "tags=" in repr_str
