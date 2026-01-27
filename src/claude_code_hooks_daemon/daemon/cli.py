@@ -35,25 +35,47 @@ from claude_code_hooks_daemon.daemon.paths import (
 from .init_config import generate_config
 
 
-def get_project_path() -> Path:
+def get_project_path(override_path: Path | None = None) -> Path:
     """Detect project path from current working directory.
 
-    Walks up directory tree to find .claude directory.
+    Walks up directory tree to find .claude directory with hooks-daemon installed.
+
+    Args:
+        override_path: Optional path to use instead of auto-detection
 
     Returns:
         Path to project root directory
 
     Raises:
-        SystemExit if .claude directory not found
+        SystemExit if .claude directory not found or hooks-daemon not installed
     """
+    if override_path:
+        override_path = override_path.resolve()
+        if not (override_path / ".claude").is_dir():
+            print(f"ERROR: No .claude directory at: {override_path}", file=sys.stderr)
+            sys.exit(1)
+        if not (override_path / ".claude" / "hooks-daemon").is_dir():
+            print(f"ERROR: hooks-daemon not installed at: {override_path}", file=sys.stderr)
+            sys.exit(1)
+        return override_path
+
     current = Path.cwd()
 
     while current != current.parent:
-        if (current / ".claude").is_dir():
-            return current
+        claude_dir = current / ".claude"
+        if claude_dir.is_dir():
+            # Sanity check: verify hooks-daemon is installed here
+            if (claude_dir / "hooks-daemon").is_dir():
+                return current
+            # Found .claude but no hooks-daemon - keep searching upward
         current = current.parent
 
-    print("ERROR: Could not find .claude directory in path hierarchy", file=sys.stderr)
+    print(
+        "ERROR: Could not find .claude directory with hooks-daemon installed\n"
+        "You must run this command from the project root or any subdirectory.\n"
+        f"Current directory: {Path.cwd()}",
+        file=sys.stderr,
+    )
     sys.exit(1)
 
 
@@ -98,7 +120,7 @@ def send_daemon_request(
         return None
 
 
-def cmd_start(_args: argparse.Namespace) -> int:
+def cmd_start(args: argparse.Namespace) -> int:
     """Start daemon in background.
 
     Args:
@@ -107,7 +129,7 @@ def cmd_start(_args: argparse.Namespace) -> int:
     Returns:
         0 if daemon started successfully, 1 otherwise
     """
-    project_path = get_project_path()
+    project_path = get_project_path(getattr(args, "project_root", None))
     socket_path = get_socket_path(project_path)
     pid_path = get_pid_path(project_path)
 
@@ -215,7 +237,7 @@ def cmd_start(_args: argparse.Namespace) -> int:
     sys.exit(0)
 
 
-def cmd_stop(_args: argparse.Namespace) -> int:
+def cmd_stop(args: argparse.Namespace) -> int:
     """Stop running daemon.
 
     Args:
@@ -224,7 +246,7 @@ def cmd_stop(_args: argparse.Namespace) -> int:
     Returns:
         0 if daemon stopped successfully, 1 otherwise
     """
-    project_path = get_project_path()
+    project_path = get_project_path(getattr(args, "project_root", None))
     pid_path = get_pid_path(project_path)
     socket_path = get_socket_path(project_path)
 
@@ -279,7 +301,7 @@ def cmd_stop(_args: argparse.Namespace) -> int:
         return 1
 
 
-def cmd_status(_args: argparse.Namespace) -> int:
+def cmd_status(args: argparse.Namespace) -> int:
     """Check daemon status.
 
     Args:
@@ -288,7 +310,7 @@ def cmd_status(_args: argparse.Namespace) -> int:
     Returns:
         0 if daemon is running, 1 otherwise
     """
-    project_path = get_project_path()
+    project_path = get_project_path(getattr(args, "project_root", None))
     pid_path = get_pid_path(project_path)
     socket_path = get_socket_path(project_path)
 
@@ -325,7 +347,7 @@ def cmd_logs(args: argparse.Namespace) -> int:
     Returns:
         0 if successful, 1 otherwise
     """
-    project_path = get_project_path()
+    project_path = get_project_path(getattr(args, "project_root", None))
     socket_path = get_socket_path(project_path)
     pid_path = get_pid_path(project_path)
 
@@ -403,7 +425,7 @@ def cmd_logs(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_health(_args: argparse.Namespace) -> int:
+def cmd_health(args: argparse.Namespace) -> int:
     """Check daemon health status.
 
     Args:
@@ -412,7 +434,7 @@ def cmd_health(_args: argparse.Namespace) -> int:
     Returns:
         0 if healthy, 1 otherwise
     """
-    project_path = get_project_path()
+    project_path = get_project_path(getattr(args, "project_root", None))
     socket_path = get_socket_path(project_path)
     pid_path = get_pid_path(project_path)
 
@@ -464,7 +486,7 @@ def cmd_handlers(args: argparse.Namespace) -> int:
     Returns:
         0 if successful, 1 otherwise
     """
-    project_path = get_project_path()
+    project_path = get_project_path(getattr(args, "project_root", None))
     socket_path = get_socket_path(project_path)
     pid_path = get_pid_path(project_path)
 
@@ -516,7 +538,7 @@ def cmd_config(args: argparse.Namespace) -> int:
     Returns:
         0 if successful, 1 otherwise
     """
-    project_path = get_project_path()
+    project_path = get_project_path(getattr(args, "project_root", None))
     config_path = project_path / ".claude" / "hooks-daemon.yaml"
 
     if not config_path.exists():
@@ -603,7 +625,7 @@ def cmd_init_config(args: argparse.Namespace) -> int:
     Returns:
         0 if config generated successfully, 1 otherwise
     """
-    project_path = get_project_path()
+    project_path = get_project_path(getattr(args, "project_root", None))
     config_path = project_path / ".claude" / "hooks-daemon.yaml"
 
     # Check if config already exists
@@ -641,8 +663,16 @@ def main() -> int:
         Exit code (0 for success, 1 for error)
     """
     parser = argparse.ArgumentParser(
-        description="Claude Code Hooks Daemon - Lifecycle Management",
+        description="Claude Code Hooks Daemon - Lifecycle Management\n"
+        "Run from project root or any subdirectory.",
         prog="claude-hooks-daemon",
+    )
+
+    # Global arguments
+    parser.add_argument(
+        "--project-root",
+        type=Path,
+        help="Override project root path (auto-detected by default)",
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Command to run")

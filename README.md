@@ -710,7 +710,9 @@ For detailed architecture documentation, see `CLAUDE/ARCHITECTURE.md`.
 
 ## Daemon Management
 
-All commands use the venv Python (NOT system Python):
+All commands use the venv Python (NOT system Python).
+
+**Working Directory**: Commands can be run from project root or any subdirectory. The CLI walks up the directory tree to find `.claude`. If you get an error about .claude not found, you are outside the project directory.
 
 ```bash
 VENV_PYTHON=.claude/hooks-daemon/untracked/venv/bin/python
@@ -1004,6 +1006,27 @@ claude-code-hooks-daemon/
 
 ## Troubleshooting
 
+**For comprehensive troubleshooting and bug reporting, see [BUG_REPORTING.md](BUG_REPORTING.md)**
+
+### Quick Debug Report
+
+Generate a complete diagnostic report for troubleshooting or bug reports:
+
+```bash
+# In daemon project (this repository)
+./scripts/debug_info.py /tmp/debug_report.md
+
+# In client project (where daemon is installed)
+.claude/hooks-daemon/scripts/debug_info.py /tmp/debug_report.md
+```
+
+The report includes:
+- System information and daemon status
+- Configuration files and handler registration
+- Hook tests (simple + destructive git command)
+- Recent daemon logs
+- Complete health summary
+
 ### Daemon Won't Start
 
 ```bash
@@ -1087,11 +1110,13 @@ MIT License - see LICENSE file for details.
 
 **Issues & Bugs:**
 - GitHub Issues: https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/issues
+- Bug Reporting: See [BUG_REPORTING.md](BUG_REPORTING.md) for debug script usage
 
 **Documentation:**
 - Architecture: `CLAUDE/ARCHITECTURE.md`
 - Handler Development: `CLAUDE/HANDLER_DEVELOPMENT.md`
 - Upgrade Guides: `CLAUDE/UPGRADES/`
+- Troubleshooting: [BUG_REPORTING.md](BUG_REPORTING.md)
 
 **Contact:**
 - Email: hello@edmondscommerce.co.uk

@@ -733,8 +733,8 @@ def verify_installation(project_root: Path) -> bool:
     """
     print("\n🔍 Verifying installation...")
 
+    # File existence checks (excluding .gitignore)
     checks = [
-        (project_root / ".claude" / ".gitignore", ".gitignore"),
         (project_root / ".claude" / "init.sh", "init.sh"),
         (project_root / ".claude" / "hooks" / "pre-tool-use", "pre-tool-use hook"),
         (project_root / ".claude" / "settings.json", "settings.json"),
@@ -749,7 +749,55 @@ def verify_installation(project_root: Path) -> bool:
             print(f"   ❌ {description} NOT FOUND")
             all_good = False
 
+    # Validate .gitignore CONTENT (not just existence)
+    gitignore_valid, missing = verify_gitignore_content(project_root)
+    if gitignore_valid:
+        print(f"   ✅ .gitignore (with required patterns)")
+    else:
+        print(f"   ❌ .gitignore INVALID")
+        if missing == ["File does not exist"]:
+            print(f"      File does not exist")
+        elif missing == ["File is empty"]:
+            print(f"      File is empty")
+        else:
+            print(f"      Missing required patterns: {', '.join(missing)}")
+        print(f"      See instructions above for required content")
+        all_good = False
+
     return all_good
+
+
+def verify_gitignore_content(project_root: Path) -> tuple[bool, list[str]]:
+    """Verify .gitignore contains required patterns by READING the file.
+
+    Args:
+        project_root: Project root directory
+
+    Returns:
+        Tuple of (is_valid, missing_patterns)
+    """
+    gitignore_path = project_root / ".claude" / ".gitignore"
+
+    if not gitignore_path.exists():
+        return False, ["File does not exist"]
+
+    # READ the file content
+    content = gitignore_path.read_text()
+
+    if not content.strip():
+        return False, ["File is empty"]
+
+    # Critical patterns that MUST be present
+    required_patterns = [
+        "hooks-daemon/",
+        "hooks.bak/",
+        "*.sock",
+        "*.pid",
+    ]
+
+    missing = [p for p in required_patterns if p not in content]
+
+    return len(missing) == 0, missing
 
 
 def show_gitignore_instructions(project_root: Path, daemon_dir: Path) -> None:
@@ -898,12 +946,14 @@ def main() -> int:
         print("   • Stop:    python3 -m claude_code_hooks_daemon.daemon.cli stop")
         print("   • Status:  python3 -m claude_code_hooks_daemon.daemon.cli status")
         print("   • Restart: python3 -m claude_code_hooks_daemon.daemon.cli restart")
-        print("\n📚 Files Created:")
-        print("   • .claude/.gitignore - Excludes hooks-daemon/ from git")
+        print("\n📚 Installation Summary:")
+        print("Files Created by Installer:")
         print("   • .claude/init.sh - Daemon lifecycle functions")
         print("   • .claude/hooks/* - Forwarder scripts (route to daemon)")
         print("   • .claude/settings.json - Hook registration")
         print("   • .claude/hooks-daemon.yaml - Handler configuration")
+        print("\nFiles Verified (Created Manually):")
+        print("   • .claude/.gitignore - Git exclusion patterns")
         print("\n⚠️  Remember to commit .claude/ files (except hooks-daemon/) to git!")
         return 0
     else:
