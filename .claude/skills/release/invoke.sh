@@ -1,86 +1,177 @@
 #!/usr/bin/env bash
-# /release skill - Automated release management
+# /release skill - Automated release management orchestration
 
 set -euo pipefail
 
 VERSION="${1:-auto}"
 
-cat <<'PROMPT'
-Execute the release management process using the Release Agent specification.
+cat <<PROMPT
+# Release Orchestration for Version: ${VERSION}
 
-**Release Agent:** .claude/agents/release-agent.md
-**Documentation:** CLAUDE/development/RELEASING.md
+Execute the release management process in stages using agent orchestration.
 
+**CRITICAL:** Agents cannot spawn nested agents. You (main Claude) will orchestrate this workflow by invoking agents sequentially.
+
+## Stage 1: Release Preparation & Execution
+
+Use the Task tool to spawn the Release Agent (Sonnet 4.5):
+
+**Agent Spec:** .claude/agents/release-agent.md
 **Target Version:** ${VERSION}
 
-**Instructions:**
+**Task for Release Agent:**
+\`\`\`
+Execute release preparation and file updates for version ${VERSION}.
 
-1. Follow the Release Agent specification exactly
-2. Validate all prerequisites before starting
-3. Use Opus agent for final review (mandatory)
-4. Provide progress updates after each major step
-5. Stop immediately on any error with clear message
-6. Display final summary with links on success
-
-**Process Steps:**
+Follow the Release Agent specification (.claude/agents/release-agent.md) for:
 
 1. Pre-Release Validation
-   - Check git state (must be clean)
+   - Verify clean git state (no uncommitted changes)
    - Run QA checks (all must pass)
    - Verify version consistency
-   - Check GitHub CLI auth
+   - Check GitHub CLI authentication
 
 2. Version Detection
-   - If version="${VERSION}" and it's not "auto", use it
-   - Otherwise auto-detect from commits
-   - Present proposal and get user confirmation
+   - If version="${VERSION}" is not "auto", use it
+   - Otherwise auto-detect from commits (semantic versioning)
+   - Present proposal to user and get confirmation
 
 3. Version Updates
-   - pyproject.toml
+   - pyproject.toml (line 7)
    - src/claude_code_hooks_daemon/version.py
-   - README.md
+   - README.md (badge line 3)
    - CLAUDE.md
    - CLAUDE/CLAUDE.md
 
 4. Changelog Generation
    - Parse commits since last tag
-   - Categorize by type (Added/Changed/Fixed/Removed)
-   - Update CHANGELOG.md
+   - Categorize (Added/Changed/Fixed/Removed)
+   - Update CHANGELOG.md with Keep a Changelog format
 
-5. Release Notes
+5. Release Notes Creation
    - Create RELEASES/vX.Y.Z.md
    - Include summary, highlights, full changelog
    - Add installation/upgrade instructions
 
-6. Opus Review
-   - Submit all changes to Opus agent
-   - Must receive 100% approval
-   - Fix issues and resubmit if rejected
+**DO NOT:**
+- Do not commit changes yet
+- Do not spawn nested agents
+- Do not push to git
 
-7. Commit & Push
-   - Commit all version files
-   - Push to main
+**Output Required:**
+- List all files modified
+- Show version number determined
+- Display changelog entry preview
+- Display release notes preview
+- Confirm ready for review
 
-8. Tag & Release
-   - Create annotated git tag
-   - Push tag
-   - Create GitHub release with gh CLI
+Stop and return results. Next stage (Opus review) will be handled by main Claude.
+\`\`\`
 
-9. Verification
-   - Confirm tag exists
-   - Verify GitHub release published
-   - Test installation from tag
+## Stage 2: Opus Review (You Handle This)
 
-10. Report
-    - Display success message
-    - Show release URL
-    - Provide installation command
+After the Release Agent completes, YOU (main Claude) will:
+
+1. Review the Release Agent's output
+2. Use Task tool to spawn an ad-hoc Opus 4.5 agent for final review:
+
+**Task for Opus Agent:**
+\`\`\`
+model: opus
+description: Final release validation review
+
+Review the following release files for version X.Y.Z and confirm 100% accuracy:
+
+Files to review:
+- pyproject.toml (version line)
+- src/claude_code_hooks_daemon/version.py
+- README.md (badge)
+- CLAUDE.md (version section)
+- CHANGELOG.md (new entry)
+- RELEASES/vX.Y.Z.md
+
+Verification checklist:
+- [ ] All version numbers consistent (X.Y.Z)
+- [ ] Changelog categorization correct (Added/Changed/Fixed/Removed)
+- [ ] Release notes comprehensive and accurate
+- [ ] No grammatical errors
+- [ ] Technical descriptions accurate
+- [ ] No missing critical changes
+- [ ] Security/breaking changes properly marked
+- [ ] Upgrade instructions clear (if needed)
+
+Respond with JSON:
+{
+  "approved": true/false,
+  "confidence": "percentage",
+  "issues": ["issue 1", "issue 2"] or [],
+  "summary": "brief validation summary"
+}
+\`\`\`
+
+3. If Opus rejects: Invoke Release Agent again to fix issues
+4. If Opus approves: Proceed to Stage 3
+
+## Stage 3: Finalization (You Handle This)
+
+After Opus approval, YOU (main Claude) will:
+
+1. Commit changes:
+\`\`\`bash
+git add pyproject.toml src/claude_code_hooks_daemon/version.py README.md CLAUDE.md CLAUDE/CLAUDE.md CHANGELOG.md RELEASES/vX.Y.Z.md
+
+git commit -m "Release vX.Y.Z: [Title]
+
+- Updated version to X.Y.Z across all files
+- Added comprehensive changelog entry
+- Generated release notes
+
+Full changelog: RELEASES/vX.Y.Z.md
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
+
+git push origin main
+\`\`\`
+
+2. Create tag and GitHub release:
+\`\`\`bash
+git tag -a vX.Y.Z -m "\$(cat RELEASES/vX.Y.Z.md)"
+git push origin vX.Y.Z
+
+gh release create vX.Y.Z \\
+  --title "vX.Y.Z - [Title]" \\
+  --notes-file RELEASES/vX.Y.Z.md \\
+  --latest
+\`\`\`
+
+3. Verify:
+\`\`\`bash
+git tag -l vX.Y.Z
+gh release view vX.Y.Z
+\`\`\`
+
+4. Display success summary:
+\`\`\`
+✅ Release vX.Y.Z Complete!
+
+📦 Version: X.Y.Z (MAJOR/MINOR/PATCH release)
+🏷️  Tag: vX.Y.Z
+📝 Changelog: CHANGELOG.md
+📋 Release Notes: RELEASES/vX.Y.Z.md
+🔗 GitHub Release: https://github.com/.../releases/tag/vX.Y.Z
+
+Installation command:
+git clone -b vX.Y.Z https://github.com/.../hooks-daemon.git
+\`\`\`
+
+---
 
 **Error Handling:**
-- Abort on dirty git state
-- Abort on QA failures
-- Retry Opus review up to 3 times
-- Provide rollback instructions if needed
+- If Stage 1 fails: Abort, show error
+- If Stage 2 rejects: Re-run Stage 1 with fixes
+- If Stage 3 fails: Provide rollback instructions
 
-Begin release process now.
+**Documentation:** CLAUDE/development/RELEASING.md
+
+Begin Stage 1 now by invoking the Release Agent.
 PROMPT

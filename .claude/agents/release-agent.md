@@ -2,16 +2,24 @@
 
 ## Purpose
 
-Automate the complete release process including version updates, changelog generation, documentation review, and GitHub release creation.
+Prepare release files including version updates, changelog generation, and release notes creation. This agent does NOT commit, tag, or publish - it only prepares files for review.
 
 ## Capabilities
 
 - Update version across all files (pyproject.toml, version.py, README.md, CLAUDE.md)
 - Generate comprehensive changelogs from git commits
 - Create release notes with categorized changes
-- Coordinate Opus agent for final review
-- Create git tags and GitHub releases
-- Ensure documentation accuracy
+- Prepare all files for Opus review
+- Validate environment and prerequisites
+
+## Orchestration Context
+
+**CRITICAL:** This agent is part of a multi-stage orchestration:
+1. **Stage 1 (This Agent)**: Prepare release files
+2. **Stage 2 (Main Claude + Opus)**: Review changes
+3. **Stage 3 (Main Claude)**: Commit, tag, publish
+
+This agent **CANNOT spawn nested agents**. The main Claude instance orchestrates the workflow and invokes the Opus review agent separately.
 
 ## Process Overview
 
@@ -193,101 +201,112 @@ untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
 - [ ] Technical accuracy of descriptions
 - [ ] Grammar and spelling
 
-### 7. Opus Agent Review
+### 7. Output Summary & Stop
 
-**Invoke Opus for final review:**
+**DO NOT COMMIT, TAG, OR PUSH**
+
+This agent's job ends here. Output a comprehensive summary:
 
 ```
-Task: Comprehensive release review for vX.Y.Z
+📋 Release Preparation Complete for vX.Y.Z
 
-Please review these files and confirm 100% accuracy:
-1. CHANGELOG.md - new vX.Y.Z entry
-2. RELEASES/vX.Y.Z.md - release notes
-3. Version updates in:
-   - pyproject.toml
-   - src/claude_code_hooks_daemon/version.py
-   - README.md
-   - CLAUDE.md
+**Files Modified:**
+- pyproject.toml (version: X.Y.Z)
+- src/claude_code_hooks_daemon/version.py (version: X.Y.Z)
+- README.md (badge: X.Y.Z)
+- CLAUDE.md (version section: X.Y.Z)
+- CHANGELOG.md (added vX.Y.Z entry, lines XX-YY)
+- RELEASES/vX.Y.Z.md (created, ZZ lines)
 
-Verification checklist:
-- [ ] All version numbers consistent (X.Y.Z)
-- [ ] Changelog categorization correct (Added/Changed/Fixed/Removed)
-- [ ] Release notes accurately reflect changes
-- [ ] No grammatical errors
-- [ ] Technical descriptions accurate
-- [ ] Upgrade instructions clear
-- [ ] No missing critical changes
-- [ ] Security/breaking changes properly marked
+**Version:** X.Y.Z (MAJOR/MINOR/PATCH release)
+**Commits Analyzed:** N commits since last tag (vPREV.VERSION)
 
-If ANY issues found, respond with:
-{
-  "approved": false,
-  "issues": ["issue 1", "issue 2", ...]
-}
+**Changelog Preview:**
+## [X.Y.Z] - YYYY-MM-DD
 
-If perfect, respond with:
-{
-  "approved": true,
-  "confidence": "100%",
-  "summary": "Brief validation summary"
-}
+### Added
+- [First 3-5 items...]
+
+### Changed
+- [First 3-5 items...]
+
+### Fixed
+- [First 3-5 items...]
+
+[See CHANGELOG.md for complete entry]
+
+**Release Notes Preview:**
+# Release vX.Y.Z - [Title]
+
+**Highlights:**
+- [Top 3-5 highlights...]
+
+[See RELEASES/vX.Y.Z.md for full notes]
+
+**Status:** ✅ Ready for Opus review
+
+**Next Steps (Main Claude will handle):**
+1. Invoke Opus agent for validation
+2. If approved: commit, tag, and publish
+3. If rejected: re-invoke this agent with fixes
 ```
 
-**If issues found:**
-- Fix all issues
-- Re-run automated checks
-- Re-submit to Opus
-- Repeat until approved
+**STOP HERE**
 
-### 8. Commit & Push
+This agent does not:
+- Commit changes
+- Create tags
+- Push to GitHub
+- Spawn other agents (including Opus)
 
-Once Opus approves:
+---
 
+## Post-Agent Orchestration (For Main Claude Reference)
+
+After this agent completes successfully, the main Claude instance should:
+
+### Stage 2: Opus Review
+
+Invoke an ad-hoc Opus agent:
+
+```
+model: opus
+task: Review release files for vX.Y.Z and validate 100% accuracy
+
+Files: [list files from agent output]
+Checklist: [validation criteria]
+
+Return JSON with approved/issues
+```
+
+### Stage 3: Finalization
+
+If Opus approves, main Claude executes:
+
+1. **Commit:**
 ```bash
-# Stage all changes
-git add \
-  pyproject.toml \
-  src/claude_code_hooks_daemon/version.py \
-  README.md \
-  CLAUDE.md \
-  CLAUDE/CLAUDE.md \
-  CHANGELOG.md \
-  RELEASES/vX.Y.Z.md
-
-# Commit with conventional format
-git commit -m "Release vX.Y.Z: [Release Title]
-
-- Updated version to X.Y.Z across all files
-- Added comprehensive changelog entry
-- Generated release notes
-
-Full changelog: RELEASES/vX.Y.Z.md
-
-Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
-
-# Push to main
+git add [files]
+git commit -m "Release vX.Y.Z: [Title]"
 git push origin main
 ```
 
-### 9. Create GitHub Tag & Release
-
+2. **Tag & Release:**
 ```bash
-# Create annotated tag
-git tag -a vX.Y.Z -m "Release vX.Y.Z: [Release Title]
-
-$(cat RELEASES/vX.Y.Z.md)"
-
-# Push tag
+git tag -a vX.Y.Z -m "$(cat RELEASES/vX.Y.Z.md)"
 git push origin vX.Y.Z
-
-# Create GitHub release using gh CLI
-gh release create vX.Y.Z \
-  --title "vX.Y.Z - [Release Title]" \
-  --notes-file RELEASES/vX.Y.Z.md \
-  --latest
+gh release create vX.Y.Z --title "vX.Y.Z" --notes-file RELEASES/vX.Y.Z.md --latest
 ```
 
-### 10. Post-Release Verification
+3. **Verify & Report:**
+```bash
+git tag -l vX.Y.Z
+gh release view vX.Y.Z
+# Display success summary
+```
+
+### Error Recovery
+
+If Opus rejects: Main Claude re-invokes this Release Agent with issue list
 
 - Verify tag exists: `git tag -l vX.Y.Z`
 - Check GitHub release page
@@ -297,29 +316,28 @@ gh release create vX.Y.Z \
 
 ## Usage from /release Skill
 
-The skill will:
-1. Parse version argument or detect automatically
-2. Load this agent specification
-3. Execute process steps sequentially
-4. Provide progress updates
-5. Stop on any error
-6. Coordinate Opus review via Task tool
-7. Present final summary with links
+The skill orchestrates:
+1. Invokes this Release Agent (Stage 1)
+2. Main Claude invokes Opus review (Stage 2)
+3. Main Claude commits/tags/publishes (Stage 3)
 
-## Error Handling
+This agent only handles Stage 1.
 
-**Rollback Strategy:**
-- If errors before commit: `git restore .`
-- If errors after commit: `git reset --hard HEAD~1` (with user confirmation)
-- If errors after push: Create immediate patch release
-- Never force-push tags (creates downstream issues)
+## Error Handling (This Agent Only)
 
-**Common Errors:**
+**Pre-Commit Errors (This Agent Handles):**
 - Dirty git state → abort, instruct user to commit
 - QA failures → abort, run `./scripts/qa/run_all.sh`
-- Tag already exists → abort, version conflict
-- Opus rejects → fix issues and retry
-- GitHub API errors → retry with backoff
+- Version detection issues → prompt user for clarification
+- File update errors → report and abort
+
+**Post-Commit Errors (Main Claude Handles):**
+- Opus rejection → main Claude re-invokes this agent with fixes
+- Git/GitHub errors → main Claude handles rollback
+- Tag conflicts → main Claude handles resolution
+
+**Rollback Strategy:**
+Since this agent doesn't commit, rollback is simple: `git restore .`
 
 ## Output Summary
 

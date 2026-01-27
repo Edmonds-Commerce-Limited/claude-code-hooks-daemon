@@ -29,7 +29,14 @@ This document describes how to publish a new release of the Claude Code Hooks Da
 
 ## Process Details
 
-The `/release` skill automates the complete release workflow:
+The `/release` skill orchestrates the complete release workflow through a multi-stage process:
+
+**Orchestration Architecture:**
+- **Stage 1**: Release Agent (Sonnet) prepares files
+- **Stage 2**: Opus Agent reviews for accuracy
+- **Stage 3**: Main Claude commits, tags, and publishes
+
+**Important:** Agents cannot spawn nested agents. Main Claude orchestrates by invoking agents sequentially.
 
 ### 1. Pre-Release Validation (Automated)
 
@@ -152,10 +159,12 @@ Creates comprehensive release notes in `RELEASES/vX.Y.Z.md`:
 
 **Example:** See `RELEASES/v2.1.0.md` (if exists) for reference format.
 
-### 6. Opus Review (Automated)
+### 6. Opus Review (Orchestrated by Main Claude)
 
 **Critical Quality Gate:**
-The agent invokes an Opus 4.5 agent to perform final review:
+After the Release Agent completes, **main Claude** (not the agent) invokes an ad-hoc Opus 4.5 agent to perform final review:
+
+**Note:** Agents cannot spawn nested agents. The /release skill orchestrates this multi-stage process through main Claude.
 
 **Review Scope:**
 - ✅ All version numbers consistent
@@ -167,22 +176,22 @@ The agent invokes an Opus 4.5 agent to perform final review:
 - ✅ Upgrade instructions clear
 
 **Outcome:**
-- **Approved**: Process continues to commit/tag/release
-- **Issues Found**: Agent fixes issues and re-submits to Opus
+- **Approved**: Main Claude proceeds to commit/tag/release
+- **Issues Found**: Main Claude re-invokes Release Agent with fixes
 - Process repeats until Opus approves with 100% confidence
 
 You'll see output like:
 ```
-📋 Submitting to Opus agent for final review...
-⏳ Waiting for Opus approval...
+📋 Release Agent Complete - Files prepared for review
+⏳ Invoking Opus agent for validation...
 ✅ Opus Review: APPROVED (100% confidence)
    "All version numbers consistent, changelog accurate,
     no issues found. Ready for release."
 ```
 
-### 7. Commit & Push (Automated)
+### 7. Commit & Push (Main Claude Executes)
 
-Once Opus approves, the agent commits and pushes:
+Once Opus approves, **main Claude** (not the Release Agent) commits and pushes:
 
 ```bash
 # Commits all version files, changelog, release notes
@@ -204,9 +213,9 @@ Full changelog: RELEASES/vX.Y.Z.md
 Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
 ```
 
-### 8. Tag & GitHub Release (Automated)
+### 8. Tag & GitHub Release (Main Claude Executes)
 
-Creates annotated git tag and GitHub release:
+**Main Claude** creates annotated git tag and GitHub release:
 
 ```bash
 # Annotated tag with full release notes
@@ -226,9 +235,9 @@ gh release create vX.Y.Z \
 - ✅ Auto-generated tarball/zip
 - ✅ Comparison link to previous version
 
-### 9. Post-Release Verification (Automated)
+### 9. Post-Release Verification (Main Claude Executes)
 
-The agent verifies:
+**Main Claude** verifies:
 - ✅ Tag exists locally and on GitHub
 - ✅ GitHub release is published
 - ✅ Release marked as "Latest"
