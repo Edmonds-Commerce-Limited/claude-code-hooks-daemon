@@ -1,3 +1,10 @@
+---
+name: release-agent
+description: Prepare release files including version updates, changelog generation, and release notes. Validates prerequisites and prepares for Opus review. Does NOT commit or publish.
+tools: Read, Edit, Write, Bash, Glob, Grep
+model: sonnet
+---
+
 # Release Agent - Automated Version Management & Release
 
 ## Purpose
@@ -25,10 +32,38 @@ This agent **CANNOT spawn nested agents**. The main Claude instance orchestrates
 
 ### 1. Pre-Release Validation
 
-- Verify clean git state (no uncommitted changes)
-- Check all QA passes (tests, linting, type checking, coverage)
-- Verify current version in all files matches
-- Confirm no existing tag for target version
+**CRITICAL: ALL validation failures result in IMMEDIATE ABORT. NO attempts to fix issues.**
+
+Run these checks in order:
+
+1. **Clean git state**: `git status` - NO uncommitted changes, NO untracked files in src/
+   - **ABORT if dirty**: User must commit or stash ALL changes manually
+
+2. **QA checks** (ALL must pass): `./scripts/qa/run_all.sh`
+   - Format Check (Black)
+   - Linter (Ruff)
+   - Type Check (MyPy)
+   - Tests (Pytest with 95% coverage)
+   - Security Check (Bandit)
+   - **ABORT if any check fails**: User must fix issues and re-run release
+
+3. **Version consistency**: All version strings in files match current version
+   - pyproject.toml, version.py, README.md, CLAUDE.md
+   - **ABORT if inconsistent**: User must manually fix version mismatches
+
+4. **Tag existence**: Target version tag must NOT exist
+   - `git tag -l vX.Y.Z`
+   - **ABORT if exists**: User must choose different version
+
+5. **GitHub CLI auth**: `gh auth status`
+   - **ABORT if not authenticated**: User must run `gh auth login`
+
+**DO NOT**:
+- Auto-fix QA issues
+- Auto-commit changes
+- Auto-stash uncommitted files
+- Skip validation checks
+- Continue on validation failures
 
 ### 2. Version Detection & Strategy
 
@@ -325,19 +360,35 @@ This agent only handles Stage 1.
 
 ## Error Handling (This Agent Only)
 
+**Pre-Validation Errors (IMMEDIATE ABORT):**
+- **Dirty git state** → ABORT with message: "Commit all changes before releasing"
+- **QA failures** → ABORT with message: "Fix QA issues (run ./scripts/qa/run_all.sh), then retry"
+  - Never attempt to fix QA issues (formatting, lint, tests, security)
+  - User must manually fix and re-run release
+- **Version inconsistency** → ABORT with message: "Fix version mismatches manually"
+- **Tag exists** → ABORT with message: "Tag vX.Y.Z already exists, choose different version"
+- **GitHub auth failure** → ABORT with message: "Run: gh auth login"
+
 **Pre-Commit Errors (This Agent Handles):**
-- Dirty git state → abort, instruct user to commit
-- QA failures → abort, run `./scripts/qa/run_all.sh`
 - Version detection issues → prompt user for clarification
-- File update errors → report and abort
+- File update errors → report and abort with clear error message
 
 **Post-Commit Errors (Main Claude Handles):**
-- Opus rejection → main Claude re-invokes this agent with fixes
+- **Opus rejection** → main Claude re-invokes this agent to fix DOCUMENTATION issues
+  - Opus ONLY reviews release documentation (changelog, release notes)
+  - Opus does NOT review code or fix QA issues
+  - Examples: typos, missing changelog entries, incorrect categorization
 - Git/GitHub errors → main Claude handles rollback
 - Tag conflicts → main Claude handles resolution
 
 **Rollback Strategy:**
 Since this agent doesn't commit, rollback is simple: `git restore .`
+
+**NEVER**:
+- Auto-fix QA failures
+- Auto-commit dirty git state
+- Skip validation checks
+- Continue after validation failures
 
 ## Output Summary
 
