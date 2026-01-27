@@ -24,6 +24,13 @@ This directory contains documentation optimized for LLM consumption (Claude, GPT
 - Testing patterns
 - Best practices
 
+**DEBUGGING_HOOKS.md** - Critical tool for introspecting hook event flows
+- Debug utility usage (`scripts/debug_hooks.sh`)
+- Capturing event sequences for scenarios
+- Analyzing logs to surgically decide which events to hook
+- From scenario to handler: complete workflow
+- Common debugging scenarios (planning mode, git ops, testing, etc.)
+
 ### Installation & Setup
 
 **LLM-INSTALL.md** - LLM-optimized installation guide
@@ -50,9 +57,20 @@ This directory contains documentation optimized for LLM consumption (Claude, GPT
 When working on this project, LLMs should:
 1. Read README.md for overview and installation
 2. Check ARCHITECTURE.md for system design
-3. Reference HANDLER_DEVELOPMENT.md for creating handlers
-4. Use LLM-INSTALL.md for installation assistance
-5. Read source code docstrings for API details
+3. **Use DEBUGGING_HOOKS.md to introspect event flows before writing handlers**
+4. Reference HANDLER_DEVELOPMENT.md for creating handlers
+5. Use LLM-INSTALL.md for installation assistance
+6. Read source code docstrings for API details
+
+### Handler Development Workflow
+
+**CRITICAL**: Always debug first, develop second:
+1. Identify scenario ("enforce TDD", "block destructive git", etc.)
+2. **Use `scripts/debug_hooks.sh` to capture event flow** (DEBUGGING_HOOKS.md)
+3. Analyze logs to determine which event type and what data is available
+4. Write tests (TDD)
+5. Implement handler (HANDLER_DEVELOPMENT.md)
+6. Debug again to verify handler intercepts correctly
 
 ## Maintenance
 

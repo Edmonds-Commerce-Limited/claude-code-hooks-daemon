@@ -76,6 +76,78 @@ The installer creates:
 3. `.claude/settings.json` - Hook registration for Claude Code
 4. `.claude/hooks-daemon.yaml` - Handler and daemon configuration
 
+**Note:** The installer will recommend creating `.claude/.gitignore` (see Git Integration section below).
+
+---
+
+## Git Integration
+
+**Recommendation:** Track project configuration, exclude personal/generated content.
+
+### What Should Be Tracked
+
+The `.claude/` directory contains files that should be committed to git:
+
+```
+.claude/
+├── .gitignore           # Self-excluding gitignore (created by installer)
+├── settings.json        # Project-wide hook configuration
+├── hooks-daemon.yaml    # Handler settings
+├── init.sh              # Daemon lifecycle functions
+└── hooks/               # Hook forwarder scripts
+    ├── pre-tool-use
+    ├── post-tool-use
+    └── ...
+```
+
+**Benefits:**
+- ✅ Team shares same hook configuration
+- ✅ Consistent code quality standards across developers
+- ✅ New team members get hooks automatically
+- ✅ Settings are version controlled
+
+### What Should NOT Be Tracked
+
+The installer creates `.claude/.gitignore` which automatically excludes:
+- `hooks-daemon/` - Daemon installation (users install it themselves)
+- `*.bak*` - Backup files created during installation
+- `*.sock`, `*.pid` - Runtime files
+- `hooks-daemon.env` - Environment files (may contain local paths)
+
+### Setup (Self-Excluding .gitignore)
+
+The installer creates `.claude/.gitignore` with this strategy:
+
+```gitignore
+# Ignore everything by default
+*
+!*/
+
+# Un-ignore project-wide configuration files (should be tracked)
+!.gitignore
+!settings.json
+!hooks-daemon.yaml
+!init.sh
+!hooks/
+!hooks/**
+```
+
+**How it works:**
+1. `*` ignores everything in `.claude/` by default
+2. `!pattern` un-ignores specific files we want tracked
+3. New generated files are automatically excluded (no manual updates needed)
+
+### Root .gitignore Setup
+
+**Important:** If your root `.gitignore` contains `.claude/`, remove it:
+
+```diff
+# .gitignore (root)
+- .claude/
+```
+
+The installer will warn if it detects this pattern. The `.claude/.gitignore` handles all exclusions automatically.
+
 ---
 
 ## Current Version: 2.1.0
@@ -690,6 +762,19 @@ $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli restart
 
 See `CLAUDE/HANDLER_DEVELOPMENT.md` for complete guide.
 
+**Before Writing Handlers:**
+
+Debug event flows first to understand which events fire and what data is available:
+
+```bash
+./scripts/debug_hooks.sh start "Testing scenario X"
+# ... perform actions in Claude Code ...
+./scripts/debug_hooks.sh stop
+# Logs show exact events, timing, and data
+```
+
+See `CLAUDE/DEBUGGING_HOOKS.md` for complete introspection guide.
+
 **Quick Start:**
 
 ```python
@@ -829,6 +914,7 @@ For complete documentation, see `CLAUDE/UPGRADES/README.md`.
 
 **Core Documentation** (`CLAUDE/` directory):
 - `ARCHITECTURE.md` - System architecture and design decisions
+- `DEBUGGING_HOOKS.md` - **Hook event introspection tool** (critical for handler development)
 - `HANDLER_DEVELOPMENT.md` - Handler creation guide with examples
 - `LLM-INSTALL.md` - LLM-optimized installation guide
 - `UPGRADES/` - Version migration guides
@@ -871,9 +957,12 @@ claude-code-hooks-daemon/
 │   ├── unit/              # Unit tests for all components
 │   ├── integration/       # Integration tests
 │   └── config/            # Configuration validation tests
-├── scripts/qa/            # QA automation scripts
+├── scripts/
+│   ├── qa/                # QA automation scripts
+│   └── debug_hooks.sh     # Hook event introspection tool
 ├── CLAUDE/                # LLM-optimized documentation
 │   ├── ARCHITECTURE.md
+│   ├── DEBUGGING_HOOKS.md
 │   ├── HANDLER_DEVELOPMENT.md
 │   ├── LLM-INSTALL.md
 │   └── UPGRADES/          # Version migration guides

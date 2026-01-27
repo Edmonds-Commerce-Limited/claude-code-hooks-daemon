@@ -2,6 +2,26 @@
 
 Guide for creating new handlers for claude-code-hooks-daemon.
 
+## 🔍 CRITICAL: Debug First, Develop Second
+
+**Before writing any handler**, use the debugging tool to capture exact event flows:
+
+```bash
+./scripts/debug_hooks.sh start "Testing scenario X"
+# Perform your test scenario in Claude Code
+./scripts/debug_hooks.sh stop
+```
+
+This shows you:
+- Which events fire (PreToolUse, PostToolUse, SubagentStart, etc.)
+- What data is in `hook_input`
+- What order events fire in
+- Which existing handlers run
+
+**See [DEBUGGING_HOOKS.md](./DEBUGGING_HOOKS.md) for complete introspection guide.**
+
+Without debugging first, you're guessing which events to hook and what data is available. With debugging, you're surgically precise.
+
 ## Quick Start
 
 ```python

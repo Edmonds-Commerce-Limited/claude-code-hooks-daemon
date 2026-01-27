@@ -449,6 +449,12 @@ class HooksDaemon:
                 handlers = {}
             response = {"result": {"handlers": handlers}}
 
+        elif action == "log_marker":
+            # Log a boundary marker message
+            message = hook_input.get("message", "MARKER")
+            logger.info(f"=== {message} ===")
+            response = {"result": {"status": "logged", "message": message}}
+
         else:
             error_msg = f"Unknown system action: {action}"
             logger.warning(error_msg)

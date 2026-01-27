@@ -24,6 +24,28 @@ src/claude_code_hooks_daemon/
 2. **Multi-Event Support**: DaemonController manages one FrontController per event type
 3. **Lazy Startup**: Daemon starts on first hook call, auto-shuts down after idle timeout
 
+### Debugging Hook Events (CRITICAL)
+
+**Before writing handlers**, introspect event flows with the debug tool:
+
+```bash
+# Capture event flow for any scenario
+./scripts/debug_hooks.sh start "Testing planning mode"
+# ... perform actions in Claude Code ...
+./scripts/debug_hooks.sh stop
+
+# Output shows exact events, timing, data, handler execution
+# Logs saved to /tmp/hook_debug_TIMESTAMP.log
+```
+
+**See CLAUDE/DEBUGGING_HOOKS.md for complete guide.**
+
+This eliminates guesswork - you'll know:
+- Which events fire (PreToolUse, SubagentStart, etc.)
+- What's in `hook_input` (tool names, parameters, context)
+- What order events fire in
+- Which handlers already intercept the event
+
 ### Handler Development
 
 Create handlers in `handlers/{event_type}/`:
