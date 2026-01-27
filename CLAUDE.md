@@ -146,12 +146,15 @@ $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli restart
 
 #### QA Standards
 
-All code MUST pass:
-- **Ruff** - Python linting (enforces code quality, imports, simplifications)
-- **MyPy** - Strict type checking (all functions must be typed)
-- **Black** - Code formatting (line length 100)
+All code MUST pass ALL checks. ANY failure = ABORT (no auto-fixing):
+
+- **Black** - Code formatting (line length 100, auto-formats by default)
+- **Ruff** - Python linting (enforces code quality, imports, simplifications, auto-fixes by default)
+- **MyPy** - Strict type checking (all functions must be typed, check-only)
 - **Pytest** - 95% minimum coverage with all tests passing
-- **Bandit** - Security checks (no vulnerabilities)
+- **Bandit** - Security scanning (no HIGH severity vulnerabilities)
+
+Run all checks: `./scripts/qa/run_all.sh` (exits with code 1 if any fail)
 
 #### Type Annotations
 

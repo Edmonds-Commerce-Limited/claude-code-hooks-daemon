@@ -176,7 +176,8 @@ class HandlerRegistry:
 
             # Extract tag filters from event config
             enable_tags = event_config.get("enable_tags")
-            disable_tags = event_config.get("disable_tags", [])
+            disable_tags_raw: Any = event_config.get("disable_tags", [])
+            disable_tags: list[str] = disable_tags_raw if isinstance(disable_tags_raw, list) else []
 
             # Find all Python files in the directory
             for py_file in event_dir.glob("*.py"):

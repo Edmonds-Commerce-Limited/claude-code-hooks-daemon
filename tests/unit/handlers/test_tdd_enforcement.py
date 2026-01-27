@@ -121,21 +121,21 @@ class TestTddEnforcementHandler:
         }
         assert handler.matches(hook_input) is False
 
-    def test_matches_non_handler_directory_returns_false(self, handler):
-        """Should NOT match files outside handler directories."""
+    def test_matches_src_directory_file(self, handler):
+        """Should match files in src directory (production code)."""
         hook_input = {
             "tool_name": "Write",
-            "tool_input": {"file_path": "/workspace/src/utils/my_util.py"},
+            "tool_input": {"file_path": "/workspace/src/core/my_module.py"},
         }
-        assert handler.matches(hook_input) is False
+        assert handler.matches(hook_input) is True
 
-    def test_matches_handlers_directory_but_not_event_subdir_returns_false(self, handler):
-        """Should NOT match files in handlers/ but not in event subdirectories."""
+    def test_matches_handlers_directory_file(self, handler):
+        """Should match files in handlers/ directory."""
         hook_input = {
             "tool_name": "Write",
             "tool_input": {"file_path": "/workspace/handlers/my_handler.py"},
         }
-        assert handler.matches(hook_input) is False
+        assert handler.matches(hook_input) is True
 
     def test_matches_test_file_returns_false(self, handler):
         """Should NOT match test files."""
@@ -435,3 +435,22 @@ class TestTddEnforcementHandler:
             # Should deny if test missing
             result = handler.handle(hook_input)
             assert result.decision == "deny", f"Should deny: {handler_path}"
+
+    def test_matches_returns_false_for_non_handler_non_src_path(self, handler):
+        """Should not match paths that are neither /handlers/ nor /src/ (line 46 branch)."""
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/workspace/docs/readme.py"},
+        }
+        # Not in /handlers/ or /src/ - should return False at line 46
+        assert handler.matches(hook_input) is False
+
+    def test_handle_returns_allow_for_non_write_edit_tool(self, handler):
+        """Should allow when tool is not Write or Edit (line 52 branch)."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "echo test"},
+        }
+        # get_file_path returns None for Bash - should return ALLOW at line 52
+        result = handler.handle(hook_input)
+        assert result.decision == "allow"

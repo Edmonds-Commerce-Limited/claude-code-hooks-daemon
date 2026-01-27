@@ -436,3 +436,28 @@ class TestValidationHelpers:
         }
         errors = validate_response("PreToolUse", response)
         assert len(errors) == 0
+
+    def test_validate_response_without_jsonschema(self, monkeypatch):
+        """validate_response should handle missing jsonschema gracefully."""
+        import builtins
+        import sys
+
+        # Mock the import to raise ImportError
+        original_import = builtins.__import__
+
+        def mock_import(name, *args, **kwargs):
+            if name == "jsonschema":
+                raise ImportError("jsonschema not installed")
+            return original_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", mock_import)
+
+        # Clear any cached imports
+        if "jsonschema" in sys.modules:
+            monkeypatch.delitem(sys.modules, "jsonschema")
+
+        response = {"hookSpecificOutput": {"hookEventName": "PreToolUse"}}
+        errors = validate_response("PreToolUse", response)
+
+        assert len(errors) == 1
+        assert "jsonschema not installed" in errors[0]

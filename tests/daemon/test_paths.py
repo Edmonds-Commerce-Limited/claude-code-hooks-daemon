@@ -3,10 +3,24 @@
 Tests project-aware socket and PID file path generation using MD5 hashing.
 """
 
+import os
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from claude_code_hooks_daemon.daemon.paths import get_pid_path, get_socket_path
+from claude_code_hooks_daemon.daemon.paths import (
+    cleanup_pid_file,
+    cleanup_socket,
+    get_log_path,
+    get_pid_path,
+    get_project_hash,
+    get_project_name,
+    get_socket_path,
+    is_pid_alive,
+    read_pid_file,
+    write_pid_file,
+)
 
 
 class TestPathGeneration(unittest.TestCase):
@@ -203,6 +217,308 @@ class TestPathGeneration(unittest.TestCase):
         pid_from_path = get_pid_path(project_path)
 
         self.assertEqual(pid_from_str, pid_from_path)
+
+
+class TestUtilityFunctions(unittest.TestCase):
+    """Test suite for utility functions."""
+
+    def test_get_project_hash_returns_8_characters(self):
+        """Test get_project_hash returns 8-character hash."""
+        project_path = Path("/home/dev/my-project")
+        hash_result = get_project_hash(project_path)
+
+        self.assertEqual(len(hash_result), 8)
+        self.assertTrue(hash_result.isalnum())
+
+    def test_get_project_hash_consistent(self):
+        """Test get_project_hash returns same hash for same path."""
+        project_path = Path("/home/dev/my-project")
+
+        hash1 = get_project_hash(project_path)
+        hash2 = get_project_hash(project_path)
+
+        self.assertEqual(hash1, hash2)
+
+    def test_get_project_hash_different_for_different_paths(self):
+        """Test get_project_hash returns different hashes for different paths."""
+        path1 = Path("/home/dev/project1")
+        path2 = Path("/home/dev/project2")
+
+        hash1 = get_project_hash(path1)
+        hash2 = get_project_hash(path2)
+
+        self.assertNotEqual(hash1, hash2)
+
+    def test_get_project_hash_accepts_string(self):
+        """Test get_project_hash accepts string paths."""
+        project_str = "/home/dev/my-project"
+        project_path = Path(project_str)
+
+        hash_from_str = get_project_hash(project_str)
+        hash_from_path = get_project_hash(project_path)
+
+        self.assertEqual(hash_from_str, hash_from_path)
+
+    def test_get_project_name_returns_last_component(self):
+        """Test get_project_name returns directory name."""
+        project_path = Path("/home/dev/my-awesome-project")
+        name = get_project_name(project_path)
+
+        self.assertEqual(name, "my-awesome-project")
+
+    def test_get_project_name_truncates_long_names(self):
+        """Test get_project_name truncates names longer than 20 characters."""
+        long_name = "this-is-a-very-long-project-name-that-exceeds-twenty-characters"
+        project_path = Path(f"/home/dev/{long_name}")
+
+        name = get_project_name(project_path)
+
+        self.assertLessEqual(len(name), 20)
+        self.assertEqual(name, long_name[:20])
+
+    def test_get_project_name_handles_root(self):
+        """Test get_project_name handles root directory."""
+        project_path = Path("/")
+        name = get_project_name(project_path)
+
+        # Root directory returns empty string (edge case)
+        self.assertIsInstance(name, str)
+
+    def test_get_log_path_format(self):
+        """Test get_log_path follows expected format."""
+        project_dir = Path("/home/dev/my-project")
+        log_path = get_log_path(project_dir)
+
+        # Should be in /tmp/
+        self.assertTrue(str(log_path).startswith("/tmp/"))
+
+        # Should have .log extension
+        self.assertTrue(str(log_path).endswith(".log"))
+
+        # Should contain 'claude-hooks' prefix
+        self.assertIn("claude-hooks", str(log_path))
+
+        # Should contain project name
+        self.assertIn("my-project", str(log_path))
+
+    def test_get_log_path_consistent(self):
+        """Test get_log_path returns same path for same project."""
+        project_dir = Path("/home/dev/my-project")
+
+        log1 = get_log_path(project_dir)
+        log2 = get_log_path(project_dir)
+
+        self.assertEqual(log1, log2)
+
+    def test_get_log_path_accepts_string(self):
+        """Test get_log_path accepts string paths."""
+        project_str = "/home/dev/my-project"
+        project_path = Path(project_str)
+
+        log_from_str = get_log_path(project_str)
+        log_from_path = get_log_path(project_path)
+
+        self.assertEqual(log_from_str, log_from_path)
+
+
+class TestPIDFileOperations(unittest.TestCase):
+    """Test suite for PID file read/write/cleanup operations."""
+
+    def test_write_pid_file_creates_file(self):
+        """Test write_pid_file creates file with PID."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pid_path = Path(tmpdir) / "test.pid"
+            test_pid = 12345
+
+            write_pid_file(pid_path, test_pid)
+
+            self.assertTrue(pid_path.exists())
+            content = pid_path.read_text()
+            self.assertEqual(content, "12345")
+
+    def test_write_pid_file_accepts_string_path(self):
+        """Test write_pid_file accepts string paths."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pid_path = Path(tmpdir) / "test.pid"
+            test_pid = 67890
+
+            write_pid_file(str(pid_path), test_pid)
+
+            self.assertTrue(pid_path.exists())
+
+    def test_read_pid_file_returns_pid_for_alive_process(self):
+        """Test read_pid_file returns PID when process is alive."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pid_path = Path(tmpdir) / "test.pid"
+            current_pid = os.getpid()  # Current process is definitely alive
+
+            write_pid_file(pid_path, current_pid)
+
+            result = read_pid_file(pid_path)
+
+            self.assertEqual(result, current_pid)
+
+    def test_read_pid_file_returns_none_for_dead_process(self):
+        """Test read_pid_file returns None for dead process and cleans up."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pid_path = Path(tmpdir) / "test.pid"
+            dead_pid = 999999  # Almost certainly not running
+
+            write_pid_file(pid_path, dead_pid)
+
+            result = read_pid_file(pid_path)
+
+            self.assertIsNone(result)
+            # Stale PID file should be cleaned up
+            self.assertFalse(pid_path.exists())
+
+    def test_read_pid_file_returns_none_for_missing_file(self):
+        """Test read_pid_file returns None when file doesn't exist."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pid_path = Path(tmpdir) / "nonexistent.pid"
+
+            result = read_pid_file(pid_path)
+
+            self.assertIsNone(result)
+
+    def test_read_pid_file_returns_none_for_invalid_content(self):
+        """Test read_pid_file returns None for invalid PID content."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pid_path = Path(tmpdir) / "test.pid"
+            pid_path.write_text("not-a-number")
+
+            result = read_pid_file(pid_path)
+
+            self.assertIsNone(result)
+
+    def test_read_pid_file_accepts_string_path(self):
+        """Test read_pid_file accepts string paths."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pid_path = Path(tmpdir) / "test.pid"
+            current_pid = os.getpid()
+
+            write_pid_file(pid_path, current_pid)
+
+            result = read_pid_file(str(pid_path))
+
+            self.assertEqual(result, current_pid)
+
+    def test_is_pid_alive_returns_true_for_current_process(self):
+        """Test is_pid_alive returns True for current process."""
+        current_pid = os.getpid()
+
+        result = is_pid_alive(current_pid)
+
+        self.assertTrue(result)
+
+    def test_is_pid_alive_returns_false_for_nonexistent_process(self):
+        """Test is_pid_alive returns False for nonexistent PID."""
+        # PID 999999 is almost certainly not running
+        result = is_pid_alive(999999)
+
+        self.assertFalse(result)
+
+    @patch("os.kill")
+    def test_is_pid_alive_returns_true_on_permission_error(self, mock_kill):
+        """Test is_pid_alive returns True when permission is denied."""
+        mock_kill.side_effect = PermissionError("Access denied")
+
+        result = is_pid_alive(12345)
+
+        self.assertTrue(result)
+
+    @patch("os.kill")
+    def test_is_pid_alive_returns_false_on_general_exception(self, mock_kill):
+        """Test is_pid_alive returns False on unexpected exceptions."""
+        mock_kill.side_effect = RuntimeError("Unexpected error")
+
+        result = is_pid_alive(12345)
+
+        self.assertFalse(result)
+
+    def test_cleanup_pid_file_removes_existing_file(self):
+        """Test cleanup_pid_file removes existing PID file."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pid_path = Path(tmpdir) / "test.pid"
+            pid_path.write_text("12345")
+
+            cleanup_pid_file(pid_path)
+
+            self.assertFalse(pid_path.exists())
+
+    def test_cleanup_pid_file_handles_missing_file(self):
+        """Test cleanup_pid_file handles missing file gracefully."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pid_path = Path(tmpdir) / "nonexistent.pid"
+
+            # Should not raise exception
+            cleanup_pid_file(pid_path)
+
+    def test_cleanup_pid_file_accepts_string_path(self):
+        """Test cleanup_pid_file accepts string paths."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pid_path = Path(tmpdir) / "test.pid"
+            pid_path.write_text("12345")
+
+            cleanup_pid_file(str(pid_path))
+
+            self.assertFalse(pid_path.exists())
+
+    @patch("pathlib.Path.unlink")
+    def test_cleanup_pid_file_handles_exception(self, mock_unlink):
+        """Test cleanup_pid_file handles exceptions during deletion."""
+        mock_unlink.side_effect = PermissionError("Access denied")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pid_path = Path(tmpdir) / "test.pid"
+            pid_path.write_text("12345")
+
+            # Should not raise exception
+            cleanup_pid_file(pid_path)
+
+
+class TestSocketCleanup(unittest.TestCase):
+    """Test suite for socket cleanup operations."""
+
+    def test_cleanup_socket_removes_existing_file(self):
+        """Test cleanup_socket removes existing socket file."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            socket_path = Path(tmpdir) / "test.sock"
+            socket_path.touch()  # Create empty file
+
+            cleanup_socket(socket_path)
+
+            self.assertFalse(socket_path.exists())
+
+    def test_cleanup_socket_handles_missing_file(self):
+        """Test cleanup_socket handles missing file gracefully."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            socket_path = Path(tmpdir) / "nonexistent.sock"
+
+            # Should not raise exception
+            cleanup_socket(socket_path)
+
+    def test_cleanup_socket_accepts_string_path(self):
+        """Test cleanup_socket accepts string paths."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            socket_path = Path(tmpdir) / "test.sock"
+            socket_path.touch()
+
+            cleanup_socket(str(socket_path))
+
+            self.assertFalse(socket_path.exists())
+
+    @patch("pathlib.Path.unlink")
+    def test_cleanup_socket_handles_exception(self, mock_unlink):
+        """Test cleanup_socket handles exceptions during deletion."""
+        mock_unlink.side_effect = PermissionError("Access denied")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            socket_path = Path(tmpdir) / "test.sock"
+            socket_path.touch()
+
+            # Should not raise exception
+            cleanup_socket(socket_path)
 
 
 if __name__ == "__main__":

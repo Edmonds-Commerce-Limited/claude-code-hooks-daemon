@@ -18,8 +18,8 @@ class TestAutoApproveReadsHandler:
 
     # Initialization Tests
     def test_init_sets_correct_name(self, handler):
-        """Handler name should be 'auto-approve-safe-reads'."""
-        assert handler.name == "auto-approve-safe-reads"
+        """Handler name should be 'auto-approve-reads'."""
+        assert handler.name == "auto-approve-reads"
 
     def test_init_sets_correct_priority(self, handler):
         """Handler priority should be 10."""
@@ -30,187 +30,117 @@ class TestAutoApproveReadsHandler:
         assert handler.terminal is True
 
     # matches() - Positive Cases
-    def test_matches_read_tool_md_file(self, handler):
-        """Should match Read tool for .md files."""
+    def test_matches_file_read_permission(self, handler):
+        """Should match file_read permission type."""
         hook_input = {
-            "tool_name": "Read",
-            "tool_input": {"file_path": "/workspace/README.md"},
+            "permission_type": "file_read",
+            "resource": "/workspace/README.md",
         }
         assert handler.matches(hook_input) is True
 
-    def test_matches_read_tool_txt_file(self, handler):
-        """Should match Read tool for .txt files."""
+    def test_matches_file_write_permission(self, handler):
+        """Should match file_write permission type."""
         hook_input = {
-            "tool_name": "Read",
-            "tool_input": {"file_path": "/workspace/notes.txt"},
-        }
-        assert handler.matches(hook_input) is True
-
-    def test_matches_read_tool_uppercase_md(self, handler):
-        """Should match .MD extension (case insensitive)."""
-        hook_input = {
-            "tool_name": "Read",
-            "tool_input": {"file_path": "/workspace/README.MD"},
-        }
-        assert handler.matches(hook_input) is True
-
-    def test_matches_read_tool_uppercase_txt(self, handler):
-        """Should match .TXT extension (case insensitive)."""
-        hook_input = {
-            "tool_name": "Read",
-            "tool_input": {"file_path": "/workspace/notes.TXT"},
-        }
-        assert handler.matches(hook_input) is True
-
-    def test_matches_read_tool_nested_path(self, handler):
-        """Should match .md/.txt files in nested directories."""
-        hook_input = {
-            "tool_name": "Read",
-            "tool_input": {"file_path": "/workspace/docs/guides/setup.md"},
+            "permission_type": "file_write",
+            "resource": "/workspace/notes.txt",
         }
         assert handler.matches(hook_input) is True
 
     # matches() - Negative Cases
-    def test_matches_read_tool_py_file_returns_false(self, handler):
-        """Should not match .py files."""
+    def test_matches_network_permission_returns_false(self, handler):
+        """Should not match network permission types."""
         hook_input = {
-            "tool_name": "Read",
-            "tool_input": {"file_path": "/workspace/script.py"},
+            "permission_type": "network",
+            "resource": "https://example.com",
         }
         assert handler.matches(hook_input) is False
 
-    def test_matches_read_tool_js_file_returns_false(self, handler):
-        """Should not match .js files."""
+    def test_matches_missing_permission_type_returns_false(self, handler):
+        """Should not match when permission_type is missing."""
         hook_input = {
-            "tool_name": "Read",
-            "tool_input": {"file_path": "/workspace/app.js"},
+            "resource": "/workspace/file.txt",
         }
         assert handler.matches(hook_input) is False
 
-    def test_matches_write_tool_returns_false(self, handler):
-        """Should not match Write tool."""
+    def test_matches_none_permission_type_returns_false(self, handler):
+        """Should not match when permission_type is None."""
         hook_input = {
-            "tool_name": "Write",
-            "tool_input": {"file_path": "/workspace/README.md", "content": "test"},
+            "permission_type": None,
+            "resource": "/workspace/file.txt",
         }
         assert handler.matches(hook_input) is False
 
-    def test_matches_edit_tool_returns_false(self, handler):
-        """Should not match Edit tool."""
+    def test_matches_empty_permission_type_returns_false(self, handler):
+        """Should not match when permission_type is empty."""
         hook_input = {
-            "tool_name": "Edit",
-            "tool_input": {
-                "file_path": "/workspace/README.md",
-                "old_string": "old",
-                "new_string": "new",
-            },
+            "permission_type": "",
+            "resource": "/workspace/file.txt",
         }
         assert handler.matches(hook_input) is False
 
-    def test_matches_bash_tool_returns_false(self, handler):
-        """Should not match Bash tool."""
+    # handle() Tests - file_read
+    def test_handle_file_read_returns_allow_decision(self, handler):
+        """handle() should return allow for file_read."""
         hook_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "cat README.md"},
-        }
-        assert handler.matches(hook_input) is False
-
-    def test_matches_read_without_file_path_returns_false(self, handler):
-        """Should not match when file_path is missing."""
-        hook_input = {
-            "tool_name": "Read",
-            "tool_input": {},
-        }
-        assert handler.matches(hook_input) is False
-
-    def test_matches_read_with_none_file_path_returns_false(self, handler):
-        """Should not match when file_path is None."""
-        hook_input = {
-            "tool_name": "Read",
-            "tool_input": {"file_path": None},
-        }
-        assert handler.matches(hook_input) is False
-
-    def test_matches_read_with_empty_file_path_returns_false(self, handler):
-        """Should not match when file_path is empty string."""
-        hook_input = {
-            "tool_name": "Read",
-            "tool_input": {"file_path": ""},
-        }
-        assert handler.matches(hook_input) is False
-
-    def test_matches_missing_tool_input_returns_false(self, handler):
-        """Should not match when tool_input is missing."""
-        hook_input = {"tool_name": "Read"}
-        assert handler.matches(hook_input) is False
-
-    # Edge Cases
-    def test_matches_dotfile_md_returns_true(self, handler):
-        """Should match .md dotfiles."""
-        hook_input = {
-            "tool_name": "Read",
-            "tool_input": {"file_path": "/workspace/.github/README.md"},
-        }
-        assert handler.matches(hook_input) is True
-
-    def test_matches_no_extension_returns_false(self, handler):
-        """Should not match files without extension."""
-        hook_input = {
-            "tool_name": "Read",
-            "tool_input": {"file_path": "/workspace/Makefile"},
-        }
-        assert handler.matches(hook_input) is False
-
-    def test_matches_md_in_filename_but_different_ext_returns_false(self, handler):
-        """Should not match files with .md in name but different extension."""
-        hook_input = {
-            "tool_name": "Read",
-            "tool_input": {"file_path": "/workspace/readme.md.bak"},
-        }
-        assert handler.matches(hook_input) is False
-
-    # handle() Tests
-    def test_handle_returns_allow_decision(self, handler):
-        """handle() should return allow for safe reads."""
-        hook_input = {
-            "tool_name": "Read",
-            "tool_input": {"file_path": "/workspace/README.md"},
+            "permission_type": "file_read",
+            "resource": "/workspace/README.md",
         }
         result = handler.handle(hook_input)
         assert result.decision == "allow"
 
-    def test_handle_has_no_reason(self, handler):
-        """handle() should not provide reason (auto-approval)."""
+    def test_handle_file_read_has_no_reason(self, handler):
+        """handle() should not provide reason for file_read (auto-approval)."""
         hook_input = {
-            "tool_name": "Read",
-            "tool_input": {"file_path": "/workspace/notes.txt"},
+            "permission_type": "file_read",
+            "resource": "/workspace/notes.txt",
         }
         result = handler.handle(hook_input)
         assert result.reason is None
 
-    def test_handle_has_no_context(self, handler):
-        """handle() should not provide context."""
+    def test_handle_file_read_has_no_context(self, handler):
+        """handle() should not provide context for file_read."""
         hook_input = {
-            "tool_name": "Read",
-            "tool_input": {"file_path": "/workspace/README.md"},
+            "permission_type": "file_read",
+            "resource": "/workspace/README.md",
         }
         result = handler.handle(hook_input)
         assert result.context == []
 
-    def test_handle_has_no_guidance(self, handler):
-        """handle() should not provide guidance."""
+    def test_handle_file_read_has_no_guidance(self, handler):
+        """handle() should not provide guidance for file_read."""
         hook_input = {
-            "tool_name": "Read",
-            "tool_input": {"file_path": "/workspace/README.md"},
+            "permission_type": "file_read",
+            "resource": "/workspace/README.md",
         }
         result = handler.handle(hook_input)
         assert result.guidance is None
 
+    # handle() Tests - file_write
+    def test_handle_file_write_returns_deny_decision(self, handler):
+        """handle() should return deny for file_write."""
+        hook_input = {
+            "permission_type": "file_write",
+            "resource": "/workspace/test.py",
+        }
+        result = handler.handle(hook_input)
+        assert result.decision == "deny"
+
+    def test_handle_file_write_has_reason(self, handler):
+        """handle() should provide reason for file_write denial."""
+        hook_input = {
+            "permission_type": "file_write",
+            "resource": "/workspace/test.py",
+        }
+        result = handler.handle(hook_input)
+        assert result.reason is not None
+        assert "BLOCKED" in result.reason
+        assert "file_write" in result.reason
+
     def test_handle_returns_hook_result_instance(self, handler):
         """handle() should return HookResult instance."""
         hook_input = {
-            "tool_name": "Read",
-            "tool_input": {"file_path": "/workspace/README.md"},
+            "permission_type": "file_read",
+            "resource": "/workspace/README.md",
         }
         result = handler.handle(hook_input)
         assert isinstance(result, HookResult)

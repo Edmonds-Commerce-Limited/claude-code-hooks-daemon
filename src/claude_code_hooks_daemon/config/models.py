@@ -136,7 +136,8 @@ class HandlersConfig(BaseModel):
             List of tags to disable (empty list if not specified)
         """
         event_config = getattr(self, event_type, {})
-        return event_config.get("disable_tags", [])
+        result: list[str] = event_config.get("disable_tags", [])
+        return result
 
     def get_handler_config(self, event_type: str, handler_name: str) -> HandlerConfig:
         """Get configuration for a specific handler.
@@ -365,7 +366,7 @@ class Config(BaseModel):
             YAML string representation
         """
         return yaml.safe_dump(
-            self.model_dump(exclude_none=True, exclude_unset=True),
+            self.model_dump(exclude_none=True, exclude_unset=True, mode="json"),
             default_flow_style=False,
             sort_keys=False,
         )
@@ -386,7 +387,7 @@ class Config(BaseModel):
                 import json
 
                 json.dump(
-                    self.model_dump(exclude_none=True),
+                    self.model_dump(exclude_none=True, mode="json"),
                     f,
                     indent=2,
                 )

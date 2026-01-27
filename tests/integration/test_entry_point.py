@@ -244,9 +244,12 @@ plugins: []
         assert result.returncode == 0
         output = json.loads(result.stdout)
 
-        # Should block with guidance about stash
+        # Should allow with guidance/warning about stash
         assert "hookSpecificOutput" in output
-        assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+        # GitStashHandler now returns ALLOW with guidance instead of DENY
+        # This warns the user but doesn't block (stash can be recovered)
+        assert output["hookSpecificOutput"].get("guidance") is not None
+        assert "stash" in output["hookSpecificOutput"]["guidance"].lower()
 
     def test_entry_point_allows_safe_commands(self, tmp_path: Path) -> None:
         """Safe commands pass through all handlers."""

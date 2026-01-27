@@ -719,6 +719,23 @@ class TestLogErrorToFile:
         # Should rename old log
         assert mock_rename.called
 
+    @patch("claude_code_hooks_daemon.core.front_controller.get_workspace_root")
+    def test_log_error_handles_logging_failure(self, mock_get_root, capsys):
+        """Should handle logging failure gracefully and write to stderr."""
+        # Mock get_workspace_root to raise an exception
+        mock_get_root.side_effect = Exception("Cannot determine workspace root")
+
+        exception = RuntimeError("Test error")
+        hook_input = {"tool_name": "Bash"}
+
+        # Should not raise, but handle the exception
+        log_error_to_file("PreToolUse", exception, hook_input)
+
+        # Check that warning was written to stderr
+        captured = capsys.readouterr()
+        assert "WARNING: Failed to log error to file" in captured.err
+        assert "Cannot determine workspace root" in captured.err
+
 
 # get_workspace_root() Tests
 

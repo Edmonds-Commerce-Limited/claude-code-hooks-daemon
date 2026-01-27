@@ -28,6 +28,7 @@ class WorkflowStateRestorationHandler(Handler):
         """
         super().__init__(
             name="workflow-state-restoration",
+            terminal=False,
             tags=["workflow", "state-management", "advisory", "non-terminal"],
         )
         self.workspace_root = Path(workspace_root) if workspace_root else get_workspace_root()

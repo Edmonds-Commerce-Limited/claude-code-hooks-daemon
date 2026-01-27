@@ -395,6 +395,16 @@ Final text with colour.
         result = handler.handle(hook_input)
         assert result.guidance is None
 
+    def test_handle_empty_content_returns_allow(self, handler):
+        """handle() should return ALLOW for empty content."""
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/workspace/CLAUDE/doc.md", "content": ""},
+        }
+        result = handler.handle(hook_input)
+        assert result.decision == "allow"
+        assert result.reason is None
+
     # _check_british_english() Tests
     def test_check_british_english_detects_color(self, handler):
         """_check_british_english() should detect 'color'."""

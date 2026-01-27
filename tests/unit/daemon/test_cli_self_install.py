@@ -1,6 +1,5 @@
 """Tests for CLI self-install mode support."""
 
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -47,10 +46,7 @@ class TestSelfInstallMode:
         # Create config with self_install_mode: true
         config_file = claude_dir / "hooks-daemon.yaml"
         config_file.write_text(
-            "version: '1.0'\n"
-            "daemon:\n"
-            "  log_level: INFO\n"
-            "  self_install_mode: true\n"
+            "version: '1.0'\n" "daemon:\n" "  log_level: INFO\n" "  self_install_mode: true\n"
         )
 
         # Should pass validation even without hooks-daemon directory
@@ -67,10 +63,7 @@ class TestSelfInstallMode:
         # Create config with self_install_mode: true
         config_file = claude_dir / "hooks-daemon.yaml"
         config_file.write_text(
-            "version: '1.0'\n"
-            "daemon:\n"
-            "  log_level: INFO\n"
-            "  self_install_mode: true\n"
+            "version: '1.0'\n" "daemon:\n" "  log_level: INFO\n" "  self_install_mode: true\n"
         )
 
         # Should pass validation
@@ -109,10 +102,7 @@ class TestSelfInstallMode:
         # Create config with explicit self_install_mode: false
         config_file = claude_dir / "hooks-daemon.yaml"
         config_file.write_text(
-            "version: '1.0'\n"
-            "daemon:\n"
-            "  log_level: INFO\n"
-            "  self_install_mode: false\n"
+            "version: '1.0'\n" "daemon:\n" "  log_level: INFO\n" "  self_install_mode: false\n"
         )
 
         # Should fail validation (no hooks-daemon directory)

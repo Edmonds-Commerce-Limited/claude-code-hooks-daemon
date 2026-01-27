@@ -642,3 +642,63 @@ class TestYoloContainerDetectionIntegration:
         handler = YoloContainerDetectionHandler()
 
         assert 36 <= handler.priority <= 55
+
+    def test_getuid_not_available_on_windows(self):
+        """Test handler handles missing os.getuid gracefully (Windows)."""
+        # Simulate Windows environment where os.getuid doesn't exist
+        with patch("os.getuid", side_effect=AttributeError("no getuid")):
+            handler = YoloContainerDetectionHandler()
+            score = handler._calculate_confidence_score()
+            # Should not crash, should return score >= 0
+            assert score >= 0
+
+    def test_unexpected_exception_in_calculate_confidence_score(self):
+        """Test handler returns 0 on unexpected exceptions in scoring."""
+        handler = YoloContainerDetectionHandler()
+
+        # Patch os.environ.get to raise unexpected exception
+        with patch("os.environ.get", side_effect=RuntimeError("Unexpected error")):
+            score = handler._calculate_confidence_score()
+            # Should fail open with 0 score
+            assert score == 0
+
+    def test_unexpected_exception_in_get_detected_indicators(self):
+        """Test handler returns empty list on unexpected exceptions."""
+        handler = YoloContainerDetectionHandler()
+
+        # Patch os.environ.get to raise unexpected exception
+        with patch("os.environ.get", side_effect=RuntimeError("Unexpected error")):
+            indicators = handler._get_detected_indicators()
+            # Should fail open with empty list
+            assert indicators == []
+
+    def test_matches_with_invalid_hook_input_type(self):
+        """Test matches handles non-dict hook_input types."""
+        handler = YoloContainerDetectionHandler()
+
+        # Test with string instead of dict
+        result = handler.matches("SessionStart")
+        assert result is False
+
+        # Test with list instead of dict
+        result = handler.matches(["SessionStart"])
+        assert result is False
+
+        # Test with int instead of dict
+        result = handler.matches(12345)
+        assert result is False
+
+    def test_matches_exception_in_threshold_check(self, monkeypatch):
+        """Test matches fails open (returns False) on threshold check exception."""
+        monkeypatch.setenv("CLAUDECODE", "1")
+
+        handler = YoloContainerDetectionHandler()
+
+        # Patch _calculate_confidence_score to raise exception during matches
+        with patch.object(
+            handler, "_calculate_confidence_score", side_effect=RuntimeError("Test error")
+        ):
+            hook_input = {"hook_event_name": "SessionStart"}
+            result = handler.matches(hook_input)
+            # Should fail open (not match)
+            assert result is False

@@ -29,7 +29,9 @@ class WorkflowStatePreCompactHandler(Handler):
                           This allows tests to provide isolated test directories.
         """
         super().__init__(
-            name="workflow-state-precompact", tags=["workflow", "state-management", "non-terminal"]
+            name="workflow-state-precompact",
+            terminal=False,
+            tags=["workflow", "state-management", "non-terminal"],
         )
         self.workspace_root = Path(workspace_root) if workspace_root else get_workspace_root()
 

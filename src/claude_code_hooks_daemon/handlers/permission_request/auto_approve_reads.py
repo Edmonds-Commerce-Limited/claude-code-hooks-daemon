@@ -1,4 +1,4 @@
-"""AutoApproveReadsHandler - automatically approves Read tool for safe file types."""
+"""AutoApproveReadsHandler - automatically approves file read permission requests."""
 
 from typing import Any
 
@@ -6,53 +6,57 @@ from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 
 
 class AutoApproveReadsHandler(Handler):
-    """Auto-approve Read tool permission requests for safe documentation files.
+    """Auto-approve file_read permission requests.
 
-    Automatically approves Read tool usage for .md and .txt files to reduce
-    permission prompt friction while maintaining security for sensitive files.
+    Automatically approves file read operations to reduce permission prompt
+    friction while blocking write operations.
     """
 
     def __init__(self) -> None:
         """Initialise handler with high priority for early approval."""
         super().__init__(
-            name="auto-approve-safe-reads",
+            name="auto-approve-reads",
             priority=10,
-            tags=["workflow", "automation", "non-terminal"],
+            tags=["workflow", "automation", "terminal"],
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """Check if Read tool is requesting .md or .txt file.
+        """Check if this is a file read or write permission request.
 
         Args:
             hook_input: Hook input dictionary from Claude Code
 
         Returns:
-            True if Read tool with .md/.txt file
+            True if file_read or file_write permission type
         """
-        tool_name = hook_input.get("tool_name")
+        permission_type = hook_input.get("permission_type")
 
-        # Only match Read tool
-        if tool_name != "Read":
-            return False
+        # Match both read and write to handle them differently
+        return permission_type in ("file_read", "file_write")
 
-        tool_input = hook_input.get("tool_input", {})
-        file_path = str(tool_input.get("file_path", ""))
-
-        # Check file_path exists and is non-empty
-        if not file_path:
-            return False
-
-        # Case-insensitive extension check for .md and .txt
-        file_path_lower = file_path.lower()
-        return bool(file_path_lower.endswith(".md") or file_path_lower.endswith(".txt"))
-
-    def handle(self, _hook_input: dict[str, Any]) -> HookResult:
-        """Auto-approve the read operation.
+    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+        """Auto-approve reads, deny writes.
 
         Args:
-            _hook_input: Hook input dictionary from Claude Code (unused)
+            hook_input: Hook input dictionary from Claude Code
 
         Returns:
-            HookResult with allow decision (silent approval)
+            HookResult with allow for reads, deny for writes
         """
-        return HookResult(decision=Decision.ALLOW)
+        permission_type = hook_input.get("permission_type")
+
+        if permission_type == "file_read":
+            # Auto-approve read operations
+            return HookResult(decision=Decision.ALLOW)
+        else:
+            # Block write operations (should use PreToolUse hooks instead)
+            resource = hook_input.get("resource", "unknown")
+            return HookResult(
+                decision=Decision.DENY,
+                reason=(
+                    f"BLOCKED: file_write permission request\n\n"
+                    f"Resource: {resource}\n\n"
+                    "File write operations should be controlled by PreToolUse hooks,\n"
+                    "not PermissionRequest hooks. This handler only auto-approves reads."
+                ),
+            )

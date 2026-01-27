@@ -249,10 +249,25 @@ class HookResult(BaseModel):
     def _format_context_only_response(self, event_name: str) -> dict[str, Any]:
         """Format context-only response for SessionStart, SessionEnd, etc.
 
+        Context-only events do NOT support deny/ask decisions - only ALLOW with optional context.
+        If DENY/ASK is used, returns an invalid response that will fail schema validation.
+
+        Args:
+            event_name: Hook event type
+
         Returns:
             hookSpecificOutput with context only (NO decision fields)
         """
         hook_output: dict[str, Any] = {"hookEventName": event_name}
+
+        # Context-only events don't support DENY/ASK - return invalid response if used
+        if self.decision in (Decision.DENY, Decision.ASK):
+            # Return response with permissionDecision (invalid for context-only events)
+            # This will fail schema validation as expected
+            hook_output["permissionDecision"] = self.decision.value
+            if self.reason:
+                hook_output["permissionDecisionReason"] = self.reason
+            return {"hookSpecificOutput": hook_output}
 
         if self.context:
             hook_output["additionalContext"] = "\n\n".join(self.context)

@@ -40,14 +40,26 @@ The `/release` skill orchestrates the complete release workflow through a multi-
 
 ### 1. Pre-Release Validation (Automated)
 
-The release agent will:
-- ✅ Verify clean git state
-- ✅ Run all QA checks (tests, lint, types, coverage)
-- ✅ Check version consistency across files
-- ✅ Confirm no existing tag for target version
-- ✅ Validate GitHub CLI authentication
+**CRITICAL: ALL checks must pass. ANY failure = IMMEDIATE ABORT. NO auto-fixing.**
 
-If any check fails, the process aborts with clear error message.
+The release agent will:
+- ✅ Verify clean git state (no uncommitted changes, no untracked files in src/)
+- ✅ Run ALL QA checks: Format (Black), Lint (Ruff), Type Check (MyPy), Tests (Pytest with 95% coverage), Security (Bandit)
+- ✅ Check version consistency across files (pyproject.toml, version.py, README.md, CLAUDE.md)
+- ✅ Confirm no existing tag for target version
+- ✅ Validate GitHub CLI authentication (`gh auth status`)
+
+**If any check fails:**
+- Process ABORTS immediately
+- Clear error message displayed
+- User must manually fix issues
+- User re-runs `/release` after fixing
+
+**NO attempts to:**
+- Auto-fix QA issues (formatting, linting, tests, security)
+- Auto-commit or stash uncommitted changes
+- Skip or bypass validation checks
+- Continue despite failures
 
 ### 2. Version Detection (Auto or Manual)
 
@@ -161,32 +173,51 @@ Creates comprehensive release notes in `RELEASES/vX.Y.Z.md`:
 
 ### 6. Opus Review (Orchestrated by Main Claude)
 
-**Critical Quality Gate:**
-After the Release Agent completes, **main Claude** (not the agent) invokes an ad-hoc Opus 4.5 agent to perform final review:
+**Critical Quality Gate: DOCUMENTATION REVIEW ONLY**
+
+After the Release Agent completes, **main Claude** (not the agent) invokes an ad-hoc Opus 4.5 agent to review **release documentation ONLY**.
 
 **Note:** Agents cannot spawn nested agents. The /release skill orchestrates this multi-stage process through main Claude.
 
-**Review Scope:**
-- ✅ All version numbers consistent
-- ✅ Changelog entries accurate and categorized correctly
+**Review Scope (Documentation Only):**
+- ✅ All version numbers consistent across files
+- ✅ Changelog entries accurate and categorized correctly (Added/Changed/Fixed/Removed)
 - ✅ Release notes comprehensive and grammatically correct
 - ✅ Technical descriptions accurate
-- ✅ No missing critical changes
+- ✅ No missing critical changes in changelog
 - ✅ Security/breaking changes properly marked
-- ✅ Upgrade instructions clear
+- ✅ Upgrade instructions clear (if needed)
+
+**What Opus Does NOT Review:**
+- ❌ Code quality (already validated by QA checks)
+- ❌ Test failures (already validated by pytest)
+- ❌ Type errors (already validated by mypy)
+- ❌ Lint violations (already validated by ruff)
+- ❌ Security issues (already validated by bandit)
+- ❌ Git state (already validated pre-release)
 
 **Outcome:**
 - **Approved**: Main Claude proceeds to commit/tag/release
-- **Issues Found**: Main Claude re-invokes Release Agent with fixes
-- Process repeats until Opus approves with 100% confidence
+- **Issues Found**: Main Claude re-invokes Release Agent to fix **documentation issues only** (typos, missing entries, etc.)
+- Process repeats until Opus approves documentation with 100% confidence
 
 You'll see output like:
 ```
 📋 Release Agent Complete - Files prepared for review
-⏳ Invoking Opus agent for validation...
+⏳ Invoking Opus agent for documentation validation...
 ✅ Opus Review: APPROVED (100% confidence)
    "All version numbers consistent, changelog accurate,
-    no issues found. Ready for release."
+    release notes comprehensive. Ready for release."
+```
+
+Or if documentation issues found:
+```
+⚠️  Opus Review: REJECTED
+   Documentation issues:
+   - Typo in release notes: "performace" → "performance"
+   - Changelog missing entry for handler addition
+
+   Re-invoking Release Agent to fix documentation...
 ```
 
 ### 7. Commit & Push (Main Claude Executes)
@@ -294,17 +325,19 @@ Next steps:
 ```
 **Fix:** Use different version or `git tag -d v2.2.0; git push origin :refs/tags/v2.2.0`
 
-**4. Opus Rejects Release**
+**4. Opus Rejects Release (Documentation Issues)**
 ```
 ⚠️  Opus Review: REJECTED
-   Issues found:
+   Documentation issues found:
    - Changelog entry missing security fix #25
    - Version number inconsistent in CLAUDE.md
    - Typo in release notes: "performace" → "performance"
 
-   Fixing issues and re-submitting...
+   Fixing documentation and re-submitting...
 ```
-**Fix:** Agent fixes automatically and re-submits. If repeated failures, manual intervention needed.
+**Fix:** Agent fixes **documentation issues only** and re-submits. Opus does NOT review code or QA issues.
+
+**Note**: If Opus repeatedly rejects, manually review changelog and release notes for accuracy.
 
 ### Rollback Strategy
 

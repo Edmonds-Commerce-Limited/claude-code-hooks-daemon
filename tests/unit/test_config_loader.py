@@ -303,6 +303,22 @@ class TestConfigLoaderHandlerSettings:
 
         assert settings is None
 
+    def test_get_handler_settings_handler_not_in_event_type(self) -> None:
+        """Should return None when handler_name not in config[handlers][event_type]."""
+        config: dict[str, Any] = {
+            "version": "1.0",
+            "handlers": {
+                "pre_tool_use": {
+                    "existing_handler": {"enabled": True},
+                }
+            },
+        }
+
+        # Event type exists, but handler_name doesn't exist in that event type
+        settings = ConfigLoader.get_handler_settings(config, "pre_tool_use", "nonexistent_handler")
+
+        assert settings is None
+
 
 class TestConfigLoaderEdgeCases:
     """Test edge cases and error conditions."""

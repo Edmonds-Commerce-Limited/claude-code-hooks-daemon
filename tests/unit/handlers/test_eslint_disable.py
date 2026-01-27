@@ -263,13 +263,14 @@ class TestEslintDisableHandler:
         hook_input = {"tool_name": "Read", "tool_input": {"file_path": "test.ts"}}
         assert handler.matches(hook_input) is False
 
-    def test_matches_missing_file_path_returns_false(self, handler):
-        """Should not match when file_path is missing."""
+    def test_matches_missing_file_path_with_js_content(self, handler):
+        """Should match when file_path is missing but content looks like JS/TS."""
         hook_input = {
             "tool_name": "Write",
             "tool_input": {"content": "// eslint-disable\nconst x = 1;"},
         }
-        assert handler.matches(hook_input) is False
+        # Handler now matches if content has JS markers even without file_path
+        assert handler.matches(hook_input) is True
 
     # handle() Tests
     def test_handle_returns_deny_decision(self, handler):
@@ -401,4 +402,52 @@ class TestEslintDisableHandler:
                 """,
             },
         }
+        assert handler.matches(hook_input) is False
+
+    def test_does_not_match_non_ts_files_without_js_markers(self, handler):
+        """Should not match non-TS files without JavaScript markers (line 61 branch)."""
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "test.txt",  # Non-TS file
+                "content": "This is plain text without JS markers",
+            },
+        }
+        # Non-TS file without JS markers - should return False
+        assert handler.matches(hook_input) is False
+
+    def test_handle_returns_allow_for_empty_content(self, handler):
+        """Should allow when content is empty (line 78 branch)."""
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "test.ts",
+                "content": "",
+            },
+        }
+        result = handler.handle(hook_input)
+        assert result.decision == "allow"
+
+    def test_handle_returns_allow_for_none_content(self, handler):
+        """Should allow when content is None (line 78 branch)."""
+        hook_input = {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": "test.ts",
+                "new_string": "",
+            },
+        }
+        result = handler.handle(hook_input)
+        assert result.decision == "allow"
+
+    def test_matches_no_file_path_without_js_markers(self, handler):
+        """Should not match when no file_path and content has no JS markers (line 61 branch)."""
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {
+                "content": "eslint-disable is mentioned here but this is plain text",
+            },
+        }
+        # No file_path, and content has no JS markers (no //, /*, const, let, etc.)
+        # Should return False at line 61
         assert handler.matches(hook_input) is False

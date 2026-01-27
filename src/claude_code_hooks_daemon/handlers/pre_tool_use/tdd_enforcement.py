@@ -18,7 +18,7 @@ class TddEnforcementHandler(Handler):
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """Check if this is a Write operation to a handler file."""
+        """Check if this is a Write operation to a production Python file."""
         # Only match Write tool
         if hook_input.get("tool_name") != "Write":
             return False
@@ -31,23 +31,19 @@ class TddEnforcementHandler(Handler):
         if not file_path.endswith(".py"):
             return False
 
-        # Must be in a handlers subdirectory
-        if "/handlers/" not in file_path:
-            return False
-
         # Exclude __init__.py files
         if file_path.endswith("__init__.py"):
             return False
 
-        # Must be in one of the handler event directories
-        handler_dirs = [
-            "/handlers/pre_tool_use/",
-            "/handlers/post_tool_use/",
-            "/handlers/user_prompt_submit/",
-            "/handlers/subagent_stop/",
-        ]
+        # Exclude test files (test files can be created without TDD enforcement)
+        if "/tests/" in file_path or "/test_" in file_path:
+            return False
 
-        return any(handler_dir in file_path for handler_dir in handler_dirs)
+        # Must be in a handlers subdirectory OR src directory (production code)
+        if "/handlers/" in file_path or "/src/" in file_path:
+            return True
+
+        return False
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Check if test file exists, deny if not."""

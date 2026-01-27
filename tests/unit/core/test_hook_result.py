@@ -402,3 +402,165 @@ class TestHookResultIntegration:
         assert "TDD violation" in hso["permissionDecisionReason"]
         assert "test_example_handler.py" in hso["additionalContext"]
         assert "Create test file" in hso["guidance"]
+
+
+class TestHookResultCoercionValidation:
+    """Test field validation and coercion."""
+
+    def test_coerce_decision_with_invalid_type(self):
+        """Should raise ValueError for invalid decision type."""
+        import pytest
+
+        with pytest.raises(ValueError, match="Invalid decision"):
+            HookResult(decision=123)  # type: ignore
+
+    def test_coerce_decision_with_string(self):
+        """Should coerce string decision to Decision enum."""
+        result = HookResult(decision="allow")
+        assert result.decision == "allow"
+
+    def test_coerce_decision_with_enum(self):
+        """Should accept Decision enum directly."""
+        from claude_code_hooks_daemon.core.hook_result import Decision
+
+        result = HookResult(decision=Decision.DENY)
+        assert result.decision == "deny"
+
+
+class TestHookResultChaining:
+    """Test method chaining functionality."""
+
+    def test_add_context_single_line(self):
+        """Should add single context line and return self."""
+        result = HookResult(decision="allow")
+        returned = result.add_context("Line 1")
+
+        assert returned is result  # Returns self for chaining
+        assert result.context == ["Line 1"]
+
+    def test_add_context_multiple_lines(self):
+        """Should add multiple context lines."""
+        result = HookResult(decision="allow")
+        result.add_context("Line 1", "Line 2", "Line 3")
+
+        assert result.context == ["Line 1", "Line 2", "Line 3"]
+
+    def test_add_context_chaining(self):
+        """Should support method chaining."""
+        result = (
+            HookResult(decision="allow")
+            .add_context("Line 1")
+            .add_context("Line 2")
+            .add_context("Line 3")
+        )
+
+        assert result.context == ["Line 1", "Line 2", "Line 3"]
+
+    def test_merge_context_from_other_result(self):
+        """Should merge context and handlers from another result."""
+        result1 = HookResult(decision="allow", context=["Line 1"])
+        result1.handlers_matched.append("handler1")
+
+        result2 = HookResult(decision="allow", context=["Line 2"])
+        result2.handlers_matched.append("handler2")
+
+        returned = result1.merge_context(result2)
+
+        assert returned is result1  # Returns self for chaining
+        assert result1.context == ["Line 1", "Line 2"]
+        assert "handler1" in result1.handlers_matched
+        assert "handler2" in result1.handlers_matched
+
+    def test_merge_context_avoids_duplicate_handlers(self):
+        """Should not duplicate handlers when merging."""
+        result1 = HookResult(decision="allow")
+        result1.handlers_matched.append("handler1")
+
+        result2 = HookResult(decision="allow")
+        result2.handlers_matched.extend(["handler1", "handler2"])
+
+        result1.merge_context(result2)
+
+        # handler1 should appear only once
+        assert result1.handlers_matched.count("handler1") == 1
+        assert "handler2" in result1.handlers_matched
+
+
+class TestHookResultFactoryMethods:
+    """Test factory method constructors."""
+
+    def test_ask_factory_creates_ask_result(self):
+        """HookResult.ask() should create ask decision result."""
+        result = HookResult.ask("Need confirmation")
+
+        assert result.decision == "ask"
+        assert result.reason == "Need confirmation"
+        assert result.context == []
+
+    def test_ask_factory_with_context(self):
+        """HookResult.ask() should accept optional context."""
+        result = HookResult.ask("Need confirmation", context=["Detail 1", "Detail 2"])
+
+        assert result.decision == "ask"
+        assert result.reason == "Need confirmation"
+        assert result.context == ["Detail 1", "Detail 2"]
+
+
+class TestHookResultPostToolUseFormat:
+    """Test PostToolUse-specific response format."""
+
+    def test_post_tool_use_deny_with_guidance(self):
+        """PostToolUse deny should support guidance field."""
+        result = HookResult(decision="deny", reason="Error detected", guidance="Fix the error")
+        output = result.to_json("PostToolUse")
+
+        assert output["decision"] == "block"
+        assert output["reason"] == "Error detected"
+        assert output["hookSpecificOutput"]["guidance"] == "Fix the error"
+
+    def test_post_tool_use_allow_with_guidance(self):
+        """PostToolUse allow should support guidance field."""
+        result = HookResult(decision="allow", guidance="Consider optimizing")
+        output = result.to_json("PostToolUse")
+
+        assert "decision" not in output
+        assert output["hookSpecificOutput"]["guidance"] == "Consider optimizing"
+
+
+class TestHookResultPermissionRequestFormat:
+    """Test PermissionRequest-specific response format."""
+
+    def test_permission_request_with_guidance(self):
+        """PermissionRequest should support guidance field."""
+        result = HookResult(
+            decision="allow", context=["File access"], guidance="Use read-only mode"
+        )
+        output = result.to_json("PermissionRequest")
+
+        hso = output["hookSpecificOutput"]
+        assert hso["decision"]["behavior"] == "allow"
+        assert hso["additionalContext"] == "File access"
+        assert hso["guidance"] == "Use read-only mode"
+
+
+class TestHookResultContextOnlyFormat:
+    """Test context-only event response format."""
+
+    def test_context_only_with_guidance(self):
+        """Context-only events should support guidance field."""
+        result = HookResult(
+            decision="allow", context=["Session info"], guidance="Remember to commit"
+        )
+        output = result.to_json("SessionStart")
+
+        hso = output["hookSpecificOutput"]
+        assert hso["additionalContext"] == "Session info"
+        assert hso["guidance"] == "Remember to commit"
+
+    def test_context_only_notification_with_guidance(self):
+        """Notification event should support guidance field."""
+        result = HookResult(decision="allow", guidance="Check logs for details")
+        output = result.to_json("Notification")
+
+        hso = output["hookSpecificOutput"]
+        assert hso["guidance"] == "Check logs for details"

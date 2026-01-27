@@ -63,6 +63,16 @@ else
 fi
 echo ""
 
+echo "5. Running Security Check..."
+echo "----------------------------------------"
+if ! "${SCRIPT_DIR}/run_security_check.sh"; then
+    OVERALL_EXIT_CODE=1
+    echo "❌ Security check FAILED"
+else
+    echo "✅ Security check PASSED"
+fi
+echo ""
+
 # Print overall summary
 echo "========================================"
 echo "QA Summary"
@@ -76,6 +86,7 @@ results = {
     "Linter": "untracked/qa/lint.json",
     "Type Check": "untracked/qa/type_check.json",
     "Tests": "untracked/qa/tests.json",
+    "Security Check": "untracked/qa/security.json",
 }
 
 all_passed = True
@@ -86,7 +97,11 @@ for name, file_path in results.items():
         with open(file_obj) as f:
             data = json.load(f)
             summary = data.get("summary", {})
-            passed = summary.get("passed", False) or summary.get("passed_all", False)
+            # For tests: use "passed_all" boolean. For others: use "passed" boolean
+            if "passed_all" in summary:
+                passed = summary["passed_all"]
+            else:
+                passed = summary.get("passed", False)
 
             status = "✅ PASSED" if passed else "❌ FAILED"
             print(f"  {name:20s}: {status}")

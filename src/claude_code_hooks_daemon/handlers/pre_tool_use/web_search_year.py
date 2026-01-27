@@ -35,17 +35,20 @@ class WebSearchYearHandler(Handler):
         return any(str(year) in query for year in range(2020, self.CURRENT_YEAR))
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
-        """Block outdated year in WebSearch."""
+        """Provide guidance about outdated year in WebSearch."""
         query = hook_input.get("tool_input", {}).get("query", "")
 
         return HookResult(
-            decision=Decision.DENY,
-            reason=(
-                f"🚫 BLOCKED: WebSearch query contains outdated year\n\n"
-                f"Query: {query}\n\n"
-                f"Current year is {self.CURRENT_YEAR}. Don't search for old years.\n\n"
-                "✅ CORRECT APPROACH:\n"
-                f"  - Use {self.CURRENT_YEAR} for current information\n"
+            decision=Decision.ALLOW,
+            context=[
+                f"WebSearch query contains outdated year: {query}",
+                f"Current year is {self.CURRENT_YEAR}. Consider updating the year for current information.",
+            ],
+            guidance=(
+                "SUGGESTION: Update year for better results\n\n"
+                f"Current query: {query}\n\n"
+                f"Current year is {self.CURRENT_YEAR}. For current information:\n"
+                f"  - Use {self.CURRENT_YEAR} instead of old years\n"
                 "  - Remove year if searching general topics\n"
                 "  - Only use old years if specifically researching history"
             ),

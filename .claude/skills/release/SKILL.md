@@ -32,15 +32,21 @@ Automate the complete release process: version updates, changelog generation, Op
 
 ## What It Does
 
-1. **Validates** environment (clean git, QA passing, gh authenticated)
+1. **Validates** environment (ABORT if any failure):
+   - Clean git state (no uncommitted changes)
+   - All QA checks passing (format, lint, types, tests, security)
+   - GitHub CLI authenticated
+   - No existing tag for target version
 2. **Determines** version bump (auto or manual)
 3. **Updates** version across all files
 4. **Generates** CHANGELOG.md entry from commits
 5. **Creates** release notes (RELEASES/vX.Y.Z.md)
-6. **Submits** to Opus agent for final review
+6. **Submits** to Opus agent for documentation review
 7. **Commits** and pushes changes
 8. **Tags** release and creates GitHub release
 9. **Verifies** release published successfully
+
+**CRITICAL**: Release process ABORTS immediately on ANY validation failure. NO auto-fixing of QA issues or git state.
 
 ## Agent
 
@@ -105,10 +111,15 @@ Fix: Commit or stash changes, then retry
 Fix: Run ./scripts/qa/run_all.sh, fix issues, retry
 ```
 
-**Opus Rejects:**
+**Opus Rejects (Documentation Issues Only):**
 ```
-⚠️  Opus found issues (auto-fixing and resubmitting)
+⚠️  Opus found documentation issues:
+   - Typo in release notes
+   - Missing changelog entry
+
+   Fixing documentation and re-submitting...
 ```
+**Note**: Opus ONLY reviews release documentation (changelog/release notes), NOT code or QA issues.
 
 **Tag Exists:**
 ```
@@ -118,10 +129,14 @@ Fix: Use different version
 
 ## Requirements
 
-- Clean git state (no uncommitted changes)
-- All QA passing (tests, lint, types, coverage)
-- GitHub CLI authenticated (`gh auth status`)
-- Write access to repository
+**ALL requirements are MANDATORY. Release ABORTS if any fail:**
+
+- **Clean git state**: No uncommitted changes, no untracked files in src/
+- **All QA passing**: Format, Lint, Type Check, Tests (95% coverage), Security (Bandit)
+- **GitHub CLI authenticated**: `gh auth status` must succeed
+- **Write access**: Repository push permissions required
+
+**NO auto-fixing**: User must manually resolve all issues before retry.
 
 ## Documentation
 

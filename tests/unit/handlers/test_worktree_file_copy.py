@@ -107,6 +107,17 @@ class TestWorktreeFileCopyHandler:
         # From worktree to main repo src/ - should block
         assert handler.matches(hook_input) is True
 
+    def test_matches_different_worktrees_to_different_worktrees_returns_true(self, handler):
+        """Should block copying between different worktrees even if both paths contain worktrees."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "cp untracked/worktrees/feature-a/file.py untracked/worktrees/feature-b/src/"
+            },
+        }
+        # Different worktrees (feature-a to feature-b/src/) - should block
+        assert handler.matches(hook_input) is True
+
     # matches() - Negative Cases: No worktrees involved
     def test_matches_cp_without_worktree_returns_false(self, handler):
         """Should not match cp without worktree paths."""

@@ -13,7 +13,6 @@ Example:
 
 import json
 import sys
-
 from typing import Any
 
 from claude_code_hooks_daemon.core.hook_result import HookResult

@@ -172,55 +172,62 @@ class TestWebSearchYearHandler:
         assert handler.matches(hook_input) is False
 
     # handle() Tests
-    def test_handle_returns_deny_decision(self, handler):
-        """handle() should return deny decision."""
+    def test_handle_returns_allow_decision(self, handler):
+        """handle() should return allow decision (advisory only)."""
         hook_input = {"tool_name": "WebSearch", "tool_input": {"query": "Python 2023 features"}}
         result = handler.handle(hook_input)
-        assert result.decision == "deny"
+        assert result.decision == "allow"
 
-    def test_handle_reason_contains_query(self, handler):
-        """handle() reason should include the blocked query."""
+    def test_handle_context_contains_query(self, handler):
+        """handle() context should include the query with outdated year."""
         hook_input = {
             "tool_name": "WebSearch",
             "tool_input": {"query": "React 2022 best practices"},
         }
         result = handler.handle(hook_input)
-        assert "React 2022 best practices" in result.reason
+        assert len(result.context) > 0
+        assert any("React 2022 best practices" in msg for msg in result.context)
 
-    def test_handle_reason_contains_current_year(self, handler):
-        """handle() reason should mention current year."""
+    def test_handle_context_contains_current_year(self, handler):
+        """handle() context should mention current year."""
         from datetime import datetime
 
         current_year = datetime.now().year
         hook_input = {"tool_name": "WebSearch", "tool_input": {"query": "AI 2024"}}
         result = handler.handle(hook_input)
-        assert str(current_year) in result.reason
+        assert len(result.context) > 0
+        assert any(str(current_year) in msg for msg in result.context)
 
-    def test_handle_reason_contains_blocked_indicator(self, handler):
-        """handle() reason should indicate operation is blocked."""
+    def test_handle_guidance_provides_suggestion(self, handler):
+        """handle() guidance should provide suggestion for updating year."""
         hook_input = {"tool_name": "WebSearch", "tool_input": {"query": "Node 2021"}}
         result = handler.handle(hook_input)
-        assert "BLOCKED" in result.reason
+        assert result.guidance is not None
+        assert "SUGGESTION" in result.guidance or "suggestion" in result.guidance.lower()
 
-    def test_handle_reason_provides_correct_approach(self, handler):
-        """handle() reason should provide correct approach guidance."""
+    def test_handle_guidance_shows_current_year(self, handler):
+        """handle() guidance should show current year."""
+        from datetime import datetime
+
+        current_year = datetime.now().year
         hook_input = {"tool_name": "WebSearch", "tool_input": {"query": "TypeScript 2020"}}
         result = handler.handle(hook_input)
-        assert "CORRECT APPROACH" in result.reason
+        assert result.guidance is not None
+        assert str(current_year) in result.guidance
 
     def test_handle_with_empty_query(self, handler):
         """handle() should work even with empty query."""
         hook_input = {"tool_name": "WebSearch", "tool_input": {"query": ""}}
         result = handler.handle(hook_input)
-        assert result.decision == "deny"
-        assert result.reason  # Should still have a reason
+        assert result.decision == "allow"
+        assert result.context  # Should have context
 
     def test_handle_with_missing_query_key(self, handler):
         """handle() should work when query key is missing."""
         hook_input = {"tool_name": "WebSearch", "tool_input": {}}
         result = handler.handle(hook_input)
-        assert result.decision == "deny"
-        assert result.reason
+        assert result.decision == "allow"
+        assert result.context
 
     # Edge Cases
     def test_matches_with_malformed_tool_input_dict(self, handler):
@@ -236,14 +243,14 @@ class TestWebSearchYearHandler:
         }
         assert handler.matches(hook_input) is True
 
-    def test_handle_context_field_is_none(self, handler):
-        """handle() context should be None (not used by this handler)."""
+    def test_handle_context_field_has_messages(self, handler):
+        """handle() context should contain advisory messages."""
         hook_input = {"tool_name": "WebSearch", "tool_input": {"query": "Python 2023"}}
         result = handler.handle(hook_input)
-        assert result.context == []
+        assert len(result.context) > 0
 
-    def test_handle_guidance_field_is_none(self, handler):
-        """handle() guidance should be None (not used by this handler)."""
+    def test_handle_guidance_field_has_suggestion(self, handler):
+        """handle() guidance should provide suggestion."""
         hook_input = {"tool_name": "WebSearch", "tool_input": {"query": "React 2021"}}
         result = handler.handle(hook_input)
-        assert result.guidance is None
+        assert result.guidance is not None

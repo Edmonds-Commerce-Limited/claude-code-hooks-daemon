@@ -293,3 +293,78 @@ class TestAllEventTypes:
             assert "hookSpecificOutput" in response
         else:
             assert "hookSpecificOutput" not in response
+
+
+class TestMainFunction:
+    """Tests for main() function."""
+
+    def test_main_with_correct_args(
+        self, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """main() should generate JSON output when called with correct args."""
+        monkeypatch.setattr(
+            sys, "argv", ["error_response.py", "PreToolUse", "test_error", "Test error message"]
+        )
+
+        from claude_code_hooks_daemon.core.error_response import main
+
+        main()
+
+        captured = capsys.readouterr()
+        # Should output valid JSON
+        response = json.loads(captured.out)
+        assert "hookSpecificOutput" in response
+
+    def test_main_with_stop_event(
+        self, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """main() should handle Stop events correctly."""
+        monkeypatch.setattr(
+            sys, "argv", ["error_response.py", "Stop", "daemon_error", "Daemon failed"]
+        )
+
+        from claude_code_hooks_daemon.core.error_response import main
+
+        main()
+
+        captured = capsys.readouterr()
+        response = json.loads(captured.out)
+        assert "decision" in response
+        assert response["decision"] == "block"
+
+    def test_main_with_insufficient_args(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """main() should exit with error if insufficient args."""
+        monkeypatch.setattr(sys, "argv", ["error_response.py", "PreToolUse"])
+
+        from claude_code_hooks_daemon.core.error_response import main
+
+        with pytest.raises(SystemExit) as excinfo:
+            main()
+
+        assert excinfo.value.code == 1
+
+    def test_main_with_no_args(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """main() should exit with error if no args."""
+        monkeypatch.setattr(sys, "argv", ["error_response.py"])
+
+        from claude_code_hooks_daemon.core.error_response import main
+
+        with pytest.raises(SystemExit) as excinfo:
+            main()
+
+        assert excinfo.value.code == 1
+
+    def test_main_prints_usage_on_error(
+        self, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """main() should print usage message when args are incorrect."""
+        monkeypatch.setattr(sys, "argv", ["error_response.py", "only-one-arg"])
+
+        from claude_code_hooks_daemon.core.error_response import main
+
+        with pytest.raises(SystemExit):
+            main()
+
+        captured = capsys.readouterr()
+        assert "Usage:" in captured.err
+        assert "error_response" in captured.err

@@ -27,9 +27,9 @@ class TestDestructiveGitHandler:
         assert handler.terminal is True
 
     def test_init_creates_destructive_patterns_list(self, handler):
-        """Handler should initialize with 6 destructive patterns."""
+        """Handler should initialize with 7 destructive patterns."""
         assert hasattr(handler, "destructive_patterns")
-        assert len(handler.destructive_patterns) == 6
+        assert len(handler.destructive_patterns) == 7
 
     # matches() - Pattern 1: git reset --hard
     def test_matches_git_reset_hard(self, handler):
@@ -372,6 +372,12 @@ class TestDestructiveGitHandler:
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git clean -f"}}
         result = handler.handle(hook_input)
         assert result.guidance is None
+
+    def test_handle_empty_command_returns_allow(self, handler):
+        """handle() should return ALLOW for empty command."""
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": ""}}
+        result = handler.handle(hook_input)
+        assert result.decision == "allow"
 
     # Integration Tests
     def test_blocks_all_destructive_commands(self, handler):

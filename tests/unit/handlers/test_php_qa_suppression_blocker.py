@@ -401,6 +401,12 @@ class TestPhpQaSuppressionBlocker:
         result = handler.handle(hook_input)
         assert result.guidance is None
 
+    def test_handle_empty_content_returns_allow(self, handler):
+        """handle() should return ALLOW for empty content."""
+        hook_input = {"tool_name": "Write", "tool_input": {"file_path": "test.php", "content": ""}}
+        result = handler.handle(hook_input)
+        assert result.decision == "allow"
+
     # Integration Tests
     def test_blocks_all_forbidden_patterns(self, handler):
         """Should block all defined forbidden patterns."""

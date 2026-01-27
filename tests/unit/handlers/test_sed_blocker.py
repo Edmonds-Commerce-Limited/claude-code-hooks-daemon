@@ -331,6 +331,12 @@ EOF
         command = "sed -i 's/foo/bar/g' file.txt && git commit -m 'message'"
         assert handler._is_git_command(command) is False
 
+    def test_is_git_command_detects_sed_command_after_commit(self, handler):
+        """_is_git_command() should detect sed command after git commit (not part of message)."""
+        command = "git add file.txt && git commit -m 'message' && sed -i 's/foo/bar/g' file.txt"
+        # This returns True because sed appears after commit, triggering line 108
+        assert handler._is_git_command(command) is True
+
     def test_is_git_command_rejects_git_diff_and_sed(self, handler):
         """_is_git_command() should reject git diff && sed (separate commands)."""
         command = "git diff && sed -i 's/foo/bar/g' file.txt"
@@ -592,3 +598,35 @@ EOF
         # So --grep='sed' doesn't match the safe readonly pattern
         # This will be blocked (which is probably overly cautious but safe)
         assert handler.matches(hook_input) is True
+
+    def test_is_git_command_with_git_add_commit_without_sed_in_message(self, handler):
+        """_is_git_command() should return False when git add && commit without sed after commit."""
+        # This tests the branch at line 108: when command_after_commit doesn't contain sed
+        command = "git add . && git commit -m 'Update files'"
+        # No 'sed' appears after 'git commit', so the search returns None
+        assert handler._is_git_command(command) is False
+
+    def test_is_git_command_with_git_commit_sed_before_commit(self, handler):
+        """_is_git_command() should return False when sed appears before git commit position."""
+        # This tests the branch at line 97: when sed_pos <= git_pos
+        command = "sed -i 's/foo/bar/' file.txt && git commit -m 'message'"
+        # 'sed' appears before 'git commit', so sed_pos < git_pos, returns False
+        assert handler._is_git_command(command) is False
+
+    def test_is_git_command_without_sed_in_command(self, handler):
+        """_is_git_command() should return False when git commit found but no sed."""
+        # This tests the branch at line 94: when sed_match is None
+        command = "git commit -m 'Update files without the s word'"
+        # git commit found, but no 'sed' in command, so sed_match is None
+        assert handler._is_git_command(command) is False
+
+    def test_is_git_command_with_sed_after_git_add_commit_chain(self, handler):
+        """_is_git_command() should detect sed in commit message in git add chain."""
+        # This specifically tests line 108: return True when sed found after commit in add chain
+        command = "git add file.txt && git commit -m 'Block sed usage'"
+        # 'sed' appears in the commit message, after 'git commit' in the chain
+        # Line 102: matches git add && git commit pattern
+        # Line 104-105: finds commit_match, extracts command_after_commit
+        # Line 107: finds 'sed' in " -m 'Block sed usage'"
+        # Line 108: returns True
+        assert handler._is_git_command(command) is True

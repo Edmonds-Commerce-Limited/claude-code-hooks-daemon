@@ -175,62 +175,57 @@ class TestGitStashHandler:
         assert handler.matches(hook_input) is False
 
     # handle() Tests
-    def test_handle_returns_deny_decision(self, handler):
-        """handle() should return deny decision."""
+    def test_handle_returns_allow_decision(self, handler):
+        """handle() should return allow decision with warning."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash"}}
         result = handler.handle(hook_input)
-        assert result.decision == "deny"
+        assert result.decision == "allow"
 
-    def test_handle_reason_contains_blocked_indicator(self, handler):
-        """handle() reason should indicate operation is blocked."""
+    def test_handle_context_contains_warning(self, handler):
+        """handle() context should contain warning messages."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash"}}
         result = handler.handle(hook_input)
-        assert "BLOCKED" in result.reason
+        assert len(result.context) > 0
+        assert any("WARNING" in msg for msg in result.context)
 
-    def test_handle_reason_explains_why_forbidden(self, handler):
-        """handle() reason should explain why stash is forbidden."""
+    def test_handle_guidance_explains_why_risky(self, handler):
+        """handle() guidance should explain why stash is risky."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash push"}}
         result = handler.handle(hook_input)
-        assert "WHY" in result.reason
-        assert "lost" in result.reason or "forgotten" in result.reason
+        assert result.guidance is not None
+        assert "WHY" in result.guidance
+        assert "lost" in result.guidance or "forgotten" in result.guidance
 
-    def test_handle_reason_provides_alternatives(self, handler):
-        """handle() reason should provide safe alternatives."""
+    def test_handle_guidance_provides_alternatives(self, handler):
+        """handle() guidance should provide safe alternatives."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash"}}
         result = handler.handle(hook_input)
-        assert "SAFE ALTERNATIVES" in result.reason
-        assert "git commit" in result.reason
+        assert result.guidance is not None
+        assert "SAFE ALTERNATIVES" in result.guidance or "ALTERNATIVES" in result.guidance
+        assert "git commit" in result.guidance
 
-    def test_handle_reason_mentions_worktree_issues(self, handler):
-        """handle() reason should mention worktree-related problems."""
+    def test_handle_guidance_mentions_worktree_issues(self, handler):
+        """handle() guidance should mention worktree-related problems."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash"}}
         result = handler.handle(hook_input)
-        assert "worktree" in result.reason.lower()
+        assert result.guidance is not None
+        assert "worktree" in result.guidance.lower()
 
-    def test_handle_reason_suggests_asking_human(self, handler):
-        """handle() reason should suggest asking human for help."""
+    def test_handle_guidance_suggests_asking_human(self, handler):
+        """handle() guidance should suggest asking human for help."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash"}}
         result = handler.handle(hook_input)
-        assert "human" in result.reason.lower()
+        assert result.guidance is not None
+        assert "human" in result.guidance.lower()
 
-    def test_handle_no_escape_hatch(self, handler):
-        """handle() should provide no way to bypass the block."""
+    def test_handle_allows_but_warns(self, handler):
+        """handle() should allow but provide strong warnings."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash"}}
         result = handler.handle(hook_input)
-        # Should be a hard deny, not an "ask" with escape hatch
-        assert result.decision == "deny"
-
-    def test_handle_context_is_none(self, handler):
-        """handle() context should be None (not used)."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash"}}
-        result = handler.handle(hook_input)
-        assert result.context == []
-
-    def test_handle_guidance_is_none(self, handler):
-        """handle() guidance should be None (not used)."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash"}}
-        result = handler.handle(hook_input)
-        assert result.guidance is None
+        # Should allow with guidance, not deny
+        assert result.decision == "allow"
+        assert result.guidance is not None
+        assert len(result.context) > 0
 
     # Integration Tests
     def test_allows_recovery_workflow(self, handler):

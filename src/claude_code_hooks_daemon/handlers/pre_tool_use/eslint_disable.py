@@ -33,17 +33,17 @@ class EslintDisableHandler(Handler):
             return False
 
         file_path = get_file_path(hook_input)
-        if not file_path:
-            return False
 
-        # Case-insensitive extension check
-        file_path_lower = file_path.lower()
-        if not any(file_path_lower.endswith(ext) for ext in self.CHECK_EXTENSIONS):
-            return False
+        # If file_path is provided, check extension
+        if file_path:
+            # Case-insensitive extension check
+            file_path_lower = file_path.lower()
+            if not any(file_path_lower.endswith(ext) for ext in self.CHECK_EXTENSIONS):
+                return False
 
-        # Skip node_modules, dist, build artifacts
-        if any(skip in file_path for skip in ["node_modules", "dist", ".build", "coverage"]):
-            return False
+            # Skip node_modules, dist, build artifacts
+            if any(skip in file_path for skip in ["node_modules", "dist", ".build", "coverage"]):
+                return False
 
         content = get_file_content(hook_input)
         if tool_name == "Edit":
@@ -51,6 +51,14 @@ class EslintDisableHandler(Handler):
 
         if not content:
             return False
+
+        # If no file_path, check content for JavaScript/TypeScript markers
+        if not file_path:
+            # Only match if content looks like JS/TS (has //, /* */, or typical JS syntax)
+            js_markers = [r"//", r"/\*", r"const\s+", r"let\s+", r"var\s+", r"function\s+", r"=>"]
+            has_js_marker = any(re.search(marker, content) for marker in js_markers)
+            if not has_js_marker:
+                return False
 
         # Check for forbidden patterns
         for pattern in self.FORBIDDEN_PATTERNS:

@@ -25,11 +25,12 @@ Execute release preparation and file updates for version ${VERSION}.
 
 Follow the Release Agent specification (.claude/agents/release-agent.md) for:
 
-1. Pre-Release Validation
+1. Pre-Release Validation (ABORT on ANY failure)
    - Verify clean git state (no uncommitted changes)
-   - Run QA checks (all must pass)
-   - Verify version consistency
+   - Run ALL QA checks: Format, Lint, Type Check, Tests, Security
+   - Verify version consistency across all files
    - Check GitHub CLI authentication
+   - CRITICAL: Do NOT auto-fix issues. User must fix and retry.
 
 2. Version Detection
    - If version="${VERSION}" is not "auto", use it
@@ -78,38 +79,47 @@ After the Release Agent completes, YOU (main Claude) will:
 **Task for Opus Agent:**
 \`\`\`
 model: opus
-description: Final release validation review
+description: Release documentation validation (NOT code review)
 
-Review the following release files for version X.Y.Z and confirm 100% accuracy:
+CRITICAL: Review DOCUMENTATION ONLY. Do NOT review code, QA, tests, or security.
+All QA checks (tests, lint, types, security) ALREADY PASSED in validation stage.
+
+Review the following release DOCUMENTATION for version X.Y.Z:
 
 Files to review:
 - pyproject.toml (version line)
 - src/claude_code_hooks_daemon/version.py
 - README.md (badge)
 - CLAUDE.md (version section)
-- CHANGELOG.md (new entry)
-- RELEASES/vX.Y.Z.md
+- CHANGELOG.md (new entry) - CRITICAL: verify accuracy
+- RELEASES/vX.Y.Z.md - CRITICAL: verify completeness
 
-Verification checklist:
+Documentation verification checklist:
 - [ ] All version numbers consistent (X.Y.Z)
 - [ ] Changelog categorization correct (Added/Changed/Fixed/Removed)
 - [ ] Release notes comprehensive and accurate
-- [ ] No grammatical errors
+- [ ] No grammatical errors or typos
 - [ ] Technical descriptions accurate
-- [ ] No missing critical changes
+- [ ] No missing critical changes in changelog
 - [ ] Security/breaking changes properly marked
-- [ ] Upgrade instructions clear (if needed)
+- [ ] Upgrade instructions clear (if breaking changes)
+
+Do NOT check:
+- Code quality (already validated by QA)
+- Test coverage (already validated by pytest)
+- Type safety (already validated by mypy)
+- Security vulnerabilities (already validated by bandit)
 
 Respond with JSON:
 {
   "approved": true/false,
   "confidence": "percentage",
-  "issues": ["issue 1", "issue 2"] or [],
-  "summary": "brief validation summary"
+  "issues": ["documentation issue 1", "documentation issue 2"] or [],
+  "summary": "brief documentation validation summary"
 }
 \`\`\`
 
-3. If Opus rejects: Invoke Release Agent again to fix issues
+3. If Opus rejects: Invoke Release Agent again to fix DOCUMENTATION issues only
 4. If Opus approves: Proceed to Stage 3
 
 ## Stage 3: Finalization (You Handle This)

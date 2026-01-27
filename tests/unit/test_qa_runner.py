@@ -955,5 +955,304 @@ class TestOutputDirectoryCreation:
             assert output_dir.exists()
 
 
+class TestRunCommandErrors:
+    """Test _run_command error handling."""
+
+    @patch("subprocess.run")
+    def test_run_command_called_process_error(self, mock_run: MagicMock) -> None:
+        """Test handling CalledProcessError."""
+        mock_run.side_effect = subprocess.CalledProcessError(
+            returncode=1, cmd="test", stderr="Error output"
+        )
+
+        runner = QARunner(project_root="/workspace")
+
+        with pytest.raises(QAExecutionError) as exc_info:
+            runner._run_command("failing command", "test command")
+
+        assert "Command failed" in str(exc_info.value)
+
+    @patch("subprocess.run")
+    def test_run_command_generic_exception(self, mock_run: MagicMock) -> None:
+        """Test handling generic exceptions."""
+        mock_run.side_effect = RuntimeError("Unexpected error")
+
+        runner = QARunner(project_root="/workspace")
+
+        with pytest.raises(QAExecutionError) as exc_info:
+            runner._run_command("failing command", "test command")
+
+        assert "Execution error" in str(exc_info.value)
+
+
+class TestRunAllWithBandit:
+    """Test run_all with bandit tool included."""
+
+    @patch.object(QARunner, "run_ruff")
+    @patch.object(QARunner, "run_mypy")
+    @patch.object(QARunner, "run_black")
+    @patch.object(QARunner, "run_pytest")
+    @patch.object(QARunner, "run_bandit")
+    def test_run_all_with_bandit_tool(
+        self,
+        mock_bandit: MagicMock,
+        mock_pytest: MagicMock,
+        mock_black: MagicMock,
+        mock_mypy: MagicMock,
+        mock_ruff: MagicMock,
+    ) -> None:
+        """Test running all QA checks including bandit."""
+        mock_ruff.return_value = ToolResult(
+            tool_name="ruff",
+            passed=True,
+            error_count=0,
+            warning_count=0,
+            output="pass",
+            duration_ms=100,
+        )
+        mock_mypy.return_value = ToolResult(
+            tool_name="mypy",
+            passed=True,
+            error_count=0,
+            warning_count=0,
+            output="pass",
+            duration_ms=200,
+        )
+        mock_black.return_value = ToolResult(
+            tool_name="black",
+            passed=True,
+            error_count=0,
+            warning_count=0,
+            output="pass",
+            duration_ms=50,
+        )
+        mock_pytest.return_value = ToolResult(
+            tool_name="pytest",
+            passed=True,
+            error_count=0,
+            warning_count=0,
+            output="pass",
+            duration_ms=1000,
+        )
+        mock_bandit.return_value = ToolResult(
+            tool_name="bandit",
+            passed=True,
+            error_count=0,
+            warning_count=0,
+            output="pass",
+            duration_ms=500,
+        )
+
+        runner = QARunner(project_root="/workspace")
+        runner.tools_to_run = ["ruff", "mypy", "black", "pytest", "bandit"]
+        result = runner.run_all()
+
+        assert result.status == "passed"
+        assert len(result.tools_run) == 5
+        assert "bandit" in result.tools_run
+
+    @patch.object(QARunner, "run_ruff")
+    def test_run_all_with_unknown_tool(self, mock_ruff: MagicMock) -> None:
+        """Test run_all skips unknown tools gracefully."""
+        mock_ruff.return_value = ToolResult(
+            tool_name="ruff",
+            passed=True,
+            error_count=0,
+            warning_count=0,
+            output="pass",
+            duration_ms=100,
+        )
+
+        runner = QARunner(project_root="/workspace")
+        runner.tools_to_run = ["ruff", "unknown_tool"]
+        result = runner.run_all()
+
+        # Should complete without error
+        assert result.status == "passed"
+
+
+class TestRuffOutputParsingEdgeCases:
+    """Test ruff output parsing edge cases."""
+
+    def test_parse_ruff_non_json_output(self) -> None:
+        """Test parsing ruff output that is not JSON."""
+        output = """module.py:10:5: F401 'os' imported but unused
+module.py:20:10: E501 line too long
+"""
+        runner = QARunner(project_root="/workspace")
+        count = runner._parse_ruff_output(output)
+        assert count == 2
+
+
+class TestMypyOutputParsingEdgeCases:
+    """Test mypy output parsing edge cases."""
+
+    def test_parse_mypy_output_manual_count(self) -> None:
+        """Test parsing mypy output by counting error lines manually."""
+        output = """src/a.py:10: error: Something wrong
+src/b.py:20: error: Another error
+src/c.py:30: error: Third error
+"""
+        runner = QARunner(project_root="/workspace")
+        count = runner._parse_mypy_output(output)
+        assert count == 3
+
+    def test_parse_mypy_output_no_issues_lowercase(self) -> None:
+        """Test parsing mypy output with lowercase 'no issues found'."""
+        output = "Success: no issues found in 10 files\n"
+        runner = QARunner(project_root="/workspace")
+        count = runner._parse_mypy_output(output)
+        assert count == 0
+
+
+class TestBanditOutputParsingEdgeCases:
+    """Test bandit output parsing edge cases."""
+
+    def test_parse_bandit_non_json_output(self) -> None:
+        """Test parsing bandit output that is not JSON."""
+        output = """Issue: [B101:assert_used] Use of assert detected.
+Issue: [B602:subprocess_shell] subprocess call with shell=True.
+"""
+        runner = QARunner(project_root="/workspace")
+        count = runner._parse_bandit_output(output)
+        assert count == 2
+
+
+class TestSaveResults:
+    """Test save_results method."""
+
+    def test_save_results_none_result(self) -> None:
+        """Test saving None result returns None."""
+        runner = QARunner(project_root="/workspace")
+        filepath = runner.save_results(None)  # type: ignore[arg-type]
+        assert filepath is None
+
+    @patch.object(Path, "open")
+    def test_save_results_write_error(self, mock_open: MagicMock) -> None:
+        """Test save_results handles write errors."""
+        mock_open.side_effect = OSError("Write error")
+
+        runner = QARunner(project_root="/workspace")
+        result = QAResult(status="passed", tools_run=["ruff"])
+
+        filepath = runner.save_results(result)
+        assert filepath is None
+
+
+class TestPrintSummary:
+    """Test print_summary method."""
+
+    @patch("builtins.print")
+    @patch.object(QARunner, "run_ruff")
+    def test_print_summary_with_results(self, mock_ruff: MagicMock, mock_print: MagicMock) -> None:
+        """Test printing summary when results exist."""
+        mock_ruff.return_value = ToolResult(
+            tool_name="ruff",
+            passed=True,
+            error_count=0,
+            warning_count=0,
+            output="pass",
+            duration_ms=100,
+        )
+
+        runner = QARunner(project_root="/workspace")
+        runner.tools_to_run = ["ruff"]
+        runner.run_all()
+        runner.print_summary()
+
+        # Should have printed something
+        assert mock_print.call_count >= 1
+
+    @patch("builtins.print")
+    def test_print_summary_without_results(self, mock_print: MagicMock) -> None:
+        """Test printing summary when no results exist."""
+        runner = QARunner(project_root="/workspace")
+        runner.print_summary()
+
+        # Should not print if no results
+        mock_print.assert_not_called()
+
+
+class TestMainFunction:
+    """Test main() CLI entry point."""
+
+    @patch("sys.argv", ["runner.py", "--project-root", "/test", "--tools", "ruff,mypy"])
+    @patch.object(QARunner, "run_all")
+    @patch("builtins.exit")
+    def test_main_success(self, mock_exit: MagicMock, mock_run_all: MagicMock) -> None:
+        """Test main function with successful QA run."""
+        mock_run_all.return_value = QAResult(status="passed", tools_run=["ruff", "mypy"])
+
+        from claude_code_hooks_daemon.qa.runner import main
+
+        main()
+
+        mock_exit.assert_called_once_with(0)
+
+    @patch("sys.argv", ["runner.py", "--project-root", "/test"])
+    @patch.object(QARunner, "run_all")
+    @patch("builtins.exit")
+    def test_main_failure(self, mock_exit: MagicMock, mock_run_all: MagicMock) -> None:
+        """Test main function with failed QA run."""
+        mock_run_all.return_value = QAResult(status="failed", tools_run=["ruff"])
+
+        from claude_code_hooks_daemon.qa.runner import main
+
+        main()
+
+        mock_exit.assert_called_once_with(1)
+
+    @patch("sys.argv", ["runner.py", "--project-root", "/test", "--save-results"])
+    @patch.object(QARunner, "run_all")
+    @patch.object(QARunner, "save_results")
+    @patch("builtins.exit")
+    @patch("builtins.print")
+    def test_main_with_save_results(
+        self,
+        mock_print: MagicMock,
+        mock_exit: MagicMock,
+        mock_save: MagicMock,
+        mock_run_all: MagicMock,
+    ) -> None:
+        """Test main function with --save-results flag."""
+        mock_run_all.return_value = QAResult(status="passed", tools_run=["ruff"])
+        mock_save.return_value = Path("/tmp/qa-results.json")
+
+        from claude_code_hooks_daemon.qa.runner import main
+
+        main()
+
+        mock_save.assert_called_once()
+        mock_exit.assert_called_once_with(0)
+
+    @patch("sys.argv", ["runner.py"])
+    @patch.object(QARunner, "run_all")
+    @patch("builtins.exit")
+    def test_main_with_exception(self, mock_exit: MagicMock, mock_run_all: MagicMock) -> None:
+        """Test main function handles exceptions."""
+        mock_run_all.side_effect = Exception("Test error")
+
+        from claude_code_hooks_daemon.qa.runner import main
+
+        main()
+
+        mock_exit.assert_called_once_with(2)
+
+    @patch("sys.argv", ["runner.py", "--output-dir", "/custom/dir"])
+    @patch.object(QARunner, "run_all")
+    @patch("builtins.exit")
+    def test_main_with_custom_output_dir(
+        self, mock_exit: MagicMock, mock_run_all: MagicMock
+    ) -> None:
+        """Test main function with custom output directory."""
+        mock_run_all.return_value = QAResult(status="passed", tools_run=["ruff"])
+
+        from claude_code_hooks_daemon.qa.runner import main
+
+        main()
+
+        mock_exit.assert_called_once_with(0)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

@@ -28,6 +28,8 @@ class DestructiveGitHandler(Handler):
             r"\bgit\s+checkout\s+.*--\s+\S",
             r"\bgit\s+restore\s+.*--worktree\b",
             r"\bgit\s+stash\s+(?:drop|clear)\b",
+            # Block force push
+            r"\bgit\s+push\s+.*--force\b",
         ]
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
@@ -62,6 +64,8 @@ class DestructiveGitHandler(Handler):
             reason = (
                 "git checkout [REF] -- file discards all local changes to that file permanently"
             )
+        elif re.search(r"\bgit\s+push\s+.*--force\b", command, re.IGNORECASE):
+            reason = "git push --force can overwrite remote history and destroy team members' work"
         else:
             reason = "This git command destroys uncommitted changes permanently"
 

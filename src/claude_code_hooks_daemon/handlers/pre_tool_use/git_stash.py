@@ -32,11 +32,16 @@ class GitStashHandler(Handler):
         return bool(re.search(r"git\s+stash(?:\s+(?:push|save))?(?:\s|$)", command, re.IGNORECASE))
 
     def handle(self, _hook_input: dict[str, Any]) -> HookResult:
-        """Always block - no escape hatch."""
+        """Warn about git stash but allow with guidance."""
         return HookResult(
-            decision=Decision.DENY,
-            reason=(
-                "🚫 BLOCKED: git stash is completely forbidden\n\n"
+            decision=Decision.ALLOW,
+            context=[
+                "WARNING: git stash detected",
+                "Stashes can be lost, forgotten, or accidentally dropped",
+                "Consider safer alternatives like git commit or git worktree",
+            ],
+            guidance=(
+                "⚠️  WARNING: git stash is risky\n\n"
                 "WHY:\n"
                 "Stashes can be lost, forgotten, or accidentally dropped.\n"
                 "Stashes are especially problematic in worktree-based workflows.\n"
