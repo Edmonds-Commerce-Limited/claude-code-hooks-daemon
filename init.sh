@@ -23,8 +23,10 @@ set -euo pipefail
 # CRITICAL: This ensures the agent sees errors and can take action.
 # Outputs JSON in Claude Code's expected hook response format.
 #
+# DRY: Uses Python utility to generate error responses - single source of truth.
+#
 # Args:
-#   $1 - Event name (e.g., "PreToolUse")
+#   $1 - Event name (e.g., "PreToolUse", "Stop")
 #   $2 - Error type (e.g., "daemon_startup_failed")
 #   $3 - Error details
 #
@@ -40,40 +42,16 @@ emit_hook_error() {
     # Log to stderr for debugging (agent won't see this)
     echo "HOOKS DAEMON ERROR [$error_type]: $error_details" >&2
 
-    # Output valid JSON to stdout (agent WILL see this)
-    # Uses jq if available, falls back to cat for JSON construction
-    if command -v jq &>/dev/null; then
-        jq -n \
-            --arg event "$event_name" \
-            --arg error_type "$error_type" \
-            --arg details "$error_details" \
-            '{
-                hookSpecificOutput: {
-                    hookEventName: $event,
-                    additionalContext: (
-                        "⚠️ HOOKS DAEMON ERROR - PROTECTION NOT ACTIVE ⚠️\n\n" +
-                        "ERROR TYPE: " + $error_type + "\n" +
-                        "ERROR DETAILS: " + $details + "\n\n" +
-                        "🛑 CRITICAL: You MUST stop work immediately.\n\n" +
-                        "The hooks daemon is not functioning. This means:\n" +
-                        "- Destructive git operations are NOT being blocked\n" +
-                        "- Code quality checks are NOT running\n" +
-                        "- Safety guardrails are NOT active\n\n" +
-                        "RECOMMENDED ACTIONS:\n" +
-                        "1. STOP all current tasks immediately\n" +
-                        "2. Inform the user that hooks protection is down\n" +
-                        "3. Run: python -m claude_code_hooks_daemon.daemon.cli status\n" +
-                        "4. Run: python -m claude_code_hooks_daemon.daemon.cli logs\n" +
-                        "5. Check daemon installation in .claude/hooks-daemon/\n" +
-                        "6. Restart daemon: python -m claude_code_hooks_daemon.daemon.cli restart\n\n" +
-                        "DO NOT continue work until hooks are verified working."
-                    )
-                }
-            }'
+    # Use Python utility for proper error response generation
+    # This ensures event-specific formatting (Stop vs other events)
+    if [[ -f "$PYTHON_CMD" ]]; then
+        $PYTHON_CMD -m claude_code_hooks_daemon.core.error_response \
+            "$event_name" "$error_type" "$error_details"
     else
-        # Fallback if jq not available - simple JSON output
+        # Fallback if Python not available (should never happen after init)
+        # Use generic hookSpecificOutput format (may fail for Stop events)
         cat <<EOF
-{"hookSpecificOutput":{"hookEventName":"$event_name","additionalContext":"⚠️ HOOKS DAEMON ERROR - PROTECTION NOT ACTIVE ⚠️\\n\\nERROR TYPE: $error_type\\nERROR DETAILS: $error_details\\n\\n🛑 CRITICAL: You MUST stop work immediately.\\n\\nThe hooks daemon is not functioning. Safety guardrails are NOT active.\\n\\nRun: python -m claude_code_hooks_daemon.daemon.cli status\\nRun: python -m claude_code_hooks_daemon.daemon.cli logs\\n\\nDO NOT continue work until hooks are verified working."}}
+{"hookSpecificOutput":{"hookEventName":"$event_name","additionalContext":"⚠️ HOOKS DAEMON ERROR\\n\\nERROR TYPE: $error_type\\nERROR DETAILS: $error_details\\n\\nHooks daemon not functional. Run: python -m claude_code_hooks_daemon.daemon.cli status"}}
 EOF
     fi
 }
@@ -247,38 +225,42 @@ send_request_stdin() {
     $PYTHON_CMD -c "
 import json
 import socket
+import subprocess
 import sys
 
 def emit_error_json(event_name: str, error_type: str, error_details: str) -> None:
-    '''Output valid hook error response to stdout.'''
+    '''Output valid hook error response to stdout.
+
+    DRY: Uses error_response module for proper event-specific formatting.
+    '''
     # Log to stderr for debugging (agent won't see this)
     print(f'HOOKS DAEMON ERROR [{error_type}]: {error_details}', file=sys.stderr)
 
-    # Output valid JSON to stdout (agent WILL see this)
-    error_response = {
-        'hookSpecificOutput': {
-            'hookEventName': event_name,
-            'additionalContext': (
-                '⚠️ HOOKS DAEMON ERROR - PROTECTION NOT ACTIVE ⚠️\\n\\n'
-                f'ERROR TYPE: {error_type}\\n'
-                f'ERROR DETAILS: {error_details}\\n\\n'
-                '🛑 CRITICAL: You MUST stop work immediately.\\n\\n'
-                'The hooks daemon is not functioning. This means:\\n'
-                '- Destructive git operations are NOT being blocked\\n'
-                '- Code quality checks are NOT running\\n'
-                '- Safety guardrails are NOT active\\n\\n'
-                'RECOMMENDED ACTIONS:\\n'
-                '1. STOP all current tasks immediately\\n'
-                '2. Inform the user that hooks protection is down\\n'
-                '3. Run: python -m claude_code_hooks_daemon.daemon.cli status\\n'
-                '4. Run: python -m claude_code_hooks_daemon.daemon.cli logs\\n'
-                '5. Check daemon installation in .claude/hooks-daemon/\\n'
-                '6. Restart daemon: python -m claude_code_hooks_daemon.daemon.cli restart\\n\\n'
-                'DO NOT continue work until hooks are verified working.'
-            )
+    # Use error_response module for proper formatting
+    try:
+        result = subprocess.run(
+            [sys.executable, '-m', 'claude_code_hooks_daemon.core.error_response',
+             event_name, error_type, error_details],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        print(result.stdout)
+    except Exception as e:
+        # Fallback if module call fails (generic hookSpecificOutput format)
+        print(f'Error calling error_response module: {e}', file=sys.stderr)
+        error_response = {
+            'hookSpecificOutput': {
+                'hookEventName': event_name,
+                'additionalContext': (
+                    f'⚠️ HOOKS DAEMON ERROR\\n\\n'
+                    f'ERROR TYPE: {error_type}\\n'
+                    f'ERROR DETAILS: {error_details}\\n\\n'
+                    f'Hooks daemon not functional.'
+                )
+            }
         }
-    }
-    print(json.dumps(error_response))
+        print(json.dumps(error_response))
 
 # Read JSON from stdin (preserves all control characters)
 request = sys.stdin.read()

@@ -5,6 +5,7 @@ building and running hook handlers.
 """
 
 from claude_code_hooks_daemon.core.chain import ChainExecutionResult, HandlerChain
+from claude_code_hooks_daemon.core.error_response import generate_daemon_error_response
 from claude_code_hooks_daemon.core.event import EventType, HookEvent, HookInput, ToolInput
 from claude_code_hooks_daemon.core.front_controller import FrontController
 from claude_code_hooks_daemon.core.handler import Handler
@@ -23,4 +24,5 @@ __all__ = [
     "HookInput",
     "HookResult",
     "ToolInput",
+    "generate_daemon_error_response",
 ]
