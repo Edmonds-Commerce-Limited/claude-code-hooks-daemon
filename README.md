@@ -1,6 +1,6 @@
 # Claude Code Hooks Daemon
 
-![Version](https://img.shields.io/badge/version-2.1.0-blue)
+![Version](https://img.shields.io/badge/version-2.2.0-blue)
 ![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Tests](https://img.shields.io/badge/tests-1168%20passing-success)
@@ -140,12 +140,14 @@ The installer will warn if it detects this pattern.
 
 ---
 
-## Current Version: 2.1.0
+## Current Version: 2.2.0
 
 **Latest Changes:**
-- ✅ **YOLO Container Detection** - Automatic detection of YOLO container environments with contextual information
-- ✅ **Upgrade System** - LLM-optimized version migration guides in `CLAUDE/UPGRADES/`
-- ✅ **Version Tracking** - Programmatic version detection via `claude_code_hooks_daemon.version`
+- ✅ **Custom Sub-Agents** - QA and development workflow automation agents
+- ✅ **Automated Release Management** - Complete `/release` skill with version detection and changelog generation
+- ✅ **Hook Event Debugging** - New debugging tool for handler development (`scripts/debug_hooks.sh`)
+- ✅ **Self-Install Mode** - CLI support for automated deployment
+- ✅ **95% Test Coverage** - Critical QA fixes with 2472 passing tests
 
 ---
 
@@ -854,13 +856,13 @@ def example(data: Dict[str, Any]) -> Optional[List[str]]:
 **Programmatic:**
 ```python
 from claude_code_hooks_daemon.version import __version__
-print(__version__)  # "2.1.0"
+print(__version__)  # "2.2.0"
 ```
 
 **Git-based:**
 ```bash
 cd .claude/hooks-daemon
-git describe --tags  # v2.1.0
+git describe --tags  # v2.2.0
 ```
 
 ### Upgrade Guides
@@ -1131,7 +1133,16 @@ MIT License - see LICENSE file for details.
 
 ## Changelog
 
-### v2.1.0 (Current)
+### v2.2.0 (Current)
+
+**New Features:**
+- ✅ Custom sub-agents for QA and development workflow automation
+- ✅ Automated release management system with `/release` skill
+- ✅ Hook event debugging tool for handler development
+- ✅ Self-install mode support in CLI and configuration
+- ✅ 95% test coverage with 2472 passing tests
+
+### v2.1.0
 
 **New Features:**
 - ✅ YOLO Container Detection handler with confidence scoring system
@@ -1159,4 +1170,4 @@ MIT License - see LICENSE file for details.
 
 ---
 
-**End of README** | Version 2.1.0 | Last Updated: 2026-01-26
+**End of README** | Version 2.2.0 | Last Updated: 2026-01-27

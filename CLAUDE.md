@@ -223,16 +223,17 @@ All QA checks run in GitHub Actions. PRs blocked if:
 
 ### Documentation
 
-- `README.md` - Installation and usage (v2.1.0 - UPDATED with accurate handler counts)
+- `README.md` - Installation and usage (v2.2.0 - includes automation features)
 - `DAEMON.md` - Architecture deep dive
 - `CLAUDE/ARCHITECTURE.md` - Design documentation
-- `CLAUDE/HANDLER_DEVELOPMENT.md` - Handler creation guide (v2.1 - includes YOLO example)
-- `CLAUDE/UPGRADES/` - Version migration guides (NEW in v2.1)
+- `CLAUDE/HANDLER_DEVELOPMENT.md` - Handler creation guide (includes YOLO example)
+- `CLAUDE/UPGRADES/` - Version migration guides
+- `CLAUDE/DEBUGGING_HOOKS.md` - Hook debugging guide (NEW in v2.2)
 - `CONTRIBUTING.md` - Contribution guidelines
 
 ### Current Version
 
-**Version: 2.1.0**
+**Version: 2.2.0**
 
 **Handler Count:**
 - PreToolUse: 17 production handlers (including 3 QA suppression blockers)

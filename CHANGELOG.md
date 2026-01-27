@@ -7,24 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-01-27
+
 ### Added
-- Comprehensive code review and issue fixes
-- DaemonController for multi-event dispatch
-- LICENSE file (MIT)
-- CHANGELOG.md
-- CONTRIBUTING.md
+- Custom sub-agents for QA and development workflow automation
+- Automated release management system with `/release` skill
+- Hook event debugging tool (`scripts/debug_hooks.sh`) for handler development
+- Self-install mode support to CLI and configuration system
+- Debug infrastructure for troubleshooting hook flows
+- `.gitignore` requirement validation in installer
+- Automatic config file backup during installation
 
 ### Changed
-- **BREAKING**: Minimum Python version raised from 3.8 to 3.11
-- Installation now creates self-contained venv in `untracked/venv/` (no system pollution)
-- All documentation updated to use venv Python instead of system Python
+- Release system orchestration to avoid nested agent spawning
+- Installer now displays `.gitignore` template with mandatory instructions
+- Documentation improvements for README config completeness and plugin events
 
 ### Fixed
-- CRIT-001: FrontController CLI constructor mismatch - daemon now starts correctly
-- CRIT-002: init.sh undefined daemon_pid variable
-- CRIT-003: Removed duplicate get_workspace_root() function
-- HIGH-001: BritishEnglishHandler now correctly set as non-terminal
-- Installation instructions no longer suggest breaking system packages
+- Critical QA failures achieving 95% test coverage requirement
+- Stop event schema validation failure
+- Critical hook response formatting bug with JSON schema validation
+- 4 upstream installation and CLI bugs
+- DRY violation in error response handling
+- Release skill registration (SKILL.md frontmatter)
+- README documentation issues with config examples
 
 ## [1.0.0-alpha] - 2025-01-15
 
