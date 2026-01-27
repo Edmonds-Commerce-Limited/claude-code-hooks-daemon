@@ -233,7 +233,7 @@ All QA checks run in GitHub Actions. PRs blocked if:
 
 ### Current Version
 
-**Version: 2.2.0**
+**Version: 2.2.1**
 
 **Handler Count:**
 - PreToolUse: 17 production handlers (including 3 QA suppression blockers)

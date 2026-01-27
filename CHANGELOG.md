@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.1] - 2026-01-27
+
+### Fixed
+- Fixed git hook executable permissions in repositories with core.fileMode=false
+- Enhanced install.py to detect and handle permission tracking settings
+- Added auto-update of git index for hook executability
+- Added context-specific warnings for tracked vs untracked files
+
 ## [2.2.0] - 2026-01-27
 
 ### Added
