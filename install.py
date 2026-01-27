@@ -752,44 +752,64 @@ def verify_installation(project_root: Path) -> bool:
     return all_good
 
 
-def check_root_gitignore(project_root: Path) -> None:
-    """Check if root .gitignore blocks .claude/ directory and warn if needed.
+def show_gitignore_instructions(project_root: Path, daemon_dir: Path) -> None:
+    """Show MANDATORY instructions for creating .claude/.gitignore.
+
+    Reads the daemon's own .claude/.gitignore as the template and displays it
+    with strong instructions. Never writes the file automatically.
 
     Args:
         project_root: Project root directory
+        daemon_dir: Daemon repository directory (source of template)
     """
     root_gitignore = project_root / ".gitignore"
     claude_gitignore = project_root / ".claude" / ".gitignore"
+    template_gitignore = daemon_dir / ".claude" / ".gitignore"
 
     # Check if root .gitignore blocks .claude/
-    has_blocking_pattern = False
     if root_gitignore.exists():
         content = root_gitignore.read_text()
         blocking_patterns = [".claude/", ".claude/*", "/.claude/", "/.claude/*"]
 
         for pattern in blocking_patterns:
             if pattern in content:
-                has_blocking_pattern = True
-                print("\n⚠️  WARNING: Git Integration Issue Detected")
+                print("\n⚠️  CRITICAL: Git Integration Issue Detected")
                 print(f"   Your root .gitignore contains: {pattern}")
                 print("   This will prevent .claude/ configuration files from being tracked.")
-                print("\n💡 Recommended Action:")
+                print("\n🔧 REQUIRED Action:")
                 print("   1. Remove '.claude/' from your root .gitignore")
-                print("   2. Create .claude/.gitignore to handle selective exclusions")
-                print("   3. This allows tracking config while excluding generated content")
-                print("\n📚 See README.md 'Git Integration' section for details")
+                print("   2. Create .claude/.gitignore (instructions below)")
                 print()
                 break
 
-    # Recommend creating .claude/.gitignore if it doesn't exist
+    # Show MANDATORY .gitignore creation instructions
     if not claude_gitignore.exists():
-        print("\n💡 Git Integration Recommendation:")
-        print("   Create .claude/.gitignore to exclude generated content from git.")
-        print("   This allows you to track hook configuration while excluding:")
-        print("   - hooks-daemon/ (users install it themselves)")
-        print("   - *.bak files (installation backups)")
-        print("   - Runtime files (*.sock, *.pid)")
-        print("\n📚 See README.md 'Git Integration' section for recommended .gitignore pattern")
+        print("\n" + "=" * 70)
+        print("⚠️  CRITICAL: .claude/.gitignore MUST be created")
+        print("=" * 70)
+        print("\nWithout this file, you will commit generated files (hooks-daemon/,")
+        print("*.bak files, runtime files) which should NOT be in version control.")
+        print("\n🔧 REQUIRED Action: Create .claude/.gitignore with this content:")
+        print("\n" + "-" * 70)
+
+        # Read and display template - FATAL if missing
+        if not template_gitignore.exists():
+            print(f"\n❌ FATAL ERROR: Template .gitignore not found")
+            print(f"   Expected at: {template_gitignore}")
+            print(f"   This file is required for installation.")
+            print(f"\n   The daemon repository is corrupted or incomplete.")
+            print(f"   Please clone from: https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon")
+            sys.exit(1)
+
+        template_content = template_gitignore.read_text()
+        print(template_content)
+
+        print("-" * 70)
+        print("\n📋 Copy command:")
+        print(f"   cp {template_gitignore} {claude_gitignore}")
+        print("\n📚 Template source (single source of truth):")
+        print("   https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/blob/main/.claude/.gitignore")
+        print("\n" + "=" * 70)
         print()
 
 
@@ -832,14 +852,14 @@ def main() -> int:
     claude_dir = project_root / ".claude"
     claude_dir.mkdir(exist_ok=True)
 
+    # Find daemon directory (where this script lives)
+    daemon_dir = Path(__file__).parent.resolve()
+
     # Backup existing hooks
     backup_existing_hooks(project_root)
 
-    # Check for root .gitignore issues and warn (but don't modify git config)
-    check_root_gitignore(project_root)
-
-    # Find daemon directory (where this script lives)
-    daemon_dir = Path(__file__).parent.resolve()
+    # Show MANDATORY .gitignore instructions (never writes file automatically)
+    show_gitignore_instructions(project_root, daemon_dir)
 
     # Detect self-installation (installer running from daemon repo itself)
     self_install = args.self_install or (daemon_dir == project_root)

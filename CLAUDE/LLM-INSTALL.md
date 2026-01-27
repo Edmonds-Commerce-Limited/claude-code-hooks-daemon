@@ -65,20 +65,32 @@ cd ../..
 - `.claude/settings.json` - Hook registration
 - `.claude/hooks-daemon.yaml` - Handler config
 
-**Git Integration:**
-- Installer will RECOMMEND creating `.claude/.gitignore` (does not create it automatically)
-- If installer warns about root `.gitignore`, remove `.claude/` entry from root
-- See README.md "Git Integration" section for recommended .gitignore pattern
+**⚠️ CRITICAL Git Integration Step:**
+The installer will display the REQUIRED `.claude/.gitignore` content.
+YOU MUST create this file before committing - copy the displayed content exactly.
 
-### 4. Commit & Restart Session ⚠️ MANDATORY
+Template source (single source of truth):
+https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/blob/main/.claude/.gitignore
+
+### 4. Create .gitignore & Commit ⚠️ MANDATORY
 
 ```bash
-# Commit installed files
+# CRITICAL: Create .claude/.gitignore FIRST (installer displayed the content)
+# Copy the template from installer output:
+cp .claude/hooks-daemon/.claude/.gitignore .claude/.gitignore
+
+# Verify it exists before committing
+ls -la .claude/.gitignore
+
+# Now commit (with .gitignore in place to exclude generated files)
 git add .claude/
 git commit -m "Install Claude Code Hooks Daemon" && git push
 ```
 
-**CRITICAL**: Tell user to **restart Claude session** (exit and re-enter). Hooks won't activate until Claude reloads `.claude/settings.json`. Do NOT proceed to step 5 until session restarts.
+**CRITICAL**:
+1. `.claude/.gitignore` MUST exist before `git add` or you'll commit hooks-daemon/
+2. Tell user to **restart Claude session** (exit and re-enter). Hooks won't activate until Claude reloads `.claude/settings.json`.
+3. Do NOT proceed to step 5 until session restarts.
 
 ### 5. Verify Hooks Active (After Restart)
 

@@ -76,77 +76,61 @@ The installer creates:
 3. `.claude/settings.json` - Hook registration for Claude Code
 4. `.claude/hooks-daemon.yaml` - Handler and daemon configuration
 
-**Note:** The installer will recommend creating `.claude/.gitignore` (see Git Integration section below).
+**⚠️ CRITICAL:** You MUST create `.claude/.gitignore` after installation (see Git Integration section below). The installer will display the required content.
 
 ---
 
 ## Git Integration
 
-**Recommendation:** Track project configuration, exclude personal/generated content.
+**⚠️ CRITICAL:** You MUST create `.claude/.gitignore` to prevent committing generated files.
 
-### What Should Be Tracked
+### Required: Create `.claude/.gitignore`
 
-The `.claude/` directory contains files that should be committed to git:
+**The installer will display this content** - copy it to `.claude/.gitignore`:
+
+**Template source (single source of truth):**
+https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/blob/main/.claude/.gitignore
+
+Or copy directly:
+```bash
+cp .claude/hooks-daemon/.claude/.gitignore .claude/.gitignore
+```
+
+### What Gets Tracked
+
+With `.claude/.gitignore` in place, these files are tracked in git:
 
 ```
 .claude/
-├── .gitignore           # Self-excluding gitignore (created by installer)
-├── settings.json        # Project-wide hook configuration
-├── hooks-daemon.yaml    # Handler settings
-├── init.sh              # Daemon lifecycle functions
-└── hooks/               # Hook forwarder scripts
-    ├── pre-tool-use
-    ├── post-tool-use
-    └── ...
+├── .gitignore           # ✅ COMMIT (you create this)
+├── settings.json        # ✅ COMMIT (project-wide hook configuration)
+├── hooks-daemon.yaml    # ✅ COMMIT (handler settings)
+├── init.sh              # ✅ COMMIT (daemon lifecycle functions)
+└── hooks/               # ✅ COMMIT (hook forwarder scripts)
 ```
 
 **Benefits:**
 - ✅ Team shares same hook configuration
-- ✅ Consistent code quality standards across developers
+- ✅ Consistent code quality standards
 - ✅ New team members get hooks automatically
-- ✅ Settings are version controlled
 
-### What Should NOT Be Tracked
+### What Gets Excluded
 
-The installer creates `.claude/.gitignore` which automatically excludes:
+The `.gitignore` automatically excludes:
 - `hooks-daemon/` - Daemon installation (users install it themselves)
-- `*.bak*` - Backup files created during installation
+- `*.bak*` - Backup files
 - `*.sock`, `*.pid` - Runtime files
-- `hooks-daemon.env` - Environment files (may contain local paths)
-
-### Setup (Self-Excluding .gitignore)
-
-The installer creates `.claude/.gitignore` with this strategy:
-
-```gitignore
-# Ignore everything by default
-*
-!*/
-
-# Un-ignore project-wide configuration files (should be tracked)
-!.gitignore
-!settings.json
-!hooks-daemon.yaml
-!init.sh
-!hooks/
-!hooks/**
-```
-
-**How it works:**
-1. `*` ignores everything in `.claude/` by default
-2. `!pattern` un-ignores specific files we want tracked
-3. New generated files are automatically excluded (no manual updates needed)
 
 ### Root .gitignore Setup
 
-**Important:** If your root `.gitignore` contains `.claude/`, remove it:
+**If your root `.gitignore` contains `.claude/`, remove it:**
 
 ```diff
 # .gitignore (root)
 - .claude/
 ```
 
-The installer will warn if it detects this pattern. The `.claude/.gitignore` handles all exclusions automatically.
+The installer will warn if it detects this pattern.
 
 ---
 
