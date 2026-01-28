@@ -26,7 +26,7 @@ class ValidationError(Exception):
 class ConfigValidator:
     """Exhaustive configuration validator."""
 
-    # Valid hook event types (10 total)
+    # Valid hook event types (11 total)
     VALID_EVENT_TYPES: ClassVar[set[str]] = {
         "pre_tool_use",
         "post_tool_use",
@@ -38,6 +38,7 @@ class ConfigValidator:
         "stop",
         "subagent_stop",
         "pre_compact",
+        "status_line",
     }
 
     # Valid log levels
@@ -128,10 +129,16 @@ class ConfigValidator:
             name: CamelCase string
 
         Returns:
-            snake_case string
+            snake_case string with _handler suffix stripped
         """
         s1 = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)
-        return re.sub("([a-z0-9])([A-Z])", r"\1_\2", s1).lower()
+        snake = re.sub("([a-z0-9])([A-Z])", r"\1_\2", s1).lower()
+
+        # Strip _handler suffix to match config keys
+        if snake.endswith("_handler"):
+            snake = snake[:-8]  # Remove "_handler"
+
+        return snake
 
     @staticmethod
     def _find_similar_names(name: str, valid_names: set[str], threshold: float = 0.6) -> list[str]:

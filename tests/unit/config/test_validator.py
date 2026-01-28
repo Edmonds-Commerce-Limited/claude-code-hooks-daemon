@@ -26,8 +26,8 @@ class TestConfigValidatorConstants:
     """Tests for ConfigValidator class constants."""
 
     def test_valid_event_types(self) -> None:
-        """VALID_EVENT_TYPES should contain all 10 event types."""
-        assert len(ConfigValidator.VALID_EVENT_TYPES) == 10
+        """VALID_EVENT_TYPES should contain all 11 event types."""
+        assert len(ConfigValidator.VALID_EVENT_TYPES) == 11
         assert "pre_tool_use" in ConfigValidator.VALID_EVENT_TYPES
         assert "post_tool_use" in ConfigValidator.VALID_EVENT_TYPES
         assert "permission_request" in ConfigValidator.VALID_EVENT_TYPES
@@ -38,6 +38,7 @@ class TestConfigValidatorConstants:
         assert "stop" in ConfigValidator.VALID_EVENT_TYPES
         assert "subagent_stop" in ConfigValidator.VALID_EVENT_TYPES
         assert "pre_compact" in ConfigValidator.VALID_EVENT_TYPES
+        assert "status_line" in ConfigValidator.VALID_EVENT_TYPES
 
     def test_valid_log_levels(self) -> None:
         """VALID_LOG_LEVELS should contain standard log levels."""
@@ -231,7 +232,7 @@ class TestValidateHandlers:
         config = {
             "handlers": {
                 "pre_tool_use": {
-                    "destructive_git_handler": {"enabled": True, "priority": 10},
+                    "destructive_git": {"enabled": True, "priority": 10},
                 }
             }
         }
@@ -491,7 +492,7 @@ class TestValidate:
             },
             "handlers": {
                 "pre_tool_use": {
-                    "destructive_git_handler": {"enabled": True, "priority": 10},
+                    "destructive_git": {"enabled": True, "priority": 10},
                 }
             },
         }

@@ -24,6 +24,7 @@ class TestEventType:
             "Notification",
             "Stop",
             "SubagentStop",
+            "Status",  # STATUS_LINE event type
         }
         actual_types = {et.value for et in EventType}
         assert actual_types == expected_types
@@ -359,3 +360,17 @@ class TestHookEvent:
             assert event.is_write_tool() == (tool == "Write")
             assert event.is_edit_tool() == (tool == "Edit")
             assert event.is_read_tool() == (tool == "Read")
+
+
+class TestEventTypeStatusLine:
+    """Tests for STATUS_LINE event type."""
+
+    def test_status_line_event_exists(self) -> None:
+        """STATUS_LINE event type should exist."""
+        assert EventType.STATUS_LINE == "Status"
+
+    def test_status_line_from_string(self) -> None:
+        """STATUS_LINE should be parseable from string."""
+        assert EventType.from_string("Status") == EventType.STATUS_LINE
+        assert EventType.from_string("status") == EventType.STATUS_LINE
+        assert EventType.from_string("status_line") == EventType.STATUS_LINE

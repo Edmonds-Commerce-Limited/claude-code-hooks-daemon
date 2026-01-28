@@ -43,14 +43,13 @@ def _discover_all_handlers() -> dict[str, list[str]]:
         "notification",
         "stop",
         "subagent_stop",
+        "status_line",
     ]
 
     for event_dir in event_dirs:
         handlers_by_event[event_dir] = []
         try:
-            event_module = importlib.import_module(
-                f"claude_code_hooks_daemon.handlers.{event_dir}"
-            )
+            event_module = importlib.import_module(f"claude_code_hooks_daemon.handlers.{event_dir}")
         except ImportError:
             continue
 
@@ -114,7 +113,7 @@ class TestConfigTemplate:
         errors = ConfigValidator.validate(config, validate_handler_names=False)
         assert errors == [], f"Generated config should be valid, got errors: {errors}"
 
-        # Check all 10 event types present
+        # Check all 11 event types present
         expected_events = {
             "pre_tool_use",
             "post_tool_use",
@@ -126,6 +125,7 @@ class TestConfigTemplate:
             "stop",
             "subagent_stop",
             "pre_compact",
+            "status_line",
         }
         assert set(config["handlers"].keys()) == expected_events
 
@@ -141,7 +141,7 @@ class TestConfigTemplate:
         assert errors == [], f"Generated config should be valid, got errors: {errors}"
 
         # Should have all event types (default is full)
-        assert len(config["handlers"]) == 10
+        assert len(config["handlers"]) == 11
 
     def test_config_contains_comments(self):
         """Test that generated config contains helpful comments."""
@@ -212,12 +212,12 @@ class TestConfigTemplate:
         assert isinstance(config["plugins"], list)
 
     def test_all_event_types_in_full_mode(self):
-        """Test that full mode includes all 10 event types."""
+        """Test that full mode includes all 11 event types."""
         config_yaml = generate_config(mode="full")
         config = yaml.safe_load(config_yaml)
 
         event_types = list(config["handlers"].keys())
-        assert len(event_types) == 10
+        assert len(event_types) == 11
 
         expected = [
             "pre_tool_use",
@@ -230,6 +230,7 @@ class TestConfigTemplate:
             "stop",
             "subagent_stop",
             "pre_compact",
+            "status_line",
         ]
 
         for event in expected:
@@ -337,6 +338,7 @@ class TestConfigHandlerCoverage:
         "validate_plan_number_handler",
         "plan_time_estimates_handler",
         "plan_workflow_handler",
+        "plan_number_helper_handler",
         "markdown_organization_handler",
         # NPM handler - project-specific
         "npm_command_handler",
@@ -358,6 +360,8 @@ class TestConfigHandlerCoverage:
         # ESLint validation - optional
         "validate_eslint_on_write_handler",
         "validate_sitemap_handler",
+        # Status line handlers - project-specific
+        "suggest_status_line_handler",
     }
 
     @pytest.fixture
@@ -473,23 +477,23 @@ class TestConfigHandlerCoverage:
                 if not isinstance(handler_config, dict):
                     continue
                 if handler_config.get("enabled", True):
-                    assert "priority" in handler_config, (
-                        f"Handler {event_type}/{handler_name} is enabled but has no priority"
-                    )
+                    assert (
+                        "priority" in handler_config
+                    ), f"Handler {event_type}/{handler_name} is enabled but has no priority"
                     priority = handler_config["priority"]
-                    assert isinstance(priority, int), (
-                        f"Handler {event_type}/{handler_name} priority must be int, got {type(priority)}"
-                    )
-                    assert 1 <= priority <= 100, (
-                        f"Handler {event_type}/{handler_name} priority {priority} out of range [1,100]"
-                    )
+                    assert isinstance(
+                        priority, int
+                    ), f"Handler {event_type}/{handler_name} priority must be int, got {type(priority)}"
+                    assert (
+                        1 <= priority <= 100
+                    ), f"Handler {event_type}/{handler_name} priority {priority} out of range [1,100]"
 
     def test_handler_discovery_finds_handlers(self, discovered_handlers: dict[str, list[str]]):
         """Verify handler discovery is working."""
         # Should find at least some handlers in pre_tool_use
-        assert len(discovered_handlers.get("pre_tool_use", [])) > 5, (
-            "Handler discovery should find multiple PreToolUse handlers"
-        )
+        assert (
+            len(discovered_handlers.get("pre_tool_use", [])) > 5
+        ), "Handler discovery should find multiple PreToolUse handlers"
 
     def test_no_unknown_handlers_in_config(
         self, discovered_handlers: dict[str, list[str]], full_config: dict

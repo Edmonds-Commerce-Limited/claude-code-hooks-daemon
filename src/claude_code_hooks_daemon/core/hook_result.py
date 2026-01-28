@@ -126,6 +126,7 @@ class HookResult(BaseModel):
         """Convert to Claude Code hook JSON format.
 
         Different event types require different response structures:
+        - Status: Plain text response {"text": "..."} (NOT JSON hookSpecificOutput)
         - PreToolUse: hookSpecificOutput with permissionDecision
         - PostToolUse: Top-level decision + hookSpecificOutput
         - Stop/SubagentStop: Top-level decision only (NO hookSpecificOutput)
@@ -139,6 +140,12 @@ class HookResult(BaseModel):
         Returns:
             Dictionary in Claude Code hook output format
         """
+        # Special case: Status event returns plain text
+        if event_name == "Status":
+            # Join all context fragments with spaces
+            text = " ".join(self.context) if self.context else "Claude"
+            return {"text": text}
+
         # Silent allow with no context - valid for all events
         if self.decision == Decision.ALLOW and not self.context and not self.guidance:
             return {}

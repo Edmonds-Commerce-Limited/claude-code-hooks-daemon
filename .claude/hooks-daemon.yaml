@@ -14,11 +14,6 @@ daemon:
     strict_mode: true          # Fail-closed: return errors on validation failures
     log_validation_errors: true
 
-  # Plan tracking (v2.3.0+) - Redirect planning mode files to project structure
-  track_plans_in_project: true  # Enable plan tracking in CLAUDE/Plan/
-  plan_workflow_docs:
-    project_structure_path: "CLAUDE/Plan"  # Where to save plans
-
 # Built-in handler configuration
 # Handlers run in priority order (lower number = earlier execution)
 # Priority ranges: 5=test, 10-20=safety, 25-45=workflow, 50-60=tool usage
@@ -60,7 +55,13 @@ handlers:
       enabled: true
       priority: 35
 
-    # WORKFLOW HANDLERS (Priority 40-50)
+    # WORKFLOW HANDLERS (Priority 30-50)
+    plan_number_helper:    # Provides correct next plan number (prevents broken bash discovery)
+      enabled: true        # Enable when using CLAUDE/Plan/ structure
+      priority: 30
+      options:
+        track_plans_in_project: "CLAUDE/Plan"  # Must match markdown_organization setting
+
     gh_issue_comments:     # Requires --comments flag for gh issue view
       enabled: true
       priority: 40
@@ -109,6 +110,10 @@ handlers:
 
   # SessionStart handlers (run when session starts)
   session_start:
+    suggest_status_line_handler:  # Suggests daemon-based status line setup
+      enabled: true                 # Enable to suggest status line configuration
+      priority: 55
+
     # workflow_state_restoration:  # Restores workflow state after compaction
     #   enabled: false              # Optional - enable for workflow state management
     #   priority: 10
@@ -142,6 +147,20 @@ handlers:
   permission_request: {}
   notification: {}
   stop: {}
+
+  # Status line handlers (format daemon-based status display)
+  status_line:
+    model_context_handler:  # Shows model name and color-coded context percentage
+      enabled: true
+      priority: 10
+
+    git_branch_handler:     # Shows current git branch if in repo
+      enabled: true
+      priority: 20
+
+    daemon_stats_handler:   # Shows daemon uptime, memory, log level
+      enabled: true
+      priority: 30
 
 # Project-level handlers (custom handlers in .claude/hooks/handlers/)
 # Example:
