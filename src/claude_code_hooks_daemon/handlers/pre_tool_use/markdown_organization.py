@@ -1,11 +1,15 @@
 """MarkdownOrganizationHandler - enforces markdown file organization rules."""
 
+import logging
 import re
 from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_file_path
+from claude_code_hooks_daemon.handlers.utils.plan_numbering import get_next_plan_number
+
+logger = logging.getLogger(__name__)
 
 
 class MarkdownOrganizationHandler(Handler):
@@ -13,14 +17,27 @@ class MarkdownOrganizationHandler(Handler):
 
     CRITICAL: This handler must match legacy hook behavior EXACTLY.
     Cannot use simple 'in' checks - must use precise pattern matching.
+
+    Additionally intercepts Claude Code planning mode writes (~/.claude/plans/)
+    and redirects them to project CLAUDE/Plan/ structure when enabled.
     """
 
     def __init__(self) -> None:
+        """Initialize handler.
+
+        Configuration is read from handler options:
+        - track_plans_in_project: str | None - Path to plan folder (e.g., "CLAUDE/Plan") or null to disable
+        - plan_workflow_docs: str | None (optional) - Path to workflow doc file (e.g., "CLAUDE/PlanWorkflow.md")
+        """
         super().__init__(
             name="enforce-markdown-organization",
             priority=35,
             tags=["workflow", "markdown", "ec-specific", "blocking", "terminal"],
         )
+        # Configuration attributes (set by registry after instantiation)
+        self._workspace_root: Path = Path.cwd()
+        self._track_plans_in_project: str | None = None  # Path to plan folder or None
+        self._plan_workflow_docs: str | None = None  # Path to workflow doc or None
 
     def normalize_path(self, file_path: str) -> str:
         """Normalize file path to project-relative format.
@@ -100,10 +117,199 @@ class MarkdownOrganizationHandler(Handler):
             re.match(r"^src/pages/articles/.*/article-[^/]+\.md$", normalized, re.IGNORECASE)
         )
 
+    def is_planning_mode_write(self, file_path: str) -> bool:
+        """Check if this is a Claude Code planning mode write.
+
+        Planning mode writes go to ~/.claude/plans/*.md (user home directory).
+
+        Args:
+            file_path: File path to check
+
+        Returns:
+            True if this is a planning mode write
+        """
+        # Pattern: ~/.claude/plans/*.md (anywhere in user home)
+        # Examples:
+        # - /home/user/.claude/plans/my-plan.md
+        # - /Users/bob/.claude/plans/plan.md
+        # - ~/.claude/plans/test.md
+        return bool(re.search(r"/.claude/plans/[^/]+\.md$", file_path))
+
+    def sanitize_folder_name(self, filename: str) -> str:
+        """Sanitize plan filename for use as folder name.
+
+        Removes .md extension, converts to lowercase, replaces special chars
+        with hyphens, and collapses multiple hyphens.
+
+        Args:
+            filename: Original filename (e.g., "My Plan.md")
+
+        Returns:
+            Sanitized folder name (e.g., "my-plan")
+        """
+        # Remove .md extension
+        name = filename.replace(".md", "")
+
+        # Convert to lowercase
+        name = name.lower()
+
+        # Replace special characters with hyphens
+        name = re.sub(r"[^a-z0-9]+", "-", name)
+
+        # Remove leading/trailing hyphens
+        name = name.strip("-")
+
+        # Collapse multiple hyphens
+        name = re.sub(r"-+", "-", name)
+
+        return name
+
+    def get_unique_folder_name(self, base_folder: Path, plan_number: str, plan_name: str) -> str:
+        """Get unique folder name, adding suffix if collision exists.
+
+        Args:
+            base_folder: Base folder (e.g., CLAUDE/Plan/)
+            plan_number: Plan number (e.g., "00001")
+            plan_name: Sanitized plan name (e.g., "my-plan")
+
+        Returns:
+            Unique folder name (e.g., "00001-my-plan" or "00001-my-plan-2")
+        """
+        folder_name = f"{plan_number}-{plan_name}"
+        folder_path = base_folder / folder_name
+
+        # If no collision, return immediately
+        if not folder_path.exists():
+            return folder_name
+
+        # Try with suffix -2, -3, etc.
+        suffix = 2
+        while True:
+            folder_name_with_suffix = f"{plan_number}-{plan_name}-{suffix}"
+            folder_path_with_suffix = base_folder / folder_name_with_suffix
+            if not folder_path_with_suffix.exists():
+                return folder_name_with_suffix
+            suffix += 1
+
+    def handle_planning_mode_write(self, hook_input: dict[str, Any]) -> HookResult:
+        """Handle planning mode write by redirecting to project structure.
+
+        Creates:
+        1. CLAUDE/Plan/{number}-{name}/PLAN.md (actual plan content)
+        2. ~/.claude/plans/{original-name}.md (stub redirect file)
+
+        Args:
+            hook_input: Hook input data
+
+        Returns:
+            HookResult with ALLOW decision and context about redirect
+        """
+        file_path = get_file_path(hook_input)
+        content = hook_input.get("tool_input", {}).get("content", "")
+
+        try:
+            # Get plan directory from config (track_plans_in_project is the path)
+            if not self._track_plans_in_project:
+                # Should not reach here - matches() should have filtered this
+                return HookResult(decision=Decision.ALLOW)
+
+            plan_base = self._workspace_root / self._track_plans_in_project
+
+            # Get next plan number
+            next_number = get_next_plan_number(plan_base)
+
+            # Sanitize filename to create folder name
+            original_filename = Path(file_path).name
+            sanitized_name = self.sanitize_folder_name(original_filename)
+
+            # Get unique folder name (handle collisions)
+            folder_name = self.get_unique_folder_name(plan_base, next_number, sanitized_name)
+
+            # Create plan folder (don't use exist_ok to catch unexpected collisions)
+            plan_folder = plan_base / folder_name
+            plan_folder.mkdir(parents=True, exist_ok=False)
+
+            # Write PLAN.md
+            plan_file = plan_folder / "PLAN.md"
+            plan_file.write_text(content, encoding="utf-8")
+
+            # Create stub redirect file at original location
+            original_path = Path(file_path).expanduser()
+            original_path.parent.mkdir(parents=True, exist_ok=True)
+
+            stub_content = (
+                f"# Plan Redirect\n\n"
+                f"This plan has been moved to the project:\n\n"
+                f"**Location**: `{self._track_plans_in_project}/{folder_name}/PLAN.md`\n\n"
+                f"The hooks daemon automatically redirects planning mode writes "
+                f"to keep plans in version control.\n"
+            )
+            original_path.write_text(stub_content, encoding="utf-8")
+
+            logger.info(f"Planning mode write redirected: {file_path} -> {plan_folder}/PLAN.md")
+
+            # Build context with workflow docs reference if configured
+            context_parts = [
+                f"Planning mode write successfully redirected.\n\n"
+                f"Your plan has been saved to: `{self._track_plans_in_project}/{folder_name}/PLAN.md`\n\n"
+                f"A redirect stub was created at: `{file_path}`\n\n"
+                f"The plan folder uses temporary name '{sanitized_name}'. "
+                f"You can rename it to something more descriptive if needed."
+            ]
+
+            # Phase 4: Inject workflow docs guidance if configured
+            if self._plan_workflow_docs:
+                workflow_path = self._workspace_root / self._plan_workflow_docs
+                if workflow_path.exists():
+                    context_parts.append(
+                        f"\n\n**Workflow Documentation**: See `{self._plan_workflow_docs}` "
+                        f"for plan structure and conventions."
+                    )
+
+            return HookResult(
+                decision=Decision.ALLOW,
+                context=context_parts,
+            )
+
+        except FileNotFoundError as e:
+            logger.error(f"Planning mode write failed - directory not found: {e}")
+            return HookResult(
+                decision=Decision.DENY,
+                reason=(
+                    "Failed to redirect planning mode write.\n\n"
+                    f"Error: Plan directory does not exist: {plan_base}\n\n"
+                    f"Please ensure {self._track_plans_in_project}/ directory exists in your project."
+                ),
+            )
+
+        except PermissionError as e:
+            logger.error(f"Planning mode write failed - permission error: {e}")
+            return HookResult(
+                decision=Decision.DENY,
+                reason=(
+                    "Failed to redirect planning mode write.\n\n"
+                    "Error: Permission denied when creating plan folder.\n\n"
+                    f"Please check file permissions for {self._track_plans_in_project}/ directory."
+                ),
+            )
+
+        except Exception as e:
+            logger.error(f"Planning mode write failed - unexpected error: {e}", exc_info=True)
+            return HookResult(
+                decision=Decision.DENY,
+                reason=(
+                    "Failed to redirect planning mode write.\n\n"
+                    f"Error: {type(e).__name__}: {e}\n\n"
+                    "Please check daemon logs for details."
+                ),
+            )
+
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if writing markdown to wrong location.
 
         IMPORTANT: Must match legacy hook behavior exactly using precise patterns.
+
+        Additionally intercepts planning mode writes when feature is enabled.
         """
         tool_name = hook_input.get("tool_name")
         if tool_name not in ["Write", "Edit"]:
@@ -112,6 +318,10 @@ class MarkdownOrganizationHandler(Handler):
         file_path = get_file_path(hook_input)
         if not file_path or not file_path.endswith(".md"):
             return False
+
+        # Check for planning mode write (takes precedence when enabled)
+        if self._track_plans_in_project and self.is_planning_mode_write(file_path):
+            return True  # Intercept to redirect
 
         # Use centralized normalization
         normalized = self.normalize_path(file_path)
@@ -155,9 +365,18 @@ class MarkdownOrganizationHandler(Handler):
         return not re.match(r"^eslint-rules/.*\.md$", normalized, re.IGNORECASE)
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
-        """Block markdown in wrong location."""
+        """Handle markdown write based on location.
+
+        Planning mode writes are redirected to project structure.
+        Other invalid locations are denied with guidance.
+        """
         file_path = get_file_path(hook_input)
 
+        # Check if this is a planning mode write to redirect
+        if self._track_plans_in_project and self.is_planning_mode_write(file_path):
+            return self.handle_planning_mode_write(hook_input)
+
+        # Otherwise, deny with standard message
         return HookResult(
             decision=Decision.DENY,
             reason=(

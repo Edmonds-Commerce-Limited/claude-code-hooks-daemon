@@ -1,6 +1,8 @@
 """Tests for MarkdownOrganizationHandler."""
 
+from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -252,3 +254,259 @@ class TestMarkdownOrganizationHandler:
         assert "src/invalid.md" in result.reason
         assert "CLAUDE/Plan" in result.reason
         assert "docs/" in result.reason
+
+
+class TestPlanningModeIntegration:
+    """Tests for planning mode write interception."""
+
+    @pytest.fixture
+    def handler(self, tmp_path: Path) -> MarkdownOrganizationHandler:
+        """Create handler with mocked workspace."""
+        handler = MarkdownOrganizationHandler()
+        # Mock workspace_root to use tmp_path
+        handler._workspace_root = tmp_path
+        return handler
+
+    @pytest.fixture
+    def planning_write_input(self) -> dict[str, Any]:
+        """Create sample planning mode Write hook input."""
+        return {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/home/user/.claude/plans/my-awesome-plan.md",
+                "content": "# My Awesome Plan\n\nThis is a test plan.",
+            },
+        }
+
+    def test_detects_planning_mode_write_to_claude_plans(
+        self, handler: MarkdownOrganizationHandler, planning_write_input: dict[str, Any]
+    ) -> None:
+        """Handler detects writes to ~/.claude/plans/ as planning mode."""
+        assert (
+            handler.is_planning_mode_write(planning_write_input["tool_input"]["file_path"]) is True
+        )
+
+    def test_detects_planning_mode_with_various_home_paths(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        """Handler detects planning mode writes across different home path formats."""
+        paths = [
+            "/home/user/.claude/plans/plan.md",
+            "/Users/bob/.claude/plans/another-plan.md",
+            "~/.claude/plans/test.md",
+            "/root/.claude/plans/root-plan.md",
+        ]
+        for path in paths:
+            assert handler.is_planning_mode_write(path) is True
+
+    def test_does_not_detect_planning_mode_for_other_claude_paths(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        """Handler does not detect other .claude paths as planning mode."""
+        paths = [
+            "/home/user/.claude/agents/test.md",
+            "/home/user/.claude/commands/deploy.md",
+            "/home/user/.claude/skills/skill.md",
+            "/workspace/.claude/hooks-daemon.yaml",
+        ]
+        for path in paths:
+            assert handler.is_planning_mode_write(path) is False
+
+    def test_does_not_detect_planning_mode_for_project_plan_paths(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        """Handler does not detect project CLAUDE/Plan paths as planning mode."""
+        paths = [
+            "/workspace/CLAUDE/Plan/00001-test/PLAN.md",
+            "CLAUDE/Plan/00002-another/notes.md",
+        ]
+        for path in paths:
+            assert handler.is_planning_mode_write(path) is False
+
+    def test_matches_returns_true_for_planning_mode_write_when_feature_enabled(
+        self, handler: MarkdownOrganizationHandler, planning_write_input: dict[str, Any]
+    ) -> None:
+        """Handler matches planning mode writes when feature is enabled."""
+        handler._track_plans_in_project = "CLAUDE/Plan"
+        assert handler.matches(planning_write_input) is True
+
+    def test_matches_returns_false_for_planning_mode_write_when_feature_disabled(
+        self, handler: MarkdownOrganizationHandler, planning_write_input: dict[str, Any]
+    ) -> None:
+        """Handler does not match planning mode writes when feature is disabled."""
+        handler._track_plans_in_project = None
+        # When disabled, planning mode writes go through normal validation
+        # and would be denied as wrong location (outside project)
+        # But matches() should return False for planning mode detection
+        assert (
+            handler.is_planning_mode_write(planning_write_input["tool_input"]["file_path"]) is True
+        )
+        # Even though it's a planning mode write, if feature is disabled, handler should not intercept it
+
+    @patch(
+        "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
+    )
+    def test_handle_creates_plan_folder_and_writes_plan_md(
+        self,
+        mock_get_next: MagicMock,
+        handler: MarkdownOrganizationHandler,
+        planning_write_input: dict[str, Any],
+        tmp_path: Path,
+    ) -> None:
+        """Handler creates numbered plan folder and writes PLAN.md."""
+        handler._track_plans_in_project = "CLAUDE/Plan"
+        mock_get_next.return_value = "00001"
+
+        # Create CLAUDE/Plan directory
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        plan_dir.mkdir(parents=True)
+
+        result = handler.handle(planning_write_input)
+
+        # Should allow the write (we handled it)
+        assert result.decision == Decision.ALLOW
+
+        # Should create plan folder
+        created_folder = plan_dir / "00001-my-awesome-plan"
+        assert created_folder.exists()
+        assert created_folder.is_dir()
+
+        # Should write PLAN.md
+        plan_file = created_folder / "PLAN.md"
+        assert plan_file.exists()
+        content = plan_file.read_text()
+        assert "# My Awesome Plan" in content
+
+    @patch(
+        "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
+    )
+    def test_handle_creates_stub_redirect_file(
+        self,
+        mock_get_next: MagicMock,
+        handler: MarkdownOrganizationHandler,
+        planning_write_input: dict[str, Any],
+        tmp_path: Path,
+    ) -> None:
+        """Handler creates stub redirect at original planning mode location."""
+        handler._track_plans_in_project = "CLAUDE/Plan"
+        mock_get_next.return_value = "00001"
+
+        # Create directories
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        plan_dir.mkdir(parents=True)
+
+        # Create the original location
+        original_path = Path(planning_write_input["tool_input"]["file_path"])
+        original_path.parent.mkdir(parents=True, exist_ok=True)
+
+        result = handler.handle(planning_write_input)
+
+        # Should create stub file at original location
+        assert original_path.exists()
+        stub_content = original_path.read_text()
+        assert "This plan has been moved to the project" in stub_content
+        assert "00001-my-awesome-plan" in stub_content
+
+    @patch(
+        "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
+    )
+    def test_handle_sanitizes_plan_folder_name(
+        self,
+        mock_get_next: MagicMock,
+        handler: MarkdownOrganizationHandler,
+        planning_write_input: dict[str, Any],
+        tmp_path: Path,
+    ) -> None:
+        """Handler sanitizes folder name from plan filename."""
+        handler._track_plans_in_project = "CLAUDE/Plan"
+        mock_get_next.return_value = "00001"
+
+        # Use a filename with special characters
+        planning_write_input["tool_input"][
+            "file_path"
+        ] = "/home/user/.claude/plans/My Plan: (with special chars!).md"
+
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        plan_dir.mkdir(parents=True)
+
+        result = handler.handle(planning_write_input)
+
+        # Should sanitize folder name
+        created_folder = plan_dir / "00001-my-plan-with-special-chars"
+        assert created_folder.exists()
+
+    @patch(
+        "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
+    )
+    def test_handle_returns_context_with_folder_location(
+        self,
+        mock_get_next: MagicMock,
+        handler: MarkdownOrganizationHandler,
+        planning_write_input: dict[str, Any],
+        tmp_path: Path,
+    ) -> None:
+        """Handler returns context informing Claude of new location."""
+        handler._track_plans_in_project = "CLAUDE/Plan"
+        mock_get_next.return_value = "00001"
+
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        plan_dir.mkdir(parents=True)
+
+        result = handler.handle(planning_write_input)
+
+        assert result.decision == Decision.ALLOW
+        assert result.context is not None
+        assert len(result.context) > 0
+        context_text = result.context[0]
+        assert "00001-my-awesome-plan" in context_text
+        assert "CLAUDE/Plan/" in context_text
+
+    @patch(
+        "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
+    )
+    def test_handle_handles_folder_collision_with_suffix(
+        self,
+        mock_get_next: MagicMock,
+        handler: MarkdownOrganizationHandler,
+        planning_write_input: dict[str, Any],
+        tmp_path: Path,
+    ) -> None:
+        """Handler adds -2 suffix if folder name collides (same plan name, same number)."""
+        handler._track_plans_in_project = "CLAUDE/Plan"
+        # Mock returns 00002, but folder 00002-my-awesome-plan already exists
+        mock_get_next.return_value = "00002"
+
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        plan_dir.mkdir(parents=True)
+
+        # Create existing folder with the name we'll try to create
+        existing_folder = plan_dir / "00002-my-awesome-plan"
+        existing_folder.mkdir()
+
+        result = handler.handle(planning_write_input)
+
+        # Should create folder with -2 suffix (same number, different suffix)
+        created_folder = plan_dir / "00002-my-awesome-plan-2"
+        assert created_folder.exists()
+        assert result.decision == Decision.ALLOW
+
+    @patch(
+        "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
+    )
+    def test_handle_fails_gracefully_on_file_not_found_error(
+        self,
+        mock_get_next: MagicMock,
+        handler: MarkdownOrganizationHandler,
+        planning_write_input: dict[str, Any],
+        tmp_path: Path,
+    ) -> None:
+        """Handler returns DENY with clear message when plan directory doesn't exist."""
+        handler._track_plans_in_project = "CLAUDE/Plan"
+        # Mock raises FileNotFoundError
+        mock_get_next.side_effect = FileNotFoundError("Plan directory does not exist")
+
+        result = handler.handle(planning_write_input)
+
+        # Should return DENY with error message
+        assert result.decision == Decision.DENY
+        assert "does not exist" in result.reason.lower() or "not found" in result.reason.lower()

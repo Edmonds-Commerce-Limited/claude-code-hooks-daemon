@@ -49,6 +49,34 @@ class TestSchemaRegistry:
 class TestPreToolUseValidation:
     """Test PreToolUse input validation."""
 
+    def test_real_claude_code_data_from_official_docs(self):
+        """CRITICAL: Test with REAL Claude Code data structure from official docs.
+
+        Reference: https://code.claude.com/docs/en/hooks (PreToolUse Input section)
+
+        Claude Code sends: {hook_event_name, tool_name, tool_input, session_id, etc.}
+        This structure is documented and confirmed in the official hooks reference.
+        """
+        # This is EXACTLY what Claude Code sends per official docs
+        hook_input = {
+            "session_id": "test-123",
+            "transcript_path": "/test/path.jsonl",
+            "cwd": "/workspace",
+            "permission_mode": "default",
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/root/.claude/plans/test.md",
+                "content": "test content"
+            },
+            "tool_use_id": "test-id"
+        }
+
+        # This MUST pass - it's real Claude Code data!
+        errors = validate_input("PreToolUse", hook_input)
+        assert errors == [], f"Real Claude Code data rejected! Errors: {errors}"
+        assert is_valid_input("PreToolUse", hook_input)
+
     def test_valid_pre_tool_use_bash(self):
         """Valid PreToolUse Bash event passes validation."""
         hook_input = {

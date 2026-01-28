@@ -4,6 +4,16 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [003: Claude Code Planning Mode → Project Workflow Integration](003-planning-mode-project-integration/PLAN.md) - 🟡 Not Started
+  - Intercept planning mode writes and redirect to project structure
+  - Auto-number plans with 5-digit padding (00001, 00002, etc.)
+  - Inject workflow guidance from PlanWorkflow.md
+  - Fix critical test coverage gaps in markdown_organization handler
+  - Add integration tests for config-based handler loading
+  - **Priority**: High
+  - **Owner**: AI Agent
+  - **Estimated**: 6-8 hours
+
 - [002: Fix Silent Handler Failures](002-fix-silent-handler-failures/PLAN.md) - 🟡 In Progress
   - Fix broken handlers (BashErrorDetector, AutoApproveReads, Notification)
   - Add input schema validation (toggleable)
@@ -33,8 +43,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans**: 2
-- **Active**: 1
+- **Total Plans**: 3
+- **Active**: 2
 - **Completed**: 1
 - **Success Rate**: 100% (1/1 completed successfully)
 

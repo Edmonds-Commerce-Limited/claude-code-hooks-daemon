@@ -34,14 +34,14 @@ class HandlerConfig(BaseModel):
     Attributes:
         enabled: Whether the handler is enabled
         priority: Override priority (None uses handler default)
-        options: Handler-specific options
+        options: Handler-specific options (e.g., track_plans_in_project, plan_workflow_docs)
     """
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")  # CRITICAL: No arbitrary fields allowed!
 
     enabled: bool = Field(default=True, description="Whether handler is enabled")
     priority: int | None = Field(default=None, description="Override priority")
-    options: dict[str, Any] = Field(default_factory=dict, description="Handler options")
+    options: dict[str, Any] = Field(default_factory=dict, description="Handler-specific options")
 
 
 class EventHandlersConfig(BaseModel):
