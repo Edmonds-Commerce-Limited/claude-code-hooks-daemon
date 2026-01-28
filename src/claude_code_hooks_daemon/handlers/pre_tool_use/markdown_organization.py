@@ -219,6 +219,8 @@ class MarkdownOrganizationHandler(Handler):
             next_number = get_next_plan_number(plan_base)
 
             # Sanitize filename to create folder name
+            if not file_path:
+                return HookResult(decision=Decision.ALLOW)  # Should not happen
             original_filename = Path(file_path).name
             sanitized_name = self.sanitize_folder_name(original_filename)
 
@@ -336,8 +338,8 @@ class MarkdownOrganizationHandler(Handler):
 
         # Check allowed locations with PRECISE pattern matching (not simple 'in' checks)
 
-        # 1. CLAUDE/Plan/NNN-*/ - Requires numbered subdirectory
-        if re.match(r"^CLAUDE/Plan/\d{3}-[^/]+/.+\.md$", normalized, re.IGNORECASE):
+        # 1. CLAUDE/Plan/NNN-*/ - Requires numbered subdirectory (3+ digits)
+        if re.match(r"^CLAUDE/Plan/\d{3,}-[^/]+/.+\.md$", normalized, re.IGNORECASE):
             return False  # Allow
 
         # 2. CLAUDE/ root level ONLY (no subdirs except known ones)
@@ -371,6 +373,8 @@ class MarkdownOrganizationHandler(Handler):
         Other invalid locations are denied with guidance.
         """
         file_path = get_file_path(hook_input)
+        if not file_path:
+            return HookResult(decision=Decision.ALLOW)
 
         # Check if this is a planning mode write to redirect
         if self._track_plans_in_project and self.is_planning_mode_write(file_path):
