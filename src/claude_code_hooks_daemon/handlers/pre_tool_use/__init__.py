@@ -4,6 +4,7 @@ from .absolute_path import AbsolutePathHandler
 from .british_english import BritishEnglishHandler
 from .destructive_git import DestructiveGitHandler
 from .eslint_disable import EslintDisableHandler
+from .gh_issue_comments import GhIssueCommentsHandler
 from .git_stash import GitStashHandler
 from .markdown_organization import MarkdownOrganizationHandler
 from .npm_command import NpmCommandHandler
@@ -20,6 +21,7 @@ __all__ = [
     "BritishEnglishHandler",
     "DestructiveGitHandler",
     "EslintDisableHandler",
+    "GhIssueCommentsHandler",
     "GitStashHandler",
     "MarkdownOrganizationHandler",
     "NpmCommandHandler",

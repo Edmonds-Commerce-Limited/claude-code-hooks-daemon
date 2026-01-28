@@ -91,60 +91,61 @@ daemon:
 handlers:
   # PreToolUse - Before tool execution
   pre_tool_use:
-    destructive_git: {enabled: true, priority: 10}
-    # git_stash: {enabled: false, priority: 20}
-    # absolute_path: {enabled: false, priority: 12}
-    # web_search_year: {enabled: false, priority: 55}
-    # british_english: {enabled: false, priority: 60}
-    # eslint_disable: {enabled: false, priority: 15}
-    # sed_blocker: {enabled: false, priority: 25}
-    # worktree_file_copy: {enabled: false, priority: 30}
-    # tdd_enforcement: {enabled: false, priority: 35}
+    # SAFETY HANDLERS (Priority 10-20)
+    destructive_git_handler: {enabled: true, priority: 10}   # Block git reset --hard, clean -f
+    sed_blocker_handler: {enabled: true, priority: 11}       # Block sed (use Edit tool instead)
+    absolute_path_handler: {enabled: true, priority: 12}     # Require absolute paths
+    worktree_file_copy_handler: {enabled: true, priority: 15}  # Prevent worktree file copies
+    git_stash_handler: {enabled: true, priority: 20}         # Warn about git stash
+
+    # CODE QUALITY HANDLERS (Priority 25-35)
+    eslint_disable_handler: {enabled: true, priority: 25}    # Block ESLint suppressions
+    python_qa_suppression_blocker: {enabled: true, priority: 26}  # Block Python QA suppressions
+    php_qa_suppression_blocker: {enabled: true, priority: 27}     # Block PHP QA suppressions
+    go_qa_suppression_blocker: {enabled: true, priority: 28}      # Block Go QA suppressions
+    tdd_enforcement_handler: {enabled: true, priority: 35}   # Enforce test-first development
+
+    # WORKFLOW HANDLERS (Priority 40-55)
+    gh_issue_comments_handler: {enabled: true, priority: 40}  # Require --comments on gh issue view
+    web_search_year_handler: {enabled: true, priority: 55}   # Fix outdated years in searches
+
+    # ADVISORY HANDLERS (Priority 56-60)
+    british_english_handler: {enabled: true, priority: 60}   # Warn about American English
 
   # PostToolUse - After tool execution
-  post_tool_use: {}
-    # bash_error_detector: {enabled: false, priority: 10}
+  post_tool_use:
+    bash_error_detector_handler: {enabled: true, priority: 10}  # Detect bash errors
 
   # PermissionRequest - Auto-approve decisions
   permission_request: {}
-    # auto_approve_reads: {enabled: false, priority: 10}
-    # auto_approve_safe_files: {enabled: false, priority: 15}
 
   # Notification - Custom notification handling
-  notification: {}
-    # notification_logger: {enabled: false, priority: 10}
+  notification:
+    notification_logger_handler: {enabled: true, priority: 10}  # Log notifications
 
   # UserPromptSubmit - Context injection before processing
   user_prompt_submit: {}
-    # git_context_injector: {enabled: false, priority: 10}
 
   # SessionStart - Initialize environment
   session_start: {}
-    # environment_loader: {enabled: false, priority: 10}
 
   # SessionEnd - Cleanup on exit
-  session_end: {}
-    # cleanup_handler: {enabled: false, priority: 10}
+  session_end:
+    cleanup_handler: {enabled: true, priority: 10}  # Session cleanup
 
   # Stop - Control agent continuation
   stop: {}
-    # task_completion_checker: {enabled: false, priority: 10}
 
   # SubagentStop - Control subagent continuation
-  subagent_stop: {}
-    # subagent_logger: {enabled: false, priority: 10}
+  subagent_stop:
+    subagent_completion_logger_handler: {enabled: true, priority: 10}  # Log subagent completion
 
   # PreCompact - Before conversation compaction
-  pre_compact: {}
-    # transcript_archiver: {enabled: false, priority: 10}
+  pre_compact:
+    transcript_archiver_handler: {enabled: true, priority: 10}  # Archive transcripts
 
 # Custom project-specific handlers
 plugins: []
-  # Example:
-  # - path: .claude/hooks/custom
-  #   handlers:
-  #     - custom_handler_one
-  #     - custom_handler_two
 """
 
 
