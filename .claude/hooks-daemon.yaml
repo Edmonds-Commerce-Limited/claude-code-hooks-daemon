@@ -14,6 +14,11 @@ daemon:
     strict_mode: true          # Fail-closed: return errors on validation failures
     log_validation_errors: true
 
+  # Plan tracking (v2.3.0+) - Redirect planning mode files to project structure
+  track_plans_in_project: true  # Enable plan tracking in CLAUDE/Plan/
+  plan_workflow_docs:
+    project_structure_path: "CLAUDE/Plan"  # Where to save plans
+
 # Built-in handler configuration
 # Handlers run in priority order (lower number = earlier execution)
 # Priority ranges: 5=test, 10-20=safety, 25-45=workflow, 50-60=tool usage
@@ -56,6 +61,10 @@ handlers:
       priority: 35
 
     # WORKFLOW HANDLERS (Priority 40-50)
+    gh_issue_comments:     # Requires --comments flag for gh issue view
+      enabled: true
+      priority: 40
+
     validate_plan_number:  # Validates plan number format (001-, 002-, etc)
       enabled: false       # Optional - enable for projects using CLAUDE/Plan/
       priority: 40
@@ -65,16 +74,18 @@ handlers:
       priority: 45
 
     plan_workflow:         # Provides guidance when creating plans
-      enabled: false       # Optional - enable for projects using CLAUDE/Plan/
+      enabled: true        # Enable for projects using CLAUDE/Plan/
       priority: 45
 
     npm_command:           # Restricts npm commands to approved list
       enabled: false       # Optional - enable for strict npm usage control
       priority: 50
 
-    markdown_organization: # Enforces markdown file organization rules
-      enabled: false       # Optional - enable for strict md organization
+    markdown_organization: # Enforces markdown file organization rules & plan tracking
+      enabled: true        # Enable for md organization + plan tracking
       priority: 50
+      track_plans_in_project: "CLAUDE/Plan"     # Path to plan folder (null to disable)
+      plan_workflow_docs: "CLAUDE/PlanWorkflow.md"  # Optional: workflow doc to reference
 
     # TOOL USAGE HANDLERS (Priority 50-60)
     web_search_year:       # Fixes year in web search queries (uses current year)
