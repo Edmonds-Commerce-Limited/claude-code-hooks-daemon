@@ -564,3 +564,47 @@ class TestHookResultContextOnlyFormat:
 
         hso = output["hookSpecificOutput"]
         assert hso["guidance"] == "Check logs for details"
+
+
+class TestHookResultStatusFormat:
+    """Test Status event response format (plain text)."""
+
+    def test_status_with_context_returns_plain_text(self):
+        """Status event should return plain text in {"text": "..."} format."""
+        result = HookResult(decision="allow", context=["Sonnet | Ctx: 42%", "| main"])
+        output = result.to_json("Status")
+
+        assert "text" in output
+        assert output["text"] == "Sonnet | Ctx: 42% | main"
+        assert "hookSpecificOutput" not in output
+
+    def test_status_empty_context_returns_default(self):
+        """Status event with no context should return default text."""
+        result = HookResult(decision="allow")
+        output = result.to_json("Status")
+
+        assert output["text"] == "Claude"
+
+    def test_status_single_context_item(self):
+        """Status event with single context item."""
+        result = HookResult(decision="allow", context=["Model: Sonnet"])
+        output = result.to_json("Status")
+
+        assert output["text"] == "Model: Sonnet"
+
+    def test_status_multiple_context_items(self):
+        """Status event with multiple context items joined with spaces."""
+        result = HookResult(decision="allow", context=["Part 1", "Part 2", "Part 3"])
+        output = result.to_json("Status")
+
+        assert output["text"] == "Part 1 Part 2 Part 3"
+
+    def test_status_ignores_decision_field(self):
+        """Status event should not include decision field."""
+        result = HookResult(decision="deny", reason="Test")
+        output = result.to_json("Status")
+
+        # Should still return plain text format (Status events don't support deny)
+        assert "text" in output
+        assert "decision" not in output
+        assert "reason" not in output

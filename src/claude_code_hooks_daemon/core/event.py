@@ -23,6 +23,7 @@ class EventType(StrEnum):
     NOTIFICATION = "Notification"
     STOP = "Stop"
     SUBAGENT_STOP = "SubagentStop"
+    STATUS_LINE = "Status"
 
     @classmethod
     def from_string(cls, value: str) -> "EventType":

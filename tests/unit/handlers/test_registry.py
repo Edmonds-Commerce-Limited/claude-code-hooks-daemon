@@ -213,7 +213,7 @@ class TestRegisterAll:
         """register_all should respect enabled=false in config."""
         config = {
             "pre_tool_use": {
-                "destructive_git_handler": {"enabled": False},
+                "destructive_git": {"enabled": False},
             }
         }
 
@@ -230,7 +230,7 @@ class TestRegisterAll:
         """register_all should apply priority override from config."""
         config = {
             "pre_tool_use": {
-                "destructive_git_handler": {"priority": 999},
+                "destructive_git": {"priority": 999},
             }
         }
 
@@ -363,14 +363,14 @@ class TestSnakeCaseConverter:
     """Tests for _to_snake_case helper."""
 
     def test_simple_camel_case(self) -> None:
-        """Should convert simple CamelCase to snake_case."""
+        """Should convert simple CamelCase to snake_case and strip _handler suffix."""
         assert _to_snake_case("HelloWorld") == "hello_world"
-        assert _to_snake_case("MyHandler") == "my_handler"
+        assert _to_snake_case("MyHandler") == "my"  # _handler suffix stripped
 
     def test_acronyms(self) -> None:
-        """Should handle acronyms correctly."""
-        assert _to_snake_case("HTTPHandler") == "http_handler"
-        assert _to_snake_case("URLParser") == "url_parser"
+        """Should handle acronyms correctly and strip _handler suffix."""
+        assert _to_snake_case("HTTPHandler") == "http"  # _handler suffix stripped
+        assert _to_snake_case("URLParser") == "url_parser"  # No _handler suffix
 
     def test_single_word(self) -> None:
         """Should handle single words."""
@@ -382,19 +382,22 @@ class TestSnakeCaseConverter:
         assert _to_snake_case("already_snake_case") == "already_snake_case"
 
     def test_numbers(self) -> None:
-        """Should handle numbers in names."""
-        assert _to_snake_case("Handler2") == "handler2"
-        assert _to_snake_case("Test123Handler") == "test123_handler"
+        """Should handle numbers in names and strip _handler suffix."""
+        assert _to_snake_case("Handler2") == "handler2"  # No _handler suffix
+        assert _to_snake_case("Test123Handler") == "test123"  # _handler suffix stripped
 
     def test_multiple_uppercase(self) -> None:
         """Should handle multiple consecutive uppercase letters."""
         assert _to_snake_case("HTTPSConnection") == "https_connection"
 
     def test_real_handler_names(self) -> None:
-        """Should correctly convert real handler class names."""
-        assert _to_snake_case("DestructiveGitHandler") == "destructive_git_handler"
-        assert _to_snake_case("BashErrorDetector") == "bash_error_detector"
-        assert _to_snake_case("HelloWorldHandler") == "hello_world_handler"
+        """Should correctly convert real handler class names to match config keys."""
+        # These match the actual config keys in hooks-daemon.yaml
+        assert _to_snake_case("DestructiveGitHandler") == "destructive_git"  # Config key
+        assert (
+            _to_snake_case("BashErrorDetectorHandler") == "bash_error_detector"
+        )  # If had Handler suffix
+        assert _to_snake_case("HelloWorldHandler") == "hello_world"  # Config key pattern
 
 
 class TestGetRegistry:

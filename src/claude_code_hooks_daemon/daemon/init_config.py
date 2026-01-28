@@ -65,6 +65,9 @@ handlers:
   # PreCompact - Before conversation compaction
   pre_compact: {}
 
+  # Status - Status line generation
+  status_line: {}
+
 # Custom project-specific handlers
 plugins: []
 """
@@ -127,7 +130,8 @@ handlers:
   user_prompt_submit: {}
 
   # SessionStart - Initialize environment
-  session_start: {}
+  session_start:
+    suggest_status_line_handler: {enabled: true, priority: 55}  # Suggest status line setup
 
   # SessionEnd - Cleanup on exit
   session_end:
@@ -143,6 +147,12 @@ handlers:
   # PreCompact - Before conversation compaction
   pre_compact:
     transcript_archiver_handler: {enabled: true, priority: 10}  # Archive transcripts
+
+  # Status - Status line generation
+  status_line:
+    model_context_handler: {enabled: true, priority: 10}  # Model name and context %
+    git_branch_handler: {enabled: true, priority: 20}     # Current git branch
+    daemon_stats_handler: {enabled: true, priority: 30}   # Daemon health metrics
 
 # Custom project-specific handlers
 plugins: []

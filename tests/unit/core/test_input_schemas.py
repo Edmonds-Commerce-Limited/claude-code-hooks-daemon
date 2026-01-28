@@ -65,11 +65,8 @@ class TestPreToolUseValidation:
             "permission_mode": "default",
             "hook_event_name": "PreToolUse",
             "tool_name": "Write",
-            "tool_input": {
-                "file_path": "/root/.claude/plans/test.md",
-                "content": "test content"
-            },
-            "tool_use_id": "test-id"
+            "tool_input": {"file_path": "/root/.claude/plans/test.md", "content": "test content"},
+            "tool_use_id": "test-id",
         }
 
         # This MUST pass - it's real Claude Code data!

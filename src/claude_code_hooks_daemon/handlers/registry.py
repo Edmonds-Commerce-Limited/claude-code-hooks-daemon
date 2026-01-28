@@ -30,6 +30,7 @@ EVENT_TYPE_MAPPING: dict[str, EventType] = {
     "notification": EventType.NOTIFICATION,
     "stop": EventType.STOP,
     "subagent_stop": EventType.SUBAGENT_STOP,
+    "status_line": EventType.STATUS_LINE,
 }
 
 
@@ -40,12 +41,13 @@ class HandlerRegistry:
     registers them with the event router.
     """
 
-    __slots__ = ("_disabled_handlers", "_handlers")
+    __slots__ = ("_disabled_handlers", "_handlers", "_workspace_root")
 
     def __init__(self) -> None:
         """Initialise empty registry."""
         self._handlers: dict[str, type[Handler]] = {}
         self._disabled_handlers: set[str] = set()
+        self._workspace_root: Path | None = None
 
     def discover(self, package_path: str = "claude_code_hooks_daemon.handlers") -> int:
         """Discover all handler classes in the handlers package.
@@ -153,16 +155,22 @@ class HandlerRegistry:
         router: "EventRouter",
         *,
         config: dict[str, dict[str, dict[str, Any]]] | None = None,
+        workspace_root: Path | None = None,
     ) -> int:
         """Register all discovered handlers with the router.
 
         Args:
             router: Event router to register handlers with
             config: Optional handler configuration from hooks-daemon.yaml
+            workspace_root: Optional workspace root path for handlers
 
         Returns:
             Number of handlers registered
         """
+        # Store workspace_root for handler initialization
+        if workspace_root:
+            self._workspace_root = workspace_root
+
         count = 0
         handlers_dir = Path(__file__).parent
 
@@ -244,15 +252,15 @@ class HandlerRegistry:
                                 # markdown_organization handler config
                                 # Options are in options dict, not top-level
                                 options = handler_config.get("options", {})
-                                instance._track_plans_in_project = options.get(
+                                instance._track_plans_in_project = options.get(  # type: ignore[attr-defined]
                                     "track_plans_in_project", None
                                 )
-                                instance._plan_workflow_docs = options.get(
+                                instance._plan_workflow_docs = options.get(  # type: ignore[attr-defined]
                                     "plan_workflow_docs", None
                                 )
                                 # Set workspace root if available
-                                if hasattr(self, "_workspace_root"):
-                                    instance._workspace_root = self._workspace_root
+                                if self._workspace_root:
+                                    instance._workspace_root = self._workspace_root  # type: ignore[attr-defined]
 
                             router.register(event_type, instance)
                             count += 1
@@ -277,12 +285,18 @@ def _to_snake_case(name: str) -> str:
         name: CamelCase string
 
     Returns:
-        snake_case string
+        snake_case string with _handler suffix stripped
     """
     import re
 
     s1 = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)
-    return re.sub("([a-z0-9])([A-Z])", r"\1_\2", s1).lower()
+    snake = re.sub("([a-z0-9])([A-Z])", r"\1_\2", s1).lower()
+
+    # Strip _handler suffix to match config keys
+    if snake.endswith("_handler"):
+        snake = snake[:-8]  # Remove "_handler"
+
+    return snake
 
 
 # Global registry instance

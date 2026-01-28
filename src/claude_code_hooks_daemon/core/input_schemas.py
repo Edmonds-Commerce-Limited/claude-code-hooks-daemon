@@ -226,6 +226,43 @@ SUBAGENT_STOP_INPUT_SCHEMA: Final[dict[str, Any]] = {
 }
 
 # =============================================================================
+# Status Hook Input Schema
+# =============================================================================
+
+STATUS_LINE_INPUT_SCHEMA: Final[dict[str, Any]] = {
+    "type": "object",
+    "required": ["hook_event_name"],
+    "properties": {
+        "hook_event_name": {"type": "string", "const": "Status"},
+        "session_id": {"type": "string"},
+        "model": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "string"},
+                "display_name": {"type": "string"},
+            },
+        },
+        "context_window": {
+            "type": "object",
+            "properties": {
+                "used_percentage": {"type": "number"},
+                "total_input_tokens": {"type": "number"},
+                "context_window_size": {"type": "number"},
+            },
+        },
+        "workspace": {
+            "type": "object",
+            "properties": {
+                "current_dir": {"type": "string"},
+                "project_dir": {"type": "string"},
+            },
+        },
+        "cost": {"type": "object"},
+    },
+    "additionalProperties": True,
+}
+
+# =============================================================================
 # Schema Registry - Map event names to input schemas
 # =============================================================================
 
@@ -240,6 +277,7 @@ INPUT_SCHEMAS: Final[dict[str, dict[str, Any]]] = {
     "UserPromptSubmit": USER_PROMPT_SUBMIT_INPUT_SCHEMA,
     "Stop": STOP_INPUT_SCHEMA,
     "SubagentStop": SUBAGENT_STOP_INPUT_SCHEMA,
+    "Status": STATUS_LINE_INPUT_SCHEMA,
 }
 
 
