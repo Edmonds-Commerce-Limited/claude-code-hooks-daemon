@@ -21,6 +21,7 @@ from functools import partial
 from typing import Any, Protocol, runtime_checkable
 
 from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.core.input_schemas import get_input_schema
 from claude_code_hooks_daemon.daemon.config import DaemonConfig
 from claude_code_hooks_daemon.daemon.memory_log_handler import MemoryLogHandler
 
@@ -107,6 +108,7 @@ class HooksDaemon:
     __slots__ = (
         "_active_requests",
         "_idle_check_interval",
+        "_input_validators",
         "_is_new_controller",
         "_shutdown_requested",
         "_shutdown_task",
@@ -140,6 +142,7 @@ class HooksDaemon:
         self._shutdown_task: asyncio.Task[None] | None = None
         self._idle_check_interval = idle_check_interval
         self._is_new_controller = isinstance(controller, Controller)
+        self._input_validators: dict[str, Any] = {}  # Cached validators per event type
 
         # Configure logging with memory handler and stderr for errors
         self._setup_logging(config.log_level)
@@ -199,6 +202,106 @@ class HooksDaemon:
         root_logger.addHandler(_memory_log_handler)
         root_logger.addHandler(stderr_handler)
 
+    def _should_validate_input(self) -> bool:
+        """Check if input validation is enabled.
+
+        Environment variable HOOKS_DAEMON_INPUT_VALIDATION overrides config.
+
+        Returns:
+            True if validation should be performed
+        """
+        # Check environment variable first
+        env_enabled = os.environ.get("HOOKS_DAEMON_INPUT_VALIDATION", "").strip().lower()
+        if env_enabled in ("true", "1", "yes"):
+            return True
+        if env_enabled in ("false", "0", "no"):
+            return False
+
+        # Fall back to config
+        return self.config.input_validation.enabled
+
+    def _is_strict_validation(self) -> bool:
+        """Check if strict validation mode is enabled.
+
+        Environment variable HOOKS_DAEMON_VALIDATION_STRICT overrides config.
+
+        Returns:
+            True if strict mode (fail-closed) should be used
+        """
+        # Check environment variable first
+        env_strict = os.environ.get("HOOKS_DAEMON_VALIDATION_STRICT", "").strip().lower()
+        if env_strict in ("true", "1", "yes"):
+            return True
+        if env_strict in ("false", "0", "no"):
+            return False
+
+        # Fall back to config
+        return self.config.input_validation.strict_mode
+
+    def _get_input_validator(self, event_type: str) -> Any:
+        """Get or create cached validator for event type.
+
+        Args:
+            event_type: Event name (PreToolUse, PostToolUse, etc.)
+
+        Returns:
+            Draft7Validator instance or None if schema not found
+        """
+        if event_type not in self._input_validators:
+            schema = get_input_schema(event_type)
+            if schema:
+                try:
+                    from jsonschema import Draft7Validator
+
+                    self._input_validators[event_type] = Draft7Validator(schema)
+                except ImportError:
+                    logger.warning("jsonschema not installed - input validation disabled")
+                    return None
+        return self._input_validators.get(event_type)
+
+    def _validate_hook_input(self, event_type: str, hook_input: dict[str, Any]) -> list[str]:
+        """Validate hook_input against event-specific schema.
+
+        Args:
+            event_type: Event name (PreToolUse, PostToolUse, etc.)
+            hook_input: Hook input dictionary
+
+        Returns:
+            List of validation error messages (empty if valid)
+        """
+        validator = self._get_input_validator(event_type)
+        if validator is None:
+            return []  # Unknown event type or jsonschema not available
+
+        errors = []
+        for error in validator.iter_errors(hook_input):
+            path = ".".join(str(p) for p in error.path) if error.path else "root"
+            errors.append(f"{path}: {error.message}")
+
+        return errors
+
+    def _validation_error_response(
+        self, event_type: str, validation_errors: list[str], request_id: str | None
+    ) -> dict[str, Any]:
+        """Create error response for validation failure.
+
+        Args:
+            event_type: Event type that failed validation
+            validation_errors: List of validation error messages
+            request_id: Optional request ID
+
+        Returns:
+            Error response dictionary
+        """
+        response: dict[str, Any] = {
+            "error": "input_validation_failed",
+            "details": validation_errors,
+            "event_type": event_type,
+        }
+        if request_id:
+            response["request_id"] = request_id
+        return response
+
     async def start(self) -> None:
         """Start the daemon server.
 
@@ -207,26 +310,26 @@ class HooksDaemon:
         - Starts idle timeout monitor
         - Handles graceful shutdown signals
         """
-        logger.info("Starting hooks daemon on %s", self.config.socket_path)
+        socket_path = self.config.socket_path_obj
+        logger.info("Starting hooks daemon on %s", socket_path)
 
         # Write PID file
-        if self.config.pid_file_path:
+        if self.config.pid_file_path_obj:
             self._write_pid_file()
 
         # Remove stale socket if exists
-        if self.config.socket_path.exists():
-            logger.warning("Removing stale socket: %s", self.config.socket_path)
-            self.config.socket_path.unlink()
+        if socket_path and socket_path.exists():
+            logger.warning("Removing stale socket: %s", socket_path)
+            socket_path.unlink()
 
         # Start Unix socket server
-        self.server = await asyncio.start_unix_server(
-            self._handle_client, path=str(self.config.socket_path)
-        )
+        self.server = await asyncio.start_unix_server(self._handle_client, path=str(socket_path))
 
         # Set socket permissions (owner read/write, group read, world none)
-        self.config.socket_path.chmod(0o660)
+        if socket_path:
+            socket_path.chmod(0o660)
 
-        logger.info("Daemon listening on %s", self.config.socket_path)
+        logger.info("Daemon listening on %s", socket_path)
 
         # Setup signal handlers for graceful shutdown
         loop = asyncio.get_running_loop()
@@ -308,14 +411,16 @@ class HooksDaemon:
             await self.server.wait_closed()
 
         # Cleanup socket file
-        if self.config.socket_path.exists():
-            self.config.socket_path.unlink()
-            logger.debug("Removed socket: %s", self.config.socket_path)
+        socket_path = self.config.socket_path_obj
+        if socket_path and socket_path.exists():
+            socket_path.unlink()
+            logger.debug("Removed socket: %s", socket_path)
 
         # Cleanup PID file
-        if self.config.pid_file_path and self.config.pid_file_path.exists():
-            self.config.pid_file_path.unlink()
-            logger.debug("Removed PID file: %s", self.config.pid_file_path)
+        pid_file_path = self.config.pid_file_path_obj
+        if pid_file_path and pid_file_path.exists():
+            pid_file_path.unlink()
+            logger.debug("Removed PID file: %s", pid_file_path)
 
         # Signal shutdown complete
         self.shutdown_event.set()
@@ -408,6 +513,28 @@ class HooksDaemon:
         if event == "_system":
             return self._handle_system_request(hook_input, request_id)
 
+        # INPUT VALIDATION - Validate hook_input structure before dispatch
+        if self._should_validate_input():
+            validation_errors = self._validate_hook_input(event, hook_input)
+            if validation_errors:
+                # Log validation errors
+                if self._is_strict_validation():
+                    logger.error(
+                        "Input validation failed for %s (strict mode): %s",
+                        event,
+                        validation_errors,
+                    )
+                    # Strict mode: return error, don't dispatch
+                    return self._validation_error_response(event, validation_errors, request_id)
+                else:
+                    # Fail-open: log warning and continue
+                    if self.config.input_validation.log_validation_errors:
+                        logger.warning(
+                            "Input validation failed for %s (continuing): %s",
+                            event,
+                            validation_errors,
+                        )
+
         # Process with appropriate controller
         loop = asyncio.get_running_loop()
 
@@ -492,15 +619,16 @@ class HooksDaemon:
 
         Handles stale PID files (process no longer exists).
         """
-        if not self.config.pid_file_path:
+        pid_file_path = self.config.pid_file_path_obj
+        if not pid_file_path:
             return
 
         pid = os.getpid()
 
         # Check for stale PID file
-        if self.config.pid_file_path.exists():
+        if pid_file_path.exists():
             try:
-                old_pid = int(self.config.pid_file_path.read_text().strip())
+                old_pid = int(pid_file_path.read_text().strip())
                 # Check if process exists
                 try:
                     os.kill(old_pid, 0)  # Signal 0 checks existence
@@ -515,6 +643,6 @@ class HooksDaemon:
                 logger.warning("Error reading stale PID file: %s", e)
 
         # Write current PID
-        self.config.pid_file_path.parent.mkdir(parents=True, exist_ok=True)
-        self.config.pid_file_path.write_text(str(pid))
-        logger.debug("Wrote PID %d to %s", pid, self.config.pid_file_path)
+        pid_file_path.parent.mkdir(parents=True, exist_ok=True)
+        pid_file_path.write_text(str(pid))
+        logger.debug("Wrote PID %d to %s", pid, pid_file_path)

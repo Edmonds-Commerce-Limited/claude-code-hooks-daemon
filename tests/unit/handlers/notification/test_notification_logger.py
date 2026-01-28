@@ -46,7 +46,7 @@ class TestNotificationLoggerHandler:
         """Should match all notification events."""
         hook_input = {
             "message": "Test notification",
-            "severity": "info",
+            "notification_type": "permission_prompt",
         }
         assert handler.matches(hook_input) is True
 
@@ -70,8 +70,8 @@ class TestNotificationLoggerHandler:
     def test_handle_writes_json_log_entry(self, mock_mkdir, mock_file, handler, mock_datetime):
         """Should write JSON log entry to file."""
         hook_input = {
-            "message": "Build complete",
-            "severity": "info",
+            "message": "Permission required",
+            "notification_type": "permission_prompt",
         }
 
         handler.handle(hook_input)
@@ -89,10 +89,12 @@ class TestNotificationLoggerHandler:
     ):
         """Should include all fields from notification in log."""
         hook_input = {
-            "message": "Error occurred",
-            "severity": "error",
-            "code": "E500",
-            "details": {"line": 42},
+            "hook_event_name": "Notification",
+            "notification_type": "idle_prompt",
+            "message": "Session idle for 5 minutes",
+            "session_id": "test-session-123",
+            "transcript_path": "/path/to/transcript.jsonl",
+            "cwd": "/workspace",
         }
 
         handler.handle(hook_input)
@@ -101,10 +103,10 @@ class TestNotificationLoggerHandler:
         written_data = "".join(call.args[0] for call in handle.write.call_args_list)
         log_entry = json.loads(written_data.strip())
 
-        assert log_entry["message"] == "Error occurred"
-        assert log_entry["severity"] == "error"
-        assert log_entry["code"] == "E500"
-        assert log_entry["details"] == {"line": 42}
+        assert log_entry["hook_event_name"] == "Notification"
+        assert log_entry["notification_type"] == "idle_prompt"
+        assert log_entry["message"] == "Session idle for 5 minutes"
+        assert log_entry["session_id"] == "test-session-123"
 
     @patch("pathlib.Path.open", new_callable=mock_open)
     @patch("pathlib.Path.mkdir")

@@ -149,8 +149,8 @@ class TestHooksDaemon:
         await asyncio.sleep(0.1)
 
         # Check PID file exists and contains valid PID
-        assert daemon_config.pid_file_path.exists()
-        pid_content = daemon_config.pid_file_path.read_text().strip()
+        assert daemon_config.pid_file_path_obj.exists()
+        pid_content = daemon_config.pid_file_path_obj.read_text().strip()
         pid = int(pid_content)
         assert pid == os.getpid()
 
@@ -168,14 +168,14 @@ class TestHooksDaemon:
         server_task = asyncio.create_task(daemon.start())
         await asyncio.sleep(0.1)
 
-        assert daemon_config.pid_file_path.exists()
+        assert daemon_config.pid_file_path_obj.exists()
 
         # Shutdown
         await daemon.shutdown()
         await server_task
 
         # PID file should be removed
-        assert not daemon_config.pid_file_path.exists()
+        assert not daemon_config.pid_file_path_obj.exists()
 
     @pytest.mark.anyio
     async def test_daemon_handles_stale_pid_file(
@@ -183,7 +183,7 @@ class TestHooksDaemon:
     ) -> None:
         """Test that daemon handles stale PID file (process died without cleanup)."""
         # Create stale PID file with non-existent PID
-        daemon_config.pid_file_path.write_text("99999")
+        daemon_config.pid_file_path_obj.write_text("99999")
 
         daemon = HooksDaemon(config=daemon_config, controller=front_controller)
 
@@ -191,8 +191,8 @@ class TestHooksDaemon:
         server_task = asyncio.create_task(daemon.start())
         await asyncio.sleep(0.1)
 
-        assert daemon_config.pid_file_path.exists()
-        pid = int(daemon_config.pid_file_path.read_text().strip())
+        assert daemon_config.pid_file_path_obj.exists()
+        pid = int(daemon_config.pid_file_path_obj.read_text().strip())
         assert pid == os.getpid()
 
         # Cleanup
@@ -220,7 +220,7 @@ class TestHooksDaemon:
 
         # Daemon should have shut down
         assert server_task.done()
-        assert not daemon_config.socket_path.exists()
+        assert not daemon_config.socket_path_obj.exists()
 
     @pytest.mark.anyio
     async def test_daemon_resets_idle_timer_on_request(
@@ -419,13 +419,13 @@ class TestHooksDaemon:
         server_task = asyncio.create_task(daemon.start())
         await asyncio.sleep(0.1)
 
-        assert daemon_config.socket_path.exists()
+        assert daemon_config.socket_path_obj.exists()
 
         await daemon.shutdown()
         await server_task
 
         # Socket should be removed
-        assert not daemon_config.socket_path.exists()
+        assert not daemon_config.socket_path_obj.exists()
 
     @pytest.mark.anyio
     async def test_daemon_handles_missing_event_field(
@@ -548,15 +548,15 @@ class TestHooksDaemon:
     ) -> None:
         """Test that daemon removes stale socket file on startup."""
         # Create stale socket file
-        daemon_config.socket_path.touch()
-        assert daemon_config.socket_path.exists()
+        daemon_config.socket_path_obj.touch()
+        assert daemon_config.socket_path_obj.exists()
 
         daemon = HooksDaemon(config=daemon_config, controller=front_controller)
         server_task = asyncio.create_task(daemon.start())
         await asyncio.sleep(0.1)
 
         # Socket should be recreated and functional
-        assert daemon_config.socket_path.exists()
+        assert daemon_config.socket_path_obj.exists()
 
         # Should be able to connect
         reader, writer = await asyncio.open_unix_connection(str(daemon_config.socket_path))
@@ -576,7 +576,7 @@ class TestHooksDaemon:
         await asyncio.sleep(0.1)
 
         # Check socket permissions
-        stat_result = daemon_config.socket_path.stat()
+        stat_result = daemon_config.socket_path_obj.stat()
         permissions = stat_result.st_mode & 0o777
         assert permissions == 0o660
 
@@ -600,8 +600,8 @@ class TestHooksDaemon:
         await server_task
 
         # Should have cleaned up properly
-        assert not daemon_config.socket_path.exists()
-        assert not daemon_config.pid_file_path.exists()
+        assert not daemon_config.socket_path_obj.exists()
+        assert not daemon_config.pid_file_path_obj.exists()
 
     @pytest.mark.anyio
     async def test_daemon_tracks_active_requests_count(
@@ -811,7 +811,7 @@ class TestHooksDaemon:
     ) -> None:
         """Test that daemon handles invalid PID file content."""
         # Create PID file with invalid content
-        daemon_config.pid_file_path.write_text("not-a-number")
+        daemon_config.pid_file_path_obj.write_text("not-a-number")
 
         daemon = HooksDaemon(config=daemon_config, controller=front_controller)
 
@@ -819,9 +819,9 @@ class TestHooksDaemon:
         server_task = asyncio.create_task(daemon.start())
         await asyncio.sleep(0.1)
 
-        assert daemon_config.pid_file_path.exists()
+        assert daemon_config.pid_file_path_obj.exists()
         # Should have written valid PID
-        pid = int(daemon_config.pid_file_path.read_text().strip())
+        pid = int(daemon_config.pid_file_path_obj.read_text().strip())
         assert pid == os.getpid()
 
         await daemon.shutdown()
@@ -833,7 +833,7 @@ class TestHooksDaemon:
     ) -> None:
         """Test that daemon handles PID file for still-running process."""
         # Write current process PID to file (simulating already running daemon)
-        daemon_config.pid_file_path.write_text(str(os.getpid()))
+        daemon_config.pid_file_path_obj.write_text(str(os.getpid()))
 
         daemon = HooksDaemon(config=daemon_config, controller=front_controller)
 
@@ -841,8 +841,8 @@ class TestHooksDaemon:
         server_task = asyncio.create_task(daemon.start())
         await asyncio.sleep(0.1)
 
-        assert daemon_config.pid_file_path.exists()
-        pid = int(daemon_config.pid_file_path.read_text().strip())
+        assert daemon_config.pid_file_path_obj.exists()
+        pid = int(daemon_config.pid_file_path_obj.read_text().strip())
         assert pid == os.getpid()
 
         await daemon.shutdown()

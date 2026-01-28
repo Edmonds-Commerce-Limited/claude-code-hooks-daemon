@@ -35,16 +35,26 @@ class TestBashErrorDetectorHandler:
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "npm run build"},
-            "tool_output": {"exit_code": 0, "stdout": "Build successful"},
+            "tool_response": {
+                "stdout": "Build successful",
+                "stderr": "",
+                "interrupted": False,
+                "isImage": False,
+            },
         }
         assert handler.matches(hook_input) is True
 
-    def test_matches_bash_with_error_exit_code(self, handler):
-        """Should match Bash tool with error exit code."""
+    def test_matches_bash_with_error(self, handler):
+        """Should match Bash tool with error."""
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "npm test"},
-            "tool_output": {"exit_code": 1, "stdout": "Tests failed"},
+            "tool_response": {
+                "stdout": "",
+                "stderr": "Tests failed",
+                "interrupted": False,
+                "isImage": False,
+            },
         }
         assert handler.matches(hook_input) is True
 
@@ -87,7 +97,12 @@ class TestBashErrorDetectorHandler:
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "npm run build"},
-            "tool_output": {"exit_code": 0, "stdout": "Build successful"},
+            "tool_response": {
+                "stdout": "Build successful",
+                "stderr": "",
+                "interrupted": False,
+                "isImage": False,
+            },
         }
         result = handler.handle(hook_input)
         assert result.decision == "allow"
@@ -97,31 +112,64 @@ class TestBashErrorDetectorHandler:
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "ls"},
-            "tool_output": {"exit_code": 0, "stdout": "file.txt"},
+            "tool_response": {
+                "stdout": "file.txt",
+                "stderr": "",
+                "interrupted": False,
+                "isImage": False,
+            },
         }
         result = handler.handle(hook_input)
         assert result.context == []
 
     # handle() - Error Cases
-    def test_handle_error_exit_code_provides_context(self, handler):
-        """Should provide context for non-zero exit codes."""
+    def test_handle_stderr_provides_context(self, handler):
+        """Should provide context when stderr has content."""
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "npm test"},
-            "tool_output": {"exit_code": 1, "stderr": "Test suite failed"},
+            "tool_response": {
+                "stdout": "",
+                "stderr": "Test suite failed",
+                "interrupted": False,
+                "isImage": False,
+            },
         }
         result = handler.handle(hook_input)
         assert result.decision == "allow"
         assert result.context  # Non-empty list
         context_text = "\n".join(result.context)
-        assert "1" in context_text  # Check for exit code number
+        assert "stderr" in context_text.lower()
+
+    def test_handle_interrupted_provides_context(self, handler):
+        """Should provide context when command was interrupted."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "long-running-task"},
+            "tool_response": {
+                "stdout": "Partial output",
+                "stderr": "",
+                "interrupted": True,
+                "isImage": False,
+            },
+        }
+        result = handler.handle(hook_input)
+        assert result.decision == "allow"
+        assert result.context  # Non-empty list
+        context_text = "\n".join(result.context)
+        assert "interrupted" in context_text.lower()
 
     def test_handle_error_in_stdout_provides_context(self, handler):
         """Should detect 'error' keyword in stdout."""
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "npm run lint"},
-            "tool_output": {"exit_code": 0, "stdout": "Error: Linting failed on 3 files"},
+            "tool_response": {
+                "stdout": "Error: Linting failed on 3 files",
+                "stderr": "",
+                "interrupted": False,
+                "isImage": False,
+            },
         }
         result = handler.handle(hook_input)
         assert result.decision == "allow"
@@ -134,20 +182,30 @@ class TestBashErrorDetectorHandler:
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "node script.js"},
-            "tool_output": {"exit_code": 0, "stderr": "Error: Cannot find module"},
+            "tool_response": {
+                "stdout": "",
+                "stderr": "Error: Cannot find module",
+                "interrupted": False,
+                "isImage": False,
+            },
         }
         result = handler.handle(hook_input)
         assert result.decision == "allow"
         assert result.context  # Non-empty list
         context_text = "\n".join(result.context).lower()
-        assert "error" in context_text
+        assert "error" in context_text or "stderr" in context_text
 
     def test_handle_warning_in_output_provides_context(self, handler):
         """Should detect 'warning' keyword in output."""
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "npm install"},
-            "tool_output": {"exit_code": 0, "stdout": "Warning: 2 deprecated packages"},
+            "tool_response": {
+                "stdout": "Warning: 2 deprecated packages",
+                "stderr": "",
+                "interrupted": False,
+                "isImage": False,
+            },
         }
         result = handler.handle(hook_input)
         assert result.decision == "allow"
@@ -160,7 +218,12 @@ class TestBashErrorDetectorHandler:
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "pytest"},
-            "tool_output": {"exit_code": 0, "stdout": "5 tests failed"},
+            "tool_response": {
+                "stdout": "5 tests failed",
+                "stderr": "",
+                "interrupted": False,
+                "isImage": False,
+            },
         }
         result = handler.handle(hook_input)
         assert result.decision == "allow"
@@ -173,7 +236,12 @@ class TestBashErrorDetectorHandler:
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "build.sh"},
-            "tool_output": {"exit_code": 0, "stdout": "ERROR: Build failed"},
+            "tool_response": {
+                "stdout": "ERROR: Build failed",
+                "stderr": "",
+                "interrupted": False,
+                "isImage": False,
+            },
         }
         result = handler.handle(hook_input)
         assert result.decision == "allow"
@@ -184,33 +252,39 @@ class TestBashErrorDetectorHandler:
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "npm run ci"},
-            "tool_output": {
-                "exit_code": 1,
+            "tool_response": {
                 "stdout": "Error: Linting failed",
                 "stderr": "Warning: Tests have warnings",
+                "interrupted": False,
+                "isImage": False,
             },
         }
         result = handler.handle(hook_input)
         assert result.context  # Non-empty list
         context_text = "\n".join(result.context).lower()
-        assert "error" in context_text or "'error'" in context_text
-        assert "warning" in context_text or "'warning'" in context_text
-        assert "1" in "\n".join(result.context)  # Exit code present
+        # Should detect both stderr and error keyword
+        assert "stderr" in context_text or "error" in context_text
+        assert "warning" in context_text
 
     def test_handle_includes_command_in_context(self, handler):
         """Context should include the command that was run."""
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "npm run build"},
-            "tool_output": {"exit_code": 1, "stderr": "Build failed"},
+            "tool_response": {
+                "stdout": "",
+                "stderr": "Build failed",
+                "interrupted": False,
+                "isImage": False,
+            },
         }
         result = handler.handle(hook_input)
         context_text = "\n".join(result.context)
         assert "npm run build" in context_text
 
     # Edge Cases
-    def test_handle_missing_tool_output(self, handler):
-        """Should handle missing tool_output gracefully."""
+    def test_handle_missing_tool_response(self, handler):
+        """Should handle missing tool_response gracefully."""
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "echo test"},
@@ -219,12 +293,12 @@ class TestBashErrorDetectorHandler:
         assert result.decision == "allow"
         assert result.context == []
 
-    def test_handle_empty_tool_output(self, handler):
-        """Should handle empty tool_output gracefully."""
+    def test_handle_empty_tool_response(self, handler):
+        """Should handle empty tool_response gracefully."""
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "echo test"},
-            "tool_output": {},
+            "tool_response": {},
         }
         result = handler.handle(hook_input)
         assert result.decision == "allow"
@@ -234,7 +308,7 @@ class TestBashErrorDetectorHandler:
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "echo test"},
-            "tool_output": {"exit_code": 0},
+            "tool_response": {"interrupted": False, "isImage": False},
         }
         result = handler.handle(hook_input)
         assert result.decision == "allow"
@@ -244,7 +318,12 @@ class TestBashErrorDetectorHandler:
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "echo test"},
-            "tool_output": {"exit_code": 0, "stdout": None, "stderr": None},
+            "tool_response": {
+                "stdout": None,
+                "stderr": None,
+                "interrupted": False,
+                "isImage": False,
+            },
         }
         result = handler.handle(hook_input)
         assert result.decision == "allow"
@@ -254,7 +333,12 @@ class TestBashErrorDetectorHandler:
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "npm test"},
-            "tool_output": {"exit_code": 1, "stderr": "Failed"},
+            "tool_response": {
+                "stdout": "",
+                "stderr": "Failed",
+                "interrupted": False,
+                "isImage": False,
+            },
         }
         result = handler.handle(hook_input)
         assert result.reason is None
@@ -264,7 +348,12 @@ class TestBashErrorDetectorHandler:
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "npm test"},
-            "tool_output": {"exit_code": 1, "stderr": "Failed"},
+            "tool_response": {
+                "stdout": "",
+                "stderr": "Failed",
+                "interrupted": False,
+                "isImage": False,
+            },
         }
         result = handler.handle(hook_input)
         assert result.guidance is None
@@ -274,7 +363,12 @@ class TestBashErrorDetectorHandler:
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "echo test"},
-            "tool_output": {"exit_code": 0},
+            "tool_response": {
+                "stdout": "test",
+                "stderr": "",
+                "interrupted": False,
+                "isImage": False,
+            },
         }
         result = handler.handle(hook_input)
         assert isinstance(result, HookResult)

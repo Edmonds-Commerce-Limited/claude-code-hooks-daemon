@@ -100,7 +100,82 @@ Asyncio Unix socket server that:
   "request_id": "uuid",
   "error": "Error message here"
 }
+
+// Validation Error (strict mode)
+{
+  "request_id": "uuid",
+  "error": "input_validation_failed",
+  "details": ["tool_response: required", "tool_output: unexpected field"],
+  "event_type": "PostToolUse"
+}
 ```
+
+### Input Validation
+
+**Added in**: v2.2.0
+
+**Purpose**: Catch malformed events and wrong field names (e.g., `tool_output` vs `tool_response`) at the server layer before dispatching to handlers.
+
+**Architecture**: Validation happens at the **front controller** (outermost layer) in `_process_request()`. Events are validated ONCE per request before any handler processing.
+
+**Implementation**:
+- JSON Schema validation using `jsonschema` library
+- Schemas defined in `src/claude_code_hooks_daemon/core/input_schemas.py`
+- Validators cached per event type (compilation happens once)
+- Performance: ~0.03ms overhead per event
+
+**Behavior Modes**:
+
+1. **Fail-Open (Default)**: Validation enabled, errors logged but processing continues
+   - Logs validation failures at WARNING level
+   - Dispatches to handlers normally
+   - Resilient to schema changes and edge cases
+
+2. **Fail-Closed (Strict Mode)**: Validation enabled, errors block processing
+   - Logs validation failures at ERROR level
+   - Returns error response to Claude Code
+   - Does NOT dispatch to handlers
+   - Use for debugging and testing
+
+3. **Disabled**: Validation completely off
+   - No validation overhead
+   - Use only if validation causes issues
+
+**Configuration**:
+```yaml
+daemon:
+  input_validation:
+    enabled: true              # Master switch (default: true)
+    strict_mode: false         # Fail-closed on errors (default: false)
+    log_validation_errors: true
+```
+
+**Environment Variables** (override config):
+- `HOOKS_DAEMON_INPUT_VALIDATION=true|false` - Enable/disable validation
+- `HOOKS_DAEMON_VALIDATION_STRICT=true|false` - Enable/disable strict mode
+
+**Example Validation Errors**:
+```
+PostToolUse validation failed:
+  - tool_response: required field missing
+  - tool_output: unexpected field (should be tool_response)
+
+PermissionRequest validation failed:
+  - permission_suggestions: required field missing
+  - permission_type: unexpected field
+```
+
+**Supported Event Types**:
+- PreToolUse, PostToolUse, SessionStart, SessionEnd, Stop
+- PreCompact, UserPromptSubmit, PermissionRequest, Notification
+- SubagentStop
+
+**Design Rationale**:
+- Validates at system boundary (fail fast)
+- Single source of truth for valid event structure
+- Handlers can trust input is well-formed
+- Catches bugs during development without blocking production
+- Performance overhead is negligible (~0.03ms)
 
 ### Init Script
 
@@ -157,12 +232,18 @@ send_request "$REQUEST_JSON"
 **File**: `.claude/hooks-daemon.yaml`
 
 ```yaml
-version: 1.0
+version: 2.0
 
 # Daemon configuration
 daemon:
   idle_timeout_seconds: 600  # Auto-shutdown after 10 minutes
   log_level: INFO
+
+  # Input validation (v2.2.0+)
+  input_validation:
+    enabled: true              # Validate hook inputs (default: true)
+    strict_mode: false         # Fail-closed on errors (default: false)
+    log_validation_errors: true
 
 # Handler configuration
 handlers:

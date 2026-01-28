@@ -3,21 +3,25 @@
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
+from claude_code_hooks_daemon.config.models import LogLevel
 from claude_code_hooks_daemon.daemon.config import DaemonConfig
 
 
 class TestDaemonConfig:
-    """Test suite for DaemonConfig."""
+    """Test suite for DaemonConfig (Pydantic version)."""
 
     def test_creates_with_required_fields(self) -> None:
         """Test DaemonConfig creation with required fields."""
         config = DaemonConfig(socket_path=Path("/tmp/test.sock"))
 
-        assert config.socket_path == Path("/tmp/test.sock")
+        # Pydantic stores paths as strings
+        assert config.socket_path == "/tmp/test.sock"
+        assert config.socket_path_obj == Path("/tmp/test.sock")
         assert config.idle_timeout_seconds == 600  # Default
         assert config.pid_file_path is None  # Default
-        assert config.log_level == "INFO"  # Default
+        assert config.log_level == LogLevel.INFO  # Default
 
     def test_creates_with_all_fields(self) -> None:
         """Test DaemonConfig creation with all fields specified."""
@@ -28,40 +32,48 @@ class TestDaemonConfig:
             log_level="DEBUG",
         )
 
-        assert config.socket_path == Path("/tmp/test.sock")
+        # Pydantic stores paths as strings
+        assert config.socket_path == "/tmp/test.sock"
+        assert config.socket_path_obj == Path("/tmp/test.sock")
         assert config.idle_timeout_seconds == 300
-        assert config.pid_file_path == Path("/tmp/test.pid")
-        assert config.log_level == "DEBUG"
+        assert config.pid_file_path == "/tmp/test.pid"
+        assert config.pid_file_path_obj == Path("/tmp/test.pid")
+        assert config.log_level == LogLevel.DEBUG
 
-    def test_converts_string_paths_to_path_objects(self) -> None:
-        """Test that string paths are converted to Path objects."""
+    def test_converts_string_paths_to_strings(self) -> None:
+        """Test that Path objects are converted to strings for storage."""
         config = DaemonConfig(
-            socket_path="/tmp/test.sock",  # type: ignore
-            pid_file_path="/tmp/test.pid",  # type: ignore
+            socket_path="/tmp/test.sock",
+            pid_file_path="/tmp/test.pid",
         )
 
-        assert isinstance(config.socket_path, Path)
-        assert isinstance(config.pid_file_path, Path)
-        assert config.socket_path == Path("/tmp/test.sock")
-        assert config.pid_file_path == Path("/tmp/test.pid")
+        # Pydantic stores as strings
+        assert isinstance(config.socket_path, str)
+        assert isinstance(config.pid_file_path, str)
+        assert config.socket_path == "/tmp/test.sock"
+        assert config.pid_file_path == "/tmp/test.pid"
+
+        # But properties return Path objects
+        assert isinstance(config.socket_path_obj, Path)
+        assert isinstance(config.pid_file_path_obj, Path)
 
     def test_rejects_negative_timeout(self) -> None:
         """Test that negative timeout is rejected."""
-        with pytest.raises(ValueError, match="idle_timeout_seconds must be positive"):
+        with pytest.raises(ValidationError, match="greater than or equal to 1"):
             DaemonConfig(socket_path=Path("/tmp/test.sock"), idle_timeout_seconds=-1)
 
     def test_rejects_zero_timeout(self) -> None:
         """Test that zero timeout is rejected."""
-        with pytest.raises(ValueError, match="idle_timeout_seconds must be positive"):
+        with pytest.raises(ValidationError, match="greater than or equal to 1"):
             DaemonConfig(socket_path=Path("/tmp/test.sock"), idle_timeout_seconds=0)
 
     def test_rejects_invalid_log_level(self) -> None:
         """Test that invalid log levels are rejected."""
-        with pytest.raises(ValueError, match="Invalid log_level"):
+        with pytest.raises(ValidationError, match="Input should be"):
             DaemonConfig(socket_path=Path("/tmp/test.sock"), log_level="INVALID")
 
     def test_accepts_valid_log_levels(self) -> None:
         """Test that all valid log levels are accepted."""
         for level in ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]:
             config = DaemonConfig(socket_path=Path("/tmp/test.sock"), log_level=level)
-            assert config.log_level == level
+            assert config.log_level == LogLevel(level)

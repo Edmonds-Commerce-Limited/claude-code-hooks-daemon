@@ -42,17 +42,20 @@ class BashErrorDetectorHandler(Handler):
         Returns:
             HookResult with context if issues detected, otherwise silent allow
         """
-        tool_output = hook_input.get("tool_output", {})
-        if not tool_output:
+        # Real Claude Code events use "tool_response" (not "tool_output")
+        tool_response = hook_input.get("tool_response", {})
+        if not tool_response:
             return HookResult(decision=Decision.ALLOW)
 
-        # Handle case where tool_output is a string (shouldn't happen in production)
-        if not isinstance(tool_output, dict):
+        # Handle case where tool_response is a string (shouldn't happen in production)
+        if not isinstance(tool_response, dict):
             return HookResult(decision=Decision.ALLOW)
 
-        exit_code = tool_output.get("exit_code", 0)
-        stdout = tool_output.get("stdout", "") or ""
-        stderr = tool_output.get("stderr", "") or ""
+        # Real Bash events have: stdout, stderr, interrupted, isImage
+        # NO exit_code field exists in real events
+        stdout = tool_response.get("stdout", "") or ""
+        stderr = tool_response.get("stderr", "") or ""
+        interrupted = tool_response.get("interrupted", False)
 
         # Combine output for keyword search
         combined_output = (stdout + "\n" + stderr).lower()
@@ -60,8 +63,13 @@ class BashErrorDetectorHandler(Handler):
         # Detect issues
         issues = []
 
-        if exit_code != 0:
-            issues.append(f"Command exited with code {exit_code}")
+        # Check if command was interrupted
+        if interrupted:
+            issues.append("Command was interrupted")
+
+        # Check if stderr has content (often indicates errors)
+        if stderr.strip():
+            issues.append("Command produced stderr output")
 
         # Case-insensitive keyword detection
         error_keywords = ["error", "failed", "failure", "fatal"]

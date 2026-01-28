@@ -618,8 +618,39 @@ class StrictHandler(Handler):
                 "Command blocked. If absolutely necessary, include:\n"
                 f'"{self.ESCAPE_HATCH}"'
             )
-        )
+
+### 5. Trust Input Validation (v2.2.0+)
+
+**Input validation is enabled by default** since v2.2.0. The front controller validates all events before dispatching to handlers.
+
+✅ What handlers can trust:
+- Field names are correct (`tool_response` not `tool_output`)
+- Required fields are present
+- Event structure matches documented schema
+- Type safety for core fields
+
+❌ What handlers still need to check:
+- Business logic (e.g., "is this git command destructive?")
+- Content validation (e.g., "does this contain banned words?")
+- Resource limits (e.g., "is this file too large?")
+
+**Example**: PostToolUse handler
+```python
+def handle(self, hook_input: dict) -> HookResult:
+    # ✅ No need to check if tool_response exists - validation guarantees it
+    tool_response = hook_input["tool_response"]
+
+    # ✅ No need to handle tool_output typo - validation rejects it
+    stderr = tool_response.get("stderr", "")
+
+    # ❌ Still need business logic
+    if "error" in stderr.lower():
+        return HookResult(decision="deny", reason="Command failed")
+
+    return HookResult(decision="allow")
 ```
+
+**When validation is disabled**: Handlers should still defensively check for required fields using `.get()` with defaults
 
 ## Checklist
 

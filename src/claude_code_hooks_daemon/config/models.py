@@ -190,6 +190,34 @@ class PluginsConfig(BaseModel):
     plugins: list[PluginConfig] = Field(default_factory=list, description="Plugin configs")
 
 
+class InputValidationConfig(BaseModel):
+    """Configuration for input validation.
+
+    Input validation catches malformed events and wrong field names (e.g., tool_output
+    vs tool_response) at the server layer before dispatching to handlers.
+
+    Attributes:
+        enabled: Enable input schema validation
+        strict_mode: Fail-closed (return error) vs fail-open (log warning)
+        log_validation_errors: Log validation failures
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    enabled: bool = Field(
+        default=True,
+        description="Enable input validation to catch wrong field names",
+    )
+    strict_mode: bool = Field(
+        default=False,
+        description="Fail-closed on validation errors (default: fail-open)",
+    )
+    log_validation_errors: bool = Field(
+        default=True,
+        description="Log validation errors to daemon logs",
+    )
+
+
 class DaemonConfig(BaseModel):
     """Configuration for the daemon server.
 
@@ -201,6 +229,7 @@ class DaemonConfig(BaseModel):
         log_buffer_size: Size of in-memory log buffer
         request_timeout_seconds: Request processing timeout
         self_install_mode: Whether daemon runs from project root (vs .claude/hooks-daemon/)
+        input_validation: Input validation configuration
     """
 
     model_config = ConfigDict(extra="allow")
@@ -210,8 +239,8 @@ class DaemonConfig(BaseModel):
         description="Idle timeout in seconds",
     )
     log_level: LogLevel = Field(default=LogLevel.INFO, description="Log level")
-    socket_path: str | None = Field(default=None, description="Custom socket path")
-    pid_file_path: str | None = Field(default=None, description="Custom PID file path")
+    socket_path: str | Path | None = Field(default=None, description="Custom socket path")
+    pid_file_path: str | Path | None = Field(default=None, description="Custom PID file path")
     log_buffer_size: Annotated[int, Field(ge=100, le=100000)] = Field(
         default=1000,
         description="In-memory log buffer size",
@@ -228,6 +257,28 @@ class DaemonConfig(BaseModel):
         default=False,
         description="Enable hello world test handlers",
     )
+    input_validation: InputValidationConfig = Field(
+        default_factory=InputValidationConfig,
+        description="Input validation configuration",
+    )
+
+    @field_validator("socket_path", "pid_file_path", mode="before")
+    @classmethod
+    def convert_path_to_str(cls, v: str | Path | None) -> str | None:
+        """Convert Path objects to strings for storage."""
+        if isinstance(v, Path):
+            return str(v)
+        return v
+
+    @property
+    def socket_path_obj(self) -> Path | None:
+        """Get socket_path as Path object."""
+        return Path(self.socket_path) if self.socket_path else None
+
+    @property
+    def pid_file_path_obj(self) -> Path | None:
+        """Get pid_file_path as Path object."""
+        return Path(self.pid_file_path) if self.pid_file_path else None
 
     def get_socket_path(self, workspace_root: Path) -> Path:
         """Get the socket path, using default if not specified.

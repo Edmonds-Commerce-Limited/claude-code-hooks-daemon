@@ -1,4 +1,4 @@
-version: "1.0"
+version: "2.0"
 
 # Daemon configuration
 daemon:
@@ -7,6 +7,12 @@ daemon:
   self_install_mode: true  # Self-install: daemon runs from project root (not .claude/hooks-daemon/)
 
   enable_hello_world_handlers: false  # Disabled - using real handlers instead
+
+  # Input validation (v2.2.0+) - Catch malformed events at front controller layer
+  input_validation:
+    enabled: true              # Validate hook inputs (recommended)
+    strict_mode: true          # Fail-closed: return errors on validation failures
+    log_validation_errors: true
 
 # Built-in handler configuration
 # Handlers run in priority order (lower number = earlier execution)

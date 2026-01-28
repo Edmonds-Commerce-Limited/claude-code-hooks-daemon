@@ -269,11 +269,17 @@ The installer will warn if it detects this pattern.
 **File**: `.claude/hooks-daemon.yaml`
 
 ```yaml
-version: "1.0"
+version: "2.0"
 
 daemon:
   idle_timeout_seconds: 600  # Auto-shutdown after 10 minutes idle
   log_level: INFO            # DEBUG, INFO, WARNING, ERROR
+
+  # Input validation (v2.2.0+) - Catch malformed events
+  input_validation:
+    enabled: true            # Validate hook inputs (recommended)
+    strict_mode: false       # Fail-closed on errors (default: fail-open)
+    log_validation_errors: true
 
 handlers:
   # PreToolUse handlers - Run before tool execution
