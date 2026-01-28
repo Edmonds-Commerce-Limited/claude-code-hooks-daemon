@@ -17,9 +17,6 @@ if __name__ == "__main__":
 
 from claude_code_hooks_daemon.config import ConfigLoader
 from claude_code_hooks_daemon.core import FrontController
-from claude_code_hooks_daemon.handlers.user_prompt_submit.auto_continue import (
-    AutoContinueHandler,
-)
 from claude_code_hooks_daemon.handlers.user_prompt_submit.git_context_injector import (
     GitContextInjectorHandler,
 )
@@ -36,7 +33,6 @@ def get_builtin_handlers() -> dict[str, type]:
     """
     return {
         "git_context_injector": GitContextInjectorHandler,
-        "auto_continue": AutoContinueHandler,
     }
 
 

@@ -18,7 +18,7 @@ class TestGetBuiltinHandlers:
         handlers = get_builtin_handlers()
 
         assert isinstance(handlers, dict)
-        assert len(handlers) == 2  # git_context_injector and auto_continue
+        assert len(handlers) == 1  # git_context_injector only
 
     def test_contains_all_expected_handlers(self) -> None:
         """All expected handler names are present."""
@@ -26,7 +26,6 @@ class TestGetBuiltinHandlers:
 
         expected = [
             "git_context_injector",
-            "auto_continue",
         ]
 
         for handler_name in expected:
@@ -36,15 +35,11 @@ class TestGetBuiltinHandlers:
         """Handler classes can be instantiated."""
         handlers = get_builtin_handlers()
 
-        from claude_code_hooks_daemon.handlers.user_prompt_submit.auto_continue import (
-            AutoContinueHandler,
-        )
         from claude_code_hooks_daemon.handlers.user_prompt_submit.git_context_injector import (
             GitContextInjectorHandler,
         )
 
         assert handlers["git_context_injector"] == GitContextInjectorHandler
-        assert handlers["auto_continue"] == AutoContinueHandler
 
 
 class TestLoadConfigSafe:
@@ -109,7 +104,6 @@ class TestMainFunction:
             "handlers": {
                 "user_prompt_submit": {
                     "git_context_injector": {"enabled": True, "priority": 50},
-                    "auto_continue": {"enabled": False},
                 }
             },
             "daemon": {},
@@ -120,7 +114,7 @@ class TestMainFunction:
 
         main()
 
-        # Should register git_context_injector but not auto_continue
+        # Should register git_context_injector
         register_calls = mock_fc_instance.register.call_args_list
         assert len(register_calls) >= 1
 
@@ -202,15 +196,14 @@ class TestMainFunction:
 
     @patch("claude_code_hooks_daemon.hooks.user_prompt_submit.FrontController")
     @patch("claude_code_hooks_daemon.hooks.user_prompt_submit.load_config_safe")
-    def test_multiple_handlers_registered(
+    def test_handler_registered_with_custom_priority(
         self, mock_load_config: Mock, mock_fc_class: Mock
     ) -> None:
-        """Multiple enabled handlers are all registered."""
+        """Handler registered with custom priority from config."""
         config = {
             "handlers": {
                 "user_prompt_submit": {
                     "git_context_injector": {"enabled": True, "priority": 10},
-                    "auto_continue": {"enabled": True, "priority": 20},
                 }
             },
             "daemon": {},
@@ -222,13 +215,11 @@ class TestMainFunction:
         main()
 
         register_calls = mock_fc_instance.register.call_args_list
-        assert len(register_calls) == 2
+        assert len(register_calls) == 1
 
-        registered_handlers = [call[0][0] for call in register_calls]
-        priorities = {type(h).__name__: h.priority for h in registered_handlers}
-
-        assert priorities["GitContextInjectorHandler"] == 10
-        assert priorities["AutoContinueHandler"] == 20
+        registered_handler = register_calls[0][0][0]
+        assert type(registered_handler).__name__ == "GitContextInjectorHandler"
+        assert registered_handler.priority == 10
 
     @patch("claude_code_hooks_daemon.hooks.user_prompt_submit.FrontController")
     @patch("claude_code_hooks_daemon.hooks.user_prompt_submit.load_config_safe")
@@ -250,7 +241,6 @@ class TestMainFunction:
             "handlers": {
                 "user_prompt_submit": {
                     "git_context_injector": {"enabled": False},
-                    "auto_continue": {"enabled": False},
                 }
             },
             "daemon": {},

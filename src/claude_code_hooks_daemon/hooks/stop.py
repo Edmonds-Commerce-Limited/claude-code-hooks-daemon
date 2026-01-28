@@ -17,6 +17,9 @@ if __name__ == "__main__":
 
 from claude_code_hooks_daemon.config import ConfigLoader
 from claude_code_hooks_daemon.core import FrontController
+from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
+    AutoContinueStopHandler,
+)
 from claude_code_hooks_daemon.handlers.stop.hello_world import HelloWorldStopHandler
 from claude_code_hooks_daemon.handlers.stop.task_completion_checker import (
     TaskCompletionCheckerHandler,
@@ -30,6 +33,7 @@ def get_builtin_handlers() -> dict[str, type]:
         Dictionary mapping handler names to handler classes
     """
     return {
+        "auto_continue_stop": AutoContinueStopHandler,
         "task_completion_checker": TaskCompletionCheckerHandler,
     }
 

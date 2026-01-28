@@ -18,22 +18,27 @@ class TestGetBuiltinHandlers:
         handlers = get_builtin_handlers()
 
         assert isinstance(handlers, dict)
-        assert len(handlers) == 1  # task_completion_checker
+        assert len(handlers) == 2  # auto_continue_stop and task_completion_checker
 
-    def test_contains_task_completion_checker_handler(self) -> None:
-        """Task completion checker handler is present."""
+    def test_contains_expected_handlers(self) -> None:
+        """Expected handlers are present."""
         handlers = get_builtin_handlers()
 
+        assert "auto_continue_stop" in handlers
         assert "task_completion_checker" in handlers
 
     def test_handler_classes_are_importable(self) -> None:
         """Handler classes can be instantiated."""
         handlers = get_builtin_handlers()
 
+        from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
+            AutoContinueStopHandler,
+        )
         from claude_code_hooks_daemon.handlers.stop.task_completion_checker import (
             TaskCompletionCheckerHandler,
         )
 
+        assert handlers["auto_continue_stop"] == AutoContinueStopHandler
         assert handlers["task_completion_checker"] == TaskCompletionCheckerHandler
 
 
@@ -98,7 +103,8 @@ class TestMainFunction:
         config = {
             "handlers": {
                 "stop": {
-                    "task_completion_checker": {"enabled": True, "priority": 50},
+                    "auto_continue_stop": {"enabled": True},
+                    "task_completion_checker": {"enabled": True},
                 }
             },
             "daemon": {},
@@ -110,11 +116,12 @@ class TestMainFunction:
         main()
 
         register_calls = mock_fc_instance.register.call_args_list
-        assert len(register_calls) >= 1
+        assert len(register_calls) == 2
 
-        registered_handler = register_calls[0][0][0]
-        assert hasattr(registered_handler, "priority")
-        assert registered_handler.priority == 50
+        # Both handlers should be registered
+        handler_names = [type(call[0][0]).__name__ for call in register_calls]
+        assert "AutoContinueStopHandler" in handler_names
+        assert "TaskCompletionCheckerHandler" in handler_names
 
     @patch("claude_code_hooks_daemon.hooks.stop.FrontController")
     @patch("claude_code_hooks_daemon.hooks.stop.load_config_safe")
@@ -148,6 +155,7 @@ class TestMainFunction:
         config = {
             "handlers": {
                 "stop": {
+                    "auto_continue_stop": {"enabled": False},
                     "task_completion_checker": {"enabled": True, "priority": 99},
                 }
             },
@@ -160,7 +168,7 @@ class TestMainFunction:
         main()
 
         register_calls = mock_fc_instance.register.call_args_list
-        assert len(register_calls) >= 1
+        assert len(register_calls) == 1
 
         registered_handler = register_calls[0][0][0]
         assert registered_handler.priority == 99
@@ -196,6 +204,7 @@ class TestMainFunction:
         config = {
             "handlers": {
                 "stop": {
+                    "auto_continue_stop": {"enabled": False},
                     "task_completion_checker": {"enabled": False},
                 }
             },
