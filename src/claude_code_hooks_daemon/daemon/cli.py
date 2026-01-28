@@ -111,15 +111,21 @@ def _validate_installation(project_root: Path) -> Path:
     config_file = claude_dir / "hooks-daemon.yaml"
 
     # Load config to check self_install_mode
+    # FAIL FAST: Invalid config must be surfaced immediately
     self_install = False
     if config_file.exists():
         try:
             config_dict = ConfigLoader.load(config_file)
             config = Config.model_validate(config_dict)
             self_install = config.daemon.self_install_mode
-        except Exception:
-            # Config load failure - treat as normal install mode
-            pass
+        except Exception as e:
+            # FAIL FAST: Config validation errors must abort with clear message
+            print(
+                f"ERROR: Invalid configuration in {config_file}:\n\n{e}\n\n"
+                "Fix the configuration file and try again.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     # Check if this is the hooks-daemon repo without self_install_mode
     if (project_root / ".git").exists() and is_hooks_daemon_repo(project_root):
@@ -280,7 +286,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         "stop": {k: v.model_dump() for k, v in config.handlers.stop.items()},
         "subagent_stop": {k: v.model_dump() for k, v in config.handlers.subagent_stop.items()},
     }
-    controller.initialise(handler_config)
+    controller.initialise(handler_config, workspace_root=project_path)
 
     # Get the daemon config with proper paths
     daemon_config = config.daemon
