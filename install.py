@@ -11,46 +11,186 @@ This script:
 import argparse
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from datetime import datetime
 
 
+class InstallationError(Exception):
+    """Error during installation validation."""
+
+    pass
+
+
+def is_hooks_daemon_repo(directory: Path) -> bool:
+    """Check if directory is the hooks-daemon repository by git remote.
+
+    Uses git remote URL as source of truth rather than magic path detection.
+    This correctly identifies the hooks-daemon repo even if cloned with a
+    different directory name.
+
+    Args:
+        directory: Directory to check
+
+    Returns:
+        True if directory is the hooks-daemon repository
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(directory), "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return False
+        remote_url = result.stdout.strip().lower()
+        # Match any of the known hooks-daemon repo URLs
+        hooks_daemon_patterns = [
+            "claude-code-hooks-daemon",
+            "claude_code_hooks_daemon",
+        ]
+        return any(pattern in remote_url for pattern in hooks_daemon_patterns)
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return False
+
+
+def _load_config_safe(project_root: Path) -> dict | None:
+    """Safely load config file without raising exceptions.
+
+    Args:
+        project_root: Project root directory
+
+    Returns:
+        Config dict or None if loading fails
+    """
+    import yaml
+
+    config_file = project_root / ".claude" / "hooks-daemon.yaml"
+    if not config_file.exists():
+        return None
+
+    try:
+        with config_file.open() as f:
+            return yaml.safe_load(f)
+    except Exception:
+        return None
+
+
+def _validate_not_nested(project_root: Path) -> None:
+    """Fail fast if nested installation detected.
+
+    Checks for two scenarios:
+    1. Existing nested structure (.claude/hooks-daemon/.claude)
+    2. Trying to install in the hooks-daemon repo without self_install_mode
+
+    Args:
+        project_root: Project root to validate
+
+    Raises:
+        InstallationError: If nested installation detected
+    """
+    # Check for existing nested structure
+    nested_claude = project_root / ".claude" / "hooks-daemon" / ".claude"
+    if nested_claude.exists():
+        raise InstallationError(
+            f"NESTED INSTALLATION DETECTED!\n"
+            f"Found: {nested_claude}\n"
+            f"Remove {project_root / '.claude' / 'hooks-daemon'} and reinstall."
+        )
+
+    # Check if we're inside an existing hooks-daemon directory
+    hooks_daemon_marker = project_root / ".claude" / "hooks-daemon" / "src"
+    if hooks_daemon_marker.exists():
+        # Check for self_install_mode in the outer project's config
+        config = _load_config_safe(project_root)
+        if config:
+            daemon_config = config.get("daemon", {})
+            if daemon_config.get("self_install_mode", False):
+                return  # Self-install mode enabled, allow
+
+        raise InstallationError(
+            f"Cannot install: appears to be inside an existing hooks-daemon installation.\n"
+            f"Found daemon source at: {hooks_daemon_marker}\n"
+            f"To develop on hooks-daemon itself, set 'self_install_mode: true' in config."
+        )
+
+
+def validate_installation_target(project_root: Path, self_install_requested: bool = False) -> None:
+    """Comprehensive pre-flight validation before installation.
+
+    Validates:
+    1. Not inside an existing hooks-daemon installation
+    2. Not the hooks-daemon repo itself (unless self_install_mode)
+    3. No nested structure exists
+
+    Args:
+        project_root: Project root to install into
+        self_install_requested: Whether --self-install flag was passed
+
+    Raises:
+        InstallationError: If installation would create invalid state
+    """
+    # 1. Check not inside existing hooks-daemon installation
+    for parent in project_root.parents:
+        if (parent / ".claude" / "hooks-daemon").exists():
+            raise InstallationError(
+                f"Cannot install: {project_root} is inside an existing installation at {parent}"
+            )
+
+    # 2. Check git remote if this looks like a git repo
+    if (project_root / ".git").exists():
+        if is_hooks_daemon_repo(project_root):
+            # Check if self-install is being requested or already configured
+            config = _load_config_safe(project_root)
+            has_self_install_config = (
+                config
+                and config.get("daemon", {}).get("self_install_mode", False)
+            )
+
+            if not self_install_requested and not has_self_install_config:
+                raise InstallationError(
+                    "This is the hooks-daemon repository.\n"
+                    "To install for development, use --self-install flag or add to "
+                    ".claude/hooks-daemon.yaml:\n"
+                    "  daemon:\n"
+                    "    self_install_mode: true"
+                )
+
+    # 3. Check for nested structure
+    _validate_not_nested(project_root)
+
+
 def find_project_root(explicit_root: Path | None = None) -> Path:
     """Find project root by looking for .claude directory.
+
+    No magic path detection - uses explicit paths and git remote as source of truth.
 
     Args:
         explicit_root: Explicitly specified project root (overrides detection)
 
     Returns:
         Path to project root directory
+
+    Raises:
+        InstallationError: If nested installation detected
     """
     if explicit_root:
-        return explicit_root.resolve()
+        resolved = explicit_root.resolve()
+        # Validate but don't check self_install_mode yet (that's done in main)
+        return resolved
 
     current = Path.cwd()
 
-    # If we're inside a directory named 'hooks-daemon', assume we're in the daemon
-    # repo and should look in parent for project .claude directory
-    if current.name == "hooks-daemon" or "hooks-daemon" in current.parts:
-        # Search upward from parent, skipping any .claude inside hooks-daemon
-        for parent in current.parents:
-            # Skip if this parent is still inside hooks-daemon
-            if "hooks-daemon" in parent.parts:
-                continue
-            if (parent / ".claude").exists():
-                return parent
+    # Search upward for .claude directory
+    for candidate in [current, *current.parents]:
+        claude_dir = candidate / ".claude"
+        if claude_dir.exists():
+            return candidate
 
-    # Check current directory first (but only if not inside hooks-daemon)
-    if (current / ".claude").exists() and "hooks-daemon" not in current.parts:
-        return current
-
-    # Search upward through parents
-    for parent in current.parents:
-        if (parent / ".claude").exists():
-            return parent
-
-    # If not found, use current directory and we'll create .claude
+    # Not found - return current directory and we'll create .claude
+    # (validation happens in main() after we know about --self-install flag)
     return current
 
 
@@ -990,12 +1130,22 @@ def main() -> int:
 
     print(f"📁 Project root: {project_root}")
 
+    # Find daemon directory (where this script lives)
+    daemon_dir = Path(__file__).parent.resolve()
+
+    # Detect self-installation early (needed for validation)
+    self_install = args.self_install or (daemon_dir == project_root)
+
+    # Pre-flight validation - fail fast if installation would create invalid state
+    try:
+        validate_installation_target(project_root, self_install_requested=self_install)
+    except InstallationError as e:
+        print(f"❌ Installation Error:\n{e}")
+        return 1
+
     # Create .claude directory if it doesn't exist
     claude_dir = project_root / ".claude"
     claude_dir.mkdir(exist_ok=True)
-
-    # Find daemon directory (where this script lives)
-    daemon_dir = Path(__file__).parent.resolve()
 
     # Backup existing hooks
     backup_existing_hooks(project_root)
@@ -1003,8 +1153,7 @@ def main() -> int:
     # Show MANDATORY .gitignore instructions (never writes file automatically)
     show_gitignore_instructions(project_root, daemon_dir)
 
-    # Detect self-installation (installer running from daemon repo itself)
-    self_install = args.self_install or (daemon_dir == project_root)
+    # Log self-installation mode if applicable
     if self_install:
         print("🔄 Self-installation mode detected")
 

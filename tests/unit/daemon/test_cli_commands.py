@@ -94,6 +94,35 @@ class TestGetProjectPath:
             get_project_path()
         assert exc_info.value.code == 1
 
+    def test_continues_search_when_validation_fails(self, tmp_path: Path, monkeypatch: Any) -> None:
+        """get_project_path continues searching upward when validation fails.
+
+        This tests the case where the first .claude directory found has an invalid
+        installation (e.g., nested installation), so it continues searching for
+        a valid installation higher in the tree.
+        """
+        # Create a valid installation in parent
+        parent_claude = tmp_path / ".claude"
+        parent_claude.mkdir()
+        parent_hooks = parent_claude / "hooks-daemon"
+        parent_hooks.mkdir()
+        (parent_claude / "hooks-daemon.yaml").write_text(
+            "version: '1.0'\ndaemon:\n  log_level: INFO\n"
+        )
+
+        # Create a nested/invalid installation in subdir
+        subdir = tmp_path / "child"
+        subdir.mkdir()
+        child_claude = subdir / ".claude"
+        child_claude.mkdir()
+        # This .claude directory has no hooks-daemon and is invalid
+        # Validation will fail and search should continue upward
+
+        monkeypatch.chdir(subdir)
+        result = get_project_path()
+        # Should find the valid parent installation, not the invalid child
+        assert result == tmp_path
+
 
 class TestSendDaemonRequest:
     """Tests for send_daemon_request function."""

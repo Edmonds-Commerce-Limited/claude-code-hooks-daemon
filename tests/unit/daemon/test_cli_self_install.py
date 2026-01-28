@@ -1,6 +1,7 @@
 """Tests for CLI self-install mode support."""
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -108,3 +109,63 @@ class TestSelfInstallMode:
         # Should fail validation (no hooks-daemon directory)
         with pytest.raises(SystemExit):
             _validate_installation(tmp_path)
+
+
+class TestNestedInstallationDetection:
+    """Tests for nested installation detection in CLI validation."""
+
+    def test_validate_fails_for_nested_installation(self, tmp_path: Path) -> None:
+        """Validation fails when nested .claude/hooks-daemon/.claude exists."""
+        claude_dir = tmp_path / ".claude"
+        nested_claude = claude_dir / "hooks-daemon" / ".claude"
+        nested_claude.mkdir(parents=True)
+
+        # Should fail validation due to nested installation
+        with pytest.raises(SystemExit):
+            _validate_installation(tmp_path)
+
+
+class TestHooksDaemonRepoDetection:
+    """Tests for hooks-daemon repository detection in CLI validation."""
+
+    def test_validate_fails_for_hooks_daemon_repo_without_self_install(
+        self, tmp_path: Path
+    ) -> None:
+        """Validation fails for hooks-daemon repo without self_install_mode."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (tmp_path / ".git").mkdir()
+
+        # Create config without self_install_mode
+        config_file = claude_dir / "hooks-daemon.yaml"
+        config_file.write_text("version: '1.0'\ndaemon:\n  log_level: INFO\n")
+
+        # Mock is_hooks_daemon_repo to return True
+        with patch("claude_code_hooks_daemon.daemon.cli.is_hooks_daemon_repo") as mock_check:
+            mock_check.return_value = True
+
+            # Should fail validation
+            with pytest.raises(SystemExit):
+                _validate_installation(tmp_path)
+
+    def test_validate_succeeds_for_hooks_daemon_repo_with_self_install(
+        self, tmp_path: Path
+    ) -> None:
+        """Validation succeeds for hooks-daemon repo with self_install_mode."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (tmp_path / ".git").mkdir()
+
+        # Create config with self_install_mode
+        config_file = claude_dir / "hooks-daemon.yaml"
+        config_file.write_text(
+            "version: '1.0'\ndaemon:\n  log_level: INFO\n  self_install_mode: true\n"
+        )
+
+        # Mock is_hooks_daemon_repo to return True
+        with patch("claude_code_hooks_daemon.daemon.cli.is_hooks_daemon_repo") as mock_check:
+            mock_check.return_value = True
+
+            # Should succeed validation
+            result = _validate_installation(tmp_path)
+            assert result == tmp_path

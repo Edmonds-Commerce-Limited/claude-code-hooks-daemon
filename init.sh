@@ -83,6 +83,58 @@ fi
 # Set daemon root directory (defaults to .claude/hooks-daemon, can be overridden)
 HOOKS_DAEMON_ROOT_DIR="${HOOKS_DAEMON_ROOT_DIR:-$PROJECT_PATH/.claude/hooks-daemon}"
 
+#
+# Nested installation check
+#
+# Detects if hooks-daemon has been installed inside itself creating
+# .claude/hooks-daemon/.claude/hooks-daemon structure
+#
+if [[ -d "$PROJECT_PATH/.claude/hooks-daemon/.claude" ]]; then
+    emit_hook_error "Unknown" "nested_installation" \
+        "NESTED INSTALLATION DETECTED! Found: $PROJECT_PATH/.claude/hooks-daemon/.claude. Remove $PROJECT_PATH/.claude/hooks-daemon and reinstall."
+    exit 0
+fi
+
+#
+# Git remote detection for self-install validation
+#
+# If this is the hooks-daemon repo itself (detected by git remote),
+# require self_install_mode in config or HOOKS_DAEMON_ROOT_DIR override
+#
+is_hooks_daemon_repo() {
+    local remote_url
+    remote_url=$(git -C "$PROJECT_PATH" remote get-url origin 2>/dev/null || echo "")
+    remote_url=$(echo "$remote_url" | tr '[:upper:]' '[:lower:]')
+
+    if [[ "$remote_url" == *"claude-code-hooks-daemon"* ]] || \
+       [[ "$remote_url" == *"claude_code_hooks_daemon"* ]]; then
+        return 0  # true - is hooks-daemon repo
+    fi
+    return 1  # false - not hooks-daemon repo
+}
+
+# Check if we're in the hooks-daemon repo without proper configuration
+if [[ -d "$PROJECT_PATH/.git" ]]; then
+    if is_hooks_daemon_repo; then
+        # Check if self_install_mode is enabled in config or env override is set
+        has_self_install=false
+
+        # Check HOOKS_DAEMON_ROOT_DIR override (from hooks-daemon.env)
+        if [[ "$HOOKS_DAEMON_ROOT_DIR" == "$PROJECT_PATH" ]]; then
+            has_self_install=true
+        fi
+
+        # Check config file for self_install_mode (requires Python, done later)
+        # For now, just trust the HOOKS_DAEMON_ROOT_DIR override
+
+        if [[ "$has_self_install" != "true" ]] && [[ ! -f "$PROJECT_PATH/.claude/hooks-daemon.env" ]]; then
+            emit_hook_error "Unknown" "hooks_daemon_repo_detected" \
+                "This is the hooks-daemon repository. To install for development, run: python install.py --self-install"
+            exit 0
+        fi
+    fi
+fi
+
 # Generate socket and PID paths using Python paths module
 PYTHON_CMD="$HOOKS_DAEMON_ROOT_DIR/untracked/venv/bin/python"
 DAEMON_MODULE="claude_code_hooks_daemon.daemon.paths"

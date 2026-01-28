@@ -32,6 +32,10 @@ from claude_code_hooks_daemon.daemon.paths import (
     get_socket_path,
     read_pid_file,
 )
+from claude_code_hooks_daemon.daemon.validation import (
+    check_for_nested_installation,
+    is_hooks_daemon_repo,
+)
 
 from .init_config import generate_config
 
@@ -83,7 +87,10 @@ def get_project_path(override_path: Path | None = None) -> Path:
 def _validate_installation(project_root: Path) -> Path:
     """Validate hooks daemon installation at project root.
 
-    Checks .claude/hooks-daemon/ directory exists unless in self_install_mode.
+    Checks:
+    1. No nested installation detected
+    2. Not the hooks-daemon repo without self_install_mode
+    3. .claude/hooks-daemon/ directory exists unless in self_install_mode
 
     Args:
         project_root: Path to project root with .claude directory
@@ -94,6 +101,12 @@ def _validate_installation(project_root: Path) -> Path:
     Raises:
         SystemExit: If installation is invalid
     """
+    # Check for nested installation
+    nested_error = check_for_nested_installation(project_root)
+    if nested_error:
+        print(f"ERROR: {nested_error}", file=sys.stderr)
+        sys.exit(1)
+
     claude_dir = project_root / ".claude"
     config_file = claude_dir / "hooks-daemon.yaml"
 
@@ -107,6 +120,18 @@ def _validate_installation(project_root: Path) -> Path:
         except Exception:
             # Config load failure - treat as normal install mode
             pass
+
+    # Check if this is the hooks-daemon repo without self_install_mode
+    if (project_root / ".git").exists() and is_hooks_daemon_repo(project_root):
+        if not self_install:
+            print(
+                "ERROR: This is the hooks-daemon repository.\n"
+                "To run the daemon for development, add to .claude/hooks-daemon.yaml:\n"
+                "  daemon:\n"
+                "    self_install_mode: true",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     # In normal install mode, verify hooks-daemon directory exists
     if not self_install:
@@ -257,17 +282,16 @@ def cmd_start(args: argparse.Namespace) -> int:
     }
     controller.initialise(handler_config)
 
-    # Create and start daemon with legacy config format for now
-    from claude_code_hooks_daemon.daemon.config import DaemonConfig as LegacyDaemonConfig
+    # Get the daemon config with proper paths
+    daemon_config = config.daemon
 
-    legacy_config = LegacyDaemonConfig(
-        socket_path=config.daemon.get_socket_path(project_path),
-        idle_timeout_seconds=config.daemon.idle_timeout_seconds,
-        pid_file_path=config.daemon.get_pid_file_path(project_path),
-        log_level=config.daemon.log_level.value,
-    )
+    # Ensure paths are set (use getters if not set)
+    if daemon_config.socket_path is None:
+        daemon_config.socket_path = str(daemon_config.get_socket_path(project_path))
+    if daemon_config.pid_file_path is None:
+        daemon_config.pid_file_path = str(daemon_config.get_pid_file_path(project_path))
 
-    daemon = HooksDaemon(legacy_config, controller)
+    daemon = HooksDaemon(daemon_config, controller)
 
     try:
         asyncio.run(daemon.start())
