@@ -23,7 +23,7 @@ class TestServerStartupValidation:
 
         from claude_code_hooks_daemon.config.validator import ConfigValidator
 
-        errors = ConfigValidator.validate(config)
+        errors = ConfigValidator.validate(config, validate_handler_names=False)
         assert errors == []
 
     def test_server_refuses_invalid_config(self):
@@ -41,7 +41,7 @@ class TestServerStartupValidation:
 
         from claude_code_hooks_daemon.config.validator import ConfigValidator
 
-        errors = ConfigValidator.validate(config)
+        errors = ConfigValidator.validate(config, validate_handler_names=False)
         assert len(errors) > 0
 
     def test_validation_error_message_is_helpful(self):
@@ -59,7 +59,7 @@ class TestServerStartupValidation:
 
         from claude_code_hooks_daemon.config.validator import ConfigValidator
 
-        errors = ConfigValidator.validate(config)
+        errors = ConfigValidator.validate(config, validate_handler_names=False)
         assert len(errors) > 0
         # Should mention the field name and expected type
         assert any("idle_timeout" in err.lower() for err in errors)
@@ -81,7 +81,7 @@ class TestServerStartupValidation:
         )
 
         try:
-            ConfigValidator.validate_and_raise(config)
+            ConfigValidator.validate_and_raise(config, validate_handler_names=False)
             raise AssertionError("Should have raised ValidationError")
         except ValidationError as e:
             # Error message should be helpful

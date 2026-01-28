@@ -7,8 +7,12 @@ Provides exhaustive validation of configuration schema including:
 - Priority range and uniqueness validation
 - Event type validation
 - Handler name format validation
+- Handler name typo detection with fuzzy matching
 """
 
+import difflib
+import importlib
+import pkgutil
 import re
 from typing import Any, ClassVar
 
@@ -49,12 +53,112 @@ class ConfigValidator:
     # Version format pattern (X.Y)
     VERSION_PATTERN = re.compile(r"^\d+\.\d+$")
 
+    # Cache for discovered handlers (event_type -> set of handler names)
+    _handler_cache: ClassVar[dict[str, set[str]]] = {}
+
     @staticmethod
-    def validate(config: dict[str, Any]) -> list[str]:
+    def get_available_handlers(event_type: str) -> set[str]:
+        """Get available handler names for a specific event type.
+
+        Discovers handler classes by scanning the handlers package and
+        converting class names to snake_case config keys.
+
+        Args:
+            event_type: Event type (e.g., "pre_tool_use")
+
+        Returns:
+            Set of valid handler names for this event type
+        """
+        # Return cached result if available
+        if event_type in ConfigValidator._handler_cache:
+            return ConfigValidator._handler_cache[event_type]
+
+        handlers: set[str] = set()
+
+        try:
+            # Import the handlers subpackage for this event type
+            package_name = f"claude_code_hooks_daemon.handlers.{event_type}"
+            package = importlib.import_module(package_name)
+
+            if not hasattr(package, "__path__"):
+                ConfigValidator._handler_cache[event_type] = handlers
+                return handlers
+
+            # Import Handler base class for isinstance check
+            from claude_code_hooks_daemon.core.handler import Handler
+
+            # Walk through all modules in the package
+            for _importer, modname, ispkg in pkgutil.walk_packages(
+                package.__path__,
+                prefix=f"{package_name}.",
+            ):
+                if ispkg or modname.endswith("__init__") or "test" in modname:
+                    continue
+
+                try:
+                    module = importlib.import_module(modname)
+                    for attr_name in dir(module):
+                        attr = getattr(module, attr_name)
+                        if (
+                            isinstance(attr, type)
+                            and issubclass(attr, Handler)
+                            and attr is not Handler
+                            and not attr.__name__.startswith("_")
+                        ):
+                            # Convert class name to snake_case config key
+                            handler_config_name = ConfigValidator._to_snake_case(attr.__name__)
+                            handlers.add(handler_config_name)
+                except Exception:
+                    # Ignore import errors for individual modules
+                    pass
+
+        except ImportError:
+            # Event type has no handlers package (that's ok)
+            pass
+
+        # Cache the result
+        ConfigValidator._handler_cache[event_type] = handlers
+        return handlers
+
+    @staticmethod
+    def _to_snake_case(name: str) -> str:
+        """Convert CamelCase to snake_case.
+
+        Args:
+            name: CamelCase string
+
+        Returns:
+            snake_case string
+        """
+        s1 = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)
+        return re.sub("([a-z0-9])([A-Z])", r"\1_\2", s1).lower()
+
+    @staticmethod
+    def _find_similar_names(name: str, valid_names: set[str], threshold: float = 0.6) -> list[str]:
+        """Find similar handler names using fuzzy matching.
+
+        Args:
+            name: The typo'd handler name
+            valid_names: Set of valid handler names
+            threshold: Similarity threshold (0.0 to 1.0)
+
+        Returns:
+            List of similar names, sorted by similarity
+        """
+        if not valid_names:
+            return []
+
+        # Use difflib for fuzzy matching
+        matches = difflib.get_close_matches(name, valid_names, n=3, cutoff=threshold)
+        return matches
+
+    @staticmethod
+    def validate(config: dict[str, Any], *, validate_handler_names: bool = True) -> list[str]:
         """Validate configuration and return list of error messages.
 
         Args:
             config: Configuration dictionary to validate
+            validate_handler_names: If False, skip handler name validation (for testing)
 
         Returns:
             List of error messages (empty if valid)
@@ -68,7 +172,11 @@ class ConfigValidator:
         errors.extend(ConfigValidator._validate_daemon(config))
 
         # Validate handlers section
-        errors.extend(ConfigValidator._validate_handlers(config))
+        errors.extend(
+            ConfigValidator._validate_handlers(
+                config, validate_handler_names=validate_handler_names
+            )
+        )
 
         # Validate plugins section (optional)
         errors.extend(ConfigValidator._validate_plugins(config))
@@ -159,11 +267,14 @@ class ConfigValidator:
         return errors
 
     @staticmethod
-    def _validate_handlers(config: dict[str, Any]) -> list[str]:
+    def _validate_handlers(
+        config: dict[str, Any], *, validate_handler_names: bool = True
+    ) -> list[str]:
         """Validate handlers configuration section.
 
         Args:
             config: Configuration dictionary
+            validate_handler_names: If False, skip handler name validation (for testing)
 
         Returns:
             List of error messages
@@ -198,6 +309,13 @@ class ConfigValidator:
                 )
                 continue
 
+            # Discover available handlers for this event type (if validation enabled)
+            available_handlers = (
+                ConfigValidator.get_available_handlers(event_type)
+                if validate_handler_names
+                else set()
+            )
+
             # Track priorities for duplicate detection
             priorities: dict[int, str] = {}
 
@@ -210,6 +328,30 @@ class ConfigValidator:
                     errors.append(
                         f"Invalid handler name '{handler_name}' at '{handler_path}'. "
                         f"Handler names must be snake_case (lowercase letters, numbers, underscores)"
+                    )
+
+                # CRITICAL: Check if handler name exists (catch typos)
+                if validate_handler_names and handler_name not in available_handlers:
+                    # Find similar names to suggest
+                    similar = ConfigValidator._find_similar_names(handler_name, available_handlers)
+
+                    if similar:
+                        suggestion = f"Did you mean: {', '.join(similar)}"
+                    elif available_handlers:
+                        # Show some available handlers
+                        available_list = sorted(list(available_handlers))[:5]
+                        available_str = ", ".join(available_list)
+                        more = (
+                            f" ({len(available_handlers) - 5} more)"
+                            if len(available_handlers) > 5
+                            else ""
+                        )
+                        suggestion = f"Available handlers for '{event_type}': {available_str}{more}"
+                    else:
+                        suggestion = f"No handlers found for event type '{event_type}'"
+
+                    errors.append(
+                        f"Unknown handler '{handler_name}' at '{handler_path}'. {suggestion}"
                     )
 
                 if not isinstance(handler_config, dict):
@@ -294,16 +436,17 @@ class ConfigValidator:
         return errors
 
     @staticmethod
-    def validate_and_raise(config: dict[str, Any]) -> None:
+    def validate_and_raise(config: dict[str, Any], *, validate_handler_names: bool = True) -> None:
         """Validate configuration and raise ValidationError if invalid.
 
         Args:
             config: Configuration dictionary to validate
+            validate_handler_names: If False, skip handler name validation (for testing)
 
         Raises:
             ValidationError: If configuration is invalid
         """
-        errors = ConfigValidator.validate(config)
+        errors = ConfigValidator.validate(config, validate_handler_names=validate_handler_names)
 
         if errors:
             error_count = len(errors)

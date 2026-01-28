@@ -239,6 +239,21 @@ class HandlerRegistry:
                             if "priority" in handler_config:
                                 instance.priority = handler_config["priority"]
 
+                            # Pass handler-specific options from options dict
+                            if hasattr(instance, "_track_plans_in_project"):
+                                # markdown_organization handler config
+                                # Options are in options dict, not top-level
+                                options = handler_config.get("options", {})
+                                instance._track_plans_in_project = options.get(
+                                    "track_plans_in_project", None
+                                )
+                                instance._plan_workflow_docs = options.get(
+                                    "plan_workflow_docs", None
+                                )
+                                # Set workspace root if available
+                                if hasattr(self, "_workspace_root"):
+                                    instance._workspace_root = self._workspace_root
+
                             router.register(event_type, instance)
                             count += 1
                             logger.debug(

@@ -84,8 +84,9 @@ handlers:
     markdown_organization: # Enforces markdown file organization rules & plan tracking
       enabled: true        # Enable for md organization + plan tracking
       priority: 50
-      track_plans_in_project: "CLAUDE/Plan"     # Path to plan folder (null to disable)
-      plan_workflow_docs: "CLAUDE/PlanWorkflow.md"  # Optional: workflow doc to reference
+      options:
+        track_plans_in_project: "CLAUDE/Plan"     # Path to plan folder (null to disable)
+        plan_workflow_docs: "CLAUDE/PlanWorkflow.md"  # Optional: workflow doc to reference
 
     # TOOL USAGE HANDLERS (Priority 50-60)
     web_search_year:       # Fixes year in web search queries (uses current year)

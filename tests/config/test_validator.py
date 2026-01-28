@@ -29,7 +29,7 @@ class TestConfigValidator:
         }
 
         # Should not raise
-        errors = ConfigValidator.validate(config)
+        errors = ConfigValidator.validate(config, validate_handler_names=False)
         assert errors == []
 
     def test_valid_config_with_handlers(self):
@@ -57,7 +57,7 @@ class TestConfigValidator:
             },
         }
 
-        errors = ConfigValidator.validate(config)
+        errors = ConfigValidator.validate(config, validate_handler_names=False)
         assert errors == []
 
     def test_missing_version_field(self):
@@ -67,7 +67,7 @@ class TestConfigValidator:
             "handlers": {"pre_tool_use": {}},
         }
 
-        errors = ConfigValidator.validate(config)
+        errors = ConfigValidator.validate(config, validate_handler_names=False)
         assert len(errors) > 0
         assert any("version" in err.lower() for err in errors)
 
@@ -79,7 +79,7 @@ class TestConfigValidator:
             "handlers": {"pre_tool_use": {}},
         }
 
-        errors = ConfigValidator.validate(config)
+        errors = ConfigValidator.validate(config, validate_handler_names=False)
         assert len(errors) > 0
         assert any("version" in err.lower() and "format" in err.lower() for err in errors)
 
@@ -91,7 +91,7 @@ class TestConfigValidator:
             "handlers": {"pre_tool_use": {}},
         }
 
-        errors = ConfigValidator.validate(config)
+        errors = ConfigValidator.validate(config, validate_handler_names=False)
         assert len(errors) > 0
         assert any("log_level" in err.lower() for err in errors)
 
@@ -105,7 +105,7 @@ class TestConfigValidator:
                 "daemon": {"idle_timeout_seconds": 600, "log_level": level},
                 "handlers": {"pre_tool_use": {}},
             }
-            errors = ConfigValidator.validate(config)
+            errors = ConfigValidator.validate(config, validate_handler_names=False)
             assert errors == [], f"Log level {level} should be valid"
 
     def test_negative_idle_timeout(self):
@@ -116,7 +116,7 @@ class TestConfigValidator:
             "handlers": {"pre_tool_use": {}},
         }
 
-        errors = ConfigValidator.validate(config)
+        errors = ConfigValidator.validate(config, validate_handler_names=False)
         assert len(errors) > 0
         assert any("idle_timeout" in err.lower() and "positive" in err.lower() for err in errors)
 
@@ -128,7 +128,7 @@ class TestConfigValidator:
             "handlers": {"pre_tool_use": {}},
         }
 
-        errors = ConfigValidator.validate(config)
+        errors = ConfigValidator.validate(config, validate_handler_names=False)
         assert len(errors) > 0
         assert any("idle_timeout" in err.lower() for err in errors)
 
@@ -140,7 +140,7 @@ class TestConfigValidator:
             "handlers": {"pre_tool_use": {}},
         }
 
-        errors = ConfigValidator.validate(config)
+        errors = ConfigValidator.validate(config, validate_handler_names=False)
         assert len(errors) > 0
         assert any("idle_timeout" in err.lower() and "integer" in err.lower() for err in errors)
 
@@ -156,7 +156,7 @@ class TestConfigValidator:
             },
         }
 
-        errors = ConfigValidator.validate(config)
+        errors = ConfigValidator.validate(config, validate_handler_names=False)
         assert len(errors) > 0
         assert any("enabled" in err.lower() and "boolean" in err.lower() for err in errors)
 
@@ -172,7 +172,7 @@ class TestConfigValidator:
             },
         }
 
-        errors = ConfigValidator.validate(config)
+        errors = ConfigValidator.validate(config, validate_handler_names=False)
         assert len(errors) > 0
         assert any("priority" in err.lower() and "5-60" in err for err in errors)
 
@@ -188,7 +188,7 @@ class TestConfigValidator:
             },
         }
 
-        errors = ConfigValidator.validate(config)
+        errors = ConfigValidator.validate(config, validate_handler_names=False)
         assert len(errors) > 0
         assert any("priority" in err.lower() and "5-60" in err for err in errors)
 
@@ -204,7 +204,7 @@ class TestConfigValidator:
             },
         }
 
-        errors = ConfigValidator.validate(config)
+        errors = ConfigValidator.validate(config, validate_handler_names=False)
         assert len(errors) > 0
         assert any("priority" in err.lower() and "integer" in err.lower() for err in errors)
 
@@ -221,7 +221,7 @@ class TestConfigValidator:
             },
         }
 
-        errors = ConfigValidator.validate(config)
+        errors = ConfigValidator.validate(config, validate_handler_names=False)
         assert len(errors) > 0
         assert any("duplicate" in err.lower() and "priority" in err.lower() for err in errors)
 
@@ -243,7 +243,7 @@ class TestConfigValidator:
             },
         }
 
-        errors = ConfigValidator.validate(config)
+        errors = ConfigValidator.validate(config, validate_handler_names=False)
         assert errors == []
 
     def test_invalid_event_type(self):
@@ -256,7 +256,7 @@ class TestConfigValidator:
             },
         }
 
-        errors = ConfigValidator.validate(config)
+        errors = ConfigValidator.validate(config, validate_handler_names=False)
         assert len(errors) > 0
         assert any("invalid_event" in err.lower() for err in errors)
 
@@ -281,7 +281,7 @@ class TestConfigValidator:
             "handlers": {event: {} for event in valid_events},
         }
 
-        errors = ConfigValidator.validate(config)
+        errors = ConfigValidator.validate(config, validate_handler_names=False)
         assert errors == []
 
     def test_invalid_handler_name_format(self):
@@ -296,7 +296,7 @@ class TestConfigValidator:
             },
         }
 
-        errors = ConfigValidator.validate(config)
+        errors = ConfigValidator.validate(config, validate_handler_names=False)
         assert len(errors) > 0
         assert any("handler name" in err.lower() and "snake_case" in err.lower() for err in errors)
 
@@ -320,7 +320,7 @@ class TestConfigValidator:
                     },
                 },
             }
-            errors = ConfigValidator.validate(config)
+            errors = ConfigValidator.validate(config, validate_handler_names=False)
             assert errors == [], f"Handler name '{name}' should be valid"
 
     def test_missing_daemon_section(self):
@@ -330,7 +330,7 @@ class TestConfigValidator:
             "handlers": {"pre_tool_use": {}},
         }
 
-        errors = ConfigValidator.validate(config)
+        errors = ConfigValidator.validate(config, validate_handler_names=False)
         assert len(errors) > 0
         assert any("daemon" in err.lower() for err in errors)
 
@@ -341,7 +341,7 @@ class TestConfigValidator:
             "daemon": {"idle_timeout_seconds": 600, "log_level": "INFO"},
         }
 
-        errors = ConfigValidator.validate(config)
+        errors = ConfigValidator.validate(config, validate_handler_names=False)
         assert len(errors) > 0
         assert any("handlers" in err.lower() for err in errors)
 
@@ -353,7 +353,7 @@ class TestConfigValidator:
             "handlers": {"pre_tool_use": {}},
         }
 
-        errors = ConfigValidator.validate(config)
+        errors = ConfigValidator.validate(config, validate_handler_names=False)
         assert errors == []
 
     def test_valid_plugins_section(self):
@@ -367,7 +367,7 @@ class TestConfigValidator:
             ],
         }
 
-        errors = ConfigValidator.validate(config)
+        errors = ConfigValidator.validate(config, validate_handler_names=False)
         assert errors == []
 
     def test_multiple_validation_errors(self):
@@ -386,7 +386,7 @@ class TestConfigValidator:
             },
         }
 
-        errors = ConfigValidator.validate(config)
+        errors = ConfigValidator.validate(config, validate_handler_names=False)
         # Should report multiple errors
         assert len(errors) >= 4
 
@@ -407,7 +407,7 @@ class TestConfigValidator:
             },
         }
 
-        errors = ConfigValidator.validate(config)
+        errors = ConfigValidator.validate(config, validate_handler_names=False)
         assert errors == []
 
     def test_validation_error_includes_context(self):
@@ -422,7 +422,7 @@ class TestConfigValidator:
             },
         }
 
-        errors = ConfigValidator.validate(config)
+        errors = ConfigValidator.validate(config, validate_handler_names=False)
         assert len(errors) > 0
         # Should mention handler name and path
         assert any("destructive_git" in err for err in errors)

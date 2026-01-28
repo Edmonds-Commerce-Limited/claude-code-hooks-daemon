@@ -235,20 +235,20 @@ class TestValidateHandlers:
                 }
             }
         }
-        errors = ConfigValidator._validate_handlers(config)
+        errors = ConfigValidator._validate_handlers(config, validate_handler_names=False)
         assert errors == []
 
     def test_missing_handlers_section(self) -> None:
         """Missing handlers section should return error."""
         config = {}
-        errors = ConfigValidator._validate_handlers(config)
+        errors = ConfigValidator._validate_handlers(config, validate_handler_names=False)
         assert len(errors) == 1
         assert "Missing required section: handlers" in errors[0]
 
     def test_handlers_wrong_type(self) -> None:
         """Handlers section with wrong type should return error."""
         config = {"handlers": []}
-        errors = ConfigValidator._validate_handlers(config)
+        errors = ConfigValidator._validate_handlers(config, validate_handler_names=False)
         assert len(errors) == 1
         assert "must be dictionary" in errors[0]
         assert "list" in errors[0]
@@ -262,7 +262,7 @@ class TestValidateHandlers:
                 }
             }
         }
-        errors = ConfigValidator._validate_handlers(config)
+        errors = ConfigValidator._validate_handlers(config, validate_handler_names=False)
         assert len(errors) == 1
         assert "Invalid event type" in errors[0]
         assert "invalid_event" in errors[0]
@@ -271,7 +271,7 @@ class TestValidateHandlers:
     def test_event_handlers_wrong_type(self) -> None:
         """Event handlers with wrong type should return error."""
         config = {"handlers": {"pre_tool_use": []}}
-        errors = ConfigValidator._validate_handlers(config)
+        errors = ConfigValidator._validate_handlers(config, validate_handler_names=False)
         assert len(errors) == 1
         assert "handlers.pre_tool_use" in errors[0]
         assert "must be dictionary" in errors[0]
@@ -286,7 +286,7 @@ class TestValidateHandlers:
                 }
             }
         }
-        errors = ConfigValidator._validate_handlers(config)
+        errors = ConfigValidator._validate_handlers(config, validate_handler_names=False)
         assert len(errors) == 1
         assert "Invalid handler name" in errors[0]
         assert "InvalidHandlerName" in errors[0]
@@ -301,7 +301,7 @@ class TestValidateHandlers:
                 }
             }
         }
-        errors = ConfigValidator._validate_handlers(config)
+        errors = ConfigValidator._validate_handlers(config, validate_handler_names=False)
         assert len(errors) == 1
         assert "handlers.pre_tool_use.my_handler" in errors[0]
         assert "must be dictionary" in errors[0]
@@ -316,7 +316,7 @@ class TestValidateHandlers:
                 }
             }
         }
-        errors = ConfigValidator._validate_handlers(config)
+        errors = ConfigValidator._validate_handlers(config, validate_handler_names=False)
         assert len(errors) == 1
         assert "enabled" in errors[0]
         assert "must be boolean" in errors[0]
@@ -331,7 +331,7 @@ class TestValidateHandlers:
                 }
             }
         }
-        errors = ConfigValidator._validate_handlers(config)
+        errors = ConfigValidator._validate_handlers(config, validate_handler_names=False)
         assert len(errors) == 1
         assert "priority" in errors[0]
         assert "must be integer" in errors[0]
@@ -346,7 +346,7 @@ class TestValidateHandlers:
                 }
             }
         }
-        errors = ConfigValidator._validate_handlers(config)
+        errors = ConfigValidator._validate_handlers(config, validate_handler_names=False)
         assert len(errors) == 1
         assert "priority" in errors[0]
         assert "must be in range" in errors[0]
@@ -361,7 +361,7 @@ class TestValidateHandlers:
                 }
             }
         }
-        errors = ConfigValidator._validate_handlers(config)
+        errors = ConfigValidator._validate_handlers(config, validate_handler_names=False)
         assert len(errors) == 1
         assert "priority" in errors[0]
         assert "must be in range" in errors[0]
@@ -376,7 +376,7 @@ class TestValidateHandlers:
                 }
             }
         }
-        errors = ConfigValidator._validate_handlers(config)
+        errors = ConfigValidator._validate_handlers(config, validate_handler_names=False)
         assert len(errors) == 1
         assert "Duplicate priority" in errors[0]
         assert "10" in errors[0]
@@ -392,7 +392,7 @@ class TestValidateHandlers:
                 }
             }
         }
-        errors = ConfigValidator._validate_handlers(config)
+        errors = ConfigValidator._validate_handlers(config, validate_handler_names=False)
         assert errors == []
 
     def test_enabled_field_optional(self) -> None:
@@ -404,7 +404,7 @@ class TestValidateHandlers:
                 }
             }
         }
-        errors = ConfigValidator._validate_handlers(config)
+        errors = ConfigValidator._validate_handlers(config, validate_handler_names=False)
         assert errors == []
 
     def test_priority_field_optional(self) -> None:
@@ -416,7 +416,7 @@ class TestValidateHandlers:
                 }
             }
         }
-        errors = ConfigValidator._validate_handlers(config)
+        errors = ConfigValidator._validate_handlers(config, validate_handler_names=False)
         assert errors == []
 
 
@@ -495,7 +495,7 @@ class TestValidate:
                 }
             },
         }
-        errors = ConfigValidator.validate(config)
+        errors = ConfigValidator.validate(config, validate_handler_names=False)
         assert errors == []
 
     def test_config_with_plugins(self) -> None:
@@ -509,7 +509,7 @@ class TestValidate:
             "handlers": {},
             "plugins": [{"path": "/path/to/plugin.py"}],
         }
-        errors = ConfigValidator.validate(config)
+        errors = ConfigValidator.validate(config, validate_handler_names=False)
         assert errors == []
 
     def test_multiple_errors_from_different_sections(self) -> None:
@@ -524,13 +524,13 @@ class TestValidate:
                 "invalid_event": {},  # Invalid event type
             },
         }
-        errors = ConfigValidator.validate(config)
+        errors = ConfigValidator.validate(config, validate_handler_names=False)
         assert len(errors) >= 4
 
     def test_empty_config(self) -> None:
         """Empty config should return multiple errors."""
         config = {}
-        errors = ConfigValidator.validate(config)
+        errors = ConfigValidator.validate(config, validate_handler_names=False)
         assert len(errors) >= 3  # version, daemon, handlers all missing
 
 
@@ -582,7 +582,7 @@ class TestEdgeCases:
                 }
             }
         }
-        errors = ConfigValidator._validate_handlers(config)
+        errors = ConfigValidator._validate_handlers(config, validate_handler_names=False)
         assert errors == []
 
     def test_maximum_valid_priority(self) -> None:
@@ -594,7 +594,7 @@ class TestEdgeCases:
                 }
             }
         }
-        errors = ConfigValidator._validate_handlers(config)
+        errors = ConfigValidator._validate_handlers(config, validate_handler_names=False)
         assert errors == []
 
     def test_all_log_levels_valid(self) -> None:
@@ -620,7 +620,7 @@ class TestEdgeCases:
         ]
         for event_type in event_types:
             config = {"handlers": {event_type: {}}}
-            errors = ConfigValidator._validate_handlers(config)
+            errors = ConfigValidator._validate_handlers(config, validate_handler_names=False)
             assert errors == []
 
     def test_handler_name_with_numbers(self) -> None:
@@ -632,7 +632,7 @@ class TestEdgeCases:
                 }
             }
         }
-        errors = ConfigValidator._validate_handlers(config)
+        errors = ConfigValidator._validate_handlers(config, validate_handler_names=False)
         assert errors == []
 
     def test_handler_name_single_char(self) -> None:
@@ -644,7 +644,7 @@ class TestEdgeCases:
                 }
             }
         }
-        errors = ConfigValidator._validate_handlers(config)
+        errors = ConfigValidator._validate_handlers(config, validate_handler_names=False)
         assert errors == []
 
     def test_empty_handlers_per_event(self) -> None:
@@ -655,7 +655,7 @@ class TestEdgeCases:
                 "post_tool_use": {},
             }
         }
-        errors = ConfigValidator._validate_handlers(config)
+        errors = ConfigValidator._validate_handlers(config, validate_handler_names=False)
         assert errors == []
 
     def test_empty_plugins_list(self) -> None:
