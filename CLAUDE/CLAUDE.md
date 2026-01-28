@@ -38,6 +38,12 @@ This directory contains documentation optimized for LLM consumption (Claude, GPT
 - Troubleshooting common issues
 - Verification steps
 
+**LLM-UPDATE.md** - LLM-optimized update guide
+- Version detection and upgrade path determination
+- References RELEASES/ for version changelogs
+- References UPGRADES/ for migration guides
+- Config migration and rollback procedures
+
 ### Troubleshooting & Support
 
 **BUG_REPORTING.md** (root directory) - Bug reporting and diagnostics
@@ -75,9 +81,10 @@ When working on this project, LLMs should:
 3. **Use DEBUGGING_HOOKS.md to introspect event flows before writing handlers**
 4. Reference HANDLER_DEVELOPMENT.md for creating handlers
 5. Use LLM-INSTALL.md for installation assistance
-6. Check BUG_REPORTING.md when troubleshooting issues
-7. **Use development/RELEASING.md when publishing releases**
-8. Read source code docstrings for API details
+6. **Use LLM-UPDATE.md for updating existing installations**
+7. Check BUG_REPORTING.md when troubleshooting issues
+8. **Use development/RELEASING.md when publishing releases**
+9. Read source code docstrings for API details
 
 ### Handler Development Workflow
 

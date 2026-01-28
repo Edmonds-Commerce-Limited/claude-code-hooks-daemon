@@ -227,8 +227,11 @@ All QA checks run in GitHub Actions. PRs blocked if:
 - `DAEMON.md` - Architecture deep dive
 - `CLAUDE/ARCHITECTURE.md` - Design documentation
 - `CLAUDE/HANDLER_DEVELOPMENT.md` - Handler creation guide (includes YOLO example)
+- `CLAUDE/LLM-INSTALL.md` - LLM-optimized installation guide
+- `CLAUDE/LLM-UPDATE.md` - LLM-optimized update guide
 - `CLAUDE/UPGRADES/` - Version migration guides
 - `CLAUDE/DEBUGGING_HOOKS.md` - Hook debugging guide (NEW in v2.2)
+- `RELEASES/` - Version release notes
 - `CONTRIBUTING.md` - Contribution guidelines
 
 ### Current Version

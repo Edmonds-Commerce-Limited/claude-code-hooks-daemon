@@ -86,6 +86,58 @@ The installer creates:
 
 ---
 
+## Updating
+
+### Quick Update - AI-Assisted (Recommended)
+
+**Copy this into Claude Code:**
+
+```
+Please read and follow the update instructions from:
+https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-UPDATE.md
+```
+
+**Update time:** ~15 seconds with AI assistance
+
+The AI-assisted update will:
+1. Check your current version
+2. Fetch and checkout the latest release
+3. Update dependencies
+4. Check for required config changes
+5. Verify the update
+
+### Manual Update
+
+From your project root:
+
+```bash
+cd .claude/hooks-daemon
+
+# Backup config
+cp ../hooks-daemon.yaml ../hooks-daemon.yaml.backup
+
+# Fetch and checkout latest
+git fetch --tags
+LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "main")
+git checkout "$LATEST_TAG"
+echo "Updated to: $LATEST_TAG"
+
+# Update dependencies
+untracked/venv/bin/pip install -e .
+
+# Restart daemon
+untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
+
+cd ../..
+```
+
+### Version-Specific Documentation
+
+- **Release Notes**: See `RELEASES/` directory for version-specific changelogs
+- **Upgrade Guides**: See `CLAUDE/UPGRADES/` directory for migration instructions
+
+---
+
 ## Git Integration
 
 **⚠️ CRITICAL:** You MUST create `.claude/.gitignore` to prevent committing generated files.
