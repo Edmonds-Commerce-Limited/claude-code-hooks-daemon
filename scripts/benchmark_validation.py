@@ -233,7 +233,9 @@ def main():
     print(f"  - One-time compile cost: {full_schema['compile_time_ms']}ms (cached)")
 
     print(f"\n✓ Simple checks: {simple['per_event_ms']}ms per event")
-    print(f"  - {simple['per_event_ms'] / full_schema['per_event_ms']:.1f}x faster than full schema")
+    print(
+        f"  - {simple['per_event_ms'] / full_schema['per_event_ms']:.1f}x faster than full schema"
+    )
     print(f"  - But catches fewer edge cases")
 
     print(f"\n✓ Hybrid approach: {hybrid['per_event_ms']}ms per event")

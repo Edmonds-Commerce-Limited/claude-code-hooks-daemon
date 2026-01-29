@@ -96,9 +96,7 @@ class DebugInfoGenerator:
         """Generate full debug report."""
         self.output(f"{self.BOLD}# Claude Code Hooks Daemon - Debug Information{self.RESET}")
         self.output()
-        self.output(
-            f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}"
-        )
+        self.output(f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
         self.output()
 
         # System Information
@@ -274,9 +272,7 @@ class DebugInfoGenerator:
             self.output("### Testing PreToolUse hook with simple command")
             self.output("```")
             test_input = '{"tool_name":"Bash","tool_input":{"command":"echo hello"}}'
-            test_out, _ = self.run_command(
-                ["bash", "-c", f"echo '{test_input}' | {pre_tool_use}"]
-            )
+            test_out, _ = self.run_command(["bash", "-c", f"echo '{test_input}' | {pre_tool_use}"])
             self.output(test_out.strip())
             self.output("```")
             self.output()
@@ -284,9 +280,7 @@ class DebugInfoGenerator:
             self.output("### Testing PreToolUse hook with destructive git command")
             self.output("```")
             test_input = '{"tool_name":"Bash","tool_input":{"command":"git reset --hard HEAD"}}'
-            test_out, _ = self.run_command(
-                ["bash", "-c", f"echo '{test_input}' | {pre_tool_use}"]
-            )
+            test_out, _ = self.run_command(["bash", "-c", f"echo '{test_input}' | {pre_tool_use}"])
             self.output(test_out.strip())
             self.output("```")
             self.output()
