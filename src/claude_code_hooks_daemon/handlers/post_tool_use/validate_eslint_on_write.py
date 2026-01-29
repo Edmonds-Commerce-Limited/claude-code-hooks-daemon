@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, ClassVar
 
+from claude_code_hooks_daemon.constants import HandlerTag, HookInputField, Priority, Timeout, ToolName
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_file_path, get_workspace_root
 
@@ -25,22 +26,22 @@ class ValidateEslintOnWriteHandler(Handler):
         """
         super().__init__(
             name="validate-eslint-on-write",
-            priority=10,
+            priority=Priority.VALIDATE_ESLINT_ON_WRITE,
             tags=[
-                "validation",
-                "typescript",
-                "javascript",
-                "qa-enforcement",
-                "advisory",
-                "non-terminal",
+                HandlerTag.VALIDATION,
+                HandlerTag.TYPESCRIPT,
+                HandlerTag.JAVASCRIPT,
+                HandlerTag.QA_ENFORCEMENT,
+                HandlerTag.ADVISORY,
+                HandlerTag.NON_TERMINAL,
             ],
         )
         self.workspace_root = Path(workspace_root) if workspace_root else get_workspace_root()
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if writing TypeScript/TSX file that needs validation."""
-        tool_name = hook_input.get("tool_name")
-        if tool_name not in ["Write", "Edit"]:
+        tool_name = hook_input.get(HookInputField.TOOL_NAME)
+        if tool_name not in [ToolName.WRITE, ToolName.EDIT]:
             return False
 
         file_path = get_file_path(hook_input)
@@ -87,7 +88,7 @@ class ValidateEslintOnWriteHandler(Handler):
             if is_worktree:
                 print("  [Detected worktree file - using ESLint wrapper for consistent config]")
 
-            result = subprocess.run(command, cwd=cwd, capture_output=True, text=True, timeout=30)
+            result = subprocess.run(command, cwd=cwd, capture_output=True, text=True, timeout=Timeout.ESLINT_CHECK)
 
             if result.returncode != 0:
                 error_message = (
@@ -115,6 +116,6 @@ class ValidateEslintOnWriteHandler(Handler):
             return HookResult(decision=Decision.ALLOW)
 
         except subprocess.TimeoutExpired:
-            return HookResult(decision=Decision.DENY, reason="ESLint timed out after 30 seconds")
+            return HookResult(decision=Decision.DENY, reason=f"ESLint timed out after {Timeout.ESLINT_CHECK} seconds")
         except Exception as e:
             return HookResult(decision=Decision.DENY, reason=f"Failed to run ESLint: {e!s}")
