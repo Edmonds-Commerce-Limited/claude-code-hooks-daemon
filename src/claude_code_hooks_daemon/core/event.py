@@ -9,6 +9,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from claude_code_hooks_daemon.constants import ToolName
+
 
 class EventType(StrEnum):
     """Supported Claude Code hook event types."""
@@ -151,19 +153,19 @@ class HookEvent(BaseModel):
 
     def is_bash_tool(self) -> bool:
         """Check if this is a Bash tool event."""
-        return self.hook_input.tool_name == "Bash"
+        return self.hook_input.tool_name == ToolName.BASH
 
     def is_write_tool(self) -> bool:
         """Check if this is a Write tool event."""
-        return self.hook_input.tool_name == "Write"
+        return self.hook_input.tool_name == ToolName.WRITE
 
     def is_edit_tool(self) -> bool:
         """Check if this is an Edit tool event."""
-        return self.hook_input.tool_name == "Edit"
+        return self.hook_input.tool_name == ToolName.EDIT
 
     def is_read_tool(self) -> bool:
         """Check if this is a Read tool event."""
-        return self.hook_input.tool_name == "Read"
+        return self.hook_input.tool_name == ToolName.READ
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "HookEvent":

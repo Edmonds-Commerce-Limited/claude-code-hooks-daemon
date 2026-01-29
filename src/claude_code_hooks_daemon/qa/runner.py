@@ -8,6 +8,8 @@ import re
 import subprocess
 import time
 from dataclasses import asdict, dataclass, field
+
+from claude_code_hooks_daemon.constants import Timeout
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -187,7 +189,7 @@ class QARunner:
             returncode, stdout, stderr = self._run_command(
                 "mypy src/",
                 "mypy type checking",
-                timeout=120,  # mypy can be slow
+                timeout=Timeout.QA_TEST_TIMEOUT,  # mypy can be slow
             )
         except QAExecutionError as e:
             return ToolResult(
@@ -260,7 +262,7 @@ class QARunner:
             returncode, stdout, stderr = self._run_command(
                 "pytest --tb=short -q",
                 "pytest tests",
-                timeout=300,  # tests can take a while
+                timeout=Timeout.QA_LONG_TIMEOUT,  # tests can take a while
             )
         except QAExecutionError as e:
             return ToolResult(
