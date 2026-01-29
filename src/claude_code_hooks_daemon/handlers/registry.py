@@ -274,7 +274,7 @@ class HandlerRegistry:
                         try:
                             # Instantiate and register
                             # Handler subclasses override __init__ with no args
-                            instance = attr()  # type: ignore[call-arg]
+                            instance = attr()
 
                             # Tag-based filtering
                             if enable_tags and not any(tag in instance.tags for tag in enable_tags):
