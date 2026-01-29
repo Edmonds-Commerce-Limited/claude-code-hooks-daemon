@@ -74,8 +74,8 @@ class DaemonStatsHandler(Handler):
             log_level = logging.getLogger().level
             level_name = logging.getLevelName(log_level)
 
-            # Format: "| ⚡ 12.3s | 45MB | INFO"
-            parts.append(f"| ⚡ {uptime_str}{mem_str} | {level_name}")
+            # Format: "| 🪝 12.3s 45MB | INFO"
+            parts.append(f"| 🪝 {uptime_str}{mem_str} | {level_name}")
 
             # Last error (if any)
             if stats.errors > 0:

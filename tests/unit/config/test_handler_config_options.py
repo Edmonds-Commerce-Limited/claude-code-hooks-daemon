@@ -21,7 +21,7 @@ class TestHandlerConfigOptions:
             options={
                 "track_plans_in_project": "CLAUDE/Plan",
                 "plan_workflow_docs": "CLAUDE/PlanWorkflow.md",
-            }
+            },
         )
 
         assert config.enabled is True
@@ -47,7 +47,7 @@ class TestHandlerConfigOptions:
             priority=50,
             options={
                 "track_plans_in_project": "CLAUDE/Plan",
-            }
+            },
         )
 
         dump = config.model_dump()

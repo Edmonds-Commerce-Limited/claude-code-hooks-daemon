@@ -394,6 +394,103 @@ class TestSubagentStopValidation:
         assert errors == []
 
 
+class TestStatusLineValidation:
+    """Test Status Line input validation - null handling for context window."""
+
+    def test_valid_status_line_with_all_fields(self):
+        """Valid Status Line event with all fields passes."""
+        hook_input = {
+            "hook_event_name": "Status",
+            "session_id": "test-session-123",
+            "model": {
+                "id": "claude-sonnet-4-5-20250929",
+                "display_name": "Sonnet 4.5",
+            },
+            "context_window": {
+                "used_percentage": 42.5,
+                "total_input_tokens": 85000,
+                "context_window_size": 200000,
+            },
+            "workspace": {
+                "current_dir": "/workspace",
+                "project_dir": "/workspace",
+            },
+        }
+
+        errors = validate_input("Status", hook_input)
+        assert errors == []
+        assert is_valid_input("Status", hook_input)
+
+    def test_status_line_allows_null_used_percentage(self):
+        """Status Line schema allows null for used_percentage (fixes TypeError bug)."""
+        hook_input = {
+            "hook_event_name": "Status",
+            "context_window": {
+                "used_percentage": None,  # Can be null early in session
+                "total_input_tokens": 1000,
+                "context_window_size": 200000,
+            },
+        }
+
+        errors = validate_input("Status", hook_input)
+        assert errors == [], f"Schema should allow null used_percentage. Errors: {errors}"
+        assert is_valid_input("Status", hook_input)
+
+    def test_status_line_allows_null_total_input_tokens(self):
+        """Status Line schema allows null for total_input_tokens."""
+        hook_input = {
+            "hook_event_name": "Status",
+            "context_window": {
+                "used_percentage": 0.0,
+                "total_input_tokens": None,  # Can be null
+                "context_window_size": 200000,
+            },
+        }
+
+        errors = validate_input("Status", hook_input)
+        assert errors == [], f"Schema should allow null total_input_tokens. Errors: {errors}"
+        assert is_valid_input("Status", hook_input)
+
+    def test_status_line_allows_null_context_window_size(self):
+        """Status Line schema allows null for context_window_size."""
+        hook_input = {
+            "hook_event_name": "Status",
+            "context_window": {
+                "used_percentage": 0.0,
+                "total_input_tokens": 1000,
+                "context_window_size": None,  # Can be null
+            },
+        }
+
+        errors = validate_input("Status", hook_input)
+        assert errors == [], f"Schema should allow null context_window_size. Errors: {errors}"
+        assert is_valid_input("Status", hook_input)
+
+    def test_status_line_allows_all_null_context_fields(self):
+        """Status Line schema allows all context_window fields to be null."""
+        hook_input = {
+            "hook_event_name": "Status",
+            "context_window": {
+                "used_percentage": None,
+                "total_input_tokens": None,
+                "context_window_size": None,
+            },
+        }
+
+        errors = validate_input("Status", hook_input)
+        assert errors == [], f"Schema should allow all null context fields. Errors: {errors}"
+        assert is_valid_input("Status", hook_input)
+
+    def test_minimal_status_line(self):
+        """Minimal Status Line event with just hook_event_name passes."""
+        hook_input = {
+            "hook_event_name": "Status",
+        }
+
+        errors = validate_input("Status", hook_input)
+        assert errors == []
+
+
 class TestUnknownEventType:
     """Test behavior with unknown event types."""
 

@@ -104,3 +104,24 @@ class TestModelContextHandler:
         result = handler.handle(hook_input)
         # Check for reset code
         assert "\033[0m" in result.context[0]
+
+    def test_handle_with_null_used_percentage(self, handler: ModelContextHandler) -> None:
+        """Test handling when used_percentage is None (fixes TypeError bug).
+
+        Early in a session, Claude Code may send null for used_percentage.
+        The handler must gracefully handle this and default to 0.0%.
+        """
+        hook_input = {
+            "model": {"display_name": "Sonnet 4.5"},
+            "context_window": {"used_percentage": None},
+        }
+
+        # Should not raise TypeError: '<=' not supported between NoneType and int
+        result = handler.handle(hook_input)
+
+        assert result.decision == "allow"
+        assert len(result.context) == 1
+        assert "Sonnet 4.5" in result.context[0]
+        assert "0.0%" in result.context[0]
+        # Should use green color (0% usage)
+        assert "\033[42m" in result.context[0]

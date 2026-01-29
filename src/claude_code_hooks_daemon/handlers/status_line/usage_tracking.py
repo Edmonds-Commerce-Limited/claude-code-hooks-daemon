@@ -1,0 +1,113 @@
+"""Usage tracking handler for status line.
+
+Displays daily and weekly token usage percentages by reading
+~/.claude/stats-cache.json and calculating usage against daily limits.
+"""
+
+from pathlib import Path
+from typing import Any
+
+from claude_code_hooks_daemon.core import Handler, HookResult
+from claude_code_hooks_daemon.handlers.status_line.stats_cache_reader import (
+    calculate_daily_usage,
+    calculate_weekly_usage,
+    read_stats_cache,
+)
+
+
+class UsageTrackingHandler(Handler):
+    """Display daily and weekly token usage percentages."""
+
+    def __init__(self, options: dict[str, Any] | None = None) -> None:
+        super().__init__(
+            name="status-usage-tracking",
+            priority=15,
+            terminal=False,
+            tags=["status", "display", "non-terminal"],
+        )
+
+        # Handler options
+        default_options = {
+            "show_daily": True,
+            "show_weekly": True,
+        }
+        self._options = {**default_options, **(options or {})}
+
+    def matches(self, hook_input: dict[str, Any]) -> bool:
+        """Always run for status events."""
+        return True
+
+    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+        """Generate daily/weekly usage percentage status text.
+
+        Args:
+            hook_input: Status event input with model data
+
+        Returns:
+            HookResult with formatted usage text in context list
+        """
+        try:
+            # Extract model ID
+            model_id = hook_input.get("model", {}).get("id")
+            if not model_id:
+                return HookResult(context=[])
+
+            # Check if model is supported (has a daily limit defined)
+            from claude_code_hooks_daemon.handlers.status_line.stats_cache_reader import (
+                DAILY_LIMITS,
+            )
+
+            if model_id not in DAILY_LIMITS:
+                # Unknown model - skip display
+                return HookResult(context=[])
+
+            # Read stats cache directly - it's fast, no need for TTL caching
+            stats_path = Path.home() / ".claude" / "stats-cache.json"
+            cache_data = read_stats_cache(stats_path)
+            if cache_data is None:
+                return HookResult(context=[])
+
+            # Calculate usage percentages
+            daily_pct = calculate_daily_usage(cache_data, model_id)
+            weekly_pct = calculate_weekly_usage(cache_data, model_id)
+
+            # Format output with color coding (same as context percentage)
+            parts = []
+            if self._options.get("show_daily", True):
+                daily_colored = self._colorize_percentage(daily_pct)
+                parts.append(f"daily: {daily_colored}")
+            if self._options.get("show_weekly", True):
+                weekly_colored = self._colorize_percentage(weekly_pct)
+                parts.append(f"weekly: {weekly_colored}")
+
+            if not parts:
+                return HookResult(context=[])
+
+            status = "| " + " | ".join(parts)
+            return HookResult(context=[status])
+
+        except Exception:
+            # Silent fail - don't break status line for usage tracking issues
+            return HookResult(context=[])
+
+    def _colorize_percentage(self, percentage: float) -> str:
+        """Apply traffic light color coding to percentage.
+
+        Args:
+            percentage: Usage percentage (0-100+)
+
+        Returns:
+            Colored percentage string with ANSI codes
+        """
+        # Traffic light system (same as ModelContextHandler)
+        if percentage <= 40:
+            color = "\033[42m\033[30m"  # Green bg, black text
+        elif percentage <= 60:
+            color = "\033[43m\033[30m"  # Yellow bg, black text
+        elif percentage <= 80:
+            color = "\033[48;5;208m\033[30m"  # Orange bg, black text
+        else:
+            color = "\033[41m\033[97m"  # Red bg, white text
+        reset = "\033[0m"
+
+        return f"{color}{percentage:.1f}%{reset}"
