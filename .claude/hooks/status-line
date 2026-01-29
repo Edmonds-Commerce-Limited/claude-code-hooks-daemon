@@ -13,9 +13,9 @@ source "$SCRIPT_DIR/../init.sh"
 
 # Ensure daemon is running (lazy startup)
 if ! ensure_daemon; then
-    # Fallback: output minimal status if daemon fails
-    echo "Claude | Ctx: N/A"
-    exit 0
+    # ERROR: Daemon failed to start - make it visible
+    echo "⚠️ DAEMON FAILED"
+    exit 1
 fi
 
 # Pipe JSON directly through socket

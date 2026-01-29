@@ -255,6 +255,59 @@ jq -c '{{event: "{event_name}", hook_input: .}}' | send_request_stdin
     return hook_file
 
 
+def create_status_line_script(hooks_dir: Path) -> Path:
+    """Create status-line script with custom logic for displaying status.
+
+    Status line has different logic than standard forwarders:
+    - Returns plain text (not JSON)
+    - Joins context array into a single line
+    - Has fallback for empty responses
+
+    Args:
+        hooks_dir: Path to .claude/hooks directory
+
+    Returns:
+        Path to created hook file
+    """
+    hook_file = hooks_dir / "status-line"
+
+    hook_content = """#!/bin/bash
+#
+# Claude Code Hooks - Status Line
+#
+# Forwards Status event to daemon via Unix socket and outputs plain text.
+# This hook is called by Claude Code to populate the status line display.
+#
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../init.sh"
+
+# Ensure daemon is running (lazy startup)
+if ! ensure_daemon; then
+    # ERROR: Daemon failed to start - make it visible
+    echo "⚠️ DAEMON FAILED"
+    exit 1
+fi
+
+# Pipe JSON directly through socket
+# Note: Status event returns context array that needs to be joined
+jq -c '{event: "Status", hook_input: .}' | send_request_stdin | jq -r '
+  if .result.context and (.result.context | length > 0) then
+    .result.context | join(" ")
+  else
+    "Claude"
+  end
+'
+"""
+
+    hook_file.write_text(hook_content)
+    hook_file.chmod(0o755)  # Make executable
+
+    return hook_file
+
+
 def check_git_filemode(project_root: Path) -> bool:
     """Check if git core.fileMode is disabled.
 
@@ -395,6 +448,11 @@ def create_all_hooks(hooks_dir: Path) -> list[Path]:
         hook_files.append(hook_file)
         print(f"   ✅ {hook_name}")
 
+    # Create status-line script (custom logic, not a standard forwarder)
+    status_line_file = create_status_line_script(hooks_dir)
+    hook_files.append(status_line_file)
+    print(f"   ✅ status-line")
+
     return hook_files
 
 
@@ -415,6 +473,10 @@ def create_settings_json(project_root: Path, force: bool = False) -> None:
         print(f"✅ Backed up existing settings.json to {backup_file.relative_to(project_root)}")
 
     settings = {
+        "statusLine": {
+            "type": "command",
+            "command": ".claude/hooks/status-line"
+        },
         "hooks": {
             "PreToolUse": [
                 {
@@ -693,6 +755,9 @@ handlers:
   permission_request: {}
   notification: {}
   stop: {}
+
+  # Status line handlers (provide custom status line display)
+  status_line: {}
 
 # Project-level handlers (custom handlers in .claude/hooks/handlers/)
 # Uncomment and customize to add custom handlers:

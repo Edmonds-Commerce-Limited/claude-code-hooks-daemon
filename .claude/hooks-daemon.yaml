@@ -129,6 +129,9 @@ handlers:
   notification: {}
   stop: {}
 
+  # Status line handlers (provide custom status line display)
+  status_line: {}
+
 # Project-level handlers (custom handlers in .claude/hooks/handlers/)
 # Uncomment and customize to add custom handlers:
 # plugins:
