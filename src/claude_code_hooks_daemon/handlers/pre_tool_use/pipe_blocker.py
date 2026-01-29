@@ -3,6 +3,7 @@
 import re
 from typing import Any
 
+from claude_code_hooks_daemon.constants import HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_bash_command
 
@@ -28,8 +29,8 @@ class PipeBlockerHandler(Handler):
         """Initialize handler with default or custom whitelist."""
         super().__init__(
             name="pipe-blocker",
-            priority=15,
-            tags=["safety", "bash", "blocking", "terminal"],
+            priority=Priority.PIPE_BLOCKER,
+            tags=[HandlerTag.SAFETY, HandlerTag.BASH, HandlerTag.BLOCKING, HandlerTag.TERMINAL],
         )
 
         # Default whitelist: commands that already filter/process output

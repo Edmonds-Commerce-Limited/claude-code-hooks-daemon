@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from claude_code_hooks_daemon.constants import HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 
 
@@ -11,8 +12,8 @@ class RemindPromptLibraryHandler(Handler):
     def __init__(self) -> None:
         super().__init__(
             name="remind-capture-prompt",
-            priority=100,
-            tags=["workflow", "advisory", "non-terminal"],
+            priority=Priority.REMIND_PROMPT_LIBRARY,
+            tags=[HandlerTag.WORKFLOW, HandlerTag.ADVISORY, HandlerTag.NON_TERMINAL],
         )
 
     def matches(self, _hook_input: dict[str, Any]) -> bool:

@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from claude_code_hooks_daemon.constants import HandlerTag
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 
 
@@ -18,7 +19,7 @@ class HelloWorldPreToolUseHandler(Handler):
             name="hello_world",
             priority=priority,
             terminal=False,  # Allow other handlers to run
-            tags=["test", "non-terminal"],
+            tags=[HandlerTag.TEST, HandlerTag.NON_TERMINAL],
         )
 
     def matches(self, _hook_input: dict[str, Any]) -> bool:

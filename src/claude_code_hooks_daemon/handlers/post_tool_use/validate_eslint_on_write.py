@@ -4,7 +4,13 @@ import subprocess
 from pathlib import Path
 from typing import Any, ClassVar
 
-from claude_code_hooks_daemon.constants import HandlerTag, HookInputField, Priority, Timeout, ToolName
+from claude_code_hooks_daemon.constants import (
+    HandlerTag,
+    HookInputField,
+    Priority,
+    Timeout,
+    ToolName,
+)
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_file_path, get_workspace_root
 
@@ -88,7 +94,9 @@ class ValidateEslintOnWriteHandler(Handler):
             if is_worktree:
                 print("  [Detected worktree file - using ESLint wrapper for consistent config]")
 
-            result = subprocess.run(command, cwd=cwd, capture_output=True, text=True, timeout=Timeout.ESLINT_CHECK)
+            result = subprocess.run(
+                command, cwd=cwd, capture_output=True, text=True, timeout=Timeout.ESLINT_CHECK
+            )
 
             if result.returncode != 0:
                 error_message = (
@@ -116,6 +124,9 @@ class ValidateEslintOnWriteHandler(Handler):
             return HookResult(decision=Decision.ALLOW)
 
         except subprocess.TimeoutExpired:
-            return HookResult(decision=Decision.DENY, reason=f"ESLint timed out after {Timeout.ESLINT_CHECK} seconds")
+            return HookResult(
+                decision=Decision.DENY,
+                reason=f"ESLint timed out after {Timeout.ESLINT_CHECK} seconds",
+            )
         except Exception as e:
             return HookResult(decision=Decision.DENY, reason=f"Failed to run ESLint: {e!s}")

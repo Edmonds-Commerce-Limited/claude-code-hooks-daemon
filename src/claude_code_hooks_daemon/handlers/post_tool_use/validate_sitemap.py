@@ -14,7 +14,13 @@ class ValidateSitemapHandler(Handler):
         super().__init__(
             name="validate-sitemap-on-edit",
             priority=Priority.VALIDATE_SITEMAP,
-            tags=[HandlerTag.VALIDATION, HandlerTag.EC_SPECIFIC, HandlerTag.PROJECT_SPECIFIC, HandlerTag.ADVISORY, HandlerTag.NON_TERMINAL],
+            tags=[
+                HandlerTag.VALIDATION,
+                HandlerTag.EC_SPECIFIC,
+                HandlerTag.PROJECT_SPECIFIC,
+                HandlerTag.ADVISORY,
+                HandlerTag.NON_TERMINAL,
+            ],
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:

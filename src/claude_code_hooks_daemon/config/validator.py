@@ -17,6 +17,8 @@ import pkgutil
 import re
 from typing import Any, ClassVar
 
+from claude_code_hooks_daemon.constants import ConfigKey, EventID
+
 logger = logging.getLogger(__name__)
 
 
@@ -29,25 +31,27 @@ class ValidationError(Exception):
 class ConfigValidator:
     """Exhaustive configuration validator."""
 
-    # Valid hook event types (11 total)
+    # Valid hook event types (11 total) - derived from EventID constants
     VALID_EVENT_TYPES: ClassVar[set[str]] = {
-        "pre_tool_use",
-        "post_tool_use",
-        "permission_request",
-        "notification",
-        "user_prompt_submit",
-        "session_start",
-        "session_end",
-        "stop",
-        "subagent_stop",
-        "pre_compact",
-        "status_line",
+        EventID.PRE_TOOL_USE.config_key,
+        EventID.POST_TOOL_USE.config_key,
+        EventID.PERMISSION_REQUEST.config_key,
+        EventID.NOTIFICATION.config_key,
+        EventID.USER_PROMPT_SUBMIT.config_key,
+        EventID.SESSION_START.config_key,
+        EventID.SESSION_END.config_key,
+        EventID.STOP.config_key,
+        EventID.SUBAGENT_STOP.config_key,
+        EventID.PRE_COMPACT.config_key,
+        EventID.STATUS_LINE.config_key,
     }
 
     # Valid log levels
     VALID_LOG_LEVELS: ClassVar[set[str]] = {"DEBUG", "INFO", "WARNING", "ERROR"}
 
-    # Priority range (inclusive)
+    # Priority range (inclusive) - project-specific config constraints
+    # NOTE: These are narrower than ValidationLimit.PRIORITY_MIN/MAX (0-100)
+    # because the project enforces a tighter range for handler priorities
     MIN_PRIORITY = 5
     MAX_PRIORITY = 60
 
@@ -206,11 +210,11 @@ class ConfigValidator:
         """
         errors: list[str] = []
 
-        if "version" not in config:
+        if ConfigKey.VERSION not in config:
             errors.append("Missing required field: version")
             return errors
 
-        version = config["version"]
+        version = config[ConfigKey.VERSION]
 
         if not isinstance(version, str):
             errors.append(f"Field 'version' must be string, got {type(version).__name__}")
@@ -235,21 +239,21 @@ class ConfigValidator:
         """
         errors: list[str] = []
 
-        if "daemon" not in config:
+        if ConfigKey.DAEMON not in config:
             errors.append("Missing required section: daemon")
             return errors
 
-        daemon = config["daemon"]
+        daemon = config[ConfigKey.DAEMON]
 
         if not isinstance(daemon, dict):
             errors.append(f"Section 'daemon' must be dictionary, got {type(daemon).__name__}")
             return errors
 
         # Validate idle_timeout_seconds
-        if "idle_timeout_seconds" not in daemon:
+        if ConfigKey.IDLE_TIMEOUT_SECONDS not in daemon:
             errors.append("Missing required field: daemon.idle_timeout_seconds")
         else:
-            timeout = daemon["idle_timeout_seconds"]
+            timeout = daemon[ConfigKey.IDLE_TIMEOUT_SECONDS]
             if not isinstance(timeout, int):
                 errors.append(
                     f"Field 'daemon.idle_timeout_seconds' must be integer, got {type(timeout).__name__}"
@@ -260,10 +264,10 @@ class ConfigValidator:
                 )
 
         # Validate log_level
-        if "log_level" not in daemon:
+        if ConfigKey.LOG_LEVEL not in daemon:
             errors.append("Missing required field: daemon.log_level")
         else:
-            log_level = daemon["log_level"]
+            log_level = daemon[ConfigKey.LOG_LEVEL]
             if not isinstance(log_level, str):
                 errors.append(
                     f"Field 'daemon.log_level' must be string, got {type(log_level).__name__}"
@@ -292,11 +296,11 @@ class ConfigValidator:
         """
         errors: list[str] = []
 
-        if "handlers" not in config:
+        if ConfigKey.HANDLERS not in config:
             errors.append("Missing required section: handlers")
             return errors
 
-        handlers = config["handlers"]
+        handlers = config[ConfigKey.HANDLERS]
 
         if not isinstance(handlers, dict):
             errors.append(f"Section 'handlers' must be dictionary, got {type(handlers).__name__}")
@@ -373,8 +377,8 @@ class ConfigValidator:
                     continue
 
                 # Validate enabled field (if present)
-                if "enabled" in handler_config:
-                    enabled = handler_config["enabled"]
+                if ConfigKey.ENABLED in handler_config:
+                    enabled = handler_config[ConfigKey.ENABLED]
                     if not isinstance(enabled, bool):
                         errors.append(
                             f"Field '{handler_path}.enabled' must be boolean, "
@@ -382,8 +386,8 @@ class ConfigValidator:
                         )
 
                 # Validate priority field (if present)
-                if "priority" in handler_config:
-                    priority = handler_config["priority"]
+                if ConfigKey.PRIORITY in handler_config:
+                    priority = handler_config[ConfigKey.PRIORITY]
                     if not isinstance(priority, int):
                         errors.append(
                             f"Field '{handler_path}.priority' must be integer, "
@@ -422,10 +426,10 @@ class ConfigValidator:
         """
         errors: list[str] = []
 
-        if "plugins" not in config:
+        if ConfigKey.PLUGINS not in config:
             return errors  # Plugins section is optional
 
-        plugins = config["plugins"]
+        plugins = config[ConfigKey.PLUGINS]
 
         if not isinstance(plugins, list):
             errors.append(f"Section 'plugins' must be list, got {type(plugins).__name__}")

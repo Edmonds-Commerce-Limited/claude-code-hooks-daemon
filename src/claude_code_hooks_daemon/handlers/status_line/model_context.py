@@ -9,6 +9,7 @@ Formats model name and color-coded context percentage using traffic light colors
 
 from typing import Any
 
+from claude_code_hooks_daemon.constants import HandlerTag, Priority
 from claude_code_hooks_daemon.core import Handler, HookResult
 
 
@@ -18,9 +19,9 @@ class ModelContextHandler(Handler):
     def __init__(self) -> None:
         super().__init__(
             name="status-model-context",
-            priority=10,
+            priority=Priority.MODEL_CONTEXT,
             terminal=False,
-            tags=["status", "display", "non-terminal"],
+            tags=[HandlerTag.STATUS, HandlerTag.DISPLAY, HandlerTag.NON_TERMINAL],
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:

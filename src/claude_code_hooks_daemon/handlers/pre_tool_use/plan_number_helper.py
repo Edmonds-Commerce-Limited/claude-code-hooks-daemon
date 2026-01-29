@@ -14,6 +14,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from claude_code_hooks_daemon.constants import HandlerTag, HookInputField, Priority, ToolName
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import HookResult
 from claude_code_hooks_daemon.handlers.utils.plan_numbering import get_next_plan_number
@@ -26,14 +27,16 @@ class PlanNumberHelperHandler(Handler):
         """Initialize handler."""
         super().__init__(
             name="plan-number-helper",
-            priority=30,  # Run before markdown_organization (35)
+            priority=Priority.PLAN_NUMBER_HELPER,  # Run before markdown_organization (35)
             terminal=False,  # Advisory only, don't block
-            tags=["workflow", "advisory", "planning"],
+            tags=[HandlerTag.WORKFLOW, HandlerTag.ADVISORY, HandlerTag.PLANNING],
+            shares_options_with="markdown_organization",  # Inherit config from parent (config key)
         )
 
         # Configuration attributes (set by registry after instantiation)
         self._workspace_root: Path = Path.cwd()
         self._track_plans_in_project: str | None = None  # Path to plan folder or None
+        self._plan_workflow_docs: str | None = None  # Path to workflow doc or None
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Match bash commands attempting to discover plan numbers.
@@ -49,10 +52,10 @@ class PlanNumberHelperHandler(Handler):
             return False
 
         # Only match Bash tool
-        if hook_input.get("tool_name") != "Bash":
+        if hook_input.get(HookInputField.TOOL_NAME) != ToolName.BASH:
             return False
 
-        command = hook_input.get("tool_input", {}).get("command", "")
+        command = hook_input.get(HookInputField.TOOL_INPUT, {}).get("command", "")
         if not command:
             return False
 
@@ -123,6 +126,14 @@ class PlanNumberHelperHandler(Handler):
                 f"💡 Next plan number is {next_number}. "
                 f"Use this instead of bash commands to discover plan numbers."
             )
+
+            # Add workflow docs reference if configured
+            if self._plan_workflow_docs:
+                workflow_path = self._workspace_root / self._plan_workflow_docs
+                if workflow_path.exists():
+                    context_message += (
+                        f"\n📖 See `{self._plan_workflow_docs}` for plan structure and conventions."
+                    )
 
             return HookResult.allow(context=[context_message])
 

@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from claude_code_hooks_daemon.constants import HandlerTag, HookInputField, Priority, ToolName
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 
 
@@ -15,19 +16,19 @@ class AbsolutePathHandler(Handler):
     def __init__(self) -> None:
         super().__init__(
             name="require-absolute-paths",
-            priority=12,
-            tags=["safety", "file-ops", "blocking", "terminal"],
+            priority=Priority.ABSOLUTE_PATH,
+            tags=[HandlerTag.SAFETY, HandlerTag.FILE_OPS, HandlerTag.BLOCKING, HandlerTag.TERMINAL],
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if tool uses relative path in file_path parameter."""
-        tool_name = hook_input.get("tool_name")
+        tool_name = hook_input.get(HookInputField.TOOL_NAME)
 
         # Only check Read, Write, and Edit tools
-        if tool_name not in ["Read", "Write", "Edit"]:
+        if tool_name not in [ToolName.READ, ToolName.WRITE, ToolName.EDIT]:
             return False
 
-        tool_input = hook_input.get("tool_input", {})
+        tool_input = hook_input.get(HookInputField.TOOL_INPUT, {})
         file_path = tool_input.get("file_path", "")
 
         if not file_path:
@@ -38,8 +39,8 @@ class AbsolutePathHandler(Handler):
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Block relative paths with explanation."""
-        tool_name = hook_input.get("tool_name")
-        tool_input = hook_input.get("tool_input", {})
+        tool_name = hook_input.get(HookInputField.TOOL_NAME)
+        tool_input = hook_input.get(HookInputField.TOOL_INPUT, {})
         file_path = tool_input.get("file_path", "")
 
         return HookResult(

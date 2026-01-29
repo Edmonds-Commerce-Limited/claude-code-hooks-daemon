@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import Any
 
+from claude_code_hooks_daemon.constants import HandlerTag, HookInputField, Priority, ToolName
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_file_path
 
@@ -13,14 +14,20 @@ class TddEnforcementHandler(Handler):
     def __init__(self) -> None:
         super().__init__(
             name="enforce-tdd",
-            priority=15,
-            tags=["tdd", "python", "qa-enforcement", "blocking", "terminal"],
+            priority=Priority.TDD_ENFORCEMENT,
+            tags=[
+                HandlerTag.TDD,
+                HandlerTag.PYTHON,
+                HandlerTag.QA_ENFORCEMENT,
+                HandlerTag.BLOCKING,
+                HandlerTag.TERMINAL,
+            ],
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if this is a Write operation to a production Python file."""
         # Only match Write tool
-        if hook_input.get("tool_name") != "Write":
+        if hook_input.get(HookInputField.TOOL_NAME) != ToolName.WRITE:
             return False
 
         file_path = get_file_path(hook_input)

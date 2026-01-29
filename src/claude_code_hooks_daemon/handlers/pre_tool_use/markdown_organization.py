@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from claude_code_hooks_daemon.constants import HandlerTag, HookInputField, Priority, ToolName
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_file_path
 from claude_code_hooks_daemon.handlers.utils.plan_numbering import get_next_plan_number
@@ -31,8 +32,14 @@ class MarkdownOrganizationHandler(Handler):
         """
         super().__init__(
             name="enforce-markdown-organization",
-            priority=35,
-            tags=["workflow", "markdown", "ec-specific", "blocking", "terminal"],
+            priority=Priority.MARKDOWN_ORGANIZATION,
+            tags=[
+                HandlerTag.WORKFLOW,
+                HandlerTag.MARKDOWN,
+                HandlerTag.EC_SPECIFIC,
+                HandlerTag.BLOCKING,
+                HandlerTag.TERMINAL,
+            ],
         )
         # Configuration attributes (set by registry after instantiation)
         self._workspace_root: Path = Path.cwd()
@@ -205,7 +212,7 @@ class MarkdownOrganizationHandler(Handler):
             HookResult with ALLOW decision and context about redirect
         """
         file_path = get_file_path(hook_input)
-        content = hook_input.get("tool_input", {}).get("content", "")
+        content = hook_input.get(HookInputField.TOOL_INPUT, {}).get("content", "")
 
         try:
             # Get plan directory from config (track_plans_in_project is the path)
@@ -322,8 +329,8 @@ class MarkdownOrganizationHandler(Handler):
 
         Additionally intercepts planning mode writes when feature is enabled.
         """
-        tool_name = hook_input.get("tool_name")
-        if tool_name not in ["Write", "Edit"]:
+        tool_name = hook_input.get(HookInputField.TOOL_NAME)
+        if tool_name not in [ToolName.WRITE, ToolName.EDIT]:
             return False
 
         file_path = get_file_path(hook_input)

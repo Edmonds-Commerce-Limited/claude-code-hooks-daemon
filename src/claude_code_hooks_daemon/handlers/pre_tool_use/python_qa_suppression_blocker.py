@@ -3,6 +3,7 @@
 import re
 from typing import Any, ClassVar
 
+from claude_code_hooks_daemon.constants import HandlerTag, HookInputField, Priority, ToolName
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_file_content, get_file_path
 
@@ -23,14 +24,19 @@ class PythonQaSuppressionBlocker(Handler):
     def __init__(self) -> None:
         super().__init__(
             name="python-qa-suppression-blocker",
-            priority=30,
-            tags=["python", "qa-suppression-prevention", "blocking", "terminal"],
+            priority=Priority.PYTHON_QA_SUPPRESSION,
+            tags=[
+                HandlerTag.PYTHON,
+                HandlerTag.QA_SUPPRESSION_PREVENTION,
+                HandlerTag.BLOCKING,
+                HandlerTag.TERMINAL,
+            ],
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if writing Python QA suppression comments."""
-        tool_name = hook_input.get("tool_name")
-        if tool_name not in ["Write", "Edit"]:
+        tool_name = hook_input.get(HookInputField.TOOL_NAME)
+        if tool_name not in [ToolName.WRITE, ToolName.EDIT]:
             return False
 
         file_path = get_file_path(hook_input)
@@ -50,8 +56,8 @@ class PythonQaSuppressionBlocker(Handler):
             return False
 
         content = get_file_content(hook_input)
-        if tool_name == "Edit":
-            content = hook_input.get("tool_input", {}).get("new_string", "")
+        if tool_name == ToolName.EDIT:
+            content = hook_input.get(HookInputField.TOOL_INPUT, {}).get("new_string", "")
 
         if not content:
             return False
@@ -67,8 +73,8 @@ class PythonQaSuppressionBlocker(Handler):
         """Block Python QA suppressions."""
         file_path = get_file_path(hook_input)
         content = get_file_content(hook_input)
-        if hook_input.get("tool_name") == "Edit":
-            content = hook_input.get("tool_input", {}).get("new_string", "")
+        if hook_input.get(HookInputField.TOOL_NAME) == "Edit":
+            content = hook_input.get(HookInputField.TOOL_INPUT, {}).get("new_string", "")
 
         if not content:
             return HookResult(decision=Decision.ALLOW)

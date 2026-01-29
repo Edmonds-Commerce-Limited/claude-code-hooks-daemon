@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from claude_code_hooks_daemon.constants import HandlerTag, Priority, Timeout
 from claude_code_hooks_daemon.core import Handler, HookResult
 
 logger = logging.getLogger(__name__)
@@ -20,9 +21,9 @@ class GitBranchHandler(Handler):
     def __init__(self) -> None:
         super().__init__(
             name="status-git-branch",
-            priority=20,
+            priority=Priority.GIT_BRANCH,
             terminal=False,
-            tags=["status", "git", "non-terminal"],
+            tags=[HandlerTag.STATUS, HandlerTag.GIT, HandlerTag.NON_TERMINAL],
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
@@ -50,7 +51,7 @@ class GitBranchHandler(Handler):
                 ["git", "rev-parse", "--show-toplevel"],
                 cwd=cwd,
                 capture_output=True,
-                timeout=0.5,
+                timeout=Timeout.GIT_STATUS_SHORT,
                 check=False,
             )
 
@@ -62,7 +63,7 @@ class GitBranchHandler(Handler):
                 ["git", "branch", "--show-current"],
                 cwd=cwd,
                 capture_output=True,
-                timeout=0.5,
+                timeout=Timeout.GIT_STATUS_SHORT,
                 check=True,
             )
 

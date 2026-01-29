@@ -3,6 +3,7 @@
 import re
 from typing import Any
 
+from claude_code_hooks_daemon.constants import HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_bash_command
 
@@ -12,7 +13,9 @@ class GitStashHandler(Handler):
 
     def __init__(self) -> None:
         super().__init__(
-            name="block-git-stash", priority=20, tags=["safety", "git", "blocking", "terminal"]
+            name="block-git-stash",
+            priority=Priority.GIT_STASH,
+            tags=[HandlerTag.SAFETY, HandlerTag.GIT, HandlerTag.BLOCKING, HandlerTag.TERMINAL],
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:

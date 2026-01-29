@@ -3,6 +3,7 @@
 import re
 from typing import Any
 
+from claude_code_hooks_daemon.constants import HandlerTag, HookInputField, Priority, ToolName
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_content, get_file_path
 
@@ -27,17 +28,19 @@ class SedBlockerHandler(Handler):
 
     def __init__(self) -> None:
         super().__init__(
-            name="block-sed-command", priority=10, tags=["safety", "bash", "blocking", "terminal"]
+            name="block-sed-command",
+            priority=Priority.SED_BLOCKER,
+            tags=[HandlerTag.SAFETY, HandlerTag.BASH, HandlerTag.BLOCKING, HandlerTag.TERMINAL],
         )
         # Word boundary pattern: \bsed\b matches "sed" as whole word
         self._sed_pattern = re.compile(r"\bsed\b", re.IGNORECASE)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if sed appears anywhere in bash commands or shell scripts."""
-        tool_name = hook_input.get("tool_name")
+        tool_name = hook_input.get(HookInputField.TOOL_NAME)
 
         # Case 1: Bash tool - block sed EXCEPT in safe contexts
-        if tool_name == "Bash":
+        if tool_name == ToolName.BASH:
             command = get_bash_command(hook_input)
             if command and self._sed_pattern.search(command):
                 # ALLOW: git commands (commits, add, etc.)
@@ -49,7 +52,7 @@ class SedBlockerHandler(Handler):
                 return not self._is_safe_readonly_command(command)
 
         # Case 2: Write tool - block shell scripts containing sed, allow markdown
-        if tool_name == "Write":
+        if tool_name == ToolName.WRITE:
             file_path = get_file_path(hook_input)
             if not file_path:
                 return False
@@ -126,10 +129,10 @@ class SedBlockerHandler(Handler):
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Block the operation with clear explanation."""
-        tool_name = hook_input.get("tool_name")
+        tool_name = hook_input.get(HookInputField.TOOL_NAME)
 
         # Extract the problematic command/content
-        if tool_name == "Bash":
+        if tool_name == ToolName.BASH:
             blocked_content = get_bash_command(hook_input)
             context_type = "command"
         else:  # Write tool

@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from claude_code_hooks_daemon.constants import HandlerTag, HookInputField, Priority, ToolName
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_file_path
 
@@ -12,15 +13,20 @@ class PlanWorkflowHandler(Handler):
     def __init__(self) -> None:
         super().__init__(
             name="plan-workflow-guidance",
-            priority=45,
+            priority=Priority.PLAN_WORKFLOW,
             terminal=False,
-            tags=["workflow", "planning", "advisory", "non-terminal"],
+            tags=[
+                HandlerTag.WORKFLOW,
+                HandlerTag.PLANNING,
+                HandlerTag.ADVISORY,
+                HandlerTag.NON_TERMINAL,
+            ],
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if writing PLAN.md in CLAUDE/Plan/ directory."""
-        tool_name = hook_input.get("tool_name")
-        if tool_name != "Write":
+        tool_name = hook_input.get(HookInputField.TOOL_NAME)
+        if tool_name != ToolName.WRITE:
             return False
 
         file_path = get_file_path(hook_input)

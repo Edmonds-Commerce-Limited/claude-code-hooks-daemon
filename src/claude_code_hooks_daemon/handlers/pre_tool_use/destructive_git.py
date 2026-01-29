@@ -3,6 +3,7 @@
 import re
 from typing import Any
 
+from claude_code_hooks_daemon.constants import HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_bash_command
 
@@ -13,8 +14,8 @@ class DestructiveGitHandler(Handler):
     def __init__(self) -> None:
         super().__init__(
             name="prevent-destructive-git",
-            priority=10,
-            tags=["safety", "git", "blocking", "terminal"],
+            priority=Priority.DESTRUCTIVE_GIT,
+            tags=[HandlerTag.SAFETY, HandlerTag.GIT, HandlerTag.BLOCKING, HandlerTag.TERMINAL],
         )
         self.destructive_patterns = [
             r"\bgit\s+reset\s+.*--hard\b",
