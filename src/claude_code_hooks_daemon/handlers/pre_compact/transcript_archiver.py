@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from claude_code_hooks_daemon.constants import DaemonPath, HandlerTag, Priority
+from claude_code_hooks_daemon.constants import DaemonPath, HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 
 
@@ -19,7 +19,7 @@ class TranscriptArchiverHandler(Handler):
     def __init__(self) -> None:
         """Initialise handler as non-terminal archiver."""
         super().__init__(
-            name="transcript-archiver",
+            handler_id=HandlerID.TRANSCRIPT_ARCHIVER,
             priority=Priority.TRANSCRIPT_ARCHIVER,
             terminal=False,
             tags=[HandlerTag.WORKFLOW, HandlerTag.ARCHIVING, HandlerTag.NON_TERMINAL],

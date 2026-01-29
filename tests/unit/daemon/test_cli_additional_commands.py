@@ -323,6 +323,40 @@ class TestCmdHandlers:
             result = cmd_handlers(args)
             assert result == 0
 
+    def test_handlers_with_empty_list_skipped(self, tmp_path: Path) -> None:
+        """cmd_handlers skips event types with empty handler lists."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        hooks_daemon_dir = claude_dir / "hooks-daemon"
+        hooks_daemon_dir.mkdir()
+
+        config_file = claude_dir / "hooks-daemon.yaml"
+        config_file.write_text("version: '1.0'\n")
+
+        args = argparse.Namespace(project_root=tmp_path, json=False)
+
+        mock_response = {
+            "result": {
+                "handlers": {
+                    "pre_tool_use": [
+                        {"name": "handler1", "priority": 10, "terminal": True},
+                    ],
+                    "post_tool_use": [],  # Empty - should be skipped
+                    "session_start": [],  # Empty - should be skipped
+                }
+            }
+        }
+
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=12345),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.send_daemon_request",
+                return_value=mock_response,
+            ),
+        ):
+            result = cmd_handlers(args)
+            assert result == 0
+
     def test_handlers_communication_failure(self, tmp_path: Path) -> None:
         """cmd_handlers handles daemon communication failure."""
         claude_dir = tmp_path / ".claude"
@@ -365,6 +399,118 @@ class TestCmdHandlers:
         ):
             result = cmd_handlers(args)
             assert result == 1
+
+
+class TestCmdLogsFollow:
+    """Tests for cmd_logs follow mode (lines 448-475)."""
+
+    def test_follow_mode_keyboard_interrupt(self, tmp_path: Path) -> None:
+        """Follow mode exits cleanly on KeyboardInterrupt."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        hooks_daemon_dir = claude_dir / "hooks-daemon"
+        hooks_daemon_dir.mkdir()
+
+        config_file = claude_dir / "hooks-daemon.yaml"
+        config_file.write_text("version: '1.0'\n")
+
+        args = argparse.Namespace(project_root=tmp_path, count=10, level=None, follow=True)
+
+        call_count = [0]
+
+        def mock_send(socket_path: object, request: object) -> dict:
+            call_count[0] += 1
+            if call_count[0] >= 2:
+                raise KeyboardInterrupt()
+            return {"result": {"logs": ["log1"], "count": 1}}
+
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=12345),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.send_daemon_request",
+                side_effect=mock_send,
+            ),
+            patch("time.sleep"),
+        ):
+            result = cmd_logs(args)
+            assert result == 0
+
+    def test_follow_mode_communication_failure(self, tmp_path: Path) -> None:
+        """Follow mode returns 1 on communication failure."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        hooks_daemon_dir = claude_dir / "hooks-daemon"
+        hooks_daemon_dir.mkdir()
+
+        config_file = claude_dir / "hooks-daemon.yaml"
+        config_file.write_text("version: '1.0'\n")
+
+        args = argparse.Namespace(project_root=tmp_path, count=10, level=None, follow=True)
+
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=12345),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.send_daemon_request",
+                return_value=None,
+            ),
+        ):
+            result = cmd_logs(args)
+            assert result == 1
+
+    def test_follow_mode_error_response(self, tmp_path: Path) -> None:
+        """Follow mode returns 1 on error response."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        hooks_daemon_dir = claude_dir / "hooks-daemon"
+        hooks_daemon_dir.mkdir()
+
+        config_file = claude_dir / "hooks-daemon.yaml"
+        config_file.write_text("version: '1.0'\n")
+
+        args = argparse.Namespace(project_root=tmp_path, count=10, level=None, follow=True)
+
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=12345),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.send_daemon_request",
+                return_value={"error": "bad"},
+            ),
+        ):
+            result = cmd_logs(args)
+            assert result == 1
+
+    def test_follow_mode_prints_new_logs(self, tmp_path: Path) -> None:
+        """Follow mode prints only new log entries."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        hooks_daemon_dir = claude_dir / "hooks-daemon"
+        hooks_daemon_dir.mkdir()
+
+        config_file = claude_dir / "hooks-daemon.yaml"
+        config_file.write_text("version: '1.0'\n")
+
+        args = argparse.Namespace(project_root=tmp_path, count=10, level=None, follow=True)
+
+        call_count = [0]
+
+        def mock_send(socket_path: object, request: object) -> dict:
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return {"result": {"logs": ["log1"], "count": 1}}
+            if call_count[0] == 2:
+                return {"result": {"logs": ["log1", "log2", "log3"], "count": 3}}
+            raise KeyboardInterrupt()
+
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=12345),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.send_daemon_request",
+                side_effect=mock_send,
+            ),
+            patch("time.sleep"),
+        ):
+            result = cmd_logs(args)
+            assert result == 0
 
 
 class TestCmdRestart:

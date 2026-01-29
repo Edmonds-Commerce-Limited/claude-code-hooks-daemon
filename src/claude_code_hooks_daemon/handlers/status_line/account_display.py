@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerTag, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Handler, HookResult
 
 
@@ -17,7 +17,7 @@ class AccountDisplayHandler(Handler):
 
     def __init__(self) -> None:
         super().__init__(
-            name="status-account-display",
+            handler_id=HandlerID.ACCOUNT_DISPLAY,
             priority=Priority.ACCOUNT_DISPLAY,
             terminal=False,
             tags=[HandlerTag.STATUS, HandlerTag.DISPLAY, HandlerTag.NON_TERMINAL],

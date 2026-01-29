@@ -9,7 +9,7 @@ Formats model name and color-coded context percentage using traffic light colors
 
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerTag, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Handler, HookResult
 
 
@@ -18,7 +18,7 @@ class ModelContextHandler(Handler):
 
     def __init__(self) -> None:
         super().__init__(
-            name="status-model-context",
+            handler_id=HandlerID.MODEL_CONTEXT,
             priority=Priority.MODEL_CONTEXT,
             terminal=False,
             tags=[HandlerTag.STATUS, HandlerTag.DISPLAY, HandlerTag.NON_TERMINAL],

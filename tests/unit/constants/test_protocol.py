@@ -4,7 +4,6 @@ Tests that all protocol field constants match the actual field names
 used in Claude Code's hook protocol (JSON contract).
 """
 
-
 from claude_code_hooks_daemon.constants.protocol import (
     HookInputField,
     HookOutputField,

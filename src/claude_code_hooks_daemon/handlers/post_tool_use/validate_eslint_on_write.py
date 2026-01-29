@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from claude_code_hooks_daemon.constants import (
+    HandlerID,
     HandlerTag,
     HookInputField,
     Priority,
@@ -31,7 +32,7 @@ class ValidateEslintOnWriteHandler(Handler):
                           This allows tests to provide isolated test directories.
         """
         super().__init__(
-            name="validate-eslint-on-write",
+            handler_id=HandlerID.VALIDATE_ESLINT_ON_WRITE,
             priority=Priority.VALIDATE_ESLINT_ON_WRITE,
             tags=[
                 HandlerTag.VALIDATION,

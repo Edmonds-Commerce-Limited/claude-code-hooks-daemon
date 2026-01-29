@@ -196,16 +196,16 @@ class TestRegisterAll:
         self, registry: HandlerRegistry, router: EventRouter
     ) -> None:
         """register_all should skip disabled handlers."""
-        # Disable a handler
-        registry.disable("HelloWorldHandler")
+        # Disable a specific handler class
+        registry.disable("HelloWorldPreToolUseHandler")
 
         registry.register_all(router)
 
-        # HelloWorldHandler should not be in any chain
+        # The disabled handler class should not be registered
         all_handlers = router.get_all_handlers()
-        for event_type, handlers in all_handlers.items():
-            handler_names = [h.name for h in handlers]
-            assert "hello-world" not in handler_names
+        pre_tool_handlers = all_handlers.get("PreToolUse", [])
+        handler_classes = [type(h).__name__ for h in pre_tool_handlers]
+        assert "HelloWorldPreToolUseHandler" not in handler_classes
 
     def test_register_all_with_config_disabled(
         self, registry: HandlerRegistry, router: EventRouter

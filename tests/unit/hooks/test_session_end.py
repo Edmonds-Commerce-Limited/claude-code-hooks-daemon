@@ -302,3 +302,20 @@ class TestMainFunction:
         # Handler should be registered or skipped based on tags
         register_calls = mock_fc_instance.register.call_args_list
         # The actual behavior depends on CleanupHandler's tags
+
+    @patch("claude_code_hooks_daemon.hooks.session_end.ConfigLoader")
+    @patch("claude_code_hooks_daemon.hooks.session_end.FrontController")
+    @patch("claude_code_hooks_daemon.hooks.session_end.load_config_safe")
+    def test_handles_config_find_failure(
+        self, mock_load_config: Mock, mock_fc_class: Mock, mock_config_loader: Mock
+    ) -> None:
+        """Handles FileNotFoundError from ConfigLoader.find_config()."""
+        mock_config_loader.find_config.side_effect = FileNotFoundError("Config not found")
+        mock_load_config.return_value = {"handlers": {}, "daemon": {}}
+        mock_fc_instance = Mock()
+        mock_fc_class.return_value = mock_fc_instance
+
+        main()
+
+        mock_load_config.assert_called_once()
+        mock_fc_instance.run.assert_called_once()

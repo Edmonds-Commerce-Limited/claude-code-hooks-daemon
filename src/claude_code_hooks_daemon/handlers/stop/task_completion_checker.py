@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerTag, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 
 
@@ -16,10 +16,15 @@ class TaskCompletionCheckerHandler(Handler):
     def __init__(self) -> None:
         """Initialise handler as non-terminal reminder."""
         super().__init__(
-            name="task-completion-checker",
+            handler_id=HandlerID.TASK_COMPLETION_CHECKER,
             priority=Priority.TASK_COMPLETION_CHECKER,
             terminal=False,
-            tags=[HandlerTag.WORKFLOW, HandlerTag.VALIDATION, HandlerTag.ADVISORY, HandlerTag.NON_TERMINAL],
+            tags=[
+                HandlerTag.WORKFLOW,
+                HandlerTag.VALIDATION,
+                HandlerTag.ADVISORY,
+                HandlerTag.NON_TERMINAL,
+            ],
         )
 
     def matches(self, _hook_input: dict[str, Any]) -> bool:

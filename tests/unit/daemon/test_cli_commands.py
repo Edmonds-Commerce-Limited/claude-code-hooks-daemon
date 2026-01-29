@@ -385,6 +385,29 @@ class TestCmdStop:
             assert result == 1
 
 
+class TestCmdStopGenericException:
+    """Tests for cmd_stop generic exception path (line 373-375)."""
+
+    def test_stop_generic_exception(self, tmp_path: Path) -> None:
+        """cmd_stop returns 1 on unexpected exception."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        hooks_daemon_dir = claude_dir / "hooks-daemon"
+        hooks_daemon_dir.mkdir()
+
+        config_file = claude_dir / "hooks-daemon.yaml"
+        config_file.write_text("version: '1.0'\ndaemon:\n  log_level: INFO\n")
+
+        args = argparse.Namespace(project_root=tmp_path)
+
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=12345),
+            patch("os.kill", side_effect=RuntimeError("unexpected")),
+        ):
+            result = cmd_stop(args)
+            assert result == 1
+
+
 class TestCmdConfig:
     """Tests for cmd_config command."""
 
@@ -460,6 +483,77 @@ daemon:
         result = cmd_config(args)
         assert result == 1
 
+    def test_config_load_exception_via_mock(self, tmp_path: Path) -> None:
+        """cmd_config returns 1 when Config.load raises exception."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        hooks_daemon_dir = claude_dir / "hooks-daemon"
+        hooks_daemon_dir.mkdir()
+
+        config_file = claude_dir / "hooks-daemon.yaml"
+        config_file.write_text("version: '1.0'\n")
+
+        args = argparse.Namespace(project_root=tmp_path, json=False)
+
+        with patch(
+            "claude_code_hooks_daemon.daemon.cli.Config.load",
+            side_effect=ValueError("bad config"),
+        ):
+            result = cmd_config(args)
+            assert result == 1
+
+    def test_config_displays_plugins(self, tmp_path: Path, capsys: Any) -> None:
+        """cmd_config displays plugin paths and plugins."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        hooks_daemon_dir = claude_dir / "hooks-daemon"
+        hooks_daemon_dir.mkdir()
+
+        config_file = claude_dir / "hooks-daemon.yaml"
+        config_file.write_text("version: '1.0'\ndaemon:\n  log_level: INFO\n")
+
+        args = argparse.Namespace(project_root=tmp_path, json=False)
+
+        from unittest.mock import MagicMock
+
+        mock_config = MagicMock()
+        mock_config.version = "1.0"
+        mock_config.daemon.idle_timeout_seconds = 600
+        mock_config.daemon.log_level.value = "INFO"
+        mock_config.daemon.log_buffer_size = 1000
+        mock_config.daemon.request_timeout_seconds = 30
+        mock_config.plugins.paths = ["/path/to/plugins"]
+        mock_plugin = MagicMock()
+        mock_plugin.path = "/path/to/plugin.py"
+        mock_plugin.enabled = True
+        mock_config.plugins.plugins = [mock_plugin]
+        # Empty handler dicts
+        for attr in [
+            "pre_tool_use",
+            "post_tool_use",
+            "session_start",
+            "session_end",
+            "pre_compact",
+            "user_prompt_submit",
+            "permission_request",
+            "notification",
+            "stop",
+            "subagent_stop",
+        ]:
+            setattr(mock_config.handlers, attr, {})
+
+        with patch(
+            "claude_code_hooks_daemon.daemon.cli.Config.load",
+            return_value=mock_config,
+        ):
+            result = cmd_config(args)
+            assert result == 0
+
+        captured = capsys.readouterr()
+        assert "[Plugins]" in captured.out
+        assert "/path/to/plugins" in captured.out
+        assert "/path/to/plugin.py" in captured.out
+
 
 class TestCmdInitConfig:
     """Tests for cmd_init_config command."""
@@ -532,6 +626,79 @@ class TestCmdInitConfig:
         content = config_file.read_text()
         assert "old config" not in content
         assert "version:" in content
+
+    def test_write_failure(self, tmp_path: Path) -> None:
+        """cmd_init_config returns 1 when config write fails."""
+        with patch(
+            "claude_code_hooks_daemon.daemon.cli.get_project_path",
+            return_value=tmp_path,
+        ):
+            args = argparse.Namespace(project_root=tmp_path, minimal=True, force=False)
+
+            with patch("pathlib.Path.write_text", side_effect=OSError("disk full")):
+                result = cmd_init_config(args)
+                assert result == 1
+
+    def test_validation_fails_no_force(self, tmp_path: Path) -> None:
+        """cmd_init_config returns 1 when validation fails without --force."""
+        args = argparse.Namespace(project_root=tmp_path, minimal=True, force=False)
+
+        with patch(
+            "claude_code_hooks_daemon.daemon.cli.get_project_path",
+            side_effect=SystemExit(1),
+        ):
+            result = cmd_init_config(args)
+            assert result == 1
+
+    def test_force_mode_with_project_root_arg(self, tmp_path: Path) -> None:
+        """cmd_init_config with --force uses project_root from args when set."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+
+        args = argparse.Namespace(project_root=tmp_path, minimal=True, force=True)
+
+        with patch(
+            "claude_code_hooks_daemon.daemon.cli.get_project_path",
+            side_effect=SystemExit(1),
+        ):
+            result = cmd_init_config(args)
+            assert result == 0
+            assert (claude_dir / "hooks-daemon.yaml").exists()
+
+    def test_force_mode_tree_walk(self, tmp_path: Path, monkeypatch: Any) -> None:
+        """cmd_init_config with --force walks tree when validation fails."""
+        # Create .claude dir somewhere up the tree
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+
+        subdir = tmp_path / "sub"
+        subdir.mkdir()
+        monkeypatch.chdir(subdir)
+
+        args = argparse.Namespace(project_root=None, minimal=True, force=True)
+
+        with patch(
+            "claude_code_hooks_daemon.daemon.cli.get_project_path",
+            side_effect=SystemExit(1),
+        ):
+            result = cmd_init_config(args)
+            assert result == 0
+            assert (claude_dir / "hooks-daemon.yaml").exists()
+
+    def test_force_mode_no_claude_dir_found(self, tmp_path: Path, monkeypatch: Any) -> None:
+        """cmd_init_config with --force returns 1 when no .claude found."""
+        subdir = tmp_path / "no_claude"
+        subdir.mkdir()
+        monkeypatch.chdir(subdir)
+
+        args = argparse.Namespace(project_root=None, minimal=True, force=True)
+
+        with patch(
+            "claude_code_hooks_daemon.daemon.cli.get_project_path",
+            side_effect=SystemExit(1),
+        ):
+            result = cmd_init_config(args)
+            assert result == 1
 
     def test_create_claude_dir_if_missing(self, tmp_path: Path) -> None:
         """cmd_init_config creates .claude directory if missing."""

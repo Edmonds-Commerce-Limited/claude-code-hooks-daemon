@@ -95,64 +95,76 @@ handlers:
   # PreToolUse - Before tool execution
   pre_tool_use:
     # SAFETY HANDLERS (Priority 10-20)
-    destructive_git_handler: {enabled: true, priority: 10}   # Block git reset --hard, clean -f
-    sed_blocker_handler: {enabled: true, priority: 11}       # Block sed (use Edit tool instead)
-    absolute_path_handler: {enabled: true, priority: 12}     # Require absolute paths
-    worktree_file_copy_handler: {enabled: true, priority: 15}  # Prevent worktree file copies
-    git_stash_handler: {enabled: true, priority: 20}         # Warn about git stash
+    destructive_git: {enabled: true, priority: 10}   # Block git reset --hard, clean -f
+    sed_blocker: {enabled: true, priority: 11}       # Block sed (use Edit tool instead)
+    absolute_path: {enabled: true, priority: 12}     # Require absolute paths
+    worktree_file_copy: {enabled: true, priority: 15}  # Prevent worktree file copies
+    git_stash: {enabled: true, priority: 20}         # Warn about git stash
 
     # CODE QUALITY HANDLERS (Priority 25-35)
-    eslint_disable_handler: {enabled: true, priority: 25}    # Block ESLint suppressions
+    eslint_disable: {enabled: true, priority: 25}    # Block ESLint suppressions
     python_qa_suppression_blocker: {enabled: true, priority: 26}  # Block Python QA suppressions
     php_qa_suppression_blocker: {enabled: true, priority: 27}     # Block PHP QA suppressions
     go_qa_suppression_blocker: {enabled: true, priority: 28}      # Block Go QA suppressions
-    tdd_enforcement_handler: {enabled: true, priority: 35}   # Enforce test-first development
+    tdd_enforcement: {enabled: true, priority: 35}   # Enforce test-first development
 
-    # WORKFLOW HANDLERS (Priority 40-55)
-    gh_issue_comments_handler: {enabled: true, priority: 40}  # Require --comments on gh issue view
-    web_search_year_handler: {enabled: true, priority: 55}   # Fix outdated years in searches
+    # WORKFLOW HANDLERS (Priority 36-55)
+    # Plan workflow handlers (parent-child relationship)
+    markdown_organization:  # Parent handler - defines plan tracking options
+      enabled: true
+      priority: 42
+      options:
+        track_plans_in_project: "CLAUDE/Plan"           # Path to plan folder
+        plan_workflow_docs: "CLAUDE/PlanWorkflow.md"    # Path to workflow doc
+    plan_number_helper:     # Child handler - inherits options from markdown_organization
+      enabled: true
+      priority: 30
+      # options: {}  # Inherits from markdown_organization (no duplication needed)
+
+    gh_issue_comments: {enabled: true, priority: 40}  # Require --comments on gh issue view
+    web_search_year: {enabled: true, priority: 55}   # Fix outdated years in searches
 
     # ADVISORY HANDLERS (Priority 56-60)
-    british_english_handler: {enabled: true, priority: 60}   # Warn about American English
+    british_english: {enabled: true, priority: 60}   # Warn about American English
 
   # PostToolUse - After tool execution
   post_tool_use:
-    bash_error_detector_handler: {enabled: true, priority: 10}  # Detect bash errors
+    bash_error_detector: {enabled: true, priority: 10}  # Detect bash errors
 
   # PermissionRequest - Auto-approve decisions
   permission_request: {}
 
   # Notification - Custom notification handling
   notification:
-    notification_logger_handler: {enabled: true, priority: 10}  # Log notifications
+    notification_logger: {enabled: true, priority: 10}  # Log notifications
 
   # UserPromptSubmit - Context injection before processing
   user_prompt_submit: {}
 
   # SessionStart - Initialize environment
   session_start:
-    suggest_status_line_handler: {enabled: true, priority: 55}  # Suggest status line setup
+    suggest_status_line: {enabled: true, priority: 55}  # Suggest status line setup
 
   # SessionEnd - Cleanup on exit
   session_end:
-    cleanup_handler: {enabled: true, priority: 10}  # Session cleanup
+    cleanup: {enabled: true, priority: 10}  # Session cleanup
 
   # Stop - Control agent continuation
   stop: {}
 
   # SubagentStop - Control subagent continuation
   subagent_stop:
-    subagent_completion_logger_handler: {enabled: true, priority: 10}  # Log subagent completion
+    subagent_completion_logger: {enabled: true, priority: 10}  # Log subagent completion
 
   # PreCompact - Before conversation compaction
   pre_compact:
-    transcript_archiver_handler: {enabled: true, priority: 10}  # Archive transcripts
+    transcript_archiver: {enabled: true, priority: 10}  # Archive transcripts
 
   # Status - Status line generation
   status_line:
-    model_context_handler: {enabled: true, priority: 10}  # Model name and context %
-    git_branch_handler: {enabled: true, priority: 20}     # Current git branch
-    daemon_stats_handler: {enabled: true, priority: 30}   # Daemon health metrics
+    model_context: {enabled: true, priority: 10}  # Model name and context %
+    git_branch: {enabled: true, priority: 20}     # Current git branch
+    daemon_stats: {enabled: true, priority: 30}   # Daemon health metrics
 
 # Custom project-specific handlers
 plugins: []

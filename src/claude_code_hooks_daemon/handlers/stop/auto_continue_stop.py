@@ -10,7 +10,7 @@ import re
 from pathlib import Path
 from typing import Any, ClassVar
 
-from claude_code_hooks_daemon.constants import HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 
 logger = logging.getLogger(__name__)
@@ -58,10 +58,15 @@ class AutoContinueStopHandler(Handler):
     def __init__(self) -> None:
         """Initialize the auto-continue stop handler."""
         super().__init__(
-            name="auto-continue-stop",
+            handler_id=HandlerID.AUTO_CONTINUE_STOP,
             priority=Priority.AUTO_CONTINUE_STOP,
             terminal=True,
-            tags=[HandlerTag.WORKFLOW, HandlerTag.AUTOMATION, HandlerTag.YOLO_MODE, HandlerTag.TERMINAL],
+            tags=[
+                HandlerTag.WORKFLOW,
+                HandlerTag.AUTOMATION,
+                HandlerTag.YOLO_MODE,
+                HandlerTag.TERMINAL,
+            ],
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:

@@ -9,7 +9,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerTag, Priority, Timeout
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority, Timeout
 from claude_code_hooks_daemon.core import Handler, HookResult
 
 logger = logging.getLogger(__name__)
@@ -20,7 +20,7 @@ class GitBranchHandler(Handler):
 
     def __init__(self) -> None:
         super().__init__(
-            name="status-git-branch",
+            handler_id=HandlerID.GIT_BRANCH,
             priority=Priority.GIT_BRANCH,
             terminal=False,
             tags=[HandlerTag.STATUS, HandlerTag.GIT, HandlerTag.NON_TERMINAL],

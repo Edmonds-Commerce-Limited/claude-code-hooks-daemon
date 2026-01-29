@@ -264,3 +264,20 @@ class TestMainFunction:
 
         register_calls = mock_fc_instance.register.call_args_list
         assert isinstance(register_calls, list)
+
+    @patch("claude_code_hooks_daemon.hooks.pre_compact.ConfigLoader")
+    @patch("claude_code_hooks_daemon.hooks.pre_compact.FrontController")
+    @patch("claude_code_hooks_daemon.hooks.pre_compact.load_config_safe")
+    def test_handles_config_find_failure(
+        self, mock_load_config: Mock, mock_fc_class: Mock, mock_config_loader: Mock
+    ) -> None:
+        """Handles FileNotFoundError from ConfigLoader.find_config()."""
+        mock_config_loader.find_config.side_effect = FileNotFoundError("Config not found")
+        mock_load_config.return_value = {"handlers": {}, "daemon": {}}
+        mock_fc_instance = Mock()
+        mock_fc_class.return_value = mock_fc_instance
+
+        main()
+
+        mock_load_config.assert_called_once()
+        mock_fc_instance.run.assert_called_once()

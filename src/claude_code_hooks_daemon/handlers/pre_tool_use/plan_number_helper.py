@@ -14,7 +14,13 @@ import re
 from pathlib import Path
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerTag, HookInputField, Priority, ToolName
+from claude_code_hooks_daemon.constants import (
+    HandlerID,
+    HandlerTag,
+    HookInputField,
+    Priority,
+    ToolName,
+)
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import HookResult
 from claude_code_hooks_daemon.handlers.utils.plan_numbering import get_next_plan_number
@@ -26,7 +32,7 @@ class PlanNumberHelperHandler(Handler):
     def __init__(self) -> None:
         """Initialize handler."""
         super().__init__(
-            name="plan-number-helper",
+            handler_id=HandlerID.PLAN_NUMBER_HELPER,
             priority=Priority.PLAN_NUMBER_HELPER,  # Run before markdown_organization (35)
             terminal=False,  # Advisory only, don't block
             tags=[HandlerTag.WORKFLOW, HandlerTag.ADVISORY, HandlerTag.PLANNING],

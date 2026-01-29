@@ -34,6 +34,21 @@ class TestPlanNumberHelperHandler:
         handler._track_plans_in_project = None  # Planning mode disabled
         return handler
 
+    @pytest.fixture
+    def handler_with_workflow_docs(self, tmp_path: Path) -> PlanNumberHelperHandler:
+        """Create handler with workflow docs configured."""
+        handler = PlanNumberHelperHandler()
+        handler._workspace_root = tmp_path
+        handler._track_plans_in_project = "CLAUDE/Plan"
+        handler._plan_workflow_docs = "CLAUDE/PlanWorkflow.md"
+
+        # Create the workflow docs file
+        workflow_file = tmp_path / "CLAUDE" / "PlanWorkflow.md"
+        workflow_file.parent.mkdir(parents=True, exist_ok=True)
+        workflow_file.write_text("# Plan Workflow\n\nGuidance here...")
+
+        return handler
+
     def test_initialization(self) -> None:
         """Handler should initialize with correct settings."""
         handler = PlanNumberHelperHandler()
@@ -229,3 +244,83 @@ class TestPlanNumberHelperHandler:
         if result.context:
             context_str = " ".join(result.context)
             assert "error" in context_str.lower() or "00001" in context_str
+
+    @patch("claude_code_hooks_daemon.handlers.pre_tool_use.plan_number_helper.get_next_plan_number")
+    def test_includes_workflow_docs_when_configured(
+        self, mock_get_next: any, handler_with_workflow_docs: PlanNumberHelperHandler
+    ) -> None:
+        """Should include workflow docs reference when configured and file exists."""
+        mock_get_next.return_value = "00042"
+
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "ls -d CLAUDE/Plan/0* | tail -1"},
+        }
+
+        result = handler_with_workflow_docs.handle(hook_input)
+
+        assert result.decision == Decision.ALLOW
+        assert result.context is not None
+        context_str = " ".join(result.context)
+
+        # Should include plan number
+        assert "00042" in context_str
+
+        # Should include workflow docs reference
+        assert "CLAUDE/PlanWorkflow.md" in context_str
+        assert "plan structure" in context_str.lower() or "conventions" in context_str.lower()
+
+    @patch("claude_code_hooks_daemon.handlers.pre_tool_use.plan_number_helper.get_next_plan_number")
+    def test_omits_workflow_docs_when_file_missing(
+        self, mock_get_next: any, tmp_path: Path
+    ) -> None:
+        """Should not include workflow docs reference when file doesn't exist."""
+        handler = PlanNumberHelperHandler()
+        handler._workspace_root = tmp_path
+        handler._track_plans_in_project = "CLAUDE/Plan"
+        handler._plan_workflow_docs = "CLAUDE/PlanWorkflow.md"
+        # Note: Not creating the workflow file
+
+        mock_get_next.return_value = "00042"
+
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "ls -d CLAUDE/Plan/0* | tail -1"},
+        }
+
+        result = handler.handle(hook_input)
+
+        assert result.decision == Decision.ALLOW
+        assert result.context is not None
+        context_str = " ".join(result.context)
+
+        # Should include plan number
+        assert "00042" in context_str
+
+        # Should NOT include workflow docs reference (file doesn't exist)
+        assert "PlanWorkflow.md" not in context_str
+
+    @patch("claude_code_hooks_daemon.handlers.pre_tool_use.plan_number_helper.get_next_plan_number")
+    def test_works_without_workflow_docs_config(
+        self, mock_get_next: any, handler_enabled: PlanNumberHelperHandler
+    ) -> None:
+        """Should work normally when workflow docs are not configured."""
+        # handler_enabled fixture doesn't have _plan_workflow_docs set
+        mock_get_next.return_value = "00042"
+
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "ls -d CLAUDE/Plan/0* | tail -1"},
+        }
+
+        result = handler_enabled.handle(hook_input)
+
+        assert result.decision == Decision.ALLOW
+        assert result.context is not None
+        context_str = " ".join(result.context)
+
+        # Should include plan number
+        assert "00042" in context_str
+
+        # Should NOT crash or include workflow docs
+        assert "PlanWorkflow.md" not in context_str

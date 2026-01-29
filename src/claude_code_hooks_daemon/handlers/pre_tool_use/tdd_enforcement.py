@@ -3,7 +3,13 @@
 from pathlib import Path
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerTag, HookInputField, Priority, ToolName
+from claude_code_hooks_daemon.constants import (
+    HandlerID,
+    HandlerTag,
+    HookInputField,
+    Priority,
+    ToolName,
+)
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_file_path
 
@@ -13,7 +19,7 @@ class TddEnforcementHandler(Handler):
 
     def __init__(self) -> None:
         super().__init__(
-            name="enforce-tdd",
+            handler_id=HandlerID.TDD_ENFORCEMENT,
             priority=Priority.TDD_ENFORCEMENT,
             tags=[
                 HandlerTag.TDD,

@@ -93,7 +93,7 @@ class TestHelloWorldHandlers:
     def test_init_sets_correct_name(self, handler_class, event_name, sample_input):
         """Handler name should be 'hello_world'."""
         handler = handler_class()
-        assert handler.name == "hello_world"
+        assert handler.name == "hello-world"
 
     @pytest.mark.parametrize("handler_class,event_name,sample_input", ALL_HANDLERS)
     def test_init_sets_correct_priority(self, handler_class, event_name, sample_input):

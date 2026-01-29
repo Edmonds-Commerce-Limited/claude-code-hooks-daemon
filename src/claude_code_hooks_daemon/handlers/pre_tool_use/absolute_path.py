@@ -2,7 +2,13 @@
 
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerTag, HookInputField, Priority, ToolName
+from claude_code_hooks_daemon.constants import (
+    HandlerID,
+    HandlerTag,
+    HookInputField,
+    Priority,
+    ToolName,
+)
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 
 
@@ -15,7 +21,7 @@ class AbsolutePathHandler(Handler):
 
     def __init__(self) -> None:
         super().__init__(
-            name="require-absolute-paths",
+            handler_id=HandlerID.ABSOLUTE_PATH,
             priority=Priority.ABSOLUTE_PATH,
             tags=[HandlerTag.SAFETY, HandlerTag.FILE_OPS, HandlerTag.BLOCKING, HandlerTag.TERMINAL],
         )

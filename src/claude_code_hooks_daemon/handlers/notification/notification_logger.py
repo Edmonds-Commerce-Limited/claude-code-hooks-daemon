@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerTag, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 
 
@@ -19,7 +19,7 @@ class NotificationLoggerHandler(Handler):
     def __init__(self) -> None:
         """Initialise handler as non-terminal logger."""
         super().__init__(
-            name="notification-logger",
+            handler_id=HandlerID.NOTIFICATION_LOGGER,
             priority=Priority.NOTIFICATION_LOGGER,
             terminal=False,
             tags=[HandlerTag.LOGGING, HandlerTag.NON_TERMINAL],

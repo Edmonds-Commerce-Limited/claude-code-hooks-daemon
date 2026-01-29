@@ -15,6 +15,7 @@ from typing import Any
 
 from claude_code_hooks_daemon.constants import (
     DaemonPath,
+    HandlerID,
     HandlerTag,
     HookInputField,
     Priority,
@@ -39,7 +40,7 @@ class WorkflowStatePreCompactHandler(Handler):
                           This allows tests to provide isolated test directories.
         """
         super().__init__(
-            name="workflow-state-precompact",
+            handler_id=HandlerID.WORKFLOW_STATE_PRE_COMPACT,
             priority=Priority.WORKFLOW_STATE_PRE_COMPACT,
             terminal=False,
             tags=[HandlerTag.WORKFLOW, HandlerTag.STATE_MANAGEMENT, HandlerTag.NON_TERMINAL],

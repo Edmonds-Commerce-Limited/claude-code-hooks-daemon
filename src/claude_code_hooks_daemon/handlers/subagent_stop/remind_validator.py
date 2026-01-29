@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from typing import Any, ClassVar
 
-from claude_code_hooks_daemon.constants import HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 
 logger = logging.getLogger(__name__)
@@ -83,9 +83,15 @@ class RemindValidatorHandler(Handler):
 
     def __init__(self) -> None:
         super().__init__(
-            name="remind-validate-after-builder",
+            handler_id=HandlerID.REMIND_VALIDATOR,
             priority=Priority.REMIND_VALIDATOR,
-            tags=[HandlerTag.WORKFLOW, HandlerTag.VALIDATION, HandlerTag.EC_SPECIFIC, HandlerTag.ADVISORY, HandlerTag.NON_TERMINAL],
+            tags=[
+                HandlerTag.WORKFLOW,
+                HandlerTag.VALIDATION,
+                HandlerTag.EC_SPECIFIC,
+                HandlerTag.ADVISORY,
+                HandlerTag.NON_TERMINAL,
+            ],
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:

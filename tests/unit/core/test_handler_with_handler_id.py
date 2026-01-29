@@ -80,7 +80,7 @@ class TestHandlerWithHandlerID:
 
     def test_handler_id_is_required(self) -> None:
         """Test that handler_id is a required parameter."""
-        with pytest.raises(TypeError, match="missing 1 required positional argument"):
+        with pytest.raises(ValueError, match="Either handler_id or name must be provided"):
             ConcreteTestHandler()  # type: ignore[call-arg]
 
     def test_handler_with_all_parameters(self) -> None:

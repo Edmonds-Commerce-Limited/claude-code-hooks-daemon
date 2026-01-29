@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerTag, Priority, ToolName
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority, ToolName
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 
 
@@ -17,7 +17,7 @@ class BashErrorDetectorHandler(Handler):
     def __init__(self) -> None:
         """Initialise handler as non-terminal for feedback."""
         super().__init__(
-            name="bash-error-detector",
+            handler_id=HandlerID.BASH_ERROR_DETECTOR,
             priority=Priority.BASH_ERROR_DETECTOR,
             terminal=False,
             tags=[

@@ -2,7 +2,13 @@
 
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerTag, HookInputField, Priority, ToolName
+from claude_code_hooks_daemon.constants import (
+    HandlerID,
+    HandlerTag,
+    HookInputField,
+    Priority,
+    ToolName,
+)
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_file_path
 
@@ -12,7 +18,7 @@ class PlanWorkflowHandler(Handler):
 
     def __init__(self) -> None:
         super().__init__(
-            name="plan-workflow-guidance",
+            handler_id=HandlerID.PLAN_WORKFLOW,
             priority=Priority.PLAN_WORKFLOW,
             terminal=False,
             tags=[
