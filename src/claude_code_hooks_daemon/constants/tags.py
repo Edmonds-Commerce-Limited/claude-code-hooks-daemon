@@ -77,10 +77,14 @@ class HandlerTag:
 
     # System tags
     STATUS = "status"
+    STATUSLINE = "statusline"
     DISPLAY = "display"
     HEALTH = "health"
     LOGGING = "logging"
     CLEANUP = "cleanup"
+    DAEMON = "daemon"
+    ARCHIVING = "archiving"
+    TEST = "test"
 
     # Project-specific tags
     EC_SPECIFIC = "ec-specific"
@@ -128,10 +132,14 @@ TagLiteral = Literal[
     "markdown",
     # System
     "status",
+    "statusline",
     "display",
     "health",
     "logging",
     "cleanup",
+    "daemon",
+    "archiving",
+    "test",
     # Project-specific
     "ec-specific",
     "ec-preference",

@@ -46,3 +46,8 @@ class Timeout:
     RETRY_DELAY_SHORT = 100  # 100ms (initial retry delay)
     RETRY_DELAY_MEDIUM = 500  # 500ms (medium retry delay)
     RETRY_DELAY_LONG = 2_000  # 2 seconds (long retry delay)
+
+    # Handler-specific timeouts (seconds, used in subprocess calls)
+    ESLINT_CHECK = 30  # 30 seconds (ESLint validation)
+    GIT_STATUS_SHORT = 0.5  # 0.5 seconds (quick git status check)
+    GIT_CONTEXT = 5  # 5 seconds (git context gathering)
