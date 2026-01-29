@@ -3,6 +3,7 @@
 import subprocess
 from typing import Any
 
+from claude_code_hooks_daemon.constants import HandlerTag, Priority, Timeout
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 
 
@@ -17,9 +18,9 @@ class GitContextInjectorHandler(Handler):
         """Initialise handler as non-terminal context provider."""
         super().__init__(
             name="git-context-injector",
-            priority=20,
+            priority=Priority.GIT_CONTEXT_INJECTOR,
             terminal=False,
-            tags=["workflow", "git", "context-injection", "non-terminal"],
+            tags=[HandlerTag.WORKFLOW, HandlerTag.GIT, HandlerTag.CONTEXT_INJECTION, HandlerTag.NON_TERMINAL],
         )
 
     def matches(self, _hook_input: dict[str, Any]) -> bool:
@@ -48,7 +49,7 @@ class GitContextInjectorHandler(Handler):
                 ["git", "status"],
                 capture_output=True,
                 text=True,
-                timeout=5,
+                timeout=Timeout.GIT_CONTEXT,
                 check=False,
             )
 

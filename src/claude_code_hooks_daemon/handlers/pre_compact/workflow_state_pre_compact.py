@@ -13,6 +13,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from claude_code_hooks_daemon.constants import (
+    DaemonPath,
+    HandlerTag,
+    HookInputField,
+    Priority,
+    ProjectPath,
+)
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_workspace_root
 
@@ -33,8 +40,9 @@ class WorkflowStatePreCompactHandler(Handler):
         """
         super().__init__(
             name="workflow-state-precompact",
+            priority=Priority.WORKFLOW_STATE_PRE_COMPACT,
             terminal=False,
-            tags=["workflow", "state-management", "non-terminal"],
+            tags=[HandlerTag.WORKFLOW, HandlerTag.STATE_MANAGEMENT, HandlerTag.NON_TERMINAL],
         )
         self.workspace_root = Path(workspace_root) if workspace_root else get_workspace_root()
 
@@ -51,7 +59,7 @@ class WorkflowStatePreCompactHandler(Handler):
             True if formal workflow detected, False otherwise
         """
         # Check if this is actually a PreCompact event
-        if hook_input.get("hook_event_name") != "PreCompact":
+        if hook_input.get(HookInputField.HOOK_EVENT_NAME) != "PreCompact":
             return False
 
         # Detect workflow
@@ -85,7 +93,7 @@ class WorkflowStatePreCompactHandler(Handler):
             workflow_state = self._extract_workflow_state(hook_input)
 
             # Create untracked/ directory if it doesn't exist
-            untracked_dir = self.workspace_root / "untracked"
+            untracked_dir = self.workspace_root / DaemonPath.UNTRACKED_DIR
             untracked_dir.mkdir(parents=True, exist_ok=True)
 
             # Sanitize workflow name for directory/filename
@@ -175,10 +183,10 @@ class WorkflowStatePreCompactHandler(Handler):
                 logger.error("Unexpected error reading CLAUDE.local.md: %s", e, exc_info=True)
 
         # Method 2: Check for active plans
-        plan_dir = self.workspace_root / "CLAUDE/Plan"
+        plan_dir = self.workspace_root / ProjectPath.PLAN_DIR
         if not plan_dir.exists():
             return False
-        plan_files = list(plan_dir.glob("*/PLAN.md"))
+        plan_files = list(plan_dir.glob(f"*/{ProjectPath.PLAN_FILE}"))
         for plan_file in plan_files:
             try:
                 with plan_file.open() as f:
@@ -240,8 +248,8 @@ class WorkflowStatePreCompactHandler(Handler):
                 logger.error("Unexpected error parsing CLAUDE.local.md: %s", e, exc_info=True)
 
         # Try to extract from active plan
-        plan_dir = self.workspace_root / "CLAUDE/Plan"
-        plan_files = list(plan_dir.glob("*/PLAN.md")) if plan_dir.exists() else []
+        plan_dir = self.workspace_root / ProjectPath.PLAN_DIR
+        plan_files = list(plan_dir.glob(f"*/{ProjectPath.PLAN_FILE}")) if plan_dir.exists() else []
         for plan_file in plan_files:
             try:
                 with plan_file.open() as f:
