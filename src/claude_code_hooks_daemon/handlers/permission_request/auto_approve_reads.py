@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from claude_code_hooks_daemon.constants import HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 
 
@@ -16,8 +17,8 @@ class AutoApproveReadsHandler(Handler):
         """Initialise handler with high priority for early approval."""
         super().__init__(
             name="auto-approve-reads",
-            priority=10,
-            tags=["workflow", "automation", "terminal"],
+            priority=Priority.AUTO_APPROVE_READS,
+            tags=[HandlerTag.WORKFLOW, HandlerTag.AUTOMATION, HandlerTag.TERMINAL],
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
@@ -29,7 +30,7 @@ class AutoApproveReadsHandler(Handler):
         Returns:
             True if file_read or file_write permission type
         """
-        permission_type = hook_input.get("permission_type")
+        permission_type = hook_input.get(HookInputField.PERMISSION_TYPE)
 
         # Match both read and write to handle them differently
         return permission_type in ("file_read", "file_write")
@@ -43,7 +44,7 @@ class AutoApproveReadsHandler(Handler):
         Returns:
             HookResult with allow for reads, deny for writes
         """
-        permission_type = hook_input.get("permission_type")
+        permission_type = hook_input.get(HookInputField.PERMISSION_TYPE)
 
         if permission_type == "file_read":
             # Auto-approve read operations

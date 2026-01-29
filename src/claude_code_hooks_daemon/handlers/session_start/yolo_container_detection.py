@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from claude_code_hooks_daemon.constants import HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import Handler, HookResult
 from claude_code_hooks_daemon.core.hook_result import Decision
 
@@ -35,9 +36,9 @@ class YoloContainerDetectionHandler(Handler):
         """Initialize handler with default configuration."""
         super().__init__(
             name="yolo-container-detection",
-            priority=40,
+            priority=Priority.YOLO_CONTAINER_DETECTION,
             terminal=False,
-            tags=["workflow", "environment", "advisory", "non-terminal"],
+            tags=[HandlerTag.WORKFLOW, HandlerTag.ENVIRONMENT, HandlerTag.ADVISORY, HandlerTag.NON_TERMINAL],
         )
 
         # Default configuration
@@ -197,7 +198,7 @@ class YoloContainerDetectionHandler(Handler):
             return False
 
         # Only match SessionStart events
-        event_name = hook_input.get("hook_event_name")
+        event_name = hook_input.get(HookInputField.HOOK_EVENT_NAME)
         if event_name != "SessionStart":
             return False
 
