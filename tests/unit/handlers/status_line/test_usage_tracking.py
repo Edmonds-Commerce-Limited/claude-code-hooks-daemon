@@ -25,10 +25,11 @@ class TestUsageTrackingHandler:
         assert "status" in handler.tags
         assert "display" in handler.tags
 
-    def test_matches_always_returns_true(self, handler: UsageTrackingHandler) -> None:
-        """Handler should always match for status events."""
-        assert handler.matches({}) is True
-        assert handler.matches({"model": {"id": "test"}}) is True
+    def test_matches_returns_false_when_disabled(self, handler: UsageTrackingHandler) -> None:
+        """Handler is currently disabled and should not match."""
+        # DISABLED: Handler needs architectural rework (see module docstring)
+        assert handler.matches({}) is False
+        assert handler.matches({"model": {"id": "test"}}) is False
 
     def test_handle_with_valid_stats_and_model(self, handler: UsageTrackingHandler) -> None:
         """Test formatting with valid stats cache and model."""

@@ -2,12 +2,22 @@
 
 Displays daily and weekly token usage percentages by reading
 ~/.claude/stats-cache.json and calculating usage against daily limits.
+
+CURRENTLY DISABLED:
+This handler is disabled because the current approach is flawed:
+- stats-cache.json only contains completed historical days, not current day usage
+- Daily limits (200k Sonnet, 100k Opus) are hardcoded without source of truth
+- No reliable way to get real-time current-day token counts or actual account limits
+- Needs architectural rework to either: show raw counts instead of %, make limits
+  configurable, use historical data only, or track tokens via proxy pattern
+
+See: Research in conversation 2026-01-29 for alternative approaches
 """
 
 from pathlib import Path
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerTag, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Handler, HookResult
 from claude_code_hooks_daemon.handlers.status_line.stats_cache_reader import (
     calculate_daily_usage,
@@ -21,7 +31,7 @@ class UsageTrackingHandler(Handler):
 
     def __init__(self, options: dict[str, Any] | None = None) -> None:
         super().__init__(
-            name="status-usage-tracking",
+            handler_id=HandlerID.USAGE_TRACKING,
             priority=Priority.USAGE_TRACKING,
             terminal=False,
             tags=[HandlerTag.STATUS, HandlerTag.DISPLAY, HandlerTag.NON_TERMINAL],
@@ -36,7 +46,8 @@ class UsageTrackingHandler(Handler):
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Always run for status events."""
-        return True
+        # DISABLED: Handler needs architectural rework (see module docstring)
+        return False
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Generate daily/weekly usage percentage status text.
