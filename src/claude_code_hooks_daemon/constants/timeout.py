@@ -51,3 +51,8 @@ class Timeout:
     ESLINT_CHECK = 30  # 30 seconds (ESLint validation)
     GIT_STATUS_SHORT = 0.5  # 0.5 seconds (quick git status check)
     GIT_CONTEXT = 5  # 5 seconds (git context gathering)
+    VALIDATION_CHECK = 5  # 5 seconds (installation validation subprocess)
+
+    # QA runner timeouts (seconds)
+    QA_TEST_TIMEOUT = 120  # 2 minutes (mypy, individual tool checks)
+    QA_LONG_TIMEOUT = 300  # 5 minutes (pytest, full test suite)

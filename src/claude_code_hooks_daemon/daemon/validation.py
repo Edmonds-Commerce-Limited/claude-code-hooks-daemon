@@ -9,7 +9,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from claude_code_hooks_daemon.constants import ConfigKey
+from claude_code_hooks_daemon.constants import ConfigKey, Timeout
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ def is_hooks_daemon_repo(directory: Path) -> bool:
             ["git", "-C", str(directory), "remote", "get-url", "origin"],
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=Timeout.VALIDATION_CHECK,
         )
         if result.returncode != 0:
             return False
