@@ -21,55 +21,58 @@ from __future__ import annotations
 
 
 class HookInputField:
-    """Hook input field names (camelCase) - single source of truth.
+    """Hook input field names (snake_case) - single source of truth.
 
     These are the field names that appear in hook input JSON from
-    Claude Code CLI. The protocol uses camelCase for field names.
+    Claude Code hooks daemon. The internal protocol uses snake_case.
 
     Input Structure (varies by hook type):
         {
-            "hookEventName": str,
-            "toolName": str,          # PreToolUse, PostToolUse
-            "toolInput": dict,        # PreToolUse, PostToolUse
-            "toolOutput": dict,       # PostToolUse
-            "sessionId": str,         # Most hooks
-            "transcriptPath": str,    # Most hooks
-            "message": str,           # UserPromptSubmit, SessionStart
-            "prompt": str,            # Stop, SubagentStop
+            "hook_event_name": str,
+            "tool_name": str,          # PreToolUse, PostToolUse
+            "tool_input": dict,        # PreToolUse, PostToolUse
+            "tool_output": dict,       # PostToolUse
+            "session_id": str,         # Most hooks
+            "transcript_path": str,    # Most hooks
+            "message": str,            # UserPromptSubmit, SessionStart
+            "prompt": str,             # Stop, SubagentStop
             ...
         }
     """
 
     # Common fields (present in most hooks)
-    HOOK_EVENT_NAME = "hookEventName"
-    SESSION_ID = "sessionId"
-    TRANSCRIPT_PATH = "transcriptPath"
+    HOOK_EVENT_NAME = "hook_event_name"
+    SESSION_ID = "session_id"
+    TRANSCRIPT_PATH = "transcript_path"
+    CWD = "cwd"
+    PERMISSION_MODE = "permission_mode"
 
     # Tool-related fields (PreToolUse, PostToolUse)
-    TOOL_NAME = "toolName"
-    TOOL_INPUT = "toolInput"
-    TOOL_OUTPUT = "toolOutput"
+    TOOL_NAME = "tool_name"
+    TOOL_INPUT = "tool_input"
+    TOOL_OUTPUT = "tool_output"
+    TOOL_USE_ID = "tool_use_id"
 
     # Message/prompt fields
     MESSAGE = "message"
     PROMPT = "prompt"
 
     # Session fields
-    SESSION_METADATA = "sessionMetadata"
-    SESSION_STATISTICS = "sessionStatistics"
+    SESSION_METADATA = "session_metadata"
+    SESSION_STATISTICS = "session_statistics"
 
     # Agent fields (subagent hooks)
-    AGENT_ID = "agentId"
-    AGENT_TYPE = "agentType"
-    AGENT_TRANSCRIPT_PATH = "agentTranscriptPath"
+    AGENT_ID = "agent_id"
+    AGENT_TYPE = "agent_type"
+    AGENT_TRANSCRIPT_PATH = "agent_transcript_path"
 
     # Notification fields
-    NOTIFICATION_TYPE = "notificationType"
-    NOTIFICATION_DATA = "notificationData"
+    NOTIFICATION_TYPE = "notification_type"
+    NOTIFICATION_DATA = "notification_data"
 
     # Permission fields
-    PERMISSION_REQUEST = "permissionRequest"
-    PERMISSION_TYPE = "permissionType"
+    PERMISSION_REQUEST = "permission_request"
+    PERMISSION_TYPE = "permission_type"
 
 
 class HookOutputField:

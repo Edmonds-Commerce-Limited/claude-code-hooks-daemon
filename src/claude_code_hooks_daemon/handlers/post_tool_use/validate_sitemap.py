@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from claude_code_hooks_daemon.constants import HandlerTag, Priority, ToolName
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_file_path
 
@@ -12,14 +13,14 @@ class ValidateSitemapHandler(Handler):
     def __init__(self) -> None:
         super().__init__(
             name="validate-sitemap-on-edit",
-            priority=20,
-            tags=["validation", "ec-specific", "project-specific", "advisory", "non-terminal"],
+            priority=Priority.VALIDATE_SITEMAP,
+            tags=[HandlerTag.VALIDATION, HandlerTag.EC_SPECIFIC, HandlerTag.PROJECT_SPECIFIC, HandlerTag.ADVISORY, HandlerTag.NON_TERMINAL],
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if editing sitemap markdown file."""
         tool_name = hook_input.get("tool_name")
-        if tool_name not in ["Write", "Edit"]:
+        if tool_name not in [ToolName.WRITE, ToolName.EDIT]:
             return False
 
         file_path = get_file_path(hook_input)

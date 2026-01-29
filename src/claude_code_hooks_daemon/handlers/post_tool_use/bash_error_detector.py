@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from claude_code_hooks_daemon.constants import HandlerTag, Priority, ToolName
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 
 
@@ -17,9 +18,9 @@ class BashErrorDetectorHandler(Handler):
         """Initialise handler as non-terminal for feedback."""
         super().__init__(
             name="bash-error-detector",
-            priority=50,
+            priority=Priority.BASH_ERROR_DETECTOR,
             terminal=False,
-            tags=["validation", "bash", "advisory", "non-terminal"],
+            tags=[HandlerTag.VALIDATION, HandlerTag.BASH, HandlerTag.ADVISORY, HandlerTag.NON_TERMINAL],
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
@@ -31,7 +32,7 @@ class BashErrorDetectorHandler(Handler):
         Returns:
             True if Bash tool
         """
-        return hook_input.get("tool_name") == "Bash"
+        return hook_input.get("tool_name") == ToolName.BASH
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Analyze Bash output for errors/warnings.
