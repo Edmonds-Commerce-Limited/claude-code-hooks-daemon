@@ -406,6 +406,10 @@ class TestPlanningModeIntegration:
         stub_content = original_path.read_text()
         assert "This plan has been moved to the project" in stub_content
         assert "00001-my-awesome-plan" in stub_content
+        # Should include rename instructions
+        assert "MUST rename this folder" in stub_content
+        assert "00001-descriptive-name" in stub_content
+        assert "Keep the plan number prefix (00001-) intact" in stub_content
 
     @patch(
         "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
