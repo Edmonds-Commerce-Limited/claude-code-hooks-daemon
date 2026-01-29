@@ -23,7 +23,17 @@ echo ""
 OVERALL_EXIT_CODE=0
 
 # Run each check, capturing exit codes
-echo "1. Running Format Check..."
+echo "1. Running Magic Value Check..."
+echo "----------------------------------------"
+if ! "${PROJECT_ROOT}/untracked/venv/bin/python" "${SCRIPT_DIR}/check_magic_values.py" --json; then
+    OVERALL_EXIT_CODE=1
+    echo "❌ Magic value check FAILED"
+else
+    echo "✅ Magic value check PASSED"
+fi
+echo ""
+
+echo "2. Running Format Check..."
 echo "----------------------------------------"
 if ! "${SCRIPT_DIR}/run_format_check.sh"; then
     OVERALL_EXIT_CODE=1
@@ -33,7 +43,7 @@ else
 fi
 echo ""
 
-echo "2. Running Linter..."
+echo "3. Running Linter..."
 echo "----------------------------------------"
 if ! "${SCRIPT_DIR}/run_lint.sh"; then
     OVERALL_EXIT_CODE=1
@@ -43,7 +53,7 @@ else
 fi
 echo ""
 
-echo "3. Running Type Checker..."
+echo "4. Running Type Checker..."
 echo "----------------------------------------"
 if ! "${SCRIPT_DIR}/run_type_check.sh"; then
     OVERALL_EXIT_CODE=1
@@ -53,7 +63,7 @@ else
 fi
 echo ""
 
-echo "4. Running Tests with Coverage..."
+echo "5. Running Tests with Coverage..."
 echo "----------------------------------------"
 if ! "${SCRIPT_DIR}/run_tests.sh"; then
     OVERALL_EXIT_CODE=1
@@ -63,7 +73,7 @@ else
 fi
 echo ""
 
-echo "5. Running Security Check..."
+echo "6. Running Security Check..."
 echo "----------------------------------------"
 if ! "${SCRIPT_DIR}/run_security_check.sh"; then
     OVERALL_EXIT_CODE=1
@@ -82,6 +92,7 @@ import json
 from pathlib import Path
 
 results = {
+    "Magic Values": "untracked/qa/magic_values.json",
     "Format Check": "untracked/qa/format.json",
     "Linter": "untracked/qa/lint.json",
     "Type Check": "untracked/qa/type_check.json",
