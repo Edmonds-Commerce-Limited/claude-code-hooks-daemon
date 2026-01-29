@@ -10,7 +10,7 @@
 
 3. **GIT CLEAN STATE**: Working directory MUST be clean (no uncommitted changes). Run `git status` - if not clean, commit/push ALL changes first.
 
-4. **SESSION RESTART REQUIRED**: After update completes, user MUST restart Claude session. Hooks won't reflect changes until Claude reloads configuration.
+4. **DAEMON ARCHITECTURE BENEFIT**: Updates take effect immediately after daemon restart - NO Claude Code session restart needed! This is a MAJOR benefit of the daemon architecture. Exception: Only if the update adds NEW event types (new files in `.claude/hooks/`), then Claude Code must reload settings.json.
 
 ---
 
@@ -90,7 +90,9 @@ echo '{"tool_name": "Bash", "tool_input": {"command": "git reset --hard HEAD"}}'
 # Expected: {"hookSpecificOutput": {"permissionDecision": "deny", ...}}
 ```
 
-**Tell user to restart Claude session to apply changes.**
+**IMPORTANT: No Claude Code restart needed!** The daemon restart in Step 3 is sufficient. New handlers, config changes, and code updates take effect immediately. This is a MAJOR benefit of the daemon architecture.
+
+**Exception**: Only restart Claude Code if the update added NEW event types (new forwarding scripts in `.claude/hooks/` directory). This is rare - most updates only change handler code or add handlers to existing event types.
 
 ---
 
@@ -584,7 +586,11 @@ cat untracked/daemon.log 2>/dev/null || echo "No logs"
 
 ### Hooks Don't Work After Update
 
-1. **Restart Claude session** (required for settings.json changes)
+1. **Restart daemon** (daemon restart is sufficient for most updates):
+   ```bash
+   cd .claude/hooks-daemon
+   untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
+   ```
 2. Check hook forwarders exist:
    ```bash
    ls -la ../.claude/hooks/
@@ -593,6 +599,10 @@ cat untracked/daemon.log 2>/dev/null || echo "No logs"
    ```bash
    echo '{"tool_name":"Bash","tool_input":{"command":"test"}}' | ../.claude/hooks/pre-tool-use
    ```
+4. **Restart Claude Code session** (ONLY needed if new event types were added - rare):
+   - Check if `.claude/hooks/` has new files compared to before update
+   - If yes, restart Claude Code to reload settings.json
+   - If no new hook files, daemon restart is sufficient
 
 ### Config Validation Errors
 
