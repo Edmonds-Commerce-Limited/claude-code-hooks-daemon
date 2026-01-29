@@ -4,6 +4,18 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00012: Eliminate ALL Magic Strings and Magic Numbers (COMPREHENSIVE)](00012-eliminate-magic-strings/PLAN.md) - 🟡 In Progress
+  - Create COMPREHENSIVE constants system (12 modules: HandlerID, EventID, Priority, Timeout, Paths, **Tags**, **ToolName**, **ConfigKey**, **Protocol**, **Validation**, **Formatting**)
+  - Centralize naming conversion utilities (eliminate _to_snake_case duplication)
+  - Build custom QA rules FIRST to catch ALL magic values (8 rules) before migration
+  - Migrate all 54 handlers to use constants (tags, tool names, priorities, timeouts)
+  - Eliminate magic strings in config system, protocol fields, validation limits
+  - **CRITICAL FINDINGS**: Original plan missed 40% of issues (tags: 67 files, tool names: 31 files, config keys, protocol fields)
+  - See COMPREHENSIVE_FINDINGS.md for complete analysis
+  - **Priority**: CRITICAL
+  - **Owner**: Claude
+  - **Estimated**: 38-56 hours (revised from 12-16 after comprehensive analysis)
+
 - [003: Claude Code Planning Mode → Project Workflow Integration](003-planning-mode-project-integration/PLAN.md) - 🟡 Not Started
   - Intercept planning mode writes and redirect to project structure
   - Auto-number plans with 5-digit padding (00001, 00002, etc.)
@@ -15,6 +27,14 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - **Estimated**: 6-8 hours
 
 ## Completed Plans
+
+- [00011: Handler Dependency System](00011-floofy-growing-moth/PLAN.md) - 🟢 Complete (2026-01-29)
+  - Implemented handler options inheritance via shares_options_with attribute
+  - Added config validation to enforce parent-child dependencies (FAIL FAST)
+  - Eliminated config duplication between markdown_organization and plan_number_helper
+  - Removed YAML anchors, replaced hasattr() hack with generic options inheritance
+  - Two-pass registry algorithm for proper options merging
+  - **Completed**: 2026-01-29 in ~2 hours
 
 - [00010: CLI and Server Coverage Improvement to 98%](Completed/00010-cli-server-coverage-improvement/PLAN.md) - 🟢 Complete (2026-01-29)
   - Improved cli.py coverage from 74.31% to 99.63%
@@ -47,10 +67,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans**: 4
-- **Active**: 1
-- **Completed**: 3
-- **Success Rate**: 100% (3/3 completed successfully)
+- **Total Plans**: 6
+- **Active**: 2
+- **Completed**: 4
+- **Success Rate**: 100% (4/4 completed successfully)
 
 ## Quick Links
 
