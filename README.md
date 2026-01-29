@@ -10,6 +10,27 @@ High-performance daemon for Claude Code hooks using Unix socket IPC and front co
 
 ---
 
+## Installation & Updates
+
+**IMPORTANT: If you are installing or updating this daemon, read these docs first:**
+
+- **INSTALL**: https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-INSTALL.md
+- **UPDATE**: https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-UPDATE.md
+
+**Quick Install (AI-Assisted - Recommended):**
+```
+Please read and follow the installation instructions from:
+https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-INSTALL.md
+```
+
+**Quick Update (AI-Assisted - Recommended):**
+```
+Please read and follow the update instructions from:
+https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-UPDATE.md
+```
+
+---
+
 ## Overview
 
 A daemon-based hooks system that eliminates process spawn overhead (~21ms) with sub-millisecond response times after warmup.
