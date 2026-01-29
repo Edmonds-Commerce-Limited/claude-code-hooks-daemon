@@ -7,6 +7,7 @@ Displays daily and weekly token usage percentages by reading
 from pathlib import Path
 from typing import Any
 
+from claude_code_hooks_daemon.constants import HandlerTag, Priority
 from claude_code_hooks_daemon.core import Handler, HookResult
 from claude_code_hooks_daemon.handlers.status_line.stats_cache_reader import (
     calculate_daily_usage,
@@ -21,9 +22,9 @@ class UsageTrackingHandler(Handler):
     def __init__(self, options: dict[str, Any] | None = None) -> None:
         super().__init__(
             name="status-usage-tracking",
-            priority=15,
+            priority=Priority.USAGE_TRACKING,
             terminal=False,
-            tags=["status", "display", "non-terminal"],
+            tags=[HandlerTag.STATUS, HandlerTag.DISPLAY, HandlerTag.NON_TERMINAL],
         )
 
         # Handler options

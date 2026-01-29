@@ -3,6 +3,7 @@
 import re
 from typing import Any
 
+from claude_code_hooks_daemon.constants import HandlerTag, HookInputField, Priority, ToolName
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_path, get_workspace_root
 
@@ -35,18 +36,23 @@ class ValidatePlanNumberHandler(Handler):
     def __init__(self) -> None:
         super().__init__(
             name="validate-plan-number",
-            priority=30,
+            priority=Priority.VALIDATE_PLAN_NUMBER,
             terminal=False,
-            tags=["workflow", "planning", "advisory", "non-terminal"],
+            tags=[
+                HandlerTag.WORKFLOW,
+                HandlerTag.PLANNING,
+                HandlerTag.ADVISORY,
+                HandlerTag.NON_TERMINAL,
+            ],
         )
         self.workspace_root = get_workspace_root()
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if creating a plan folder."""
-        tool_name = hook_input.get("tool_name")
+        tool_name = hook_input.get(HookInputField.TOOL_NAME)
 
         # Check Write operations
-        if tool_name == "Write":
+        if tool_name == ToolName.WRITE:
             file_path = get_file_path(hook_input)
             if file_path:
                 # Skip documentation/command files
@@ -58,7 +64,7 @@ class ValidatePlanNumberHandler(Handler):
                     return True
 
         # Check Bash mkdir commands
-        if tool_name == "Bash":
+        if tool_name == ToolName.BASH:
             command = get_bash_command(hook_input)
             if command:
                 # Skip heredoc commands (documentation)
@@ -93,12 +99,12 @@ class ValidatePlanNumberHandler(Handler):
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Validate plan number is sequential."""
-        tool_name = hook_input.get("tool_name")
+        tool_name = hook_input.get(HookInputField.TOOL_NAME)
         plan_number = None
         plan_name = None
 
         # Extract plan number and name
-        if tool_name == "Write":
+        if tool_name == ToolName.WRITE:
             file_path = get_file_path(hook_input)
             if file_path:
                 match = re.search(r"CLAUDE/Plan/(\d{3})-([^/]+)/", file_path)
@@ -106,7 +112,7 @@ class ValidatePlanNumberHandler(Handler):
                     plan_number = int(match.group(1))
                     plan_name = match.group(2)
 
-        elif tool_name == "Bash":
+        elif tool_name == ToolName.BASH:
             command = get_bash_command(hook_input)
             if command:
                 match = re.search(r"mkdir.*?CLAUDE/Plan/(\d{3})-([^\s/]+)", command)

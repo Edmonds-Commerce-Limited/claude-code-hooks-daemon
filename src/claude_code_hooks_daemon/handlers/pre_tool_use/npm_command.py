@@ -3,6 +3,7 @@
 import re
 from typing import Any, ClassVar
 
+from claude_code_hooks_daemon.constants import HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_bash_command
 
@@ -37,8 +38,15 @@ class NpmCommandHandler(Handler):
     def __init__(self) -> None:
         super().__init__(
             name="enforce-npm-commands",
-            priority=50,
-            tags=["workflow", "npm", "nodejs", "javascript", "advisory", "non-terminal"],
+            priority=Priority.NPM_COMMAND,
+            tags=[
+                HandlerTag.WORKFLOW,
+                HandlerTag.NPM,
+                HandlerTag.NODEJS,
+                HandlerTag.JAVASCRIPT,
+                HandlerTag.ADVISORY,
+                HandlerTag.NON_TERMINAL,
+            ],
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:

@@ -3,6 +3,7 @@
 import re
 from typing import Any, ClassVar
 
+from claude_code_hooks_daemon.constants import HandlerTag, HookInputField, Priority, ToolName
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_file_content, get_file_path
 
@@ -30,15 +31,20 @@ class BritishEnglishHandler(Handler):
         # Non-terminal (terminal=False) - allows operation but adds warning context
         super().__init__(
             name="enforce-british-english",
-            priority=60,
+            priority=Priority.BRITISH_ENGLISH,
             terminal=False,
-            tags=["advisory", "content-quality", "ec-preference", "non-terminal"],
+            tags=[
+                HandlerTag.ADVISORY,
+                HandlerTag.CONTENT_QUALITY,
+                HandlerTag.EC_PREFERENCE,
+                HandlerTag.NON_TERMINAL,
+            ],
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if writing content files with potential American spellings."""
-        tool_name = hook_input.get("tool_name")
-        if tool_name not in ["Write", "Edit"]:
+        tool_name = hook_input.get(HookInputField.TOOL_NAME)
+        if tool_name not in [ToolName.WRITE, ToolName.EDIT]:
             return False
 
         file_path = get_file_path(hook_input)
@@ -54,8 +60,8 @@ class BritishEnglishHandler(Handler):
             return False
 
         content = get_file_content(hook_input)
-        if tool_name == "Edit":
-            content = hook_input.get("tool_input", {}).get("new_string", "")
+        if tool_name == ToolName.EDIT:
+            content = hook_input.get(HookInputField.TOOL_INPUT, {}).get("new_string", "")
 
         if not content:
             return False
@@ -68,10 +74,10 @@ class BritishEnglishHandler(Handler):
         """Warn about American spellings but allow operation."""
         file_path = get_file_path(hook_input)
         content = get_file_content(hook_input)
-        tool_name = hook_input.get("tool_name")
+        tool_name = hook_input.get(HookInputField.TOOL_NAME)
 
-        if tool_name == "Edit":
-            content = hook_input.get("tool_input", {}).get("new_string", "")
+        if tool_name == ToolName.EDIT:
+            content = hook_input.get(HookInputField.TOOL_INPUT, {}).get("new_string", "")
 
         if not content:
             return HookResult(decision=Decision.ALLOW)

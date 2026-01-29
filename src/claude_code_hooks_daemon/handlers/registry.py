@@ -10,6 +10,7 @@ import pkgutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from claude_code_hooks_daemon.constants import ConfigKey
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler import Handler
 
@@ -159,6 +160,10 @@ class HandlerRegistry:
     ) -> int:
         """Register all discovered handlers with the router.
 
+        Uses a two-pass algorithm to support handler options inheritance:
+        1. First pass: collect all handler options into options_registry
+        2. Second pass: instantiate handlers and apply inherited options
+
         Args:
             router: Event router to register handlers with
             config: Optional handler configuration from hooks-daemon.yaml
@@ -171,8 +176,52 @@ class HandlerRegistry:
         if workspace_root:
             self._workspace_root = workspace_root
 
-        count = 0
+        # PASS 1: Collect all handler options
+        options_registry: dict[str, dict[str, Any]] = {}
         handlers_dir = Path(__file__).parent
+
+        for dir_name, event_type in EVENT_TYPE_MAPPING.items():
+            event_dir = handlers_dir / dir_name
+            if not event_dir.is_dir():
+                continue
+
+            event_config = (config or {}).get(dir_name) or {}
+
+            for py_file in event_dir.glob("*.py"):
+                if py_file.name.startswith("_"):
+                    continue
+
+                module_name = f"claude_code_hooks_daemon.handlers.{dir_name}.{py_file.stem}"
+
+                try:
+                    module = importlib.import_module(module_name)
+                except Exception:
+                    continue
+
+                for attr_name in dir(module):
+                    attr = getattr(module, attr_name)
+                    if (
+                        isinstance(attr, type)
+                        and issubclass(attr, Handler)
+                        and attr is not Handler
+                        and not attr.__name__.startswith("_")
+                    ):
+                        config_key = _to_snake_case(attr.__name__)
+                        handler_config = event_config.get(config_key, {})
+                        if handler_config.get(ConfigKey.ENABLED, True):
+                            # Use config key (snake_case class name) as registry key
+                            try:
+                                registry_key = f"{event_type.value}.{config_key}"
+                                options = handler_config.get(ConfigKey.OPTIONS, {})
+                                # Include workspace_root in options if available
+                                if self._workspace_root:
+                                    options["workspace_root"] = self._workspace_root
+                                options_registry[registry_key] = options
+                            except Exception:
+                                pass
+
+        # PASS 2: Register handlers with inherited options
+        count = 0
 
         for dir_name, event_type in EVENT_TYPE_MAPPING.items():
             event_dir = handlers_dir / dir_name
@@ -183,8 +232,8 @@ class HandlerRegistry:
             event_config = (config or {}).get(dir_name) or {}
 
             # Extract tag filters from event config
-            enable_tags = event_config.get("enable_tags")
-            disable_tags_raw: Any = event_config.get("disable_tags", [])
+            enable_tags = event_config.get(ConfigKey.ENABLE_TAGS)
+            disable_tags_raw: Any = event_config.get(ConfigKey.DISABLE_TAGS, [])
             disable_tags: list[str] = disable_tags_raw if isinstance(disable_tags_raw, list) else []
 
             # Find all Python files in the directory
@@ -209,11 +258,12 @@ class HandlerRegistry:
                         and attr is not Handler
                         and not attr.__name__.startswith("_")
                     ):
-                        # Check handler-specific config
-                        handler_config = event_config.get(_to_snake_case(attr.__name__), {})
+                        # Check handler-specific config (use config key = snake_case class name)
+                        config_key = _to_snake_case(attr.__name__)
+                        handler_config = event_config.get(config_key, {})
 
                         # Skip disabled handlers
-                        if not handler_config.get("enabled", True):
+                        if not handler_config.get(ConfigKey.ENABLED, True):
                             logger.debug("Handler %s is disabled", attr.__name__)
                             continue
 
@@ -244,23 +294,25 @@ class HandlerRegistry:
                                 continue
 
                             # Override priority from config if specified
-                            if "priority" in handler_config:
-                                instance.priority = handler_config["priority"]
+                            if ConfigKey.PRIORITY in handler_config:
+                                instance.priority = handler_config[ConfigKey.PRIORITY]
 
-                            # Pass handler-specific options from options dict
-                            if hasattr(instance, "_track_plans_in_project"):
-                                # markdown_organization handler config
-                                # Options are in options dict, not top-level
-                                options = handler_config.get("options", {})
-                                instance._track_plans_in_project = options.get(
-                                    "track_plans_in_project", None
-                                )
-                                instance._plan_workflow_docs = options.get(  # type: ignore[attr-defined]
-                                    "plan_workflow_docs", None
-                                )
-                                # Set workspace root if available
-                                if self._workspace_root:
-                                    instance._workspace_root = self._workspace_root  # type: ignore[attr-defined]
+                            # Apply options inheritance if handler shares options with parent
+                            registry_key = f"{event_type.value}.{config_key}"
+                            handler_options = options_registry.get(registry_key, {})
+
+                            if instance.shares_options_with:
+                                # Get parent options
+                                parent_key = f"{event_type.value}.{instance.shares_options_with}"
+                                parent_options = options_registry.get(parent_key, {})
+                                # Merge: parent options + child overrides
+                                merged_options = {**parent_options, **handler_options}
+                            else:
+                                merged_options = handler_options
+
+                            # Apply all options as private attributes (generic for all handlers)
+                            for option_key, option_value in merged_options.items():
+                                setattr(instance, f"_{option_key}", option_value)
 
                             router.register(event_type, instance)
                             count += 1

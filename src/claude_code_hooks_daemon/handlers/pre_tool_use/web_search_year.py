@@ -3,6 +3,7 @@
 from datetime import datetime
 from typing import Any
 
+from claude_code_hooks_daemon.constants import HandlerTag, HookInputField, Priority, ToolName
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 
 
@@ -17,17 +18,17 @@ class WebSearchYearHandler(Handler):
     def __init__(self) -> None:
         super().__init__(
             name="validate-websearch-year",
-            priority=55,
-            tags=["workflow", "advisory", "non-terminal"],
+            priority=Priority.WEB_SEARCH_YEAR,
+            tags=[HandlerTag.WORKFLOW, HandlerTag.ADVISORY, HandlerTag.NON_TERMINAL],
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if WebSearch query uses old year."""
-        tool_name = hook_input.get("tool_name")
-        if tool_name != "WebSearch":
+        tool_name = hook_input.get(HookInputField.TOOL_NAME)
+        if tool_name != ToolName.WEB_SEARCH:
             return False
 
-        query = hook_input.get("tool_input", {}).get("query", "")
+        query = hook_input.get(HookInputField.TOOL_INPUT, {}).get("query", "")
         if not query:
             return False
 
@@ -36,7 +37,7 @@ class WebSearchYearHandler(Handler):
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Provide guidance about outdated year in WebSearch."""
-        query = hook_input.get("tool_input", {}).get("query", "")
+        query = hook_input.get(HookInputField.TOOL_INPUT, {}).get("query", "")
 
         return HookResult(
             decision=Decision.ALLOW,

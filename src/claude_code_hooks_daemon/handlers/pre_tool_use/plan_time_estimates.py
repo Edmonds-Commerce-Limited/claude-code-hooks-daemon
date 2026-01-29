@@ -3,6 +3,7 @@
 import re
 from typing import Any, ClassVar
 
+from claude_code_hooks_daemon.constants import HandlerTag, HookInputField, Priority, ToolName
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_file_content, get_file_path
 
@@ -27,14 +28,19 @@ class PlanTimeEstimatesHandler(Handler):
     def __init__(self) -> None:
         super().__init__(
             name="block-plan-time-estimates",
-            priority=40,
-            tags=["workflow", "planning", "advisory", "non-terminal"],
+            priority=Priority.PLAN_TIME_ESTIMATES,
+            tags=[
+                HandlerTag.WORKFLOW,
+                HandlerTag.PLANNING,
+                HandlerTag.ADVISORY,
+                HandlerTag.NON_TERMINAL,
+            ],
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if writing time estimates to plan files."""
-        tool_name = hook_input.get("tool_name")
-        if tool_name not in ["Write", "Edit"]:
+        tool_name = hook_input.get(HookInputField.TOOL_NAME)
+        if tool_name not in [ToolName.WRITE, ToolName.EDIT]:
             return False
 
         file_path = get_file_path(hook_input)
@@ -42,8 +48,8 @@ class PlanTimeEstimatesHandler(Handler):
             return False
 
         content = get_file_content(hook_input)
-        if tool_name == "Edit":
-            content = hook_input.get("tool_input", {}).get("new_string", "")
+        if tool_name == ToolName.EDIT:
+            content = hook_input.get(HookInputField.TOOL_INPUT, {}).get("new_string", "")
 
         if not content:
             return False

@@ -20,7 +20,12 @@ class BashErrorDetectorHandler(Handler):
             name="bash-error-detector",
             priority=Priority.BASH_ERROR_DETECTOR,
             terminal=False,
-            tags=[HandlerTag.VALIDATION, HandlerTag.BASH, HandlerTag.ADVISORY, HandlerTag.NON_TERMINAL],
+            tags=[
+                HandlerTag.VALIDATION,
+                HandlerTag.BASH,
+                HandlerTag.ADVISORY,
+                HandlerTag.NON_TERMINAL,
+            ],
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:

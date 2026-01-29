@@ -9,6 +9,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from claude_code_hooks_daemon.constants import ConfigKey
+
 logger = logging.getLogger(__name__)
 
 
@@ -106,8 +108,8 @@ def validate_not_nested(project_root: Path) -> None:
         # Check for self_install_mode in the outer project's config
         config = load_config_safe(project_root)
         if config:
-            daemon_config = config.get("daemon", {})
-            if daemon_config.get("self_install_mode", False):
+            daemon_config = config.get(ConfigKey.DAEMON, {})
+            if daemon_config.get(ConfigKey.SELF_INSTALL_MODE, False):
                 return  # Self-install mode enabled, allow
 
         raise InstallationError(
@@ -144,7 +146,7 @@ def validate_installation_target(project_root: Path, self_install_requested: boo
         if is_hooks_daemon_repo(project_root):
             # Check if self-install is being requested or already configured
             config = load_config_safe(project_root)
-            has_self_install_config = config and config.get("daemon", {}).get(
+            has_self_install_config = config and config.get(ConfigKey.DAEMON, {}).get(
                 "self_install_mode", False
             )
 

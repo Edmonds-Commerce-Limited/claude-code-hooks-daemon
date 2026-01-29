@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 from typing import Any, ClassVar
 
+from claude_code_hooks_daemon.constants import HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 
 logger = logging.getLogger(__name__)
@@ -83,18 +84,18 @@ class RemindValidatorHandler(Handler):
     def __init__(self) -> None:
         super().__init__(
             name="remind-validate-after-builder",
-            priority=10,
-            tags=["workflow", "validation", "ec-specific", "advisory", "non-terminal"],
+            priority=Priority.REMIND_VALIDATOR,
+            tags=[HandlerTag.WORKFLOW, HandlerTag.VALIDATION, HandlerTag.EC_SPECIFIC, HandlerTag.ADVISORY, HandlerTag.NON_TERMINAL],
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if a builder agent just completed."""
-        hook_event = hook_input.get("hook_event_name", "")
+        hook_event = hook_input.get(HookInputField.HOOK_EVENT_NAME, "")
 
         if hook_event != "SubagentStop":
             return False
 
-        transcript_path = hook_input.get("transcript_path", "")
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH, "")
         if not transcript_path:
             return False
 
@@ -106,7 +107,7 @@ class RemindValidatorHandler(Handler):
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Add reminder to run validator agent."""
-        transcript_path = hook_input.get("transcript_path", "")
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH, "")
         completed_agent = self._get_last_completed_agent(transcript_path)
 
         validation_config = self.BUILDER_TO_VALIDATOR.get(completed_agent)

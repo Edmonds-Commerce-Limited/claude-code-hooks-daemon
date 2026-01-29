@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from claude_code_hooks_daemon.constants import HandlerTag, Priority
 from claude_code_hooks_daemon.core import Handler, HookResult
 from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.core.utils import get_bash_command
@@ -20,8 +21,8 @@ class GhIssueCommentsHandler(Handler):
     def __init__(self) -> None:
         super().__init__(
             name="require-gh-issue-comments",
-            priority=40,
-            tags=["workflow", "github", "blocking", "terminal"],
+            priority=Priority.GH_ISSUE_COMMENTS,
+            tags=[HandlerTag.WORKFLOW, HandlerTag.GITHUB, HandlerTag.BLOCKING, HandlerTag.TERMINAL],
         )
         # Match: gh issue view [number] [--repo owner/repo] [other flags]
         # But NOT already containing --comments
