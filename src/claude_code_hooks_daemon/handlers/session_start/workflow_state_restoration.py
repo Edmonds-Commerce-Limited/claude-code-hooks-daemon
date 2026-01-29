@@ -11,6 +11,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from claude_code_hooks_daemon.constants import HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_workspace_root
 
@@ -32,7 +33,7 @@ class WorkflowStateRestorationHandler(Handler):
         super().__init__(
             name="workflow-state-restoration",
             terminal=False,
-            tags=["workflow", "state-management", "advisory", "non-terminal"],
+            tags=[HandlerTag.WORKFLOW, HandlerTag.STATE_MANAGEMENT, HandlerTag.ADVISORY, HandlerTag.NON_TERMINAL],
         )
         self.workspace_root = Path(workspace_root) if workspace_root else get_workspace_root()
 
@@ -47,7 +48,7 @@ class WorkflowStateRestorationHandler(Handler):
             True if source="compact", False otherwise
         """
         # Check if this is actually a SessionStart event
-        if hook_input.get("hook_event_name") != "SessionStart":
+        if hook_input.get(HookInputField.HOOK_EVENT_NAME) != "SessionStart":
             return False
 
         # Match only when resuming after compaction

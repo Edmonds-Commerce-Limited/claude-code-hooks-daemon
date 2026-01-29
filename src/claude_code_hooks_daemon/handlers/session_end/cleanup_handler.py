@@ -4,6 +4,7 @@ import contextlib
 from pathlib import Path
 from typing import Any
 
+from claude_code_hooks_daemon.constants import HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 
 
@@ -18,9 +19,9 @@ class CleanupHandler(Handler):
         """Initialise handler as non-terminal cleanup."""
         super().__init__(
             name="session-cleanup",
-            priority=100,
+            priority=Priority.SESSION_CLEANUP,
             terminal=False,
-            tags=["cleanup", "workflow", "non-terminal"],
+            tags=[HandlerTag.CLEANUP, HandlerTag.WORKFLOW, HandlerTag.NON_TERMINAL],
         )
 
     def matches(self, _hook_input: dict[str, Any]) -> bool:
