@@ -94,6 +94,190 @@ echo '{"tool_name": "Bash", "tool_input": {"command": "git reset --hard HEAD"}}'
 
 ---
 
+## Step 5: Discover New Handlers (After Update)
+
+After updating, you should check for new handlers that weren't in the previous version.
+
+### Method 1: Discover All Available Handlers (Programmatic)
+
+This discovers ALL handlers by scanning the codebase (source of truth):
+
+```bash
+cd .claude/hooks-daemon
+
+VENV_PYTHON=untracked/venv/bin/python
+
+$VENV_PYTHON -c "
+from claude_code_hooks_daemon.handlers.registry import HandlerRegistry, EVENT_TYPE_MAPPING
+from claude_code_hooks_daemon.core.handler import Handler
+import importlib, json
+from pathlib import Path
+
+registry = HandlerRegistry()
+handlers_dir = Path('src/claude_code_hooks_daemon/handlers')
+result = {}
+
+for dir_name, event_type in EVENT_TYPE_MAPPING.items():
+    event_dir = handlers_dir / dir_name
+    if not event_dir.is_dir():
+        continue
+    handlers = []
+    for py_file in event_dir.glob('*.py'):
+        if py_file.name.startswith('_'):
+            continue
+        mod = f'claude_code_hooks_daemon.handlers.{dir_name}.{py_file.stem}'
+        try:
+            module = importlib.import_module(mod)
+            for attr_name in dir(module):
+                attr = getattr(module, attr_name)
+                if isinstance(attr, type) and issubclass(attr, Handler) and attr is not Handler:
+                    instance = attr()
+                    handlers.append({
+                        'class': attr.__name__,
+                        'handler_id': instance.handler_id,
+                        'name': instance.name,
+                        'priority': instance.priority,
+                        'terminal': instance.terminal,
+                        'tags': list(instance.tags) if hasattr(instance, 'tags') else [],
+                        'doc': (attr.__doc__ or '').strip().split('\n')[0] if attr.__doc__ else '',
+                    })
+        except Exception as e:
+            handlers.append({'module': mod, 'error': str(e)})
+    if handlers:
+        result[dir_name] = sorted(handlers, key=lambda h: h.get('priority', 99))
+
+print(json.dumps(result, indent=2))
+"
+```
+
+This outputs JSON with all handlers organized by event type, showing:
+- `handler_id` - Unique identifier
+- `name` - Handler name (used in config)
+- `priority` - Execution order
+- `terminal` - Whether it stops dispatch chain
+- `tags` - Handler tags (language, function, etc.)
+- `doc` - First line of docstring
+
+### Method 2: Get Full Default Config Template
+
+This generates the recommended default config with inline comments:
+
+```bash
+cd .claude/hooks-daemon
+VENV_PYTHON=untracked/venv/bin/python
+
+$VENV_PYTHON -c "
+from claude_code_hooks_daemon.daemon.init_config import generate_config
+print(generate_config(mode='full'))
+"
+```
+
+This outputs a complete YAML config with:
+- All available handlers
+- Default settings for each
+- Inline comments explaining each handler
+- Recommended priority values
+
+### Method 3: Compare with Current Config
+
+To find handlers you're missing:
+
+```bash
+cd .claude/hooks-daemon
+VENV_PYTHON=untracked/venv/bin/python
+
+# 1. Get list of ALL available handlers
+$VENV_PYTHON -c "
+from claude_code_hooks_daemon.handlers.registry import HandlerRegistry, EVENT_TYPE_MAPPING
+from claude_code_hooks_daemon.core.handler import Handler
+import importlib
+from pathlib import Path
+
+handlers_dir = Path('src/claude_code_hooks_daemon/handlers')
+available = {}
+
+for dir_name in EVENT_TYPE_MAPPING.keys():
+    event_dir = handlers_dir / dir_name
+    if not event_dir.is_dir():
+        continue
+    handlers = []
+    for py_file in event_dir.glob('*.py'):
+        if py_file.name.startswith('_'):
+            continue
+        mod = f'claude_code_hooks_daemon.handlers.{dir_name}.{py_file.stem}'
+        try:
+            module = importlib.import_module(mod)
+            for attr_name in dir(module):
+                attr = getattr(module, attr_name)
+                if isinstance(attr, type) and issubclass(attr, Handler) and attr is not Handler:
+                    instance = attr()
+                    handlers.append(instance.name)
+        except:
+            pass
+    if handlers:
+        available[dir_name] = sorted(handlers)
+
+# 2. Read current config
+import yaml
+from pathlib import Path
+current_config = yaml.safe_load(Path('../hooks-daemon.yaml').read_text())
+current = current_config.get('handlers', {})
+
+# 3. Find missing handlers
+print('Available handlers NOT in your config:\n')
+for event_type, handler_names in available.items():
+    event_config = current.get(event_type, {})
+    missing = [h for h in handler_names if h not in event_config]
+    if missing:
+        print(f'{event_type}:')
+        for h in missing:
+            print(f'  - {h}')
+"
+```
+
+### What to Do with New Handlers
+
+1. **Read the handler documentation**:
+   ```bash
+   cd .claude/hooks-daemon
+   # Example: read destructive_git handler docs
+   cat src/claude_code_hooks_daemon/handlers/pre_tool_use/destructive_git.py
+   ```
+
+2. **Check release notes** for handler descriptions:
+   ```bash
+   cat RELEASES/v2.3.0.md | grep -A 5 "New Handlers"
+   ```
+
+3. **Add handlers to your config** if desired:
+   ```yaml
+   # .claude/hooks-daemon.yaml
+   handlers:
+     pre_tool_use:
+       new_handler_name:
+         enabled: true
+         priority: 50
+         # handler-specific options...
+   ```
+
+4. **Restart daemon** to load new config:
+   ```bash
+   cd .claude/hooks-daemon
+   untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
+   ```
+
+### Understanding Handler Tags
+
+Handlers are tagged by language, function, and specificity. Use tags to filter:
+
+**Language Tags**: `python`, `php`, `typescript`, `javascript`, `go`
+**Function Tags**: `safety`, `tdd`, `qa-enforcement`, `workflow`, `advisory`, `validation`
+**Specificity Tags**: `ec-specific`, `project-specific`
+
+To see handlers by tag in the discovery output above, check the `tags` field.
+
+---
+
 ## Version-Specific Documentation
 
 ### RELEASES Directory
