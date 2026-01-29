@@ -61,17 +61,16 @@ class TestHandlerConfig:
         assert config.priority == 42
         assert config.options == {"key": "value"}
 
-    def test_extra_fields_allowed(self) -> None:
-        """HandlerConfig allows extra fields."""
-        config = HandlerConfig.model_validate(
-            {
-                "enabled": True,
-                "priority": 10,
-                "custom_field": "custom_value",
-            }
-        )
-        assert config.enabled is True
-        assert config.priority == 10
+    def test_extra_fields_forbidden(self) -> None:
+        """HandlerConfig FORBIDS extra fields - use options dict instead."""
+        with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+            HandlerConfig.model_validate(
+                {
+                    "enabled": True,
+                    "priority": 10,
+                    "custom_field": "custom_value",  # Should fail - extra field
+                }
+            )
 
     def test_model_validate_from_dict(self) -> None:
         """Can validate HandlerConfig from dict."""

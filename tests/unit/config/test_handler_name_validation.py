@@ -4,8 +4,10 @@ Following TDD - these tests verify that config validation catches typos
 in handler names and fails fast with clear error messages.
 
 CRITICAL: This addresses the bug where users could typo handler names
-(e.g., 'destructive_git' instead of 'destructive_git_handler') and the
-config would silently be ignored, with no error message.
+and the config would silently be ignored, with no error message.
+
+NOTE: Handler config keys do NOT include _handler suffix.
+Class DestructiveGitHandler -> config key "destructive_git"
 """
 
 import pytest
@@ -21,7 +23,7 @@ class TestHandlerNameValidation:
         config = {
             "version": "1.0",
             "daemon": {"idle_timeout_seconds": 600, "log_level": "INFO"},
-            "handlers": {"pre_tool_use": {"destructive_git_handler": {"enabled": True}}},
+            "handlers": {"pre_tool_use": {"destructive_git": {"enabled": True}}},
         }
 
         # Should not raise - this is a valid handler name
@@ -37,8 +39,8 @@ class TestHandlerNameValidation:
             "daemon": {"idle_timeout_seconds": 600, "log_level": "INFO"},
             "handlers": {
                 "pre_tool_use": {
-                    # TYPO: Missing _handler suffix
-                    "destructive_git": {"enabled": False}
+                    # TYPO: Wrong name with unexpected suffix
+                    "destructive_git_handler": {"enabled": False}
                 }
             },
         }
@@ -48,7 +50,7 @@ class TestHandlerNameValidation:
             ConfigValidator.validate_and_raise(config)
 
         error_message = str(exc_info.value)
-        assert "destructive_git" in error_message.lower()
+        assert "destructive_git_handler" in error_message.lower()
         assert "unknown handler" in error_message.lower() or "not found" in error_message.lower()
 
     def test_multiple_invalid_handler_names_all_reported(self) -> None:
@@ -58,8 +60,8 @@ class TestHandlerNameValidation:
             "daemon": {"idle_timeout_seconds": 600, "log_level": "INFO"},
             "handlers": {
                 "pre_tool_use": {
-                    "destructive_git": {"enabled": True},  # TYPO
-                    "sed_blocker": {"enabled": True},  # TYPO
+                    "invalid_name_one": {"enabled": True},  # TYPO
+                    "invalid_name_two": {"enabled": True},  # TYPO
                 }
             },
         }
@@ -69,8 +71,8 @@ class TestHandlerNameValidation:
 
         error_message = str(exc_info.value)
         # Both typos should be mentioned
-        assert "destructive_git" in error_message.lower()
-        assert "sed_blocker" in error_message.lower()
+        assert "invalid_name_one" in error_message.lower()
+        assert "invalid_name_two" in error_message.lower()
 
     def test_mixed_valid_and_invalid_handler_names(self) -> None:
         """Test that only invalid names are reported when mixed with valid ones."""
@@ -79,8 +81,8 @@ class TestHandlerNameValidation:
             "daemon": {"idle_timeout_seconds": 600, "log_level": "INFO"},
             "handlers": {
                 "pre_tool_use": {
-                    "destructive_git_handler": {"enabled": True},  # VALID
-                    "typo_handler": {"enabled": True},  # INVALID
+                    "destructive_git": {"enabled": True},  # VALID
+                    "typo_name": {"enabled": True},  # INVALID
                 }
             },
         }
@@ -89,9 +91,11 @@ class TestHandlerNameValidation:
             ConfigValidator.validate_and_raise(config)
 
         error_message = str(exc_info.value)
-        # Only invalid name should be mentioned
-        assert "typo_handler" in error_message.lower()
-        assert "destructive_git_handler" not in error_message.lower()
+        # Invalid name should be mentioned as unknown
+        assert "typo_name" in error_message.lower()
+        assert "unknown handler" in error_message.lower()
+        # Valid handler should not be mentioned as unknown (it may appear in available handlers list)
+        assert "unknown handler 'destructive_git'" not in error_message.lower()
 
     def test_validation_suggests_similar_handler_names(self) -> None:
         """Test that validation suggests similar handler names for typos."""
@@ -100,8 +104,8 @@ class TestHandlerNameValidation:
             "daemon": {"idle_timeout_seconds": 600, "log_level": "INFO"},
             "handlers": {
                 "pre_tool_use": {
-                    # Close to destructive_git_handler
-                    "destructive_git": {"enabled": False}
+                    # Typo: Close to destructive_git (correct)
+                    "destructiv_git": {"enabled": False}
                 }
             },
         }
@@ -111,7 +115,7 @@ class TestHandlerNameValidation:
 
         error_message = str(exc_info.value)
         # Should suggest the correct name
-        assert "destructive_git_handler" in error_message.lower()
+        assert "destructive_git" in error_message.lower()
         assert "did you mean" in error_message.lower() or "suggestion" in error_message.lower()
 
     def test_validation_checks_all_event_types(self) -> None:
@@ -174,11 +178,11 @@ class TestHandlerNameValidationPerformance:
             "daemon": {"idle_timeout_seconds": 600, "log_level": "INFO"},
             "handlers": {
                 "pre_tool_use": {
-                    "destructive_git_handler": {"enabled": True},
-                    "sed_blocker_handler": {"enabled": True},
-                    "absolute_path_handler": {"enabled": True},
-                    "tdd_enforcement_handler": {"enabled": True},
-                    "british_english_handler": {"enabled": True},
+                    "destructive_git": {"enabled": True},
+                    "sed_blocker": {"enabled": True},
+                    "absolute_path": {"enabled": True},
+                    "tdd_enforcement": {"enabled": True},
+                    "british_english": {"enabled": True},
                 }
             },
         }
@@ -201,10 +205,10 @@ class TestHandlerDiscoveryForValidation:
         # Validator should have access to all handler names
         pre_tool_use_handlers = ConfigValidator.get_available_handlers("pre_tool_use")
 
-        # Should include known production handlers
-        assert "destructive_git_handler" in pre_tool_use_handlers
-        assert "sed_blocker_handler" in pre_tool_use_handlers
-        assert "absolute_path_handler" in pre_tool_use_handlers
+        # Should include known production handlers (without _handler suffix)
+        assert "destructive_git" in pre_tool_use_handlers
+        assert "sed_blocker" in pre_tool_use_handlers
+        assert "absolute_path" in pre_tool_use_handlers
 
     def test_validator_discovers_handlers_for_all_events(self) -> None:
         """Test that validator can discover handlers for all event types."""

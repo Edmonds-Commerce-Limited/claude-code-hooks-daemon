@@ -35,9 +35,7 @@ class TestHandlerConfigLoading:
         config_file = tmp_path / "config.yaml"
         config_data = {
             "version": "1.0",
-            "handlers": {
-                "pre_tool_use": {"destructive_git_handler": {"enabled": True, "priority": 10}}
-            },
+            "handlers": {"pre_tool_use": {"destructive_git": {"enabled": True, "priority": 10}}},
         }
         with config_file.open("w") as f:
             yaml.dump(config_data, f)
@@ -70,7 +68,7 @@ class TestHandlerConfigLoading:
         config_file = tmp_path / "config.yaml"
         config_data = {
             "version": "1.0",
-            "handlers": {"pre_tool_use": {"destructive_git_handler": {"enabled": False}}},
+            "handlers": {"pre_tool_use": {"destructive_git": {"enabled": False}}},
         }
         with config_file.open("w") as f:
             yaml.dump(config_data, f)
@@ -127,8 +125,8 @@ class TestHandlerConfigLoading:
             "version": "1.0",
             "handlers": {
                 "pre_tool_use": {
-                    "destructive_git_handler": {"enabled": True},
-                    "sed_blocker_handler": {"enabled": False},
+                    "destructive_git": {"enabled": True},
+                    "sed_blocker": {"enabled": False},
                 }
             },
         }
@@ -283,9 +281,7 @@ class TestEndToEndBlockingScenarios:
         config_file = tmp_path / "config.yaml"
         config_data = {
             "version": "1.0",
-            "handlers": {
-                "pre_tool_use": {"destructive_git_handler": {"enabled": True, "priority": 10}}
-            },
+            "handlers": {"pre_tool_use": {"destructive_git": {"enabled": True, "priority": 10}}},
         }
         with config_file.open("w") as f:
             yaml.dump(config_data, f)
@@ -322,9 +318,7 @@ class TestEndToEndBlockingScenarios:
         config_file = tmp_path / "config.yaml"
         config_data = {
             "version": "1.0",
-            "handlers": {
-                "pre_tool_use": {"sed_blocker_handler": {"enabled": True, "priority": 15}}
-            },
+            "handlers": {"pre_tool_use": {"sed_blocker": {"enabled": True, "priority": 15}}},
         }
         with config_file.open("w") as f:
             yaml.dump(config_data, f)
@@ -361,9 +355,7 @@ class TestEndToEndBlockingScenarios:
         config_file = tmp_path / "config.yaml"
         config_data = {
             "version": "1.0",
-            "handlers": {
-                "pre_tool_use": {"destructive_git_handler": {"enabled": False}}  # DISABLED
-            },
+            "handlers": {"pre_tool_use": {"destructive_git": {"enabled": False}}},  # DISABLED
         }
         with config_file.open("w") as f:
             yaml.dump(config_data, f)
@@ -395,9 +387,7 @@ class TestConfigPriorityOverride:
         config_file = tmp_path / "config.yaml"
         config_data = {
             "version": "1.0",
-            "handlers": {
-                "pre_tool_use": {"destructive_git_handler": {"enabled": True, "priority": 99}}
-            },
+            "handlers": {"pre_tool_use": {"destructive_git": {"enabled": True, "priority": 99}}},
         }
         with config_file.open("w") as f:
             yaml.dump(config_data, f)

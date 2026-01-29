@@ -245,9 +245,9 @@ STATUS_LINE_INPUT_SCHEMA: Final[dict[str, Any]] = {
         "context_window": {
             "type": "object",
             "properties": {
-                "used_percentage": {"type": "number"},
-                "total_input_tokens": {"type": "number"},
-                "context_window_size": {"type": "number"},
+                "used_percentage": {"type": ["number", "null"]},
+                "total_input_tokens": {"type": ["number", "null"]},
+                "context_window_size": {"type": ["number", "null"]},
             },
         },
         "workspace": {

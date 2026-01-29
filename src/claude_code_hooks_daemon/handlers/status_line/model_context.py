@@ -39,7 +39,7 @@ class ModelContextHandler(Handler):
         # Extract data with safe defaults
         model = hook_input.get("model", {}).get("display_name", "Claude")
         ctx_data = hook_input.get("context_window", {})
-        used_pct = ctx_data.get("used_percentage", 0)
+        used_pct = ctx_data.get("used_percentage") or 0
 
         # Color code by percentage (traffic light system)
         if used_pct <= 40:

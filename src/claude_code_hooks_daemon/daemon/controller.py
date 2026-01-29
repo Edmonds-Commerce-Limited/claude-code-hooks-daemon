@@ -8,6 +8,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from claude_code_hooks_daemon.core.chain import ChainExecutionResult
@@ -111,7 +112,9 @@ class DaemonController:
         self._initialised = False
 
     def initialise(
-        self, handler_config: dict[str, dict[str, dict[str, Any]]] | None = None
+        self,
+        handler_config: dict[str, dict[str, dict[str, Any]]] | None = None,
+        workspace_root: Path | None = None,
     ) -> None:
         """Initialise the controller with handlers.
 
@@ -119,6 +122,7 @@ class DaemonController:
 
         Args:
             handler_config: Optional handler configuration from hooks-daemon.yaml
+            workspace_root: Optional workspace root path
         """
         if self._initialised:
             logger.warning("DaemonController already initialised")
@@ -128,7 +132,9 @@ class DaemonController:
 
         # Discover and register handlers
         self._registry.discover()
-        count = self._registry.register_all(self._router, config=handler_config)
+        count = self._registry.register_all(
+            self._router, config=handler_config, workspace_root=workspace_root
+        )
 
         logger.info("DaemonController initialised with %d handlers", count)
         self._initialised = True

@@ -43,9 +43,7 @@ def discover_all_production_handlers() -> dict[str, list[str]]:
     for event_dir in event_dirs:
         handlers_by_event[event_dir] = []
         try:
-            event_module = importlib.import_module(
-                f"claude_code_hooks_daemon.handlers.{event_dir}"
-            )
+            event_module = importlib.import_module(f"claude_code_hooks_daemon.handlers.{event_dir}")
         except ImportError:
             continue
 
@@ -109,26 +107,21 @@ def class_name_to_snake_case(class_name: str) -> str:
 
 
 class TestDogfoodingConfiguration:
-    """Test that this project dogfoods all its own handlers."""
+    """Test that this project dogfoods all its own handlers.
 
-    # Handlers that are intentionally optional (not required for dogfooding)
-    OPTIONAL_HANDLERS = {
-        "ValidateEslintOnWriteHandler",  # Project-specific: only needed for JS projects
-        "ValidateSitemapHandler",  # Project-specific: only for sitemap projects
-        "WorkflowStateRestorationHandler",  # Optional workflow feature
-        "WorkflowStatePreCompactHandler",  # Optional workflow feature
-        "RemindPromptLibraryHandler",  # Optional reminder
-        "RemindValidatorHandler",  # Optional reminder
-        "AutoContinueHandler",  # Optional auto-continue feature
-        "NpmCommandHandler",  # Optional npm restriction
-        "ValidatePlanNumberHandler",  # Optional plan validation
-        "PlanTimeEstimatesHandler",  # Optional plan validation
-    }
+    DOGFOODING PRINCIPLE: ALL handlers discovered in the codebase MUST be
+    enabled in .claude/hooks-daemon.yaml. No exceptions. This ensures:
+    1. We use every feature we build
+    2. Adding a new handler automatically requires enabling it
+    3. We catch configuration drift immediately
+    """
 
     def test_all_production_handlers_are_enabled(self):
         """DOGFOODING: All production handlers must be enabled in project config.
 
-        This ensures the hooks daemon project uses all its own features.
+        This test dynamically discovers all handler classes and verifies each
+        is enabled. If you add a new handler, this test will fail until you
+        enable it in .claude/hooks-daemon.yaml.
         """
         # Discover all production handlers in the codebase
         discovered = discover_all_production_handlers()
@@ -148,9 +141,7 @@ class TestDogfoodingConfiguration:
                 event_config = {}
 
             for handler_class in handler_classes:
-                # Skip optional handlers
-                if handler_class in self.OPTIONAL_HANDLERS:
-                    continue
+                # DOGFOODING: No exclusions - ALL handlers must be enabled
 
                 # Convert handler class name to expected config key
                 expected_config_key = class_name_to_snake_case(handler_class)
@@ -224,9 +215,9 @@ class TestDogfoodingConfiguration:
             if isinstance(event_handlers, dict):
                 for handler_name, handler_cfg in event_handlers.items():
                     if "hello_world" in handler_name.lower():
-                        assert handler_cfg.get("enabled", True) is False, (
-                            f"Test handler {event_type}.{handler_name} must be disabled"
-                        )
+                        assert (
+                            handler_cfg.get("enabled", True) is False
+                        ), f"Test handler {event_type}.{handler_name} must be disabled"
 
     def test_config_has_all_event_types(self):
         """Config must have sections for all supported event types."""

@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization import (
     MarkdownOrganizationHandler,
 )
@@ -50,9 +49,7 @@ class TestPlanNumberFormats:
         # Should NOT match (returns False = allowed)
         assert not handler.matches(hook_input), "5-digit plan numbers should be allowed"
 
-    def test_allows_flexible_digit_count(
-        self, handler: MarkdownOrganizationHandler
-    ) -> None:
+    def test_allows_flexible_digit_count(self, handler: MarkdownOrganizationHandler) -> None:
         """Test that handler allows 3 or more digits (flexible)."""
         test_cases = [
             "CLAUDE/Plan/001-three-digits/PLAN.md",
@@ -74,9 +71,7 @@ class TestPlanNumberFormats:
 
             assert not handler.matches(hook_input), f"{file_path} should be allowed"
 
-    def test_rejects_insufficient_digits(
-        self, handler: MarkdownOrganizationHandler
-    ) -> None:
+    def test_rejects_insufficient_digits(self, handler: MarkdownOrganizationHandler) -> None:
         """Test that plan folders with fewer than 3 digits are rejected."""
         invalid_cases = [
             "CLAUDE/Plan/1-one-digit/PLAN.md",
@@ -95,9 +90,7 @@ class TestPlanNumberFormats:
 
             assert handler.matches(hook_input), f"{file_path} should be rejected (< 3 digits)"
 
-    def test_rejects_non_numeric_plan_folders(
-        self, handler: MarkdownOrganizationHandler
-    ) -> None:
+    def test_rejects_non_numeric_plan_folders(self, handler: MarkdownOrganizationHandler) -> None:
         """Test that plan folders without numbers are rejected."""
         invalid_cases = [
             "CLAUDE/Plan/no-number/PLAN.md",
