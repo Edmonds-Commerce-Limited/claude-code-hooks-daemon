@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-01-29
+
+### Added
+- Daemon-based status line with 20x faster rendering performance
+- Handler for GitHub issue comments (`gh_issue_comments`) with full test coverage
+- Auto-continue Stop handler for workflow automation
+- Pipe blocker handler to prevent risky shell command patterns
+- Account display and usage tracking in status line
+- Log level environment variable override (`HOOKS_DAEMON_LOG_LEVEL`)
+- Comprehensive input validation system at front controller layer (Plan 002)
+- Planning workflow system with formal documentation and templates
+- Handler ID migration system with QA enforcement (Plan 00012)
+- Dogfooding test to ensure all production handlers enabled in strict mode
+- Plan archive system for completed work (CLAUDE/Plan/Completed/)
+
+### Changed
+- Handler architecture to use `handler_id` constants (320 violations fixed in Plan 00012)
+- Config architecture to use explicit `options` dict instead of extra fields
+- Installation hardening to prevent nested installs
+- Status line script performance and reliability
+- Test coverage increased to 97% (3172 tests passing)
+- Documentation improvements for FAIL FAST principle and error handling
+- Plan numbering pattern to support 3+ digit formats
+
+### Fixed
+- **FAIL FAST**: Comprehensive error hiding audit and remediation (Plan 00008)
+- Bash error detection and input validation across all handlers
+- QA failures: tests, type errors, and installer synchronization
+- Status line rendering bugs and race conditions
+- Config validation and test data integrity
+- Tool name and timeout violations in handler implementations
+- Type annotation cleanup (removed unused `type: ignore` comments)
+
+### Removed
+- Usage tracking handler (disabled due to architectural issues)
+- Fake UserPromptSubmit auto-continue handler (replaced with real Stop handler)
+
 ## [2.2.1] - 2026-01-27
 
 ### Fixed
