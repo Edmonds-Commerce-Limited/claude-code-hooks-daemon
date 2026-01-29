@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from claude_code_hooks_daemon.constants import DaemonPath, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 
 
@@ -19,9 +20,9 @@ class TranscriptArchiverHandler(Handler):
         """Initialise handler as non-terminal archiver."""
         super().__init__(
             name="transcript-archiver",
-            priority=10,
+            priority=Priority.TRANSCRIPT_ARCHIVER,
             terminal=False,
-            tags=["workflow", "archiving", "non-terminal"],
+            tags=[HandlerTag.WORKFLOW, HandlerTag.ARCHIVING, HandlerTag.NON_TERMINAL],
         )
 
     def matches(self, _hook_input: dict[str, Any]) -> bool:
@@ -46,7 +47,7 @@ class TranscriptArchiverHandler(Handler):
         """
         try:
             # Create archive directory
-            archive_dir = Path("untracked/transcripts")
+            archive_dir = Path(DaemonPath.UNTRACKED_DIR) / "transcripts"
             archive_dir.mkdir(parents=True, exist_ok=True)
 
             # Generate timestamp filename
