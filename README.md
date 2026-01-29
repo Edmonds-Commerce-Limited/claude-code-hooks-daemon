@@ -1,9 +1,9 @@
 # Claude Code Hooks Daemon
 
-![Version](https://img.shields.io/badge/version-2.2.1-blue)
+![Version](https://img.shields.io/badge/version-2.3.0-blue)
 ![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-1168%20passing-success)
+![Tests](https://img.shields.io/badge/tests-3172%20passing-success)
 ![Coverage](https://img.shields.io/badge/coverage-95%25%20required-success)
 
 High-performance daemon for Claude Code hooks using Unix socket IPC and front controller architecture.
