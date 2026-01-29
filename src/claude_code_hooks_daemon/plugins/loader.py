@@ -99,9 +99,8 @@ class PluginLoader:
         # Instantiate the handler
         try:
             # Handlers are responsible for their own initialization
-            # They must call super().__init__(name=..., priority=..., terminal=...)
-            # Type ignore: handler_class_raw is verified as Handler subclass but mypy sees it as Any
-            handler = handler_class_raw()  # type: ignore[call-arg]
+            # They must call super().__init__(handler_id=..., priority=..., terminal=...)
+            handler = handler_class_raw()
             return handler
         except Exception as e:
             logger.error(f"Failed to instantiate handler {class_name}: {e}")
