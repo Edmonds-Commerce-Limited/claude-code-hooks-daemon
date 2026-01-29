@@ -30,7 +30,7 @@ class EventType(StrEnum):
         """Convert string to EventType, case-insensitive.
 
         Args:
-            value: Event type string (e.g., "PreToolUse", "pre_tool_use")
+            value: Event type string (e.g., "PreToolUse", "pre_tool_use", "status_line")
 
         Returns:
             Matching EventType enum member
@@ -42,6 +42,10 @@ class EventType(StrEnum):
         for member in cls:
             if member.value == value:
                 return member
+
+        # Handle special case: "status_line" -> "Status"
+        if value.lower() in ("status_line", "statusline"):
+            return cls.STATUS_LINE
 
         # Try snake_case conversion
         normalised = value.lower().replace("_", "")

@@ -292,12 +292,15 @@ if ! ensure_daemon; then
 fi
 
 # Pipe JSON directly through socket
+# Add hook_event_name to input, then wrap in standard request format
 # Note: Status event returns context array that needs to be joined
-jq -c '{event: "Status", hook_input: .}' | send_request_stdin | jq -r '
-  if .result.context and (.result.context | length > 0) then
+jq -c '. + {hook_event_name: "Status"} | {event: "Status", hook_input: .}' | send_request_stdin | jq -r '
+  if .error then
+    "⚠️ ERROR: " + .error
+  elif .result.context and (.result.context | length > 0) then
     .result.context | join(" ")
   else
-    "Claude"
+    "⚠️ NO STATUS DATA"
   end
 '
 """

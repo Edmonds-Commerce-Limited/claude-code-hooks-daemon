@@ -24,7 +24,7 @@ class TestReadStatsCache:
                     "date": "2026-01-29",
                     "tokensByModel": {
                         "claude-sonnet-4-5-20250929": 50000,
-                    }
+                    },
                 }
             ]
         }
@@ -73,7 +73,7 @@ class TestCalculateDailyUsage:
                     "date": today,
                     "tokensByModel": {
                         "claude-sonnet-4-5-20250929": 50000,
-                    }
+                    },
                 }
             ]
         }
@@ -86,7 +86,9 @@ class TestCalculateDailyUsage:
         """Test calculating usage when no data exists for today."""
         yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
         cache_data = {
-            "dailyModelTokens": [{"date": yesterday, "tokensByModel": {"claude-sonnet-4-5-20250929": 100000}}]
+            "dailyModelTokens": [
+                {"date": yesterday, "tokensByModel": {"claude-sonnet-4-5-20250929": 100000}}
+            ]
         }
 
         # No data for today = 0%
@@ -115,7 +117,9 @@ class TestCalculateDailyUsage:
         """Test calculating usage for Opus model (100k daily limit)."""
         today = datetime.now().strftime("%Y-%m-%d")
         cache_data = {
-            "dailyModelTokens": [{"date": today, "tokensByModel": {"claude-opus-4-5-20251101": 30000}}]
+            "dailyModelTokens": [
+                {"date": today, "tokensByModel": {"claude-opus-4-5-20251101": 30000}}
+            ]
         }
 
         # 30000 / 100000 = 30%
@@ -131,7 +135,7 @@ class TestCalculateDailyUsage:
                     "date": today,
                     "tokensByModel": {
                         "claude-sonnet-4-5-20250929": 250000,  # Over 200k limit
-                    }
+                    },
                 }
             ]
         }
@@ -152,9 +156,18 @@ class TestCalculateWeeklyUsage:
         cache_data = {
             "dailyModelTokens": [
                 {"date": dates[0], "tokensByModel": {"claude-sonnet-4-5-20250929": 30000}},  # Today
-                {"date": dates[1], "tokensByModel": {"claude-sonnet-4-5-20250929": 40000}},  # Yesterday
-                {"date": dates[2], "tokensByModel": {"claude-sonnet-4-5-20250929": 50000}},  # 2 days ago
-                {"date": dates[6], "tokensByModel": {"claude-sonnet-4-5-20250929": 20000}},  # 6 days ago
+                {
+                    "date": dates[1],
+                    "tokensByModel": {"claude-sonnet-4-5-20250929": 40000},
+                },  # Yesterday
+                {
+                    "date": dates[2],
+                    "tokensByModel": {"claude-sonnet-4-5-20250929": 50000},
+                },  # 2 days ago
+                {
+                    "date": dates[6],
+                    "tokensByModel": {"claude-sonnet-4-5-20250929": 20000},
+                },  # 6 days ago
             ]
         }
 
@@ -205,7 +218,10 @@ class TestCalculateWeeklyUsage:
         cache_data = {
             "dailyModelTokens": [
                 {"date": recent_date, "tokensByModel": {"claude-sonnet-4-5-20250929": 70000}},
-                {"date": old_date, "tokensByModel": {"claude-sonnet-4-5-20250929": 999999}},  # Should be ignored
+                {
+                    "date": old_date,
+                    "tokensByModel": {"claude-sonnet-4-5-20250929": 999999},
+                },  # Should be ignored
             ]
         }
 
@@ -230,3 +246,39 @@ class TestDailyLimits:
     def test_opus_limit(self) -> None:
         """Test Opus daily limit is 100k."""
         assert DAILY_LIMITS["claude-opus-4-5-20251101"] == 100_000
+
+    def test_calculate_daily_usage_zero_limit(self) -> None:
+        """Test daily usage calculation with zero limit returns 0%."""
+        today = datetime.now().strftime("%Y-%m-%d")
+        cache_data = {"dailyModelTokens": [{"date": today, "tokensByModel": {"test-model": 50000}}]}
+
+        # Temporarily add a model with 0 limit
+        from claude_code_hooks_daemon.handlers.status_line import stats_cache_reader
+
+        original_limits = stats_cache_reader.DAILY_LIMITS.copy()
+        try:
+            stats_cache_reader.DAILY_LIMITS["test-model"] = 0
+            result = calculate_daily_usage(cache_data, "test-model")
+            assert result == 0.0
+        finally:
+            # Restore original limits
+            stats_cache_reader.DAILY_LIMITS.clear()
+            stats_cache_reader.DAILY_LIMITS.update(original_limits)
+
+    def test_calculate_weekly_usage_zero_limit(self) -> None:
+        """Test weekly usage calculation with zero limit returns 0%."""
+        today = datetime.now().strftime("%Y-%m-%d")
+        cache_data = {"dailyModelTokens": [{"date": today, "tokensByModel": {"test-model": 50000}}]}
+
+        # Temporarily add a model with 0 limit
+        from claude_code_hooks_daemon.handlers.status_line import stats_cache_reader
+
+        original_limits = stats_cache_reader.DAILY_LIMITS.copy()
+        try:
+            stats_cache_reader.DAILY_LIMITS["test-model"] = 0
+            result = calculate_weekly_usage(cache_data, "test-model")
+            assert result == 0.0
+        finally:
+            # Restore original limits
+            stats_cache_reader.DAILY_LIMITS.clear()
+            stats_cache_reader.DAILY_LIMITS.update(original_limits)
