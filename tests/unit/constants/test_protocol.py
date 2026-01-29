@@ -17,15 +17,15 @@ class TestHookInputFieldConstants:
 
     def test_common_input_fields(self) -> None:
         """Test common fields present in most hook inputs."""
-        assert HookInputField.HOOK_EVENT_NAME == "hookEventName"
-        assert HookInputField.SESSION_ID == "sessionId"
-        assert HookInputField.TRANSCRIPT_PATH == "transcriptPath"
+        assert HookInputField.HOOK_EVENT_NAME == "hook_event_name"
+        assert HookInputField.SESSION_ID == "session_id"
+        assert HookInputField.TRANSCRIPT_PATH == "transcript_path"
 
     def test_tool_related_fields(self) -> None:
         """Test tool-related input fields."""
-        assert HookInputField.TOOL_NAME == "toolName"
-        assert HookInputField.TOOL_INPUT == "toolInput"
-        assert HookInputField.TOOL_OUTPUT == "toolOutput"
+        assert HookInputField.TOOL_NAME == "tool_name"
+        assert HookInputField.TOOL_INPUT == "tool_input"
+        assert HookInputField.TOOL_OUTPUT == "tool_output"
 
     def test_message_prompt_fields(self) -> None:
         """Test message and prompt fields."""
@@ -34,24 +34,24 @@ class TestHookInputFieldConstants:
 
     def test_session_fields(self) -> None:
         """Test session-related fields."""
-        assert HookInputField.SESSION_METADATA == "sessionMetadata"
-        assert HookInputField.SESSION_STATISTICS == "sessionStatistics"
+        assert HookInputField.SESSION_METADATA == "session_metadata"
+        assert HookInputField.SESSION_STATISTICS == "session_statistics"
 
     def test_agent_fields(self) -> None:
         """Test subagent-related fields."""
-        assert HookInputField.AGENT_ID == "agentId"
-        assert HookInputField.AGENT_TYPE == "agentType"
-        assert HookInputField.AGENT_TRANSCRIPT_PATH == "agentTranscriptPath"
+        assert HookInputField.AGENT_ID == "agent_id"
+        assert HookInputField.AGENT_TYPE == "agent_type"
+        assert HookInputField.AGENT_TRANSCRIPT_PATH == "agent_transcript_path"
 
     def test_notification_fields(self) -> None:
         """Test notification-related fields."""
-        assert HookInputField.NOTIFICATION_TYPE == "notificationType"
-        assert HookInputField.NOTIFICATION_DATA == "notificationData"
+        assert HookInputField.NOTIFICATION_TYPE == "notification_type"
+        assert HookInputField.NOTIFICATION_DATA == "notification_data"
 
     def test_permission_fields(self) -> None:
         """Test permission-related fields."""
-        assert HookInputField.PERMISSION_REQUEST == "permissionRequest"
-        assert HookInputField.PERMISSION_TYPE == "permissionType"
+        assert HookInputField.PERMISSION_REQUEST == "permission_request"
+        assert HookInputField.PERMISSION_TYPE == "permission_type"
 
 
 class TestHookOutputFieldConstants:
@@ -105,14 +105,13 @@ class TestPermissionDecisionConstants:
 class TestProtocolFieldNaming:
     """Tests for protocol field naming conventions."""
 
-    def test_input_fields_use_camelcase(self) -> None:
-        """Test that input fields use camelCase format."""
+    def test_input_fields_use_snake_case(self) -> None:
+        """Test that input fields use snake_case format."""
         for key, value in vars(HookInputField).items():
             if not key.startswith("_") and isinstance(value, str):
-                # Should start with lowercase (camelCase)
-                assert value[0].islower(), f"{key}={value} not camelCase"
+                # Should be lowercase with underscores (snake_case)
+                assert value.islower() or "_" in value, f"{key}={value} not snake_case"
                 assert " " not in value, f"{key}={value} contains spaces"
-                assert "_" not in value, f"{key}={value} uses underscores (should be camelCase)"
 
     def test_output_fields_use_camelcase(self) -> None:
         """Test that output fields use camelCase format."""
@@ -155,6 +154,8 @@ class TestProtocolUsagePatterns:
         }
         assert hook_input[HookInputField.TOOL_NAME] == "Bash"
         assert HookInputField.TOOL_INPUT in hook_input
+        # Verify snake_case format
+        assert HookInputField.TOOL_NAME == "tool_name"
 
     def test_output_field_construction_pattern(self) -> None:
         """Test common pattern for constructing output."""
@@ -183,9 +184,9 @@ class TestCriticalProtocolFields:
 
     def test_required_input_fields(self) -> None:
         """Test most commonly used input fields."""
-        assert HookInputField.TOOL_NAME == "toolName"
-        assert HookInputField.TOOL_INPUT == "toolInput"
-        assert HookInputField.SESSION_ID == "sessionId"
+        assert HookInputField.TOOL_NAME == "tool_name"
+        assert HookInputField.TOOL_INPUT == "tool_input"
+        assert HookInputField.SESSION_ID == "session_id"
 
     def test_required_output_fields(self) -> None:
         """Test most commonly used output fields."""
@@ -211,7 +212,7 @@ class TestProtocolExport:
         from claude_code_hooks_daemon.constants import HookInputField as ImportedInput
         from claude_code_hooks_daemon.constants import HookOutputField as ImportedOutput
 
-        assert ImportedInput.TOOL_NAME == "toolName"
+        assert ImportedInput.TOOL_NAME == "tool_name"
         assert ImportedOutput.DECISION == "decision"
 
 

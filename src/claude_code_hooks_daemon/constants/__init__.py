@@ -25,8 +25,8 @@ Usage:
     )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        tool_name = hook_input.get(HookInputField.TOOL_NAME)
-        return tool_name == ToolName.BASH
+        tool_name = hook_input.get(HookInputField.TOOL_NAME)  # "tool_name"
+        return tool_name == ToolName.BASH  # "Bash"
 
 Design Principles:
 - NO MAGIC STRINGS: All identifiers come from this module

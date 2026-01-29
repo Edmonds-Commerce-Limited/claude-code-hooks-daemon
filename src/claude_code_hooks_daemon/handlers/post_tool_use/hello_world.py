@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from claude_code_hooks_daemon.constants import HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 
 
@@ -12,13 +13,13 @@ class HelloWorldPostToolUseHandler(Handler):
     Controlled by global config: daemon.enable_hello_world_handlers
     """
 
-    def __init__(self, priority: int = 5) -> None:
+    def __init__(self, priority: int = Priority.HELLO_WORLD) -> None:
         """Initialise handler with low priority to run first."""
         super().__init__(
             name="hello_world",
             priority=priority,
             terminal=False,  # Allow other handlers to run
-            tags=["test", "non-terminal"],
+            tags=[HandlerTag.TEST, HandlerTag.NON_TERMINAL],
         )
 
     def matches(self, _hook_input: dict[str, Any]) -> bool:
