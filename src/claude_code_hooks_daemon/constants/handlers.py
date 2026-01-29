@@ -1,0 +1,387 @@
+"""Handler identifier constants - Single source of truth for all handler names.
+
+This module defines the canonical identifiers for all handlers in the system.
+Each handler has three name formats:
+- class_name: PascalCase with "Handler" suffix (Python class name)
+- config_key: snake_case without suffix (YAML config key)
+- display_name: kebab-case, descriptive (user-facing name)
+
+Usage:
+    from claude_code_hooks_daemon.constants import HandlerID
+
+    class DestructiveGitHandler(Handler):
+        def __init__(self) -> None:
+            super().__init__(
+                handler_id=HandlerID.DESTRUCTIVE_GIT,
+                priority=Priority.DESTRUCTIVE_GIT,
+            )
+"""
+
+from dataclasses import dataclass
+from typing import Literal
+
+
+@dataclass(frozen=True)
+class HandlerIDMeta:
+    """Metadata for a handler identifier.
+
+    Attributes:
+        class_name: Python class name (PascalCase with Handler suffix)
+        config_key: YAML config key (snake_case, no suffix)
+        display_name: User-facing name (kebab-case, descriptive)
+    """
+
+    class_name: str
+    config_key: str
+    display_name: str
+
+
+class HandlerID:
+    """Single source of truth for all handler identifiers.
+
+    Each constant provides all three naming formats for a handler.
+    Use these instead of hardcoding handler names anywhere in the codebase.
+    """
+
+    # Test handlers (Priority: 5)
+    HELLO_WORLD_PRE_TOOL_USE = HandlerIDMeta(
+        class_name="HelloWorldPreToolUseHandler",
+        config_key="hello_world_pre_tool_use",
+        display_name="hello-world",
+    )
+    HELLO_WORLD_POST_TOOL_USE = HandlerIDMeta(
+        class_name="HelloWorldPostToolUseHandler",
+        config_key="hello_world_post_tool_use",
+        display_name="hello-world",
+    )
+    HELLO_WORLD_SESSION_START = HandlerIDMeta(
+        class_name="HelloWorldSessionStartHandler",
+        config_key="hello_world_session_start",
+        display_name="hello-world",
+    )
+    HELLO_WORLD_SESSION_END = HandlerIDMeta(
+        class_name="HelloWorldSessionEndHandler",
+        config_key="hello_world_session_end",
+        display_name="hello-world",
+    )
+    HELLO_WORLD_STOP = HandlerIDMeta(
+        class_name="HelloWorldStopHandler",
+        config_key="hello_world_stop",
+        display_name="hello-world",
+    )
+    HELLO_WORLD_SUBAGENT_STOP = HandlerIDMeta(
+        class_name="HelloWorldSubagentStopHandler",
+        config_key="hello_world_subagent_stop",
+        display_name="hello-world",
+    )
+    HELLO_WORLD_USER_PROMPT_SUBMIT = HandlerIDMeta(
+        class_name="HelloWorldUserPromptSubmitHandler",
+        config_key="hello_world_user_prompt_submit",
+        display_name="hello-world",
+    )
+    HELLO_WORLD_PRE_COMPACT = HandlerIDMeta(
+        class_name="HelloWorldPreCompactHandler",
+        config_key="hello_world_pre_compact",
+        display_name="hello-world",
+    )
+    HELLO_WORLD_NOTIFICATION = HandlerIDMeta(
+        class_name="HelloWorldNotificationHandler",
+        config_key="hello_world_notification",
+        display_name="hello-world",
+    )
+    HELLO_WORLD_PERMISSION_REQUEST = HandlerIDMeta(
+        class_name="HelloWorldPermissionRequestHandler",
+        config_key="hello_world_permission_request",
+        display_name="hello-world",
+    )
+
+    # Safety handlers (Priority: 10-20)
+    DESTRUCTIVE_GIT = HandlerIDMeta(
+        class_name="DestructiveGitHandler",
+        config_key="destructive_git",
+        display_name="prevent-destructive-git",
+    )
+    SED_BLOCKER = HandlerIDMeta(
+        class_name="SedBlockerHandler",
+        config_key="sed_blocker",
+        display_name="block-sed-command",
+    )
+    AUTO_APPROVE_READS = HandlerIDMeta(
+        class_name="AutoApproveReadsHandler",
+        config_key="auto_approve_reads",
+        display_name="auto-approve-reads",
+    )
+    VALIDATE_ESLINT_ON_WRITE = HandlerIDMeta(
+        class_name="ValidateEslintOnWriteHandler",
+        config_key="validate_eslint_on_write",
+        display_name="validate-eslint-on-write",
+    )
+    REMIND_VALIDATOR = HandlerIDMeta(
+        class_name="RemindValidatorHandler",
+        config_key="remind_validator",
+        display_name="remind-validate-after-builder",
+    )
+    TRANSCRIPT_ARCHIVER = HandlerIDMeta(
+        class_name="TranscriptArchiverHandler",
+        config_key="transcript_archiver",
+        display_name="transcript-archiver",
+    )
+    ABSOLUTE_PATH = HandlerIDMeta(
+        class_name="AbsolutePathHandler",
+        config_key="absolute_path",
+        display_name="require-absolute-paths",
+    )
+    TDD_ENFORCEMENT = HandlerIDMeta(
+        class_name="TddEnforcementHandler",
+        config_key="tdd_enforcement",
+        display_name="enforce-tdd",
+    )
+    AUTO_CONTINUE_STOP = HandlerIDMeta(
+        class_name="AutoContinueStopHandler",
+        config_key="auto_continue_stop",
+        display_name="auto-continue-stop",
+    )
+    WORKTREE_FILE_COPY = HandlerIDMeta(
+        class_name="WorktreeFileCopyHandler",
+        config_key="worktree_file_copy",
+        display_name="prevent-worktree-file-copying",
+    )
+    GIT_CONTEXT_INJECTOR = HandlerIDMeta(
+        class_name="GitContextInjectorHandler",
+        config_key="git_context_injector",
+        display_name="git-context-injector",
+    )
+    GIT_BRANCH = HandlerIDMeta(
+        class_name="GitBranchHandler",
+        config_key="git_branch",
+        display_name="status-git-branch",
+    )
+    GIT_STASH = HandlerIDMeta(
+        class_name="GitStashHandler",
+        config_key="git_stash",
+        display_name="block-git-stash",
+    )
+    VALIDATE_SITEMAP = HandlerIDMeta(
+        class_name="ValidateSitemapHandler",
+        config_key="validate_sitemap",
+        display_name="validate-sitemap-on-edit",
+    )
+
+    # QA enforcement handlers (Priority: 30-35)
+    PYTHON_QA_SUPPRESSION = HandlerIDMeta(
+        class_name="PythonQaSuppressionBlocker",
+        config_key="python_qa_suppression",
+        display_name="python-qa-suppression-blocker",
+    )
+    PHP_QA_SUPPRESSION = HandlerIDMeta(
+        class_name="PhpQaSuppressionBlocker",
+        config_key="php_qa_suppression",
+        display_name="php-qa-suppression-blocker",
+    )
+    GO_QA_SUPPRESSION = HandlerIDMeta(
+        class_name="GoQaSuppressionBlocker",
+        config_key="go_qa_suppression",
+        display_name="go-qa-suppression-blocker",
+    )
+    ESLINT_DISABLE = HandlerIDMeta(
+        class_name="EslintDisableHandler",
+        config_key="eslint_disable",
+        display_name="enforce-no-eslint-disable",
+    )
+    VALIDATE_PLAN_NUMBER = HandlerIDMeta(
+        class_name="ValidatePlanNumberHandler",
+        config_key="validate_plan_number",
+        display_name="validate-plan-number",
+    )
+    PLAN_NUMBER_HELPER = HandlerIDMeta(
+        class_name="PlanNumberHelperHandler",
+        config_key="plan_number_helper",
+        display_name="plan-number-helper",
+    )
+    DAEMON_STATS = HandlerIDMeta(
+        class_name="DaemonStatsHandler",
+        config_key="daemon_stats",
+        display_name="status-daemon-stats",
+    )
+    MARKDOWN_ORGANIZATION = HandlerIDMeta(
+        class_name="MarkdownOrganizationHandler",
+        config_key="markdown_organization",
+        display_name="enforce-markdown-organization",
+    )
+
+    # Workflow handlers (Priority: 40-55)
+    GH_ISSUE_COMMENTS = HandlerIDMeta(
+        class_name="GhIssueCommentsHandler",
+        config_key="gh_issue_comments",
+        display_name="require-gh-issue-comments",
+    )
+    YOLO_CONTAINER_DETECTION = HandlerIDMeta(
+        class_name="YoloContainerDetectionHandler",
+        config_key="yolo_container_detection",
+        display_name="yolo-container-detection",
+    )
+    PLAN_TIME_ESTIMATES = HandlerIDMeta(
+        class_name="PlanTimeEstimatesHandler",
+        config_key="plan_time_estimates",
+        display_name="block-plan-time-estimates",
+    )
+    PLAN_WORKFLOW = HandlerIDMeta(
+        class_name="PlanWorkflowHandler",
+        config_key="plan_workflow",
+        display_name="plan-workflow-guidance",
+    )
+    NPM_COMMAND = HandlerIDMeta(
+        class_name="NpmCommandHandler",
+        config_key="npm_command",
+        display_name="enforce-npm-commands",
+    )
+    TASK_COMPLETION_CHECKER = HandlerIDMeta(
+        class_name="TaskCompletionCheckerHandler",
+        config_key="task_completion_checker",
+        display_name="task-completion-checker",
+    )
+    BASH_ERROR_DETECTOR = HandlerIDMeta(
+        class_name="BashErrorDetectorHandler",
+        config_key="bash_error_detector",
+        display_name="bash-error-detector",
+    )
+    WEB_SEARCH_YEAR = HandlerIDMeta(
+        class_name="WebSearchYearHandler",
+        config_key="web_search_year",
+        display_name="validate-websearch-year",
+    )
+    SUGGEST_STATUSLINE = HandlerIDMeta(
+        class_name="SuggestStatusLineHandler",
+        config_key="suggest_statusline",
+        display_name="suggest-statusline",
+    )
+
+    # Advisory handlers (Priority: 60)
+    BRITISH_ENGLISH = HandlerIDMeta(
+        class_name="BritishEnglishHandler",
+        config_key="british_english",
+        display_name="enforce-british-english",
+    )
+
+    # Logging/cleanup handlers (Priority: 100)
+    NOTIFICATION_LOGGER = HandlerIDMeta(
+        class_name="NotificationLoggerHandler",
+        config_key="notification_logger",
+        display_name="notification-logger",
+    )
+    SUBAGENT_COMPLETION_LOGGER = HandlerIDMeta(
+        class_name="SubagentCompletionLoggerHandler",
+        config_key="subagent_completion_logger",
+        display_name="subagent-completion-logger",
+    )
+    REMIND_PROMPT_LIBRARY = HandlerIDMeta(
+        class_name="RemindPromptLibraryHandler",
+        config_key="remind_prompt_library",
+        display_name="remind-capture-prompt",
+    )
+    SESSION_CLEANUP = HandlerIDMeta(
+        class_name="CleanupHandler",
+        config_key="session_cleanup",
+        display_name="session-cleanup",
+    )
+
+    # Status line handlers (varied priorities)
+    ACCOUNT_DISPLAY = HandlerIDMeta(
+        class_name="AccountDisplayHandler",
+        config_key="account_display",
+        display_name="status-account-display",
+    )
+    MODEL_CONTEXT = HandlerIDMeta(
+        class_name="ModelContextHandler",
+        config_key="model_context",
+        display_name="status-model-context",
+    )
+    USAGE_TRACKING = HandlerIDMeta(
+        class_name="UsageTrackingHandler",
+        config_key="usage_tracking",
+        display_name="status-usage-tracking",
+    )
+
+    # Workflow state handlers (no fixed priority)
+    WORKFLOW_STATE_RESTORATION = HandlerIDMeta(
+        class_name="WorkflowStateRestorationHandler",
+        config_key="workflow_state_restoration",
+        display_name="workflow-state-restoration",
+    )
+    WORKFLOW_STATE_PRE_COMPACT = HandlerIDMeta(
+        class_name="WorkflowStatePreCompactHandler",
+        config_key="workflow_state_pre_compact",
+        display_name="workflow-state-precompact",
+    )
+
+    # Stats cache reader (status line)
+    STATS_CACHE_READER = HandlerIDMeta(
+        class_name="StatsCacheReaderHandler",
+        config_key="stats_cache_reader",
+        display_name="status-stats-cache-reader",
+    )
+
+
+# Type-safe config key literal (for mypy/type checking)
+HandlerKey = Literal[
+    # Test handlers
+    "hello_world_pre_tool_use",
+    "hello_world_post_tool_use",
+    "hello_world_session_start",
+    "hello_world_session_end",
+    "hello_world_stop",
+    "hello_world_subagent_stop",
+    "hello_world_user_prompt_submit",
+    "hello_world_pre_compact",
+    "hello_world_notification",
+    "hello_world_permission_request",
+    # Safety handlers
+    "destructive_git",
+    "sed_blocker",
+    "auto_approve_reads",
+    "validate_eslint_on_write",
+    "remind_validator",
+    "transcript_archiver",
+    "absolute_path",
+    "tdd_enforcement",
+    "auto_continue_stop",
+    "worktree_file_copy",
+    "git_context_injector",
+    "git_branch",
+    "git_stash",
+    "validate_sitemap",
+    # QA enforcement handlers
+    "python_qa_suppression",
+    "php_qa_suppression",
+    "go_qa_suppression",
+    "eslint_disable",
+    "validate_plan_number",
+    "plan_number_helper",
+    "daemon_stats",
+    "markdown_organization",
+    # Workflow handlers
+    "gh_issue_comments",
+    "yolo_container_detection",
+    "plan_time_estimates",
+    "plan_workflow",
+    "npm_command",
+    "task_completion_checker",
+    "bash_error_detector",
+    "web_search_year",
+    "suggest_statusline",
+    # Advisory handlers
+    "british_english",
+    # Logging/cleanup handlers
+    "notification_logger",
+    "subagent_completion_logger",
+    "remind_prompt_library",
+    "session_cleanup",
+    # Status line handlers
+    "account_display",
+    "model_context",
+    "usage_tracking",
+    "stats_cache_reader",
+    # Workflow state handlers
+    "workflow_state_restoration",
+    "workflow_state_pre_compact",
+]
