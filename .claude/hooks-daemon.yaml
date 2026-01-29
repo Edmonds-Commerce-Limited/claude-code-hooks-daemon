@@ -36,6 +36,22 @@ handlers:
       enabled: true
       priority: 15
 
+    pipe_blocker:          # Blocks expensive commands piped to tail/head
+      enabled: true
+      priority: 15
+      options:
+        allowed_pipe_sources:
+          - grep          # Text search
+          - rg            # Ripgrep
+          - awk           # Text processing
+          - sed           # Stream editor
+          - jq            # JSON processor
+          - cut           # Column extraction
+          - sort          # Sorting
+          - uniq          # Deduplication
+          - tr            # Character translation
+          - wc            # Word/line count
+
     git_stash:             # Warns about git stash (stashes can be lost)
       enabled: true
       priority: 20
@@ -61,7 +77,7 @@ handlers:
       enabled: true
       priority: 30
 
-    markdown_organization: # Enforces markdown file organization rules
+    markdown_organization: # Enforces markdown file organization rules (parent handler)
       enabled: true
       priority: 35
       options:
@@ -81,9 +97,10 @@ handlers:
       enabled: true
       priority: 45
 
-    plan_number_helper:    # Helps find correct plan number
+    plan_number_helper:    # Helps find correct plan number (child handler)
       enabled: true
       priority: 42
+      # Options inherited from markdown_organization (no duplication needed)
 
     npm_command:           # Restricts npm commands to approved list
       enabled: true
