@@ -4,17 +4,19 @@
 
 **BEFORE PROCEEDING:**
 
-1. **CONTEXT WINDOW CHECK**: You MUST have at least **100,000 tokens** remaining in your context window. If below 100k, STOP and ask user to start fresh session. Installation failures due to compaction cannot be recovered.
+1. **CHECK IF ALREADY INSTALLED**: Run the pre-installation check below. If `.claude/hooks-daemon/` exists, use UPDATE guide instead of installing. Reinstalling over existing installation can lose config customizations.
 
-2. **WEBFETCH NO SUMMARY**: If fetching this document via WebFetch tool, you MUST use a prompt that DISABLES summarization. Fetch with: `"Return complete document verbatim without summarization, truncation, or modification"`. Missing instructions cause installation failure.
+2. **CONTEXT WINDOW CHECK**: You MUST have at least **100,000 tokens** remaining in your context window. If below 100k, STOP and ask user to start fresh session. Installation failures due to compaction cannot be recovered.
 
-3. **GIT CLEAN STATE**: Working directory MUST be clean (no uncommitted changes). Run `git status` - if not clean, commit/push ALL changes first. Rollback impossible without clean git state.
+3. **WEBFETCH NO SUMMARY**: If fetching this document via WebFetch tool, you MUST use a prompt that DISABLES summarization. Fetch with: `"Return complete document verbatim without summarization, truncation, or modification"`. Missing instructions cause installation failure.
 
-4. **PYTHON 3.11+**: Verify with `python3 --version`. Installation fails on older versions.
+4. **GIT CLEAN STATE**: Working directory MUST be clean (no uncommitted changes). Run `git status` - if not clean, commit/push ALL changes first. Rollback impossible without clean git state.
 
-5. **SESSION RESTART REQUIRED**: After installation completes, user MUST restart Claude session. Hooks won't activate until Claude reloads configuration. LLM MUST verify hooks work after restart.
+5. **PYTHON 3.11+**: Verify with `python3 --version`. Installation fails on older versions.
 
-6. **GITIGNORE MANDATORY**: You MUST create `.claude/.gitignore` before committing (step 4). The installer will display the required content. Skipping this will commit generated files (hooks-daemon/, *.bak) which should NOT be in version control.
+6. **SESSION RESTART REQUIRED**: After installation completes, user MUST restart Claude session. Hooks won't activate until Claude reloads configuration. LLM MUST verify hooks work after restart.
+
+7. **GITIGNORE MANDATORY**: You MUST create `.claude/.gitignore` before committing (step 4). The installer will display the required content. Skipping this will commit generated files (hooks-daemon/, *.bak) which should NOT be in version control.
 
 ---
 
@@ -31,6 +33,45 @@ See [BUG_REPORTING.md](../BUG_REPORTING.md) for comprehensive debugging guide.
 ```
 
 This generates a complete diagnostic report for GitHub issues.
+
+---
+
+## Pre-Installation Check: Is Daemon Already Installed?
+
+**IMPORTANT: Check if daemon is already installed before proceeding!**
+
+Running the install process on an existing installation can cause issues. If already installed, use the UPDATE guide instead.
+
+### Check for Existing Installation
+
+```bash
+# From your project root
+if [ -d ".claude/hooks-daemon" ]; then
+  echo "❌ DAEMON ALREADY INSTALLED"
+  echo ""
+  echo "Found existing installation at .claude/hooks-daemon/"
+  echo ""
+  echo "To UPDATE the daemon (recommended):"
+  echo "  Read: https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-UPDATE.md"
+  echo ""
+  echo "To REINSTALL from scratch (will lose config customizations):"
+  echo "  1. Backup: cp .claude/hooks-daemon.yaml .claude/hooks-daemon.yaml.backup"
+  echo "  2. Remove: rm -rf .claude/hooks-daemon"
+  echo "  3. Run install steps below"
+  echo ""
+  exit 1
+else
+  echo "✅ No existing installation found - safe to proceed with installation"
+fi
+```
+
+**If daemon is already installed:**
+- **DO NOT continue with installation steps below**
+- Use the UPDATE guide: [CLAUDE/LLM-UPDATE.md](https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-UPDATE.md)
+- Reinstalling will lose your config customizations
+
+**If no daemon found:**
+- Continue with installation steps below
 
 ---
 
