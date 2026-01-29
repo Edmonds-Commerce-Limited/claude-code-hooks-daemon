@@ -612,7 +612,12 @@ def cmd_config(args: argparse.Namespace) -> int:
     Returns:
         0 if successful, 1 otherwise
     """
-    project_path = get_project_path(getattr(args, "project_root", None))
+    try:
+        project_path = get_project_path(getattr(args, "project_root", None))
+    except SystemExit:
+        # get_project_path already printed error message
+        return 1
+
     config_path = project_path / ".claude" / "hooks-daemon.yaml"
 
     if not config_path.exists():
@@ -699,7 +704,26 @@ def cmd_init_config(args: argparse.Namespace) -> int:
     Returns:
         0 if config generated successfully, 1 otherwise
     """
-    project_path = get_project_path(getattr(args, "project_root", None))
+    try:
+        project_path = get_project_path(getattr(args, "project_root", None))
+    except SystemExit:
+        # If validation fails but --force is set, we'll overwrite the bad config anyway
+        # Otherwise, get_project_path already printed error message
+        if not args.force:
+            return 1
+        # With --force, continue with project_root from args
+        project_path = args.project_root
+        if project_path is None:
+            # Try to find .claude directory
+            current = Path.cwd()
+            while current != current.parent:
+                if (current / ".claude").exists():
+                    project_path = current
+                    break
+                current = current.parent
+            if project_path is None:
+                return 1
+
     config_path = project_path / ".claude" / "hooks-daemon.yaml"
 
     # Check if config already exists

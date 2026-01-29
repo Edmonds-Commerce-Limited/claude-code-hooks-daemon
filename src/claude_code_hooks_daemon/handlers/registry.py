@@ -252,7 +252,7 @@ class HandlerRegistry:
                                 # markdown_organization handler config
                                 # Options are in options dict, not top-level
                                 options = handler_config.get("options", {})
-                                instance._track_plans_in_project = options.get(  # type: ignore[attr-defined]
+                                instance._track_plans_in_project = options.get(
                                     "track_plans_in_project", None
                                 )
                                 instance._plan_workflow_docs = options.get(  # type: ignore[attr-defined]

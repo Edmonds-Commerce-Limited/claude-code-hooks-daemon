@@ -111,6 +111,9 @@ class PlanNumberHelperHandler(Handler):
         Returns:
             HookResult with ALLOW decision and helpful context
         """
+        # Precondition: matches() ensures _track_plans_in_project is not None
+        assert self._track_plans_in_project is not None, "Handler called without matches check"
+
         # Get next plan number
         try:
             plan_base = self._workspace_root / self._track_plans_in_project

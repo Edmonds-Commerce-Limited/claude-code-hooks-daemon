@@ -39,7 +39,7 @@ class TestUsageTrackingHandler:
                     "date": today,
                     "tokensByModel": {
                         "claude-sonnet-4-5-20250929": 50000,  # 25% of 200k
-                    }
+                    },
                 }
             ]
         }
@@ -112,7 +112,9 @@ class TestUsageTrackingHandler:
         """Test formatting when usage is 0%."""
         today = datetime.now().strftime("%Y-%m-%d")
         cache_data = {
-            "dailyModelTokens": [{"date": today, "tokensByModel": {"claude-sonnet-4-5-20250929": 0}}]
+            "dailyModelTokens": [
+                {"date": today, "tokensByModel": {"claude-sonnet-4-5-20250929": 0}}
+            ]
         }
 
         hook_input = {
@@ -139,7 +141,7 @@ class TestUsageTrackingHandler:
                     "date": today,
                     "tokensByModel": {
                         "claude-sonnet-4-5-20250929": 180000,  # 90% of 200k
-                    }
+                    },
                 }
             ]
         }
@@ -164,7 +166,9 @@ class TestUsageTrackingHandler:
         """Test with options to show only daily usage."""
         today = datetime.now().strftime("%Y-%m-%d")
         cache_data = {
-            "dailyModelTokens": [{"date": today, "tokensByModel": {"claude-sonnet-4-5-20250929": 50000}}]
+            "dailyModelTokens": [
+                {"date": today, "tokensByModel": {"claude-sonnet-4-5-20250929": 50000}}
+            ]
         }
 
         hook_input = {
@@ -188,7 +192,9 @@ class TestUsageTrackingHandler:
         """Test with options to show only weekly usage."""
         today = datetime.now().strftime("%Y-%m-%d")
         cache_data = {
-            "dailyModelTokens": [{"date": today, "tokensByModel": {"claude-sonnet-4-5-20250929": 50000}}]
+            "dailyModelTokens": [
+                {"date": today, "tokensByModel": {"claude-sonnet-4-5-20250929": 50000}}
+            ]
         }
 
         hook_input = {
@@ -217,7 +223,7 @@ class TestUsageTrackingHandler:
                     "date": today,
                     "tokensByModel": {
                         "claude-opus-4-5-20251101": 30000,  # 30% of 100k
-                    }
+                    },
                 }
             ]
         }
@@ -240,7 +246,9 @@ class TestUsageTrackingHandler:
         """Test that file is read on every call (no TTL caching)."""
         today = datetime.now().strftime("%Y-%m-%d")
         cache_data = {
-            "dailyModelTokens": [{"date": today, "tokensByModel": {"claude-sonnet-4-5-20250929": 50000}}]
+            "dailyModelTokens": [
+                {"date": today, "tokensByModel": {"claude-sonnet-4-5-20250929": 50000}}
+            ]
         }
 
         hook_input = {
@@ -260,3 +268,59 @@ class TestUsageTrackingHandler:
         assert mock_read.call_count == 2
         # Results should be the same
         assert result1.context == result2.context
+
+    def test_handle_with_both_daily_weekly_disabled(self, handler: UsageTrackingHandler) -> None:
+        """Test with both daily and weekly disabled returns empty context."""
+        today = datetime.now().strftime("%Y-%m-%d")
+        cache_data = {
+            "dailyModelTokens": [
+                {"date": today, "tokensByModel": {"claude-sonnet-4-5-20250929": 50000}}
+            ]
+        }
+
+        hook_input = {
+            "model": {
+                "id": "claude-sonnet-4-5-20250929",
+            }
+        }
+
+        # Disable both options
+        handler._options = {"show_daily": False, "show_weekly": False}
+
+        with patch("pathlib.Path.exists", return_value=True):
+            with patch("pathlib.Path.read_text", return_value=json.dumps(cache_data)):
+                result = handler.handle(hook_input)
+
+        # Should return empty context (no parts to display)
+        assert result.decision == "allow"
+        assert result.context == []
+
+    def test_handle_with_exception(self, handler: UsageTrackingHandler) -> None:
+        """Test exception handling returns empty context."""
+        hook_input = {
+            "model": {
+                "id": "claude-sonnet-4-5-20250929",
+            }
+        }
+
+        # Simulate exception during file read
+        with patch("pathlib.Path.exists", side_effect=RuntimeError("Simulated error")):
+            result = handler.handle(hook_input)
+
+        # Should silently fail with empty context
+        assert result.decision == "allow"
+        assert result.context == []
+
+    def test_colorize_percentage_yellow(self, handler: UsageTrackingHandler) -> None:
+        """Test yellow color for 41-60% usage."""
+        result = handler._colorize_percentage(50.0)
+        # Should have yellow color
+        assert "\033[43m" in result  # Yellow background
+        assert "50.0%" in result
+
+    def test_colorize_percentage_orange(self, handler: UsageTrackingHandler) -> None:
+        """Test orange color for 61-80% usage."""
+        result = handler._colorize_percentage(70.0)
+        # Should have orange color
+        assert "\033[48;5;208m" in result  # Orange background
+        assert "70.0%" in result
