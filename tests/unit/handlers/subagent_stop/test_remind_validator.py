@@ -491,3 +491,162 @@ class TestGetLastCompletedAgent:
 
         result = handler._get_last_completed_agent(str(transcript_file))
         assert result == "test-agent"
+
+    def test_handles_keyerror_in_parsing(
+        self, handler: RemindValidatorHandler, transcript_file: Path
+    ) -> None:
+        """Handles KeyError when message structure is unexpected."""
+        # Write a malformed message that will cause KeyError
+        message = {
+            "type": "message",
+            # Missing "message" key - will cause KeyError
+        }
+
+        with transcript_file.open("w") as f:
+            f.write(json.dumps(message) + "\n")
+            # Add a valid message after
+            f.write(
+                json.dumps(
+                    {
+                        "type": "message",
+                        "message": {
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "type": "tool_use",
+                                    "name": "Task",
+                                    "input": {"subagent_type": "valid-agent"},
+                                }
+                            ],
+                        },
+                    }
+                )
+                + "\n"
+            )
+
+        result = handler._get_last_completed_agent(str(transcript_file))
+        assert result == "valid-agent"
+
+    def test_handles_oserror_reading_file(
+        self, handler: RemindValidatorHandler, tmp_path: Path
+    ) -> None:
+        """Handles OSError when reading transcript file."""
+        # Create an unreadable file
+        transcript_file = tmp_path / "unreadable.jsonl"
+        transcript_file.touch()
+        transcript_file.chmod(0o000)
+
+        try:
+            result = handler._get_last_completed_agent(str(transcript_file))
+            assert result == ""
+        finally:
+            # Restore permissions for cleanup
+            transcript_file.chmod(0o644)
+
+    def test_handles_unicode_decode_error(
+        self, handler: RemindValidatorHandler, transcript_file: Path
+    ) -> None:
+        """Handles UnicodeDecodeError when file has invalid encoding."""
+        # Write invalid UTF-8 bytes
+        with transcript_file.open("wb") as f:
+            f.write(b"\xff\xfe invalid utf-8 \x80\x81")
+
+        result = handler._get_last_completed_agent(str(transcript_file))
+        assert result == ""
+
+    def test_handles_attribute_error(
+        self, handler: RemindValidatorHandler, transcript_file: Path, monkeypatch: Any
+    ) -> None:
+        """Handles AttributeError during transcript parsing."""
+        # Write a valid file first
+        with transcript_file.open("w") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "type": "message",
+                        "message": {
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "type": "tool_use",
+                                    "name": "Task",
+                                    "input": {"subagent_type": "test-agent"},
+                                }
+                            ],
+                        },
+                    }
+                )
+                + "\n"
+            )
+
+        # Patch Path.exists to raise AttributeError
+        def mock_exists(self: Any) -> bool:
+            raise AttributeError("Test attribute error")
+
+        monkeypatch.setattr(Path, "exists", mock_exists)
+
+        result = handler._get_last_completed_agent(str(transcript_file))
+        assert result == ""
+
+    def test_handles_unexpected_exception(
+        self, handler: RemindValidatorHandler, transcript_file: Path, monkeypatch: Any
+    ) -> None:
+        """Handles unexpected exceptions during transcript parsing."""
+        # Write a valid file first
+        with transcript_file.open("w") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "type": "message",
+                        "message": {
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "type": "tool_use",
+                                    "name": "Task",
+                                    "input": {"subagent_type": "test-agent"},
+                                }
+                            ],
+                        },
+                    }
+                )
+                + "\n"
+            )
+
+        # Patch Path.open to raise an unexpected exception
+        def mock_open(*args: Any, **kwargs: Any) -> Any:
+            raise RuntimeError("Unexpected error")
+
+        monkeypatch.setattr(Path, "open", mock_open)
+
+        result = handler._get_last_completed_agent(str(transcript_file))
+        assert result == ""
+
+    def test_handles_non_message_type_entries(
+        self, handler: RemindValidatorHandler, transcript_file: Path
+    ) -> None:
+        """Handles transcript with non-message type entries."""
+        with transcript_file.open("w") as f:
+            f.write(json.dumps({"type": "event", "data": "something"}) + "\n")
+            f.write(json.dumps({"type": "status", "data": "something"}) + "\n")
+            f.write(
+                json.dumps(
+                    {
+                        "type": "message",
+                        "message": {
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "type": "tool_use",
+                                    "name": "Task",
+                                    "input": {"subagent_type": "valid-agent"},
+                                }
+                            ],
+                        },
+                    }
+                )
+                + "\n"
+            )
+
+        result = handler._get_last_completed_agent(str(transcript_file))
+        assert result == "valid-agent"

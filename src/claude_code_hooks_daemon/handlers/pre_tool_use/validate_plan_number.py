@@ -3,7 +3,13 @@
 import re
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerTag, HookInputField, Priority, ToolName
+from claude_code_hooks_daemon.constants import (
+    HandlerID,
+    HandlerTag,
+    HookInputField,
+    Priority,
+    ToolName,
+)
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_path, get_workspace_root
 
@@ -35,7 +41,7 @@ class ValidatePlanNumberHandler(Handler):
 
     def __init__(self) -> None:
         super().__init__(
-            name="validate-plan-number",
+            handler_id=HandlerID.VALIDATE_PLAN_NUMBER,
             priority=Priority.VALIDATE_PLAN_NUMBER,
             terminal=False,
             tags=[

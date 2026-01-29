@@ -3,7 +3,13 @@
 import re
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerTag, HookInputField, Priority, ToolName
+from claude_code_hooks_daemon.constants import (
+    HandlerID,
+    HandlerTag,
+    HookInputField,
+    Priority,
+    ToolName,
+)
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_content, get_file_path
 
@@ -28,7 +34,7 @@ class SedBlockerHandler(Handler):
 
     def __init__(self) -> None:
         super().__init__(
-            name="block-sed-command",
+            handler_id=HandlerID.SED_BLOCKER,
             priority=Priority.SED_BLOCKER,
             tags=[HandlerTag.SAFETY, HandlerTag.BASH, HandlerTag.BLOCKING, HandlerTag.TERMINAL],
         )

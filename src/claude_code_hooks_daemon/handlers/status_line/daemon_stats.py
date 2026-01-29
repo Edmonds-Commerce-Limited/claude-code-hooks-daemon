@@ -7,7 +7,7 @@ Fails silently if stats cannot be retrieved to avoid breaking the status line.
 import logging
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerTag, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Handler, HookResult
 from claude_code_hooks_daemon.daemon.controller import get_controller
 
@@ -24,7 +24,7 @@ class DaemonStatsHandler(Handler):
 
     def __init__(self) -> None:
         super().__init__(
-            name="status-daemon-stats",
+            handler_id=HandlerID.DAEMON_STATS,
             priority=Priority.DAEMON_STATS,
             terminal=False,
             tags=[HandlerTag.STATUS, HandlerTag.DAEMON, HandlerTag.HEALTH, HandlerTag.NON_TERMINAL],

@@ -3,7 +3,13 @@
 import re
 from typing import Any, ClassVar
 
-from claude_code_hooks_daemon.constants import HandlerTag, HookInputField, Priority, ToolName
+from claude_code_hooks_daemon.constants import (
+    HandlerID,
+    HandlerTag,
+    HookInputField,
+    Priority,
+    ToolName,
+)
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_file_content, get_file_path
 
@@ -30,7 +36,7 @@ class BritishEnglishHandler(Handler):
     def __init__(self) -> None:
         # Non-terminal (terminal=False) - allows operation but adds warning context
         super().__init__(
-            name="enforce-british-english",
+            handler_id=HandlerID.BRITISH_ENGLISH,
             priority=Priority.BRITISH_ENGLISH,
             terminal=False,
             tags=[

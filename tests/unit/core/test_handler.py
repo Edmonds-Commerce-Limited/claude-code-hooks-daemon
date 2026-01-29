@@ -493,9 +493,13 @@ class TestHandlerEdgeCases:
     """Test edge cases for Handler."""
 
     def test_handler_with_none_name(self):
-        """Handler can be created with None name (no validation)."""
-        handler = ConcreteHandler(name=None)  # type: ignore[arg-type]
-        assert handler.name is None
+        """Handler raises ValueError with None name and no handler_id."""
+        # After adding handler_id support, None name is no longer allowed
+        # unless handler_id is provided
+        import pytest
+
+        with pytest.raises(ValueError, match="Either handler_id or name must be provided"):
+            ConcreteHandler(name=None)  # type: ignore[arg-type]
 
     def test_handler_with_empty_name(self):
         """Handler can be created with empty name."""

@@ -3,7 +3,13 @@
 from datetime import datetime
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerTag, HookInputField, Priority, ToolName
+from claude_code_hooks_daemon.constants import (
+    HandlerID,
+    HandlerTag,
+    HookInputField,
+    Priority,
+    ToolName,
+)
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 
 
@@ -17,7 +23,7 @@ class WebSearchYearHandler(Handler):
 
     def __init__(self) -> None:
         super().__init__(
-            name="validate-websearch-year",
+            handler_id=HandlerID.WEB_SEARCH_YEAR,
             priority=Priority.WEB_SEARCH_YEAR,
             tags=[HandlerTag.WORKFLOW, HandlerTag.ADVISORY, HandlerTag.NON_TERMINAL],
         )

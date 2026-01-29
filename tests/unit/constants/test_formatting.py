@@ -4,7 +4,6 @@ Tests that all formatting limits are properly defined and have
 reasonable values for their display purposes.
 """
 
-
 from claude_code_hooks_daemon.constants.formatting import FormatLimit
 
 

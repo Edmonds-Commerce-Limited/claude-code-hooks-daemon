@@ -5,7 +5,13 @@ import re
 from pathlib import Path
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerTag, HookInputField, Priority, ToolName
+from claude_code_hooks_daemon.constants import (
+    HandlerID,
+    HandlerTag,
+    HookInputField,
+    Priority,
+    ToolName,
+)
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_file_path
 from claude_code_hooks_daemon.handlers.utils.plan_numbering import get_next_plan_number
@@ -31,7 +37,7 @@ class MarkdownOrganizationHandler(Handler):
         - plan_workflow_docs: str | None (optional) - Path to workflow doc file (e.g., "CLAUDE/PlanWorkflow.md")
         """
         super().__init__(
-            name="enforce-markdown-organization",
+            handler_id=HandlerID.MARKDOWN_ORGANIZATION,
             priority=Priority.MARKDOWN_ORGANIZATION,
             tags=[
                 HandlerTag.WORKFLOW,

@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerTag, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 
 
@@ -16,7 +16,7 @@ class HelloWorldPermissionRequestHandler(Handler):
     def __init__(self, priority: int = Priority.HELLO_WORLD) -> None:
         """Initialise handler with low priority to run first."""
         super().__init__(
-            name="hello_world",
+            handler_id=HandlerID.HELLO_WORLD_PERMISSION_REQUEST,
             priority=priority,
             terminal=False,  # Allow other handlers to run
             tags=[HandlerTag.TEST, HandlerTag.NON_TERMINAL],

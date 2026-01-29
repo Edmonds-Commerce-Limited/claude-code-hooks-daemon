@@ -13,7 +13,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import Handler, HookResult
 from claude_code_hooks_daemon.core.hook_result import Decision
 
@@ -35,10 +35,15 @@ class YoloContainerDetectionHandler(Handler):
     def __init__(self) -> None:
         """Initialize handler with default configuration."""
         super().__init__(
-            name="yolo-container-detection",
+            handler_id=HandlerID.YOLO_CONTAINER_DETECTION,
             priority=Priority.YOLO_CONTAINER_DETECTION,
             terminal=False,
-            tags=[HandlerTag.WORKFLOW, HandlerTag.ENVIRONMENT, HandlerTag.ADVISORY, HandlerTag.NON_TERMINAL],
+            tags=[
+                HandlerTag.WORKFLOW,
+                HandlerTag.ENVIRONMENT,
+                HandlerTag.ADVISORY,
+                HandlerTag.NON_TERMINAL,
+            ],
         )
 
         # Default configuration

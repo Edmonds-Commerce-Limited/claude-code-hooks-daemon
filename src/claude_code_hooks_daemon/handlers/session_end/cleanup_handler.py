@@ -4,7 +4,7 @@ import contextlib
 from pathlib import Path
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerTag, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 
 
@@ -18,7 +18,7 @@ class CleanupHandler(Handler):
     def __init__(self) -> None:
         """Initialise handler as non-terminal cleanup."""
         super().__init__(
-            name="session-cleanup",
+            handler_id=HandlerID.SESSION_CLEANUP,
             priority=Priority.SESSION_CLEANUP,
             terminal=False,
             tags=[HandlerTag.CLEANUP, HandlerTag.WORKFLOW, HandlerTag.NON_TERMINAL],

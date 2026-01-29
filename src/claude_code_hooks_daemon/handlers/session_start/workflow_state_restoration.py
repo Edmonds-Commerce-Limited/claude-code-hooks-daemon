@@ -11,7 +11,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_workspace_root
 
@@ -31,9 +31,14 @@ class WorkflowStateRestorationHandler(Handler):
                           This allows tests to provide isolated test directories.
         """
         super().__init__(
-            name="workflow-state-restoration",
+            handler_id=HandlerID.WORKFLOW_STATE_RESTORATION,
             terminal=False,
-            tags=[HandlerTag.WORKFLOW, HandlerTag.STATE_MANAGEMENT, HandlerTag.ADVISORY, HandlerTag.NON_TERMINAL],
+            tags=[
+                HandlerTag.WORKFLOW,
+                HandlerTag.STATE_MANAGEMENT,
+                HandlerTag.ADVISORY,
+                HandlerTag.NON_TERMINAL,
+            ],
         )
         self.workspace_root = Path(workspace_root) if workspace_root else get_workspace_root()
 

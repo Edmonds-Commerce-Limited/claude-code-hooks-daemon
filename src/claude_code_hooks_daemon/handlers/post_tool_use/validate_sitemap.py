@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerTag, Priority, ToolName
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority, ToolName
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_file_path
 
@@ -12,7 +12,7 @@ class ValidateSitemapHandler(Handler):
 
     def __init__(self) -> None:
         super().__init__(
-            name="validate-sitemap-on-edit",
+            handler_id=HandlerID.VALIDATE_SITEMAP,
             priority=Priority.VALIDATE_SITEMAP,
             tags=[
                 HandlerTag.VALIDATION,

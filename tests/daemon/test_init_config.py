@@ -19,9 +19,9 @@ from claude_code_hooks_daemon.daemon.init_config import (
 
 
 def _to_snake_case(name: str) -> str:
-    """Convert CamelCase to snake_case."""
+    """Convert CamelCase to snake_case and remove _handler suffix."""
     s1 = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)
-    return re.sub("([a-z0-9])([A-Z])", r"\1_\2", s1).lower()
+    return re.sub("([a-z0-9])([A-Z])", r"\1_\2", s1).lower().removesuffix("_handler")
 
 
 def _discover_all_handlers() -> dict[str, list[str]]:
@@ -237,17 +237,17 @@ class TestConfigTemplate:
             assert event in event_types, f"Missing event type: {event}"
 
     def test_pre_tool_use_has_destructive_git_example(self):
-        """Test that pre_tool_use section includes destructive_git_handler."""
+        """Test that pre_tool_use section includes destructive_git."""
         config_yaml = generate_config(mode="full")
         config = yaml.safe_load(config_yaml)
 
         assert "pre_tool_use" in config["handlers"]
         pre_tool_use = config["handlers"]["pre_tool_use"]
 
-        # Should have destructive_git_handler as an enabled example
-        assert "destructive_git_handler" in pre_tool_use
-        assert pre_tool_use["destructive_git_handler"]["enabled"] is True
-        assert pre_tool_use["destructive_git_handler"]["priority"] == 10
+        # Should have destructive_git as an enabled example
+        assert "destructive_git" in pre_tool_use
+        assert pre_tool_use["destructive_git"]["enabled"] is True
+        assert pre_tool_use["destructive_git"]["priority"] == 10
 
     def test_pre_tool_use_has_gh_issue_comments_enabled(self):
         """Test that pre_tool_use section includes gh_issue_comments_handler enabled."""
@@ -257,10 +257,10 @@ class TestConfigTemplate:
         assert "pre_tool_use" in config["handlers"]
         pre_tool_use = config["handlers"]["pre_tool_use"]
 
-        # Should have gh_issue_comments_handler as an enabled handler
-        assert "gh_issue_comments_handler" in pre_tool_use
-        assert pre_tool_use["gh_issue_comments_handler"]["enabled"] is True
-        assert pre_tool_use["gh_issue_comments_handler"]["priority"] == 40
+        # Should have gh_issue_comments as an enabled handler
+        assert "gh_issue_comments" in pre_tool_use
+        assert pre_tool_use["gh_issue_comments"]["enabled"] is True
+        assert pre_tool_use["gh_issue_comments"]["priority"] == 40
 
     def test_full_config_has_all_safety_handlers_enabled(self):
         """Test that full config enables all safety handlers by default."""
@@ -271,11 +271,11 @@ class TestConfigTemplate:
 
         # All safety handlers should be enabled
         safety_handlers = [
-            "destructive_git_handler",
-            "sed_blocker_handler",
-            "absolute_path_handler",
-            "worktree_file_copy_handler",
-            "git_stash_handler",
+            "destructive_git",
+            "sed_blocker",
+            "absolute_path",
+            "worktree_file_copy",
+            "git_stash",
         ]
         for handler in safety_handlers:
             assert handler in pre_tool_use, f"Missing handler: {handler}"
@@ -335,33 +335,35 @@ class TestConfigHandlerCoverage:
     # (e.g., workflow-specific handlers that need explicit opt-in)
     EXCLUDED_HANDLERS: ClassVar[set[str]] = {
         # Plan workflow handlers - require CLAUDE/Plan/ directory structure
-        "validate_plan_number_handler",
-        "plan_time_estimates_handler",
-        "plan_workflow_handler",
-        "plan_number_helper_handler",
-        "markdown_organization_handler",
+        "validate_plan_number",
+        "plan_time_estimates",
+        "plan_workflow",
+        "plan_number_helper",
+        "markdown_organization",
         # NPM handler - project-specific
-        "npm_command_handler",
+        "npm_command",
         # Permission handlers - YOLO mode doesn't use these
-        "auto_approve_reads_handler",
+        "auto_approve_reads",
         # Git context injector - optional
-        "git_context_injector_handler",
+        "git_context_injector",
         # Workflow restoration - optional
-        "workflow_state_restoration_handler",
-        "workflow_state_pre_compact_handler",
+        "workflow_state_restoration",
+        "workflow_state_pre_compact",
         # YOLO container detection - auto-detects
-        "yolo_container_detection_handler",
+        "yolo_container_detection",
         # Reminder handlers - optional
-        "remind_prompt_library_handler",
-        "remind_validator_handler",
+        "remind_prompt_library",
+        "remind_validator",
         # Stop handlers - optional
-        "auto_continue_stop_handler",
-        "task_completion_checker_handler",
+        "auto_continue_stop",
+        "task_completion_checker",
+        # Pipe blocker - optional
+        "pipe_blocker",
         # ESLint validation - optional
-        "validate_eslint_on_write_handler",
-        "validate_sitemap_handler",
+        "validate_eslint_on_write",
+        "validate_sitemap",
         # Status line handlers - project-specific
-        "suggest_status_line_handler",
+        "suggest_status_line",
     }
 
     @pytest.fixture

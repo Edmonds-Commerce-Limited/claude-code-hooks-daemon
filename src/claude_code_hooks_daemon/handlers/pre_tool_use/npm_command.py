@@ -3,7 +3,7 @@
 import re
 from typing import Any, ClassVar
 
-from claude_code_hooks_daemon.constants import HandlerTag, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_bash_command
 
@@ -37,7 +37,7 @@ class NpmCommandHandler(Handler):
 
     def __init__(self) -> None:
         super().__init__(
-            name="enforce-npm-commands",
+            handler_id=HandlerID.NPM_COMMAND,
             priority=Priority.NPM_COMMAND,
             tags=[
                 HandlerTag.WORKFLOW,

@@ -4,7 +4,6 @@ Tests that all config key constants are properly defined and match
 the actual keys used in YAML configuration files.
 """
 
-
 from claude_code_hooks_daemon.constants.config import ConfigKey
 
 

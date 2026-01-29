@@ -156,6 +156,11 @@ class HandlerID:
         config_key="git_branch",
         display_name="status-git-branch",
     )
+    PIPE_BLOCKER = HandlerIDMeta(
+        class_name="PipeBlockerHandler",
+        config_key="pipe_blocker",
+        display_name="pipe-blocker",
+    )
     GIT_STASH = HandlerIDMeta(
         class_name="GitStashHandler",
         config_key="git_stash",
@@ -348,6 +353,7 @@ HandlerKey = Literal[
     "worktree_file_copy",
     "git_context_injector",
     "git_branch",
+    "pipe_blocker",
     "git_stash",
     "validate_sitemap",
     # QA enforcement handlers

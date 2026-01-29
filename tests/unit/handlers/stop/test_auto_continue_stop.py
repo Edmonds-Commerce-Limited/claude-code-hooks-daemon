@@ -437,3 +437,164 @@ class TestAutoContinueStopHandlerHandle:
         # Should contain action verbs
         action_verbs = ["continue", "proceed", "go", "resume", "move"]
         assert any(verb in reason_lower for verb in action_verbs)
+
+
+class TestAutoContinueStopHandlerEdgeCases:
+    """Test edge cases for transcript parsing."""
+
+    @pytest.fixture
+    def handler(self) -> AutoContinueStopHandler:
+        """Create handler instance."""
+        return AutoContinueStopHandler()
+
+    @pytest.fixture
+    def mock_transcript_path(self, tmp_path: Path) -> Path:
+        """Create a temporary transcript file path."""
+        return tmp_path / "transcript.jsonl"
+
+    def test_matches_handles_transcript_with_blank_lines(
+        self, handler: AutoContinueStopHandler, mock_transcript_path: Path
+    ) -> None:
+        """Should handle transcripts with blank lines."""
+        with mock_transcript_path.open("w") as f:
+            f.write("\n")  # Blank line
+            f.write("\n")  # Another blank line
+            f.write(
+                json.dumps(
+                    {
+                        "type": "message",
+                        "message": {
+                            "role": "assistant",
+                            "content": [{"type": "text", "text": "Should I continue?"}],
+                        },
+                    }
+                )
+                + "\n"
+            )
+
+        hook_input = {
+            "transcript_path": str(mock_transcript_path),
+            "stop_hook_active": False,
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_handles_transcript_with_non_message_entries(
+        self, handler: AutoContinueStopHandler, mock_transcript_path: Path
+    ) -> None:
+        """Should skip non-message type entries in transcript."""
+        with mock_transcript_path.open("w") as f:
+            f.write(json.dumps({"type": "status", "data": "some status"}) + "\n")
+            f.write(json.dumps({"type": "event", "data": "some event"}) + "\n")
+            f.write(
+                json.dumps(
+                    {
+                        "type": "message",
+                        "message": {
+                            "role": "assistant",
+                            "content": [{"type": "text", "text": "Would you like me to proceed?"}],
+                        },
+                    }
+                )
+                + "\n"
+            )
+
+        hook_input = {
+            "transcript_path": str(mock_transcript_path),
+            "stop_hook_active": False,
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_handles_string_content_in_message(
+        self, handler: AutoContinueStopHandler, mock_transcript_path: Path
+    ) -> None:
+        """Should handle content that is a string instead of dict."""
+        with mock_transcript_path.open("w") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "type": "message",
+                        "message": {
+                            "role": "assistant",
+                            "content": ["Should I continue?"],  # String directly
+                        },
+                    }
+                )
+                + "\n"
+            )
+
+        hook_input = {
+            "transcript_path": str(mock_transcript_path),
+            "stop_hook_active": False,
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_handles_oserror_reading_transcript(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """Should handle OSError when reading transcript."""
+        transcript_path = tmp_path / "unreadable.jsonl"
+        transcript_path.touch()
+        # Make file unreadable
+        transcript_path.chmod(0o000)
+
+        hook_input = {
+            "transcript_path": str(transcript_path),
+            "stop_hook_active": False,
+        }
+
+        try:
+            result = handler.matches(hook_input)
+            # Should return False on read error
+            assert result is False
+        finally:
+            # Clean up - restore permissions so pytest can delete the file
+            transcript_path.chmod(0o644)
+
+    def test_matches_handles_unicode_decode_error(
+        self, handler: AutoContinueStopHandler, mock_transcript_path: Path
+    ) -> None:
+        """Should handle UnicodeDecodeError when reading transcript."""
+        # Write invalid UTF-8 bytes
+        with mock_transcript_path.open("wb") as f:
+            f.write(b"\xff\xfe invalid utf-8 \x80\x81")
+
+        hook_input = {
+            "transcript_path": str(mock_transcript_path),
+            "stop_hook_active": False,
+        }
+        # Should return False on decode error
+        assert handler.matches(hook_input) is False
+
+    def test_matches_handles_unexpected_exception(
+        self, handler: AutoContinueStopHandler, mock_transcript_path: Path, monkeypatch: Any
+    ) -> None:
+        """Should handle unexpected exceptions during transcript reading."""
+        # Write a valid file first
+        with mock_transcript_path.open("w") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "type": "message",
+                        "message": {
+                            "role": "assistant",
+                            "content": [{"type": "text", "text": "Should I continue?"}],
+                        },
+                    }
+                )
+                + "\n"
+            )
+
+        # Patch Path.open to raise an unexpected exception
+        original_open = Path.open
+
+        def mock_open(*args: Any, **kwargs: Any) -> Any:
+            raise RuntimeError("Unexpected error")
+
+        monkeypatch.setattr(Path, "open", mock_open)
+
+        hook_input = {
+            "transcript_path": str(mock_transcript_path),
+            "stop_hook_active": False,
+        }
+        # Should return False on unexpected error
+        assert handler.matches(hook_input) is False

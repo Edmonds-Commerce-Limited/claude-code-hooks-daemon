@@ -93,6 +93,99 @@ class HandlersConfig(BaseModel):
     stop: dict[str, Any] = Field(default_factory=dict)
     subagent_stop: dict[str, Any] = Field(default_factory=dict)
 
+    @model_validator(mode="after")
+    def validate_handler_dependencies(self) -> Self:
+        """Validate handler dependencies (shares_options_with relationships).
+
+        Ensures that if a child handler is enabled and shares options with a parent,
+        the parent handler must also be enabled.
+
+        Returns:
+            Self for method chaining
+
+        Raises:
+            ValueError: If child handler is enabled but parent is disabled
+        """
+        # Import here to avoid circular dependency
+        import re
+
+        from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
+
+        def _to_snake_case(name: str) -> str:
+            """Convert class name to snake_case config key."""
+            s1 = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)
+            return re.sub("([a-z0-9])([A-Z])", r"\1_\2", s1).lower().removesuffix("_handler")
+
+        # Discover all handlers to check their shares_options_with attribute
+        registry = HandlerRegistry()
+        registry.discover()
+
+        # Get all discovered handler classes (flat dict keyed by class name)
+        all_handlers = registry._handlers
+
+        # Check each event type
+        for event_type in [
+            "pre_tool_use",
+            "post_tool_use",
+            "session_start",
+            "session_end",
+            "pre_compact",
+            "user_prompt_submit",
+            "permission_request",
+            "notification",
+            "stop",
+            "subagent_stop",
+        ]:
+            event_config = getattr(self, event_type, {})
+            if not isinstance(event_config, dict):
+                continue
+
+            # Check all handlers to see if they belong to this event type
+            # We check by instantiating and seeing if they're configured for this event
+            for handler_cls in all_handlers.values():
+                # Convert class name to config key (snake_case)
+                config_key = _to_snake_case(handler_cls.__name__)
+
+                # Get config for this handler in this event type
+                handler_config = event_config.get(config_key)
+                if handler_config is None:
+                    # Handler not configured for this event type
+                    continue
+
+                # Check if handler is enabled
+                if isinstance(handler_config, HandlerConfig):
+                    is_enabled = handler_config.enabled
+                elif isinstance(handler_config, dict):
+                    is_enabled = handler_config.get("enabled", True)
+                else:
+                    is_enabled = True
+
+                # If enabled, check if it has parent dependency
+                if is_enabled:
+                    # Instantiate to check shares_options_with attribute
+                    handler_instance = handler_cls()
+                    if handler_instance.shares_options_with:
+                        parent_key = handler_instance.shares_options_with
+                        parent_config = event_config.get(parent_key)
+
+                        # Determine if parent is enabled
+                        parent_enabled = True  # Default is enabled
+                        if isinstance(parent_config, HandlerConfig):
+                            parent_enabled = parent_config.enabled
+                        elif isinstance(parent_config, dict):
+                            parent_enabled = parent_config.get("enabled", True)
+                        elif parent_config is None:
+                            parent_enabled = True  # Not in config = use defaults (enabled)
+
+                        if not parent_enabled:
+                            raise ValueError(
+                                f"Handler '{config_key}' in '{event_type}' shares options with "
+                                f"'{parent_key}' but '{parent_key}' is disabled. "
+                                f"Either enable '{parent_key}' or disable '{config_key}'."
+                            )
+
+        return self
+
     @field_validator("*", mode="before")
     @classmethod
     def coerce_handler_configs(cls, v: dict[str, Any] | None) -> dict[str, Any]:

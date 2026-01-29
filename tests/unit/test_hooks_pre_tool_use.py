@@ -298,3 +298,20 @@ class TestMainFunction:
         assert priorities["DestructiveGitHandler"] == 10
         assert priorities["GitStashHandler"] == 20
         assert priorities["SedBlockerHandler"] == 15
+
+    @patch("claude_code_hooks_daemon.hooks.pre_tool_use.ConfigLoader")
+    @patch("claude_code_hooks_daemon.hooks.pre_tool_use.FrontController")
+    @patch("claude_code_hooks_daemon.hooks.pre_tool_use.load_config_safe")
+    def test_handles_config_find_failure(
+        self, mock_load_config: Mock, mock_fc_class: Mock, mock_config_loader: Mock
+    ) -> None:
+        """Handles FileNotFoundError from ConfigLoader.find_config()."""
+        mock_config_loader.find_config.side_effect = FileNotFoundError("Config not found")
+        mock_load_config.return_value = {"handlers": {}, "daemon": {}, "plugins": []}
+        mock_fc_instance = Mock()
+        mock_fc_class.return_value = mock_fc_instance
+
+        main()
+
+        mock_load_config.assert_called_once()
+        mock_fc_instance.run.assert_called_once()

@@ -4,7 +4,6 @@ Tests that all validation limits are properly defined and have
 reasonable values for their intended use.
 """
 
-
 from claude_code_hooks_daemon.constants.validation import ValidationLimit
 
 

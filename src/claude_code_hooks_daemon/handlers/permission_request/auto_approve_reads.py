@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 
 
@@ -16,7 +16,7 @@ class AutoApproveReadsHandler(Handler):
     def __init__(self) -> None:
         """Initialise handler with high priority for early approval."""
         super().__init__(
-            name="auto-approve-reads",
+            handler_id=HandlerID.AUTO_APPROVE_READS,
             priority=Priority.AUTO_APPROVE_READS,
             tags=[HandlerTag.WORKFLOW, HandlerTag.AUTOMATION, HandlerTag.TERMINAL],
         )

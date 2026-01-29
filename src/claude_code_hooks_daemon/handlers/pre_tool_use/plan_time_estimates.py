@@ -3,7 +3,13 @@
 import re
 from typing import Any, ClassVar
 
-from claude_code_hooks_daemon.constants import HandlerTag, HookInputField, Priority, ToolName
+from claude_code_hooks_daemon.constants import (
+    HandlerID,
+    HandlerTag,
+    HookInputField,
+    Priority,
+    ToolName,
+)
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_file_content, get_file_path
 
@@ -27,7 +33,7 @@ class PlanTimeEstimatesHandler(Handler):
 
     def __init__(self) -> None:
         super().__init__(
-            name="block-plan-time-estimates",
+            handler_id=HandlerID.PLAN_TIME_ESTIMATES,
             priority=Priority.PLAN_TIME_ESTIMATES,
             tags=[
                 HandlerTag.WORKFLOW,

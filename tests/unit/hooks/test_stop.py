@@ -242,3 +242,78 @@ class TestMainFunction:
         main()
 
         mock_fc_instance.run.assert_called_once()
+
+    @patch("claude_code_hooks_daemon.hooks.stop.ConfigLoader")
+    @patch("claude_code_hooks_daemon.hooks.stop.FrontController")
+    @patch("claude_code_hooks_daemon.hooks.stop.load_config_safe")
+    def test_handles_config_find_failure(
+        self, mock_load_config: Mock, mock_fc_class: Mock, mock_config_loader: Mock
+    ) -> None:
+        """Handles FileNotFoundError from ConfigLoader.find_config()."""
+        mock_config_loader.find_config.side_effect = FileNotFoundError("Config not found")
+        mock_load_config.return_value = {"handlers": {}, "daemon": {}}
+        mock_fc_instance = Mock()
+        mock_fc_class.return_value = mock_fc_instance
+
+        main()
+
+        # Should fallback and use default config path
+        mock_load_config.assert_called_once()
+        mock_fc_instance.run.assert_called_once()
+
+    @patch("claude_code_hooks_daemon.hooks.stop.FrontController")
+    @patch("claude_code_hooks_daemon.hooks.stop.load_config_safe")
+    def test_enable_tags_filters_handlers(
+        self, mock_load_config: Mock, mock_fc_class: Mock
+    ) -> None:
+        """Handlers filtered by enable_tags - only matching handlers registered."""
+        config = {
+            "handlers": {
+                "stop": {
+                    "enable_tags": ["terminal"],  # Only handlers with 'terminal' tag
+                    "auto_continue_stop": {"enabled": True},
+                    "task_completion_checker": {"enabled": True},
+                }
+            },
+            "daemon": {},
+        }
+        mock_load_config.return_value = config
+        mock_fc_instance = Mock()
+        mock_fc_class.return_value = mock_fc_instance
+
+        main()
+
+        register_calls = mock_fc_instance.register.call_args_list
+        # auto_continue_stop has 'terminal' tag, task_completion_checker doesn't
+        assert len(register_calls) == 1
+        registered_handler = register_calls[0][0][0]
+        assert "terminal" in registered_handler.tags
+
+    @patch("claude_code_hooks_daemon.hooks.stop.FrontController")
+    @patch("claude_code_hooks_daemon.hooks.stop.load_config_safe")
+    def test_disable_tags_filters_handlers(
+        self, mock_load_config: Mock, mock_fc_class: Mock
+    ) -> None:
+        """Handlers filtered by disable_tags - handlers with disabled tags skipped."""
+        config = {
+            "handlers": {
+                "stop": {
+                    "disable_tags": ["terminal"],  # Skip handlers with 'terminal' tag
+                    "auto_continue_stop": {"enabled": True},
+                    "task_completion_checker": {"enabled": True},
+                }
+            },
+            "daemon": {},
+        }
+        mock_load_config.return_value = config
+        mock_fc_instance = Mock()
+        mock_fc_class.return_value = mock_fc_instance
+
+        main()
+
+        register_calls = mock_fc_instance.register.call_args_list
+        # auto_continue_stop has 'terminal' tag (should be skipped)
+        # task_completion_checker doesn't (should be registered)
+        assert len(register_calls) == 1
+        registered_handler = register_calls[0][0][0]
+        assert "terminal" not in registered_handler.tags
