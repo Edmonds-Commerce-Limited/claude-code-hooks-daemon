@@ -5,11 +5,14 @@ continue automatically in YOLO mode without requiring any user interaction.
 """
 
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any, ClassVar
 
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+
+logger = logging.getLogger(__name__)
 
 
 class AutoContinueStopHandler(Handler):
@@ -156,7 +159,11 @@ class AutoContinueStopHandler(Handler):
                     continue
 
             return ""
-        except Exception:
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError) as e:
+            logger.debug("Failed to read transcript from %s: %s", transcript_path, e)
+            return ""
+        except Exception as e:
+            logger.error("Unexpected error reading transcript: %s", e, exc_info=True)
             return ""
 
     def _contains_confirmation_pattern(self, text: str) -> bool:

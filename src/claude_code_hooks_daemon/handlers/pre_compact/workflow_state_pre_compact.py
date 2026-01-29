@@ -7,6 +7,7 @@ for restoration after compaction.
 """
 
 import json
+import logging
 import re
 from datetime import datetime
 from pathlib import Path
@@ -14,6 +15,8 @@ from typing import Any
 
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_workspace_root
+
+logger = logging.getLogger(__name__)
 
 
 class WorkflowStatePreCompactHandler(Handler):
@@ -105,8 +108,12 @@ class WorkflowStatePreCompactHandler(Handler):
                         workflow_state["created_at"] = old_state.get(
                             "created_at", workflow_state["created_at"]
                         )
-                except Exception:
-                    pass
+                except (OSError, json.JSONDecodeError, PermissionError) as e:
+                    logger.warning(
+                        "Failed to read existing workflow state from %s: %s", state_file, e
+                    )
+                except Exception as e:
+                    logger.error("Unexpected error reading workflow state: %s", e, exc_info=True)
             else:
                 # Create new file with start_time timestamp
                 start_time = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -116,9 +123,25 @@ class WorkflowStatePreCompactHandler(Handler):
             with state_file.open("w") as f:
                 json.dump(workflow_state, f, indent=2)
 
-        except Exception:
-            # Fail open - if anything goes wrong, just allow compaction
-            pass
+        except (OSError, json.JSONDecodeError, PermissionError) as e:
+            logger.error("Workflow state preservation failed: %s", e, exc_info=True)
+            # Return warning context to user
+            return HookResult(
+                decision=Decision.ALLOW,
+                reason=None,
+                context=[
+                    f"⚠️  WARNING: Failed to preserve workflow state: {e}",
+                    "Compaction proceeding but state may be lost.",
+                ],
+            )
+        except Exception as e:
+            logger.error("Unexpected error in workflow state handler: %s", e, exc_info=True)
+            # Surface unexpected errors to user
+            return HookResult(
+                decision=Decision.DENY,
+                reason=f"Workflow state handler encountered unexpected error: {e}",
+                context=["Contact support if this persists."],
+            )
 
         # Always allow compaction to proceed
         return HookResult(decision=Decision.ALLOW)
@@ -146,8 +169,10 @@ class WorkflowStatePreCompactHandler(Handler):
                     content = f.read()
                     if "WORKFLOW STATE" in content or "workflow:" in content.lower():
                         return True
-            except Exception:
-                pass
+            except (OSError, PermissionError, UnicodeDecodeError) as e:
+                logger.debug("Failed to read CLAUDE.local.md: %s", e)
+            except Exception as e:
+                logger.error("Unexpected error reading CLAUDE.local.md: %s", e, exc_info=True)
 
         # Method 2: Check for active plans
         plan_dir = self.workspace_root / "CLAUDE/Plan"
@@ -165,8 +190,10 @@ class WorkflowStatePreCompactHandler(Handler):
                     )
                     if in_progress and has_phase_or_workflow:
                         return True
-            except Exception:
-                pass
+            except (OSError, PermissionError, UnicodeDecodeError) as e:
+                logger.debug("Failed to read plan file %s: %s", plan_file, e)
+            except Exception as e:
+                logger.error("Unexpected error reading plan file: %s", e, exc_info=True)
 
         # Method 3: Check transcript for workflow skill markers
         # (Would require reading transcript_path, but for now we keep it simple)
@@ -207,8 +234,10 @@ class WorkflowStatePreCompactHandler(Handler):
                 with claude_local.open() as f:
                     content = f.read()
                     state = self._parse_workflow_from_memory(content, state)
-            except Exception:
-                pass
+            except (ValueError, AttributeError) as e:
+                logger.debug("Failed to parse workflow from CLAUDE.local.md: %s", e)
+            except Exception as e:
+                logger.error("Unexpected error parsing CLAUDE.local.md: %s", e, exc_info=True)
 
         # Try to extract from active plan
         plan_dir = self.workspace_root / "CLAUDE/Plan"
@@ -220,8 +249,10 @@ class WorkflowStatePreCompactHandler(Handler):
                     if "🔄 In Progress" in content or "🔄 in_progress" in content.lower():
                         state = self._parse_workflow_from_plan(str(plan_file), content, state)
                         break
-            except Exception:
-                pass
+            except (ValueError, AttributeError) as e:
+                logger.debug("Failed to parse workflow from plan: %s", e)
+            except Exception as e:
+                logger.error("Unexpected error parsing plan: %s", e, exc_info=True)
 
         return state
 

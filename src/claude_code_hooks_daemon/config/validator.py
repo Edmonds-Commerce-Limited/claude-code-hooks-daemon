@@ -12,9 +12,12 @@ Provides exhaustive validation of configuration schema including:
 
 import difflib
 import importlib
+import logging
 import pkgutil
 import re
 from typing import Any, ClassVar
+
+logger = logging.getLogger(__name__)
 
 
 class ValidationError(Exception):
@@ -109,9 +112,10 @@ class ConfigValidator:
                             # Convert class name to snake_case config key
                             handler_config_name = ConfigValidator._to_snake_case(attr.__name__)
                             handlers.add(handler_config_name)
-                except Exception:
-                    # Ignore import errors for individual modules
-                    pass
+                except (ImportError, SyntaxError, AttributeError) as e:
+                    logger.debug("Failed to import handler module %s: %s", modname, e)
+                except Exception as e:
+                    logger.error("Unexpected error importing %s: %s", modname, e, exc_info=True)
 
         except ImportError:
             # Event type has no handlers package (that's ok)

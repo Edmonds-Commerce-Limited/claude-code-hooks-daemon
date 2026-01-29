@@ -8,12 +8,15 @@ This handler is non-terminal and advisory - it never blocks execution, only
 provides helpful context about the runtime environment.
 """
 
+import logging
 import os
 from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.core import Handler, HookResult
 from claude_code_hooks_daemon.core.hook_result import Decision
+
+logger = logging.getLogger(__name__)
 
 
 class YoloContainerDetectionHandler(Handler):
@@ -111,8 +114,11 @@ class YoloContainerDetectionHandler(Handler):
                 # os.getuid() not available on Windows - skip
                 pass
 
-        except Exception:
-            # Fail open - return 0 score on unexpected errors
+        except (OSError, RuntimeError, AttributeError) as e:
+            logger.debug("Confidence score calculation failed: %s", e)
+            return 0
+        except Exception as e:
+            logger.error("Unexpected error in confidence score: %s", e, exc_info=True)
             return 0
 
         return score
@@ -165,8 +171,11 @@ class YoloContainerDetectionHandler(Handler):
             except AttributeError:
                 pass
 
-        except Exception:
-            # Fail open - return empty list on errors
+        except (OSError, RuntimeError, AttributeError) as e:
+            logger.debug("Indicator detection failed: %s", e)
+            return []
+        except Exception as e:
+            logger.error("Unexpected error detecting indicators: %s", e, exc_info=True)
             return []
 
         return indicators
@@ -197,8 +206,11 @@ class YoloContainerDetectionHandler(Handler):
             score = self._calculate_confidence_score()
             threshold = int(self.config.get("min_confidence_score", 3))
             return score >= threshold
-        except Exception:
-            # Fail open - don't match on errors
+        except (ValueError, TypeError, AttributeError) as e:
+            logger.debug("YOLO match check failed: %s", e)
+            return False
+        except Exception as e:
+            logger.error("Unexpected error in YOLO matches(): %s", e, exc_info=True)
             return False
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
@@ -237,6 +249,15 @@ class YoloContainerDetectionHandler(Handler):
 
             return HookResult(decision=Decision.ALLOW, reason=None, context=context)
 
-        except Exception:
-            # Fail open - return ALLOW with no context on errors
-            return HookResult(decision=Decision.ALLOW, reason=None, context=[])
+        except (OSError, RuntimeError, AttributeError) as e:
+            logger.warning("YOLO container detection failed: %s", e, exc_info=True)
+            return HookResult(
+                decision=Decision.ALLOW, reason=None, context=[f"⚠️  YOLO detection failed: {e}"]
+            )
+        except Exception as e:
+            logger.error("YOLO handler encountered unexpected error: %s", e, exc_info=True)
+            return HookResult(
+                decision=Decision.DENY,
+                reason=f"YOLO handler error: {e}",
+                context=["Contact support if this persists."],
+            )

@@ -4,9 +4,12 @@ Provides validation functions to prevent nested installations and detect
 the hooks-daemon repository. Used by both install.py and daemon/cli.py.
 """
 
+import logging
 import subprocess
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 class InstallationError(Exception):
@@ -67,7 +70,11 @@ def load_config_safe(project_root: Path) -> dict[str, Any] | None:
         with config_file.open() as f:
             result: dict[str, Any] | None = yaml.safe_load(f)
             return result
-    except Exception:
+    except (OSError, PermissionError, yaml.YAMLError) as e:
+        logger.debug("Failed to load config from %s: %s", config_file, e)
+        return None
+    except Exception as e:
+        logger.error("Unexpected error loading config %s: %s", config_file, e, exc_info=True)
         return None
 
 

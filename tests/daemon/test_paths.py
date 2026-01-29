@@ -476,6 +476,18 @@ class TestPIDFileOperations(unittest.TestCase):
             # Should not raise exception
             cleanup_pid_file(pid_path)
 
+    @patch("pathlib.Path.unlink")
+    def test_cleanup_pid_file_handles_unexpected_exception(self, mock_unlink):
+        """Test cleanup_pid_file logs unexpected exceptions."""
+        mock_unlink.side_effect = RuntimeError("Unexpected error")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pid_path = Path(tmpdir) / "test.pid"
+            pid_path.write_text("12345")
+
+            # Should not raise exception
+            cleanup_pid_file(pid_path)
+
 
 class TestSocketCleanup(unittest.TestCase):
     """Test suite for socket cleanup operations."""
@@ -512,6 +524,18 @@ class TestSocketCleanup(unittest.TestCase):
     def test_cleanup_socket_handles_exception(self, mock_unlink):
         """Test cleanup_socket handles exceptions during deletion."""
         mock_unlink.side_effect = PermissionError("Access denied")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            socket_path = Path(tmpdir) / "test.sock"
+            socket_path.touch()
+
+            # Should not raise exception
+            cleanup_socket(socket_path)
+
+    @patch("pathlib.Path.unlink")
+    def test_cleanup_socket_handles_unexpected_exception(self, mock_unlink):
+        """Test cleanup_socket logs unexpected exceptions."""
+        mock_unlink.side_effect = RuntimeError("Unexpected error")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             socket_path = Path(tmpdir) / "test.sock"
