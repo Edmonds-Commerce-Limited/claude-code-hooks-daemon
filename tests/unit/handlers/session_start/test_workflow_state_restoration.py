@@ -390,10 +390,10 @@ class TestWorkflowStateRestorationHandler:
         guidance = handler._build_guidance_message(state)
         assert "Context:" not in guidance
 
-    def test_handle_returns_allow_on_exception(
+    def test_handle_returns_deny_on_unexpected_exception(
         self, handler: WorkflowStateRestorationHandler, tmp_workspace: Path, monkeypatch: Any
     ) -> None:
-        """Should return ALLOW decision if any exception occurs during processing."""
+        """Should return DENY decision for unexpected exceptions (FAIL FAST)."""
         # Create workflow state directory and file
         workflow_dir = tmp_workspace / "untracked/workflow-state/test-workflow"
         workflow_dir.mkdir(parents=True)
@@ -407,13 +407,14 @@ class TestWorkflowStateRestorationHandler:
         state_file = workflow_dir / "state-test-workflow-20260127_120000.json"
         state_file.write_text(json.dumps(state))
 
-        # Mock _build_guidance_message to raise an exception
+        # Mock _build_guidance_message to raise an unexpected exception
         def mock_build_guidance(*args: Any, **kwargs: Any) -> str:
             raise RuntimeError("Unexpected error in guidance building")
 
         monkeypatch.setattr(handler, "_build_guidance_message", mock_build_guidance)
 
-        # Should not raise, should return ALLOW
+        # Should not raise, should return DENY for unexpected error
         result = handler.handle({})
-        assert result.decision == Decision.ALLOW
-        assert result.context == []  # No context due to exception
+        assert result.decision == Decision.DENY
+        assert "Workflow restoration handler error" in result.reason
+        assert "Unexpected error in guidance building" in result.reason

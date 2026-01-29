@@ -7,6 +7,8 @@ Log cleanup happens asynchronously after responses are sent.
 import logging
 from collections import deque
 
+logger = logging.getLogger(__name__)
+
 
 class MemoryLogHandler(logging.Handler):
     """Logging handler that stores records in a circular in-memory buffer.
@@ -35,8 +37,12 @@ class MemoryLogHandler(logging.Handler):
             # Store the record in circular buffer
             # deque with maxlen automatically drops oldest when full
             self.records.append(record)
-        except Exception:
-            # Don't let logging errors break the daemon
+        except (MemoryError, AttributeError, TypeError):
+            # Expected errors in append/access
+            self.handleError(record)
+        except Exception as e:
+            # Unexpected errors - log and handle
+            logger.error("Unexpected error in memory log handler: %s", e, exc_info=True)
             self.handleError(record)
 
     def get_logs(self, count: int | None = None) -> list[str]:

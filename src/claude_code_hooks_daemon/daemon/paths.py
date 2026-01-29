@@ -7,8 +7,11 @@ enabling multi-project daemon isolation.
 
 import contextlib
 import hashlib
+import logging
 import os
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def get_project_hash(project_path: Path | str) -> str:
@@ -123,7 +126,11 @@ def is_pid_alive(pid: int) -> bool:
     except PermissionError:
         # Process exists but we can't access it
         return True
-    except Exception:
+    except (OSError, TypeError, ValueError) as e:
+        logger.debug("PID check failed for %d: %s", pid, e)
+        return False
+    except Exception as e:
+        logger.error("Unexpected error checking PID %d: %s", pid, e, exc_info=True)
         return False
 
 
@@ -149,7 +156,13 @@ def read_pid_file(pid_path: Path | str) -> int | None:
             with contextlib.suppress(Exception):
                 pid_path.unlink()
             return None
-    except (FileNotFoundError, ValueError, Exception):
+    except FileNotFoundError:
+        return None
+    except ValueError as e:
+        logger.debug("Invalid PID value in %s: %s", pid_path, e)
+        return None
+    except (OSError, PermissionError) as e:
+        logger.debug("Failed to read PID file %s: %s", pid_path, e)
         return None
 
 
@@ -177,8 +190,10 @@ def cleanup_socket(socket_path: Path | str) -> None:
         socket_path = Path(socket_path)
         if socket_path.exists():
             socket_path.unlink()
-    except Exception:
-        pass
+    except (OSError, PermissionError) as e:
+        logger.warning("Failed to cleanup socket %s: %s", socket_path, e)
+    except Exception as e:
+        logger.error("Unexpected error cleaning socket %s: %s", socket_path, e, exc_info=True)
 
 
 def cleanup_pid_file(pid_path: Path | str) -> None:
@@ -192,5 +207,7 @@ def cleanup_pid_file(pid_path: Path | str) -> None:
         pid_path = Path(pid_path)
         if pid_path.exists():
             pid_path.unlink()
-    except Exception:
-        pass
+    except (OSError, PermissionError) as e:
+        logger.warning("Failed to cleanup PID file %s: %s", pid_path, e)
+    except Exception as e:
+        logger.error("Unexpected error cleaning PID file %s: %s", pid_path, e, exc_info=True)

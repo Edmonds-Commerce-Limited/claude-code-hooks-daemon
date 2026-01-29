@@ -65,8 +65,10 @@ class DaemonStatsHandler(Handler):
                     process = psutil.Process()
                     mem_mb = process.memory_info().rss / (1024 * 1024)
                     mem_str = f" | {mem_mb:.0f}MB"
-                except Exception:
-                    pass
+                except (OSError, AttributeError) as e:
+                    logger.debug("Failed to get process memory: %s", e)
+                except Exception as e:
+                    logger.error("Unexpected error getting memory stats: %s", e, exc_info=True)
 
             # Log level
             log_level = logging.getLogger().level

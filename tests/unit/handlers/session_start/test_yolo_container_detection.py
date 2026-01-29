@@ -499,20 +499,21 @@ class TestYoloContainerDetectionEdgeCases:
             # Context might be empty or have error message
             assert isinstance(result.context, list)
 
-    def test_handle_with_exception_in_get_indicators_fails_open(self, monkeypatch):
-        """Test handler fails open if get_indicators throws exception."""
+    def test_handle_with_unexpected_exception_returns_deny(self, monkeypatch):
+        """Test handler returns DENY for unexpected exceptions (FAIL FAST)."""
         monkeypatch.setenv("CLAUDECODE", "1")  # Ensure matches() returns True
 
         handler = YoloContainerDetectionHandler()
 
-        # Patch _get_detected_indicators to raise exception
+        # Patch _get_detected_indicators to raise unexpected exception
         with patch.object(handler, "_get_detected_indicators", side_effect=Exception("Test error")):
             hook_input = {"hook_event_name": "SessionStart"}
 
-            # Should not crash
+            # Should not crash, should return DENY for unexpected error
             result = handler.handle(hook_input)
 
-            assert result.decision == "allow"
+            assert result.decision == "deny"
+            assert "YOLO handler error" in result.reason
 
     def test_filesystem_error_during_cwd_check(self):
         """Test handler handles filesystem errors gracefully."""

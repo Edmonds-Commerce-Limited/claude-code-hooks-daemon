@@ -1,10 +1,13 @@
 """RemindValidatorHandler - reminds to run validator agents after builder agents complete."""
 
 import json
+import logging
 from pathlib import Path
 from typing import Any, ClassVar
 
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+
+logger = logging.getLogger(__name__)
 
 
 class RemindValidatorHandler(Handler):
@@ -168,5 +171,9 @@ If called {completed_agent} directly, you should validate manually.
 
             return ""
 
-        except Exception:
+        except (OSError, json.JSONDecodeError, AttributeError) as e:
+            logger.debug("Failed to get last completed agent: %s", e)
+            return ""
+        except Exception as e:
+            logger.error("Unexpected error parsing agent info: %s", e, exc_info=True)
             return ""

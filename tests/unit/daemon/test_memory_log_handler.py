@@ -118,6 +118,32 @@ class TestMemoryLogHandler:
         # Restore original records
         handler.records = original_records
 
+    def test_emit_handles_memory_error(self, handler: MemoryLogHandler) -> None:
+        """emit should handle MemoryError specifically."""
+        handler.handleError = MagicMock()  # type: ignore[method-assign]
+
+        original_records = handler.records
+        handler.records = MagicMock()  # type: ignore[assignment]
+        handler.records.append.side_effect = MemoryError("Out of memory")
+
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="test.py",
+            lineno=10,
+            msg="Test message",
+            args=(),
+            exc_info=None,
+        )
+
+        handler.emit(record)
+
+        # handleError should have been called
+        handler.handleError.assert_called_once_with(record)
+
+        # Restore original records
+        handler.records = original_records
+
     def test_get_logs_all(self, handler: MemoryLogHandler) -> None:
         """get_logs should return all formatted logs when count is None."""
         # Add some records

@@ -4,11 +4,14 @@ Shows current git branch if the workspace is in a git repository.
 Fails silently if not in a git repo or if git commands error.
 """
 
+import logging
 import subprocess
 from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.core import Handler, HookResult
+
+logger = logging.getLogger(__name__)
 
 
 class GitBranchHandler(Handler):
@@ -67,8 +70,9 @@ class GitBranchHandler(Handler):
             if branch:
                 return HookResult(context=[f"| {branch}"])
 
-        except Exception:
-            # Fail silently - git errors shouldn't break status line
-            pass
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as e:
+            logger.debug("Failed to get git branch: %s", e)
+        except Exception as e:
+            logger.error("Unexpected error in git branch handler: %s", e, exc_info=True)
 
         return HookResult(context=[])

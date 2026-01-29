@@ -7,11 +7,14 @@ guidance to force re-reading of workflow documentation.
 """
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_workspace_root
+
+logger = logging.getLogger(__name__)
 
 
 class WorkflowStateRestorationHandler(Handler):
@@ -109,9 +112,20 @@ class WorkflowStateRestorationHandler(Handler):
             # Return guidance with workflow context
             return HookResult(decision=Decision.ALLOW, context=[guidance])
 
-        except Exception:
-            # Fail open on any error
-            return HookResult(decision=Decision.ALLOW)
+        except (OSError, json.JSONDecodeError, PermissionError) as e:
+            logger.warning("Workflow state restoration failed: %s", e, exc_info=True)
+            return HookResult(
+                decision=Decision.ALLOW,
+                reason=None,
+                context=[f"⚠️  Failed to restore workflow state: {e}"],
+            )
+        except Exception as e:
+            logger.error("Unexpected error in workflow restoration: %s", e, exc_info=True)
+            return HookResult(
+                decision=Decision.DENY,
+                reason=f"Workflow restoration handler error: {e}",
+                context=["Contact support if this persists."],
+            )
 
     def _build_guidance_message(self, state: dict[str, Any]) -> str:
         """
