@@ -244,7 +244,15 @@ class MarkdownOrganizationHandler(Handler):
                 f"This plan has been moved to the project:\n\n"
                 f"**Location**: `{self._track_plans_in_project}/{folder_name}/PLAN.md`\n\n"
                 f"The hooks daemon automatically redirects planning mode writes "
-                f"to keep plans in version control.\n"
+                f"to keep plans in version control.\n\n"
+                f"**IMPORTANT**: The plan folder currently has a temporary name: `{folder_name}`\n\n"
+                f"**You MUST rename this folder** to a descriptive name based on the plan content:\n"
+                f"1. Read the plan to understand what it's about\n"
+                f"2. Choose a clear, descriptive kebab-case name\n"
+                f"3. Rename: `{self._track_plans_in_project}/{folder_name}/` → "
+                f"`{self._track_plans_in_project}/{next_number}-descriptive-name/`\n"
+                f"4. Keep the plan number prefix ({next_number}-) intact\n\n"
+                f"Example: `{next_number}-floofy-growing-moth` → `{next_number}-implement-tdd-validation`\n"
             )
             original_path.write_text(stub_content, encoding="utf-8")
 
@@ -255,8 +263,9 @@ class MarkdownOrganizationHandler(Handler):
                 f"Planning mode write successfully redirected.\n\n"
                 f"Your plan has been saved to: `{self._track_plans_in_project}/{folder_name}/PLAN.md`\n\n"
                 f"A redirect stub was created at: `{file_path}`\n\n"
-                f"The plan folder uses temporary name '{sanitized_name}'. "
-                f"You can rename it to something more descriptive if needed."
+                f"**ACTION REQUIRED**: The plan folder has a temporary name.\n"
+                f"Please rename `{folder_name}/` to `{next_number}-descriptive-name/` "
+                f"based on the plan content. Keep the number prefix intact."
             ]
 
             # Phase 4: Inject workflow docs guidance if configured
