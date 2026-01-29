@@ -14,15 +14,19 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - **Owner**: AI Agent
   - **Estimated**: 6-8 hours
 
-- [002: Fix Silent Handler Failures](002-fix-silent-handler-failures/PLAN.md) - 🟡 In Progress
+## Completed Plans
+
+- [00010: CLI and Server Coverage Improvement to 98%](Completed/00010-cli-server-coverage-improvement/PLAN.md) - 🟢 Complete (2026-01-29)
+  - Improved cli.py coverage from 74.31% to 99.63%
+  - Improved server.py coverage from 88.83% to 96.95%
+  - Overall project coverage improved from 93.72% to 97.04%
+  - Added 62 new tests covering fork logic, exception paths, async operations
+  - **Completed**: 2026-01-29 in ~3 hours (Opus agent execution)
+
+- [002: Fix Silent Handler Failures](Completed/002-fix-silent-handler-failures/PLAN.md) - 🟢 Complete
   - Fix broken handlers (BashErrorDetector, AutoApproveReads, Notification)
   - Add input schema validation (toggleable)
   - Add sanity checks for required fields
-  - **Priority**: Critical
-  - **Owner**: TBD
-  - **Estimated**: 8-12 hours
-
-## Completed Plans
 
 - [001: Test Fixture Validation Against Real Claude Code Events](Completed/001-test-fixture-validation/PLAN.md) - 🟢 Complete (2026-01-27)
   - Validated all test fixtures against real daemon logs
@@ -43,10 +47,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans**: 3
-- **Active**: 2
-- **Completed**: 1
-- **Success Rate**: 100% (1/1 completed successfully)
+- **Total Plans**: 4
+- **Active**: 1
+- **Completed**: 3
+- **Success Rate**: 100% (3/3 completed successfully)
 
 ## Quick Links
 
