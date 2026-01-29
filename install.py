@@ -144,9 +144,8 @@ def validate_installation_target(project_root: Path, self_install_requested: boo
         if is_hooks_daemon_repo(project_root):
             # Check if self-install is being requested or already configured
             config = _load_config_safe(project_root)
-            has_self_install_config = (
-                config
-                and config.get("daemon", {}).get("self_install_mode", False)
+            has_self_install_config = config and config.get("daemon", {}).get(
+                "self_install_mode", False
             )
 
             if not self_install_requested and not has_self_install_config:
@@ -476,114 +475,45 @@ def create_settings_json(project_root: Path, force: bool = False) -> None:
         print(f"✅ Backed up existing settings.json to {backup_file.relative_to(project_root)}")
 
     settings = {
-        "statusLine": {
-            "type": "command",
-            "command": ".claude/hooks/status-line"
-        },
+        "statusLine": {"type": "command", "command": ".claude/hooks/status-line"},
         "hooks": {
             "PreToolUse": [
                 {
                     "hooks": [
-                        {
-                            "type": "command",
-                            "command": ".claude/hooks/pre-tool-use",
-                            "timeout": 60
-                        }
+                        {"type": "command", "command": ".claude/hooks/pre-tool-use", "timeout": 60}
                     ]
                 }
             ],
             "PostToolUse": [
                 {
                     "hooks": [
-                        {
-                            "type": "command",
-                            "command": ".claude/hooks/post-tool-use",
-                            "timeout": 60
-                        }
+                        {"type": "command", "command": ".claude/hooks/post-tool-use", "timeout": 60}
                     ]
                 }
             ],
             "SessionStart": [
-                {
-                    "hooks": [
-                        {
-                            "type": "command",
-                            "command": ".claude/hooks/session-start"
-                        }
-                    ]
-                }
+                {"hooks": [{"type": "command", "command": ".claude/hooks/session-start"}]}
             ],
             "Notification": [
-                {
-                    "hooks": [
-                        {
-                            "type": "command",
-                            "command": ".claude/hooks/notification"
-                        }
-                    ]
-                }
+                {"hooks": [{"type": "command", "command": ".claude/hooks/notification"}]}
             ],
             "PermissionRequest": [
-                {
-                    "hooks": [
-                        {
-                            "type": "command",
-                            "command": ".claude/hooks/permission-request"
-                        }
-                    ]
-                }
+                {"hooks": [{"type": "command", "command": ".claude/hooks/permission-request"}]}
             ],
             "PreCompact": [
-                {
-                    "hooks": [
-                        {
-                            "type": "command",
-                            "command": ".claude/hooks/pre-compact"
-                        }
-                    ]
-                }
+                {"hooks": [{"type": "command", "command": ".claude/hooks/pre-compact"}]}
             ],
             "SessionEnd": [
-                {
-                    "hooks": [
-                        {
-                            "type": "command",
-                            "command": ".claude/hooks/session-end"
-                        }
-                    ]
-                }
+                {"hooks": [{"type": "command", "command": ".claude/hooks/session-end"}]}
             ],
-            "Stop": [
-                {
-                    "hooks": [
-                        {
-                            "type": "command",
-                            "command": ".claude/hooks/stop"
-                        }
-                    ]
-                }
-            ],
+            "Stop": [{"hooks": [{"type": "command", "command": ".claude/hooks/stop"}]}],
             "SubagentStop": [
-                {
-                    "hooks": [
-                        {
-                            "type": "command",
-                            "command": ".claude/hooks/subagent-stop"
-                        }
-                    ]
-                }
+                {"hooks": [{"type": "command", "command": ".claude/hooks/subagent-stop"}]}
             ],
             "UserPromptSubmit": [
-                {
-                    "hooks": [
-                        {
-                            "type": "command",
-                            "command": ".claude/hooks/user-prompt-submit"
-                        }
-                    ]
-                }
-            ]
-        }
+                {"hooks": [{"type": "command", "command": ".claude/hooks/user-prompt-submit"}]}
+            ],
+        },
     }
 
     settings_file.write_text(json.dumps(settings, indent=2) + "\n")
@@ -897,7 +827,8 @@ Minimum 95% coverage required.
         if event == "pre_tool_use":
             example_handler = event_dir / "example_handler.py.example"
             if not example_handler.exists():
-                example_handler.write_text('''"""ExampleHandler - template for project-level handlers."""
+                example_handler.write_text(
+                    '''"""ExampleHandler - template for project-level handlers."""
 
 import sys
 from pathlib import Path
@@ -964,7 +895,8 @@ class ExampleHandler(Handler):
         #     decision="allow",
         #     context="Example guidance message",
         # )
-''')
+'''
+                )
 
             example_test = tests_dir / "test_example_handler.py.example"
             if not example_test.exists():
@@ -1148,7 +1080,9 @@ def show_gitignore_instructions(project_root: Path, daemon_dir: Path) -> None:
             print(f"   Expected at: {template_gitignore}")
             print(f"   This file is required for installation.")
             print(f"\n   The daemon repository is corrupted or incomplete.")
-            print(f"   Please clone from: https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon")
+            print(
+                f"   Please clone from: https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon"
+            )
             sys.exit(1)
 
         template_content = template_gitignore.read_text()
@@ -1158,7 +1092,9 @@ def show_gitignore_instructions(project_root: Path, daemon_dir: Path) -> None:
         print("\n📋 Copy command:")
         print(f"   cp {template_gitignore} {claude_gitignore}")
         print("\n📚 Template source (single source of truth):")
-        print("   https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/blob/main/.claude/.gitignore")
+        print(
+            "   https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/blob/main/.claude/.gitignore"
+        )
         print("\n" + "=" * 70)
         print()
 
@@ -1172,17 +1108,17 @@ def main() -> int:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Overwrite existing configuration files without prompting"
+        help="Overwrite existing configuration files without prompting",
     )
     parser.add_argument(
         "--self-install",
         action="store_true",
-        help="Install hooks on the daemon repository itself (self-installation mode)"
+        help="Install hooks on the daemon repository itself (self-installation mode)",
     )
     parser.add_argument(
         "--project-root",
         type=Path,
-        help="Explicitly specify the project root directory (must contain or will create .claude/)"
+        help="Explicitly specify the project root directory (must contain or will create .claude/)",
     )
     args = parser.parse_args()
 

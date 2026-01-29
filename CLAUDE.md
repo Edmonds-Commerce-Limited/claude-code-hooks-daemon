@@ -61,6 +61,23 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli restart
 - Add tests first, then implement
 - Validate with schemas, don't assume
 
+## Planning Workflow
+
+**CRITICAL: Plan before implementing**
+
+All non-trivial work must follow the planning workflow:
+
+1. **Create a plan** in `CLAUDE/Plan/NNNNN-description/`
+2. **Document approach** in `PLAN.md` with tasks, goals, and success criteria
+3. **Get approval** before implementation (for human developers)
+4. **Execute plan** following TDD principles
+5. **Update plan** as work progresses
+6. **Complete plan** with summary and results
+
+**See @CLAUDE/PlanWorkflow.md for complete workflow and templates**
+
+**Current plans**: See `CLAUDE/Plan/README.md` for active/completed plans
+
 ## Architecture
 
 ```
@@ -151,5 +168,7 @@ handlers:
 - **CLAUDE/SELF_INSTALL.md** - Self-install mode details
 - **CLAUDE/LLM-INSTALL.md** - Installation guide
 - **CLAUDE/LLM-UPDATE.md** - Update guide
+- **@CLAUDE/PlanWorkflow.md** - Planning workflow and standards
+- **CLAUDE/Plan/** - Implementation plans directory
 - **RELEASES/** - Version release notes
 - **CONTRIBUTING.md** - Contribution guidelines
