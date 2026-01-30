@@ -19,6 +19,15 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - **Estimated**: 38-56 hours (revised from 12-16 after comprehensive analysis)
   - **Progress**: ~25% complete (checkpoint committed, 320 violations documented)
 
+- [00014: Eliminate CWD, Implement Calculated Constants](00014-eliminate-cwd-calculated-constants/PLAN.md) - 🟡 Not Started
+  - Eliminate all dynamic `Path.cwd()` / `os.getcwd()` calls from handler and core code
+  - Create `ProjectContext` dataclass calculated once at daemon launch (project root, git repo name, git toplevel)
+  - Update 10+ handlers to use calculated constants instead of CWD
+  - FAIL FAST on missing project root or uninitialized context
+  - **Priority**: High (reliability issue, FAIL FAST violation)
+  - **Owner**: To be assigned
+  - **Estimated**: 4-6 hours
+
 - [003: Claude Code Planning Mode → Project Workflow Integration](003-planning-mode-project-integration/PLAN.md) - 🟡 Not Started
   - Intercept planning mode writes and redirect to project structure
   - Auto-number plans with 5-digit padding (00001, 00002, etc.)
@@ -70,8 +79,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans**: 6
-- **Active**: 2
+- **Total Plans**: 7
+- **Active**: 3
 - **Completed**: 4
 - **Success Rate**: 100% (4/4 completed successfully)
 
