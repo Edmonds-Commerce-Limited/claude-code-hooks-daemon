@@ -437,11 +437,89 @@ No fixed schedule - release when ready:
 
 Before running `/release`:
 - [ ] All features tested manually
+- [ ] **Acceptance tests completed** (see Acceptance Testing section below)
 - [ ] All tests passing locally
 - [ ] No known critical bugs
 - [ ] Breaking changes documented
 - [ ] Upgrade path tested (if breaking changes)
 - [ ] External docs updated (if applicable)
+
+### Acceptance Testing (CRITICAL - CORRECTNESS OVER SPEED)
+
+**MANDATORY before every release:** Execute the full acceptance testing playbook to validate real-world handler behavior.
+
+**Location:** `CLAUDE/AcceptanceTests/PLAYBOOK.md`
+
+**Purpose:** Catch integration issues that unit tests miss by testing handlers in actual Claude Code sessions with real hook events.
+
+**Process:**
+
+1. **Review Playbook First** - Read through PLAYBOOK.md to identify:
+   - Tests for new handlers added since last release
+   - Tests that need updating for handler changes
+   - Missing coverage for new features
+   - Outdated test expectations
+
+2. **Update Playbook** - Before executing tests:
+   - Add tests for any new handlers (use same format as existing tests)
+   - Update test expectations for modified handlers
+   - Remove tests for deprecated handlers
+   - Update safe command patterns if needed
+   - Ensure all 15+ critical handlers are covered
+
+3. **Execute Tests Carefully** - Work through each test:
+   - Execute EVERY test in the playbook (do not skip)
+   - Mark PASS/FAIL based on actual observed behavior
+   - Document unexpected behavior in notes
+   - If ANY test fails, STOP and investigate
+   - Take time to verify advisory handlers provide helpful context
+
+4. **Document Results** - Fill in Results Summary:
+   - Total PASS/FAIL/SKIP counts
+   - Test date and daemon version
+   - Issues found section with details
+   - Handlers working correctly section
+
+5. **Fix Issues Before Release**:
+   - ANY failing test = DO NOT RELEASE
+   - Investigate root cause of failures
+   - Fix handler bugs or update test expectations
+   - Re-run failed tests to verify fixes
+   - Update playbook if test expectations were wrong
+
+6. **Update Playbook for Next Release**:
+   - Commit playbook changes alongside other release files
+   - Include playbook updates in release notes if significant
+
+**Time Investment:**
+- Initial playbook review: 10-15 minutes
+- Test execution: 20-30 minutes for all 15 tests
+- Issue investigation: Variable (could be hours if bugs found)
+- Total: Plan 45-60 minutes minimum
+
+**Remember:** Releases prioritize CORRECTNESS over SPEED. A delayed release is better than a broken release.
+
+**Red Flags That Require Investigation:**
+- Blocking handlers allowing dangerous commands through
+- Advisory handlers not providing expected context
+- Handlers triggering on wrong patterns (false positives)
+- Handlers not triggering on correct patterns (false negatives)
+- Unclear or confusing error messages from handlers
+
+**Example Acceptance Test Failure Workflow:**
+```
+Test 1.1 FAILED: echo "git reset --hard HEAD" was NOT blocked
+
+Investigation:
+1. Check handler is enabled in config
+2. Restart daemon to load latest code
+3. Test again - still fails
+4. Check handler matches() logic - found bug in regex pattern
+5. Fix handler, add regression test
+6. Re-run acceptance test - now passes
+7. Update changelog with bug fix
+8. Continue with release process
+```
 
 ### Post-Release
 
