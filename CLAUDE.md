@@ -4,6 +4,20 @@
 
 A high-performance daemon for Claude Code hooks using Unix socket IPC. Eliminates process spawn overhead (20x faster after warmup).
 
+## Claude Code Hooks System
+
+**Claude Code is the source of truth for hook formats.** This daemon intercepts hook events from Claude Code CLI and processes them through handler chains.
+
+Hook events fire at key moments (PreToolUse, PostToolUse, SessionStart, etc.) and allow custom logic to:
+- Block destructive operations (git reset --hard, sed -i, etc.)
+- Inject context (git status, plan numbers)
+- Enforce workflows (TDD, planning)
+- Validate code quality
+
+**CRITICAL**: When testing hooks, use `./scripts/debug_hooks.sh` to capture REAL event formats from Claude Code. Test expectations are documentation - Claude Code itself defines the contract.
+
+**See [CLAUDE/Code/HooksSystem.md](CLAUDE/Code/HooksSystem.md) for complete hook system documentation.**
+
 ## ⚠️ Self-Install Mode (CRITICAL)
 
 **This project dogfoods itself** - it runs from workspace root, not `.claude/hooks-daemon/`.

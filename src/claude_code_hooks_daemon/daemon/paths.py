@@ -50,6 +50,9 @@ def get_socket_path(project_dir: Path | str) -> Path:
 
     Pattern: /tmp/claude-hooks-{project-name}-{hash}.sock
 
+    Can be overridden via CLAUDE_HOOKS_SOCKET_PATH environment variable
+    (useful for testing to avoid collision with production daemon).
+
     Args:
         project_dir: Path to project directory (Path object or string)
 
@@ -60,6 +63,10 @@ def get_socket_path(project_dir: Path | str) -> Path:
         >>> get_socket_path(Path('/home/dev/alpha'))
         Path('/tmp/claude-hooks-alpha-a1b2c3d4.sock')
     """
+    # Allow environment variable override for testing
+    if env_path := os.environ.get("CLAUDE_HOOKS_SOCKET_PATH"):
+        return Path(env_path)
+
     project_name = get_project_name(project_dir)
     project_hash = get_project_hash(project_dir)
     return Path(f"/tmp/claude-hooks-{project_name}-{project_hash}.sock")
@@ -71,6 +78,9 @@ def get_pid_path(project_dir: Path | str) -> Path:
 
     Pattern: /tmp/claude-hooks-{project-name}-{hash}.pid
 
+    Can be overridden via CLAUDE_HOOKS_PID_PATH environment variable
+    (useful for testing to avoid collision with production daemon).
+
     Args:
         project_dir: Path to project directory (Path object or string)
 
@@ -81,6 +91,10 @@ def get_pid_path(project_dir: Path | str) -> Path:
         >>> get_pid_path(Path('/home/dev/alpha'))
         Path('/tmp/claude-hooks-alpha-a1b2c3d4.pid')
     """
+    # Allow environment variable override for testing
+    if env_path := os.environ.get("CLAUDE_HOOKS_PID_PATH"):
+        return Path(env_path)
+
     project_name = get_project_name(project_dir)
     project_hash = get_project_hash(project_dir)
     return Path(f"/tmp/claude-hooks-{project_name}-{project_hash}.pid")
@@ -92,6 +106,9 @@ def get_log_path(project_dir: Path | str) -> Path:
 
     Pattern: /tmp/claude-hooks-{project-name}-{hash}.log
 
+    Can be overridden via CLAUDE_HOOKS_LOG_PATH environment variable
+    (useful for testing to avoid collision with production daemon).
+
     Args:
         project_dir: Path to project directory (Path object or string)
 
@@ -102,6 +119,10 @@ def get_log_path(project_dir: Path | str) -> Path:
         >>> get_log_path(Path('/home/dev/alpha'))
         Path('/tmp/claude-hooks-alpha-a1b2c3d4.log')
     """
+    # Allow environment variable override for testing
+    if env_path := os.environ.get("CLAUDE_HOOKS_LOG_PATH"):
+        return Path(env_path)
+
     project_name = get_project_name(project_dir)
     project_hash = get_project_hash(project_dir)
     return Path(f"/tmp/claude-hooks-{project_name}-{project_hash}.log")
