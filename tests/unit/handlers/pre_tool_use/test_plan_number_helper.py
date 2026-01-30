@@ -65,7 +65,7 @@ class TestPlanNumberHelperHandler:
         handler = PlanNumberHelperHandler()
         assert handler.name == "plan-number-helper"
         assert handler.priority == 30  # Run before other workflow handlers
-        assert not handler.terminal  # Non-blocking, advisory only
+        assert handler.terminal  # Block broken commands
         assert "workflow" in handler.tags
         assert "advisory" in handler.tags
 
@@ -87,6 +87,24 @@ class TestPlanNumberHelperHandler:
             "ls -d CLAUDE/Plan/[0-9]* | tail -1",
             "ls CLAUDE/Plan/ | grep -E '^[0-9]' | sort | tail -1",
             "ls -1 CLAUDE/Plan | sort -n | tail -1",
+        ]
+
+        for command in commands:
+            hook_input = {
+                "tool_name": "Bash",
+                "tool_input": {"command": command},
+            }
+            assert handler_enabled.matches(hook_input), f"Should match: {command}"
+
+    def test_detects_ls_piped_to_grep_for_numbers(
+        self, handler_enabled: PlanNumberHelperHandler
+    ) -> None:
+        """Should detect ls on plan directory piped to grep filtering for numbers."""
+        commands = [
+            "ls -1 CLAUDE/Plan/ | grep -E '^[0-9]+'",
+            "ls CLAUDE/Plan/ | grep '^[0-9]'",
+            "ls -la CLAUDE/Plan | grep -E '^d[0-9]'",
+            "ls CLAUDE/Plan | grep '[0-9]'",
         ]
 
         for command in commands:
@@ -152,10 +170,10 @@ class TestPlanNumberHelperHandler:
         assert not handler_enabled.matches(hook_input)
 
     @patch("claude_code_hooks_daemon.handlers.pre_tool_use.plan_number_helper.get_next_plan_number")
-    def test_returns_correct_next_plan_number(
+    def test_blocks_and_provides_correct_next_plan_number(
         self, mock_get_next: any, handler_enabled: PlanNumberHelperHandler, tmp_path: Path
     ) -> None:
-        """Should return correct next plan number in context."""
+        """Should block broken command and provide correct next plan number."""
         # Mock the plan numbering utility
         mock_get_next.return_value = "00042"
 
@@ -169,15 +187,13 @@ class TestPlanNumberHelperHandler:
 
         result = handler_enabled.handle(hook_input)
 
-        # Should return ALLOW with context
-        assert result.decision == Decision.ALLOW
-        assert result.context is not None
-        assert len(result.context) > 0
+        # Should return DENY to block the broken command
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
 
-        # Context should include next plan number
-        context_str = " ".join(result.context)
-        assert "00042" in context_str
-        assert "next plan number" in context_str.lower()
+        # Reason should include next plan number
+        assert "00042" in result.reason
+        assert "next plan number" in result.reason.lower()
 
         # Should call get_next_plan_number with correct path
         mock_get_next.assert_called_once()
@@ -185,10 +201,10 @@ class TestPlanNumberHelperHandler:
         assert call_args == tmp_path / "CLAUDE/Plan"
 
     @patch("claude_code_hooks_daemon.handlers.pre_tool_use.plan_number_helper.get_next_plan_number")
-    def test_provides_helpful_context_message(
+    def test_provides_helpful_reason_message(
         self, mock_get_next: any, handler_enabled: PlanNumberHelperHandler
     ) -> None:
-        """Should provide clear, actionable context message."""
+        """Should provide clear, actionable reason message."""
         mock_get_next.return_value = "00123"
 
         hook_input = {
@@ -198,18 +214,19 @@ class TestPlanNumberHelperHandler:
 
         result = handler_enabled.handle(hook_input)
 
-        assert result.decision == Decision.ALLOW
-        context_str = " ".join(result.context)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
 
         # Should explain the problem and provide solution
-        assert "00123" in context_str
-        assert "next" in context_str.lower()
-        assert "plan" in context_str.lower()
+        assert "00123" in result.reason
+        assert "next" in result.reason.lower()
+        assert "plan" in result.reason.lower()
 
-    def test_handler_is_non_terminal(self, handler_enabled: PlanNumberHelperHandler) -> None:
-        """Handler should be non-terminal to allow command execution."""
-        # This is advisory only - we want to provide context but not block
-        assert not handler_enabled.terminal
+    def test_handler_is_terminal(self, handler_enabled: PlanNumberHelperHandler) -> None:
+        """Handler should be terminal to block broken commands."""
+        # Block broken commands that would return incorrect plan numbers
+        # (e.g., missing plans in Completed/ subdirectories)
+        assert handler_enabled.terminal
 
     def test_priority_runs_before_other_workflow_handlers(self) -> None:
         """Should run before other workflow handlers (priority 30)."""
@@ -248,13 +265,12 @@ class TestPlanNumberHelperHandler:
 
         result = handler_enabled.handle(hook_input)
 
-        # Should still return ALLOW (non-blocking)
-        assert result.decision == Decision.ALLOW
+        # Should still block the broken command (DENY)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
 
-        # Should provide error context
-        if result.context:
-            context_str = " ".join(result.context)
-            assert "error" in context_str.lower() or "00001" in context_str
+        # Should provide error info in reason
+        assert "could not determine" in result.reason.lower() or "00001" in result.reason
 
     @patch("claude_code_hooks_daemon.handlers.pre_tool_use.plan_number_helper.get_next_plan_number")
     def test_includes_workflow_docs_when_configured(
@@ -270,16 +286,15 @@ class TestPlanNumberHelperHandler:
 
         result = handler_with_workflow_docs.handle(hook_input)
 
-        assert result.decision == Decision.ALLOW
-        assert result.context is not None
-        context_str = " ".join(result.context)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
 
         # Should include plan number
-        assert "00042" in context_str
+        assert "00042" in result.reason
 
         # Should include workflow docs reference
-        assert "CLAUDE/PlanWorkflow.md" in context_str
-        assert "plan structure" in context_str.lower() or "conventions" in context_str.lower()
+        assert "CLAUDE/PlanWorkflow.md" in result.reason
+        assert "plan structure" in result.reason.lower() or "conventions" in result.reason.lower()
 
     @patch("claude_code_hooks_daemon.handlers.pre_tool_use.plan_number_helper.get_next_plan_number")
     def test_omits_workflow_docs_when_file_missing(
@@ -301,15 +316,14 @@ class TestPlanNumberHelperHandler:
 
         result = handler.handle(hook_input)
 
-        assert result.decision == Decision.ALLOW
-        assert result.context is not None
-        context_str = " ".join(result.context)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
 
         # Should include plan number
-        assert "00042" in context_str
+        assert "00042" in result.reason
 
         # Should NOT include workflow docs reference (file doesn't exist)
-        assert "PlanWorkflow.md" not in context_str
+        assert "PlanWorkflow.md" not in result.reason
 
     @patch("claude_code_hooks_daemon.handlers.pre_tool_use.plan_number_helper.get_next_plan_number")
     def test_works_without_workflow_docs_config(
@@ -326,12 +340,11 @@ class TestPlanNumberHelperHandler:
 
         result = handler_enabled.handle(hook_input)
 
-        assert result.decision == Decision.ALLOW
-        assert result.context is not None
-        context_str = " ".join(result.context)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
 
         # Should include plan number
-        assert "00042" in context_str
+        assert "00042" in result.reason
 
         # Should NOT crash or include workflow docs
-        assert "PlanWorkflow.md" not in context_str
+        assert "PlanWorkflow.md" not in result.reason
