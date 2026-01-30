@@ -98,15 +98,23 @@ class TestLoadConfigSafe:
 class TestValidateNotNested:
     """Tests for _validate_not_nested function."""
 
-    def test_raises_for_nested_claude_directory(self, tmp_path: Path) -> None:
-        """Test raises InstallationError for nested .claude directory."""
-        nested_claude = tmp_path / ".claude" / "hooks-daemon" / ".claude"
-        nested_claude.mkdir(parents=True)
+    def test_raises_for_nested_hooks_daemon_install(self, tmp_path: Path) -> None:
+        """Test raises InstallationError for nested hooks-daemon installation."""
+        nested_install = tmp_path / ".claude" / "hooks-daemon" / ".claude" / "hooks-daemon"
+        nested_install.mkdir(parents=True)
 
         with pytest.raises(InstallationError) as exc_info:
             _validate_not_nested(tmp_path)
 
         assert "NESTED INSTALLATION DETECTED" in str(exc_info.value)
+
+    def test_allows_hooks_daemon_with_own_claude_dir(self, tmp_path: Path) -> None:
+        """Test allows .claude/hooks-daemon/.claude without nested hooks-daemon."""
+        nested_claude = tmp_path / ".claude" / "hooks-daemon" / ".claude"
+        nested_claude.mkdir(parents=True)
+
+        # Should not raise - .claude dir inside hooks-daemon repo is fine
+        _validate_not_nested(tmp_path)
 
     def test_raises_for_hooks_daemon_marker_without_config(self, tmp_path: Path) -> None:
         """Test raises for hooks-daemon marker without self_install_mode."""

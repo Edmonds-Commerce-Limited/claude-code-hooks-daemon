@@ -115,9 +115,9 @@ HOOKS_DAEMON_ROOT_DIR="${HOOKS_DAEMON_ROOT_DIR:-$PROJECT_PATH/.claude/hooks-daem
 # Detects if hooks-daemon has been installed inside itself creating
 # .claude/hooks-daemon/.claude/hooks-daemon structure
 #
-if [[ -d "$PROJECT_PATH/.claude/hooks-daemon/.claude" ]]; then
+if [[ -d "$PROJECT_PATH/.claude/hooks-daemon/.claude/hooks-daemon" ]]; then
     emit_hook_error "Unknown" "nested_installation" \
-        "NESTED INSTALLATION DETECTED! Found: $PROJECT_PATH/.claude/hooks-daemon/.claude. Remove $PROJECT_PATH/.claude/hooks-daemon and reinstall."
+        "NESTED INSTALLATION DETECTED! Found: $PROJECT_PATH/.claude/hooks-daemon/.claude/hooks-daemon. Remove $PROJECT_PATH/.claude/hooks-daemon and reinstall."
     exit 0
 fi
 
