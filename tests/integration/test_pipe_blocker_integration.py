@@ -55,7 +55,9 @@ class TestPipeBlockerIntegration:
 
         # Should be denied
         assert result.result.decision == "deny"
-        assert result.terminated_by == HandlerID.PIPE_BLOCKER.display_name, "Terminal handler should terminate chain"
+        assert (
+            result.terminated_by == HandlerID.PIPE_BLOCKER.display_name
+        ), "Terminal handler should terminate chain"
 
     def test_grep_pipe_tail_allowed_through_router(self) -> None:
         """Test whitelisted grep | tail is allowed."""

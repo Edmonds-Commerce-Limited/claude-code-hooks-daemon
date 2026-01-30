@@ -144,7 +144,7 @@ class HandlerChain:
                         "Handler %s returned decision=%s, terminal=%s",
                         handler.name,
                         result.decision,
-                        handler.terminal
+                        handler.terminal,
                     )
                     handlers_executed.append(handler.name)
                     result.add_handler(handler.name)

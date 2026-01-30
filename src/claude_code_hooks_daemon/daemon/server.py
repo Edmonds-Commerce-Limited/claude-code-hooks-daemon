@@ -458,7 +458,11 @@ class HooksDaemon:
             response_json = json.dumps(response) + "\n"
 
             # DEBUG: Log ALL responses with deny/block decisions
-            if "deny" in response_json or "block" in response_json or "permissionDecision" in response_json:
+            if (
+                "deny" in response_json
+                or "block" in response_json
+                or "permissionDecision" in response_json
+            ):
                 logger.debug("BLOCKING RESPONSE: %s", response_json[:1000])
 
             writer.write(response_json.encode())
