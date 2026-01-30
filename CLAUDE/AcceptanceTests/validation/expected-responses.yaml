@@ -1,0 +1,167 @@
+# Expected handler responses for acceptance testing
+# Version: 1.0
+
+handlers:
+  # Safety Blockers (Priority 10-20)
+  destructive-git:
+    event_type: PreToolUse
+    priority: 10
+    terminal: true
+    tests:
+      - pattern: "git reset --hard"
+        decision: deny
+        reason_contains: ["destroys all uncommitted changes", "permanently"]
+      - pattern: "git clean -f"
+        decision: deny
+        reason_contains: ["permanently deletes untracked files"]
+      - pattern: "git push --force"
+        decision: deny
+        reason_contains: ["overwrite remote history"]
+      - pattern: "git push -f"
+        decision: deny
+        reason_contains: ["overwrite remote history"]
+
+  sed-blocker:
+    event_type: PreToolUse
+    priority: 11
+    terminal: true
+    tests:
+      - pattern: "sed -i"
+        decision: deny
+        reason_contains: ["sed", "Edit tool"]
+      - pattern: "sed -i 's/foo/bar/' file.txt"
+        decision: deny
+        reason_contains: ["Edit tool"]
+
+  pipe-blocker:
+    event_type: PreToolUse
+    priority: 12
+    terminal: true
+    tests:
+      - pattern: "npm test | tail"
+        decision: deny
+        reason_contains: ["pipe", "complete output"]
+      - pattern: "find . -name '*.py' | head"
+        decision: deny
+        reason_contains: ["pipe", "Glob tool"]
+
+  absolute-path:
+    event_type: PreToolUse
+    priority: 20
+    terminal: true
+    tests:
+      - pattern: "relative/path/to/file.txt"
+        decision: deny
+        reason_contains: ["absolute path", "relative path"]
+
+  # QA Enforcement (Priority 25-35)
+  tdd-enforcement:
+    event_type: PreToolUse
+    priority: 25
+    terminal: true
+    tests:
+      - pattern: "create handler without test"
+        decision: deny
+        reason_contains: ["TDD", "test file", "write tests first"]
+
+  python-qa-suppression:
+    event_type: PreToolUse
+    priority: 28
+    terminal: true
+    tests:
+      - pattern: "# noqa"
+        decision: deny
+        reason_contains: ["QA suppression", "noqa", "fix the issue"]
+      - pattern: "# type: ignore"
+        decision: deny
+        reason_contains: ["type suppression", "fix the type error"]
+
+  go-qa-suppression:
+    event_type: PreToolUse
+    priority: 29
+    terminal: true
+    tests:
+      - pattern: "// nolint"
+        decision: deny
+        reason_contains: ["QA suppression", "nolint", "fix the issue"]
+
+  eslint-disable:
+    event_type: PreToolUse
+    priority: 30
+    terminal: true
+    tests:
+      - pattern: "// eslint-disable"
+        decision: deny
+        reason_contains: ["ESLint suppression", "fix the linting issue"]
+      - pattern: "/* eslint-disable */"
+        decision: deny
+        reason_contains: ["ESLint suppression"]
+
+  # Workflow Handlers (Priority 36-55)
+  plan-workflow:
+    event_type: PreToolUse
+    priority: 48
+    terminal: false
+    tests:
+      - pattern: "write to PLAN.md"
+        decision: allow
+        reason_contains: ["plan", "workflow"]
+
+  web-search-year:
+    event_type: PreToolUse
+    priority: 50
+    terminal: false
+    tests:
+      - pattern: "WebSearch with 2023"
+        decision: allow
+        reason_contains: ["2026", "current year"]
+
+  # Advisory Handlers (Priority 56-60)
+  british-english:
+    event_type: PreToolUse
+    priority: 56
+    terminal: false
+    tests:
+      - pattern: "color"
+        decision: allow
+        reason_contains: ["colour", "British English"]
+      - pattern: "behavior"
+        decision: allow
+        reason_contains: ["behaviour", "British English"]
+
+  # Context Injection Handlers
+  git-context:
+    event_type: UserPromptSubmit
+    priority: null
+    terminal: false
+    tests:
+      - pattern: "user prompt"
+        decision: allow
+        reason_contains: ["git status", "context"]
+
+  workflow-state:
+    event_type: SessionStart
+    priority: null
+    terminal: false
+    tests:
+      - pattern: "session start"
+        decision: allow
+        reason_contains: ["workflow", "state"]
+
+  bash-error-detector:
+    event_type: PostToolUse
+    priority: null
+    terminal: false
+    tests:
+      - pattern: "exit code 1"
+        decision: allow
+        reason_contains: ["error", "failed"]
+
+  daemon-stats:
+    event_type: StatusLine
+    priority: 30
+    terminal: false
+    tests:
+      - pattern: "status line"
+        decision: allow
+        reason_contains: ["daemon", "handlers"]

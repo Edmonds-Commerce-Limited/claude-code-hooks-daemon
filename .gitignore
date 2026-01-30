@@ -144,3 +144,7 @@ verify-*.sh
 
 # Development artifacts and QA outputs
 untracked/
+
+# Acceptance test results
+CLAUDE/AcceptanceTests/results/*
+!CLAUDE/AcceptanceTests/results/.gitkeep
