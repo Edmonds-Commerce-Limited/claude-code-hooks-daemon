@@ -78,14 +78,14 @@ class TestSedBlockerHandler:
         }
         assert handler.matches(hook_input) is True
 
-    def test_matches_bash_sed_with_echo_returns_false(self, handler):
-        """Should NOT match sed when echo is in command (echo makes it safe)."""
+    def test_matches_bash_sed_chained_after_echo_blocks(self, handler):
+        """Should BLOCK sed when chained after echo (sed still executes!)."""
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "echo 'test' && sed -i 's/a/b/g' file.txt"},
         }
-        # echo presence makes this a "safe readonly command"
-        assert handler.matches(hook_input) is False
+        # This is dangerous! echo runs, THEN sed executes destructively
+        assert handler.matches(hook_input) is True
 
     def test_matches_bash_sed_case_insensitive(self, handler):
         """Should match sed with different casing."""
@@ -154,8 +154,17 @@ EOF
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "grep 'sed' *.py"}}
         assert handler.matches(hook_input) is False
 
-    def test_matches_echo_mentioning_sed_returns_false(self, handler):
-        """Should NOT match echo command mentioning sed."""
+    def test_matches_echo_with_sed_command_pattern_blocks(self, handler):
+        """Should BLOCK echo containing actual sed command pattern."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "echo \"sed -i 's/foo/bar/g' /nonexistent/safe/test.txt\""},
+        }
+        # Echo containing a full sed command should be blocked - it's demonstrating dangerous patterns
+        assert handler.matches(hook_input) is True
+
+    def test_matches_echo_mentioning_sed_word_only_returns_false(self, handler):
+        """Should NOT match echo command only mentioning the word 'sed'."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "echo 'Do not use sed'"}}
         assert handler.matches(hook_input) is False
 
