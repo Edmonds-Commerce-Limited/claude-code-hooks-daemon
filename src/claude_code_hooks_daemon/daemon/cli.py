@@ -25,6 +25,7 @@ from typing import Any, Literal, cast
 
 from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.config.models import Config
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.paths import (
     cleanup_pid_file,
     cleanup_socket,
@@ -115,6 +116,11 @@ def _validate_installation(project_root: Path) -> Path:
     self_install = False
     if config_file.exists():
         try:
+            # Initialize ProjectContext BEFORE config validation
+            # (Config validation instantiates handlers which may use ProjectContext)
+            if not ProjectContext._initialized:  # noqa: SLF001 - checking before init
+                ProjectContext.initialize(config_file)
+
             config_dict = ConfigLoader.load(config_file)
             config = Config.model_validate(config_dict)
             self_install = config.daemon.self_install_mode

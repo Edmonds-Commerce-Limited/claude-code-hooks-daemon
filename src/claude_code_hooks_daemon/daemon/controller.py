@@ -142,9 +142,13 @@ class DaemonController:
         logger.info("Initialising DaemonController")
 
         # Initialize ProjectContext singleton (single source of truth for project-level constants)
+        # May already be initialized from CLI config validation
         config_path = workspace_root / ".claude" / "hooks-daemon.yaml"
-        ProjectContext.initialize(config_path)
-        logger.info("ProjectContext initialized from config: %s", config_path)
+        if not ProjectContext._initialized:  # noqa: SLF001 - checking before init
+            ProjectContext.initialize(config_path)
+            logger.info("ProjectContext initialized from config: %s", config_path)
+        else:
+            logger.info("ProjectContext already initialized")
 
         # Discover and register handlers
         self._registry.discover()
