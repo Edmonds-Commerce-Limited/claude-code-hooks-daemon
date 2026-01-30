@@ -49,11 +49,14 @@ class TddEnforcementHandler(Handler):
             return False
 
         # Exclude test files (test files can be created without TDD enforcement)
-        if "/tests/" in file_path or "/test_" in file_path:
+        # Check if file is in tests directory OR filename starts with test_
+        filename = Path(file_path).name
+        if "/tests/" in file_path or filename.startswith("test_"):
             return False
 
         # Must be in a handlers subdirectory OR src directory (production code)
-        if "/handlers/" in file_path or "/src/" in file_path:
+        # Note: handlers/ not /handlers/ to match paths like test-handlers/
+        if "handlers/" in file_path or "/src/" in file_path:
             return True
 
         return False
