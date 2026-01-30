@@ -123,15 +123,34 @@ class SedBlockerHandler(Handler):
 
         Safe commands include:
         - grep (searching for the word 'sed')
-        - echo (printing text mentioning sed)
+        - echo mentioning 'sed' WITHOUT actual sed command patterns
 
         NOT safe:
+        - echo containing sed command patterns (e.g., "echo \"sed -i 's/foo/bar/g' file\"")
         - cat | sed (piping to sed)
         - find -exec sed (executing sed)
         - command chains with sed (&&, ||, ;)
         """
-        # Check for grep or echo (safe - just mentioning sed)
-        return bool(re.search(r"(^|\s|[;&|])\s*(grep|echo)\s+", command))
+        # Always allow grep (safe - just searching)
+        if re.search(r"(^|\s|[;&|])\s*grep\s+", command):
+            return True
+
+        # For echo commands, only allow if NOT containing sed command patterns
+        if re.search(r"(^|\s|[;&|])\s*echo\s+", command):
+            # Check if echo contains actual sed command patterns (flags like -i, -e, -n)
+            # or sed substitution patterns like 's/.../'
+            has_sed_flags = bool(re.search(r"\bsed\s+-[ien]", command, re.IGNORECASE))
+            has_sed_substitution = bool(re.search(r"\bsed\s+'s/", command, re.IGNORECASE))
+            has_sed_substitution_double = bool(re.search(r'\bsed\s+"s/', command, re.IGNORECASE))
+
+            # If echo contains actual sed command patterns, it's NOT safe
+            if has_sed_flags or has_sed_substitution or has_sed_substitution_double:
+                return False
+
+            # Echo just mentioning the word "sed" is safe
+            return True
+
+        return False
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Block the operation with clear explanation."""
