@@ -85,8 +85,7 @@ def daemon_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any
     config_dir = tmp_path / ".claude"
     config_dir.mkdir()
     config_path = config_dir / "hooks-daemon.yaml"
-    config_path.write_text(
-        """
+    config_path.write_text("""
 version: '1.0'
 daemon:
   log_level: INFO
@@ -96,8 +95,7 @@ handlers:
   post_tool_use: {}
   session_start: {}
 plugins: {}
-"""
-    )
+""")
 
     return {
         "project_root": tmp_path,
@@ -171,7 +169,9 @@ def daemon_process(daemon_env: dict[str, Any]):
     time.sleep(0.5)
 
 
-def send_hook_event(socket_path: str | Path, hook_input: dict[str, Any], timeout: float = 5.0) -> dict:
+def send_hook_event(
+    socket_path: str | Path, hook_input: dict[str, Any], timeout: float = 5.0
+) -> dict:
     """Send a hook event to the daemon via Unix socket.
 
     Args:
@@ -521,15 +521,13 @@ class TestDaemonConfiguration:
         config_dir = tmp_path / ".claude"
         config_dir.mkdir()
         config_path = config_dir / "hooks-daemon.yaml"
-        config_path.write_text(
-            """
+        config_path.write_text("""
 version: '1.0'
 daemon:
   self_install_mode: true
 handlers: {}
 plugins: {}
-"""
-        )
+""")
 
         # Start daemon (redirect output to /dev/null)
         start_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "start"]
@@ -543,7 +541,9 @@ plugins: {}
                 timeout=2,
             )
 
-        assert result.returncode == 0, f"Failed to start with minimal config (exit code {result.returncode})"
+        assert (
+            result.returncode == 0
+        ), f"Failed to start with minimal config (exit code {result.returncode})"
 
         # Verify running
         time.sleep(1)
