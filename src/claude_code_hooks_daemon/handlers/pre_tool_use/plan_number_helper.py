@@ -35,7 +35,7 @@ class PlanNumberHelperHandler(Handler):
         super().__init__(
             handler_id=HandlerID.PLAN_NUMBER_HELPER,
             priority=Priority.PLAN_NUMBER_HELPER,  # Run before markdown_organization (35)
-            terminal=False,  # Advisory only, don't block
+            terminal=True,  # Block broken commands that return incorrect plan numbers
             tags=[HandlerTag.WORKFLOW, HandlerTag.ADVISORY, HandlerTag.PLANNING],
             shares_options_with="markdown_organization",  # Inherit config from parent (config key)
         )
@@ -110,16 +110,23 @@ class PlanNumberHelperHandler(Handler):
             if re.search(r"tail\s+-\d+", command) or "tail -1" in command:
                 return True
 
+        # 5. ls on plan directory piped to grep with number patterns
+        # This catches: ls CLAUDE/Plan/ | grep -E '^[0-9]+' or similar
+        if re.search(rf"ls\s+.*{re.escape(plan_dir)}", command) and "grep" in command:
+            # Check if grep is filtering for numbers (common pattern)
+            if re.search(r"grep.*['\"]?\^?\[?0-9\]?", command):
+                return True
+
         return False
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
-        """Provide correct next plan number in context.
+        """Block broken command and provide correct next plan number.
 
         Args:
             hook_input: Hook input data
 
         Returns:
-            HookResult with ALLOW decision and helpful context
+            HookResult with DENY decision and helpful reason
         """
         # Precondition: matches() ensures _track_plans_in_project is not None
         assert self._track_plans_in_project is not None, "Handler called without matches check"
@@ -129,7 +136,8 @@ class PlanNumberHelperHandler(Handler):
             plan_base = self._workspace_root / self._track_plans_in_project
             next_number = get_next_plan_number(plan_base)
 
-            context_message = (
+            reason_message = (
+                f"🚫 BLOCKED: This command won't find all plans (misses subdirectories like Completed/).\n\n"
                 f"💡 Next plan number is {next_number}. "
                 f"Use this instead of bash commands to discover plan numbers."
             )
@@ -138,17 +146,18 @@ class PlanNumberHelperHandler(Handler):
             if self._plan_workflow_docs:
                 workflow_path = self._workspace_root / self._plan_workflow_docs
                 if workflow_path.exists():
-                    context_message += (
+                    reason_message += (
                         f"\n📖 See `{self._plan_workflow_docs}` for plan structure and conventions."
                     )
 
-            return HookResult.allow(context=[context_message])
+            return HookResult.deny(reason=reason_message)
 
         except Exception as e:
-            # Gracefully handle errors - provide default context
-            context_message = (
+            # Gracefully handle errors - still block the broken command
+            reason_message = (
+                f"🚫 BLOCKED: This command won't find all plans.\n\n"
                 f"⚠️ Could not determine next plan number ({e}). "
                 f"Starting from 00001 if this is a new project."
             )
 
-            return HookResult.allow(context=[context_message])
+            return HookResult.deny(reason=reason_message)
