@@ -40,6 +40,13 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00018: Fix Container/Host Environment Switching](00018-container-host-environment-switching/PLAN-v2.md) - 🟢 Complete (2026-01-30)
+  - Decoupled hook hot path from venv Python (bash path computation, system python3 socket client)
+  - Added jq-based error emission with event-specific formatting
+  - Added venv health validation with fail-fast and `repair` CLI command
+  - Zero new runtime dependencies
+  - **Completed**: 2026-01-30 (GitHub Issue #15)
+
 - [00011: Handler Dependency System](00011-floofy-growing-moth/PLAN.md) - 🟢 Complete (2026-01-29)
   - Implemented handler options inheritance via shares_options_with attribute
   - Added config validation to enforce parent-child dependencies (FAIL FAST)
@@ -79,10 +86,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans**: 7
+- **Total Plans**: 8
 - **Active**: 3
-- **Completed**: 4
-- **Success Rate**: 100% (4/4 completed successfully)
+- **Completed**: 5
+- **Success Rate**: 100% (5/5 completed successfully)
 
 ## Quick Links
 
