@@ -5,6 +5,18 @@ Comprehensive test coverage for plan number validation.
 
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def mock_project_context():
+    """Mock ProjectContext for handler instantiation tests."""
+    with patch("claude_code_hooks_daemon.core.project_context.ProjectContext.project_root") as mock:
+        mock.return_value = Path("/tmp/test")
+        yield mock
+
 
 import pytest
 

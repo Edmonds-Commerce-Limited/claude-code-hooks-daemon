@@ -10,8 +10,8 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
-from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_path, get_workspace_root
+from claude_code_hooks_daemon.core import Decision, Handler, HookResult, ProjectContext
+from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_path
 
 
 class ValidatePlanNumberHandler(Handler):
@@ -51,7 +51,7 @@ class ValidatePlanNumberHandler(Handler):
                 HandlerTag.NON_TERMINAL,
             ],
         )
-        self.workspace_root = get_workspace_root()
+        self.workspace_root = ProjectContext.project_root()
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if creating a plan folder."""

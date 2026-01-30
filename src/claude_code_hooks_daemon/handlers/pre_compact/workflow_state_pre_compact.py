@@ -21,8 +21,7 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ProjectPath,
 )
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
-from claude_code_hooks_daemon.core.utils import get_workspace_root
+from claude_code_hooks_daemon.core import Decision, Handler, HookResult, ProjectContext
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +35,7 @@ class WorkflowStatePreCompactHandler(Handler):
 
         Args:
             workspace_root: Optional Path to project root (for testing).
-                          If None, auto-detects using get_workspace_root().
+                          If None, auto-detects using ProjectContext.project_root().
                           This allows tests to provide isolated test directories.
         """
         super().__init__(
@@ -45,7 +44,9 @@ class WorkflowStatePreCompactHandler(Handler):
             terminal=False,
             tags=[HandlerTag.WORKFLOW, HandlerTag.STATE_MANAGEMENT, HandlerTag.NON_TERMINAL],
         )
-        self.workspace_root = Path(workspace_root) if workspace_root else get_workspace_root()
+        self.workspace_root = (
+            Path(workspace_root) if workspace_root else ProjectContext.project_root()
+        )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """

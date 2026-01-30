@@ -23,6 +23,7 @@ from claude_code_hooks_daemon.constants import (
 )
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.handlers.utils.plan_numbering import get_next_plan_number
 
 
@@ -40,7 +41,7 @@ class PlanNumberHelperHandler(Handler):
         )
 
         # Configuration attributes (set by registry after instantiation)
-        self._workspace_root: Path = Path.cwd()
+        self._workspace_root: Path = ProjectContext.project_root()
         self._track_plans_in_project: str | None = None  # Path to plan folder or None
         self._plan_workflow_docs: str | None = None  # Path to workflow doc or None
 

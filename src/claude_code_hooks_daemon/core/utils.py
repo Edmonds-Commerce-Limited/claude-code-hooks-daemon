@@ -3,6 +3,8 @@
 from pathlib import Path
 from typing import Any, cast
 
+from claude_code_hooks_daemon.core.project_context import ProjectContext
+
 
 def get_bash_command(hook_input: dict[str, Any]) -> str | None:
     """Extract bash command from hook input, or None if not Bash tool.
@@ -70,5 +72,5 @@ def get_workspace_root() -> Path:
         if (parent / ".git").exists() and (parent / "CLAUDE").exists():
             return parent
 
-    # Fallback: use current working directory
-    return Path.cwd()
+    # Fallback: use ProjectContext (single source of truth)
+    return ProjectContext.project_root()

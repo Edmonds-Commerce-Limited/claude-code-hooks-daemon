@@ -12,6 +12,17 @@ from unittest.mock import patch
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def mock_project_context():
+    """Mock ProjectContext for handler instantiation tests."""
+    with patch("claude_code_hooks_daemon.core.project_context.ProjectContext.project_root") as mock:
+        mock.return_value = Path("/tmp/test")
+        yield mock
+
+
+import pytest
+
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.session_start.workflow_state_restoration import (
     WorkflowStateRestorationHandler,
@@ -77,7 +88,7 @@ class TestWorkflowStateRestorationHandler:
     def test_init_auto_detects_workspace_root_when_none(self) -> None:
         """Handler auto-detects workspace root when not provided."""
         with patch(
-            "claude_code_hooks_daemon.handlers.session_start.workflow_state_restoration.get_workspace_root"
+            "claude_code_hooks_daemon.core.project_context.ProjectContext.project_root"
         ) as mock_get_root:
             mock_get_root.return_value = Path("/detected/root")
             handler = WorkflowStateRestorationHandler()

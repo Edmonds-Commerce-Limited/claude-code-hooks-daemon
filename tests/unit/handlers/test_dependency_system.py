@@ -4,12 +4,28 @@ These tests verify that handlers can inherit configuration options from parent
 handlers and that dependency validation works correctly at config load time.
 """
 
+from pathlib import Path
+from unittest.mock import patch
+
 import pytest
 
 from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.router import EventRouter
 from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
+
+
+@pytest.fixture(autouse=True)
+def mock_project_context():
+    """Mock ProjectContext for tests that validate config.
+
+    Config validation instantiates handlers to check dependencies.
+    Handlers may call ProjectContext.project_root() in __init__().
+    This fixture mocks it to return a dummy path.
+    """
+    with patch("claude_code_hooks_daemon.core.project_context.ProjectContext.project_root") as mock:
+        mock.return_value = Path("/tmp/test")
+        yield mock
 
 
 def test_shares_options_with_parent_enabled() -> None:

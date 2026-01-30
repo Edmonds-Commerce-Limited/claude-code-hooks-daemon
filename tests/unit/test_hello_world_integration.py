@@ -2,9 +2,54 @@
 
 import contextlib
 import json
+import subprocess
 from io import StringIO
+from pathlib import Path
 
 from claude_code_hooks_daemon.hooks import post_tool_use, pre_tool_use, session_start
+
+
+def setup_test_git_repo(tmp_path: Path) -> None:
+    """Set up a minimal git repository for testing.
+
+    ProjectContext requires a git repository with remote origin.
+    This helper creates the minimal structure needed for tests.
+
+    Args:
+        tmp_path: Temporary directory to initialize as git repo
+    """
+    # Initialize git repo
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test User"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+
+    # Add a remote origin (required by ProjectContext)
+    subprocess.run(
+        ["git", "remote", "add", "origin", "https://github.com/test/repo.git"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+
+    # Create initial commit (some git operations need at least one commit)
+    (tmp_path / "README.md").write_text("# Test Repo\n")
+    subprocess.run(["git", "add", "README.md"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "Initial commit"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
 
 
 class TestHelloWorldIntegrationPreToolUse:
@@ -12,6 +57,7 @@ class TestHelloWorldIntegrationPreToolUse:
 
     def test_hello_world_handler_not_registered_when_disabled(self, tmp_path, monkeypatch):
         """When enable_hello_world_handlers is false, handler should not be registered."""
+        setup_test_git_repo(tmp_path)
         # Create config with flag disabled
         config_file = tmp_path / ".claude" / "hooks-daemon.yaml"
         config_file.parent.mkdir(parents=True)
@@ -44,6 +90,7 @@ handlers:
 
     def test_hello_world_handler_registered_when_enabled(self, tmp_path, monkeypatch):
         """When enable_hello_world_handlers is true, handler should be registered."""
+        setup_test_git_repo(tmp_path)
         # Create config with flag enabled
         config_file = tmp_path / ".claude" / "hooks-daemon.yaml"
         config_file.parent.mkdir(parents=True)
@@ -80,6 +127,7 @@ handlers:
 
     def test_hello_world_handler_not_registered_when_omitted(self, tmp_path, monkeypatch):
         """When enable_hello_world_handlers is omitted, handler should not be registered (default false)."""
+        setup_test_git_repo(tmp_path)
         # Create config WITHOUT the flag (should default to false)
         config_file = tmp_path / ".claude" / "hooks-daemon.yaml"
         config_file.parent.mkdir(parents=True)
@@ -116,6 +164,7 @@ class TestHelloWorldIntegrationPostToolUse:
 
     def test_hello_world_handler_registered_when_enabled(self, tmp_path, monkeypatch):
         """When enable_hello_world_handlers is true, handler should be registered."""
+        setup_test_git_repo(tmp_path)
         # Create config with flag enabled
         config_file = tmp_path / ".claude" / "hooks-daemon.yaml"
         config_file.parent.mkdir(parents=True)
@@ -156,6 +205,7 @@ class TestHelloWorldIntegrationSessionStart:
 
     def test_hello_world_handler_registered_when_enabled(self, tmp_path, monkeypatch):
         """When enable_hello_world_handlers is true, handler should be registered."""
+        setup_test_git_repo(tmp_path)
         # Create config with flag enabled
         config_file = tmp_path / ".claude" / "hooks-daemon.yaml"
         config_file.parent.mkdir(parents=True)
