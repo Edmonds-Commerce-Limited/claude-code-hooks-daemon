@@ -66,10 +66,27 @@ Follow the Release Agent specification (.claude/agents/release-agent.md) for:
 - Display release notes preview
 - Confirm ready for review
 
-Stop and return results. Next stage (Opus review) will be handled by main Claude.
+Stop and return results. Next stages (acceptance tests, then Opus review) will be handled by main Claude.
 \`\`\`
 
-## Stage 2: Opus Review (You Handle This)
+## Stage 2: Acceptance Test Gate (You Handle This)
+
+**MANDATORY after Stage 1 QA validation passes but BEFORE proceeding to documentation review.**
+
+After the Release Agent completes Stage 1 (QA passed, version updated, changelog/release notes generated), YOU (main Claude) must execute acceptance tests:
+
+1. **Read the playbook** at \`CLAUDE/AcceptanceTests/PLAYBOOK.md\`
+2. **Check for coverage gaps** - if new handlers were added since the playbook was last updated, update the playbook with tests for those handlers first
+3. **Execute every test** in the playbook sequentially
+4. **Record PASS/FAIL** for each test
+5. **If ANY test fails**: STOP the release. Investigate and fix the handler bug. Do NOT proceed until all tests pass.
+6. **Report results** to the user: total pass/fail counts and any issues found
+
+**CRITICAL**: Do NOT skip this stage. A delayed release is better than a broken release.
+
+**Reference:** \`CLAUDE/development/RELEASING.md\` "Acceptance Testing" section
+
+## Stage 3: Opus Review (You Handle This)
 
 After the Release Agent completes, YOU (main Claude) will:
 
@@ -120,9 +137,9 @@ Respond with JSON:
 \`\`\`
 
 3. If Opus rejects: Invoke Release Agent again to fix DOCUMENTATION issues only
-4. If Opus approves: Proceed to Stage 3
+4. If Opus approves: Proceed to Stage 4
 
-## Stage 3: Finalization (You Handle This)
+## Stage 4: Finalization (You Handle This)
 
 After Opus approval, YOU (main Claude) will:
 
@@ -178,8 +195,9 @@ git clone -b vX.Y.Z https://github.com/.../hooks-daemon.git
 
 **Error Handling:**
 - If Stage 1 fails: Abort, show error
-- If Stage 2 rejects: Re-run Stage 1 with fixes
-- If Stage 3 fails: Provide rollback instructions
+- If Stage 2 fails: Fix handler bugs, re-run acceptance tests
+- If Stage 3 rejects: Re-run Stage 1 with documentation fixes
+- If Stage 4 fails: Provide rollback instructions
 
 **Documentation:** CLAUDE/development/RELEASING.md
 

@@ -9,14 +9,44 @@ Covers critical paths in:
 
 import argparse
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
+import pytest
+
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.cli import (
     cmd_handlers,
     cmd_health,
     cmd_logs,
     cmd_restart,
 )
+
+
+@pytest.fixture(autouse=True)
+def mock_git_checks(monkeypatch: Any) -> None:
+    """Mock git repository checks for tests running in tmp directories."""
+
+    def mock_get_git_repo_name(project_root: Path) -> str:
+        return "test-repo"
+
+    def mock_get_git_toplevel(project_root: Path) -> Path:
+        return project_root
+
+    monkeypatch.setattr(
+        "claude_code_hooks_daemon.core.project_context.ProjectContext._get_git_repo_name",
+        mock_get_git_repo_name,
+    )
+    monkeypatch.setattr(
+        "claude_code_hooks_daemon.core.project_context.ProjectContext._get_git_toplevel",
+        mock_get_git_toplevel,
+    )
+
+
+@pytest.fixture(autouse=True)
+def reset_project_context() -> None:
+    """Reset ProjectContext singleton between tests."""
+    ProjectContext._initialized = False
 
 
 class TestCmdLogs:

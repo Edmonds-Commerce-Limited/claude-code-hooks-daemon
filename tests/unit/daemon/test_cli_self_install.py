@@ -1,11 +1,39 @@
 """Tests for CLI self-install mode support."""
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
 
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.cli import _validate_installation
+
+
+@pytest.fixture(autouse=True)
+def mock_git_checks(monkeypatch: Any) -> None:
+    """Mock git repository checks for tests running in tmp directories."""
+
+    def mock_get_git_repo_name(project_root: Path) -> str:
+        return "test-repo"
+
+    def mock_get_git_toplevel(project_root: Path) -> Path:
+        return project_root
+
+    monkeypatch.setattr(
+        "claude_code_hooks_daemon.core.project_context.ProjectContext._get_git_repo_name",
+        mock_get_git_repo_name,
+    )
+    monkeypatch.setattr(
+        "claude_code_hooks_daemon.core.project_context.ProjectContext._get_git_toplevel",
+        mock_get_git_toplevel,
+    )
+
+
+@pytest.fixture(autouse=True)
+def reset_project_context() -> None:
+    """Reset ProjectContext singleton between tests."""
+    ProjectContext._initialized = False
 
 
 class TestSelfInstallMode:
@@ -115,10 +143,10 @@ class TestNestedInstallationDetection:
     """Tests for nested installation detection in CLI validation."""
 
     def test_validate_fails_for_nested_installation(self, tmp_path: Path) -> None:
-        """Validation fails when nested .claude/hooks-daemon/.claude exists."""
+        """Validation fails when nested .claude/hooks-daemon/.claude/hooks-daemon exists."""
         claude_dir = tmp_path / ".claude"
-        nested_claude = claude_dir / "hooks-daemon" / ".claude"
-        nested_claude.mkdir(parents=True)
+        nested_install = claude_dir / "hooks-daemon" / ".claude" / "hooks-daemon"
+        nested_install.mkdir(parents=True)
 
         # Should fail validation due to nested installation
         with pytest.raises(SystemExit):

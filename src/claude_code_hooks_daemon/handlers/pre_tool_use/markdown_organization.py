@@ -360,9 +360,25 @@ class MarkdownOrganizationHandler(Handler):
 
         # Check allowed locations with PRECISE pattern matching (not simple 'in' checks)
 
-        # 1. CLAUDE/ - Allow all files and subdirectories
+        # 1. CLAUDE/ - Allow all files and subdirectories, BUT validate plan number format
         if normalized.lower().startswith("claude/"):
-            return False  # Allow
+            # Special validation for CLAUDE/Plan/ directories
+            if normalized.lower().startswith("claude/plan/"):
+                # Extract plan folder pattern: CLAUDE/Plan/{folder}/PLAN.md
+                plan_match = re.match(r"^claude/plan/([^/]+)/", normalized, re.IGNORECASE)
+                if plan_match:
+                    folder_name = plan_match.group(1)
+                    # Check if folder starts with a number
+                    number_match = re.match(r"^(\d+)-", folder_name)
+                    if number_match:
+                        # Validate plan number has at least 3 digits
+                        plan_number = number_match.group(1)
+                        if len(plan_number) < 3:
+                            return True  # Block - insufficient digits
+                    else:
+                        # No numeric prefix - block
+                        return True  # Block - missing plan number
+            return False  # Allow all other CLAUDE/ files
 
         # 5. docs/ - Human-facing documentation
         if normalized.lower().startswith("docs/"):

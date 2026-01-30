@@ -128,7 +128,7 @@ class TestHooksDaemon:
 
         # Verify response structure
         assert response["request_id"] == "test-001"
-        assert "result" in response
+        assert "hookSpecificOutput" in response
         assert "timing_ms" in response
         assert response["timing_ms"] >= 0
 
@@ -344,7 +344,7 @@ class TestHooksDaemon:
         # Request should complete successfully
         response = await request_task
         assert response["request_id"] == "slow-req"
-        assert "result" in response
+        assert "hookSpecificOutput" in response
 
         await shutdown_task
         await server_task
@@ -534,7 +534,7 @@ class TestHooksDaemon:
         response = json.loads(response_data.decode())
 
         # Should process successfully without request_id
-        assert "result" in response
+        assert "hookSpecificOutput" in response
         assert "request_id" not in response
 
         writer.close()
