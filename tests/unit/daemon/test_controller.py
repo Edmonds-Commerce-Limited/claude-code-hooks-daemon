@@ -152,9 +152,7 @@ class TestDaemonController:
 
         assert controller.is_initialised is True
 
-    def test_initialise_only_once(
-        self, controller: DaemonController, workspace_root: Path
-    ) -> None:
+    def test_initialise_only_once(self, controller: DaemonController, workspace_root: Path) -> None:
         """Initialise only runs once."""
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
@@ -187,16 +185,12 @@ class TestDaemonController:
 
         assert controller.is_initialised is True
 
-    def test_initialise_fails_without_workspace_root(
-        self, controller: DaemonController
-    ) -> None:
+    def test_initialise_fails_without_workspace_root(self, controller: DaemonController) -> None:
         """Initialise FAIL FAST if workspace_root not provided."""
         with pytest.raises(ValueError, match="workspace_root is required"):
             controller.initialise()
 
-    def test_process_event(
-        self, controller: DaemonController, workspace_root: Path
-    ) -> None:
+    def test_process_event(self, controller: DaemonController, workspace_root: Path) -> None:
         """Process event routes to handler chain."""
         # Pre-initialize controller
         with patch("subprocess.run") as mock_run:
@@ -308,9 +302,7 @@ class TestDaemonController:
         assert result.result.decision.value in ["allow", "deny", "block", "error"]
         assert result.execution_time_ms >= 0
 
-    def test_process_request(
-        self, controller: DaemonController, workspace_root: Path
-    ) -> None:
+    def test_process_request(self, controller: DaemonController, workspace_root: Path) -> None:
         """Process request parses and routes event."""
         # Pre-initialize controller
         with patch("subprocess.run") as mock_run:
@@ -377,9 +369,7 @@ class TestDaemonController:
         assert "stats" in health
         assert "handlers" in health
 
-    def test_get_handlers(
-        self, controller: DaemonController, workspace_root: Path
-    ) -> None:
+    def test_get_handlers(self, controller: DaemonController, workspace_root: Path) -> None:
         """Get handlers returns handler details."""
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
@@ -505,9 +495,7 @@ class TestIntegration:
         assert "PreToolUse" in stats.requests_by_event
         assert stats.errors == 0
 
-    def test_multiple_requests(
-        self, controller: DaemonController, workspace_root: Path
-    ) -> None:
+    def test_multiple_requests(self, controller: DaemonController, workspace_root: Path) -> None:
         """Multiple requests accumulate stats."""
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
