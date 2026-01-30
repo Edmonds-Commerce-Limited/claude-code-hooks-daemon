@@ -211,6 +211,10 @@ handlers:
 
   # Status line handlers (provide custom status line display)
   status_line:
+    git_repo_name:         # Shows repository name at start (cached)
+      enabled: true
+      priority: 3
+
     account_display:       # Shows Claude account username
       enabled: true
       priority: 5

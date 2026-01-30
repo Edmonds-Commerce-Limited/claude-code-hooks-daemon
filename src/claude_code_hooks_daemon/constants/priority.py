@@ -87,6 +87,7 @@ class Priority:
     SESSION_CLEANUP = 100
 
     # Status line handlers (varied priorities)
+    GIT_REPO_NAME = 3
     ACCOUNT_DISPLAY = 5
     MODEL_CONTEXT = 10
     USAGE_TRACKING = 15
