@@ -100,6 +100,15 @@ class EventRouter:
             event_type.value,
             len(chain),
         )
+
+        # DEBUG: Log full hook_input for PreToolUse to debug pipe blocker
+        if event_type == EventType.PRE_TOOL_USE:
+            import json
+            logger.debug(
+                "PRE_TOOL_USE hook_input:\n%s",
+                json.dumps(hook_input, indent=2, default=str),
+            )
+
         return chain.execute(hook_input)
 
     def route_by_string(self, event_type_str: str, hook_input: dict[str, Any]) -> HookResult:

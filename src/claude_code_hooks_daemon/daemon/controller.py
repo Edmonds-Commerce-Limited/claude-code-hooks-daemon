@@ -220,10 +220,8 @@ class DaemonController:
 
         result = self.process_event(event)
 
-        return result.result.to_response_dict(
-            event.event_type.value,
-            result.execution_time_ms,
-        )
+        # Use to_json() for Claude Code hook format, not to_response_dict()
+        return result.result.to_json(event.event_type.value)
 
     def get_stats(self) -> DaemonStats:
         """Get daemon statistics.

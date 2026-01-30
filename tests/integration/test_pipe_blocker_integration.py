@@ -1,5 +1,6 @@
 """Integration test for pipe blocker through full daemon pipeline."""
 
+from claude_code_hooks_daemon.constants import HandlerID
 from claude_code_hooks_daemon.core import EventRouter, EventType
 from claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker import PipeBlockerHandler
 
@@ -33,7 +34,7 @@ class TestPipeBlockerIntegration:
         assert result.result.decision == "deny", f"Expected deny, got {result.result.decision}"
         assert "pipe" in result.result.reason.lower(), "Reason should mention pipe"
         assert len(result.handlers_matched) > 0, "Should have matched handlers"
-        assert "pipe-blocker" in result.handlers_matched
+        assert HandlerID.PIPE_BLOCKER.display_name in result.handlers_matched
 
     def test_find_pipe_tail_blocks_through_router(self) -> None:
         """Test find | tail is blocked through full pipeline."""
@@ -54,7 +55,7 @@ class TestPipeBlockerIntegration:
 
         # Should be denied
         assert result.result.decision == "deny"
-        assert result.terminated is True, "Terminal handler should terminate chain"
+        assert result.terminated_by == HandlerID.PIPE_BLOCKER.display_name, "Terminal handler should terminate chain"
 
     def test_grep_pipe_tail_allowed_through_router(self) -> None:
         """Test whitelisted grep | tail is allowed."""
