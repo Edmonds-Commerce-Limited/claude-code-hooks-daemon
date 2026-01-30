@@ -1,13 +1,15 @@
 """Tests for DaemonController."""
 
 from datetime import datetime
+from pathlib import Path
 from typing import Any
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 
 from claude_code_hooks_daemon.core.chain import ChainExecutionResult
 from claude_code_hooks_daemon.core.event import EventType, HookEvent
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.controller import (
     DaemonController,
     DaemonStats,
@@ -106,6 +108,20 @@ class TestDaemonStats:
 class TestDaemonController:
     """Tests for DaemonController class."""
 
+    def teardown_method(self) -> None:
+        """Reset ProjectContext after each test."""
+        ProjectContext.reset()
+
+    @pytest.fixture
+    def workspace_root(self, tmp_path: Path) -> Path:
+        """Create a workspace root with config file for testing."""
+        workspace = tmp_path / "test-workspace"
+        claude_dir = workspace / ".claude"
+        claude_dir.mkdir(parents=True)
+        config_file = claude_dir / "hooks-daemon.yaml"
+        config_file.write_text("version: 1.0\n")
+        return workspace
+
     @pytest.fixture
     def controller(self) -> DaemonController:
         """Create a DaemonController instance."""
@@ -123,33 +139,74 @@ class TestDaemonController:
 
         assert controller._config is config
 
-    def test_initialise(self, controller: DaemonController) -> None:
+    def test_initialise(self, controller: DaemonController, workspace_root: Path) -> None:
         """Initialise discovers and registers handlers."""
-        controller.initialise()
+        # Mock git commands for ProjectContext initialization
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                Mock(returncode=0, stdout=b"/tmp/test\n"),  # git rev-parse --show-toplevel
+                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),  # git remote get-url
+                Mock(returncode=0, stdout=b"/tmp/test\n"),  # git rev-parse (again for toplevel)
+            ]
+            controller.initialise(workspace_root=workspace_root)
 
         assert controller.is_initialised is True
 
-    def test_initialise_only_once(self, controller: DaemonController) -> None:
+    def test_initialise_only_once(
+        self, controller: DaemonController, workspace_root: Path
+    ) -> None:
         """Initialise only runs once."""
-        controller.initialise()
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                Mock(returncode=0, stdout=b"/tmp/test\n"),
+                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout=b"/tmp/test\n"),
+            ]
+            controller.initialise(workspace_root=workspace_root)
         assert controller.is_initialised is True
 
-        # Second call should be a no-op
-        controller.initialise()
+        # Second call should be a no-op (doesn't call ProjectContext.initialize again)
+        controller.initialise(workspace_root=workspace_root)
         assert controller.is_initialised is True
 
-    def test_initialise_with_handler_config(self, controller: DaemonController) -> None:
+    def test_initialise_with_handler_config(
+        self, controller: DaemonController, workspace_root: Path
+    ) -> None:
         """Initialise accepts handler configuration."""
         handler_config: dict[str, dict[str, dict[str, Any]]] = {
             "pre_tool_use": {"destructive_git": {"enabled": True, "priority": 10}}
         }
 
-        controller.initialise(handler_config=handler_config)
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                Mock(returncode=0, stdout=b"/tmp/test\n"),
+                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout=b"/tmp/test\n"),
+            ]
+            controller.initialise(handler_config=handler_config, workspace_root=workspace_root)
 
         assert controller.is_initialised is True
 
-    def test_process_event(self, controller: DaemonController) -> None:
+    def test_initialise_fails_without_workspace_root(
+        self, controller: DaemonController
+    ) -> None:
+        """Initialise FAIL FAST if workspace_root not provided."""
+        with pytest.raises(ValueError, match="workspace_root is required"):
+            controller.initialise()
+
+    def test_process_event(
+        self, controller: DaemonController, workspace_root: Path
+    ) -> None:
         """Process event routes to handler chain."""
+        # Pre-initialize controller
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                Mock(returncode=0, stdout=b"/tmp/test\n"),
+                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout=b"/tmp/test\n"),
+            ]
+            controller.initialise(workspace_root=workspace_root)
+
         # Create a minimal HookEvent using correct field names
         from claude_code_hooks_daemon.core.event import HookInput
 
@@ -168,8 +225,10 @@ class TestDaemonController:
         assert result.result is not None
         assert result.execution_time_ms >= 0
 
-    def test_process_event_auto_initialises(self, controller: DaemonController) -> None:
-        """Process event auto-initialises if not done."""
+    def test_process_event_auto_initialise_fails_without_workspace(
+        self, controller: DaemonController
+    ) -> None:
+        """Process event FAIL FAST if auto-initialize attempted without workspace_root."""
         from claude_code_hooks_daemon.core.event import HookInput
 
         assert controller.is_initialised is False
@@ -183,12 +242,23 @@ class TestDaemonController:
             ),
         )
 
-        controller.process_event(event)
+        # Auto-initialization without workspace_root should FAIL FAST (raise exception)
+        with pytest.raises(ValueError, match="workspace_root is required"):
+            controller.process_event(event)
 
-        assert controller.is_initialised is True
-
-    def test_process_event_records_stats(self, controller: DaemonController) -> None:
+    def test_process_event_records_stats(
+        self, controller: DaemonController, workspace_root: Path
+    ) -> None:
         """Process event records statistics."""
+        # Pre-initialize controller
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                Mock(returncode=0, stdout=b"/tmp/test\n"),
+                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout=b"/tmp/test\n"),
+            ]
+            controller.initialise(workspace_root=workspace_root)
+
         from claude_code_hooks_daemon.core.event import HookInput
 
         event = HookEvent(
@@ -206,11 +276,20 @@ class TestDaemonController:
         assert stats.requests_processed == 1
         assert stats.requests_by_event["PreToolUse"] == 1
 
-    def test_process_event_returns_valid_result(self, controller: DaemonController) -> None:
+    def test_process_event_returns_valid_result(
+        self, controller: DaemonController, workspace_root: Path
+    ) -> None:
         """Process event returns a valid ChainExecutionResult."""
-        from claude_code_hooks_daemon.core.event import HookInput
+        # Properly initialize controller
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                Mock(returncode=0, stdout=b"/tmp/test\n"),
+                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout=b"/tmp/test\n"),
+            ]
+            controller.initialise(workspace_root=workspace_root)
 
-        controller._initialised = True
+        from claude_code_hooks_daemon.core.event import HookInput
 
         event = HookEvent(
             event=EventType.PRE_TOOL_USE,
@@ -229,8 +308,19 @@ class TestDaemonController:
         assert result.result.decision.value in ["allow", "deny", "block", "error"]
         assert result.execution_time_ms >= 0
 
-    def test_process_request(self, controller: DaemonController) -> None:
+    def test_process_request(
+        self, controller: DaemonController, workspace_root: Path
+    ) -> None:
         """Process request parses and routes event."""
+        # Pre-initialize controller
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                Mock(returncode=0, stdout=b"/tmp/test\n"),
+                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout=b"/tmp/test\n"),
+            ]
+            controller.initialise(workspace_root=workspace_root)
+
         request_data = {
             "event": "PreToolUse",
             "hook_input": {
@@ -246,8 +336,19 @@ class TestDaemonController:
         # Response should be a valid hook response dict
         assert "result" in response or "hookSpecificOutput" in response or "decision" in response
 
-    def test_process_request_invalid_data(self, controller: DaemonController) -> None:
+    def test_process_request_invalid_data(
+        self, controller: DaemonController, workspace_root: Path
+    ) -> None:
         """Process request handles invalid data."""
+        # Pre-initialize controller
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                Mock(returncode=0, stdout=b"/tmp/test\n"),
+                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout=b"/tmp/test\n"),
+            ]
+            controller.initialise(workspace_root=workspace_root)
+
         request_data = {
             "invalid": "data",
         }
@@ -276,9 +377,17 @@ class TestDaemonController:
         assert "stats" in health
         assert "handlers" in health
 
-    def test_get_handlers(self, controller: DaemonController) -> None:
+    def test_get_handlers(
+        self, controller: DaemonController, workspace_root: Path
+    ) -> None:
         """Get handlers returns handler details."""
-        controller.initialise()
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                Mock(returncode=0, stdout=b"/tmp/test\n"),
+                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout=b"/tmp/test\n"),
+            ]
+            controller.initialise(workspace_root=workspace_root)
 
         handlers = controller.get_handlers()
 
@@ -343,15 +452,37 @@ class TestGlobalController:
 class TestIntegration:
     """Integration tests for DaemonController."""
 
+    def teardown_method(self) -> None:
+        """Reset ProjectContext after each test."""
+        ProjectContext.reset()
+
+    @pytest.fixture
+    def workspace_root(self, tmp_path: Path) -> Path:
+        """Create a workspace root with config file for testing."""
+        workspace = tmp_path / "test-workspace"
+        claude_dir = workspace / ".claude"
+        claude_dir.mkdir(parents=True)
+        config_file = claude_dir / "hooks-daemon.yaml"
+        config_file.write_text("version: 1.0\n")
+        return workspace
+
     @pytest.fixture
     def controller(self) -> DaemonController:
         """Create a DaemonController instance."""
         return DaemonController()
 
-    def test_full_request_processing_flow(self, controller: DaemonController) -> None:
+    def test_full_request_processing_flow(
+        self, controller: DaemonController, workspace_root: Path
+    ) -> None:
         """Full flow from request to response."""
         # Initialize
-        controller.initialise()
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                Mock(returncode=0, stdout=b"/tmp/test\n"),
+                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout=b"/tmp/test\n"),
+            ]
+            controller.initialise(workspace_root=workspace_root)
 
         # Process request
         request_data = {
@@ -374,9 +505,17 @@ class TestIntegration:
         assert "PreToolUse" in stats.requests_by_event
         assert stats.errors == 0
 
-    def test_multiple_requests(self, controller: DaemonController) -> None:
+    def test_multiple_requests(
+        self, controller: DaemonController, workspace_root: Path
+    ) -> None:
         """Multiple requests accumulate stats."""
-        controller.initialise()
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                Mock(returncode=0, stdout=b"/tmp/test\n"),
+                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout=b"/tmp/test\n"),
+            ]
+            controller.initialise(workspace_root=workspace_root)
 
         for i in range(5):
             request_data = {
@@ -393,9 +532,17 @@ class TestIntegration:
         assert stats.requests_processed >= 5
         assert stats.requests_by_event.get("PreToolUse", 0) >= 5
 
-    def test_health_check_after_requests(self, controller: DaemonController) -> None:
+    def test_health_check_after_requests(
+        self, controller: DaemonController, workspace_root: Path
+    ) -> None:
         """Health check reflects request processing."""
-        controller.initialise()
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                Mock(returncode=0, stdout=b"/tmp/test\n"),
+                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout=b"/tmp/test\n"),
+            ]
+            controller.initialise(workspace_root=workspace_root)
 
         request_data = {
             "event": "PreToolUse",

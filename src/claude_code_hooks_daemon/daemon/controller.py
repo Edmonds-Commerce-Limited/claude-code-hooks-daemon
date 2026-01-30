@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from claude_code_hooks_daemon.core.chain import ChainExecutionResult
 from claude_code_hooks_daemon.core.event import HookEvent
 from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.router import EventRouter
 from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
 
@@ -122,13 +123,28 @@ class DaemonController:
 
         Args:
             handler_config: Optional handler configuration from hooks-daemon.yaml
-            workspace_root: Optional workspace root path
+            workspace_root: Optional workspace root path (FAIL FAST if None)
+
+        Raises:
+            ValueError: If workspace_root is None (FAIL FAST requirement)
         """
         if self._initialised:
             logger.warning("DaemonController already initialised")
             return
 
+        # FAIL FAST: workspace_root is required
+        if workspace_root is None:
+            raise ValueError(
+                "workspace_root is required for DaemonController initialization. "
+                "This indicates a bug in daemon startup."
+            )
+
         logger.info("Initialising DaemonController")
+
+        # Initialize ProjectContext singleton (single source of truth for project-level constants)
+        config_path = workspace_root / ".claude" / "hooks-daemon.yaml"
+        ProjectContext.initialize(config_path)
+        logger.info("ProjectContext initialized from config: %s", config_path)
 
         # Discover and register handlers
         self._registry.discover()
