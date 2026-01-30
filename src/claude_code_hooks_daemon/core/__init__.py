@@ -10,6 +10,7 @@ from claude_code_hooks_daemon.core.event import EventType, HookEvent, HookInput,
 from claude_code_hooks_daemon.core.front_controller import FrontController
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.router import EventRouter
 
 __all__ = [
@@ -23,6 +24,7 @@ __all__ = [
     "HookEvent",
     "HookInput",
     "HookResult",
+    "ProjectContext",
     "ToolInput",
     "generate_daemon_error_response",
 ]
