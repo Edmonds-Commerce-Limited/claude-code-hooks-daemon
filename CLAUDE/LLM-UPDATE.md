@@ -312,6 +312,97 @@ untracked/venv/bin/python scripts/handler_status.py > /tmp/handler-status.txt
 
 ---
 
+## Post-Update: Planning Workflow Check (Optional)
+
+After updating, check if you want to adopt or sync with the daemon's planning workflow system.
+
+### Check Current Planning Setup
+
+```bash
+# Check if you already have planning docs
+ls -la CLAUDE/PlanWorkflow.md 2>/dev/null
+ls -la CLAUDE/Plan/ 2>/dev/null
+
+# Check daemon's latest planning docs
+cat .claude/hooks-daemon/CLAUDE/PlanWorkflow.md | head -50
+```
+
+### Scenarios
+
+**Scenario 1: No Planning Docs Yet**
+
+See "Post-Installation: Planning Workflow Adoption" in [LLM-INSTALL.md](https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-INSTALL.md) for full adoption guide.
+
+Quick adoption:
+```bash
+# Copy planning workflow docs
+cp .claude/hooks-daemon/CLAUDE/PlanWorkflow.md CLAUDE/PlanWorkflow.md
+mkdir -p CLAUDE/Plan
+
+# Enable planning handlers in .claude/hooks-daemon.yaml
+# (see install docs for handler config)
+
+# Restart daemon
+.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
+```
+
+**Scenario 2: Already Using Planning System**
+
+Check if daemon's approach has updates:
+```bash
+# Compare your version with daemon's version
+diff CLAUDE/PlanWorkflow.md .claude/hooks-daemon/CLAUDE/PlanWorkflow.md || echo "Docs differ"
+```
+
+**If docs differ, ask user:**
+```
+Your project has planning docs, but the daemon's planning workflow has been updated.
+
+Would you like to:
+1. Update your planning docs to match daemon's latest version?
+2. Keep your current planning docs unchanged?
+3. Review differences and selectively adopt changes?
+```
+
+**If user chooses to update:**
+```bash
+# Backup current docs
+cp CLAUDE/PlanWorkflow.md CLAUDE/PlanWorkflow.md.backup
+
+# Update to latest
+cp .claude/hooks-daemon/CLAUDE/PlanWorkflow.md CLAUDE/PlanWorkflow.md
+
+# Review changes
+diff CLAUDE/PlanWorkflow.md.backup CLAUDE/PlanWorkflow.md
+
+# Commit if satisfied
+git add CLAUDE/PlanWorkflow.md
+git commit -m "Update planning workflow docs to match daemon v2.3.0"
+```
+
+**Scenario 3: Different Planning Approach**
+
+If you have a different planning system (Jira, Linear, custom docs), you can:
+- Keep planning handlers disabled
+- Use daemon for code quality/safety only
+- No action needed
+
+### Planning Handlers Reference
+
+Available planning enforcement handlers:
+- `plan-workflow-guidance` (priority 45) - Guides through planning steps
+- `validate-plan-number` (priority 30) - Validates plan numbering
+- `block-plan-time-estimates` (priority 40) - Prevents time estimates
+- `enforce-markdown-organization` (priority 35) - Enforces markdown rules (EC-specific)
+
+**Check status:**
+```bash
+cd .claude/hooks-daemon
+untracked/venv/bin/python scripts/handler_status.py | grep -A 1 "plan-\|markdown"
+```
+
+---
+
 ## Version-Specific Documentation
 
 ### RELEASES Directory
