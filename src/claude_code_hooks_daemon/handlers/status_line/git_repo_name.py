@@ -14,7 +14,6 @@ from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority, Timeout
 from claude_code_hooks_daemon.core import Handler, HookResult
-from claude_code_hooks_daemon.daemon.paths import get_project_root
 
 logger = logging.getLogger(__name__)
 
@@ -48,9 +47,9 @@ class GitRepoNameHandler(Handler):
             Repository name or None if not in git repo
         """
         try:
-            # Get project root
-            project_root = get_project_root()
-            if not project_root or not project_root.exists():
+            # Use current working directory (where daemon was started)
+            project_root = Path.cwd()
+            if not project_root.exists():
                 return None
 
             # Check if in git repo
