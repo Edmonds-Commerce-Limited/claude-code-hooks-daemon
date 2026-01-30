@@ -226,6 +226,67 @@ Restart daemon after config changes:
 
 ---
 
+## Post-Installation: Handler Status Report
+
+After installation and configuration, generate a comprehensive report showing all handlers and their status:
+
+```bash
+cd .claude/hooks-daemon
+untracked/venv/bin/python scripts/handler_status.py
+```
+
+This displays a detailed table with:
+- **All available handlers** organized by event type (PreToolUse, PostToolUse, etc.)
+- **Enabled/Disabled status** for each handler
+- **Priority and terminal settings**
+- **Handler tags** (language, function, specificity)
+- **Handler-specific configuration options** (if enabled)
+- **Summary statistics** (total handlers, enabled count, disabled count)
+- **Tag filtering info** (if using enable_tags/disable_tags)
+
+**Example output:**
+```
+====================================================================================================
+CLAUDE CODE HOOKS DAEMON - HANDLER STATUS REPORT
+====================================================================================================
+
+Config: /path/to/.claude/hooks-daemon.yaml
+Daemon: /path/to/.claude/hooks-daemon
+
+Total Handlers: 52
+Enabled: 15
+Disabled: 37
+
+====================================================================================================
+
+====================================================================================================
+EVENT TYPE: pre_tool_use
+====================================================================================================
+
+Handler                        Enabled  Priority  Terminal  Tags
+----------------------------------------------------------------------------------------------------
+prevent-destructive-git        ✓ YES    10        YES       safety, git, blocking...
+block-sed-command              ✓ YES    10        YES       safety, bash, blocking...
+enforce-tdd                    ✗ NO     15        YES       tdd, python, qa-enforcement...
+...
+```
+
+**Review this report to:**
+- Verify your desired handlers are enabled
+- Understand what hooks are active in your project
+- Identify handlers you may want to enable
+- See handler-specific configuration
+- Confirm tag filtering is working as expected
+
+**Save for reference:**
+```bash
+cd .claude/hooks-daemon
+untracked/venv/bin/python scripts/handler_status.py > /tmp/handler-status.txt
+cat /tmp/handler-status.txt
+```
+
+---
+
 ## Custom Handler Migration
 
 If you had custom hooks before install (backed up to `.claude/hooks.bak.TIMESTAMP/`):

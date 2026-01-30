@@ -280,6 +280,38 @@ To see handlers by tag in the discovery output above, check the `tags` field.
 
 ---
 
+## Post-Update: Handler Status Report
+
+After updating and discovering new handlers, generate a comprehensive status report:
+
+```bash
+cd .claude/hooks-daemon
+untracked/venv/bin/python scripts/handler_status.py
+```
+
+This provides a complete overview of your handler configuration:
+- **All available handlers** organized by event type
+- **Enabled/Disabled status** for each handler
+- **Priority and terminal settings**
+- **Handler tags** (for filtering and organization)
+- **Handler-specific configuration** (for enabled handlers)
+- **Summary statistics**
+
+**Use this report to:**
+1. **Verify** your enabled handlers are correct
+2. **Identify** new handlers from the update
+3. **Review** handler-specific configuration
+4. **Compare** with the discovery output to see what's missing
+5. **Confirm** tag filtering is working as expected
+
+**Save for documentation:**
+```bash
+cd .claude/hooks-daemon
+untracked/venv/bin/python scripts/handler_status.py > /tmp/handler-status.txt
+```
+
+---
+
 ## Version-Specific Documentation
 
 ### RELEASES Directory
