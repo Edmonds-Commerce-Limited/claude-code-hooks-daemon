@@ -42,17 +42,43 @@ emit_hook_error() {
     # Log to stderr for debugging (agent won't see this)
     echo "HOOKS DAEMON ERROR [$error_type]: $error_details" >&2
 
-    # Use Python utility for proper error response generation
-    # This ensures event-specific formatting (Stop vs other events)
-    if [[ -f "$PYTHON_CMD" ]]; then
-        $PYTHON_CMD -m claude_code_hooks_daemon.core.error_response \
-            "$event_name" "$error_type" "$error_details"
+    # Build error context message
+    local context_msg
+    context_msg=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s' \
+        "⚠️ HOOKS DAEMON ERROR - PROTECTION NOT ACTIVE ⚠️" \
+        "" \
+        "ERROR TYPE: $error_type" \
+        "ERROR DETAILS: $error_details" \
+        "" \
+        "🛑 CRITICAL: You MUST stop work immediately." \
+        "" \
+        "The hooks daemon is not functioning. This means:" \
+        "- Destructive git operations are NOT being blocked" \
+        "- Code quality checks are NOT running" \
+        "- Safety guardrails are NOT active" \
+        "" \
+        "RECOMMENDED ACTIONS:" \
+        "1. STOP all current tasks immediately" \
+        "2. Inform the user that hooks protection is down" \
+        "3. Run: python -m claude_code_hooks_daemon.daemon.cli status" \
+        "4. Restart daemon: python -m claude_code_hooks_daemon.daemon.cli restart")
+
+    # Event-specific JSON formatting using jq (already a dependency)
+    # Stop/SubagentStop: top-level decision only (deny to show error)
+    # Other events: hookSpecificOutput with context (fail-open allow)
+    if command -v jq &>/dev/null; then
+        if [[ "$event_name" == "Stop" || "$event_name" == "SubagentStop" ]]; then
+            jq -n --arg reason "Hooks daemon not running - protection not active" \
+                '{"decision": "block", "reason": $reason}'
+        else
+            jq -n --arg event "$event_name" --arg context "$context_msg" \
+                '{"hookSpecificOutput": {"hookEventName": $event, "additionalContext": $context}}'
+        fi
     else
-        # Fallback if Python not available (should never happen after init)
-        # Use generic hookSpecificOutput format (may fail for Stop events)
-        cat <<EOF
-{"hookSpecificOutput":{"hookEventName":"$event_name","additionalContext":"⚠️ HOOKS DAEMON ERROR\\n\\nERROR TYPE: $error_type\\nERROR DETAILS: $error_details\\n\\nHooks daemon not functional. Run: python -m claude_code_hooks_daemon.daemon.cli status"}}
-EOF
+        # Fallback if jq not available (should not happen - jq is required)
+        cat <<FALLBACK_EOF
+{"hookSpecificOutput":{"hookEventName":"$event_name","additionalContext":"HOOKS DAEMON ERROR: $error_type - $error_details"}}
+FALLBACK_EOF
     fi
 }
 
@@ -135,20 +161,28 @@ if [[ -d "$PROJECT_PATH/.git" ]]; then
     fi
 fi
 
-# Generate socket and PID paths using Python paths module
+# Venv Python (only needed for daemon startup, NOT for hot path)
 PYTHON_CMD="$HOOKS_DAEMON_ROOT_DIR/untracked/venv/bin/python"
-DAEMON_MODULE="claude_code_hooks_daemon.daemon.paths"
 
-# Import paths module and generate paths
-SOCKET_PATH=$($PYTHON_CMD -c "
-from $DAEMON_MODULE import get_socket_path
-print(get_socket_path('$PROJECT_PATH'))
-")
+# Generate socket and PID paths using pure bash (no Python dependency)
+# Pattern: /tmp/claude-hooks-{name truncated to 20}-{md5 first 8}.{ext}
+# Must match Python paths module: claude_code_hooks_daemon.daemon.paths
+_abs_project_path=$(realpath "$PROJECT_PATH")
+_project_name=$(basename "$_abs_project_path")
+_project_name="${_project_name:0:20}"
+# Cross-platform MD5: md5sum (Linux) vs md5 -q (macOS)
+if command -v md5sum &>/dev/null; then
+    _project_hash=$(printf '%s' "$_abs_project_path" | md5sum | cut -c1-8)
+elif command -v md5 &>/dev/null; then
+    _project_hash=$(printf '%s' "$_abs_project_path" | md5 -q | cut -c1-8)
+else
+    # Fallback: use Python (should never happen on modern systems)
+    _project_hash=$(python3 -c "import hashlib; print(hashlib.md5('$_abs_project_path'.encode()).hexdigest()[:8])")
+fi
 
-PID_PATH=$($PYTHON_CMD -c "
-from $DAEMON_MODULE import get_pid_path
-print(get_pid_path('$PROJECT_PATH'))
-")
+# Allow environment variable overrides (for testing)
+SOCKET_PATH="${CLAUDE_HOOKS_SOCKET_PATH:-/tmp/claude-hooks-${_project_name}-${_project_hash}.sock}"
+PID_PATH="${CLAUDE_HOOKS_PID_PATH:-/tmp/claude-hooks-${_project_name}-${_project_hash}.pid}"
 
 # Daemon startup timeout (deciseconds - 1/10th second units)
 DAEMON_STARTUP_TIMEOUT=50
@@ -161,7 +195,41 @@ export HOOKS_DAEMON_ROOT_DIR
 export SOCKET_PATH
 export PID_PATH
 export PROJECT_PATH
-export PYTHON_CMD
+# Note: PYTHON_CMD is intentionally NOT exported - only used internally
+# by start_daemon() and validate_venv(). Hot path uses system python3.
+
+#
+# validate_venv() - Check if venv is healthy for daemon startup
+#
+# Returns:
+#   0 if venv is healthy
+#   1 if venv is broken (outputs diagnostic to stderr)
+#
+# Sets VENV_ERROR with human-readable error message on failure.
+#
+validate_venv() {
+    VENV_ERROR=""
+
+    # Check venv Python binary exists
+    if [[ ! -f "$PYTHON_CMD" ]]; then
+        VENV_ERROR="Venv Python not found at $PYTHON_CMD. Run: cd $HOOKS_DAEMON_ROOT_DIR && uv sync"
+        return 1
+    fi
+
+    # Check venv Python is executable
+    if [[ ! -x "$PYTHON_CMD" ]]; then
+        VENV_ERROR="Venv Python not executable at $PYTHON_CMD. Run: cd $HOOKS_DAEMON_ROOT_DIR && uv sync"
+        return 1
+    fi
+
+    # Check key package is importable
+    if ! "$PYTHON_CMD" -c "import claude_code_hooks_daemon" 2>/dev/null; then
+        VENV_ERROR="Cannot import claude_code_hooks_daemon. Venv may be broken (stale .pth files or Python version mismatch). Run: cd $HOOKS_DAEMON_ROOT_DIR && uv sync"
+        return 1
+    fi
+
+    return 0
+}
 
 #
 # is_daemon_running() - Check if daemon is running
@@ -208,6 +276,12 @@ start_daemon() {
     # Check if already running
     if is_daemon_running; then
         return 0
+    fi
+
+    # Validate venv before attempting startup (fail-fast with actionable error)
+    if ! validate_venv; then
+        echo "ERROR: Venv validation failed: $VENV_ERROR" >&2
+        return 1
     fi
 
     # Remove stale socket file
@@ -271,48 +345,58 @@ ensure_daemon() {
 #   echo '{"key":"value"}' | send_request_stdin
 #
 send_request_stdin() {
-    # Use Python for reliable JSON transport - no shell variable interpolation
-    # This reads from stdin and sends to socket, avoiding all shell escaping issues
+    # Use system python3 for reliable JSON transport - no venv dependency
+    # Only uses stdlib: socket, sys, json (no venv packages needed)
     # CRITICAL: On error, outputs valid JSON to stdout (not stderr) so agent sees it
-    $PYTHON_CMD -c "
+    python3 -c "
 import json
 import socket
-import subprocess
 import sys
 
-def emit_error_json(event_name: str, error_type: str, error_details: str) -> None:
+def emit_error_json(event_name, error_type, error_details):
     '''Output valid hook error response to stdout.
 
-    DRY: Uses error_response module for proper event-specific formatting.
+    Inlines JSON generation using only stdlib (no venv dependency).
+    Handles event-specific formatting: Stop/SubagentStop vs other events.
     '''
-    # Log to stderr for debugging (agent won't see this)
     print(f'HOOKS DAEMON ERROR [{error_type}]: {error_details}', file=sys.stderr)
 
-    # Use error_response module for proper formatting
-    try:
-        result = subprocess.run(
-            [sys.executable, '-m', 'claude_code_hooks_daemon.core.error_response',
-             event_name, error_type, error_details],
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        print(result.stdout)
-    except Exception as e:
-        # Fallback if module call fails (generic hookSpecificOutput format)
-        print(f'Error calling error_response module: {e}', file=sys.stderr)
-        error_response = {
+    context_lines = [
+        '⚠️ HOOKS DAEMON ERROR - PROTECTION NOT ACTIVE ⚠️',
+        '',
+        f'ERROR TYPE: {error_type}',
+        f'ERROR DETAILS: {error_details}',
+        '',
+        '🛑 CRITICAL: You MUST stop work immediately.',
+        '',
+        'The hooks daemon is not functioning. This means:',
+        '- Destructive git operations are NOT being blocked',
+        '- Code quality checks are NOT running',
+        '- Safety guardrails are NOT active',
+        '',
+        'RECOMMENDED ACTIONS:',
+        '1. STOP all current tasks immediately',
+        '2. Inform the user that hooks protection is down',
+        '3. Run: python -m claude_code_hooks_daemon.daemon.cli status',
+        '4. Restart daemon: python -m claude_code_hooks_daemon.daemon.cli restart',
+    ]
+    context = chr(10).join(context_lines)
+
+    # Stop/SubagentStop: top-level decision only (deny to show error)
+    if event_name in ('Stop', 'SubagentStop'):
+        response = {
+            'decision': 'block',
+            'reason': 'Hooks daemon not running - protection not active',
+        }
+    else:
+        # Other events: hookSpecificOutput with context (fail-open allow)
+        response = {
             'hookSpecificOutput': {
                 'hookEventName': event_name,
-                'additionalContext': (
-                    f'⚠️ HOOKS DAEMON ERROR\\n\\n'
-                    f'ERROR TYPE: {error_type}\\n'
-                    f'ERROR DETAILS: {error_details}\\n\\n'
-                    f'Hooks daemon not functional.'
-                )
+                'additionalContext': context,
             }
         }
-        print(json.dumps(error_response))
+    print(json.dumps(response))
 
 # Read JSON from stdin (preserves all control characters)
 request = sys.stdin.read()
@@ -322,12 +406,12 @@ event_name = 'Unknown'
 try:
     req_data = json.loads(request)
     event_name = req_data.get('event', 'Unknown')
-except:
+except Exception:
     pass
 
 # Add newline if not present (daemon expects newline-terminated JSON)
-if not request.endswith('\\n'):
-    request += '\\n'
+if not request.endswith('\n'):
+    request += '\n'
 
 socket_path = '$SOCKET_PATH'
 
@@ -348,7 +432,7 @@ try:
     sock.close()
 
     # Output response (strip trailing newline for clean output)
-    output = response.decode('utf-8').rstrip('\\n')
+    output = response.decode('utf-8').rstrip('\n')
     print(output)
     sys.exit(0)
 
@@ -380,6 +464,7 @@ except Exception as e:
 
 # Export functions for use by forwarder scripts
 export -f emit_hook_error
+export -f validate_venv
 export -f is_daemon_running
 export -f start_daemon
 export -f ensure_daemon

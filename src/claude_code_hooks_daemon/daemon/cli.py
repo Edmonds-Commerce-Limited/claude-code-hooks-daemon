@@ -10,6 +10,7 @@ Provides:
 - handlers: List registered handlers
 - config: Show loaded configuration
 - init-config: Generate configuration template
+- repair: Repair broken venv (runs uv sync)
 """
 
 import argparse
@@ -18,6 +19,7 @@ import json
 import os
 import signal
 import socket
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -118,7 +120,7 @@ def _validate_installation(project_root: Path) -> Path:
         try:
             # Initialize ProjectContext BEFORE config validation
             # (Config validation instantiates handlers which may use ProjectContext)
-            if not ProjectContext._initialized:  # noqa: SLF001 - checking before init
+            if not ProjectContext._initialized:
                 ProjectContext.initialize(config_file)
 
             config_dict = ConfigLoader.load(config_file)
@@ -701,6 +703,79 @@ def cmd_restart(args: argparse.Namespace) -> int:
     return cmd_start(args)
 
 
+def cmd_repair(args: argparse.Namespace) -> int:
+    """Repair venv by running uv sync.
+
+    Fixes broken venvs caused by environment switching (container/host),
+    Python version changes, or stale editable install .pth files.
+
+    Args:
+        args: Command-line arguments
+
+    Returns:
+        0 if repair succeeded, 1 otherwise
+    """
+    project_root = get_project_path(getattr(args, "project_root", None))
+
+    print("Repairing venv...")
+
+    # Stop daemon first if running
+    socket_path = get_socket_path(project_root)
+    pid_path = get_pid_path(project_root)
+    pid = read_pid_file(str(pid_path))
+    if pid is not None:
+        print("Stopping running daemon first...")
+        cmd_stop(args)
+        time.sleep(0.5)
+
+    # Run uv sync to rebuild venv
+    venv_path = Path(project_root) / "untracked" / "venv"
+    env = os.environ.copy()
+    env["UV_PROJECT_ENVIRONMENT"] = str(venv_path)
+
+    try:
+        result = subprocess.run(
+            ["uv", "sync"],
+            cwd=str(project_root),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            print(f"ERROR: uv sync failed (exit {result.returncode})")
+            if result.stderr:
+                print(result.stderr)
+            return 1
+
+        print("Venv repaired successfully.")
+
+        # Verify the repair worked
+        venv_python = venv_path / "bin" / "python"
+        verify = subprocess.run(
+            [str(venv_python), "-c", "import claude_code_hooks_daemon; print('OK')"],
+            capture_output=True,
+            text=True,
+        )
+        if verify.returncode == 0:
+            print("Verification: import claude_code_hooks_daemon OK")
+        else:
+            print("WARNING: Venv repaired but import check failed:")
+            print(verify.stderr)
+            return 1
+
+        return 0
+
+    except FileNotFoundError:
+        print(
+            "ERROR: 'uv' not found. Install with: curl -LsSf https://astral.sh/uv/install.sh | sh"
+        )
+        return 1
+    except subprocess.TimeoutExpired:
+        print("ERROR: uv sync timed out after 120 seconds")
+        return 1
+
+
 def cmd_init_config(args: argparse.Namespace) -> int:
     """Generate configuration template.
 
@@ -841,6 +916,10 @@ def main() -> int:
         help="Output as JSON",
     )
     parser_config.set_defaults(func=cmd_config)
+
+    # repair command
+    parser_repair = subparsers.add_parser("repair", help="Repair broken venv (runs uv sync)")
+    parser_repair.set_defaults(func=cmd_repair)
 
     # init-config command
     parser_init_config = subparsers.add_parser(
