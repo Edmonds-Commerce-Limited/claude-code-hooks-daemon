@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
-from claude_code_hooks_daemon.core import Handler, HookResult
+from claude_code_hooks_daemon.core import Handler, HookResult, ProjectContext
 from claude_code_hooks_daemon.core.hook_result import Decision
 
 logger = logging.getLogger(__name__)
@@ -85,9 +85,8 @@ class YoloContainerDetectionHandler(Handler):
 
             # Check for /workspace + .claude/ directory
             try:
-                if Path.cwd() == Path("/workspace"):
-                    claude_dir = Path(".claude")
-                    if claude_dir.exists():
+                if ProjectContext.project_root() == Path("/workspace"):
+                    if ProjectContext.config_dir().exists():
                         score += 3
             except (OSError, RuntimeError):
                 # Filesystem errors - skip this check
@@ -147,8 +146,11 @@ class YoloContainerDetectionHandler(Handler):
                 indicators.append("CLAUDE_CODE_ENTRYPOINT=cli environment variable")
 
             try:
-                if Path.cwd() == Path("/workspace") and Path(".claude").exists():
-                    indicators.append("Working directory is /workspace with .claude/ present")
+                if (
+                    ProjectContext.project_root() == Path("/workspace")
+                    and ProjectContext.config_dir().exists()
+                ):
+                    indicators.append("Project root is /workspace with .claude/ present")
             except (OSError, RuntimeError):
                 pass
 

@@ -11,6 +11,49 @@ from pathlib import Path
 from typing import Any
 
 
+def setup_test_git_repo(tmp_path: Path) -> None:
+    """Set up a minimal git repository for testing.
+
+    ProjectContext requires a git repository with remote origin.
+    This helper creates the minimal structure needed for tests.
+
+    Args:
+        tmp_path: Temporary directory to initialize as git repo
+    """
+    # Initialize git repo
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test User"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+
+    # Add a remote origin (required by ProjectContext)
+    subprocess.run(
+        ["git", "remote", "add", "origin", "https://github.com/test/repo.git"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+
+    # Create initial commit (some git operations need at least one commit)
+    (tmp_path / "README.md").write_text("# Test Repo\n")
+    subprocess.run(["git", "add", "README.md"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "Initial commit"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+
+
 class TestEntryPointBranchCoverage:
     """Tests targeting specific branch coverage in hook entry points."""
 
@@ -40,6 +83,8 @@ class TestEntryPointBranchCoverage:
 
     def test_notification_without_config_file(self, tmp_path: Path) -> None:
         """Notification hook works without config file (FileNotFoundError branch)."""
+        setup_test_git_repo(tmp_path)
+
         # No config file - triggers FileNotFoundError in ConfigLoader.find_config()
         hook_input = {
             "level": "info",
@@ -58,6 +103,8 @@ class TestEntryPointBranchCoverage:
 
     def test_permission_request_without_config_file(self, tmp_path: Path) -> None:
         """PermissionRequest hook works without config file."""
+        setup_test_git_repo(tmp_path)
+
         hook_input = {
             "permission_type": "file_read",
             "resource": "/tmp/test.txt",
@@ -75,6 +122,8 @@ class TestEntryPointBranchCoverage:
 
     def test_stop_without_config_file(self, tmp_path: Path) -> None:
         """Stop hook works without config file."""
+        setup_test_git_repo(tmp_path)
+
         hook_input = {
             "reason": "user_request",
         }
@@ -91,6 +140,8 @@ class TestEntryPointBranchCoverage:
 
     def test_user_prompt_submit_without_config_file(self, tmp_path: Path) -> None:
         """UserPromptSubmit hook works without config file."""
+        setup_test_git_repo(tmp_path)
+
         hook_input = {
             "prompt": "Test prompt",
         }
@@ -103,10 +154,16 @@ class TestEntryPointBranchCoverage:
 
         assert result.returncode == 0
         output = json.loads(result.stdout)
-        assert output == {}
+        # With git repo set up, git_context_injector handler runs by default
+        # and adds git status to the output
+        assert "hookSpecificOutput" in output
+        assert "additionalContext" in output["hookSpecificOutput"]
+        assert "git repository" in output["hookSpecificOutput"]["additionalContext"].lower()
 
     def test_subagent_stop_without_config_file(self, tmp_path: Path) -> None:
         """SubagentStop hook works without config file."""
+        setup_test_git_repo(tmp_path)
+
         hook_input = {
             "subagent_name": "test-agent",
             "reason": "completed",
@@ -124,6 +181,8 @@ class TestEntryPointBranchCoverage:
 
     def test_pre_compact_without_config_file(self, tmp_path: Path) -> None:
         """PreCompact hook works without config file."""
+        setup_test_git_repo(tmp_path)
+
         hook_input = {
             "reason": "token_limit",
         }
@@ -140,6 +199,8 @@ class TestEntryPointBranchCoverage:
 
     def test_session_end_without_config_file(self, tmp_path: Path) -> None:
         """SessionEnd hook works without config file."""
+        setup_test_git_repo(tmp_path)
+
         hook_input = {
             "session_id": "test-session",
         }
@@ -156,6 +217,8 @@ class TestEntryPointBranchCoverage:
 
     def test_post_tool_use_without_config_file(self, tmp_path: Path) -> None:
         """PostToolUse hook works without config file."""
+        setup_test_git_repo(tmp_path)
+
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "echo test"},
@@ -174,6 +237,8 @@ class TestEntryPointBranchCoverage:
 
     def test_session_start_without_config_file(self, tmp_path: Path) -> None:
         """SessionStart hook works without config file."""
+        setup_test_git_repo(tmp_path)
+
         hook_input = {
             "session_id": "test-session",
         }
@@ -190,6 +255,8 @@ class TestEntryPointBranchCoverage:
 
     def test_pre_tool_use_with_tag_filtering_enable_tags(self, tmp_path: Path) -> None:
         """PreToolUse handler registration respects enable_tags configuration."""
+        setup_test_git_repo(tmp_path)
+
         # Create config with enable_tags at event level
         config_file = tmp_path / ".claude" / "hooks-daemon.yaml"
         config_file.parent.mkdir(parents=True)
@@ -221,6 +288,8 @@ plugins: []
 
     def test_pre_tool_use_with_tag_filtering_disable_tags(self, tmp_path: Path) -> None:
         """PreToolUse handler registration respects disable_tags configuration."""
+        setup_test_git_repo(tmp_path)
+
         # Create config with disable_tags at event level
         config_file = tmp_path / ".claude" / "hooks-daemon.yaml"
         config_file.parent.mkdir(parents=True)
@@ -252,6 +321,8 @@ plugins: []
 
     def test_post_tool_use_with_tag_filtering_enable_tags(self, tmp_path: Path) -> None:
         """PostToolUse handler registration respects enable_tags."""
+        setup_test_git_repo(tmp_path)
+
         config_file = tmp_path / ".claude" / "hooks-daemon.yaml"
         config_file.parent.mkdir(parents=True)
         config_file.write_text("""
@@ -281,6 +352,8 @@ plugins: []
 
     def test_post_tool_use_with_tag_filtering_disable_tags(self, tmp_path: Path) -> None:
         """PostToolUse handler registration respects disable_tags."""
+        setup_test_git_repo(tmp_path)
+
         config_file = tmp_path / ".claude" / "hooks-daemon.yaml"
         config_file.parent.mkdir(parents=True)
         config_file.write_text("""
@@ -310,6 +383,8 @@ plugins: []
 
     def test_session_end_with_tag_filtering_enable_tags(self, tmp_path: Path) -> None:
         """SessionEnd handler registration respects enable_tags."""
+        setup_test_git_repo(tmp_path)
+
         config_file = tmp_path / ".claude" / "hooks-daemon.yaml"
         config_file.parent.mkdir(parents=True)
         config_file.write_text("""
@@ -336,6 +411,8 @@ plugins: []
 
     def test_session_end_with_tag_filtering_disable_tags(self, tmp_path: Path) -> None:
         """SessionEnd handler registration respects disable_tags."""
+        setup_test_git_repo(tmp_path)
+
         config_file = tmp_path / ".claude" / "hooks-daemon.yaml"
         config_file.parent.mkdir(parents=True)
         config_file.write_text("""
@@ -362,6 +439,8 @@ plugins: []
 
     def test_notification_with_tag_filtering_enable_tags(self, tmp_path: Path) -> None:
         """Notification hook respects enable_tags at event level."""
+        setup_test_git_repo(tmp_path)
+
         config_file = tmp_path / ".claude" / "hooks-daemon.yaml"
         config_file.parent.mkdir(parents=True)
         config_file.write_text("""
@@ -389,6 +468,8 @@ plugins: []
 
     def test_notification_with_tag_filtering_disable_tags(self, tmp_path: Path) -> None:
         """Notification hook respects disable_tags at event level."""
+        setup_test_git_repo(tmp_path)
+
         config_file = tmp_path / ".claude" / "hooks-daemon.yaml"
         config_file.parent.mkdir(parents=True)
         config_file.write_text("""
@@ -416,6 +497,8 @@ plugins: []
 
     def test_permission_request_with_tag_filtering(self, tmp_path: Path) -> None:
         """PermissionRequest hook respects tag filtering."""
+        setup_test_git_repo(tmp_path)
+
         config_file = tmp_path / ".claude" / "hooks-daemon.yaml"
         config_file.parent.mkdir(parents=True)
         config_file.write_text("""
@@ -441,6 +524,8 @@ plugins: []
 
     def test_stop_with_tag_filtering(self, tmp_path: Path) -> None:
         """Stop hook respects tag filtering."""
+        setup_test_git_repo(tmp_path)
+
         config_file = tmp_path / ".claude" / "hooks-daemon.yaml"
         config_file.parent.mkdir(parents=True)
         config_file.write_text("""
@@ -465,6 +550,8 @@ plugins: []
 
     def test_user_prompt_submit_with_tag_filtering(self, tmp_path: Path) -> None:
         """UserPromptSubmit hook respects tag filtering."""
+        setup_test_git_repo(tmp_path)
+
         config_file = tmp_path / ".claude" / "hooks-daemon.yaml"
         config_file.parent.mkdir(parents=True)
         config_file.write_text("""
@@ -489,6 +576,8 @@ plugins: []
 
     def test_subagent_stop_with_tag_filtering(self, tmp_path: Path) -> None:
         """SubagentStop hook respects tag filtering."""
+        setup_test_git_repo(tmp_path)
+
         config_file = tmp_path / ".claude" / "hooks-daemon.yaml"
         config_file.parent.mkdir(parents=True)
         config_file.write_text("""
@@ -514,6 +603,8 @@ plugins: []
 
     def test_pre_compact_with_tag_filtering(self, tmp_path: Path) -> None:
         """PreCompact hook respects tag filtering."""
+        setup_test_git_repo(tmp_path)
+
         config_file = tmp_path / ".claude" / "hooks-daemon.yaml"
         config_file.parent.mkdir(parents=True)
         config_file.write_text("""
@@ -538,6 +629,8 @@ plugins: []
 
     def test_session_start_with_tag_filtering(self, tmp_path: Path) -> None:
         """SessionStart hook respects tag filtering."""
+        setup_test_git_repo(tmp_path)
+
         config_file = tmp_path / ".claude" / "hooks-daemon.yaml"
         config_file.parent.mkdir(parents=True)
         config_file.write_text("""

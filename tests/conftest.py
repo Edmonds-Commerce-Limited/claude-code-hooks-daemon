@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.response_schemas import (
     get_response_schema,
     is_valid_response,
@@ -134,3 +135,17 @@ def hook_result_validator(response_validator):
             return self.response_validator.get_errors(event_name, response)
 
     return HookResultValidator(response_validator)
+
+
+@pytest.fixture(autouse=True)
+def reset_project_context():
+    """Reset ProjectContext singleton after each test.
+
+    ProjectContext is a singleton that can only be initialized once per process.
+    This fixture ensures it's reset between tests so each test starts fresh.
+
+    This is an autouse fixture, so it runs automatically for every test.
+    """
+    yield  # Let the test run
+    # After test completes, reset ProjectContext
+    ProjectContext.reset()

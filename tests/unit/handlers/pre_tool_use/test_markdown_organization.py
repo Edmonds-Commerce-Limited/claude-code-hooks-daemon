@@ -6,6 +6,17 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def mock_project_context():
+    """Mock ProjectContext for handler instantiation tests."""
+    with patch("claude_code_hooks_daemon.core.project_context.ProjectContext.project_root") as mock:
+        mock.return_value = Path("/tmp/test")
+        yield mock
+
+
+import pytest
+
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization import (
     MarkdownOrganizationHandler,

@@ -9,11 +9,57 @@ import sys
 from pathlib import Path
 
 
+def setup_test_git_repo(tmp_path: Path) -> None:
+    """Set up a minimal git repository for testing.
+
+    ProjectContext requires a git repository with remote origin.
+    This helper creates the minimal structure needed for tests.
+
+    Args:
+        tmp_path: Temporary directory to initialize as git repo
+    """
+    # Initialize git repo
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test User"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+
+    # Add a remote origin (required by ProjectContext)
+    subprocess.run(
+        ["git", "remote", "add", "origin", "https://github.com/test/repo.git"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+
+    # Create initial commit (some git operations need at least one commit)
+    (tmp_path / "README.md").write_text("# Test Repo\n")
+    subprocess.run(["git", "add", "README.md"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "Initial commit"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+
+
 class TestPreToolUseEntryPoint:
     """Integration tests for pre_tool_use.py entry point."""
 
     def test_entry_point_with_minimal_config(self, tmp_path: Path) -> None:
         """Entry point works with minimal configuration."""
+        # Set up git repository (required by ProjectContext)
+        setup_test_git_repo(tmp_path)
+
         # Create minimal config
         config_file = tmp_path / ".claude" / "hooks-daemon.yaml"
         config_file.parent.mkdir(parents=True)
@@ -47,6 +93,9 @@ plugins: []
 
     def test_entry_point_blocks_destructive_git(self, tmp_path: Path) -> None:
         """Entry point blocks destructive git commands via handler."""
+        # Set up git repository (required by ProjectContext)
+        setup_test_git_repo(tmp_path)
+
         # Create config with destructive_git enabled
         config_file = tmp_path / ".claude" / "hooks-daemon.yaml"
         config_file.parent.mkdir(parents=True)
@@ -85,6 +134,9 @@ plugins: []
 
     def test_entry_point_with_disabled_handler(self, tmp_path: Path) -> None:
         """Disabled handlers are not invoked."""
+        # Set up git repository (required by ProjectContext)
+        setup_test_git_repo(tmp_path)
+
         # Create config with handler disabled
         config_file = tmp_path / ".claude" / "hooks-daemon.yaml"
         config_file.parent.mkdir(parents=True)
@@ -120,6 +172,9 @@ plugins: []
 
     def test_entry_point_with_custom_priority(self, tmp_path: Path) -> None:
         """Custom priority configuration is applied."""
+        # Set up git repository (required by ProjectContext)
+        setup_test_git_repo(tmp_path)
+
         # Create config with custom priority
         config_file = tmp_path / ".claude" / "hooks-daemon.yaml"
         config_file.parent.mkdir(parents=True)
@@ -157,6 +212,9 @@ plugins: []
 
     def test_entry_point_without_config_uses_defaults(self, tmp_path: Path) -> None:
         """Entry point works without config file (uses defaults)."""
+        # Set up git repository (required by ProjectContext)
+        setup_test_git_repo(tmp_path)
+
         # No config file created
 
         # Create hook input
@@ -182,6 +240,9 @@ plugins: []
 
     def test_entry_point_with_invalid_json_input(self, tmp_path: Path) -> None:
         """Invalid JSON input doesn't crash (fail-open)."""
+        # Set up git repository (required by ProjectContext)
+        setup_test_git_repo(tmp_path)
+
         # Create config
         config_file = tmp_path / ".claude" / "hooks-daemon.yaml"
         config_file.parent.mkdir(parents=True)
@@ -210,6 +271,9 @@ handlers:
 
     def test_entry_point_processes_multiple_handlers(self, tmp_path: Path) -> None:
         """Multiple enabled handlers are processed in priority order."""
+        # Set up git repository (required by ProjectContext)
+        setup_test_git_repo(tmp_path)
+
         # Create config with multiple handlers
         config_file = tmp_path / ".claude" / "hooks-daemon.yaml"
         config_file.parent.mkdir(parents=True)
@@ -253,6 +317,9 @@ plugins: []
 
     def test_entry_point_allows_safe_commands(self, tmp_path: Path) -> None:
         """Safe commands pass through all handlers."""
+        # Set up git repository (required by ProjectContext)
+        setup_test_git_repo(tmp_path)
+
         # Create config with all handlers enabled
         config_file = tmp_path / ".claude" / "hooks-daemon.yaml"
         config_file.parent.mkdir(parents=True)
@@ -292,6 +359,9 @@ plugins: []
 
     def test_entry_point_as_executable_script(self, tmp_path: Path) -> None:
         """Entry point can be run as executable script."""
+        # Set up git repository (required by ProjectContext)
+        setup_test_git_repo(tmp_path)
+
         # Create minimal config
         config_file = tmp_path / ".claude" / "hooks-daemon.yaml"
         config_file.parent.mkdir(parents=True)

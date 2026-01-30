@@ -5,6 +5,17 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def mock_project_context():
+    """Mock ProjectContext for handler instantiation tests."""
+    with patch("claude_code_hooks_daemon.core.project_context.ProjectContext.project_root") as mock:
+        mock.return_value = Path("/tmp/test")
+        yield mock
+
+
+import pytest
+
 from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write import (
     ValidateEslintOnWriteHandler,
@@ -32,7 +43,7 @@ class TestValidateEslintOnWriteHandler:
     def test_initialization_auto_detect_workspace(self) -> None:
         """Handler should auto-detect workspace if not provided."""
         with patch(
-            "claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write.get_workspace_root"
+            "claude_code_hooks_daemon.core.project_context.ProjectContext.project_root"
         ) as mock_get_workspace:
             mock_get_workspace.return_value = Path("/mock/workspace")
             handler = ValidateEslintOnWriteHandler()

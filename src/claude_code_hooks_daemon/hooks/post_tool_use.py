@@ -17,6 +17,7 @@ if __name__ == "__main__":
 
 from claude_code_hooks_daemon.config import ConfigLoader
 from claude_code_hooks_daemon.core import FrontController
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.handlers.post_tool_use.bash_error_detector import (
     BashErrorDetectorHandler,
 )
@@ -71,6 +72,11 @@ def main() -> None:
 
     config = load_config_safe(config_path)
 
+    # 1.5. Initialize ProjectContext (required for handlers that use it)
+    # Only initialize if config file exists (skip for default config scenarios)
+    if config_path.exists():
+        ProjectContext.initialize(config_path)
+
     # 2. Create front controller
     controller = FrontController(event_name="PostToolUse")
 
@@ -94,7 +100,17 @@ def main() -> None:
             continue
 
         # Instantiate handler to get its tags
-        handler = handler_class()
+
+        try:
+            handler = handler_class()
+
+        except RuntimeError:
+
+            # Skip handlers that require ProjectContext when it\'s not initialized
+
+            # (This happens in edge cases like no config file)
+
+            continue
 
         # Tag-based filtering
         if enable_tags and not any(tag in handler.tags for tag in enable_tags):
