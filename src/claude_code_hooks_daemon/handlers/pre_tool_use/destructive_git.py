@@ -27,7 +27,12 @@ class DestructiveGitHandler(Handler):
             # Matches: git checkout main -- file
             # Matches: git checkout @{upstream} -- file
             r"\bgit\s+checkout\s+.*--\s+\S",
-            r"\bgit\s+restore\s+.*--worktree\b",
+            # SECURITY FIX: Match git restore with file paths (discards working tree changes)
+            # Matches: git restore file.txt
+            # Matches: git restore src/main.py
+            # Matches: git restore --worktree file.txt
+            # Does NOT match: git restore --staged file.txt (safe - only unstages)
+            r"\bgit\s+restore\s+(?!--staged).*\S",
             r"\bgit\s+stash\s+(?:drop|clear)\b",
             # Block force push
             r"\bgit\s+push\s+.*--force\b",
@@ -65,6 +70,8 @@ class DestructiveGitHandler(Handler):
             reason = (
                 "git checkout [REF] -- file discards all local changes to that file permanently"
             )
+        elif re.search(r"\bgit\s+restore\s+(?!--staged)", command, re.IGNORECASE):
+            reason = "git restore discards all local changes to files permanently"
         elif re.search(r"\bgit\s+push\s+.*--force\b", command, re.IGNORECASE):
             reason = "git push --force can overwrite remote history and destroy team members' work"
         else:
