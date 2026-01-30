@@ -141,7 +141,31 @@ class TestDestructiveGitHandler:
         }
         assert handler.matches(hook_input) is True
 
-    # matches() - Pattern 5: git restore --worktree
+    # matches() - Pattern 5: git restore (destructive variants)
+    def test_matches_git_restore_file(self, handler):
+        """Should match 'git restore file' (discards working tree changes)."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git restore file.txt"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_git_restore_multiple_files(self, handler):
+        """Should match 'git restore' with multiple files."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git restore file1.txt file2.txt"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_git_restore_path(self, handler):
+        """Should match 'git restore' with path."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git restore src/main.py"},
+        }
+        assert handler.matches(hook_input) is True
+
     def test_matches_git_restore_worktree(self, handler):
         """Should match 'git restore --worktree' command."""
         hook_input = {
@@ -306,6 +330,13 @@ class TestDestructiveGitHandler:
             in result.reason
         )
 
+    def test_handle_git_restore_reason(self, handler):
+        """handle() should provide specific reason for git restore."""
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git restore file.txt"}}
+        result = handler.handle(hook_input)
+        assert result.decision == "deny"
+        assert "git restore discards all local changes to files permanently" in result.reason
+
     def test_handle_generic_destructive_reason(self, handler):
         """handle() should provide generic reason for other patterns."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git checkout ."}}
@@ -391,6 +422,8 @@ class TestDestructiveGitHandler:
             "git checkout .",
             "git checkout -- file.txt",
             "git checkout HEAD -- file.txt",
+            "git restore file.txt",
+            "git restore src/main.py",
             "git restore --worktree file.txt",
             "git stash drop",
             "git stash clear",
