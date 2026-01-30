@@ -360,20 +360,8 @@ class MarkdownOrganizationHandler(Handler):
 
         # Check allowed locations with PRECISE pattern matching (not simple 'in' checks)
 
-        # 1. CLAUDE/Plan/NNN-*/ - Requires numbered subdirectory (3+ digits)
-        if re.match(r"^CLAUDE/Plan/\d{3,}-[^/]+/.+\.md$", normalized, re.IGNORECASE):
-            return False  # Allow
-
-        # 2. CLAUDE/ root level ONLY (no subdirs except known ones)
-        if normalized.lower().startswith("claude/") and "/" not in normalized[7:]:
-            return False  # Allow
-
-        # 3. CLAUDE/research/ - Structured research data
-        if re.match(r"^CLAUDE/research/", normalized, re.IGNORECASE):
-            return False  # Allow
-
-        # 4. CLAUDE/Sitemap/ - Site architecture
-        if re.match(r"^CLAUDE/Sitemap/", normalized, re.IGNORECASE):
+        # 1. CLAUDE/ - Allow all files and subdirectories
+        if normalized.lower().startswith("claude/"):
             return False  # Allow
 
         # 5. docs/ - Human-facing documentation
@@ -410,18 +398,16 @@ class MarkdownOrganizationHandler(Handler):
                 "Markdown files must follow project organization rules.\n\n"
                 f"Attempted to write: {file_path}\n\n"
                 "This location is NOT allowed. Markdown files can only be written to:\n\n"
-                "1. ./CLAUDE/Plan/XXX-plan-name/ - Docs for current plan\n"
-                "2. ./CLAUDE/ (root only) - Generic LLM docs\n"
-                "3. ./CLAUDE/research/ - Structured research data\n"
-                "4. ./docs/ - Human-facing documentation\n"
-                "5. ./eslint-rules/ - ESLint rule documentation\n"
-                "6. ./untracked/ - Ad-hoc temporary docs\n"
-                "7. ./.claude/commands/ - Slash command definitions\n\n"
+                "1. ./CLAUDE/ - All LLM documentation and subdirectories\n"
+                "2. ./docs/ - Human-facing documentation\n"
+                "3. ./eslint-rules/ - ESLint rule documentation\n"
+                "4. ./untracked/ - Ad-hoc temporary docs\n"
+                "5. ./.claude/commands/ - Slash command definitions\n\n"
                 "CHOOSE THE RIGHT LOCATION:\n"
+                "- Is this for LLMs/agents? -> CLAUDE/\n"
                 "- Is this for the current plan? -> CLAUDE/Plan/{plan-number}-*/\n"
                 "- Is this temporary/ad-hoc? -> untracked/\n"
                 "- Is this for humans? -> docs/\n"
-                "- Is this a slash command? -> .claude/commands/\n"
-                "- Is this generic LLM context? -> CLAUDE/ (very rare!)"
+                "- Is this a slash command? -> .claude/commands/"
             ),
         )

@@ -206,6 +206,20 @@ class TestMarkdownOrganizationHandler:
         write_input["tool_input"]["file_path"] = "CLAUDE/Sitemap/test.md"
         assert handler.matches(write_input) is False
 
+    def test_matches_returns_false_for_claude_subdirectories(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Handler allows markdown in any CLAUDE/ subdirectory."""
+        test_paths = [
+            "CLAUDE/AcceptanceTests/PLAYBOOK.md",
+            "CLAUDE/AcceptanceTests/subfolder/test.md",
+            "CLAUDE/SomeNewDirectory/document.md",
+            "CLAUDE/deep/nested/path/file.md",
+        ]
+        for path in test_paths:
+            write_input["tool_input"]["file_path"] = path
+            assert handler.matches(write_input) is False, f"Should allow: {path}"
+
     def test_matches_returns_false_for_docs_directory(
         self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
     ) -> None:

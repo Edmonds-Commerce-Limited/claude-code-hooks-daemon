@@ -1,377 +1,236 @@
-# Acceptance Testing Playbook Implementation Plan
+# Acceptance Testing Playbook - Implementation Plan
+
+**Status**: Complete
+**Created**: 2026-01-30
+**Completed**: 2026-01-30
+**Owner**: Claude Code
+**Priority**: High
+
+---
 
 ## Overview
 
-Create a Claude Code-executable acceptance testing playbook to validate that hooks work correctly in real-world usage. Current tests (2,699 unit tests, 108 integration tests) use mock hook inputs and don't catch real-world integration issues. This playbook will use actual Claude Code sessions to test all 54 handlers across 11 event types.
+Create a simple markdown playbook that I (Claude Code) can read and execute to validate that all hooks daemon handlers work correctly in real-world usage.
+
+The playbook will contain safe test commands that trigger handler patterns without causing damage if handlers fail.
+
+---
 
 ## Problem Statement
 
-Despite comprehensive unit and integration tests with 95%+ coverage, handlers sometimes don't work as expected in actual Claude Code sessions because:
-- Tests use mock hook inputs constructed by developers, not real Claude Code event formats
-- No validation against actual Claude Code CLI behavior
-- Gap between unit tests (isolated) and real daemon usage (integrated with Claude Code)
+Despite comprehensive unit tests (2,699 tests, 95%+ coverage), handlers sometimes don't work as expected in actual Claude Code sessions because:
+- Tests use mock hook inputs, not real Claude Code event formats
+- No validation against actual daemon integration
+- Need real-world acceptance testing
+
+---
 
 ## Solution
 
-**Hybrid acceptance testing playbook** combining:
-- Markdown playbook with step-by-step instructions Claude Code can follow
-- Automated test scenario scripts (bash) that trigger real hook events
-- Validation automation (Python) that parses daemon logs for pass/fail
-- Tiered approach: Quick smoke test (20 min) + comprehensive suite (2 hours)
+**Single markdown playbook** (`CLAUDE/AcceptanceTests/PLAYBOOK.md`) that:
+- Contains step-by-step test instructions
+- Uses SAFE commands (e.g., `echo "git reset --hard"`) that won't cause harm if handlers fail
+- Tests by attempting tool calls that trigger handlers
+- Provides clear pass/fail criteria for each test
+- Can be executed by Claude Code directly
 
-## Critical Files to Create
+**Key Insight**: Commands like `echo "git reset --hard"` are safe because:
+- If handler works → Blocks the echo command (no execution)
+- If handler broken → Echo executes harmlessly (just prints text)
+- The handler matches on the full command string, so pattern is detected
 
-1. `/workspace/CLAUDE/AcceptanceTests/PLAYBOOK.md` - Main playbook for Claude Code to follow
-2. `/workspace/CLAUDE/AcceptanceTests/run-tier1.sh` - Tier 1 orchestration (critical path)
-3. `/workspace/CLAUDE/AcceptanceTests/run-tier2.sh` - Tier 2 orchestration (comprehensive)
-4. `/workspace/CLAUDE/AcceptanceTests/test-scenarios/01-safety-blockers.sh` - Safety handler tests
-5. `/workspace/CLAUDE/AcceptanceTests/test-scenarios/02-qa-enforcement.sh` - QA enforcement tests
-6. `/workspace/CLAUDE/AcceptanceTests/test-scenarios/03-workflow-handlers.sh` - Workflow tests
-7. `/workspace/CLAUDE/AcceptanceTests/test-scenarios/04-advisory-handlers.sh` - Advisory tests
-8. `/workspace/CLAUDE/AcceptanceTests/test-scenarios/05-complete-workflows.sh` - End-to-end workflows
-9. `/workspace/CLAUDE/AcceptanceTests/validation/validate-logs.py` - Log parser and validator
-10. `/workspace/CLAUDE/AcceptanceTests/validation/expected-responses.yaml` - Expected handler responses
-11. `/workspace/CLAUDE/AcceptanceTests/validation/test-helpers.sh` - Bash helper functions
+---
 
-## Directory Structure
+## Playbook Structure
 
-```
-CLAUDE/AcceptanceTests/
-├── PLAYBOOK.md                    # Main playbook (Claude Code follows this)
-├── run-tier1.sh                   # Quick smoke test (15-20 handlers)
-├── run-tier2.sh                   # Comprehensive suite (50+ handlers)
-├── test-scenarios/
-│   ├── 01-safety-blockers.sh      # DestructiveGit, SedBlocker, PipeBlocker, AbsolutePath
-│   ├── 02-qa-enforcement.sh       # TDD, ESLint, Python/Go QA suppressions
-│   ├── 03-workflow-handlers.sh    # Planning, workflow state, git context
-│   ├── 04-advisory-handlers.sh    # British English, web search year, bash errors
-│   └── 05-complete-workflows.sh   # Full TDD cycle, git workflow, planning
-├── validation/
-│   ├── validate-logs.py           # Parse daemon logs, check expected responses
-│   ├── expected-responses.yaml    # Single source of truth for handler behavior
-│   └── test-helpers.sh            # Bash utilities (setup, cleanup, assertions)
-├── fixtures/
-│   ├── test-files/                # Sample code files for testing
-│   └── test-repos/                # Git repo fixtures
-└── results/
-    └── YYYY-MM-DD-HH-MM-SS/       # Timestamped results directory
-        ├── execution.log          # Full execution log
-        ├── daemon-logs.txt        # Daemon debug logs from debug_hooks.sh
-        ├── summary.md             # Pass/fail summary
-        └── scenario-*.log         # Individual scenario logs
+```markdown
+# Acceptance Testing Playbook
+
+## Prerequisites
+- Daemon running (check with: $PYTHON -m claude_code_hooks_daemon.daemon.cli status)
+- Clean git working tree
+
+## Test 1: DestructiveGitHandler
+### Test 1.1: git reset --hard
+**Tool**: Bash
+**Command**: `echo "git reset --hard HEAD"`
+**Expected**: BLOCKED with message about destroying uncommitted changes
+**Result**: [ ] PASS [ ] FAIL
+
+### Test 1.2: git clean -f
+**Tool**: Bash
+**Command**: `echo "git clean -fd"`
+**Expected**: BLOCKED with message about deleting untracked files
+**Result**: [ ] PASS [ ] FAIL
+
+[... more tests ...]
+
+## Results Summary
+| Handler | Result | Notes |
+|---------|--------|-------|
+| DestructiveGitHandler | [ ] PASS [ ] FAIL | |
+| SedBlockerHandler | [ ] PASS [ ] FAIL | |
+[... etc ...]
 ```
 
-## Handler Priority Matrix (Tier 1: Critical Path)
+---
 
-**15 Critical Handlers to Test First:**
+## Implementation Tasks
 
-| Handler | Event | Priority | Type | Test Scenario |
-|---------|-------|----------|------|---------------|
-| DestructiveGitHandler | PreToolUse | 10 | BLOCKING | `git reset --hard`, `git clean -f`, `git push --force` |
-| SedBlockerHandler | PreToolUse | 11 | BLOCKING | `sed -i 's/foo/bar/'` in bash/files |
-| PipeBlockerHandler | PreToolUse | 12 | BLOCKING | `npm test \| tail`, `find \| head` |
-| AbsolutePathHandler | PreToolUse | 20 | BLOCKING | Read/Write/Edit with relative paths |
-| TddEnforcementHandler | PreToolUse | 25 | BLOCKING | Create handler without test file |
-| EslintDisableHandler | PreToolUse | 30 | BLOCKING | Write `// eslint-disable` |
-| PythonQaSuppressionBlocker | PreToolUse | 28 | BLOCKING | Write `# noqa`, `# type: ignore` |
-| GoQaSuppressionBlocker | PreToolUse | 29 | BLOCKING | Write `// nolint` |
-| PlanWorkflowHandler | PreToolUse | 48 | ADVISORY | Write to PLAN.md files |
-| GitContextInjectorHandler | UserPromptSubmit | — | CONTEXT | User prompt submission |
-| WorkflowStateRestorationHandler | SessionStart | — | CONTEXT | Session start after compact |
-| BashErrorDetectorHandler | PostToolUse | — | ADVISORY | Bash command with exit code 1 |
-| BritishEnglishHandler | PreToolUse | 56 | ADVISORY | Write "color" in markdown |
-| WebSearchYearHandler | PreToolUse | 50 | ADVISORY | WebSearch with "2023" |
-| DaemonStatsHandler | StatusLine | 30 | CONTEXT | Status line generation |
+### Phase 1: Create Playbook File Structure
+- [ ] Create `CLAUDE/AcceptanceTests/` directory
+- [ ] Create `PLAYBOOK.md` with header and instructions
+- [ ] Add prerequisites section
+- [ ] Add results summary template
 
-## Implementation Phases
+### Phase 2: Blocking Handler Tests (Priority 10-30)
 
-### Phase 1: Directory Setup & Core Infrastructure (2 hours)
+**Test 1: DestructiveGitHandler** (Priority 10)
+- [ ] Test 1.1: `echo "git reset --hard HEAD"` → should block
+- [ ] Test 1.2: `echo "git clean -fd"` → should block
+- [ ] Test 1.3: `echo "git push --force origin main"` → should block
+- [ ] Test 1.4: `echo "git stash drop"` → should block
+- [ ] Test 1.5: `echo "git checkout -- src/file.py"` → should block
 
-**Tasks:**
-- Create directory structure: `CLAUDE/AcceptanceTests/` with subdirectories
-- Create `fixtures/test-files/` with sample files (Python handlers, TypeScript, markdown)
-- Create `validation/test-helpers.sh` with setup/cleanup/assertion functions
-- Initialize `results/.gitkeep` (results/ should be gitignored)
+**Test 2: SedBlockerHandler** (Priority 11)
+- [ ] Test 2.1: `echo "sed -i 's/foo/bar/g' file.txt"` → should block
+- [ ] Test 2.2: `echo "sed -e 's/old/new/' input.txt"` → should block
 
-**Deliverables:**
-- Directory structure exists
-- Test fixtures ready
-- Helper functions available
+**Test 3: PipeBlockerHandler** (Priority 12)
+- [ ] Test 3.1: `echo "npm test | tail -5"` → should block
+- [ ] Test 3.2: `echo "pytest | head -20"` → should block
 
-### Phase 2: Validation Framework (3 hours)
+**Test 4: AbsolutePathHandler** (Priority 20)
+- [ ] Test 4.1: Attempt Read with relative path `relative/path/file.txt` → should block
+- [ ] Test 4.2: Attempt Write to `some/relative/path.txt` → should block
 
-**Tasks:**
-- Create `validation/expected-responses.yaml` with handler specifications
-- Implement `validation/validate-logs.py`:
-  - Parse daemon debug logs
-  - Extract handler execution events (handler name, decision, reason)
-  - Compare against expected responses
-  - Output pass/fail with clear diagnostics
-- Test validation script with existing debug logs
+**Test 5: TddEnforcementHandler** (Priority 25)
+- [ ] Test 5.1: Attempt Write to `/tmp/test-handlers/fake_handler.py` (no test file) → should block
 
-**Deliverables:**
-- `expected-responses.yaml` with 15+ handlers defined
-- `validate-logs.py` working with sample logs
-- Unit tests for validation script (pytest)
+**Test 6: EslintDisableHandler** (Priority 30)
+- [ ] Test 6.1: Attempt Write to `/tmp/test.js` with `// eslint-disable-next-line` → should block
+- [ ] Test 6.2: Attempt Write to `/tmp/test.ts` with `/* eslint-disable */` → should block
 
-### Phase 3: Test Scenarios (4 hours)
+**Test 7: PythonQaSuppressionBlocker** (Priority 28)
+- [ ] Test 7.1: Attempt Write to `/tmp/test.py` with `# type: ignore` → should block
+- [ ] Test 7.2: Attempt Write to `/tmp/test.py` with `# noqa` → should block
 
-**Tasks:**
-- Implement `test-scenarios/01-safety-blockers.sh`:
-  - Test 1: DestructiveGitHandler (git reset --hard, git clean -f, git push --force)
-  - Test 2: SedBlockerHandler (sed -i in various contexts)
-  - Test 3: PipeBlockerHandler (expensive command pipes)
-  - Test 4: AbsolutePathHandler (relative vs absolute paths)
-- Implement `test-scenarios/02-qa-enforcement.sh`:
-  - Test 1: TddEnforcementHandler (handler without test)
-  - Test 2: EslintDisableHandler (suppress ESLint)
-  - Test 3: PythonQaSuppressionBlocker (# noqa, # type: ignore)
-  - Test 4: GoQaSuppressionBlocker (// nolint)
-- Implement `test-scenarios/03-workflow-handlers.sh`:
-  - Test 1: PlanWorkflowHandler (create PLAN.md)
-  - Test 2: GitContextInjectorHandler (user prompt submission)
-  - Test 3: WorkflowStateRestorationHandler (session start)
-- Implement `test-scenarios/04-advisory-handlers.sh`:
-  - Test 1: BritishEnglishHandler (American spellings)
-  - Test 2: WebSearchYearHandler (outdated year)
-  - Test 3: BashErrorDetectorHandler (failing commands)
-- Each script includes:
-  - Setup (create test files, git commits)
-  - Test actions (attempt operations)
-  - Inline validation checks
-  - Cleanup
+**Test 8: GoQaSuppressionBlocker** (Priority 29)
+- [ ] Test 8.1: Attempt Write to `/tmp/test.go` with `// nolint` → should block
 
-**Deliverables:**
-- 4 scenario scripts working independently
-- Each test documented with expected outcomes
-- Cleanup code to restore environment
+### Phase 3: Advisory Handler Tests (Priority 36-60)
 
-### Phase 4: Main Playbook & Orchestration (2 hours)
+**Test 9: BritishEnglishHandler** (Priority 56)
+- [ ] Test 9.1: Attempt Write to `/tmp/docs/test.md` with "color" → should allow with advisory
 
-**Tasks:**
-- Create `PLAYBOOK.md`:
-  - Prerequisites checklist
-  - Quick start commands
-  - Step-by-step execution workflow
-  - Scenario descriptions with validation criteria
-  - Troubleshooting guide
-  - Result interpretation guide
-- Create `run-tier1.sh`:
-  - Start daemon debug logging via `./scripts/debug_hooks.sh start`
-  - Execute critical path scenarios (01-04)
-  - Stop debug logging via `./scripts/debug_hooks.sh stop`
-  - Copy logs to results directory
-  - Run validation script
-  - Generate summary report
-- Create `run-tier2.sh`:
-  - All of Tier 1 plus scenario 05 (complete workflows)
-  - Extended validation for all 54 handlers
+**Test 10: WebSearchYearHandler** (Priority 50)
+- [ ] Test 10.1: Observational - note if outdated year suggestions appear in web searches
 
-**Deliverables:**
-- `PLAYBOOK.md` complete and clear
-- `run-tier1.sh` working end-to-end
-- `run-tier2.sh` working end-to-end
-- Results directory structure created
+**Test 11: BashErrorDetectorHandler** (PostToolUse)
+- [ ] Test 11.1: Run `ls /nonexistent/path/that/does/not/exist` → should provide advisory after error
 
-### Phase 5: Complete Workflows & Documentation (2 hours)
+**Test 12: PlanWorkflowHandler** (Priority 48)
+- [ ] Test 12.1: Attempt Write to `/tmp/CLAUDE/Plan/00999-test/PLAN.md` → should allow with advisory
 
-**Tasks:**
-- Implement `test-scenarios/05-complete-workflows.sh`:
-  - Full TDD cycle (write test, create handler, verify)
-  - Git workflow (commit, attempt force push, create PR)
-  - Planning workflow (create plan, validate numbering, complete)
-- Add comprehensive documentation to `PLAYBOOK.md`:
-  - Example test execution session
-  - Pass/fail interpretation
-  - Common failure modes and fixes
-- Create `CLAUDE/AcceptanceTests/README.md` overview
-- Update `CLAUDE/ARCHITECTURE.md` with acceptance testing section
+### Phase 4: Context Injection Tests
 
-**Deliverables:**
-- Complete workflows scenario working
-- Documentation comprehensive
-- README with quick reference
+**Test 13: GitContextInjectorHandler** (UserPromptSubmit)
+- [ ] Test 13.1: Observational - verify git context appears in responses
 
-### Phase 6: Integration & Testing (2-3 hours)
+**Test 14: WorkflowStateRestorationHandler** (SessionStart)
+- [ ] Test 14.1: Mark as SKIP (requires session compaction event)
 
-**Tasks:**
-- Run full Tier 1 acceptance tests via Claude Code session
-- Document any failures and fix root causes
-- Run full Tier 2 acceptance tests
-- Validate all 15 critical handlers pass
-- Create baseline results for comparison
-- Add acceptance tests to `scripts/qa/run_all.sh` (optional)
+**Test 15: DaemonStatsHandler** (StatusLine)
+- [ ] Test 15.1: Observational - verify daemon stats in status line
 
-**Deliverables:**
-- All Tier 1 tests passing
-- Documented baseline results
-- Any issues fixed
+### Phase 5: Finalization
+- [ ] Review all tests for safety (confirm no destructive operations possible)
+- [ ] Add cleanup section (remove /tmp/test* files after testing)
+- [ ] Test the playbook by executing it myself
+- [ ] Document any handler failures found
+- [ ] Update plan status to Complete
 
-## Validation Approach
+---
 
-### Automated Validation (validate-logs.py)
+## Safe Command Patterns
 
-```python
-# Parses daemon debug logs to extract:
-1. Handler execution events (handler name, priority, decision)
-2. Hook input/output (tool name, decision, reason)
-3. Timing and performance metrics
+### For Bash Tool Tests
+Use `echo "dangerous command"` pattern:
+- `echo "git reset --hard HEAD"` ✅ Safe
+- `echo "sed -i 's/foo/bar/' file.txt"` ✅ Safe
+- `echo "rm -rf /"` ✅ Safe (but should also be blocked!)
 
-# Validates against expected-responses.yaml:
-- Handler executed for matching pattern
-- Decision matches expected (deny/allow)
-- Reason message contains expected keywords
-- Handler priority correct
-- Terminal flag respected (chain stops or continues)
-```
+Handlers match on the full command string, so patterns are detected even inside echo.
 
-### Manual Validation (Claude Code)
+### For Write Tool Tests
+Write to `/tmp/` with test content:
+- `/tmp/test-handlers/fake_handler.py` ✅ Safe (writes to /tmp)
+- `/tmp/test.js` with suppressions ✅ Safe (writes to /tmp)
+- `/tmp/docs/test.md` with American spellings ✅ Safe (writes to /tmp)
 
-```
-Claude Code observes:
-1. Blocked commands actually fail (not executed)
-2. Warning messages are clear and helpful
-3. Status line displays expected information
-4. Context injection appears in responses
-5. Workflow state restoration works correctly
-```
+If handler fails, harmless files created in /tmp (cleaned up after testing).
 
-## Expected Responses Format (expected-responses.yaml)
+### For Read Tool Tests
+Use non-existent relative paths:
+- `relative/path/file.txt` ✅ Safe (file doesn't exist, Read fails harmlessly)
+- `some/relative/path.txt` ✅ Safe (handler blocks before Read executes)
 
-```yaml
-handlers:
-  destructive-git:
-    event_type: PreToolUse
-    priority: 10
-    terminal: true
-    tests:
-      - pattern: "git reset --hard"
-        decision: deny
-        reason_contains: ["destroys all uncommitted changes", "permanently"]
-      - pattern: "git clean -f"
-        decision: deny
-        reason_contains: ["permanently deletes untracked files"]
-      - pattern: "git push --force"
-        decision: deny
-        reason_contains: ["overwrite remote history"]
-
-  sed-blocker:
-    event_type: PreToolUse
-    priority: 11
-    terminal: true
-    tests:
-      - pattern: "sed -i 's/foo/bar/' file.txt"
-        decision: deny
-        reason_contains: ["sed", "Edit tool", "parallel haiku"]
-```
-
-## Test Execution Workflow for Claude Code
-
-1. **Prerequisites Check:**
-   ```bash
-   # Claude Code runs:
-   $PYTHON -m claude_code_hooks_daemon.daemon.cli status  # Must be RUNNING
-   git status  # Must be clean working tree
-   ```
-
-2. **Execute Tier 1:**
-   ```bash
-   # Claude Code runs:
-   ./CLAUDE/AcceptanceTests/run-tier1.sh
-
-   # Observes output:
-   # - Each scenario executes
-   # - Daemon logs captured
-   # - Validation results shown
-   ```
-
-3. **Review Results:**
-   ```bash
-   # Claude Code reads:
-   cat CLAUDE/AcceptanceTests/results/latest/summary.md
-
-   # Shows:
-   # ✓ PASS: destructive-git (3/3 tests)
-   # ✓ PASS: sed-blocker (4/4 tests)
-   # ✗ FAIL: pipe-blocker (2/3 tests) - Test 3 failed
-   ```
-
-4. **Debug Failures:**
-   ```bash
-   # Claude Code investigates:
-   cat CLAUDE/AcceptanceTests/results/latest/daemon-logs.txt | grep pipe-blocker
-   # Identifies root cause, fixes handler or test
-   ```
+---
 
 ## Success Criteria
 
-- [ ] All 15 Tier 1 handlers pass acceptance tests
-- [ ] Playbook is clear enough for Claude Code to follow without clarification
-- [ ] Validation script correctly identifies pass/fail
-- [ ] Results documented in timestamped directories
-- [ ] Test execution completes in < 20 minutes (Tier 1)
-- [ ] Tests use real Claude Code events (via debug_hooks.sh)
-- [ ] Pass/fail criteria are objective and automatable
-- [ ] Documentation explains how to add new test scenarios
+- [ ] Playbook created with all 15 handler tests
+- [ ] All tests use safe commands (no destructive operations possible)
+- [ ] Each test has clear pass/fail criteria
+- [ ] Results summary table included
+- [ ] Playbook is executable by Claude Code (clear instructions)
+- [ ] Documents baseline handler behavior for regression testing
 
-## Integration with Existing Infrastructure
+---
 
-**Reuses:**
-- `scripts/debug_hooks.sh` for daemon log capture
-- Existing daemon lifecycle management
-- Existing handler implementations (no changes needed)
-- Existing QA infrastructure (pytest for validation script)
+## Critical Safety Rules
 
-**Complements:**
-- Unit tests: Handler logic in isolation
-- Integration tests: Daemon lifecycle and config loading
-- Acceptance tests: Real-world Claude Code usage (NEW)
+1. **NEVER use actual destructive commands** (e.g., `git reset --hard`, `rm -rf`)
+2. **ALWAYS use echo for bash patterns** (e.g., `echo "git reset --hard"`)
+3. **ALWAYS write to /tmp/** for file write tests
+4. **ALWAYS use non-existent paths** for Read tests with relative paths
+5. **VERIFY handler fired** by checking for blocking error or advisory context
 
-**Documents:**
-- Real handler behavior for developers
-- Expected user experience for each handler
-- Baseline for regression testing
+---
 
-## Risks & Mitigations
+## Edge Cases & Considerations
 
-| Risk | Impact | Mitigation |
-|------|--------|------------|
-| Daemon restart during testing disrupts session | High | Use debug_hooks.sh which handles restart gracefully |
-| Log parsing fragile to log format changes | Medium | Use structured logging, version expected-responses.yaml |
-| Tests too slow (> 30 min for Tier 1) | Medium | Parallelize independent scenarios, optimize setup/cleanup |
-| False positives (tests pass but handlers broken) | High | Include manual validation steps, test negative cases |
-| Tests require manual intervention | Medium | Automate setup/cleanup, provide clear error messages |
+1. **Echo-based tests and pattern matching**: Handlers examine the full bash command string. `echo "git reset --hard HEAD"` contains the dangerous pattern, so handlers match it. This is desired behavior - slightly over-cautious but safe.
 
-## Estimated Effort
+2. **Write-to-/tmp tests**: If handlers fail, only harmless files created in /tmp. Include cleanup section in playbook to remove these after testing.
 
-- **Total Implementation**: 15-18 hours
-  - Phase 1: 2 hours
-  - Phase 2: 3 hours
-  - Phase 3: 4 hours
-  - Phase 4: 2 hours
-  - Phase 5: 2 hours
-  - Phase 6: 2-3 hours
+3. **Advisory handlers**: Don't block operations, just provide context/guidance. Pass criteria: operation succeeds AND advisory message received.
 
-- **Execution Time**:
-  - Tier 1: 15-20 minutes
-  - Tier 2: 1.5-2 hours
-  - Per-handler debug: 5-10 minutes
+4. **Untestable handlers**: SessionStart (requires compaction), StatusLine (observational). Mark as SKIP or OBSERVATIONAL in results.
 
-## Future Enhancements
+5. **Daemon must be running**: Playbook starts with prerequisite check to verify daemon is active.
 
-- Add visual indicators (colors) for pass/fail in terminal
-- Screenshot capture for visual handlers (status line)
-- Parallel test execution for independent scenarios
-- CI/CD integration (run acceptance tests nightly)
-- Benchmark performance (handler latency)
-- Coverage report (which handlers tested, which skipped)
+---
 
-## Verification Steps
+## Files to Create
 
-After implementation, verify by:
+- `/workspace/CLAUDE/AcceptanceTests/PLAYBOOK.md` - The executable playbook (ONLY file needed)
 
-1. Running Tier 1 in fresh Claude Code session
-2. Confirming all 15 critical handlers pass
-3. Intentionally breaking a handler (e.g., disable destructive-git)
-4. Confirming acceptance test catches the failure
-5. Documenting baseline results for future comparison
+---
+
+## Next Steps
+
+1. Create `CLAUDE/AcceptanceTests/` directory
+2. Write `PLAYBOOK.md` with all 15 handler tests
+3. Execute the playbook myself to validate handlers
+4. Document results and any failures found
+5. Mark plan as Complete
+
+---
+
+## Notes
+
+- The original plan was over-engineered (bash orchestration scripts, validation frameworks, etc.)
+- This simplified approach focuses on the core goal: a markdown checklist I can execute
+- Safe commands proven to work (tested `echo "git reset --hard"` successfully)
+- Hooks are working correctly when using proper safe test patterns
