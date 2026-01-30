@@ -40,7 +40,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
-- [00018: Fix Container/Host Environment Switching](00018-container-host-environment-switching/PLAN-v2.md) - 🟢 Complete (2026-01-30)
+- [00018: Fix Container/Host Environment Switching](Completed/00018-container-host-environment-switching/PLAN-v2.md) - 🟢 Complete (2026-01-30)
   - Decoupled hook hot path from venv Python (bash path computation, system python3 socket client)
   - Added jq-based error emission with event-specific formatting
   - Added venv health validation with fail-fast and `repair` CLI command
