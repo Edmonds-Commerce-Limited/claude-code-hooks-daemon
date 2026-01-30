@@ -91,12 +91,14 @@ def _validate_not_nested(project_root: Path) -> None:
     Raises:
         InstallationError: If nested installation detected
     """
-    # Check for existing nested structure
-    nested_claude = project_root / ".claude" / "hooks-daemon" / ".claude"
-    if nested_claude.exists():
+    # Check for nested hooks-daemon installation inside hooks-daemon
+    # Having .claude/hooks-daemon/.claude is fine (the repo has its own .claude dir).
+    # A true nested install is .claude/hooks-daemon/.claude/hooks-daemon.
+    nested_install = project_root / ".claude" / "hooks-daemon" / ".claude" / "hooks-daemon"
+    if nested_install.exists():
         raise InstallationError(
             f"NESTED INSTALLATION DETECTED!\n"
-            f"Found: {nested_claude}\n"
+            f"Found: {nested_install}\n"
             f"Remove {project_root / '.claude' / 'hooks-daemon'} and reinstall."
         )
 

@@ -92,7 +92,7 @@ fi
 # Check 3: No nested installation
 #
 echo -n "3. No nested installation... "
-NESTED_DIR="$PROJECT_ROOT/.claude/hooks-daemon/.claude"
+NESTED_DIR="$PROJECT_ROOT/.claude/hooks-daemon/.claude/hooks-daemon"
 if [[ -d "$NESTED_DIR" ]]; then
     echo -e "${RED}✗ NESTED INSTALLATION DETECTED${NC}"
     echo "   Found: $NESTED_DIR"

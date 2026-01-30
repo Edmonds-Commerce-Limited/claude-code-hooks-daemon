@@ -93,14 +93,10 @@ def validate_not_nested(project_root: Path) -> None:
     Raises:
         InstallationError: If nested installation detected
     """
-    # Check for existing nested structure
-    nested_claude = project_root / ".claude" / "hooks-daemon" / ".claude"
-    if nested_claude.exists():
-        raise InstallationError(
-            f"NESTED INSTALLATION DETECTED!\n"
-            f"Found: {nested_claude}\n"
-            f"Remove {project_root / '.claude' / 'hooks-daemon'} and reinstall."
-        )
+    # Delegate nested install check to single source of truth
+    nested_error = check_for_nested_installation(project_root)
+    if nested_error:
+        raise InstallationError(nested_error)
 
     # Check if we're inside an existing hooks-daemon directory
     hooks_daemon_marker = project_root / ".claude" / "hooks-daemon" / "src"
@@ -175,12 +171,14 @@ def check_for_nested_installation(project_root: Path) -> str | None:
     Returns:
         Error message string if nested installation detected, None otherwise
     """
-    # Check for existing nested structure
-    nested_claude = project_root / ".claude" / "hooks-daemon" / ".claude"
-    if nested_claude.exists():
+    # Check for nested hooks-daemon installation inside hooks-daemon
+    # Having .claude/hooks-daemon/.claude is fine (the repo has its own .claude dir).
+    # A true nested install is .claude/hooks-daemon/.claude/hooks-daemon.
+    nested_install = project_root / ".claude" / "hooks-daemon" / ".claude" / "hooks-daemon"
+    if nested_install.exists():
         return (
             f"NESTED INSTALLATION DETECTED!\n"
-            f"Found: {nested_claude}\n"
+            f"Found: {nested_install}\n"
             f"Remove {project_root / '.claude' / 'hooks-daemon'} and reinstall."
         )
 
