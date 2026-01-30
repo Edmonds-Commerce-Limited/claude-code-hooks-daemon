@@ -456,6 +456,11 @@ class HooksDaemon:
 
             # Send response
             response_json = json.dumps(response) + "\n"
+
+            # DEBUG: Log ALL responses with deny/block decisions
+            if "deny" in response_json or "block" in response_json or "permissionDecision" in response_json:
+                logger.debug("BLOCKING RESPONSE: %s", response_json[:1000])
+
             writer.write(response_json.encode())
             await writer.drain()
 
@@ -550,8 +555,8 @@ class HooksDaemon:
             # Legacy FrontController - dispatch and convert result
             hook_result = await loop.run_in_executor(None, self.controller.dispatch, hook_input)
 
-            # Build response
-            response_dict: dict[str, Any] = {"result": hook_result.to_json(event)}
+            # Build response (don't wrap in "result" - to_json already returns correct format)
+            response_dict: dict[str, Any] = hook_result.to_json(event)
             if request_id:
                 response_dict["request_id"] = request_id
             return response_dict

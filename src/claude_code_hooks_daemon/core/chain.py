@@ -140,6 +140,12 @@ class HandlerChain:
                     logger.debug("Handler %s matched event", handler.name)
 
                     result = handler.handle(hook_input)
+                    logger.debug(
+                        "Handler %s returned decision=%s, terminal=%s",
+                        handler.name,
+                        result.decision,
+                        handler.terminal
+                    )
                     handlers_executed.append(handler.name)
                     result.add_handler(handler.name)
 

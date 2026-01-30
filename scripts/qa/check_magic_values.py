@@ -83,6 +83,53 @@ EVENT_TYPE_STRINGS: frozenset[str] = frozenset({
     "user_prompt_submit",
 })
 
+# Known handler display names (kebab-case handler IDs)
+HANDLER_DISPLAY_NAMES: frozenset[str] = frozenset({
+    "pipe-blocker",
+    "destructive-git",
+    "sed-blocker",
+    "absolute-path",
+    "worktree-file-copy",
+    "git-stash",
+    "eslint-disable",
+    "tdd-enforcement",
+    "python-qa-suppression-blocker",
+    "php-qa-suppression-blocker",
+    "go-qa-suppression-blocker",
+    "markdown-organization",
+    "validate-plan-number",
+    "plan-time-estimates",
+    "plan-workflow",
+    "plan-number-helper",
+    "npm-command",
+    "gh-issue-comments",
+    "web-search-year",
+    "british-english",
+    "bash-error-detector",
+    "validate-eslint-on-write",
+    "validate-sitemap",
+    "workflow-state-restoration",
+    "workflow-state-pre-compact",
+    "yolo-container-detection",
+    "suggest-statusline",
+    "transcript-archiver",
+    "cleanup",
+    "task-completion-checker",
+    "auto-continue-stop",
+    "subagent-completion-logger",
+    "remind-validator",
+    "remind-prompt-library",
+    "git-context-injector",
+    "auto-approve-reads",
+    "notification-logger",
+    "status-git-repo-name",
+    "status-account-display",
+    "status-model-context",
+    "status-usage-tracking",
+    "status-git-branch",
+    "status-daemon-stats",
+})
+
 
 class MagicValueChecker(ast.NodeVisitor):
     """AST visitor that detects magic values in Python source."""
@@ -190,6 +237,12 @@ class MagicValueChecker(ast.NodeVisitor):
                 for comp in node.comparators:
                     self._check_magic_event_comparator(comp)
 
+            # IN TEST FILES: check for handler display names
+            # result.terminated_by == "pipe-blocker"
+            if self._is_test_file() and left_name in ("handlers_matched", "terminated_by"):
+                for comp in node.comparators:
+                    self._check_magic_handler_display_name(comp)
+
             # "Bash" == tool_name (reversed)
             if len(node.comparators) == 1:
                 comp_name = _get_name(node.comparators[0])
@@ -207,6 +260,21 @@ class MagicValueChecker(ast.NodeVisitor):
                             "magic-event-type",
                             f'Magic event type "{val}" - use EventID.XXX constant',
                         )
+
+                # IN TEST FILES: handler display names
+                # "pipe-blocker" in result.handlers_matched
+                # "pipe-blocker" == result.terminated_by
+                if self._is_test_file() and comp_name in ("handlers_matched", "terminated_by"):
+                    if isinstance(node.left, ast.Constant) and isinstance(node.left.value, str):
+                        self._check_magic_handler_display_name(node.left)
+
+                # IN TEST FILES: Check when attribute is on the left in "in" comparisons
+                # Catches: "pipe-blocker" in result.handlers_matched
+                if self._is_test_file() and isinstance(node.left, ast.Constant) and isinstance(node.left.value, str):
+                    if isinstance(node.comparators[0], ast.Attribute):
+                        attr_name = node.comparators[0].attr
+                        if attr_name in ("handlers_matched", "terminated_by"):
+                            self._check_magic_handler_display_name(node.left)
 
         self.generic_visit(node)
 
@@ -245,6 +313,21 @@ class MagicValueChecker(ast.NodeVisitor):
                         "magic-event-type",
                         f'Magic event type "{elt.value}" - use EventID.XXX constant',
                     )
+
+    def _check_magic_handler_display_name(self, node: ast.expr) -> None:
+        """Check a node for magic handler display name strings (in tests)."""
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            val = node.value
+            if val in HANDLER_DISPLAY_NAMES:
+                self._add(
+                    node,
+                    "magic-handler-display-name",
+                    f'Magic handler display name "{val}" - use HandlerID.XXX.display_name',
+                )
+
+    def _is_test_file(self) -> bool:
+        """Check if current file is a test file."""
+        return "test" in self.filepath.parts or self.filepath.name.startswith("test_")
 
     def visit_Subscript(self, node: ast.Subscript) -> None:
         """Detect magic config keys like config["enabled"]."""
@@ -343,7 +426,7 @@ def check_file(filepath: Path) -> list[Violation]:
 
 
 def main() -> int:
-    """Check all Python files in src/ directory for magic values.
+    """Check all Python files in src/ and tests/ directories for magic values.
 
     Returns:
         0 if no violations, 1 if violations found
@@ -354,6 +437,7 @@ def main() -> int:
     script_path = Path(__file__).resolve()
     project_root = script_path.parent.parent.parent
     src_dir = project_root / "src" / "claude_code_hooks_daemon"
+    tests_dir = project_root / "tests"
 
     if not src_dir.exists():
         print(f"ERROR: Source directory not found: {src_dir}", file=sys.stderr)
@@ -361,11 +445,17 @@ def main() -> int:
 
     violations: list[Violation] = []
 
+    # Check source files
     for pyfile in sorted(src_dir.rglob("*.py")):
         # Skip constants module itself (it defines the constants)
         if "constants" in pyfile.parts:
             continue
         violations.extend(check_file(pyfile))
+
+    # Check test files
+    if tests_dir.exists():
+        for pyfile in sorted(tests_dir.rglob("*.py")):
+            violations.extend(check_file(pyfile))
 
     violations.sort(key=lambda v: (v.file, v.line, v.column))
 
