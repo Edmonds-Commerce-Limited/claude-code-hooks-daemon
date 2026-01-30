@@ -1,6 +1,14 @@
 """Model and context percentage handler for status line.
 
-Formats model name and color-coded context percentage using traffic light colors:
+Formats color-coded model name and context percentage:
+
+Model colors (by model type):
+- Blue: Haiku models
+- Green: Sonnet models
+- Orange: Opus models
+- White: Unknown/other models
+
+Context percentage colors (traffic light system):
 - Green (0-40%): Low usage, plenty of space
 - Yellow (41-60%): Moderate usage
 - Orange (61-80%): High usage, approaching limit
@@ -38,22 +46,33 @@ class ModelContextHandler(Handler):
             HookResult with formatted status text in context list
         """
         # Extract data with safe defaults
-        model = hook_input.get("model", {}).get("display_name", "Claude")
+        model_display = hook_input.get("model", {}).get("display_name", "Claude")
         ctx_data = hook_input.get("context_window", {})
         used_pct = ctx_data.get("used_percentage") or 0
 
-        # Color code by percentage (traffic light system)
-        if used_pct <= 40:
-            color = "\033[42m\033[30m"  # Green bg, black text
-        elif used_pct <= 60:
-            color = "\033[43m\033[30m"  # Yellow bg, black text
-        elif used_pct <= 80:
-            color = "\033[48;5;208m\033[30m"  # Orange bg, black text
+        # Color code model name by model type
+        model_lower = model_display.lower()
+        if "haiku" in model_lower:
+            model_color = "\033[34m"  # Blue for Haiku
+        elif "sonnet" in model_lower:
+            model_color = "\033[32m"  # Green for Sonnet
+        elif "opus" in model_lower:
+            model_color = "\033[38;5;208m"  # Orange for Opus
         else:
-            color = "\033[41m\033[97m"  # Red bg, white text
+            model_color = "\033[37m"  # White for unknown
+
+        # Color code context percentage by usage (traffic light system)
+        if used_pct <= 40:
+            ctx_color = "\033[42m\033[30m"  # Green bg, black text
+        elif used_pct <= 60:
+            ctx_color = "\033[43m\033[30m"  # Yellow bg, black text
+        elif used_pct <= 80:
+            ctx_color = "\033[48;5;208m\033[30m"  # Orange bg, black text
+        else:
+            ctx_color = "\033[41m\033[97m"  # Red bg, white text
         reset = "\033[0m"
 
         # Format: "Model | Ctx: XX%"
-        status = f"{model} | Ctx: {color}{used_pct:.1f}%{reset}"
+        status = f"{model_color}{model_display}{reset} | Ctx: {ctx_color}{used_pct:.1f}%{reset}"
 
         return HookResult(context=[status])

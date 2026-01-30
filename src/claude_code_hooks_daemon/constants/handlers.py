@@ -151,6 +151,11 @@ class HandlerID:
         config_key="git_context_injector",
         display_name="git-context-injector",
     )
+    GIT_REPO_NAME = HandlerIDMeta(
+        class_name="GitRepoNameHandler",
+        config_key="git_repo_name",
+        display_name="status-git-repo-name",
+    )
     GIT_BRANCH = HandlerIDMeta(
         class_name="GitBranchHandler",
         config_key="git_branch",
@@ -383,6 +388,7 @@ HandlerKey = Literal[
     "remind_prompt_library",
     "session_cleanup",
     # Status line handlers
+    "git_repo_name",
     "account_display",
     "model_context",
     "usage_tracking",
