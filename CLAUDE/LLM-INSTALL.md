@@ -287,6 +287,146 @@ cat /tmp/handler-status.txt
 
 ---
 
+## Post-Installation: Planning Workflow Adoption (Optional)
+
+The daemon includes a comprehensive planning workflow system with numbered plan directories and enforcement handlers. Check if you want to adopt this approach.
+
+### Check for Existing Planning Documentation
+
+```bash
+# Look for existing planning docs in common locations
+find . -maxdepth 3 \( \
+  -name "PLANNING.md" -o \
+  -name "PlanWorkflow.md" -o \
+  -name "Planning.md" -o \
+  -path "*/docs/planning/*" -o \
+  -path "*/CLAUDE/planning*" -o \
+  -path "*/Plan/*" \
+) 2>/dev/null
+```
+
+### Compare with Hooks Daemon Approach
+
+The daemon uses a structured planning system:
+
+**View the daemon's planning workflow:**
+```bash
+cat .claude/hooks-daemon/CLAUDE/PlanWorkflow.md | head -100
+```
+
+**Key features:**
+- Numbered plan directories (CLAUDE/Plan/001-description/, 002-description/)
+- Standardized PLAN.md template with tasks, goals, success criteria
+- Task status system (⬜ ⏸️ 🔄 ✅ ✗ 🚫 👁️)
+- TDD integration and QA enforcement
+- Planning-specific handlers for enforcement
+
+**Enforcement handlers available:**
+- `plan-workflow-guidance` - Guides through planning steps
+- `validate-plan-number` - Validates plan numbering consistency
+- `block-plan-time-estimates` - Prevents time estimates in plans
+- `enforce-markdown-organization` - Enforces markdown organization rules
+
+### Decide: Adopt or Skip
+
+**Ask the user:**
+```
+I found the hooks daemon includes a comprehensive planning workflow system with:
+- Numbered plan directories (Plan/001-name/, 002-name/)
+- Standardized planning templates
+- Task tracking with status icons
+- Enforcement handlers
+
+Would you like to:
+1. Adopt this planning approach for your project?
+2. Skip (keep your existing approach)
+```
+
+### If User Chooses to Adopt
+
+**1. Copy planning workflow documentation:**
+```bash
+# Create planning directory structure
+mkdir -p CLAUDE/Plan
+
+# Copy planning workflow docs
+cp .claude/hooks-daemon/CLAUDE/PlanWorkflow.md CLAUDE/PlanWorkflow.md
+
+# Optionally copy Plan/README.md template
+if [ ! -f "CLAUDE/Plan/README.md" ]; then
+  echo "# Plans Index
+
+## Active Plans
+- None
+
+## Completed Plans
+- None
+
+## Blocked Plans
+- None
+
+## Cancelled Plans
+- None
+" > CLAUDE/Plan/README.md
+fi
+```
+
+**2. Enable planning enforcement handlers:**
+
+Edit `.claude/hooks-daemon.yaml`:
+```yaml
+handlers:
+  pre_tool_use:
+    # Planning workflow handlers
+    plan-workflow-guidance:
+      enabled: true
+      priority: 45
+
+    validate-plan-number:
+      enabled: true
+      priority: 30
+
+    block-plan-time-estimates:
+      enabled: true
+      priority: 40
+
+    # Markdown organization (optional - EC-specific)
+    enforce-markdown-organization:
+      enabled: false  # Set true if adopting markdown rules
+      priority: 35
+```
+
+**3. Restart daemon:**
+```bash
+.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
+```
+
+**4. Add to project README (optional):**
+
+Add a section to your project README referencing the planning workflow:
+```markdown
+## Development Workflow
+
+This project uses a structured planning system. See [CLAUDE/PlanWorkflow.md](CLAUDE/PlanWorkflow.md) for:
+- How to create and manage plans
+- Task status tracking
+- TDD integration
+- QA requirements
+```
+
+**5. Commit planning docs:**
+```bash
+git add CLAUDE/PlanWorkflow.md CLAUDE/Plan/README.md .claude/hooks-daemon.yaml
+git commit -m "Adopt hooks daemon planning workflow system"
+git push
+```
+
+### If User Chooses to Skip
+
+No action needed. The planning handlers will remain disabled. You can enable them later if you change your mind.
+
+---
+
 ## Custom Handler Migration
 
 If you had custom hooks before install (backed up to `.claude/hooks.bak.TIMESTAMP/`):
