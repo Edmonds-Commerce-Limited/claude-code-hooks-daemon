@@ -1,5 +1,7 @@
 # Plan Lifecycle
 
+See @CLAUDE/PlanWorkflow.md for full planning workflow, templates, and standards.
+
 ## Plan Sources
 
 Plans come from two sources:
@@ -26,7 +28,7 @@ CLAUDE/Plan/
 ### 1. Create
 
 - Create folder: `CLAUDE/Plan/NNNNN-description/`
-- Write `PLAN.md` following the template in `PlanWorkflow.md`
+- Write `PLAN.md` following the template in @CLAUDE/PlanWorkflow.md
 - Add entry to `README.md` under **Active Plans**
 - If from a GitHub issue, include `**GitHub Issue**: #N` in the header
 
