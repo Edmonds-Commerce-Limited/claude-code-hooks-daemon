@@ -6,6 +6,35 @@
 
 ---
 
+## ⚠️ CRITICAL SAFETY WARNING ⚠️
+
+**NEVER RUN DESTRUCTIVE COMMANDS DIRECTLY**
+
+This playbook uses **triple-layer safety** for all destructive command tests:
+
+### Layer 1: Use `echo` (MANDATORY)
+✅ **CORRECT**: `echo "git reset --hard NONEXISTENT_REF"`
+❌ **NEVER DO**: `git reset --hard NONEXISTENT_REF`
+
+### Layer 2: Hooks Block Commands
+The daemon hooks will intercept and block destructive commands.
+
+### Layer 3: Fail-Safe Arguments (NEW)
+All destructive commands use non-existent refs/paths/files that would fail harmlessly if somehow executed:
+- `git reset --hard NONEXISTENT_REF_SAFE_TEST` - non-existent git ref
+- `git clean -fd /nonexistent/safe/test/path` - non-existent directory
+- `git push --force NONEXISTENT_REMOTE NONEXISTENT_BRANCH` - non-existent remote
+- `sed -i 's/foo/bar/' /nonexistent/safe/test.txt` - non-existent file
+
+**Why All Three Layers?**
+- Layer 1 (echo): Zero risk even if hooks completely fail
+- Layer 2 (hooks): Tests the actual blocking behavior
+- Layer 3 (fail-safe args): Defense-in-depth - even catastrophic failure is harmless
+
+**Even with these protections, ALWAYS use echo for destructive commands.**
+
+---
+
 ## Prerequisites
 
 Before starting:
@@ -49,33 +78,38 @@ Before starting:
 
 ### Test 1.1: git reset --hard
 
-**Command**: `echo "git reset --hard HEAD"`
+**Command**: `echo "git reset --hard NONEXISTENT_REF_SAFE_TEST"`
 **Expected**: BLOCKED with message about destroying uncommitted changes
 **Result**: [ ] PASS [ ] FAIL
+**Safety**: Uses non-existent ref - would fail harmlessly if executed
 
 ### Test 1.2: git clean -f
 
-**Command**: `echo "git clean -fd"`
+**Command**: `echo "git clean -fd /nonexistent/safe/test/path"`
 **Expected**: BLOCKED with message about permanently deleting untracked files
 **Result**: [ ] PASS [ ] FAIL
+**Safety**: Uses non-existent path - would fail harmlessly if executed
 
 ### Test 1.3: git push --force
 
-**Command**: `echo "git push --force origin main"`
+**Command**: `echo "git push --force NONEXISTENT_REMOTE NONEXISTENT_BRANCH"`
 **Expected**: BLOCKED with message about overwriting remote history
 **Result**: [ ] PASS [ ] FAIL
+**Safety**: Uses non-existent remote/branch - would fail harmlessly if executed
 
 ### Test 1.4: git stash drop
 
-**Command**: `echo "git stash drop"`
+**Command**: `echo "git stash drop stash@{999}"`
 **Expected**: BLOCKED with message about permanent deletion
 **Result**: [ ] PASS [ ] FAIL
+**Safety**: Uses non-existent stash index - would fail harmlessly if executed
 
 ### Test 1.5: git checkout --
 
-**Command**: `echo "git checkout -- src/important.py"`
+**Command**: `echo "git checkout -- /nonexistent/safe/test/file.py"`
 **Expected**: BLOCKED with message about discarding changes
 **Result**: [ ] PASS [ ] FAIL
+**Safety**: Uses non-existent file path - would fail harmlessly if executed
 
 ---
 
@@ -88,15 +122,17 @@ Before starting:
 
 ### Test 2.1: sed -i with substitution
 
-**Command**: `echo "sed -i 's/foo/bar/g' file.txt"`
+**Command**: `echo "sed -i 's/foo/bar/g' /nonexistent/safe/test.txt"`
 **Expected**: BLOCKED with message about using Edit tool instead
 **Result**: [ ] PASS [ ] FAIL
+**Safety**: Uses non-existent file - would fail harmlessly if executed
 
 ### Test 2.2: sed -e command
 
-**Command**: `echo "sed -e 's/old/new/' input.txt"`
+**Command**: `echo "sed -e 's/old/new/' /nonexistent/safe/test.txt"`
 **Expected**: BLOCKED with message about using Edit tool
 **Result**: [ ] PASS [ ] FAIL
+**Safety**: Uses non-existent file - would fail harmlessly if executed
 
 ---
 
