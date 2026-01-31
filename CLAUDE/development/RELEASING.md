@@ -480,12 +480,17 @@ Before running `/release`:
    - Issues found section with details
    - Handlers working correctly section
 
-5. **Fix Issues Before Release**:
+5. **Fix Issues Before Release** (FAIL-FAST Cycle):
    - ANY failing test = DO NOT RELEASE
    - Investigate root cause of failures
-   - Fix handler bugs or update test expectations
-   - Re-run failed tests to verify fixes
-   - Update playbook if test expectations were wrong
+   - Fix handler bugs using TDD (write failing test, implement fix, verify test passes)
+   - **CRITICAL: If ANY code changes made:**
+     1. Run FULL QA suite: `./scripts/qa/run_all.sh` (must pass 100%)
+     2. Restart daemon: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
+     3. **Restart acceptance testing FROM TEST 1.1** (not from where you left off)
+     4. Continue until ALL tests pass with ZERO code changes
+   - **Why restart from beginning?** Code changes can introduce regressions in previously passing handlers
+   - Update playbook if test expectations were wrong (documentation fixes don't require restart)
 
 6. **Update Playbook for Next Release**:
    - Commit playbook changes alongside other release files

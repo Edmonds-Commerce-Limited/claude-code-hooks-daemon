@@ -7,6 +7,10 @@ model: sonnet
 
 # Release Agent - Automated Version Management & Release
 
+**📖 SINGLE SOURCE OF TRUTH:** [`CLAUDE/development/RELEASING.md`](../../CLAUDE/development/RELEASING.md)
+
+This agent implements the release process defined in the documentation above. For complete details on validation, acceptance testing, FAIL-FAST cycles, and all release procedures, **see the release documentation**.
+
 ## Purpose
 
 Prepare release files including version updates, changelog generation, and release notes creation. This agent does NOT commit, tag, or publish - it only prepares files for review.
