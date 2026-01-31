@@ -107,14 +107,16 @@ class QARunner:
 
     def _run_command(
         self,
-        command: str,
+        command: list[str],
         description: str,
         timeout: int = 60,
     ) -> tuple[int, str, str]:
-        """Run a shell command and capture output.
+        """Run a command and capture output.
+
+        SECURITY: Uses shell=False to prevent command injection attacks.
 
         Args:
-            command: Command to run
+            command: Command as list of arguments (e.g., ["ruff", "check", "src/"])
             description: Description for logging
             timeout: Timeout in seconds
 
@@ -127,7 +129,7 @@ class QARunner:
         try:
             result = subprocess.run(
                 command,
-                shell=True,
+                shell=False,  # SECURITY: Never use shell=True (prevents command injection)
                 cwd=str(self.project_root),
                 capture_output=True,
                 text=True,
@@ -149,21 +151,28 @@ class QARunner:
         """
         start = time.time()
 
+        # Try src/ and tests/ first, fallback to src/ only if tests/ doesn't exist
         try:
             returncode, stdout, stderr = self._run_command(
-                "ruff check src/ tests/ --output-format=json 2>/dev/null || "
-                "ruff check src/ --output-format=json",
+                ["ruff", "check", "src/", "tests/", "--output-format=json"],
                 "ruff linting",
             )
-        except QAExecutionError as e:
-            return ToolResult(
-                tool_name="ruff",
-                passed=False,
-                error_count=-1,
-                warning_count=0,
-                output=str(e),
-                duration_ms=int((time.time() - start) * 1000),
-            )
+        except QAExecutionError:
+            # Fallback: try src/ only (tests/ might not exist)
+            try:
+                returncode, stdout, stderr = self._run_command(
+                    ["ruff", "check", "src/", "--output-format=json"],
+                    "ruff linting (src only)",
+                )
+            except QAExecutionError as e:
+                return ToolResult(
+                    tool_name="ruff",
+                    passed=False,
+                    error_count=-1,
+                    warning_count=0,
+                    output=str(e),
+                    duration_ms=int((time.time() - start) * 1000),
+                )
 
         error_count = self._parse_ruff_output(stdout)
         duration_ms = int((time.time() - start) * 1000)
@@ -187,7 +196,7 @@ class QARunner:
 
         try:
             returncode, stdout, stderr = self._run_command(
-                "mypy src/",
+                ["mypy", "src/"],
                 "mypy type checking",
                 timeout=Timeout.QA_TEST_TIMEOUT,  # mypy can be slow
             )
@@ -221,20 +230,28 @@ class QARunner:
         """
         start = time.time()
 
+        # Try src/ and tests/ first, fallback to src/ only if tests/ doesn't exist
         try:
             returncode, stdout, stderr = self._run_command(
-                "black --check src/ tests/ 2>&1 || black --check src/",
+                ["black", "--check", "src/", "tests/"],
                 "black format check",
             )
-        except QAExecutionError as e:
-            return ToolResult(
-                tool_name="black",
-                passed=False,
-                error_count=-1,
-                warning_count=0,
-                output=str(e),
-                duration_ms=int((time.time() - start) * 1000),
-            )
+        except QAExecutionError:
+            # Fallback: try src/ only (tests/ might not exist)
+            try:
+                returncode, stdout, stderr = self._run_command(
+                    ["black", "--check", "src/"],
+                    "black format check (src only)",
+                )
+            except QAExecutionError as e:
+                return ToolResult(
+                    tool_name="black",
+                    passed=False,
+                    error_count=-1,
+                    warning_count=0,
+                    output=str(e),
+                    duration_ms=int((time.time() - start) * 1000),
+                )
 
         # Black outputs to stderr
         combined_output = stdout + stderr
@@ -260,7 +277,7 @@ class QARunner:
 
         try:
             returncode, stdout, stderr = self._run_command(
-                "pytest --tb=short -q",
+                ["pytest", "--tb=short", "-q"],
                 "pytest tests",
                 timeout=Timeout.QA_LONG_TIMEOUT,  # tests can take a while
             )
@@ -296,7 +313,7 @@ class QARunner:
 
         try:
             returncode, stdout, stderr = self._run_command(
-                "bandit -r src/ -f json",
+                ["bandit", "-r", "src/", "-f", "json"],
                 "bandit security linting",
             )
         except QAExecutionError as e:

@@ -1,6 +1,8 @@
 """Handler with version number in name for naming conversion tests."""
 
+from claude_code_hooks_daemon.constants import Priority
 from claude_code_hooks_daemon.core import Handler, HookResult
+from claude_code_hooks_daemon.core.hook_result import Decision
 
 
 class HandlerV2Example(Handler):
@@ -12,7 +14,7 @@ class HandlerV2Example(Handler):
         Args:
             config: Optional configuration dictionary
         """
-        super().__init__(name="handler-v2", priority=40)
+        super().__init__(name="handler-v2", priority=Priority.GH_ISSUE_COMMENTS)
         self.config = config
 
     def matches(self, hook_input: dict) -> bool:
@@ -35,4 +37,4 @@ class HandlerV2Example(Handler):
         Returns:
             HookResult with allow decision
         """
-        return HookResult(decision="allow", context="Handler V2")
+        return HookResult(decision=Decision.ALLOW, context="Handler V2")

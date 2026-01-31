@@ -115,7 +115,7 @@ class TestHandlerRegistry:
 
     def test_discover_skips_init_modules(self, registry: HandlerRegistry) -> None:
         """discover should skip __init__.py modules."""
-        count = registry.discover()
+        registry.discover()
         handlers = registry.list_handlers()
 
         # Should not include __init__ as a handler name
@@ -123,7 +123,7 @@ class TestHandlerRegistry:
 
     def test_discover_skips_test_files(self, registry: HandlerRegistry) -> None:
         """discover should skip test files."""
-        count = registry.discover()
+        registry.discover()
         handlers = registry.list_handlers()
 
         # Should not include any test handlers
@@ -351,7 +351,7 @@ class TestEventTypeMapping:
 
     def test_mapping_keys_are_snake_case(self) -> None:
         """All mapping keys should be snake_case."""
-        for key in EVENT_TYPE_MAPPING.keys():
+        for key in EVENT_TYPE_MAPPING:
             assert key.islower()
             assert " " not in key
             # Should use underscores for word separation

@@ -10,6 +10,7 @@ import pytest
 
 from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.core import Handler, HookResult
+from claude_code_hooks_daemon.core.hook_result import Decision
 
 
 class ConcreteTestHandler(Handler):
@@ -21,7 +22,7 @@ class ConcreteTestHandler(Handler):
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Simple handle implementation."""
-        return HookResult(decision="allow")
+        return HookResult(decision=Decision.ALLOW)
 
 
 class TestHandlerWithHandlerID:

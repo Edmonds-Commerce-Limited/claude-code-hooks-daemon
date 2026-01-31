@@ -11,8 +11,7 @@ Non-blocking (advisory only) - provides context but doesn't prevent execution.
 """
 
 import re
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from claude_code_hooks_daemon.constants import (
     HandlerID,
@@ -25,6 +24,9 @@ from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.handlers.utils.plan_numbering import get_next_plan_number
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class PlanNumberHelperHandler(Handler):

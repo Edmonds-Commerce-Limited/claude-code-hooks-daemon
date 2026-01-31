@@ -13,9 +13,10 @@ from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.constants import Priority
 from claude_code_hooks_daemon.core.front_controller import FrontController
 from claude_code_hooks_daemon.core.handler import Handler
-from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 from claude_code_hooks_daemon.daemon.config import DaemonConfig
 from claude_code_hooks_daemon.daemon.server import HooksDaemon
 
@@ -25,7 +26,7 @@ class SimpleTestHandler(Handler):
 
     def __init__(self) -> None:
         """Initialise test handler."""
-        super().__init__(name="test_handler", priority=50, terminal=True)
+        super().__init__(name="test_handler", priority=Priority.HELLO_WORLD, terminal=True)
 
     def matches(self, hook_input: dict) -> bool:
         """Match all requests."""
@@ -33,7 +34,7 @@ class SimpleTestHandler(Handler):
 
     def handle(self, hook_input: dict) -> HookResult:
         """Return simple allow result."""
-        return HookResult(decision="allow", context="Test handler executed")
+        return HookResult(decision=Decision.ALLOW, context="Test handler executed")
 
 
 class SlowTestHandler(Handler):
@@ -41,7 +42,7 @@ class SlowTestHandler(Handler):
 
     def __init__(self, delay_ms: int = 100) -> None:
         """Initialise slow handler."""
-        super().__init__(name="slow_test_handler", priority=50, terminal=True)
+        super().__init__(name="slow_test_handler", priority=Priority.HELLO_WORLD, terminal=True)
         self.delay_ms = delay_ms
 
     def matches(self, hook_input: dict) -> bool:
@@ -51,7 +52,7 @@ class SlowTestHandler(Handler):
     def handle(self, hook_input: dict) -> HookResult:
         """Sleep then return result."""
         time.sleep(self.delay_ms / 1000.0)
-        return HookResult(decision="allow", context=f"Delayed {self.delay_ms}ms")
+        return HookResult(decision=Decision.ALLOW, context=f"Delayed {self.delay_ms}ms")
 
 
 class TestHooksDaemon:
@@ -559,7 +560,7 @@ class TestHooksDaemon:
         assert daemon_config.socket_path_obj.exists()
 
         # Should be able to connect
-        reader, writer = await asyncio.open_unix_connection(str(daemon_config.socket_path))
+        _reader, writer = await asyncio.open_unix_connection(str(daemon_config.socket_path))
         writer.close()
         await writer.wait_closed()
 
@@ -685,7 +686,9 @@ class TestHooksDaemon:
             """Handler that always raises an exception."""
 
             def __init__(self) -> None:
-                super().__init__(name="failing_handler", priority=50, terminal=True)
+                super().__init__(
+                    name="failing_handler", priority=Priority.HELLO_WORLD, terminal=True
+                )
 
             def matches(self, hook_input: dict) -> bool:
                 return True
@@ -713,7 +716,7 @@ class TestHooksDaemon:
 
         # Should receive error response
         response_data = await reader.readline()
-        response = json.loads(response_data.decode())
+        json.loads(response_data.decode())
 
         # Daemon should still be running
         assert not server_task.done()
@@ -798,7 +801,7 @@ class TestHooksDaemon:
         await asyncio.sleep(0.1)
 
         # Should work without PID file
-        reader, writer = await asyncio.open_unix_connection(str(config.socket_path))
+        _reader, writer = await asyncio.open_unix_connection(str(config.socket_path))
         writer.close()
         await writer.wait_closed()
 

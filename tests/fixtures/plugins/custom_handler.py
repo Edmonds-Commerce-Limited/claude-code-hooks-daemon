@@ -1,6 +1,7 @@
 """Custom handler for plugin loading tests."""
 
 from claude_code_hooks_daemon.core import Handler, HookResult
+from claude_code_hooks_daemon.core.hook_result import Decision
 
 
 class CustomHandler(Handler):
@@ -35,4 +36,4 @@ class CustomHandler(Handler):
         Returns:
             HookResult with allow decision
         """
-        return HookResult(decision="allow", context="Test custom handler")
+        return HookResult(decision=Decision.ALLOW, context="Test custom handler")

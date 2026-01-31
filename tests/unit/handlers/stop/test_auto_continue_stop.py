@@ -585,7 +585,6 @@ class TestAutoContinueStopHandlerEdgeCases:
             )
 
         # Patch Path.open to raise an unexpected exception
-        original_open = Path.open
 
         def mock_open(*args: Any, **kwargs: Any) -> Any:
             raise RuntimeError("Unexpected error")

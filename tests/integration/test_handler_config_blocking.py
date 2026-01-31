@@ -20,6 +20,7 @@ from typing import Any
 import yaml
 
 from claude_code_hooks_daemon.config.loader import ConfigLoader
+from claude_code_hooks_daemon.constants import Priority
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.core.router import EventRouter
@@ -414,7 +415,7 @@ class TestConfigPriorityOverride:
         # Create test handlers with different priorities
         class LowPriorityHandler(Handler):
             def __init__(self) -> None:
-                super().__init__(name="low", priority=10, terminal=False)
+                super().__init__(name="low", priority=Priority.DESTRUCTIVE_GIT, terminal=False)
 
             def matches(self, hook_input: dict[str, Any]) -> bool:
                 return True
@@ -424,7 +425,7 @@ class TestConfigPriorityOverride:
 
         class HighPriorityHandler(Handler):
             def __init__(self) -> None:
-                super().__init__(name="high", priority=50, terminal=False)
+                super().__init__(name="high", priority=Priority.HELLO_WORLD, terminal=False)
 
             def matches(self, hook_input: dict[str, Any]) -> bool:
                 return True
@@ -440,5 +441,6 @@ class TestConfigPriorityOverride:
         # Execute
         result = router.route(EventType.PRE_TOOL_USE, {"tool_name": "Test"})
 
-        # Verify execution order
-        assert result.handlers_executed == ["low", "high"]
+        # Verify execution order (lower priority numbers execute first)
+        # high has priority 5, low has priority 10
+        assert result.handlers_executed == ["high", "low"]

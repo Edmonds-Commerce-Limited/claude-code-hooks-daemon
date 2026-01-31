@@ -258,7 +258,7 @@ class TestUsageTrackingHandler:
             }
         }
 
-        with patch("pathlib.Path.exists", return_value=True) as mock_exists:
+        with patch("pathlib.Path.exists", return_value=True):
             with patch("pathlib.Path.read_text", return_value=json.dumps(cache_data)) as mock_read:
                 # First call
                 result1 = handler.handle(hook_input)

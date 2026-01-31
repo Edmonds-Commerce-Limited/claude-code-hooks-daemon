@@ -37,7 +37,7 @@ class TestRemindValidatorHandler:
 
     def test_builder_mapping_structure(self, handler: RemindValidatorHandler) -> None:
         """Builder mappings have required structure."""
-        for builder, config in handler.BUILDER_TO_VALIDATOR.items():
+        for _builder, config in handler.BUILDER_TO_VALIDATOR.items():
             assert "validator" in config
             assert "description" in config
             assert "validation_target" in config
@@ -142,7 +142,7 @@ class TestMatches:
         self, handler: RemindValidatorHandler, transcript_file: Path
     ) -> None:
         """Matches all configured builder agents."""
-        for builder in handler.BUILDER_TO_VALIDATOR.keys():
+        for builder in handler.BUILDER_TO_VALIDATOR:
             self._write_task_tool_use(transcript_file, builder)
 
             hook_input: dict[str, Any] = {

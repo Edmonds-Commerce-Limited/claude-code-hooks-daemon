@@ -1,6 +1,7 @@
 """Another test handler with config support."""
 
 from claude_code_hooks_daemon.core import Handler, HookResult
+from claude_code_hooks_daemon.core.hook_result import Decision
 
 
 class AnotherTestHandler(Handler):
@@ -36,4 +37,4 @@ class AnotherTestHandler(Handler):
         Returns:
             HookResult with allow decision and config value in context
         """
-        return HookResult(decision="allow", context=[f"Another handler: {self.test_value}"])
+        return HookResult(decision=Decision.ALLOW, context=[f"Another handler: {self.test_value}"])

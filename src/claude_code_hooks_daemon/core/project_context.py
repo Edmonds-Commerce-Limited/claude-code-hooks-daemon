@@ -39,6 +39,9 @@ class _ProjectContextData:
         self_install_mode: True if daemon is running in self-install mode (dogfooding)
         git_repo_name: Repository name from git remote URL (FAIL FAST: always present)
         git_toplevel: Git repository root path (FAIL FAST: always present)
+        daemon_untracked_dir: Path to daemon's untracked directory for runtime files
+            - Normal mode: {project}/.claude/hooks-daemon/untracked
+            - Self-install mode: {project}/untracked
     """
 
     project_root: Path
@@ -47,6 +50,7 @@ class _ProjectContextData:
     self_install_mode: bool
     git_repo_name: str
     git_toplevel: Path
+    daemon_untracked_dir: Path
 
 
 class ProjectContext:
@@ -137,6 +141,16 @@ class ProjectContext:
         logger.info("ProjectContext: Git repo name: %s", git_repo_name)
         logger.info("ProjectContext: Git toplevel: %s", git_toplevel)
 
+        # Calculate daemon untracked directory (for runtime files like socket, pid, log)
+        # Self-install mode: {project}/untracked
+        # Normal mode: {project}/.claude/hooks-daemon/untracked
+        if self_install_mode:
+            daemon_untracked_dir = project_root / "untracked"
+        else:
+            daemon_untracked_dir = config_dir / "hooks-daemon" / "untracked"
+
+        logger.info("ProjectContext: Daemon untracked dir: %s", daemon_untracked_dir)
+
         # Store instance
         cls._instance = _ProjectContextData(
             project_root=project_root,
@@ -145,6 +159,7 @@ class ProjectContext:
             self_install_mode=self_install_mode,
             git_repo_name=git_repo_name,
             git_toplevel=git_toplevel,
+            daemon_untracked_dir=daemon_untracked_dir,
         )
         cls._initialized = True
 
@@ -358,6 +373,27 @@ class ProjectContext:
         cls._ensure_initialized()
         assert cls._instance is not None
         return cls._instance.git_toplevel
+
+    @classmethod
+    def daemon_untracked_dir(cls) -> Path:
+        """Get daemon's untracked directory for runtime files.
+
+        This directory is used for socket, PID file, log file, and other
+        runtime artifacts that should not be committed to git.
+
+        Location depends on install mode:
+        - Normal mode: {project}/.claude/hooks-daemon/untracked
+        - Self-install mode: {project}/untracked
+
+        Returns:
+            Absolute path to daemon untracked directory
+
+        Raises:
+            RuntimeError: If ProjectContext not initialized
+        """
+        cls._ensure_initialized()
+        assert cls._instance is not None
+        return cls._instance.daemon_untracked_dir
 
     @classmethod
     def reset(cls) -> None:

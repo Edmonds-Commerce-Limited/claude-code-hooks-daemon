@@ -1,6 +1,7 @@
 """Handler that raises error in __init__."""
 
 from claude_code_hooks_daemon.core import Handler, HookResult
+from claude_code_hooks_daemon.core.hook_result import Decision
 
 
 class InitErrorHandler(Handler):
@@ -37,4 +38,4 @@ class InitErrorHandler(Handler):
         Returns:
             HookResult
         """
-        return HookResult(decision="allow")
+        return HookResult(decision=Decision.ALLOW)

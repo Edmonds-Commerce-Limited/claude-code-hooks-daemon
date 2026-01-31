@@ -275,7 +275,6 @@ class TestMainFunction:
 
         # Handler should be registered or skipped based on tags
         # CleanupHandler doesn't have 'cleanup' tag by default, so it should be skipped
-        register_calls = mock_fc_instance.register.call_args_list
         # The actual behavior depends on CleanupHandler's tags
 
     @patch("claude_code_hooks_daemon.hooks.session_end.FrontController")
@@ -300,7 +299,6 @@ class TestMainFunction:
         main()
 
         # Handler should be registered or skipped based on tags
-        register_calls = mock_fc_instance.register.call_args_list
         # The actual behavior depends on CleanupHandler's tags
 
     @patch("claude_code_hooks_daemon.hooks.session_end.ConfigLoader")

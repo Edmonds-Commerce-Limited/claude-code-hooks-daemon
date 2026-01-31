@@ -354,7 +354,7 @@ class ConfigValidator:
                         suggestion = f"Did you mean: {', '.join(similar)}"
                     elif available_handlers:
                         # Show some available handlers
-                        available_list = sorted(list(available_handlers))[:5]
+                        available_list = sorted(available_handlers)[:5]
                         available_str = ", ".join(available_list)
                         more = (
                             f" ({len(available_handlers) - 5} more)"

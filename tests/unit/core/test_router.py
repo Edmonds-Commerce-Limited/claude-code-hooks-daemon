@@ -63,7 +63,7 @@ class TestEventRouter:
 
         chain = router.get_chain(EventType.PRE_TOOL_USE)
         assert len(chain) == 1
-        assert list(chain.handlers)[0].name == "test-handler"
+        assert next(iter(chain.handlers)).name == "test-handler"
 
     def test_register_multiple_handlers(self, router: EventRouter) -> None:
         """register should add multiple handlers to chain."""
@@ -92,7 +92,7 @@ class TestEventRouter:
         for event_type in EventType:
             chain = router.get_chain(event_type)
             assert len(chain) == 1
-            assert list(chain.handlers)[0].name == "global-handler"
+            assert next(iter(chain.handlers)).name == "global-handler"
 
     def test_unregister_handler(self, router: EventRouter) -> None:
         """unregister should remove handler from chain."""

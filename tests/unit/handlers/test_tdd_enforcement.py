@@ -145,6 +145,16 @@ class TestTddEnforcementHandler:
         }
         assert handler.matches(hook_input) is False
 
+    def test_matches_handler_in_test_named_directory(self, handler):
+        """Should match handler file even in directory with 'test' in name."""
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/tmp/test-handlers/pre_tool_use/fake_handler.py"},
+        }
+        # This is a handler file (has /handlers/ in path), not a test file
+        # The "test-" is in the parent directory name, not indicating a test file
+        assert handler.matches(hook_input) is True
+
     def test_matches_missing_file_path_returns_false(self, handler):
         """Should NOT match when file_path is missing."""
         hook_input = {"tool_name": "Write", "tool_input": {}}

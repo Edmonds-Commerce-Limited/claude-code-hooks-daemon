@@ -97,11 +97,12 @@ EOF
 # Clean up raw file
 rm -f "${OUTPUT_FILE}.raw"
 
-# Print summary
+# Print summary and exit based on violations, not auto-fix status
 echo ""
 echo "Lint Results:"
 python3 -c "
 import json
+import sys
 with open('${OUTPUT_FILE}') as f:
     data = json.load(f)
     summary = data['summary']
@@ -110,6 +111,6 @@ with open('${OUTPUT_FILE}') as f:
     print(f\"  Errors: {summary['errors']}\")
     print(f\"  Warnings: {summary['warnings']}\")
     print(f\"  Status: {'✅ PASSED' if summary['passed'] else '❌ FAILED'}\")
+    # Exit 0 if passed (0 violations), exit 1 if failed
+    sys.exit(0 if summary['passed'] else 1)
 "
-
-exit ${EXIT_CODE}

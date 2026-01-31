@@ -193,10 +193,9 @@ class HandlerRegistry:
 
                 module_name = f"claude_code_hooks_daemon.handlers.{dir_name}.{py_file.stem}"
 
-                try:
-                    module = importlib.import_module(module_name)
-                except Exception:
-                    continue
+                # FAIL FAST: If a production handler fails to import, that's a critical error
+                # Test fixtures are loaded separately via plugins, not through this path
+                module = importlib.import_module(module_name)
 
                 for attr_name in dir(module):
                     attr = getattr(module, attr_name)

@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.core import FrontController, HookResult
+from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.plugins import PluginLoader
 
 
@@ -40,7 +41,7 @@ class TestPluginIntegration:
         result = controller.dispatch(hook_input)
 
         assert isinstance(result, HookResult)
-        assert result.decision == "allow"
+        assert result.decision == Decision.ALLOW
         context_text = "\n".join(result.context)
         assert "Test custom handler" in context_text
 
@@ -93,7 +94,7 @@ class TestPluginIntegration:
             result = controller.dispatch(hook_input)
 
             # Should return "allow" decision (fail open) with error in context
-            assert result.decision == "allow"
+            assert result.decision == Decision.ALLOW
             context_text = "\n".join(result.context)
             assert "Hook handler error" in context_text or "error" in context_text.lower()
 
@@ -136,7 +137,7 @@ class TestPluginIntegration:
                 return False
 
             def handle(self, hook_input):
-                return HookResult(decision="allow")
+                return HookResult(decision=Decision.ALLOW)
 
         builtin = MockBuiltInHandler()
         controller.register(builtin)
