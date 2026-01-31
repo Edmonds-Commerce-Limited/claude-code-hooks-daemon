@@ -5,7 +5,7 @@ Uses Python tools: ruff, mypy, black, pytest, bandit (optional).
 
 import json
 import re
-import subprocess
+import subprocess  # nosec B404 - subprocess used for QA tools only (ruff, mypy, black, pytest, bandit)
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -127,13 +127,15 @@ class QARunner:
             QAExecutionError: If command fails unexpectedly
         """
         try:
-            result = subprocess.run(
-                command,
-                shell=False,  # SECURITY: Never use shell=True (prevents command injection)
-                cwd=str(self.project_root),
-                capture_output=True,
-                text=True,
-                timeout=timeout,
+            result = (
+                subprocess.run(  # nosec B603 - QA tools (ruff, mypy, etc.) are trusted, shell=False
+                    command,
+                    shell=False,  # SECURITY: Never use shell=True (prevents command injection)
+                    cwd=str(self.project_root),
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                )
             )
             return result.returncode, result.stdout, result.stderr
         except subprocess.TimeoutExpired as e:

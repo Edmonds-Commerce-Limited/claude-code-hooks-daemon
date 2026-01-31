@@ -5,7 +5,7 @@ Fails silently if not in a git repo or if git commands error.
 """
 
 import logging
-import subprocess
+import subprocess  # nosec B404 - subprocess used for git commands only (trusted system tool)
 from pathlib import Path
 from typing import Any
 
@@ -47,7 +47,7 @@ class GitBranchHandler(Handler):
 
         try:
             # Check if in git repo
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
                 ["git", "rev-parse", "--show-toplevel"],
                 cwd=cwd,
                 capture_output=True,
@@ -59,7 +59,7 @@ class GitBranchHandler(Handler):
                 return HookResult(context=[])  # Not a git repo
 
             # Get current branch
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
                 ["git", "branch", "--show-current"],
                 cwd=cwd,
                 capture_output=True,

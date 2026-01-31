@@ -1,6 +1,6 @@
 """ValidateEslintOnWriteHandler - runs ESLint validation on TypeScript/TSX files after write."""
 
-import subprocess
+import subprocess  # nosec B404 - subprocess used for eslint validation only (trusted tool)
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -97,8 +97,10 @@ class ValidateEslintOnWriteHandler(Handler):
             if is_worktree:
                 print("  [Detected worktree file - using ESLint wrapper for consistent config]")
 
-            result = subprocess.run(
-                command, cwd=cwd, capture_output=True, text=True, timeout=Timeout.ESLINT_CHECK
+            result = (
+                subprocess.run(  # nosec B603 - eslint/npx are trusted tools, file path validated
+                    command, cwd=cwd, capture_output=True, text=True, timeout=Timeout.ESLINT_CHECK
+                )
             )
 
             if result.returncode != 0:

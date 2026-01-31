@@ -18,7 +18,7 @@ Usage:
 
 import logging
 import re
-import subprocess
+import subprocess  # nosec B404 - subprocess used for git commands only (trusted system tool)
 from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
@@ -179,7 +179,7 @@ class ProjectContext:
         """
         try:
             # Check if in git repo
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
                 ["git", "rev-parse", "--show-toplevel"],
                 cwd=project_root,
                 capture_output=True,
@@ -192,7 +192,7 @@ class ProjectContext:
                 return None
 
             # Get remote origin URL
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
                 ["git", "remote", "get-url", "origin"],
                 cwd=project_root,
                 capture_output=True,
@@ -248,7 +248,7 @@ class ProjectContext:
             Git toplevel path or None
         """
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
                 ["git", "rev-parse", "--show-toplevel"],
                 cwd=project_root,
                 capture_output=True,

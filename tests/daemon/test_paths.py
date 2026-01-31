@@ -31,34 +31,28 @@ class TestPathGeneration(unittest.TestCase):
         project_dir = Path("/home/dev/my-project")
         socket_path = get_socket_path(project_dir)
 
-        # Should be in /tmp/
-        self.assertTrue(str(socket_path).startswith("/tmp/"))
+        # Should be in project's untracked directory
+        self.assertIn(".claude/hooks-daemon/untracked", str(socket_path))
 
         # Should have .sock extension
-        self.assertTrue(str(socket_path).endswith(".sock"))
+        self.assertTrue(str(socket_path).endswith("daemon.sock"))
 
-        # Should contain 'claude-hooks' prefix
-        self.assertIn("claude-hooks", str(socket_path))
-
-        # Should contain project name (truncated to 20 chars)
-        self.assertIn("my-project", str(socket_path))
+        # Should be under the project directory
+        self.assertTrue(str(socket_path).startswith("/home/dev/my-project/"))
 
     def test_get_pid_path_format(self):
         """Test PID path follows expected format."""
         project_dir = Path("/home/dev/my-project")
         pid_path = get_pid_path(project_dir)
 
-        # Should be in /tmp/
-        self.assertTrue(str(pid_path).startswith("/tmp/"))
+        # Should be in project's untracked directory
+        self.assertIn(".claude/hooks-daemon/untracked", str(pid_path))
 
         # Should have .pid extension
-        self.assertTrue(str(pid_path).endswith(".pid"))
+        self.assertTrue(str(pid_path).endswith("daemon.pid"))
 
-        # Should contain 'claude-hooks' prefix
-        self.assertIn("claude-hooks", str(pid_path))
-
-        # Should contain project name
-        self.assertIn("my-project", str(pid_path))
+        # Should be under the project directory
+        self.assertTrue(str(pid_path).startswith("/home/dev/my-project/"))
 
     def test_same_project_returns_same_socket(self):
         """Test same project directory returns identical socket path."""
@@ -99,56 +93,42 @@ class TestPathGeneration(unittest.TestCase):
         self.assertNotEqual(pid_alpha, pid_beta)
 
     def test_hash_uniqueness(self):
-        """Test hash portion is unique for different paths."""
+        """Test paths are unique for different projects."""
         project1 = Path("/home/dev/project-alpha")
         project2 = Path("/home/dev/project-beta")
 
         socket1 = get_socket_path(project1)
         socket2 = get_socket_path(project2)
 
-        # Extract hash portions (should be different)
-        # Format: /tmp/claude-hooks-{name}-{hash}.sock
-        parts1 = str(socket1).split("-")
-        parts2 = str(socket2).split("-")
+        # Paths should be different (each in their own project directory)
+        self.assertNotEqual(socket1, socket2)
 
-        # Get hash portion (last part before .sock)
-        hash1 = parts1[-1].replace(".sock", "")
-        hash2 = parts2[-1].replace(".sock", "")
-
-        self.assertNotEqual(hash1, hash2)
-        # Hash should be 8 characters (first 8 of MD5)
-        self.assertEqual(len(hash1), 8)
-        self.assertEqual(len(hash2), 8)
+        # Verify they're in different project directories
+        self.assertIn("project-alpha", str(socket1))
+        self.assertIn("project-beta", str(socket2))
 
     def test_hash_consistency(self):
-        """Test hash is consistent for same absolute path."""
+        """Test path is consistent for same absolute path."""
         project = Path("/home/dev/my-project")
 
         socket1 = get_socket_path(project)
         socket2 = get_socket_path(project)
 
-        # Extract hash portions
-        hash1 = str(socket1).split("-")[-1].replace(".sock", "")
-        hash2 = str(socket2).split("-")[-1].replace(".sock", "")
-
-        self.assertEqual(hash1, hash2)
+        # Paths should be identical for same project
+        self.assertEqual(socket1, socket2)
 
     def test_project_name_truncation(self):
-        """Test long project names are truncated to 20 characters."""
+        """Test long project names are handled correctly."""
         long_name = "this-is-a-very-long-project-name-that-exceeds-twenty-characters"
         project_dir = Path(f"/home/dev/{long_name}")
 
         socket_path = get_socket_path(project_dir)
-        filename = Path(socket_path).name
 
-        # Extract project name portion (between claude-hooks- and hash)
-        # Format: claude-hooks-{name}-{hash}.sock
-        parts = filename.replace("claude-hooks-", "").split("-")
-        # Everything except last part (which is hash.sock) is the name
-        project_name = "-".join(parts[:-1])
+        # Path should be under the project directory (no truncation needed)
+        self.assertIn(long_name, str(socket_path))
 
-        # Should be truncated to 20 chars
-        self.assertLessEqual(len(project_name), 20)
+        # Should still be in untracked directory
+        self.assertIn(".claude/hooks-daemon/untracked", str(socket_path))
 
     def test_relative_vs_absolute_paths(self):
         """Test relative and absolute paths produce different hashes."""
@@ -161,20 +141,18 @@ class TestPathGeneration(unittest.TestCase):
         # Should be different because absolute path is different
         self.assertNotEqual(socket_rel, socket_abs)
 
-    def test_socket_and_pid_have_same_hash(self):
-        """Test socket and PID paths use the same hash for same project."""
+    def test_socket_and_pid_have_same_directory(self):
+        """Test socket and PID paths are in the same directory for same project."""
         project_dir = Path("/home/dev/my-project")
 
         socket_path = get_socket_path(project_dir)
         pid_path = get_pid_path(project_dir)
 
-        # Extract hash from socket path
-        socket_hash = str(socket_path).split("-")[-1].replace(".sock", "")
-        # Extract hash from PID path
-        pid_hash = str(pid_path).split("-")[-1].replace(".pid", "")
+        # Both should be in the same untracked directory
+        self.assertEqual(socket_path.parent, pid_path.parent)
 
-        # Hashes should be identical
-        self.assertEqual(socket_hash, pid_hash)
+        # Both should be in the untracked directory
+        self.assertIn(".claude/hooks-daemon/untracked", str(socket_path.parent))
 
     def test_returns_path_objects(self):
         """Test functions return Path objects, not strings."""
@@ -194,13 +172,13 @@ class TestPathGeneration(unittest.TestCase):
         socket_path = get_socket_path(project_dir)
         pid_path = get_pid_path(project_dir)
 
-        # Should still generate valid paths
-        self.assertTrue(str(socket_path).startswith("/tmp/"))
-        self.assertTrue(str(pid_path).startswith("/tmp/"))
+        # Should still generate valid paths in untracked directory
+        self.assertIn(".claude/hooks-daemon/untracked", str(socket_path))
+        self.assertIn(".claude/hooks-daemon/untracked", str(pid_path))
 
-        # Hash should be consistent
-        socket_hash = str(socket_path).split("-")[-1].replace(".sock", "")
-        self.assertEqual(len(socket_hash), 8)
+        # Paths should end with expected filenames
+        self.assertTrue(str(socket_path).endswith("daemon.sock"))
+        self.assertTrue(str(pid_path).endswith("daemon.pid"))
 
     def test_accepts_string_paths(self):
         """Test functions accept string paths for backward compatibility."""
@@ -289,17 +267,14 @@ class TestUtilityFunctions(unittest.TestCase):
         project_dir = Path("/home/dev/my-project")
         log_path = get_log_path(project_dir)
 
-        # Should be in /tmp/
-        self.assertTrue(str(log_path).startswith("/tmp/"))
+        # Should be in project's untracked directory
+        self.assertIn(".claude/hooks-daemon/untracked", str(log_path))
 
         # Should have .log extension
-        self.assertTrue(str(log_path).endswith(".log"))
+        self.assertTrue(str(log_path).endswith("daemon.log"))
 
-        # Should contain 'claude-hooks' prefix
-        self.assertIn("claude-hooks", str(log_path))
-
-        # Should contain project name
-        self.assertIn("my-project", str(log_path))
+        # Should be under the project directory
+        self.assertTrue(str(log_path).startswith("/home/dev/my-project/"))
 
     def test_get_log_path_consistent(self):
         """Test get_log_path returns same path for same project."""
