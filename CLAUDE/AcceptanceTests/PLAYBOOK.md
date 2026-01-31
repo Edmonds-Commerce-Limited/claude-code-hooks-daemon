@@ -34,6 +34,26 @@ Unit tests validate individual functions. Acceptance tests validate **real-world
 
 **CRITICAL: Use TDD for all bugs found during acceptance testing.**
 
+### FAIL-FAST Principle
+
+**See:** [`CLAUDE/development/RELEASING.md`](../development/RELEASING.md#fix-issues-before-release-fail-fast-cycle) for the complete FAIL-FAST cycle documentation.
+
+**ANY code change during acceptance testing = Complete the full cycle:**
+
+```
+Acceptance Testing → Find Bug → Fix with TDD → Run QA → Restart Acceptance FROM TEST 1.1
+```
+
+**Quick Reference:**
+1. Find failing test during acceptance testing
+2. Fix bug using TDD (write failing test, implement fix, verify)
+3. Run FULL QA: `./scripts/qa/run_all.sh` (must pass 100%)
+4. Restart daemon: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
+5. **Restart acceptance testing FROM TEST 1.1** (not from where you left off)
+6. Continue until ALL tests pass with ZERO code changes
+
+**Why?** Code changes can introduce regressions. See release documentation for complete rationale.
+
 ### Process for Handling Failures
 
 1. **Identify the Bug**

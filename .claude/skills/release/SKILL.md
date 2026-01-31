@@ -140,7 +140,16 @@ Fix: Use different version
 
 ## Documentation
 
-Full process details: `CLAUDE/development/RELEASING.md`
+**📖 SINGLE SOURCE OF TRUTH:** [`CLAUDE/development/RELEASING.md`](../../CLAUDE/development/RELEASING.md)
+
+This skill implements the process defined in the release documentation. For complete details on:
+- Pre-release validation steps
+- Acceptance testing requirements and FAIL-FAST cycle
+- Version detection rules
+- Changelog generation format
+- Post-release procedures
+
+**See the release documentation above.** The documentation is the authoritative source - this skill follows it.
 
 ## Version
 
