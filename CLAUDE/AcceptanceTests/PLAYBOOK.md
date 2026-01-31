@@ -36,7 +36,7 @@ Unit tests validate individual functions. Acceptance tests validate **real-world
 
 ### FAIL-FAST Principle
 
-**See:** [`CLAUDE/development/RELEASING.md`](../development/RELEASING.md#fix-issues-before-release-fail-fast-cycle) for the complete FAIL-FAST cycle documentation.
+**See:** @CLAUDE/development/RELEASING.md for the complete FAIL-FAST cycle documentation.
 
 **ANY code change during acceptance testing = Complete the full cycle:**
 

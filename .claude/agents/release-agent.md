@@ -7,7 +7,7 @@ model: sonnet
 
 # Release Agent - Automated Version Management & Release
 
-**📖 SINGLE SOURCE OF TRUTH:** [`CLAUDE/development/RELEASING.md`](../../CLAUDE/development/RELEASING.md)
+**📖 SINGLE SOURCE OF TRUTH:** @CLAUDE/development/RELEASING.md
 
 This agent implements the release process defined in the documentation above. For complete details on validation, acceptance testing, FAIL-FAST cycles, and all release procedures, **see the release documentation**.
 
