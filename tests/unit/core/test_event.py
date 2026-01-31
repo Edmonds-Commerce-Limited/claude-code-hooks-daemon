@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from claude_code_hooks_daemon.constants import ToolName
 from claude_code_hooks_daemon.core.event import EventType, HookEvent, HookInput, ToolInput
 
 
@@ -135,7 +136,7 @@ class TestHookInput:
             "sessionId": "session-123",
         }
         hook_input = HookInput.model_validate(data)
-        assert hook_input.tool_name == "Bash"
+        assert hook_input.tool_name == ToolName.BASH
         assert hook_input.tool_input == {"command": "git status"}
         assert hook_input.session_id == "session-123"
 
@@ -148,7 +149,7 @@ class TestHookInput:
             "transcriptPath": "/path/to/transcript",
         }
         hook_input = HookInput.model_validate(data)
-        assert hook_input.tool_name == "Write"
+        assert hook_input.tool_name == ToolName.WRITE
         assert hook_input.session_id == "session-123"
         assert hook_input.transcript_path == "/path/to/transcript"
 
@@ -211,7 +212,7 @@ class TestHookEvent:
         }
         event = HookEvent.model_validate(data)
         assert event.event_type == EventType.PRE_TOOL_USE
-        assert event.hook_input.tool_name == "Bash"
+        assert event.hook_input.tool_name == ToolName.BASH
         assert event.request_id == "req-456"
 
     def test_tool_name_property(self) -> None:
@@ -220,7 +221,7 @@ class TestHookEvent:
             event_type=EventType.PRE_TOOL_USE,
             hook_input=HookInput(tool_name="Bash"),
         )
-        assert event.tool_name == "Bash"
+        assert event.tool_name == ToolName.BASH
 
     def test_tool_input_property(self) -> None:
         """tool_input property should access hook_input.tool_input."""
@@ -321,7 +322,7 @@ class TestHookEvent:
         }
         event = HookEvent.from_dict(data)
         assert event.event_type == EventType.PRE_TOOL_USE
-        assert event.tool_name == "Bash"
+        assert event.tool_name == ToolName.BASH
 
     def test_from_dict_legacy_format(self) -> None:
         """from_dict should handle legacy format (no event wrapper)."""
@@ -332,7 +333,7 @@ class TestHookEvent:
         event = HookEvent.from_dict(data)
         # Should default to PreToolUse for legacy format
         assert event.event_type == EventType.PRE_TOOL_USE
-        assert event.tool_name == "Bash"
+        assert event.tool_name == ToolName.BASH
 
     def test_frozen_model(self) -> None:
         """HookEvent should be immutable."""
@@ -356,8 +357,8 @@ class TestHookEvent:
             )
 
             # Only the matching method should return True
-            assert event.is_bash_tool() == (tool == "Bash")
-            assert event.is_write_tool() == (tool == "Write")
+            assert event.is_bash_tool() == (tool == ToolName.BASH)
+            assert event.is_write_tool() == (tool == ToolName.WRITE)
             assert event.is_edit_tool() == (tool == "Edit")
             assert event.is_read_tool() == (tool == "Read")
 

@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.core import HookResult
 from claude_code_hooks_daemon.handlers.user_prompt_submit.git_context_injector import (
     GitContextInjectorHandler,
@@ -117,7 +118,9 @@ class TestGitContextInjectorHandler:
         """Should handle git command timeout gracefully."""
         import subprocess
 
-        mock_run.side_effect = subprocess.TimeoutExpired(cmd="git status", timeout=5)
+        mock_run.side_effect = subprocess.TimeoutExpired(
+            cmd="git status", timeout=Timeout.SOCKET_CONNECT
+        )
 
         hook_input = {"prompt": "Test"}
         result = handler.handle(hook_input)

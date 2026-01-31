@@ -31,8 +31,8 @@ echo "Running Bandit security scanner..."
 
 # Run bandit with JSON output
 # Note: Bandit uses -f json for JSON format, -r for recursive
-# Skip false positives: B324 (MD5 for cache), B602 (shell=True internal), B404/B603/B607 (subprocess legitimate use), B108 (temp files), B110 (try/except/pass)
-if venv_tool bandit -r src/ -f json -o "${OUTPUT_FILE}.raw" -s B101,B324,B602,B404,B603,B607,B108,B110 2>&1; then
+# Skip ONLY test assertions (B101) - we run bandit on src/ not tests/
+if venv_tool bandit -r src/ -f json -o "${OUTPUT_FILE}.raw" -s B101 2>&1; then
     EXIT_CODE=0
 else
     EXIT_CODE=$?
@@ -93,14 +93,14 @@ if "_totals" in metrics:
     # Use Bandit's file count if available
     total_files = max(total_files, metrics["_totals"].get("loc", 0) // 100)  # Rough estimate
 
-# Build summary
+# Build summary - FAIL on ANY issue (HIGH, MEDIUM, or LOW)
 summary = {
     "total_files_checked": total_files,
     "total_issues": len(issues),
     "errors": sum(1 for i in issues if i["severity"] == "error"),
     "warnings": sum(1 for i in issues if i["severity"] == "warning"),
     "info": sum(1 for i in issues if i["severity"] == "info"),
-    "passed": len([i for i in issues if i["severity"] == "error"]) == 0,
+    "passed": len(issues) == 0,  # ZERO TOLERANCE - any issue fails
 }
 
 # Output final JSON
@@ -118,11 +118,12 @@ EOF
 # Clean up raw file
 rm -f "${OUTPUT_FILE}.raw"
 
-# Print summary
+# Print summary and determine final exit code based on HIGH severity errors
 echo ""
 echo "Security Check Results:"
 python3 -c "
 import json
+import sys
 with open('${OUTPUT_FILE}') as f:
     data = json.load(f)
     summary = data['summary']
@@ -132,6 +133,6 @@ with open('${OUTPUT_FILE}') as f:
     print(f\"  Warnings (MEDIUM): {summary['warnings']}\")
     print(f\"  Info (LOW): {summary['info']}\")
     print(f\"  Status: {'✅ PASSED' if summary['passed'] else '❌ FAILED'}\")
+    # Exit 0 if passed (no HIGH severity), exit 1 if failed
+    sys.exit(0 if summary['passed'] else 1)
 "
-
-exit ${EXIT_CODE}

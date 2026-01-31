@@ -24,6 +24,8 @@ from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.constants import Timeout
+
 
 @pytest.fixture
 def daemon_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
@@ -152,7 +154,7 @@ def daemon_process(daemon_env: dict[str, Any]):
         env=test_env,
         capture_output=True,
         text=True,
-        timeout=5,
+        timeout=Timeout.SOCKET_CONNECT,
     )
 
     if "RUNNING" not in status_result.stdout:
@@ -163,7 +165,13 @@ def daemon_process(daemon_env: dict[str, Any]):
 
     # Cleanup: Stop daemon
     stop_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "stop"]
-    subprocess.run(stop_cmd, cwd=project_root, env=test_env, capture_output=True, timeout=5)
+    subprocess.run(
+        stop_cmd,
+        cwd=project_root,
+        env=test_env,
+        capture_output=True,
+        timeout=Timeout.SOCKET_CONNECT,
+    )
 
     # Wait for cleanup
     time.sleep(0.5)
@@ -243,7 +251,7 @@ class TestDaemonSmoke:
             env=test_env,
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=Timeout.SOCKET_CONNECT,
         )
 
         assert "RUNNING" in status_result.stdout, "Daemon not running after start"
@@ -256,7 +264,7 @@ class TestDaemonSmoke:
             env=test_env,
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=Timeout.SOCKET_CONNECT,
         )
 
         assert stop_result.returncode == 0, f"Stop failed: {stop_result.stderr}"
@@ -269,7 +277,7 @@ class TestDaemonSmoke:
             env=test_env,
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=Timeout.SOCKET_CONNECT,
         )
 
         assert "NOT RUNNING" in status_result.stdout, "Daemon still running after stop"
@@ -392,13 +400,13 @@ class TestDaemonSmoke:
 
         # Restart daemon
         restart_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "restart"]
-        restart_result = subprocess.run(
+        subprocess.run(
             restart_cmd,
             cwd=project_root,
             env=test_env,
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=Timeout.DAEMON_SHUTDOWN,
         )
 
         time.sleep(1)
@@ -411,14 +419,20 @@ class TestDaemonSmoke:
             env=test_env,
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=Timeout.SOCKET_CONNECT,
         )
 
         assert "RUNNING" in status_result.stdout, "Daemon not running after restart"
 
         # Cleanup
         stop_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "stop"]
-        subprocess.run(stop_cmd, cwd=project_root, env=test_env, capture_output=True, timeout=5)
+        subprocess.run(
+            stop_cmd,
+            cwd=project_root,
+            env=test_env,
+            capture_output=True,
+            timeout=Timeout.SOCKET_CONNECT,
+        )
 
     def test_daemon_rejects_second_start(self, daemon_process: dict[str, Any]) -> None:
         """Daemon rejects second start attempt when already running."""
@@ -431,10 +445,9 @@ class TestDaemonSmoke:
             start_cmd,
             cwd=project_root,
             env=test_env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             text=True,
-            timeout=5,
+            timeout=Timeout.SOCKET_CONNECT,
         )
 
         # Should succeed with message about already running
@@ -491,7 +504,7 @@ class TestDaemonConfiguration:
             env=test_env,
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=Timeout.DAEMON_SHUTDOWN,
         )
 
         # Should fail with clear error
@@ -567,11 +580,17 @@ plugins: {}
             env=test_env,
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=Timeout.SOCKET_CONNECT,
         )
 
         assert "RUNNING" in status_result.stdout
 
         # Cleanup
         stop_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "stop"]
-        subprocess.run(stop_cmd, cwd=tmp_path, env=test_env, capture_output=True, timeout=5)
+        subprocess.run(
+            stop_cmd,
+            cwd=tmp_path,
+            env=test_env,
+            capture_output=True,
+            timeout=Timeout.SOCKET_CONNECT,
+        )

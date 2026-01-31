@@ -138,22 +138,21 @@ def validate_installation_target(project_root: Path, self_install_requested: boo
             )
 
     # 2. Check git remote if this looks like a git repo
-    if (project_root / ".git").exists():
-        if is_hooks_daemon_repo(project_root):
-            # Check if self-install is being requested or already configured
-            config = load_config_safe(project_root)
-            has_self_install_config = config and config.get(ConfigKey.DAEMON, {}).get(
-                "self_install_mode", False
-            )
+    if (project_root / ".git").exists() and is_hooks_daemon_repo(project_root):
+        # Check if self-install is being requested or already configured
+        config = load_config_safe(project_root)
+        has_self_install_config = config and config.get(ConfigKey.DAEMON, {}).get(
+            "self_install_mode", False
+        )
 
-            if not self_install_requested and not has_self_install_config:
-                raise InstallationError(
-                    "This is the hooks-daemon repository.\n"
-                    "To install for development, use --self-install flag or add to "
-                    ".claude/hooks-daemon.yaml:\n"
-                    "  daemon:\n"
-                    "    self_install_mode: true"
-                )
+        if not self_install_requested and not has_self_install_config:
+            raise InstallationError(
+                "This is the hooks-daemon repository.\n"
+                "To install for development, use --self-install flag or add to "
+                ".claude/hooks-daemon.yaml:\n"
+                "  daemon:\n"
+                "    self_install_mode: true"
+            )
 
     # 3. Check for nested structure
     validate_not_nested(project_root)

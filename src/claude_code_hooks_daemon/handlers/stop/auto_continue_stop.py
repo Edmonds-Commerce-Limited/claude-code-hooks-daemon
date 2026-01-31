@@ -197,7 +197,4 @@ class AutoContinueStopHandler(Handler):
             True if text contains an error pattern (should not auto-continue)
         """
         text_lower = text.lower()
-        for pattern in self.ERROR_PATTERNS:
-            if re.search(pattern, text_lower, re.IGNORECASE):
-                return True
-        return False
+        return any(re.search(pattern, text_lower, re.IGNORECASE) for pattern in self.ERROR_PATTERNS)

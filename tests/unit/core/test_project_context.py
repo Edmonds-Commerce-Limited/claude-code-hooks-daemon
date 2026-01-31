@@ -46,6 +46,9 @@ class TestProjectContextInitialization:
         assert ProjectContext.self_install_mode() is False
         assert ProjectContext.git_repo_name() == "test-repo"
         assert ProjectContext.git_toplevel() == Path("/tmp/project")
+        # Verify daemon_untracked_dir in normal mode: {project}/.claude/hooks-daemon/untracked
+        expected_untracked = claude_dir / "hooks-daemon" / "untracked"
+        assert ProjectContext.daemon_untracked_dir() == expected_untracked
 
     def test_initialize_with_valid_config_self_install_mode(self, tmp_path: Path) -> None:
         """Initialize with valid config in self-install mode (dogfooding)."""
@@ -74,6 +77,9 @@ class TestProjectContextInitialization:
         assert ProjectContext.self_install_mode() is True
         assert ProjectContext.project_root() == project_root
         assert ProjectContext.git_repo_name() == "daemon"
+        # Verify daemon_untracked_dir in self-install mode: {project}/untracked
+        expected_untracked = project_root / "untracked"
+        assert ProjectContext.daemon_untracked_dir() == expected_untracked
 
     def test_initialize_fails_if_config_does_not_exist(self, tmp_path: Path) -> None:
         """FAIL FAST: Initialize fails if config file doesn't exist."""

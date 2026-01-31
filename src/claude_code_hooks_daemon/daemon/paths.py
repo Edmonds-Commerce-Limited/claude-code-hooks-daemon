@@ -3,6 +3,9 @@ Path management for daemon Unix socket and PID files.
 
 Generates unique socket and PID file paths based on project directory,
 enabling multi-project daemon isolation.
+
+SECURITY: All runtime files stored in daemon's untracked directory,
+not /tmp, to prevent security vulnerabilities.
 """
 
 import contextlib
@@ -10,6 +13,8 @@ import hashlib
 import logging
 import os
 from pathlib import Path
+
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +30,8 @@ def get_project_hash(project_path: Path | str) -> str:
         First 8 characters of MD5 hash of absolute path
     """
     abs_path = str(Path(project_path).resolve())
-    hash_obj = hashlib.md5(abs_path.encode("utf-8"))
+    # MD5 used only for generating short path identifier, not for security
+    hash_obj = hashlib.md5(abs_path.encode("utf-8"), usedforsecurity=False)
     return hash_obj.hexdigest()[:8]
 
 
@@ -48,7 +54,8 @@ def get_socket_path(project_dir: Path | str) -> Path:
     """
     Generate Unix socket path for project-specific daemon.
 
-    Pattern: /tmp/claude-hooks-{project-name}-{hash}.sock
+    SECURITY: Stored in daemon's untracked directory, not /tmp.
+    Pattern: {project}/.claude/hooks-daemon/untracked/daemon.sock
 
     Can be overridden via CLAUDE_HOOKS_SOCKET_PATH environment variable
     (useful for testing to avoid collision with production daemon).
@@ -61,22 +68,25 @@ def get_socket_path(project_dir: Path | str) -> Path:
 
     Example:
         >>> get_socket_path(Path('/home/dev/alpha'))
-        Path('/tmp/claude-hooks-alpha-a1b2c3d4.sock')
+        Path('/home/dev/alpha/.claude/hooks-daemon/untracked/daemon.sock')
     """
     # Allow environment variable override for testing
     if env_path := os.environ.get("CLAUDE_HOOKS_SOCKET_PATH"):
         return Path(env_path)
 
-    project_name = get_project_name(project_dir)
-    project_hash = get_project_hash(project_dir)
-    return Path(f"/tmp/claude-hooks-{project_name}-{project_hash}.sock")
+    # Use daemon's untracked directory (secure, project-specific)
+    project_path = Path(project_dir).resolve()
+    untracked_dir = project_path / ".claude" / "hooks-daemon" / "untracked"
+    untracked_dir.mkdir(parents=True, exist_ok=True)
+    return untracked_dir / "daemon.sock"
 
 
 def get_pid_path(project_dir: Path | str) -> Path:
     """
     Generate PID file path for project-specific daemon.
 
-    Pattern: /tmp/claude-hooks-{project-name}-{hash}.pid
+    SECURITY: Stored in daemon's untracked directory, not /tmp.
+    Pattern: {project}/.claude/hooks-daemon/untracked/daemon.pid
 
     Can be overridden via CLAUDE_HOOKS_PID_PATH environment variable
     (useful for testing to avoid collision with production daemon).
@@ -89,22 +99,25 @@ def get_pid_path(project_dir: Path | str) -> Path:
 
     Example:
         >>> get_pid_path(Path('/home/dev/alpha'))
-        Path('/tmp/claude-hooks-alpha-a1b2c3d4.pid')
+        Path('/home/dev/alpha/.claude/hooks-daemon/untracked/daemon.pid')
     """
     # Allow environment variable override for testing
     if env_path := os.environ.get("CLAUDE_HOOKS_PID_PATH"):
         return Path(env_path)
 
-    project_name = get_project_name(project_dir)
-    project_hash = get_project_hash(project_dir)
-    return Path(f"/tmp/claude-hooks-{project_name}-{project_hash}.pid")
+    # Use daemon's untracked directory (secure, project-specific)
+    project_path = Path(project_dir).resolve()
+    untracked_dir = project_path / ".claude" / "hooks-daemon" / "untracked"
+    untracked_dir.mkdir(parents=True, exist_ok=True)
+    return untracked_dir / "daemon.pid"
 
 
 def get_log_path(project_dir: Path | str) -> Path:
     """
     Generate log file path for project-specific daemon.
 
-    Pattern: /tmp/claude-hooks-{project-name}-{hash}.log
+    SECURITY: Stored in daemon's untracked directory, not /tmp.
+    Pattern: {project}/.claude/hooks-daemon/untracked/daemon.log
 
     Can be overridden via CLAUDE_HOOKS_LOG_PATH environment variable
     (useful for testing to avoid collision with production daemon).
@@ -117,15 +130,17 @@ def get_log_path(project_dir: Path | str) -> Path:
 
     Example:
         >>> get_log_path(Path('/home/dev/alpha'))
-        Path('/tmp/claude-hooks-alpha-a1b2c3d4.log')
+        Path('/home/dev/alpha/.claude/hooks-daemon/untracked/daemon.log')
     """
     # Allow environment variable override for testing
     if env_path := os.environ.get("CLAUDE_HOOKS_LOG_PATH"):
         return Path(env_path)
 
-    project_name = get_project_name(project_dir)
-    project_hash = get_project_hash(project_dir)
-    return Path(f"/tmp/claude-hooks-{project_name}-{project_hash}.log")
+    # Use daemon's untracked directory (secure, project-specific)
+    project_path = Path(project_dir).resolve()
+    untracked_dir = project_path / ".claude" / "hooks-daemon" / "untracked"
+    untracked_dir.mkdir(parents=True, exist_ok=True)
+    return untracked_dir / "daemon.log"
 
 
 def is_pid_alive(pid: int) -> bool:

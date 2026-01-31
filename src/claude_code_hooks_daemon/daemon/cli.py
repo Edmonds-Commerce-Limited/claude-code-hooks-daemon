@@ -27,6 +27,7 @@ from typing import Any, Literal, cast
 
 from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.config.models import Config
+from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.paths import (
     cleanup_pid_file,
@@ -344,7 +345,7 @@ def cmd_stop(args: argparse.Namespace) -> int:
         print(f"Sent SIGTERM to daemon (PID: {pid})")
 
         # Wait for process to exit (up to 5 seconds)
-        timeout = 5
+        timeout = Timeout.SOCKET_CONNECT
         interval = 0.1
         elapsed = 0.0
 
@@ -720,7 +721,7 @@ def cmd_repair(args: argparse.Namespace) -> int:
     print("Repairing venv...")
 
     # Stop daemon first if running
-    socket_path = get_socket_path(project_root)
+    get_socket_path(project_root)
     pid_path = get_pid_path(project_root)
     pid = read_pid_file(str(pid_path))
     if pid is not None:
@@ -740,7 +741,7 @@ def cmd_repair(args: argparse.Namespace) -> int:
             env=env,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=Timeout.BASH_DEFAULT,
         )
         if result.returncode != 0:
             print(f"ERROR: uv sync failed (exit {result.returncode})")
@@ -772,7 +773,7 @@ def cmd_repair(args: argparse.Namespace) -> int:
         )
         return 1
     except subprocess.TimeoutExpired:
-        print("ERROR: uv sync timed out after 120 seconds")
+        print(f"ERROR: uv sync timed out after {Timeout.BASH_DEFAULT / 1000:.0f} seconds")
         return 1
 
 

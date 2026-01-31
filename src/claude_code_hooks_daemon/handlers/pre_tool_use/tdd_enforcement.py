@@ -56,10 +56,7 @@ class TddEnforcementHandler(Handler):
 
         # Must be in a handlers subdirectory OR src directory (production code)
         # Note: handlers/ not /handlers/ to match paths like test-handlers/
-        if "handlers/" in file_path or "/src/" in file_path:
-            return True
-
-        return False
+        return bool("handlers/" in file_path or "/src/" in file_path)
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Check if test file exists, deny if not."""

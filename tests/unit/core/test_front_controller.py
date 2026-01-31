@@ -13,7 +13,7 @@ from claude_code_hooks_daemon.core.front_controller import (
     log_error_to_file,
 )
 from claude_code_hooks_daemon.core.handler import Handler
-from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 
 # Test Fixtures
 
@@ -32,7 +32,9 @@ def mock_terminal_handler():
     handler.priority = 10
     handler.terminal = True
     handler.matches.return_value = False
-    handler.handle.return_value = HookResult(decision="deny", reason="Terminal handler blocked")
+    handler.handle.return_value = HookResult(
+        decision=Decision.DENY, reason="Terminal handler blocked"
+    )
     return handler
 
 
@@ -44,7 +46,9 @@ def mock_non_terminal_handler():
     handler.priority = 5
     handler.terminal = False
     handler.matches.return_value = False
-    handler.handle.return_value = HookResult(decision="allow", context="Non-terminal context")
+    handler.handle.return_value = HookResult(
+        decision=Decision.ALLOW, context="Non-terminal context"
+    )
     return handler
 
 
@@ -191,7 +195,7 @@ class TestTerminalHandlerDispatch:
         handler1.priority = 10
         handler1.terminal = True
         handler1.matches.return_value = True
-        handler1.handle.return_value = HookResult(decision="deny", reason="Blocked")
+        handler1.handle.return_value = HookResult(decision=Decision.DENY, reason="Blocked")
 
         handler2 = MagicMock(spec=Handler)
         handler2.priority = 20
@@ -206,7 +210,7 @@ class TestTerminalHandlerDispatch:
         # Should execute handler1 and stop
         assert handler1.handle.called
         assert not handler2.handle.called  # Should NOT reach handler2
-        assert result.decision == "deny"
+        assert result.decision == Decision.DENY
 
     def test_terminal_handler_returns_result_immediately(
         self, front_controller, mock_terminal_handler
@@ -217,7 +221,7 @@ class TestTerminalHandlerDispatch:
 
         result = front_controller.dispatch({"tool_name": "Bash"})
 
-        assert result.decision == "deny"
+        assert result.decision == Decision.DENY
         assert result.reason == "Terminal handler blocked"
 
     def test_terminal_handler_no_match_continues(self, front_controller):
@@ -231,7 +235,7 @@ class TestTerminalHandlerDispatch:
         handler2.priority = 20
         handler2.terminal = True
         handler2.matches.return_value = True
-        handler2.handle.return_value = HookResult(decision="allow")
+        handler2.handle.return_value = HookResult(decision=Decision.ALLOW)
 
         front_controller.register(handler1)
         front_controller.register(handler2)
@@ -241,7 +245,7 @@ class TestTerminalHandlerDispatch:
         # Should skip handler1, execute handler2
         assert not handler1.handle.called
         assert handler2.handle.called
-        assert result.decision == "allow"
+        assert result.decision == Decision.ALLOW
 
     def test_multiple_terminal_handlers_first_match_wins(self, front_controller):
         """First matching terminal handler should win."""
@@ -249,20 +253,20 @@ class TestTerminalHandlerDispatch:
         handler1.priority = 10
         handler1.terminal = True
         handler1.matches.return_value = True
-        handler1.handle.return_value = HookResult(decision="deny", reason="First")
+        handler1.handle.return_value = HookResult(decision=Decision.DENY, reason="First")
 
         handler2 = MagicMock(spec=Handler)
         handler2.priority = 20
         handler2.terminal = True
         handler2.matches.return_value = True
-        handler2.handle.return_value = HookResult(decision="ask", reason="Second")
+        handler2.handle.return_value = HookResult(decision=Decision.ASK, reason="Second")
 
         front_controller.register(handler1)
         front_controller.register(handler2)
 
         result = front_controller.dispatch({"tool_name": "Bash"})
 
-        assert result.decision == "deny"
+        assert result.decision == Decision.DENY
         assert result.reason == "First"
 
 
@@ -278,13 +282,17 @@ class TestNonTerminalHandlerDispatch:
         handler1.priority = 10
         handler1.terminal = False  # Non-terminal
         handler1.matches.return_value = True
-        handler1.handle.return_value = HookResult(decision="allow", context="Context from handler1")
+        handler1.handle.return_value = HookResult(
+            decision=Decision.ALLOW, context="Context from handler1"
+        )
 
         handler2 = MagicMock(spec=Handler)
         handler2.priority = 20
         handler2.terminal = True
         handler2.matches.return_value = True
-        handler2.handle.return_value = HookResult(decision="deny", reason="Blocked by handler2")
+        handler2.handle.return_value = HookResult(
+            decision=Decision.DENY, reason="Blocked by handler2"
+        )
 
         front_controller.register(handler1)
         front_controller.register(handler2)
@@ -296,7 +304,7 @@ class TestNonTerminalHandlerDispatch:
         assert handler2.handle.called
 
         # Terminal handler result wins
-        assert result.decision == "deny"
+        assert result.decision == Decision.DENY
         assert result.reason == "Blocked by handler2"
 
     def test_non_terminal_handler_context_accumulated(self, front_controller):
@@ -305,13 +313,15 @@ class TestNonTerminalHandlerDispatch:
         handler1.priority = 10
         handler1.terminal = False
         handler1.matches.return_value = True
-        handler1.handle.return_value = HookResult(decision="allow", context="Context from handler1")
+        handler1.handle.return_value = HookResult(
+            decision=Decision.ALLOW, context="Context from handler1"
+        )
 
         handler2 = MagicMock(spec=Handler)
         handler2.priority = 20
         handler2.terminal = True
         handler2.matches.return_value = True
-        handler2.handle.return_value = HookResult(decision="deny", reason="Blocked")
+        handler2.handle.return_value = HookResult(decision=Decision.DENY, reason="Blocked")
 
         front_controller.register(handler1)
         front_controller.register(handler2)
@@ -327,19 +337,19 @@ class TestNonTerminalHandlerDispatch:
         handler1.priority = 10
         handler1.terminal = False
         handler1.matches.return_value = True
-        handler1.handle.return_value = HookResult(decision="allow", context="Context 1")
+        handler1.handle.return_value = HookResult(decision=Decision.ALLOW, context="Context 1")
 
         handler2 = MagicMock(spec=Handler)
         handler2.priority = 20
         handler2.terminal = False
         handler2.matches.return_value = True
-        handler2.handle.return_value = HookResult(decision="allow", context="Context 2")
+        handler2.handle.return_value = HookResult(decision=Decision.ALLOW, context="Context 2")
 
         handler3 = MagicMock(spec=Handler)
         handler3.priority = 30
         handler3.terminal = False
         handler3.matches.return_value = True
-        handler3.handle.return_value = HookResult(decision="allow", context="Context 3")
+        handler3.handle.return_value = HookResult(decision=Decision.ALLOW, context="Context 3")
 
         front_controller.register(handler1)
         front_controller.register(handler2)
@@ -353,7 +363,7 @@ class TestNonTerminalHandlerDispatch:
         assert handler3.handle.called
 
         # Last handler result returned
-        assert result.decision == "allow"
+        assert result.decision == Decision.ALLOW
 
 
 # Context Accumulation Tests
@@ -368,20 +378,24 @@ class TestContextAccumulation:
         handler1.priority = 10
         handler1.terminal = False
         handler1.matches.return_value = True
-        handler1.handle.return_value = HookResult(decision="allow", context="Context from handler1")
+        handler1.handle.return_value = HookResult(
+            decision=Decision.ALLOW, context="Context from handler1"
+        )
 
         handler2 = MagicMock(spec=Handler)
         handler2.priority = 20
         handler2.terminal = False
         handler2.matches.return_value = True
-        handler2.handle.return_value = HookResult(decision="allow", context="Context from handler2")
+        handler2.handle.return_value = HookResult(
+            decision=Decision.ALLOW, context="Context from handler2"
+        )
 
         handler3 = MagicMock(spec=Handler)
         handler3.priority = 30
         handler3.terminal = True
         handler3.matches.return_value = True
         handler3.handle.return_value = HookResult(
-            decision="deny", reason="Blocked", context="Terminal context"
+            decision=Decision.DENY, reason="Blocked", context="Terminal context"
         )
 
         front_controller.register(handler1)
@@ -401,19 +415,19 @@ class TestContextAccumulation:
         handler1.priority = 10
         handler1.terminal = False
         handler1.matches.return_value = True
-        handler1.handle.return_value = HookResult(decision="allow", context="First")
+        handler1.handle.return_value = HookResult(decision=Decision.ALLOW, context="First")
 
         handler2 = MagicMock(spec=Handler)
         handler2.priority = 20
         handler2.terminal = False
         handler2.matches.return_value = True
-        handler2.handle.return_value = HookResult(decision="allow", context="Second")
+        handler2.handle.return_value = HookResult(decision=Decision.ALLOW, context="Second")
 
         handler3 = MagicMock(spec=Handler)
         handler3.priority = 30
         handler3.terminal = True
         handler3.matches.return_value = True
-        handler3.handle.return_value = HookResult(decision="allow", context="Third")
+        handler3.handle.return_value = HookResult(decision=Decision.ALLOW, context="Third")
 
         front_controller.register(handler1)
         front_controller.register(handler2)
@@ -432,13 +446,17 @@ class TestContextAccumulation:
         handler1.priority = 10
         handler1.terminal = False
         handler1.matches.return_value = True
-        handler1.handle.return_value = HookResult(decision="allow", context=None)  # No context
+        handler1.handle.return_value = HookResult(
+            decision=Decision.ALLOW, context=None
+        )  # No context
 
         handler2 = MagicMock(spec=Handler)
         handler2.priority = 20
         handler2.terminal = True
         handler2.matches.return_value = True
-        handler2.handle.return_value = HookResult(decision="allow", context="Terminal context")
+        handler2.handle.return_value = HookResult(
+            decision=Decision.ALLOW, context="Terminal context"
+        )
 
         front_controller.register(handler1)
         front_controller.register(handler2)
@@ -454,13 +472,17 @@ class TestContextAccumulation:
         handler1.priority = 10
         handler1.terminal = False
         handler1.matches.return_value = True
-        handler1.handle.return_value = HookResult(decision="allow", context="Non-terminal context")
+        handler1.handle.return_value = HookResult(
+            decision=Decision.ALLOW, context="Non-terminal context"
+        )
 
         handler2 = MagicMock(spec=Handler)
         handler2.priority = 20
         handler2.terminal = True
         handler2.matches.return_value = True
-        handler2.handle.return_value = HookResult(decision="deny", reason="Blocked", context=None)
+        handler2.handle.return_value = HookResult(
+            decision=Decision.DENY, reason="Blocked", context=None
+        )
 
         front_controller.register(handler1)
         front_controller.register(handler2)
@@ -492,7 +514,7 @@ class TestErrorHandling:
             result = front_controller.dispatch({"tool_name": "Bash"})
 
         # Should fail open
-        assert result.decision == "allow"
+        assert result.decision == Decision.ALLOW
         # Context is now a list, join for text search
         context_text = "\n".join(result.context).lower()
         assert "error" in context_text
@@ -526,7 +548,7 @@ class TestErrorHandling:
 
         result = front_controller.dispatch({"tool_name": "Bash"})
 
-        assert result.decision == "allow"
+        assert result.decision == Decision.ALLOW
         assert result.reason is None
         assert result.context == []
 
@@ -534,7 +556,7 @@ class TestErrorHandling:
         """Empty handlers list should return default allow."""
         result = front_controller.dispatch({"tool_name": "Bash"})
 
-        assert result.decision == "allow"
+        assert result.decision == Decision.ALLOW
         assert result.reason is None
         assert result.context == []
 
@@ -584,7 +606,7 @@ class TestJSONInputOutput:
         handler.priority = 10
         handler.terminal = True
         handler.matches.return_value = True
-        handler.handle.return_value = HookResult(decision="deny", reason="Blocked")
+        handler.handle.return_value = HookResult(decision=Decision.DENY, reason="Blocked")
 
         front_controller.register(handler)
 
@@ -601,7 +623,7 @@ class TestJSONInputOutput:
 
             output = json.loads(mock_stdout.getvalue())
             assert "hookSpecificOutput" in output
-            assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+            assert output["hookSpecificOutput"]["permissionDecision"] == Decision.DENY
 
 
 # run() Method Tests
@@ -618,7 +640,7 @@ class TestRunMethod:
             patch("sys.stdin", StringIO(json.dumps(hook_input))),
             patch("sys.stdout", new_callable=StringIO),
             patch.object(
-                FrontController, "dispatch", return_value=HookResult(decision="allow")
+                FrontController, "dispatch", return_value=HookResult(decision=Decision.ALLOW)
             ) as mock_dispatch,
         ):
             fc = FrontController("PreToolUse")

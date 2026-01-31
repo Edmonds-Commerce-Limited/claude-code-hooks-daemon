@@ -315,7 +315,7 @@ class TestMemoryLogHandler:
         logs = handler.get_logs()
         assert len(logs) == 5
 
-        for (_, level_name, msg), log in zip(levels, logs):
+        for (_, level_name, msg), log in zip(levels, logs, strict=False):
             assert log == f"{level_name}: {msg}"
 
     def test_integration_with_logger(self) -> None:

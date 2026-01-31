@@ -13,9 +13,10 @@ from unittest.mock import patch
 
 import pytest
 
+from claude_code_hooks_daemon.constants import Priority
 from claude_code_hooks_daemon.core.front_controller import FrontController
 from claude_code_hooks_daemon.core.handler import Handler
-from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 from claude_code_hooks_daemon.daemon.config import DaemonConfig
 from claude_code_hooks_daemon.daemon.server import HooksDaemon
 
@@ -25,7 +26,7 @@ class SimpleTestHandler(Handler):
 
     def __init__(self) -> None:
         """Initialise test handler."""
-        super().__init__(name="test_handler", priority=50, terminal=True)
+        super().__init__(name="test_handler", priority=Priority.HELLO_WORLD, terminal=True)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Match all requests."""
@@ -33,7 +34,7 @@ class SimpleTestHandler(Handler):
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Return simple allow result."""
-        return HookResult(decision="allow", context="Test handler executed")
+        return HookResult(decision=Decision.ALLOW, context="Test handler executed")
 
 
 class TestLogLevelEnvironmentOverride:
@@ -340,7 +341,7 @@ class TestLogLevelEnvironmentOverride:
             )
 
             with patch.dict(os.environ, {"HOOKS_DAEMON_LOG_LEVEL": level_str}):
-                daemon = HooksDaemon(config=config, controller=front_controller)
+                HooksDaemon(config=config, controller=front_controller)
 
                 # Just verify initialization doesn't raise
                 expected_level = getattr(logging, level_str)

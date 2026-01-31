@@ -16,6 +16,7 @@ def mock_project_context():
 
 import pytest
 
+from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write import (
     ValidateEslintOnWriteHandler,
@@ -277,7 +278,7 @@ class TestValidateEslintOnWriteHandler:
 
         import subprocess
 
-        mock_run.side_effect = subprocess.TimeoutExpired(cmd="eslint", timeout=30)
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd="eslint", timeout=Timeout.ESLINT_CHECK)
 
         hook_input = {
             "tool_name": "Write",

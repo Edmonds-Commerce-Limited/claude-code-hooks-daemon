@@ -8,7 +8,7 @@ from typing import Any
 
 from claude_code_hooks_daemon.core.chain import ChainExecutionResult, HandlerChain
 from claude_code_hooks_daemon.core.handler import Handler
-from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 
 
 class MockHandler(Handler):
@@ -264,7 +264,7 @@ class TestHandlerChain:
 
         result = chain.execute(hook_input)
 
-        assert result.result.decision == "allow"
+        assert result.result.decision == Decision.ALLOW
         assert result.handlers_executed == []
         assert result.handlers_matched == []
         assert result.terminated_by is None
@@ -331,13 +331,13 @@ class TestHandlerChain:
             "h1",
             priority=10,
             terminal=False,
-            result=HookResult(decision="allow", context=["ctx1"]),
+            result=HookResult(decision=Decision.ALLOW, context=["ctx1"]),
         )
         h2 = MockHandler(
             "h2",
             priority=20,
             terminal=False,
-            result=HookResult(decision="allow", context=["ctx2"]),
+            result=HookResult(decision=Decision.ALLOW, context=["ctx2"]),
         )
 
         chain.add(h1)
@@ -355,13 +355,13 @@ class TestHandlerChain:
             "h1",
             priority=10,
             terminal=False,
-            result=HookResult(decision="allow", context=["ctx1"]),
+            result=HookResult(decision=Decision.ALLOW, context=["ctx1"]),
         )
         h2 = MockHandler(
             "h2",
             priority=20,
             terminal=True,
-            result=HookResult(decision="deny", context=["ctx2"]),
+            result=HookResult(decision=Decision.DENY, context=["ctx2"]),
         )
 
         chain.add(h1)
@@ -371,7 +371,7 @@ class TestHandlerChain:
         result = chain.execute(hook_input)
 
         assert result.result.context == ["ctx1", "ctx2"]
-        assert result.result.decision == "deny"
+        assert result.result.decision == Decision.DENY
         assert result.terminated_by == "h2"
 
     def test_execute_records_handler_names_in_result(self) -> None:
@@ -441,7 +441,7 @@ class TestHandlerChain:
         h2 = MockHandler(
             "h2",
             terminal=True,
-            result=HookResult(decision="allow", context=["ctx2"]),
+            result=HookResult(decision=Decision.ALLOW, context=["ctx2"]),
         )
 
         chain.add(h1)
@@ -512,7 +512,7 @@ class TestHandlerChain:
         hook_input = {"tool_name": "Bash"}
         result = chain.execute(hook_input)
 
-        assert result.result.decision == "allow"
+        assert result.result.decision == Decision.ALLOW
         assert result.handlers_executed == []
         assert result.handlers_matched == []
 
@@ -545,7 +545,7 @@ class TestHandlerChain:
         result = chain.execute_legacy(hook_input)
 
         assert isinstance(result, HookResult)
-        assert result.decision == "deny"
+        assert result.decision == Decision.DENY
         assert result.reason == "blocked"
 
     def test_execute_legacy_compatible_with_execute(self) -> None:
@@ -573,19 +573,19 @@ class TestHandlerChain:
             "h1",
             priority=10,
             terminal=False,
-            result=HookResult(decision="allow", context=["info1"]),
+            result=HookResult(decision=Decision.ALLOW, context=["info1"]),
         )
         h2 = MockHandler(
             "h2",
             priority=20,
             terminal=False,
-            result=HookResult(decision="allow", context=["info2"]),
+            result=HookResult(decision=Decision.ALLOW, context=["info2"]),
         )
         h3 = MockHandler(
             "h3",
             priority=30,
             terminal=False,
-            result=HookResult(decision="allow", context=["info3"]),
+            result=HookResult(decision=Decision.ALLOW, context=["info3"]),
         )
 
         # Terminal handler that makes final decision
@@ -593,7 +593,7 @@ class TestHandlerChain:
             "h4",
             priority=40,
             terminal=True,
-            result=HookResult(decision="deny", reason="final decision", context=["info4"]),
+            result=HookResult(decision=Decision.DENY, reason="final decision", context=["info4"]),
         )
 
         # Handler that should never execute
@@ -617,7 +617,7 @@ class TestHandlerChain:
         assert h5.handle_called == 0
 
         # Verify result
-        assert result.result.decision == "deny"
+        assert result.result.decision == Decision.DENY
         assert result.result.reason == "final decision"
         assert result.result.context == ["info1", "info2", "info3", "info4"]
         assert result.terminated_by == "h4"

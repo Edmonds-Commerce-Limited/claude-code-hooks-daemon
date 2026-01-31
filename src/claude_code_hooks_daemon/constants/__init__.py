@@ -52,35 +52,35 @@ from claude_code_hooks_daemon.constants.tools import ToolName, ToolNameLiteral
 from claude_code_hooks_daemon.constants.validation import ValidationLimit
 
 __all__ = [
-    # Handler constants
-    "HandlerID",
-    "HandlerIDMeta",
-    "HandlerKey",
+    # Config key constants
+    "ConfigKey",
+    # Path constants
+    "DaemonPath",
     # Event constants
     "EventID",
     "EventIDMeta",
     "EventKey",
-    # Priority constants
-    "Priority",
-    # Timeout constants
-    "Timeout",
-    # Path constants
-    "DaemonPath",
-    "ProjectPath",
+    # Formatting limit constants
+    "FormatLimit",
+    # Handler constants
+    "HandlerID",
+    "HandlerIDMeta",
+    "HandlerKey",
     # Tag constants
     "HandlerTag",
-    "TagLiteral",
-    # Tool name constants
-    "ToolName",
-    "ToolNameLiteral",
-    # Config key constants
-    "ConfigKey",
     # Protocol field constants
     "HookInputField",
     "HookOutputField",
     "PermissionDecision",
+    # Priority constants
+    "Priority",
+    "ProjectPath",
+    "TagLiteral",
+    # Timeout constants
+    "Timeout",
+    # Tool name constants
+    "ToolName",
+    "ToolNameLiteral",
     # Validation limit constants
     "ValidationLimit",
-    # Formatting limit constants
-    "FormatLimit",
 ]

@@ -2,8 +2,9 @@
 
 import pytest
 
+from claude_code_hooks_daemon.constants import Priority, ToolName
 from claude_code_hooks_daemon.core.handler import Handler
-from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 
 # Test Fixtures
 
@@ -17,7 +18,7 @@ class ConcreteHandler(Handler):
 
     def handle(self, hook_input: dict) -> HookResult:
         """Simple handle implementation."""
-        return HookResult(decision="allow", context="Concrete handler executed")
+        return HookResult(decision=Decision.ALLOW, context="Concrete handler executed")
 
 
 class TerminalHandler(Handler):
@@ -29,7 +30,7 @@ class TerminalHandler(Handler):
 
     def handle(self, hook_input: dict) -> HookResult:
         """Handle implementation."""
-        return HookResult(decision="deny", reason="Terminal handler blocked")
+        return HookResult(decision=Decision.DENY, reason="Terminal handler blocked")
 
 
 class NonTerminalHandler(Handler):
@@ -37,7 +38,9 @@ class NonTerminalHandler(Handler):
 
     def __init__(self) -> None:
         """Initialize non-terminal handler."""
-        super().__init__(name="non-terminal-test", priority=20, terminal=False)
+        super().__init__(
+            name="non-terminal-test", priority=Priority.GIT_CONTEXT_INJECTOR, terminal=False
+        )
 
     def matches(self, hook_input: dict) -> bool:
         """Match implementation."""
@@ -45,13 +48,13 @@ class NonTerminalHandler(Handler):
 
     def handle(self, hook_input: dict) -> HookResult:
         """Handle implementation."""
-        return HookResult(decision="allow", context="Non-terminal context")
+        return HookResult(decision=Decision.ALLOW, context="Non-terminal context")
 
 
 @pytest.fixture
 def concrete_handler():
     """Create concrete handler instance."""
-    return ConcreteHandler(name="test-handler", priority=10)
+    return ConcreteHandler(name="test-handler", priority=Priority.DESTRUCTIVE_GIT)
 
 
 @pytest.fixture
@@ -202,7 +205,7 @@ class TestHandlerAbstractMethods:
 
             def handle(self, hook_input: dict) -> HookResult:
                 """Handle implementation."""
-                return HookResult(decision="allow")
+                return HookResult(decision=Decision.ALLOW)
 
         # ABC prevents instantiation of incomplete subclasses
         with pytest.raises(TypeError, match="abstract"):
@@ -254,7 +257,7 @@ class TestHandlerSubclass:
         result = concrete_handler.handle({})
 
         assert isinstance(result, HookResult)
-        assert result.decision == "allow"
+        assert result.decision == Decision.ALLOW
         assert result.context == ["Concrete handler executed"]  # Now a list
 
     def test_terminal_handler_behavior(self, terminal_handler):
@@ -263,7 +266,7 @@ class TestHandlerSubclass:
         assert terminal_handler.matches({}) is True
 
         result = terminal_handler.handle({})
-        assert result.decision == "deny"
+        assert result.decision == Decision.DENY
 
     def test_non_terminal_handler_behavior(self, non_terminal_handler):
         """Non-terminal handler should have terminal=False."""
@@ -271,21 +274,21 @@ class TestHandlerSubclass:
         assert non_terminal_handler.matches({}) is True
 
         result = non_terminal_handler.handle({})
-        assert result.decision == "allow"
+        assert result.decision == Decision.ALLOW
         assert result.context == ["Non-terminal context"]  # Now a list
 
     def test_multiple_handlers_with_different_priorities(self):
         """Multiple handlers should maintain different priorities."""
-        handler1 = ConcreteHandler(name="handler1", priority=10)
-        handler2 = ConcreteHandler(name="handler2", priority=20)
-        handler3 = ConcreteHandler(name="handler3", priority=30)
+        handler1 = ConcreteHandler(name="handler1", priority=Priority.DESTRUCTIVE_GIT)
+        handler2 = ConcreteHandler(name="handler2", priority=Priority.GIT_CONTEXT_INJECTOR)
+        handler3 = ConcreteHandler(name="handler3", priority=Priority.ESLINT_DISABLE)
 
         assert handler1.priority < handler2.priority < handler3.priority
 
     def test_handlers_can_have_same_priority(self):
         """Multiple handlers can have same priority."""
-        handler1 = ConcreteHandler(name="handler1", priority=20)
-        handler2 = ConcreteHandler(name="handler2", priority=20)
+        handler1 = ConcreteHandler(name="handler1", priority=Priority.GIT_CONTEXT_INJECTOR)
+        handler2 = ConcreteHandler(name="handler2", priority=Priority.GIT_CONTEXT_INJECTOR)
 
         assert handler1.priority == handler2.priority
 
@@ -325,13 +328,13 @@ class TestMatchesMethod:
                 tool_input = hook_input.get("tool_input", {})
                 command = tool_input.get("command", "")
 
-                return tool_name == "Bash" and "rm -rf" in command
+                return tool_name == ToolName.BASH and "rm -rf" in command
 
             def handle(self, hook_input: dict) -> HookResult:
                 """Handle implementation."""
-                return HookResult(decision="deny", reason="Dangerous command")
+                return HookResult(decision=Decision.DENY, reason="Dangerous command")
 
-        handler = ComplexHandler(name="complex", priority=10)
+        handler = ComplexHandler(name="complex", priority=Priority.DESTRUCTIVE_GIT)
 
         # Should match
         assert handler.matches({"tool_name": "Bash", "tool_input": {"command": "rm -rf /"}}) is True
@@ -381,21 +384,21 @@ class TestHandleMethod:
                 """Handle with different decisions based on input."""
                 action = hook_input.get("action")
 
-                if action == "allow":
-                    return HookResult(decision="allow")
-                elif action == "deny":
-                    return HookResult(decision="deny", reason="Denied")
-                elif action == "ask":
-                    return HookResult(decision="ask", reason="Need confirmation")
+                if action == Decision.ALLOW:
+                    return HookResult(decision=Decision.ALLOW)
+                elif action == Decision.DENY:
+                    return HookResult(decision=Decision.DENY, reason="Denied")
+                elif action == Decision.ASK:
+                    return HookResult(decision=Decision.ASK, reason="Need confirmation")
                 else:
-                    return HookResult(decision="allow")
+                    return HookResult(decision=Decision.ALLOW)
 
-        handler = MultiDecisionHandler(name="multi", priority=10)
+        handler = MultiDecisionHandler(name="multi", priority=Priority.DESTRUCTIVE_GIT)
 
         # Test different decisions
-        assert handler.handle({"action": "allow"}).decision == "allow"
-        assert handler.handle({"action": "deny"}).decision == "deny"
-        assert handler.handle({"action": "ask"}).decision == "ask"
+        assert handler.handle({"action": "allow"}).decision == Decision.ALLOW
+        assert handler.handle({"action": "deny"}).decision == Decision.DENY
+        assert handler.handle({"action": "ask"}).decision == Decision.ASK
 
 
 # Integration Tests
@@ -417,16 +420,16 @@ class TestHandlerIntegration:
 
             def handle(self, hook_input: dict) -> HookResult:
                 """Deny dangerous operations."""
-                return HookResult(decision="deny", reason="Dangerous command blocked")
+                return HookResult(decision=Decision.DENY, reason="Dangerous command blocked")
 
-        handler = DenyHandler(name="deny-dangerous", priority=10)
+        handler = DenyHandler(name="deny-dangerous", priority=Priority.DESTRUCTIVE_GIT)
 
         # Test matching and handling
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "rm -rf /"}}
         assert handler.matches(hook_input) is True
 
         result = handler.handle(hook_input)
-        assert result.decision == "deny"
+        assert result.decision == Decision.DENY
         assert result.reason and "Dangerous" in result.reason
 
     def test_typical_guidance_handler(self):
@@ -437,7 +440,9 @@ class TestHandlerIntegration:
 
             def __init__(self) -> None:
                 """Initialize with non-terminal."""
-                super().__init__(name="guidance-handler", priority=20, terminal=False)
+                super().__init__(
+                    name="guidance-handler", priority=Priority.GIT_CONTEXT_INJECTOR, terminal=False
+                )
 
             def matches(self, hook_input: dict) -> bool:
                 """Match Write operations."""
@@ -445,7 +450,9 @@ class TestHandlerIntegration:
 
             def handle(self, hook_input: dict) -> HookResult:
                 """Provide guidance."""
-                return HookResult(decision="allow", guidance="Consider using Edit instead of Write")
+                return HookResult(
+                    decision=Decision.ALLOW, guidance="Consider using Edit instead of Write"
+                )
 
         handler = GuidanceHandler()
 
@@ -455,28 +462,33 @@ class TestHandlerIntegration:
         assert handler.matches(hook_input) is True
 
         result = handler.handle(hook_input)
-        assert result.decision == "allow"
+        assert result.decision == Decision.ALLOW
         assert result.guidance and "Edit instead" in result.guidance
 
     def test_handler_priority_ordering(self):
         """Test that handlers can be ordered by priority."""
         handlers = [
-            ConcreteHandler(name="high", priority=50),
-            ConcreteHandler(name="low", priority=10),
-            ConcreteHandler(name="medium", priority=30),
+            ConcreteHandler(name="high", priority=Priority.HELLO_WORLD),
+            ConcreteHandler(name="low", priority=Priority.DESTRUCTIVE_GIT),
+            ConcreteHandler(name="medium", priority=Priority.ESLINT_DISABLE),
         ]
 
-        # Sort by priority
+        # Sort by priority (lower numbers execute first)
         sorted_handlers = sorted(handlers, key=lambda h: h.priority)
 
-        assert sorted_handlers[0].name == "low"
-        assert sorted_handlers[1].name == "medium"
-        assert sorted_handlers[2].name == "high"
+        # HELLO_WORLD=5, DESTRUCTIVE_GIT=10, ESLINT_DISABLE=30
+        assert sorted_handlers[0].name == "high"  # Priority 5
+        assert sorted_handlers[1].name == "low"  # Priority 10
+        assert sorted_handlers[2].name == "medium"  # Priority 30
 
     def test_handler_terminal_flag_usage(self):
         """Test terminal flag affects handler behavior."""
-        terminal = ConcreteHandler(name="terminal", priority=10, terminal=True)
-        non_terminal = ConcreteHandler(name="non-terminal", priority=20, terminal=False)
+        terminal = ConcreteHandler(
+            name="terminal", priority=Priority.DESTRUCTIVE_GIT, terminal=True
+        )
+        non_terminal = ConcreteHandler(
+            name="non-terminal", priority=Priority.GIT_CONTEXT_INJECTOR, terminal=False
+        )
 
         assert terminal.terminal is True
         assert non_terminal.terminal is False
@@ -660,7 +672,9 @@ class TestHandlerRepr:
 
     def test_repr_format(self):
         """__repr__ should have expected format."""
-        handler = ConcreteHandler(name="test", priority=10, terminal=True, tags=["safety"])
+        handler = ConcreteHandler(
+            name="test", priority=Priority.DESTRUCTIVE_GIT, terminal=True, tags=["safety"]
+        )
         repr_str = repr(handler)
         assert repr_str.startswith("ConcreteHandler(")
         assert repr_str.endswith(")")

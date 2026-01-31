@@ -17,6 +17,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.cli import (
     cmd_config,
@@ -167,7 +168,7 @@ class TestSendDaemonRequest:
             mock_socket_class.return_value = mock_sock
 
             request = {"event": "test", "data": "test_data"}
-            result = send_daemon_request(socket_path, request, timeout=5)
+            result = send_daemon_request(socket_path, request, timeout=Timeout.SOCKET_CONNECT)
 
             assert result == response_data
             mock_sock.connect.assert_called_once_with(str(socket_path))
@@ -214,7 +215,7 @@ class TestSendDaemonRequest:
             mock_socket_class.return_value = mock_sock
 
             request = {"event": "test"}
-            result = send_daemon_request(socket_path, request, timeout=1)
+            result = send_daemon_request(socket_path, request, timeout=Timeout.SOCKET_CONNECT)
 
             assert result is None
 
@@ -335,7 +336,7 @@ class TestCmdStop:
 
         with (
             patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=12345),
-            patch("os.kill", side_effect=mock_kill_func) as mock_kill,
+            patch("os.kill", side_effect=mock_kill_func),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_pid_file") as mock_cleanup_pid,
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket") as mock_cleanup_sock,
             patch("time.sleep"),

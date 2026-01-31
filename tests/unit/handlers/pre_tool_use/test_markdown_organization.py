@@ -424,7 +424,7 @@ class TestPlanningModeIntegration:
         original_path = Path(planning_write_input["tool_input"]["file_path"])
         original_path.parent.mkdir(parents=True, exist_ok=True)
 
-        result = handler.handle(planning_write_input)
+        handler.handle(planning_write_input)
 
         # Should create stub file at original location
         assert original_path.exists()
@@ -458,7 +458,7 @@ class TestPlanningModeIntegration:
         plan_dir = tmp_path / "CLAUDE" / "Plan"
         plan_dir.mkdir(parents=True)
 
-        result = handler.handle(planning_write_input)
+        handler.handle(planning_write_input)
 
         # Should sanitize folder name
         created_folder = plan_dir / "00001-my-plan-with-special-chars"
