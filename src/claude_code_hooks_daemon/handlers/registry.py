@@ -216,7 +216,9 @@ class HandlerRegistry:
                                 if self._workspace_root:
                                     options["workspace_root"] = self._workspace_root
                                 options_registry[registry_key] = options
-                            except Exception:
+                            except (
+                                Exception
+                            ):  # nosec B110 - handler config options are optional, non-critical
                                 pass
 
         # PASS 2: Register handlers with inherited options

@@ -19,7 +19,7 @@ import json
 import os
 import signal
 import socket
-import subprocess
+import subprocess  # nosec B404 - subprocess used for daemon management (systemctl) only
 import sys
 import time
 from pathlib import Path
@@ -735,7 +735,7 @@ def cmd_repair(args: argparse.Namespace) -> int:
     env["UV_PROJECT_ENVIRONMENT"] = str(venv_path)
 
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 B607 - uv is trusted tool, no user input
             ["uv", "sync"],
             cwd=str(project_root),
             env=env,
@@ -753,7 +753,7 @@ def cmd_repair(args: argparse.Namespace) -> int:
 
         # Verify the repair worked
         venv_python = venv_path / "bin" / "python"
-        verify = subprocess.run(
+        verify = subprocess.run(  # nosec B603 - venv python with hardcoded import check
             [str(venv_python), "-c", "import claude_code_hooks_daemon; print('OK')"],
             capture_output=True,
             text=True,

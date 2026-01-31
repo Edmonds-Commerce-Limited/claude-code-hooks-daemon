@@ -1,6 +1,6 @@
 """GitContextInjectorHandler - injects git status context into user prompts."""
 
-import subprocess
+import subprocess  # nosec B404 - subprocess used for git commands only (trusted system tool)
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority, Timeout
@@ -50,7 +50,7 @@ class GitContextInjectorHandler(Handler):
         """
         try:
             # Run git status with short timeout
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
                 ["git", "status"],
                 capture_output=True,
                 text=True,

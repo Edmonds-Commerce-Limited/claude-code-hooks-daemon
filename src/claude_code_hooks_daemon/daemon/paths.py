@@ -14,8 +14,6 @@ import logging
 import os
 from pathlib import Path
 
-from claude_code_hooks_daemon.core.project_context import ProjectContext
-
 logger = logging.getLogger(__name__)
 
 

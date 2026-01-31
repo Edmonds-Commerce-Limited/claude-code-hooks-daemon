@@ -5,7 +5,7 @@ the hooks-daemon repository. Used by both install.py and daemon/cli.py.
 """
 
 import logging
-import subprocess
+import subprocess  # nosec B404 - subprocess used for git commands only (trusted system tool)
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +34,7 @@ def is_hooks_daemon_repo(directory: Path) -> bool:
         True if directory is the hooks-daemon repository
     """
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
             ["git", "-C", str(directory), "remote", "get-url", "origin"],
             capture_output=True,
             text=True,
