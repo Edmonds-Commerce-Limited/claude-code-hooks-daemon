@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "claude-code-hooks-daemon"
-version = "2.3.0"
+version = "2.4.0"
 description = "High-performance daemon for Claude Code hooks using front controller architecture"
 readme = "README.md"
 authors = [
