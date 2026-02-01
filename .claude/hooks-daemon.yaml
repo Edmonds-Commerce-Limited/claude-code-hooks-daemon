@@ -28,6 +28,10 @@ handlers:
       enabled: true
       priority: 10
 
+    pip_break_system:      # Blocks pip install --break-system-packages
+      enabled: true
+      priority: 10
+
     absolute_path:         # Enforces absolute paths in file operations
       enabled: true
       priority: 12
