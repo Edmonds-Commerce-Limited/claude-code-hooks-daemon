@@ -165,24 +165,21 @@ fi
 PYTHON_CMD="$HOOKS_DAEMON_ROOT_DIR/untracked/venv/bin/python"
 
 # Generate socket and PID paths using pure bash (no Python dependency)
-# Pattern: /tmp/claude-hooks-{name truncated to 20}-{md5 first 8}.{ext}
+# SECURITY: Paths stored in daemon's untracked directory, NOT /tmp
+# Pattern: {project}/.claude/hooks-daemon/untracked/daemon.{sock|pid}
 # Must match Python paths module: claude_code_hooks_daemon.daemon.paths
 _abs_project_path=$(realpath "$PROJECT_PATH")
-_project_name=$(basename "$_abs_project_path")
-_project_name="${_project_name:0:20}"
-# Cross-platform MD5: md5sum (Linux) vs md5 -q (macOS)
-if command -v md5sum &>/dev/null; then
-    _project_hash=$(printf '%s' "$_abs_project_path" | md5sum | cut -c1-8)
-elif command -v md5 &>/dev/null; then
-    _project_hash=$(printf '%s' "$_abs_project_path" | md5 -q | cut -c1-8)
-else
-    # Fallback: use Python (should never happen on modern systems)
-    _project_hash=$(python3 -c "import hashlib; print(hashlib.md5('$_abs_project_path'.encode()).hexdigest()[:8])")
-fi
+
+# Determine untracked directory path
+# Must match ProjectContext.daemon_untracked_dir() logic
+_untracked_dir="$_abs_project_path/.claude/hooks-daemon/untracked"
+
+# Create untracked directory if it doesn't exist
+mkdir -p "$_untracked_dir"
 
 # Allow environment variable overrides (for testing)
-SOCKET_PATH="${CLAUDE_HOOKS_SOCKET_PATH:-/tmp/claude-hooks-${_project_name}-${_project_hash}.sock}"
-PID_PATH="${CLAUDE_HOOKS_PID_PATH:-/tmp/claude-hooks-${_project_name}-${_project_hash}.pid}"
+SOCKET_PATH="${CLAUDE_HOOKS_SOCKET_PATH:-$_untracked_dir/daemon.sock}"
+PID_PATH="${CLAUDE_HOOKS_PID_PATH:-$_untracked_dir/daemon.pid}"
 
 # Daemon startup timeout (deciseconds - 1/10th second units)
 DAEMON_STARTUP_TIMEOUT=50
