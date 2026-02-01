@@ -75,6 +75,53 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli restart
 - Add tests first, then implement
 - Validate with schemas, don't assume
 
+## Security Standards
+
+**ZERO TOLERANCE POLICY - All security issues must be fixed immediately**
+
+### Security Principles
+
+1. **ALL SECURITY LEVELS MATTER** - HIGH, MEDIUM, and LOW severity issues are all unacceptable
+2. **FAIL FAST ON SECURITY** - Never silently suppress security errors or exceptions
+3. **NO SHORTCUTS** - Fix root causes, never work around security issues
+4. **ABSOLUTE HIGHEST STANDARDS** - Security is non-negotiable
+
+### Required Security Practices
+
+**Subprocess Security (B602, B603, B607, B404):**
+- **NEVER use `shell=True`** in subprocess calls - it enables command injection attacks
+- Always pass commands as lists: `["git", "status"]` not `"git status"`
+- Replace shell operators (`||`, `&&`) with explicit Python logic (try/except)
+- Only trusted system tools (git, ruff, mypy, black, pytest, bandit) may use subprocess
+- Document all subprocess usage with SECURITY comments
+
+**File Security (B108):**
+- **NEVER use `/tmp`** for runtime files (sockets, PID files, logs)
+- Always use daemon's untracked directory via `ProjectContext.daemon_untracked_dir()`
+- Normal mode: `{project}/.claude/hooks-daemon/untracked/`
+- Self-install mode: `{project}/untracked/`
+
+**Cryptographic Security (B324):**
+- When using MD5 for non-security purposes, **MUST** specify `usedforsecurity=False`
+- Document why MD5 is acceptable (e.g., "hash for path identifier, not cryptographic")
+
+**Error Handling (B110):**
+- **NEVER silently suppress exceptions** with bare try/except/pass
+- FAIL FAST - if something can't import or initialize, crash immediately
+- No silent error hiding - all failures must be visible
+
+### QA Security Check
+
+Security check **MUST pass with ZERO issues** before any commit:
+
+```bash
+./scripts/qa/run_security_check.sh
+# Expected: 0 issues (HIGH, MEDIUM, LOW all count)
+# Only B101 (assert statements) is filtered
+```
+
+**See scripts/qa/run_security_check.sh for enforcement details**
+
 ## Planning Workflow
 
 **CRITICAL: Plan before implementing**
