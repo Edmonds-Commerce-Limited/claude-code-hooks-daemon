@@ -106,6 +106,26 @@ class HandlerID:
         config_key="sed_blocker",
         display_name="block-sed-command",
     )
+    PIP_BREAK_SYSTEM = HandlerIDMeta(
+        class_name="PipBreakSystemHandler",
+        config_key="pip_break_system",
+        display_name="block-pip-break-system",
+    )
+    SUDO_PIP = HandlerIDMeta(
+        class_name="SudoPipHandler",
+        config_key="sudo_pip",
+        display_name="block-sudo-pip",
+    )
+    CURL_PIPE_SHELL = HandlerIDMeta(
+        class_name="CurlPipeShellHandler",
+        config_key="curl_pipe_shell",
+        display_name="block-curl-pipe-shell",
+    )
+    DANGEROUS_PERMISSIONS = HandlerIDMeta(
+        class_name="DangerousPermissionsHandler",
+        config_key="dangerous_permissions",
+        display_name="block-dangerous-permissions",
+    )
     AUTO_APPROVE_READS = HandlerIDMeta(
         class_name="AutoApproveReadsHandler",
         config_key="auto_approve_reads",
@@ -265,6 +285,11 @@ class HandlerID:
         config_key="suggest_statusline",
         display_name="suggest-statusline",
     )
+    GLOBAL_NPM_ADVISOR = HandlerIDMeta(
+        class_name="GlobalNpmAdvisorHandler",
+        config_key="global_npm_advisor",
+        display_name="advise-global-npm",
+    )
 
     # Advisory handlers (Priority: 60)
     BRITISH_ENGLISH = HandlerIDMeta(
@@ -348,6 +373,10 @@ HandlerKey = Literal[
     # Safety handlers
     "destructive_git",
     "sed_blocker",
+    "pip_break_system",
+    "sudo_pip",
+    "curl_pipe_shell",
+    "dangerous_permissions",
     "auto_approve_reads",
     "validate_eslint_on_write",
     "remind_validator",
@@ -380,6 +409,7 @@ HandlerKey = Literal[
     "bash_error_detector",
     "web_search_year",
     "suggest_statusline",
+    "global_npm_advisor",
     # Advisory handlers
     "british_english",
     # Logging/cleanup handlers
