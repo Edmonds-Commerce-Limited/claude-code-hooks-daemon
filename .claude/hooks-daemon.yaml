@@ -44,6 +44,10 @@ handlers:
       enabled: true
       priority: 12
 
+    dangerous_permissions: # Blocks chmod 777 and a+rwx
+      enabled: true
+      priority: 15
+
     worktree_file_copy:    # Prevents copying files between git worktrees
       enabled: true
       priority: 15
