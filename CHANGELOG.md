@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-02-01
+
+### Added
+- **Security Standards Documentation**: Comprehensive security standards section in CLAUDE.md with ZERO TOLERANCE policy
+- **Acceptance Testing Playbook**: Complete acceptance testing infrastructure with 15+ critical handler tests (Plan 00017)
+- **Handler Status Report**: Post-install/upgrade verification script for handler discovery
+- **Installation Safety**: Pre-installation check to prevent accidental reinstalls
+- **Plan Lifecycle System**: Plan archival system with hard links and lifecycle documentation
+- **ProjectContext Architecture**: Singleton module for project path management eliminating CWD dependencies (Plan 00014)
+- **Repo Name in Status Line**: Repository name and model color coding in status line display
+- **Planning Workflow Guidance**: Adoption guidance in install/upgrade documentation
+- **Triple-Layer Safety**: Enhanced acceptance testing with FAIL-FAST cycle documentation
+- **Implementation Plans**: Added plans for GitHub issues 11-15
+- **Comprehensive Hooks Documentation**: Integration smoke tests and hook system documentation
+
+### Changed
+- **Release Process**: Established single source of truth in CLAUDE/development/RELEASING.md
+- **Documentation Links**: Use @ syntax for doc links to force reading by LLMs
+- **Upgrade Documentation**: Clarified daemon restart vs Claude Code restart procedures
+- **Acceptance Testing**: Improved playbook clarity and practicality with detailed test cases
+- **Installation Detection**: Nested installation detection now allows .claude dir inside hooks-daemon
+- **Status Line Format**: Updated after protocol format change
+
+### Fixed
+- **SECURITY: File Path Handling**: Fixed init.sh to use secure daemon untracked directory instead of /tmp (B108)
+- **SECURITY: Subprocess Security**: Fixed all security violations with TDD approach (B602, B603, B607, B404)
+- **SECURITY: Dangerous Git Commands**: Added handler to block dangerous commands preventing data loss
+- **Critical Protocol Bug**: Fixed handlers not blocking commands due to protocol format issue
+- **TDD Enforcement**: Handle directories with 'test' in name correctly
+- **Sed Blocker**: Detect sed patterns in echo commands
+- **Version Inconsistency**: Fixed version mismatch and updated install.py status format
+- **Plan Number Helper**: Block broken plan discovery commands
+- **ProjectContext Initialization**: Initialize before config validation to prevent errors
+- **Git Repo Name**: Parse from remote URL instead of directory name
+- **Import Errors**: Fixed git_repo_name handler import issues
+- **QA Failures**: Resolved all QA issues to prepare for release
+- **Test Paths**: Achieved ZERO security violations with proper nosec documentation
+
+### Security
+- **B108 Violations**: Eliminated /tmp usage in favor of secure daemon untracked directory
+- **B602/B603/B607/B404**: Fixed all subprocess security issues with comprehensive TDD approach
+- **Dangerous Git Commands**: Blocked commands that can cause data loss
+- Complete security audit achieving ZERO violations across entire codebase (Plan 00018)
+
+
 ## [2.3.0] - 2026-01-29
 
 ### Added

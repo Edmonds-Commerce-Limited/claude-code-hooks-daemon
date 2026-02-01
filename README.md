@@ -1,6 +1,6 @@
 # Claude Code Hooks Daemon
 
-![Version](https://img.shields.io/badge/version-2.3.0-blue)
+![Version](https://img.shields.io/badge/version-2.4.0-blue)
 ![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Tests](https://img.shields.io/badge/tests-3172%20passing-success)
@@ -213,14 +213,15 @@ The installer will warn if it detects this pattern.
 
 ---
 
-## Current Version: 2.2.0
+## Current Version: 2.4.0
 
 **Latest Changes:**
-- ✅ **Custom Sub-Agents** - QA and development workflow automation agents
-- ✅ **Automated Release Management** - Complete `/release` skill with version detection and changelog generation
-- ✅ **Hook Event Debugging** - New debugging tool for handler development (`scripts/debug_hooks.sh`)
-- ✅ **Self-Install Mode** - CLI support for automated deployment
-- ✅ **95% Test Coverage** - Critical QA fixes with 2472 passing tests
+- ✅ **Security Hardening** - ZERO security violations (complete audit eliminating all B108, B602, B603, B607, B404)
+- ✅ **Acceptance Testing Playbook** - 15+ critical handler tests for real-world validation with FAIL-FAST cycle
+- ✅ **ProjectContext Architecture** - Eliminated CWD dependencies (Plan 00014)
+- ✅ **Security Standards Documentation** - ZERO TOLERANCE policy for all severity levels
+- ✅ **Release Process Documentation** - Single source of truth in CLAUDE/development/RELEASING.md
+- ✅ **Handler Status Reporting** - Post-install verification system
 
 ---
 
@@ -1212,7 +1213,37 @@ MIT License - see LICENSE file for details.
 
 ## Changelog
 
-### v2.2.0 (Current)
+### v2.4.0 (Current)
+
+**Security & Quality:**
+- ✅ **ZERO security violations** - Complete audit eliminating all B108, B602, B603, B607, B404 issues
+- ✅ Acceptance Testing Playbook with 15+ critical handler tests
+- ✅ FAIL-FAST cycle for release validation
+- ✅ Security Standards Documentation with ZERO TOLERANCE policy
+
+**Architecture:**
+- ✅ ProjectContext Architecture - Eliminated CWD dependencies (Plan 00014)
+- ✅ Handler Status Reporting - Post-install verification system
+- ✅ Plan Lifecycle System - Archival with hard links
+
+**Documentation:**
+- ✅ Release Process Documentation - Single source of truth
+- ✅ Comprehensive Hooks Documentation
+- ✅ Planning Workflow Guidance
+
+### v2.3.0
+
+**New Features:**
+- ✅ Installation Safety - Pre-installation checks
+- ✅ Repo Name in Status Line - With model color coding
+- ✅ Triple-Layer Safety - Enhanced blocker system
+
+**Fixes:**
+- ✅ Critical Protocol Bug - Handlers not blocking correctly
+- ✅ TDD Enforcement - Fixed directory detection
+- ✅ Sed Blocker - Improved pattern matching
+
+### v2.2.0
 
 **New Features:**
 - ✅ Custom sub-agents for QA and development workflow automation
@@ -1249,4 +1280,4 @@ MIT License - see LICENSE file for details.
 
 ---
 
-**End of README** | Version 2.2.0 | Last Updated: 2026-01-27
+**End of README** | Version 2.4.0 | Last Updated: 2026-02-01
