@@ -36,6 +36,10 @@ handlers:
       enabled: true
       priority: 10
 
+    curl_pipe_shell:       # Blocks curl/wget piped to bash/sh
+      enabled: true
+      priority: 10
+
     absolute_path:         # Enforces absolute paths in file operations
       enabled: true
       priority: 12
