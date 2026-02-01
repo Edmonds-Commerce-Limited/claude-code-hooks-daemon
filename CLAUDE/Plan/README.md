@@ -16,7 +16,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - See COMPREHENSIVE_FINDINGS.md for complete analysis
   - **Priority**: CRITICAL
   - **Owner**: Claude
-  - **Estimated**: 38-56 hours (revised from 12-16 after comprehensive analysis)
   - **Progress**: ~25% complete (checkpoint committed, 320 violations documented)
 
 - [00014: Eliminate CWD, Implement Calculated Constants](00014-eliminate-cwd-calculated-constants/PLAN.md) - 🟡 Not Started
@@ -26,7 +25,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - FAIL FAST on missing project root or uninitialized context
   - **Priority**: High (reliability issue, FAIL FAST violation)
   - **Owner**: To be assigned
-  - **Estimated**: 4-6 hours
 
 - [003: Claude Code Planning Mode → Project Workflow Integration](003-planning-mode-project-integration/PLAN.md) - 🟡 Not Started
   - Intercept planning mode writes and redirect to project structure
@@ -36,7 +34,44 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Add integration tests for config-based handler loading
   - **Priority**: High
   - **Owner**: AI Agent
-  - **Estimated**: 6-8 hours
+
+- [00023: LLM Upgrade Experience Improvements](00023-llm-upgrade-experience/PLAN.md) - 🟡 Not Started
+  - Create location detection and self-locating upgrade script
+  - Improve LLM-UPDATE.md with clear copy-paste instructions
+  - Soften error messages during upgrade to avoid investigation loops
+  - Prevent nested .claude conflicts in development
+  - **Priority**: High (developer experience)
+  - **GitHub Issue**: #16
+  - **Owner**: To be assigned
+
+- [00020: Configuration Validation at Daemon Startup](00020-config-validation-startup/PLAN.md) - 🟡 Not Started
+  - Implement config validation at daemon startup with graceful fail-open
+  - Add degraded mode for invalid configurations
+  - Standardize error handling across all code paths
+  - **Priority**: HIGH (safety)
+  - **GitHub Issue**: #13
+  - **Owner**: To be assigned
+
+- [00022: System Package Safety Handlers](00022-system-package-safety-handlers/PLAN.md) - 🟡 Not Started
+  - Block dangerous package management patterns (--break-system-packages, sudo pip, curl|bash)
+  - Add 5 safety handlers with proper priorities
+  - **Priority**: Medium (safety)
+  - **GitHub Issue**: #11
+  - **Owner**: To be assigned
+
+- [00021: Language-Specific Hook Handlers](00021-language-specific-handlers/PLAN.md) - 🟡 Not Started
+  - Implement LanguageConfig-based architecture for multi-language support
+  - Refactor QA suppression and TDD handlers to eliminate DRY violations
+  - **Priority**: Medium (architecture)
+  - **GitHub Issue**: #12
+  - **Owner**: To be assigned
+
+- [00019: Orchestrator-Only Mode](00019-orchestrator-only-mode/PLAN.md) - 🟡 Not Started
+  - Create optional handler to enforce orchestration-only pattern
+  - Block work tools, allow only Task delegation
+  - **Priority**: Medium (feature)
+  - **GitHub Issue**: #14
+  - **Owner**: To be assigned
 
 ## Completed Plans
 
@@ -86,8 +121,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans**: 8
-- **Active**: 3
+- **Total Plans**: 13
+- **Active**: 8
 - **Completed**: 5
 - **Success Rate**: 100% (5/5 completed successfully)
 
