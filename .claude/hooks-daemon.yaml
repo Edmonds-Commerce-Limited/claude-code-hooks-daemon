@@ -101,6 +101,10 @@ handlers:
         plan_workflow_docs: "CLAUDE/PlanWorkflow.md"
 
     # WORKFLOW HANDLERS (Priority 40-50)
+    global_npm_advisor:    # Advises on npm install -g (non-blocking)
+      enabled: true
+      priority: 40
+
     validate_plan_number:  # Validates plan number format (001-, 002-, etc)
       enabled: true
       priority: 40
