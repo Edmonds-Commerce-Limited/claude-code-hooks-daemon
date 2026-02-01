@@ -32,6 +32,10 @@ handlers:
       enabled: true
       priority: 10
 
+    sudo_pip:              # Blocks sudo pip install
+      enabled: true
+      priority: 10
+
     absolute_path:         # Enforces absolute paths in file operations
       enabled: true
       priority: 12
