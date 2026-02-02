@@ -108,3 +108,20 @@ class BashErrorDetectorHandler(Handler):
         context += "\nReview the output carefully to ensure the command succeeded as expected."
 
         return HookResult(decision=Decision.ALLOW, context=[context])
+
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests for Bash Error Detector."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="Bash command error detection",
+                command="ls /nonexistent/path",
+                description="Detects command failures (PostToolUse advisory)",
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r"error", r"failed"],
+                safety_notes="Non-existent path - harmless failure",
+                test_type=TestType.ADVISORY,
+                requires_event="PostToolUse after failed Bash command",
+            ),
+        ]

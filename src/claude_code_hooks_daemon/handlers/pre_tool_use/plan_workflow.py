@@ -58,3 +58,20 @@ class PlanWorkflowHandler(Handler):
         )
 
         return HookResult(decision=Decision.ALLOW, guidance=guidance)
+
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests for Plan Workflow."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="Writing to PLAN.md file",
+                command="Write to PLAN.md file in plan directory",
+                description="Provides plan workflow guidance (advisory)",
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r"plan", r"workflow"],
+                safety_notes="Advisory handler - provides context",
+                test_type=TestType.ADVISORY,
+                requires_event="PreToolUse with Write tool to PLAN.md",
+            ),
+        ]

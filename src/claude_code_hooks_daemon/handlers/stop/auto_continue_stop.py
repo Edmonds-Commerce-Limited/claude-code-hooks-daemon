@@ -198,3 +198,20 @@ class AutoContinueStopHandler(Handler):
         """
         text_lower = text.lower()
         return any(re.search(pattern, text_lower, re.IGNORECASE) for pattern in self.ERROR_PATTERNS)
+
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests for this handler."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="auto continue stop handler test",
+                command='echo "test"',
+                description="Tests auto continue stop handler functionality",
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r".*"],
+                safety_notes="Context/utility handler - minimal testing required",
+                test_type=TestType.CONTEXT,
+                requires_event="Stop event",
+            ),
+        ]

@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Handler, HookResult
+from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.handlers.status_line.stats_cache_reader import (
     calculate_daily_usage,
     calculate_weekly_usage,
@@ -123,3 +123,20 @@ class UsageTrackingHandler(Handler):
         reset = "\033[0m"
 
         return f"{color}{percentage:.1f}%{reset}"
+
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests for this handler."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="usage tracking handler test",
+                command='echo "test"',
+                description="Tests usage tracking handler functionality",
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r".*"],
+                safety_notes="Context/utility handler - minimal testing required",
+                test_type=TestType.CONTEXT,
+                requires_event="StatusLine event",
+            ),
+        ]

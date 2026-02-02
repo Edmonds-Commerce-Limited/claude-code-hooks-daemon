@@ -36,6 +36,21 @@ class SimpleTestHandler(Handler):
         """Return simple allow result."""
         return HookResult(decision=Decision.ALLOW, context="Test handler executed")
 
+    def get_acceptance_tests(self) -> list[Any]:
+        """Test handler - stub implementation."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="test handler",
+                command="echo 'test'",
+                description="Test handler for unit tests",
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r".*"],
+                test_type=TestType.BLOCKING,
+            )
+        ]
+
 
 class TestLogLevelEnvironmentOverride:
     """Test suite for HOOKS_DAEMON_LOG_LEVEL environment variable override."""

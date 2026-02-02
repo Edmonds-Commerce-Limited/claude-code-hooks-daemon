@@ -123,3 +123,35 @@ The correct solution is almost never 777."""
             context=[],
             guidance=None,
         )
+
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests for dangerous permissions handler."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="chmod 777",
+                command='echo "chmod 777 /tmp/test_file.txt"',
+                description="Blocks chmod 777 (security vulnerability)",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"chmod 777",
+                    r"security vulnerabilities",
+                    r"principle of least privilege",
+                ],
+                safety_notes="Uses echo - safe to test",
+                test_type=TestType.BLOCKING,
+            ),
+            AcceptanceTest(
+                title="chmod a+rwx",
+                command='echo "chmod a+rwx /tmp/test_script.sh"',
+                description="Blocks chmod a+rwx (equivalent to 777)",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"dangerous permissions",
+                    r"anyone to read, write, and execute",
+                ],
+                safety_notes="Uses echo - safe to test",
+                test_type=TestType.BLOCKING,
+            ),
+        ]

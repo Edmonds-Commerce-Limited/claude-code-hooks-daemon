@@ -174,3 +174,35 @@ class PipeBlockerHandler(Handler):
         )
 
         return HookResult(decision=Decision.DENY, reason=reason)
+
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests for pipe blocker handler."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="npm test piped to tail",
+                command='echo "npm test | tail -5"',
+                description="Blocks expensive commands piped to tail (information loss)",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"Pipe to tail/head detected",
+                    r"information loss",
+                    r"Redirect to temp file",
+                ],
+                safety_notes="Uses echo - safe to test",
+                test_type=TestType.BLOCKING,
+            ),
+            AcceptanceTest(
+                title="pytest piped to head",
+                command='echo "pytest | head -20"',
+                description="Blocks pytest piped to head",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"Pipe to tail/head",
+                    r"expensive",
+                ],
+                safety_notes="Uses echo - safe to test",
+                test_type=TestType.BLOCKING,
+            ),
+        ]

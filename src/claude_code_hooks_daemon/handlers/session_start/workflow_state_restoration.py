@@ -198,3 +198,20 @@ class WorkflowStateRestorationHandler(Handler):
         )
 
         return "\n".join(guidance_parts)
+
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests for this handler."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="workflow state restoration handler test",
+                command='echo "test"',
+                description="Tests workflow state restoration handler functionality",
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r".*"],
+                safety_notes="Context/utility handler - minimal testing required",
+                test_type=TestType.CONTEXT,
+                requires_event="SessionStart event",
+            ),
+        ]

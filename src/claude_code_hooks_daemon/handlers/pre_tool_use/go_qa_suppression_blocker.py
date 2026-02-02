@@ -112,3 +112,20 @@ class GoQaSuppressionBlocker(Handler):
                 "  - Go Code Review: https://github.com/golang/go/wiki/CodeReviewComments"
             ),
         )
+
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests for Go Qa Suppression Blocker."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="nolint comment",
+                command="Write Go file with '// nolint' comment",
+                description="Blocks nolint comments (fix linting issues instead)",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[r"nolint", r"Fix.*linting", r"BLOCKED"],
+                safety_notes="Tests Write tool validation without actual file operations",
+                test_type=TestType.BLOCKING,
+                requires_event="PreToolUse with Write tool to .go file",
+            ),
+        ]

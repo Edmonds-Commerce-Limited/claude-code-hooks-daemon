@@ -34,6 +34,22 @@ class MockHandler(Handler):
 
         return HookResult.allow()
 
+    def get_acceptance_tests(self) -> list:
+        """Test handler - stub implementation."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+        from claude_code_hooks_daemon.core.hook_result import Decision
+
+        return [
+            AcceptanceTest(
+                title="mock handler",
+                command="echo 'test'",
+                description="Mock handler for unit tests",
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r".*"],
+                test_type=TestType.BLOCKING,
+            )
+        ]
+
 
 class TestHandlerRegistry:
     """Tests for HandlerRegistry class."""

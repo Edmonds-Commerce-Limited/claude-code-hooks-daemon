@@ -20,6 +20,20 @@ class ConcreteHandler(Handler):
         """Simple handle implementation."""
         return HookResult(decision=Decision.ALLOW, context="Concrete handler executed")
 
+    def get_acceptance_tests(self):
+        """Return test acceptance tests."""
+        from claude_code_hooks_daemon.core import AcceptanceTest
+
+        return [
+            AcceptanceTest(
+                title="Test concrete handler",
+                command='echo "test"',
+                description="Test handler execution",
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r"executed"],
+            )
+        ]
+
 
 class TerminalHandler(Handler):
     """Terminal handler for testing."""
@@ -31,6 +45,20 @@ class TerminalHandler(Handler):
     def handle(self, hook_input: dict) -> HookResult:
         """Handle implementation."""
         return HookResult(decision=Decision.DENY, reason="Terminal handler blocked")
+
+    def get_acceptance_tests(self):
+        """Return test acceptance tests."""
+        from claude_code_hooks_daemon.core import AcceptanceTest
+
+        return [
+            AcceptanceTest(
+                title="Test terminal handler",
+                command='echo "test"',
+                description="Test terminal blocking",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[r"blocked"],
+            )
+        ]
 
 
 class NonTerminalHandler(Handler):
@@ -49,6 +77,21 @@ class NonTerminalHandler(Handler):
     def handle(self, hook_input: dict) -> HookResult:
         """Handle implementation."""
         return HookResult(decision=Decision.ALLOW, context="Non-terminal context")
+
+    def get_acceptance_tests(self):
+        """Return test acceptance tests."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="Test non-terminal handler",
+                command='echo "test"',
+                description="Test non-terminal context",
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r"context"],
+                test_type=TestType.CONTEXT,
+            )
+        ]
 
 
 @pytest.fixture
@@ -334,6 +377,21 @@ class TestMatchesMethod:
                 """Handle implementation."""
                 return HookResult(decision=Decision.DENY, reason="Dangerous command")
 
+            def get_acceptance_tests(self):
+                """Test handler - stub implementation."""
+                from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+                return [
+                    AcceptanceTest(
+                        title="complex handler",
+                        command="echo 'test'",
+                        description="Complex test handler",
+                        expected_decision=Decision.DENY,
+                        expected_message_patterns=[r".*"],
+                        test_type=TestType.BLOCKING,
+                    )
+                ]
+
         handler = ComplexHandler(name="complex", priority=Priority.DESTRUCTIVE_GIT)
 
         # Should match
@@ -393,6 +451,21 @@ class TestHandleMethod:
                 else:
                     return HookResult(decision=Decision.ALLOW)
 
+            def get_acceptance_tests(self):
+                """Test handler - stub implementation."""
+                from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+                return [
+                    AcceptanceTest(
+                        title="multi decision handler",
+                        command="echo 'test'",
+                        description="Multi decision test handler",
+                        expected_decision=Decision.ALLOW,
+                        expected_message_patterns=[r".*"],
+                        test_type=TestType.BLOCKING,
+                    )
+                ]
+
         handler = MultiDecisionHandler(name="multi", priority=Priority.DESTRUCTIVE_GIT)
 
         # Test different decisions
@@ -421,6 +494,21 @@ class TestHandlerIntegration:
             def handle(self, hook_input: dict) -> HookResult:
                 """Deny dangerous operations."""
                 return HookResult(decision=Decision.DENY, reason="Dangerous command blocked")
+
+            def get_acceptance_tests(self):
+                """Test handler - stub implementation."""
+                from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+                return [
+                    AcceptanceTest(
+                        title="deny handler",
+                        command="echo 'test'",
+                        description="Deny test handler",
+                        expected_decision=Decision.DENY,
+                        expected_message_patterns=[r".*"],
+                        test_type=TestType.BLOCKING,
+                    )
+                ]
 
         handler = DenyHandler(name="deny-dangerous", priority=Priority.DESTRUCTIVE_GIT)
 
@@ -453,6 +541,21 @@ class TestHandlerIntegration:
                 return HookResult(
                     decision=Decision.ALLOW, guidance="Consider using Edit instead of Write"
                 )
+
+            def get_acceptance_tests(self):
+                """Test handler - stub implementation."""
+                from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+                return [
+                    AcceptanceTest(
+                        title="guidance handler",
+                        command="echo 'test'",
+                        description="Guidance test handler",
+                        expected_decision=Decision.ALLOW,
+                        expected_message_patterns=[r".*"],
+                        test_type=TestType.CONTEXT,
+                    )
+                ]
 
         handler = GuidanceHandler()
 
@@ -682,3 +785,78 @@ class TestHandlerRepr:
         assert "priority=" in repr_str
         assert "terminal=" in repr_str
         assert "tags=" in repr_str
+
+
+class TestHandlerAcceptanceTests:
+    """Test Handler get_acceptance_tests() method."""
+
+    def test_get_acceptance_tests_is_abstract_method(self):
+        """get_acceptance_tests() should be an abstract method."""
+
+        class NoAcceptanceTestHandler(Handler):
+            """Handler without get_acceptance_tests implementation."""
+
+            def matches(self, hook_input: dict) -> bool:
+                return True
+
+            def handle(self, hook_input: dict) -> HookResult:
+                return HookResult(decision=Decision.ALLOW)
+
+        # Should raise TypeError because get_acceptance_tests() is not implemented
+        with pytest.raises(TypeError, match="abstract"):
+            NoAcceptanceTestHandler(name="no-tests")
+
+    def test_concrete_handler_must_implement_get_acceptance_tests(self):
+        """Concrete handlers must implement get_acceptance_tests()."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        class WithAcceptanceTestHandler(Handler):
+            """Handler with acceptance tests."""
+
+            def matches(self, hook_input: dict) -> bool:
+                return True
+
+            def handle(self, hook_input: dict) -> HookResult:
+                return HookResult(decision=Decision.DENY, reason="Blocked")
+
+            def get_acceptance_tests(self) -> list[AcceptanceTest]:
+                return [
+                    AcceptanceTest(
+                        title="Test blocking",
+                        command='echo "test"',
+                        description="Tests handler blocks operation",
+                        expected_decision=Decision.DENY,
+                        expected_message_patterns=[r"Blocked"],
+                        test_type=TestType.BLOCKING,
+                    )
+                ]
+
+        # Should instantiate successfully
+        handler = WithAcceptanceTestHandler(name="with-tests")
+        tests = handler.get_acceptance_tests()
+
+        assert len(tests) == 1
+        assert tests[0].title == "Test blocking"
+        assert tests[0].expected_decision == Decision.DENY
+
+    def test_get_acceptance_tests_returns_empty_list_raises_error(self):
+        """get_acceptance_tests() returning empty list should raise ValueError."""
+        from claude_code_hooks_daemon.core import AcceptanceTest
+
+        class EmptyTestsHandler(Handler):
+            """Handler returning empty tests."""
+
+            def matches(self, hook_input: dict) -> bool:
+                return True
+
+            def handle(self, hook_input: dict) -> HookResult:
+                return HookResult(decision=Decision.ALLOW)
+
+            def get_acceptance_tests(self) -> list[AcceptanceTest]:
+                return []
+
+        handler = EmptyTestsHandler(name="empty-tests")
+
+        # Empty list should be rejected during validation (not at instantiation)
+        tests = handler.get_acceptance_tests()
+        assert tests == []  # Method can return empty, validation happens elsewhere

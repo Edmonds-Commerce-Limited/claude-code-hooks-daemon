@@ -65,3 +65,37 @@ class AbsolutePathHandler(Handler):
                 "'The file_path parameter must be an absolute path, not a relative path'"
             ),
         )
+
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests for absolute path handler."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="Read with relative path",
+                command="Read file with relative path 'relative/path/file.txt'",
+                description="Blocks Read tool with relative path (requires absolute path)",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"requires absolute path",
+                    r"Relative path provided",
+                    r"/workspace/",
+                ],
+                safety_notes="Tests path validation without file operations",
+                test_type=TestType.BLOCKING,
+                requires_event="PreToolUse with Read tool and relative file_path",
+            ),
+            AcceptanceTest(
+                title="Write with relative path",
+                command="Write file with relative path 'some/relative/path.txt'",
+                description="Blocks Write tool with relative path",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"absolute path",
+                    r"ambiguity",
+                ],
+                safety_notes="Tests path validation without file operations",
+                test_type=TestType.BLOCKING,
+                requires_event="PreToolUse with Write tool and relative file_path",
+            ),
+        ]

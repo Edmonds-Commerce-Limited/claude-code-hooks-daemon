@@ -123,3 +123,19 @@ Proceeding with global install..."""
             context=[advisory],
             guidance=None,
         )
+
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests for Global Npm Advisor."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="Global npm install warning",
+                command='echo "npm install -g package"',
+                description="Warns about global npm installs (advisory)",
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r"global.*npm", r"local install"],
+                safety_notes="Uses echo - safe to test",
+                test_type=TestType.ADVISORY,
+            ),
+        ]

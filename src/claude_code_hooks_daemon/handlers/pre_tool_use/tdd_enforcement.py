@@ -128,3 +128,20 @@ class TddEnforcementHandler(Handler):
         test_file_path = controller_dir / "tests" / test_filename
 
         return test_file_path
+
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests for Tdd Enforcement."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="Create handler without test file",
+                command="Write to handler file without corresponding test",
+                description="Blocks handler file creation without test file (TDD enforcement)",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[r"TDD REQUIRED", r"test file", r"Write tests first"],
+                safety_notes="Tests TDD enforcement without actual file operations",
+                test_type=TestType.BLOCKING,
+                requires_event="PreToolUse with Write tool to handler file",
+            ),
+        ]

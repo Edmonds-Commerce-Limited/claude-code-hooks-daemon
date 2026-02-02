@@ -81,3 +81,20 @@ class PlanTimeEstimatesHandler(Handler):
                 "  - Focus on actionable work, not timelines"
             ),
         )
+
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests for Plan Time Estimates."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="Plan time estimate validation",
+                command="Write to PLAN.md with time estimates",
+                description="Validates time estimate format in plans (advisory)",
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r"time estimate", r"plan"],
+                safety_notes="Advisory handler - validates format",
+                test_type=TestType.ADVISORY,
+                requires_event="PreToolUse with Write tool to PLAN.md",
+            ),
+        ]

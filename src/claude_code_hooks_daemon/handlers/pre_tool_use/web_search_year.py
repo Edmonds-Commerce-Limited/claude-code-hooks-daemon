@@ -60,3 +60,20 @@ class WebSearchYearHandler(Handler):
                 "  - Only use old years if specifically researching history"
             ),
         )
+
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests for Web Search Year."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="Outdated year in search query",
+                command="Web search with outdated year in query",
+                description="Advises current year for web searches (advisory)",
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r"current year", r"2026"],
+                safety_notes="Advisory handler - suggests improvements",
+                test_type=TestType.ADVISORY,
+                requires_event="PreToolUse with WebSearch tool",
+            ),
+        ]

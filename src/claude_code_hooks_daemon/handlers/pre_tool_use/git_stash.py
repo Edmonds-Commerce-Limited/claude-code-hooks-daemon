@@ -59,3 +59,35 @@ class GitStashHandler(Handler):
                 "The human will guide you to the correct approach for your situation."
             ),
         )
+
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests for git stash handler."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="git stash",
+                command='echo "git stash"',
+                description="Allows git stash with advisory warning (risky but sometimes needed)",
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[
+                    r"WARNING.*git stash",
+                    r"risky",
+                    r"git commit.*WIP",
+                ],
+                safety_notes="Uses echo - safe to test",
+                test_type=TestType.ADVISORY,
+            ),
+            AcceptanceTest(
+                title="git stash push",
+                command="echo \"git stash push -m 'temp changes'\"",
+                description="Allows git stash push with advisory warning",
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[
+                    r"WARNING",
+                    r"better alternatives",
+                ],
+                safety_notes="Uses echo - safe to test",
+                test_type=TestType.ADVISORY,
+            ),
+        ]

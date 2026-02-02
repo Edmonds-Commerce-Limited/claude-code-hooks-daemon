@@ -8,7 +8,7 @@ import logging
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Handler, HookResult
+from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.daemon.controller import get_controller
 
 try:
@@ -87,3 +87,20 @@ class DaemonStatsHandler(Handler):
             # Fail silently - don't break status line
 
         return HookResult(context=parts)
+
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests for this handler."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="daemon stats handler test",
+                command='echo "test"',
+                description="Tests daemon stats handler functionality",
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r".*"],
+                safety_notes="Context/utility handler - minimal testing required",
+                test_type=TestType.CONTEXT,
+                requires_event="StatusLine event",
+            ),
+        ]

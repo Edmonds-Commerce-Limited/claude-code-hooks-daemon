@@ -69,3 +69,35 @@ class WorktreeFileCopyHandler(Handler):
                 "📖 See CLAUDE/Worktree.md for complete guide."
             ),
         )
+
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests for worktree file copy handler."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="cp from worktree to main repo",
+                command='echo "cp untracked/worktrees/feature-branch/src/file.py src/"',
+                description="Blocks copying files from worktree to main repo (breaks isolation)",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"CATASTROPHIC",
+                    r"worktree.*isolation",
+                    r"git merge",
+                ],
+                safety_notes="Uses echo - safe to test",
+                test_type=TestType.BLOCKING,
+            ),
+            AcceptanceTest(
+                title="rsync from worktree to main repo",
+                command='echo "rsync -av untracked/worktrees/feature/src/ src/"',
+                description="Blocks rsync from worktree to main repo",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"worktree to main repo",
+                    r"git history",
+                ],
+                safety_notes="Uses echo - safe to test",
+                test_type=TestType.BLOCKING,
+            ),
+        ]

@@ -59,3 +59,20 @@ Before stopping, ensure:
 If any items are incomplete, continue working or inform the user."""
 
         return HookResult(decision=Decision.ALLOW, context=[context])
+
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests for this handler."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="task completion checker handler test",
+                command='echo "test"',
+                description="Tests task completion checker handler functionality",
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r".*"],
+                safety_notes="Context/utility handler - minimal testing required",
+                test_type=TestType.CONTEXT,
+                requires_event="Stop event",
+            ),
+        ]

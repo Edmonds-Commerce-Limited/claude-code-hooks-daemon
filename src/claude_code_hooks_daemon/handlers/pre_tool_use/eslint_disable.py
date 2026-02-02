@@ -112,3 +112,20 @@ class EslintDisableHandler(Handler):
                 "ESLint rules exist for good reason. Fix the code, don't silence the tool."
             ),
         )
+
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests for Eslint Disable."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="eslint-disable-next-line in JS",
+                command="Write JS file with '// eslint-disable-next-line' comment",
+                description="Blocks eslint-disable comments (fix linting issues instead)",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[r"eslint-disable", r"Fix.*linting", r"BLOCKED"],
+                safety_notes="Tests Write tool validation without actual file operations",
+                test_type=TestType.BLOCKING,
+                requires_event="PreToolUse with Write tool to .js file",
+            ),
+        ]

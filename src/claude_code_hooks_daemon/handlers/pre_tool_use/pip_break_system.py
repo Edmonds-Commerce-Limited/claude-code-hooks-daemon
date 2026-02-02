@@ -119,3 +119,35 @@ NEVER use --break-system-packages as default behavior."""
             context=[],
             guidance=None,
         )
+
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests for pip break system handler."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="pip install --break-system-packages",
+                command='echo "pip install --break-system-packages requests"',
+                description="Blocks pip --break-system-packages flag (system corruption risk)",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"--break-system-packages",
+                    r"system Python installation",
+                    r"virtual environment",
+                ],
+                safety_notes="Uses echo - safe to test",
+                test_type=TestType.BLOCKING,
+            ),
+            AcceptanceTest(
+                title="python3 -m pip install --break-system-packages",
+                command='echo "python3 -m pip install --break-system-packages numpy"',
+                description="Blocks python3 -m pip with --break-system-packages",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"--break-system-packages",
+                    r"Corrupt.*system Python",
+                ],
+                safety_notes="Uses echo - safe to test",
+                test_type=TestType.BLOCKING,
+            ),
+        ]

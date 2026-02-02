@@ -140,3 +140,20 @@ class BritishEnglishHandler(Handler):
                     )
 
         return issues
+
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests for British English."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="American spellings in markdown",
+                command="Write markdown file with American spellings like 'color', 'organization'",
+                description="Advises British spellings but allows operation (advisory)",
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r"colour", r"organisation", r"British"],
+                safety_notes="Advisory handler - does not block operations",
+                test_type=TestType.ADVISORY,
+                requires_event="PreToolUse with Write tool to .md file in docs/",
+            ),
+        ]

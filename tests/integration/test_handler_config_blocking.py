@@ -423,6 +423,21 @@ class TestConfigPriorityOverride:
             def handle(self, hook_input: dict[str, Any]) -> HookResult:
                 return HookResult(decision=Decision.ALLOW, context=["low executed"])
 
+            def get_acceptance_tests(self) -> list[Any]:
+                """Test handler - stub implementation."""
+                from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+                return [
+                    AcceptanceTest(
+                        title="low priority handler",
+                        command="echo 'test'",
+                        description="Low priority test handler",
+                        expected_decision=Decision.ALLOW,
+                        expected_message_patterns=[r".*"],
+                        test_type=TestType.BLOCKING,
+                    )
+                ]
+
         class HighPriorityHandler(Handler):
             def __init__(self) -> None:
                 super().__init__(name="high", priority=Priority.HELLO_WORLD, terminal=False)
@@ -432,6 +447,21 @@ class TestConfigPriorityOverride:
 
             def handle(self, hook_input: dict[str, Any]) -> HookResult:
                 return HookResult(decision=Decision.ALLOW, context=["high executed"])
+
+            def get_acceptance_tests(self) -> list[Any]:
+                """Test handler - stub implementation."""
+                from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+                return [
+                    AcceptanceTest(
+                        title="high priority handler",
+                        command="echo 'test'",
+                        description="High priority test handler",
+                        expected_decision=Decision.ALLOW,
+                        expected_message_patterns=[r".*"],
+                        test_type=TestType.BLOCKING,
+                    )
+                ]
 
         # Create router and add handlers out of order
         router = EventRouter()

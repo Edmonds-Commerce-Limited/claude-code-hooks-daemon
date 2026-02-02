@@ -66,3 +66,20 @@ class NotificationLoggerHandler(Handler):
             pass
 
         return HookResult(decision=Decision.ALLOW)
+
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests for Notification Logger."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="Notification logging",
+                command="Notification event",
+                description="Logs notification events",
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r"notification"],
+                safety_notes="Logging only",
+                test_type=TestType.CONTEXT,
+                requires_event="Notification event",
+            ),
+        ]
