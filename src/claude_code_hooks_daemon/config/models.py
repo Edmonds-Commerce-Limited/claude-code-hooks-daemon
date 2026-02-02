@@ -6,7 +6,7 @@ validation, serialisation, and sensible defaults.
 
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated, Any, Self
+from typing import Annotated, Any, Literal, Self
 
 import yaml
 from pydantic import (
@@ -258,6 +258,7 @@ class PluginConfig(BaseModel):
 
     Attributes:
         path: Path to plugin module or package
+        event_type: Event type this plugin handles
         handlers: List of handler class names to load (None = all)
         enabled: Whether the plugin is enabled
     """
@@ -265,6 +266,19 @@ class PluginConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     path: str = Field(description="Path to plugin")
+    event_type: Literal[
+        "pre_tool_use",
+        "post_tool_use",
+        "session_start",
+        "session_end",
+        "pre_compact",
+        "user_prompt_submit",
+        "permission_request",
+        "notification",
+        "stop",
+        "subagent_stop",
+        "status_line",
+    ] = Field(description="Event type this plugin handles")
     handlers: list[str] | None = Field(default=None, description="Handler classes to load")
     enabled: bool = Field(default=True, description="Whether plugin is enabled")
 
