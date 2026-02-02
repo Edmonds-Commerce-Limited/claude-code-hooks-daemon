@@ -5,6 +5,7 @@ security vulnerabilities by allowing anyone to read, write, and execute files.
 """
 
 import re
+from typing import Any
 
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
@@ -40,7 +41,7 @@ class DangerousPermissionsHandler(Handler):
             terminal=True,
         )
 
-    def matches(self, hook_input: dict) -> bool:
+    def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if command sets dangerous permissions (777 or a+rwx).
 
         Matches:
@@ -73,7 +74,7 @@ class DangerousPermissionsHandler(Handler):
 
         return bool(re.search(pattern, command))
 
-    def handle(self, hook_input: dict) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Block command and explain why 777 permissions are dangerous.
 
         Args:

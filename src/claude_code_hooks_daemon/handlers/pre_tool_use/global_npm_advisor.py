@@ -6,6 +6,7 @@ global namespace pollution and version conflicts.
 """
 
 import re
+from typing import Any
 
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
@@ -39,7 +40,7 @@ class GlobalNpmAdvisorHandler(Handler):
             terminal=False,  # Non-blocking
         )
 
-    def matches(self, hook_input: dict) -> bool:
+    def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if command installs global npm/yarn packages.
 
         Matches:
@@ -70,7 +71,7 @@ class GlobalNpmAdvisorHandler(Handler):
 
         return bool(re.search(pattern, command, re.IGNORECASE))
 
-    def handle(self, hook_input: dict) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Provide advice about npx alternative (non-blocking).
 
         Args:
