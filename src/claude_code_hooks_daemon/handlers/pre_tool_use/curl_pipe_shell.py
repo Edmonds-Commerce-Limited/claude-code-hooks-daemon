@@ -6,6 +6,7 @@ a common vector for malware and system compromise.
 """
 
 import re
+from typing import Any
 
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
@@ -42,7 +43,7 @@ class CurlPipeShellHandler(Handler):
             terminal=True,
         )
 
-    def matches(self, hook_input: dict) -> bool:
+    def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if command pipes curl/wget to shell.
 
         Matches:
@@ -77,7 +78,7 @@ class CurlPipeShellHandler(Handler):
 
         return bool(re.search(pattern, command, re.IGNORECASE))
 
-    def handle(self, hook_input: dict) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Block command and explain why piping to shell is dangerous.
 
         Args:

@@ -6,6 +6,7 @@ Python installations managed by the OS package manager.
 """
 
 import re
+from typing import Any
 
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
@@ -36,7 +37,7 @@ class PipBreakSystemHandler(Handler):
             terminal=True,
         )
 
-    def matches(self, hook_input: dict) -> bool:
+    def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if command contains pip install --break-system-packages.
 
         Matches:
@@ -69,7 +70,7 @@ class PipBreakSystemHandler(Handler):
 
         return bool(re.search(pattern, command, re.IGNORECASE))
 
-    def handle(self, hook_input: dict) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Block command and explain why --break-system-packages is dangerous.
 
         Args:

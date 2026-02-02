@@ -6,6 +6,7 @@ and break system tools.
 """
 
 import re
+from typing import Any
 
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
@@ -35,7 +36,7 @@ class SudoPipHandler(Handler):
             terminal=True,
         )
 
-    def matches(self, hook_input: dict) -> bool:
+    def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if command contains sudo pip install.
 
         Matches:
@@ -68,7 +69,7 @@ class SudoPipHandler(Handler):
 
         return bool(re.search(pattern, command, re.IGNORECASE))
 
-    def handle(self, hook_input: dict) -> HookResult:
+    def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Block command and explain why sudo pip install is dangerous.
 
         Args:
