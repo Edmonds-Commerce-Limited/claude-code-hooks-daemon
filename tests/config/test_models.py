@@ -338,14 +338,24 @@ class TestPluginConfig:
     """Tests for PluginConfig model."""
 
     def test_required_fields(self) -> None:
-        """PluginConfig requires path field."""
+        """PluginConfig requires path and event_type fields."""
+        # Missing both path and event_type
         with pytest.raises(ValidationError):
             PluginConfig.model_validate({})
 
+        # Missing event_type
+        with pytest.raises(ValidationError):
+            PluginConfig.model_validate({"path": "/path/to/plugin"})
+
+        # Missing path
+        with pytest.raises(ValidationError):
+            PluginConfig.model_validate({"event_type": "pre_tool_use"})
+
     def test_default_values(self) -> None:
-        """PluginConfig has correct defaults."""
-        config = PluginConfig(path="/path/to/plugin")
+        """PluginConfig has correct defaults for optional fields."""
+        config = PluginConfig(path="/path/to/plugin", event_type="pre_tool_use")
         assert config.path == "/path/to/plugin"
+        assert config.event_type == "pre_tool_use"
         assert config.handlers is None
         assert config.enabled is True
 
@@ -353,22 +363,61 @@ class TestPluginConfig:
         """Can set all PluginConfig fields."""
         config = PluginConfig(
             path="/custom/path",
+            event_type="post_tool_use",
             handlers=["Handler1", "Handler2"],
             enabled=False,
         )
         assert config.path == "/custom/path"
+        assert config.event_type == "post_tool_use"
         assert config.handlers == ["Handler1", "Handler2"]
         assert config.enabled is False
+
+    def test_event_type_valid_values(self) -> None:
+        """event_type accepts all valid event type values."""
+        valid_event_types = [
+            "pre_tool_use",
+            "post_tool_use",
+            "session_start",
+            "session_end",
+            "pre_compact",
+            "user_prompt_submit",
+            "permission_request",
+            "notification",
+            "stop",
+            "subagent_stop",
+            "status_line",
+        ]
+
+        for event_type in valid_event_types:
+            config = PluginConfig(path="/path", event_type=event_type)
+            assert config.event_type == event_type
+
+    def test_event_type_invalid_values_rejected(self) -> None:
+        """event_type rejects invalid values."""
+        invalid_event_types = [
+            "invalid_event",
+            "PreToolUse",  # PascalCase not allowed (config uses snake_case)
+            "pre-tool-use",  # kebab-case not allowed
+            "",
+            "PRE_TOOL_USE",  # SCREAMING_SNAKE_CASE not allowed
+            "random",
+        ]
+
+        for event_type in invalid_event_types:
+            with pytest.raises(ValidationError, match="event_type"):
+                PluginConfig(path="/path", event_type=event_type)
 
     def test_extra_fields_allowed(self) -> None:
         """PluginConfig allows extra fields."""
         config = PluginConfig.model_validate(
             {
                 "path": "/path",
+                "event_type": "pre_tool_use",
                 "custom_field": "value",
             }
         )
         assert config.path == "/path"
+        assert config.event_type == "pre_tool_use"
 
 
 class TestPluginsConfig:
@@ -389,27 +438,31 @@ class TestPluginsConfig:
         """Can set plugin configurations."""
         config = PluginsConfig(
             plugins=[
-                PluginConfig(path="/plugin1"),
-                PluginConfig(path="/plugin2", enabled=False),
+                PluginConfig(path="/plugin1", event_type="pre_tool_use"),
+                PluginConfig(path="/plugin2", event_type="post_tool_use", enabled=False),
             ]
         )
         assert len(config.plugins) == 2
         assert config.plugins[0].path == "/plugin1"
+        assert config.plugins[0].event_type == "pre_tool_use"
         assert config.plugins[1].enabled is False
+        assert config.plugins[1].event_type == "post_tool_use"
 
     def test_validates_plugin_list(self) -> None:
         """Validates plugin list items."""
         config = PluginsConfig.model_validate(
             {
                 "plugins": [
-                    {"path": "/plugin1"},
-                    {"path": "/plugin2", "handlers": ["Handler1"]},
+                    {"path": "/plugin1", "event_type": "pre_tool_use"},
+                    {"path": "/plugin2", "event_type": "session_start", "handlers": ["Handler1"]},
                 ]
             }
         )
         assert len(config.plugins) == 2
         assert isinstance(config.plugins[0], PluginConfig)
+        assert config.plugins[0].event_type == "pre_tool_use"
         assert config.plugins[1].handlers == ["Handler1"]
+        assert config.plugins[1].event_type == "session_start"
 
 
 class TestDaemonConfig:
@@ -772,7 +825,7 @@ handlers:
             plugins=PluginsConfig(
                 paths=["/path1", "/path2"],
                 plugins=[
-                    PluginConfig(path="/plugin1", handlers=["Handler1"]),
+                    PluginConfig(path="/plugin1", event_type="pre_tool_use", handlers=["Handler1"]),
                 ],
             ),
         )

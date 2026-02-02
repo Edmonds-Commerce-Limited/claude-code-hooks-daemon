@@ -382,8 +382,8 @@ class TestLoadFromPluginsConfig:
         plugins_config = PluginsConfig(
             paths=[str(plugin_dir)],
             plugins=[
-                PluginConfig(path="custom_handler", enabled=True),
-                PluginConfig(path="another_test_handler", enabled=True),
+                PluginConfig(path="custom_handler", event_type="pre_tool_use", enabled=True),
+                PluginConfig(path="another_test_handler", event_type="pre_tool_use", enabled=True),
             ],
         )
 
@@ -402,8 +402,8 @@ class TestLoadFromPluginsConfig:
         plugins_config = PluginsConfig(
             paths=[str(plugin_dir)],
             plugins=[
-                PluginConfig(path="custom_handler", enabled=False),
-                PluginConfig(path="another_test_handler", enabled=True),
+                PluginConfig(path="custom_handler", event_type="pre_tool_use", enabled=False),
+                PluginConfig(path="another_test_handler", event_type="pre_tool_use", enabled=True),
             ],
         )
 
@@ -432,7 +432,9 @@ class TestLoadFromPluginsConfig:
         plugins_config = PluginsConfig(
             paths=[],
             plugins=[
-                PluginConfig(path="/absolute/path/to/custom_handler", enabled=True),
+                PluginConfig(
+                    path="/absolute/path/to/custom_handler", event_type="pre_tool_use", enabled=True
+                ),
             ],
         )
 
@@ -451,6 +453,7 @@ class TestLoadFromPluginsConfig:
             plugins=[
                 PluginConfig(
                     path="custom_handler",
+                    event_type="pre_tool_use",
                     handlers=["CustomHandler"],
                     enabled=True,
                 ),
@@ -469,9 +472,15 @@ class TestLoadFromPluginsConfig:
         plugins_config = PluginsConfig(
             paths=[str(plugin_dir)],
             plugins=[
-                PluginConfig(path="custom_handler", enabled=True),  # priority 50
-                PluginConfig(path="another_test_handler", enabled=True),  # priority 30
-                PluginConfig(path="handler_v2_example", enabled=True),  # priority 40
+                PluginConfig(
+                    path="custom_handler", event_type="pre_tool_use", enabled=True
+                ),  # priority 50
+                PluginConfig(
+                    path="another_test_handler", event_type="pre_tool_use", enabled=True
+                ),  # priority 30
+                PluginConfig(
+                    path="handler_v2_example", event_type="pre_tool_use", enabled=True
+                ),  # priority 40
             ],
         )
 
@@ -490,8 +499,12 @@ class TestLoadFromPluginsConfig:
         plugins_config = PluginsConfig(
             paths=[str(plugin_dir)],
             plugins=[
-                PluginConfig(path="syntax_error_handler", enabled=True),  # Will fail
-                PluginConfig(path="custom_handler", enabled=True),  # Should succeed
+                PluginConfig(
+                    path="syntax_error_handler", event_type="pre_tool_use", enabled=True
+                ),  # Will fail
+                PluginConfig(
+                    path="custom_handler", event_type="pre_tool_use", enabled=True
+                ),  # Should succeed
             ],
         )
 
@@ -510,6 +523,7 @@ class TestLoadFromPluginsConfig:
             plugins=[
                 PluginConfig(
                     path=str(plugin_dir / "custom_handler.py"),
+                    event_type="pre_tool_use",
                     enabled=True,
                 ),
             ],
@@ -534,7 +548,7 @@ class TestLoadFromPluginsConfig:
         plugins_config = PluginsConfig(
             paths=[str(plugin_dir), str(other_dir)],
             plugins=[
-                PluginConfig(path="custom_handler", enabled=True),
+                PluginConfig(path="custom_handler", event_type="pre_tool_use", enabled=True),
             ],
         )
 
