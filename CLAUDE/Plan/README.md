@@ -35,6 +35,17 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - **Priority**: High
   - **Owner**: AI Agent
 
+- [00025: Programmatic Acceptance Testing System](00025-programmatic-acceptance-tests/PLAN.md) - 🟡 Not Started
+  - Create AcceptanceTest dataclass for type-safe test definitions
+  - Extend Handler base class with get_acceptance_tests() method (optional, backward compatible)
+  - Implement playbook generator CLI command to auto-generate PLAYBOOK.md
+  - Migrate all 54 built-in handlers to define programmatic tests
+  - Support custom plugin handlers automatically
+  - Eliminate duplication between handler code and manual playbook
+  - **Priority**: High (testing infrastructure)
+  - **GitHub Issue**: #18
+  - **Owner**: To be assigned
+
 - [00024: Plugin System Fix](00024-plugin-system-fix/PLAN.md) - 🟡 Not Started
   - Fix configuration format mismatch between models.py and loader.py
   - Integrate plugin loading into DaemonController (currently only in standalone scripts)
@@ -131,8 +142,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans**: 14
-- **Active**: 9
+- **Total Plans**: 15
+- **Active**: 10
 - **Completed**: 5
 - **Success Rate**: 100% (5/5 completed successfully)
 
