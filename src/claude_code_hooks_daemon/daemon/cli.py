@@ -295,7 +295,9 @@ def cmd_start(args: argparse.Namespace) -> int:
         "stop": {k: v.model_dump() for k, v in config.handlers.stop.items()},
         "subagent_stop": {k: v.model_dump() for k, v in config.handlers.subagent_stop.items()},
     }
-    controller.initialise(handler_config, workspace_root=project_path)
+    controller.initialise(
+        handler_config, workspace_root=project_path, plugins_config=config.plugins
+    )
 
     # Get the daemon config with proper paths
     daemon_config = config.daemon
