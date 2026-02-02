@@ -12,14 +12,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from claude_code_hooks_daemon.core.chain import ChainExecutionResult
-from claude_code_hooks_daemon.core.event import HookEvent
+from claude_code_hooks_daemon.core.event import EventType, HookEvent
 from claude_code_hooks_daemon.core.hook_result import HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.router import EventRouter
 from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
 
 if TYPE_CHECKING:
-    from claude_code_hooks_daemon.config.models import DaemonConfig
+    from claude_code_hooks_daemon.config.models import DaemonConfig, PluginsConfig
 
 logger = logging.getLogger(__name__)
 
@@ -116,14 +116,17 @@ class DaemonController:
         self,
         handler_config: dict[str, dict[str, dict[str, Any]]] | None = None,
         workspace_root: Path | None = None,
+        plugins_config: "PluginsConfig | None" = None,
     ) -> None:
         """Initialise the controller with handlers.
 
-        Discovers and registers all handlers with the event router.
+        Discovers and registers all handlers with the event router,
+        then loads any configured plugins.
 
         Args:
             handler_config: Optional handler configuration from hooks-daemon.yaml
             workspace_root: Optional workspace root path (FAIL FAST if None)
+            plugins_config: Optional plugin configuration from hooks-daemon.yaml
 
         Raises:
             ValueError: If workspace_root is None (FAIL FAST requirement)
@@ -150,14 +153,109 @@ class DaemonController:
         else:
             logger.info("ProjectContext already initialized")
 
-        # Discover and register handlers
+        # Discover and register built-in handlers
         self._registry.discover()
         count = self._registry.register_all(
             self._router, config=handler_config, workspace_root=workspace_root
         )
 
-        logger.info("DaemonController initialised with %d handlers", count)
+        logger.info("Registered %d built-in handlers", count)
+
+        # Load and register plugin handlers
+        plugin_count = 0
+        if plugins_config is not None:
+            plugin_count = self._load_plugins(plugins_config, workspace_root)
+            logger.info("Loaded %d plugin handlers", plugin_count)
+
+        total_count = count + plugin_count
+        logger.info("DaemonController initialised with %d total handlers", total_count)
         self._initialised = True
+
+    def _load_plugins(self, plugins_config: "PluginsConfig", workspace_root: Path) -> int:
+        """Load and register plugin handlers.
+
+        Loads handlers from plugin configuration and registers them with
+        the appropriate event type's handler chain.
+
+        Args:
+            plugins_config: Plugin configuration from hooks-daemon.yaml
+            workspace_root: Workspace root path for resolving relative paths
+
+        Returns:
+            Number of plugin handlers loaded and registered
+        """
+        from claude_code_hooks_daemon.plugins.loader import PluginLoader
+
+        # Load all handlers from plugins config
+        handlers = PluginLoader.load_from_plugins_config(plugins_config)
+
+        if not handlers:
+            logger.debug("No plugin handlers loaded")
+            return 0
+
+        # Build mapping from plugin path to event_type for registration
+        # PluginConfig has event_type field that tells us where to register
+        path_to_event_type: dict[str, str] = {}
+        for plugin in plugins_config.plugins:
+            if plugin.enabled:
+                # Use the path as key (snake_case module name)
+                path_to_event_type[plugin.path] = plugin.event_type
+
+        registered_count = 0
+        for handler in handlers:
+            # Determine which event type to register this handler for
+            # The handler.name comes from the Handler.__init__(name=...) call
+            # We need to find which plugin config matches this handler
+            event_type_str: str | None = None
+
+            # Try to find matching plugin config by checking all paths
+            for plugin in plugins_config.plugins:
+                if not plugin.enabled:
+                    continue
+
+                # Check if this handler came from this plugin
+                # The handler name is set by the handler itself, so we need to
+                # match based on the plugin path (module name)
+                plugin_module = Path(plugin.path).stem
+                # The handler class name would be PascalCase of the module name
+                expected_class = PluginLoader.snake_to_pascal(plugin_module)
+
+                if handler.__class__.__name__ == expected_class:
+                    event_type_str = plugin.event_type
+                    break
+
+            if event_type_str is None:
+                logger.warning(
+                    "Could not determine event type for plugin handler '%s' "
+                    "(class: %s), skipping",
+                    handler.name,
+                    handler.__class__.__name__,
+                )
+                continue
+
+            # Convert event type string to EventType enum
+            try:
+                event_type = EventType.from_string(event_type_str)
+            except ValueError:
+                logger.error(
+                    "Invalid event type '%s' for plugin handler '%s', skipping",
+                    event_type_str,
+                    handler.name,
+                )
+                continue
+
+            # Register handler with the router
+            self._router.register(event_type, handler)
+            logger.info(
+                "Registered plugin handler '%s' for %s (priority=%d, terminal=%s)",
+                handler.name,
+                event_type.value,
+                handler.priority,
+                handler.terminal,
+            )
+            registered_count += 1
+
+        return registered_count
 
     def process_event(self, event: HookEvent) -> ChainExecutionResult:
         """Process a hook event.
