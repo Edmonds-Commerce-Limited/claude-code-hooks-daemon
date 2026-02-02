@@ -98,7 +98,11 @@ handlers:
     destructive_git: {enabled: true, priority: 10}   # Block git reset --hard, clean -f
     sed_blocker: {enabled: true, priority: 11}       # Block sed (use Edit tool instead)
     absolute_path: {enabled: true, priority: 12}     # Require absolute paths
-    worktree_file_copy: {enabled: true, priority: 15}  # Prevent worktree file copies
+    pip_break_system: {enabled: true, priority: 13}  # Block pip --break-system-packages
+    sudo_pip: {enabled: true, priority: 14}          # Block sudo pip
+    curl_pipe_shell: {enabled: true, priority: 15}   # Block curl | bash patterns
+    worktree_file_copy: {enabled: true, priority: 16}  # Prevent worktree file copies
+    dangerous_permissions: {enabled: true, priority: 17}  # Block chmod 777, chown root
     git_stash: {enabled: true, priority: 20}         # Warn about git stash
 
     # CODE QUALITY HANDLERS (Priority 25-35)
@@ -122,6 +126,7 @@ handlers:
       # options: {}  # Inherits from markdown_organization (no duplication needed)
 
     gh_issue_comments: {enabled: true, priority: 40}  # Require --comments on gh issue view
+    global_npm_advisor: {enabled: true, priority: 41}  # Advise on npm install -g (non-blocking)
     web_search_year: {enabled: true, priority: 55}   # Fix outdated years in searches
 
     # ADVISORY HANDLERS (Priority 56-60)

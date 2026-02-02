@@ -365,3 +365,181 @@ class TestLoadHandlersFromConfig:
         assert handlers[0].priority == 30
         assert handlers[1].priority == 40
         assert handlers[2].priority == 50
+
+
+class TestLoadFromPluginsConfig:
+    """Test loading handlers from PluginsConfig model (new API)."""
+
+    @pytest.fixture
+    def plugin_dir(self) -> Path:
+        """Return path to test plugin fixtures."""
+        return Path(__file__).parent.parent / "fixtures" / "plugins"
+
+    def test_load_from_plugins_config_basic(self, plugin_dir: Path) -> None:
+        """Test loading handlers from PluginsConfig model."""
+        from claude_code_hooks_daemon.config.models import PluginConfig, PluginsConfig
+
+        plugins_config = PluginsConfig(
+            paths=[str(plugin_dir)],
+            plugins=[
+                PluginConfig(path="custom_handler", enabled=True),
+                PluginConfig(path="another_test_handler", enabled=True),
+            ],
+        )
+
+        handlers = PluginLoader.load_from_plugins_config(plugins_config)
+
+        assert len(handlers) == 2
+        assert all(isinstance(h, Handler) for h in handlers)
+        handler_names = [h.name for h in handlers]
+        assert "test-custom" in handler_names
+        assert "another-test" in handler_names
+
+    def test_load_from_plugins_config_disabled_plugin(self, plugin_dir: Path) -> None:
+        """Test that disabled plugins are not loaded."""
+        from claude_code_hooks_daemon.config.models import PluginConfig, PluginsConfig
+
+        plugins_config = PluginsConfig(
+            paths=[str(plugin_dir)],
+            plugins=[
+                PluginConfig(path="custom_handler", enabled=False),
+                PluginConfig(path="another_test_handler", enabled=True),
+            ],
+        )
+
+        handlers = PluginLoader.load_from_plugins_config(plugins_config)
+
+        assert len(handlers) == 1
+        assert handlers[0].name == "another-test"
+
+    def test_load_from_plugins_config_empty_plugins(self, plugin_dir: Path) -> None:
+        """Test loading with empty plugins list."""
+        from claude_code_hooks_daemon.config.models import PluginsConfig
+
+        plugins_config = PluginsConfig(
+            paths=[str(plugin_dir)],
+            plugins=[],
+        )
+
+        handlers = PluginLoader.load_from_plugins_config(plugins_config)
+
+        assert handlers == []
+
+    def test_load_from_plugins_config_no_paths(self) -> None:
+        """Test loading with no paths falls back to plugin path."""
+        from claude_code_hooks_daemon.config.models import PluginConfig, PluginsConfig
+
+        plugins_config = PluginsConfig(
+            paths=[],
+            plugins=[
+                PluginConfig(path="/absolute/path/to/custom_handler", enabled=True),
+            ],
+        )
+
+        # Should try to load from the absolute path in plugin.path
+        handlers = PluginLoader.load_from_plugins_config(plugins_config)
+
+        # Will fail to load (path doesn't exist), but should not crash
+        assert handlers == []
+
+    def test_load_from_plugins_config_with_specific_handlers(self, plugin_dir: Path) -> None:
+        """Test loading only specific handler classes from a plugin."""
+        from claude_code_hooks_daemon.config.models import PluginConfig, PluginsConfig
+
+        plugins_config = PluginsConfig(
+            paths=[str(plugin_dir)],
+            plugins=[
+                PluginConfig(
+                    path="custom_handler",
+                    handlers=["CustomHandler"],
+                    enabled=True,
+                ),
+            ],
+        )
+
+        handlers = PluginLoader.load_from_plugins_config(plugins_config)
+
+        assert len(handlers) == 1
+        assert handlers[0].name == "test-custom"
+
+    def test_load_from_plugins_config_sorts_by_priority(self, plugin_dir: Path) -> None:
+        """Test that loaded handlers are sorted by priority."""
+        from claude_code_hooks_daemon.config.models import PluginConfig, PluginsConfig
+
+        plugins_config = PluginsConfig(
+            paths=[str(plugin_dir)],
+            plugins=[
+                PluginConfig(path="custom_handler", enabled=True),  # priority 50
+                PluginConfig(path="another_test_handler", enabled=True),  # priority 30
+                PluginConfig(path="handler_v2_example", enabled=True),  # priority 40
+            ],
+        )
+
+        handlers = PluginLoader.load_from_plugins_config(plugins_config)
+
+        assert len(handlers) == 3
+        # Should be sorted by priority (30, 40, 50)
+        assert handlers[0].priority == 30
+        assert handlers[1].priority == 40
+        assert handlers[2].priority == 50
+
+    def test_load_from_plugins_config_invalid_plugin_continues(self, plugin_dir: Path) -> None:
+        """Test that invalid plugins don't stop other plugins from loading."""
+        from claude_code_hooks_daemon.config.models import PluginConfig, PluginsConfig
+
+        plugins_config = PluginsConfig(
+            paths=[str(plugin_dir)],
+            plugins=[
+                PluginConfig(path="syntax_error_handler", enabled=True),  # Will fail
+                PluginConfig(path="custom_handler", enabled=True),  # Should succeed
+            ],
+        )
+
+        handlers = PluginLoader.load_from_plugins_config(plugins_config)
+
+        assert len(handlers) == 1
+        assert handlers[0].name == "test-custom"
+
+    def test_load_from_plugins_config_absolute_path_in_plugin(self, plugin_dir: Path) -> None:
+        """Test loading plugin with absolute path in plugin.path."""
+        from claude_code_hooks_daemon.config.models import PluginConfig, PluginsConfig
+
+        # Use absolute path in plugin.path instead of relying on search paths
+        plugins_config = PluginsConfig(
+            paths=[],  # Empty search paths
+            plugins=[
+                PluginConfig(
+                    path=str(plugin_dir / "custom_handler.py"),
+                    enabled=True,
+                ),
+            ],
+        )
+
+        handlers = PluginLoader.load_from_plugins_config(plugins_config)
+
+        # Should load from absolute path
+        assert len(handlers) == 1
+        assert handlers[0].name == "test-custom"
+
+    def test_load_from_plugins_config_multiple_paths_first_wins(
+        self, plugin_dir: Path, tmp_path: Path
+    ) -> None:
+        """Test that first matching path is used when plugin exists in multiple paths."""
+        from claude_code_hooks_daemon.config.models import PluginConfig, PluginsConfig
+
+        # Create a second plugin directory with a different version
+        other_dir = tmp_path / "other_plugins"
+        other_dir.mkdir()
+
+        plugins_config = PluginsConfig(
+            paths=[str(plugin_dir), str(other_dir)],
+            plugins=[
+                PluginConfig(path="custom_handler", enabled=True),
+            ],
+        )
+
+        handlers = PluginLoader.load_from_plugins_config(plugins_config)
+
+        # Should load from first path
+        assert len(handlers) == 1
+        assert handlers[0].name == "test-custom"
