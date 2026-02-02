@@ -15,11 +15,11 @@ Currently, acceptance tests are maintained manually in `CLAUDE/AcceptanceTests/P
 ## Goals
 
 - Create `AcceptanceTest` dataclass for type-safe test definitions
-- Extend Handler base class with `get_acceptance_tests()` method (optional, backward compatible)
+- Extend Handler base class with **REQUIRED** `get_acceptance_tests()` abstract method
 - Implement playbook generator that aggregates tests from all enabled handlers
 - Create `generate-playbook` CLI command
-- Migrate all 54 built-in handlers to define their acceptance tests programmatically
-- Support custom plugin handlers automatically
+- Migrate all 54 built-in handlers to define their acceptance tests programmatically (MANDATORY)
+- Enforce acceptance testing for custom plugin handlers (breaking change, but necessary)
 - Maintain 95%+ test coverage throughout
 
 ## Non-Goals
@@ -27,7 +27,6 @@ Currently, acceptance tests are maintained manually in `CLAUDE/AcceptanceTests/P
 - Automated execution of acceptance tests (foundation only, automation is future work)
 - Changing existing handler behavior or priorities
 - Modifying manual PLAYBOOK.md format (must match exactly for compatibility)
-- Breaking backward compatibility with existing handlers
 
 ## Context & Background
 
@@ -84,27 +83,41 @@ Currently, acceptance tests are maintained manually in `CLAUDE/AcceptanceTests/P
   - [ ] Verify 95%+ coverage
   - [ ] Run QA: `./scripts/qa/run_all.sh`
 
-- [ ] **Task 1.2**: Extend Handler base class
-  - [ ] Write failing tests for `get_acceptance_tests()` method
-  - [ ] Add optional method to `Handler` base class returning `list[AcceptanceTest]`
-  - [ ] Default implementation returns empty list (backward compatible)
-  - [ ] Verify existing handlers unaffected
+- [ ] **Task 1.2**: Extend Handler base class (BREAKING CHANGE)
+  - [ ] Write failing tests for `get_acceptance_tests()` abstract method
+  - [ ] Add **REQUIRED** `@abstractmethod` to `Handler` base class
+  - [ ] Method signature: `def get_acceptance_tests(self) -> list[AcceptanceTest]`
+  - [ ] Add validation in `__init_subclass__` or at registration time
+  - [ ] **REJECT empty list returns** - every handler MUST have at least 1 test
+  - [ ] Raise `ValueError` if handler returns `[]` (no empty arrays allowed)
+  - [ ] This WILL break all existing handlers (intentional - forces implementation)
+  - [ ] Run QA: `./scripts/qa/run_all.sh` (WILL FAIL until all handlers updated)
+
+- [ ] **Task 1.3**: Add empty array validation
+  - [ ] Write failing tests for empty array detection
+  - [ ] Add validation in handler registry or playbook generator
+  - [ ] Raise descriptive error if `get_acceptance_tests()` returns `[]`
+  - [ ] Error message: "Handler {name} must define at least 1 acceptance test. No empty arrays allowed."
+  - [ ] Verify validation catches empty returns
   - [ ] Run QA: `./scripts/qa/run_all.sh`
 
-- [ ] **Task 1.3**: Create PlaybookGenerator core
+- [ ] **Task 1.4**: Create PlaybookGenerator core
   - [ ] Write failing tests for generator logic
   - [ ] Create `src/claude_code_hooks_daemon/daemon/playbook_generator.py`
   - [ ] Implement handler discovery (built-in + plugins)
   - [ ] Implement config-aware filtering (only enabled handlers)
   - [ ] Implement markdown generation matching current format
+  - [ ] Call validation to reject empty arrays during generation
   - [ ] Verify 95%+ coverage
   - [ ] Run QA: `./scripts/qa/run_all.sh`
   - [ ] Restart daemon: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
   - [ ] Verify daemon status: RUNNING
 
-### Phase 2: Sample Handler Migration (Validation)
+### Phase 2: ALL Handler Migration (MANDATORY - No Half Measures)
 
-Migrate 3 representative handlers to validate approach before full rollout:
+**CRITICAL**: After adding @abstractmethod in Phase 1, ALL 54 handlers MUST be updated before ANY code can pass QA. No gradual migration - big bang approach.
+
+Start with 3 representative handlers to validate approach, then complete remaining 51:
 
 - [ ] **Task 2.1**: DestructiveGitHandler (blocking, multiple patterns)
   - [ ] Write failing tests for `get_acceptance_tests()` implementation
@@ -309,18 +322,31 @@ Migrate all remaining built-in handlers by category:
 
 ## Technical Decisions
 
-### Decision 1: Make get_acceptance_tests() Optional
-**Context**: Need backward compatibility with existing handlers
+### Decision 1: Make get_acceptance_tests() REQUIRED (@abstractmethod)
+**Context**: Need to enforce acceptance testing discipline across ALL handlers
 **Options Considered**:
-1. Make method required (forces all handlers to implement)
-2. Make method optional with default implementation (backward compatible)
+1. Make method required via @abstractmethod (forces all handlers to implement)
+2. Make method optional with default implementation (allows gradual adoption)
 
-**Decision**: Option 2 - Optional method with default `return []`
+**Decision**: Option 1 - REQUIRED abstract method (breaking change)
 **Rationale**:
-- Allows gradual migration
-- No breaking changes for existing handlers
-- Handlers without tests simply won't appear in generated playbook
-- Plugin handlers can adopt at their own pace
+- **User requirement**: "every single handler" must have acceptance tests
+- **Quality enforcement**: No handler can skip acceptance testing
+- **Plugin discipline**: Custom plugins MUST define tests (no shortcuts)
+- **Long-term benefit**: Ensures all handlers are testable and documented
+- **Breaking change acceptable**: Worth it for enforced quality
+- **Empty arrays REJECTED**: Returning `[]` raises `ValueError` - no exceptions
+**Date**: 2026-02-02
+
+### Decision 1.5: Reject Empty Array Returns
+**Context**: Prevent handlers from returning empty test lists
+**Decision**: Validate and reject `[]` returns from `get_acceptance_tests()`
+**Rationale**:
+- **User requirement**: "reject empty array return" - no handler can skip tests
+- **Zero tolerance**: Every handler must have at least 1 test
+- **No loopholes**: Can't satisfy abstract method with empty implementation
+- **Conscious testing**: Forces developers to think about testability
+- **Validation location**: Handler registry or playbook generator
 **Date**: 2026-02-02
 
 ### Decision 2: Playbook Format Must Match Exactly
@@ -384,17 +410,19 @@ Migrate all remaining built-in handlers by category:
 Initial plan created based on user requirements for programmatic acceptance testing system.
 
 **User Requirements**:
-- Handlers implement interface to return acceptance test definitions
+- **EVERY SINGLE HANDLER** must have acceptance tests (mandatory, not optional)
 - Test objects have: title, command, description, should_block, expected_message_patterns
 - Universal support (built-in + plugin handlers)
 - CLI command to generate markdown playbook
 - Config-aware (only enabled handlers)
 
 **Key Design Decisions**:
-1. Optional `get_acceptance_tests()` method (backward compatible)
-2. `AcceptanceTest` dataclass with validation
-3. Match existing PLAYBOOK.md format exactly
-4. Support complex scenarios (setup/cleanup, non-triggerable events, advisory handlers)
+1. **REQUIRED** `get_acceptance_tests()` abstract method (breaking change, enforced quality)
+2. **REJECT empty arrays** - returning `[]` raises `ValueError` (zero tolerance)
+3. `AcceptanceTest` dataclass with validation
+4. Match existing PLAYBOOK.md format exactly
+5. Support complex scenarios (setup/cleanup, non-triggerable events, advisory handlers)
+6. Big bang migration - all 54 handlers updated in one phase
 
 **Next Steps**:
 1. Begin Phase 1: Create dataclass and extend Handler base class
