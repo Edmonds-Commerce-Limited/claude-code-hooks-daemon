@@ -7,7 +7,7 @@ global namespace pollution and version conflicts.
 
 import re
 
-from claude_code_hooks_daemon.constants.decision import Decision
+from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core.handler import Handler
