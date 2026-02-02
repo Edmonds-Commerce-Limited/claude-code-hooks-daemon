@@ -5,9 +5,12 @@ import inspect
 import logging
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from claude_code_hooks_daemon.core import Handler
+
+if TYPE_CHECKING:
+    from claude_code_hooks_daemon.config.models import PluginsConfig
 
 logger = logging.getLogger(__name__)
 
@@ -136,8 +139,98 @@ class PluginLoader:
         return handlers
 
     @staticmethod
+    def load_from_plugins_config(plugins_config: "PluginsConfig") -> list[Handler]:
+        """Load handlers from PluginsConfig model (new API).
+
+        This is the preferred method for loading plugins, using the type-safe
+        PluginsConfig model from config/models.py.
+
+        Args:
+            plugins_config: PluginsConfig instance from configuration file
+
+        Returns:
+            List of loaded Handler instances, sorted by priority
+
+        Example:
+            >>> from claude_code_hooks_daemon.config.models import PluginsConfig, PluginConfig
+            >>> config = PluginsConfig(
+            ...     paths=["/path/to/plugins"],
+            ...     plugins=[
+            ...         PluginConfig(path="my_handler", enabled=True),
+            ...     ]
+            ... )
+            >>> handlers = PluginLoader.load_from_plugins_config(config)
+        """
+        # Import here to avoid circular dependency
+        from claude_code_hooks_daemon.config.models import PluginsConfig
+
+        if not isinstance(plugins_config, PluginsConfig):
+            logger.error("plugins_config must be a PluginsConfig instance")
+            return []
+
+        if not plugins_config.plugins:
+            return []
+
+        loaded_handlers = []
+
+        # Process each plugin configuration
+        for plugin_config in plugins_config.plugins:
+            # Skip disabled plugins
+            if not plugin_config.enabled:
+                continue
+
+            # Determine search paths: plugin.path or global paths
+            plugin_path = Path(plugin_config.path)
+
+            # If plugin.path is absolute or exists, use it directly
+            if plugin_path.is_absolute() or plugin_path.exists():
+                search_paths = [plugin_path.parent if plugin_path.suffix == ".py" else plugin_path]
+                handler_module = (
+                    plugin_path.stem if plugin_path.suffix == ".py" else plugin_path.name
+                )
+            else:
+                # Use global search paths with plugin.path as module name
+                search_paths = [Path(p) for p in plugins_config.paths]
+                handler_module = plugin_config.path
+
+            # Determine which handlers to load
+            if plugin_config.handlers:
+                # handlers are class names, but we need module names for load_handler
+                # The module name is plugin_config.path (snake_case)
+                # We'll load the module and check if the class exists
+                # For now, just use the handler_module as the base
+                handlers_to_load = [handler_module]
+            else:
+                # Load all handlers from the module (use snake_case module name)
+                handlers_to_load = [handler_module]
+
+            # Load each handler
+            for module_name in handlers_to_load:
+                handler = None
+
+                # Try each search path
+                for search_path in search_paths:
+                    handler = PluginLoader.load_handler(module_name, search_path)
+                    if handler is not None:
+                        break
+
+                if handler is not None:
+                    loaded_handlers.append(handler)
+                else:
+                    logger.warning(
+                        f"Failed to load plugin handler from module '{module_name}' (path: '{plugin_config.path}')"
+                    )
+
+        # Sort by priority (lower number = higher priority)
+        loaded_handlers.sort(key=lambda h: h.priority)
+
+        return loaded_handlers
+
+    @staticmethod
     def load_handlers_from_config(plugin_config: dict[str, Any]) -> list[Handler]:
-        """Load handlers from plugin configuration.
+        """Load handlers from plugin configuration (legacy API).
+
+        DEPRECATED: Use load_from_plugins_config() with PluginsConfig model instead.
 
         Args:
             plugin_config: Plugin configuration dictionary with structure:
