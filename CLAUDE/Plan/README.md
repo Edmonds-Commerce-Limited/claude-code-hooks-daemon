@@ -35,6 +35,16 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - **Priority**: High
   - **Owner**: AI Agent
 
+- [00024: Plugin System Fix](00024-plugin-system-fix/PLAN.md) - 🟡 Not Started
+  - Fix configuration format mismatch between models.py and loader.py
+  - Integrate plugin loading into DaemonController (currently only in standalone scripts)
+  - Soften shared options validation (warn instead of error)
+  - Add daemon integration tests for plugin loading
+  - Document plugin development guide
+  - **Priority**: High (broken functionality)
+  - **GitHub Issue**: #17
+  - **Owner**: To be assigned
+
 - [00023: LLM Upgrade Experience Improvements](00023-llm-upgrade-experience/PLAN.md) - 🟡 Not Started
   - Create location detection and self-locating upgrade script
   - Improve LLM-UPDATE.md with clear copy-paste instructions
@@ -121,8 +131,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans**: 13
-- **Active**: 8
+- **Total Plans**: 14
+- **Active**: 9
 - **Completed**: 5
 - **Success Rate**: 100% (5/5 completed successfully)
 
