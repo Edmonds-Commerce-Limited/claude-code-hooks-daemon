@@ -1,8 +1,8 @@
 # Plan 00024: Plugin System Fix
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-02-02
-**Owner**: To be assigned
+**Owner**: Claude Sonnet 4.5
 **Priority**: High
 **GitHub Issue**: #17
 
@@ -86,18 +86,21 @@ count = self._registry.register_all(
 
 ### Phase 2: TDD - Configuration Unification
 
-- [ ] ⬜ **Task 2.1**: Update PluginLoader to match models.py format
-  - [ ] ⬜ Write failing test for new `load_from_plugins_config(PluginsConfig)` method
-  - [ ] ⬜ Implement method to iterate `plugins_config.plugins` list
-  - [ ] ⬜ Verify each `PluginConfig` has `path`, optional `handlers`, `enabled`
-  - [ ] ⬜ Load handlers from each plugin path
-  - [ ] ⬜ Run QA: `./scripts/qa/run_all.sh`
+- [x] ✅ **Task 2.1**: Update PluginLoader to match models.py format
+  - [x] ✅ Write failing test for new `load_from_plugins_config(PluginsConfig)` method
+  - [x] ✅ Implement method to iterate `plugins_config.plugins` list
+  - [x] ✅ Verify each `PluginConfig` has `path`, optional `handlers`, `enabled`
+  - [x] ✅ Load handlers from each plugin path
+  - [x] ✅ Run QA: All tests pass, 96.25% coverage
+  - [x] ✅ Commit: 1f6c2b2
 
-- [ ] ⬜ **Task 2.2**: Add event_type to PluginConfig model
-  - [ ] ⬜ Write failing test for `event_type` field in PluginConfig
-  - [ ] ⬜ Add `event_type: str` field to `PluginConfig` in models.py
-  - [ ] ⬜ Update schema.py if needed
-  - [ ] ⬜ Run QA
+- [x] ✅ **Task 2.2**: Add event_type to PluginConfig model
+  - [x] ✅ Write failing test for `event_type` field in PluginConfig
+  - [x] ✅ Add `event_type: Literal[...]` field to `PluginConfig` in models.py
+  - [x] ✅ Update all tests to include event_type parameter
+  - [x] ✅ Fix type hints in 5 handlers (dict -> dict[str, Any])
+  - [x] ✅ Run QA: All checks pass
+  - [x] ✅ Commit: 0b925ec, 5051ae5
 
 - [ ] ⬜ **Task 2.3**: Update existing tests
   - [ ] ⬜ Update `tests/unit/test_plugin_loader.py` to use new format
