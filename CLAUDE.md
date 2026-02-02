@@ -4,6 +4,28 @@
 
 A high-performance daemon for Claude Code hooks using Unix socket IPC. Eliminates process spawn overhead (20x faster after warmup).
 
+## ⚠️ CRITICAL: Code Lifecycle (READ BEFORE MAKING CHANGES)
+
+**MANDATORY**: Read these documents BEFORE implementing changes:
+
+- **Before implementing features**: @CLAUDE/CodeLifecycle/Features.md
+- **Before fixing bugs**: @CLAUDE/CodeLifecycle/Bugs.md
+- **For all code changes**: @CLAUDE/CodeLifecycle/General.md
+
+### The Non-Negotiable Rule
+
+**EVERY change MUST pass daemon restart verification**:
+
+```bash
+$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
+$PYTHON -m claude_code_hooks_daemon.daemon.cli status
+# Expected: Status: RUNNING
+```
+
+**If daemon fails to start, your change is NOT done** - fix it before committing.
+
+**Why this matters**: Unit tests alone don't catch import errors. The 5-handler failure (wrong import path) would have been caught by daemon restart.
+
 ## Claude Code Hooks System
 
 **Claude Code is the source of truth for hook formats.** This daemon intercepts hook events from Claude Code CLI and processes them through handler chains.
