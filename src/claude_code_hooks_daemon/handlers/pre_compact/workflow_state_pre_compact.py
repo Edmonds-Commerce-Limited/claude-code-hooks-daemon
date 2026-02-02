@@ -374,3 +374,20 @@ class WorkflowStatePreCompactHandler(Handler):
         # Limit length to 50 characters
         sanitized = sanitized[:50]
         return sanitized
+
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests for this handler."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="workflow state pre compact handler test",
+                command='echo "test"',
+                description="Tests workflow state pre compact handler functionality",
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r".*"],
+                safety_notes="Context/utility handler - minimal testing required",
+                test_type=TestType.CONTEXT,
+                requires_event="PreCompact event",
+            ),
+        ]

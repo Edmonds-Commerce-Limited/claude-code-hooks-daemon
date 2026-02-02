@@ -203,3 +203,20 @@ See: CLAUDE/Plan/CLAUDE.md for full instructions
                 numbers.append(int(match.group(1)))
 
         return max(numbers) if numbers else 0
+
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests for Validate Plan Number."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="Plan number validation",
+                command="Write to plan directory with number",
+                description="Validates plan numbering format (advisory)",
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r"plan number", r"format"],
+                safety_notes="Advisory handler - validates numbering",
+                test_type=TestType.ADVISORY,
+                requires_event="PreToolUse with Write tool to plan directory",
+            ),
+        ]

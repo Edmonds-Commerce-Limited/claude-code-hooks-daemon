@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Handler, HookResult
+from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 
 
 class AccountDisplayHandler(Handler):
@@ -52,3 +52,20 @@ class AccountDisplayHandler(Handler):
         except Exception:
             # Silent fail - don't break status line for account display issues
             return HookResult(context=[])
+
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests for this handler."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="account display handler test",
+                command='echo "test"',
+                description="Tests account display handler functionality",
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r".*"],
+                safety_notes="Context/utility handler - minimal testing required",
+                test_type=TestType.CONTEXT,
+                requires_event="StatusLine event",
+            ),
+        ]

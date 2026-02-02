@@ -73,3 +73,20 @@ class GitContextInjectorHandler(Handler):
         except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
             # Git not installed, timeout, or other errors - silent allow
             return HookResult(decision=Decision.ALLOW)
+
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests for this handler."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="git context injector handler test",
+                command='echo "test"',
+                description="Tests git context injector handler functionality",
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r".*"],
+                safety_notes="Context/utility handler - minimal testing required",
+                test_type=TestType.CONTEXT,
+                requires_event="UserPromptSubmit event",
+            ),
+        ]

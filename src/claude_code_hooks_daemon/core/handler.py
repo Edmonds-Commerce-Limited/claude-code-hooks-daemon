@@ -149,3 +149,37 @@ class Handler(ABC):
             HookResult with decision and optional reason/context
         """
         ...
+
+    @abstractmethod
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests for this handler.
+
+        MANDATORY: Every handler MUST define at least one acceptance test.
+        Returning an empty list is NOT ALLOWED and will be rejected during
+        validation.
+
+        Acceptance tests define real-world scenarios that verify the handler
+        works correctly. They're used to generate manual test playbooks and
+        will enable automated testing in the future.
+
+        Returns:
+            List of AcceptanceTest objects (must contain at least 1 test)
+
+        Raises:
+            ValueError: If validation detects empty list return (enforced elsewhere)
+
+        Example:
+            def get_acceptance_tests(self) -> list[AcceptanceTest]:
+                return [
+                    AcceptanceTest(
+                        title="Block git reset --hard",
+                        command='echo "git reset --hard"',
+                        description="Prevents destructive git reset",
+                        expected_decision=Decision.DENY,
+                        expected_message_patterns=[r"destroys.*uncommitted"],
+                        safety_notes="Uses echo - safe to execute",
+                        test_type=TestType.BLOCKING,
+                    )
+                ]
+        """
+        ...

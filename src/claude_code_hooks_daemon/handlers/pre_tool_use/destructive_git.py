@@ -93,3 +93,94 @@ class DestructiveGitHandler(Handler):
                 "The LLM is NOT ALLOWED to run destructive git commands. Ask the user to do it."
             ),
         )
+
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests for destructive git handler."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="git reset --hard",
+                command='echo "git reset --hard NONEXISTENT_REF_SAFE_TEST"',
+                description="Blocks git reset --hard (destroys uncommitted changes)",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"destroys.*uncommitted changes",
+                    r"PERMANENTLY DESTROYS",
+                ],
+                safety_notes="Uses non-existent ref - would fail harmlessly if executed",
+                test_type=TestType.BLOCKING,
+            ),
+            AcceptanceTest(
+                title="git clean -f",
+                command='echo "git clean -fd /nonexistent/safe/test/path"',
+                description="Blocks git clean -f (permanently deletes untracked files)",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"permanently deletes untracked files",
+                    r"PERMANENTLY DESTROYS",
+                ],
+                safety_notes="Uses non-existent path - would fail harmlessly if executed",
+                test_type=TestType.BLOCKING,
+            ),
+            AcceptanceTest(
+                title="git push --force",
+                command='echo "git push --force NONEXISTENT_REMOTE NONEXISTENT_BRANCH"',
+                description="Blocks git push --force (overwrites remote history)",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"overwrite remote history",
+                    r"destroy.*work",
+                ],
+                safety_notes="Uses non-existent remote/branch - would fail harmlessly if executed",
+                test_type=TestType.BLOCKING,
+            ),
+            AcceptanceTest(
+                title="git stash drop",
+                command='echo "git stash drop stash@{999}"',
+                description="Blocks git stash drop (permanent deletion)",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"permanently destroys",
+                    r"stash",
+                ],
+                safety_notes="Uses non-existent stash index - would fail harmlessly if executed",
+                test_type=TestType.BLOCKING,
+            ),
+            AcceptanceTest(
+                title="git checkout --",
+                command='echo "git checkout -- /nonexistent/safe/test/file.py"',
+                description="Blocks git checkout -- (discards changes)",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"discards.*local changes",
+                    r"permanently",
+                ],
+                safety_notes="Uses non-existent file path - would fail harmlessly if executed",
+                test_type=TestType.BLOCKING,
+            ),
+            AcceptanceTest(
+                title="git restore",
+                command='echo "git restore /nonexistent/safe/test/file.py"',
+                description="Blocks git restore (discards working tree changes)",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"discards.*local changes",
+                    r"permanently",
+                ],
+                safety_notes="Uses non-existent file path - would fail harmlessly if executed",
+                test_type=TestType.BLOCKING,
+            ),
+            AcceptanceTest(
+                title="git stash clear",
+                command='echo "git stash clear"',
+                description="Blocks git stash clear (destroys all stashes)",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"permanently destroys all",
+                    r"stash",
+                ],
+                safety_notes="Safe to test - only clears stash (recoverable via reflog)",
+                test_type=TestType.BLOCKING,
+            ),
+        ]

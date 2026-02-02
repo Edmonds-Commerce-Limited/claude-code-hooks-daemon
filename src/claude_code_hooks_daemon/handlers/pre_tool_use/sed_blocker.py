@@ -183,3 +183,37 @@ class SedBlockerHandler(Handler):
                 f"  Good: Dispatch 10 haiku agents with Edit tool"
             ),
         )
+
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests for sed blocker handler."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="sed -i with substitution",
+                command='sed -i "s/foo/bar/g" /tmp/sed_test.txt',
+                description="Blocks sed -i (in-place editing) to prevent file destruction",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"sed.*FORBIDDEN",
+                    r"file corruption",
+                    r"Edit tool",
+                ],
+                setup_commands=['echo "test content" > /tmp/sed_test.txt'],
+                cleanup_commands=["rm -f /tmp/sed_test.txt"],
+                safety_notes="Uses test file in /tmp - safe to test",
+                test_type=TestType.BLOCKING,
+            ),
+            AcceptanceTest(
+                title="sed -e command",
+                command='sed -e "s/old/new/" /tmp/sed_test.txt',
+                description="Blocks sed -e commands",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"sed.*FORBIDDEN",
+                    r"Edit tool",
+                ],
+                safety_notes="Uses test file in /tmp - safe to test",
+                test_type=TestType.BLOCKING,
+            ),
+        ]

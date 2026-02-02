@@ -118,3 +118,20 @@ class PythonQaSuppressionBlocker(Handler):
                 "  - Pylint: https://pylint.readthedocs.io/"
             ),
         )
+
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests for Python Qa Suppression Blocker."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="type: ignore comment",
+                command="Write Python file with '# type: ignore' comment",
+                description="Blocks type: ignore comments (fix type errors instead)",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[r"type: ignore", r"Fix.*type error", r"BLOCKED"],
+                safety_notes="Tests Write tool validation without actual file operations",
+                test_type=TestType.BLOCKING,
+                requires_event="PreToolUse with Write tool to .py file",
+            ),
+        ]

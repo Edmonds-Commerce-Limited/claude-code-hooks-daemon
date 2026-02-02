@@ -66,3 +66,19 @@ class GhIssueCommentsHandler(Handler):
                 f"  {suggested_command}\n"
             ),
         )
+
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests for Gh Issue Comments."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="GitHub issue comment guidance",
+                command='echo "gh issue comment 123"',
+                description="Provides GitHub CLI guidance (advisory)",
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r"GitHub", r"issue"],
+                safety_notes="Uses echo - safe to test",
+                test_type=TestType.ADVISORY,
+            ),
+        ]

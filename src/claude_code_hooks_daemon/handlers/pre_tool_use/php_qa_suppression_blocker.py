@@ -115,3 +115,20 @@ class PhpQaSuppressionBlocker(Handler):
                 "  - PHP_CodeSniffer: https://github.com/squizlabs/PHP_CodeSniffer"
             ),
         )
+
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests for Php Qa Suppression Blocker."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="phpcs:ignore comment",
+                command="Write PHP file with '// phpcs:ignore' comment",
+                description="Blocks phpcs:ignore comments (fix code style instead)",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[r"phpcs:ignore", r"Fix.*issue", r"BLOCKED"],
+                safety_notes="Tests Write tool validation without actual file operations",
+                test_type=TestType.BLOCKING,
+                requires_event="PreToolUse with Write tool to .php file",
+            ),
+        ]

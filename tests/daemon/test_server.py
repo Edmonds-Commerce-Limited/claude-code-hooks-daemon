@@ -36,6 +36,21 @@ class SimpleTestHandler(Handler):
         """Return simple allow result."""
         return HookResult(decision=Decision.ALLOW, context="Test handler executed")
 
+    def get_acceptance_tests(self) -> list:
+        """Test handler - stub implementation."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="test handler",
+                command="echo 'test'",
+                description="Test handler for unit tests",
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r".*"],
+                test_type=TestType.BLOCKING,
+            )
+        ]
+
 
 class SlowTestHandler(Handler):
     """Slow handler for testing concurrent request handling."""
@@ -53,6 +68,21 @@ class SlowTestHandler(Handler):
         """Sleep then return result."""
         time.sleep(self.delay_ms / 1000.0)
         return HookResult(decision=Decision.ALLOW, context=f"Delayed {self.delay_ms}ms")
+
+    def get_acceptance_tests(self) -> list:
+        """Test handler - stub implementation."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="slow test handler",
+                command="echo 'test'",
+                description="Slow test handler for unit tests",
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r".*"],
+                test_type=TestType.BLOCKING,
+            )
+        ]
 
 
 class TestHooksDaemon:
@@ -695,6 +725,21 @@ class TestHooksDaemon:
 
             def handle(self, hook_input: dict) -> HookResult:
                 raise RuntimeError("Simulated handler failure")
+
+            def get_acceptance_tests(self) -> list:
+                """Test handler - stub implementation."""
+                from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+                return [
+                    AcceptanceTest(
+                        title="failing test handler",
+                        command="echo 'test'",
+                        description="Failing test handler for unit tests",
+                        expected_decision=Decision.ALLOW,
+                        expected_message_patterns=[r".*"],
+                        test_type=TestType.BLOCKING,
+                    )
+                ]
 
         controller = FrontController(event_name="PreToolUse")
         controller.register(FailingHandler())

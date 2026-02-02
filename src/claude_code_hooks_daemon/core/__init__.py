@@ -4,6 +4,7 @@ This module exports the primary classes and utilities for
 building and running hook handlers.
 """
 
+from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest, TestType
 from claude_code_hooks_daemon.core.chain import ChainExecutionResult, HandlerChain
 from claude_code_hooks_daemon.core.error_response import generate_daemon_error_response
 from claude_code_hooks_daemon.core.event import EventType, HookEvent, HookInput, ToolInput
@@ -14,6 +15,7 @@ from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.router import EventRouter
 
 __all__ = [
+    "AcceptanceTest",
     "ChainExecutionResult",
     "Decision",
     "EventRouter",
@@ -25,6 +27,7 @@ __all__ = [
     "HookInput",
     "HookResult",
     "ProjectContext",
+    "TestType",
     "ToolInput",
     "generate_daemon_error_response",
 ]

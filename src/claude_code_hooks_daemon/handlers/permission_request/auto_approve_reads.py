@@ -61,3 +61,20 @@ class AutoApproveReadsHandler(Handler):
                     "not PermissionRequest hooks. This handler only auto-approves reads."
                 ),
             )
+
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests for Auto Approve Reads."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="Auto-approve read permissions",
+                command="Read file permission request",
+                description="Auto-approves read-only operations",
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r"read", r"approved"],
+                safety_notes="Read-only operations are safe",
+                test_type=TestType.CONTEXT,
+                requires_event="PermissionRequest for Read tool",
+            ),
+        ]

@@ -141,3 +141,19 @@ class NpmCommandHandler(Handler):
                 f"No need for grep/awk/sed post-processing!"
             ),
         )
+
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests for Npm Command."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="npm command guidance",
+                command='echo "npm install"',
+                description="Provides npm command best practices (advisory)",
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r"npm", r"package"],
+                safety_notes="Uses echo - safe to test",
+                test_type=TestType.ADVISORY,
+            ),
+        ]

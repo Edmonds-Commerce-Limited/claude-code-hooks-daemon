@@ -163,3 +163,20 @@ class PlanNumberHelperHandler(Handler):
             )
 
             return HookResult.deny(reason=reason_message)
+
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests for Plan Number Helper."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, Decision, TestType
+
+        return [
+            AcceptanceTest(
+                title="Plan number suggestion",
+                command="Create new plan directory",
+                description="Suggests next plan number (advisory)",
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r"plan number", r"next"],
+                safety_notes="Advisory handler - suggests numbering",
+                test_type=TestType.ADVISORY,
+                requires_event="PreToolUse creating plan directory",
+            ),
+        ]

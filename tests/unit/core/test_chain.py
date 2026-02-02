@@ -52,6 +52,21 @@ class MockHandler(Handler):
             raise self._raise_exception
         return self._result
 
+    def get_acceptance_tests(self) -> list[Any]:
+        """Test handler - stub implementation."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="mock handler",
+                command="echo 'test'",
+                description="Mock handler for chain tests",
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r".*"],
+                test_type=TestType.BLOCKING,
+            )
+        ]
+
 
 class TestChainExecutionResult:
     """Tests for ChainExecutionResult dataclass."""

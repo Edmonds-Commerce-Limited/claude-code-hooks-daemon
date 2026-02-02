@@ -116,3 +116,35 @@ NEVER use sudo pip install as default behavior."""
             context=[],
             guidance=None,
         )
+
+    def get_acceptance_tests(self) -> list[Any]:
+        """Return acceptance tests for sudo pip handler."""
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="sudo pip install",
+                command='echo "sudo pip install requests"',
+                description="Blocks sudo pip install (system-wide corruption risk)",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"sudo pip install",
+                    r"OS package manager",
+                    r"virtual environment",
+                ],
+                safety_notes="Uses echo - safe to test",
+                test_type=TestType.BLOCKING,
+            ),
+            AcceptanceTest(
+                title="sudo python3 -m pip install",
+                command='echo "sudo python3 -m pip install numpy"',
+                description="Blocks sudo python3 -m pip install",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"sudo pip",
+                    r"Conflicts.*OS",
+                ],
+                safety_notes="Uses echo - safe to test",
+                test_type=TestType.BLOCKING,
+            ),
+        ]
