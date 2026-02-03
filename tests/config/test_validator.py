@@ -209,7 +209,7 @@ class TestConfigValidator:
         assert any("priority" in err.lower() and "integer" in err.lower() for err in errors)
 
     def test_duplicate_priorities_same_event(self):
-        """Test that duplicate priorities within same event fail validation."""
+        """Test that duplicate priorities within same event log warning but pass validation."""
         config = {
             "version": "1.0",
             "daemon": {"idle_timeout_seconds": 600, "log_level": "INFO"},
@@ -222,8 +222,9 @@ class TestConfigValidator:
         }
 
         errors = ConfigValidator.validate(config, validate_handler_names=False)
-        assert len(errors) > 0
-        assert any("duplicate" in err.lower() and "priority" in err.lower() for err in errors)
+        # Duplicate priorities are handled by HandlerChain with alphabetical tiebreaker
+        # Not a validation error (per user feedback)
+        assert len(errors) == 0
 
     def test_duplicate_priorities_different_events_allowed(self):
         """Test that duplicate priorities across different events are allowed."""

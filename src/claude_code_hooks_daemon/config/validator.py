@@ -403,11 +403,15 @@ class ConfigValidator:
                         )
                     else:
                         # Check for duplicate priorities within same event
+                        # NOTE: Duplicate priorities are NOT errors - they are handled by HandlerChain
+                        # with alphabetical tiebreaker. Just track them for potential warnings.
                         if priority in priorities:
                             other_handler = priorities[priority]
-                            errors.append(
+                            # Log warning but don't add to errors (per user feedback)
+                            logger.warning(
                                 f"Duplicate priority {priority} in 'handlers.{event_type}': "
-                                f"both '{handler_name}' and '{other_handler}' have same priority"
+                                f"'{handler_name}' and '{other_handler}' share priority. "
+                                f"Will use alphabetical order for deterministic sorting."
                             )
                         else:
                             priorities[priority] = handler_name
