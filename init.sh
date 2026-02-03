@@ -164,9 +164,41 @@ fi
 # Venv Python (only needed for daemon startup, NOT for hot path)
 PYTHON_CMD="$HOOKS_DAEMON_ROOT_DIR/untracked/venv/bin/python"
 
+#
+# _get_hostname_suffix() - Get hostname-based suffix for runtime files
+#
+# Uses HOSTNAME environment variable directly to isolate daemon runtime
+# files across different environments (containers, machines).
+#
+# Returns:
+#   "-{sanitized-hostname}" or "-{time-hash}" if no hostname
+#
+# Example:
+#   HOSTNAME="laptop" -> "-laptop"
+#   HOSTNAME="506355bfbc76" -> "-506355bfbc76"
+#   HOSTNAME="My-Server" -> "-my-server"
+#   No HOSTNAME -> "-a1b2c3d4" (MD5 of timestamp)
+#
+_get_hostname_suffix() {
+    local hostname="${HOSTNAME:-}"
+
+    # No hostname? Use MD5 of current time for uniqueness
+    if [[ -z "$hostname" ]]; then
+        local timestamp=$(date +%s.%N)
+        local hash=$(echo -n "$timestamp" | md5sum | cut -c1-8)
+        echo "-${hash}"
+        return 0
+    fi
+
+    # Sanitize hostname for filesystem safety: lowercase, no spaces
+    local sanitized=$(echo "$hostname" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
+    echo "-${sanitized}"
+}
+
 # Generate socket and PID paths using pure bash (no Python dependency)
 # SECURITY: Paths stored in daemon's untracked directory, NOT /tmp
 # Pattern: {project}/.claude/hooks-daemon/untracked/daemon.{sock|pid}
+# Container: {project}/.claude/hooks-daemon/untracked/daemon-{hash}.{sock|pid}
 # Must match Python paths module: claude_code_hooks_daemon.daemon.paths
 _abs_project_path=$(realpath "$PROJECT_PATH")
 
@@ -177,9 +209,12 @@ _untracked_dir="$_abs_project_path/.claude/hooks-daemon/untracked"
 # Create untracked directory if it doesn't exist
 mkdir -p "$_untracked_dir"
 
+# Generate hostname-based suffix for path isolation
+_hostname_suffix=$(_get_hostname_suffix)
+
 # Allow environment variable overrides (for testing)
-SOCKET_PATH="${CLAUDE_HOOKS_SOCKET_PATH:-$_untracked_dir/daemon.sock}"
-PID_PATH="${CLAUDE_HOOKS_PID_PATH:-$_untracked_dir/daemon.pid}"
+SOCKET_PATH="${CLAUDE_HOOKS_SOCKET_PATH:-$_untracked_dir/daemon${_hostname_suffix}.sock}"
+PID_PATH="${CLAUDE_HOOKS_PID_PATH:-$_untracked_dir/daemon${_hostname_suffix}.pid}"
 
 # Daemon startup timeout (deciseconds - 1/10th second units)
 DAEMON_STARTUP_TIMEOUT=50

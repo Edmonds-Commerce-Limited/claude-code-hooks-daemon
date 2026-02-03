@@ -78,6 +78,32 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli restart
 ./scripts/debug_hooks.sh start   # Debug hook events
 ```
 
+## Hostname-Based Isolation
+
+**Multi-Environment Support**: Each unique hostname gets isolated daemon runtime files, preventing conflicts when running multiple instances (containers, machines, etc.).
+
+**How It Works**: Uses `HOSTNAME` environment variable directly as suffix - simple, transparent, debuggable.
+
+**Path Pattern**:
+- With hostname: `.claude/hooks-daemon/untracked/daemon-{hostname}.{sock,pid,log}`
+- No hostname: `.claude/hooks-daemon/untracked/daemon-{time-hash}.{sock,pid,log}`
+
+**Sanitization**: Hostname is lowercased and spaces replaced with hyphens for filesystem safety.
+
+**Environment Overrides**: `CLAUDE_HOOKS_SOCKET_PATH`, `CLAUDE_HOOKS_PID_PATH`, `CLAUDE_HOOKS_LOG_PATH` take precedence.
+
+**Examples**:
+```bash
+# Hostname used directly as suffix
+HOSTNAME=laptop → daemon-laptop.sock
+HOSTNAME=506355bfbc76 → daemon-506355bfbc76.sock
+HOSTNAME=prod-server-01 → daemon-prod-server-01.sock
+HOSTNAME="My Server" → daemon-my-server.sock (sanitized)
+
+# No hostname = MD5(timestamp) for uniqueness
+unset HOSTNAME → daemon-a1b2c3d4.sock
+```
+
 ## Engineering Principles
 
 **CRITICAL: Follow these for ALL code changes:**
