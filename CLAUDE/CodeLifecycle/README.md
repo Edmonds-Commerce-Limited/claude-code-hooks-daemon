@@ -65,7 +65,7 @@ This project has comprehensive testing already:
 
 - **Unit Tests**: `tests/unit/` (pytest, 95%+ coverage required)
 - **Integration Tests**: `tests/integration/` (component interactions)
-- **Acceptance Tests**: `CLAUDE/AcceptanceTests/PLAYBOOK.md` (manual, pre-release)
+- **Acceptance Tests**: Generated from code (see `CLAUDE/AcceptanceTests/GENERATING.md`)
 - **Dogfooding Tests**: `tests/integration/test_dogfooding*.py` (auto-verification)
 - **QA Suite**: `./scripts/qa/run_all.sh` (6 automated checks)
 
