@@ -90,8 +90,14 @@ def test_shares_options_with_parent_enabled() -> None:
     assert plan_helper._plan_workflow_docs == "CLAUDE/PlanWorkflow.md"  # type: ignore[attr-defined]
 
 
-def test_shares_options_with_parent_disabled_fails() -> None:
-    """Test that config validation fails if child is enabled but parent is disabled."""
+def test_shares_options_with_parent_disabled_logs_warning(caplog: pytest.LogCaptureFixture) -> None:
+    """Test that config validation FAILS FAST if child is enabled but parent is disabled.
+
+    This is FAIL FAST behavior - config should raise ValueError with helpful message.
+    Per user feedback: config should fail fast and loud so it can be properly fixed.
+    """
+    from pydantic import ValidationError
+
     config_data = {
         "version": "1.0",
         "handlers": {
@@ -100,20 +106,24 @@ def test_shares_options_with_parent_disabled_fails() -> None:
                     "enabled": False,  # Parent disabled
                 },
                 "plan_number_helper": {
-                    "enabled": True,  # Child enabled - should fail
+                    "enabled": True,  # Child enabled - should FAIL
                 },
             }
         },
     }
 
-    # Should raise ValueError with clear message
-    with pytest.raises(ValueError) as exc_info:
-        Config.model_validate(config_data)
+    # Config should FAIL with ValidationError (FAIL FAST behavior)
+    with pytest.raises(ValidationError) as exc_info:
+        config = Config.model_validate(config_data)
 
-    error_msg = str(exc_info.value)
-    assert "plan_number_helper" in error_msg
-    assert "markdown_organization" in error_msg
-    assert "disabled" in error_msg
+    # Error message should be helpful and mention both handlers
+    error_message = str(exc_info.value)
+    assert "plan_number_helper" in error_message
+    assert "markdown_organization" in error_message
+
+    # Should provide helpful guidance about enabling/disabling
+    assert "enable" in error_message.lower()
+    assert "disable" in error_message.lower()
 
 
 def test_child_options_override_parent() -> None:

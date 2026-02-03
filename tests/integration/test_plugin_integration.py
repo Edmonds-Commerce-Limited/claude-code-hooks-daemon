@@ -180,3 +180,131 @@ class TestPluginIntegration:
         handlers = PluginLoader.load_handlers_from_config(config)
 
         assert handlers == []
+
+
+class TestPluginIntegrationWithPluginsConfig:
+    """Test plugin integration using PluginsConfig model (new format)."""
+
+    @pytest.fixture
+    def plugin_dir(self):
+        """Return path to test plugin fixtures."""
+        return Path(__file__).parent.parent / "fixtures" / "plugins"
+
+    @pytest.fixture
+    def controller(self):
+        """Create a fresh FrontController instance."""
+        return FrontController(event_name="PreToolUse")
+
+    def test_load_from_plugins_config_and_dispatch(self, controller, plugin_dir):
+        """Test loading from PluginsConfig and dispatching through FrontController."""
+        from claude_code_hooks_daemon.config.models import PluginConfig, PluginsConfig
+
+        plugins_config = PluginsConfig(
+            paths=[str(plugin_dir)],
+            plugins=[
+                PluginConfig(path="custom_handler", event_type="pre_tool_use", enabled=True),
+            ],
+        )
+
+        handlers = PluginLoader.load_from_plugins_config(plugins_config)
+        assert len(handlers) == 1
+
+        controller.register(handlers[0])
+
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "ls"}}
+        result = controller.dispatch(hook_input)
+
+        assert isinstance(result, HookResult)
+        assert result.decision == Decision.ALLOW
+        context_text = "\n".join(result.context)
+        assert "Test custom handler" in context_text
+
+    def test_load_multiple_plugins_from_plugins_config(self, controller, plugin_dir):
+        """Test loading multiple plugins from PluginsConfig model."""
+        from claude_code_hooks_daemon.config.models import PluginConfig, PluginsConfig
+
+        plugins_config = PluginsConfig(
+            paths=[str(plugin_dir)],
+            plugins=[
+                PluginConfig(path="custom_handler", event_type="pre_tool_use", enabled=True),
+                PluginConfig(path="another_test_handler", event_type="pre_tool_use", enabled=True),
+                PluginConfig(path="handler_v2_example", event_type="pre_tool_use", enabled=True),
+            ],
+        )
+
+        handlers = PluginLoader.load_from_plugins_config(plugins_config)
+        assert len(handlers) == 3
+
+        # Register all with controller
+        for handler in handlers:
+            controller.register(handler)
+
+        assert len(controller.handlers) == 3
+        # Verify priority ordering
+        assert controller.handlers[0].priority == 30  # another_test_handler
+        assert controller.handlers[1].priority == 40  # handler_v2_example
+        assert controller.handlers[2].priority == 50  # custom_handler
+
+    def test_plugins_config_disabled_plugin_not_loaded(self, plugin_dir):
+        """Test that disabled plugins in PluginsConfig are not loaded."""
+        from claude_code_hooks_daemon.config.models import PluginConfig, PluginsConfig
+
+        plugins_config = PluginsConfig(
+            paths=[str(plugin_dir)],
+            plugins=[
+                PluginConfig(path="custom_handler", event_type="pre_tool_use", enabled=False),
+                PluginConfig(path="another_test_handler", event_type="pre_tool_use", enabled=True),
+            ],
+        )
+
+        handlers = PluginLoader.load_from_plugins_config(plugins_config)
+
+        assert len(handlers) == 1
+        assert handlers[0].name == "another-test"
+
+    def test_plugins_config_with_event_type_filtering(self, controller, plugin_dir):
+        """Test that event_type is properly associated with plugins."""
+        from claude_code_hooks_daemon.config.models import PluginConfig, PluginsConfig
+
+        plugins_config = PluginsConfig(
+            paths=[str(plugin_dir)],
+            plugins=[
+                PluginConfig(path="custom_handler", event_type="pre_tool_use", enabled=True),
+                PluginConfig(path="another_test_handler", event_type="post_tool_use", enabled=True),
+            ],
+        )
+
+        handlers = PluginLoader.load_from_plugins_config(plugins_config)
+
+        # Both should load (event_type is for registration, not filtering at load time)
+        assert len(handlers) == 2
+
+    def test_plugins_config_with_specific_handler_classes(self, controller, plugin_dir):
+        """Test loading specific handler classes from PluginsConfig."""
+        from claude_code_hooks_daemon.config.models import PluginConfig, PluginsConfig
+
+        plugins_config = PluginsConfig(
+            paths=[str(plugin_dir)],
+            plugins=[
+                PluginConfig(
+                    path="custom_handler",
+                    event_type="pre_tool_use",
+                    handlers=["CustomHandler"],
+                    enabled=True,
+                ),
+            ],
+        )
+
+        handlers = PluginLoader.load_from_plugins_config(plugins_config)
+
+        assert len(handlers) == 1
+        assert handlers[0].name == "test-custom"
+
+        # Register and dispatch
+        controller.register(handlers[0])
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "ls"}}
+        result = controller.dispatch(hook_input)
+
+        assert result.decision == Decision.ALLOW
+        context_text = "\n".join(result.context)
+        assert "Test custom handler" in context_text

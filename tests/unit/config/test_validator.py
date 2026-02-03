@@ -368,7 +368,7 @@ class TestValidateHandlers:
         assert "must be in range" in errors[0]
 
     def test_duplicate_priorities(self) -> None:
-        """Duplicate priorities should return error."""
+        """Duplicate priorities should log warning but NOT return error."""
         config = {
             "handlers": {
                 "pre_tool_use": {
@@ -378,10 +378,9 @@ class TestValidateHandlers:
             }
         }
         errors = ConfigValidator._validate_handlers(config, validate_handler_names=False)
-        assert len(errors) == 1
-        assert "Duplicate priority" in errors[0]
-        assert "10" in errors[0]
-        assert "handler_one" in errors[0] or "handler_two" in errors[0]
+        # Duplicate priorities are handled by HandlerChain with alphabetical tiebreaker
+        # Not a validation error (per user feedback)
+        assert len(errors) == 0
 
     def test_different_priorities_ok(self) -> None:
         """Different priorities should be valid."""

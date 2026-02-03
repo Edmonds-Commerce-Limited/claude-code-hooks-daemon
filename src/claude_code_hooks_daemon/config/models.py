@@ -191,9 +191,20 @@ class HandlersConfig(BaseModel):
 
                         if not parent_enabled:
                             raise ValueError(
-                                f"Handler '{config_key}' in '{event_type}' shares options with "
-                                f"'{parent_key}' but '{parent_key}' is disabled. "
-                                f"Either enable '{parent_key}' or disable '{config_key}'."
+                                f"Configuration error in '{event_type}' handlers:\n"
+                                f"  Handler '{config_key}' requires '{parent_key}' to be enabled.\n"
+                                f"  Reason: '{config_key}' shares configuration options with '{parent_key}'.\n"
+                                f"\n"
+                                f"To fix this issue, choose one of:\n"
+                                f"  1. Enable the parent handler '{parent_key}'\n"
+                                f"  2. Disable the dependent handler '{config_key}'\n"
+                                f"\n"
+                                f"Example configuration:\n"
+                                f"  {event_type}:\n"
+                                f"    {parent_key}:\n"
+                                f"      enabled: true\n"
+                                f"    {config_key}:\n"
+                                f"      enabled: true"
                             )
 
         return self
