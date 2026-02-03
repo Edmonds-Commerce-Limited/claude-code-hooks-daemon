@@ -99,9 +99,10 @@ class HandlerChain:
 
     @property
     def handlers(self) -> list["Handler"]:
-        """Get handlers in priority order."""
+        """Get handlers in priority order (then alphabetically by name for ties)."""
         if not self._sorted:
-            self._handlers.sort(key=lambda h: h.priority)
+            # Sort by priority first, then alphabetically by name for determinism
+            self._handlers.sort(key=lambda h: (h.priority, h.name))
             self._sorted = True
         return self._handlers
 
