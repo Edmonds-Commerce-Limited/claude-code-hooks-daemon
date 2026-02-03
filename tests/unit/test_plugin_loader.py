@@ -148,6 +148,38 @@ class TestLoadHandler:
         assert handler is None
         assert any("does not contain class" in record.message for record in caplog.records)
 
+    def test_load_handler_without_acceptance_tests_logs_warning(self, plugin_dir, caplog):
+        """Test that handler with empty acceptance tests logs warning but loads successfully."""
+        with caplog.at_level(logging.WARNING):
+            handler = PluginLoader.load_handler("no_acceptance_tests_handler", plugin_dir)
+
+        # Handler should load (fail-open for plugins)
+        assert handler is not None
+        assert isinstance(handler, Handler)
+        assert handler.name == "no-acceptance-tests"
+
+        # Should log warning about missing acceptance tests
+        assert any("acceptance test" in record.message.lower() for record in caplog.records)
+        assert any(record.levelname == "WARNING" for record in caplog.records)
+
+    def test_load_handler_validates_acceptance_tests(self, plugin_dir, caplog):
+        """Test that handler with valid acceptance tests loads without warnings."""
+        with caplog.at_level(logging.WARNING):
+            handler = PluginLoader.load_handler("custom_handler", plugin_dir)
+
+        # Handler should load successfully
+        assert handler is not None
+        assert isinstance(handler, Handler)
+        assert handler.name == "test-custom"
+
+        # Should NOT log any warnings about acceptance tests
+        acceptance_warnings = [
+            record
+            for record in caplog.records
+            if record.levelname == "WARNING" and "acceptance test" in record.message.lower()
+        ]
+        assert len(acceptance_warnings) == 0
+
 
 class TestDiscoverHandlers:
     """Test handler discovery in directories."""
