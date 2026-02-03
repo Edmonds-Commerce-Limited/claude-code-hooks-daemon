@@ -131,8 +131,8 @@ class HookResult(BaseModel):
         - PostToolUse: Top-level decision + hookSpecificOutput
         - Stop/SubagentStop: Top-level decision only (NO hookSpecificOutput)
         - PermissionRequest: hookSpecificOutput with nested decision.behavior
-        - SessionStart/SessionEnd/PreCompact/UserPromptSubmit/Notification:
-          hookSpecificOutput with context only (NO decision fields)
+        - UserPromptSubmit: hookSpecificOutput with context only (NO decision fields)
+        - SessionStart/SessionEnd/PreCompact/Notification: systemMessage ONLY (NO hookSpecificOutput)
 
         Args:
             event_name: Hook event type (PreToolUse, PostToolUse, etc.)
@@ -163,10 +163,13 @@ class HookResult(BaseModel):
         elif event_name == "PreToolUse":
             # PreToolUse: hookSpecificOutput with permissionDecision
             return self._format_pre_tool_use_response(event_name)
-        else:
-            # Context-only events: SessionStart, SessionEnd, PreCompact,
-            # UserPromptSubmit, Notification
+        elif event_name == "UserPromptSubmit":
+            # UserPromptSubmit: hookSpecificOutput with context only
             return self._format_context_only_response(event_name)
+        else:
+            # SessionStart, SessionEnd, PreCompact, Notification: systemMessage ONLY
+            # These events do NOT support hookSpecificOutput in Claude Code
+            return self._format_system_message_response()
 
     def _format_pre_tool_use_response(self, event_name: str) -> dict[str, Any]:
         """Format PreToolUse response (current format).
@@ -283,6 +286,30 @@ class HookResult(BaseModel):
             hook_output["guidance"] = self.guidance
 
         return {"hookSpecificOutput": hook_output} if len(hook_output) > 1 else {}
+
+    def _format_system_message_response(self) -> dict[str, Any]:
+        """Format response for events that only support systemMessage.
+
+        These events do NOT support hookSpecificOutput:
+        - PreCompact
+        - SessionStart
+        - SessionEnd
+        - Notification
+
+        Returns:
+            systemMessage with combined context, or empty dict for silent allow
+        """
+        # Context/guidance gets combined into systemMessage
+        messages = []
+        if self.context:
+            messages.extend(self.context)
+        if self.guidance:
+            messages.append(self.guidance)
+
+        if not messages:
+            return {}
+
+        return {"systemMessage": "\n\n".join(messages)}
 
     def to_response_dict(self, _event_name: str, timing_ms: float) -> dict[str, Any]:
         """Convert to full daemon response format (PRD 3.2.2).

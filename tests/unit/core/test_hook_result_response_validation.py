@@ -247,6 +247,35 @@ class TestPreCompactResponses:
         )
         hook_result_validator.assert_valid("PreCompact", result)
 
+    def test_precompact_must_not_use_hook_specific_output(self):
+        """CRITICAL: PreCompact must NOT use hookSpecificOutput.
+
+        Claude Code only accepts hookSpecificOutput for:
+        - PreToolUse
+        - UserPromptSubmit
+        - PostToolUse
+
+        PreCompact should use systemMessage instead.
+
+        This is a regression test for the /compact validation failure.
+        """
+        result = HookResult(
+            decision=Decision.ALLOW,
+            context=["✅ PreCompact hook system active"],
+        )
+        output = result.to_json("PreCompact")
+
+        # MUST NOT contain hookSpecificOutput
+        assert "hookSpecificOutput" not in output, (
+            "PreCompact responses must NOT use hookSpecificOutput - "
+            "Claude Code only accepts it for PreToolUse, UserPromptSubmit, PostToolUse"
+        )
+
+        # Context should be in systemMessage instead
+        if result.context:
+            assert "systemMessage" in output
+            assert output["systemMessage"] == "✅ PreCompact hook system active"
+
 
 class TestUserPromptSubmitResponses:
     """Test HookResult produces valid UserPromptSubmit responses."""

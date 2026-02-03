@@ -463,6 +463,191 @@ class TestPluginDaemonIntegration:
             timeout=Timeout.SOCKET_CONNECT,
         )
 
+    def test_plugin_blocks_through_daemon_socket(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, plugin_fixture_dir: Path
+    ) -> None:
+        """E2E smoke test: Plugin can block requests through daemon socket.
+
+        This is THE critical test - verifies the complete production flow:
+        1. Client sends request → Unix socket
+        2. Daemon receives → routes to plugin handler
+        3. Plugin handler blocks → returns DENY decision
+        4. Response flows back through socket → client receives block
+
+        This proves plugins work as deployed, not just in unit tests.
+        """
+        # Setup daemon with blocking handler
+        test_id = tmp_path.name[-20:]
+        socket_path = Path(f"/tmp/test-plugin-e2e-{test_id}.sock")
+        pid_path = Path(f"/tmp/test-plugin-e2e-{test_id}.pid")
+        log_path = Path(f"/tmp/test-plugin-e2e-{test_id}.log")
+
+        monkeypatch.setenv("CLAUDE_HOOKS_SOCKET_PATH", str(socket_path))
+        monkeypatch.setenv("CLAUDE_HOOKS_PID_PATH", str(pid_path))
+        monkeypatch.setenv("CLAUDE_HOOKS_LOG_PATH", str(log_path))
+
+        # Create minimal project with git repository
+        subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@test.com"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Test"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+        )
+        # Add remote origin (required by daemon validation)
+        subprocess.run(
+            ["git", "remote", "add", "origin", "https://github.com/test/test.git"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+        )
+
+        # Create config with blocking handler
+        config_dir = tmp_path / ".claude"
+        config_dir.mkdir()
+        config_path = config_dir / "hooks-daemon.yaml"
+
+        # Use absolute path to blocking_handler.py
+        blocking_handler_path = plugin_fixture_dir / "blocking_handler.py"
+
+        config_path.write_text(
+            f"""
+version: '1.0'
+daemon:
+  idle_timeout_seconds: 600
+  log_level: INFO
+  self_install_mode: true
+handlers:
+  pre_tool_use: {{}}
+plugins:
+  paths: []
+  plugins:
+    - path: "{blocking_handler_path}"
+      event_type: pre_tool_use
+      handlers: ["BlockingTestHandler"]
+      enabled: true
+"""
+        )
+
+        # Start daemon
+        test_env = os.environ.copy()
+        start_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "start"]
+        result = subprocess.run(
+            start_cmd,
+            cwd=tmp_path,
+            env=test_env,
+            capture_output=True,
+            text=True,
+            timeout=Timeout.SOCKET_CONNECT,
+        )
+
+        if result.returncode != 0:
+            # Check log file for details
+            log_content = ""
+            if log_path.exists():
+                log_content = log_path.read_text()
+            pytest.fail(
+                f"Failed to start daemon with plugin (exit code {result.returncode})\n"
+                f"Stdout: {result.stdout}\n"
+                f"Stderr: {result.stderr}\n"
+                f"Log file: {log_path}\n{log_content}"
+            )
+
+        # Wait for daemon to be ready
+        time.sleep(1.5)
+
+        # Verify daemon is RUNNING
+        status_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "status"]
+        status_result = subprocess.run(
+            status_cmd,
+            cwd=tmp_path,
+            env=test_env,
+            capture_output=True,
+            text=True,
+            timeout=Timeout.SOCKET_CONNECT,
+        )
+
+        if "RUNNING" not in status_result.stdout:
+            # Check log file for details
+            log_content = ""
+            if log_path.exists():
+                log_content = log_path.read_text()
+            pytest.fail(
+                f"Daemon not running after start:\n"
+                f"Status stdout: {status_result.stdout}\n"
+                f"Status stderr: {status_result.stderr}\n"
+                f"Log file: {log_path}\n{log_content}"
+            )
+
+        try:
+            # Test 1: Send request with BLOCK_THIS pattern - should be DENIED
+            hook_input_block = {
+                "event": "PreToolUse",
+                "hook_input": {
+                    "tool_name": "Bash",
+                    "tool_input": {"command": "echo BLOCK_THIS"},
+                },
+                "request_id": "test-e2e-block",
+            }
+
+            response_block = send_hook_event(socket_path, hook_input_block)
+            assert isinstance(response_block, dict), "Response should be dict"
+
+            # Verify DENY decision came through socket
+            hook_output_block = response_block.get("hookSpecificOutput", {})
+            permission = hook_output_block.get("permissionDecision")
+            reason = hook_output_block.get("permissionDecisionReason", "")
+
+            assert permission == "deny", (
+                f"Plugin should have blocked request. "
+                f"Got permission={permission}, reason={reason}, response={response_block}"
+            )
+            assert "Blocked by E2E smoke test" in reason, (
+                f"Expected blocking plugin message. Got: {reason}"
+            )
+
+            # Test 2: Send request WITHOUT pattern - should be ALLOWED
+            hook_input_allow = {
+                "event": "PreToolUse",
+                "hook_input": {
+                    "tool_name": "Bash",
+                    "tool_input": {"command": "echo safe_command"},
+                },
+                "request_id": "test-e2e-allow",
+            }
+
+            response_allow = send_hook_event(socket_path, hook_input_allow)
+            assert isinstance(response_allow, dict), "Response should be dict"
+
+            hook_output_allow = response_allow.get("hookSpecificOutput", {})
+            permission_allow = hook_output_allow.get("permissionDecision", "allow")
+
+            # Should be allowed (plugin doesn't match)
+            assert permission_allow != "deny", (
+                f"Non-matching request should be allowed. Response: {response_allow}"
+            )
+
+        finally:
+            # Cleanup
+            stop_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "stop"]
+            subprocess.run(
+                stop_cmd,
+                cwd=tmp_path,
+                env=test_env,
+                capture_output=True,
+                timeout=Timeout.SOCKET_CONNECT,
+            )
+            # Clean up test files
+            for path in [socket_path, pid_path, log_path]:
+                if path.exists():
+                    path.unlink()
+
 
 class TestPluginDaemonErrorHandling:
     """Tests for error handling when loading plugins through daemon."""

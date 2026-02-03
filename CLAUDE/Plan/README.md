@@ -46,15 +46,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - **GitHub Issue**: #18
   - **Owner**: To be assigned
 
-- [00024: Plugin System Fix](00024-plugin-system-fix/PLAN.md) - 🟡 Not Started
-  - Fix configuration format mismatch between models.py and loader.py
-  - Integrate plugin loading into DaemonController (currently only in standalone scripts)
-  - Soften shared options validation (warn instead of error)
-  - Add daemon integration tests for plugin loading
-  - Document plugin development guide
-  - **Priority**: High (broken functionality)
-  - **GitHub Issue**: #17
-  - **Owner**: To be assigned
 
 - [00023: LLM Upgrade Experience Improvements](00023-llm-upgrade-experience/PLAN.md) - 🟡 Not Started
   - Create location detection and self-locating upgrade script
@@ -95,6 +86,15 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - **Owner**: To be assigned
 
 ## Completed Plans
+
+- [00024: Plugin System Fix](Completed/00024-plugin-system-fix/PLAN.md) - 🟢 Complete (2026-02-03)
+  - Fixed configuration format mismatch (PluginsConfig model is source of truth)
+  - Integrated plugin loading into DaemonController lifecycle (THE CORE FIX)
+  - Made duplicate priorities deterministic (sort by priority, then name)
+  - Added helpful error messages for validation failures
+  - Added acceptance test validation for plugin handlers
+  - Updated all documentation with event_type requirement
+  - **Completed**: 2026-02-03 (GitHub Issue #17)
 
 - [00018: Fix Container/Host Environment Switching](Completed/00018-container-host-environment-switching/PLAN-v2.md) - 🟢 Complete (2026-01-30)
   - Decoupled hook hot path from venv Python (bash path computation, system python3 socket client)
@@ -143,9 +143,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans**: 15
-- **Active**: 10
-- **Completed**: 5
-- **Success Rate**: 100% (5/5 completed successfully)
+- **Active**: 9
+- **Completed**: 6
+- **Success Rate**: 100% (6/6 completed successfully)
 
 ## Quick Links
 
