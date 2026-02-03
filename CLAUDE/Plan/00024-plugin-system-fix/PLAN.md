@@ -149,11 +149,15 @@ count = self._registry.register_all(
 
 ### Phase 4: TDD - Validation Fixes
 
-- [ ] ⬜ **Task 4.1**: Soften shared options validation
-  - [ ] ⬜ Write test for warning instead of error
-  - [ ] ⬜ Change `ValueError` to `logger.warning()` in `validate_handler_dependencies()`
-  - [ ] ⬜ Add `strict_dependency_validation` config option (default: False)
-  - [ ] ⬜ Run QA
+- [x] ✅ **Task 4.1**: Make duplicate priorities deterministic (CORRECTED)
+  - [x] ✅ Updated HandlerChain sorting to (priority, name) for determinism
+  - [x] ✅ Duplicate priorities now sort alphabetically by handler name
+  - [x] ✅ Kept shared options validation as ValueError (FAIL FAST - correct behavior)
+  - [x] ✅ Added try/except for handlers requiring runtime context (validates_handler_dependencies)
+  - [x] ✅ All 35 chain tests pass
+  - [x] ✅ Daemon restarts successfully
+  - [x] ✅ Commit: 5895db9
+  - Note: User feedback was about PRIORITY conflicts, not validation strictness
 
 - [ ] ⬜ **Task 4.2**: Add helpful error messages
   - [ ] ⬜ Improve validation error messages with actionable guidance
