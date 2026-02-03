@@ -11,8 +11,20 @@ CONFIG_FILE=".claude/hooks-daemon.yaml"
 BACKUP_FILE=".claude/hooks-daemon.yaml.debug_backup"
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# Find daemon socket (it's named after project path hash)
-SOCKET_PATH=$(ls /tmp/claude-hooks-workspace-*.sock 2>/dev/null | head -n1)
+# Find daemon socket in project's untracked directory
+# Supports both suffixed (container) and unsuffixed (desktop) paths
+SOCKET_PATH=$(find "$PROJECT_ROOT/.claude/hooks-daemon/untracked/" -name "daemon*.sock" 2>/dev/null | head -n1)
+
+if [[ -z "$SOCKET_PATH" ]]; then
+    # Fallback: check for env var override
+    SOCKET_PATH="${CLAUDE_HOOKS_SOCKET_PATH:-}"
+fi
+
+if [[ -z "$SOCKET_PATH" ]]; then
+    echo "ERROR: No daemon socket found in $PROJECT_ROOT/.claude/hooks-daemon/untracked/"
+    echo "Is the daemon running? Check: python -m claude_code_hooks_daemon.daemon.cli status"
+    exit 1
+fi
 
 if [[ ! -f "$VENV_PYTHON" ]]; then
     echo "ERROR: venv Python not found at $VENV_PYTHON"

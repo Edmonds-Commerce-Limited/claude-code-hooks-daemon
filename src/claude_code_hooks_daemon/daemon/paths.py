@@ -17,6 +17,36 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
+def _get_hostname_suffix() -> str:
+    """
+    Get hostname-based suffix for runtime files.
+
+    Uses HOSTNAME environment variable directly to isolate daemon runtime
+    files across different environments (containers, machines).
+
+    Returns:
+        "-{sanitized-hostname}" or "-{time-hash}" if no hostname
+
+    Example:
+        HOSTNAME="laptop" -> "-laptop"
+        HOSTNAME="506355bfbc76" -> "-506355bfbc76"
+        HOSTNAME="My-Server" -> "-my-server"
+        No HOSTNAME -> "-a1b2c3d4" (MD5 of timestamp)
+    """
+    hostname = os.environ.get("HOSTNAME", "")
+
+    # No hostname? Use MD5 of current time for uniqueness
+    if not hostname:
+        import time
+        timestamp = str(time.time())
+        hash_obj = hashlib.md5(timestamp.encode("utf-8"), usedforsecurity=False)
+        return f"-{hash_obj.hexdigest()[:8]}"
+
+    # Sanitize hostname for filesystem safety: lowercase, no spaces
+    sanitized = hostname.lower().replace(" ", "-")
+    return f"-{sanitized}"
+
+
 def get_project_hash(project_path: Path | str) -> str:
     """
     Generate a short hash from the absolute project path.
@@ -54,6 +84,7 @@ def get_socket_path(project_dir: Path | str) -> Path:
 
     SECURITY: Stored in daemon's untracked directory, not /tmp.
     Pattern: {project}/.claude/hooks-daemon/untracked/daemon.sock
+    Container: {project}/.claude/hooks-daemon/untracked/daemon-{hash}.sock
 
     Can be overridden via CLAUDE_HOOKS_SOCKET_PATH environment variable
     (useful for testing to avoid collision with production daemon).
@@ -76,7 +107,10 @@ def get_socket_path(project_dir: Path | str) -> Path:
     project_path = Path(project_dir).resolve()
     untracked_dir = project_path / ".claude" / "hooks-daemon" / "untracked"
     untracked_dir.mkdir(parents=True, exist_ok=True)
-    return untracked_dir / "daemon.sock"
+
+    # Add hostname-based suffix for isolation
+    suffix = _get_hostname_suffix()
+    return untracked_dir / f"daemon{suffix}.sock"
 
 
 def get_pid_path(project_dir: Path | str) -> Path:
@@ -85,6 +119,7 @@ def get_pid_path(project_dir: Path | str) -> Path:
 
     SECURITY: Stored in daemon's untracked directory, not /tmp.
     Pattern: {project}/.claude/hooks-daemon/untracked/daemon.pid
+    Container: {project}/.claude/hooks-daemon/untracked/daemon-{hash}.pid
 
     Can be overridden via CLAUDE_HOOKS_PID_PATH environment variable
     (useful for testing to avoid collision with production daemon).
@@ -107,7 +142,10 @@ def get_pid_path(project_dir: Path | str) -> Path:
     project_path = Path(project_dir).resolve()
     untracked_dir = project_path / ".claude" / "hooks-daemon" / "untracked"
     untracked_dir.mkdir(parents=True, exist_ok=True)
-    return untracked_dir / "daemon.pid"
+
+    # Add hostname-based suffix for isolation
+    suffix = _get_hostname_suffix()
+    return untracked_dir / f"daemon{suffix}.pid"
 
 
 def get_log_path(project_dir: Path | str) -> Path:
@@ -116,6 +154,7 @@ def get_log_path(project_dir: Path | str) -> Path:
 
     SECURITY: Stored in daemon's untracked directory, not /tmp.
     Pattern: {project}/.claude/hooks-daemon/untracked/daemon.log
+    Container: {project}/.claude/hooks-daemon/untracked/daemon-{hash}.log
 
     Can be overridden via CLAUDE_HOOKS_LOG_PATH environment variable
     (useful for testing to avoid collision with production daemon).
@@ -138,7 +177,10 @@ def get_log_path(project_dir: Path | str) -> Path:
     project_path = Path(project_dir).resolve()
     untracked_dir = project_path / ".claude" / "hooks-daemon" / "untracked"
     untracked_dir.mkdir(parents=True, exist_ok=True)
-    return untracked_dir / "daemon.log"
+
+    # Add hostname-based suffix for isolation
+    suffix = _get_hostname_suffix()
+    return untracked_dir / f"daemon{suffix}.log"
 
 
 def is_pid_alive(pid: int) -> bool:

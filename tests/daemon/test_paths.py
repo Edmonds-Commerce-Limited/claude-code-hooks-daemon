@@ -520,5 +520,87 @@ class TestSocketCleanup(unittest.TestCase):
             cleanup_socket(socket_path)
 
 
+class TestHostnameIsolation(unittest.TestCase):
+    """Test hostname-based path isolation."""
+
+    def test_socket_path_uses_raw_hostname(self):
+        """Test socket path uses raw hostname as suffix."""
+        with patch.dict(os.environ, {"HOSTNAME": "mycontainer"}):
+            socket_path = get_socket_path("/workspace")
+            self.assertTrue(str(socket_path).endswith("daemon-mycontainer.sock"))
+
+    def test_socket_path_sanitizes_hostname(self):
+        """Test hostname is sanitized (lowercase, no spaces)."""
+        with patch.dict(os.environ, {"HOSTNAME": "My Server"}):
+            socket_path = get_socket_path("/workspace")
+            self.assertTrue(str(socket_path).endswith("daemon-my-server.sock"))
+
+    def test_pid_path_uses_raw_hostname(self):
+        """Test PID path uses raw hostname as suffix."""
+        with patch.dict(os.environ, {"HOSTNAME": "container123"}):
+            pid_path = get_pid_path("/workspace")
+            self.assertTrue(str(pid_path).endswith("daemon-container123.pid"))
+
+    def test_log_path_uses_raw_hostname(self):
+        """Test log path uses raw hostname as suffix."""
+        with patch.dict(os.environ, {"HOSTNAME": "webserver"}):
+            log_path = get_log_path("/workspace")
+            self.assertTrue(str(log_path).endswith("daemon-webserver.log"))
+
+    def test_env_var_override_takes_precedence(self):
+        """Test env var overrides hostname-based suffix."""
+        with patch.dict(
+            os.environ,
+            {
+                "HOSTNAME": "container-abc123",
+                "CLAUDE_HOOKS_SOCKET_PATH": "/custom/path.sock",
+            },
+        ):
+            socket_path = get_socket_path("/workspace")
+            self.assertEqual(socket_path, Path("/custom/path.sock"))
+
+    def test_different_hostnames_get_different_paths(self):
+        """Test different hostnames get unique paths."""
+        with patch.dict(os.environ, {"HOSTNAME": "machine-abc"}):
+            socket_a = get_socket_path("/workspace")
+
+        with patch.dict(os.environ, {"HOSTNAME": "machine-xyz"}):
+            socket_b = get_socket_path("/workspace")
+
+        self.assertNotEqual(socket_a, socket_b)
+        self.assertTrue(str(socket_a).endswith("daemon-machine-abc.sock"))
+        self.assertTrue(str(socket_b).endswith("daemon-machine-xyz.sock"))
+
+    def test_numeric_hostname(self):
+        """Test numeric hostname works correctly."""
+        with patch.dict(os.environ, {"HOSTNAME": "506355bfbc76"}):
+            socket_path = get_socket_path("/workspace")
+            self.assertTrue(str(socket_path).endswith("daemon-506355bfbc76.sock"))
+
+    def test_hostname_with_uppercase(self):
+        """Test uppercase hostname is lowercased."""
+        with patch.dict(os.environ, {"HOSTNAME": "PRODUCTION"}):
+            socket_path = get_socket_path("/workspace")
+            self.assertTrue(str(socket_path).endswith("daemon-production.sock"))
+
+    def test_empty_hostname_gets_time_hash(self):
+        """Test empty hostname gets time-based hash suffix."""
+        with patch.dict(os.environ, {}, clear=True):
+            # Remove HOSTNAME if it exists
+            os.environ.pop("HOSTNAME", None)
+            socket_path = get_socket_path("/workspace")
+            # Should get a time-based hash suffix (8 hex chars)
+            self.assertRegex(str(socket_path), r"daemon-[a-f0-9]{8}\.sock")
+
+    def test_suffix_consistency_same_hostname(self):
+        """Test same hostname produces same suffix."""
+        hostname = "test-machine"
+        with patch.dict(os.environ, {"HOSTNAME": hostname}):
+            socket1 = get_socket_path("/workspace")
+            socket2 = get_socket_path("/workspace")
+            self.assertEqual(socket1, socket2)
+            self.assertTrue(str(socket1).endswith("daemon-test-machine.sock"))
+
+
 if __name__ == "__main__":
     unittest.main()
