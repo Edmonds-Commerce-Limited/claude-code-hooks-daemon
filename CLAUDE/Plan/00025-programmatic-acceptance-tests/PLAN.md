@@ -16,17 +16,20 @@ Currently, acceptance tests are maintained manually in `CLAUDE/AcceptanceTests/P
 
 - Create `AcceptanceTest` dataclass for type-safe test definitions
 - Extend Handler base class with **REQUIRED** `get_acceptance_tests()` abstract method
-- Implement playbook generator that aggregates tests from all enabled handlers
-- Create `generate-playbook` CLI command
+- Implement playbook generator that aggregates tests from ALL handlers (built-in + plugins)
+- Create `generate-playbook` CLI command that outputs to STDOUT (never writes files)
 - Migrate all 54 built-in handlers to define their acceptance tests programmatically (MANDATORY)
-- Enforce acceptance testing for custom plugin handlers (breaking change, but necessary)
+- **ENFORCE** acceptance testing for custom project-level plugin handlers (no exceptions)
 - Maintain 95%+ test coverage throughout
+- **CRITICAL**: Playbook is ALWAYS generated fresh from code, never stored in markdown
+- **CRITICAL**: Plugin handlers MUST implement get_acceptance_tests() (abstract method enforces)
 
 ## Non-Goals
 
 - Automated execution of acceptance tests (foundation only, automation is future work)
 - Changing existing handler behavior or priorities
-- Modifying manual PLAYBOOK.md format (must match exactly for compatibility)
+- Writing playbook to files (defeats single source of truth - always generate to stdout)
+- Maintaining manual PLAYBOOK.md (will be replaced by programmatic generation)
 
 ## Context & Background
 
@@ -104,10 +107,13 @@ Currently, acceptance tests are maintained manually in `CLAUDE/AcceptanceTests/P
 - [ ] **Task 1.4**: Create PlaybookGenerator core
   - [ ] Write failing tests for generator logic
   - [ ] Create `src/claude_code_hooks_daemon/daemon/playbook_generator.py`
-  - [ ] Implement handler discovery (built-in + plugins)
+  - [ ] Implement handler discovery (built-in handlers)
+  - [ ] **CRITICAL**: Implement plugin handler discovery (project-level plugins)
   - [ ] Implement config-aware filtering (only enabled handlers)
+  - [ ] Aggregate tests from ALL handlers (built-in + plugins)
   - [ ] Implement markdown generation matching current format
   - [ ] Call validation to reject empty arrays during generation
+  - [ ] Verify plugin handlers are included in output
   - [ ] Verify 95%+ coverage
   - [ ] Run QA: `./scripts/qa/run_all.sh`
   - [ ] Restart daemon: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
@@ -152,12 +158,13 @@ Start with 3 representative handlers to validate approach, then complete remaini
 
 ### Phase 3: CLI Command (TDD)
 
-- [ ] **Task 3.1**: Implement `generate-playbook` CLI command
+- [ ] **Task 3.1**: Implement `generate-playbook` CLI command (STDOUT ONLY)
   - [ ] Write failing tests for CLI command
   - [ ] Add `generate-playbook` subcommand to `cli.py`
   - [ ] Implement argparse integration
-  - [ ] Add `--output PATH` flag (default: `CLAUDE/AcceptanceTests/PLAYBOOK-generated.md`)
+  - [ ] **CRITICAL**: Output to STDOUT only (no file writing)
   - [ ] Add `--include-disabled` flag (include all handlers, not just enabled)
+  - [ ] Add `--format` flag (markdown, json, yaml) for different output formats
   - [ ] Verify command execution
   - [ ] Run QA: `./scripts/qa/run_all.sh`
 
@@ -174,7 +181,8 @@ Start with 3 representative handlers to validate approach, then complete remaini
   - [ ] Verify daemon status: `$PYTHON -m claude_code_hooks_daemon.daemon.cli status` (RUNNING)
   - [ ] Check logs for errors
   - [ ] Generate playbook: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-playbook`
-  - [ ] Verify output file created and formatted correctly
+  - [ ] Verify output to stdout is correctly formatted
+  - [ ] Test piping: `generate-playbook > /tmp/test.md` to verify it works
 
 ### Phase 4: Full Handler Migration (51 remaining handlers)
 
@@ -262,53 +270,67 @@ Migrate all remaining built-in handlers by category:
   - [ ] Explain automatic inclusion in generated playbook
   - [ ] Run QA: `./scripts/qa/run_all.sh`
 
-- [ ] **Task 5.3**: Update PLAYBOOK.md header
-  - [ ] Add generation instructions to playbook header
-  - [ ] Document `generate-playbook` command
-  - [ ] Explain relationship between manual and generated playbooks
+- [ ] **Task 5.3**: Replace PLAYBOOK.md with generation instructions
+  - [ ] Replace `CLAUDE/AcceptanceTests/PLAYBOOK.md` with `GENERATING.md`
+  - [ ] Document how to generate playbook: `generate-playbook > playbook.md`
+  - [ ] Explain playbook is ALWAYS generated from code (never stored)
   - [ ] Keep FAIL-FAST instructions
   - [ ] Keep safety warnings
   - [ ] Run QA: `./scripts/qa/run_all.sh`
 
-- [ ] **Task 5.4**: Generate and validate official playbook
+- [ ] **Task 5.4**: Validate generated playbook format
   - [ ] Run: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-playbook`
-  - [ ] Compare output with manual `PLAYBOOK.md`
-  - [ ] Verify all 15+ test sections present
+  - [ ] Verify all handler test sections present
   - [ ] Verify safety warnings included
   - [ ] Verify FAIL-FAST instructions included
-  - [ ] Verify format matches exactly
-  - [ ] Document any discrepancies
+  - [ ] Verify markdown format is correct
+  - [ ] Test different output formats (--format json, yaml)
 
-- [ ] **Task 5.5**: Manual acceptance testing with generated playbook
-  - [ ] Execute generated playbook manually (all tests)
+- [ ] **Task 5.5**: Manual acceptance testing workflow
+  - [ ] Generate fresh playbook: `generate-playbook > /tmp/test-playbook.md`
+  - [ ] Execute tests manually from generated playbook
   - [ ] Mark PASS/FAIL for each test
   - [ ] Document any failures
   - [ ] Fix issues using TDD (if found)
   - [ ] Re-run QA after fixes
-  - [ ] Regenerate playbook
-  - [ ] Verify all tests pass
+  - [ ] Regenerate and verify fixes
+  - [ ] Delete temporary playbook after testing (ephemeral)
 
-### Phase 6: Plugin Support
+### Phase 6: Project-Level Plugin Support (CRITICAL)
 
-- [ ] **Task 6.1**: Plugin acceptance test integration
-  - [ ] Write tests for plugin handler discovery
+**REQUIREMENT**: Custom project-level plugins MUST be fully supported.
+
+- [ ] **Task 6.1**: Plugin handler discovery and integration
+  - [ ] Write tests for plugin handler discovery from project plugins
   - [ ] Implement plugin test aggregation in PlaybookGenerator
-  - [ ] Test with sample custom plugin handler
-  - [ ] Verify custom handlers included in playbook
-  - [ ] Verify tests execute correctly
+  - [ ] Test with sample custom plugin handler in `.claude/plugins/`
+  - [ ] Verify custom project handlers automatically included in playbook
+  - [ ] Verify plugin tests display correctly with project context
+  - [ ] Test with multiple custom plugins (2-3 test plugins)
   - [ ] Run QA: `./scripts/qa/run_all.sh`
 
-- [ ] **Task 6.2**: Plugin development guide updates
-  - [ ] Update plugin template with `get_acceptance_tests()` example
+- [ ] **Task 6.2**: Plugin development documentation
+  - [ ] Create `CLAUDE/Plugin/ACCEPTANCE_TESTING.md` guide
+  - [ ] Document that `get_acceptance_tests()` is REQUIRED (abstract method)
+  - [ ] Update plugin template with complete `get_acceptance_tests()` example
   - [ ] Add acceptance testing to plugin development checklist
-  - [ ] Document testing best practices for plugins
-  - [ ] Provide working example plugin with tests
+  - [ ] Document testing best practices for custom handlers
+  - [ ] Provide working example plugin with multiple tests
+  - [ ] Explain how plugin tests appear in generated playbook
   - [ ] Run QA: `./scripts/qa/run_all.sh`
 
-- [ ] **Task 6.3**: Final validation
-  - [ ] Restart daemon successfully
-  - [ ] Generate playbook with plugins
-  - [ ] Verify plugin tests included
+- [ ] **Task 6.3**: Plugin validation workflow
+  - [ ] Document how to verify plugin tests: `generate-playbook | grep "MyPlugin"`
+  - [ ] Create test project with custom plugin
+  - [ ] Generate playbook and verify plugin section appears
+  - [ ] Verify plugin tests are config-aware (enabled/disabled)
+  - [ ] Test priority ordering (plugin tests sorted by priority)
+  - [ ] Verify empty array rejection works for plugin handlers
+
+- [ ] **Task 6.4**: Final validation
+  - [ ] Restart daemon successfully with custom plugins loaded
+  - [ ] Generate playbook: verify built-in + plugin handlers appear
+  - [ ] Verify plugin tests grouped/labeled correctly
   - [ ] Execute full playbook (built-in + plugin tests)
   - [ ] All tests pass
   - [ ] Update GitHub issue #18 with completion summary
@@ -382,15 +404,17 @@ Migrate all remaining built-in handlers by category:
 ## Success Criteria
 
 - [ ] `AcceptanceTest` dataclass implemented with full validation
-- [ ] Handler base class extended with `get_acceptance_tests()` (backward compatible)
+- [ ] Handler base class has REQUIRED `get_acceptance_tests()` abstract method
 - [ ] All 54 built-in handlers migrated with test definitions
-- [ ] `generate-playbook` CLI command functional
-- [ ] Generated playbook matches manual PLAYBOOK.md format exactly
-- [ ] Plugin handlers automatically discovered and included
+- [ ] `generate-playbook` CLI command functional (outputs to stdout)
+- [ ] **CRITICAL**: Custom project-level plugin handlers automatically discovered
+- [ ] **CRITICAL**: Plugin handler tests included in generated playbook
+- [ ] **CRITICAL**: Empty array validation enforced for plugin handlers
 - [ ] All QA checks pass with 95%+ coverage
 - [ ] Daemon loads successfully after all changes
 - [ ] Manual playbook execution passes with generated playbook (all tests PASS)
-- [ ] Documentation updated (HANDLER_DEVELOPMENT.md, plugin guide, PLAYBOOK.md header)
+- [ ] Documentation updated (HANDLER_DEVELOPMENT.md, plugin guide, GENERATING.md)
+- [ ] Plugin template includes `get_acceptance_tests()` example
 - [ ] GitHub issue #18 closed with completion summary
 
 ## Risks & Mitigations
