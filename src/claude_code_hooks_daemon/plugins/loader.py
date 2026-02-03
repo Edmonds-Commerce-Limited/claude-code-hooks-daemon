@@ -104,10 +104,28 @@ class PluginLoader:
             # Handlers are responsible for their own initialization
             # They must call super().__init__(handler_id=..., priority=..., terminal=...)
             handler = handler_class_raw()
-            return handler
         except Exception as e:
             logger.error(f"Failed to instantiate handler {class_name}: {e}")
             return None
+
+        # Validate acceptance tests
+        try:
+            acceptance_tests = handler.get_acceptance_tests()
+            if not acceptance_tests:
+                logger.warning(
+                    f"Plugin handler '{handler.name}' (class {class_name}) does not define "
+                    f"any acceptance tests. Plugin handlers must define at least one acceptance "
+                    f"test via get_acceptance_tests(). See CLAUDE/AcceptanceTests/PLAYBOOK.md "
+                    f"for examples."
+                )
+        except Exception as e:
+            logger.warning(
+                f"Plugin handler '{handler.name}' (class {class_name}) failed to return "
+                f"acceptance tests: {e}. Handlers must implement get_acceptance_tests() and "
+                f"return at least one test."
+            )
+
+        return handler
 
     @staticmethod
     def discover_handlers(plugin_path: Path) -> list[str]:

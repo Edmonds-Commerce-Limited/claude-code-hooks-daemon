@@ -133,7 +133,15 @@ count = self._registry.register_all(
   - [x] ✅ Run QA
   - [x] ✅ Note: Completed together with Task 3.2 (Commit: 1f0c876)
 
-- [ ] ⬜ **Task 3.4**: End-to-end daemon smoke test
+- [ ] ⬜ **Task 3.4**: Validate plugin handlers have acceptance tests
+  - [ ] ⬜ Write failing test: plugin without acceptance tests rejected
+  - [ ] ⬜ Write failing test: plugin with empty acceptance tests rejected
+  - [ ] ⬜ Add validation to PluginLoader.load_handler()
+  - [ ] ⬜ Validate get_acceptance_tests() returns non-empty list
+  - [ ] ⬜ Log warning with helpful error message
+  - [ ] ⬜ Run QA
+
+- [ ] ⬜ **Task 3.5**: End-to-end daemon smoke test
   - [ ] ⬜ Add test to daemon integration suite
   - [ ] ⬜ Test plugin handler blocks/allows through daemon socket
   - [ ] ⬜ Run QA
