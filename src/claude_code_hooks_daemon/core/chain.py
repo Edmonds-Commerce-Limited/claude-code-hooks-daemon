@@ -101,6 +101,22 @@ class HandlerChain:
     def handlers(self) -> list["Handler"]:
         """Get handlers in priority order (then alphabetically by name for ties)."""
         if not self._sorted:
+            # Check for duplicate priorities and log warnings
+            priority_map: dict[int, list[str]] = {}
+            for handler in self._handlers:
+                if handler.priority not in priority_map:
+                    priority_map[handler.priority] = []
+                priority_map[handler.priority].append(handler.name)
+
+            # Log warnings for duplicate priorities
+            for priority, handler_names in priority_map.items():
+                if len(handler_names) > 1:
+                    sorted_names = sorted(handler_names)
+                    logger.warning(
+                        f"Duplicate priority {priority} detected for handlers: {', '.join(sorted_names)}. "
+                        f"Using alphabetical order for determinism: {' -> '.join(sorted_names)}"
+                    )
+
             # Sort by priority first, then alphabetically by name for determinism
             self._handlers.sort(key=lambda h: (h.priority, h.name))
             self._sorted = True
