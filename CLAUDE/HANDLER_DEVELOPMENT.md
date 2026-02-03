@@ -930,16 +930,19 @@ plugins:
   plugins:   # List of plugin configurations
     # File-based plugin (single handler)
     - path: ".claude/hooks/handlers/pre_tool_use/my_handler.py"
+      event_type: pre_tool_use  # REQUIRED: which hook event to register for
       handlers: ["MyHandler"]  # Optional: specific classes to load
       enabled: true
 
     # Module-based plugin (multiple handlers)
     - path: ".claude/hooks/handlers/post_tool_use/"
+      event_type: post_tool_use  # REQUIRED
       handlers: null  # null = load all Handler classes
       enabled: true
 
     # External plugin (from separate package)
     - path: "my_plugin_package.handlers"
+      event_type: session_start  # REQUIRED
       handlers: ["CustomHandler"]
       enabled: true
 ```
@@ -955,10 +958,17 @@ plugins:
   - File: `.claude/hooks/handlers/pre_tool_use/my_handler.py`
   - Module: `.claude/hooks/handlers/pre_tool_use` or `package.module`
   - Relative paths resolve from project root
+- `event_type`: Hook event to register handler for (required)
+  - Valid values: `pre_tool_use`, `post_tool_use`, `session_start`, `session_end`, `stop`, `subagent_stop`, `pre_compact`, `status_line`, `permission_request`, `notification`, `user_prompt_submit`
+  - Handlers are registered only for the specified event type
 - `handlers`: List of handler class names to load (optional)
   - `null` or omitted: Load all Handler subclasses found
   - `["ClassName"]`: Load only specified classes
 - `enabled`: Whether to load this plugin (default: true)
+
+**Important Requirements**:
+- All plugin handlers MUST implement `get_acceptance_tests()` returning a non-empty list
+- Handlers without acceptance tests will log a warning but still load (fail-open)
 
 ### Example: Project-Level Handler Registration
 
@@ -986,6 +996,7 @@ plugins:
   paths: []
   plugins:
     - path: ".claude/hooks/handlers/pre_tool_use/project_rules.py"
+      event_type: pre_tool_use  # REQUIRED: specifies which hook event
       handlers: ["ProjectRulesHandler"]
       enabled: true
 ```
@@ -1017,6 +1028,7 @@ plugins:
   paths: []
   plugins:
     - path: ".claude/hooks/handlers/pre_tool_use/my_handlers.py"
+      event_type: pre_tool_use  # REQUIRED
       handlers: null  # Load all Handler subclasses
       enabled: true
 
@@ -1025,6 +1037,7 @@ plugins:
   paths: []
   plugins:
     - path: ".claude/hooks/handlers/pre_tool_use/my_handlers.py"
+      event_type: pre_tool_use  # REQUIRED
       handlers: ["Handler1"]  # Only load Handler1
       enabled: true
 ```
