@@ -20,6 +20,7 @@ from claude_code_hooks_daemon.config.models import (
     PluginConfig,
     PluginsConfig,
 )
+from claude_code_hooks_daemon.constants import EventID
 
 
 class TestLogLevel:
@@ -353,9 +354,9 @@ class TestPluginConfig:
 
     def test_default_values(self) -> None:
         """PluginConfig has correct defaults for optional fields."""
-        config = PluginConfig(path="/path/to/plugin", event_type="pre_tool_use")
+        config = PluginConfig(path="/path/to/plugin", event_type=EventID.PRE_TOOL_USE.config_key)
         assert config.path == "/path/to/plugin"
-        assert config.event_type == "pre_tool_use"
+        assert config.event_type == EventID.PRE_TOOL_USE.config_key
         assert config.handlers is None
         assert config.enabled is True
 
@@ -363,12 +364,12 @@ class TestPluginConfig:
         """Can set all PluginConfig fields."""
         config = PluginConfig(
             path="/custom/path",
-            event_type="post_tool_use",
+            event_type=EventID.POST_TOOL_USE.config_key,
             handlers=["Handler1", "Handler2"],
             enabled=False,
         )
         assert config.path == "/custom/path"
-        assert config.event_type == "post_tool_use"
+        assert config.event_type == EventID.POST_TOOL_USE.config_key
         assert config.handlers == ["Handler1", "Handler2"]
         assert config.enabled is False
 
@@ -412,12 +413,12 @@ class TestPluginConfig:
         config = PluginConfig.model_validate(
             {
                 "path": "/path",
-                "event_type": "pre_tool_use",
+                "event_type": EventID.PRE_TOOL_USE.config_key,
                 "custom_field": "value",
             }
         )
         assert config.path == "/path"
-        assert config.event_type == "pre_tool_use"
+        assert config.event_type == EventID.PRE_TOOL_USE.config_key
 
 
 class TestPluginsConfig:
@@ -438,31 +439,37 @@ class TestPluginsConfig:
         """Can set plugin configurations."""
         config = PluginsConfig(
             plugins=[
-                PluginConfig(path="/plugin1", event_type="pre_tool_use"),
-                PluginConfig(path="/plugin2", event_type="post_tool_use", enabled=False),
+                PluginConfig(path="/plugin1", event_type=EventID.PRE_TOOL_USE.config_key),
+                PluginConfig(
+                    path="/plugin2", event_type=EventID.POST_TOOL_USE.config_key, enabled=False
+                ),
             ]
         )
         assert len(config.plugins) == 2
         assert config.plugins[0].path == "/plugin1"
-        assert config.plugins[0].event_type == "pre_tool_use"
+        assert config.plugins[0].event_type == EventID.PRE_TOOL_USE.config_key
         assert config.plugins[1].enabled is False
-        assert config.plugins[1].event_type == "post_tool_use"
+        assert config.plugins[1].event_type == EventID.POST_TOOL_USE.config_key
 
     def test_validates_plugin_list(self) -> None:
         """Validates plugin list items."""
         config = PluginsConfig.model_validate(
             {
                 "plugins": [
-                    {"path": "/plugin1", "event_type": "pre_tool_use"},
-                    {"path": "/plugin2", "event_type": "session_start", "handlers": ["Handler1"]},
+                    {"path": "/plugin1", "event_type": EventID.PRE_TOOL_USE.config_key},
+                    {
+                        "path": "/plugin2",
+                        "event_type": EventID.SESSION_START.config_key,
+                        "handlers": ["Handler1"],
+                    },
                 ]
             }
         )
         assert len(config.plugins) == 2
         assert isinstance(config.plugins[0], PluginConfig)
-        assert config.plugins[0].event_type == "pre_tool_use"
+        assert config.plugins[0].event_type == EventID.PRE_TOOL_USE.config_key
         assert config.plugins[1].handlers == ["Handler1"]
-        assert config.plugins[1].event_type == "session_start"
+        assert config.plugins[1].event_type == EventID.SESSION_START.config_key
 
 
 class TestDaemonConfig:
