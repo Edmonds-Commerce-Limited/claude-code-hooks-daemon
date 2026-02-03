@@ -4,6 +4,7 @@ This module provides strongly-typed configuration models with
 validation, serialisation, and sensible defaults.
 """
 
+import logging
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any, Literal, Self
@@ -16,6 +17,8 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class LogLevel(StrEnum):
@@ -163,7 +166,16 @@ class HandlersConfig(BaseModel):
                 # If enabled, check if it has parent dependency
                 if is_enabled:
                     # Instantiate to check shares_options_with attribute
-                    handler_instance = handler_cls()
+                    try:
+                        handler_instance = handler_cls()
+                    except Exception as e:
+                        # Some handlers require runtime context (ProjectContext, etc.)
+                        # Skip validation for these handlers
+                        logger.debug(
+                            f"Could not instantiate handler '{config_key}' for validation: {e}"
+                        )
+                        continue
+
                     if handler_instance.shares_options_with:
                         parent_key = handler_instance.shares_options_with
                         parent_config = event_config.get(parent_key)

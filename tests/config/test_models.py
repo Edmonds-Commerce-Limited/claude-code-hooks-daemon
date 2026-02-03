@@ -4,6 +4,7 @@ Tests all Pydantic models, validation, serialization, and configuration loading.
 """
 
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -333,7 +334,6 @@ class TestHandlersConfig:
         assert isinstance(handler_config, HandlerConfig)
         assert handler_config.enabled is True
         assert handler_config.priority is None
-
 
 class TestPluginConfig:
     """Tests for PluginConfig model."""
