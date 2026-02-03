@@ -10,6 +10,7 @@ Provides:
 - handlers: List registered handlers
 - config: Show loaded configuration
 - init-config: Generate configuration template
+- generate-playbook: Generate acceptance test playbook from handler definitions
 - repair: Repair broken venv (runs uv sync)
 """
 
@@ -838,6 +839,64 @@ def cmd_init_config(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_generate_playbook(args: argparse.Namespace) -> int:
+    """Generate acceptance test playbook from handler definitions.
+
+    Args:
+        args: Command-line arguments with include_disabled flag
+
+    Returns:
+        0 if playbook generated successfully, 1 otherwise
+    """
+    try:
+        # Get project path
+        project_path = get_project_path(getattr(args, "project_root", None))
+    except SystemExit:
+        # get_project_path already printed error message
+        return 1
+
+    config_path = project_path / ".claude" / "hooks-daemon.yaml"
+
+    if not config_path.exists():
+        print(f"No configuration file found at: {config_path}", file=sys.stderr)
+        print("Run 'init-config' to create one", file=sys.stderr)
+        return 1
+
+    try:
+        # Load configuration
+        config = Config.load(config_path)
+
+        # Create handler registry and discover handlers
+        from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
+
+        registry = HandlerRegistry()
+        registry.discover()
+
+        # Create playbook generator
+        from claude_code_hooks_daemon.daemon.playbook_generator import PlaybookGenerator
+
+        # Convert HandlersConfig to dictionary
+        handlers_dict = config.handlers.model_dump() if config.handlers is not None else {}
+
+        generator = PlaybookGenerator(
+            config=handlers_dict,
+            registry=registry,
+        )
+
+        # Generate markdown playbook
+        include_disabled = getattr(args, "include_disabled", False)
+        markdown = generator.generate_markdown(include_disabled=include_disabled)
+
+        # Print to stdout
+        print(markdown)
+
+        return 0
+
+    except Exception as e:
+        print(f"ERROR: Failed to generate playbook: {e}", file=sys.stderr)
+        return 1
+
+
 def main() -> int:
     """Main CLI entry point.
 
@@ -935,6 +994,17 @@ def main() -> int:
         "--force", action="store_true", help="Overwrite existing configuration file"
     )
     parser_init_config.set_defaults(func=cmd_init_config)
+
+    # generate-playbook command
+    parser_gen_playbook = subparsers.add_parser(
+        "generate-playbook", help="Generate acceptance test playbook from handler definitions"
+    )
+    parser_gen_playbook.add_argument(
+        "--include-disabled",
+        action="store_true",
+        help="Include tests from disabled handlers",
+    )
+    parser_gen_playbook.set_defaults(func=cmd_generate_playbook)
 
     # Parse arguments
     args = parser.parse_args()

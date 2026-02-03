@@ -450,9 +450,8 @@ class HooksDaemon:
             response = await self._process_request(request_data.decode())
             elapsed_ms = (time.time() - start_time) * 1000
 
-            # Add timing metric if not already present
-            if "timing_ms" not in response:
-                response["timing_ms"] = round(elapsed_ms, 2)
+            # Note: timing_ms removed - Claude Code schema doesn't accept it as top-level field
+            # Timing is logged below for internal metrics only
 
             # Send response
             response_json = json.dumps(response) + "\n"

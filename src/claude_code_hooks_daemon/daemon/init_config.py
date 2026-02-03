@@ -95,6 +95,7 @@ handlers:
   # PreToolUse - Before tool execution
   pre_tool_use:
     # SAFETY HANDLERS (Priority 10-20)
+    daemon_restart_verifier: {enabled: true, priority: 10}  # Suggest daemon restart verification (advisory)
     destructive_git: {enabled: true, priority: 10}   # Block git reset --hard, clean -f
     sed_blocker: {enabled: true, priority: 11}       # Block sed (use Edit tool instead)
     absolute_path: {enabled: true, priority: 12}     # Require absolute paths

@@ -96,6 +96,11 @@ class HandlerID:
     )
 
     # Safety handlers (Priority: 10-20)
+    DAEMON_RESTART_VERIFIER = HandlerIDMeta(
+        class_name="DaemonRestartVerifierHandler",
+        config_key="daemon_restart_verifier",
+        display_name="verify-daemon-restart",
+    )
     DESTRUCTIVE_GIT = HandlerIDMeta(
         class_name="DestructiveGitHandler",
         config_key="destructive_git",
@@ -371,6 +376,7 @@ HandlerKey = Literal[
     "hello_world_notification",
     "hello_world_permission_request",
     # Safety handlers
+    "daemon_restart_verifier",
     "destructive_git",
     "sed_blocker",
     "pip_break_system",
