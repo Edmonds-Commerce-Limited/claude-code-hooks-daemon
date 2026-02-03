@@ -38,6 +38,7 @@ def _get_hostname_suffix() -> str:
     # No hostname? Use MD5 of current time for uniqueness
     if not hostname:
         import time
+
         timestamp = str(time.time())
         hash_obj = hashlib.md5(timestamp.encode("utf-8"), usedforsecurity=False)
         return f"-{hash_obj.hexdigest()[:8]}"
