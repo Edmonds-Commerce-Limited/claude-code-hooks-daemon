@@ -38,7 +38,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00025: Programmatic Acceptance Testing System](00025-programmatic-acceptance-tests/PLAN.md) - 🟡 Not Started
   - Create AcceptanceTest dataclass for type-safe test definitions
   - Extend Handler base class with get_acceptance_tests() method (optional, backward compatible)
-  - Implement playbook generator CLI command to auto-generate PLAYBOOK.md
+  - Implement playbook generator CLI command (outputs to stdout, ephemeral)
   - Migrate all 54 built-in handlers to define programmatic tests
   - Support custom plugin handlers automatically
   - Eliminate duplication between handler code and manual playbook

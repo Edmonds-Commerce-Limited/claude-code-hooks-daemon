@@ -12,7 +12,7 @@ Complete lifecycle from idea to production-ready feature with rigorous testing a
 ```
                     /\
                    /  \  Acceptance Tests
-                  /    \  (PLAYBOOK.md - Manual, Pre-Release)
+                  /    \  (Generated from code - Ephemeral, Pre-Release)
                  /------\
                 /        \  Integration Tests
                /          \  (FrontController, EventRouter, Dogfooding)

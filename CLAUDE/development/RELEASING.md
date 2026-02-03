@@ -448,13 +448,18 @@ Before running `/release`:
 
 **MANDATORY before every release:** Execute the full acceptance testing playbook to validate real-world handler behavior.
 
-**Location:** `CLAUDE/AcceptanceTests/PLAYBOOK.md`
+**Location:** Generate fresh from code: `generate-playbook > /tmp/playbook.md`
+**Instructions:** `CLAUDE/AcceptanceTests/GENERATING.md`
 
 **Purpose:** Catch integration issues that unit tests miss by testing handlers in actual Claude Code sessions with real hook events.
 
 **Process:**
 
-1. **Review Playbook First** - Read through PLAYBOOK.md to identify:
+1. **Generate Fresh Playbook** - Generate ephemeral playbook from code:
+   ```bash
+   python -m claude_code_hooks_daemon.daemon.cli generate-playbook > /tmp/playbook.md
+   ```
+   Review to identify:
    - Tests for new handlers added since last release
    - Tests that need updating for handler changes
    - Missing coverage for new features
