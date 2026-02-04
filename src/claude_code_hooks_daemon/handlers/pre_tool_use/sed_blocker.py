@@ -53,6 +53,10 @@ class SedBlockerHandler(Handler):
                 if self._is_git_command(command):
                     return False
 
+                # ALLOW: GitHub CLI (gh) commands with sed in text content
+                if self._is_gh_command(command):
+                    return False
+
                 # ALLOW: safe read-only commands (grep, echo, cat, etc.)
                 # BLOCK: Actual sed execution
                 return not self._is_safe_readonly_command(command)
@@ -115,6 +119,49 @@ class SedBlockerHandler(Handler):
                 command_after_commit = command[commit_match.end() :]
                 if self._sed_pattern.search(command_after_commit):
                     return True
+
+        return False
+
+    def _is_gh_command(self, command: str) -> bool:
+        """Check if command is a GitHub CLI (gh) operation with sed in text content.
+
+        GitHub CLI commands are allowed to mention sed in their text arguments (issue bodies,
+        PR descriptions, comments, etc.) because they're just creating documentation/text
+        content, not executing sed.
+
+        SAFE:
+        - gh issue create --title "Block sed" --body "sed is dangerous"
+        - gh pr create --title "Fix" --body "Blocks sed usage"
+        - gh issue comment 123 --body "Do not use sed"
+        - gh pr comment 456 --body "$(cat <<'EOF'\nPackage.resolved\nEOF\n)"
+
+        NOT SAFE (sed is separate command):
+        - gh issue list && sed -i 's/foo/bar/g' file.txt
+        - sed -i 's/foo/bar/g' file.txt && gh pr create
+
+        Key: sed must appear AFTER 'gh' command in the command string, not as a separate
+        command chained with && or || or ;
+        """
+        # Check if this is a gh command (issue, pr, release, etc.)
+        if re.search(r"\bgh\s+(issue|pr|release|gist|repo)\b", command):
+            # Find position of 'gh' command
+            gh_match = re.search(r"\bgh\s+(issue|pr|release|gist|repo)\b", command)
+            if gh_match:
+                gh_pos = gh_match.start()
+                # Find position of 'sed'
+                sed_match = self._sed_pattern.search(command)
+                if sed_match:
+                    sed_pos = sed_match.start()
+                    # sed must come AFTER gh command to be part of the text content
+                    if sed_pos > gh_pos:
+                        # Check that sed is not a separate command (not after &&, ||, ;)
+                        # Extract text between gh command and sed
+                        text_between = command[gh_pos:sed_pos]
+                        # If there's a command separator, sed is separate (NOT safe)
+                        if re.search(r"[;&|]{1,2}\s*$", text_between):
+                            return False
+                        # sed is part of gh command arguments (SAFE)
+                        return True
 
         return False
 
