@@ -516,8 +516,7 @@ class TestPluginDaemonIntegration:
         # Use absolute path to blocking_handler.py
         blocking_handler_path = plugin_fixture_dir / "blocking_handler.py"
 
-        config_path.write_text(
-            f"""
+        config_path.write_text(f"""
 version: '1.0'
 daemon:
   idle_timeout_seconds: 600
@@ -530,22 +529,22 @@ plugins:
   plugins:
     - path: "{blocking_handler_path}"
       event_type: pre_tool_use
-      handlers: ["BlockingTestHandler"]
+      handlers: ["BlockingHandler"]
       enabled: true
-"""
-        )
+""")
 
         # Start daemon
         test_env = os.environ.copy()
         start_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "start"]
-        result = subprocess.run(
-            start_cmd,
-            cwd=tmp_path,
-            env=test_env,
-            capture_output=True,
-            text=True,
-            timeout=Timeout.SOCKET_CONNECT,
-        )
+        with open("/dev/null", "w") as devnull:
+            result = subprocess.run(
+                start_cmd,
+                cwd=tmp_path,
+                env=test_env,
+                stdout=devnull,
+                stderr=devnull,
+                timeout=Timeout.SOCKET_CONNECT,
+            )
 
         if result.returncode != 0:
             # Check log file for details
@@ -554,8 +553,6 @@ plugins:
                 log_content = log_path.read_text()
             pytest.fail(
                 f"Failed to start daemon with plugin (exit code {result.returncode})\n"
-                f"Stdout: {result.stdout}\n"
-                f"Stderr: {result.stderr}\n"
                 f"Log file: {log_path}\n{log_content}"
             )
 
@@ -608,9 +605,9 @@ plugins:
                 f"Plugin should have blocked request. "
                 f"Got permission={permission}, reason={reason}, response={response_block}"
             )
-            assert "Blocked by E2E smoke test" in reason, (
-                f"Expected blocking plugin message. Got: {reason}"
-            )
+            assert (
+                "Blocked by E2E smoke test" in reason
+            ), f"Expected blocking plugin message. Got: {reason}"
 
             # Test 2: Send request WITHOUT pattern - should be ALLOWED
             hook_input_allow = {
@@ -629,9 +626,9 @@ plugins:
             permission_allow = hook_output_allow.get("permissionDecision", "allow")
 
             # Should be allowed (plugin doesn't match)
-            assert permission_allow != "deny", (
-                f"Non-matching request should be allowed. Response: {response_allow}"
-            )
+            assert (
+                permission_allow != "deny"
+            ), f"Non-matching request should be allowed. Response: {response_allow}"
 
         finally:
             # Cleanup

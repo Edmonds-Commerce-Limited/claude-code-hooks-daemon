@@ -4,7 +4,7 @@ from claude_code_hooks_daemon.core import Handler, HookResult
 from claude_code_hooks_daemon.core.hook_result import Decision
 
 
-class BlockingTestHandler(Handler):
+class BlockingHandler(Handler):
     """A test handler that blocks specific patterns."""
 
     def __init__(self, config=None):
