@@ -292,12 +292,12 @@ class TestToJsonEventName:
         assert output["decision"] == "block"
         assert "hookSpecificOutput" not in output
 
-        # Test SessionStart format (hookSpecificOutput with context only, no decision)
+        # Test SessionStart format (systemMessage only, NOT hookSpecificOutput)
         result_session = HookResult(decision=Decision.ALLOW, context=["Test context"])
         output = result_session.to_json("SessionStart")
-        assert output["hookSpecificOutput"]["hookEventName"] == "SessionStart"
-        assert "permissionDecision" not in output["hookSpecificOutput"]
-        assert output["hookSpecificOutput"]["additionalContext"] == "Test context"
+        assert "systemMessage" in output
+        assert output["systemMessage"] == "Test context"
+        assert "hookSpecificOutput" not in output
 
     def test_to_json_silent_allow_no_event_name(self):
         """Silent allow should not include hookEventName (empty dict)."""
@@ -388,8 +388,9 @@ class TestHookResultIntegration:
         )
         output = result.to_json("SessionStart")
 
-        assert output["hookSpecificOutput"]["additionalContext"]
-        assert "PLAN.md" in output["hookSpecificOutput"]["additionalContext"]
+        assert "systemMessage" in output
+        assert "PLAN.md" in output["systemMessage"]
+        assert "hookSpecificOutput" not in output
 
     def test_deny_with_guidance_and_context(self):
         """Complex deny with guidance and context."""
@@ -550,26 +551,30 @@ class TestHookResultPermissionRequestFormat:
 
 
 class TestHookResultContextOnlyFormat:
-    """Test context-only event response format."""
+    """Test context-only event response format (systemMessage based)."""
 
     def test_context_only_with_guidance(self):
-        """Context-only events should support guidance field."""
+        """SessionStart/SessionEnd/PreCompact/Notification use systemMessage (NOT hookSpecificOutput)."""
         result = HookResult(
             decision=Decision.ALLOW, context=["Session info"], guidance="Remember to commit"
         )
         output = result.to_json("SessionStart")
 
-        hso = output["hookSpecificOutput"]
-        assert hso["additionalContext"] == "Session info"
-        assert hso["guidance"] == "Remember to commit"
+        # Should use systemMessage, NOT hookSpecificOutput
+        assert "systemMessage" in output
+        assert "Session info" in output["systemMessage"]
+        assert "Remember to commit" in output["systemMessage"]
+        assert "hookSpecificOutput" not in output
 
     def test_context_only_notification_with_guidance(self):
-        """Notification event should support guidance field."""
+        """Notification event should use systemMessage (NOT hookSpecificOutput)."""
         result = HookResult(decision=Decision.ALLOW, guidance="Check logs for details")
         output = result.to_json("Notification")
 
-        hso = output["hookSpecificOutput"]
-        assert hso["guidance"] == "Check logs for details"
+        # Should use systemMessage, NOT hookSpecificOutput
+        assert "systemMessage" in output
+        assert "Check logs for details" in output["systemMessage"]
+        assert "hookSpecificOutput" not in output
 
 
 class TestHookResultStatusFormat:

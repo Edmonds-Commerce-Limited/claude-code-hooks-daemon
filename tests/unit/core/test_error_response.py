@@ -105,15 +105,19 @@ class TestGenerateDaemonErrorResponse:
         assert not errors, f"Schema validation failed: {errors}"
 
     def test_session_start_format(self) -> None:
-        """SessionStart events should use hookSpecificOutput format."""
+        """SessionStart events should use systemMessage format (NOT hookSpecificOutput)."""
         response = generate_daemon_error_response(
             "SessionStart", "init_path_error", "Could not find .claude directory"
         )
 
-        # Should have hookSpecificOutput
-        assert "hookSpecificOutput" in response
-        assert response["hookSpecificOutput"]["hookEventName"] == "SessionStart"
-        assert "additionalContext" in response["hookSpecificOutput"]
+        # Should have systemMessage (NOT hookSpecificOutput)
+        assert "systemMessage" in response
+        assert "hookSpecificOutput" not in response
+
+        # System message should contain error details
+        message = response["systemMessage"]
+        assert "PROTECTION NOT ACTIVE" in message
+        assert "init_path_error" in message
 
         # Validate against schema
         errors = validate_response("SessionStart", response)
@@ -279,14 +283,22 @@ class TestAllEventTypes:
             ("SubagentStop", False),
             ("PreToolUse", True),
             ("PostToolUse", True),
-            ("SessionStart", True),
             ("UserPromptSubmit", True),
+            # SessionStart/SessionEnd/PreCompact/Notification use systemMessage (NOT hookSpecificOutput)
+            ("SessionStart", False),
+            ("SessionEnd", False),
+            ("PreCompact", False),
+            ("Notification", False),
         ],
     )
     def test_hook_specific_output_presence(
         self, event_name: str, should_have_hook_specific: bool
     ) -> None:
-        """Verify hookSpecificOutput presence based on event type."""
+        """Verify hookSpecificOutput presence based on event type.
+
+        CRITICAL: Only PreToolUse, PostToolUse, and UserPromptSubmit use hookSpecificOutput.
+        All other events use systemMessage or top-level decision fields.
+        """
         response = generate_daemon_error_response(event_name, "test_error", "Test details")
 
         if should_have_hook_specific:

@@ -287,7 +287,10 @@ class TestPermissionRequestSchema:
 
 
 class TestSessionStartSchema:
-    """Tests for SessionStart hook response schema."""
+    """Tests for SessionStart hook response schema.
+
+    CRITICAL: SessionStart uses systemMessage, NOT hookSpecificOutput.
+    """
 
     def test_valid_minimal_response(self, response_validator):
         """Minimal valid response: empty."""
@@ -295,28 +298,26 @@ class TestSessionStartSchema:
         response_validator.assert_valid("SessionStart", response)
 
     def test_valid_with_context(self, response_validator):
-        """Valid response with additional context."""
-        response = {
-            "hookSpecificOutput": {
-                "hookEventName": "SessionStart",
-                "additionalContext": "Session initialized with custom settings",
-            }
-        }
+        """Valid response with systemMessage (NOT hookSpecificOutput)."""
+        response = {"systemMessage": "Session initialized with custom settings"}
         response_validator.assert_valid("SessionStart", response)
 
-    def test_invalid_with_decision(self, response_validator):
-        """SessionStart should NOT have decision fields."""
+    def test_invalid_with_hook_specific_output(self, response_validator):
+        """SessionStart should NOT use hookSpecificOutput."""
         response = {
             "hookSpecificOutput": {
                 "hookEventName": "SessionStart",
-                "permissionDecision": "allow",  # Not allowed
+                "additionalContext": "Invalid format",
             }
         }
         response_validator.assert_invalid("SessionStart", response)
 
 
 class TestSessionEndSchema:
-    """Tests for SessionEnd hook response schema."""
+    """Tests for SessionEnd hook response schema.
+
+    CRITICAL: SessionEnd uses systemMessage, NOT hookSpecificOutput.
+    """
 
     def test_valid_minimal_response(self, response_validator):
         """Minimal valid response: empty."""
@@ -324,18 +325,16 @@ class TestSessionEndSchema:
         response_validator.assert_valid("SessionEnd", response)
 
     def test_valid_with_context(self, response_validator):
-        """Valid response with context."""
-        response = {
-            "hookSpecificOutput": {
-                "hookEventName": "SessionEnd",
-                "additionalContext": "Session cleanup complete",
-            }
-        }
+        """Valid response with systemMessage (NOT hookSpecificOutput)."""
+        response = {"systemMessage": "Session cleanup complete"}
         response_validator.assert_valid("SessionEnd", response)
 
 
 class TestPreCompactSchema:
-    """Tests for PreCompact hook response schema."""
+    """Tests for PreCompact hook response schema.
+
+    CRITICAL: PreCompact uses systemMessage, NOT hookSpecificOutput.
+    """
 
     def test_valid_minimal_response(self, response_validator):
         """Minimal valid response: empty."""
@@ -343,13 +342,8 @@ class TestPreCompactSchema:
         response_validator.assert_valid("PreCompact", response)
 
     def test_valid_with_context(self, response_validator):
-        """Valid response with context."""
-        response = {
-            "hookSpecificOutput": {
-                "hookEventName": "PreCompact",
-                "additionalContext": "✅ PreCompact hook system active",
-            }
-        }
+        """Valid response with systemMessage (NOT hookSpecificOutput)."""
+        response = {"systemMessage": "✅ PreCompact hook system active"}
         response_validator.assert_valid("PreCompact", response)
 
 
@@ -373,7 +367,10 @@ class TestUserPromptSubmitSchema:
 
 
 class TestNotificationSchema:
-    """Tests for Notification hook response schema."""
+    """Tests for Notification hook response schema.
+
+    CRITICAL: Notification uses systemMessage, NOT hookSpecificOutput.
+    """
 
     def test_valid_minimal_response(self, response_validator):
         """Minimal valid response: empty."""
@@ -381,13 +378,8 @@ class TestNotificationSchema:
         response_validator.assert_valid("Notification", response)
 
     def test_valid_with_context(self, response_validator):
-        """Valid response with context."""
-        response = {
-            "hookSpecificOutput": {
-                "hookEventName": "Notification",
-                "additionalContext": "Notification logged",
-            }
-        }
+        """Valid response with systemMessage (NOT hookSpecificOutput)."""
+        response = {"systemMessage": "Notification logged"}
         response_validator.assert_valid("Notification", response)
 
 
