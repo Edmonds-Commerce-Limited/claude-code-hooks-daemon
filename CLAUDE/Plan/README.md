@@ -4,20 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00012: Eliminate ALL Magic Strings and Magic Numbers (COMPREHENSIVE)](00012-eliminate-magic-strings/PLAN.md) - 🟡 In Progress
-  - Create COMPREHENSIVE constants system (12 modules: HandlerID, EventID, Priority, Timeout, Paths, **Tags**, **ToolName**, **ConfigKey**, **Protocol**, **Validation**, **Formatting**)
-  - Centralize naming conversion utilities (eliminate _to_snake_case duplication)
-  - Build custom QA rules FIRST to catch ALL magic values (8 rules) before migration
-  - Migrate all 54 handlers to use constants (tags, tool names, priorities, timeouts)
-  - Eliminate magic strings in config system, protocol fields, validation limits
-  - **CRITICAL FINDINGS**: Original plan missed 40% of issues (tags: 67 files, tool names: 31 files, config keys, protocol fields)
-  - **QA SYSTEM COMPLETE**: Found 320 violations (179 tags, 51 handler names, 41 tool names, 39 priorities, 7 timeouts, 3 config keys)
-  - **CHECKPOINT (e1f1118)**: Phase 1-2 complete (6/12 constants modules + QA system)
-  - See COMPREHENSIVE_FINDINGS.md for complete analysis
-  - **Priority**: CRITICAL
-  - **Owner**: Claude
-  - **Progress**: ~25% complete (checkpoint committed, 320 violations documented)
-
 - [00014: Eliminate CWD, Implement Calculated Constants](00014-eliminate-cwd-calculated-constants/PLAN.md) - 🟡 Not Started
   - Eliminate all dynamic `Path.cwd()` / `os.getcwd()` calls from handler and core code
   - Create `ProjectContext` dataclass calculated once at daemon launch (project root, git repo name, git toplevel)
@@ -87,6 +73,15 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00012: Eliminate ALL Magic Strings and Magic Numbers](Completed/00012-eliminate-magic-strings/PLAN.md) - 🟢 Complete (2026-02-04)
+  - Created comprehensive constants system (12 modules: HandlerID, EventID, Priority, Timeout, Paths, Tags, ToolName, ConfigKey, Protocol, Validation, Formatting)
+  - Built custom QA checker with AST-based magic value detection (8 rules)
+  - Fixed 320 violations across entire codebase (179 tags, 51 handler names, 41 tool names, 39 priorities, 7 timeouts, 3 config keys)
+  - Migrated all 54 handlers to use constants (zero magic strings/numbers remaining)
+  - Centralized naming conversion utilities (eliminated _to_snake_case duplication)
+  - Integrated QA checker into CI/CD pipeline (runs first, fail fast)
+  - **Completed**: 2026-02-04
+
 - [00024: Plugin System Fix](Completed/00024-plugin-system-fix/PLAN.md) - 🟢 Complete (2026-02-03)
   - Fixed configuration format mismatch (PluginsConfig model is source of truth)
   - Integrated plugin loading into DaemonController lifecycle (THE CORE FIX)
@@ -152,9 +147,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans**: 15
-- **Active**: 8
-- **Completed**: 7
-- **Success Rate**: 100% (7/7 completed successfully)
+- **Active**: 7
+- **Completed**: 8
+- **Success Rate**: 100% (8/8 completed successfully)
 
 ## Quick Links
 
