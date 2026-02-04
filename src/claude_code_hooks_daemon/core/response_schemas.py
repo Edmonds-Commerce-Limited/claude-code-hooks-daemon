@@ -119,63 +119,42 @@ PERMISSION_REQUEST_SCHEMA: Final[dict[str, Any]] = {
 
 # =============================================================================
 # SessionStart Hook Response Schema
+# CRITICAL: Claude Code does NOT accept hookSpecificOutput for SessionStart
+# Only systemMessage is valid
 # =============================================================================
 
 SESSION_START_SCHEMA: Final[dict[str, Any]] = {
     "type": "object",
     "properties": {
-        "hookSpecificOutput": {
-            "type": "object",
-            "properties": {
-                "hookEventName": {"type": "string", "const": "SessionStart"},
-                "additionalContext": {"type": "string"},
-                "guidance": {"type": "string"},
-            },
-            "required": ["hookEventName"],
-            "additionalProperties": False,
-        }
+        "systemMessage": {"type": "string"},
     },
     "additionalProperties": False,
 }
 
 # =============================================================================
-# SessionEnd Hook Response Schema (identical to SessionStart)
+# SessionEnd Hook Response Schema
+# CRITICAL: Claude Code does NOT accept hookSpecificOutput for SessionEnd
+# Only systemMessage is valid
 # =============================================================================
 
 SESSION_END_SCHEMA: Final[dict[str, Any]] = {
     "type": "object",
     "properties": {
-        "hookSpecificOutput": {
-            "type": "object",
-            "properties": {
-                "hookEventName": {"type": "string", "const": "SessionEnd"},
-                "additionalContext": {"type": "string"},
-                "guidance": {"type": "string"},
-            },
-            "required": ["hookEventName"],
-            "additionalProperties": False,
-        }
+        "systemMessage": {"type": "string"},
     },
     "additionalProperties": False,
 }
 
 # =============================================================================
-# PreCompact Hook Response Schema (identical structure to SessionStart)
+# PreCompact Hook Response Schema
+# CRITICAL: Claude Code does NOT accept hookSpecificOutput for PreCompact
+# Only systemMessage is valid
 # =============================================================================
 
 PRE_COMPACT_SCHEMA: Final[dict[str, Any]] = {
     "type": "object",
     "properties": {
-        "hookSpecificOutput": {
-            "type": "object",
-            "properties": {
-                "hookEventName": {"type": "string", "const": "PreCompact"},
-                "additionalContext": {"type": "string"},
-                "guidance": {"type": "string"},
-            },
-            "required": ["hookEventName"],
-            "additionalProperties": False,
-        }
+        "systemMessage": {"type": "string"},
     },
     "additionalProperties": False,
 }
@@ -202,22 +181,15 @@ USER_PROMPT_SUBMIT_SCHEMA: Final[dict[str, Any]] = {
 }
 
 # =============================================================================
-# Notification Hook Response Schema (identical structure to SessionStart)
+# Notification Hook Response Schema
+# CRITICAL: Claude Code does NOT accept hookSpecificOutput for Notification
+# Only systemMessage is valid
 # =============================================================================
 
 NOTIFICATION_SCHEMA: Final[dict[str, Any]] = {
     "type": "object",
     "properties": {
-        "hookSpecificOutput": {
-            "type": "object",
-            "properties": {
-                "hookEventName": {"type": "string", "const": "Notification"},
-                "additionalContext": {"type": "string"},
-                "guidance": {"type": "string"},
-            },
-            "required": ["hookEventName"],
-            "additionalProperties": False,
-        }
+        "systemMessage": {"type": "string"},
     },
     "additionalProperties": False,
 }

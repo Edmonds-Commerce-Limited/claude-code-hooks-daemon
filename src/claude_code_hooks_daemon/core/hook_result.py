@@ -290,15 +290,25 @@ class HookResult(BaseModel):
     def _format_system_message_response(self) -> dict[str, Any]:
         """Format response for events that only support systemMessage.
 
-        These events do NOT support hookSpecificOutput:
+        These events do NOT support hookSpecificOutput or decision fields:
         - PreCompact
         - SessionStart
         - SessionEnd
         - Notification
 
         Returns:
-            systemMessage with combined context, or empty dict for silent allow
+            systemMessage with combined context, or empty dict for silent allow.
+            If DENY/ASK is used, returns deliberately invalid response for schema validation.
         """
+        # These events don't support DENY/ASK - return invalid response if used
+        if self.decision in (Decision.DENY, Decision.ASK):
+            # Return response with decision field (invalid for systemMessage-only events)
+            # This will fail schema validation as expected
+            response: dict[str, Any] = {"decision": self.decision.value}
+            if self.reason:
+                response["reason"] = self.reason
+            return response
+
         # Context/guidance gets combined into systemMessage
         messages = []
         if self.context:
