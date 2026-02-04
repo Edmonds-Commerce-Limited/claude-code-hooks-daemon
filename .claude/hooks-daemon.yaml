@@ -121,6 +121,10 @@ handlers:
       enabled: true
       priority: 45
 
+    task_tdd_advisor:      # Advises on TDD when spawning Task agents for implementation
+      enabled: true
+      priority: 45
+
     plan_number_helper:    # Helps find correct plan number (child handler)
       enabled: true
       priority: 42
