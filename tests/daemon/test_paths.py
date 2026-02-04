@@ -34,8 +34,9 @@ class TestPathGeneration(unittest.TestCase):
         # Should be in project's untracked directory
         self.assertIn(".claude/hooks-daemon/untracked", str(socket_path))
 
-        # Should have .sock extension
-        self.assertTrue(str(socket_path).endswith("daemon.sock"))
+        # Should have .sock extension (may include hostname suffix: daemon-laptop.sock)
+        self.assertTrue(str(socket_path).endswith(".sock"))
+        self.assertIn("daemon", socket_path.name)
 
         # Should be under the project directory
         self.assertTrue(str(socket_path).startswith("/home/dev/my-project/"))
@@ -48,8 +49,9 @@ class TestPathGeneration(unittest.TestCase):
         # Should be in project's untracked directory
         self.assertIn(".claude/hooks-daemon/untracked", str(pid_path))
 
-        # Should have .pid extension
-        self.assertTrue(str(pid_path).endswith("daemon.pid"))
+        # Should have .pid extension (may include hostname suffix: daemon-laptop.pid)
+        self.assertTrue(str(pid_path).endswith(".pid"))
+        self.assertIn("daemon", pid_path.name)
 
         # Should be under the project directory
         self.assertTrue(str(pid_path).startswith("/home/dev/my-project/"))
@@ -176,9 +178,11 @@ class TestPathGeneration(unittest.TestCase):
         self.assertIn(".claude/hooks-daemon/untracked", str(socket_path))
         self.assertIn(".claude/hooks-daemon/untracked", str(pid_path))
 
-        # Paths should end with expected filenames
-        self.assertTrue(str(socket_path).endswith("daemon.sock"))
-        self.assertTrue(str(pid_path).endswith("daemon.pid"))
+        # Paths should have expected extensions (may include hostname suffix)
+        self.assertTrue(str(socket_path).endswith(".sock"))
+        self.assertTrue(str(pid_path).endswith(".pid"))
+        self.assertIn("daemon", socket_path.name)
+        self.assertIn("daemon", pid_path.name)
 
     def test_accepts_string_paths(self):
         """Test functions accept string paths for backward compatibility."""
@@ -270,8 +274,9 @@ class TestUtilityFunctions(unittest.TestCase):
         # Should be in project's untracked directory
         self.assertIn(".claude/hooks-daemon/untracked", str(log_path))
 
-        # Should have .log extension
-        self.assertTrue(str(log_path).endswith("daemon.log"))
+        # Should have .log extension (may include hostname suffix: daemon-laptop.log)
+        self.assertTrue(str(log_path).endswith(".log"))
+        self.assertIn("daemon", log_path.name)
 
         # Should be under the project directory
         self.assertTrue(str(log_path).startswith("/home/dev/my-project/"))
