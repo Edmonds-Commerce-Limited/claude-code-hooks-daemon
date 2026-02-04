@@ -44,6 +44,11 @@ class HandlerID:
     """
 
     # Test handlers (Priority: 5)
+    TEST_SERVER = HandlerIDMeta(
+        class_name="TestServerHandler",
+        config_key="test_server",
+        display_name="test-server",
+    )
     HELLO_WORLD_PRE_TOOL_USE = HandlerIDMeta(
         class_name="HelloWorldPreToolUseHandler",
         config_key="hello_world_pre_tool_use",

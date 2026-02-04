@@ -24,8 +24,10 @@ class TestServerHandler(Handler):
     """Simple handler for testing server responses."""
 
     def __init__(self) -> None:
-        # Test-only handler, use literal values (not in production constants)
-        super().__init__(name="test-server-handler", priority=5, terminal=True)
+        # Test-only handler using test constants
+        super().__init__(
+            handler_id=HandlerID.TEST_SERVER, priority=Priority.HELLO_WORLD, terminal=True
+        )
 
     def matches(self, hook_input: dict) -> bool:
         return True
