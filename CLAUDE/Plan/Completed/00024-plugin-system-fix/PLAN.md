@@ -143,10 +143,14 @@ count = self._registry.register_all(
   - [x] ✅ Run QA: All plugin loader tests pass
   - [x] ✅ Commit: 49a9c25
 
-- [ ] ⬜ **Task 3.5**: End-to-end daemon smoke test
-  - [ ] ⬜ Add test to daemon integration suite
-  - [ ] ⬜ Test plugin handler blocks/allows through daemon socket
-  - [ ] ⬜ Run QA
+- [x] ✅ **Task 3.5**: End-to-end daemon smoke test
+  - [x] ✅ Created blocking_handler.py test fixture with BlockingHandler class
+  - [x] ✅ Added test_plugin_blocks_through_daemon_socket() E2E test
+  - [x] ✅ Test verifies plugin blocks through actual Unix socket communication
+  - [x] ✅ Test verifies both DENY (blocked) and ALLOW (not blocked) cases
+  - [x] ✅ All assertions pass - plugin successfully blocks through daemon socket
+  - [x] ✅ Run QA: All checks pass
+  - [x] ✅ Commit: 20d31a7
 
 ### Phase 4: TDD - Validation Fixes
 
@@ -261,8 +265,14 @@ count = self._registry.register_all(
 - ✅ Daemon restarts successfully with all changes
 - ✅ Integration tests verify plugins work end-to-end through daemon socket
 
-**Remaining Optional Task**:
-- Phase 3 Task 3.5: End-to-end daemon smoke test (optional - integration tests already cover this)
+**Task 3.5 NOW COMPLETE** (2026-02-04):
+- ✅ Created blocking_handler.py test fixture
+- ✅ Added test_plugin_blocks_through_daemon_socket() E2E test
+- ✅ Verifies plugin blocks through actual Unix socket (production flow)
+- ✅ Proves plugins work end-to-end, not just in unit tests
+- ✅ Commit: 20d31a7
+
+**ALL TASKS COMPLETE** - Plan 00024 is now 100% finished!
 
 **Commits**:
 - 1f6c2b2, 0b925ec, 5051ae5: Phase 2 (Config unification)
