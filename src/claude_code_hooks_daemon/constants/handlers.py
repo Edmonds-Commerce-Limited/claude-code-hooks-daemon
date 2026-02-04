@@ -275,6 +275,11 @@ class HandlerID:
         config_key="task_completion_checker",
         display_name="task-completion-checker",
     )
+    TASK_TDD_ADVISOR = HandlerIDMeta(
+        class_name="TaskTddAdvisorHandler",
+        config_key="task_tdd_advisor",
+        display_name="task-tdd-advisor",
+    )
     BASH_ERROR_DETECTOR = HandlerIDMeta(
         class_name="BashErrorDetectorHandler",
         config_key="bash_error_detector",
