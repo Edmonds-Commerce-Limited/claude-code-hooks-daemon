@@ -368,6 +368,66 @@ EOF
         # 'sed' in filename happens before 'git commit', so it returns False
         assert handler._is_git_command(command) is False
 
+    # _is_gh_command() Tests
+    def test_is_gh_command_detects_issue_create_with_sed(self, handler):
+        """_is_gh_command() should detect gh issue create with sed in body."""
+        command = "gh issue create --title 'Block sed' --body 'sed is dangerous'"
+        assert handler._is_gh_command(command) is True
+
+    def test_is_gh_command_detects_pr_create_with_sed(self, handler):
+        """_is_gh_command() should detect gh pr create with sed in body."""
+        command = "gh pr create --title 'Fix' --body 'Blocks sed usage'"
+        assert handler._is_gh_command(command) is True
+
+    def test_is_gh_command_detects_issue_comment_with_sed(self, handler):
+        """_is_gh_command() should detect gh issue comment with sed."""
+        command = "gh issue comment 123 --body 'Do not use sed'"
+        assert handler._is_gh_command(command) is True
+
+    def test_is_gh_command_detects_pr_comment_with_sed_heredoc(self, handler):
+        """_is_gh_command() should detect gh pr comment with sed in heredoc."""
+        command = """gh pr comment 456 --body "$(cat <<'EOF'
+Package.resolved file
+sed commands blocked
+EOF
+)" """
+        assert handler._is_gh_command(command) is True
+
+    def test_is_gh_command_detects_release_with_sed(self, handler):
+        """_is_gh_command() should detect gh release with sed in notes."""
+        command = "gh release create v1.0 --notes 'Blocks sed commands'"
+        assert handler._is_gh_command(command) is True
+
+    def test_is_gh_command_rejects_sed_before_gh(self, handler):
+        """_is_gh_command() should reject sed appearing before gh command."""
+        command = "sed -i 's/foo/bar/g' file.txt && gh issue create --title 'Fix'"
+        assert handler._is_gh_command(command) is False
+
+    def test_is_gh_command_rejects_sed_after_command_separator(self, handler):
+        """_is_gh_command() should reject sed as separate command after gh."""
+        command = "gh issue list && sed -i 's/foo/bar/g' file.txt"
+        assert handler._is_gh_command(command) is False
+
+    def test_is_gh_command_rejects_sed_after_pipe(self, handler):
+        """_is_gh_command() should reject sed piped from gh command."""
+        command = "gh issue list | sed 's/foo/bar/g'"
+        assert handler._is_gh_command(command) is False
+
+    def test_is_gh_command_rejects_sed_after_semicolon(self, handler):
+        """_is_gh_command() should reject sed after semicolon separator."""
+        command = "gh pr list; sed -i 's/foo/bar/g' file.txt"
+        assert handler._is_gh_command(command) is False
+
+    def test_is_gh_command_rejects_non_gh_commands(self, handler):
+        """_is_gh_command() should reject non-gh commands."""
+        command = "sed -i 's/foo/bar/g' file.txt"
+        assert handler._is_gh_command(command) is False
+
+    def test_is_gh_command_rejects_gh_without_sed(self, handler):
+        """_is_gh_command() should reject gh commands without sed."""
+        command = "gh issue create --title 'New feature' --body 'Description'"
+        assert handler._is_gh_command(command) is False
+
     # _is_safe_readonly_command() Tests
     def test_is_safe_readonly_command_detects_grep(self, handler):
         """_is_safe_readonly_command() should detect grep commands."""
@@ -639,3 +699,51 @@ EOF
         # Line 107: finds 'sed' in " -m 'Block sed usage'"
         # Line 108: returns True
         assert handler._is_git_command(command) is True
+
+    # GitHub CLI (gh) Commands - Should allow sed in documentation
+    def test_matches_gh_issue_create_with_sed_in_body_returns_false(self, handler):
+        """Should NOT match gh issue create with sed in body text (documentation)."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": """gh issue create --title "Block sed" --body "$(cat <<'EOF'
+sed commands are dangerous
+EOF
+)" """},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_matches_gh_pr_create_with_sed_in_description_returns_false(self, handler):
+        """Should NOT match gh pr create with sed in PR description."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "gh pr create --title 'Fix' --body 'Blocks sed usage'"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_matches_gh_issue_comment_with_sed_returns_false(self, handler):
+        """Should NOT match gh issue comment mentioning sed."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "gh issue comment 123 --body 'Do not use sed'"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_matches_gh_pr_comment_with_sed_heredoc_returns_false(self, handler):
+        """Should NOT match gh pr comment with sed in heredoc."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": """gh pr comment 456 --body "$(cat <<'EOF'
+Package.resolved file
+sed commands blocked
+EOF
+)" """},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_matches_sed_command_after_gh_issue_blocks(self, handler):
+        """Should BLOCK sed when it's separate from gh command."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "gh issue list && sed -i 's/foo/bar/g' file.txt"},
+        }
+        assert handler.matches(hook_input) is True
