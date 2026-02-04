@@ -12,9 +12,10 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.core.front_controller import FrontController
 from claude_code_hooks_daemon.core.handler import Handler
-from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
+from claude_code_hooks_daemon.core.hook_result import HookResult
 from claude_code_hooks_daemon.daemon.config import DaemonConfig
 from claude_code_hooks_daemon.daemon.server import HooksDaemon
 
@@ -23,7 +24,7 @@ class TestServerHandler(Handler):
     """Simple handler for testing server responses."""
 
     def __init__(self) -> None:
-        super().__init__(name="test-server-handler", priority=10, terminal=True)
+        super().__init__(name=HandlerID.TEST_HANDLER, priority=Priority.SAFETY_HIGH, terminal=True)
 
     def matches(self, hook_input: dict) -> bool:
         return True
