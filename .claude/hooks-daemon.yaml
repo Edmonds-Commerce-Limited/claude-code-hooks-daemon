@@ -20,6 +20,10 @@ handlers:
   # PreToolUse handlers (run before every tool call)
   pre_tool_use:
     # SAFETY HANDLERS (Priority 10-20)
+    daemon_restart_verifier: # Verifies daemon restarts successfully after code changes
+      enabled: true
+      priority: 10
+
     destructive_git:       # Blocks git reset --hard, git clean -f, etc
       enabled: true
       priority: 10

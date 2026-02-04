@@ -135,7 +135,11 @@ def daemon_with_plugin(daemon_env_with_plugin: dict[str, Any]):
     project_root = daemon_env_with_plugin["project_root"]
 
     # Prepare environment with test-specific paths
+    # Include the monkeypatched paths from daemon_env_with_plugin
     test_env = os.environ.copy()
+    test_env["CLAUDE_HOOKS_SOCKET_PATH"] = str(daemon_env_with_plugin["socket_path"])
+    test_env["CLAUDE_HOOKS_PID_PATH"] = str(daemon_env_with_plugin["pid_path"])
+    test_env["CLAUDE_HOOKS_LOG_PATH"] = str(daemon_env_with_plugin["log_path"])
 
     # Start daemon (redirect output to /dev/null)
     start_cmd = [
