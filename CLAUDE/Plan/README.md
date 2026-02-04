@@ -111,12 +111,21 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Two-pass registry algorithm for proper options merging
   - **Completed**: 2026-01-29 in ~2 hours
 
+- [00024: Plugin System Fix](Completed/00024-plugin-system-fix/PLAN.md) - 🟢 Complete (2026-02-04)
+  - Fixed plugins to load through daemon lifecycle (THE CORE FIX)
+  - Unified plugin configuration format (PluginsConfig model is source of truth)
+  - Added event_type requirement to plugin configuration
+  - Made duplicate priorities deterministic (alphabetical tiebreaker)
+  - Added E2E daemon smoke test (verifies plugins block through Unix socket)
+  - Updated all documentation with event_type requirement
+  - **Completed**: 2026-02-04 (GitHub Issue #17)
+
 - [00010: CLI and Server Coverage Improvement to 98%](Completed/00010-cli-server-coverage-improvement/PLAN.md) - 🟢 Complete (2026-01-29)
   - Improved cli.py coverage from 74.31% to 99.63%
   - Improved server.py coverage from 88.83% to 96.95%
   - Overall project coverage improved from 93.72% to 97.04%
   - Added 62 new tests covering fork logic, exception paths, async operations
-  - **Completed**: 2026-01-29 in ~3 hours (Opus agent execution)
+  - **Completed**: 2026-01-29 (Opus agent execution)
 
 - [002: Fix Silent Handler Failures](Completed/002-fix-silent-handler-failures/PLAN.md) - 🟢 Complete
   - Fix broken handlers (BashErrorDetector, AutoApproveReads, Notification)
@@ -143,9 +152,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans**: 15
-- **Active**: 9
-- **Completed**: 6
-- **Success Rate**: 100% (6/6 completed successfully)
+- **Active**: 8
+- **Completed**: 7
+- **Success Rate**: 100% (7/7 completed successfully)
 
 ## Quick Links
 
