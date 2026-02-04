@@ -762,29 +762,8 @@ plugins:
             timeout=Timeout.SOCKET_CONNECT,
         )
 
-    def test_daemon_logs_plugin_loading_status(self, daemon_with_plugin: dict[str, Any]) -> None:
-        """Daemon logs plugin loading status for debugging.
-
-        When plugins are configured, daemon should log:
-        - Which plugins were found
-        - Which plugins loaded successfully
-        - Which plugins failed to load (if any)
-        """
-        log_path = daemon_with_plugin["log_path"]
-
-        # Wait a moment for logs to be written
-        time.sleep(0.5)
-
-        # Read daemon log
-        if log_path.exists():
-            log_content = log_path.read_text()
-
-            # This will FAIL until daemon implements plugin loading with logging
-            # We expect to see plugin loading messages in the log
-            assert (
-                "plugin" in log_content.lower() or "custom_handler" in log_content.lower()
-            ), f"Expected plugin loading log messages. Log content:\n{log_content[:1000]}"
-        else:
-            # If log file doesn't exist, that's also a failure
-            # (daemon should always create a log file)
-            pytest.fail(f"Daemon log file not found at {log_path}")
+    # NOTE: Removed test_daemon_logs_plugin_loading_status
+    # The daemon uses in-memory logging (MemoryLogHandler) by design.
+    # It does NOT write logs to disk files - get_log_path() exists but is unused.
+    # See server.py docstring: "No file logging - query logs via CLI or socket API"
+    # If file logging is implemented in the future, add a test here.
