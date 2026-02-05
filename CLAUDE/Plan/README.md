@@ -50,13 +50,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - **GitHub Issue**: #13
   - **Owner**: To be assigned
 
-- [00022: System Package Safety Handlers](00022-system-package-safety-handlers/PLAN.md) - 🟡 Not Started
-  - Block dangerous package management patterns (--break-system-packages, sudo pip, curl|bash)
-  - Add 5 safety handlers with proper priorities
-  - **Priority**: Medium (safety)
-  - **GitHub Issue**: #11
-  - **Owner**: To be assigned
-
 - [00021: Language-Specific Hook Handlers](00021-language-specific-handlers/PLAN.md) - 🟡 Not Started
   - Implement LanguageConfig-based architecture for multi-language support
   - Refactor QA suppression and TDD handlers to eliminate DRY violations
