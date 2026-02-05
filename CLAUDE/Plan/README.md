@@ -71,7 +71,48 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - **GitHub Issue**: #14
   - **Owner**: To be assigned
 
+- [00016: Comprehensive Handler Integration Tests](00016-comprehensive-handler-integration-tests/PLAN.md) - 🟡 Not Started (Blocked by Plan 00014)
+  - Achieve 100% handler coverage in integration tests
+  - Use parametrized tests for multiple scenarios per handler
+  - Catch initialization failures and silent handler failures
+  - **Priority**: Critical (QA/reliability)
+  - **Owner**: To be assigned
+  - **Blocked by**: Plan 00014 (ProjectContext dependency)
+
 ## Completed Plans
+
+- [00017: Acceptance Testing Playbook](Completed/00017-acceptance-testing-playbook/PLAN.md) - 🟢 Complete (2026-01-30)
+  - Created CLAUDE/AcceptanceTests/ directory structure
+  - Evolved to programmatic acceptance testing approach (Plan 00025)
+  - Initial manual playbook concept archived, replaced by dynamic generation
+  - **Completed**: 2026-01-30
+
+- [00013: Pipe Blocker Handler](Completed/00013-pipe-blocker-handler/PLAN.md) - 🟢 Complete (2026-01-29)
+  - Implemented handler to block dangerous pipe operations (expensive commands piped to tail/head)
+  - 70 comprehensive tests with 100% pass rate
+  - Whitelist support for safe commands (grep, awk, jq, sed, etc.)
+  - Clear error messages with temp file suggestions
+  - **Completed**: 2026-01-29
+
+- [00009: Status Line Handlers Enhancement](Completed/00009-abundant-puzzling-cray/PLAN.md) - 🟢 Complete (2026-02-05)
+  - Fixed schema validation for null context_window fields
+  - Implemented account_display and usage_tracking handlers
+  - Added stats_cache_reader utility for ~/.claude/stats-cache.json
+  - 73 tests passing with excellent coverage
+  - **Completed**: 2026-02-05
+
+- [00006: Daemon-Based Status Line System](Completed/00006-eager-popping-nebula/PLAN.md) - 🟢 Complete (2026-02-04)
+  - Implemented STATUS_LINE event type and bash hook entry point
+  - Created 6 status line handlers (git_repo_name, account_display, model_context, usage_tracking, git_branch, daemon_stats)
+  - Added SessionStart suggestion handler
+  - Full integration with special response formatting
+  - **Completed**: 2026-02-04
+
+- [00004: Final Workspace Test](Completed/00004-final-workspace-test/PLAN.md) - 🟢 Complete (2026-02-05)
+  - Verified daemon.strict_mode implementation and testing
+  - Confirmed single unified fail-fast configuration
+  - Feature deployed and enabled in dogfooding configuration
+  - **Completed**: 2026-02-05
 
 - [00012: Eliminate ALL Magic Strings and Magic Numbers](Completed/00012-eliminate-magic-strings/PLAN.md) - 🟢 Complete (2026-02-04)
   - Created comprehensive constants system (12 modules: HandlerID, EventID, Priority, Timeout, Paths, Tags, ToolName, ConfigKey, Protocol, Validation, Formatting)
@@ -82,14 +123,14 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Integrated QA checker into CI/CD pipeline (runs first, fail fast)
   - **Completed**: 2026-02-04
 
-- [00024: Plugin System Fix](Completed/00024-plugin-system-fix/PLAN.md) - 🟢 Complete (2026-02-03)
+- [00024: Plugin System Fix](Completed/00024-plugin-system-fix/PLAN.md) - 🟢 Complete (2026-02-04)
   - Fixed configuration format mismatch (PluginsConfig model is source of truth)
   - Integrated plugin loading into DaemonController lifecycle (THE CORE FIX)
   - Made duplicate priorities deterministic (sort by priority, then name)
   - Added helpful error messages for validation failures
   - Added acceptance test validation for plugin handlers
   - Updated all documentation with event_type requirement
-  - **Completed**: 2026-02-03 (GitHub Issue #17)
+  - **Completed**: 2026-02-04 (GitHub Issue #17)
 
 - [00018: Fix Container/Host Environment Switching](Completed/00018-container-host-environment-switching/PLAN-v2.md) - 🟢 Complete (2026-01-30)
   - Decoupled hook hot path from venv Python (bash path computation, system python3 socket client)
@@ -98,22 +139,13 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Zero new runtime dependencies
   - **Completed**: 2026-01-30 (GitHub Issue #15)
 
-- [00011: Handler Dependency System](00011-floofy-growing-moth/PLAN.md) - 🟢 Complete (2026-01-29)
+- [00011: Handler Dependency System](00011-handler-dependency-system/PLAN.md) - 🟢 Complete (2026-01-29)
   - Implemented handler options inheritance via shares_options_with attribute
   - Added config validation to enforce parent-child dependencies (FAIL FAST)
   - Eliminated config duplication between markdown_organization and plan_number_helper
   - Removed YAML anchors, replaced hasattr() hack with generic options inheritance
   - Two-pass registry algorithm for proper options merging
-  - **Completed**: 2026-01-29 in ~2 hours
-
-- [00024: Plugin System Fix](Completed/00024-plugin-system-fix/PLAN.md) - 🟢 Complete (2026-02-04)
-  - Fixed plugins to load through daemon lifecycle (THE CORE FIX)
-  - Unified plugin configuration format (PluginsConfig model is source of truth)
-  - Added event_type requirement to plugin configuration
-  - Made duplicate priorities deterministic (alphabetical tiebreaker)
-  - Added E2E daemon smoke test (verifies plugins block through Unix socket)
-  - Updated all documentation with event_type requirement
-  - **Completed**: 2026-02-04 (GitHub Issue #17)
+  - **Completed**: 2026-01-29
 
 - [00010: CLI and Server Coverage Improvement to 98%](Completed/00010-cli-server-coverage-improvement/PLAN.md) - 🟢 Complete (2026-01-29)
   - Improved cli.py coverage from 74.31% to 99.63%
@@ -146,10 +178,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans**: 15
-- **Active**: 7
-- **Completed**: 8
-- **Success Rate**: 100% (8/8 completed successfully)
+- **Total Plans**: 19
+- **Active**: 9
+- **Completed**: 13
+- **Success Rate**: 100% (13/13 completed successfully)
 
 ## Quick Links
 
