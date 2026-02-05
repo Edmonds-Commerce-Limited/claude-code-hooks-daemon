@@ -81,6 +81,19 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00008: Fail-Fast Error Hiding Audit](Completed/00008-fail-fast-error-hiding-audit/PLAN.md) - 🟢 Complete (2026-02-05)
+  - Fixed all 22 error hiding violations across 13 files
+  - Created unified daemon.strict_mode for all fail-fast behavior
+  - Replaced bare except blocks with specific exception types
+  - Added comprehensive logging and fail-fast paths
+  - **Completed**: 2026-02-05
+
+- [00007: Handler Naming Convention Fix](Completed/00007-handler-naming-convention-fix/PLAN.md) - 🟢 Complete (2026-02-04)
+  - Fixed handler naming convention conflict (config keys without _handler suffix)
+  - Superseded and completed by Plan 00012 (comprehensive constants system)
+  - All handlers now use HandlerID constants with correct naming
+  - **Completed**: 2026-02-04 (via Plan 00012)
+
 - [00017: Acceptance Testing Playbook](Completed/00017-acceptance-testing-playbook/PLAN.md) - 🟢 Complete (2026-01-30)
   - Created CLAUDE/AcceptanceTests/ directory structure
   - Evolved to programmatic acceptance testing approach (Plan 00025)
@@ -179,9 +192,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans**: 19
-- **Active**: 9
-- **Completed**: 13
-- **Success Rate**: 100% (13/13 completed successfully)
+- **Active**: 7
+- **Completed**: 15
+- **Success Rate**: 100% (15/15 completed successfully)
 
 ## Quick Links
 
