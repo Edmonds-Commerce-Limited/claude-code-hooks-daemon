@@ -28,7 +28,7 @@ def daemon_config_validation_enabled():
     config.socket_path = "/tmp/test.sock"
     config.pid_file_path = "/tmp/test.pid"
     assert config.input_validation.enabled is True
-    assert config.input_validation.strict_mode is False
+    assert config.strict_mode is False  # strict_mode is now at daemon level
     return config
 
 
@@ -48,7 +48,8 @@ def daemon_config_strict_mode():
     config = DaemonConfig()
     config.socket_path = "/tmp/test.sock"
     config.pid_file_path = "/tmp/test.pid"
-    config.input_validation = InputValidationConfig(enabled=True, strict_mode=True)
+    config.input_validation = InputValidationConfig(enabled=True)
+    config.strict_mode = True  # strict_mode is now at daemon level
     return config
 
 

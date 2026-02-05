@@ -130,7 +130,9 @@ class HandlerChain:
         """Iterate over handlers in priority order."""
         return iter(self.handlers)
 
-    def execute(self, hook_input: dict[str, Any]) -> ChainExecutionResult:
+    def execute(
+        self, hook_input: dict[str, Any], strict_mode: bool = False
+    ) -> ChainExecutionResult:
         """Execute the handler chain for an event.
 
         Handlers are executed in priority order. Terminal handlers stop
@@ -139,6 +141,8 @@ class HandlerChain:
 
         Args:
             hook_input: Hook input dictionary to process
+            strict_mode: If True, FAIL FAST on handler exceptions (fail-closed).
+                        If False, log and continue (fail-open).
 
         Returns:
             ChainExecutionResult with final result and metadata
@@ -184,13 +188,25 @@ class HandlerChain:
                 logger.exception("Handler %s raised exception", handler.name)
                 handlers_executed.append(handler.name)
 
-                # Fail-open: create error result but don't stop chain
-                error_result = HookResult.error(
-                    error_type="handler_exception",
-                    error_details=f"{handler.name}: {type(e).__name__}: {e}",
-                )
-                error_result.add_handler(handler.name)
-                accumulated_context.extend(error_result.context)
+                if strict_mode:
+                    # STRICT MODE: FAIL FAST - handler crash = BLOCK operation (fail-closed)
+                    error_result = HookResult.deny(
+                        reason=f"SYSTEM ERROR: Handler {handler.name} crashed - blocking for safety",
+                    )
+                    error_result.context.append(f"Handler exception: {type(e).__name__}: {e}")
+                    error_result.add_handler(handler.name)
+
+                    # Stop chain immediately - this is terminal
+                    if accumulated_context:
+                        error_result.context = accumulated_context + error_result.context
+                    final_result = error_result
+                    terminated_by = handler.name
+                    break
+                else:
+                    # NON-STRICT MODE: Fail-open - log error and continue chain
+                    error_context = f"Handler exception: {type(e).__name__}: {e}"
+                    accumulated_context.append(error_context)
+                    # Continue to next handler
 
         # Build final result
         if final_result is None:

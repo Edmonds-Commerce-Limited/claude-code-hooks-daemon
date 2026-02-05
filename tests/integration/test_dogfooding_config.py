@@ -184,19 +184,20 @@ class TestDogfoodingConfiguration:
             pytest.fail("".join(error_msg))
 
     def test_strict_mode_is_enabled(self):
-        """DOGFOODING: Input validation strict mode must be enabled."""
+        """DOGFOODING: Strict mode must be enabled for FAIL FAST behavior."""
         config = load_project_config()
 
-        input_validation = config.get("daemon", {}).get("input_validation", {})
+        daemon_config = config.get("daemon", {})
+        input_validation = daemon_config.get("input_validation", {})
 
         assert input_validation.get("enabled", False) is True, (
             "Input validation must be enabled for dogfooding. "
             "Set daemon.input_validation.enabled: true"
         )
 
-        assert input_validation.get("strict_mode", False) is True, (
-            "Input validation strict mode must be enabled for dogfooding. "
-            "Set daemon.input_validation.strict_mode: true"
+        assert daemon_config.get("strict_mode", False) is True, (
+            "Daemon strict mode must be enabled for dogfooding (FAIL FAST on ALL errors). "
+            "Set daemon.strict_mode: true"
         )
 
     def test_hello_world_handlers_are_disabled(self):

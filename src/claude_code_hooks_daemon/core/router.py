@@ -84,12 +84,15 @@ class EventRouter:
         """
         return self._chains[event_type].remove(handler_name)
 
-    def route(self, event_type: EventType, hook_input: dict[str, Any]) -> ChainExecutionResult:
+    def route(
+        self, event_type: EventType, hook_input: dict[str, Any], strict_mode: bool = False
+    ) -> ChainExecutionResult:
         """Route an event to its handler chain.
 
         Args:
             event_type: Type of hook event
             hook_input: Hook input dictionary
+            strict_mode: If True, FAIL FAST on handler exceptions (fail-closed)
 
         Returns:
             Execution result from the handler chain
@@ -110,7 +113,7 @@ class EventRouter:
                 json.dumps(hook_input, indent=2, default=str),
             )
 
-        return chain.execute(hook_input)
+        return chain.execute(hook_input, strict_mode=strict_mode)
 
     def route_by_string(self, event_type_str: str, hook_input: dict[str, Any]) -> HookResult:
         """Route with string event type.

@@ -434,7 +434,7 @@ class TestHandlerChain:
         assert result.execution_time_ms < 100.0  # Should be very fast
 
     def test_execute_handles_handler_exception(self) -> None:
-        """execute handles exceptions raised by handlers."""
+        """execute handles exceptions raised by handlers with FAIL FAST (strict mode)."""
         chain = HandlerChain()
         h1 = MockHandler("h1", raise_exception=ValueError("test error"))
         h2 = MockHandler("h2")
@@ -443,14 +443,17 @@ class TestHandlerChain:
         chain.add(h2)
 
         hook_input = {"tool_name": "Bash"}
-        result = chain.execute(hook_input)
+        result = chain.execute(hook_input, strict_mode=True)
 
-        # Chain continues after error
-        assert h2.handle_called == 1
-        assert result.handlers_executed == ["h1", "h2"]
+        # STRICT MODE: Chain stops immediately, h2 never called
+        assert h2.handle_called == 0
+        assert result.handlers_executed == ["h1"]
+        # Should return DENY to block operation when handler crashes
+        assert result.result.decision == Decision.DENY
+        assert "SYSTEM ERROR" in result.result.reason
 
     def test_execute_creates_error_context_on_exception(self) -> None:
-        """execute creates error context when handler raises exception."""
+        """execute creates error context when handler raises exception in strict mode."""
         chain = HandlerChain()
         h1 = MockHandler("h1", raise_exception=RuntimeError("boom"))
         h2 = MockHandler(
@@ -463,14 +466,17 @@ class TestHandlerChain:
         chain.add(h2)
 
         hook_input = {"tool_name": "Bash"}
-        result = chain.execute(hook_input)
+        result = chain.execute(hook_input, strict_mode=True)
 
-        # Error context should be accumulated
+        # STRICT MODE: Chain stops at exception, h2 never called
+        # Error context should be present
         assert any("RuntimeError" in ctx for ctx in result.result.context)
-        assert "ctx2" in result.result.context
+        # h2's context should NOT be present since chain stopped
+        assert "ctx2" not in result.result.context
+        assert result.result.decision == Decision.DENY
 
-    def test_execute_fail_open_continues_after_exception(self) -> None:
-        """execute continues chain after exception (fail-open)."""
+    def test_execute_fail_closed_stops_on_exception(self) -> None:
+        """execute stops chain immediately on exception in strict mode (fail-closed)."""
         chain = HandlerChain()
         h1 = MockHandler("h1", priority=10, raise_exception=Exception("error"))
         h2 = MockHandler("h2", priority=20, terminal=True)
@@ -479,10 +485,32 @@ class TestHandlerChain:
         chain.add(h2)
 
         hook_input = {"tool_name": "Bash"}
-        result = chain.execute(hook_input)
+        result = chain.execute(hook_input, strict_mode=True)
 
+        # STRICT MODE: h1 crashes, chain stops, h2 never called
+        assert result.terminated_by == "h1"
+        assert h2.handle_called == 0
+        assert result.result.decision == Decision.DENY
+
+    def test_execute_fail_open_continues_on_exception(self) -> None:
+        """execute continues chain on exception in non-strict mode (fail-open)."""
+        chain = HandlerChain()
+        h1 = MockHandler("h1", priority=10, raise_exception=Exception("error"))
+        h2 = MockHandler("h2", priority=20, terminal=True)
+
+        chain.add(h1)
+        chain.add(h2)
+
+        hook_input = {"tool_name": "Bash"}
+        result = chain.execute(hook_input, strict_mode=False)
+
+        # NON-STRICT MODE: h1 crashes but chain continues, h2 IS called
         assert result.terminated_by == "h2"
         assert h2.handle_called == 1
+        # h2 is terminal with default ALLOW, so final result is ALLOW
+        assert result.result.decision == Decision.ALLOW
+        # Exception context should be accumulated
+        assert any("Handler exception:" in ctx for ctx in result.result.context)
 
     def test_execute_preserves_handler_priority_order(self) -> None:
         """execute processes handlers in strict priority order."""

@@ -326,9 +326,10 @@ class InputValidationConfig(BaseModel):
     Input validation catches malformed events and wrong field names (e.g., tool_output
     vs tool_response) at the server layer before dispatching to handlers.
 
+    Note: Fail-closed vs fail-open behavior is controlled by daemon.strict_mode.
+
     Attributes:
         enabled: Enable input schema validation
-        strict_mode: Fail-closed (return error) vs fail-open (log warning)
         log_validation_errors: Log validation failures
     """
 
@@ -337,10 +338,6 @@ class InputValidationConfig(BaseModel):
     enabled: bool = Field(
         default=True,
         description="Enable input validation to catch wrong field names",
-    )
-    strict_mode: bool = Field(
-        default=False,
-        description="Fail-closed on validation errors (default: fail-open)",
     )
     log_validation_errors: bool = Field(
         default=True,
@@ -359,6 +356,7 @@ class DaemonConfig(BaseModel):
         log_buffer_size: Size of in-memory log buffer
         request_timeout_seconds: Request processing timeout
         self_install_mode: Whether daemon runs from project root (vs .claude/hooks-daemon/)
+        strict_mode: Fail-fast on ALL errors (handler exceptions, validation errors, etc.)
         input_validation: Input validation configuration
     """
 
@@ -386,6 +384,10 @@ class DaemonConfig(BaseModel):
     enable_hello_world_handlers: bool = Field(
         default=False,
         description="Enable hello world test handlers",
+    )
+    strict_mode: bool = Field(
+        default=False,
+        description="Strict mode: FAIL FAST on ALL errors - handler exceptions, validation errors, etc. (fail-closed vs fail-open)",
     )
     input_validation: InputValidationConfig = Field(
         default_factory=InputValidationConfig,

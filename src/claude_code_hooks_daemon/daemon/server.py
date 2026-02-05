@@ -235,8 +235,8 @@ class HooksDaemon:
         if env_strict in ("false", "0", "no"):
             return False
 
-        # Fall back to config
-        return self.config.input_validation.strict_mode
+        # Fall back to daemon-level strict_mode
+        return self.config.strict_mode
 
     def _get_input_validator(self, event_type: str) -> Any:
         """Get or create cached validator for event type.

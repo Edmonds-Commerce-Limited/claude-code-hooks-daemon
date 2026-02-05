@@ -275,9 +275,18 @@ class DaemonController:
         try:
             # Convert HookInput to dict for handlers (use Python field names, not camelCase aliases)
             hook_input_dict = event.hook_input.model_dump(by_alias=False)
-            result = self._router.route(event.event_type, hook_input_dict)
+
+            # Get strict_mode from config (default to False if no config)
+            strict_mode = self._config.strict_mode if self._config else False
+
+            result = self._router.route(event.event_type, hook_input_dict, strict_mode=strict_mode)
             processing_time = (time.perf_counter() - start_time) * 1000
             self._stats.record_request(event.event_type.value, processing_time)
+
+            # Check if a handler crashed (strict mode creates error result with context)
+            if any("Handler exception:" in ctx for ctx in result.result.context):
+                self._stats.record_error()
+
             return result
         except Exception as e:
             processing_time = (time.perf_counter() - start_time) * 1000

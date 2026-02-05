@@ -6,11 +6,11 @@ daemon:
   idle_timeout_seconds: 600  # Auto-shutdown after 10 minutes of inactivity
   log_level: INFO
   enable_hello_world_handlers: false  # Disable test handlers in production
+  strict_mode: true  # FAIL FAST on ALL errors (handler exceptions, validation errors) - dogfooding requirement
 
-  # Input validation with strict mode (fail-closed)
+  # Input validation
   input_validation:
     enabled: true      # Enable input validation
-    strict_mode: true  # Fail on validation errors (dogfooding requirement)
 
 # Built-in handler configuration
 # DOGFOODING: ALL handlers enabled - we use every feature we build

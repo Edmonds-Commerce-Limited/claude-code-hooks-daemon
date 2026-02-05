@@ -21,11 +21,6 @@ class TestInputValidationConfigDefaults:
         config = InputValidationConfig()
         assert config.enabled is True
 
-    def test_strict_mode_disabled_by_default(self):
-        """Strict mode is disabled by default (fail-open)."""
-        config = InputValidationConfig()
-        assert config.strict_mode is False
-
     def test_log_validation_errors_enabled_by_default(self):
         """Logging validation errors is enabled by default."""
         config = InputValidationConfig()
@@ -45,8 +40,9 @@ class TestDaemonConfigIntegration:
         """DaemonConfig has correct default validation settings."""
         config = DaemonConfig()
         assert config.input_validation.enabled is True
-        assert config.input_validation.strict_mode is False
         assert config.input_validation.log_validation_errors is True
+        # strict_mode moved to daemon level
+        assert config.strict_mode is False
 
 
 class TestConfigYamlSerialization:
@@ -71,13 +67,11 @@ version: "2.0"
 daemon:
   input_validation:
     enabled: true
-    strict_mode: false
 """
         data = yaml.safe_load(yaml_str)
         config = Config.model_validate(data)
 
         assert config.daemon.input_validation.enabled is True
-        assert config.daemon.input_validation.strict_mode is False
 
     def test_deserialize_config_with_validation_disabled(self):
         """Deserialize config with validation disabled."""
@@ -93,19 +87,19 @@ daemon:
         assert config.daemon.input_validation.enabled is False
 
     def test_deserialize_config_with_strict_mode(self):
-        """Deserialize config with strict mode enabled."""
+        """Deserialize config with strict mode enabled at daemon level."""
         yaml_str = """
 version: "2.0"
 daemon:
+  strict_mode: true
   input_validation:
     enabled: true
-    strict_mode: true
 """
         data = yaml.safe_load(yaml_str)
         config = Config.model_validate(data)
 
+        assert config.daemon.strict_mode is True
         assert config.daemon.input_validation.enabled is True
-        assert config.daemon.input_validation.strict_mode is True
 
     def test_deserialize_config_without_validation_section(self):
         """Config without input_validation section uses defaults."""
@@ -120,7 +114,8 @@ daemon:
 
         # Should use defaults
         assert config.daemon.input_validation.enabled is True
-        assert config.daemon.input_validation.strict_mode is False
+        # strict_mode is now at daemon level, not input_validation level
+        assert config.daemon.strict_mode is False
 
 
 class TestConfigValidationModes:
@@ -143,33 +138,33 @@ class TestConfigValidationModes:
             {
                 "version": "2.0",
                 "daemon": {
+                    "strict_mode": False,
                     "input_validation": {
                         "enabled": True,
-                        "strict_mode": False,
-                    }
+                    },
                 },
             }
         )
 
         assert config.daemon.input_validation.enabled is True
-        assert config.daemon.input_validation.strict_mode is False
+        assert config.daemon.strict_mode is False
 
     def test_mode_enabled_fail_closed(self):
-        """Mode 3: Enabled + fail-closed (strict)."""
+        """Mode 3: Enabled + fail-closed (strict mode at daemon level)."""
         config = Config.model_validate(
             {
                 "version": "2.0",
                 "daemon": {
+                    "strict_mode": True,
                     "input_validation": {
                         "enabled": True,
-                        "strict_mode": True,
-                    }
+                    },
                 },
             }
         )
 
         assert config.daemon.input_validation.enabled is True
-        assert config.daemon.input_validation.strict_mode is True
+        assert config.daemon.strict_mode is True
 
 
 class TestConfigBackwardCompatibility:
@@ -187,7 +182,8 @@ settings:
 
         # Should have default validation settings
         assert config.daemon.input_validation.enabled is True
-        assert config.daemon.input_validation.strict_mode is False
+        # strict_mode is at daemon level now
+        assert config.daemon.strict_mode is False
 
         # Legacy migration should work
         assert config.daemon.log_level == "DEBUG"
@@ -201,4 +197,5 @@ settings:
         assert config.daemon.idle_timeout_seconds == 600
         assert config.daemon.log_level == "INFO"
         assert config.daemon.input_validation.enabled is True
-        assert config.daemon.input_validation.strict_mode is False
+        # strict_mode moved to daemon level
+        assert config.daemon.strict_mode is False
