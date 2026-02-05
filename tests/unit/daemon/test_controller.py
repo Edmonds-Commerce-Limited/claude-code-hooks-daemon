@@ -407,6 +407,97 @@ class TestDaemonController:
         assert registry is not None
         assert registry is controller._registry
 
+    def test_initialise_with_project_context_already_initialized(
+        self, controller: DaemonController, workspace_root: Path
+    ) -> None:
+        """Initialise handles ProjectContext already initialized."""
+        # Pre-initialize ProjectContext
+        config_path = workspace_root / ".claude" / "hooks-daemon.yaml"
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                Mock(returncode=0, stdout=str(workspace_root).encode() + b"\n"),
+                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout=str(workspace_root).encode() + b"\n"),
+            ]
+            ProjectContext.initialize(config_path)
+
+        assert ProjectContext._initialized is True
+
+        # Now initialize controller - should hit "already initialized" branch
+        controller.initialise(workspace_root=workspace_root)
+
+        assert controller.is_initialised is True
+
+    def test_process_event_handles_handler_exception(
+        self, controller: DaemonController, workspace_root: Path
+    ) -> None:
+        """Process event handles exceptions from handler chain in strict mode."""
+        from typing import Any
+
+        from claude_code_hooks_daemon.config.models import DaemonConfig
+        from claude_code_hooks_daemon.constants import HandlerID, Priority
+        from claude_code_hooks_daemon.core import Handler, HookResult
+
+        # Create controller with strict_mode=True
+        config = DaemonConfig(strict_mode=True)
+        controller = DaemonController(config=config)
+
+        # Create a handler that raises an exception
+        class ExplodingHandler(Handler):
+            def __init__(self) -> None:
+                super().__init__(
+                    handler_id=HandlerID.DESTRUCTIVE_GIT,
+                    priority=Priority.DESTRUCTIVE_GIT,
+                    terminal=False,
+                )
+
+            def matches(self, hook_input: dict[str, Any]) -> bool:
+                return True
+
+            def handle(self, hook_input: dict[str, Any]) -> HookResult:
+                raise RuntimeError("Handler exploded")
+
+            def get_acceptance_tests(self) -> list:
+                return []
+
+        # Initialize controller
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                Mock(returncode=0, stdout=str(workspace_root).encode() + b"\n"),
+                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout=str(workspace_root).encode() + b"\n"),
+            ]
+            controller.initialise(workspace_root=workspace_root)
+
+        # Register the exploding handler
+        controller._router.register(EventType.PRE_TOOL_USE, ExplodingHandler())
+
+        from claude_code_hooks_daemon.core.event import HookInput
+
+        event = HookEvent(
+            event=EventType.PRE_TOOL_USE,
+            hook_input=HookInput(
+                tool_name="Bash",
+                tool_input={"command": "ls"},
+                transcript_path="/tmp/transcript.jsonl",
+            ),
+        )
+
+        # Process event - handler will raise exception
+        result = controller.process_event(event)
+
+        # FAIL FAST: Handler crash should BLOCK operation (fail-closed)
+        # When protection system is down, default to blocking for safety
+        assert result.result.decision.value == "deny"
+        assert "SYSTEM ERROR" in result.result.reason
+        assert "crashed" in result.result.reason
+        # Check that RuntimeError appears somewhere in context
+        assert any("RuntimeError" in ctx for ctx in result.result.context)
+
+        # Stats should record error from the handler
+        stats = controller.get_stats()
+        assert stats.errors == 1
+
 
 class TestGlobalController:
     """Tests for global controller functions."""
