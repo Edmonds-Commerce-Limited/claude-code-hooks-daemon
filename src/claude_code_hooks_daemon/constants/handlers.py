@@ -43,6 +43,13 @@ class HandlerID:
     Use these instead of hardcoding handler names anywhere in the codebase.
     """
 
+    # Orchestrator-only mode (Priority: 8)
+    ORCHESTRATOR_ONLY = HandlerIDMeta(
+        class_name="OrchestratorOnlyHandler",
+        config_key="orchestrator_only",
+        display_name="orchestrator-only-mode",
+    )
+
     # Test handlers (Priority: 5)
     TEST_SERVER = HandlerIDMeta(
         class_name="TestServerHandler",
@@ -379,6 +386,8 @@ class HandlerID:
 
 # Type-safe config key literal (for mypy/type checking)
 HandlerKey = Literal[
+    # Orchestrator-only mode
+    "orchestrator_only",
     # Test handlers
     "hello_world_pre_tool_use",
     "hello_world_post_tool_use",
