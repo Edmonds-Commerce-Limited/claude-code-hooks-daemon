@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from claude_code_hooks_daemon.config.validator import ConfigValidator
 from claude_code_hooks_daemon.core.chain import ChainExecutionResult
 from claude_code_hooks_daemon.core.event import EventType, HookEvent
 from claude_code_hooks_daemon.core.hook_result import HookResult
@@ -98,7 +99,15 @@ class DaemonController:
     Provides a single entry point for processing hook events.
     """
 
-    __slots__ = ("_config", "_initialised", "_registry", "_router", "_stats")
+    __slots__ = (
+        "_config",
+        "_config_errors",
+        "_degraded",
+        "_initialised",
+        "_registry",
+        "_router",
+        "_stats",
+    )
 
     def __init__(self, config: "DaemonConfig | None" = None) -> None:
         """Initialise daemon controller.
@@ -111,6 +120,8 @@ class DaemonController:
         self._config = config
         self._stats = DaemonStats()
         self._initialised = False
+        self._degraded = False
+        self._config_errors: list[str] = []
 
     def initialise(
         self,
@@ -170,6 +181,9 @@ class DaemonController:
         total_count = count + plugin_count
         logger.info("DaemonController initialised with %d total handlers", total_count)
         self._initialised = True
+
+        # Validate configuration at startup (fail-open: degraded mode on errors)
+        self._validate_config(config_path)
 
     def _load_plugins(self, plugins_config: "PluginsConfig", workspace_root: Path) -> int:
         """Load and register plugin handlers.
@@ -257,10 +271,47 @@ class DaemonController:
 
         return registered_count
 
+    def _validate_config(self, config_path: Path) -> None:
+        """Validate configuration at startup, entering degraded mode on errors.
+
+        Fail-open: If validation fails or the validator itself crashes,
+        the daemon still starts but enters degraded mode.
+
+        Args:
+            config_path: Path to the configuration file
+        """
+        try:
+            from claude_code_hooks_daemon.config.loader import ConfigLoader
+
+            config_dict = ConfigLoader.load(config_path)
+            errors = ConfigValidator.validate(config_dict)
+            if errors:
+                self._degraded = True
+                self._config_errors = errors
+                logger.warning(
+                    "Configuration validation failed with %d error(s). "
+                    "Daemon is running in DEGRADED mode.",
+                    len(errors),
+                )
+                for error in errors:
+                    logger.warning("Config error: %s", error)
+            else:
+                logger.info("Configuration validation passed")
+        except Exception as e:
+            # Validator itself crashed or config file unreadable -
+            # still enter degraded mode (fail-open)
+            self._degraded = True
+            self._config_errors = [f"Config validator error: {type(e).__name__}: {e}"]
+            logger.warning(
+                "Configuration validator crashed: %s. " "Daemon is running in DEGRADED mode.",
+                e,
+            )
+
     def process_event(self, event: HookEvent) -> ChainExecutionResult:
         """Process a hook event.
 
         Routes the event to the appropriate handler chain.
+        In degraded mode, returns configuration error for every request.
 
         Args:
             event: Hook event to process
@@ -270,6 +321,14 @@ class DaemonController:
         """
         if not self._initialised:
             self.initialise()
+
+        # In degraded mode, return config error for every request
+        if self._degraded:
+            config_error_result = HookResult.configuration_error(self._config_errors)
+            return ChainExecutionResult(
+                result=config_error_result,
+                execution_time_ms=0.0,
+            )
 
         start_time = time.perf_counter()
         try:
@@ -344,12 +403,17 @@ class DaemonController:
         Returns:
             Health status dictionary
         """
-        return {
-            "status": "healthy",
+        health: dict[str, Any] = {
+            "status": "degraded" if self._degraded else "healthy",
             "initialised": self._initialised,
             "stats": self._stats.to_dict(),
             "handlers": self._router.get_handler_count(),
         }
+
+        if self._degraded:
+            health["config_errors"] = self._config_errors
+
+        return health
 
     def get_handlers(self) -> dict[str, list[dict[str, Any]]]:
         """Get all registered handlers with details.
@@ -390,6 +454,16 @@ class DaemonController:
     def is_initialised(self) -> bool:
         """Check if controller is initialised."""
         return self._initialised
+
+    @property
+    def is_degraded(self) -> bool:
+        """Check if controller is in degraded mode due to config errors."""
+        return self._degraded
+
+    @property
+    def config_errors(self) -> list[str]:
+        """Get configuration validation errors (empty if valid)."""
+        return self._config_errors
 
 
 # Global controller instance
