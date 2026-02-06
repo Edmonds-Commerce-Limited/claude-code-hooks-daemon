@@ -13,7 +13,7 @@ import pytest
 def mock_project_context():
     """Mock ProjectContext for handler instantiation tests."""
     with patch("claude_code_hooks_daemon.core.project_context.ProjectContext.project_root") as mock:
-        mock.return_value = Path("/tmp/test")
+        mock.return_value = Path("/workspace")
         yield mock
 
 
