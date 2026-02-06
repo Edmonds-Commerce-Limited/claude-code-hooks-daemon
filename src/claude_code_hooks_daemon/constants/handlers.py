@@ -307,6 +307,11 @@ class HandlerID:
         config_key="suggest_statusline",
         display_name="suggest-statusline",
     )
+    PLAN_COMPLETION_ADVISOR = HandlerIDMeta(
+        class_name="PlanCompletionAdvisorHandler",
+        config_key="plan_completion_advisor",
+        display_name="plan-completion-advisor",
+    )
     GLOBAL_NPM_ADVISOR = HandlerIDMeta(
         class_name="GlobalNpmAdvisorHandler",
         config_key="global_npm_advisor",
@@ -434,6 +439,7 @@ HandlerKey = Literal[
     "bash_error_detector",
     "web_search_year",
     "suggest_statusline",
+    "plan_completion_advisor",
     "global_npm_advisor",
     # Advisory handlers
     "british_english",
