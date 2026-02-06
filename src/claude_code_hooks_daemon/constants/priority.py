@@ -29,6 +29,9 @@ class Priority:
     This ensures priorities are never magic numbers and makes refactoring safe.
     """
 
+    # Orchestrator-only mode (Priority: 8 - before all other handlers)
+    ORCHESTRATOR_ONLY = 8
+
     # Test handlers (Priority: 5)
     HELLO_WORLD = 5
 

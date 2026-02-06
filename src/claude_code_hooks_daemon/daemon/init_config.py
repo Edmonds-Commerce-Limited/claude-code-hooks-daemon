@@ -94,6 +94,9 @@ daemon:
 handlers:
   # PreToolUse - Before tool execution
   pre_tool_use:
+    # ORCHESTRATOR MODE (Priority 8 - opt-in, disabled by default)
+    orchestrator_only: {enabled: false, priority: 8}  # Block work tools, force Task delegation
+
     # SAFETY HANDLERS (Priority 10-20)
     daemon_restart_verifier: {enabled: true, priority: 10}  # Suggest daemon restart verification (advisory)
     destructive_git: {enabled: true, priority: 10}   # Block git reset --hard, clean -f

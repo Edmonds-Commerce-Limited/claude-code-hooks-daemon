@@ -8,6 +8,7 @@ from .gh_issue_comments import GhIssueCommentsHandler
 from .git_stash import GitStashHandler
 from .markdown_organization import MarkdownOrganizationHandler
 from .npm_command import NpmCommandHandler
+from .orchestrator_only import OrchestratorOnlyHandler
 from .plan_time_estimates import PlanTimeEstimatesHandler
 from .plan_workflow import PlanWorkflowHandler
 from .sed_blocker import SedBlockerHandler
@@ -25,6 +26,7 @@ __all__ = [
     "GitStashHandler",
     "MarkdownOrganizationHandler",
     "NpmCommandHandler",
+    "OrchestratorOnlyHandler",
     "PlanTimeEstimatesHandler",
     "PlanWorkflowHandler",
     "SedBlockerHandler",
