@@ -11,7 +11,15 @@ from claude_code_hooks_daemon.core.event import EventType, HookEvent, HookInput,
 from claude_code_hooks_daemon.core.front_controller import FrontController
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
+from claude_code_hooks_daemon.core.language_config import (
+    GO_CONFIG,
+    PYTHON_CONFIG,
+    PHP_CONFIG,
+    LanguageConfig,
+    get_language_config,
+)
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.core.qa_suppression_base import QaSuppressionBlockerBase
 from claude_code_hooks_daemon.core.router import EventRouter
 
 __all__ = [
@@ -21,13 +29,19 @@ __all__ = [
     "EventRouter",
     "EventType",
     "FrontController",
+    "GO_CONFIG",
     "Handler",
     "HandlerChain",
     "HookEvent",
     "HookInput",
     "HookResult",
+    "LanguageConfig",
+    "PYTHON_CONFIG",
+    "PHP_CONFIG",
     "ProjectContext",
+    "QaSuppressionBlockerBase",
     "TestType",
     "ToolInput",
     "generate_daemon_error_response",
+    "get_language_config",
 ]
