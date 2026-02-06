@@ -28,15 +28,21 @@ class TestPhpQaSuppressionBlocker:
         """Handler should be terminal (default)."""
         assert handler.terminal is True
 
-    def test_forbidden_patterns_defined(self, handler):
-        """Handler should define forbidden patterns."""
-        assert hasattr(handler, "FORBIDDEN_PATTERNS")
-        assert len(handler.FORBIDDEN_PATTERNS) == 5
+    def test_uses_php_config_patterns(self, handler):
+        """Handler should use PHP_CONFIG forbidden patterns."""
+        from claude_code_hooks_daemon.core.language_config import PHP_CONFIG
 
-    def test_check_extensions_defined(self, handler):
-        """Handler should define check extensions."""
-        assert hasattr(handler, "CHECK_EXTENSIONS")
-        assert ".php" in handler.CHECK_EXTENSIONS
+        # Verify handler uses config patterns (not hardcoded)
+        assert len(PHP_CONFIG.qa_forbidden_patterns) == 5
+        assert r"@phpstan-ignore-next-line" in PHP_CONFIG.qa_forbidden_patterns
+        assert r"@psalm-suppress" in PHP_CONFIG.qa_forbidden_patterns
+
+    def test_uses_php_config_extensions(self, handler):
+        """Handler should use PHP_CONFIG extensions."""
+        from claude_code_hooks_daemon.core.language_config import PHP_CONFIG
+
+        # Verify handler uses config extensions (not hardcoded)
+        assert ".php" in PHP_CONFIG.extensions
 
     # matches() - Positive Cases: @phpstan-ignore-next-line pattern
     def test_matches_phpstan_ignore_next_line_in_write(self, handler):
