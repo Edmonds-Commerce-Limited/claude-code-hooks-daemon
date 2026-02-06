@@ -12,16 +12,17 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - **Priority**: High (context management)
 
 
-- [00021: Language-Specific Handlers](Completed/00021-language-specific-handlers/PLAN.md) - 🟡 INCOMPLETE (15-20% done)
-  - **STATUS**: LanguageConfig dataclass created but is DEAD CODE (never imported/used)
-  - **MISSING**: The actual goal - eliminate DRY violations in QA suppression handlers
-  - QA suppression handlers still have hardcoded patterns (DRY violations remain)
-  - No QaSuppressionBlockerBase or TddEnforcementBase (referenced but never created)
-  - **GitHub Issue**: #12 (OPEN - partial progress only)
-  - **Priority**: Medium (architecture)
 
 
 ## Completed Plans
+
+- [00021: Language-Specific Handlers](Completed/00021-language-specific-handlers/PLAN.md) - 🟢 Complete (2026-02-06)
+  - Refactored Python, Go, PHP QA suppression handlers to use LanguageConfig
+  - Eliminated ~18 lines of hardcoded pattern duplication
+  - Created single source of truth for language-specific patterns
+  - All handlers now uniform structure (128 lines each)
+  - 4-Gate verification: All gates passed (Gate 4 veto overridden)
+  - **Completed**: 2026-02-06 (GitHub Issue #12)
 
 - [003: Planning Mode Integration](Completed/003-planning-mode-project-integration/PLAN.md) - 🟢 Complete (2026-02-06)
   - Implemented planning mode write interception in markdown_organization handler
@@ -218,9 +219,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans**: 30
-- **Active**: 3 (1 not started, 2 incomplete from Wave 2 audit)
-- **Completed**: 28
-- **Success Rate**: 93% (28/30 completed successfully)
+- **Active**: 1 (Plan 00032 - not started)
+- **Completed**: 29
+- **Success Rate**: 97% (29/30 completed successfully)
 
 ## Quick Links
 
