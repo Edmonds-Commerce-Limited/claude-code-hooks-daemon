@@ -39,9 +39,7 @@ def _discover_handler_modules() -> list[tuple[str, str]]:
             if py_file.name == "stats_cache_reader.py":
                 continue
 
-            module_path = (
-                f"claude_code_hooks_daemon.handlers.{event_dir.name}.{py_file.stem}"
-            )
+            module_path = f"claude_code_hooks_daemon.handlers.{event_dir.name}.{py_file.stem}"
             display_name = f"{event_dir.name}/{py_file.stem}"
             modules.append((module_path, display_name))
 
@@ -74,9 +72,7 @@ def test_handler_imports_and_instantiates(
     handler_classes = [
         obj
         for _name, obj in inspect.getmembers(module, inspect.isclass)
-        if issubclass(obj, Handler)
-        and obj is not Handler
-        and obj.__module__ == module_path
+        if issubclass(obj, Handler) and obj is not Handler and obj.__module__ == module_path
     ]
 
     assert len(handler_classes) > 0, f"No Handler subclass found in {module_path}"
@@ -90,9 +86,9 @@ def test_handler_imports_and_instantiates(
 
         # Verify acceptance tests are defined
         acceptance_tests = handler.get_acceptance_tests()
-        assert len(acceptance_tests) > 0, (
-            f"{handler_class.__name__} must define at least 1 acceptance test"
-        )
+        assert (
+            len(acceptance_tests) > 0
+        ), f"{handler_class.__name__} must define at least 1 acceptance test"
 
 
 @pytest.mark.parametrize(
@@ -112,18 +108,16 @@ def test_handler_matches_returns_bool(
     handler_classes = [
         obj
         for _name, obj in inspect.getmembers(module, inspect.isclass)
-        if issubclass(obj, Handler)
-        and obj is not Handler
-        and obj.__module__ == module_path
+        if issubclass(obj, Handler) and obj is not Handler and obj.__module__ == module_path
     ]
 
     for handler_class in handler_classes:
         handler = handler_class()
         # Empty input should not match any handler (and should not crash)
         result = handler.matches({})
-        assert isinstance(result, bool), (
-            f"{handler_class.__name__}.matches({{}}) returned {type(result)}, expected bool"
-        )
-        assert result is False, (
-            f"{handler_class.__name__}.matches({{}}) returned True for empty input"
-        )
+        assert isinstance(
+            result, bool
+        ), f"{handler_class.__name__}.matches({{}}) returned {type(result)}, expected bool"
+        assert (
+            result is False
+        ), f"{handler_class.__name__}.matches({{}}) returned True for empty input"
