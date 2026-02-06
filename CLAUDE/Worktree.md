@@ -125,7 +125,49 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli status
 
 #### Explicit Path Overrides (Optional)
 
-For additional control, env vars override automatic resolution:
+For additional control, use CLI flags or env vars to override automatic resolution.
+
+**Path Resolution Precedence**: CLI flags > Environment variables > Auto-discovery
+
+##### CLI Flags (Plan 00028)
+
+The most explicit way to control daemon paths is with CLI flags:
+
+```bash
+cd /workspace/untracked/worktrees/worktree-plan-00028
+PYTHON=/workspace/untracked/worktrees/worktree-plan-00028/untracked/venv/bin/python
+
+# Start daemon with explicit paths
+$PYTHON -m claude_code_hooks_daemon.daemon.cli \
+  --pid-file .claude/hooks-daemon/untracked/daemon-wt.pid \
+  --socket .claude/hooks-daemon/untracked/daemon-wt.sock \
+  start
+
+# All commands support these flags
+$PYTHON -m claude_code_hooks_daemon.daemon.cli \
+  --pid-file .claude/hooks-daemon/untracked/daemon-wt.pid \
+  --socket .claude/hooks-daemon/untracked/daemon-wt.sock \
+  status
+
+$PYTHON -m claude_code_hooks_daemon.daemon.cli \
+  --pid-file .claude/hooks-daemon/untracked/daemon-wt.pid \
+  --socket .claude/hooks-daemon/untracked/daemon-wt.sock \
+  stop
+```
+
+**Supported CLI Flags**:
+- `--pid-file PATH`: Explicit PID file path (overrides env vars and auto-discovery)
+- `--socket PATH`: Explicit socket path (overrides env vars and auto-discovery)
+
+**When to use CLI flags**:
+- Testing specific path configurations
+- Debugging daemon isolation issues
+- Temporary path overrides without modifying environment
+- Scripted daemon management with custom paths
+
+##### Environment Variables
+
+Alternatively, use env vars to override automatic resolution:
 
 ```bash
 # Force specific paths (usually not needed - automatic isolation works)
@@ -133,6 +175,8 @@ export CLAUDE_HOOKS_SOCKET_PATH={worktree}/.claude/hooks-daemon/untracked/daemon
 export CLAUDE_HOOKS_PID_PATH={worktree}/.claude/hooks-daemon/untracked/daemon-wt.pid
 export CLAUDE_HOOKS_LOG_PATH={worktree}/.claude/hooks-daemon/untracked/daemon-wt.log
 ```
+
+**Note**: CLI flags take precedence over environment variables if both are specified.
 
 #### Stopping a Worktree Daemon (MANDATORY Before Cleanup)
 
@@ -142,7 +186,15 @@ export CLAUDE_HOOKS_LOG_PATH={worktree}/.claude/hooks-daemon/untracked/daemon-wt
 # ALWAYS stop daemon BEFORE removing worktree
 cd /workspace/untracked/worktrees/worktree-plan-00028
 PYTHON=/workspace/untracked/worktrees/worktree-plan-00028/untracked/venv/bin/python
+
+# Method 1: Auto-discovery (works if cwd is worktree)
 $PYTHON -m claude_code_hooks_daemon.daemon.cli stop
+
+# Method 2: Explicit paths with CLI flags (works from any directory)
+$PYTHON -m claude_code_hooks_daemon.daemon.cli \
+  --pid-file /workspace/untracked/worktrees/worktree-plan-00028/.claude/hooks-daemon/untracked/daemon-*.pid \
+  --socket /workspace/untracked/worktrees/worktree-plan-00028/.claude/hooks-daemon/untracked/daemon-*.sock \
+  stop
 
 # NOW safe to remove worktree
 cd /workspace
