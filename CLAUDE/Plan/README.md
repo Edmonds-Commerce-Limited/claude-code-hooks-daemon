@@ -4,57 +4,48 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00031: Lock File Edit Blocker](00031-lock-file-edit-blocker/PLAN.md) - 🟡 Not Started
-  - Block direct editing of package manager lock files (Write/Edit tools)
-  - Protect 14 lock file types across 8 ecosystems (PHP, JS, Python, Ruby, Rust, Go, .NET, Swift)
-  - Safety handler (priority 10, terminal=true)
+- [00031: Lock File Edit Blocker](Completed/00031-lock-file-edit-blocker/PLAN.md) - 🔴 INCOMPLETE (0% done)
+  - **STATUS**: Plan document written, ZERO implementation exists
+  - **MISSING**: Handler file, tests, config registration - nothing was implemented
+  - **GitHub Issue**: #19 (REOPENED)
   - **Priority**: High (data corruption prevention)
-  - **GitHub Issue**: #19
-  - **Owner**: To be assigned
 
-- [003: Claude Code Planning Mode → Project Workflow Integration](003-planning-mode-project-integration/PLAN.md) - 🟡 Not Started
-  - Intercept planning mode writes and redirect to project structure
-  - Auto-number plans with 5-digit padding (00001, 00002, etc.)
-  - Inject workflow guidance from PlanWorkflow.md
-  - Fix critical test coverage gaps in markdown_organization handler
-  - Add integration tests for config-based handler loading
-  - **Priority**: High
-  - **Owner**: AI Agent
-
-
-
-
-- [00021: Language-Specific Hook Handlers](00021-language-specific-handlers/PLAN.md) - 🟡 Not Started
-  - Implement LanguageConfig-based architecture for multi-language support
-  - Refactor QA suppression and TDD handlers to eliminate DRY violations
+- [00021: Language-Specific Handlers](Completed/00021-language-specific-handlers/PLAN.md) - 🟡 INCOMPLETE (15-20% done)
+  - **STATUS**: LanguageConfig dataclass created but is DEAD CODE (never imported/used)
+  - **MISSING**: The actual goal - eliminate DRY violations in QA suppression handlers
+  - QA suppression handlers still have hardcoded patterns (DRY violations remain)
+  - No QaSuppressionBlockerBase or TddEnforcementBase (referenced but never created)
+  - **GitHub Issue**: #12 (OPEN - partial progress only)
   - **Priority**: Medium (architecture)
-  - **GitHub Issue**: #12
-  - **Owner**: To be assigned
 
-
-- [00028: Daemon CLI Explicit Paths for Worktree Isolation](00028-daemon-cli-explicit-paths/PLAN.md) - 🟡 Not Started
-  - Add `--pid-file` and `--socket` CLI flags to all daemon commands
-  - Fix worktree daemon cross-kill by allowing explicit path overrides
-  - Maintain backward compatibility (flags are optional)
-  - **Priority**: High (bug fix / infrastructure)
-  - **Owner**: To be assigned
-
-- [00029: Fix Markdown Handler to Allow Memory Writes](00029-fix-markdown-handler-memory/PLAN.md) - 🟡 Not Started
-  - Fix markdown_organization handler blocking writes outside project root
-  - Allow Claude Code auto memory writes to `/root/.claude/projects/` paths
-  - Scope handler to only enforce rules for files WITHIN the project
-  - **Priority**: High (bug fix)
-  - **Owner**: To be assigned
-
-- [00030: Agent Team Workflow Documentation](00030-agent-team-documentation/PLAN.md) - 🟡 Not Started
-  - Create `CLAUDE/AgentTeam.md` with project-specific agent team guidance
-  - Document lessons learned from Wave 1 POC execution
-  - Capture daemon isolation, agent autonomy, and merge protocol
-  - Cross-reference Worktree.md throughout
-  - **Priority**: High (documentation)
-  - **Owner**: To be assigned
+- [003: Planning Mode Integration](Completed/003-planning-mode-project-integration/PLAN.md) - 🟡 INCOMPLETE (25-30% done)
+  - **STATUS**: Added integration tests (14 tests) and plan number scanner
+  - **MISSING**: 6 of 8 phases incomplete (design, documentation, full QA validation)
+  - Core planning mode code pre-existed this plan
+  - **Priority**: Medium (testing improvement)
 
 ## Completed Plans
+
+- [00030: Agent Team Workflow Documentation](Completed/00030-agent-team-documentation/PLAN.md) - 🟢 Complete (2026-02-06)
+  - Created comprehensive CLAUDE/AgentTeam.md (752 lines)
+  - Documented worktree isolation, daemon management, and merge protocol
+  - Captured lessons from Wave 1 parallel execution POC
+  - Cross-referenced Worktree.md throughout for complete workflow
+  - **Completed**: 2026-02-06
+
+- [00029: Fix Markdown Handler to Allow Memory Writes](Completed/00029-fix-markdown-handler-memory/PLAN.md) - 🟢 Complete (2026-02-06)
+  - Fixed markdown_organization handler blocking Claude Code auto memory
+  - Scoped enforcement to project-relative paths only
+  - Allows writes to `/root/.claude/projects/` (outside project root)
+  - Added comprehensive tests for path scoping logic
+  - **Completed**: 2026-02-06
+
+- [00028: Daemon CLI Explicit Paths for Worktree Isolation](Completed/00028-daemon-cli-explicit-paths/PLAN.md) - 🟢 Complete (2026-02-06)
+  - Added --pid-file and --socket CLI flags to all daemon commands
+  - Fixes worktree daemon cross-kill issue with explicit path overrides
+  - Maintains backward compatibility (flags are optional)
+  - Enables safe multi-daemon worktree workflows
+  - **Completed**: 2026-02-06
 
 - [00025: Programmatic Acceptance Testing System](Completed/00025-programmatic-acceptance-tests/PLAN.md) - 🟢 Complete (2026-02-06)
   - Created AcceptanceTest dataclass with validation
@@ -215,10 +206,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans**: 28
-- **Active**: 5
-- **Completed**: 23
-- **Success Rate**: 100% (23/23 completed successfully)
+- **Total Plans**: 29
+- **Active**: 3 (1 not started, 2 partially complete)
+- **Completed**: 26
+- **Success Rate**: 90% (26/29 completed successfully, 3 incomplete)
 
 ## Quick Links
 
