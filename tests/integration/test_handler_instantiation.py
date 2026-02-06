@@ -102,6 +102,12 @@ def test_handler_matches_returns_bool(
     """Every handler's matches() returns a boolean, not None or exception.
 
     Uses an empty hook_input to verify basic type safety.
+
+    Note: Some handlers are "always-match" handlers that run on every event
+    of their type (status_line, notification, session events, etc.). These
+    legitimately return True for empty input. Only handlers for events with
+    variable content (pre_tool_use, post_tool_use, permission_request) should
+    return False for empty input.
     """
     module = importlib.import_module(module_path)
 
@@ -111,13 +117,26 @@ def test_handler_matches_returns_bool(
         if issubclass(obj, Handler) and obj is not Handler and obj.__module__ == module_path
     ]
 
+    # Event types that require specific input to match
+    # (as opposed to always-match event types like status_line, notification, etc.)
+    CONDITIONAL_EVENT_TYPES = {"pre_tool_use", "post_tool_use", "permission_request"}
+
     for handler_class in handler_classes:
         handler = handler_class()
-        # Empty input should not match any handler (and should not crash)
+        # Empty input should not crash
         result = handler.matches({})
+
+        # Verify matches() returns a bool (not None, not exception)
         assert isinstance(
             result, bool
         ), f"{handler_class.__name__}.matches({{}}) returned {type(result)}, expected bool"
-        assert (
-            result is False
-        ), f"{handler_class.__name__}.matches({{}}) returned True for empty input"
+
+        # Extract event type from display_name (format: "event_type/handler_name")
+        event_type = display_name.split("/")[0]
+
+        # Only conditional event types should return False for empty input
+        # Always-match handlers (status_line, notification, session events, etc.) can return True
+        if event_type in CONDITIONAL_EVENT_TYPES:
+            assert (
+                result is False
+            ), f"{handler_class.__name__}.matches({{}}) returned True for empty input (expected False for {event_type} handlers)"
