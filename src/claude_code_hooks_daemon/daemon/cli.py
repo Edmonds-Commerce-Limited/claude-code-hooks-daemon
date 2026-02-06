@@ -205,6 +205,40 @@ def send_daemon_request(
         return None
 
 
+def _resolve_pid_path(args: argparse.Namespace, project_path: Path) -> Path:
+    """Resolve PID file path with CLI flag override support.
+
+    Precedence: CLI flag > auto-discovery (env vars honored by get_pid_path).
+
+    Args:
+        args: Parsed command-line arguments
+        project_path: Project root directory
+
+    Returns:
+        Resolved PID file path
+    """
+    if hasattr(args, "pid_file") and args.pid_file is not None:
+        return Path(args.pid_file)
+    return get_pid_path(project_path)
+
+
+def _resolve_socket_path(args: argparse.Namespace, project_path: Path) -> Path:
+    """Resolve socket path with CLI flag override support.
+
+    Precedence: CLI flag > auto-discovery (env vars honored by get_socket_path).
+
+    Args:
+        args: Parsed command-line arguments
+        project_path: Project root directory
+
+    Returns:
+        Resolved socket path
+    """
+    if hasattr(args, "socket") and args.socket is not None:
+        return Path(args.socket)
+    return get_socket_path(project_path)
+
+
 def cmd_start(args: argparse.Namespace) -> int:
     """Start daemon in background.
 
@@ -215,8 +249,8 @@ def cmd_start(args: argparse.Namespace) -> int:
         0 if daemon started successfully, 1 otherwise
     """
     project_path = get_project_path(getattr(args, "project_root", None))
-    socket_path = get_socket_path(project_path)
-    pid_path = get_pid_path(project_path)
+    socket_path = _resolve_socket_path(args, project_path)
+    pid_path = _resolve_pid_path(args, project_path)
 
     # Check if already running
     pid = read_pid_file(str(pid_path))
@@ -333,8 +367,8 @@ def cmd_stop(args: argparse.Namespace) -> int:
         0 if daemon stopped successfully, 1 otherwise
     """
     project_path = get_project_path(getattr(args, "project_root", None))
-    pid_path = get_pid_path(project_path)
-    socket_path = get_socket_path(project_path)
+    pid_path = _resolve_pid_path(args, project_path)
+    socket_path = _resolve_socket_path(args, project_path)
 
     # Read PID
     pid = read_pid_file(str(pid_path))
@@ -397,8 +431,8 @@ def cmd_status(args: argparse.Namespace) -> int:
         0 if daemon is running, 1 otherwise
     """
     project_path = get_project_path(getattr(args, "project_root", None))
-    pid_path = get_pid_path(project_path)
-    socket_path = get_socket_path(project_path)
+    pid_path = _resolve_pid_path(args, project_path)
+    socket_path = _resolve_socket_path(args, project_path)
 
     # Read PID
     pid = read_pid_file(str(pid_path))
@@ -434,8 +468,8 @@ def cmd_logs(args: argparse.Namespace) -> int:
         0 if successful, 1 otherwise
     """
     project_path = get_project_path(getattr(args, "project_root", None))
-    socket_path = get_socket_path(project_path)
-    pid_path = get_pid_path(project_path)
+    socket_path = _resolve_socket_path(args, project_path)
+    pid_path = _resolve_pid_path(args, project_path)
 
     # Check if daemon is running
     pid = read_pid_file(str(pid_path))
@@ -521,8 +555,8 @@ def cmd_health(args: argparse.Namespace) -> int:
         0 if healthy, 1 otherwise
     """
     project_path = get_project_path(getattr(args, "project_root", None))
-    socket_path = get_socket_path(project_path)
-    pid_path = get_pid_path(project_path)
+    socket_path = _resolve_socket_path(args, project_path)
+    pid_path = _resolve_pid_path(args, project_path)
 
     # Check if daemon is running
     pid = read_pid_file(str(pid_path))
@@ -573,8 +607,8 @@ def cmd_handlers(args: argparse.Namespace) -> int:
         0 if successful, 1 otherwise
     """
     project_path = get_project_path(getattr(args, "project_root", None))
-    socket_path = get_socket_path(project_path)
-    pid_path = get_pid_path(project_path)
+    socket_path = _resolve_socket_path(args, project_path)
+    pid_path = _resolve_pid_path(args, project_path)
 
     # Check if daemon is running
     pid = read_pid_file(str(pid_path))
@@ -724,8 +758,7 @@ def cmd_repair(args: argparse.Namespace) -> int:
     print("Repairing venv...")
 
     # Stop daemon first if running
-    get_socket_path(project_root)
-    pid_path = get_pid_path(project_root)
+    pid_path = _resolve_pid_path(args, project_root)
     pid = read_pid_file(str(pid_path))
     if pid is not None:
         print("Stopping running daemon first...")
@@ -914,6 +947,16 @@ def main() -> int:
         "--project-root",
         type=Path,
         help="Override project root path (auto-detected by default)",
+    )
+    parser.add_argument(
+        "--pid-file",
+        type=Path,
+        help="Explicit PID file path (overrides auto-discovery)",
+    )
+    parser.add_argument(
+        "--socket",
+        type=Path,
+        help="Explicit socket path (overrides auto-discovery)",
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
