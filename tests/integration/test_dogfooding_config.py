@@ -130,6 +130,14 @@ class TestDogfoodingConfiguration:
         config = load_project_config()
         handlers_config = config.get("handlers", {})
 
+        # Opt-in handlers that are intentionally disabled by default.
+        # These handlers change fundamental behavior and must be explicitly enabled.
+        opt_in_handlers = frozenset(
+            {
+                "orchestrator_only",  # Blocks all work tools, opt-in only
+            }
+        )
+
         # Track missing handlers
         missing_handlers: dict[str, list[str]] = {}
 
@@ -141,10 +149,12 @@ class TestDogfoodingConfiguration:
                 event_config = {}
 
             for handler_class in handler_classes:
-                # DOGFOODING: No exclusions - ALL handlers must be enabled
-
                 # Convert handler class name to expected config key
                 expected_config_key = class_name_to_snake_case(handler_class)
+
+                # Skip opt-in handlers (intentionally disabled by default)
+                if expected_config_key in opt_in_handlers:
+                    continue
 
                 # Check if handler exists in config and is enabled
                 if expected_config_key in event_config:
