@@ -71,6 +71,28 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - **Priority**: Medium (workflow improvement)
   - **Owner**: To be assigned
 
+- [00028: Daemon CLI Explicit Paths for Worktree Isolation](00028-daemon-cli-explicit-paths/PLAN.md) - 🟡 Not Started
+  - Add `--pid-file` and `--socket` CLI flags to all daemon commands
+  - Fix worktree daemon cross-kill by allowing explicit path overrides
+  - Maintain backward compatibility (flags are optional)
+  - **Priority**: High (bug fix / infrastructure)
+  - **Owner**: To be assigned
+
+- [00029: Fix Markdown Handler to Allow Memory Writes](00029-fix-markdown-handler-memory/PLAN.md) - 🟡 Not Started
+  - Fix markdown_organization handler blocking writes outside project root
+  - Allow Claude Code auto memory writes to `/root/.claude/projects/` paths
+  - Scope handler to only enforce rules for files WITHIN the project
+  - **Priority**: High (bug fix)
+  - **Owner**: To be assigned
+
+- [00030: Agent Team Workflow Documentation](00030-agent-team-documentation/PLAN.md) - 🟡 Not Started
+  - Create `CLAUDE/AgentTeam.md` with project-specific agent team guidance
+  - Document lessons learned from Wave 1 POC execution
+  - Capture daemon isolation, agent autonomy, and merge protocol
+  - Cross-reference Worktree.md throughout
+  - **Priority**: High (documentation)
+  - **Owner**: To be assigned
+
 ## Completed Plans
 
 - [00014: Eliminate CWD, Implement Calculated Constants](Completed/00014-eliminate-cwd-calculated-constants/PLAN.md) - 🟢 Complete (2026-02-06)
@@ -191,8 +213,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans**: 20
-- **Active**: 7
+- **Total Plans**: 27
+- **Active**: 11
 - **Completed**: 16
 - **Success Rate**: 100% (16/16 completed successfully)
 
