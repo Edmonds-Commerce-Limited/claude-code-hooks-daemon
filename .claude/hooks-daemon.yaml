@@ -49,6 +49,10 @@ handlers:
       enabled: true
       priority: 10
 
+    lock_file_edit_blocker: # Blocks direct editing of package manager lock files
+      enabled: true
+      priority: 10
+
     absolute_path:         # Enforces absolute paths in file operations
       enabled: true
       priority: 12

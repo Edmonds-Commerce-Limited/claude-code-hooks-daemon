@@ -133,6 +133,11 @@ class HandlerID:
         config_key="sudo_pip",
         display_name="block-sudo-pip",
     )
+    LOCK_FILE_EDIT_BLOCKER = HandlerIDMeta(
+        class_name="LockFileEditBlockerHandler",
+        config_key="lock_file_edit_blocker",
+        display_name="lock-file-edit-blocker",
+    )
     CURL_PIPE_SHELL = HandlerIDMeta(
         class_name="CurlPipeShellHandler",
         config_key="curl_pipe_shell",
