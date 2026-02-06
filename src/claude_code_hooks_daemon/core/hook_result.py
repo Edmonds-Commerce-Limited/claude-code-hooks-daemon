@@ -443,3 +443,45 @@ class HookResult(BaseModel):
             reason="HOOKS DAEMON ERROR - Proceeding without protection",
             context=context_lines,
         )
+
+    @classmethod
+    def configuration_error(cls, errors: list[str]) -> "HookResult":
+        """Create a configuration error result for degraded mode.
+
+        Fail-open: Returns allow decision but includes warning context about
+        invalid configuration. Used when daemon starts with invalid config
+        and enters degraded mode.
+
+        Args:
+            errors: List of configuration validation error messages
+
+        Returns:
+            HookResult with allow decision and configuration error context
+        """
+        context_lines = [
+            "WARNING: DEGRADED MODE - Hooks daemon configuration is invalid.",
+            "The daemon is running but handlers may not be configured correctly.",
+            "",
+        ]
+
+        if errors:
+            context_lines.append(f"CONFIGURATION ERRORS ({len(errors)}):")
+            for error in errors:
+                context_lines.append(f"  - {error}")
+            context_lines.append("")
+
+        context_lines.extend(
+            [
+                "REMEDIATION:",
+                "1. Fix the configuration in .claude/hooks-daemon.yaml",
+                "2. Restart the daemon: python -m claude_code_hooks_daemon.daemon.cli restart",
+                "",
+                "Working in degraded mode - some handlers may not be active.",
+            ]
+        )
+
+        return cls(
+            decision=Decision.ALLOW,
+            reason="HOOKS DAEMON DEGRADED - Configuration invalid",
+            context=context_lines,
+        )
