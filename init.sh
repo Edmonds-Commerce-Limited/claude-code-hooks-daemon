@@ -320,7 +320,13 @@ start_daemon() {
     rm -f "$SOCKET_PATH"
 
     # Start daemon using CLI (proper daemonization)
-    $PYTHON_CMD -m claude_code_hooks_daemon.daemon.cli start \
+    # CRITICAL: Pass --project-root and export env vars so the CLI uses the
+    # same paths we computed above. Without this, the CLI re-discovers the
+    # project from CWD which may find a worktree's .claude/ instead of ours.
+    CLAUDE_HOOKS_SOCKET_PATH="$SOCKET_PATH" \
+    CLAUDE_HOOKS_PID_PATH="$PID_PATH" \
+    $PYTHON_CMD -m claude_code_hooks_daemon.daemon.cli \
+        --project-root "$PROJECT_PATH" start \
         > /dev/null 2>&1
 
     # Wait for socket to be ready (using deciseconds for integer arithmetic)
