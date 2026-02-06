@@ -38,8 +38,8 @@ class TestGhIssueCommentsHandler:
         }
         assert handler.matches(hook_input) is True
 
-    def test_matches_with_json_flag(self, handler: GhIssueCommentsHandler) -> None:
-        """Should match gh issue view with other flags but no --comments."""
+    def test_matches_with_json_flag_without_comments(self, handler: GhIssueCommentsHandler) -> None:
+        """Should match gh issue view with --json but no comments field."""
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "gh issue view 123 --json title,body"},
@@ -79,6 +79,32 @@ class TestGhIssueCommentsHandler:
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "gh issue view 227 --repo owner/repo --comments"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_not_matches_with_json_including_comments(
+        self, handler: GhIssueCommentsHandler
+    ) -> None:
+        """Should NOT match when --json includes comments field."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "gh issue view 19 --json title,body,comments"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_not_matches_with_json_comments_first(self, handler: GhIssueCommentsHandler) -> None:
+        """Should NOT match when --json includes comments field (different order)."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "gh issue view 19 --json comments,title,body"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_not_matches_with_json_piped_to_jq(self, handler: GhIssueCommentsHandler) -> None:
+        """Should NOT match when --json with comments is piped to jq."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "gh issue view 19 --json title,body,comments | jq '.'"},
         }
         assert handler.matches(hook_input) is False
 
@@ -193,6 +219,32 @@ class TestGhIssueCommentsHandler:
         result = handler.handle(hook_input)
         assert result.reason is not None
         assert "context" in result.reason.lower() or "clarification" in result.reason.lower()
+
+    def test_handle_suggests_adding_comments_to_json_fields(
+        self, handler: GhIssueCommentsHandler
+    ) -> None:
+        """Should suggest adding 'comments' to --json fields rather than appending --comments."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "gh issue view 19 --json title,body"},
+        }
+        result = handler.handle(hook_input)
+        expected_suggestion = "gh issue view 19 --json title,body,comments"
+        assert result.reason is not None
+        assert expected_suggestion in result.reason
+
+    def test_handle_suggests_adding_comments_to_json_with_pipe(
+        self, handler: GhIssueCommentsHandler
+    ) -> None:
+        """Should suggest adding 'comments' to --json fields even when piped."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "gh issue view 19 --json title,body | jq '.'"},
+        }
+        result = handler.handle(hook_input)
+        expected_suggestion = "gh issue view 19 --json title,body,comments | jq '.'"
+        assert result.reason is not None
+        assert expected_suggestion in result.reason
 
     def test_handle_allows_when_no_command(self, handler: GhIssueCommentsHandler) -> None:
         """Should return ALLOW if somehow handle is called with no command."""

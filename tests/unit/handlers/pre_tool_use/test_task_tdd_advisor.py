@@ -374,6 +374,4 @@ class TestTaskTddAdvisorHandler:
                     "description": "Test",
                 },
             }
-            assert (
-                handler.matches(hook_input) is False
-            ), f"Should NOT match keyword: {keyword}"
+            assert handler.matches(hook_input) is False, f"Should NOT match keyword: {keyword}"

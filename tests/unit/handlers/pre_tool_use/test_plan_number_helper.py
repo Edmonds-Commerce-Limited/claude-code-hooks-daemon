@@ -105,6 +105,8 @@ class TestPlanNumberHelperHandler:
             "ls CLAUDE/Plan/ | grep '^[0-9]'",
             "ls -la CLAUDE/Plan | grep -E '^d[0-9]'",
             "ls CLAUDE/Plan | grep '[0-9]'",
+            # Bug: This command was NOT blocked but should have been
+            "ls -la /workspace/CLAUDE/Plan/ | grep -E '^d' | grep -E '[0-9]{3}-'",
         ]
 
         for command in commands:

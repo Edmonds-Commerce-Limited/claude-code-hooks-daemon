@@ -41,8 +41,23 @@ class GhIssueCommentsHandler(Handler):
         if not self._gh_issue_view_pattern.search(command):
             return False
 
-        # Already has --comments? Allow it through
-        return "--comments" not in command
+        # Already has --comments flag? Allow it through
+        if "--comments" in command:
+            return False
+
+        # Using --json with comments field? That's equivalent to --comments
+        if "--json" in command:
+            # Extract the fields after --json
+            # Pattern: --json <fields> where fields might be quoted or unquoted
+            json_match = re.search(r"--json\s+([^\s|]+)", command)
+            if json_match:
+                fields = json_match.group(1)
+                # Check if 'comments' is one of the comma-separated fields
+                if re.search(r"\bcomments\b", fields):
+                    return False
+
+        # No --comments flag and no --json with comments field
+        return True
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Block and suggest adding --comments flag."""
@@ -50,8 +65,20 @@ class GhIssueCommentsHandler(Handler):
         if not command:
             return HookResult(decision=Decision.ALLOW)
 
-        # Suggest the corrected command
-        suggested_command = f"{command} --comments"
+        # Check if using --json format
+        if "--json" in command:
+            # Suggest adding 'comments' to the JSON fields
+            json_match = re.search(r"(--json\s+)([^\s|]+)", command)
+            if json_match:
+                prefix = json_match.group(1)
+                fields = json_match.group(2)
+                new_fields = f"{fields},comments"
+                suggested_command = command.replace(f"{prefix}{fields}", f"{prefix}{new_fields}", 1)
+            else:
+                suggested_command = f"{command} --comments"
+        else:
+            # Regular command - add --comments flag
+            suggested_command = f"{command} --comments"
 
         return HookResult(
             decision=Decision.DENY,

@@ -324,6 +324,29 @@ When new work is identified:
 4. Mark plan status as Complete
 5. Add completion date to plan
 6. Document any lessons learned
+7. **Follow the Plan Completion Checklist below**
+
+### Plan Completion Checklist
+
+When a plan is complete, follow these steps to properly close it out. Skipping steps leads to stale plan indexes and orphaned folders.
+
+1. **Update PLAN.md status**: Change `**Status**:` to `Complete (YYYY-MM-DD)` with the actual completion date
+2. **Mark all tasks**: Change `- [ ]` to `- [x]` for all completed tasks in the plan
+3. **Move to Completed folder**: Relocate the plan directory into the archive
+   ```bash
+   git mv CLAUDE/Plan/NNNNN-description CLAUDE/Plan/Completed/NNNNN-description
+   ```
+4. **Update README.md**: Edit `CLAUDE/Plan/README.md` with all of the following changes:
+   - Remove the plan entry from the "Active Plans" section
+   - Add the plan to the "Completed Plans" section with a brief summary
+   - Update plan statistics (Total, Active count, Completed count, Success Rate)
+5. **Unblock dependent plans**: Check if any other plans had `Blocked by: Plan NNNNN` referencing this plan and remove that blocker so dependent work can proceed
+6. **Commit**: Include all plan-related file changes (PLAN.md, README.md, directory move) in a single commit using the message format:
+   ```
+   Plan NNNNN: Complete - Brief description
+   ```
+
+**Why a single commit?** Atomic plan closure ensures the plan index, archive, and status are always consistent. Splitting across commits risks partial updates if work is interrupted.
 
 ---
 

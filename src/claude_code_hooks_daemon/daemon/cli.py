@@ -876,7 +876,7 @@ def cmd_generate_playbook(args: argparse.Namespace) -> int:
         from claude_code_hooks_daemon.daemon.playbook_generator import PlaybookGenerator
 
         # Convert HandlersConfig to dictionary
-        handlers_dict = config.handlers.model_dump() if config.handlers is not None else {}
+        handlers_dict = config.handlers.model_dump()
 
         generator = PlaybookGenerator(
             config=handlers_dict,

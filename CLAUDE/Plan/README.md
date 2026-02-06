@@ -63,6 +63,14 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - **Priority**: Critical (QA/reliability)
   - **Owner**: To be assigned
 
+- [00027: Plan Completion Move Advisor](00027-plan-completion-move-advisor/PLAN.md) - 🟡 Not Started
+  - Detect when PLAN.md is edited to mark status as Complete
+  - Advisory reminder to `git mv` plan folder to `CLAUDE/Plan/Completed/`
+  - Remind to update `CLAUDE/Plan/README.md` and plan statistics
+  - Non-blocking (terminal=False), priority 50
+  - **Priority**: Medium (workflow improvement)
+  - **Owner**: To be assigned
+
 ## Completed Plans
 
 - [00014: Eliminate CWD, Implement Calculated Constants](Completed/00014-eliminate-cwd-calculated-constants/PLAN.md) - 🟢 Complete (2026-02-06)
@@ -183,8 +191,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans**: 19
-- **Active**: 6
+- **Total Plans**: 20
+- **Active**: 7
 - **Completed**: 16
 - **Success Rate**: 100% (16/16 completed successfully)
 
