@@ -28,15 +28,21 @@ class TestPythonQaSuppressionBlocker:
         """Handler should be terminal (default)."""
         assert handler.terminal is True
 
-    def test_forbidden_patterns_defined(self, handler):
-        """Handler should define forbidden patterns."""
-        assert hasattr(handler, "FORBIDDEN_PATTERNS")
-        assert len(handler.FORBIDDEN_PATTERNS) == 5
+    def test_uses_python_config_patterns(self, handler):
+        """Handler should use PYTHON_CONFIG forbidden patterns."""
+        from claude_code_hooks_daemon.core.language_config import PYTHON_CONFIG
 
-    def test_check_extensions_defined(self, handler):
-        """Handler should define check extensions."""
-        assert hasattr(handler, "CHECK_EXTENSIONS")
-        assert ".py" in handler.CHECK_EXTENSIONS
+        # Verify handler uses config patterns (not hardcoded)
+        assert len(PYTHON_CONFIG.qa_forbidden_patterns) == 5
+        assert r"#\s*type:\s*ignore" in PYTHON_CONFIG.qa_forbidden_patterns
+        assert r"#\s*noqa" in PYTHON_CONFIG.qa_forbidden_patterns
+
+    def test_uses_python_config_extensions(self, handler):
+        """Handler should use PYTHON_CONFIG extensions."""
+        from claude_code_hooks_daemon.core.language_config import PYTHON_CONFIG
+
+        # Verify handler uses config extensions (not hardcoded)
+        assert ".py" in PYTHON_CONFIG.extensions
 
     # matches() - Positive Cases: type: ignore pattern
     def test_matches_type_ignore_in_write(self, handler):
