@@ -363,9 +363,12 @@ class TestConfigValidator:
             "version": "1.0",
             "daemon": {"idle_timeout_seconds": 600, "log_level": "INFO"},
             "handlers": {"pre_tool_use": {}},
-            "plugins": [
-                {"path": ".claude/hooks/custom", "handlers": ["custom_one"]},
-            ],
+            "plugins": {
+                "paths": [],
+                "plugins": [
+                    {"path": ".claude/hooks/custom", "handlers": ["custom_one"]},
+                ],
+            },
         }
 
         errors = ConfigValidator.validate(config, validate_handler_names=False)

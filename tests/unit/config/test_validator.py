@@ -426,10 +426,13 @@ class TestValidatePlugins:
     def test_valid_plugins_section(self) -> None:
         """Valid plugins section should pass validation."""
         config = {
-            "plugins": [
-                {"path": "/path/to/plugin.py"},
-                {"path": "/another/plugin.py"},
-            ]
+            "plugins": {
+                "paths": ["/path/to/plugins"],
+                "plugins": [
+                    {"path": "/path/to/plugin.py"},
+                    {"path": "/another/plugin.py"},
+                ],
+            }
         }
         errors = ConfigValidator._validate_plugins(config)
         assert errors == []
@@ -442,37 +445,47 @@ class TestValidatePlugins:
 
     def test_plugins_wrong_type(self) -> None:
         """Plugins section with wrong type should return error."""
-        config = {"plugins": {}}
+        config = {"plugins": "not a dict"}
         errors = ConfigValidator._validate_plugins(config)
         assert len(errors) == 1
         assert "plugins" in errors[0]
+        assert "must be dictionary" in errors[0]
+        assert "str" in errors[0]
+
+    def test_plugins_paths_wrong_type(self) -> None:
+        """Plugins paths with wrong type should return error."""
+        config = {"plugins": {"paths": "not a list"}}
+        errors = ConfigValidator._validate_plugins(config)
+        assert len(errors) == 1
+        assert "plugins.paths" in errors[0]
         assert "must be list" in errors[0]
-        assert "dict" in errors[0]
 
     def test_plugin_wrong_type(self) -> None:
         """Plugin entry with wrong type should return error."""
-        config = {"plugins": ["not a dict"]}
+        config = {"plugins": {"plugins": ["not a dict"]}}
         errors = ConfigValidator._validate_plugins(config)
         assert len(errors) == 1
-        assert "plugins[0]" in errors[0]
+        assert "plugins.plugins[0]" in errors[0]
         assert "must be dictionary" in errors[0]
         assert "str" in errors[0]
 
     def test_plugin_missing_path(self) -> None:
         """Plugin without path should return error."""
-        config = {"plugins": [{"name": "my-plugin"}]}
+        config = {"plugins": {"plugins": [{"name": "my-plugin"}]}}
         errors = ConfigValidator._validate_plugins(config)
         assert len(errors) == 1
-        assert "Missing required field: plugins[0].path" in errors[0]
+        assert "Missing required field: plugins.plugins[0].path" in errors[0]
 
     def test_multiple_plugin_errors(self) -> None:
         """Multiple plugin errors should return all errors."""
         config = {
-            "plugins": [
-                {},
-                {"path": "/valid/path"},
-                "not a dict",
-            ]
+            "plugins": {
+                "plugins": [
+                    {},
+                    {"path": "/valid/path"},
+                    "not a dict",
+                ],
+            }
         }
         errors = ConfigValidator._validate_plugins(config)
         assert len(errors) == 2
@@ -507,7 +520,7 @@ class TestValidate:
                 "log_level": "INFO",
             },
             "handlers": {},
-            "plugins": [{"path": "/path/to/plugin.py"}],
+            "plugins": {"paths": [], "plugins": [{"path": "/path/to/plugin.py"}]},
         }
         errors = ConfigValidator.validate(config, validate_handler_names=False)
         assert errors == []
@@ -658,9 +671,15 @@ class TestEdgeCases:
         errors = ConfigValidator._validate_handlers(config, validate_handler_names=False)
         assert errors == []
 
-    def test_empty_plugins_list(self) -> None:
-        """Empty plugins list should be valid."""
-        config = {"plugins": []}
+    def test_empty_plugins_section(self) -> None:
+        """Empty plugins section should be valid."""
+        config = {"plugins": {"paths": [], "plugins": []}}
+        errors = ConfigValidator._validate_plugins(config)
+        assert errors == []
+
+    def test_plugins_dict_with_no_subkeys(self) -> None:
+        """Plugins dict with no subkeys should be valid (defaults apply)."""
+        config = {"plugins": {}}
         errors = ConfigValidator._validate_plugins(config)
         assert errors == []
 

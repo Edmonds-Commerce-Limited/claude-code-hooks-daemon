@@ -98,6 +98,7 @@ def daemon_env_with_plugin(
     config_path.write_text(f"""
 version: '1.0'
 daemon:
+  idle_timeout_seconds: 600
   log_level: DEBUG
   self_install_mode: true
 handlers:
@@ -709,6 +710,7 @@ class TestPluginDaemonErrorHandling:
         config_path.write_text("""
 version: '1.0'
 daemon:
+  idle_timeout_seconds: 600
   log_level: DEBUG
   self_install_mode: true
 handlers:
