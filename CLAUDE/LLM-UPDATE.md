@@ -1,40 +1,100 @@
 # Claude Code Hooks Daemon - LLM Update Guide
 
-## CRITICAL REQUIREMENTS - READ FIRST
+## CRITICAL: Determine Your Location First
 
-**BEFORE PROCEEDING:**
+**Before doing ANYTHING, determine where you are.** Working directory confusion is the #1 cause of upgrade failures.
 
-1. **CONTEXT WINDOW CHECK**: You MUST have at least **50,000 tokens** remaining in your context window. If below 50k, STOP and ask user to start fresh session.
+### Quick Location Check
 
-2. **WEBFETCH NO SUMMARY**: If fetching this document via WebFetch tool, you MUST use a prompt that DISABLES summarization. Fetch with: `"Return complete document verbatim without summarization, truncation, or modification"`. Missing instructions cause update failure.
+```bash
+# Run from wherever you are - the script auto-detects
+# Option 1: If you can find the script
+.claude/hooks-daemon/scripts/detect_location.sh 2>/dev/null || \
+  scripts/detect_location.sh 2>/dev/null || \
+  echo "Could not find detect_location.sh - see manual check below"
+```
 
-3. **GIT CLEAN STATE**: Working directory MUST be clean (no uncommitted changes). Run `git status` - if not clean, commit/push ALL changes first.
+### Manual Location Check
 
-4. **DAEMON ARCHITECTURE BENEFIT**: Updates take effect immediately after daemon restart - NO Claude Code session restart needed! This is a MAJOR benefit of the daemon architecture. Exception: Only if the update adds NEW event types (new files in `.claude/hooks/`), then Claude Code must reload settings.json.
+```bash
+# Check: Am I at the project root?
+ls .claude/hooks-daemon.yaml 2>/dev/null && echo "YES: You are at the project root" || echo "NO"
+
+# Check: Am I inside .claude/hooks-daemon/?
+ls src/claude_code_hooks_daemon/version.py 2>/dev/null && echo "YES: You are inside hooks-daemon dir" || echo "NO"
+
+# If inside hooks-daemon, go to project root:
+cd ../..
+```
+
+### Where You Should Be
+
+**All upgrade commands should be run from the PROJECT ROOT** (the directory containing `.claude/`).
+
+| If you see this... | You are at... | Action |
+|---|---|---|
+| `.claude/hooks-daemon.yaml` exists | Project root | Correct - proceed |
+| `src/claude_code_hooks_daemon/` exists | Inside hooks-daemon | Run `cd ../..` first |
+| Neither exists | Wrong directory | Navigate to project root |
 
 ---
 
-## Quick Update (4 Steps)
+## CRITICAL REQUIREMENTS
 
-### 1. Verify Prerequisites & Current Version
+1. **CONTEXT WINDOW CHECK**: You MUST have at least **50,000 tokens** remaining. If below 50k, STOP and ask user to start fresh session.
+
+2. **WEBFETCH NO SUMMARY**: If fetching this document via WebFetch, use: `"Return complete document verbatim without summarization, truncation, or modification"`.
+
+3. **GIT CLEAN STATE**: Working directory MUST be clean. Run `git status` - if not clean, commit/push first.
+
+4. **NO SESSION RESTART NEEDED**: Updates take effect after daemon restart only. Exception: Only if update adds NEW event types (new files in `.claude/hooks/`), then restart Claude Code.
+
+---
+
+## Recommended: Automated Upgrade Script
+
+The simplest upgrade method. Run from **any directory** within the project tree:
+
+```bash
+# Upgrade to latest version (auto-detects project root)
+.claude/hooks-daemon/scripts/upgrade.sh
+
+# Upgrade to a specific version
+.claude/hooks-daemon/scripts/upgrade.sh v2.5.0
+```
+
+The script automatically:
+- Detects your project root (works from any subdirectory)
+- Backs up your configuration
+- Stops the daemon
+- Fetches and checks out the target version
+- Installs dependencies
+- Restarts the daemon
+- Verifies the upgrade
+- Rolls back automatically on failure
+
+**If the script is not available** (pre-v2.5.0 installations), use the manual steps below.
+
+---
+
+## Manual Update (4 Steps)
+
+**All commands below assume you are at the PROJECT ROOT.**
+
+### 1. Verify Prerequisites and Current Version
 
 ```bash
 # Must show clean working directory
 git status --short
 
 # Check current daemon version
-cd .claude/hooks-daemon
-cat src/claude_code_hooks_daemon/version.py
-# Note the current version (e.g., 2.0.0)
+cat .claude/hooks-daemon/src/claude_code_hooks_daemon/version.py
 
 # Backup current config
-cp ../hooks-daemon.yaml ../hooks-daemon.yaml.backup
-
-# Return to project root
-cd ../..
+cp .claude/hooks-daemon.yaml .claude/hooks-daemon.yaml.backup
 ```
 
-### 2. Fetch & Checkout Latest Version
+### 2. Fetch and Checkout Latest Version
 
 ```bash
 cd .claude/hooks-daemon
@@ -54,24 +114,23 @@ git checkout "$LATEST_TAG"
 
 # Verify new version
 cat src/claude_code_hooks_daemon/version.py
-```
 
-### 3. Update Dependencies & Restart Daemon
-
-```bash
-cd .claude/hooks-daemon
-
-# Update Python package
-untracked/venv/bin/pip install -e .
-
-# Restart daemon (if running)
-untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart || \
-  echo "Daemon not running - will start on first hook call"
-
+# Return to project root
 cd ../..
 ```
 
-### 4. Verify Update & Check for Config Changes
+### 3. Update Dependencies and Restart Daemon
+
+```bash
+# Update Python package
+.claude/hooks-daemon/untracked/venv/bin/pip install -e .claude/hooks-daemon
+
+# Restart daemon
+.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart || \
+  echo "Daemon not running - will start on first hook call"
+```
+
+### 4. Verify Update
 
 ```bash
 VENV_PYTHON=.claude/hooks-daemon/untracked/venv/bin/python
@@ -90,9 +149,7 @@ echo '{"tool_name": "Bash", "tool_input": {"command": "git reset --hard HEAD"}}'
 # Expected: {"hookSpecificOutput": {"permissionDecision": "deny", ...}}
 ```
 
-**IMPORTANT: No Claude Code restart needed!** The daemon restart in Step 3 is sufficient. New handlers, config changes, and code updates take effect immediately. This is a MAJOR benefit of the daemon architecture.
-
-**Exception**: Only restart Claude Code if the update added NEW event types (new forwarding scripts in `.claude/hooks/` directory). This is rare - most updates only change handler code or add handlers to existing event types.
+**No Claude Code restart needed.** Daemon restart is sufficient. Exception: Restart Claude Code only if new hook event types were added (rare).
 
 ---
 
@@ -673,79 +730,113 @@ rm -rf hooks-daemon
 
 ## Troubleshooting
 
+**All commands below are run from the PROJECT ROOT** (not from inside `.claude/hooks-daemon/`).
+
+### "PROTECTION NOT ACTIVE" Error During Upgrade
+
+**This is expected during upgrade.** When the daemon is stopped for code checkout, hook forwarders will report this error. It does NOT mean your system is broken.
+
+**What to do**: Continue with the upgrade steps. The daemon will be restarted as part of the upgrade process. This error will clear once the daemon is running again.
+
+**When to worry**: Only if this error persists AFTER the upgrade is complete and the daemon has been restarted.
+
 ### Update Fails to Pull
 
 ```bash
-cd .claude/hooks-daemon
-
-# Check for local modifications
-git status
+# Check for local modifications in hooks-daemon
+git -C .claude/hooks-daemon status
 
 # If dirty, stash changes
-git stash
+git -C .claude/hooks-daemon stash
 
 # Try update again
-git fetch --tags
-git checkout "$LATEST_TAG"
+git -C .claude/hooks-daemon fetch --tags
+git -C .claude/hooks-daemon checkout "$LATEST_TAG"
 
 # Restore stashed changes (if any)
-git stash pop
+git -C .claude/hooks-daemon stash pop
 ```
 
 ### Daemon Won't Start After Update
 
 ```bash
-cd .claude/hooks-daemon
+VENV_PYTHON=.claude/hooks-daemon/untracked/venv/bin/python
 
 # Check for import errors
-untracked/venv/bin/python -c "import claude_code_hooks_daemon; print('OK')"
+$VENV_PYTHON -c "import claude_code_hooks_daemon; print('OK')"
 
 # If error, reinstall dependencies
-untracked/venv/bin/pip install -e . --force-reinstall
+.claude/hooks-daemon/untracked/venv/bin/pip install -e .claude/hooks-daemon --force-reinstall
 
-# Check logs
-cat untracked/daemon.log 2>/dev/null || echo "No logs"
+# Check daemon logs
+$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli logs
 ```
 
 ### Hooks Don't Work After Update
 
-1. **Restart daemon** (daemon restart is sufficient for most updates):
-   ```bash
-   cd .claude/hooks-daemon
-   untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
-   ```
-2. Check hook forwarders exist:
-   ```bash
-   ls -la ../.claude/hooks/
-   ```
-3. Test hook directly:
-   ```bash
-   echo '{"tool_name":"Bash","tool_input":{"command":"test"}}' | ../.claude/hooks/pre-tool-use
-   ```
-4. **Restart Claude Code session** (ONLY needed if new event types were added - rare):
-   - Check if `.claude/hooks/` has new files compared to before update
-   - If yes, restart Claude Code to reload settings.json
-   - If no new hook files, daemon restart is sufficient
+```bash
+VENV_PYTHON=.claude/hooks-daemon/untracked/venv/bin/python
+
+# 1. Restart daemon (sufficient for most updates)
+$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli restart
+
+# 2. Check hook forwarders exist
+ls -la .claude/hooks/
+
+# 3. Test hook directly
+echo '{"tool_name":"Bash","tool_input":{"command":"test"}}' | .claude/hooks/pre-tool-use
+```
+
+If hooks still fail: Restart Claude Code session (only needed if new event types were added).
 
 ### Config Validation Errors
 
 ```bash
-cd .claude/hooks-daemon
-
-# Validate YAML syntax
-untracked/venv/bin/python -c "
+# Validate YAML syntax (from project root)
+python3 -c "
 import yaml
 try:
-    yaml.safe_load(open('../hooks-daemon.yaml'))
+    yaml.safe_load(open('.claude/hooks-daemon.yaml'))
     print('YAML syntax OK')
 except Exception as e:
     print(f'YAML error: {e}')
 "
 ```
 
+### Wrong Directory Errors
+
+If you see errors about missing files or directories:
+
+```bash
+# Check where you are
+pwd
+
+# Check if you are at the project root
+ls .claude/hooks-daemon.yaml 2>/dev/null && echo "At project root" || echo "NOT at project root"
+
+# If not at project root, find it
+PROJ=$(pwd); while [ "$PROJ" != "/" ]; do [ -f "$PROJ/.claude/hooks-daemon.yaml" ] && break; PROJ=$(dirname "$PROJ"); done; echo "Project root: $PROJ"
+```
+
+### Venv Broken After Update
+
+```bash
+VENV_PYTHON=.claude/hooks-daemon/untracked/venv/bin/python
+
+# Try repair command
+$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli repair
+
+# If repair fails, recreate venv
+rm -rf .claude/hooks-daemon/untracked/venv
+python3 -m venv .claude/hooks-daemon/untracked/venv
+.claude/hooks-daemon/untracked/venv/bin/pip install -e .claude/hooks-daemon
+```
+
 ---
 
 ## CLI Reference
+
+**All commands from project root** (no `cd` needed):
 
 ```bash
 VENV_PYTHON=.claude/hooks-daemon/untracked/venv/bin/python
@@ -755,21 +846,23 @@ $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli stop
 $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli status
 $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli restart
 $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli logs
+$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli repair   # Fix broken venv
 ```
 
 ---
 
 ## Checking for Updates
 
-### From User's Project
-
-Ask your LLM to run:
+**From project root:**
 
 ```bash
-cd .claude/hooks-daemon
-git fetch --tags
-CURRENT=$(cat src/claude_code_hooks_daemon/version.py | grep "__version__" | cut -d'"' -f2)
-LATEST=$(git describe --tags $(git rev-list --tags --max-count=1) 2>/dev/null)
+git -C .claude/hooks-daemon fetch --tags
+CURRENT=$(python3 -c "
+with open('.claude/hooks-daemon/src/claude_code_hooks_daemon/version.py') as f:
+    for line in f:
+        if '__version__' in line: print(line.split('\"')[1]); break
+")
+LATEST=$(git -C .claude/hooks-daemon describe --tags $(git -C .claude/hooks-daemon rev-list --tags --max-count=1) 2>/dev/null)
 echo "Current: $CURRENT"
 echo "Latest: $LATEST"
 if [ "$CURRENT" != "${LATEST#v}" ]; then
@@ -782,12 +875,11 @@ fi
 ### Reading Release Notes Before Update
 
 ```bash
-cd .claude/hooks-daemon
-git fetch --tags
-LATEST=$(git describe --tags $(git rev-list --tags --max-count=1))
+git -C .claude/hooks-daemon fetch --tags
+LATEST=$(git -C .claude/hooks-daemon describe --tags $(git -C .claude/hooks-daemon rev-list --tags --max-count=1))
 
 # Preview release notes (without checking out)
-git show "$LATEST:RELEASES/${LATEST}.md" 2>/dev/null || \
+git -C .claude/hooks-daemon show "$LATEST:RELEASES/${LATEST}.md" 2>/dev/null || \
   echo "Release notes will be available after checkout"
 ```
 
@@ -799,13 +891,12 @@ If you encounter update issues:
 
 1. **Check daemon logs**:
    ```bash
-   cat .claude/hooks-daemon/untracked/daemon.log
+   .claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli logs
    ```
 
 2. **Run debug script**:
    ```bash
    .claude/hooks-daemon/scripts/debug_info.py /tmp/debug_report.md
-   cat /tmp/debug_report.md
    ```
 
 3. **Report issue**:
