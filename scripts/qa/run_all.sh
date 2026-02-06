@@ -83,6 +83,16 @@ else
 fi
 echo ""
 
+echo "7. Running Dependency Check..."
+echo "----------------------------------------"
+if ! "${SCRIPT_DIR}/run_dependency_check.sh"; then
+    OVERALL_EXIT_CODE=1
+    echo "❌ Dependency check FAILED"
+else
+    echo "✅ Dependency check PASSED"
+fi
+echo ""
+
 # Print overall summary
 echo "========================================"
 echo "QA Summary"
@@ -98,6 +108,7 @@ results = {
     "Type Check": "untracked/qa/type_check.json",
     "Tests": "untracked/qa/tests.json",
     "Security Check": "untracked/qa/security.json",
+    "Dependencies": "untracked/qa/dependencies.json",
 }
 
 all_passed = True

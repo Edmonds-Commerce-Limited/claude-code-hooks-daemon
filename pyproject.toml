@@ -46,6 +46,7 @@ dev = [
     "twine>=4.0",
     "types-PyYAML>=6.0",
     "types-jsonschema>=4.0",
+    "deptry>=0.20",
 ]
 
 [project.scripts]
@@ -216,3 +217,17 @@ skips = [
     "B607",  # Starting process with partial path - intentional for tool execution
     "B108",  # Temp file/directory usage - standard library patterns, safe usage
 ]
+
+[tool.deptry]
+# Exclude non-source directories (regex patterns)
+exclude = [
+    "tests/.*",
+    "scripts/.*",
+    "CLAUDE/.*",
+    "untracked/.*",
+    "\\.claude/.*",
+    "\\.venv/.*",
+]
+# DEP002: dev tools (CLI-only, not imported in code) - false positives
+# DEP003: self-package imports (claude_code_hooks_daemon imports itself) - false positives
+ignore = ["DEP002", "DEP003"]
