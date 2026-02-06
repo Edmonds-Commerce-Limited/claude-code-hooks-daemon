@@ -422,6 +422,11 @@ class ConfigValidator:
     def _validate_plugins(config: dict[str, Any]) -> list[str]:
         """Validate plugins configuration section (optional).
 
+        The plugins section follows the PluginsConfig schema:
+          plugins:
+            paths: list[str]     # Plugin search paths
+            plugins: list[dict]  # Plugin configurations
+
         Args:
             config: Configuration dictionary
 
@@ -435,22 +440,37 @@ class ConfigValidator:
 
         plugins = config[ConfigKey.PLUGINS]
 
-        if not isinstance(plugins, list):
-            errors.append(f"Section 'plugins' must be list, got {type(plugins).__name__}")
+        if not isinstance(plugins, dict):
+            errors.append(f"Section 'plugins' must be dictionary, got {type(plugins).__name__}")
             return errors
 
-        for idx, plugin in enumerate(plugins):
-            plugin_path = f"plugins[{idx}]"
+        # Validate paths (optional, defaults to empty list)
+        if "paths" in plugins:
+            paths = plugins["paths"]
+            if not isinstance(paths, list):
+                errors.append(f"Field 'plugins.paths' must be list, got {type(paths).__name__}")
 
-            if not isinstance(plugin, dict):
+        # Validate plugins list (optional, defaults to empty list)
+        if "plugins" in plugins:
+            plugin_list = plugins["plugins"]
+            if not isinstance(plugin_list, list):
                 errors.append(
-                    f"Plugin at '{plugin_path}' must be dictionary, " f"got {type(plugin).__name__}"
+                    f"Field 'plugins.plugins' must be list, got {type(plugin_list).__name__}"
                 )
-                continue
+            else:
+                for idx, plugin in enumerate(plugin_list):
+                    plugin_path = f"plugins.plugins[{idx}]"
 
-            # Validate required 'path' field
-            if "path" not in plugin:
-                errors.append(f"Missing required field: {plugin_path}.path")
+                    if not isinstance(plugin, dict):
+                        errors.append(
+                            f"Plugin at '{plugin_path}' must be dictionary, "
+                            f"got {type(plugin).__name__}"
+                        )
+                        continue
+
+                    # Validate required 'path' field
+                    if "path" not in plugin:
+                        errors.append(f"Missing required field: {plugin_path}.path")
 
         return errors
 
