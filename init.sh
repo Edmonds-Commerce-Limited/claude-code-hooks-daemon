@@ -43,25 +43,25 @@ emit_hook_error() {
     echo "HOOKS DAEMON ERROR [$error_type]: $error_details" >&2
 
     # Build error context message
+    # NOTE: Language is intentionally measured to avoid triggering investigation loops
+    # in LLM agents. Previous "STOP work immediately" wording caused agents to abandon
+    # tasks and enter analysis cycles instead of simply restarting the daemon.
     local context_msg
-    context_msg=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s' \
-        "⚠️ HOOKS DAEMON ERROR - PROTECTION NOT ACTIVE ⚠️" \
+    context_msg=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s' \
+        "HOOKS DAEMON: Not currently running" \
         "" \
-        "ERROR TYPE: $error_type" \
-        "ERROR DETAILS: $error_details" \
+        "Error: $error_type - $error_details" \
         "" \
-        "🛑 CRITICAL: You MUST stop work immediately." \
+        "Hook safety handlers are inactive until the daemon is restarted." \
+        "If you are in the middle of an upgrade, this is expected and temporary." \
         "" \
-        "The hooks daemon is not functioning. This means:" \
-        "- Destructive git operations are NOT being blocked" \
-        "- Code quality checks are NOT running" \
-        "- Safety guardrails are NOT active" \
+        "TO FIX (usually takes a few seconds):" \
+        "1. Run: python -m claude_code_hooks_daemon.daemon.cli restart" \
+        "2. Verify: python -m claude_code_hooks_daemon.daemon.cli status" \
         "" \
-        "RECOMMENDED ACTIONS:" \
-        "1. STOP all current tasks immediately" \
-        "2. Inform the user that hooks protection is down" \
-        "3. Run: python -m claude_code_hooks_daemon.daemon.cli status" \
-        "4. Restart daemon: python -m claude_code_hooks_daemon.daemon.cli restart")
+        "If restart fails, check logs:" \
+        "  python -m claude_code_hooks_daemon.daemon.cli logs" \
+        "Then inform the user if the issue persists.")
 
     # Event-specific JSON formatting using jq (already a dependency)
     # Stop/SubagentStop: top-level decision only (deny to show error)
@@ -394,23 +394,20 @@ def emit_error_json(event_name, error_type, error_details):
     print(f'HOOKS DAEMON ERROR [{error_type}]: {error_details}', file=sys.stderr)
 
     context_lines = [
-        '⚠️ HOOKS DAEMON ERROR - PROTECTION NOT ACTIVE ⚠️',
+        'HOOKS DAEMON: Not currently running',
         '',
-        f'ERROR TYPE: {error_type}',
-        f'ERROR DETAILS: {error_details}',
+        f'Error: {error_type} - {error_details}',
         '',
-        '🛑 CRITICAL: You MUST stop work immediately.',
+        'Hook safety handlers are inactive until the daemon is restarted.',
+        'If you are in the middle of an upgrade, this is expected and temporary.',
         '',
-        'The hooks daemon is not functioning. This means:',
-        '- Destructive git operations are NOT being blocked',
-        '- Code quality checks are NOT running',
-        '- Safety guardrails are NOT active',
+        'TO FIX (usually takes a few seconds):',
+        '1. Run: python -m claude_code_hooks_daemon.daemon.cli restart',
+        '2. Verify: python -m claude_code_hooks_daemon.daemon.cli status',
         '',
-        'RECOMMENDED ACTIONS:',
-        '1. STOP all current tasks immediately',
-        '2. Inform the user that hooks protection is down',
-        '3. Run: python -m claude_code_hooks_daemon.daemon.cli status',
-        '4. Restart daemon: python -m claude_code_hooks_daemon.daemon.cli restart',
+        'If restart fails, check logs:',
+        '  python -m claude_code_hooks_daemon.daemon.cli logs',
+        'Then inform the user if the issue persists.',
     ]
     context = chr(10).join(context_lines)
 
