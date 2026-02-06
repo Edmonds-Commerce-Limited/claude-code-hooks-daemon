@@ -19,6 +19,11 @@ daemon:
 handlers:
   # PreToolUse handlers (run before every tool call)
   pre_tool_use:
+    # ORCHESTRATOR MODE (Priority 8 - opt-in, disabled by default)
+    orchestrator_only:       # Blocks work tools, forces delegation via Task tool
+      enabled: false
+      priority: 8
+
     # SAFETY HANDLERS (Priority 10-20)
     daemon_restart_verifier: # Verifies daemon restarts successfully after code changes
       enabled: true
