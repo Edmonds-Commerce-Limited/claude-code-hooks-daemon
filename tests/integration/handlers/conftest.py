@@ -25,12 +25,8 @@ def _init_project_context(tmp_path: Any) -> Any:
 
     with patch.object(ProjectContext, "project_root", return_value=tmp_path):
         with patch.object(ProjectContext, "config_dir", return_value=claude_dir):
-            with patch.object(
-                ProjectContext, "daemon_untracked_dir", return_value=untracked
-            ):
-                with patch.object(
-                    ProjectContext, "git_repo_name", return_value="test-repo"
-                ):
+            with patch.object(ProjectContext, "daemon_untracked_dir", return_value=untracked):
+                with patch.object(ProjectContext, "git_repo_name", return_value="test-repo"):
                     yield
 
 
@@ -43,9 +39,7 @@ def make_bash_hook_input(command: str) -> dict[str, Any]:
     }
 
 
-def make_write_hook_input(
-    file_path: str, content: str = ""
-) -> dict[str, Any]:
+def make_write_hook_input(file_path: str, content: str = "") -> dict[str, Any]:
     """Create a PreToolUse hook_input for a Write operation."""
     return {
         "hook_event_name": "PreToolUse",
@@ -143,9 +137,7 @@ def make_subagent_stop_input(
     }
 
 
-def make_permission_request_input(
-    permission_type: str, resource: str = ""
-) -> dict[str, Any]:
+def make_permission_request_input(permission_type: str, resource: str = "") -> dict[str, Any]:
     """Create a PermissionRequest hook_input."""
     return {
         "hook_event_name": "PermissionRequest",

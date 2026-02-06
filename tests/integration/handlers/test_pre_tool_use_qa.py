@@ -89,9 +89,7 @@ class TestEslintDisableHandler:
         ],
         ids=["eslint-disable-ts", "ts-ignore-tsx", "ts-nocheck-js"],
     )
-    def test_blocks_eslint_suppression(
-        self, handler: Any, file_path: str, content_fn: Any
-    ) -> None:
+    def test_blocks_eslint_suppression(self, handler: Any, file_path: str, content_fn: Any) -> None:
         content = f"const x = 1; // {content_fn()}"
         hook_input = make_write_hook_input(file_path, content)
         assert handler.matches(hook_input) is True
@@ -107,9 +105,7 @@ class TestEslintDisableHandler:
         ],
         ids=["clean-ts", "non-js-file", "python-file"],
     )
-    def test_allows_clean_code(
-        self, handler: Any, file_path: str, content: str
-    ) -> None:
+    def test_allows_clean_code(self, handler: Any, file_path: str, content: str) -> None:
         hook_input = make_write_hook_input(file_path, content)
         assert handler.matches(hook_input) is False
 
@@ -201,9 +197,7 @@ class TestPythonQaSuppressionBlocker:
         ],
         ids=["type-ignore", "noqa", "pylint-disable"],
     )
-    def test_blocks_python_suppression(
-        self, handler: Any, content_fn: Any, desc: str
-    ) -> None:
+    def test_blocks_python_suppression(self, handler: Any, content_fn: Any, desc: str) -> None:
         content = f"x = 1  {content_fn()}"
         hook_input = make_write_hook_input("/src/module.py", content)
         assert handler.matches(hook_input) is True
@@ -260,9 +254,7 @@ class TestPhpQaSuppressionBlocker:
         ],
         ids=["phpstan-ignore", "psalm-suppress", "phpcs-ignore"],
     )
-    def test_blocks_php_suppression(
-        self, handler: Any, content_fn: Any, desc: str
-    ) -> None:
+    def test_blocks_php_suppression(self, handler: Any, content_fn: Any, desc: str) -> None:
         content = f"<?php // {content_fn()}"
         hook_input = make_write_hook_input("/src/Controller.php", content)
         assert handler.matches(hook_input) is True
@@ -270,9 +262,7 @@ class TestPhpQaSuppressionBlocker:
         assert result.decision == Decision.DENY
 
     def test_allows_clean_php(self, handler: Any) -> None:
-        hook_input = make_write_hook_input(
-            "/src/Controller.php", "<?php\nclass Controller {}\n"
-        )
+        hook_input = make_write_hook_input("/src/Controller.php", "<?php\nclass Controller {}\n")
         assert handler.matches(hook_input) is False
 
     def test_skips_vendor(self, handler: Any) -> None:
@@ -308,9 +298,7 @@ class TestGoQaSuppressionBlocker:
         ],
         ids=["nolint", "lint-ignore"],
     )
-    def test_blocks_go_suppression(
-        self, handler: Any, content_fn: Any, desc: str
-    ) -> None:
+    def test_blocks_go_suppression(self, handler: Any, content_fn: Any, desc: str) -> None:
         content = f"func main() {{}}\n{content_fn()}"
         hook_input = make_write_hook_input("/src/main.go", content)
         assert handler.matches(hook_input) is True
@@ -318,9 +306,7 @@ class TestGoQaSuppressionBlocker:
         assert result.decision == Decision.DENY
 
     def test_allows_clean_go(self, handler: Any) -> None:
-        hook_input = make_write_hook_input(
-            "/src/main.go", "package main\n\nfunc main() {}\n"
-        )
+        hook_input = make_write_hook_input("/src/main.go", "package main\n\nfunc main() {}\n")
         assert handler.matches(hook_input) is False
 
     def test_skips_vendor(self, handler: Any) -> None:

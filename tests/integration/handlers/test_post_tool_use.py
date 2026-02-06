@@ -67,9 +67,7 @@ class TestBashErrorDetectorHandler:
         ],
         ids=["success-output", "clean-output", "no-output"],
     )
-    def test_silent_on_clean_output(
-        self, handler: Any, stdout: str, stderr: str
-    ) -> None:
+    def test_silent_on_clean_output(self, handler: Any, stdout: str, stderr: str) -> None:
         hook_input = make_post_tool_bash_input("git status", stdout=stdout, stderr=stderr)
         assert handler.matches(hook_input) is True
         result = handler.handle(hook_input)
