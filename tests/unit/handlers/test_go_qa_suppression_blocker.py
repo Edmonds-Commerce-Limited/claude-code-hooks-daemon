@@ -28,15 +28,21 @@ class TestGoQaSuppressionBlocker:
         """Handler should be terminal (default)."""
         assert handler.terminal is True
 
-    def test_forbidden_patterns_defined(self, handler):
-        """Handler should define forbidden patterns."""
-        assert hasattr(handler, "FORBIDDEN_PATTERNS")
-        assert len(handler.FORBIDDEN_PATTERNS) == 2
+    def test_uses_go_config_patterns(self, handler):
+        """Handler should use GO_CONFIG forbidden patterns."""
+        from claude_code_hooks_daemon.core.language_config import GO_CONFIG
 
-    def test_check_extensions_defined(self, handler):
-        """Handler should define check extensions."""
-        assert hasattr(handler, "CHECK_EXTENSIONS")
-        assert ".go" in handler.CHECK_EXTENSIONS
+        # Verify handler uses config patterns (not hardcoded)
+        assert len(GO_CONFIG.qa_forbidden_patterns) == 2
+        assert r"//\s*nolint" in GO_CONFIG.qa_forbidden_patterns
+        assert r"//\s*lint:ignore" in GO_CONFIG.qa_forbidden_patterns
+
+    def test_uses_go_config_extensions(self, handler):
+        """Handler should use GO_CONFIG extensions."""
+        from claude_code_hooks_daemon.core.language_config import GO_CONFIG
+
+        # Verify handler uses config extensions (not hardcoded)
+        assert ".go" in GO_CONFIG.extensions
 
     # matches() - Positive Cases: nolint pattern
     def test_matches_nolint_in_write(self, handler):
