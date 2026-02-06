@@ -69,9 +69,7 @@ def make_write_input(file_path: str, content: str) -> dict[str, Any]:
     }
 
 
-def make_edit_input(
-    file_path: str, old_string: str, new_string: str
-) -> dict[str, Any]:
+def make_edit_input(file_path: str, old_string: str, new_string: str) -> dict[str, Any]:
     """Create a PreToolUse Edit hook input."""
     return {
         "hook_event_name": "PreToolUse",
