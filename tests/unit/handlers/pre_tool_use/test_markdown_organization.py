@@ -280,6 +280,52 @@ class TestMarkdownOrganizationHandler:
         assert "CLAUDE/Plan" in result.reason
         assert "docs/" in result.reason
 
+    def test_matches_returns_false_for_paths_outside_project_root(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Handler does NOT match writes to paths outside the project root."""
+        # Memory directory is outside project root
+        write_input["tool_input"][
+            "file_path"
+        ] = "/root/.claude/projects/-workspace/memory/MEMORY.md"
+        assert handler.matches(write_input) is False
+
+    def test_matches_returns_false_for_claude_auto_memory(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Handler does NOT match writes to Claude Code auto memory directory."""
+        write_input["tool_input"][
+            "file_path"
+        ] = "/root/.claude/projects/my-project/memory/MEMORY.md"
+        assert handler.matches(write_input) is False
+
+    def test_matches_returns_false_for_any_absolute_path_outside_project(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Handler does NOT match writes to any absolute path outside project root."""
+        test_paths = [
+            "/home/user/notes/test.md",
+            "/tmp/scratch.md",
+            "/var/log/notes.md",
+            "/root/.claude/other-project/doc.md",
+        ]
+        for path in test_paths:
+            write_input["tool_input"]["file_path"] = path
+            assert (
+                handler.matches(write_input) is False
+            ), f"Should NOT match outside-project path: {path}"
+
+    def test_matches_returns_true_for_project_relative_invalid_location(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Handler still matches writes to project-relative markdown in wrong locations."""
+        # These paths are under project root but in invalid locations
+        write_input["tool_input"]["file_path"] = "/tmp/test/src/invalid.md"
+        assert handler.matches(write_input) is True
+
+        write_input["tool_input"]["file_path"] = "/tmp/test/test.md"
+        assert handler.matches(write_input) is True
+
 
 class TestPlanningModeIntegration:
     """Tests for planning mode write interception."""
