@@ -1,9 +1,33 @@
 """Tests for DaemonRestartVerifier handler."""
 
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.handlers.pre_tool_use.daemon_restart_verifier import (
     DaemonRestartVerifierHandler,
 )
+
+
+@pytest.fixture(autouse=True)
+def _init_project_context(tmp_path: Path) -> None:
+    """Initialize ProjectContext before handler instantiation."""
+    project_root = tmp_path / "project"
+    claude_dir = project_root / ".claude"
+    claude_dir.mkdir(parents=True)
+    config_path = claude_dir / "hooks-daemon.yaml"
+    config_path.write_text("version: 1.0\n")
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout=b"/tmp/project\n"),
+            MagicMock(returncode=0, stdout=b"git@github.com:user/test-repo.git\n"),
+            MagicMock(returncode=0, stdout=b"/tmp/project\n"),
+        ]
+        ProjectContext.initialize(config_path)
 
 
 def test_handler_initialization() -> None:
@@ -25,7 +49,11 @@ def test_matches_git_commit() -> None:
         "tool_input": {"command": "git commit -m 'test'"},
     }
 
-    assert handler.matches(hook_input) is True
+    with patch(
+        "claude_code_hooks_daemon.handlers.pre_tool_use.daemon_restart_verifier.is_hooks_daemon_repo",
+        return_value=True,
+    ):
+        assert handler.matches(hook_input) is True
 
 
 def test_matches_git_commit_with_options() -> None:
@@ -39,9 +67,13 @@ def test_matches_git_commit_with_options() -> None:
         "git commit --no-verify -m 'test'",
     ]
 
-    for command in test_cases:
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": command}}
-        assert handler.matches(hook_input) is True, f"Should match: {command}"
+    with patch(
+        "claude_code_hooks_daemon.handlers.pre_tool_use.daemon_restart_verifier.is_hooks_daemon_repo",
+        return_value=True,
+    ):
+        for command in test_cases:
+            hook_input = {"tool_name": "Bash", "tool_input": {"command": command}}
+            assert handler.matches(hook_input) is True, f"Should match: {command}"
 
 
 def test_does_not_match_non_commit_commands() -> None:

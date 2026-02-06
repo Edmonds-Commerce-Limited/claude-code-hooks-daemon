@@ -18,7 +18,14 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
-from claude_code_hooks_daemon.core import AcceptanceTest, Decision, Handler, HookResult, TestType
+from claude_code_hooks_daemon.core import (
+    AcceptanceTest,
+    Decision,
+    Handler,
+    HookResult,
+    ProjectContext,
+    TestType,
+)
 from claude_code_hooks_daemon.daemon.validation import is_hooks_daemon_repo
 
 
@@ -35,10 +42,8 @@ class DaemonRestartVerifierHandler(Handler):
         )
 
         # Configuration attributes (set by registry after instantiation)
-        # Default to current directory, will be overridden by registry if workspace_root option is set
-        from pathlib import Path
-
-        self._workspace_root = Path.cwd()
+        # Default to ProjectContext (initialized before handlers), overridden by registry options
+        self._workspace_root = ProjectContext.project_root()
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Match git commit commands in hooks daemon repo.
