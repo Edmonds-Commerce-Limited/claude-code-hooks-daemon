@@ -343,9 +343,23 @@ class MarkdownOrganizationHandler(Handler):
         if not file_path or not file_path.endswith(".md"):
             return False
 
-        # Check for planning mode write (takes precedence when enabled)
+        # Check for planning mode write FIRST (takes precedence when enabled)
+        # Planning mode writes are intentionally outside project but should be intercepted
         if self._track_plans_in_project and self.is_planning_mode_write(file_path):
             return True  # Intercept to redirect
+
+        # CRITICAL: Only enforce rules for files WITHIN the project root
+        # Files outside project root (like Claude Code auto memory) should be allowed
+        # Only check absolute paths - relative paths are always within project
+        if Path(file_path).is_absolute():
+            file_path_obj = Path(file_path).resolve()
+            project_root = ProjectContext.project_root()
+            try:
+                # Check if file_path is under project_root
+                file_path_obj.relative_to(project_root)
+            except ValueError:
+                # File is outside project root - allow it (don't match)
+                return False
 
         # Use centralized normalization
         normalized = self.normalize_path(file_path)
@@ -375,6 +389,8 @@ class MarkdownOrganizationHandler(Handler):
                         plan_number = number_match.group(1)
                         if len(plan_number) < 3:
                             return True  # Block - insufficient digits
+                        # Plan number is valid (3+ digits) - allow
+                        return False
                     else:
                         # No numeric prefix - block
                         return True  # Block - missing plan number
