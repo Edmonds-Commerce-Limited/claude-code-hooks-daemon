@@ -4,6 +4,14 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00031: Lock File Edit Blocker](00031-lock-file-edit-blocker/PLAN.md) - 🟡 Not Started
+  - Block direct editing of package manager lock files (Write/Edit tools)
+  - Protect 14 lock file types across 8 ecosystems (PHP, JS, Python, Ruby, Rust, Go, .NET, Swift)
+  - Safety handler (priority 10, terminal=true)
+  - **Priority**: High (data corruption prevention)
+  - **GitHub Issue**: #19
+  - **Owner**: To be assigned
+
 - [003: Claude Code Planning Mode → Project Workflow Integration](003-planning-mode-project-integration/PLAN.md) - 🟡 Not Started
   - Intercept planning mode writes and redirect to project structure
   - Auto-number plans with 5-digit padding (00001, 00002, etc.)
@@ -207,10 +215,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans**: 27
-- **Active**: 5
+- **Total Plans**: 28
+- **Active**: 6
 - **Completed**: 22
-- **Success Rate**: 100% (21/21 completed successfully)
+- **Success Rate**: 100% (22/22 completed successfully)
 
 ## Quick Links
 
