@@ -21,16 +21,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - **Priority**: High
   - **Owner**: AI Agent
 
-- [00025: Programmatic Acceptance Testing System](00025-programmatic-acceptance-tests/PLAN.md) - 🟡 Not Started
-  - Create AcceptanceTest dataclass for type-safe test definitions
-  - Extend Handler base class with get_acceptance_tests() method (optional, backward compatible)
-  - Implement playbook generator CLI command (outputs to stdout, ephemeral)
-  - Migrate all 54 built-in handlers to define programmatic tests
-  - Support custom plugin handlers automatically
-  - Eliminate duplication between handler code and manual playbook
-  - **Priority**: High (testing infrastructure)
-  - **GitHub Issue**: #18
-  - **Owner**: To be assigned
 
 
 
@@ -65,6 +55,16 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - **Owner**: To be assigned
 
 ## Completed Plans
+
+- [00025: Programmatic Acceptance Testing System](Completed/00025-programmatic-acceptance-tests/PLAN.md) - 🟢 Complete (2026-02-06)
+  - Created AcceptanceTest dataclass with validation
+  - Made Handler.get_acceptance_tests() REQUIRED (@abstractmethod)
+  - Implemented playbook generator with plugin discovery
+  - Migrated ALL 63 handlers to programmatic tests
+  - CLI command outputs to STDOUT (ephemeral playbooks)
+  - Full plugin support with automatic discovery
+  - Replaced manual PLAYBOOK.md with GENERATING.md
+  - **Completed**: 2026-02-06 (GitHub Issue #18)
 
 - [00027: Plan Completion Move Advisor](Completed/00027-plan-completion-move-advisor/PLAN.md) - 🟢 Complete (2026-02-06)
   - Added PreToolUse handler to detect plan completion markers
@@ -216,9 +216,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans**: 28
-- **Active**: 6
-- **Completed**: 22
-- **Success Rate**: 100% (22/22 completed successfully)
+- **Active**: 5
+- **Completed**: 23
+- **Success Rate**: 100% (23/23 completed successfully)
 
 ## Quick Links
 
