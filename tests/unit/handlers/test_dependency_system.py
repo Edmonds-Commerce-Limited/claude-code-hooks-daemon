@@ -114,7 +114,7 @@ def test_shares_options_with_parent_disabled_logs_warning(caplog: pytest.LogCapt
 
     # Config should FAIL with ValidationError (FAIL FAST behavior)
     with pytest.raises(ValidationError) as exc_info:
-        config = Config.model_validate(config_data)
+        Config.model_validate(config_data)
 
     # Error message should be helpful and mention both handlers
     error_message = str(exc_info.value)

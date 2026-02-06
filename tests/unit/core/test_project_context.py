@@ -273,3 +273,62 @@ class TestGitRepoNameParsing:
             ProjectContext.initialize(config_path)
 
         assert ProjectContext.git_repo_name() == "no-extension"
+
+    def test_get_git_repo_name_handles_empty_url(self, tmp_path: Path) -> None:
+        """_get_git_repo_name returns None for empty remote URL."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout=b"/tmp/project\n"),  # git rev-parse
+                MagicMock(returncode=0, stdout=b"\n"),  # git remote (empty URL)
+            ]
+
+            result = ProjectContext._get_git_repo_name(tmp_path)
+
+        assert result is None
+
+    def test_get_git_repo_name_handles_timeout(self, tmp_path: Path) -> None:
+        """_get_git_repo_name returns None on timeout."""
+        import subprocess
+
+        from claude_code_hooks_daemon.constants import Timeout
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = subprocess.TimeoutExpired(cmd="git", timeout=Timeout.GIT_CONTEXT)
+
+            result = ProjectContext._get_git_repo_name(tmp_path)
+
+        assert result is None
+
+    def test_get_git_repo_name_handles_unparseable_url(self, tmp_path: Path) -> None:
+        """_get_git_repo_name returns None for unparseable URL."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout=b"/tmp/project\n"),  # git rev-parse
+                MagicMock(returncode=0, stdout=b"/.git\n"),  # Malformed URL
+            ]
+
+            result = ProjectContext._get_git_repo_name(tmp_path)
+
+        assert result is None
+
+    def test_get_git_toplevel_handles_timeout(self, tmp_path: Path) -> None:
+        """_get_git_toplevel returns None on timeout."""
+        import subprocess
+
+        from claude_code_hooks_daemon.constants import Timeout
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = subprocess.TimeoutExpired(cmd="git", timeout=Timeout.GIT_CONTEXT)
+
+            result = ProjectContext._get_git_toplevel(tmp_path)
+
+        assert result is None
+
+    def test_get_git_toplevel_handles_unexpected_error(self, tmp_path: Path) -> None:
+        """_get_git_toplevel returns None on unexpected errors."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = OSError("Unexpected filesystem error")
+
+            result = ProjectContext._get_git_toplevel(tmp_path)
+
+        assert result is None

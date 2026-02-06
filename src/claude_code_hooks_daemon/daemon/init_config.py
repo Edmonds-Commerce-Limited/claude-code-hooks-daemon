@@ -128,6 +128,7 @@ handlers:
 
     gh_issue_comments: {enabled: true, priority: 40}  # Require --comments on gh issue view
     global_npm_advisor: {enabled: true, priority: 41}  # Advise on npm install -g (non-blocking)
+    task_tdd_advisor: {enabled: true, priority: 45}  # Advise on TDD workflow for Task agents (non-blocking)
     web_search_year: {enabled: true, priority: 55}   # Fix outdated years in searches
 
     # ADVISORY HANDLERS (Priority 56-60)
