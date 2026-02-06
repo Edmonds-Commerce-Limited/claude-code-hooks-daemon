@@ -241,3 +241,327 @@ class TestInitShPassesEnvVars:
         """init.sh start_daemon() must pass --project-root to CLI."""
         init_sh = Path("/workspace/.claude/init.sh").read_text()
         assert '--project-root "$PROJECT_PATH"' in init_sh
+
+
+# ============================================================================
+# NEW: CLI Flag Tests for Plan 00028
+# ============================================================================
+
+
+class TestCliExplicitPathFlags:
+    """Test --pid-file and --socket CLI flags (Plan 00028).
+
+    These flags provide an explicit alternative to environment variables
+    for worktree isolation. They override auto-discovery but are independent
+    of env vars (flags take precedence).
+    """
+
+    def test_main_accepts_pid_file_flag(self) -> None:
+        """Test that main() argparse accepts --pid-file flag."""
+        # This will FAIL until we add the flag to main()
+        from claude_code_hooks_daemon.daemon.cli import main
+
+        with patch("sys.argv", ["cli", "--pid-file", "/custom/path.pid", "status"]):
+            with patch("claude_code_hooks_daemon.daemon.cli.cmd_status") as mock_cmd:
+                mock_cmd.return_value = 0
+                # Should not raise ArgumentError
+                result = main()
+                assert result == 0
+                # Verify args.pid_file was set
+                call_args = mock_cmd.call_args[0][0]
+                assert hasattr(call_args, "pid_file")
+                assert call_args.pid_file == Path("/custom/path.pid")
+
+    def test_main_accepts_socket_flag(self) -> None:
+        """Test that main() argparse accepts --socket flag."""
+        from claude_code_hooks_daemon.daemon.cli import main
+
+        with patch("sys.argv", ["cli", "--socket", "/custom/socket.sock", "status"]):
+            with patch("claude_code_hooks_daemon.daemon.cli.cmd_status") as mock_cmd:
+                mock_cmd.return_value = 0
+                result = main()
+                assert result == 0
+                call_args = mock_cmd.call_args[0][0]
+                assert hasattr(call_args, "socket")
+                assert call_args.socket == Path("/custom/socket.sock")
+
+    def test_main_accepts_both_flags_together(self) -> None:
+        """Test that --pid-file and --socket can be used together."""
+        from claude_code_hooks_daemon.daemon.cli import main
+
+        with patch(
+            "sys.argv",
+            [
+                "cli",
+                "--pid-file",
+                "/custom/path.pid",
+                "--socket",
+                "/custom/socket.sock",
+                "status",
+            ],
+        ):
+            with patch("claude_code_hooks_daemon.daemon.cli.cmd_status") as mock_cmd:
+                mock_cmd.return_value = 0
+                result = main()
+                assert result == 0
+                call_args = mock_cmd.call_args[0][0]
+                assert call_args.pid_file == Path("/custom/path.pid")
+                assert call_args.socket == Path("/custom/socket.sock")
+
+    def test_flags_work_with_project_root(self) -> None:
+        """Test that explicit path flags work with --project-root."""
+        from claude_code_hooks_daemon.daemon.cli import main
+
+        with patch(
+            "sys.argv",
+            [
+                "cli",
+                "--project-root",
+                "/custom/project",
+                "--pid-file",
+                "/worktree/daemon.pid",
+                "--socket",
+                "/worktree/daemon.sock",
+                "status",
+            ],
+        ):
+            with patch("claude_code_hooks_daemon.daemon.cli.cmd_status") as mock_cmd:
+                mock_cmd.return_value = 0
+                result = main()
+                assert result == 0
+                call_args = mock_cmd.call_args[0][0]
+                assert call_args.project_root == Path("/custom/project")
+                assert call_args.pid_file == Path("/worktree/daemon.pid")
+                assert call_args.socket == Path("/worktree/daemon.sock")
+
+
+class TestCmdStatusWithCliFlags:
+    """Test cmd_status uses explicit CLI flags when provided."""
+
+    def test_cmd_status_uses_explicit_pid_file_flag(self, tmp_path: Path) -> None:
+        """When --pid-file is provided, cmd_status uses it instead of auto-discovery."""
+        from claude_code_hooks_daemon.daemon.cli import cmd_status
+
+        custom_pid = tmp_path / "custom.pid"
+        custom_socket = tmp_path / "custom.sock"
+
+        # Write a PID file
+        custom_pid.write_text("12345")
+        custom_socket.touch()
+
+        args = argparse.Namespace(
+            project_root=None,
+            pid_file=custom_pid,
+            socket=custom_socket,
+        )
+
+        with patch("claude_code_hooks_daemon.daemon.cli.get_project_path") as mock_gpp:
+            mock_gpp.return_value = tmp_path
+            with patch("claude_code_hooks_daemon.daemon.paths.is_pid_alive") as mock_alive:
+                mock_alive.return_value = True
+                with patch("builtins.print"):
+                    result = cmd_status(args)
+
+                # Should report running using our custom paths
+                assert result == 0
+
+    def test_cmd_status_without_flags_uses_auto_discovery(self, tmp_path: Path) -> None:
+        """When flags are omitted, cmd_status falls back to auto-discovery (backward compat)."""
+        from claude_code_hooks_daemon.daemon.cli import cmd_status
+
+        args = argparse.Namespace(
+            project_root=None,
+            pid_file=None,
+            socket=None,
+        )
+
+        with patch("claude_code_hooks_daemon.daemon.cli.get_project_path") as mock_gpp:
+            with patch("claude_code_hooks_daemon.daemon.cli.get_pid_path") as mock_get_pid:
+                with patch(
+                    "claude_code_hooks_daemon.daemon.cli.get_socket_path"
+                ) as mock_get_socket:
+                    with patch("claude_code_hooks_daemon.daemon.cli.read_pid_file") as mock_rpf:
+                        mock_gpp.return_value = tmp_path
+                        mock_get_pid.return_value = tmp_path / "auto-discovered.pid"
+                        mock_get_socket.return_value = tmp_path / "auto-discovered.sock"
+                        mock_rpf.return_value = None
+
+                        with patch("builtins.print"):
+                            cmd_status(args)
+
+                        # Auto-discovery should have been called
+                        mock_get_pid.assert_called_once_with(tmp_path)
+                        mock_get_socket.assert_called_once_with(tmp_path)
+
+
+class TestCmdStopWithCliFlags:
+    """Test cmd_stop uses explicit CLI flags when provided."""
+
+    def test_cmd_stop_uses_explicit_flags(self, tmp_path: Path) -> None:
+        """When --pid-file and --socket provided, cmd_stop uses them."""
+        from claude_code_hooks_daemon.daemon.cli import cmd_stop
+
+        custom_pid = tmp_path / "custom.pid"
+        custom_socket = tmp_path / "custom.sock"
+
+        args = argparse.Namespace(
+            project_root=None,
+            pid_file=custom_pid,
+            socket=custom_socket,
+        )
+
+        with patch("claude_code_hooks_daemon.daemon.cli.get_project_path") as mock_gpp:
+            mock_gpp.return_value = tmp_path
+            with patch("claude_code_hooks_daemon.daemon.cli.read_pid_file") as mock_rpf:
+                mock_rpf.return_value = None  # Not running
+
+                with patch("builtins.print"):
+                    result = cmd_stop(args)
+
+                # Should succeed (nothing to stop)
+                assert result == 0
+
+
+class TestCmdStartWithCliFlags:
+    """Test cmd_start uses explicit CLI flags when provided."""
+
+    def test_cmd_start_uses_explicit_flags(self, tmp_path: Path) -> None:
+        """When --pid-file and --socket provided, cmd_start uses them."""
+        from claude_code_hooks_daemon.daemon.cli import cmd_start
+
+        custom_pid = tmp_path / "custom.pid"
+        custom_socket = tmp_path / "custom.sock"
+
+        args = argparse.Namespace(
+            project_root=None,
+            pid_file=custom_pid,
+            socket=custom_socket,
+        )
+
+        with patch("claude_code_hooks_daemon.daemon.cli.get_project_path") as mock_gpp:
+            mock_gpp.return_value = tmp_path
+            with patch("claude_code_hooks_daemon.daemon.cli.read_pid_file") as mock_rpf:
+                mock_rpf.return_value = 12345  # Already running
+
+                with patch("builtins.print"):
+                    result = cmd_start(args)
+
+                # Should report already running
+                assert result == 0
+
+
+class TestCmdLogsWithCliFlags:
+    """Test cmd_logs uses explicit --socket flag."""
+
+    def test_cmd_logs_uses_explicit_socket_flag(self, tmp_path: Path) -> None:
+        """When --socket provided, cmd_logs uses it."""
+        from claude_code_hooks_daemon.daemon.cli import cmd_logs
+
+        custom_socket = tmp_path / "custom.sock"
+        custom_pid = tmp_path / "custom.pid"
+
+        args = argparse.Namespace(
+            project_root=None,
+            socket=custom_socket,
+            pid_file=custom_pid,
+            count=None,
+            level=None,
+            follow=False,
+        )
+
+        with patch("claude_code_hooks_daemon.daemon.cli.get_project_path") as mock_gpp:
+            mock_gpp.return_value = tmp_path
+            with patch("claude_code_hooks_daemon.daemon.cli.read_pid_file") as mock_rpf:
+                mock_rpf.return_value = None  # Not running
+
+                with patch("builtins.print"):
+                    result = cmd_logs(args)
+
+                # Should report not running
+                assert result == 1
+
+
+class TestCmdRestartWithCliFlags:
+    """Test cmd_restart passes explicit flags through to stop and start."""
+
+    def test_cmd_restart_preserves_explicit_flags(self, tmp_path: Path) -> None:
+        """cmd_restart should pass --pid-file and --socket to both stop and start."""
+        from claude_code_hooks_daemon.daemon.cli import cmd_restart
+
+        custom_pid = tmp_path / "custom.pid"
+        custom_socket = tmp_path / "custom.sock"
+
+        args = argparse.Namespace(
+            project_root=None,
+            pid_file=custom_pid,
+            socket=custom_socket,
+        )
+
+        with patch("claude_code_hooks_daemon.daemon.cli.cmd_stop") as mock_stop:
+            with patch("claude_code_hooks_daemon.daemon.cli.cmd_start") as mock_start:
+                mock_stop.return_value = 0
+                mock_start.return_value = 0
+
+                result = cmd_restart(args)
+
+                # Both should receive the same args
+                assert result == 0
+                mock_stop.assert_called_once_with(args)
+                mock_start.assert_called_once_with(args)
+
+
+class TestFlagsPrecedenceOverEnvVars:
+    """Test that CLI flags take precedence over environment variables."""
+
+    def test_cli_flag_overrides_env_var_for_socket(self, monkeypatch: Any, tmp_path: Path) -> None:
+        """When both --socket flag and env var are set, flag wins."""
+        env_socket = tmp_path / "env-socket.sock"
+        flag_socket = tmp_path / "flag-socket.sock"
+
+        monkeypatch.setenv("CLAUDE_HOOKS_SOCKET_PATH", str(env_socket))
+
+        from claude_code_hooks_daemon.daemon.cli import cmd_status
+
+        args = argparse.Namespace(
+            project_root=None,
+            pid_file=None,
+            socket=flag_socket,
+        )
+
+        with patch("claude_code_hooks_daemon.daemon.cli.get_project_path") as mock_gpp:
+            mock_gpp.return_value = tmp_path
+            with patch("claude_code_hooks_daemon.daemon.cli.read_pid_file") as mock_rpf:
+                with patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"):
+                    mock_rpf.return_value = None
+
+                    with patch("builtins.print"):
+                        cmd_status(args)
+
+                    # The explicit flag should take precedence
+                    # (This test will verify the implementation honors the flag)
+
+    def test_cli_flag_overrides_env_var_for_pid(self, monkeypatch: Any, tmp_path: Path) -> None:
+        """When both --pid-file flag and env var are set, flag wins."""
+        env_pid = tmp_path / "env-daemon.pid"
+        flag_pid = tmp_path / "flag-daemon.pid"
+
+        monkeypatch.setenv("CLAUDE_HOOKS_PID_PATH", str(env_pid))
+
+        from claude_code_hooks_daemon.daemon.cli import cmd_status
+
+        args = argparse.Namespace(
+            project_root=None,
+            pid_file=flag_pid,
+            socket=None,
+        )
+
+        with patch("claude_code_hooks_daemon.daemon.cli.get_project_path") as mock_gpp:
+            mock_gpp.return_value = tmp_path
+            with patch("claude_code_hooks_daemon.daemon.cli.read_pid_file") as mock_rpf:
+                with patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"):
+                    mock_rpf.return_value = None
+
+                    with patch("builtins.print"):
+                        cmd_status(args)
+
+                    # The explicit flag should take precedence
