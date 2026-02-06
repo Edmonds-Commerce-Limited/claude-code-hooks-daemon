@@ -474,3 +474,227 @@ class TestConfigPriorityOverride:
         # Verify execution order (lower priority numbers execute first)
         # high has priority 5, low has priority 10
         assert result.handlers_executed == ["high", "low"]
+
+
+class TestMarkdownOrganizationHandlerIntegration:
+    """Integration tests for MarkdownOrganizationHandler config and blocking.
+
+    CRITICAL: These tests address the bug where markdown_organization was
+    disabled in config but tests didn't catch it.
+    """
+
+    def test_markdown_handler_loads_from_config(
+        self, tmp_path: Path, project_context: Path
+    ) -> None:
+        """Test that markdown_organization handler loads when enabled in config."""
+        # Create config with markdown_organization enabled
+        config_file = tmp_path / "config.yaml"
+        config_data = {
+            "version": "1.0",
+            "handlers": {
+                "pre_tool_use": {"markdown_organization": {"enabled": True, "priority": 35}}
+            },
+        }
+        with config_file.open("w") as f:
+            yaml.dump(config_data, f)
+
+        # Load config
+        config = ConfigLoader.load(config_file)
+
+        # Create router and registry
+        router = EventRouter()
+        registry = HandlerRegistry()
+        registry.discover()
+
+        # Register handlers with config
+        count = registry.register_all(router, config=config.get("handlers"))
+
+        # Verify handler was registered
+        pre_tool_use_chain = router.get_chain(EventType.PRE_TOOL_USE)
+        handler = pre_tool_use_chain.get("enforce-markdown-organization")
+
+        assert handler is not None, "Handler should be registered when enabled=true"
+        assert handler.name == "enforce-markdown-organization"
+        assert count > 0
+
+    def test_markdown_handler_disabled_in_config_prevents_loading(
+        self, tmp_path: Path, project_context: Path
+    ) -> None:
+        """CRITICAL: Test that enabled=false prevents markdown handler loading.
+
+        This is the exact bug scenario - handler disabled but tests didn't catch it.
+        """
+        # Create config with markdown_organization DISABLED
+        config_file = tmp_path / "config.yaml"
+        config_data = {
+            "version": "1.0",
+            "handlers": {"pre_tool_use": {"markdown_organization": {"enabled": False}}},
+        }
+        with config_file.open("w") as f:
+            yaml.dump(config_data, f)
+
+        # Load config
+        config = ConfigLoader.load(config_file)
+
+        # Create router and registry
+        router = EventRouter()
+        registry = HandlerRegistry()
+        registry.discover()
+
+        # Register handlers with config
+        registry.register_all(router, config=config.get("handlers"))
+
+        # Verify handler was NOT registered
+        pre_tool_use_chain = router.get_chain(EventType.PRE_TOOL_USE)
+        handler = pre_tool_use_chain.get("enforce-markdown-organization")
+
+        assert handler is None, "Handler should NOT be registered when enabled=false"
+
+    def test_markdown_handler_blocks_invalid_location_e2e(
+        self, tmp_path: Path, project_context: Path
+    ) -> None:
+        """E2E: Verify markdown handler blocks writes to invalid locations."""
+        # Create config with markdown_organization enabled
+        config_file = tmp_path / "config.yaml"
+        config_data = {
+            "version": "1.0",
+            "handlers": {
+                "pre_tool_use": {"markdown_organization": {"enabled": True, "priority": 35}}
+            },
+        }
+        with config_file.open("w") as f:
+            yaml.dump(config_data, f)
+
+        # Setup system
+        config = ConfigLoader.load(config_file)
+        router = EventRouter()
+        registry = HandlerRegistry()
+        registry.discover()
+        registry.register_all(router, config=config.get("handlers"))
+
+        # Simulate Write to invalid location (src/invalid.md) - use absolute path
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": str(project_context / "src" / "invalid.md"),
+                "content": "# Test",
+            },
+        }
+
+        result = router.route(EventType.PRE_TOOL_USE, hook_input)
+
+        # Verify blocking
+        assert result.result.decision == Decision.DENY
+        assert "MARKDOWN FILE IN WRONG LOCATION" in result.result.reason
+        assert result.terminated_by == "enforce-markdown-organization"
+
+    def test_markdown_handler_allows_valid_location_e2e(
+        self, tmp_path: Path, project_context: Path
+    ) -> None:
+        """E2E: Verify markdown handler allows writes to valid locations."""
+        # Create config
+        config_file = tmp_path / "config.yaml"
+        config_data = {
+            "version": "1.0",
+            "handlers": {
+                "pre_tool_use": {"markdown_organization": {"enabled": True, "priority": 35}}
+            },
+        }
+        with config_file.open("w") as f:
+            yaml.dump(config_data, f)
+
+        # Setup system
+        config = ConfigLoader.load(config_file)
+        router = EventRouter()
+        registry = HandlerRegistry()
+        registry.discover()
+        registry.register_all(router, config=config.get("handlers"))
+
+        # Simulate Write to valid location (CLAUDE/test.md) - use absolute path
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": str(project_context / "CLAUDE" / "test.md"),
+                "content": "# Test",
+            },
+        }
+
+        result = router.route(EventType.PRE_TOOL_USE, hook_input)
+
+        # Verify allowed (handler doesn't match valid locations)
+        assert result.result.decision == Decision.ALLOW
+        assert "enforce-markdown-organization" not in result.handlers_matched
+
+    def test_planning_mode_redirect_e2e(self, project_context: Path) -> None:
+        """E2E: Verify planning mode write interception when feature enabled.
+
+        This tests the new planning mode integration feature.
+        """
+        # Use project_context which already has CLAUDE/Plan structure
+        plan_dir = project_context / "CLAUDE" / "Plan"
+        assert plan_dir.exists(), "Plan directory should exist from fixture"
+
+        # Create config with planning mode tracking enabled
+        config_file = project_context / ".claude" / "hooks-daemon.yaml"
+        config_data = {
+            "version": "1.0",
+            "handlers": {
+                "pre_tool_use": {
+                    "markdown_organization": {
+                        "enabled": True,
+                        "priority": 35,
+                        "track_plans_in_project": "CLAUDE/Plan",
+                        "plan_workflow_docs": "CLAUDE/PlanWorkflow.md",
+                    }
+                }
+            },
+        }
+        with config_file.open("w") as f:
+            yaml.dump(config_data, f)
+
+        # Setup system
+        config = ConfigLoader.load(config_file)
+        router = EventRouter()
+        registry = HandlerRegistry()
+        registry.discover()
+
+        # Register handlers with config - this should configure the handler
+        registry.register_all(router, config=config.get("handlers"))
+
+        # Get the handler and manually configure it (since registry doesn't set these yet)
+        pre_tool_use_chain = router.get_chain(EventType.PRE_TOOL_USE)
+        handler = pre_tool_use_chain.get("enforce-markdown-organization")
+        assert handler is not None
+
+        # Manually set config (workaround until registry supports handler options)
+        handler._workspace_root = project_context
+        handler._track_plans_in_project = "CLAUDE/Plan"
+        handler._plan_workflow_docs = "CLAUDE/PlanWorkflow.md"
+
+        # Simulate planning mode write (to ~/.claude/plans/)
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/home/user/.claude/plans/my-test-plan.md",
+                "content": "# My Test Plan\n\nThis is a test.",
+            },
+        }
+
+        result = router.route(EventType.PRE_TOOL_USE, hook_input)
+
+        # Verify interception and redirect
+        assert result.result.decision == Decision.ALLOW
+        assert result.terminated_by == "enforce-markdown-organization"
+        assert result.result.context is not None
+        assert len(result.result.context) > 0
+
+        # Verify plan folder was created
+        created_folders = list(plan_dir.iterdir())
+        assert len(created_folders) == 1
+        assert created_folders[0].name.startswith("00001-")
+
+        # Verify PLAN.md was created
+        plan_file = created_folders[0] / "PLAN.md"
+        assert plan_file.exists()
+        content = plan_file.read_text()
+        assert "# My Test Plan" in content
