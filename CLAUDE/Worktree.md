@@ -704,6 +704,66 @@ Teams share a task list. Map tasks to worktrees:
 - **If overlap is unavoidable**, merge children sequentially into parent and resolve conflicts there
 - **Config files** (`.claude/hooks-daemon.yaml`): Only the team lead should modify shared config; teammates should not change it in their worktrees
 
+## Automation Scripts
+
+Two scripts automate the most error-prone worktree operations:
+
+### `scripts/setup_worktree.sh` - Create Worktree with Venv
+
+Automates: worktree creation, venv setup, editable install, verification.
+
+```bash
+# Create parent worktree from main:
+./scripts/setup_worktree.sh worktree-plan-00028
+
+# Create child worktree from parent:
+./scripts/setup_worktree.sh worktree-child-plan-00028-handler-a worktree-plan-00028
+```
+
+**What it does:**
+1. Validates branch name (must start with `worktree-`)
+2. Creates git worktree in `untracked/worktrees/`
+3. Creates Python venv at `untracked/venv/`
+4. Installs package in editable mode (`pip install -e ".[dev]"`)
+5. Verifies editable install points to worktree's own `src/`
+6. Creates daemon untracked directory
+7. Prints agent prompt template
+
+### `scripts/validate_worktrees.sh` - QA Validation
+
+Runs QA sequentially across all (or specific) worktrees.
+
+```bash
+# Validate all worktrees:
+./scripts/validate_worktrees.sh
+
+# Validate specific worktree:
+./scripts/validate_worktrees.sh worktree-plan-00028
+```
+
+**What it does:**
+1. Checks venv exists and editable install is correct
+2. Runs `./scripts/qa/run_all.sh` from within each worktree
+3. Reports pass/fail summary for all worktrees
+
+## Concurrent QA Limitation (CRITICAL)
+
+**QA runs in worktrees MUST be sequential, NOT parallel.**
+
+Running `./scripts/qa/run_all.sh` in multiple worktrees simultaneously causes:
+
+1. **Daemon socket collisions**: Integration tests (`test_daemon_smoke.py`) start/stop daemons that compete for socket paths, causing `FileNotFoundError` and `AssertionError: Daemon still running after stop`
+2. **MyPy cache corruption**: Concurrent mypy processes writing to `.mypy_cache` causes type checker failures (`Library stubs not installed for "jsonschema"`)
+
+**Correct approach**: Use `scripts/validate_worktrees.sh` which runs QA sequentially.
+
+**When agents work in parallel**: Each agent runs QA in their OWN worktree. This is safe because:
+- Each worktree has its own venv, daemon socket, and test isolation
+- The daemon smoke tests use `/tmp/test-daemon-{unique-id}.sock` for test isolation
+- Conflicts only occur when the same worktree's QA runs concurrently with another's
+
+**Bottom line**: One QA run per worktree at a time. Multiple agents in DIFFERENT worktrees can run QA concurrently as long as the daemon smoke tests don't collide (which they shouldn't since they use unique temp paths).
+
 ## Common Pitfalls
 
 ### ❌ Working in Wrong Directory
@@ -1099,6 +1159,8 @@ git branch -d worktree-plan-00028
 - Plan workflow: `CLAUDE/PlanWorkflow.md`
 - QA suite: `scripts/qa/run_all.sh`
 - Code lifecycle: `CLAUDE/CodeLifecycle/General.md`
+- **Worktree setup**: `scripts/setup_worktree.sh` (automated creation + venv)
+- **Worktree QA validation**: `scripts/validate_worktrees.sh` (sequential QA)
 
 ---
 
