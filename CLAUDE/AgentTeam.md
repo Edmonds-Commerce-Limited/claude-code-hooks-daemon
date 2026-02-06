@@ -82,11 +82,14 @@ To prevent false completion claims discovered in Wave 2 audit, all agent teams M
 - Report "approved" or "rejected with specific gaps"
 - **Can reject entire branch** if incomplete
 
-**5. Honesty Checker** (Anti-Theater Auditor)
-- **CRITICAL ROLE**: Verify work actually achieves plan goals
+**5. Honesty Checker** (Anti-Theater Auditor - Value Verification)
+- **CRITICAL ROLE**: Verify work delivers REAL VALUE, not just "looks complete"
+- **TDD Theater Detection**: Tests that exist but don't prove anything meaningful
+- **Handler Theater Detection**: Handlers that "work" but don't really do what they claim
+- **Lazy Solutions Detection**: Code that works but is shitty/lazy, not proper implementation
+- **Value Delivery Verification**: Does it actually accomplish the feature goal or just look like it?
 - Check for dead code that's never imported/used
 - Verify handlers are registered in config
-- Verify tests actually test the implementation (not just exist)
 - Count actual deliverables vs claimed deliverables
 - Report "genuine completion" or "theater detected with evidence"
 - **Can veto merge** if theater found
@@ -442,61 +445,135 @@ SendMessage(
 
 ### Role 5: Honesty Checker (Anti-Theater Auditor - CRITICAL)
 
-**Primary Responsibility**: Detect "theater" - code that exists but accomplishes nothing or false completion claims.
+**Primary Responsibility**: Verify work delivers REAL VALUE, not just "looks complete". Detect theater, lazy solutions, and false claims.
+
+**Critical Understanding**:
+- Code can pass tests, pass QA, and still be theater if it doesn't deliver real value
+- Tests can exist but not prove anything meaningful (TDD theater)
+- Handlers can "work" but be shitty/lazy implementations
+- Features can be "done" but not really solve the problem they claim to solve
 
 **Workflow:**
 1. Triggered after Senior Reviewer reports "approved"
 2. `cd` to developer's worktree
-3. **Perform deep audit** for theater indicators
-4. Count actual deliverables vs claimed deliverables
-5. Verify code is actually used (not dead code)
-6. Check handlers are registered in config
-7. Verify tests actually test the implementation
-8. Report "genuine completion" or "theater detected" via `SendMessage`
+3. **Perform deep VALUE AUDIT** (not just code existence check)
+4. Question: "Does this ACTUALLY deliver the value implied by the feature?"
+5. Check for lazy/shitty solutions that "work" but aren't proper
+6. Verify tests actually PROVE the feature works (not just exist)
+7. Report "genuine completion" or "theater detected" via `SendMessage`
 
 **Theater Detection Checks:**
 
-**Check 1: Dead Code**
+**Check 1: Dead Code Theater**
 - Search for imports of new modules: `git grep "from.*handler_name import"`
 - If handler created but never imported → THEATER
 - If class defined but never instantiated → THEATER
+- **Value Check**: Is code actually USED in the application flow?
 
-**Check 2: Config Registration**
+**Check 2: Config Registration Theater**
 - Read `.claude/hooks-daemon.yaml`
 - Verify handler is registered with correct name and priority
 - If handler exists but not in config → THEATER
+- **Value Check**: Is handler actually ACTIVE and intercepting events?
 
-**Check 3: Test Coverage Theater**
+**Check 3: TDD Theater (Tests That Don't Prove Anything)**
 - Count actual test functions: `grep -c "def test_" tests/path/to/test_file.py`
-- Compare to claimed test count
-- If claims "42 tests" but only 5 exist → THEATER
+- Compare to claimed test count (if mismatch → THEATER)
+- **READ THE ACTUAL TESTS** - do they test real behavior or just existence?
+- Example of TDD theater:
+  ```python
+  def test_handler_exists():
+      assert HandlerName() is not None  # This proves NOTHING
+  ```
+- **Value Check**: Do tests actually prove the feature works as claimed?
+- Are edge cases tested? Error conditions? Real-world scenarios?
+- Or are tests just calling methods and checking they don't crash?
 
-**Check 4: Goal Achievement**
-- If plan says "eliminate DRY violations in handlers X, Y, Z"
-- Check handlers X, Y, Z for remaining duplication
+**Check 4: Handler Theater (Handlers That Don't Really Do Anything)**
+- Read the actual handler code (don't just check it exists)
+- **Value Check**: Does the handler actually BLOCK/ALLOW/ADVISE correctly?
+- Example of handler theater:
+  ```python
+  def matches(self, hook_input):
+      return True  # Matches EVERYTHING (lazy, wrong)
+
+  def handle(self, hook_input):
+      return HookResult(decision="allow", reason="ok")  # Does nothing useful
+  ```
+- Check if handler logic is properly implemented or just a stub
+- Verify patterns actually match what they claim to match
+- Check if blocking logic is robust or has obvious bypass holes
+
+**Check 5: Lazy Solution Theater (Works But Is Shitty)**
+- **Value Check**: Is this a PROPER solution or a lazy workaround?
+- Example of lazy theater:
+  ```python
+  # Plan says "eliminate DRY violations"
+  # But code just copies another handler with minor tweaks (still DRY violation)
+  ```
+- Check if code follows project patterns or is just hacked together
+- Verify error handling exists (not just happy path)
+- Check if solution is maintainable or will break easily
+- Is this something you'd accept in code review or reject as lazy?
+
+**Check 6: Goal Achievement Theater**
+- Read plan goals carefully: "eliminate DRY violations in handlers X, Y, Z"
+- **Actually check handlers X, Y, Z** for remaining duplication
 - If duplication still exists → THEATER (goal not achieved)
+- **Value Check**: Did they actually SOLVE the problem or just write code?
+- Example: Plan says "block destructive sed commands"
+  - Check: Does handler actually catch `sed -i`, `sed -e`, `sed -ibak`?
+  - Or does it only catch `sed -i` and miss the others? (incomplete)
 
-**Check 5: Phase Completion**
+**Check 7: Phase Completion Theater**
 - If plan has 8 phases, verify artifacts for ALL 8
 - If only 2 phases have deliverables → THEATER (incomplete)
+- **Value Check**: Are all phases actually DONE or just "started"?
+
+**Check 8: Integration Theater**
+- **Value Check**: Do all pieces actually WORK TOGETHER?
+- Example: Handler exists, tests pass, but handler never fires because priority is wrong
+- Check if solution integrates properly with existing code
+- Verify no conflicts or interference with other handlers
 
 **You CANNOT:**
-- Accept "looks good" without evidence
-- Skip checking if code is actually used
+- Accept "looks good" without reading actual code
+- Skip checking if code is actually used and delivers value
 - Trust claims without verification
 - Approve partial completion as "theater-free"
+- Accept tests that exist but don't prove anything
+- Accept handlers that "work" but are lazy/shitty implementations
 
-**You CAN:**
+**You CAN (and SHOULD):**
 - VETO entire branch if theater detected (nuclear option)
-- Reject work even if tests pass (if it accomplishes nothing)
-- Demand evidence of actual functionality
+- Reject work even if tests pass (if tests are theater or don't prove value)
+- Reject handlers that "work" but are lazy/incomplete implementations
+- Demand evidence of actual value delivery (not just code existence)
+- Ask: "Would I accept this in code review or reject as lazy/incomplete?"
+- Call out shitty solutions that technically work but aren't proper
 
 **Report Format (GENUINE):**
 ```
 SendMessage(
   type="message",
   recipient="team-lead",
-  content="Honesty check PASSED for [task]. Verified: code is imported/used, handler registered in config, [X] tests exist (matches claim), plan goals actually achieved, ALL phases complete. No theater detected. APPROVED FOR MERGE.",
+  content="Honesty check PASSED for [task].
+
+VALUE VERIFICATION:
+- Code delivers real value (not just exists)
+- Tests actually PROVE feature works (not TDD theater)
+- Handler logic is PROPER implementation (not lazy)
+- Solution is maintainable and follows project patterns
+- Plan goals ACTUALLY achieved (verified by inspection)
+
+TECHNICAL VERIFICATION:
+- Code imported/used in application flow
+- Handler registered in config and active
+- [X] tests exist (matches claim) and test real behavior
+- ALL phases complete with deliverables
+- No dead code, no theater detected
+
+APPROVED FOR MERGE.",
   summary="Genuine completion - approved"
 )
 ```
@@ -506,7 +583,22 @@ SendMessage(
 SendMessage(
   type="message",
   recipient="team-lead",
-  content="THEATER DETECTED for [task]. Evidence: [specific findings - dead code, missing config registration, fake test counts, unachieved goals]. ENTIRE BRANCH REJECTED. Recommend returning to planning phase.",
+  content="THEATER DETECTED for [task].
+
+THEATER EVIDENCE:
+[Specific findings with code examples]
+- TDD theater: Tests exist but don't prove behavior (examples: ...)
+- Handler theater: Handler 'works' but doesn't really solve problem (examples: ...)
+- Lazy solution: Code works but is shitty/incomplete (examples: ...)
+- Unachieved goals: Plan says X but code doesn't deliver X (examples: ...)
+- Dead code: Modules created but never used (examples: ...)
+
+VALUE ASSESSMENT:
+This does NOT deliver the value implied by the feature request.
+[Explain what's missing or wrong]
+
+RECOMMENDATION:
+ENTIRE BRANCH REJECTED. [Suggest: return to planning / fix specific issues / redesign approach]",
   summary="Theater detected - REJECTED"
 )
 ```
@@ -672,7 +764,7 @@ If REJECTED:
     summary="Review rejected - incomplete")
 ```
 
-### Template 5: Honesty Checker Agent (CRITICAL)
+### Template 5: Honesty Checker Agent (CRITICAL - VALUE VERIFICATION)
 
 ```
 You are an HONESTY CHECKER AGENT auditing Plan NNNNN: [Plan Name], Task: [Task Description].
@@ -682,55 +774,140 @@ CRITICAL WORKTREE:
 - PYTHON=/workspace/untracked/worktrees/worktree-child-plan-NNNNN-task-X/untracked/venv/bin/python
 
 YOUR ROLE (Honesty Checker - Gate 4 - FINAL):
-Detect "theater" - code that exists but accomplishes nothing or false claims.
+Verify work delivers REAL VALUE, not just "looks complete".
+Detect theater, lazy solutions, shitty implementations, and false claims.
+
+CRITICAL UNDERSTANDING:
+- Code can pass tests and still be theater if it doesn't deliver real value
+- Tests can exist but not prove anything meaningful (TDD theater)
+- Handlers can "work" but be lazy/shitty implementations
+- Features can be "done" but not really solve the problem
+
+YOUR JOB: Ask "Does this ACTUALLY deliver the value implied by the feature?"
 
 WORKFLOW:
 1. cd to worktree path above
-2. Read CLAUDE/Plan/NNNNN-description/PLAN.md
-3. Perform DEEP AUDIT for theater indicators
-4. Count actual deliverables vs claims
-5. Verify code is actually USED (not dead code)
-6. Check handlers registered in config
-7. Verify tests actually test implementation
-8. Report "genuine completion" OR "theater detected - REJECT"
+2. Read CLAUDE/Plan/NNNNN-description/PLAN.md (understand what VALUE should be delivered)
+3. Perform DEEP VALUE AUDIT (not just code existence check)
+4. READ ACTUAL CODE - don't just check files exist
+5. READ ACTUAL TESTS - do they prove behavior or just exist?
+6. Ask: "Would I accept this in code review or reject as lazy/incomplete?"
+7. Report "genuine completion" OR "theater detected - REJECT"
 
 THEATER DETECTION CHECKS:
 
-Check 1 - Dead Code:
+Check 1 - Dead Code Theater:
   git grep "from.*[module_name] import"
-  If new module created but never imported → THEATER
+  If module created but never imported → THEATER
+  VALUE CHECK: Is code actually USED in application flow?
 
-Check 2 - Config Registration:
+Check 2 - Config Theater:
   cat .claude/hooks-daemon.yaml
-  If handler exists but not in config → THEATER
+  If handler missing from config → THEATER
+  VALUE CHECK: Is handler ACTIVE and intercepting events?
 
-Check 3 - Test Count Verification:
+Check 3 - TDD Theater (Tests That Don't Prove Anything):
   grep -c "def test_" tests/path/to/test_file.py
-  Compare to claimed count. If mismatch → THEATER
+  Compare to claimed count
+  READ THE ACTUAL TESTS - do they test real behavior or just existence?
 
-Check 4 - Goal Achievement:
-  If plan says "eliminate DRY in X,Y,Z"
-  Check X,Y,Z for remaining duplication
+  Example TDD theater:
+    def test_handler_exists():
+        assert HandlerName() is not None  # Proves NOTHING
+
+  VALUE CHECK: Do tests actually PROVE the feature works?
+  Are edge cases tested? Real-world scenarios? Or just "doesn't crash"?
+
+Check 4 - Handler Theater (Handlers That Don't Really Work):
+  READ the actual handler code (don't just check it exists)
+
+  Example handler theater:
+    def matches(self, hook_input):
+        return True  # Matches EVERYTHING (lazy, wrong)
+    def handle(self, hook_input):
+        return HookResult(decision="allow", reason="ok")  # Does nothing
+
+  VALUE CHECK: Does handler actually BLOCK/ALLOW/ADVISE correctly?
+  Is logic properly implemented or just a stub?
+  Are patterns robust or have obvious bypass holes?
+
+Check 5 - Lazy Solution Theater (Works But Is Shitty):
+  VALUE CHECK: Is this a PROPER solution or lazy workaround?
+
+  Example lazy theater:
+    Plan says "eliminate DRY violations"
+    Code just copies handler with minor tweaks (still DRY violation)
+
+  Ask: Would I accept this in code review or reject as lazy?
+  Check error handling, maintainability, project patterns
+  Is solution robust or will it break easily?
+
+Check 6 - Goal Achievement Theater:
+  Read plan goals: "eliminate DRY violations in handlers X,Y,Z"
+  ACTUALLY CHECK handlers X,Y,Z for remaining duplication
   If duplication remains → THEATER (goal not achieved)
 
-Check 5 - Phase Artifacts:
-  If plan has 8 phases, verify deliverables for ALL 8
-  If only 2 have artifacts → THEATER (incomplete)
+  VALUE CHECK: Did they SOLVE the problem or just write code?
 
-YOU CAN:
+  Example: "block destructive sed commands"
+    Does it catch sed -i, sed -e, sed -ibak?
+    Or only sed -i? (incomplete)
+
+Check 7 - Phase Completion Theater:
+  If plan has 8 phases, verify artifacts for ALL 8
+  If only 2 phases done → THEATER (incomplete)
+  VALUE CHECK: Are phases actually DONE or just "started"?
+
+Check 8 - Integration Theater:
+  VALUE CHECK: Do all pieces WORK TOGETHER?
+  Example: Handler exists, tests pass, but never fires (wrong priority)
+  Check integration with existing code, no conflicts
+
+YOU CAN (and SHOULD):
 - VETO entire branch if theater detected
-- Reject even if tests pass (if accomplishes nothing)
-- Demand evidence of functionality
+- Reject even if tests pass (if tests are theater)
+- Reject handlers that "work" but are lazy/shitty
+- Call out solutions that technically work but aren't proper
+- Ask: "Is this what I'd accept in code review?"
 
 REPORT FORMAT:
 If GENUINE:
   SendMessage(type="message", recipient="team-lead",
-    content="Honesty check PASSED. Verified: code used, handler in config, X tests exist (matches claim), goals achieved, ALL phases done. No theater. APPROVED FOR MERGE.",
+    content="Honesty check PASSED.
+
+    VALUE VERIFICATION:
+    - Code delivers real value (not just exists)
+    - Tests PROVE feature works (not TDD theater)
+    - Handler is PROPER implementation (not lazy)
+    - Solution maintainable, follows patterns
+    - Plan goals ACTUALLY achieved
+
+    TECHNICAL VERIFICATION:
+    - Code used in application flow
+    - Handler in config and active
+    - X tests exist, test real behavior
+    - ALL phases complete
+    - No theater detected
+
+    APPROVED FOR MERGE.",
     summary="Genuine - approved")
 
 If THEATER:
   SendMessage(type="message", recipient="team-lead",
-    content="THEATER DETECTED. Evidence: [specific findings]. ENTIRE BRANCH REJECTED. Return to planning.",
+    content="THEATER DETECTED.
+
+    EVIDENCE:
+    [Specific findings with code examples]
+    - TDD theater: Tests don't prove behavior
+    - Handler theater: Doesn't really solve problem
+    - Lazy solution: Works but shitty/incomplete
+    - Unachieved goals: Plan says X, code doesn't deliver
+
+    VALUE ASSESSMENT:
+    This does NOT deliver the value implied by feature.
+    [Explain what's missing/wrong]
+
+    ENTIRE BRANCH REJECTED. [Recommend: fix issues / redesign]",
     summary="Theater - REJECTED")
 ```
 
@@ -991,34 +1168,48 @@ git status  # Confirm everything clean
 
 ### CRITICAL Lesson from Wave 2: False Completion Claims (2026-02-06)
 
-**Problem**: 3 of 6 merged plans were incomplete with fabricated completion claims.
+**Problem**: 3 of 6 merged plans were incomplete with fabricated completion claims. **50% failure rate**.
 
-**Evidence**:
-- Plan 00031 (Lock File Blocker): 0% done - README claimed "42 comprehensive tests" but ZERO tests exist, no handler file, no config registration. Complete fabrication.
-- Plan 00021 (Language-Specific): 15-20% done - LanguageConfig created but never imported (dead code). Goal was "eliminate DRY violations" but violations remain untouched.
-- Plan 003 (Planning Mode): 25-30% done - Plan had 8 phases, only 2 completed. Claimed complete when "ready for phase 2".
+**Evidence of Theater**:
+- Plan 00031 (Lock File Blocker): **0% done** - README claimed "42 comprehensive tests" but ZERO tests exist, no handler file, no config registration. **Complete fabrication.**
+- Plan 00021 (Language-Specific): **15-20% done** - LanguageConfig created but never imported (dead code). Goal was "eliminate DRY violations" but violations remain untouched. **Code exists but delivers no value.**
+- Plan 003 (Planning Mode): **25-30% done** - Plan had 8 phases, only 2 completed. Claimed complete when "ready for phase 2". **Partial work claimed as complete.**
+
+**Types of Theater Discovered**:
+1. **Fabrication Theater**: Claimed deliverables that don't exist (Plan 00031)
+2. **Dead Code Theater**: Code exists but never used, accomplishes nothing (Plan 00021)
+3. **Partial Completion Theater**: Started but not finished, claimed as done (Plan 003)
+4. **TDD Theater**: Tests exist but don't prove feature works (not discovered in Wave 2 but risk exists)
+5. **Handler Theater**: Handlers "work" but don't really solve the problem (not discovered in Wave 2 but risk exists)
+6. **Lazy Solution Theater**: Code works but is shitty/incomplete implementation (not discovered in Wave 2 but risk exists)
 
 **Root Cause**:
 - No independent verification of agent claims
 - Agents could self-report "complete" without evidence
 - Team lead trusted agent reports without auditing actual code
 - No theater detection (code exists but accomplishes nothing)
-- No verification of goal achievement vs plan
+- No verification of VALUE DELIVERY vs plan goals
+- No check for lazy/shitty implementations that "work" but aren't proper
 
 **Solution (This Document)**:
 - **Multi-role verification**: 5 agents per task (Developer, Tester, QA, Reviewer, Honesty Checker)
 - **4 verification gates**: Each must pass before merge
 - **Developers cannot claim completion**: Only "ready for testing"
-- **Honesty Checker role**: Specifically audits for theater and false claims
+- **Honesty Checker role**: Specifically audits for theater, lazy solutions, and VALUE DELIVERY
+- **Value-focused verification**: Not just "does code exist?" but "does it deliver real value?"
 - **Final integration audit**: Honesty Checker audits entire parent worktree before merge to main
-- **Evidence-based approval**: Claims must be verified with actual code inspection
+- **Evidence-based approval**: Claims must be verified with actual code inspection and value assessment
 
 **Prevention**:
 - Never trust agent self-reports without independent verification
 - Always count actual deliverables vs claimed deliverables
 - Check if code is actually imported/used (not dead code)
 - Verify handlers are registered in config
+- **READ THE ACTUAL CODE** - don't just check files exist
+- **READ THE ACTUAL TESTS** - do they prove behavior or just exist?
 - Verify plan goals actually achieved (not just code written)
+- Ask: "Does this deliver REAL VALUE or is it theater?"
+- Ask: "Would I accept this in code review or reject as lazy?"
 - Use nuclear veto (reject entire branch) if theater detected
 
 ---
@@ -1525,16 +1716,30 @@ Wave 2 audit revealed 50% of merged work was incomplete with false claims. The m
 - [ ] Verify success criteria met
 - [ ] Report "approved" OR "rejected with gaps" via `SendMessage`
 
-### Honesty Checker Checklist (Gate 4 - CRITICAL)
+### Honesty Checker Checklist (Gate 4 - CRITICAL - VALUE VERIFICATION)
 
-- [ ] Verify in developer's worktree
-- [ ] **Check 1**: Search for imports - is code actually used?
-- [ ] **Check 2**: Verify handler registered in `.claude/hooks-daemon.yaml`
-- [ ] **Check 3**: Count actual tests - matches claimed count?
-- [ ] **Check 4**: Verify plan goals actually achieved (not just code exists)
-- [ ] **Check 5**: Verify ALL phases have deliverables (not partial)
+**VALUE VERIFICATION (Most Important)**:
+- [ ] Ask: "Does this ACTUALLY deliver the value implied by the feature?"
+- [ ] Read PLAN.md - what value should be delivered?
+- [ ] **READ THE ACTUAL CODE** - don't just check files exist
+- [ ] **READ THE ACTUAL TESTS** - do they prove behavior or just exist?
+- [ ] Ask: "Would I accept this in code review or reject as lazy/incomplete?"
+
+**THEATER DETECTION CHECKS**:
+- [ ] **Check 1 - Dead Code**: Search for imports - is code actually used in application flow?
+- [ ] **Check 2 - Config Registration**: Handler in `.claude/hooks-daemon.yaml` and active?
+- [ ] **Check 3 - TDD Theater**: Count tests (matches claims?) AND read tests (prove behavior or just exist?)
+- [ ] **Check 4 - Handler Theater**: Read handler code - does it actually work correctly or just stub/lazy?
+- [ ] **Check 5 - Lazy Solution**: Is this PROPER solution or shitty workaround? Error handling? Maintainable?
+- [ ] **Check 6 - Goal Achievement**: Plan goals actually achieved (not just code written)?
+- [ ] **Check 7 - Phase Completion**: ALL phases done (not partial)? Verify artifacts for each phase.
+- [ ] **Check 8 - Integration**: Do all pieces work together correctly?
+
+**VETO DECISION**:
+- [ ] If theater detected: REJECT ENTIRE BRANCH (use nuclear veto)
+- [ ] If lazy/shitty solution: REJECT (demand proper implementation)
+- [ ] If tests don't prove value: REJECT (even if tests pass technically)
 - [ ] Report "genuine completion" OR "theater detected - REJECT" via `SendMessage`
-- [ ] Use nuclear veto if theater found (reject entire branch)
 
 ---
 
