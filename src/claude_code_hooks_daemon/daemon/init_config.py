@@ -107,6 +107,7 @@ handlers:
     pip_break_system: {enabled: true, priority: 13}  # Block pip --break-system-packages
     sudo_pip: {enabled: true, priority: 14}          # Block sudo pip
     curl_pipe_shell: {enabled: true, priority: 15}   # Block curl | bash patterns
+    lock_file_edit_blocker: {enabled: true, priority: 10}  # Block direct editing of package manager lock files
     worktree_file_copy: {enabled: true, priority: 16}  # Prevent worktree file copies
     dangerous_permissions: {enabled: true, priority: 17}  # Block chmod 777, chown root
     git_stash: {enabled: true, priority: 20}         # Warn about git stash
