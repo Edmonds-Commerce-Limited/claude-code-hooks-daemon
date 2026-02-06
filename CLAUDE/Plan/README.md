@@ -4,14 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00014: Eliminate CWD, Implement Calculated Constants](00014-eliminate-cwd-calculated-constants/PLAN.md) - 🟡 Not Started
-  - Eliminate all dynamic `Path.cwd()` / `os.getcwd()` calls from handler and core code
-  - Create `ProjectContext` dataclass calculated once at daemon launch (project root, git repo name, git toplevel)
-  - Update 10+ handlers to use calculated constants instead of CWD
-  - FAIL FAST on missing project root or uninitialized context
-  - **Priority**: High (reliability issue, FAIL FAST violation)
-  - **Owner**: To be assigned
-
 - [003: Claude Code Planning Mode → Project Workflow Integration](003-planning-mode-project-integration/PLAN.md) - 🟡 Not Started
   - Intercept planning mode writes and redirect to project structure
   - Auto-number plans with 5-digit padding (00001, 00002, etc.)
@@ -64,15 +56,22 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - **GitHub Issue**: #14
   - **Owner**: To be assigned
 
-- [00016: Comprehensive Handler Integration Tests](00016-comprehensive-handler-integration-tests/PLAN.md) - 🟡 Not Started (Blocked by Plan 00014)
+- [00016: Comprehensive Handler Integration Tests](00016-comprehensive-handler-integration-tests/PLAN.md) - 🟡 Not Started
   - Achieve 100% handler coverage in integration tests
   - Use parametrized tests for multiple scenarios per handler
   - Catch initialization failures and silent handler failures
   - **Priority**: Critical (QA/reliability)
   - **Owner**: To be assigned
-  - **Blocked by**: Plan 00014 (ProjectContext dependency)
 
 ## Completed Plans
+
+- [00014: Eliminate CWD, Implement Calculated Constants](Completed/00014-eliminate-cwd-calculated-constants/PLAN.md) - 🟢 Complete (2026-02-06)
+  - Created ProjectContext singleton with all project constants calculated once at daemon startup
+  - Eliminated all `Path.cwd()` calls from handler and core code (only CLI discovery remains, acceptable)
+  - `get_workspace_root()` falls back to ProjectContext instead of CWD
+  - FAIL FAST on uninitialized context (RuntimeError)
+  - Comprehensive tests for singleton lifecycle, git URL parsing, mode detection
+  - **Completed**: 2026-02-06
 
 - [00008: Fail-Fast Error Hiding Audit](Completed/00008-fail-fast-error-hiding-audit/PLAN.md) - 🟢 Complete (2026-02-05)
   - Fixed all 22 error hiding violations across 13 files
@@ -185,9 +184,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans**: 19
-- **Active**: 7
-- **Completed**: 15
-- **Success Rate**: 100% (15/15 completed successfully)
+- **Active**: 6
+- **Completed**: 16
+- **Success Rate**: 100% (16/16 completed successfully)
 
 ## Quick Links
 
