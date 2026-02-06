@@ -125,6 +125,10 @@ handlers:
       enabled: true
       priority: 45
 
+    plan_completion_advisor:  # Advises on plan completion steps (git mv, README update)
+      enabled: true
+      priority: 50
+
     plan_number_helper:    # Helps find correct plan number (child handler)
       enabled: true
       priority: 42
