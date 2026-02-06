@@ -168,7 +168,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Zero new runtime dependencies
   - **Completed**: 2026-01-30 (GitHub Issue #15)
 
-- [00011: Handler Dependency System](00011-handler-dependency-system/PLAN.md) - 🟢 Complete (2026-01-29)
+- [00011: Handler Dependency System](Completed/00011-handler-dependency-system/PLAN.md) - 🟢 Complete (2026-01-29)
   - Implemented handler options inheritance via shares_options_with attribute
   - Added config validation to enforce parent-child dependencies (FAIL FAST)
   - Eliminated config duplication between markdown_organization and plan_number_helper
@@ -208,8 +208,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans**: 27
-- **Active**: 6
-- **Completed**: 21
+- **Active**: 5
+- **Completed**: 22
 - **Success Rate**: 100% (21/21 completed successfully)
 
 ## Quick Links
