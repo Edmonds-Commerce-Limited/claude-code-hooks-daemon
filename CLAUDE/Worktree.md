@@ -573,6 +573,8 @@ git branch -d worktree-plan-00028
 
 Worktrees are designed to work with Claude Code's **agent team mode** (`TeamCreate` / `SendMessage` / `Task` with `team_name`). The team lead orchestrates work from the main workspace while teammates operate in isolated worktrees.
 
+**For complete agent team workflow, see @CLAUDE/AgentTeam.md** - includes team lead/agent responsibilities, lessons learned from Wave 1 POC, and copy-paste agent prompts.
+
 ### Architecture
 
 ```
@@ -1159,6 +1161,7 @@ git branch -d worktree-plan-00028
 - Plan workflow: `CLAUDE/PlanWorkflow.md`
 - QA suite: `scripts/qa/run_all.sh`
 - Code lifecycle: `CLAUDE/CodeLifecycle/General.md`
+- **Agent team workflow**: `CLAUDE/AgentTeam.md` (team coordination, lessons learned, prompts)
 - **Worktree setup**: `scripts/setup_worktree.sh` (automated creation + venv)
 - **Worktree QA validation**: `scripts/validate_worktrees.sh` (sequential QA)
 
