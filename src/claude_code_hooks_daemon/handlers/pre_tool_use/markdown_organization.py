@@ -389,6 +389,8 @@ class MarkdownOrganizationHandler(Handler):
                         plan_number = number_match.group(1)
                         if len(plan_number) < 3:
                             return True  # Block - insufficient digits
+                        # Plan number is valid (3+ digits) - allow
+                        return False
                     else:
                         # No numeric prefix - block
                         return True  # Block - missing plan number
