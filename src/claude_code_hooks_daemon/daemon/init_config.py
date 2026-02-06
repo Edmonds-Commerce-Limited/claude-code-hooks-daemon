@@ -69,7 +69,9 @@ handlers:
   status_line: {}
 
 # Custom project-specific handlers
-plugins: []
+plugins:
+  paths: []
+  plugins: []
 """
 
     @staticmethod
@@ -177,7 +179,9 @@ handlers:
     daemon_stats: {enabled: true, priority: 30}   # Daemon health metrics
 
 # Custom project-specific handlers
-plugins: []
+plugins:
+  paths: []
+  plugins: []
 """
 
 

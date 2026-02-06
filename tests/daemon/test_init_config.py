@@ -209,7 +209,9 @@ class TestConfigTemplate:
         config = yaml.safe_load(config_yaml)
 
         assert "plugins" in config
-        assert isinstance(config["plugins"], list)
+        assert isinstance(config["plugins"], dict)
+        assert "paths" in config["plugins"]
+        assert "plugins" in config["plugins"]
 
     def test_all_event_types_in_full_mode(self):
         """Test that full mode includes all 11 event types."""

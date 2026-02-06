@@ -119,7 +119,14 @@ class TestDaemonController:
         claude_dir = workspace / ".claude"
         claude_dir.mkdir(parents=True)
         config_file = claude_dir / "hooks-daemon.yaml"
-        config_file.write_text("version: 1.0\n")
+        config_file.write_text(
+            "version: '1.0'\n"
+            "daemon:\n"
+            "  idle_timeout_seconds: 600\n"
+            "  log_level: INFO\n"
+            "handlers:\n"
+            "  pre_tool_use: {}\n"
+        )
         return workspace
 
     @pytest.fixture
@@ -544,7 +551,14 @@ class TestIntegration:
         claude_dir = workspace / ".claude"
         claude_dir.mkdir(parents=True)
         config_file = claude_dir / "hooks-daemon.yaml"
-        config_file.write_text("version: 1.0\n")
+        config_file.write_text(
+            "version: '1.0'\n"
+            "daemon:\n"
+            "  idle_timeout_seconds: 600\n"
+            "  log_level: INFO\n"
+            "handlers:\n"
+            "  pre_tool_use: {}\n"
+        )
         return workspace
 
     @pytest.fixture

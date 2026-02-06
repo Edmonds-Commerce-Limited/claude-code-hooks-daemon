@@ -90,13 +90,13 @@ def daemon_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any
     config_path.write_text("""
 version: '1.0'
 daemon:
+  idle_timeout_seconds: 600
   log_level: INFO
   self_install_mode: true
 handlers:
   pre_tool_use: {}
   post_tool_use: {}
   session_start: {}
-plugins: {}
 """)
 
     return {
@@ -550,9 +550,9 @@ class TestDaemonConfiguration:
         config_path.write_text("""
 version: '1.0'
 daemon:
+  idle_timeout_seconds: 600
   self_install_mode: true
 handlers: {}
-plugins: {}
 """)
 
         # Start daemon (redirect output to /dev/null)
