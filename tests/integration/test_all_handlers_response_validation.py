@@ -416,6 +416,114 @@ class TestTddEnforcementHandler:
             assert expected_decision == Decision.ALLOW
 
 
+class TestMarkdownOrganizationHandler:
+    """Test MarkdownOrganizationHandler response validation."""
+
+    @pytest.fixture
+    def handler(self, project_context):
+        from claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization import (
+            MarkdownOrganizationHandler,
+        )
+
+        return MarkdownOrganizationHandler()
+
+    @pytest.mark.parametrize(
+        "hook_input,expected_decision,description",
+        [
+            # Blocked - invalid location
+            (
+                {
+                    "tool_name": "Write",
+                    "tool_input": {"file_path": "src/invalid.md", "content": "# Test"},
+                },
+                Decision.DENY,
+                "Block markdown in src/",
+            ),
+            (
+                {
+                    "tool_name": "Write",
+                    "tool_input": {"file_path": "test.md", "content": "# Test"},
+                },
+                Decision.DENY,
+                "Block markdown at root",
+            ),
+            # Allowed - valid locations
+            (
+                {
+                    "tool_name": "Write",
+                    "tool_input": {"file_path": "CLAUDE/test.md", "content": "# Test"},
+                },
+                Decision.ALLOW,
+                "Allow CLAUDE/ directory",
+            ),
+            (
+                {
+                    "tool_name": "Write",
+                    "tool_input": {
+                        "file_path": "CLAUDE/Plan/00001-test/PLAN.md",
+                        "content": "# Plan",
+                    },
+                },
+                Decision.ALLOW,
+                "Allow CLAUDE/Plan/ with valid number",
+            ),
+            (
+                {
+                    "tool_name": "Write",
+                    "tool_input": {"file_path": "docs/test.md", "content": "# Test"},
+                },
+                Decision.ALLOW,
+                "Allow docs/ directory",
+            ),
+            (
+                {
+                    "tool_name": "Write",
+                    "tool_input": {"file_path": "untracked/test.md", "content": "# Test"},
+                },
+                Decision.ALLOW,
+                "Allow untracked/ directory",
+            ),
+            # Allowed - special files
+            (
+                {
+                    "tool_name": "Write",
+                    "tool_input": {"file_path": "CLAUDE.md", "content": "# Test"},
+                },
+                Decision.ALLOW,
+                "Allow CLAUDE.md anywhere",
+            ),
+            (
+                {
+                    "tool_name": "Write",
+                    "tool_input": {"file_path": "src/README.md", "content": "# Test"},
+                },
+                Decision.ALLOW,
+                "Allow README.md anywhere",
+            ),
+            # Allowed - non-markdown files
+            (
+                {
+                    "tool_name": "Write",
+                    "tool_input": {"file_path": "src/test.py", "content": "# Python code"},
+                },
+                Decision.ALLOW,
+                "Allow non-markdown files",
+            ),
+        ],
+    )
+    def test_response_validity(
+        self, handler, hook_input, expected_decision, description, response_validator
+    ):
+        """Test handler returns valid PreToolUse response."""
+        if handler.matches(hook_input):
+            result = handler.handle(hook_input)
+            assert result.decision == expected_decision, f"Failed: {description}"
+            response = result.to_json("PreToolUse")
+            response_validator.assert_valid("PreToolUse", response)
+        else:
+            assert expected_decision == Decision.ALLOW
+
+
 class TestGitStashHandler:
     """Test GitStashHandler response validation."""
 
