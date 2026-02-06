@@ -103,9 +103,7 @@ class TestGhIssueCommentsHandler:
         ],
         ids=["simple-view", "with-repo", "json-without-comments"],
     )
-    def test_blocks_gh_issue_view_without_comments(
-        self, handler: Any, command: str
-    ) -> None:
+    def test_blocks_gh_issue_view_without_comments(self, handler: Any, command: str) -> None:
         hook_input = make_bash_hook_input(command)
         assert handler.matches(hook_input) is True
         result = handler.handle(hook_input)
@@ -122,9 +120,7 @@ class TestGhIssueCommentsHandler:
         ],
         ids=["with-comments", "json-with-comments", "issue-list", "pr-not-issue"],
     )
-    def test_allows_commands_with_comments(
-        self, handler: Any, command: str
-    ) -> None:
+    def test_allows_commands_with_comments(self, handler: Any, command: str) -> None:
         hook_input = make_bash_hook_input(command)
         assert handler.matches(hook_input) is False
 
@@ -263,15 +259,11 @@ class TestBritishEnglishHandler:
         assert handler.matches(hook_input) is False
 
     def test_ignores_non_content_files(self, handler: Any) -> None:
-        hook_input = make_write_hook_input(
-            "/src/module.py", "color = 'red'"
-        )
+        hook_input = make_write_hook_input("/src/module.py", "color = 'red'")
         assert handler.matches(hook_input) is False
 
     def test_ignores_non_content_directories(self, handler: Any) -> None:
-        hook_input = make_write_hook_input(
-            "/random/dir/guide.md", "The color is red."
-        )
+        hook_input = make_write_hook_input("/random/dir/guide.md", "The color is red.")
         assert handler.matches(hook_input) is False
 
     def test_skips_code_blocks(self, handler: Any) -> None:
@@ -297,18 +289,14 @@ class TestPlanTimeEstimatesHandler:
 
     def test_blocks_time_estimates_in_plan(self, handler: Any) -> None:
         content = "## Tasks\n\nThis should take approximately 2 hours to complete.\n"
-        hook_input = make_write_hook_input(
-            "/workspace/CLAUDE/Plan/00001-test/PLAN.md", content
-        )
+        hook_input = make_write_hook_input("/workspace/CLAUDE/Plan/00001-test/PLAN.md", content)
         if handler.matches(hook_input):
             result = handler.handle(hook_input)
             assert result.decision == Decision.DENY
 
     def test_allows_plan_without_time_estimates(self, handler: Any) -> None:
         content = "## Tasks\n\n- [ ] Task 1: Implement feature\n- [ ] Task 2: Write tests\n"
-        hook_input = make_write_hook_input(
-            "/workspace/CLAUDE/Plan/00001-test/PLAN.md", content
-        )
+        hook_input = make_write_hook_input("/workspace/CLAUDE/Plan/00001-test/PLAN.md", content)
         assert handler.matches(hook_input) is False
 
     def test_ignores_non_plan_files(self, handler: Any) -> None:
