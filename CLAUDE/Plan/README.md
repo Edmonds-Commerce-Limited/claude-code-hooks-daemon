@@ -25,22 +25,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - **Owner**: To be assigned
 
 
-- [00023: LLM Upgrade Experience Improvements](00023-llm-upgrade-experience/PLAN.md) - 🟡 Not Started
-  - Create location detection and self-locating upgrade script
-  - Improve LLM-UPDATE.md with clear copy-paste instructions
-  - Soften error messages during upgrade to avoid investigation loops
-  - Prevent nested .claude conflicts in development
-  - **Priority**: High (developer experience)
-  - **GitHub Issue**: #16
-  - **Owner**: To be assigned
-
-- [00020: Configuration Validation at Daemon Startup](00020-config-validation-startup/PLAN.md) - 🟡 Not Started
-  - Implement config validation at daemon startup with graceful fail-open
-  - Add degraded mode for invalid configurations
-  - Standardize error handling across all code paths
-  - **Priority**: HIGH (safety)
-  - **GitHub Issue**: #13
-  - **Owner**: To be assigned
 
 - [00021: Language-Specific Hook Handlers](00021-language-specific-handlers/PLAN.md) - 🟡 Not Started
   - Implement LanguageConfig-based architecture for multi-language support
@@ -49,27 +33,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - **GitHub Issue**: #12
   - **Owner**: To be assigned
 
-- [00019: Orchestrator-Only Mode](00019-orchestrator-only-mode/PLAN.md) - 🟡 Not Started
-  - Create optional handler to enforce orchestration-only pattern
-  - Block work tools, allow only Task delegation
-  - **Priority**: Medium (feature)
-  - **GitHub Issue**: #14
-  - **Owner**: To be assigned
-
-- [00016: Comprehensive Handler Integration Tests](00016-comprehensive-handler-integration-tests/PLAN.md) - 🟡 Not Started
-  - Achieve 100% handler coverage in integration tests
-  - Use parametrized tests for multiple scenarios per handler
-  - Catch initialization failures and silent handler failures
-  - **Priority**: Critical (QA/reliability)
-  - **Owner**: To be assigned
-
-- [00027: Plan Completion Move Advisor](00027-plan-completion-move-advisor/PLAN.md) - 🟡 Not Started
-  - Detect when PLAN.md is edited to mark status as Complete
-  - Advisory reminder to `git mv` plan folder to `CLAUDE/Plan/Completed/`
-  - Remind to update `CLAUDE/Plan/README.md` and plan statistics
-  - Non-blocking (terminal=False), priority 50
-  - **Priority**: Medium (workflow improvement)
-  - **Owner**: To be assigned
 
 - [00028: Daemon CLI Explicit Paths for Worktree Isolation](00028-daemon-cli-explicit-paths/PLAN.md) - 🟡 Not Started
   - Add `--pid-file` and `--socket` CLI flags to all daemon commands
@@ -94,6 +57,37 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - **Owner**: To be assigned
 
 ## Completed Plans
+
+- [00027: Plan Completion Move Advisor](Completed/00027-plan-completion-move-advisor/PLAN.md) - 🟢 Complete (2026-02-06)
+  - Added PreToolUse handler to detect plan completion markers
+  - Advisory reminder for git mv to Completed/ folder
+  - Reminds about README.md updates and plan statistics
+  - **Completed**: 2026-02-06
+
+- [00023: LLM Upgrade Experience Improvements](Completed/00023-llm-upgrade-experience/PLAN.md) - 🟢 Complete (2026-02-06)
+  - Created location detection and self-locating upgrade script
+  - Improved LLM-UPDATE.md with clear copy-paste instructions
+  - Softened error messages during upgrade to avoid investigation loops
+  - **Completed**: 2026-02-06 (GitHub Issue #16)
+
+- [00020: Configuration Validation at Daemon Startup](Completed/00020-config-validation-startup/PLAN.md) - 🟢 Complete (2026-02-06)
+  - Implemented config validation at daemon startup with graceful fail-open
+  - Added degraded mode for invalid configurations
+  - Standardized error handling across all code paths
+  - **Completed**: 2026-02-06 (GitHub Issue #13)
+
+- [00019: Orchestrator-Only Mode](Completed/00019-orchestrator-only-mode/PLAN.md) - 🟢 Complete (2026-02-06)
+  - Created optional handler to enforce orchestration-only pattern
+  - Blocks work tools, allows only Task delegation
+  - Configurable read-only Bash prefix allowlist
+  - **Completed**: 2026-02-06 (GitHub Issue #14)
+
+- [00016: Comprehensive Handler Integration Tests](Completed/00016-comprehensive-handler-integration-tests/PLAN.md) - 🟢 Complete (2026-02-06)
+  - Achieved 100% handler coverage in integration tests
+  - Used parametrized tests for multiple scenarios per handler
+  - Catches initialization failures and silent handler failures
+  - Added 2,270 lines across 10 test files
+  - **Completed**: 2026-02-06
 
 - [00014: Eliminate CWD, Implement Calculated Constants](Completed/00014-eliminate-cwd-calculated-constants/PLAN.md) - 🟢 Complete (2026-02-06)
   - Created ProjectContext singleton with all project constants calculated once at daemon startup
@@ -214,9 +208,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans**: 27
-- **Active**: 11
-- **Completed**: 16
-- **Success Rate**: 100% (16/16 completed successfully)
+- **Active**: 6
+- **Completed**: 21
+- **Success Rate**: 100% (21/21 completed successfully)
 
 ## Quick Links
 
