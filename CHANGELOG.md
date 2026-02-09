@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-02-09
+
+### Added
+- **Client Installation Safety Validator**: Comprehensive validation system for client project installations that prevents configuration issues
+  - Pre-install validation ensures no stale configs or runtime files
+  - Post-install validation verifies correct daemon directory structure
+  - Lazy-load imports to avoid dependency issues during installation
+  - Prevents handler_status.py path confusion in client projects
+- **/hooks-daemon-update Slash Command**: Auto-deployed during install/upgrade to provide guided LLM assistance for daemon updates
+  - Always fetches latest upgrade instructions from GitHub
+  - Works for all versions including pre-v2.5.0 installations
+  - Ensures upgrade process uses current best practices
+
+### Changed
+- **Upgrade Documentation**: Made GitHub-fetched upgrade script the primary recommended method (follows rustup/nvm pattern)
+- **Complete Dogfooding Configuration**: Enabled all handlers in daemon's own config for comprehensive self-testing
+  - Enabled strict_mode at daemon level for FAIL FAST behavior
+  - Activated all safety handlers (curl_pipe_shell, pipe_blocker, dangerous_permissions, etc.)
+  - Activated all workflow handlers (plan_completion_advisor, task_tdd_advisor, etc.)
+  - Activated all session handlers (workflow_state_restoration, remind_prompt_library, etc.)
+  - Activated all status handlers (git_repo_name, account_display, thinking_mode, usage_tracking)
+- **Hook Script Regeneration**: Updated all hook scripts to match current installer output
+  - Fixed config handler name (hello_world_pre_tool_use)
+  - Ensures consistency between generated and committed scripts
+
+### Fixed
+- **Config Detection Logic**: Fixed handler_status.py to properly distinguish self-install vs client project mode
+  - Now reads config file for self_install_mode flag instead of checking directory existence
+  - Prevents reading wrong config file in client projects
+  - All paths dynamically detected without hardcoded assumptions
+
 ## [2.5.0] - 2026-02-09
 
 ### Added
