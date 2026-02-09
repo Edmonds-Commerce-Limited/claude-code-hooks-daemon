@@ -40,9 +40,12 @@ class HandlerStatusReporter:
         script_dir = Path(__file__).parent
         self.daemon_root = script_dir.parent
 
+        # Determine if this is self-install mode by checking config
+        self_install_mode = self._detect_self_install_mode()
+
         # Check if we're in daemon project or client project
-        if (self.daemon_root / "src" / "claude_code_hooks_daemon").exists():
-            # Running from daemon project
+        if self_install_mode:
+            # Running from daemon project (self-install mode)
             self.project_root = self.daemon_root
             self.config_path = self.daemon_root / ".claude" / "hooks-daemon.yaml"
         else:
@@ -53,6 +56,27 @@ class HandlerStatusReporter:
         # Ensure we can import daemon modules
         if str(self.daemon_root / "src") not in sys.path:
             sys.path.insert(0, str(self.daemon_root / "src"))
+
+    def _detect_self_install_mode(self) -> bool:
+        """Detect if running in self-install mode.
+
+        Returns:
+            True if self-install mode, False if client project
+        """
+        # First, check config in potential self-install location
+        self_install_config = self.daemon_root / ".claude" / "hooks-daemon.yaml"
+        if self_install_config.exists():
+            try:
+                with open(self_install_config, "r") as f:
+                    config = yaml.safe_load(f)
+                    if config and config.get("daemon", {}).get("self_install_mode"):
+                        return True
+            except Exception:
+                pass
+
+        # If not self-install, it must be a client project
+        # (daemon is installed at .claude/hooks-daemon/)
+        return False
 
     def load_config(self) -> dict[str, Any]:
         """Load config from hooks-daemon.yaml."""
