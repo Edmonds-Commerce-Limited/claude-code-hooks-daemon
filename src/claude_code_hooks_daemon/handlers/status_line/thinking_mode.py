@@ -1,7 +1,10 @@
-"""Thinking mode status handler for status line.
+"""Thinking mode and effort level status handler for status line.
 
-Reads ~/.claude/settings.json to show whether thinking mode is enabled.
-Format: "thinking: On" (orange) or "thinking: Off" (dim)
+Reads ~/.claude/settings.json to show thinking mode and effort level.
+Format: "thinking: On/Off" plus "effort: medium" when set.
+
+Uses alwaysThinkingEnabled key (same as PowerShell reference implementation).
+Uses effortLevel key for Opus 4.6 extended thinking effort (low/medium/high).
 """
 
 import json
@@ -16,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class ThinkingModeHandler(Handler):
-    """Display thinking mode status (On/Off) in status line."""
+    """Display thinking mode and effort level in status line."""
 
     def __init__(self) -> None:
         super().__init__(
@@ -31,48 +34,57 @@ class ThinkingModeHandler(Handler):
         return True
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
-        """Read settings and display thinking mode status.
+        """Read settings and display thinking mode and effort level.
 
         Args:
             hook_input: Status event input (not used)
 
         Returns:
-            HookResult with thinking mode status in context
+            HookResult with thinking mode and effort level in context
         """
         try:
-            thinking_on = self._is_thinking_enabled()
+            settings = self._read_settings()
 
             orange = "\033[38;5;208m"
             dim = "\033[2m"
             reset = "\033[0m"
 
-            if thinking_on:
-                status = f"thinking: {orange}On{reset}"
-            else:
-                status = f"thinking: {dim}Off{reset}"
+            parts: list[str] = []
 
-            return HookResult(context=[status])
+            # Only show thinking status when we actually know the state
+            if "alwaysThinkingEnabled" in settings:
+                thinking_on = bool(settings["alwaysThinkingEnabled"])
+                if thinking_on:
+                    parts.append(f"thinking: {orange}On{reset}")
+                else:
+                    parts.append(f"thinking: {dim}Off{reset}")
+
+            effort_level = settings.get("effortLevel")
+            if effort_level is not None:
+                parts.append(f"effort: {orange}{effort_level}{reset}")
+
+            return HookResult(context=parts)
         except Exception:
             logger.info("Error reading thinking mode settings")
             return HookResult(context=[])
 
-    def _is_thinking_enabled(self) -> bool:
-        """Check if thinking mode is enabled in settings.
+    def _read_settings(self) -> dict[str, Any]:
+        """Read Claude settings file.
 
         Returns:
-            True if alwaysThinkingEnabled is true in settings
+            Parsed settings dict, or empty dict on failure
         """
         settings_path = self._get_settings_path()
 
         if not settings_path.exists():
-            return False
+            return {}
 
         try:
             raw = settings_path.read_text()
-            settings = json.loads(raw)
-            return bool(settings.get("alwaysThinkingEnabled", False))
+            result: dict[str, Any] = json.loads(raw)
+            return result
         except (json.JSONDecodeError, OSError):
-            return False
+            return {}
 
     def _get_settings_path(self) -> Path:
         """Get path to Claude settings file.

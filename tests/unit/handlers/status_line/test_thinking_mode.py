@@ -32,7 +32,7 @@ class TestThinkingModeHandler:
     def test_matches_always_true(self, handler: ThinkingModeHandler) -> None:
         assert handler.matches({}) is True
 
-    def test_handle_shows_on_when_thinking_enabled(
+    def test_handle_shows_on_when_always_thinking_enabled(
         self, handler: ThinkingModeHandler, tmp_path: Path
     ) -> None:
         """Should show 'On' when alwaysThinkingEnabled is true."""
@@ -44,14 +44,13 @@ class TestThinkingModeHandler:
             result = handler.handle({})
 
         assert result.context is not None
-        assert len(result.context) > 0
-        context_str = result.context[0]
-        assert "On" in context_str
+        assert len(result.context) == 1
+        assert "On" in result.context[0]
 
-    def test_handle_shows_off_when_thinking_disabled(
+    def test_handle_shows_off_when_always_thinking_disabled(
         self, handler: ThinkingModeHandler, tmp_path: Path
     ) -> None:
-        """Should show 'Off' when alwaysThinkingEnabled is false."""
+        """Should show 'Off' when alwaysThinkingEnabled is explicitly false."""
         settings = {"alwaysThinkingEnabled": False}
         settings_file = tmp_path / "settings.json"
         settings_file.write_text(json.dumps(settings))
@@ -60,48 +59,111 @@ class TestThinkingModeHandler:
             result = handler.handle({})
 
         assert result.context is not None
-        assert len(result.context) > 0
-        context_str = result.context[0]
-        assert "Off" in context_str
+        assert len(result.context) == 1
+        assert "Off" in result.context[0]
 
-    def test_handle_shows_off_when_key_missing(
+    def test_handle_omits_thinking_when_key_missing(
         self, handler: ThinkingModeHandler, tmp_path: Path
     ) -> None:
-        """Should show 'Off' when key is missing from settings."""
-        settings: dict[str, Any] = {"someOtherKey": True}
+        """Should not show thinking status when key is absent (unknown state)."""
+        settings = {"model": "opus"}
         settings_file = tmp_path / "settings.json"
         settings_file.write_text(json.dumps(settings))
 
         with patch.object(handler, "_get_settings_path", return_value=settings_file):
             result = handler.handle({})
 
-        context_str = result.context[0]
-        assert "Off" in context_str
+        # No thinking status, no effort level = empty
+        assert len(result.context) == 0
 
-    def test_handle_shows_off_when_file_missing(
+    def test_handle_shows_effort_level_when_present(
         self, handler: ThinkingModeHandler, tmp_path: Path
     ) -> None:
-        """Should show 'Off' when settings file doesn't exist."""
+        """Should show effort level as separate context item."""
+        settings = {"alwaysThinkingEnabled": True, "effortLevel": "medium"}
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text(json.dumps(settings))
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_file):
+            result = handler.handle({})
+
+        assert len(result.context) == 2
+        assert "On" in result.context[0]
+        assert "medium" in result.context[1]
+
+    def test_handle_shows_effort_high(self, handler: ThinkingModeHandler, tmp_path: Path) -> None:
+        """Should show high effort level."""
+        settings = {"alwaysThinkingEnabled": True, "effortLevel": "high"}
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text(json.dumps(settings))
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_file):
+            result = handler.handle({})
+
+        assert len(result.context) == 2
+        assert "high" in result.context[1]
+
+    def test_handle_effort_level_only_no_thinking_key(
+        self, handler: ThinkingModeHandler, tmp_path: Path
+    ) -> None:
+        """Should show only effort level when thinking key is absent."""
+        settings = {"effortLevel": "medium"}
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text(json.dumps(settings))
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_file):
+            result = handler.handle({})
+
+        assert len(result.context) == 1
+        assert "medium" in result.context[0]
+        assert "thinking" not in result.context[0]
+
+    def test_handle_no_thinking_key_no_effort(
+        self, handler: ThinkingModeHandler, tmp_path: Path
+    ) -> None:
+        """Should return empty context when neither key exists."""
+        settings = {"model": "opus"}
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text(json.dumps(settings))
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_file):
+            result = handler.handle({})
+
+        assert len(result.context) == 0
+
+    def test_handle_empty_when_file_missing(
+        self, handler: ThinkingModeHandler, tmp_path: Path
+    ) -> None:
+        """Should return empty context when settings file doesn't exist."""
         settings_file = tmp_path / "nonexistent.json"
 
         with patch.object(handler, "_get_settings_path", return_value=settings_file):
             result = handler.handle({})
 
-        context_str = result.context[0]
-        assert "Off" in context_str
+        assert len(result.context) == 0
 
-    def test_handle_shows_off_on_malformed_json(
+    def test_handle_empty_on_malformed_json(
         self, handler: ThinkingModeHandler, tmp_path: Path
     ) -> None:
-        """Should show 'Off' when settings file has invalid JSON."""
+        """Should return empty context when settings file has invalid JSON."""
         settings_file = tmp_path / "settings.json"
         settings_file.write_text("not valid json{{{")
 
         with patch.object(handler, "_get_settings_path", return_value=settings_file):
             result = handler.handle({})
 
-        context_str = result.context[0]
-        assert "Off" in context_str
+        assert len(result.context) == 0
+
+    def test_handle_empty_settings(self, handler: ThinkingModeHandler, tmp_path: Path) -> None:
+        """Should return empty context for empty settings."""
+        settings: dict[str, Any] = {}
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text(json.dumps(settings))
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_file):
+            result = handler.handle({})
+
+        assert len(result.context) == 0
 
     def test_get_acceptance_tests(self, handler: ThinkingModeHandler) -> None:
         tests = handler.get_acceptance_tests()
