@@ -58,16 +58,24 @@ handlers:
       enabled: true
       priority: 20
 
+    daemon_restart_verifier: # Verifies daemon restart after code changes
+      enabled: false       # Enable for daemon development projects
+      priority: 22
+
+    worktree_file_copy:    # Prevents copying files between git worktrees
+      enabled: true
+      priority: 15
+
     # CODE QUALITY HANDLERS (Priority 25-45) - Optional but recommended
-    python_qa_suppression_blocker:  # Blocks Python QA suppressions (# noqa, # type: ignore, etc)
+    python_qa_suppression:  # Blocks Python QA suppressions (# noqa, # type: ignore, etc)
       enabled: false  # Enable for strict Python quality control
       priority: 26
 
-    php_qa_suppression_blocker:     # Blocks PHP QA suppressions (@phpstan-ignore, etc)
+    php_qa_suppression:     # Blocks PHP QA suppressions (@phpstan-ignore, etc)
       enabled: false  # Enable for strict PHP quality control
       priority: 27
 
-    go_qa_suppression_blocker:      # Blocks Go QA suppressions (//nolint, etc)
+    go_qa_suppression:      # Blocks Go QA suppressions (//nolint, etc)
       enabled: false  # Enable for strict Go quality control
       priority: 28
 
@@ -154,8 +162,8 @@ handlers:
       enabled: true
       priority: 10
 
-    suggest_status_line:  # Suggests daemon-based status line setup
-      enabled: true       # Recommends status line if not configured
+    suggest_statusline:  # Suggests daemon-based status line setup
+      enabled: true      # Recommends status line if not configured
       priority: 55
 
     workflow_state_restoration:  # Restores workflow state after compaction
@@ -174,7 +182,7 @@ handlers:
 
   # SessionEnd handlers (run when session ends)
   session_end:
-    cleanup:  # Session cleanup operations
+    session_cleanup:  # Session cleanup operations
       enabled: true
       priority: 10
 
@@ -247,6 +255,10 @@ handlers:
     usage_tracking: # Tracks and displays usage statistics
       enabled: true
       priority: 60
+
+    stats_cache_reader: # Reads cached stats from data layer
+      enabled: true
+      priority: 70
 
 # Project-level handlers (custom handlers in .claude/hooks/handlers/)
 # Example:
