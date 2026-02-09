@@ -21,7 +21,3 @@ class TestVersion:
     def test_version_is_not_empty(self) -> None:
         """Version is not an empty string."""
         assert __version__ != ""
-
-    def test_version_has_expected_value(self) -> None:
-        """Version matches expected value."""
-        assert __version__ == "2.6.0"

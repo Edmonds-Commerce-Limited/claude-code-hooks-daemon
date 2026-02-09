@@ -28,9 +28,28 @@ Edit RELEASES/*.md      # ❌ NEVER DO THIS
 - Version consistency checks across all files
 - Changelog generation from commits
 - Opus documentation review
+- **🚨 QA VERIFICATION GATE** - Full QA suite must pass before commit
+- **🚨 ACCEPTANCE TESTING GATE** - All acceptance tests must pass before commit
 - Proper git tagging and GitHub release creation
 
-**If you bypass the release workflow, you WILL create inconsistent releases with missing documentation, wrong versions, and broken upgrade paths.**
+**If you bypass the release workflow, you WILL create inconsistent releases with missing documentation, wrong versions, broken upgrade paths, and untested code.**
+
+### Critical Blocking Gates (NON-NEGOTIABLE)
+
+The `/release` skill includes TWO mandatory blocking gates that MUST pass before any git operations:
+
+1. **QA Verification Gate** (after Opus review):
+   - Main Claude manually runs: `./scripts/qa/run_all.sh`
+   - ALL 6 checks must pass (Magic Values, Format, Lint, Type Check, Tests, Security)
+   - If ANY check fails → ABORT release immediately
+
+2. **Acceptance Testing Gate** (after QA passes):
+   - Main Claude generates and executes full acceptance test playbook
+   - ALL 15+ tests must pass in real Claude Code session
+   - If ANY test fails → ABORT release, enter FAIL-FAST cycle
+   - Time investment: Minimum 30 minutes
+
+**These gates are BLOCKING. Release CANNOT proceed if they fail. No exceptions.**
 
 ### Release Commands
 
