@@ -51,29 +51,70 @@ cd ../..
 
 ---
 
-## Recommended: Automated Upgrade Script
+## RECOMMENDED: Automated Upgrade (Always Use Latest)
 
-The simplest upgrade method. Run from **any directory** within the project tree:
+**CRITICAL: Always fetch the upgrade script from GitHub** - Never use the local version.
+
+The upgrade script itself may have been improved or fixed in newer releases. Fetching from GitHub ensures you always use the most up-to-date upgrade logic, regardless of your current installation version.
+
+### One-Command Upgrade
 
 ```bash
-# Upgrade to latest version (auto-detects project root)
-.claude/hooks-daemon/scripts/upgrade.sh
-
-# Upgrade to a specific version
-.claude/hooks-daemon/scripts/upgrade.sh v2.5.0
+# Fetch latest upgrade script from GitHub and run it
+curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/scripts/upgrade.sh | bash
 ```
 
-The script automatically:
-- Detects your project root (works from any subdirectory)
-- Backs up your configuration
-- Stops the daemon
-- Fetches and checks out the target version
-- Installs dependencies
-- Restarts the daemon
-- Verifies the upgrade
-- Rolls back automatically on failure
+This works from **any directory** within your project tree and for **any version** (including pre-v2.5.0 installations).
 
-**If the script is not available** (pre-v2.5.0 installations), use the manual steps below.
+### Inspect Before Running (Safer)
+
+```bash
+# Download script to inspect it first
+curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/scripts/upgrade.sh -o /tmp/upgrade.sh
+
+# Review the script
+less /tmp/upgrade.sh
+
+# Run it
+bash /tmp/upgrade.sh
+
+# Clean up
+rm /tmp/upgrade.sh
+```
+
+### Upgrade to Specific Version
+
+```bash
+# Fetch and run with version argument
+curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/scripts/upgrade.sh -o /tmp/upgrade.sh
+bash /tmp/upgrade.sh v2.5.0
+rm /tmp/upgrade.sh
+```
+
+### What the Script Does
+
+The automated upgrade script:
+- ✅ Auto-detects your project root (works from any subdirectory)
+- ✅ Backs up your configuration
+- ✅ Stops the daemon safely
+- ✅ Fetches and checks out the target version
+- ✅ Installs dependencies
+- ✅ Restarts the daemon
+- ✅ Verifies the upgrade
+- ✅ Rolls back automatically on failure
+- ✅ Handles both normal and self-install modes
+
+### Why Fetch from GitHub?
+
+**Never use the local upgrade script** (`.claude/hooks-daemon/scripts/upgrade.sh`) because:
+
+1. **Bug fixes** - Your local script might have bugs fixed in newer versions
+2. **New features** - Latest script may handle new migration scenarios
+3. **Better safety** - Improved rollback and error handling
+4. **Bootstrap solution** - Works for all versions, even pre-v2.5.0
+5. **Consistency** - Everyone uses the same upgrade logic
+
+This is the same pattern used by `rustup`, `nvm`, `homebrew`, and other modern tooling.
 
 ---
 
