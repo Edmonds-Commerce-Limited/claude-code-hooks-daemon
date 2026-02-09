@@ -420,17 +420,19 @@ else
     echo "The daemon configuration has validation errors (see above)."
     echo "This typically means config settings changed between versions."
     echo ""
-    echo "TO FIX: Ask your project's Claude agent to fix the config:"
+    echo -e "${BOLD}OPTION 1: Replace with default config (RECOMMENDED for most projects)${NC}"
+    echo "  This will replace your config with a fresh default configuration."
+    echo "  Your current config is backed up at: ${CONFIG_BACKUP:-unknown}"
     echo ""
-    echo "  1. Show Claude the error messages above"
-    echo "  2. Ask: 'Fix my hooks-daemon config based on these errors'"
-    echo "  3. Claude will read release notes at:"
-    echo "     $HOOKS_DAEMON_DIR/RELEASES/v${NEW_VERSION}.md"
-    echo "  4. Claude will update .claude/hooks-daemon.yaml automatically"
+    echo "  To replace config, ask your project's Claude agent:"
+    echo "    'Replace my hooks-daemon config with default config'"
     echo ""
-    echo "Config backup available at: ${CONFIG_BACKUP:-none}"
+    echo -e "${BOLD}OPTION 2: Fix config manually (for advanced customizations)${NC}"
+    echo "  If you have custom handlers or complex config, ask Claude to:"
+    echo "    'Fix my hooks-daemon config based on the validation errors above'"
+    echo "  Claude will read release notes and apply fixes selectively."
     echo ""
-    echo "After Claude fixes config, restart daemon:"
+    echo "After fixing config, restart daemon:"
     echo "  $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli restart"
     echo ""
     exit 1
@@ -494,6 +496,62 @@ PYTHON_EOF
     fi
 fi
 
+# Step 9: Handler inventory and recommendations
+log_step "9" "Handler inventory and recommendations"
+
+echo "Checking available handlers..."
+HANDLER_STATUS=$("$VENV_PYTHON" "$HOOKS_DAEMON_DIR/scripts/handler_status.py" 2>/dev/null || echo "")
+
+if [ -n "$HANDLER_STATUS" ]; then
+    echo "$HANDLER_STATUS"
+    echo ""
+else
+    echo -e "${YELLOW}Could not generate handler status (older version may not have handler_status.py)${NC}"
+fi
+
+# Detect project features and make recommendations
+echo -e "${BOLD}📋 Project Feature Detection${NC}"
+echo "================================================"
+
+RECOMMENDATIONS=""
+
+# Check for PlanWorkflow.md (case insensitive)
+if find "$PROJECT_ROOT" -maxdepth 3 -iname "planworkflow.md" 2>/dev/null | grep -q .; then
+    echo "✅ Detected: PlanWorkflow.md (planning workflow in use)"
+    RECOMMENDATIONS="${RECOMMENDATIONS}\n  - Enable plan workflow handlers (plan_mode, task tracking)"
+fi
+
+# Check for Python project indicators
+if [ -f "$PROJECT_ROOT/pyproject.toml" ] || [ -f "$PROJECT_ROOT/setup.py" ] || [ -f "$PROJECT_ROOT/requirements.txt" ]; then
+    echo "✅ Detected: Python project"
+    RECOMMENDATIONS="${RECOMMENDATIONS}\n  - Enable TDD enforcement handlers"
+    RECOMMENDATIONS="${RECOMMENDATIONS}\n  - Enable pytest workflow handlers"
+fi
+
+# Check for Node/JavaScript project
+if [ -f "$PROJECT_ROOT/package.json" ]; then
+    echo "✅ Detected: Node.js/JavaScript project"
+    RECOMMENDATIONS="${RECOMMENDATIONS}\n  - Enable npm audit handler"
+    RECOMMENDATIONS="${RECOMMENDATIONS}\n  - Enable ESLint handlers (if applicable)"
+fi
+
+# Check for git repository
+if [ -d "$PROJECT_ROOT/.git" ]; then
+    echo "✅ Detected: Git repository"
+    RECOMMENDATIONS="${RECOMMENDATIONS}\n  - Enable destructive git protection handlers (HIGHLY RECOMMENDED)"
+fi
+
+echo ""
+
+if [ -n "$RECOMMENDATIONS" ]; then
+    echo -e "${YELLOW}${BOLD}💡 Recommended Handlers to Enable:${NC}"
+    echo -e "$RECOMMENDATIONS"
+    echo ""
+    echo "To enable recommended handlers, ask your project's Claude agent:"
+    echo "  'Enable the recommended handlers listed above'"
+    echo ""
+fi
+
 echo ""
 echo "========================================"
 echo -e "${GREEN}${BOLD}Upgrade Complete${NC}"
@@ -502,15 +560,6 @@ echo ""
 echo "  Previous version: ${CURRENT_VERSION:-unknown}"
 echo "  Current version:  ${NEW_ACTUAL_VERSION:-$NEW_VERSION}"
 echo "  Config backup:    ${CONFIG_BACKUP:-none}"
-echo ""
-
-# Check for new handlers
-echo "To discover new handlers in this version, run:"
-if [ "$SELF_INSTALL" = "true" ]; then
-    echo "  $VENV_PYTHON scripts/handler_status.py"
-else
-    echo "  cd $HOOKS_DAEMON_DIR && $VENV_PYTHON scripts/handler_status.py"
-fi
 echo ""
 
 # Check for upgrade guides
