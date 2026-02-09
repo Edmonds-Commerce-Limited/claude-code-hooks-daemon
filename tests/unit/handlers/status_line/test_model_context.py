@@ -1,5 +1,9 @@
 """Tests for ModelContextHandler."""
 
+import json
+from pathlib import Path
+from unittest.mock import patch
+
 import pytest
 
 from claude_code_hooks_daemon.handlers.status_line import ModelContextHandler
@@ -125,3 +129,115 @@ class TestModelContextHandler:
         assert "0.0%" in result.context[0]
         # Should use green color (0% usage)
         assert "\033[42m" in result.context[0]
+
+    def test_opus_shows_effort_level_medium(
+        self, handler: ModelContextHandler, tmp_path: Path
+    ) -> None:
+        """Opus model should show effort level next to model name."""
+        hook_input = {
+            "model": {"display_name": "Opus 4.6"},
+            "context_window": {"used_percentage": 30.0},
+        }
+        settings = {"effortLevel": "medium"}
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text(json.dumps(settings))
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_file):
+            result = handler.handle(hook_input)
+
+        assert len(result.context) == 1
+        assert "Opus 4.6" in result.context[0]
+        assert "medium" in result.context[0]
+        # Green color for medium effort
+        assert "\033[32mmedium" in result.context[0]
+
+    def test_opus_shows_effort_level_low_blue(
+        self, handler: ModelContextHandler, tmp_path: Path
+    ) -> None:
+        """Low effort should be colored blue."""
+        hook_input = {
+            "model": {"display_name": "Opus 4.6"},
+            "context_window": {"used_percentage": 30.0},
+        }
+        settings = {"effortLevel": "low"}
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text(json.dumps(settings))
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_file):
+            result = handler.handle(hook_input)
+
+        assert "low" in result.context[0]
+        # Blue color for low effort
+        assert "\033[34mlow" in result.context[0]
+
+    def test_opus_shows_effort_level_high_orange(
+        self, handler: ModelContextHandler, tmp_path: Path
+    ) -> None:
+        """High effort should be colored orange."""
+        hook_input = {
+            "model": {"display_name": "Opus 4.6"},
+            "context_window": {"used_percentage": 30.0},
+        }
+        settings = {"effortLevel": "high"}
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text(json.dumps(settings))
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_file):
+            result = handler.handle(hook_input)
+
+        assert "high" in result.context[0]
+        # Orange color for high effort
+        assert "\033[38;5;208mhigh" in result.context[0]
+
+    def test_sonnet_does_not_show_effort(
+        self, handler: ModelContextHandler, tmp_path: Path
+    ) -> None:
+        """Sonnet model should NOT show effort level."""
+        hook_input = {
+            "model": {"display_name": "Sonnet 4.5"},
+            "context_window": {"used_percentage": 30.0},
+        }
+        settings = {"effortLevel": "medium"}
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text(json.dumps(settings))
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_file):
+            result = handler.handle(hook_input)
+
+        assert "medium" not in result.context[0]
+        assert "effort" not in result.context[0].lower()
+
+    def test_opus_no_effort_when_not_set(
+        self, handler: ModelContextHandler, tmp_path: Path
+    ) -> None:
+        """Opus should not show effort suffix when effortLevel is not set."""
+        hook_input = {
+            "model": {"display_name": "Opus 4.6"},
+            "context_window": {"used_percentage": 30.0},
+        }
+        settings = {"alwaysThinkingEnabled": True}
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text(json.dumps(settings))
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_file):
+            result = handler.handle(hook_input)
+
+        assert "Opus 4.6" in result.context[0]
+        # No parenthesized effort
+        assert "(" not in result.context[0] or "Ctx:" in result.context[0]
+
+    def test_opus_no_effort_when_settings_missing(
+        self, handler: ModelContextHandler, tmp_path: Path
+    ) -> None:
+        """Opus should handle missing settings file gracefully."""
+        hook_input = {
+            "model": {"display_name": "Opus 4.6"},
+            "context_window": {"used_percentage": 30.0},
+        }
+        settings_file = tmp_path / "nonexistent.json"
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_file):
+            result = handler.handle(hook_input)
+
+        assert "Opus 4.6" in result.context[0]
+        assert len(result.context) == 1

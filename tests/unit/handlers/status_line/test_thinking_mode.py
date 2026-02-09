@@ -76,10 +76,10 @@ class TestThinkingModeHandler:
         # No thinking status, no effort level = empty
         assert len(result.context) == 0
 
-    def test_handle_shows_effort_level_when_present(
+    def test_handle_effort_level_ignored(
         self, handler: ThinkingModeHandler, tmp_path: Path
     ) -> None:
-        """Should show effort level as separate context item."""
+        """Effort level should not be shown (handled by ModelContextHandler now)."""
         settings = {"alwaysThinkingEnabled": True, "effortLevel": "medium"}
         settings_file = tmp_path / "settings.json"
         settings_file.write_text(json.dumps(settings))
@@ -87,36 +87,10 @@ class TestThinkingModeHandler:
         with patch.object(handler, "_get_settings_path", return_value=settings_file):
             result = handler.handle({})
 
-        assert len(result.context) == 2
-        assert "On" in result.context[0]
-        assert "medium" in result.context[1]
-
-    def test_handle_shows_effort_high(self, handler: ThinkingModeHandler, tmp_path: Path) -> None:
-        """Should show high effort level."""
-        settings = {"alwaysThinkingEnabled": True, "effortLevel": "high"}
-        settings_file = tmp_path / "settings.json"
-        settings_file.write_text(json.dumps(settings))
-
-        with patch.object(handler, "_get_settings_path", return_value=settings_file):
-            result = handler.handle({})
-
-        assert len(result.context) == 2
-        assert "high" in result.context[1]
-
-    def test_handle_effort_level_only_no_thinking_key(
-        self, handler: ThinkingModeHandler, tmp_path: Path
-    ) -> None:
-        """Should show only effort level when thinking key is absent."""
-        settings = {"effortLevel": "medium"}
-        settings_file = tmp_path / "settings.json"
-        settings_file.write_text(json.dumps(settings))
-
-        with patch.object(handler, "_get_settings_path", return_value=settings_file):
-            result = handler.handle({})
-
+        # Only thinking status, no effort
         assert len(result.context) == 1
-        assert "medium" in result.context[0]
-        assert "thinking" not in result.context[0]
+        assert "On" in result.context[0]
+        assert "medium" not in result.context[0]
 
     def test_handle_no_thinking_key_no_effort(
         self, handler: ThinkingModeHandler, tmp_path: Path
