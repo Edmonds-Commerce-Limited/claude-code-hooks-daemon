@@ -725,3 +725,162 @@ def test_generate_markdown_with_no_message_patterns() -> None:
         if test_section_started and "**Expected Message Patterns**:" in line:
             # This shouldn't happen for empty patterns
             raise AssertionError("Expected Message Patterns should not appear for empty list")
+
+
+def test_generate_markdown_includes_plugin_handlers() -> None:
+    """Test that plugin handlers are included in generated playbook."""
+    # Create acceptance test for plugin
+    plugin_test = AcceptanceTest(
+        title="Plugin handler test",
+        command="echo 'plugin test'",
+        description="Test from a plugin handler",
+        expected_decision=Decision.ALLOW,
+        expected_message_patterns=["plugin"],
+        test_type=TestType.ADVISORY,
+    )
+
+    # Create a mock plugin handler
+    class MockPluginHandler(Handler):
+        def __init__(self) -> None:
+            from claude_code_hooks_daemon.constants.handlers import HandlerIDMeta
+
+            super().__init__(
+                handler_id=HandlerIDMeta(
+                    class_name="MockPluginHandler",
+                    config_key="mock_plugin",
+                    display_name="mock-plugin",
+                ),
+                priority=Priority.BRITISH_ENGLISH,  # Use existing advisory priority
+                terminal=False,
+            )
+
+        def matches(self, hook_input: dict[str, Any]) -> bool:
+            return True
+
+        def handle(self, hook_input: dict[str, Any]) -> HookResult:
+            return HookResult(decision=Decision.ALLOW)
+
+        def get_acceptance_tests(self) -> list[AcceptanceTest]:
+            return [plugin_test]
+
+    # Create plugin instance
+    plugin_handler = MockPluginHandler()
+
+    # Create empty registry (no library handlers)
+    registry = HandlerRegistry()
+    config: dict[str, Any] = {}
+
+    # Create generator with plugins parameter
+    generator = PlaybookGenerator(config=config, registry=registry, plugins=[plugin_handler])
+
+    markdown = generator.generate_markdown()
+
+    # Verify plugin handler appears in playbook
+    assert "Plugin handler test" in markdown
+    assert "Test from a plugin handler" in markdown
+    assert "echo 'plugin test'" in markdown
+    assert "**Total Tests**: 1" in markdown
+    assert "**Total Handlers**: 1" in markdown
+
+
+def test_generate_markdown_combines_library_and_plugin_handlers() -> None:
+    """Test that library and plugin handlers are combined and sorted by priority."""
+    # Library handler test
+    library_test = AcceptanceTest(
+        title="Library handler test",
+        command="echo 'library'",
+        description="Test from library handler",
+        expected_decision=Decision.DENY,
+        expected_message_patterns=[],
+    )
+
+    # Plugin handler test
+    plugin_test = AcceptanceTest(
+        title="Plugin handler test",
+        command="echo 'plugin'",
+        description="Test from plugin handler",
+        expected_decision=Decision.ALLOW,
+        expected_message_patterns=[],
+    )
+
+    # Create mock plugin with lower priority (should appear first)
+    class MockPluginHandler(Handler):
+        def __init__(self) -> None:
+            from claude_code_hooks_daemon.constants.handlers import HandlerIDMeta
+
+            super().__init__(
+                handler_id=HandlerIDMeta(
+                    class_name="MockPluginHandler",
+                    config_key="mock_plugin",
+                    display_name="mock-plugin",
+                ),
+                priority=Priority.HELLO_WORLD,  # Lower priority (5) than library handler (10)
+                terminal=False,
+            )
+
+        def matches(self, hook_input: dict[str, Any]) -> bool:
+            return True
+
+        def handle(self, hook_input: dict[str, Any]) -> HookResult:
+            return HookResult(decision=Decision.ALLOW)
+
+        def get_acceptance_tests(self) -> list[AcceptanceTest]:
+            return [plugin_test]
+
+    plugin_handler = MockPluginHandler()
+
+    # Setup library handler with higher priority
+    MockHandlerWithTests.__module__ = "claude_code_hooks_daemon.handlers.pre_tool_use.combined"
+
+    registry = HandlerRegistry()
+    registry._handlers["MockHandlerWithTests"] = MockHandlerWithTests
+
+    config = {"pre_tool_use": {"mock_handler_with_tests": {"enabled": True, "priority": 10}}}
+
+    # Create generator with both library and plugin handlers
+    generator = PlaybookGenerator(config=config, registry=registry, plugins=[plugin_handler])
+
+    with patch.object(MockHandlerWithTests, "get_acceptance_tests", return_value=[library_test]):
+        markdown = generator.generate_markdown()
+
+    # Both should appear
+    assert "Library handler test" in markdown
+    assert "Plugin handler test" in markdown
+
+    # Plugin (priority 5) should appear before library (priority 10)
+    plugin_pos = markdown.find("Plugin handler test")
+    library_pos = markdown.find("Library handler test")
+    assert plugin_pos < library_pos, "Plugin handler (lower priority) should appear first"
+
+    assert "**Total Tests**: 2" in markdown
+    assert "**Total Handlers**: 2" in markdown
+
+
+def test_generate_markdown_with_empty_plugins_list() -> None:
+    """Test that empty plugins list works (backward compatibility)."""
+    config: dict[str, Any] = {}
+    registry = HandlerRegistry()
+
+    # Explicitly pass empty plugins list
+    generator = PlaybookGenerator(config=config, registry=registry, plugins=[])
+
+    markdown = generator.generate_markdown()
+
+    # Should generate valid markdown with no errors
+    assert "# Acceptance Testing Playbook" in markdown
+    assert "**Total Tests**: 0" in markdown
+
+
+def test_generate_markdown_plugins_parameter_defaults_to_empty() -> None:
+    """Test that plugins parameter is optional and defaults to empty list."""
+    config: dict[str, Any] = {}
+    registry = HandlerRegistry()
+
+    # Don't pass plugins parameter at all (backward compatibility)
+    generator = PlaybookGenerator(config=config, registry=registry)
+
+    markdown = generator.generate_markdown()
+
+    # Should work without plugins parameter
+    assert "# Acceptance Testing Playbook" in markdown
+    assert "**Total Tests**: 0" in markdown

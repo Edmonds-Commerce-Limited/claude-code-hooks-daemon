@@ -24,17 +24,21 @@ logger = logging.getLogger(__name__)
 class PlaybookGenerator:
     """Generate acceptance test playbooks from handler definitions."""
 
-    __slots__ = ("_config", "_registry")
+    __slots__ = ("_config", "_plugins", "_registry")
 
-    def __init__(self, config: dict[str, Any], registry: HandlerRegistry) -> None:
+    def __init__(
+        self, config: dict[str, Any], registry: HandlerRegistry, plugins: list[Any] | None = None
+    ) -> None:
         """Initialize playbook generator.
 
         Args:
             config: Configuration dictionary (handlers section from hooks-daemon.yaml)
             registry: Handler registry with discovered handlers
+            plugins: Optional list of plugin handler instances to include in playbook
         """
         self._config = config
         self._registry = registry
+        self._plugins = plugins or []
 
     def generate_markdown(self, include_disabled: bool = False) -> str:
         """Generate acceptance test playbook in markdown format.
@@ -95,6 +99,29 @@ class PlaybookGenerator:
                             )
                 except Exception as e:
                     logger.warning("Failed to get tests from %s: %s", handler_class_name, e)
+
+        # Collect acceptance tests from plugin handlers
+        for plugin_handler in self._plugins:
+            try:
+                # Get acceptance tests from plugin
+                if hasattr(plugin_handler, "get_acceptance_tests"):
+                    tests = plugin_handler.get_acceptance_tests()
+                    if tests:
+                        # Get handler name and event type (plugins don't have event type in module path)
+                        handler_name = plugin_handler.__class__.__name__
+                        # Plugins should have event_type attribute or we use "Plugin"
+                        event_type_str = getattr(plugin_handler, "event_type", "Plugin")
+                        if hasattr(event_type_str, "value"):
+                            event_type_str = event_type_str.value
+
+                        tests_by_handler.append(
+                            (handler_name, event_type_str, plugin_handler.priority, tests)
+                        )
+                        logger.debug("Collected %d tests from plugin %s", len(tests), handler_name)
+            except Exception as e:
+                logger.warning(
+                    "Failed to get tests from plugin %s: %s", plugin_handler.__class__.__name__, e
+                )
 
         # Sort handlers by priority (lower priority = higher precedence)
         tests_by_handler.sort(key=lambda x: x[2])
