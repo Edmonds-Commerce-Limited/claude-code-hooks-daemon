@@ -264,10 +264,11 @@ ROLLBACK_TAG=$(git -C "$HOOKS_DAEMON_DIR" describe --tags --exact-match 2>/dev/n
 echo "Current version: ${CURRENT_VERSION:-unknown}"
 echo "Current git ref: ${ROLLBACK_TAG:-unknown}"
 
-# Backup config
+# Backup config with timestamp
 CONFIG_FILE="$PROJECT_ROOT/.claude/hooks-daemon.yaml"
 if [ -f "$CONFIG_FILE" ]; then
-    CONFIG_BACKUP="${CONFIG_FILE}.upgrade-backup"
+    TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+    CONFIG_BACKUP="${CONFIG_FILE}.backup-${TIMESTAMP}"
     cp "$CONFIG_FILE" "$CONFIG_BACKUP"
     echo -e "${GREEN}Config backed up to: $CONFIG_BACKUP${NC}"
 else
