@@ -905,6 +905,11 @@ def cmd_generate_playbook(args: argparse.Namespace) -> int:
         registry = HandlerRegistry()
         registry.discover()
 
+        # Load plugin handlers
+        from claude_code_hooks_daemon.plugins.loader import PluginLoader
+
+        plugins = PluginLoader.load_from_plugins_config(config.plugins)
+
         # Create playbook generator
         from claude_code_hooks_daemon.daemon.playbook_generator import PlaybookGenerator
 
@@ -914,6 +919,7 @@ def cmd_generate_playbook(args: argparse.Namespace) -> int:
         generator = PlaybookGenerator(
             config=handlers_dict,
             registry=registry,
+            plugins=plugins,
         )
 
         # Generate markdown playbook
