@@ -51,32 +51,26 @@ cd ../..
 
 ---
 
-## RECOMMENDED: Automated Upgrade (Always Use Latest)
+## RECOMMENDED: Fetch, Review, and Run (Safest Method)
 
-**CRITICAL: Always fetch the upgrade script from GitHub** - Never use the local version.
+**CRITICAL: Fetch the upgrade script, review it, then run it** - This avoids curl pipe shell patterns that our own security handlers block.
 
-The upgrade script itself may have been improved or fixed in newer releases. Fetching from GitHub ensures you always use the most up-to-date upgrade logic, regardless of your current installation version.
+The upgrade script itself handles all git operations (fetch, checkout, pull, etc.). You just need to download it, make sure you're comfortable with what it does, then run it.
 
-### One-Command Upgrade
-
-```bash
-# Fetch latest upgrade script from GitHub and run it
-curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/scripts/upgrade.sh | bash
-```
-
-This works from **any directory** within your project tree and for **any version** (including pre-v2.5.0 installations).
-
-### Inspect Before Running (Safer)
+### Standard Upgrade Process
 
 ```bash
-# Download script to inspect it first
+# Download the latest upgrade script
 curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/scripts/upgrade.sh -o /tmp/upgrade.sh
 
-# Review the script
+# Review the script to ensure you're comfortable with it
 less /tmp/upgrade.sh
 
-# Run it
+# Run it (it handles all the git operations)
 bash /tmp/upgrade.sh
+```
+
+This works for **any version** (including pre-v2.5.0 installations) and is the safest method since you can inspect what the script will do before running it. The script itself handles all the git fetch/checkout/pull operations
 
 # Clean up
 rm /tmp/upgrade.sh

@@ -15,6 +15,110 @@ Claude Code Hooks Daemon is a reusable, configurable hook system for Claude Code
 3. **Extensibility** - Easy plugin system for custom handlers
 4. **Performance** - Single process, efficient dispatch (20ms vs 200ms)
 5. **Safety** - Fail-open philosophy (errors don't block work)
+6. **Deterministic Only** - Daemon handles pattern matching; agent evaluation uses native Claude Code hooks
+
+---
+
+## When to Use Hooks Daemon vs Claude Code Native Hooks
+
+**Critical Architectural Principle:** The hooks daemon is designed for **deterministic validation only**. Complex evaluation requiring reasoning should use **Claude Code's native agent-based hooks**.
+
+### Use Hooks Daemon For (Deterministic)
+
+✅ **Pattern matching and regex validation**
+- Block dangerous commands: `sed -i`, `git reset --hard`, `rm -rf`
+- Validate file paths (absolute vs relative)
+- Check for QA suppression comments
+
+✅ **Fast, synchronous validation**
+- String contains/matches checks
+- File extension validation
+- Simple conditional logic
+
+✅ **Reusable safety handlers**
+- Apply same protection across multiple projects
+- Configurable enable/disable per project
+- Battle-tested patterns
+
+**Examples:**
+- `DestructiveGitHandler` - blocks `git reset --hard` via regex
+- `SedBlockerHandler` - blocks `sed` command usage
+- `AbsolutePathHandler` - validates file paths are absolute
+- `PythonQaSuppessionBlocker` - detects `# noqa`, `# type: ignore`
+
+### Use Claude Code Native Agent Hooks For (Complex Evaluation)
+
+✅ **Workflow compliance validation**
+- Verify release process is followed
+- Check if planning workflow adhered to
+- Validate architectural patterns
+
+✅ **Context analysis requiring reasoning**
+- Read session transcripts to detect agent context
+- Analyze git state and commit history
+- Evaluate whether changes align with project standards
+
+✅ **Multi-turn investigation**
+- Read multiple files to understand intent
+- Execute commands to gather context
+- Make judgment calls based on session history
+
+**Examples:**
+- Release workflow enforcement - verify `/release` skill was used
+- Architecture compliance - check if changes follow documented patterns
+- Planning workflow - ensure plan exists before implementation
+
+### Configuration Locations
+
+| Hook Type | Configuration File | Purpose |
+|-----------|-------------------|---------|
+| Daemon Handlers | `.claude/hooks-daemon.yaml` | Deterministic validation, reusable handlers |
+| Native Agent Hooks | `.claude/hooks.json` | Complex evaluation, project-specific workflow |
+
+### Example: Release Workflow Protection
+
+**Wrong Approach** (Daemon Handler):
+```python
+# ❌ This requires analyzing session context and workflow state
+class ReleaseWorkflowHandler(Handler):
+    def handle(self, hook_input: dict) -> HookResult:
+        # How do we know if release-agent is running?
+        # How do we parse session transcript?
+        # This is too complex for deterministic logic!
+        pass
+```
+
+**Correct Approach** (Native Agent Hook in `.claude/hooks.json`):
+```json
+{
+  "PreToolUse": [{
+    "matcher": {"tool": "Bash", "pattern": "git tag"},
+    "hooks": [{
+      "type": "agent",
+      "prompt": "Read $TRANSCRIPT_PATH and verify release-agent is active. Block if not following @CLAUDE/development/RELEASING.md workflow."
+    }]
+  }]
+}
+```
+
+### Decision Tree
+
+```
+Need to validate something?
+│
+├─ Is it a simple pattern match? (regex, string contains, etc.)
+│  └─ YES → Use Hooks Daemon Handler
+│
+├─ Does it need to read files or analyze context?
+│  └─ YES → Use Claude Code Native Agent Hook
+│
+├─ Does it require multi-turn reasoning?
+│  └─ YES → Use Claude Code Native Agent Hook
+│
+└─ Does it need to work across multiple projects?
+   └─ YES → Use Hooks Daemon Handler (if deterministic)
+       └─ NO → Use Claude Code Native Agent Hook (if complex)
+```
 
 ---
 
