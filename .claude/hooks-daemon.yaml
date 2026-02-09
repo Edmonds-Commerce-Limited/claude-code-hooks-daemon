@@ -1,34 +1,31 @@
-version: "1.0"
+version: "2.0"
 
 # Daemon configuration
 daemon:
-  self_install_mode: true    # Enable self-install mode for development
   idle_timeout_seconds: 600  # Auto-shutdown after 10 minutes of inactivity
   log_level: INFO
-  enable_hello_world_handlers: false  # Disable test handlers in production
-  strict_mode: true  # FAIL FAST on ALL errors (handler exceptions, validation errors) - dogfooding requirement
+  self_install_mode: true  # Self-install: daemon runs from project root (not .claude/hooks-daemon/)
 
-  # Input validation
+  enable_hello_world_handlers: false  # Disabled - using real handlers instead
+
+  # Input validation (v2.2.0+) - Catch malformed events at front controller layer
   input_validation:
-    enabled: true      # Enable input validation
+    enabled: true              # Validate hook inputs (recommended)
+    strict_mode: true          # Fail-closed: return errors on validation failures
+    log_validation_errors: true
 
 # Built-in handler configuration
-# DOGFOODING: ALL handlers enabled - we use every feature we build
 # Handlers run in priority order (lower number = earlier execution)
 # Priority ranges: 5=test, 10-20=safety, 25-45=workflow, 50-60=tool usage
 handlers:
   # PreToolUse handlers (run before every tool call)
   pre_tool_use:
-    # ORCHESTRATOR MODE (Priority 8 - opt-in, disabled by default)
-    orchestrator_only:       # Blocks work tools, forces delegation via Task tool
-      enabled: false
-      priority: 8
+    # TESTING HANDLERS (Priority 5)
+    hello_world_pre_tool_use:  # Test handler showing hook is working
+      enabled: false                     # Disabled - using real handlers
+      priority: 5
 
     # SAFETY HANDLERS (Priority 10-20)
-    daemon_restart_verifier: # Verifies daemon restarts successfully after code changes
-      enabled: true
-      priority: 10
-
     destructive_git:       # Blocks git reset --hard, git clean -f, etc
       enabled: true
       priority: 10
@@ -37,55 +34,31 @@ handlers:
       enabled: true
       priority: 10
 
-    pip_break_system:      # Blocks pip install --break-system-packages
-      enabled: true
-      priority: 10
-
-    sudo_pip:              # Blocks sudo pip install
-      enabled: true
-      priority: 10
-
-    curl_pipe_shell:       # Blocks curl/wget piped to bash/sh
-      enabled: true
-      priority: 10
-
-    lock_file_edit_blocker: # Blocks direct editing of package manager lock files
-      enabled: true
-      priority: 10
-
     absolute_path:         # Enforces absolute paths in file operations
       enabled: true
       priority: 12
-
-    dangerous_permissions: # Blocks chmod 777 and a+rwx
-      enabled: true
-      priority: 15
 
     worktree_file_copy:    # Prevents copying files between git worktrees
       enabled: true
       priority: 15
 
-    pipe_blocker:          # Blocks expensive commands piped to tail/head
-      enabled: true
-      priority: 15
-      options:
-        allowed_pipe_sources:
-          - grep          # Text search
-          - rg            # Ripgrep
-          - awk           # Text processing
-          - sed           # Stream editor
-          - jq            # JSON processor
-          - cut           # Column extraction
-          - sort          # Sorting
-          - uniq          # Deduplication
-          - tr            # Character translation
-          - wc            # Word/line count
-
     git_stash:             # Warns about git stash (stashes can be lost)
       enabled: true
       priority: 20
 
-    # CODE QUALITY HANDLERS (Priority 25-35)
+    # CODE QUALITY HANDLERS (Priority 25-45)
+    python_qa_suppression_blocker:  # Blocks Python QA suppressions (# noqa, # type: ignore, etc)
+      enabled: true
+      priority: 26
+
+    php_qa_suppression_blocker:     # Blocks PHP QA suppressions (@phpstan-ignore, etc)
+      enabled: true
+      priority: 27
+
+    go_qa_suppression_blocker:      # Blocks Go QA suppressions (//nolint, etc)
+      enabled: true
+      priority: 28
+
     eslint_disable:        # Prevents ESLint suppression comments
       enabled: true
       priority: 30
@@ -94,62 +67,39 @@ handlers:
       enabled: true
       priority: 35
 
-    python_qa_suppression_blocker:  # Blocks Python QA suppression comments
-      enabled: true
+    # WORKFLOW HANDLERS (Priority 30-50)
+    plan_number_helper:    # Provides correct next plan number (prevents broken bash discovery)
+      enabled: true        # Enable when using CLAUDE/Plan/ structure
       priority: 30
-
-    php_qa_suppression_blocker:     # Blocks PHP QA suppression comments
-      enabled: true
-      priority: 30
-
-    go_qa_suppression_blocker:      # Blocks Go QA suppression comments
-      enabled: true
-      priority: 30
-
-    markdown_organization: # Enforces markdown file organization rules (parent handler)
-      enabled: true
-      priority: 35
       options:
-        track_plans_in_project: "CLAUDE/Plan"  # Redirect Claude Code plans to project structure
-        plan_workflow_docs: "CLAUDE/PlanWorkflow.md"
+        track_plans_in_project: "CLAUDE/Plan"  # Must match markdown_organization setting
 
-    # WORKFLOW HANDLERS (Priority 40-50)
-    global_npm_advisor:    # Advises on npm install -g (non-blocking)
+    gh_issue_comments:     # Requires --comments flag for gh issue view
       enabled: true
       priority: 40
 
     validate_plan_number:  # Validates plan number format (001-, 002-, etc)
-      enabled: true
+      enabled: false       # Optional - enable for projects using CLAUDE/Plan/
       priority: 40
 
     plan_time_estimates:   # Blocks time estimates in plan files
-      enabled: true
+      enabled: false       # Optional - enable for projects using CLAUDE/Plan/
       priority: 45
 
     plan_workflow:         # Provides guidance when creating plans
-      enabled: true
+      enabled: true        # Enable for projects using CLAUDE/Plan/
       priority: 45
-
-    task_tdd_advisor:      # Advises on TDD when spawning Task agents for implementation
-      enabled: true
-      priority: 45
-
-    plan_completion_advisor:  # Advises on plan completion steps (git mv, README update)
-      enabled: true
-      priority: 50
-
-    plan_number_helper:    # Helps find correct plan number (child handler)
-      enabled: true
-      priority: 42
-      # Options inherited from markdown_organization (no duplication needed)
 
     npm_command:           # Restricts npm commands to approved list
-      enabled: true
+      enabled: false       # Optional - enable for strict npm usage control
       priority: 50
 
-    gh_issue_comments:     # Helps fetch GitHub issue comments
-      enabled: true
+    markdown_organization: # Enforces markdown file organization rules & plan tracking
+      enabled: true        # Enable for md organization + plan tracking
       priority: 50
+      options:
+        track_plans_in_project: "CLAUDE/Plan"     # Path to plan folder (null to disable)
+        plan_workflow_docs: "CLAUDE/PlanWorkflow.md"  # Optional: workflow doc to reference
 
     # TOOL USAGE HANDLERS (Priority 50-60)
     web_search_year:       # Fixes year in web search queries (uses current year)
@@ -162,51 +112,47 @@ handlers:
 
   # PostToolUse handlers (run after tool execution)
   post_tool_use:
-    bash_error_detector:   # Detects errors in bash command output
+    bash_error_detector:   # Detects bash errors and suggests corrections
       enabled: true
       priority: 10
 
-    validate_eslint_on_write:  # Runs ESLint after file writes
-      enabled: true
-      priority: 20
+    # validate_eslint_on_write:  # Runs ESLint after file writes
+    #   enabled: false            # Optional - enable for automatic ESLint validation
+    #   priority: 20
 
-    validate_sitemap:      # Validates sitemap structure after writes
-      enabled: true
-      priority: 30
+    # validate_sitemap:          # Validates sitemap structure after writes
+    #   enabled: false            # Optional - enable for sitemap validation
+    #   priority: 30
 
   # SessionStart handlers (run when session starts)
   session_start:
-    workflow_state_restoration:  # Restores workflow state after compaction
+    yolo_container_detection:  # Detects YOLO development environments (Docker, etc)
       enabled: true
       priority: 10
 
-    yolo_container_detection:    # Detects YOLO container environments
-      enabled: true
-      priority: 40
-      options:
-        min_confidence_score: 3
-        show_detailed_indicators: true
-        show_workflow_tips: true
-
-    suggest_status_line:   # Suggests status line setup
-      enabled: true
+    suggest_status_line:  # Suggests daemon-based status line setup
+      enabled: true         # Enable to suggest status line configuration
       priority: 55
 
-  # SessionEnd handlers (run when session ends)
-  session_end:
-    cleanup:               # Cleanup tasks at session end
-      enabled: true
-      priority: 10
+    # workflow_state_restoration:  # Restores workflow state after compaction
+    #   enabled: false              # Optional - enable for workflow state management
+    #   priority: 60
 
   # PreCompact handlers (run before conversation compaction)
   pre_compact:
-    workflow_state_pre_compact:  # Saves workflow state before compaction
+    transcript_archiver:  # Archives transcripts before compaction
       enabled: true
       priority: 10
 
-    transcript_archiver:   # Archives transcripts before compaction
+    # workflow_state_pre_compact:  # Saves workflow state before compaction
+    #   enabled: false              # Optional - enable for workflow state management
+    #   priority: 20
+
+  # SessionEnd handlers (run when session ends)
+  session_end:
+    cleanup:  # Session cleanup operations
       enabled: true
-      priority: 20
+      priority: 10
 
   # SubagentStop handlers (run when subagent completes)
   subagent_stop:
@@ -214,80 +160,66 @@ handlers:
       enabled: true
       priority: 10
 
-    remind_prompt_library: # Reminds about prompt library after agent work
-      enabled: true
-      priority: 20
+    # remind_prompt_library:  # Reminds about prompt library after agent work
+    #   enabled: false         # Optional - enable for prompt library reminders
+    #   priority: 20
 
-    remind_validator:      # Reminds about HTML validation
-      enabled: true
-      priority: 30
+    # remind_validator:       # Reminds about HTML validation
+    #   enabled: false         # Optional - enable for validation reminders
+    #   priority: 30
 
   # UserPromptSubmit handlers (run when user submits prompt)
   user_prompt_submit:
-    git_context_injector:  # Injects git context into prompts
+    git_context_injector:  # Injects git context into user prompts
       enabled: true
       priority: 10
 
-  # PermissionRequest handlers (run on permission requests)
+    # auto_continue:  # Auto-continues on 'continue' keyword
+    #   enabled: false # Optional - enable for auto-continue behavior
+    #   priority: 20
+
+  # Other hook events
   permission_request:
-    auto_approve_reads:    # Auto-approves read-only operations
+    auto_approve_reads:  # Auto-approves read-only file operations
       enabled: true
       priority: 10
 
-  # Notification handlers (run on notifications)
   notification:
-    notification_logger:   # Logs notifications
+    notification_logger:  # Logs notifications
       enabled: true
       priority: 10
 
-  # Stop handlers (run when session stops)
   stop:
-    task_completion_checker:  # Checks for incomplete tasks
+    auto_continue_stop:  # Auto-continues after stop events based on criteria
       enabled: true
       priority: 10
 
-    auto_continue_stop:    # Handles auto-continue on stop
+    task_completion_checker:  # Checks for task completion
       enabled: true
       priority: 20
 
-  # Status line handlers (provide custom status line display)
+  # Status line handlers (format daemon-based status display)
   status_line:
-    git_repo_name:         # Shows repository name at start (cached)
-      enabled: true
-      priority: 5
-
-    account_display:       # Shows Claude account username
-      enabled: true
-      priority: 5
-
-    model_context:         # Shows model name and context percentage
+    model_context:  # Shows model name and color-coded context percentage
       enabled: true
       priority: 10
 
-    usage_tracking:        # Shows daily/weekly token usage percentages
-      enabled: true
-      priority: 15
-      options:
-        show_daily: true
-        show_weekly: true
-
-    git_branch:            # Shows current git branch
+    git_branch:     # Shows current git branch if in repo
       enabled: true
       priority: 20
 
-    thinking_mode:         # Shows thinking mode On/Off status
-      enabled: true
-      priority: 25
-
-    daemon_stats:          # Shows daemon uptime and stats
+    daemon_stats:   # Shows daemon uptime, memory, log level
       enabled: true
       priority: 30
 
 # Project-level handlers (custom handlers in .claude/hooks/handlers/)
-plugins:
-  paths: [".claude/hooks/handlers/session_start"]
-  plugins:
-    - path: dogfooding_reminder
-      event_type: session_start
-      enabled: true
-      priority: 35
+# Example:
+# plugins:
+#   - type: "file"
+#     path: ".claude/hooks/handlers/pre_tool_use/my_handler.py"
+#     class: "MyHandler"
+#     events: ["PreToolUse"]
+# Custom plugin configuration (optional)
+# plugins:
+#   paths: []
+#   plugins: []

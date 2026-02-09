@@ -1183,6 +1183,29 @@ def main() -> int:
         print(f"❌ Installation Error:\n{e}")
         return 1
 
+    # CLIENT PROJECT SAFETY CHECKS (skip for self-install mode)
+    if not self_install:
+        print("\n🔍 Running client installation safety checks...")
+        # Import validator only when needed (after venv is set up)
+        sys.path.insert(0, str(Path(__file__).parent / "src"))
+        from claude_code_hooks_daemon.install import ClientInstallValidator
+
+        validation_result = ClientInstallValidator.validate_pre_install(project_root)
+
+        # Display warnings
+        for warning in validation_result.warnings:
+            print(f"⚠️  {warning}")
+
+        # Display errors and fail if any
+        if not validation_result.passed:
+            print(f"\n❌ Pre-installation validation failed with {len(validation_result.errors)} error(s):\n")
+            for error in validation_result.errors:
+                print(f"❌ {error}\n")
+            print("Installation aborted. Please fix the issues above and try again.")
+            return 1
+
+        print("✅ Pre-installation checks passed")
+
     # Create .claude directory if it doesn't exist
     claude_dir = project_root / ".claude"
     claude_dir.mkdir(exist_ok=True)
@@ -1256,6 +1279,31 @@ def main() -> int:
 
     # Verify installation
     if verify_installation(project_root):
+        # POST-INSTALLATION SAFETY CHECKS (skip for self-install mode)
+        if not self_install:
+            print("\n🔍 Running post-installation verification...")
+            # Import validator only when needed (already imported in pre-install)
+            if 'ClientInstallValidator' not in locals():
+                sys.path.insert(0, str(Path(__file__).parent / "src"))
+                from claude_code_hooks_daemon.install import ClientInstallValidator
+
+            validation_result = ClientInstallValidator.validate_post_install(project_root)
+
+            # Display warnings
+            for warning in validation_result.warnings:
+                print(f"⚠️  {warning}")
+
+            # Display errors and fail if any
+            if not validation_result.passed:
+                print(f"\n❌ Post-installation validation failed with {len(validation_result.errors)} error(s):\n")
+                for error in validation_result.errors:
+                    print(f"❌ {error}\n")
+                print("\n⚠️  Installation files were created but validation failed.")
+                print("This may indicate a bug in the installer. Please file a bug report.")
+                return 1
+
+            print("✅ Post-installation verification passed")
+
         print("\n🎉 Installation complete!")
         print("\n📚 Daemon Architecture:")
         print("   • Lazy startup - daemon starts on first hook call")

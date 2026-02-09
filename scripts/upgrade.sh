@@ -167,8 +167,57 @@ if [ ! -d "$HOOKS_DAEMON_DIR/.git" ]; then
     exit 1
 fi
 
-# Step 2: Check current version and backup config
-log_step "2" "Checking current version and backing up config"
+# Step 2: Pre-upgrade safety checks (for client projects only)
+log_step "2" "Running pre-upgrade safety checks"
+
+if [ "$SELF_INSTALL" = "false" ]; then
+    echo "Running client installation safety checks..."
+
+    # Run Python validator
+    VALIDATION_SCRIPT=$(cat <<'PYTHON_EOF'
+import sys
+from pathlib import Path
+
+# Add src to path
+daemon_dir = Path("$HOOKS_DAEMON_DIR")
+sys.path.insert(0, str(daemon_dir / "src"))
+
+try:
+    from claude_code_hooks_daemon.install import ClientInstallValidator
+
+    # Run cleanup of stale runtime files
+    result = ClientInstallValidator.cleanup_stale_runtime_files(Path("$PROJECT_ROOT"))
+    for warning in result.warnings:
+        print(f"  {warning}")
+
+    # Check existing config
+    result = ClientInstallValidator._check_existing_config(Path("$PROJECT_ROOT"))
+    for warning in result.warnings:
+        print(f"⚠️  {warning}")
+
+    if not result.passed:
+        for error in result.errors:
+            print(f"❌ {error}", file=sys.stderr)
+        sys.exit(1)
+
+    print("✅ Pre-upgrade checks passed")
+except Exception as e:
+    print(f"⚠️  Warning: Could not run safety checks: {e}", file=sys.stderr)
+    # Don't fail upgrade if validator can't run (might be old version)
+PYTHON_EOF
+)
+
+    if ! python3 -c "$VALIDATION_SCRIPT"; then
+        echo -e "${RED}Pre-upgrade validation failed${NC}"
+        echo "Please fix the issues above before upgrading."
+        exit 1
+    fi
+else
+    echo "Self-install mode - skipping client safety checks"
+fi
+
+# Step 3: Check current version and backup config
+log_step "3" "Checking current version and backing up config"
 
 # Get current version
 CURRENT_VERSION=""
@@ -202,8 +251,8 @@ else
     echo -e "${YELLOW}No config file found at $CONFIG_FILE${NC}"
 fi
 
-# Step 3: Fetch and checkout target version
-log_step "3" "Fetching latest tags and checking out target version"
+# Step 4: Fetch and checkout target version
+log_step "4" "Fetching latest tags and checking out target version"
 
 git -C "$HOOKS_DAEMON_DIR" fetch --tags --quiet
 
@@ -246,8 +295,8 @@ fi
 echo "Checking out $NEW_VERSION..."
 git -C "$HOOKS_DAEMON_DIR" checkout "$NEW_VERSION" --quiet
 
-# Step 4: Install dependencies
-log_step "4" "Installing dependencies"
+# Step 5: Install dependencies
+log_step "5" "Installing dependencies"
 
 VENV_PIP="$(dirname "$VENV_PYTHON")/pip"
 
@@ -299,8 +348,8 @@ else
     echo -e "${YELLOW}Slash command not found (older version)${NC}"
 fi
 
-# Step 5: Restart daemon and verify
-log_step "5" "Restarting daemon"
+# Step 6: Restart daemon and verify
+log_step "6" "Restarting daemon"
 
 "$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli restart 2>/dev/null || true
 
@@ -316,8 +365,8 @@ else
     echo "The daemon will start automatically on the next hook call."
 fi
 
-# Step 6: Verify new version
-log_step "6" "Verifying upgrade"
+# Step 7: Verify new version
+log_step "7" "Verifying upgrade"
 
 NEW_ACTUAL_VERSION=""
 if [ -f "$VERSION_FILE" ]; then
@@ -325,6 +374,53 @@ if [ -f "$VERSION_FILE" ]; then
 from claude_code_hooks_daemon.version import __version__
 print(__version__)
 " 2>/dev/null || echo "unknown")
+fi
+
+# Step 8: Post-upgrade verification (for client projects only)
+if [ "$SELF_INSTALL" = "false" ]; then
+    log_step "8" "Running post-upgrade verification"
+
+    VALIDATION_SCRIPT=$(cat <<'PYTHON_EOF'
+import sys
+from pathlib import Path
+
+# Add src to path
+daemon_dir = Path("$HOOKS_DAEMON_DIR")
+sys.path.insert(0, str(daemon_dir / "src"))
+
+try:
+    from claude_code_hooks_daemon.install import ClientInstallValidator
+
+    # Verify config is valid
+    result = ClientInstallValidator._verify_config_valid(Path("$PROJECT_ROOT"))
+    if not result.passed:
+        for error in result.errors:
+            print(f"❌ {error}", file=sys.stderr)
+        sys.exit(1)
+
+    # CRITICAL: Verify no self_install_mode in config
+    result = ClientInstallValidator._verify_no_self_install_mode(Path("$PROJECT_ROOT"))
+    if not result.passed:
+        for error in result.errors:
+            print(f"❌ {error}", file=sys.stderr)
+        sys.exit(1)
+
+    for warning in result.warnings:
+        print(f"⚠️  {warning}")
+
+    print("✅ Post-upgrade verification passed")
+except Exception as e:
+    print(f"⚠️  Warning: Could not run post-upgrade checks: {e}", file=sys.stderr)
+    # Don't fail if verification can't run
+PYTHON_EOF
+)
+
+    if ! "$VENV_PYTHON" -c "$VALIDATION_SCRIPT"; then
+        echo -e "${RED}Post-upgrade verification failed${NC}"
+        echo "Upgrade completed but configuration validation failed."
+        echo "Please check the errors above."
+        exit 1
+    fi
 fi
 
 echo ""

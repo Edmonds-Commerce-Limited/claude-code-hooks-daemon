@@ -1,10 +1,10 @@
-"""Thinking mode and effort level status handler for status line.
+"""Thinking mode status handler for status line.
 
-Reads ~/.claude/settings.json to show thinking mode and effort level.
-Format: "thinking: On/Off" plus "effort: medium" when set.
+Reads ~/.claude/settings.json to show thinking mode status.
+Format: "thinking: On/Off".
 
 Uses alwaysThinkingEnabled key (same as PowerShell reference implementation).
-Uses effortLevel key for Opus 4.6 extended thinking effort (low/medium/high).
+Effort level display is handled by ModelContextHandler (shown next to model name).
 """
 
 import json
@@ -58,10 +58,6 @@ class ThinkingModeHandler(Handler):
                     parts.append(f"thinking: {orange}On{reset}")
                 else:
                     parts.append(f"thinking: {dim}Off{reset}")
-
-            effort_level = settings.get("effortLevel")
-            if effort_level is not None:
-                parts.append(f"effort: {orange}{effort_level}{reset}")
 
             return HookResult(context=parts)
         except Exception:
