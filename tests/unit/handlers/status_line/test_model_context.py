@@ -125,3 +125,62 @@ class TestModelContextHandler:
         assert "0.0%" in result.context[0]
         # Should use green color (0% usage)
         assert "\033[42m" in result.context[0]
+
+    def test_extended_thinking_effort_level_displayed(self, handler: ModelContextHandler) -> None:
+        """Test effort level is displayed when extended thinking is enabled."""
+        hook_input = {
+            "model": {"display_name": "Opus 4.6"},
+            "context_window": {"used_percentage": 25.0},
+            "extended_thinking": {"enabled": True, "effort_level": 3},
+        }
+
+        result = handler.handle(hook_input)
+
+        assert result.decision == "allow"
+        assert len(result.context) == 1
+        assert "Opus 4.6" in result.context[0]
+        assert "Effort: 3" in result.context[0]
+
+    def test_extended_thinking_disabled(self, handler: ModelContextHandler) -> None:
+        """Test effort level is not displayed when extended thinking is disabled."""
+        hook_input = {
+            "model": {"display_name": "Opus 4.6"},
+            "context_window": {"used_percentage": 25.0},
+            "extended_thinking": {"enabled": False, "effort_level": 3},
+        }
+
+        result = handler.handle(hook_input)
+
+        assert result.decision == "allow"
+        assert len(result.context) == 1
+        assert "Opus 4.6" in result.context[0]
+        assert "Effort:" not in result.context[0]
+
+    def test_extended_thinking_missing(self, handler: ModelContextHandler) -> None:
+        """Test no error when extended_thinking key is missing entirely."""
+        hook_input = {
+            "model": {"display_name": "Sonnet 4.5"},
+            "context_window": {"used_percentage": 30.0},
+        }
+
+        result = handler.handle(hook_input)
+
+        assert result.decision == "allow"
+        assert len(result.context) == 1
+        assert "Sonnet 4.5" in result.context[0]
+        assert "Effort:" not in result.context[0]
+
+    def test_extended_thinking_effort_level_none(self, handler: ModelContextHandler) -> None:
+        """Test effort level not displayed when effort_level is None."""
+        hook_input = {
+            "model": {"display_name": "Opus 4.6"},
+            "context_window": {"used_percentage": 25.0},
+            "extended_thinking": {"enabled": True, "effort_level": None},
+        }
+
+        result = handler.handle(hook_input)
+
+        assert result.decision == "allow"
+        assert len(result.context) == 1
+        assert "Opus 4.6" in result.context[0]
+        assert "Effort:" not in result.context[0]
