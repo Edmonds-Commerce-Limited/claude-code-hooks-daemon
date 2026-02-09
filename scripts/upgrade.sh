@@ -190,8 +190,13 @@ log_step "2" "Running pre-upgrade safety checks"
 if [ "$SELF_INSTALL" = "false" ]; then
     echo "Running client installation safety checks..."
 
-    # Run Python validator
-    VALIDATION_SCRIPT=$(cat <<PYTHON_EOF
+    # Check if venv exists before running checks
+    if [ ! -f "$VENV_PYTHON" ]; then
+        echo -e "${YELLOW}Venv not found yet - skipping pre-upgrade checks${NC}"
+        echo "Safety checks will run after venv is created."
+    else
+        # Run Python validator using venv Python (not system python3)
+        VALIDATION_SCRIPT=$(cat <<PYTHON_EOF
 import sys
 from pathlib import Path
 
@@ -224,10 +229,11 @@ except Exception as e:
 PYTHON_EOF
 )
 
-    if ! python3 -c "$VALIDATION_SCRIPT"; then
-        echo -e "${RED}Pre-upgrade validation failed${NC}"
-        echo "Please fix the issues above before upgrading."
-        exit 1
+        if ! "$VENV_PYTHON" -c "$VALIDATION_SCRIPT"; then
+            echo -e "${RED}Pre-upgrade validation failed${NC}"
+            echo "Please fix the issues above before upgrading."
+            exit 1
+        fi
     fi
 else
     echo "Self-install mode - skipping client safety checks"
@@ -470,5 +476,15 @@ echo ""
 # Clear rollback tag on success (prevents cleanup from rolling back)
 ROLLBACK_TAG=""
 
-echo -e "${GREEN}No Claude Code session restart needed${NC} (daemon restart is sufficient)."
-echo "Exception: Restart Claude Code only if new hook event types were added."
+echo -e "${YELLOW}${BOLD}⚠️  IMPORTANT: Restart Claude Code Now${NC}"
+echo "========================================"
+echo ""
+echo "The daemon has been upgraded and restarted, but Claude Code CLI"
+echo "still has the OLD hook script versions loaded in memory."
+echo ""
+echo "To activate the upgraded hooks, you MUST restart Claude Code:"
+echo ""
+echo "  1. Exit your current Claude Code session completely"
+echo "  2. Start a new Claude Code session"
+echo ""
+echo "Until you restart, hooks will use the old versions and may behave incorrectly."
