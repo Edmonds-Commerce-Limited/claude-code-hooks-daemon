@@ -371,21 +371,49 @@ else
     echo -e "${YELLOW}Slash command not found (older version)${NC}"
 fi
 
-# Step 6: Restart daemon and verify
-log_step "6" "Restarting daemon"
+# Step 6: Restart daemon and verify config
+log_step "6" "Restarting daemon and validating config"
 
-"$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli restart 2>/dev/null || true
+echo "Stopping daemon..."
+"$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
+
+# Brief pause
+sleep 1
+
+echo "Starting daemon..."
+"$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli start 2>/dev/null || true
 
 # Brief pause for startup
 sleep 1
 
-# Check daemon status
-if "$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli status 2>/dev/null; then
-    echo -e "${GREEN}Daemon restarted successfully${NC}"
+# Check daemon status (DO NOT silence errors - we need to see config validation failures)
+echo "Checking daemon status..."
+STATUS_OUTPUT=$("$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli status 2>&1)
+STATUS_EXIT_CODE=$?
+
+if [ $STATUS_EXIT_CODE -eq 0 ]; then
+    echo -e "${GREEN}✅ Daemon started successfully${NC}"
+    echo "$STATUS_OUTPUT"
 else
-    echo -e "${YELLOW}Daemon not running after restart.${NC}"
-    echo "This may be normal if hooks trigger lazy startup."
-    echo "The daemon will start automatically on the next hook call."
+    echo -e "${RED}❌ Daemon failed to start${NC}"
+    echo ""
+    echo "$STATUS_OUTPUT"
+    echo ""
+    echo -e "${YELLOW}${BOLD}Common Issues:${NC}"
+    echo ""
+    echo "1. ${BOLD}Invalid config settings${NC} - Config schema changed between versions"
+    echo "   Fix: Edit .claude/hooks-daemon.yaml and remove deprecated settings"
+    echo "   See error messages above for specific fields to remove"
+    echo ""
+    echo "2. ${BOLD}Permission errors${NC} - Hook scripts not executable"
+    echo "   Fix: chmod +x .claude/hooks/*"
+    echo ""
+    echo "3. ${BOLD}Python version${NC} - Requires Python 3.11+"
+    echo "   Fix: Ensure venv has correct Python version"
+    echo ""
+    echo "Config backup available at: ${CONFIG_BACKUP:-none}"
+    echo ""
+    exit 1
 fi
 
 # Step 7: Verify new version
