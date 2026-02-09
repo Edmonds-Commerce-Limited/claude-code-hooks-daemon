@@ -11,16 +11,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Research agent team sub-agent spawning capability
   - **Priority**: High (context management)
 
-- [00033: Status Line Enhancements (PowerShell Port)](00033-statusline-enhancements/PLAN.md) - Not Started
-  - Port features from production PowerShell status line implementation
-  - Add visual progress bars for usage tracking (●●●○○○○○○○)
-  - Implement API-based 5-hour and 7-day usage windows with reset times
-  - Add thinking mode status display (On/Off)
-  - Improve token count formatting with k/m abbreviations
-  - Add percentage remaining display
-  - Implement smart caching for API calls (60s TTL)
-  - **Priority**: Medium (status line enhancement)
-
 - [00034: Library/Plugin Separation and QA Sub-Agent Integration](00034-library-plugin-separation-qa/PLAN.md) - Not Started
   - Move dogfooding_reminder from library to plugin system
   - Add library/plugin separation check to QA Agent role (AgentTeam.md)
@@ -30,6 +20,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 
 ## Completed Plans
+
+- [00033: Status Line Enhancements (PowerShell Port)](Completed/00033-statusline-enhancements/PLAN.md) - 🟡 Complete with reduced scope (2026-02-09)
+  - Scope reduced: OAuth tokens blocked from third-party API use since Jan 2026
+  - API-based features (progress bars, usage tracking, reset times) all cancelled
+  - Delivered: ThinkingModeHandler with thinking On/Off + effortLevel display
+  - **Completed**: 2026-02-09
 
 - [00040: Playbook Generator Plugin Support](Completed/00040-playbook-generator-plugin-support/PLAN.md) - 🟢 Complete (2026-02-09)
   - Added plugin handler support to acceptance test playbook generator
@@ -251,8 +247,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 33
-- **Completed**: 30
-- **Active** (not started): 3
+- **Completed**: 31 (1 with reduced scope)
+- **Active** (not started): 2
 - **Cancelled/Abandoned**: 0
 
 ## Quick Links
