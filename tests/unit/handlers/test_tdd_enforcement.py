@@ -298,7 +298,7 @@ class TestTddEnforcementHandler:
         }
         result = handler.handle(hook_input)
         # Should contain the full test path
-        assert "/controller/tests/test_my_handler.py" in result.reason
+        assert "/controller/tests/unit/pre_tool_use/test_my_handler.py" in result.reason
 
     @patch("pathlib.Path.exists")
     def test_handle_context_is_none(self, mock_exists, handler):
@@ -341,16 +341,16 @@ class TestTddEnforcementHandler:
         assert "tests" in str(test_path)
 
     def test_get_test_file_path_puts_test_in_tests_directory(self, handler):
-        """_get_test_file_path() should put test file in tests/ directory."""
+        """_get_test_file_path() should put test file in tests/unit/ directory."""
         handler_path = "/workspace/controller/src/handlers/pre_tool_use/my_handler.py"
         test_path = handler._get_test_file_path(handler_path)
-        assert str(test_path).endswith("controller/tests/test_my_handler.py")
+        assert str(test_path).endswith("controller/tests/unit/pre_tool_use/test_my_handler.py")
 
     def test_get_test_file_path_handles_nested_handler_path(self, handler):
         """_get_test_file_path() should handle deeply nested handler paths."""
         handler_path = "/very/deep/path/controller/src/handlers/pre_tool_use/my_handler.py"
         test_path = handler._get_test_file_path(handler_path)
-        assert "controller/tests/test_my_handler.py" in str(test_path)
+        assert "controller/tests/unit/pre_tool_use/test_my_handler.py" in str(test_path)
 
     def test_get_test_file_path_handles_complex_handler_name(self, handler):
         """_get_test_file_path() should handle complex handler names."""
@@ -463,4 +463,75 @@ class TestTddEnforcementHandler:
         }
         # get_file_path returns None for Bash - should return ALLOW at line 52
         result = handler.handle(hook_input)
+        assert result.decision == "allow"
+
+    # Regression test for hooks-daemon structure bug
+    def test_get_test_file_path_handles_hooks_daemon_structure(self, handler):
+        """Regression test: _get_test_file_path() should handle hooks-daemon structure.
+
+        Bug: Handler doesn't find test files in hooks-daemon structure.
+        Handler path: /workspace/src/claude_code_hooks_daemon/handlers/session_start/yolo_container_detection.py
+        Expected test: /workspace/tests/unit/handlers/session_start/test_yolo_container_detection.py
+        """
+        handler_path = "/workspace/src/claude_code_hooks_daemon/handlers/session_start/yolo_container_detection.py"
+        test_path = handler._get_test_file_path(handler_path)
+
+        # Should construct correct test path for hooks-daemon structure
+        expected = Path(
+            "/workspace/tests/unit/handlers/session_start/test_yolo_container_detection.py"
+        )
+        assert test_path == expected, f"Expected {expected}, got {test_path}"
+
+    def test_handle_allows_hooks_daemon_handler_with_existing_test(self, handler):
+        """Regression test: Should allow hooks-daemon handler when test exists.
+
+        Bug: Handler claims test is missing even when it exists at correct location.
+        This test MUST FAIL before fix (false negative - blocks valid handler creation).
+        """
+        # Test with actual filesystem - test file really exists
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/workspace/src/claude_code_hooks_daemon/handlers/session_start/yolo_container_detection.py"
+            },
+        }
+
+        result = handler.handle(hook_input)
+
+        # Should ALLOW because test exists, but currently DENIES (bug)
+        assert (
+            result.decision == "allow"
+        ), f"Should allow when test exists, but got: {result.reason}"
+
+    def test_get_test_file_path_handles_utils_structure(self, handler):
+        """Test: _get_test_file_path() should handle utils/ structure.
+
+        Utils path: /workspace/src/claude_code_hooks_daemon/utils/formatting.py
+        Expected test: /workspace/tests/unit/utils/test_formatting.py
+        """
+        handler_path = "/workspace/src/claude_code_hooks_daemon/utils/formatting.py"
+        test_path = handler._get_test_file_path(handler_path)
+
+        # Should construct correct test path for utils structure
+        expected = Path("/workspace/tests/unit/utils/test_formatting.py")
+        assert test_path == expected, f"Expected {expected}, got {test_path}"
+
+    @patch("pathlib.Path.exists")
+    def test_handle_allows_utils_file_with_existing_test(self, mock_exists, handler):
+        """Test: Should allow utils file when test exists.
+
+        This verifies that utils files follow the same TDD pattern as handlers.
+        """
+        mock_exists.return_value = True
+
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/workspace/src/claude_code_hooks_daemon/utils/formatting.py"
+            },
+        }
+
+        result = handler.handle(hook_input)
+
+        # Should ALLOW because test exists
         assert result.decision == "allow"

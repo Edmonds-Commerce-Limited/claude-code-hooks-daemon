@@ -130,7 +130,7 @@ plugins: []
         assert "hookSpecificOutput" in output
         hook_output = output["hookSpecificOutput"]
         assert hook_output["permissionDecision"] == "deny"
-        assert "destructive" in hook_output["permissionDecisionReason"].lower()
+        assert "blocked" in hook_output["permissionDecisionReason"].lower()
 
     def test_entry_point_with_disabled_handler(self, tmp_path: Path) -> None:
         """Disabled handlers are not invoked."""

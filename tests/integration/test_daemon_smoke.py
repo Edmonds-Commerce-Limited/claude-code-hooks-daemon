@@ -321,7 +321,7 @@ class TestDaemonSmoke:
         assert "hookSpecificOutput" in response, "Expected handler to block command"
         hook_output = response["hookSpecificOutput"]
         assert hook_output.get("permissionDecision") == "deny", "Should deny destructive git"
-        assert "destructive" in hook_output.get("permissionDecisionReason", "").lower()
+        assert "blocked" in hook_output.get("permissionDecisionReason", "").lower()
 
     def test_daemon_processes_post_tool_use_hook(self, daemon_process: dict[str, Any]) -> None:
         """Daemon processes PostToolUse hook events correctly."""

@@ -106,28 +106,56 @@ class TddEnforcementHandler(Handler):
         )
 
     def _get_test_file_path(self, handler_path: str) -> Path:
-        """Get the expected test file path for a handler file."""
-        # Extract just the handler filename
-        handler_filename = Path(handler_path).name
+        """Get the expected test file path for a handler file.
 
-        # Convert handler filename to test filename
-        # e.g., git_handler.py -> test_git_handler.py
+        Uses generic src/ directory detection to mirror source structure into tests/unit/.
+        Pattern: src/{package}/{subdir}/.../file.py -> tests/unit/{subdir}/.../test_file.py
+
+        The package directory (first dir after src/) is stripped since test directories
+        typically don't replicate the package name.
+        """
+        handler_filename = Path(handler_path).name
         test_filename = f"test_{handler_filename}"
 
-        # Get controller directory by finding 'controller' in path
         path_parts = Path(handler_path).parts
+
+        # Generic src/-based path mapping
+        if "src" in path_parts:
+            try:
+                src_idx = path_parts.index("src")
+
+                # Workspace root is everything before src/
+                workspace_parts = path_parts[:src_idx]
+                workspace_root = Path(*workspace_parts) if workspace_parts else Path("/workspace")
+
+                # Parts after src/: {package}/{subdir}/.../file.py
+                after_src = path_parts[src_idx + 1 :]
+
+                # Skip the package directory (first dir after src/) and the filename (last)
+                # Remaining parts are the subdirectory structure to mirror
+                if len(after_src) > 2:
+                    # after_src[0] = package name (skip)
+                    # after_src[1:-1] = subdirectories to mirror
+                    # after_src[-1] = filename (replaced with test_filename)
+                    sub_dirs = after_src[1:-1]
+                    test_file_path = workspace_root / "tests" / "unit"
+                    for sub_dir in sub_dirs:
+                        test_file_path = test_file_path / sub_dir
+                    return test_file_path / test_filename
+                elif len(after_src) == 2:
+                    # src/{package}/file.py -> tests/unit/test_file.py
+                    return workspace_root / "tests" / "unit" / test_filename
+            except (ValueError, IndexError):
+                pass
+
+        # Fallback for non-src/ paths (e.g., controller-based structure)
         try:
             controller_idx = path_parts.index("controller")
-            # Reconstruct path from parts (properly handles leading /)
             controller_dir = Path(*path_parts[: controller_idx + 1])
         except ValueError:
-            # Fallback: assume standard structure
             controller_dir = Path(handler_path).parent.parent.parent
 
-        # Test file should be in tests/ directory
-        test_file_path = controller_dir / "tests" / test_filename
-
-        return test_file_path
+        return controller_dir / "tests" / test_filename
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Tdd Enforcement."""

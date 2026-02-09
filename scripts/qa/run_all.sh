@@ -136,6 +136,14 @@ for name, file_path in results.items():
 
 print("")
 print(f"Overall Status: {'✅ ALL CHECKS PASSED' if all_passed else '❌ SOME CHECKS FAILED'}")
+
+# Add sub-agent QA reminder if automated QA passes
+if all_passed:
+    print("")
+    print("⚠️  IMPORTANT: Automated QA is complete, but full QA requires sub-agent review.")
+    print("")
+    print("Run QA sub-agents for architecture and quality review.")
+    print("See CLAUDE/QA.md for complete workflow.")
 EOF
 
 echo ""
