@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.1] - 2026-02-09
+
+### Changed
+- **Architecture Documentation**: Added comprehensive documentation clarifying daemon vs agent hooks separation
+  - Documented when to use daemon handlers (deterministic, fast) vs native agent hooks (complex reasoning)
+  - Added "When NOT to Write a Handler" section to HANDLER_DEVELOPMENT.md
+  - Updated README.md with architectural principle explanations
+  - Enhanced ARCHITECTURE.md with daemon/agent hooks distinction
+- **Release Workflow Documentation**: Added critical warnings to prevent manual release operations
+  - Added CRITICAL section to CLAUDE.md emphasizing mandatory /release skill usage
+  - Documents why manual git tag/push operations are forbidden
+  - Clarifies pre-release validation, version consistency, and Opus review workflow
+
+### Fixed
+- **Upgrade Instructions Security**: Fixed v2.6.0 upgrade instructions to use fetch-review-run pattern instead of curl pipe bash
+  - Removes security risk of piping curl output directly to shell
+  - Aligns with project's own curl_pipe_shell blocker handler
+  - Updated CHANGELOG.md and upgrade documentation
+
 ## [2.6.0] - 2026-02-09
 
 ### Added
