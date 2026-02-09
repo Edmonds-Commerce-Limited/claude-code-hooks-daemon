@@ -285,9 +285,9 @@ handlers:
 
 # Project-level handlers (custom handlers in .claude/hooks/handlers/)
 plugins:
-  paths: [".claude/hooks"]
+  paths: [".claude/hooks/handlers/session_start"]
   plugins:
-    - path: handlers.session_start.dogfooding_reminder
+    - path: dogfooding_reminder
       event_type: session_start
       enabled: true
       priority: 35

@@ -85,14 +85,20 @@ class PluginLoader:
             logger.error(f"Failed to import plugin {handler_name}: {e}")
             return None
 
-        # Find the Handler class
+        # Find the Handler class (try both with and without "Handler" suffix)
         class_name = PluginLoader.snake_to_pascal(handler_name)
+        class_name_with_suffix = f"{class_name}Handler"
 
-        if not hasattr(module, class_name):
-            logger.error(f"Plugin module {handler_name} does not contain class {class_name}")
+        # Try with "Handler" suffix first (common convention)
+        if hasattr(module, class_name_with_suffix):
+            handler_class_raw = getattr(module, class_name_with_suffix)
+        elif hasattr(module, class_name):
+            handler_class_raw = getattr(module, class_name)
+        else:
+            logger.error(
+                f"Plugin module {handler_name} does not contain class {class_name} or {class_name_with_suffix}"
+            )
             return None
-
-        handler_class_raw = getattr(module, class_name)
 
         # Validate it's a Handler subclass
         if not (inspect.isclass(handler_class_raw) and issubclass(handler_class_raw, Handler)):
