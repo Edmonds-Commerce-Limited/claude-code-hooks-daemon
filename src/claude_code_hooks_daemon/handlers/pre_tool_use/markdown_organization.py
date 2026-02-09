@@ -85,11 +85,11 @@ class MarkdownOrganizationHandler(Handler):
         return normalized
 
     def is_adhoc_instruction_file(self, file_path: str) -> bool:
-        """Check if this is CLAUDE.md, README.md, SKILL.md, agent file, or command file (allowed anywhere)."""
+        """Check if this is CLAUDE.md, README.md, CHANGELOG.md, SKILL.md, agent file, or command file (allowed anywhere)."""
         filename = Path(file_path).name.lower()
 
-        # CLAUDE.md and README.md allowed anywhere
-        if filename in ["claude.md", "readme.md"]:
+        # CLAUDE.md, README.md, and CHANGELOG.md allowed anywhere
+        if filename in ["claude.md", "readme.md", "changelog.md"]:
             return True
 
         # Use centralized normalization
@@ -404,7 +404,11 @@ class MarkdownOrganizationHandler(Handler):
         if normalized.lower().startswith("untracked/"):
             return False  # Allow
 
-        # 7. eslint-rules/ - ESLint rule docs
+        # 7. RELEASES/ - Release notes
+        if normalized.lower().startswith("releases/"):
+            return False  # Allow
+
+        # 8. eslint-rules/ - ESLint rule docs
         # Not in allowed location - block (negated condition returns True)
         return not re.match(r"^eslint-rules/.*\.md$", normalized, re.IGNORECASE)
 
@@ -434,12 +438,14 @@ class MarkdownOrganizationHandler(Handler):
                 "2. ./docs/ - Human-facing documentation\n"
                 "3. ./eslint-rules/ - ESLint rule documentation\n"
                 "4. ./untracked/ - Ad-hoc temporary docs\n"
-                "5. ./.claude/commands/ - Slash command definitions\n\n"
+                "5. ./RELEASES/ - Release notes\n"
+                "6. ./.claude/commands/ - Slash command definitions\n\n"
                 "CHOOSE THE RIGHT LOCATION:\n"
                 "- Is this for LLMs/agents? -> CLAUDE/\n"
                 "- Is this for the current plan? -> CLAUDE/Plan/{plan-number}-*/\n"
                 "- Is this temporary/ad-hoc? -> untracked/\n"
                 "- Is this for humans? -> docs/\n"
+                "- Is this a release note? -> RELEASES/\n"
                 "- Is this a slash command? -> .claude/commands/"
             ),
         )

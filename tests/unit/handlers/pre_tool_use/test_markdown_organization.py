@@ -178,6 +178,20 @@ class TestMarkdownOrganizationHandler:
         write_input["tool_input"]["file_path"] = "/workspace/src/README.md"
         assert handler.matches(write_input) is False
 
+    def test_matches_returns_false_for_changelog_md(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Handler allows CHANGELOG.md in project root."""
+        write_input["tool_input"]["file_path"] = "CHANGELOG.md"
+        assert handler.matches(write_input) is False
+
+    def test_matches_returns_false_for_releases_directory(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Handler allows markdown files in RELEASES/ directory."""
+        write_input["tool_input"]["file_path"] = "RELEASES/v2.5.0.md"
+        assert handler.matches(write_input) is False
+
     def test_matches_returns_false_for_plan_directory(
         self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
     ) -> None:
