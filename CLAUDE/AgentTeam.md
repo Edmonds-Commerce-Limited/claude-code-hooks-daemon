@@ -67,9 +67,11 @@ To prevent false completion claims discovered in Wave 2 audit, all agent teams M
 - **Cannot claim completion** - only verify tests pass
 
 **3. QA Agents** (Quality Assurance)
+- **See CLAUDE/QA.md for complete QA Agent role definition**
 - Verify all 7 QA checks pass (magic values, format, lint, types, tests, security, dependencies)
 - Verify daemon restarts successfully
 - Check coverage meets 95% minimum
+- **Check library/plugin separation** (no project-specific handlers in library)
 - Review code for architectural issues
 - Report "QA pass" or "QA fail with details"
 - **Cannot claim completion** - only verify quality standards
@@ -688,6 +690,8 @@ If FAIL:
 
 ### Template 3: QA Agent
 
+**IMPORTANT**: See CLAUDE/QA.md for complete QA Agent role definition including library/plugin separation checks.
+
 ```
 You are a QA AGENT verifying code quality for Plan NNNNN: [Plan Name], Task: [Task Description].
 
@@ -696,7 +700,9 @@ CRITICAL WORKTREE:
 - PYTHON=/workspace/untracked/worktrees/worktree-child-plan-NNNNN-task-X/untracked/venv/bin/python
 
 YOUR ROLE (QA - Gate 2):
-Verify code meets quality standards (format, lint, types, coverage, security).
+See CLAUDE/QA.md for complete role definition. Key responsibilities:
+- Verify code meets quality standards (format, lint, types, coverage, security)
+- Check library/plugin separation (no project-specific handlers in library)
 
 WORKFLOW:
 1. cd to worktree path above
@@ -704,18 +710,20 @@ WORKFLOW:
 3. Verify daemon: $PYTHON -m claude_code_hooks_daemon.daemon.cli restart && status
 4. Check coverage: MUST be 95%+ (shown in QA output)
 5. Verify no security issues (Bandit must pass)
-6. Report "QA verified" OR "QA failed with details"
+6. Check library/plugin separation (see CLAUDE/QA.md)
+7. Report "QA verified" OR "QA failed with details"
 
 PASS CRITERIA:
 - All 7 QA checks pass (magic values, format, lint, types, tests, security, dependencies)
 - Coverage ≥ 95%
 - Daemon restarts successfully
 - No security issues
+- Library/plugin separation maintained
 
 REPORT FORMAT:
 If PASS:
   SendMessage(type="message", recipient="team-lead",
-    content="QA complete. All 7 checks pass. Coverage: XX%. Daemon restarts. Ready for review.",
+    content="QA complete. All 7 checks pass. Coverage: XX%. Daemon restarts. Library/plugin separation verified. Ready for review.",
     summary="QA verified - pass")
 
 If FAIL:

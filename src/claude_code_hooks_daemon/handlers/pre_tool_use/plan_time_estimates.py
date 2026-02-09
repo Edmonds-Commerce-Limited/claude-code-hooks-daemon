@@ -27,8 +27,35 @@ class PlanTimeEstimatesHandler(Handler):
         r"Target\s+Completion:\s*\d{4}-\d{2}-\d{2}",
         r"\*\*Completion\*\*:\s*\d{4}-\d{2}-\d{2}",
         r"Completion:\s*\d{4}-\d{2}-\d{2}",
-        r"\b\d+\s*(hour|hr|minute|min|day|week|month)s?\b",
+        # Work estimate patterns (with context clues)
+        r"\b(?:take|takes|require|requires|need|needs|approximately|about)\s+\d+[-]\d+\s*(?:hour|hr|minute|min|day|week|month)s?\b",
+        r"\b(?:take|takes|require|requires|need|needs|approximately|about)\s+\d+\s+(?:hour|hr|minute|min|day|week|month)s?\b",
+        r"\bPhase\s+\d+[^:]*:\s*[^\(]*\(\s*\d+[-]\d+\s*(?:hour|hr|minute|min|day|week)s?\s*\)",
+        r"\bPhase\s+\d+[^:]*:\s*[^\(]*\(\s*\d+\s+(?:hour|hr|minute|min|day|week)s?\s*\)",
+        r"\b(?:Total|Overall|Combined)[^\n:]*:\s*\d+[-]\d+\s*(?:hour|hr|minute|min|day|week)s?\b",
+        r"\b(?:Total|Overall|Combined)[^\n:]*:\s*\d+\s+(?:hour|hr|minute|min|day|week)s?\b",
+        r"\b\d+[-]\d+\s*(?:hour|hr|minute|min|day|week)s?\s+(?:of\s+)?(?:work|implementation|development|effort|time)\b",
+        r"\b\d+\s+(?:hour|hr|minute|min|day|week)s?\s+(?:of\s+)?(?:work|implementation|development|effort|time)\b",
         r"\b(ETA|timeline|deadline|due date):\s*\d",
+    ]
+
+    # Technical terms that should NOT be flagged (feature descriptions)
+    TECHNICAL_PATTERNS: ClassVar[list[str]] = [
+        r"\bTTL\b",
+        r"\bcache\b",
+        r"\bretention\b",
+        r"\bpolicy\b",
+        r"\bwindow\b",
+        r"\btimeout\b",
+        r"\bexpir(?:e|es|ation|y)\b",
+        r"\btracking\b",
+        r"\btrial\b",
+        r"\bperiod\b",
+        r"\bsession\b",
+        r"\brolling\b",
+        r"\busage\b",
+        r"\bAPI\b",
+        r"\brate\s+limit",
     ]
 
     def __init__(self) -> None:
@@ -61,7 +88,21 @@ class PlanTimeEstimatesHandler(Handler):
             return False
 
         # Check for time estimate patterns
-        return any(re.search(pattern, content, re.IGNORECASE) for pattern in self.ESTIMATE_PATTERNS)
+        has_estimate_pattern = any(
+            re.search(pattern, content, re.IGNORECASE) for pattern in self.ESTIMATE_PATTERNS
+        )
+
+        if not has_estimate_pattern:
+            return False
+
+        # Check if this is a technical term (not a work estimate)
+        # Look for technical keywords near the time unit
+        is_technical = any(
+            re.search(pattern, content, re.IGNORECASE) for pattern in self.TECHNICAL_PATTERNS
+        )
+
+        # If technical keywords found, it's likely a feature description, not a work estimate
+        return not is_technical
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Block time estimates."""

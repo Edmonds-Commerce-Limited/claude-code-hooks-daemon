@@ -103,9 +103,6 @@ class Priority:
     ACCOUNT_DISPLAY = 5
     MODEL_CONTEXT = 10
     USAGE_TRACKING = 15
-    API_USAGE_FIVE_HOUR = 16
-    API_USAGE_SEVEN_DAY = 17
-    API_USAGE_EXTRA = 18
     THINKING_MODE = 25
 
     # Special handlers (no fixed priority in catalog)

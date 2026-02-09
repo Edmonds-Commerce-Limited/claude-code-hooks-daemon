@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from claude_code_hooks_daemon.config.validator import ConfigValidator
 from claude_code_hooks_daemon.core.chain import ChainExecutionResult
+from claude_code_hooks_daemon.core.data_layer import get_data_layer
 from claude_code_hooks_daemon.core.event import EventType, HookEvent
 from claude_code_hooks_daemon.core.hook_result import HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
@@ -335,12 +336,28 @@ class DaemonController:
             # Convert HookInput to dict for handlers (use Python field names, not camelCase aliases)
             hook_input_dict = event.hook_input.model_dump(by_alias=False)
 
+            # Update data layer SessionState on StatusLine events
+            if event.event_type == EventType.STATUS_LINE:
+                get_data_layer().session.update_from_status_event(hook_input_dict)
+
             # Get strict_mode from config (default to False if no config)
             strict_mode = self._config.strict_mode if self._config else False
 
             result = self._router.route(event.event_type, hook_input_dict, strict_mode=strict_mode)
             processing_time = (time.perf_counter() - start_time) * 1000
             self._stats.record_request(event.event_type.value, processing_time)
+
+            # Record handler decisions in data layer history
+            data_layer = get_data_layer()
+            for handler_name in result.handlers_matched:
+                tool_name = event.hook_input.tool_name or ""
+                data_layer.history.record(
+                    handler_id=handler_name,
+                    event_type=event.event_type.value,
+                    decision=result.result.decision.value,
+                    tool_name=tool_name,
+                    reason=result.result.reason,
+                )
 
             # Check if a handler crashed (strict mode creates error result with context)
             if any("Handler exception:" in ctx for ctx in result.result.context):

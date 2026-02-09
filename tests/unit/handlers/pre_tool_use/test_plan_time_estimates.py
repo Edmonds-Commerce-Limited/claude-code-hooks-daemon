@@ -322,3 +322,138 @@ class TestPlanTimeEstimatesHandler:
         assert "minutes?" in patterns_str
         assert "days?" in patterns_str
         assert "weeks?" in patterns_str
+
+    # Regression tests for bug: False positives on technical terms
+
+    def test_bug_does_not_match_technical_cache_ttl(
+        self, handler: PlanTimeEstimatesHandler
+    ) -> None:
+        """Regression test: Should NOT match technical cache TTL terms.
+
+        Bug: Handler blocks legitimate technical terms like "30 day TTL cache".
+        This is NOT a work estimate, it's a technical configuration detail.
+        """
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/workspace/CLAUDE/Plan/001-test/PLAN.md",
+                "content": "Implement 30 day TTL cache for API responses",
+            },
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_bug_does_not_match_api_usage_window(self, handler: PlanTimeEstimatesHandler) -> None:
+        """Regression test: Should NOT match API feature names.
+
+        Bug: Handler blocks "5 hour usage window" which is an API feature name.
+        """
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/workspace/CLAUDE/Plan/001-test/PLAN.md",
+                "content": "Add support for 5 hour API usage window tracking",
+            },
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_bug_does_not_match_retention_policy(self, handler: PlanTimeEstimatesHandler) -> None:
+        """Regression test: Should NOT match data retention policies.
+
+        Bug: Handler blocks "30 day retention policy" technical term.
+        """
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/workspace/CLAUDE/Plan/001-test/PLAN.md",
+                "content": "Configure 30 day retention policy for user data",
+            },
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_bug_does_not_match_rolling_window(self, handler: PlanTimeEstimatesHandler) -> None:
+        """Regression test: Should NOT match technical rolling window terms.
+
+        Bug: Handler blocks "24 hour rolling window" feature description.
+        """
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/workspace/CLAUDE/Plan/001-test/PLAN.md",
+                "content": "Support 24 hour rolling window for rate limiting",
+            },
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_bug_does_not_match_day_tracking_feature(
+        self, handler: PlanTimeEstimatesHandler
+    ) -> None:
+        """Regression test: Should NOT match feature names with time units.
+
+        Bug: Handler blocks "7 day usage tracking" feature name.
+        """
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/workspace/CLAUDE/Plan/001-test/PLAN.md",
+                "content": "Implement 7 day usage tracking dashboard",
+            },
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_bug_does_not_match_trial_period(self, handler: PlanTimeEstimatesHandler) -> None:
+        """Regression test: Should NOT match trial period feature.
+
+        Bug: Handler blocks "2 week trial period" feature description.
+        """
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/workspace/CLAUDE/Plan/001-test/PLAN.md",
+                "content": "Enable 2 week trial period for new users",
+            },
+        }
+        assert handler.matches(hook_input) is False
+
+    # Still SHOULD match work estimates
+
+    def test_bug_still_matches_phase_time_estimate(self, handler: PlanTimeEstimatesHandler) -> None:
+        """Regression test: Should STILL match work estimates in phases.
+
+        Should block: "Phase 1: 2-3 hours" (work estimate).
+        """
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/workspace/CLAUDE/Plan/001-test/PLAN.md",
+                "content": "Phase 1: Implementation (2-3 hours)",
+            },
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_bug_still_matches_total_effort(self, handler: PlanTimeEstimatesHandler) -> None:
+        """Regression test: Should STILL match total effort estimates.
+
+        Should block: "Total: 10-15 hours" (work estimate).
+        """
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/workspace/CLAUDE/Plan/001-test/PLAN.md",
+                "content": "Total: 10-15 hours of implementation work",
+            },
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_bug_still_matches_implementation_time(self, handler: PlanTimeEstimatesHandler) -> None:
+        """Regression test: Should STILL match implementation time estimates.
+
+        Should block: "8-12 hours" as standalone work estimate.
+        """
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/workspace/CLAUDE/Plan/001-test/PLAN.md",
+                "content": "This implementation will take 8-12 hours to complete",
+            },
+        }
+        assert handler.matches(hook_input) is True

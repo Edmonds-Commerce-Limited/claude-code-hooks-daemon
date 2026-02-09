@@ -157,6 +157,8 @@ handlers:
 
   # SessionStart - Initialize environment
   session_start:
+    workflow_state_restoration: {enabled: true, priority: 10}  # Restore workflow state after compaction
+    yolo_container_detection: {enabled: true, priority: 40}  # Detect YOLO container environments
     suggest_status_line: {enabled: true, priority: 55}  # Suggest status line setup
 
   # SessionEnd - Cleanup on exit
