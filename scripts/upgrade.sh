@@ -274,6 +274,31 @@ if ! "$VENV_PYTHON" -c "import claude_code_hooks_daemon; print('OK')" 2>/dev/nul
 fi
 echo -e "${GREEN}Import verification passed${NC}"
 
+# Update slash commands (if available)
+echo "Updating slash commands..."
+COMMANDS_DIR="$PROJECT_ROOT/.claude/commands"
+mkdir -p "$COMMANDS_DIR"
+
+SOURCE_CMD="$HOOKS_DAEMON_DIR/.claude/commands/hooks-daemon-update.md"
+DEST_CMD="$COMMANDS_DIR/hooks-daemon-update.md"
+
+if [ -f "$SOURCE_CMD" ]; then
+    if [ "$SELF_INSTALL" = "true" ]; then
+        # Self-install mode: create symlink
+        if [ -L "$DEST_CMD" ] || [ -f "$DEST_CMD" ]; then
+            rm -f "$DEST_CMD"
+        fi
+        ln -s "$SOURCE_CMD" "$DEST_CMD"
+        echo -e "${GREEN}Symlinked /hooks-daemon-update command${NC}"
+    else
+        # Normal mode: copy file
+        cp "$SOURCE_CMD" "$DEST_CMD"
+        echo -e "${GREEN}Updated /hooks-daemon-update command${NC}"
+    fi
+else
+    echo -e "${YELLOW}Slash command not found (older version)${NC}"
+fi
+
 # Step 5: Restart daemon and verify
 log_step "5" "Restarting daemon"
 

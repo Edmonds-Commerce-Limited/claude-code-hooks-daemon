@@ -24,4 +24,4 @@ class TestVersion:
 
     def test_version_has_expected_value(self) -> None:
         """Version matches expected value."""
-        assert __version__ == "2.4.0"
+        assert __version__ == "2.5.0"
