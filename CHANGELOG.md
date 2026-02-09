@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Ensures upgrade process uses current best practices
 
 ### Changed
-- **Upgrade Documentation**: Made GitHub-fetched upgrade script the primary recommended method (follows rustup/nvm pattern)
+- **Upgrade Documentation**: Standardized upgrade process to fetch-review-run pattern (avoids curl pipe shell pattern blocked by our own security handlers)
 - **Complete Dogfooding Configuration**: Enabled all handlers in daemon's own config for comprehensive self-testing
   - Enabled strict_mode at daemon level for FAIL FAST behavior
   - Activated all safety handlers (curl_pipe_shell, pipe_blocker, dangerous_permissions, etc.)

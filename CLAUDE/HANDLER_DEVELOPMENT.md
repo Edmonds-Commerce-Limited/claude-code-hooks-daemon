@@ -22,6 +22,73 @@ This shows you:
 
 Without debugging first, you're guessing which events to hook and what data is available. With debugging, you're surgically precise.
 
+## ⚠️ When NOT to Write a Handler
+
+**CRITICAL**: Handlers are for **deterministic validation only**. If your logic requires reasoning, context analysis, or multi-turn investigation, **use Claude Code's native agent-based hooks instead**.
+
+### Don't Write a Handler If:
+
+❌ **Requires analyzing session context**
+- Reading session transcripts to detect agent type
+- Checking if specific workflow steps were followed
+- Determining if operations are part of structured process
+
+❌ **Needs multi-turn reasoning**
+- "Is this change architecturally sound?"
+- "Does this follow our planning workflow?"
+- "Is the release process being followed?"
+
+❌ **Requires reading/analyzing files**
+- Parsing git history to understand intent
+- Reading multiple files to validate patterns
+- Complex file content analysis
+
+❌ **Involves judgment calls**
+- "Is this a reasonable refactoring?"
+- "Does this align with project standards?"
+- "Should this be allowed in this context?"
+
+### Use Native Agent Hooks Instead
+
+For complex validation, use `.claude/hooks.json` with agent-based hooks:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [{
+      "matcher": {"tool": "Bash", "pattern": "git tag"},
+      "hooks": [{
+        "type": "agent",
+        "prompt": "Analyze session context and validate workflow compliance...",
+        "timeout": 60
+      }]
+    }]
+  }
+}
+```
+
+**See [ARCHITECTURE.md](./ARCHITECTURE.md) for complete guidance on when to use daemon handlers vs native agent hooks.**
+
+### Write a Handler If:
+
+✅ **Simple pattern matching**
+- Regex checks: `git reset --hard`, `sed -i`, `rm -rf`
+- String contains: `# noqa`, `--force`, `--break-system-packages`
+
+✅ **Deterministic validation**
+- File path validation (absolute vs relative)
+- File extension checks
+- Command flag detection
+
+✅ **Fast, synchronous checks**
+- No file reads required (beyond hook_input)
+- No external command execution needed
+- Known input → known output
+
+✅ **Reusable across projects**
+- Same validation logic applies everywhere
+- Configurable enable/disable per project
+
 ## Quick Start
 
 ```python

@@ -41,9 +41,31 @@ A daemon-based hooks system that eliminates process spawn overhead (~21ms) with 
 - **Auto-shutdown** - Exits after 10 minutes of inactivity
 - **Multi-project support** - Unique daemon per project directory
 - **42 production handlers** across 10 event types
-- **4261 tests** with 95% coverage requirement
+- **4296 tests** with 95% coverage requirement
 - **Type-safe** - Full MyPy strict mode compliance
 - **Plugin system** - Easy to add project-specific handlers
+- **Deterministic validation** - Fast pattern matching and rule enforcement
+
+### Architectural Principle: Deterministic vs Agent-Based Hooks
+
+**The hooks daemon is designed for deterministic validation only.** Complex evaluation requiring reasoning should use Claude Code's native agent-based hooks.
+
+| Use Hooks Daemon For | Use Claude Code Agent Hooks For |
+|---------------------|--------------------------------|
+| ✅ Pattern matching (regex, string checks) | ✅ Workflow compliance validation |
+| ✅ Fast synchronous validation | ✅ Context analysis (transcripts, git state) |
+| ✅ Reusable safety rules | ✅ Multi-turn investigation |
+| ✅ Deterministic logic | ✅ Reasoning and judgment calls |
+
+**Examples:**
+- **Daemon**: Block `sed -i`, validate absolute paths, detect QA suppressions
+- **Agent Hooks**: Verify release workflow, check architectural compliance, validate planning process
+
+**Configuration:**
+- Daemon handlers: `.claude/hooks-daemon.yaml`
+- Agent hooks: `.claude/hooks.json` (project-level)
+
+**See [ARCHITECTURE.md](./CLAUDE/ARCHITECTURE.md) for complete guidance.**
 
 ---
 

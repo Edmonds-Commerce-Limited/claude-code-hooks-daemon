@@ -4,6 +4,49 @@
 
 A high-performance daemon for Claude Code hooks using Unix socket IPC. Eliminates process spawn overhead (20x faster after warmup).
 
+## 🚨 CRITICAL: RELEASE WORKFLOW (ABSOLUTE REQUIREMENT)
+
+**NEVER RELEASE MANUALLY. ALWAYS FOLLOW STRICT RELEASE DOCUMENTATION.**
+
+### The Release Rule (NON-NEGOTIABLE)
+
+**ALL releases MUST use the `/release` skill or follow @CLAUDE/development/RELEASING.md exactly.**
+
+```bash
+# CORRECT - Use the release skill
+/release
+
+# WRONG - Manual operations bypass validation
+git tag v2.7.0          # ❌ NEVER DO THIS
+git push origin v2.7.0  # ❌ NEVER DO THIS
+Edit CHANGELOG.md       # ❌ NEVER DO THIS
+Edit RELEASES/*.md      # ❌ NEVER DO THIS
+```
+
+**Why this matters**: Manual release operations bypass:
+- Pre-release validation (QA, git state, GitHub CLI)
+- Version consistency checks across all files
+- Changelog generation from commits
+- Opus documentation review
+- Proper git tagging and GitHub release creation
+
+**If you bypass the release workflow, you WILL create inconsistent releases with missing documentation, wrong versions, and broken upgrade paths.**
+
+### Release Commands
+
+| Operation | Status |
+|-----------|--------|
+| `/release` | ✅ ONLY CORRECT WAY |
+| `git tag v*` | ❌ FORBIDDEN |
+| `git push origin v*` | ❌ FORBIDDEN |
+| `git push origin tags` | ❌ FORBIDDEN |
+| Edit CHANGELOG.md | ❌ FORBIDDEN (outside release) |
+| Edit RELEASES/*.md | ❌ FORBIDDEN (outside release) |
+
+**See @CLAUDE/development/RELEASING.md for complete release workflow documentation.**
+
+---
+
 ## ⚠️ CRITICAL: Code Lifecycle (READ BEFORE MAKING CHANGES)
 
 **MANDATORY**: Read these documents BEFORE implementing changes:
