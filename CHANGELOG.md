@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-02-09
+
+### Added
+- **Lock File Edit Blocker Handler**: Prevents editing package lock files (package-lock.json, yarn.lock, composer.lock, etc.) - Plan 00031
+- **5 System Package Safety Handlers**: Block dangerous package management operations (Plan 00022)
+  - `pip_break_system` - Blocks pip --break-system-packages flag
+  - `sudo_pip` - Blocks sudo pip install commands
+  - `curl_pipe_shell` - Blocks curl/wget piped to shell
+  - `dangerous_permissions` - Blocks chmod 777 and similar unsafe permissions
+  - `global_npm_advisor` - Advises against npm install -g
+- **Orchestrator-Only Mode Handler**: Opt-in mode for handlers that only run in orchestrator context (Plan 00019)
+- **Plan Completion Move Advisor**: Guides moving completed plans to archive folder (Plan 00027)
+- **TDD Advisor Handler**: Enforces test-driven development workflow with task-based guidance
+- **Hostname-Based Daemon Isolation**: Multi-environment support with hostname-suffixed runtime files (sockets, PIDs, logs)
+- **Worktree CLI Flags**: Added --pid-file and --socket flags for git worktree isolation (Plan 00028)
+- **Programmatic Acceptance Testing System**: Ephemeral playbook generation from handler metadata (Plan 00025)
+- **Plugin Support in Playbook Generator**: Acceptance tests now include plugin handlers (Plan 00040)
+- **Config Validation at Daemon Startup**: Validates configuration before daemon starts (Plan 00020)
+- **Comprehensive Handler Integration Tests**: Added integration tests for all handlers (Plan 00016)
+- **Deptry Dependency Checking**: Integrated deptry into QA suite for dependency validation
+- **LanguageConfig Foundation**: Centralized language-specific configuration for QA suppression handlers (Plan 00021)
+- **Agent Team Workflow Documentation**: Multi-role verification structure with honesty checker (Plan 00030)
+- **Worktree Automation Scripts**: Parallel plan execution with git worktree support
+- **Code Lifecycle Documentation**: Complete Definition of Done checklists for features, bugs, and general changes
+
+### Changed
+- **Plugin System Architecture**: Complete overhaul with event_type field and daemon integration (Plan 00024)
+- **QA Suppression Handlers**: Refactored to use centralized LanguageConfig data layer (Plan 00021)
+- **Strict Mode Behavior**: Unified daemon.strict_mode for all fail-fast behavior across handlers
+- **Acceptance Testing**: Migrated all 59+ handlers to programmatic acceptance tests with empty array rejection
+- **Magic Value Elimination**: Removed all magic strings and numbers, replaced with constants (Plan 00012)
+- **Plan Workflow**: Enhanced planning system with completion checklists and archive automation
+- **Status Line Display**: Added effort level display and thinking toggle logic for Opus 4.6 extended thinking
+- **Markdown Handler**: Allow writes outside project root for cross-project documentation (Plan 00029)
+- **LLM Upgrade Experience**: Improved upgrade documentation and verification (Plan 00023)
+- **Plugin Loader**: Handle Handler suffix correctly in class name detection
+- **Duplicate Handler Priorities**: Made deterministic with warning logs for conflicts
+
+### Fixed
+- **HOTFIX: Decision Import**: Fixed wrong import path in 5 new handlers (constants.decision vs core.Decision)
+- **Sed Blocker False Positive**: Fixed blocking of legitimate gh CLI commands
+- **Plugin Schema Validation**: Fixed plugins config integration test validation
+- **PreCompact Hook Schema**: Fixed systemMessage format validation
+- **Daemon Path Isolation**: Fixed worktree isolation with proper path handling (Plan 00028)
+- **Handler Instantiation Test**: Fixed test suite for dynamic handler loading
+- **Markdown Plan Number Validation**: Corrected plan number detection in markdown files
+- **Type Hints**: Fixed MyPy violations in 5 system package safety handlers
+- **Magic Value Violations**: Eliminated remaining magic values in test_models.py and paths.py
+- **Import Errors**: Removed non-existent qa_suppression_base import references
+- **Plan Status Accuracy**: Corrected multiple plan completion statuses after audit
+- **Test Failures**: Resolved hostname isolation test failures and fixture updates
+
+### Security
+- Maintained ZERO security violations across entire codebase
+- All new handlers follow security best practices (no shell=True, proper subprocess usage)
+
+### Documentation
+- Added comprehensive Code Lifecycle guides (Features.md, Bugs.md, General.md)
+- Enhanced PlanWorkflow.md with completion checklist and atomic commit guidance
+- Added Agent Team workflow with multi-role verification
+- Updated handler development guide with acceptance testing requirements
+- Documented worktree workflow and parallel plan execution
+
 ## [2.4.0] - 2026-02-01
 
 ### Added
