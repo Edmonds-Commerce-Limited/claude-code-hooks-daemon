@@ -1,9 +1,9 @@
 # Claude Code Hooks Daemon
 
-![Version](https://img.shields.io/badge/version-2.4.0-blue)
+![Version](https://img.shields.io/badge/version-2.5.0-blue)
 ![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-3172%20passing-success)
+![Tests](https://img.shields.io/badge/tests-4261%20passing-success)
 ![Coverage](https://img.shields.io/badge/coverage-95%25%20required-success)
 
 High-performance daemon for Claude Code hooks using Unix socket IPC and front controller architecture.
@@ -40,8 +40,8 @@ A daemon-based hooks system that eliminates process spawn overhead (~21ms) with 
 - **Lazy startup** - Daemon starts on first hook call
 - **Auto-shutdown** - Exits after 10 minutes of inactivity
 - **Multi-project support** - Unique daemon per project directory
-- **33 production handlers** across 10 event types
-- **1168 tests** with 95% coverage requirement
+- **42 production handlers** across 10 event types
+- **4261 tests** with 95% coverage requirement
 - **Type-safe** - Full MyPy strict mode compliance
 - **Plugin system** - Easy to add project-specific handlers
 
@@ -213,32 +213,43 @@ The installer will warn if it detects this pattern.
 
 ---
 
-## Current Version: 2.4.0
+## Current Version: 2.5.0
 
 **Latest Changes:**
-- ✅ **Security Hardening** - ZERO security violations (complete audit eliminating all B108, B602, B603, B607, B404)
-- ✅ **Acceptance Testing Playbook** - 15+ critical handler tests for real-world validation with FAIL-FAST cycle
-- ✅ **ProjectContext Architecture** - Eliminated CWD dependencies (Plan 00014)
-- ✅ **Security Standards Documentation** - ZERO TOLERANCE policy for all severity levels
-- ✅ **Release Process Documentation** - Single source of truth in CLAUDE/development/RELEASING.md
-- ✅ **Handler Status Reporting** - Post-install verification system
+- ✅ **Plugin System Enhancements** - Complete plugin support with acceptance testing and validation
+- ✅ **9 New Handlers** - Lock file protection, system package safety, orchestrator-only mode
+- ✅ **Hostname-Based Isolation** - Multi-environment daemon support with isolated runtime files
+- ✅ **Worktree Support** - CLI flags for git worktree isolation with --pid-file and --socket
+- ✅ **Programmatic Acceptance Testing** - Ephemeral playbook generation for all 59+ handlers
+- ✅ **Config Validation** - Startup validation with strict mode fail-fast behavior
+- ✅ **Agent Team Workflow** - Multi-role verification and honesty checking documentation
+- ✅ **Dependency Checking** - Integrated deptry for dependency validation in QA suite
 
 ---
 
 ## Implementation Status
 
-### Implemented Event Types (33 Production Handlers)
+### Implemented Event Types (42 Production Handlers)
 
-**PreToolUse** (17 handlers):
+**PreToolUse** (26 handlers):
 - `destructive_git` - Blocks dangerous git operations (force push, hard reset, etc.)
 - `sed_blocker` - Blocks sed commands (encourages Edit tool usage)
 - `absolute_path` - Enforces relative paths in tool calls
 - `git_stash` - Discourages git stash with escape hatch
 - `tdd_enforcement` - Enforces test-driven development workflow
+- `tdd_advisor` - **NEW in v2.5** Provides TDD workflow guidance with task-based enforcement
 - `eslint_disable` - Prevents disabling ESLint rules
 - `python_qa_suppression_blocker` - Blocks Python QA suppressions (# type: ignore, # noqa, etc.)
 - `php_qa_suppression_blocker` - Blocks PHP QA suppressions (@phpstan-ignore, phpcs:ignore, etc.)
 - `go_qa_suppression_blocker` - Blocks Go QA suppressions (//nolint, //lint:ignore, etc.)
+- `lock_file_edit_blocker` - **NEW in v2.5** Prevents editing package lock files (package-lock.json, yarn.lock, etc.)
+- `pip_break_system` - **NEW in v2.5** Blocks pip --break-system-packages flag
+- `sudo_pip` - **NEW in v2.5** Blocks sudo pip install commands
+- `curl_pipe_shell` - **NEW in v2.5** Blocks curl/wget piped to shell
+- `dangerous_permissions` - **NEW in v2.5** Blocks chmod 777 and similar unsafe permissions
+- `global_npm_advisor` - **NEW in v2.5** Advises against npm install -g (advisory)
+- `orchestrator_only` - **NEW in v2.5** Opt-in mode for orchestrator-only handlers
+- `plan_completion_move_advisor` - **NEW in v2.5** Guides moving completed plans to archive
 - `web_search_year` - Ensures web searches include current year (2026)
 - `british_english` - Warns on American English spellings
 - `worktree_file_copy` - Prevents accidental worktree file copies
@@ -901,13 +912,13 @@ class MyHandler(Handler):
 - **Black** - Code formatting (line length 100)
 - **Ruff** - Python linting (auto-fixes violations)
 - **MyPy** - Strict type checking (all functions typed)
-- **Pytest** - 95% minimum coverage, 1168 tests
+- **Pytest** - 95% minimum coverage, 4261 tests
 - **Bandit** - Security vulnerability scanning
 
 All checks auto-fix by default (except MyPy and tests).
 
 **Current Test Stats:**
-- **1168 tests** across 40 test files
+- **4261 tests** across 40 test files
 - **95% coverage requirement**
 - All tests passing
 
@@ -936,7 +947,7 @@ def example(data: Dict[str, Any]) -> Optional[List[str]]:
 **Programmatic:**
 ```python
 from claude_code_hooks_daemon.version import __version__
-print(__version__)  # "2.2.0"
+print(__version__)  # "2.5.0"
 ```
 
 **Git-based:**
@@ -1012,7 +1023,7 @@ claude-code-hooks-daemon/
 │   ├── core/              # Front controller, Handler base, HookResult
 │   ├── daemon/            # Server, CLI, DaemonController, paths
 │   ├── handlers/          # All handler implementations (by event type)
-│   │   ├── pre_tool_use/      # 17 production handlers
+│   │   ├── pre_tool_use/      # 26 production handlers
 │   │   ├── post_tool_use/     # 3 production handlers
 │   │   ├── session_start/     # 2 production handlers
 │   │   ├── session_end/       # 1 production handler
@@ -1027,7 +1038,7 @@ claude-code-hooks-daemon/
 │   ├── plugins/           # Plugin system for custom handlers
 │   ├── qa/                # QA runner utilities
 │   └── version.py         # Version tracking
-├── tests/                 # 40 test files, 1168 tests, 95% coverage
+├── tests/                 # 40 test files, 4261 tests, 95% coverage
 │   ├── unit/              # Unit tests for all components
 │   ├── integration/       # Integration tests
 │   └── config/            # Configuration validation tests
@@ -1213,7 +1224,26 @@ MIT License - see LICENSE file for details.
 
 ## Changelog
 
-### v2.4.0 (Current)
+### v2.5.0 (Current)
+
+**Plugin System & Multi-Environment:**
+- ✅ **Complete Plugin System Overhaul** - Event-type aware loading with acceptance testing (Plan 00024)
+- ✅ **9 New Handlers** - Lock file protection, system package safety, orchestrator mode, TDD advisor
+- ✅ **Hostname-Based Isolation** - Multi-environment daemon support with isolated runtime files
+- ✅ **Worktree Support** - CLI flags for git worktree isolation (--pid-file, --socket)
+
+**Testing & Quality:**
+- ✅ **Programmatic Acceptance Testing** - Ephemeral playbook generation for all 59+ handlers (Plan 00025)
+- ✅ **Config Validation** - Startup validation with strict mode fail-fast behavior (Plan 00020)
+- ✅ **Dependency Checking** - Integrated deptry into QA suite
+- ✅ **4261 Tests Passing** - 1089 new tests, 95%+ coverage maintained
+
+**Architecture:**
+- ✅ **LanguageConfig Foundation** - Centralized language-specific QA suppression patterns (Plan 00021)
+- ✅ **Agent Team Workflow** - Multi-role verification with honesty checking
+- ✅ **Code Lifecycle Documentation** - Complete Definition of Done checklists
+
+### v2.4.0
 
 **Security & Quality:**
 - ✅ **ZERO security violations** - Complete audit eliminating all B108, B602, B603, B607, B404 issues
@@ -1280,4 +1310,4 @@ MIT License - see LICENSE file for details.
 
 ---
 
-**End of README** | Version 2.4.0 | Last Updated: 2026-02-01
+**End of README** | Version 2.5.0 | Last Updated: 2026-02-09
