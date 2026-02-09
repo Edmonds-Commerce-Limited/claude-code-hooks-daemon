@@ -376,6 +376,16 @@ if [ "$SKIP_UPGRADE" = false ]; then
     fi
 fi  # End of SKIP_UPGRADE=false block
 
+# Fix hook script permissions (ALWAYS RUN)
+echo "Ensuring hook scripts are executable..."
+HOOKS_DIR="$PROJECT_ROOT/.claude/hooks"
+if [ -d "$HOOKS_DIR" ]; then
+    chmod +x "$HOOKS_DIR"/* 2>/dev/null || true
+    echo -e "${GREEN}Hook scripts permissions fixed${NC}"
+else
+    echo -e "${YELLOW}Hooks directory not found: $HOOKS_DIR${NC}"
+fi
+
 # Step 6: Restart daemon and verify config (ALWAYS RUN)
 log_step "6" "Restarting daemon and validating config"
 
