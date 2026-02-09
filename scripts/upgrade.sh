@@ -301,77 +301,81 @@ fi
 
 echo "Target version: $NEW_VERSION"
 
+SKIP_UPGRADE=false
 if [ "$ROLLBACK_TAG" = "$NEW_VERSION" ]; then
-    echo -e "${GREEN}Already at version $NEW_VERSION. Nothing to upgrade.${NC}"
-    # Clear rollback state since we did not change anything
+    echo -e "${GREEN}Already at version $NEW_VERSION.${NC}"
+    echo "Skipping code checkout, jumping to daemon validation..."
+    SKIP_UPGRADE=true
+    # Clear rollback state since we're not changing anything
     ROLLBACK_TAG=""
-    exit 0
 fi
 
-# Stop daemon before checkout (prevents file conflicts)
-echo "Stopping daemon..."
-if [ -f "$VENV_PYTHON" ]; then
-    "$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
-fi
-
-# Checkout target version
-echo "Checking out $NEW_VERSION..."
-git -C "$HOOKS_DAEMON_DIR" checkout "$NEW_VERSION" --quiet
-
-# Step 5: Install dependencies
-log_step "5" "Installing dependencies"
-
-VENV_PIP="$(dirname "$VENV_PYTHON")/pip"
-
-if [ ! -f "$VENV_PYTHON" ]; then
-    echo -e "${YELLOW}Venv not found. Creating...${NC}"
-    VENV_DIR="$(dirname "$(dirname "$VENV_PYTHON")")"
-    python3 -m venv "$VENV_DIR"
-fi
-
-if [ -f "$VENV_PIP" ]; then
-    echo "Installing package..."
-    "$VENV_PIP" install -e "$HOOKS_DAEMON_DIR" --quiet
-    echo -e "${GREEN}Dependencies installed${NC}"
-else
-    echo -e "${RED}pip not found at $VENV_PIP${NC}"
-    exit 1
-fi
-
-# Verify import works
-echo "Verifying installation..."
-if ! "$VENV_PYTHON" -c "import claude_code_hooks_daemon; print('OK')" 2>/dev/null; then
-    echo -e "${RED}Import verification failed after install${NC}"
-    exit 1
-fi
-echo -e "${GREEN}Import verification passed${NC}"
-
-# Update slash commands (if available)
-echo "Updating slash commands..."
-COMMANDS_DIR="$PROJECT_ROOT/.claude/commands"
-mkdir -p "$COMMANDS_DIR"
-
-SOURCE_CMD="$HOOKS_DAEMON_DIR/.claude/commands/hooks-daemon-update.md"
-DEST_CMD="$COMMANDS_DIR/hooks-daemon-update.md"
-
-if [ -f "$SOURCE_CMD" ]; then
-    if [ "$SELF_INSTALL" = "true" ]; then
-        # Self-install mode: create symlink
-        if [ -L "$DEST_CMD" ] || [ -f "$DEST_CMD" ]; then
-            rm -f "$DEST_CMD"
-        fi
-        ln -s "$SOURCE_CMD" "$DEST_CMD"
-        echo -e "${GREEN}Symlinked /hooks-daemon-update command${NC}"
-    else
-        # Normal mode: copy file
-        cp "$SOURCE_CMD" "$DEST_CMD"
-        echo -e "${GREEN}Updated /hooks-daemon-update command${NC}"
+if [ "$SKIP_UPGRADE" = false ]; then
+    # Stop daemon before checkout (prevents file conflicts)
+    echo "Stopping daemon..."
+    if [ -f "$VENV_PYTHON" ]; then
+        "$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
     fi
-else
-    echo -e "${YELLOW}Slash command not found (older version)${NC}"
-fi
 
-# Step 6: Restart daemon and verify config
+    # Checkout target version
+    echo "Checking out $NEW_VERSION..."
+    git -C "$HOOKS_DAEMON_DIR" checkout "$NEW_VERSION" --quiet
+
+    # Step 5: Install dependencies
+    log_step "5" "Installing dependencies"
+
+    VENV_PIP="$(dirname "$VENV_PYTHON")/pip"
+
+    if [ ! -f "$VENV_PYTHON" ]; then
+        echo -e "${YELLOW}Venv not found. Creating...${NC}"
+        VENV_DIR="$(dirname "$(dirname "$VENV_PYTHON")")"
+        python3 -m venv "$VENV_DIR"
+    fi
+
+    if [ -f "$VENV_PIP" ]; then
+        echo "Installing package..."
+        "$VENV_PIP" install -e "$HOOKS_DAEMON_DIR" --quiet
+        echo -e "${GREEN}Dependencies installed${NC}"
+    else
+        echo -e "${RED}pip not found at $VENV_PIP${NC}"
+        exit 1
+    fi
+
+    # Verify import works
+    echo "Verifying installation..."
+    if ! "$VENV_PYTHON" -c "import claude_code_hooks_daemon; print('OK')" 2>/dev/null; then
+        echo -e "${RED}Import verification failed after install${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}Import verification passed${NC}"
+
+    # Update slash commands (if available)
+    echo "Updating slash commands..."
+    COMMANDS_DIR="$PROJECT_ROOT/.claude/commands"
+    mkdir -p "$COMMANDS_DIR"
+
+    SOURCE_CMD="$HOOKS_DAEMON_DIR/.claude/commands/hooks-daemon-update.md"
+    DEST_CMD="$COMMANDS_DIR/hooks-daemon-update.md"
+
+    if [ -f "$SOURCE_CMD" ]; then
+        if [ "$SELF_INSTALL" = "true" ]; then
+            # Self-install mode: create symlink
+            if [ -L "$DEST_CMD" ] || [ -f "$DEST_CMD" ]; then
+                rm -f "$DEST_CMD"
+            fi
+            ln -s "$SOURCE_CMD" "$DEST_CMD"
+            echo -e "${GREEN}Symlinked /hooks-daemon-update command${NC}"
+        else
+            # Normal mode: copy file
+            cp "$SOURCE_CMD" "$DEST_CMD"
+            echo -e "${GREEN}Updated /hooks-daemon-update command${NC}"
+        fi
+    else
+        echo -e "${YELLOW}Slash command not found (older version)${NC}"
+    fi
+fi  # End of SKIP_UPGRADE=false block
+
+# Step 6: Restart daemon and verify config (ALWAYS RUN)
 log_step "6" "Restarting daemon and validating config"
 
 echo "Stopping daemon..."
