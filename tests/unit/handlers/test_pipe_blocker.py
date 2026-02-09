@@ -1,5 +1,7 @@
 """Comprehensive tests for PipeBlockerHandler."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker import PipeBlockerHandler
@@ -412,7 +414,13 @@ class TestPipeBlockerHandler:
     def test_handle_returns_deny_decision(self, handler):
         """Should return DENY decision."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
-        result = handler.handle(hook_input)
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 0
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
         from claude_code_hooks_daemon.core import Decision
 
         assert result.decision == Decision.DENY
@@ -420,13 +428,25 @@ class TestPipeBlockerHandler:
     def test_handle_reason_contains_blocked_command(self, handler):
         """Reason should contain the blocked command."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "docker ps -a | tail -n 20"}}
-        result = handler.handle(hook_input)
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 1
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
         assert "docker ps -a | tail -n 20" in result.reason
 
     def test_handle_reason_explains_why_blocked(self, handler):
         """Reason should explain information loss."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "npm test | head -n 10"}}
-        result = handler.handle(hook_input)
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 1
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
         assert "information" in result.reason.lower()
         # Should mention the problem with re-running
         assert "re-run" in result.reason.lower() or "rerun" in result.reason.lower()
@@ -434,20 +454,38 @@ class TestPipeBlockerHandler:
     def test_handle_reason_suggests_temp_file(self, handler):
         """Reason should suggest redirecting to temp file."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
-        result = handler.handle(hook_input)
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 1
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
         assert "temp" in result.reason.lower() or "/tmp" in result.reason
 
     def test_handle_reason_shows_whitelist(self, handler):
         """Reason should show whitelist commands."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "docker ps | tail -n 20"}}
-        result = handler.handle(hook_input)
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 3
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
         # Should mention at least some whitelist commands
         assert "grep" in result.reason.lower() or "awk" in result.reason.lower()
 
     def test_handle_message_is_clear_and_actionable(self, handler):
         """Message should be clear and provide alternatives."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
-        result = handler.handle(hook_input)
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 1
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
         # Should have some structure (sections)
         assert "BLOCKED" in result.reason or "blocked" in result.reason.lower()
         # Should provide alternative
@@ -456,7 +494,13 @@ class TestPipeBlockerHandler:
     def test_handle_with_head_command(self, handler):
         """Should handle head command appropriately."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "ls -la | head -n 5"}}
-        result = handler.handle(hook_input)
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 1
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
         from claude_code_hooks_daemon.core import Decision
 
         assert result.decision == Decision.DENY
@@ -468,7 +512,13 @@ class TestPipeBlockerHandler:
             "tool_name": "Bash",
             "tool_input": {"command": "find . -name '*.log' -exec cat {} \\; | tail -n 100"},
         }
-        result = handler.handle(hook_input)
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 0
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
         from claude_code_hooks_daemon.core import Decision
 
         assert result.decision == Decision.DENY
@@ -479,30 +529,153 @@ class TestPipeBlockerHandler:
             "tool_name": "Bash",
             "tool_input": {"command": "docker logs container | tail -n 50"},
         }
-        result = handler.handle(hook_input)
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 1
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
         # Should identify docker as the expensive command
         assert "docker" in result.reason.lower()
 
     def test_handle_reason_format_has_sections(self, handler):
         """Reason should have clear sections."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "npm run test | tail -n 20"}}
-        result = handler.handle(hook_input)
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 1
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
         # Check for section markers (newlines, headers)
         assert "\n\n" in result.reason  # Should have paragraph breaks
 
     def test_handle_includes_emoji_or_marker(self, handler):
         """Reason should include visual marker for clarity."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
-        result = handler.handle(hook_input)
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 0
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
         # Should have some visual indicator
         assert "🚫" in result.reason or "BLOCKED" in result.reason or "❌" in result.reason
 
     def test_handle_with_tail_flag(self, handler):
         """Should handle tail with -n flag appropriately."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "docker ps | tail -n 20"}}
-        result = handler.handle(hook_input)
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 1
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
         from claude_code_hooks_daemon.core import Decision
 
         assert result.decision == Decision.DENY
         assert result.reason is not None
         assert len(result.reason) > 50  # Should be a helpful message
+
+
+class TestPipeBlockerProgressiveVerbosity:
+    """Test progressive verbosity based on block count."""
+
+    @pytest.fixture
+    def handler(self):
+        """Create handler instance."""
+        return PipeBlockerHandler()
+
+    @pytest.fixture
+    def hook_input(self):
+        """Create sample hook input."""
+        return {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
+
+    def test_terse_reason_on_first_block(self, handler, hook_input):
+        """First block should return terse message."""
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 0
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
+
+        # Terse message should be short
+        assert len(result.reason) < 200
+        # Should contain key elements
+        assert "BLOCKED" in result.reason
+        assert "temp file" in result.reason.lower() or "/tmp" in result.reason
+
+    def test_standard_reason_on_second_block(self, handler, hook_input):
+        """Second block should return standard message without whitelist."""
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 1
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
+
+        # Standard message should contain WHY BLOCKED section
+        assert "WHY BLOCKED" in result.reason
+        # Should NOT contain whitelist section
+        assert "WHITELISTED COMMANDS" not in result.reason
+
+    def test_standard_reason_on_third_block(self, handler, hook_input):
+        """Third block should return standard message without whitelist."""
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 2
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
+
+        # Standard message should contain WHY BLOCKED section
+        assert "WHY BLOCKED" in result.reason
+        # Should NOT contain whitelist section
+        assert "WHITELISTED COMMANDS" not in result.reason
+
+    def test_verbose_reason_on_fourth_block(self, handler, hook_input):
+        """Fourth block should return verbose message with whitelist."""
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 3
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
+
+        # Verbose message should contain whitelist section
+        assert "WHITELISTED COMMANDS" in result.reason
+
+    def test_verbose_reason_on_many_blocks(self, handler, hook_input):
+        """Many blocks should return verbose message with whitelist."""
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 10
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
+
+        # Verbose message should contain whitelist section
+        assert "WHITELISTED COMMANDS" in result.reason
+
+    def test_data_layer_error_falls_back_to_terse(self, handler, hook_input):
+        """Data layer error should fall back to terse message."""
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
+            side_effect=Exception("Data layer error"),
+        ):
+            result = handler.handle(hook_input)
+
+        # Should fall back to terse message (block count 0)
+        assert len(result.reason) < 200
+        assert "BLOCKED" in result.reason
+        assert "temp file" in result.reason.lower() or "/tmp" in result.reason

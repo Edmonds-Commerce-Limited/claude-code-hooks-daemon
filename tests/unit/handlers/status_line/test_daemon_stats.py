@@ -120,10 +120,17 @@ class TestDaemonStatsHandler:
         mock_controller = MagicMock()
         mock_controller.get_stats.return_value = mock_stats
 
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks.return_value = 0
+
         with (
             patch(
                 "claude_code_hooks_daemon.handlers.status_line.daemon_stats.get_controller",
                 return_value=mock_controller,
+            ),
+            patch(
+                "claude_code_hooks_daemon.handlers.status_line.daemon_stats.get_data_layer",
+                return_value=mock_dl,
             ),
             patch("logging.getLogger") as mock_logger,
         ):
@@ -198,3 +205,94 @@ class TestDaemonStatsHandler:
         # Should still return stats, just without memory
         assert result.decision == "allow"
         assert len(result.context) >= 1
+
+    def test_handle_shows_block_count_when_positive(self, handler: DaemonStatsHandler) -> None:
+        """Test block count is shown when greater than zero."""
+        mock_stats = MagicMock()
+        mock_stats.uptime_seconds = 60.0
+        mock_stats.errors = 0
+        mock_controller = MagicMock()
+        mock_controller.get_stats.return_value = mock_stats
+
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks.return_value = 5
+
+        with (
+            patch(
+                "claude_code_hooks_daemon.handlers.status_line.daemon_stats.get_controller",
+                return_value=mock_controller,
+            ),
+            patch("claude_code_hooks_daemon.handlers.status_line.daemon_stats.psutil", None),
+            patch(
+                "claude_code_hooks_daemon.handlers.status_line.daemon_stats.get_data_layer",
+                return_value=mock_dl,
+            ),
+            patch("logging.getLogger") as mock_logger,
+        ):
+            mock_logger.return_value.level = 20
+            result = handler.handle({})
+
+        # Find the block count part
+        block_parts = [p for p in result.context if "blocks" in p]
+        assert len(block_parts) == 1
+        assert "🛡️ 5 blocks" in block_parts[0]
+
+    def test_handle_hides_block_count_when_zero(self, handler: DaemonStatsHandler) -> None:
+        """Test block count is hidden when zero."""
+        mock_stats = MagicMock()
+        mock_stats.uptime_seconds = 60.0
+        mock_stats.errors = 0
+        mock_controller = MagicMock()
+        mock_controller.get_stats.return_value = mock_stats
+
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks.return_value = 0
+
+        with (
+            patch(
+                "claude_code_hooks_daemon.handlers.status_line.daemon_stats.get_controller",
+                return_value=mock_controller,
+            ),
+            patch("claude_code_hooks_daemon.handlers.status_line.daemon_stats.psutil", None),
+            patch(
+                "claude_code_hooks_daemon.handlers.status_line.daemon_stats.get_data_layer",
+                return_value=mock_dl,
+            ),
+            patch("logging.getLogger") as mock_logger,
+        ):
+            mock_logger.return_value.level = 20
+            result = handler.handle({})
+
+        # Verify no context item contains "blocks"
+        block_parts = [p for p in result.context if "blocks" in p]
+        assert len(block_parts) == 0
+
+    def test_handle_block_count_error_silent_fail(self, handler: DaemonStatsHandler) -> None:
+        """Test handler continues when get_data_layer raises exception."""
+        mock_stats = MagicMock()
+        mock_stats.uptime_seconds = 60.0
+        mock_stats.errors = 0
+        mock_controller = MagicMock()
+        mock_controller.get_stats.return_value = mock_stats
+
+        with (
+            patch(
+                "claude_code_hooks_daemon.handlers.status_line.daemon_stats.get_controller",
+                return_value=mock_controller,
+            ),
+            patch("claude_code_hooks_daemon.handlers.status_line.daemon_stats.psutil", None),
+            patch(
+                "claude_code_hooks_daemon.handlers.status_line.daemon_stats.get_data_layer",
+                side_effect=Exception("Data layer error"),
+            ),
+            patch("logging.getLogger") as mock_logger,
+        ):
+            mock_logger.return_value.level = 20
+            result = handler.handle({})
+
+        # Handler should still work, just without block count
+        assert result.decision == "allow"
+        assert len(result.context) >= 1
+        # Verify no context item contains "blocks"
+        block_parts = [p for p in result.context if "blocks" in p]
+        assert len(block_parts) == 0

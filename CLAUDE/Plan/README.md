@@ -11,10 +11,40 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Research agent team sub-agent spawning capability
   - **Priority**: High (context management)
 
+- [00033: Status Line Enhancements (PowerShell Port)](00033-statusline-enhancements/PLAN.md) - Not Started
+  - Port features from production PowerShell status line implementation
+  - Add visual progress bars for usage tracking (●●●○○○○○○○)
+  - Implement API-based 5-hour and 7-day usage windows with reset times
+  - Add thinking mode status display (On/Off)
+  - Improve token count formatting with k/m abbreviations
+  - Add percentage remaining display
+  - Implement smart caching for API calls (60s TTL)
+  - **Priority**: Medium (status line enhancement)
 
+- [00034: Library/Plugin Separation and QA Sub-Agent Integration](00034-library-plugin-separation-qa/PLAN.md) - Not Started
+  - Move dogfooding_reminder from library to plugin system
+  - Add library/plugin separation check to QA Agent role (AgentTeam.md)
+  - Update run_all.sh to indicate sub-agent QA needed
+  - Create CLAUDE/QA.md documenting complete pipeline (automated + sub-agents)
+  - **Priority**: High (architectural integrity)
+
+- [00040: Playbook Generator Plugin Support](00040-playbook-generator-plugin-support/PLAN.md) - Not Started
+  - Include plugin handlers in generated acceptance test playbooks
+  - Modify cli.py to load plugins and pass to PlaybookGenerator
+  - Update PlaybookGenerator to iterate both library and plugin handlers
+  - Ensure dogfooding plugin appears in generated playbooks
+  - **Priority**: Medium (QA completeness)
 
 
 ## Completed Plans
+
+- [00039: Progressive Verbosity & Data Layer Handler Enhancements](Completed/00039-progressive-verbosity-data-layer/PLAN.md) - 🟢 Complete (2026-02-09)
+  - Implemented count_blocks_by_handler() in HandlerHistory
+  - Added progressive verbosity to PipeBlocker, SedBlocker, DestructiveGit (3 tiers each)
+  - Added block count display in DaemonStats status line
+  - Saves tokens by being terse on first block, verbose only when needed
+  - All 5 phases complete with full 3-layer QA verification
+  - **Completed**: 2026-02-09
 
 - [00021: Language-Specific Handlers](Completed/00021-language-specific-handlers/PLAN.md) - 🟢 Complete (2026-02-06)
   - Refactored Python, Go, PHP QA suppression handlers to use LanguageConfig
@@ -218,10 +248,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans**: 30
-- **Active**: 1 (Plan 00032 - not started)
+- **Total Plans**: 32
+- **Active**: 3 (Plans 00032, 00033, 00034 - not started)
 - **Completed**: 29
-- **Success Rate**: 97% (29/30 completed successfully)
+- **Success Rate**: 91% (29/32 completed successfully)
 
 ## Quick Links
 

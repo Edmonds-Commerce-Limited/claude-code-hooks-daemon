@@ -4,7 +4,7 @@ import re
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import Decision, Handler, HookResult, get_data_layer
 from claude_code_hooks_daemon.core.utils import get_bash_command
 
 
@@ -141,17 +141,48 @@ class PipeBlockerHandler(Handler):
             # Fail-safe: if extraction fails, return None (will block by default)
             return None
 
-    def handle(self, hook_input: dict[str, Any]) -> HookResult:
-        """Block the operation with clear explanation."""
-        # Extract the blocked command
-        command = get_bash_command(hook_input) or "unknown command"
+    def _get_block_count(self) -> int:
+        """Get number of previous blocks by this handler."""
+        try:
+            return get_data_layer().history.count_blocks_by_handler(self.name)
+        except Exception:
+            return 0
 
-        # Extract source command for context
-        source_cmd = self._extract_source_command(command)
+    def _terse_reason(self, source_cmd: str | None, command: str) -> str:
+        """Return terse blocking message for first block."""
+        source_name = source_cmd if source_cmd else "command"
+        return (
+            f"🚫 BLOCKED: Pipe to tail/head detected\n\n"
+            f"Use temp file instead:\n"
+            f"  {source_name} > /tmp/out.txt"
+        )
+
+    def _standard_reason(self, source_cmd: str | None, command: str) -> str:
+        """Return standard blocking message (without whitelist section)."""
         source_name = source_cmd if source_cmd else "expensive operation"
+        return (
+            f"🚫 BLOCKED: Pipe to tail/head detected\n\n"
+            f"COMMAND: {command}\n\n"
+            f"WHY BLOCKED:\n"
+            f"  • Piping {source_name} to tail/head causes information loss\n"
+            f"  • If needed data isn't in those N truncated lines, the ENTIRE\n"
+            f"    expensive command must be re-run\n"
+            f"  • This wastes time and resources\n\n"
+            f"✅ RECOMMENDED ALTERNATIVE:\n"
+            f"  Redirect to temp file for selective extraction:\n\n"
+            f"  # Redirect full output to temp file\n"
+            f'  TEMP_FILE="/tmp/output_$$.txt"\n'
+            f"  {source_cmd or 'command'} > \"$TEMP_FILE\"\n\n"
+            f"  # Extract what you need (can run multiple times)\n"
+            f'  tail -n 20 "$TEMP_FILE"\n'
+            f"  grep 'error' \"$TEMP_FILE\"\n"
+            f"  # etc.\n"
+        )
 
-        # Build comprehensive error message
-        reason = (
+    def _verbose_reason(self, source_cmd: str | None, command: str) -> str:
+        """Return verbose blocking message with whitelist section."""
+        source_name = source_cmd if source_cmd else "expensive operation"
+        return (
             f"🚫 BLOCKED: Pipe to tail/head detected\n\n"
             f"COMMAND: {command}\n\n"
             f"WHY BLOCKED:\n"
@@ -172,6 +203,27 @@ class PipeBlockerHandler(Handler):
             f"  Commands that already filter output: {', '.join(self._allowed_pipe_sources)}\n\n"
             f"  Example: grep error /var/log/syslog | tail -n 20  (allowed)\n"
         )
+
+    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+        """Block the operation with progressive verbosity."""
+        # Extract the blocked command
+        command = get_bash_command(hook_input) or "unknown command"
+
+        # Extract source command for context
+        source_cmd = self._extract_source_command(command)
+
+        # Get block count and select appropriate verbosity level
+        block_count = self._get_block_count()
+
+        if block_count == 0:
+            # First block: terse message
+            reason = self._terse_reason(source_cmd, command)
+        elif block_count <= 2:
+            # Blocks 1-2: standard message
+            reason = self._standard_reason(source_cmd, command)
+        else:
+            # Blocks 3+: verbose message with whitelist
+            reason = self._verbose_reason(source_cmd, command)
 
         return HookResult(decision=Decision.DENY, reason=reason)
 

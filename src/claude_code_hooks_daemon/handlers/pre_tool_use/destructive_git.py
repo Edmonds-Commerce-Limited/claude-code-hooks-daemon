@@ -4,7 +4,7 @@ import re
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import Decision, Handler, HookResult, get_data_layer
 from claude_code_hooks_daemon.core.utils import get_bash_command
 
 
@@ -51,6 +51,46 @@ class DestructiveGitHandler(Handler):
 
         return False
 
+    def _get_block_count(self) -> int:
+        """Get number of previous blocks by this handler."""
+        try:
+            return get_data_layer().history.count_blocks_by_handler(self.name)
+        except Exception:
+            return 0
+
+    def _terse_reason(self, reason: str, command: str) -> str:
+        """Generate terse reason message (first block)."""
+        return f"BLOCKED: {reason}. Ask the user to run manually."
+
+    def _standard_reason(self, reason: str, command: str) -> str:
+        """Generate standard reason message (blocks 2-3)."""
+        return (
+            f"BLOCKED: {reason}\n\n"
+            f"Command: {command}\n\n"
+            "SAFE alternatives:\n"
+            "  - git stash        (save changes, can recover later)\n"
+            "  - git diff         (review changes first)\n"
+            "  - git status       (see what would be affected)\n"
+            "  - git commit       (save changes permanently first)\n\n"
+            "Ask the user to run this manually if needed."
+        )
+
+    def _verbose_reason(self, reason: str, command: str) -> str:
+        """Generate verbose reason message (blocks 4+)."""
+        return (
+            f"BLOCKED: Destructive git command detected\n\n"
+            f"Reason: {reason}\n\n"
+            f"Command: {command}\n\n"
+            "This command PERMANENTLY DESTROYS uncommitted changes with NO recovery possible.\n\n"
+            "If this operation is truly necessary, you must ask the human user to run it manually.\n\n"
+            "SAFE alternatives:\n"
+            "  - git stash        (save changes, can recover later)\n"
+            "  - git diff         (review changes first)\n"
+            "  - git status       (see what would be affected)\n"
+            "  - git commit       (save changes permanently first)\n\n"
+            "The LLM is NOT ALLOWED to run destructive git commands. Ask the user to do it."
+        )
+
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Block the destructive command with explanation."""
         command = get_bash_command(hook_input)
@@ -59,39 +99,39 @@ class DestructiveGitHandler(Handler):
 
         # Determine which pattern matched and provide specific reason
         if re.search(r"\bgit\s+reset\s+.*--hard\b", command, re.IGNORECASE):
-            reason = "git reset --hard destroys all uncommitted changes permanently"
+            specific_reason = "git reset --hard destroys all uncommitted changes permanently"
         elif re.search(r"\bgit\s+clean\s+.*-[a-z]*f", command, re.IGNORECASE):
-            reason = "git clean -f permanently deletes untracked files"
+            specific_reason = "git clean -f permanently deletes untracked files"
         elif re.search(r"\bgit\s+stash\s+drop\b", command, re.IGNORECASE):
-            reason = "git stash drop permanently destroys stashed changes"
+            specific_reason = "git stash drop permanently destroys stashed changes"
         elif re.search(r"\bgit\s+stash\s+clear\b", command, re.IGNORECASE):
-            reason = "git stash clear permanently destroys all stashed changes"
+            specific_reason = "git stash clear permanently destroys all stashed changes"
         elif re.search(r"\bgit\s+checkout\s+.*--\s+\S", command, re.IGNORECASE):
-            reason = (
+            specific_reason = (
                 "git checkout [REF] -- file discards all local changes to that file permanently"
             )
         elif re.search(r"\bgit\s+restore\s+(?!--staged)", command, re.IGNORECASE):
-            reason = "git restore discards all local changes to files permanently"
+            specific_reason = "git restore discards all local changes to files permanently"
         elif re.search(r"\bgit\s+push\s+.*--force\b", command, re.IGNORECASE):
-            reason = "git push --force can overwrite remote history and destroy team members' work"
+            specific_reason = (
+                "git push --force can overwrite remote history and destroy team members' work"
+            )
         else:
-            reason = "This git command destroys uncommitted changes permanently"
+            specific_reason = "This git command destroys uncommitted changes permanently"
+
+        # Get block count and determine verbosity level
+        block_count = self._get_block_count()
+
+        if block_count == 0:
+            reason = self._terse_reason(specific_reason, command)
+        elif block_count <= 2:
+            reason = self._standard_reason(specific_reason, command)
+        else:
+            reason = self._verbose_reason(specific_reason, command)
 
         return HookResult(
             decision=Decision.DENY,
-            reason=(
-                f"BLOCKED: Destructive git command detected\n\n"
-                f"Reason: {reason}\n\n"
-                f"Command: {command}\n\n"
-                "This command PERMANENTLY DESTROYS uncommitted changes with NO recovery possible.\n\n"
-                "If this operation is truly necessary, you must ask the human user to run it manually.\n\n"
-                "SAFE alternatives:\n"
-                "  - git stash        (save changes, can recover later)\n"
-                "  - git diff         (review changes first)\n"
-                "  - git status       (see what would be affected)\n"
-                "  - git commit       (save changes permanently first)\n\n"
-                "The LLM is NOT ALLOWED to run destructive git commands. Ask the user to do it."
-            ),
+            reason=reason,
         )
 
     def get_acceptance_tests(self) -> list[Any]:
