@@ -5,6 +5,7 @@ daemon:
   idle_timeout_seconds: 600  # Auto-shutdown after 10 minutes of inactivity
   log_level: INFO
   self_install_mode: true  # Self-install: daemon runs from project root (not .claude/hooks-daemon/)
+  strict_mode: true  # FAIL FAST on ALL errors (dogfooding requirement)
 
   enable_hello_world_handlers: false  # Disabled - using real handlers instead
 
@@ -42,9 +43,37 @@ handlers:
       enabled: true
       priority: 15
 
+    curl_pipe_shell:       # Blocks dangerous curl | sh patterns
+      enabled: true
+      priority: 15
+
+    pipe_blocker:          # Blocks dangerous pipe patterns in bash commands
+      enabled: true
+      priority: 15
+
+    dangerous_permissions: # Warns about dangerous file permission changes
+      enabled: true
+      priority: 18
+
     git_stash:             # Warns about git stash (stashes can be lost)
       enabled: true
       priority: 20
+
+    lock_file_edit_blocker: # Prevents editing package lock files
+      enabled: true
+      priority: 20
+
+    pip_break_system:      # Blocks pip commands that break system packages
+      enabled: true
+      priority: 20
+
+    sudo_pip:              # Blocks sudo pip (use venv instead)
+      enabled: true
+      priority: 20
+
+    daemon_restart_verifier: # Verifies daemon restart after code changes
+      enabled: true
+      priority: 22
 
     # CODE QUALITY HANDLERS (Priority 25-45)
     python_qa_suppression_blocker:  # Blocks Python QA suppressions (# noqa, # type: ignore, etc)
@@ -74,24 +103,36 @@ handlers:
       options:
         track_plans_in_project: "CLAUDE/Plan"  # Must match markdown_organization setting
 
+    task_tdd_advisor:      # Advises on TDD workflow for tasks
+      enabled: true
+      priority: 35
+
     gh_issue_comments:     # Requires --comments flag for gh issue view
       enabled: true
       priority: 40
 
     validate_plan_number:  # Validates plan number format (001-, 002-, etc)
-      enabled: false       # Optional - enable for projects using CLAUDE/Plan/
+      enabled: true        # Enable for projects using CLAUDE/Plan/
       priority: 40
 
+    global_npm_advisor:    # Advises against global npm installs
+      enabled: true
+      priority: 42
+
     plan_time_estimates:   # Blocks time estimates in plan files
-      enabled: false       # Optional - enable for projects using CLAUDE/Plan/
+      enabled: true        # Enable for projects using CLAUDE/Plan/
       priority: 45
 
     plan_workflow:         # Provides guidance when creating plans
       enabled: true        # Enable for projects using CLAUDE/Plan/
       priority: 45
 
+    plan_completion_advisor: # Advises on plan completion workflow
+      enabled: true
+      priority: 48
+
     npm_command:           # Restricts npm commands to approved list
-      enabled: false       # Optional - enable for strict npm usage control
+      enabled: true        # Enable for strict npm usage control
       priority: 50
 
     markdown_organization: # Enforces markdown file organization rules & plan tracking
@@ -116,13 +157,13 @@ handlers:
       enabled: true
       priority: 10
 
-    # validate_eslint_on_write:  # Runs ESLint after file writes
-    #   enabled: false            # Optional - enable for automatic ESLint validation
-    #   priority: 20
+    validate_eslint_on_write:  # Runs ESLint after file writes
+      enabled: true            # Enable for automatic ESLint validation
+      priority: 20
 
-    # validate_sitemap:          # Validates sitemap structure after writes
-    #   enabled: false            # Optional - enable for sitemap validation
-    #   priority: 30
+    validate_sitemap:          # Validates sitemap structure after writes
+      enabled: true            # Enable for sitemap validation
+      priority: 30
 
   # SessionStart handlers (run when session starts)
   session_start:
@@ -134,9 +175,9 @@ handlers:
       enabled: true         # Enable to suggest status line configuration
       priority: 55
 
-    # workflow_state_restoration:  # Restores workflow state after compaction
-    #   enabled: false              # Optional - enable for workflow state management
-    #   priority: 60
+    workflow_state_restoration:  # Restores workflow state after compaction
+      enabled: true              # Enable for workflow state management
+      priority: 60
 
   # PreCompact handlers (run before conversation compaction)
   pre_compact:
@@ -144,9 +185,9 @@ handlers:
       enabled: true
       priority: 10
 
-    # workflow_state_pre_compact:  # Saves workflow state before compaction
-    #   enabled: false              # Optional - enable for workflow state management
-    #   priority: 20
+    workflow_state_pre_compact:  # Saves workflow state before compaction
+      enabled: true              # Enable for workflow state management
+      priority: 20
 
   # SessionEnd handlers (run when session ends)
   session_end:
@@ -160,13 +201,13 @@ handlers:
       enabled: true
       priority: 10
 
-    # remind_prompt_library:  # Reminds about prompt library after agent work
-    #   enabled: false         # Optional - enable for prompt library reminders
-    #   priority: 20
+    remind_prompt_library:  # Reminds about prompt library after agent work
+      enabled: true         # Enable for prompt library reminders
+      priority: 20
 
-    # remind_validator:       # Reminds about HTML validation
-    #   enabled: false         # Optional - enable for validation reminders
-    #   priority: 30
+    remind_validator:       # Reminds about HTML validation
+      enabled: true         # Enable for validation reminders
+      priority: 30
 
   # UserPromptSubmit handlers (run when user submits prompt)
   user_prompt_submit:
@@ -208,9 +249,25 @@ handlers:
       enabled: true
       priority: 20
 
+    git_repo_name:  # Shows git repository name
+      enabled: true
+      priority: 25
+
     daemon_stats:   # Shows daemon uptime, memory, log level
       enabled: true
       priority: 30
+
+    account_display: # Shows account information
+      enabled: true
+      priority: 40
+
+    thinking_mode:  # Shows current thinking mode
+      enabled: true
+      priority: 50
+
+    usage_tracking: # Tracks and displays usage statistics
+      enabled: true
+      priority: 60
 
 # Project-level handlers (custom handlers in .claude/hooks/handlers/)
 # Example:
