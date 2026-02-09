@@ -36,7 +36,7 @@ def _discover_handler_modules() -> list[tuple[str, str]]:
             if py_file.name.startswith("_") or py_file.name == "hello_world.py":
                 continue
             # Skip non-handler utility files
-            if py_file.name == "stats_cache_reader.py":
+            if py_file.name in ("stats_cache_reader.py", "api_usage_base.py"):
                 continue
 
             module_path = f"claude_code_hooks_daemon.handlers.{event_dir.name}.{py_file.stem}"

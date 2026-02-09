@@ -72,7 +72,7 @@ class Priority:
 
     MARKDOWN_ORGANIZATION = 35
 
-    # Workflow handlers (Priority: 40-55)
+    # Workflow handlers (Priority: 35-55)
     GH_ISSUE_COMMENTS = 40
     YOLO_CONTAINER_DETECTION = 40
     PLAN_TIME_ESTIMATES = 40
@@ -103,6 +103,10 @@ class Priority:
     ACCOUNT_DISPLAY = 5
     MODEL_CONTEXT = 10
     USAGE_TRACKING = 15
+    API_USAGE_FIVE_HOUR = 16
+    API_USAGE_SEVEN_DAY = 17
+    API_USAGE_EXTRA = 18
+    THINKING_MODE = 25
 
     # Special handlers (no fixed priority in catalog)
     # These handlers set priority dynamically or don't use the standard system

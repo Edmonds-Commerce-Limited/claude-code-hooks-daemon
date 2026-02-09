@@ -275,11 +275,31 @@ handlers:
       enabled: true
       priority: 20
 
+    api_usage_five_hour:   # Shows 5-hour usage window with progress bar
+      enabled: true
+      priority: 16
+
+    api_usage_seven_day:   # Shows 7-day usage window with progress bar
+      enabled: true
+      priority: 17
+
+    api_usage_extra:       # Shows extra usage credits when enabled
+      enabled: true
+      priority: 18
+
+    thinking_mode:         # Shows thinking mode On/Off status
+      enabled: true
+      priority: 25
+
     daemon_stats:          # Shows daemon uptime and stats
       enabled: true
       priority: 30
 
 # Project-level handlers (custom handlers in .claude/hooks/handlers/)
 plugins:
-  paths: []
-  plugins: []
+  paths: [".claude/hooks"]
+  plugins:
+    - path: handlers.session_start.dogfooding_reminder
+      event_type: session_start
+      enabled: true
+      priority: 35

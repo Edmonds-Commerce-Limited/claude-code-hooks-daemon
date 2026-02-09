@@ -67,6 +67,7 @@ def discover_all_production_handlers() -> dict[str, list[str]]:
                         and attr is not Handler
                         and not attr.__name__.startswith("_")
                         and "HelloWorld" not in attr.__name__
+                        and "Base" not in attr.__name__
                     ):
                         handlers_by_event[event_dir].append(attr.__name__)
             except Exception:
