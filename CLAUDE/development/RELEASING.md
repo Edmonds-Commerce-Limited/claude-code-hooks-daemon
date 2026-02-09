@@ -34,9 +34,20 @@ The `/release` skill orchestrates the complete release workflow through a multi-
 **Orchestration Architecture:**
 - **Stage 1**: Release Agent (Sonnet) prepares files
 - **Stage 2**: Opus Agent reviews for accuracy
-- **Stage 3**: Main Claude commits, tags, and publishes
+- **Stage 3**: Main Claude runs QA verification (BLOCKING GATE)
+- **Stage 4**: Main Claude runs acceptance tests (BLOCKING GATE)
+- **Stage 5**: Main Claude commits, tags, and publishes
 
 **Important:** Agents cannot spawn nested agents. Main Claude orchestrates by invoking agents sequentially.
+
+## 🚨 CRITICAL: BLOCKING GATES
+
+**The following steps are MANDATORY and BLOCKING. Release CANNOT proceed if these fail:**
+
+1. **QA Verification Gate** (after Opus review, before commit)
+2. **Acceptance Testing Gate** (after QA passes, before commit)
+
+**If either gate fails, the release is ABORTED. No exceptions.**
 
 ### 1. Pre-Release Validation (Automated)
 
@@ -197,7 +208,7 @@ After the Release Agent completes, **main Claude** (not the agent) invokes an ad
 - ❌ Git state (already validated pre-release)
 
 **Outcome:**
-- **Approved**: Main Claude proceeds to commit/tag/release
+- **Approved**: Main Claude proceeds to **QA Verification Gate** (Step 7)
 - **Issues Found**: Main Claude re-invokes Release Agent to fix **documentation issues only** (typos, missing entries, etc.)
 - Process repeats until Opus approves documentation with 100% confidence
 
@@ -220,9 +231,99 @@ Or if documentation issues found:
    Re-invoking Release Agent to fix documentation...
 ```
 
-### 7. Commit & Push (Main Claude Executes)
+### 7. QA Verification Gate (Main Claude Executes) - 🚨 BLOCKING
 
-Once Opus approves, **main Claude** (not the Release Agent) commits and pushes:
+**CRITICAL BLOCKING GATE: Main Claude must manually verify QA passes.**
+
+After Opus approves documentation, **main Claude MUST run full QA suite manually**:
+
+```bash
+# MANDATORY: Run complete QA suite
+./scripts/qa/run_all.sh
+```
+
+**Expected Output:**
+```
+========================================
+QA Summary
+========================================
+  Magic Values        : ✅ PASSED
+  Format Check        : ✅ PASSED
+  Linter              : ✅ PASSED
+  Type Check          : ✅ PASSED
+  Tests               : ✅ PASSED
+  Security Check      : ✅ PASSED
+
+Overall Status: ✅ ALL CHECKS PASSED
+```
+
+**If ANY check fails:**
+- ❌ **ABORT RELEASE IMMEDIATELY**
+- Display failure details to user
+- User must fix issues manually
+- User re-runs `/release` from beginning
+
+**Why This Gate Exists:**
+- Agent's pre-release QA check (Step 1) may be stale by the time files are prepared
+- Documentation changes could introduce issues
+- This is the final verification before irreversible git operations
+
+**Main Claude proceeds to Acceptance Testing Gate (Step 8) ONLY if all QA checks pass.**
+
+### 8. Acceptance Testing Gate (Main Claude Executes) - 🚨 BLOCKING
+
+**CRITICAL BLOCKING GATE: Main Claude must execute acceptance test playbook.**
+
+After QA passes, **main Claude MUST run acceptance tests manually**:
+
+**Step 8.1: Generate Fresh Playbook**
+```bash
+python -m claude_code_hooks_daemon.daemon.cli generate-playbook > /tmp/playbook.md
+```
+
+**Step 8.2: Review Playbook**
+- Check for tests covering new/changed handlers
+- Verify test expectations are current
+- Add tests for any new features
+
+**Step 8.3: Execute ALL Tests**
+- Work through **EVERY test** in playbook (15+ tests)
+- Test in real Claude Code session with hook events
+- Mark PASS/FAIL for each test
+- Document any unexpected behavior
+
+**Step 8.4: Evaluate Results**
+
+**If ALL tests PASS:**
+- ✅ Proceed to Commit & Push (Step 9)
+
+**If ANY test FAILS:**
+- ❌ **ABORT RELEASE IMMEDIATELY**
+- **FAIL-FAST Cycle:**
+  1. Investigate root cause
+  2. Fix bug using TDD (write failing test → implement fix → verify test passes)
+  3. Run FULL QA: `./scripts/qa/run_all.sh` (must pass 100%)
+  4. Restart daemon: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
+  5. **RESTART acceptance testing FROM TEST 1.1** (not from where you left off)
+  6. Continue until ALL tests pass with ZERO code changes
+
+**Why This Gate Exists:**
+- Unit tests don't catch integration issues with real Claude Code hook events
+- Handlers might pass unit tests but fail in actual usage
+- Real-world testing is the final safety check before release
+- **CORRECTNESS over SPEED** - A delayed release is better than a broken release
+
+**Expected Time Investment:**
+- Playbook generation: 2 minutes
+- Test execution: 20-30 minutes (15+ tests)
+- Issue investigation: Variable (hours if bugs found)
+- **Minimum: 30 minutes**
+
+**Main Claude proceeds to Commit & Push (Step 9) ONLY if acceptance tests pass.**
+
+### 9. Commit & Push (Main Claude Executes)
+
+Once QA and acceptance tests pass, **main Claude** (not the Release Agent) commits and pushes:
 
 ```bash
 # Commits all version files, changelog, release notes
@@ -244,7 +345,7 @@ Full changelog: RELEASES/vX.Y.Z.md
 Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
 ```
 
-### 8. Tag & GitHub Release (Main Claude Executes)
+### 10. Tag & GitHub Release (Main Claude Executes)
 
 **Main Claude** creates annotated git tag and GitHub release:
 
@@ -266,7 +367,7 @@ gh release create vX.Y.Z \
 - ✅ Auto-generated tarball/zip
 - ✅ Comparison link to previous version
 
-### 9. Post-Release Verification (Main Claude Executes)
+### 11. Post-Release Verification (Main Claude Executes)
 
 **Main Claude** verifies:
 - ✅ Tag exists locally and on GitHub

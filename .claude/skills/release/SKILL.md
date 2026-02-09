@@ -42,11 +42,13 @@ Automate the complete release process: version updates, changelog generation, Op
 4. **Generates** CHANGELOG.md entry from commits
 5. **Creates** release notes (RELEASES/vX.Y.Z.md)
 6. **Submits** to Opus agent for documentation review
-7. **Commits** and pushes changes
-8. **Tags** release and creates GitHub release
-9. **Verifies** release published successfully
+7. **🚨 QA VERIFICATION GATE** - Main Claude runs `./scripts/qa/run_all.sh` (BLOCKING)
+8. **🚨 ACCEPTANCE TESTING GATE** - Main Claude executes full acceptance test playbook (BLOCKING)
+9. **Commits** and pushes changes (only after gates pass)
+10. **Tags** release and creates GitHub release
+11. **Verifies** release published successfully
 
-**CRITICAL**: Release process ABORTS immediately on ANY validation failure. NO auto-fixing of QA issues or git state.
+**CRITICAL**: Release process ABORTS immediately on ANY validation failure or if blocking gates fail. NO auto-fixing of QA issues or git state.
 
 ## Agent
 
@@ -71,6 +73,14 @@ Generate Changelog
 Create Release Notes
     ↓
 Opus Review ←→ Fix Issues (if needed)
+    ↓
+🚨 QA VERIFICATION GATE (BLOCKING)
+    Main Claude runs: ./scripts/qa/run_all.sh
+    ABORT if any check fails
+    ↓
+🚨 ACCEPTANCE TESTING GATE (BLOCKING)
+    Main Claude executes full playbook
+    ABORT if any test fails
     ↓
 Commit & Push
     ↓
