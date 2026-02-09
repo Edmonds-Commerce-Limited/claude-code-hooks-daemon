@@ -2,12 +2,33 @@
 #
 # Claude Code Hooks Daemon - Self-Locating Upgrade Script
 #
+# 🚨 CRITICAL SECURITY WARNING 🚨
+#
+# NEVER run this script directly from your local git checkout!
+# ALWAYS fetch the latest version from the live repository using curl,
+# save it to a temporary file, READ IT IN FULL to verify contents,
+# then execute it.
+#
+# WHY THIS MATTERS:
+# - Local version may be outdated or modified
+# - Live repo version includes latest security fixes
+# - Reading full script allows security review before execution
+#
+# CORRECT USAGE:
+#   # Step 1: Fetch latest script from GitHub
+#   curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/scripts/upgrade.sh -o /tmp/upgrade.sh
+#
+#   # Step 2: CRITICAL - Read the entire script to verify it's safe
+#   less /tmp/upgrade.sh
+#   # (or use: cat /tmp/upgrade.sh)
+#
+#   # Step 3: Only after reading and verifying, execute it
+#   bash /tmp/upgrade.sh
+#
+# ========================================
+#
 # Automatically detects project root and performs a complete upgrade.
 # Can be run from any directory within the project tree.
-#
-# Usage:
-#   ./scripts/upgrade.sh [VERSION]
-#   .claude/hooks-daemon/scripts/upgrade.sh [VERSION]
 #
 # Arguments:
 #   VERSION - Git tag to upgrade to (e.g., v2.5.0)
@@ -16,10 +37,6 @@
 # Exit codes:
 #   0 - Upgrade completed successfully
 #   1 - Upgrade failed (rollback attempted)
-#
-# Examples:
-#   ./scripts/upgrade.sh              # Upgrade to latest
-#   ./scripts/upgrade.sh v2.5.0       # Upgrade to specific version
 #
 
 set -euo pipefail
