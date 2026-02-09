@@ -13,6 +13,7 @@ This directory contains all handlers for the `status_line` hook event type. Thes
 | `model_context.py` | `ModelContextHandler` | 10 | Formats color-coded model name (blue=Haiku, green=Sonnet, orange=Opus) and context percentage |
 | `usage_tracking.py` | `UsageTrackingHandler` | 15 | Daily/weekly token usage percentages (currently disabled - needs rework) |
 | `git_branch.py` | `GitBranchHandler` | 20 | Shows current git branch name |
+| `thinking_mode.py` | `ThinkingModeHandler` | 25 | Shows thinking mode On/Off and effort level from `~/.claude/settings.json` |
 | `daemon_stats.py` | `DaemonStatsHandler` | 30 | Shows daemon uptime, memory usage, log level, and error count |
 
 ## Supporting Modules

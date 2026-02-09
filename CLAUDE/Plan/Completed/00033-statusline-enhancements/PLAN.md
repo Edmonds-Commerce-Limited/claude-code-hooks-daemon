@@ -1,8 +1,8 @@
 # Plan 00033: Status Line Enhancements (PowerShell Port)
 
-**Status**: Not Started
+**Status**: Complete (2026-02-09) - Scope reduced due to OAuth API limitations
 **Created**: 2026-02-09
-**Owner**: TBD
+**Owner**: Claude Sonnet 4.5 / Claude Opus 4.6
 **Priority**: Medium
 
 ## Overview
@@ -339,147 +339,57 @@ Build reusable utilities that multiple handlers will use.
 
 ## Tasks
 
-### Phase 1: Foundation (Core Utilities)
+### Phase 1: Foundation (Core Utilities) - ❌ CANCELLED
 
-- [ ] ⬜ **Task 1.1: Create formatting utility module**
-  - [ ] ⬜ Create `src/claude_code_hooks_daemon/utils/formatting.py`
-  - [ ] ⬜ Write failing tests for `format_token_count()` (TDD)
-  - [ ] ⬜ Implement `format_token_count()` function
-  - [ ] ⬜ Test edge cases: 0, 1, 999, 1k, 1.5M, etc.
-  - [ ] ⬜ Run QA: `./scripts/qa/run_all.sh`
+Formatting utilities were implemented (checkpoint a2d2c59) but removed (commit 97eb4d1)
+because the only consumers were the API usage handlers, which were cancelled.
 
-- [ ] ⬜ **Task 1.2: Add progress bar builder**
-  - [ ] ⬜ Write failing tests for `build_progress_bar()` (TDD)
-  - [ ] ⬜ Implement progress bar with Unicode characters
-  - [ ] ⬜ Add dynamic color coding (green→yellow→orange→red)
-  - [ ] ⬜ Test all percentage ranges (0%, 25%, 50%, 75%, 100%)
-  - [ ] ⬜ Run QA: `./scripts/qa/run_all.sh`
+- [x] ❌ **Task 1.1: Create formatting utility module** - CANCELLED (removed, no consumers)
+- [x] ❌ **Task 1.2: Add progress bar builder** - CANCELLED (removed, no consumers)
+- [x] ❌ **Task 1.3: Add time formatting utility** - CANCELLED (removed, no consumers)
 
-- [ ] ⬜ **Task 1.3: Add time formatting utility**
-  - [ ] ⬜ Write failing tests for `format_reset_time()` (TDD)
-  - [ ] ⬜ Implement ISO 8601 parsing and UTC→local conversion
-  - [ ] ⬜ Support "time", "datetime", "date" styles
-  - [ ] ⬜ Test with fixed timezone (avoid flaky tests)
-  - [ ] ⬜ Run QA: `./scripts/qa/run_all.sh`
+### Phase 2: API Integration (Usage Data Source) - ❌ CANCELLED
 
-### Phase 2: API Integration (Usage Data Source)
+**Reason**: OAuth tokens have been blocked from third-party API use since Jan 2026.
+The `/api/oauth/usage` endpoint requires an ANTHROPIC_API_KEY from console.anthropic.com,
+not the OAuth tokens available in `~/.claude/.credentials.json`. This makes the entire
+API-based usage tracking approach non-viable for dogfooding.
 
-- [ ] ⬜ **Task 2.1: Create API usage client**
-  - [ ] ⬜ Create `src/claude_code_hooks_daemon/utils/api_usage_client.py`
-  - [ ] ⬜ Write failing tests for `get_credentials()` (TDD)
-  - [ ] ⬜ Implement credentials reader (never log tokens!)
-  - [ ] ⬜ Write failing tests for `fetch_usage()` (TDD)
-  - [ ] ⬜ Implement API call with OAuth authentication
-  - [ ] ⬜ Add proper error handling (timeout, auth errors)
-  - [ ] ⬜ Test with mocked responses
-  - [ ] ⬜ Run security check: `./scripts/qa/run_security_check.sh`
-  - [ ] ⬜ Run QA: `./scripts/qa/run_all.sh`
+Full implementation was completed (checkpoint a2d2c59) then removed (commit 7a201db).
 
-- [ ] ⬜ **Task 2.2: Create usage cache**
-  - [ ] ⬜ Create `src/claude_code_hooks_daemon/utils/usage_cache.py`
-  - [ ] ⬜ Write failing tests for cache read/write/staleness (TDD)
-  - [ ] ⬜ Implement `UsageCache` class
-  - [ ] ⬜ Use `~/.claude/status-line-cache.json`
-  - [ ] ⬜ Default TTL: 60 seconds (configurable)
-  - [ ] ⬜ Test with mocked file times
-  - [ ] ⬜ Run QA: `./scripts/qa/run_all.sh`
+- [x] ❌ **Task 2.1: Create API usage client** - CANCELLED (OAuth blocked)
+- [x] ❌ **Task 2.2: Create usage cache** - CANCELLED (no API to cache)
+- [x] ❌ **Task 2.3: Integration tests for API flow** - CANCELLED (no API)
 
-- [ ] ⬜ **Task 2.3: Integration tests for API flow**
-  - [ ] ⬜ Write integration test: credentials → API → cache
-  - [ ] ⬜ Test fallback: API fail → stale cache → graceful degradation
-  - [ ] ⬜ Test error scenarios: no creds, expired token, timeout
-  - [ ] ⬜ Run integration tests: `pytest tests/integration/ -v`
+### Phase 3: Enhanced Handlers (New Features) - PARTIAL
 
-### Phase 3: Enhanced Handlers (New Features)
+- [ ] ⬜ **Task 3.1: Enhance model_context handler** - NOT DONE (low priority without API data)
 
-- [ ] ⬜ **Task 3.1: Enhance model_context handler**
-  - [ ] ⬜ Write failing tests for token count display (TDD)
-  - [ ] ⬜ Add token count: "50k / 200k"
-  - [ ] ⬜ Write failing tests for remaining percentage (TDD)
-  - [ ] ⬜ Add remaining %: "75% remain 150,000"
-  - [ ] ⬜ Maintain backward compatibility
-  - [ ] ⬜ Run QA: `./scripts/qa/run_all.sh`
+- [x] ❌ **Task 3.2: Create 5-hour usage handler** - CANCELLED (OAuth blocked)
+- [x] ❌ **Task 3.3: Create 7-day usage handler** - CANCELLED (OAuth blocked)
+- [x] ❌ **Task 3.4: Create extra usage handler** - CANCELLED (OAuth blocked)
 
-- [ ] ⬜ **Task 3.2: Create 5-hour usage handler**
-  - [ ] ⬜ Create `api_usage_five_hour.py`
-  - [ ] ⬜ Write failing tests for handler (TDD)
-  - [ ] ⬜ Implement handler using ApiUsageClient + UsageCache
-  - [ ] ⬜ Add progress bar with reset time
-  - [ ] ⬜ Test with mocked API data
-  - [ ] ⬜ Add acceptance tests
-  - [ ] ⬜ Register in config with priority 16
-  - [ ] ⬜ Restart daemon: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
-  - [ ] ⬜ Verify daemon loads: `$PYTHON -m claude_code_hooks_daemon.daemon.cli status`
-  - [ ] ⬜ Run QA: `./scripts/qa/run_all.sh`
+- [x] ✅ **Task 3.5: Create thinking mode handler** - DONE
+  - [x] ✅ Created `thinking_mode.py` with ThinkingModeHandler
+  - [x] ✅ Reads `~/.claude/settings.json` for `alwaysThinkingEnabled`
+  - [x] ✅ Shows thinking: On (orange) / Off (dim)
+  - [x] ✅ Only shows when key actually exists (no misleading "Off")
+  - [x] ✅ Added effortLevel display (low/medium/high) for Opus 4.6
+  - [x] ✅ Acceptance tests included
+  - [x] ✅ Registered in config, daemon restart verified
+  - [x] ✅ 15 tests passing, QA green
 
-- [ ] ⬜ **Task 3.3: Create 7-day usage handler**
-  - [ ] ⬜ Create `api_usage_seven_day.py`
-  - [ ] ⬜ Write failing tests (TDD)
-  - [ ] ⬜ Implement handler (similar to five_hour)
-  - [ ] ⬜ Add acceptance tests
-  - [ ] ⬜ Register in config with priority 17
-  - [ ] ⬜ Restart daemon and verify
-  - [ ] ⬜ Run QA: `./scripts/qa/run_all.sh`
+### Phase 4: Configuration & Polish - PARTIAL
 
-- [ ] ⬜ **Task 3.4: Create extra usage handler**
-  - [ ] ⬜ Create `api_usage_extra.py`
-  - [ ] ⬜ Write failing tests for enabled/disabled states (TDD)
-  - [ ] ⬜ Implement handler with conditional display
-  - [ ] ⬜ Add acceptance tests
-  - [ ] ⬜ Register in config with priority 18
-  - [ ] ⬜ Restart daemon and verify
-  - [ ] ⬜ Run QA: `./scripts/qa/run_all.sh`
+- [x] ✅ **Task 4.1: Add handler configuration** - thinking_mode registered in config
+- [ ] ⬜ **Task 4.2: Update documentation** - NOT DONE (status line CLAUDE.md not updated for thinking_mode)
+- [x] ✅ **Task 4.3: Error handling & logging** - thinking_mode has graceful degradation
 
-- [ ] ⬜ **Task 3.5: Create thinking mode handler**
-  - [ ] ⬜ Create `thinking_mode.py`
-  - [ ] ⬜ Write failing tests for settings file read (TDD)
-  - [ ] ⬜ Implement handler with file caching
-  - [ ] ⬜ Test On/Off display states
-  - [ ] ⬜ Add acceptance tests
-  - [ ] ⬜ Register in config with priority 25
-  - [ ] ⬜ Restart daemon and verify
-  - [ ] ⬜ Run QA: `./scripts/qa/run_all.sh`
+### Phase 5: Multi-line Display (Optional/Future) - ❌ CANCELLED
 
-### Phase 4: Configuration & Polish
+Not investigated. Single-line display is sufficient for current features.
 
-- [ ] ⬜ **Task 4.1: Add handler configuration**
-  - [ ] ⬜ Update `.claude/hooks-daemon.yaml` with new handlers
-  - [ ] ⬜ Add configuration options (bar_width, cache_ttl, etc.)
-  - [ ] ⬜ Update config schema validation
-  - [ ] ⬜ Test config loading with new options
-  - [ ] ⬜ Run QA: `./scripts/qa/run_all.sh`
-
-- [ ] ⬜ **Task 4.2: Update documentation**
-  - [ ] ⬜ Update `CLAUDE/Architecture/StatusLine.md`
-  - [ ] ⬜ Update `src/claude_code_hooks_daemon/handlers/status_line/CLAUDE.md`
-  - [ ] ⬜ Document API authentication flow
-  - [ ] ⬜ Add troubleshooting section
-  - [ ] ⬜ Document caching strategy
-
-- [ ] ⬜ **Task 4.3: Error handling & logging**
-  - [ ] ⬜ Review all handlers for proper error handling
-  - [ ] ⬜ Ensure API failures log at INFO (not ERROR)
-  - [ ] ⬜ Test graceful degradation on failures
-  - [ ] ⬜ Verify status line never crashes
-  - [ ] ⬜ Run QA: `./scripts/qa/run_all.sh`
-
-### Phase 5: Multi-line Display (Optional/Future)
-
-- [ ] ⬜ **Task 5.1: Investigate multi-line support**
-  - [ ] ⬜ Research Claude Code status line architecture
-  - [ ] ⬜ Test newlines in handler context
-  - [ ] ⬜ Document findings in plan
-
-- [ ] ⬜ **Task 5.2: Implement multi-line (if supported)**
-  - [ ] ⬜ Update handlers for 3-line format
-  - [ ] ⬜ Add configuration option: single_line vs multi_line
-  - [ ] ⬜ Test both modes
-  - [ ] ⬜ Run QA: `./scripts/qa/run_all.sh`
-
-- [ ] ⬜ **Task 5.3: Single-line fallback**
-  - [ ] ⬜ Implement truncation/abbreviation for single line
-  - [ ] ⬜ Prioritize most important information
-  - [ ] ⬜ Test readability
+- [x] ❌ **Task 5.1-5.3** - CANCELLED (not needed for reduced scope)
 
 ## Dependencies
 
@@ -585,19 +495,20 @@ Build reusable utilities that multiple handlers will use.
 
 ## Success Criteria
 
-- [ ] Token counts displayed with k/m abbreviations (e.g., "50k / 200k")
-- [ ] Progress bars render correctly with Unicode characters (●●●○○○○○○○)
-- [ ] 5-hour usage window shows percentage and reset time
-- [ ] 7-day usage window shows percentage and reset time
-- [ ] Extra usage credits display (if enabled in account)
-- [ ] Thinking mode status shows On/Off
-- [ ] API calls succeed with OAuth authentication
-- [ ] Cache reduces API calls (60-second TTL)
-- [ ] All handlers fail gracefully on errors (no status line crashes)
-- [ ] 95%+ test coverage maintained
-- [ ] All QA checks pass: `./scripts/qa/run_all.sh`
-- [ ] Daemon restarts successfully: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
-- [ ] Documentation updated with new features
+- [x] ❌ Token counts displayed with k/m abbreviations - CANCELLED (no API data source)
+- [x] ❌ Progress bars render correctly - CANCELLED (no API data source)
+- [x] ❌ 5-hour usage window - CANCELLED (OAuth blocked)
+- [x] ❌ 7-day usage window - CANCELLED (OAuth blocked)
+- [x] ❌ Extra usage credits display - CANCELLED (OAuth blocked)
+- [x] ✅ Thinking mode status shows On/Off
+- [x] ✅ Effort level display (low/medium/high) - bonus feature not in original plan
+- [x] ❌ API calls succeed with OAuth authentication - BLOCKED (OAuth tokens blocked since Jan 2026)
+- [x] ❌ Cache reduces API calls - CANCELLED (no API)
+- [x] ✅ All handlers fail gracefully on errors (no status line crashes)
+- [x] ✅ 95%+ test coverage maintained
+- [x] ✅ All QA checks pass
+- [x] ✅ Daemon restarts successfully
+- [ ] ⬜ Documentation updated with new features (status line CLAUDE.md needs thinking_mode entry)
 
 ## Risks & Mitigations
 
@@ -613,7 +524,17 @@ Build reusable utilities that multiple handlers will use.
 
 ## Notes & Updates
 
-### 2026-02-09
+### 2026-02-09 (Completion)
+- **Scope reduced**: OAuth tokens blocked from third-party API use since Jan 2026
+  - The `/api/oauth/usage` endpoint requires ANTHROPIC_API_KEY (from console.anthropic.com)
+  - OAuth tokens in `~/.claude/.credentials.json` cannot access usage APIs
+  - All API-dependent features (progress bars, usage tracking, reset times) cancelled
+- Full API implementation was completed and checkpointed (commit a2d2c59) then removed (commit 7a201db)
+- Formatting utilities created then removed as unused (commit 97eb4d1)
+- **Delivered**: ThinkingModeHandler with thinking On/Off + effortLevel display
+- **Commits**: a2d2c59, 7a201db, 97eb4d1, 9968ace, 0821aca, 03caa5a
+
+### 2026-02-09 (Created)
 - Plan created
 - PowerShell reference saved to `powershell-reference.ps1`
 - Feature comparison matrix completed
