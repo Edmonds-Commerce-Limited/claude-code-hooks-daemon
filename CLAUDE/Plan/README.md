@@ -28,15 +28,17 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Create CLAUDE/QA.md documenting complete pipeline (automated + sub-agents)
   - **Priority**: High (architectural integrity)
 
-- [00040: Playbook Generator Plugin Support](00040-playbook-generator-plugin-support/PLAN.md) - Not Started
-  - Include plugin handlers in generated acceptance test playbooks
-  - Modify cli.py to load plugins and pass to PlaybookGenerator
-  - Update PlaybookGenerator to iterate both library and plugin handlers
-  - Ensure dogfooding plugin appears in generated playbooks
-  - **Priority**: Medium (QA completeness)
-
 
 ## Completed Plans
+
+- [00040: Playbook Generator Plugin Support](Completed/00040-playbook-generator-plugin-support/PLAN.md) - 🟢 Complete (2026-02-09)
+  - Added plugin handler support to acceptance test playbook generator
+  - Modified cli.py to load plugins via PluginLoader and pass to PlaybookGenerator
+  - Updated PlaybookGenerator to iterate both library and plugin handlers, sorted by priority
+  - Fixed plugin loader to handle Handler suffix (tries ClassName and ClassNameHandler)
+  - Fixed plugin config format for dogfooding plugin
+  - Verified: 68 handlers in playbook (67 library + 1 dogfooding plugin)
+  - **Completed**: 2026-02-09
 
 - [00039: Progressive Verbosity & Data Layer Handler Enhancements](Completed/00039-progressive-verbosity-data-layer/PLAN.md) - 🟢 Complete (2026-02-09)
   - Implemented count_blocks_by_handler() in HandlerHistory
@@ -250,8 +252,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans**: 32
 - **Active**: 3 (Plans 00032, 00033, 00034 - not started)
-- **Completed**: 29
-- **Success Rate**: 91% (29/32 completed successfully)
+- **Completed**: 30
+- **Success Rate**: 94% (30/32 completed successfully)
 
 ## Quick Links
 
