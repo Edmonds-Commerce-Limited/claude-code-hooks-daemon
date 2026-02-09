@@ -250,10 +250,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans**: 32
-- **Active**: 3 (Plans 00032, 00033, 00034 - not started)
+- **Total Plans Created**: 33
 - **Completed**: 30
-- **Success Rate**: 94% (30/32 completed successfully)
+- **Active** (not started): 3
+- **Cancelled/Abandoned**: 0
 
 ## Quick Links
 
