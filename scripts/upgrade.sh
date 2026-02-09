@@ -376,14 +376,35 @@ if [ "$SKIP_UPGRADE" = false ]; then
     fi
 fi  # End of SKIP_UPGRADE=false block
 
-# Fix hook script permissions (ALWAYS RUN)
-echo "Ensuring hook scripts are executable..."
-HOOKS_DIR="$PROJECT_ROOT/.claude/hooks"
-if [ -d "$HOOKS_DIR" ]; then
-    chmod +x "$HOOKS_DIR"/* 2>/dev/null || true
-    echo -e "${GREEN}Hook scripts permissions fixed${NC}"
+# Redeploy hook scripts (ALWAYS RUN)
+echo "Redeploying hook scripts from daemon..."
+SOURCE_HOOKS_DIR="$HOOKS_DAEMON_DIR/.claude/hooks"
+DEST_HOOKS_DIR="$PROJECT_ROOT/.claude/hooks"
+
+if [ -d "$SOURCE_HOOKS_DIR" ]; then
+    mkdir -p "$DEST_HOOKS_DIR"
+
+    # Copy all hook scripts (excluding handlers subdirectory)
+    for hook_script in "$SOURCE_HOOKS_DIR"/*; do
+        if [ -f "$hook_script" ]; then
+            hook_name=$(basename "$hook_script")
+            cp "$hook_script" "$DEST_HOOKS_DIR/$hook_name"
+            chmod +x "$DEST_HOOKS_DIR/$hook_name"
+        fi
+    done
+
+    echo -e "${GREEN}Hook scripts redeployed and made executable${NC}"
 else
-    echo -e "${YELLOW}Hooks directory not found: $HOOKS_DIR${NC}"
+    echo -e "${YELLOW}Source hooks directory not found: $SOURCE_HOOKS_DIR${NC}"
+    echo -e "${YELLOW}Falling back to permission fix only...${NC}"
+
+    # Fallback: just fix permissions on existing hooks
+    if [ -d "$DEST_HOOKS_DIR" ]; then
+        chmod +x "$DEST_HOOKS_DIR"/* 2>/dev/null || true
+        echo -e "${GREEN}Hook scripts permissions fixed${NC}"
+    else
+        echo -e "${RED}Hooks directory not found: $DEST_HOOKS_DIR${NC}"
+    fi
 fi
 
 # Step 6: Restart daemon and verify config (ALWAYS RUN)
