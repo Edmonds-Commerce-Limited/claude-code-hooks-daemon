@@ -72,8 +72,16 @@ class ModelContextHandler(Handler):
             ctx_color = "\033[41m\033[97m"  # Red bg, white text
         reset = "\033[0m"
 
-        # Format: "Model | Ctx: XX%"
-        status = f"{model_color}{model_display}{reset} | Ctx: {ctx_color}{used_pct:.1f}%{reset}"
+        # Check for extended thinking effort (Opus 4.6+)
+        extended_thinking = hook_input.get("extended_thinking", {})
+        effort_str = ""
+        if extended_thinking.get("enabled"):
+            effort_level = extended_thinking.get("effort_level")
+            if effort_level is not None:
+                effort_str = f" | Effort: {effort_level}"
+
+        # Format: "Model | Ctx: XX% [| Effort: N]"
+        status = f"{model_color}{model_display}{reset} | Ctx: {ctx_color}{used_pct:.1f}%{reset}{effort_str}"
 
         return HookResult(context=[status])
 
