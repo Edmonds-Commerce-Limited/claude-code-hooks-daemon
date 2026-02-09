@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from claude_code_hooks_daemon.constants import HandlerID
+from claude_code_hooks_daemon.constants import HandlerID, EventID
 
 
 @pytest.fixture
@@ -170,3 +170,94 @@ def test_example_config_input_validation_enabled(example_config: dict) -> None:
     assert input_validation.get("enabled") is True
     assert input_validation.get("strict_mode") is True
     assert input_validation.get("log_validation_errors") is True
+
+
+def test_example_config_includes_all_library_handlers(example_config: dict) -> None:
+    """All library handlers must be present in example config (enabled or disabled).
+
+    This test dynamically discovers all handlers from HandlerID constants
+    and verifies each one is present in the example config.
+
+    Excluded handlers:
+    - Test handlers (hello_world_*, test_server)
+    - Internal-only handlers (orchestrator_only)
+    """
+    # Get all handler constants from HandlerID class
+    all_handlers = []
+    for attr_name in dir(HandlerID):
+        if attr_name.startswith("_"):
+            continue
+        attr = getattr(HandlerID, attr_name)
+        if hasattr(attr, "config_key"):
+            all_handlers.append(attr.config_key)
+
+    # Exclude test and internal handlers
+    excluded_handlers = {
+        "hello_world_pre_tool_use",
+        "hello_world_post_tool_use",
+        "hello_world_session_start",
+        "hello_world_session_end",
+        "hello_world_stop",
+        "hello_world_subagent_stop",
+        "hello_world_user_prompt_submit",
+        "hello_world_pre_compact",
+        "hello_world_notification",
+        "hello_world_permission_request",
+        "test_server",
+        "orchestrator_only",
+    }
+
+    library_handlers = [h for h in all_handlers if h not in excluded_handlers]
+
+    # Flatten all handlers from example config
+    config_handlers = set()
+    for event_type, handlers in example_config["handlers"].items():
+        for handler_name in handlers.keys():
+            config_handlers.add(handler_name)
+
+    # Check each library handler is present
+    missing_handlers = []
+    for handler in library_handlers:
+        if handler not in config_handlers:
+            missing_handlers.append(handler)
+
+    assert not missing_handlers, (
+        f"Example config missing {len(missing_handlers)} library handlers:\n"
+        f"{', '.join(sorted(missing_handlers))}\n\n"
+        f"All library handlers must be present (enabled or disabled) "
+        f"so users know what's available."
+    )
+
+
+def test_example_config_no_test_handlers(example_config: dict) -> None:
+    """Example config should not include test handlers (hello_world, etc).
+
+    Test handlers are for development/debugging only and should not
+    be in the example config that users copy.
+    """
+    # Flatten all handlers from example config
+    config_handlers = set()
+    for event_type, handlers in example_config["handlers"].items():
+        for handler_name in handlers.keys():
+            config_handlers.add(handler_name)
+
+    test_handlers = [
+        "hello_world_pre_tool_use",
+        "hello_world_post_tool_use",
+        "hello_world_session_start",
+        "hello_world_session_end",
+        "hello_world_stop",
+        "hello_world_subagent_stop",
+        "hello_world_user_prompt_submit",
+        "hello_world_pre_compact",
+        "hello_world_notification",
+        "hello_world_permission_request",
+        "test_server",
+        "orchestrator_only",
+    ]
+
+    found_test_handlers = [h for h in test_handlers if h in config_handlers]
+
+    assert not found_test_handlers, (
+        f"Example config should not include test handlers: {', '.join(found_test_handlers)}"
+    )
