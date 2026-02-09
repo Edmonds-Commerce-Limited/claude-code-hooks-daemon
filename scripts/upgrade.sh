@@ -174,7 +174,7 @@ if [ "$SELF_INSTALL" = "false" ]; then
     echo "Running client installation safety checks..."
 
     # Run Python validator
-    VALIDATION_SCRIPT=$(cat <<'PYTHON_EOF'
+    VALIDATION_SCRIPT=$(cat <<PYTHON_EOF
 import sys
 from pathlib import Path
 
@@ -380,7 +380,7 @@ fi
 if [ "$SELF_INSTALL" = "false" ]; then
     log_step "8" "Running post-upgrade verification"
 
-    VALIDATION_SCRIPT=$(cat <<'PYTHON_EOF'
+    VALIDATION_SCRIPT=$(cat <<PYTHON_EOF
 import sys
 from pathlib import Path
 
