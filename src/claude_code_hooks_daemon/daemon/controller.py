@@ -338,6 +338,7 @@ class DaemonController:
 
             # Update data layer SessionState on StatusLine events
             if event.event_type == EventType.STATUS_LINE:
+                logger.debug("StatusLine raw hook_input: %s", hook_input_dict)
                 get_data_layer().session.update_from_status_event(hook_input_dict)
 
             # Get strict_mode from config (default to False if no config)
