@@ -5,6 +5,7 @@ in the handlers directory and registering them with the event router.
 """
 
 import importlib
+import inspect
 import logging
 import pkgutil
 from pathlib import Path
@@ -93,6 +94,7 @@ class HandlerRegistry:
                         and issubclass(attr, Handler)
                         and attr is not Handler
                         and not attr.__name__.startswith("_")
+                        and not inspect.isabstract(attr)
                     ):
                         self._handlers[attr.__name__] = attr
                         count += 1
@@ -204,6 +206,7 @@ class HandlerRegistry:
                         and issubclass(attr, Handler)
                         and attr is not Handler
                         and not attr.__name__.startswith("_")
+                        and not inspect.isabstract(attr)
                     ):
                         config_key = _to_snake_case(attr.__name__)
                         handler_config = event_config.get(config_key, {})
@@ -258,6 +261,7 @@ class HandlerRegistry:
                         and issubclass(attr, Handler)
                         and attr is not Handler
                         and not attr.__name__.startswith("_")
+                        and not inspect.isabstract(attr)
                     ):
                         # Check handler-specific config (use config key = snake_case class name)
                         config_key = _to_snake_case(attr.__name__)

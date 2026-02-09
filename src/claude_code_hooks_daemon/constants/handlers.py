@@ -381,6 +381,28 @@ class HandlerID:
         display_name="workflow-state-precompact",
     )
 
+    # API usage handlers (status line)
+    API_USAGE_FIVE_HOUR = HandlerIDMeta(
+        class_name="ApiUsageFiveHourHandler",
+        config_key="api_usage_five_hour",
+        display_name="status-api-usage-5h",
+    )
+    API_USAGE_SEVEN_DAY = HandlerIDMeta(
+        class_name="ApiUsageSevenDayHandler",
+        config_key="api_usage_seven_day",
+        display_name="status-api-usage-7d",
+    )
+    API_USAGE_EXTRA = HandlerIDMeta(
+        class_name="ApiUsageExtraHandler",
+        config_key="api_usage_extra",
+        display_name="status-api-usage-extra",
+    )
+    THINKING_MODE = HandlerIDMeta(
+        class_name="ThinkingModeHandler",
+        config_key="thinking_mode",
+        display_name="status-thinking-mode",
+    )
+
     # Stats cache reader (status line)
     STATS_CACHE_READER = HandlerIDMeta(
         class_name="StatsCacheReaderHandler",
