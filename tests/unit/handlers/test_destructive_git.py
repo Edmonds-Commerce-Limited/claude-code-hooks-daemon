@@ -1,5 +1,7 @@
 """Comprehensive tests for DestructiveGitHandler."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git import DestructiveGitHandler
@@ -294,36 +296,66 @@ class TestDestructiveGitHandler:
     # handle() Tests - Specific reasons for each pattern
     def test_handle_git_reset_hard_reason(self, handler):
         """handle() should provide specific reason for git reset --hard."""
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 0
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git reset --hard"}}
-        result = handler.handle(hook_input)
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
         assert result.decision == "deny"
         assert "git reset --hard destroys all uncommitted changes permanently" in result.reason
 
     def test_handle_git_clean_f_reason(self, handler):
         """handle() should provide specific reason for git clean -f."""
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 0
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git clean -f"}}
-        result = handler.handle(hook_input)
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
         assert result.decision == "deny"
         assert "git clean -f permanently deletes untracked files" in result.reason
 
     def test_handle_git_stash_drop_reason(self, handler):
         """handle() should provide specific reason for git stash drop."""
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 0
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash drop"}}
-        result = handler.handle(hook_input)
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
         assert result.decision == "deny"
         assert "git stash drop permanently destroys stashed changes" in result.reason
 
     def test_handle_git_stash_clear_reason(self, handler):
         """handle() should provide specific reason for git stash clear."""
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 0
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash clear"}}
-        result = handler.handle(hook_input)
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
         assert result.decision == "deny"
         assert "git stash clear permanently destroys all stashed changes" in result.reason
 
     def test_handle_git_checkout_dash_dash_reason(self, handler):
         """handle() should provide specific reason for git checkout -- file."""
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 0
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git checkout -- file.txt"}}
-        result = handler.handle(hook_input)
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
         assert result.decision == "deny"
         assert (
             "git checkout [REF] -- file discards all local changes to that file permanently"
@@ -332,35 +364,65 @@ class TestDestructiveGitHandler:
 
     def test_handle_git_restore_reason(self, handler):
         """handle() should provide specific reason for git restore."""
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 0
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git restore file.txt"}}
-        result = handler.handle(hook_input)
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
         assert result.decision == "deny"
         assert "git restore discards all local changes to files permanently" in result.reason
 
     def test_handle_generic_destructive_reason(self, handler):
         """handle() should provide generic reason for other patterns."""
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 0
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git checkout ."}}
-        result = handler.handle(hook_input)
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
         assert result.decision == "deny"
         assert "This git command destroys uncommitted changes permanently" in result.reason
 
     # handle() Tests - Message structure
     def test_handle_reason_contains_blocked_indicator(self, handler):
         """handle() reason should indicate operation is blocked."""
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 0
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git reset --hard"}}
-        result = handler.handle(hook_input)
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
         assert "BLOCKED" in result.reason
 
     def test_handle_reason_contains_command(self, handler):
         """handle() reason should include the blocked command."""
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 1
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git reset --hard HEAD~3"}}
-        result = handler.handle(hook_input)
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
         assert "git reset --hard HEAD~3" in result.reason
 
     def test_handle_reason_provides_safe_alternatives(self, handler):
         """handle() reason should provide safe alternatives."""
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 1
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git clean -fd"}}
-        result = handler.handle(hook_input)
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
         assert "SAFE alternatives" in result.reason
         assert "git stash" in result.reason
         assert "git diff" in result.reason
@@ -369,39 +431,75 @@ class TestDestructiveGitHandler:
 
     def test_handle_reason_warns_no_recovery(self, handler):
         """handle() reason should warn about no recovery."""
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 3
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git reset --hard"}}
-        result = handler.handle(hook_input)
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
         assert "NO recovery possible" in result.reason
 
     def test_handle_reason_instructs_ask_human(self, handler):
         """handle() reason should instruct to ask human."""
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 0
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git clean -f"}}
-        result = handler.handle(hook_input)
-        assert "ask the human user to run it manually" in result.reason
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
+        assert "Ask the user to run manually" in result.reason
 
     def test_handle_reason_explains_llm_not_allowed(self, handler):
         """handle() reason should explain LLM is not allowed."""
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 3
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash drop"}}
-        result = handler.handle(hook_input)
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
         assert "LLM is NOT ALLOWED" in result.reason
 
     # handle() Tests - Return values
     def test_handle_returns_deny_decision(self, handler):
         """handle() should always return deny decision."""
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 0
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git reset --hard"}}
-        result = handler.handle(hook_input)
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
         assert result.decision == "deny"
 
     def test_handle_context_is_none(self, handler):
         """handle() context should be None (not used)."""
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 0
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git reset --hard"}}
-        result = handler.handle(hook_input)
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
         assert result.context == []
 
     def test_handle_guidance_is_none(self, handler):
         """handle() guidance should be None (not used)."""
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 0
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git clean -f"}}
-        result = handler.handle(hook_input)
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
         assert result.guidance is None
 
     def test_handle_empty_command_returns_allow(self, handler):
@@ -453,3 +551,112 @@ class TestDestructiveGitHandler:
         for cmd in safe_commands:
             hook_input = {"tool_name": "Bash", "tool_input": {"command": cmd}}
             assert handler.matches(hook_input) is False, f"Should allow: {cmd}"
+
+
+class TestDestructiveGitProgressiveVerbosity:
+    """Test progressive verbosity based on block count."""
+
+    @pytest.fixture
+    def handler(self):
+        """Create handler instance."""
+        return DestructiveGitHandler()
+
+    def test_terse_reason_on_first_block(self, handler):
+        """First block should produce terse message."""
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 0
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git reset --hard"}}
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
+
+        assert result.decision == "deny"
+        assert len(result.reason) < 200
+        assert "BLOCKED" in result.reason
+        assert "Ask the user" in result.reason
+        assert "PERMANENTLY DESTROYS" not in result.reason
+        assert "Command:" not in result.reason
+
+    def test_standard_reason_on_second_block(self, handler):
+        """Second block should produce standard message."""
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 1
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git reset --hard"}}
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
+
+        assert result.decision == "deny"
+        assert "Command:" in result.reason
+        assert "SAFE alternatives" in result.reason
+        assert "PERMANENTLY DESTROYS" not in result.reason
+        assert "LLM is NOT ALLOWED" not in result.reason
+
+    def test_standard_reason_on_third_block(self, handler):
+        """Third block should still produce standard message."""
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 2
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git clean -f"}}
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
+
+        assert result.decision == "deny"
+        assert "Command:" in result.reason
+        assert "SAFE alternatives" in result.reason
+        assert "PERMANENTLY DESTROYS" not in result.reason
+        assert "LLM is NOT ALLOWED" not in result.reason
+
+    def test_verbose_reason_on_fourth_block(self, handler):
+        """Fourth block should produce verbose message."""
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 3
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash drop"}}
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
+
+        assert result.decision == "deny"
+        assert "PERMANENTLY DESTROYS" in result.reason
+        assert "LLM is NOT ALLOWED" in result.reason
+        assert "Command:" in result.reason
+        assert "SAFE alternatives" in result.reason
+
+    def test_verbose_reason_on_many_blocks(self, handler):
+        """Many blocks should still produce verbose message."""
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 10
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git checkout -- file.txt"}}
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
+
+        assert result.decision == "deny"
+        assert "PERMANENTLY DESTROYS" in result.reason
+        assert "LLM is NOT ALLOWED" in result.reason
+
+    def test_data_layer_error_falls_back_to_terse(self, handler):
+        """If data layer raises exception, should fall back to terse."""
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.side_effect = Exception("Data layer error")
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git restore file.txt"}}
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
+
+        assert result.decision == "deny"
+        # Should fall back to count=0 (terse)
+        assert len(result.reason) < 200
+        assert "BLOCKED" in result.reason

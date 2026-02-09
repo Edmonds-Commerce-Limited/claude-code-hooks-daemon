@@ -10,7 +10,7 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import Decision, Handler, HookResult, get_data_layer
 from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_content, get_file_path
 
 
@@ -199,6 +199,55 @@ class SedBlockerHandler(Handler):
 
         return False
 
+    def _get_block_count(self) -> int:
+        """Get number of previous blocks by this handler."""
+        try:
+            return get_data_layer().history.count_blocks_by_handler(self.name)
+        except Exception:
+            return 0
+
+    def _terse_reason(self, context_type: str, blocked_content: str | None) -> str:
+        """Return terse message for first block."""
+        return (
+            f"BLOCKED: sed is forbidden. Use Edit tool (or parallel Haiku agents for bulk).\n\n"
+            f"BLOCKED {context_type}: {blocked_content}"
+        )
+
+    def _standard_reason(self, context_type: str, blocked_content: str | None) -> str:
+        """Return standard message for blocks 2-3."""
+        return (
+            f"🚫 BLOCKED: sed command detected\n\n"
+            f"sed is FORBIDDEN - causes large-scale file corruption.\n\n"
+            f"BLOCKED {context_type}: {blocked_content}\n\n"
+            f"WHY BANNED:\n"
+            f"  • Claude gets sed syntax wrong regularly\n"
+            f"  • Single error destroys hundreds of files\n"
+            f"  • In-place editing is irreversible\n\n"
+            f"✅ USE PARALLEL HAIKU AGENTS:\n"
+            f"  1. List files to update\n"
+            f"  2. Dispatch haiku agents (one per file)\n"
+            f"  3. Use Edit tool (safe, atomic, git-trackable)"
+        )
+
+    def _verbose_reason(self, context_type: str, blocked_content: str | None) -> str:
+        """Return verbose message with example for blocks 4+."""
+        return (
+            f"🚫 BLOCKED: sed command detected\n\n"
+            f"sed is FORBIDDEN - causes large-scale file corruption.\n\n"
+            f"BLOCKED {context_type}: {blocked_content}\n\n"
+            f"WHY BANNED:\n"
+            f"  • Claude gets sed syntax wrong regularly\n"
+            f"  • Single error destroys hundreds of files\n"
+            f"  • In-place editing is irreversible\n\n"
+            f"✅ USE PARALLEL HAIKU AGENTS:\n"
+            f"  1. List files to update\n"
+            f"  2. Dispatch haiku agents (one per file)\n"
+            f"  3. Use Edit tool (safe, atomic, git-trackable)\n\n"
+            f"EXAMPLE:\n"
+            f"  Bad:  find . -name \"*.ts\" -exec sed -i 's/foo/bar/g' {{}} \\;\n"
+            f"  Good: Dispatch 10 haiku agents with Edit tool"
+        )
+
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Block the operation with clear explanation."""
         tool_name = hook_input.get(HookInputField.TOOL_NAME)
@@ -211,24 +260,20 @@ class SedBlockerHandler(Handler):
             blocked_content = get_file_path(hook_input)
             context_type = "script"
 
+        # Get block count and determine verbosity level
+        block_count = self._get_block_count()
+
+        # Progressive verbosity: terse -> standard -> verbose
+        if block_count == 0:
+            reason = self._terse_reason(context_type, blocked_content)
+        elif block_count <= 2:
+            reason = self._standard_reason(context_type, blocked_content)
+        else:
+            reason = self._verbose_reason(context_type, blocked_content)
+
         return HookResult(
             decision=Decision.DENY,
-            reason=(
-                f"🚫 BLOCKED: sed command detected\n\n"
-                f"sed is FORBIDDEN - causes large-scale file corruption.\n\n"
-                f"BLOCKED {context_type}: {blocked_content}\n\n"
-                f"WHY BANNED:\n"
-                f"  • Claude gets sed syntax wrong regularly\n"
-                f"  • Single error destroys hundreds of files\n"
-                f"  • In-place editing is irreversible\n\n"
-                f"✅ USE PARALLEL HAIKU AGENTS:\n"
-                f"  1. List files to update\n"
-                f"  2. Dispatch haiku agents (one per file)\n"
-                f"  3. Use Edit tool (safe, atomic, git-trackable)\n\n"
-                f"EXAMPLE:\n"
-                f"  Bad:  find . -name \"*.ts\" -exec sed -i 's/foo/bar/g' {{}} \\;\n"
-                f"  Good: Dispatch 10 haiku agents with Edit tool"
-            ),
+            reason=reason,
         )
 
     def get_acceptance_tests(self) -> list[Any]:

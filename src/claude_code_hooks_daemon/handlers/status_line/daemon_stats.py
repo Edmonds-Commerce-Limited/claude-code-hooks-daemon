@@ -8,7 +8,7 @@ import logging
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import Decision, Handler, HookResult, get_data_layer
 from claude_code_hooks_daemon.daemon.controller import get_controller
 
 try:
@@ -81,6 +81,14 @@ class DaemonStatsHandler(Handler):
             # Last error (if any)
             if stats.errors > 0:
                 parts.append(f"| ❌ {stats.errors} err")
+
+            # Block count from handler history
+            try:
+                block_count = get_data_layer().history.count_blocks()
+                if block_count > 0:
+                    parts.append(f"| 🛡️ {block_count} blocks")
+            except Exception as e:
+                logger.debug("Failed to get block count: %s", e)
 
         except Exception as e:
             logger.debug(f"Failed to get daemon stats: {e}")
