@@ -398,6 +398,13 @@ class HandlerID:
         display_name="status-thinking-mode",
     )
 
+    # Hedging language detector (Stop handler)
+    HEDGING_LANGUAGE_DETECTOR = HandlerIDMeta(
+        class_name="HedgingLanguageDetectorHandler",
+        config_key="hedging_language_detector",
+        display_name="hedging-language-detector",
+    )
+
     # Stats cache reader (status line)
     STATS_CACHE_READER = HandlerIDMeta(
         class_name="StatsCacheReaderHandler",
@@ -459,6 +466,7 @@ HandlerKey = Literal[
     "plan_workflow",
     "npm_command",
     "task_completion_checker",
+    "hedging_language_detector",
     "bash_error_detector",
     "web_search_year",
     "suggest_status_line",

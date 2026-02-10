@@ -239,6 +239,10 @@ handlers:
       enabled: true
       priority: 10
 
+    hedging_language_detector:  # Detects guessing language (should probably, IIRC, I believe, etc)
+      enabled: true
+      priority: 30
+
     task_completion_checker:  # Checks for task completion
       enabled: true
       priority: 20
