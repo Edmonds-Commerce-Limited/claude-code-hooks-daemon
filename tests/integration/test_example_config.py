@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from claude_code_hooks_daemon.constants import HandlerID, EventID
+from claude_code_hooks_daemon.constants import HandlerID
 
 
 @pytest.fixture
@@ -69,9 +69,9 @@ def test_example_config_safety_handlers_enabled(example_config: dict) -> None:
 
     for handler in safety_handlers:
         assert handler in pre_tool_use, f"Safety handler {handler} missing from example config"
-        assert pre_tool_use[handler]["enabled"] is True, (
-            f"Safety handler {handler} should be enabled by default"
-        )
+        assert (
+            pre_tool_use[handler]["enabled"] is True
+        ), f"Safety handler {handler} should be enabled by default"
 
 
 def test_example_config_workflow_handlers_disabled(example_config: dict) -> None:
@@ -109,9 +109,9 @@ def test_example_config_qa_handlers_disabled(example_config: dict) -> None:
 
     for handler in qa_handlers:
         if handler in pre_tool_use:
-            assert pre_tool_use[handler]["enabled"] is False, (
-                f"QA handler {handler} should be disabled by default (opt-in for strict mode)"
-            )
+            assert (
+                pre_tool_use[handler]["enabled"] is False
+            ), f"QA handler {handler} should be disabled by default (opt-in for strict mode)"
 
 
 def test_example_config_all_events_covered(example_config: dict) -> None:
@@ -152,9 +152,9 @@ def test_example_config_status_line_handlers_enabled(example_config: dict) -> No
 
     for handler in status_handlers:
         assert handler in status_line, f"Status handler {handler} missing from example config"
-        assert status_line[handler]["enabled"] is True, (
-            f"Status handler {handler} should be enabled by default"
-        )
+        assert (
+            status_line[handler]["enabled"] is True
+        ), f"Status handler {handler} should be enabled by default"
 
 
 def test_example_config_has_version_2(example_config: dict) -> None:
@@ -258,6 +258,6 @@ def test_example_config_no_test_handlers(example_config: dict) -> None:
 
     found_test_handlers = [h for h in test_handlers if h in config_handlers]
 
-    assert not found_test_handlers, (
-        f"Example config should not include test handlers: {', '.join(found_test_handlers)}"
-    )
+    assert (
+        not found_test_handlers
+    ), f"Example config should not include test handlers: {', '.join(found_test_handlers)}"
