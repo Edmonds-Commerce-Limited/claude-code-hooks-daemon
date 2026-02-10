@@ -291,6 +291,87 @@ class TestCmdStartChildProcess:
                 cmd_start(args)
             assert exc_info.value.code == 1
 
+    def test_daemon_process_passes_project_handlers_config(self, tmp_path: Path) -> None:
+        """cmd_start passes project_handlers_config to controller.initialise().
+
+        Regression test for C1 bug: cmd_start() called controller.initialise()
+        without project_handlers_config, so project handlers were never loaded
+        at runtime.
+        """
+        args = argparse.Namespace(project_root=tmp_path)
+
+        mock_config = MagicMock()
+        mock_config.daemon.socket_path = None
+        mock_config.daemon.pid_file_path = None
+        mock_config.daemon.get_socket_path.return_value = tmp_path / "sock"
+        mock_config.daemon.get_pid_file_path.return_value = tmp_path / "pid"
+        mock_project_handlers = MagicMock()
+        mock_config.project_handlers = mock_project_handlers
+        for attr in [
+            "pre_tool_use",
+            "post_tool_use",
+            "session_start",
+            "session_end",
+            "pre_compact",
+            "user_prompt_submit",
+            "permission_request",
+            "notification",
+            "stop",
+            "subagent_stop",
+        ]:
+            getattr(mock_config.handlers, attr).items.return_value = []
+
+        mock_daemon = MagicMock()
+        mock_controller = MagicMock()
+
+        mock_devnull = MagicMock()
+        mock_devnull.fileno.return_value = 99
+
+        with (
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_project_path",
+                return_value=tmp_path,
+            ),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.read_pid_file",
+                return_value=None,
+            ),
+            patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
+            patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
+            patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket"),
+            patch("os.fork", side_effect=[0, 0]),
+            patch("os.chdir"),
+            patch("os.setsid"),
+            patch("os.umask"),
+            patch("os.dup2"),
+            patch.object(sys, "stdin", MagicMock()),
+            patch("pathlib.Path.open", return_value=mock_devnull),
+            patch(
+                "claude_code_hooks_daemon.config.models.Config.find_and_load",
+                return_value=mock_config,
+            ),
+            patch(
+                "claude_code_hooks_daemon.daemon.controller.DaemonController",
+                return_value=mock_controller,
+            ),
+            patch(
+                "claude_code_hooks_daemon.daemon.server.HooksDaemon",
+                return_value=mock_daemon,
+            ),
+            patch("asyncio.run"),
+        ):
+            with pytest.raises(SystemExit) as exc_info:
+                cmd_start(args)
+            assert exc_info.value.code == 0
+
+            # Verify project_handlers_config was passed to initialise()
+            mock_controller.initialise.assert_called_once()
+            call_kwargs = mock_controller.initialise.call_args
+            assert (
+                "project_handlers_config" in call_kwargs.kwargs
+            ), "project_handlers_config must be passed to controller.initialise()"
+            assert call_kwargs.kwargs["project_handlers_config"] is mock_project_handlers
+
     def test_daemon_process_with_existing_paths(self, tmp_path: Path) -> None:
         """Daemon process skips path setup when paths already configured."""
         args = argparse.Namespace(project_root=tmp_path)

@@ -410,6 +410,27 @@ class TestGetLastAssistantMessageEdgeCases:
         result = handler._get_last_assistant_message(str(binary_file))
         assert result == ""
 
+    def test_transcript_with_empty_lines(self, handler: Any) -> None:
+        """Empty lines in JSONL are skipped."""
+        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False)
+        tmp.write("\n")
+        tmp.write("\n")
+        tmp.write(json.dumps(_assistant_message("I believe this is right")) + "\n")
+        tmp.write("\n")
+        tmp.flush()
+        assert handler.matches({HookInputField.TRANSCRIPT_PATH: tmp.name}) is True
+
+    def test_transcript_unexpected_exception(self, handler: Any) -> None:
+        """Unexpected exception in transcript reading returns empty string."""
+        from unittest.mock import patch as mock_patch
+
+        with mock_patch(
+            "claude_code_hooks_daemon.handlers.stop.hedging_language_detector.Path"
+        ) as mock_path:
+            mock_path.return_value.exists.side_effect = TypeError("unexpected")
+            result = handler._get_last_assistant_message("/some/path")
+            assert result == ""
+
 
 class TestHedgingLanguageDetectorAcceptanceTests:
     """Test acceptance test definitions."""

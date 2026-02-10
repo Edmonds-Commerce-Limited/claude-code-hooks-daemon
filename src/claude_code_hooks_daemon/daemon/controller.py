@@ -21,7 +21,11 @@ from claude_code_hooks_daemon.core.router import EventRouter
 from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
 
 if TYPE_CHECKING:
-    from claude_code_hooks_daemon.config.models import DaemonConfig, PluginsConfig
+    from claude_code_hooks_daemon.config.models import (
+        DaemonConfig,
+        PluginsConfig,
+        ProjectHandlersConfig,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -129,16 +133,18 @@ class DaemonController:
         handler_config: dict[str, dict[str, dict[str, Any]]] | None = None,
         workspace_root: Path | None = None,
         plugins_config: "PluginsConfig | None" = None,
+        project_handlers_config: "ProjectHandlersConfig | None" = None,
     ) -> None:
         """Initialise the controller with handlers.
 
         Discovers and registers all handlers with the event router,
-        then loads any configured plugins.
+        then loads any configured plugins and project handlers.
 
         Args:
             handler_config: Optional handler configuration from hooks-daemon.yaml
             workspace_root: Optional workspace root path (FAIL FAST if None)
             plugins_config: Optional plugin configuration from hooks-daemon.yaml
+            project_handlers_config: Optional project handlers configuration
 
         Raises:
             ValueError: If workspace_root is None (FAIL FAST requirement)
@@ -179,7 +185,16 @@ class DaemonController:
             plugin_count = self._load_plugins(plugins_config, workspace_root)
             logger.info("Loaded %d plugin handlers", plugin_count)
 
-        total_count = count + plugin_count
+        # Load and register project handlers
+        project_count = 0
+        if project_handlers_config is not None:
+            project_count = self._load_project_handlers(
+                project_handlers_config=project_handlers_config,
+                workspace_root=workspace_root,
+            )
+            logger.info("Loaded %d project handlers", project_count)
+
+        total_count = count + plugin_count + project_count
         logger.info("DaemonController initialised with %d total handlers", total_count)
         self._initialised = True
 
@@ -270,6 +285,86 @@ class DaemonController:
             )
             registered_count += 1
 
+        return registered_count
+
+    def _load_project_handlers(
+        self,
+        *,
+        project_handlers_config: "ProjectHandlersConfig",
+        workspace_root: Path,
+    ) -> int:
+        """Load and register project-level handlers.
+
+        Discovers handlers from a convention-based directory structure
+        and registers them with the appropriate event type's handler chain.
+
+        Args:
+            project_handlers_config: Project handlers configuration
+            workspace_root: Workspace root path for resolving relative paths
+
+        Returns:
+            Number of project handlers loaded and registered
+        """
+        if not project_handlers_config.enabled:
+            logger.info("Project handlers are disabled")
+            return 0
+
+        from claude_code_hooks_daemon.handlers.project_loader import ProjectHandlerLoader
+
+        # Resolve path: relative paths are resolved against workspace_root
+        handlers_path = Path(project_handlers_config.path)
+        if not handlers_path.is_absolute():
+            handlers_path = workspace_root / handlers_path
+
+        # Discover handlers from convention-based directory structure
+        discovered = ProjectHandlerLoader.discover_handlers(handlers_path)
+
+        if not discovered:
+            logger.info("No project handlers discovered from %s", handlers_path)
+            return 0
+
+        # Register each discovered handler with the router (with conflict detection)
+        registered_count = 0
+        for event_type, handler in discovered:
+            # Check for handler_id conflict with existing handlers in the same event type
+            existing_chain = self._router.get_chain(event_type)
+            existing_names = [h.name for h in existing_chain.handlers]
+
+            if handler.name in existing_names:
+                logger.warning(
+                    "Project handler '%s' conflict: handler with same ID already registered "
+                    "for %s. Preferring built-in handler, skipping project handler.",
+                    handler.name,
+                    event_type.value,
+                )
+                continue
+
+            # Check for priority collision (warn but still register)
+            existing_priorities = [h.priority for h in existing_chain.handlers]
+            if handler.priority in existing_priorities:
+                logger.warning(
+                    "Project handler '%s' priority collision: priority %d already used "
+                    "by another handler for %s",
+                    handler.name,
+                    handler.priority,
+                    event_type.value,
+                )
+
+            self._router.register(event_type, handler)
+            logger.info(
+                "Registered project handler '%s' for %s (priority=%d, terminal=%s)",
+                handler.name,
+                event_type.value,
+                handler.priority,
+                handler.terminal,
+            )
+            registered_count += 1
+
+        logger.info(
+            "Loaded %d project handlers from %s",
+            registered_count,
+            handlers_path,
+        )
         return registered_count
 
     def _validate_config(self, config_path: Path) -> None:
