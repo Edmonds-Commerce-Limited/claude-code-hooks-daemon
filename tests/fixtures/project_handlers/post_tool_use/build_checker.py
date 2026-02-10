@@ -18,7 +18,7 @@ class BuildCheckerHandler(Handler):
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        tool_input = hook_input.get("toolInput", {})
+        tool_input = hook_input.get("tool_input", {})
         file_path = tool_input.get("file_path", "") if isinstance(tool_input, dict) else ""
         return ".ts" in file_path or ".scss" in file_path
 

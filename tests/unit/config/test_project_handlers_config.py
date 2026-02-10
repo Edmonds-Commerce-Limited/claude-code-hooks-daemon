@@ -2,7 +2,9 @@
 
 from pathlib import Path
 
+import pytest
 import yaml
+from pydantic import ValidationError
 
 from claude_code_hooks_daemon.config.models import Config, ProjectHandlersConfig
 
@@ -48,6 +50,15 @@ class TestProjectHandlersConfigValidation:
         """Test that empty path is valid (will be resolved at runtime)."""
         config = ProjectHandlersConfig(path="")
         assert config.path == ""
+
+    def test_extra_fields_are_rejected(self) -> None:
+        """Test that unknown fields raise ValidationError (extra='forbid').
+
+        Regression test for M3: extra='allow' silently accepted typos in config.
+        Using extra='forbid' catches config typos early.
+        """
+        with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+            ProjectHandlersConfig(enabled=True, path="handlers", typo_field="oops")
 
 
 class TestProjectHandlersConfigInRootConfig:

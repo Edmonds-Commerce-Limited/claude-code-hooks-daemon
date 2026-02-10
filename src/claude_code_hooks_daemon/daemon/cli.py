@@ -337,7 +337,10 @@ def cmd_start(args: argparse.Namespace) -> int:
         "subagent_stop": {k: v.model_dump() for k, v in config.handlers.subagent_stop.items()},
     }
     controller.initialise(
-        handler_config, workspace_root=project_path, plugins_config=config.plugins
+        handler_config,
+        workspace_root=project_path,
+        plugins_config=config.plugins,
+        project_handlers_config=config.project_handlers,
     )
 
     # Get the daemon config with proper paths
