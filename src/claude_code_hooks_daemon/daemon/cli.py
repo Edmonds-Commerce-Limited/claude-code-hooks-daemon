@@ -12,6 +12,9 @@ Provides:
 - init-config: Generate configuration template
 - generate-playbook: Generate acceptance test playbook from handler definitions
 - repair: Repair broken venv (runs uv sync)
+- config-diff: Compare user config against default
+- config-merge: Merge user customizations onto new default
+- config-validate: Validate config against Pydantic schema
 """
 
 import argparse
@@ -936,6 +939,73 @@ def cmd_generate_playbook(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_config_diff(args: argparse.Namespace) -> int:
+    """Run config diff operation.
+
+    Args:
+        args: Parsed CLI arguments with user_config and default_config paths
+
+    Returns:
+        0 on success, 1 on error
+    """
+    from claude_code_hooks_daemon.install.config_cli import run_config_diff
+
+    try:
+        result = run_config_diff(
+            user_config_path=Path(args.user_config),
+            default_config_path=Path(args.default_config),
+        )
+        print(json.dumps(result, indent=2))
+        return 0
+    except (FileNotFoundError, ValueError) as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_config_merge(args: argparse.Namespace) -> int:
+    """Run config merge operation.
+
+    Args:
+        args: Parsed CLI arguments with config paths
+
+    Returns:
+        0 on success, 1 on error
+    """
+    from claude_code_hooks_daemon.install.config_cli import run_config_merge
+
+    try:
+        result = run_config_merge(
+            user_config_path=Path(args.user_config),
+            old_default_config_path=Path(args.old_default_config),
+            new_default_config_path=Path(args.new_default_config),
+        )
+        print(json.dumps(result, indent=2))
+        return 0
+    except (FileNotFoundError, ValueError) as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_config_validate(args: argparse.Namespace) -> int:
+    """Run config validation.
+
+    Args:
+        args: Parsed CLI arguments with config_path
+
+    Returns:
+        0 if valid, 1 if invalid or error
+    """
+    from claude_code_hooks_daemon.install.config_cli import run_config_validate
+
+    try:
+        result = run_config_validate(config_path=Path(args.config_path))
+        print(json.dumps(result, indent=2))
+        return 0 if result["valid"] else 1
+    except (FileNotFoundError, ValueError) as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+
+
 def main() -> int:
     """Main CLI entry point.
 
@@ -1054,6 +1124,42 @@ def main() -> int:
         help="Include tests from disabled handlers",
     )
     parser_gen_playbook.set_defaults(func=cmd_generate_playbook)
+
+    # config-diff command
+    parser_config_diff = subparsers.add_parser(
+        "config-diff", help="Compare user config against default config"
+    )
+    parser_config_diff.add_argument(
+        "user_config", type=str, help="Path to user's current config YAML"
+    )
+    parser_config_diff.add_argument(
+        "default_config", type=str, help="Path to default/example config YAML"
+    )
+    parser_config_diff.set_defaults(func=cmd_config_diff)
+
+    # config-merge command
+    parser_config_merge = subparsers.add_parser(
+        "config-merge", help="Merge user customizations onto new default config"
+    )
+    parser_config_merge.add_argument(
+        "user_config", type=str, help="Path to user's current config YAML"
+    )
+    parser_config_merge.add_argument(
+        "old_default_config", type=str, help="Path to default config from current version"
+    )
+    parser_config_merge.add_argument(
+        "new_default_config", type=str, help="Path to default config from new version"
+    )
+    parser_config_merge.set_defaults(func=cmd_config_merge)
+
+    # config-validate command
+    parser_config_validate = subparsers.add_parser(
+        "config-validate", help="Validate config against Pydantic schema"
+    )
+    parser_config_validate.add_argument(
+        "config_path", type=str, help="Path to config YAML to validate"
+    )
+    parser_config_validate.set_defaults(func=cmd_config_validate)
 
     # Parse arguments
     args = parser.parse_args()
