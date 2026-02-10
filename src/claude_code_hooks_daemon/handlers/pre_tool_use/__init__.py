@@ -13,6 +13,7 @@ from .plan_time_estimates import PlanTimeEstimatesHandler
 from .plan_workflow import PlanWorkflowHandler
 from .sed_blocker import SedBlockerHandler
 from .tdd_enforcement import TddEnforcementHandler
+from .validate_instruction_content import ValidateInstructionContentHandler
 from .validate_plan_number import ValidatePlanNumberHandler
 from .web_search_year import WebSearchYearHandler
 from .worktree_file_copy import WorktreeFileCopyHandler
@@ -31,6 +32,7 @@ __all__ = [
     "PlanWorkflowHandler",
     "SedBlockerHandler",
     "TddEnforcementHandler",
+    "ValidateInstructionContentHandler",
     "ValidatePlanNumberHandler",
     "WebSearchYearHandler",
     "WorktreeFileCopyHandler",

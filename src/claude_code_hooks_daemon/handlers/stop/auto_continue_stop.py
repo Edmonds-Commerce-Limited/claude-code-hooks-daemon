@@ -44,6 +44,11 @@ class AutoContinueStopHandler(Handler):
         r"continue with (?:batch|phase|step)",
         r"would you like.+(?:batch|phase|step)",
         r"shall I proceed.+(?:batch|phase|step)",
+        # Patterns ported from php-qa-ci (Phase 2 integration)
+        r"let me know if you.*(?:continue|proceed)",
+        r"want me to (?:go ahead|keep going)",
+        r"if you'd like.*(?:continue|proceed)",
+        r"i can (?:continue|proceed) with",
     ]
 
     # Patterns that indicate an error or problem - should NOT auto-continue
