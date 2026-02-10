@@ -6,12 +6,18 @@ Uses 1-day cache to avoid excessive git operations.
 
 import json
 import logging
-import subprocess
+import subprocess  # nosec B404 - subprocess used for git commands only (trusted system tool)
 import time
 from pathlib import Path
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants import (
+    HandlerID,
+    HandlerTag,
+    HookInputField,
+    Priority,
+    Timeout,
+)
 from claude_code_hooks_daemon.core import Handler, HookResult, ProjectContext
 from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.version import __version__
@@ -56,8 +62,10 @@ class VersionCheckHandler(Handler):
             cache_dir = ProjectContext.daemon_untracked_dir()
             return cache_dir / "version_check_cache.json"
         except (OSError, RuntimeError):
-            # Fallback to temp
-            return Path("/tmp/hooks_daemon_version_check.json")
+            # Fallback to project-relative untracked dir (avoid /tmp per B108)
+            fallback = Path.cwd() / "untracked"
+            fallback.mkdir(parents=True, exist_ok=True)
+            return fallback / "version_check_cache.json"
 
     def _is_cache_valid(self, cache_file: Path) -> bool:
         """Check if cache file exists and is not expired."""
@@ -68,10 +76,10 @@ class VersionCheckHandler(Handler):
             with open(cache_file) as f:
                 cache_data = json.load(f)
 
-            cached_at = cache_data.get("cached_at", 0)
+            cached_at = float(cache_data.get("cached_at", 0))
             ttl_seconds = int(self.config.get("cache_ttl_hours", 24)) * 3600
 
-            return (time.time() - cached_at) < ttl_seconds
+            return bool((time.time() - cached_at) < ttl_seconds)
         except (OSError, json.JSONDecodeError, ValueError, KeyError):
             return False
 
@@ -79,7 +87,8 @@ class VersionCheckHandler(Handler):
         """Read cached version check result."""
         try:
             with open(cache_file) as f:
-                return json.load(f)
+                data: dict[str, Any] = json.load(f)
+                return data
         except (OSError, json.JSONDecodeError):
             return None
 
@@ -105,7 +114,7 @@ class VersionCheckHandler(Handler):
             # - URL is trusted: our own GitHub repository
             # - No shell=True (prevents command injection)
             # - Timeout prevents hanging
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
                 [
                     "git",
                     "ls-remote",
@@ -116,7 +125,7 @@ class VersionCheckHandler(Handler):
                 ],
                 capture_output=True,
                 text=True,
-                timeout=5,
+                timeout=Timeout.VERSION_CHECK,
                 check=False,
             )
 

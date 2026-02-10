@@ -42,7 +42,7 @@ LAST_TIME="2025-01-29T10:30:00Z"
         assert result.decision == "allow"
         assert len(result.context) == 1
         assert "ballicom_rohil" in result.context[0]
-        assert result.context[0] == "ballicom_rohil |"
+        assert result.context[0] == "👤 ballicom_rohil |"
 
     def test_handle_with_different_username(self, handler: AccountDisplayHandler) -> None:
         """Test formatting with different username."""
@@ -53,7 +53,7 @@ LAST_TIME="2025-01-29T10:30:00Z"
                 result = handler.handle({})
 
         assert result.decision == "allow"
-        assert result.context == ["john_doe |"]
+        assert result.context == ["👤 john_doe |"]
 
     def test_handle_with_missing_file(self, handler: AccountDisplayHandler) -> None:
         """Test handling when .last-launch.conf doesn't exist."""
@@ -96,7 +96,7 @@ LAST_TIME="2025-01-29T10:30:00Z"
 
         # Empty token should still be shown
         assert result.decision == "allow"
-        assert result.context == [" |"]
+        assert result.context == ["👤  |"]
 
     def test_conf_file_path_is_correct(self, handler: AccountDisplayHandler) -> None:
         """Test that handler looks in correct path."""
