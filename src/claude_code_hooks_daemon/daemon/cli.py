@@ -15,6 +15,9 @@ Provides:
 - config-diff: Compare user config against default
 - config-merge: Merge user customizations onto new default
 - config-validate: Validate config against Pydantic schema
+- init-project-handlers: Scaffold project-handlers directory structure
+- validate-project-handlers: Validate project handler files
+- test-project-handlers: Run project handler tests
 """
 
 import argparse
@@ -334,7 +337,10 @@ def cmd_start(args: argparse.Namespace) -> int:
         "subagent_stop": {k: v.model_dump() for k, v in config.handlers.subagent_stop.items()},
     }
     controller.initialise(
-        handler_config, workspace_root=project_path, plugins_config=config.plugins
+        handler_config,
+        workspace_root=project_path,
+        plugins_config=config.plugins,
+        project_handlers_config=config.project_handlers,
     )
 
     # Get the daemon config with proper paths
@@ -1006,6 +1012,407 @@ def cmd_config_validate(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_init_project_handlers(args: argparse.Namespace) -> int:
+    """Scaffold project-handlers directory structure.
+
+    Creates the convention-based directory structure for project-level handlers
+    with example handler, tests, and conftest.py fixtures.
+
+    Args:
+        args: Command-line arguments with optional force flag
+
+    Returns:
+        0 if scaffolding created successfully, 1 otherwise
+    """
+    try:
+        project_path = get_project_path(getattr(args, "project_root", None))
+    except SystemExit:
+        return 1
+
+    handlers_dir = project_path / ".claude" / "project-handlers"
+
+    # Check if directory already exists
+    if handlers_dir.exists() and not getattr(args, "force", False):
+        print(
+            f"ERROR: Project handlers directory already exists: {handlers_dir}",
+            file=sys.stderr,
+        )
+        print("Use --force to overwrite", file=sys.stderr)
+        return 1
+
+    # Create directory structure
+    handlers_dir.mkdir(parents=True, exist_ok=True)
+    (handlers_dir / "__init__.py").write_text('"""Project-level handlers for hooks daemon."""\n')
+
+    # Create conftest.py with standard fixtures
+    conftest_content = '''"""Shared test fixtures for project handlers."""
+
+import sys
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+# Add each event-type subdirectory to sys.path so co-located tests
+# can import handler modules with --import-mode=importlib
+_handlers_root = Path(__file__).resolve().parent
+for _subdir in _handlers_root.iterdir():
+    if _subdir.is_dir() and not _subdir.name.startswith("_"):
+        sys.path.insert(0, str(_subdir))
+
+
+@pytest.fixture
+def bash_hook_input():
+    """Factory fixture for creating Bash tool hook inputs."""
+
+    def _make(command: str) -> dict[str, Any]:
+        return {
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+        }
+
+    return _make
+
+
+@pytest.fixture
+def write_hook_input():
+    """Factory fixture for creating Write tool hook inputs."""
+
+    def _make(file_path: str, content: str = "") -> dict[str, Any]:
+        return {
+            "tool_name": "Write",
+            "tool_input": {"file_path": file_path, "content": content},
+        }
+
+    return _make
+
+
+@pytest.fixture
+def edit_hook_input():
+    """Factory fixture for creating Edit tool hook inputs."""
+
+    def _make(
+        file_path: str, old_string: str = "", new_string: str = ""
+    ) -> dict[str, Any]:
+        return {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": file_path,
+                "old_string": old_string,
+                "new_string": new_string,
+            },
+        }
+
+    return _make
+'''
+    (handlers_dir / "conftest.py").write_text(conftest_content)
+
+    # Create pre_tool_use subdirectory with example handler
+    pre_tool_use_dir = handlers_dir / "pre_tool_use"
+    pre_tool_use_dir.mkdir(exist_ok=True)
+    (pre_tool_use_dir / "__init__.py").write_text("")
+
+    example_handler_content = '''"""Example project handler - customise or replace this."""
+
+from typing import Any
+
+from claude_code_hooks_daemon.core import AcceptanceTest, Handler, HookResult, TestType
+from claude_code_hooks_daemon.core.hook_result import Decision
+
+
+class ExampleHandler(Handler):
+    """Example advisory handler.
+
+    This handler demonstrates the project handler pattern.
+    Replace this with your own handler logic.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            handler_id="example-project-handler",
+            priority=50,
+            terminal=False,
+            tags=["project", "example"],
+        )
+
+    def matches(self, hook_input: dict[str, Any]) -> bool:
+        """Match condition - customise this."""
+        tool_input = hook_input.get("tool_input", {})
+        command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
+        return "example-trigger" in command
+
+    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+        """Handler logic - customise this."""
+        return HookResult(
+            decision=Decision.ALLOW,
+            context=["EXAMPLE: This is an example project handler context message."],
+        )
+
+    def get_acceptance_tests(self) -> list[AcceptanceTest]:
+        """Define acceptance tests for this handler."""
+        return [
+            AcceptanceTest(
+                title="Example handler triggers on keyword",
+                command=\'echo "example-trigger test"\',
+                description="Verify example handler provides advisory context",
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r"EXAMPLE"],
+                safety_notes="Uses echo - safe to execute",
+                test_type=TestType.ADVISORY,
+            ),
+        ]
+'''
+    (pre_tool_use_dir / "example_handler.py").write_text(example_handler_content)
+
+    example_test_content = '''"""Tests for example project handler."""
+
+from typing import Any
+
+from claude_code_hooks_daemon.core.hook_result import Decision
+from example_handler import ExampleHandler
+
+
+class TestExampleHandler:
+    """Tests for ExampleHandler."""
+
+    def setup_method(self) -> None:
+        self.handler = ExampleHandler()
+
+    def test_init(self) -> None:
+        assert self.handler.name == "example-project-handler"
+        assert self.handler.priority == 50
+        assert self.handler.terminal is False
+
+    def test_matches_trigger(self, bash_hook_input: Any) -> None:
+        hook_input = bash_hook_input("example-trigger test")
+        assert self.handler.matches(hook_input) is True
+
+    def test_no_match_without_trigger(self, bash_hook_input: Any) -> None:
+        hook_input = bash_hook_input("git status")
+        assert self.handler.matches(hook_input) is False
+
+    def test_handle_returns_advisory(self, bash_hook_input: Any) -> None:
+        hook_input = bash_hook_input("example-trigger test")
+        result = self.handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW
+        assert any("EXAMPLE" in ctx for ctx in result.context)
+
+    def test_acceptance_tests_defined(self) -> None:
+        tests = self.handler.get_acceptance_tests()
+        assert len(tests) >= 1
+'''
+    (pre_tool_use_dir / "test_example_handler.py").write_text(example_test_content)
+
+    # Update config if project_handlers section is missing
+    config_path = project_path / ".claude" / "hooks-daemon.yaml"
+    if config_path.exists():
+        config_content = config_path.read_text()
+        if "project_handlers" not in config_content:
+            config_content += (
+                "\nproject_handlers:\n  enabled: true\n  path: .claude/project-handlers\n"
+            )
+            config_path.write_text(config_content)
+
+    print(f"Created project handlers directory: {handlers_dir}")
+    print()
+    print("Structure:")
+    print(f"  {handlers_dir}/")
+    print("    __init__.py")
+    print("    conftest.py")
+    print("    pre_tool_use/")
+    print("      __init__.py")
+    print("      example_handler.py")
+    print("      test_example_handler.py")
+    print()
+    print("Next steps:")
+    print("  1. Edit pre_tool_use/example_handler.py with your handler logic")
+    print("  2. Run tests: python -m claude_code_hooks_daemon.daemon.cli test-project-handlers")
+    print("  3. Validate: python -m claude_code_hooks_daemon.daemon.cli validate-project-handlers")
+    print("  4. Restart daemon: python -m claude_code_hooks_daemon.daemon.cli restart")
+
+    return 0
+
+
+def cmd_validate_project_handlers(args: argparse.Namespace) -> int:
+    """Validate project handler files.
+
+    Discovers project handlers, attempts to import and instantiate each,
+    verifies Handler subclass, checks acceptance tests, and reports conflicts.
+
+    Args:
+        args: Command-line arguments
+
+    Returns:
+        0 if validation passed, 1 otherwise
+    """
+    try:
+        project_path = get_project_path(getattr(args, "project_root", None))
+    except SystemExit:
+        return 1
+
+    # Load config to get project_handlers path
+    config_path = project_path / ".claude" / "hooks-daemon.yaml"
+    try:
+        config = Config.load(config_path) if config_path.exists() else Config()
+    except Exception:
+        config = Config()
+
+    handlers_path = Path(config.project_handlers.path)
+    if not handlers_path.is_absolute():
+        handlers_path = project_path / handlers_path
+
+    if not handlers_path.exists() or not handlers_path.is_dir():
+        print(
+            f"ERROR: Project handlers directory not found: {handlers_path}",
+            file=sys.stderr,
+        )
+        print("Run 'init-project-handlers' to create it", file=sys.stderr)
+        return 1
+
+    # Discover handlers using ProjectHandlerLoader
+    from claude_code_hooks_daemon.handlers.project_loader import ProjectHandlerLoader
+    from claude_code_hooks_daemon.handlers.registry import EVENT_TYPE_MAPPING
+
+    print(f"Scanning {handlers_path}...")
+    print()
+
+    total_handlers = 0
+    total_warnings = 0
+    handlers_by_event: dict[str, list[str]] = {}
+
+    for dir_name, event_type in EVENT_TYPE_MAPPING.items():
+        event_dir = handlers_path / dir_name
+        if not event_dir.is_dir():
+            continue
+
+        for py_file in sorted(event_dir.glob("*.py")):
+            if py_file.name.startswith("_") or py_file.name.startswith("test_"):
+                continue
+
+            handler = ProjectHandlerLoader.load_handler_from_file(py_file)
+            if handler is None:
+                print(f"  ERROR: Failed to load {dir_name}/{py_file.name}")
+                total_warnings += 1
+                continue
+
+            total_handlers += 1
+            if dir_name not in handlers_by_event:
+                handlers_by_event[dir_name] = []
+            handlers_by_event[dir_name].append(handler.name)
+
+            print(f"  {dir_name}/{py_file.name} -> {handler.__class__.__name__}")
+            print(f"    - Name: {handler.name}")
+            print(f"    - Priority: {handler.priority}")
+            print(f"    - Terminal: {handler.terminal}")
+            print(f"    - Tags: {handler.tags}")
+
+            # Check acceptance tests
+            try:
+                tests = handler.get_acceptance_tests()
+                if not tests:
+                    print("    - WARNING: No acceptance tests defined")
+                    total_warnings += 1
+                else:
+                    print(f"    - Acceptance tests: {len(tests)}")
+            except Exception as e:
+                print(f"    - WARNING: get_acceptance_tests() failed: {e}")
+                total_warnings += 1
+
+            print("    - Status: OK")
+            print()
+
+    if total_handlers == 0:
+        print("No project handlers found")
+        print(f"Add handler .py files to event-type subdirectories in {handlers_path}")
+        return 0
+
+    # Summary
+    print(f"Validation: {total_handlers} handler(s) loaded successfully")
+    if total_warnings > 0:
+        print(f"Warnings: {total_warnings}")
+
+    for event_name, handler_names in handlers_by_event.items():
+        print(f"  {event_name}: {len(handler_names)} handler(s)")
+
+    return 0
+
+
+def cmd_test_project_handlers(args: argparse.Namespace) -> int:
+    """Run project handler tests using pytest.
+
+    Runs pytest on the project-handlers directory using --import-mode=importlib
+    to allow co-located test files to import handler modules.
+
+    Args:
+        args: Command-line arguments with optional verbose flag
+
+    Returns:
+        pytest exit code (0 for success, non-zero for failure)
+    """
+    try:
+        project_path = get_project_path(getattr(args, "project_root", None))
+    except SystemExit:
+        return 1
+
+    # Load config to get project_handlers path
+    config_path = project_path / ".claude" / "hooks-daemon.yaml"
+    try:
+        config = Config.load(config_path) if config_path.exists() else Config()
+    except Exception:
+        config = Config()
+
+    handlers_path = Path(config.project_handlers.path)
+    if not handlers_path.is_absolute():
+        handlers_path = project_path / handlers_path
+
+    if not handlers_path.exists() or not handlers_path.is_dir():
+        print(
+            f"ERROR: Project handlers directory not found: {handlers_path}",
+            file=sys.stderr,
+        )
+        print("Run 'init-project-handlers' to create it", file=sys.stderr)
+        return 1
+
+    # Build pytest command using current Python interpreter
+    cmd = [
+        sys.executable,
+        "-m",
+        "pytest",
+        str(handlers_path),
+        "--import-mode=importlib",
+    ]
+
+    if getattr(args, "verbose", False):
+        cmd.append("-v")
+
+    print(f"Running project handler tests in {handlers_path}...")
+    print()
+
+    try:
+        result = subprocess.run(  # nosec B603 - pytest with project handler path only
+            cmd,
+            cwd=str(project_path),
+            capture_output=True,
+            text=True,
+            timeout=Timeout.QA_TEST_TIMEOUT,
+        )
+
+        # Print output
+        if result.stdout:
+            print(result.stdout)
+        if result.stderr:
+            print(result.stderr, file=sys.stderr)
+
+        return result.returncode
+
+    except subprocess.TimeoutExpired:
+        print(
+            f"ERROR: Test execution timed out after {Timeout.QA_TEST_TIMEOUT} seconds",
+            file=sys.stderr,
+        )
+        return 1
+
+
 def main() -> int:
     """Main CLI entry point.
 
@@ -1160,6 +1567,38 @@ def main() -> int:
         "config_path", type=str, help="Path to config YAML to validate"
     )
     parser_config_validate.set_defaults(func=cmd_config_validate)
+
+    # init-project-handlers command
+    parser_init_ph = subparsers.add_parser(
+        "init-project-handlers",
+        help="Scaffold project-handlers directory with example handler and tests",
+    )
+    parser_init_ph.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite existing project-handlers directory",
+    )
+    parser_init_ph.set_defaults(func=cmd_init_project_handlers)
+
+    # validate-project-handlers command
+    parser_validate_ph = subparsers.add_parser(
+        "validate-project-handlers",
+        help="Validate project handler files (import, instantiate, check acceptance tests)",
+    )
+    parser_validate_ph.set_defaults(func=cmd_validate_project_handlers)
+
+    # test-project-handlers command
+    parser_test_ph = subparsers.add_parser(
+        "test-project-handlers",
+        help="Run project handler tests with pytest",
+    )
+    parser_test_ph.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Verbose test output",
+    )
+    parser_test_ph.set_defaults(func=cmd_test_project_handlers)
 
     # Parse arguments
     args = parser.parse_args()

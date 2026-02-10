@@ -671,11 +671,12 @@ class TestMarkdownOrganizationHandlerIntegration:
         handler._track_plans_in_project = "CLAUDE/Plan"
         handler._plan_workflow_docs = "CLAUDE/PlanWorkflow.md"
 
-        # Simulate planning mode write (to ~/.claude/plans/)
+        # Simulate planning mode write (to writable temp path matching /.claude/plans/ pattern)
+        fake_home = project_context / "fake_home"
         hook_input = {
             "tool_name": "Write",
             "tool_input": {
-                "file_path": "/home/user/.claude/plans/my-test-plan.md",
+                "file_path": str(fake_home / ".claude" / "plans" / "my-test-plan.md"),
                 "content": "# My Test Plan\n\nThis is a test.",
             },
         }

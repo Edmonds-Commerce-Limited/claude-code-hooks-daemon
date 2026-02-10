@@ -5,6 +5,7 @@ Tests all Pydantic models, validation, serialization, and configuration loading.
 
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -545,7 +546,8 @@ class TestDaemonConfig:
         result = config.get_socket_path(Path("/workspace"))
         assert result == Path("/custom/socket.sock")
 
-    def test_get_socket_path_generates_default(self) -> None:
+    @patch.object(Path, "mkdir")
+    def test_get_socket_path_generates_default(self, _mock_mkdir) -> None:
         """get_socket_path generates default path when not set."""
         config = DaemonConfig()
         workspace = Path("/test/workspace")
@@ -559,7 +561,8 @@ class TestDaemonConfig:
         result = config.get_pid_file_path(Path("/workspace"))
         assert result == Path("/custom/daemon.pid")
 
-    def test_get_pid_file_path_generates_default(self) -> None:
+    @patch.object(Path, "mkdir")
+    def test_get_pid_file_path_generates_default(self, _mock_mkdir) -> None:
         """get_pid_file_path generates default path when not set."""
         config = DaemonConfig()
         workspace = Path("/test/workspace")

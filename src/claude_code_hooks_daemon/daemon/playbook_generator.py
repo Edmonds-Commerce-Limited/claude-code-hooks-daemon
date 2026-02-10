@@ -24,10 +24,14 @@ logger = logging.getLogger(__name__)
 class PlaybookGenerator:
     """Generate acceptance test playbooks from handler definitions."""
 
-    __slots__ = ("_config", "_plugins", "_registry")
+    __slots__ = ("_config", "_plugins", "_project_handlers", "_registry")
 
     def __init__(
-        self, config: dict[str, Any], registry: HandlerRegistry, plugins: list[Any] | None = None
+        self,
+        config: dict[str, Any],
+        registry: HandlerRegistry,
+        plugins: list[Any] | None = None,
+        project_handlers: list[Any] | None = None,
     ) -> None:
         """Initialize playbook generator.
 
@@ -35,10 +39,12 @@ class PlaybookGenerator:
             config: Configuration dictionary (handlers section from hooks-daemon.yaml)
             registry: Handler registry with discovered handlers
             plugins: Optional list of plugin handler instances to include in playbook
+            project_handlers: Optional list of project handler instances to include in playbook
         """
         self._config = config
         self._registry = registry
         self._plugins = plugins or []
+        self._project_handlers = project_handlers or []
 
     def generate_markdown(self, include_disabled: bool = False) -> str:
         """Generate acceptance test playbook in markdown format.
@@ -123,19 +129,50 @@ class PlaybookGenerator:
                     "Failed to get tests from plugin %s: %s", plugin_handler.__class__.__name__, e
                 )
 
+        # Collect acceptance tests from project handlers
+        project_tests_by_handler: list[tuple[str, str, int, list[AcceptanceTest]]] = []
+        for project_handler in self._project_handlers:
+            try:
+                if hasattr(project_handler, "get_acceptance_tests"):
+                    tests = project_handler.get_acceptance_tests()
+                    if tests:
+                        handler_name = project_handler.__class__.__name__
+                        event_type_str = getattr(project_handler, "event_type", "Project")
+                        if hasattr(event_type_str, "value"):
+                            event_type_str = event_type_str.value
+
+                        project_tests_by_handler.append(
+                            (handler_name, event_type_str, project_handler.priority, tests)
+                        )
+                        logger.debug(
+                            "Collected %d tests from project handler %s",
+                            len(tests),
+                            handler_name,
+                        )
+            except Exception as e:
+                logger.warning(
+                    "Failed to get tests from project handler %s: %s",
+                    project_handler.__class__.__name__,
+                    e,
+                )
+
         # Sort handlers by priority (lower priority = higher precedence)
         tests_by_handler.sort(key=lambda x: x[2])
+        project_tests_by_handler.sort(key=lambda x: x[2])
 
         # Generate markdown
-        return self._format_playbook(tests_by_handler)
+        return self._format_playbook(tests_by_handler, project_tests_by_handler)
 
     def _format_playbook(
-        self, tests_by_handler: list[tuple[str, str, int, list[AcceptanceTest]]]
+        self,
+        tests_by_handler: list[tuple[str, str, int, list[AcceptanceTest]]],
+        project_tests_by_handler: list[tuple[str, str, int, list[AcceptanceTest]]] | None = None,
     ) -> str:
         """Format tests as markdown playbook.
 
         Args:
             tests_by_handler: List of (handler_name, event_type, priority, tests)
+            project_tests_by_handler: Optional list of project handler tests
 
         Returns:
             Formatted markdown playbook
@@ -261,11 +298,80 @@ class PlaybookGenerator:
 
                 test_number += 1
 
+        # Project Handlers section (if any)
+        if project_tests_by_handler:
+            lines.append("## Project Handlers")
+            lines.append("")
+
+            for handler_name, event_type, priority, tests in project_tests_by_handler:
+                if not tests:
+                    continue
+
+                lines.append(f"### Handler: {handler_name}")
+                lines.append("")
+                lines.append(f"**Event Type**: {event_type}")
+                lines.append(f"**Priority**: {priority}")
+                lines.append("**Source**: Project handler")
+                lines.append("")
+
+                for test in tests:
+                    lines.append(f"#### Test {test_number}: {test.title}")
+                    lines.append("")
+                    lines.append(f"**Type**: {test.test_type.value.title()}")
+                    lines.append(f"**Expected Decision**: {test.expected_decision.value}")
+                    lines.append("")
+                    lines.append(f"**Description**: {test.description}")
+                    lines.append("")
+
+                    if test.setup_commands:
+                        lines.append("**Setup**:")
+                        lines.append("```bash")
+                        for cmd in test.setup_commands:
+                            lines.append(cmd)
+                        lines.append("```")
+                        lines.append("")
+
+                    lines.append("**Command**:")
+                    lines.append("```bash")
+                    lines.append(test.command)
+                    lines.append("```")
+                    lines.append("")
+
+                    if test.expected_message_patterns:
+                        lines.append("**Expected Message Patterns**:")
+                        for pattern in test.expected_message_patterns:
+                            lines.append(f"- `{pattern}`")
+                        lines.append("")
+
+                    if test.safety_notes:
+                        lines.append(f"**Safety**: {test.safety_notes}")
+                        lines.append("")
+
+                    if test.cleanup_commands:
+                        lines.append("**Cleanup**:")
+                        lines.append("```bash")
+                        for cmd in test.cleanup_commands:
+                            lines.append(cmd)
+                        lines.append("```")
+                        lines.append("")
+
+                    lines.append("**Result**: [ ] PASS [ ] FAIL")
+                    lines.append("")
+                    lines.append("---")
+                    lines.append("")
+
+                    test_number += 1
+
+        # Total handler count including project handlers
+        total_handler_count = len(tests_by_handler)
+        if project_tests_by_handler:
+            total_handler_count += len(project_tests_by_handler)
+
         # Summary section
         lines.append("## Summary")
         lines.append("")
         lines.append(f"**Total Tests**: {test_number - 1}")
-        lines.append(f"**Total Handlers**: {len(tests_by_handler)}")
+        lines.append(f"**Total Handlers**: {total_handler_count}")
         lines.append("")
         lines.append("**Completion Criteria**:")
         lines.append("- [ ] All tests marked PASS")

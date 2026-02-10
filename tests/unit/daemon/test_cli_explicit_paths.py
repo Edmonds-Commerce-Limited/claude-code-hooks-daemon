@@ -224,22 +224,36 @@ class TestInitShPassesEnvVars:
     The actual runtime behavior is tested via integration tests.
     """
 
+    # Derive project root dynamically from test file location
+    _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+
+    def _read_init_sh(self) -> str:
+        """Read init.sh from the project root, trying multiple locations."""
+        # Self-install mode: init.sh at project root
+        for candidate in [
+            self._PROJECT_ROOT / "init.sh",
+            self._PROJECT_ROOT / ".claude" / "init.sh",
+        ]:
+            if candidate.is_file():
+                return candidate.read_text()
+        raise FileNotFoundError(f"init.sh not found in {self._PROJECT_ROOT}")
+
     def test_init_sh_exports_socket_path_to_cli(self) -> None:
         """init.sh start_daemon() must set CLAUDE_HOOKS_SOCKET_PATH before CLI call."""
-        init_sh = Path("/workspace/.claude/init.sh").read_text()
+        init_sh = self._read_init_sh()
         assert "CLAUDE_HOOKS_SOCKET_PATH" in init_sh
         # The env var should appear in the start_daemon function's CLI call
         assert 'CLAUDE_HOOKS_SOCKET_PATH="$SOCKET_PATH"' in init_sh
 
     def test_init_sh_exports_pid_path_to_cli(self) -> None:
         """init.sh start_daemon() must set CLAUDE_HOOKS_PID_PATH before CLI call."""
-        init_sh = Path("/workspace/.claude/init.sh").read_text()
+        init_sh = self._read_init_sh()
         assert "CLAUDE_HOOKS_PID_PATH" in init_sh
         assert 'CLAUDE_HOOKS_PID_PATH="$PID_PATH"' in init_sh
 
     def test_init_sh_passes_project_root_to_cli(self) -> None:
         """init.sh start_daemon() must pass --project-root to CLI."""
-        init_sh = Path("/workspace/.claude/init.sh").read_text()
+        init_sh = self._read_init_sh()
         assert '--project-root "$PROJECT_PATH"' in init_sh
 
 

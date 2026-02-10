@@ -275,3 +275,43 @@ class TestCheckForNestedInstallation:
 
         result = check_for_nested_installation(tmp_path)
         assert result is None
+
+    def test_returns_none_when_outer_hooks_daemon_is_the_repo(self, tmp_path: Path) -> None:
+        """Test returns None when .claude/hooks-daemon IS the hooks-daemon repo.
+
+        When the hooks-daemon repo is installed at .claude/hooks-daemon/ and it
+        has its own .claude/hooks-daemon/ subdirectory (for self-dogfooding),
+        this should NOT be flagged as a nested installation.
+
+        The repo is identified by having a pyproject.toml file.
+        """
+        hooks_daemon_repo = tmp_path / ".claude" / "hooks-daemon"
+        hooks_daemon_repo.mkdir(parents=True)
+        # The outer .claude/hooks-daemon IS the hooks-daemon repo (has pyproject.toml)
+        (hooks_daemon_repo / "pyproject.toml").write_text(
+            "[project]\nname = 'claude-code-hooks-daemon'\n"
+        )
+        (hooks_daemon_repo / "src").mkdir()
+        # The repo has its own .claude/hooks-daemon subdirectory (dogfooding)
+        inner_hooks_daemon = hooks_daemon_repo / ".claude" / "hooks-daemon"
+        inner_hooks_daemon.mkdir(parents=True)
+
+        result = check_for_nested_installation(tmp_path)
+        assert result is None
+
+    def test_returns_error_for_genuine_nested_installation(self, tmp_path: Path) -> None:
+        """Test returns error when nested install is genuine (outer is NOT the repo).
+
+        When .claude/hooks-daemon/ does NOT have pyproject.toml (i.e., it's just
+        a normal installation directory), the inner .claude/hooks-daemon IS a
+        genuinely nested installation and should be flagged.
+        """
+        hooks_daemon_dir = tmp_path / ".claude" / "hooks-daemon"
+        hooks_daemon_dir.mkdir(parents=True)
+        # No pyproject.toml - this is NOT the repo, just an install directory
+        nested_install = hooks_daemon_dir / ".claude" / "hooks-daemon"
+        nested_install.mkdir(parents=True)
+
+        result = check_for_nested_installation(tmp_path)
+        assert result is not None
+        assert "NESTED INSTALLATION DETECTED" in result

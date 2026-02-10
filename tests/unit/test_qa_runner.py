@@ -18,6 +18,15 @@ from claude_code_hooks_daemon.qa.runner import (
     ToolResult,
 )
 
+# Save original before autouse fixture patches it
+_original_path_mkdir = Path.mkdir
+
+
+@pytest.fixture(autouse=True)
+def _mock_mkdir(monkeypatch):
+    """Prevent filesystem side effects from QARunner._ensure_output_dir in all tests."""
+    monkeypatch.setattr(Path, "mkdir", lambda *_args, **_kwargs: None)
+
 
 class TestQAResult:
     """Test QAResult data class."""
@@ -944,12 +953,14 @@ class TestCommandExecution:
 class TestOutputDirectoryCreation:
     """Test output directory handling."""
 
-    def test_output_directory_creation(self) -> None:
+    def test_output_directory_creation(self, monkeypatch) -> None:
         """Test that output directory is created if it doesn't exist."""
+        # Restore real Path.mkdir (overrides autouse _mock_mkdir fixture)
+        monkeypatch.setattr(Path, "mkdir", _original_path_mkdir)
         with tempfile.TemporaryDirectory() as tmpdir:
             output_dir = Path(tmpdir) / "qa_output"
 
-            runner = QARunner(project_root="/workspace", output_dir=str(output_dir))
+            runner = QARunner(project_root=tmpdir, output_dir=str(output_dir))
             runner._ensure_output_dir()
 
             assert output_dir.exists()

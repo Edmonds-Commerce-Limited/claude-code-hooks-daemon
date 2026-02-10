@@ -153,14 +153,15 @@ Need to validate something?
 │  - matches(hook_input) → bool               │
 │  - handle(hook_input) → HookResult          │
 │  - Properties: name, priority, terminal     │
-└─────────────────────┬───────────────────────┘
-                      │
-          ┌───────────┴───────────┐
-          ▼                       ▼
-┌───────────────────┐   ┌──────────────────────┐
-│  Built-in Handlers│   │  Plugin Handlers     │
-│  (daemon package) │   │  (project-specific)  │
-└───────────────────┘   └──────────────────────┘
+└─────────────┬───────────────────────────────┘
+              │
+  ┌───────────┼───────────────┐
+  ▼           ▼               ▼
+┌───────────┐ ┌─────────────┐ ┌──────────────────┐
+│ Built-in  │ │   Plugin    │ │ Project Handlers │
+│ Handlers  │ │  Handlers   │ │ (.claude/project │
+│ (daemon)  │ │  (legacy)   │ │  -handlers/)     │
+└───────────┘ └─────────────┘ └──────────────────┘
 ```
 
 ---
@@ -325,6 +326,61 @@ handler_class = load_handler("npm_command_handler", ".claude/hooks/controller/ha
 - Handler must inherit from `Handler` base class
 - Module must export handler class
 - Class name must follow PascalCase convention
+
+### 6. Project Handler Loading (`handlers/project_loader.py`)
+
+Project handlers provide convention-based auto-discovery from `.claude/project-handlers/`. They are the recommended approach for project-specific handlers, replacing the legacy plugin system for most use cases.
+
+**Loading Pipeline** (in `DaemonController.initialise()`):
+
+```
+Phase 1: Built-in handlers (HandlerRegistry.discover + register_all)
+Phase 2: Legacy plugins (PluginLoader.load_from_plugins_config)
+Phase 3: Project handlers (ProjectHandlerLoader.discover_handlers)  ← NEW
+```
+
+**Discovery Mechanism**:
+
+```python
+ProjectHandlerLoader.discover_handlers(project_handlers_path)
+```
+
+1. Scans event-type subdirectories (`pre_tool_use/`, `post_tool_use/`, etc.)
+2. Finds `.py` files, skipping files starting with `_` or `test_`
+3. Uses `importlib.util.spec_from_file_location` to dynamically load each file
+4. Finds concrete `Handler` subclasses in each module
+5. Instantiates the handler and returns `(EventType, Handler)` tuples
+6. Registers handlers with the `EventRouter`
+
+**Directory Structure**:
+
+```
+.claude/project-handlers/
+    conftest.py              # Shared test fixtures
+    pre_tool_use/
+        vendor_reminder.py   # Loaded → (PRE_TOOL_USE, handler)
+        test_vendor_reminder.py  # Skipped (test_ prefix)
+        _helpers.py              # Skipped (_ prefix)
+    post_tool_use/
+        build_checker.py     # Loaded → (POST_TOOL_USE, handler)
+    session_start/
+        branch_enforcer.py   # Loaded → (SESSION_START, handler)
+```
+
+**Configuration**:
+
+```yaml
+# .claude/hooks-daemon.yaml
+project_handlers:
+  enabled: true                       # Master switch (default: true)
+  path: .claude/project-handlers      # Relative to workspace root
+```
+
+**Conflict Resolution**:
+- If a project handler has the same `handler_id` as a built-in handler, the built-in handler takes precedence (logged as warning)
+- Priority collisions use existing alphabetical-sorting tiebreaker in HandlerChain
+
+**See [PROJECT_HANDLERS.md](PROJECT_HANDLERS.md) for complete developer guide.**
 
 ---
 

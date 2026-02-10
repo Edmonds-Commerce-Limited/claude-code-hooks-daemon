@@ -313,6 +313,25 @@ class MyHandler(Handler):
 - `terminal=True`: Stops dispatch chain, returns immediately
 - `terminal=False`: Continues dispatch, accumulates context
 
+## Project-Level Handlers
+
+Projects can define their own handlers in `.claude/project-handlers/`. These are auto-discovered by convention, co-located with tests, and use the same Handler ABC as built-in handlers.
+
+```bash
+# Scaffold project-handlers directory
+$PYTHON -m claude_code_hooks_daemon.daemon.cli init-project-handlers
+
+# Validate handlers load correctly
+$PYTHON -m claude_code_hooks_daemon.daemon.cli validate-project-handlers
+
+# Run project handler tests
+$PYTHON -m claude_code_hooks_daemon.daemon.cli test-project-handlers --verbose
+```
+
+**Directory structure**: Event-type subdirectories (`pre_tool_use/`, `post_tool_use/`, `session_start/`, etc.) with handler `.py` files and co-located `test_` files.
+
+**See CLAUDE/PROJECT_HANDLERS.md for complete developer guide and examples.**
+
 ## Configuration
 
 Config file: `.claude/hooks-daemon.yaml`
@@ -326,6 +345,9 @@ daemon:
 handlers:
   pre_tool_use:
     destructive_git: {enabled: true, priority: 10}
+project_handlers:
+  enabled: true
+  path: .claude/project-handlers
 ```
 
 ## QA Requirements
@@ -341,10 +363,12 @@ handlers:
 - **CLAUDE/ARCHITECTURE.md** - Design documentation
 - **CLAUDE/DEBUGGING_HOOKS.md** - Hook debugging workflow
 - **CLAUDE/HANDLER_DEVELOPMENT.md** - Handler creation guide
+- **CLAUDE/PROJECT_HANDLERS.md** - Project-level handler developer guide
 - **CLAUDE/SELF_INSTALL.md** - Self-install mode details
 - **CLAUDE/LLM-INSTALL.md** - Installation guide
 - **CLAUDE/LLM-UPDATE.md** - Update guide
 - **@CLAUDE/PlanWorkflow.md** - Planning workflow and standards
 - **CLAUDE/Plan/** - Implementation plans directory
+- **examples/project-handlers/** - Example project handlers with tests
 - **RELEASES/** - Version release notes
 - **CONTRIBUTING.md** - Contribution guidelines
