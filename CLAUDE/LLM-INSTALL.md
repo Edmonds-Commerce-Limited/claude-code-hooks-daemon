@@ -1,6 +1,6 @@
 # Claude Code Hooks Daemon - LLM Installation Guide
 
-## ⚠️ CRITICAL REQUIREMENTS - READ FIRST ⚠️
+## CRITICAL REQUIREMENTS - READ FIRST
 
 **BEFORE PROCEEDING:**
 
@@ -17,6 +17,17 @@
 6. **SESSION RESTART REQUIRED**: After installation completes, user MUST restart Claude session. Hooks won't activate until Claude reloads configuration. LLM MUST verify hooks work after restart.
 
 7. **GITIGNORE MANDATORY**: You MUST create `.claude/.gitignore` before committing (step 4). The installer will display the required content. Skipping this will commit generated files (hooks-daemon/, *.bak) which should NOT be in version control.
+
+---
+
+## Architecture Overview
+
+The installation system uses a **two-layer architecture**:
+
+- **Layer 1** (`install.sh`): Minimal curl-fetched script (~100 lines). Validates prerequisites, clones the repository, then delegates to Layer 2 via `exec`.
+- **Layer 2** (`scripts/install_version.sh`): Version-specific orchestrator that sources a shared modular library (`scripts/install/*.sh`) for all operations.
+
+This design means Layer 1 is stable across versions (safe to curl from GitHub), while Layer 2 evolves with the codebase and always matches the installed version.
 
 ---
 
@@ -47,7 +58,7 @@ Running the install process on an existing installation can cause issues. If alr
 ```bash
 # From your project root
 if [ -d ".claude/hooks-daemon" ]; then
-  echo "❌ DAEMON ALREADY INSTALLED"
+  echo "DAEMON ALREADY INSTALLED"
   echo ""
   echo "Found existing installation at .claude/hooks-daemon/"
   echo ""
@@ -61,7 +72,7 @@ if [ -d ".claude/hooks-daemon" ]; then
   echo ""
   exit 1
 else
-  echo "✅ No existing installation found - safe to proceed with installation"
+  echo "No existing installation found - safe to proceed with installation"
 fi
 ```
 
@@ -75,7 +86,50 @@ fi
 
 ---
 
-## Quick Install (6 Steps)
+## Quick Install (Recommended)
+
+The one-line installer handles everything via the two-layer architecture:
+
+```bash
+# From your project root (must have .claude/ and .git/)
+curl -sSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/install.sh | bash
+```
+
+This will:
+1. Validate prerequisites (git required)
+2. Clone the daemon repository to `.claude/hooks-daemon/`
+3. Delegate to the version-specific Layer 2 installer which:
+   - Checks for self-install mode (aborts if detected)
+   - Verifies Python 3.11+ and installs uv if needed
+   - Creates isolated venv at `.claude/hooks-daemon/untracked/venv/`
+   - Deploys hook forwarder scripts to `.claude/hooks/`
+   - Generates `.claude/settings.json` for hook registration
+   - Creates `.claude/hooks-daemon.env` environment file
+   - Generates default `.claude/hooks-daemon.yaml` config
+   - Sets up all `.gitignore` files
+   - Deploys slash commands to `.claude/commands/`
+   - Starts the daemon and verifies it is running
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DAEMON_BRANCH` | `main` | Git branch or tag to install |
+| `FORCE` | `false` | Set to `true` to reinstall over existing |
+
+```bash
+# Install specific version
+DAEMON_BRANCH=v2.5.0 curl -sSL .../install.sh | bash
+
+# Force reinstall
+FORCE=true curl -sSL .../install.sh | bash
+```
+
+---
+
+## Manual Install (6 Steps)
+
+If you prefer manual control over each step:
 
 ### 1. Verify Prerequisites
 
@@ -101,7 +155,7 @@ cd hooks-daemon
 git fetch --tags
 LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "main")
 git checkout "$LATEST_TAG"
-echo "📌 Using version: $LATEST_TAG"
+echo "Using version: $LATEST_TAG"
 
 # Create isolated venv (survives container restarts)
 python3 -m venv untracked/venv
@@ -131,27 +185,14 @@ cd ../..
 - `.claude/settings.json` - Hook registration
 - `.claude/hooks-daemon.yaml` - Handler config
 
-**⚠️ CRITICAL: .gitignore Content Displayed**
+**CRITICAL: .gitignore Content Displayed**
 
-The installer will display a large banner with the REQUIRED `.claude/.gitignore` content:
-
-```
-======================================================================
-⚠️  CRITICAL: .claude/.gitignore MUST be created
-======================================================================
-[full template content shown here]
-======================================================================
-```
-
-**YOU MUST:**
-1. Read the displayed content carefully
-2. Create `.claude/.gitignore` in step 4 (next)
-3. Do NOT skip this - committing without it will include hooks-daemon/ in git
+The installer will display a large banner with the REQUIRED `.claude/.gitignore` content. **YOU MUST** create the gitignore in step 4.
 
 Template source (single source of truth):
 https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/blob/main/.claude/.gitignore
 
-### 4. Create .gitignore & Commit ⚠️ MANDATORY
+### 4. Create .gitignore & Commit (MANDATORY)
 
 ```bash
 # CRITICAL: Create .claude/.gitignore FIRST (installer displayed the content)
@@ -195,7 +236,7 @@ echo '{"tool_name": "Bash", "tool_input": {"command": "ls -la"}}' \
 # Expected: {} (empty = allow)
 ```
 
-**If all tests pass**: Hooks active ✅
+**If all tests pass**: Hooks active.
 
 **If tests fail**: Check troubleshooting section below.
 
@@ -244,40 +285,6 @@ This displays a detailed table with:
 - **Summary statistics** (total handlers, enabled count, disabled count)
 - **Tag filtering info** (if using enable_tags/disable_tags)
 
-**Example output:**
-```
-====================================================================================================
-CLAUDE CODE HOOKS DAEMON - HANDLER STATUS REPORT
-====================================================================================================
-
-Config: /path/to/.claude/hooks-daemon.yaml
-Daemon: /path/to/.claude/hooks-daemon
-
-Total Handlers: 52
-Enabled: 15
-Disabled: 37
-
-====================================================================================================
-
-====================================================================================================
-EVENT TYPE: pre_tool_use
-====================================================================================================
-
-Handler                        Enabled  Priority  Terminal  Tags
-----------------------------------------------------------------------------------------------------
-prevent-destructive-git        ✓ YES    10        YES       safety, git, blocking...
-block-sed-command              ✓ YES    10        YES       safety, bash, blocking...
-enforce-tdd                    ✗ NO     15        YES       tdd, python, qa-enforcement...
-...
-```
-
-**Review this report to:**
-- Verify your desired handlers are enabled
-- Understand what hooks are active in your project
-- Identify handlers you may want to enable
-- See handler-specific configuration
-- Confirm tag filtering is working as expected
-
 **Save for reference:**
 ```bash
 cd .claude/hooks-daemon
@@ -317,7 +324,7 @@ cat .claude/hooks-daemon/CLAUDE/PlanWorkflow.md | head -100
 **Key features:**
 - Numbered plan directories (CLAUDE/Plan/001-description/, 002-description/)
 - Standardized PLAN.md template with tasks, goals, success criteria
-- Task status system (⬜ ⏸️ 🔄 ✅ ✗ 🚫 👁️)
+- Task status system
 - TDD integration and QA enforcement
 - Planning-specific handlers for enforcement
 
@@ -327,32 +334,13 @@ cat .claude/hooks-daemon/CLAUDE/PlanWorkflow.md | head -100
 - `block-plan-time-estimates` - Prevents time estimates in plans
 - `enforce-markdown-organization` - Enforces markdown organization rules
 
-### Decide: Adopt or Skip
-
-**Ask the user:**
-```
-I found the hooks daemon includes a comprehensive planning workflow system with:
-- Numbered plan directories (Plan/001-name/, 002-name/)
-- Standardized planning templates
-- Task tracking with status icons
-- Enforcement handlers
-
-Would you like to:
-1. Adopt this planning approach for your project?
-2. Skip (keep your existing approach)
-```
-
 ### If User Chooses to Adopt
 
 **1. Copy planning workflow documentation:**
 ```bash
-# Create planning directory structure
 mkdir -p CLAUDE/Plan
-
-# Copy planning workflow docs
 cp .claude/hooks-daemon/CLAUDE/PlanWorkflow.md CLAUDE/PlanWorkflow.md
 
-# Optionally copy Plan/README.md template
 if [ ! -f "CLAUDE/Plan/README.md" ]; then
   echo "# Plans Index
 
@@ -361,39 +349,18 @@ if [ ! -f "CLAUDE/Plan/README.md" ]; then
 
 ## Completed Plans
 - None
-
-## Blocked Plans
-- None
-
-## Cancelled Plans
-- None
 " > CLAUDE/Plan/README.md
 fi
 ```
 
-**2. Enable planning enforcement handlers:**
-
-Edit `.claude/hooks-daemon.yaml`:
+**2. Enable planning enforcement handlers** in `.claude/hooks-daemon.yaml`:
 ```yaml
 handlers:
   pre_tool_use:
-    # Planning workflow handlers
-    plan-workflow-guidance:
-      enabled: true
-      priority: 45
-
-    validate-plan-number:
-      enabled: true
-      priority: 30
-
-    block-plan-time-estimates:
-      enabled: true
-      priority: 40
-
-    # Markdown organization (optional - EC-specific)
-    enforce-markdown-organization:
-      enabled: false  # Set true if adopting markdown rules
-      priority: 35
+    plan-workflow-guidance: {enabled: true, priority: 45}
+    validate-plan-number: {enabled: true, priority: 30}
+    block-plan-time-estimates: {enabled: true, priority: 40}
+    enforce-markdown-organization: {enabled: false, priority: 35}  # EC-specific
 ```
 
 **3. Restart daemon:**
@@ -401,29 +368,9 @@ handlers:
 .claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
 ```
 
-**4. Add to project README (optional):**
-
-Add a section to your project README referencing the planning workflow:
-```markdown
-## Development Workflow
-
-This project uses a structured planning system. See [CLAUDE/PlanWorkflow.md](CLAUDE/PlanWorkflow.md) for:
-- How to create and manage plans
-- Task status tracking
-- TDD integration
-- QA requirements
-```
-
-**5. Commit planning docs:**
-```bash
-git add CLAUDE/PlanWorkflow.md CLAUDE/Plan/README.md .claude/hooks-daemon.yaml
-git commit -m "Adopt hooks daemon planning workflow system"
-git push
-```
-
 ### If User Chooses to Skip
 
-No action needed. The planning handlers will remain disabled. You can enable them later if you change your mind.
+No action needed. The planning handlers will remain disabled.
 
 ---
 
@@ -456,7 +403,6 @@ class MyHandler(Handler):
         super().__init__(name="my-handler", priority=50, terminal=True)
 
     def matches(self, hook_input: dict) -> bool:
-        # Return True if handler should run
         command = hook_input.get("tool_input", {}).get("command", "")
         return "npm" in command
 
@@ -517,6 +463,9 @@ grep -A 1 "destructive_git:" .claude/hooks-daemon.yaml
 2. Run debug script to see what's wrong
 3. Check [BUG_REPORTING.md](../BUG_REPORTING.md)
 
+**Layer 2 installer not found (legacy fallback):**
+If you see "Layer 2 installer not found" during install, you are installing an older version that predates the modular architecture. The legacy fallback (uv sync + install.py) will handle the installation. This is expected for tags before the two-layer architecture was introduced.
+
 ### Rollback to Previous Hooks
 
 **Option 1 - Git restore (if you committed before install):**
@@ -530,7 +479,7 @@ rm -rf .claude/hooks-daemon/
 ```bash
 BACKUP_DIR=$(ls -d .claude/hooks.bak.* 2>/dev/null | tail -1)
 if [ -z "$BACKUP_DIR" ]; then
-    echo "❌ No backup - rollback impossible without git commit"
+    echo "No backup - rollback impossible without git commit"
     exit 1
 fi
 
@@ -572,17 +521,24 @@ Lower priority = runs first. Terminal handlers stop dispatch chain.
 ```
 project/
 ├── .claude/
-│   ├── .gitignore              # ⚠️  RECOMMENDED (not auto-created) - see README.md
-│   ├── init.sh                 # ✅ COMMIT - Daemon lifecycle
-│   ├── hooks-daemon.yaml       # ✅ COMMIT - Handler config
-│   ├── settings.json           # ✅ COMMIT - Hook registration
-│   ├── hooks/                  # ✅ COMMIT - Forwarder scripts
+│   ├── .gitignore              # RECOMMENDED (not auto-created) - see README.md
+│   ├── init.sh                 # COMMIT - Daemon lifecycle
+│   ├── hooks-daemon.yaml       # COMMIT - Handler config
+│   ├── hooks-daemon.env        # COMMIT - Environment variables
+│   ├── settings.json           # COMMIT - Hook registration
+│   ├── hooks/                  # COMMIT - Forwarder scripts
 │   │   ├── pre-tool-use
 │   │   ├── post-tool-use
-│   │   └── handlers/           # ✅ COMMIT - Custom handlers
-│   └── hooks-daemon/           # ❌ Should be excluded (create .claude/.gitignore)
-│       ├── src/
-│       └── untracked/venv/     # Isolated Python environment
+│   │   └── handlers/           # COMMIT - Custom handlers
+│   ├── commands/               # COMMIT - Slash commands
+│   └── hooks-daemon/           # EXCLUDED via .gitignore
+│       ├── src/                # Daemon source code
+│       ├── scripts/
+│       │   ├── install/        # Shared modular library (14 modules)
+│       │   ├── install_version.sh  # Layer 2 install orchestrator
+│       │   └── upgrade_version.sh  # Layer 2 upgrade orchestrator
+│       └── untracked/
+│           └── venv/           # Isolated Python environment
 ```
 
 **Git Integration:**
