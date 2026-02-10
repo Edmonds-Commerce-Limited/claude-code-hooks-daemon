@@ -1,7 +1,7 @@
 # Plan 00041: Project-Level Handlers - First-Class Developer Experience
 
 **Created**: 2026-02-10
-**Status**: Ready for Implementation
+**Status**: In Progress
 **Priority**: High
 **Branch**: feature/project-handlers-dx
 
@@ -21,8 +21,8 @@ Implement first-class developer experience for project-level handler development
 
 ## Progress
 
-- [ ] Create feature branch from latest main
-- [ ] Phase 1: Core Infrastructure
+- [✓] Create feature branch from latest main
+- [✓] Phase 1: Core Infrastructure
 - [ ] Phase 2: Developer Experience CLI
 - [ ] Phase 3: Documentation & Examples
 - [ ] Phase 4: Dogfooding & Refinement
@@ -36,35 +36,35 @@ Implement first-class developer experience for project-level handler development
 
 #### Tasks
 
-- [ ] **Create config models** (TDD)
-  - [ ] Add `ProjectHandlersConfig` to `config/models.py`
-  - [ ] Add `project_handlers` field to root `Config` model
-  - [ ] Schema: `enabled`, `path`, `handlers_config`
-  - [ ] Write tests for config validation
-  - [ ] Verify config loads from YAML correctly
+- [✓] **Create config models** (TDD)
+  - [✓] Add `ProjectHandlersConfig` to `config/models.py`
+  - [✓] Add `project_handlers` field to root `Config` model
+  - [✓] Schema: `enabled`, `path`, `handlers_config`
+  - [✓] Write tests for config validation
+  - [✓] Verify config loads from YAML correctly
 
-- [ ] **Create ProjectHandlerLoader** (TDD)
-  - [ ] New file: `src/handlers/project_loader.py`
-  - [ ] Implement `discover_handlers(path: Path) -> list[Handler]`
-  - [ ] Use `importlib.util.spec_from_file_location` (same as PluginLoader)
-  - [ ] Walk event-type subdirectories (pre_tool_use/, post_tool_use/, etc.)
-  - [ ] Skip files starting with `_` or `test_`
-  - [ ] Write comprehensive unit tests (95%+ coverage)
+- [✓] **Create ProjectHandlerLoader** (TDD)
+  - [✓] New file: `src/handlers/project_loader.py`
+  - [✓] Implement `discover_handlers(path: Path) -> list[Handler]`
+  - [✓] Use `importlib.util.spec_from_file_location` (same as PluginLoader)
+  - [✓] Walk event-type subdirectories (pre_tool_use/, post_tool_use/, etc.)
+  - [✓] Skip files starting with `_` or `test_`
+  - [✓] Write comprehensive unit tests (95%+ coverage)
 
-- [ ] **Integrate with DaemonController** (TDD)
-  - [ ] Add `_load_project_handlers()` method
-  - [ ] Call after built-in handlers and legacy plugins in `initialise()`
-  - [ ] Pass project_handlers config and workspace_root
-  - [ ] Register loaded handlers with EventRouter
-  - [ ] Write integration tests for loading pipeline
+- [✓] **Integrate with DaemonController** (TDD)
+  - [✓] Add `_load_project_handlers()` method
+  - [✓] Call after built-in handlers and legacy plugins in `initialise()`
+  - [✓] Pass project_handlers config and workspace_root
+  - [✓] Register loaded handlers with EventRouter
+  - [✓] Write integration tests for loading pipeline
 
-- [ ] **Conflict Detection** (TDD)
-  - [ ] Check for handler_id conflicts with built-in handlers
-  - [ ] Check for priority collisions (log warnings)
-  - [ ] Prefer built-in handlers on conflict (log warning)
-  - [ ] Write tests for conflict scenarios
+- [✓] **Conflict Detection** (TDD)
+  - [✓] Check for handler_id conflicts with built-in handlers
+  - [✓] Check for priority collisions (log warnings)
+  - [✓] Prefer built-in handlers on conflict (log warning)
+  - [✓] Write tests for conflict scenarios
 
-- [ ] **Run full QA**: `./scripts/qa/run_all.sh`
+- [✓] **Run full QA**: `./scripts/qa/run_all.sh`
 - [ ] **Verify daemon restarts**: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
 
 ### Phase 2: Developer Experience CLI
