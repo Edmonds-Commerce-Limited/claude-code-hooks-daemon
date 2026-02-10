@@ -1,6 +1,20 @@
 #!/usr/bin/env python3
 """Install claude-code-hooks-daemon into a Claude Code project.
 
+DEPRECATION NOTICE:
+    This script is superseded by the modular bash installer:
+      - Layer 1: install.sh (curl-fetched entry point)
+      - Layer 2: scripts/install_version.sh (version-specific orchestrator)
+      - Library: scripts/install/*.sh (shared modules)
+
+    The new architecture eliminates code duplication between install and
+    upgrade paths, adds config preservation with diff/merge/validate, and
+    provides full state rollback on failure.
+
+    This file is retained for backward compatibility with older tags that
+    don't have the Layer 2 installer. New installations should use:
+      curl -sSL <repo>/install.sh | bash
+
 This script:
 1. Backs up existing .claude/hooks directory (if exists)
 2. Creates all hook entry point files
