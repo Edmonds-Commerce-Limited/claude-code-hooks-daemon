@@ -326,6 +326,83 @@ def test_handle_fails_silently_on_git_error(
     assert result.context == []
 
 
+def test_handle_catches_unexpected_exception(
+    handler: VersionCheckHandler,
+    new_session_input: dict,
+) -> None:
+    """Handler catches unexpected exceptions in handle() and returns ALLOW."""
+    with patch.object(handler, "_get_cache_file", side_effect=ValueError("unexpected")):
+        result = handler.handle(new_session_input)
+
+    assert result.decision == Decision.ALLOW
+    assert result.context == []
+
+
+def test_get_cache_file_fallback_on_project_context_error(
+    handler: VersionCheckHandler,
+) -> None:
+    """_get_cache_file falls back when ProjectContext raises."""
+    with patch(
+        "claude_code_hooks_daemon.handlers.session_start.version_check.ProjectContext.daemon_untracked_dir",
+        side_effect=RuntimeError("no project"),
+    ):
+        cache_file = handler._get_cache_file()
+
+    assert cache_file.name == "version_check_cache.json"
+    assert "untracked" in str(cache_file)
+
+
+def test_get_cached_result_returns_none_on_error(
+    handler: VersionCheckHandler, tmp_path: Path
+) -> None:
+    """_get_cached_result returns None on malformed JSON."""
+    cache_file = tmp_path / "bad_cache.json"
+    cache_file.write_text("not valid json")
+    result = handler._get_cached_result(cache_file)
+    assert result is None
+
+
+def test_write_cache_handles_os_error(handler: VersionCheckHandler, tmp_path: Path) -> None:
+    """_write_cache handles OSError gracefully."""
+    # Use a path that can't be written (directory as file)
+    cache_file = tmp_path / "readonly_dir" / "subdir" / "cache.json"
+    # Create readonly_dir as a file to cause OSError
+    (tmp_path / "readonly_dir").write_text("not a dir")
+
+    # Should not raise
+    handler._write_cache(cache_file, {"test": True})
+
+
+def test_is_resume_session_handles_os_error(handler: VersionCheckHandler) -> None:
+    """_is_resume_session returns False on OSError."""
+    with patch("claude_code_hooks_daemon.handlers.session_start.version_check.Path") as mock_path:
+        mock_path.return_value.exists.side_effect = OSError("permission denied")
+        result = handler._is_resume_session({"transcript_path": "/some/path"})
+    assert result is False
+
+
+def test_get_latest_version_skips_empty_lines(handler: VersionCheckHandler) -> None:
+    """_get_latest_version skips empty lines in git output."""
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="\n\nabc123\trefs/tags/v2.7.0\n",
+        )
+        version = handler._get_latest_version()
+        assert version == "2.7.0"
+
+
+def test_get_latest_version_returns_none_on_empty_output(handler: VersionCheckHandler) -> None:
+    """_get_latest_version returns None when git returns no tags."""
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="\n\n",
+        )
+        version = handler._get_latest_version()
+        assert version is None
+
+
 def test_get_latest_version_parses_git_output(handler: VersionCheckHandler) -> None:
     """_get_latest_version parses git ls-remote output correctly."""
     with patch("subprocess.run") as mock_run:

@@ -1,5 +1,9 @@
 """Tests for SuggestStatusLineHandler."""
 
+import json
+from pathlib import Path
+from unittest.mock import patch
+
 import pytest
 
 from claude_code_hooks_daemon.handlers.session_start import SuggestStatusLineHandler
@@ -22,10 +26,30 @@ class TestSuggestStatusLineHandler:
         assert "workflow" in handler.tags
         assert "statusline" in handler.tags
 
-    def test_matches_always_returns_true(self, handler: SuggestStatusLineHandler) -> None:
-        """Handler should always match for session start events."""
-        assert handler.matches({}) is True
-        assert handler.matches({"session_id": "test"}) is True
+    def test_matches_new_session_no_statusline(self, handler: SuggestStatusLineHandler) -> None:
+        """Handler matches on new sessions when status line is not configured."""
+        with (
+            patch.object(handler, "_is_resume_session", return_value=False),
+            patch.object(handler, "_is_statusline_configured", return_value=False),
+        ):
+            assert handler.matches({}) is True
+
+    def test_matches_returns_false_on_resume_session(
+        self, handler: SuggestStatusLineHandler
+    ) -> None:
+        """Handler does not match on resumed sessions."""
+        with patch.object(handler, "_is_resume_session", return_value=True):
+            assert handler.matches({}) is False
+
+    def test_matches_returns_false_when_statusline_configured(
+        self, handler: SuggestStatusLineHandler
+    ) -> None:
+        """Handler does not match when status line is already configured."""
+        with (
+            patch.object(handler, "_is_resume_session", return_value=False),
+            patch.object(handler, "_is_statusline_configured", return_value=True),
+        ):
+            assert handler.matches({}) is False
 
     def test_handle_returns_suggestion(self, handler: SuggestStatusLineHandler) -> None:
         """Test handler returns status line setup suggestion."""
@@ -59,3 +83,107 @@ class TestSuggestStatusLineHandler:
         assert "context usage" in context_text
         assert "git branch" in context_text
         assert "daemon health" in context_text
+
+
+class TestIsResumeSession:
+    """Tests for _is_resume_session private method."""
+
+    @pytest.fixture
+    def handler(self) -> SuggestStatusLineHandler:
+        """Create handler instance."""
+        return SuggestStatusLineHandler()
+
+    def test_no_transcript_path(self, handler: SuggestStatusLineHandler) -> None:
+        """Returns False when no transcript_path in hook_input."""
+        assert handler._is_resume_session({}) is False
+
+    def test_empty_transcript_path(self, handler: SuggestStatusLineHandler) -> None:
+        """Returns False when transcript_path is empty string."""
+        assert handler._is_resume_session({"transcript_path": ""}) is False
+
+    def test_nonexistent_transcript_file(self, handler: SuggestStatusLineHandler) -> None:
+        """Returns False when transcript file does not exist."""
+        assert handler._is_resume_session({"transcript_path": "/nonexistent/file.jsonl"}) is False
+
+    def test_small_transcript_file(self, handler: SuggestStatusLineHandler, tmp_path: Path) -> None:
+        """Returns False when transcript file is small (new session)."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text("small")
+        assert handler._is_resume_session({"transcript_path": str(transcript)}) is False
+
+    def test_large_transcript_file(self, handler: SuggestStatusLineHandler, tmp_path: Path) -> None:
+        """Returns True when transcript file is large (resume session)."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text("x" * 200)
+        assert handler._is_resume_session({"transcript_path": str(transcript)}) is True
+
+    def test_oserror_returns_false(self, handler: SuggestStatusLineHandler) -> None:
+        """Returns False when an OSError occurs."""
+        with patch(
+            "claude_code_hooks_daemon.handlers.session_start.suggest_statusline.Path"
+        ) as mock_path:
+            mock_path.return_value.exists.side_effect = OSError("permission denied")
+            assert handler._is_resume_session({"transcript_path": "/some/path"}) is False
+
+
+class TestIsStatusLineConfigured:
+    """Tests for _is_statusline_configured private method."""
+
+    @pytest.fixture
+    def handler(self) -> SuggestStatusLineHandler:
+        """Create handler instance."""
+        return SuggestStatusLineHandler()
+
+    def test_settings_file_does_not_exist(
+        self, handler: SuggestStatusLineHandler, tmp_path: Path
+    ) -> None:
+        """Returns False when settings.json does not exist."""
+        with patch(
+            "claude_code_hooks_daemon.handlers.session_start.suggest_statusline.ProjectContext.config_dir",
+            return_value=tmp_path,
+        ):
+            assert handler._is_statusline_configured() is False
+
+    def test_settings_file_has_statusline(
+        self, handler: SuggestStatusLineHandler, tmp_path: Path
+    ) -> None:
+        """Returns True when settings.json contains statusLine key."""
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text(json.dumps({"statusLine": {"type": "command"}}))
+        with patch(
+            "claude_code_hooks_daemon.handlers.session_start.suggest_statusline.ProjectContext.config_dir",
+            return_value=tmp_path,
+        ):
+            assert handler._is_statusline_configured() is True
+
+    def test_settings_file_without_statusline(
+        self, handler: SuggestStatusLineHandler, tmp_path: Path
+    ) -> None:
+        """Returns False when settings.json does not contain statusLine key."""
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text(json.dumps({"hooks": {}}))
+        with patch(
+            "claude_code_hooks_daemon.handlers.session_start.suggest_statusline.ProjectContext.config_dir",
+            return_value=tmp_path,
+        ):
+            assert handler._is_statusline_configured() is False
+
+    def test_invalid_json_returns_false(
+        self, handler: SuggestStatusLineHandler, tmp_path: Path
+    ) -> None:
+        """Returns False when settings.json contains invalid JSON."""
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text("not valid json {{{")
+        with patch(
+            "claude_code_hooks_daemon.handlers.session_start.suggest_statusline.ProjectContext.config_dir",
+            return_value=tmp_path,
+        ):
+            assert handler._is_statusline_configured() is False
+
+    def test_runtime_error_returns_false(self, handler: SuggestStatusLineHandler) -> None:
+        """Returns False when ProjectContext.config_dir raises RuntimeError."""
+        with patch(
+            "claude_code_hooks_daemon.handlers.session_start.suggest_statusline.ProjectContext.config_dir",
+            side_effect=RuntimeError("no project"),
+        ):
+            assert handler._is_statusline_configured() is False
