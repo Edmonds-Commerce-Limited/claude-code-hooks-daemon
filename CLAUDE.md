@@ -257,8 +257,12 @@ src/claude_code_hooks_daemon/
 ├── daemon/         # Server, CLI, DaemonController, paths
 ├── handlers/       # All handler implementations (by event type)
 ├── config/         # YAML/JSON config loading
+├── constants/      # Handler IDs, priorities, tags, tool names
 ├── hooks/          # Entry point modules (one per event)
-└── plugins/        # Plugin system for custom handlers
+├── install/        # Installer logic
+├── plugins/        # Plugin system for custom handlers
+├── qa/             # QA runner utilities
+└── utils/          # Shared utilities
 ```
 
 **Pattern**: Bash scripts → Unix socket → Daemon → FrontController → Handlers
@@ -297,11 +301,12 @@ class MyHandler(Handler):
 
 ### Priority Ranges
 
-- **5**: Test handlers
-- **10-20**: Safety (destructive git, sed blocker)
-- **25-35**: Code quality (ESLint, TDD)
-- **36-55**: Workflow (planning, npm)
+- **0-9**: Test handlers (hello_world), orchestrator-only
+- **10-20**: Safety (destructive git, sed blocker, auto-approve)
+- **25-35**: Code quality (ESLint, TDD, QA suppression)
+- **36-55**: Workflow (planning, npm, config checker)
 - **56-60**: Advisory (British English)
+- **100+**: Logging/cleanup (notification logger, session cleanup)
 
 ### Terminal vs Non-Terminal
 

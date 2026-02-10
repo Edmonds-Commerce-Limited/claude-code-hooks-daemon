@@ -102,40 +102,40 @@ handlers:
     # SAFETY HANDLERS (Priority 10-20)
     daemon_restart_verifier: {enabled: true, priority: 10}  # Suggest daemon restart verification (advisory)
     destructive_git: {enabled: true, priority: 10}   # Block git reset --hard, clean -f
-    sed_blocker: {enabled: true, priority: 11}       # Block sed (use Edit tool instead)
-    absolute_path: {enabled: true, priority: 12}     # Require absolute paths
-    pip_break_system: {enabled: true, priority: 13}  # Block pip --break-system-packages
-    sudo_pip: {enabled: true, priority: 14}          # Block sudo pip
-    curl_pipe_shell: {enabled: true, priority: 15}   # Block curl | bash patterns
+    sed_blocker: {enabled: true, priority: 10}       # Block sed (use Edit tool instead)
+    pip_break_system: {enabled: true, priority: 10}  # Block pip --break-system-packages
+    sudo_pip: {enabled: true, priority: 10}          # Block sudo pip
+    curl_pipe_shell: {enabled: true, priority: 10}   # Block curl | bash patterns
     lock_file_edit_blocker: {enabled: true, priority: 10}  # Block direct editing of package manager lock files
-    worktree_file_copy: {enabled: true, priority: 16}  # Prevent worktree file copies
-    dangerous_permissions: {enabled: true, priority: 17}  # Block chmod 777, chown root
+    absolute_path: {enabled: true, priority: 12}     # Require absolute paths
+    pipe_blocker: {enabled: true, priority: 15}      # Block dangerous pipe patterns
+    worktree_file_copy: {enabled: true, priority: 15}  # Prevent worktree file copies
+    dangerous_permissions: {enabled: true, priority: 15}  # Block chmod 777, chown root
     git_stash: {enabled: true, priority: 20}         # Warn about git stash
 
     # CODE QUALITY HANDLERS (Priority 25-35)
-    eslint_disable: {enabled: true, priority: 25}    # Block ESLint suppressions
-    python_qa_suppression_blocker: {enabled: true, priority: 26}  # Block Python QA suppressions
-    php_qa_suppression_blocker: {enabled: true, priority: 27}     # Block PHP QA suppressions
-    go_qa_suppression_blocker: {enabled: true, priority: 28}      # Block Go QA suppressions
-    tdd_enforcement: {enabled: true, priority: 35}   # Enforce test-first development
-
-    # WORKFLOW HANDLERS (Priority 36-55)
-    # Plan workflow handlers (parent-child relationship)
-    markdown_organization:  # Parent handler - defines plan tracking options
+    python_qa_suppression_blocker: {enabled: true, priority: 30}  # Block Python QA suppressions
+    php_qa_suppression_blocker: {enabled: true, priority: 30}     # Block PHP QA suppressions
+    go_qa_suppression_blocker: {enabled: true, priority: 30}      # Block Go QA suppressions
+    eslint_disable: {enabled: true, priority: 30}    # Block ESLint suppressions
+    validate_plan_number: {enabled: true, priority: 30}  # Validate plan number format
+    plan_number_helper: {enabled: true, priority: 30}  # Provide correct next plan number
+    markdown_organization:  # Plan tracking and markdown organization
       enabled: true
-      priority: 42
+      priority: 35
       options:
         track_plans_in_project: "CLAUDE/Plan"           # Path to plan folder
         plan_workflow_docs: "CLAUDE/PlanWorkflow.md"    # Path to workflow doc
-    plan_number_helper:     # Child handler - inherits options from markdown_organization
-      enabled: true
-      priority: 30
-      # options: {}  # Inherits from markdown_organization (no duplication needed)
 
+    # WORKFLOW HANDLERS (Priority 36-55)
+    tdd_enforcement: {enabled: true, priority: 15}   # Enforce test-first development
     gh_issue_comments: {enabled: true, priority: 40}  # Require --comments on gh issue view
-    global_npm_advisor: {enabled: true, priority: 41}  # Advise on npm install -g (non-blocking)
+    plan_time_estimates: {enabled: true, priority: 40}  # Block time estimates in plans
+    global_npm_advisor: {enabled: true, priority: 40}  # Advise on npm install -g (non-blocking)
+    plan_workflow: {enabled: true, priority: 45}     # Guidance when creating plans
     task_tdd_advisor: {enabled: true, priority: 45}  # Advise on TDD workflow for Task agents (non-blocking)
-    plan_completion_advisor: {enabled: true, priority: 50}  # Advise on plan completion steps (git mv, README update)
+    npm_command: {enabled: true, priority: 50}       # Restrict npm commands to approved list
+    plan_completion_advisor: {enabled: true, priority: 50}  # Advise on plan completion steps
     validate_instruction_content: {enabled: true, priority: 50}  # Block ephemeral content in CLAUDE.md/README.md
     web_search_year: {enabled: true, priority: 55}   # Fix outdated years in searches
 
@@ -144,46 +144,60 @@ handlers:
 
   # PostToolUse - After tool execution
   post_tool_use:
-    bash_error_detector: {enabled: true, priority: 10}  # Detect bash errors
+    bash_error_detector: {enabled: true, priority: 50}  # Detect bash errors
+    validate_eslint_on_write: {enabled: true, priority: 10}  # Run ESLint after file writes
+    validate_sitemap: {enabled: true, priority: 20}  # Validate sitemap structure
 
   # PermissionRequest - Auto-approve decisions
-  permission_request: {}
+  permission_request:
+    auto_approve_reads: {enabled: true, priority: 10}  # Auto-approve read-only operations
 
   # Notification - Custom notification handling
   notification:
     notification_logger: {enabled: true, priority: 10}  # Log notifications
 
   # UserPromptSubmit - Context injection before processing
-  user_prompt_submit: {}
+  user_prompt_submit:
+    git_context_injector: {enabled: true, priority: 20}  # Inject git context into prompts
 
   # SessionStart - Initialize environment
   session_start:
-    workflow_state_restoration: {enabled: true, priority: 10}  # Restore workflow state after compaction
+    workflow_state_restoration: {enabled: true, priority: 50}  # Restore workflow state after compaction
     yolo_container_detection: {enabled: true, priority: 40}  # Detect YOLO container environments
     optimal_config_checker: {enabled: true, priority: 52}  # Check Claude Code env for optimal settings
     suggest_status_line: {enabled: true, priority: 55}  # Suggest status line setup
-    version_check: {enabled: true, priority: 56}  # Check for daemon updates on new sessions
+    version_check: {enabled: true, priority: 55}  # Check for daemon updates on new sessions
 
   # SessionEnd - Cleanup on exit
   session_end:
     cleanup: {enabled: true, priority: 10}  # Session cleanup
 
   # Stop - Control agent continuation
-  stop: {}
+  stop:
+    auto_continue_stop: {enabled: true, priority: 15}  # Auto-continue after stop events
+    hedging_language_detector: {enabled: true, priority: 30}  # Detect guessing language in output
+    task_completion_checker: {enabled: true, priority: 50}  # Check for task completion
 
   # SubagentStop - Control subagent continuation
   subagent_stop:
     subagent_completion_logger: {enabled: true, priority: 10}  # Log subagent completion
+    remind_prompt_library: {enabled: true, priority: 20}  # Remind about prompt library
+    remind_validator: {enabled: true, priority: 10}  # Remind about HTML validation
 
   # PreCompact - Before conversation compaction
   pre_compact:
     transcript_archiver: {enabled: true, priority: 10}  # Archive transcripts
+    workflow_state_pre_compact: {enabled: true, priority: 50}  # Save workflow state
 
   # Status - Status line generation
   status_line:
-    model_context: {enabled: true, priority: 10}  # Model name and context %
-    git_branch: {enabled: true, priority: 20}     # Current git branch
-    daemon_stats: {enabled: true, priority: 30}   # Daemon health metrics
+    git_repo_name: {enabled: true, priority: 5}      # Git repository name
+    account_display: {enabled: true, priority: 6}    # Account information
+    model_context: {enabled: true, priority: 10}    # Model name and context %
+    usage_tracking: {enabled: true, priority: 15}   # Usage statistics
+    git_branch: {enabled: true, priority: 20}       # Current git branch
+    thinking_mode: {enabled: true, priority: 25}    # Current thinking mode
+    daemon_stats: {enabled: true, priority: 30}     # Daemon health metrics
 
 # Custom project-specific handlers
 plugins:
