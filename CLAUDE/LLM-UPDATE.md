@@ -51,6 +51,31 @@ cd ../..
 
 ---
 
+## Architecture Overview
+
+The upgrade system uses a **two-layer architecture**:
+
+- **Layer 1** (`scripts/upgrade.sh`): Minimal curl-fetched script (~130 lines). Detects project root, fetches tags, determines target version, then delegates to Layer 2 via `exec`.
+- **Layer 2** (`scripts/upgrade_version.sh`): Version-specific orchestrator implementing **"Upgrade = Clean Reinstall + Config Preservation"**. Sources a shared modular library (`scripts/install/*.sh`) for all operations.
+
+**Key principle**: Upgrade produces the same clean state as a fresh install, while preserving only user config customizations via a diff/merge/validate pipeline.
+
+### Config Preservation Pipeline
+
+During upgrade, user customizations are preserved automatically:
+
+1. **Backup**: Current config saved to timestamped backup file
+2. **Snapshot**: Full state snapshot saved (hooks, config, settings.json) for rollback
+3. **Extract**: Diff between old default config and user config identifies customizations
+4. **Checkout**: New version code checked out (clean reinstall of code)
+5. **Merge**: User customizations merged into new default config
+6. **Validate**: Merged config validated for structural correctness
+7. **Report**: Any incompatibilities reported to the user
+
+If any step fails, the upgrade rolls back to the snapshot automatically.
+
+---
+
 ## RECOMMENDED: Fetch, Review, and Run (Safest Method)
 
 **CRITICAL: Fetch the upgrade script, review it, then run it** - This avoids curl pipe shell patterns that our own security handlers block.
@@ -68,13 +93,12 @@ less /tmp/upgrade.sh
 
 # Run it (it handles all the git operations)
 bash /tmp/upgrade.sh
-```
-
-This works for **any version** (including pre-v2.5.0 installations) and is the safest method since you can inspect what the script will do before running it. The script itself handles all the git fetch/checkout/pull operations
 
 # Clean up
 rm /tmp/upgrade.sh
 ```
+
+This works for **any version** (including pre-v2.5.0 installations) and is the safest method since you can inspect what the script will do before running it. The script handles all the git fetch/checkout/pull operations.
 
 ### Upgrade to Specific Version
 
@@ -85,18 +109,30 @@ bash /tmp/upgrade.sh v2.5.0
 rm /tmp/upgrade.sh
 ```
 
-### What the Script Does
+### What the Script Does (Two-Layer Flow)
 
-The automated upgrade script:
-- ✅ Auto-detects your project root (works from any subdirectory)
-- ✅ Backs up your configuration
-- ✅ Stops the daemon safely
-- ✅ Fetches and checks out the target version
-- ✅ Installs dependencies
-- ✅ Restarts the daemon
-- ✅ Verifies the upgrade
-- ✅ Rolls back automatically on failure
-- ✅ Handles both normal and self-install modes
+**Layer 1** (the curl-fetched script):
+- Auto-detects your project root (works from any subdirectory)
+- Fetches latest tags from remote
+- Determines target version (latest tag or specified argument)
+- Delegates to Layer 2 via `exec`
+
+**Layer 2** (version-specific orchestrator):
+- Creates state snapshot for rollback (hooks, config, settings.json)
+- Backs up user config
+- Extracts user customizations (diff against old defaults)
+- Stops the daemon safely
+- Checks out target version code
+- Recreates virtual environment (clean venv)
+- Deploys hook scripts and slash commands
+- Merges user customizations into new default config
+- Validates merged config
+- Reports any incompatibilities
+- Starts daemon and verifies running
+- Cleans up old snapshots (keeps 5 most recent)
+- Rolls back automatically on any failure
+
+**Legacy fallback**: If upgrading to a version that predates the two-layer architecture, Layer 1 falls back to a legacy inline upgrade (stop, checkout, pip install, restart). This is expected for older tags.
 
 ### Why Fetch from GitHub?
 
@@ -244,17 +280,7 @@ print(json.dumps(result, indent=2))
 "
 ```
 
-This outputs JSON with all handlers organized by event type, showing:
-- `handler_id` - Unique identifier
-- `name` - Handler name (used in config)
-- `priority` - Execution order
-- `terminal` - Whether it stops dispatch chain
-- `tags` - Handler tags (language, function, etc.)
-- `doc` - First line of docstring
-
 ### Method 2: Get Full Default Config Template
-
-This generates the recommended default config with inline comments:
 
 ```bash
 cd .claude/hooks-daemon
@@ -266,12 +292,6 @@ print(generate_config(mode='full'))
 "
 ```
 
-This outputs a complete YAML config with:
-- All available handlers
-- Default settings for each
-- Inline comments explaining each handler
-- Recommended priority values
-
 ### Method 3: Compare with Current Config
 
 To find handlers you're missing:
@@ -280,7 +300,6 @@ To find handlers you're missing:
 cd .claude/hooks-daemon
 VENV_PYTHON=untracked/venv/bin/python
 
-# 1. Get list of ALL available handlers
 $VENV_PYTHON -c "
 from claude_code_hooks_daemon.handlers.registry import HandlerRegistry, EVENT_TYPE_MAPPING
 from claude_code_hooks_daemon.core.handler import Handler
@@ -311,13 +330,11 @@ for dir_name in EVENT_TYPE_MAPPING.keys():
     if handlers:
         available[dir_name] = sorted(handlers)
 
-# 2. Read current config
 import yaml
 from pathlib import Path
 current_config = yaml.safe_load(Path('../hooks-daemon.yaml').read_text())
 current = current_config.get('handlers', {})
 
-# 3. Find missing handlers
 print('Available handlers NOT in your config:\n')
 for event_type, handler_names in available.items():
     event_config = current.get(event_type, {})
@@ -334,7 +351,6 @@ for event_type, handler_names in available.items():
 1. **Read the handler documentation**:
    ```bash
    cd .claude/hooks-daemon
-   # Example: read destructive_git handler docs
    cat src/claude_code_hooks_daemon/handlers/pre_tool_use/destructive_git.py
    ```
 
@@ -345,13 +361,11 @@ for event_type, handler_names in available.items():
 
 3. **Add handlers to your config** if desired:
    ```yaml
-   # .claude/hooks-daemon.yaml
    handlers:
      pre_tool_use:
        new_handler_name:
          enabled: true
          priority: 50
-         # handler-specific options...
    ```
 
 4. **Restart daemon** to load new config:
@@ -368,8 +382,6 @@ Handlers are tagged by language, function, and specificity. Use tags to filter:
 **Function Tags**: `safety`, `tdd`, `qa-enforcement`, `workflow`, `advisory`, `validation`
 **Specificity Tags**: `ec-specific`, `project-specific`
 
-To see handlers by tag in the discovery output above, check the `tags` field.
-
 ---
 
 ## Post-Update: Handler Status Report
@@ -381,27 +393,6 @@ cd .claude/hooks-daemon
 untracked/venv/bin/python scripts/handler_status.py
 ```
 
-This provides a complete overview of your handler configuration:
-- **All available handlers** organized by event type
-- **Enabled/Disabled status** for each handler
-- **Priority and terminal settings**
-- **Handler tags** (for filtering and organization)
-- **Handler-specific configuration** (for enabled handlers)
-- **Summary statistics**
-
-**Use this report to:**
-1. **Verify** your enabled handlers are correct
-2. **Identify** new handlers from the update
-3. **Review** handler-specific configuration
-4. **Compare** with the discovery output to see what's missing
-5. **Confirm** tag filtering is working as expected
-
-**Save for documentation:**
-```bash
-cd .claude/hooks-daemon
-untracked/venv/bin/python scripts/handler_status.py > /tmp/handler-status.txt
-```
-
 ---
 
 ## Post-Update: Planning Workflow Check (Optional)
@@ -411,87 +402,20 @@ After updating, check if you want to adopt or sync with the daemon's planning wo
 ### Check Current Planning Setup
 
 ```bash
-# Check if you already have planning docs
 ls -la CLAUDE/PlanWorkflow.md 2>/dev/null
 ls -la CLAUDE/Plan/ 2>/dev/null
-
-# Check daemon's latest planning docs
-cat .claude/hooks-daemon/CLAUDE/PlanWorkflow.md | head -50
 ```
 
 ### Scenarios
 
-**Scenario 1: No Planning Docs Yet**
+**Scenario 1: No Planning Docs Yet** - See "Post-Installation: Planning Workflow Adoption" in LLM-INSTALL.md.
 
-See "Post-Installation: Planning Workflow Adoption" in [LLM-INSTALL.md](https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-INSTALL.md) for full adoption guide.
-
-Quick adoption:
+**Scenario 2: Already Using Planning System** - Check for updates:
 ```bash
-# Copy planning workflow docs
-cp .claude/hooks-daemon/CLAUDE/PlanWorkflow.md CLAUDE/PlanWorkflow.md
-mkdir -p CLAUDE/Plan
-
-# Enable planning handlers in .claude/hooks-daemon.yaml
-# (see install docs for handler config)
-
-# Restart daemon
-.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
-```
-
-**Scenario 2: Already Using Planning System**
-
-Check if daemon's approach has updates:
-```bash
-# Compare your version with daemon's version
 diff CLAUDE/PlanWorkflow.md .claude/hooks-daemon/CLAUDE/PlanWorkflow.md || echo "Docs differ"
 ```
 
-**If docs differ, ask user:**
-```
-Your project has planning docs, but the daemon's planning workflow has been updated.
-
-Would you like to:
-1. Update your planning docs to match daemon's latest version?
-2. Keep your current planning docs unchanged?
-3. Review differences and selectively adopt changes?
-```
-
-**If user chooses to update:**
-```bash
-# Backup current docs
-cp CLAUDE/PlanWorkflow.md CLAUDE/PlanWorkflow.md.backup
-
-# Update to latest
-cp .claude/hooks-daemon/CLAUDE/PlanWorkflow.md CLAUDE/PlanWorkflow.md
-
-# Review changes
-diff CLAUDE/PlanWorkflow.md.backup CLAUDE/PlanWorkflow.md
-
-# Commit if satisfied
-git add CLAUDE/PlanWorkflow.md
-git commit -m "Update planning workflow docs to match daemon v2.3.0"
-```
-
-**Scenario 3: Different Planning Approach**
-
-If you have a different planning system (Jira, Linear, custom docs), you can:
-- Keep planning handlers disabled
-- Use daemon for code quality/safety only
-- No action needed
-
-### Planning Handlers Reference
-
-Available planning enforcement handlers:
-- `plan-workflow-guidance` (priority 45) - Guides through planning steps
-- `validate-plan-number` (priority 30) - Validates plan numbering
-- `block-plan-time-estimates` (priority 40) - Prevents time estimates
-- `enforce-markdown-organization` (priority 35) - Enforces markdown rules (EC-specific)
-
-**Check status:**
-```bash
-cd .claude/hooks-daemon
-untracked/venv/bin/python scripts/handler_status.py | grep -A 1 "plan-\|markdown"
-```
+**Scenario 3: Different Planning Approach** - Keep planning handlers disabled.
 
 ---
 
@@ -501,21 +425,8 @@ untracked/venv/bin/python scripts/handler_status.py | grep -A 1 "plan-\|markdown
 
 **Location**: `RELEASES/` (in daemon repository)
 
-**Purpose**: Contains detailed release notes for each version.
+Contains detailed release notes for each version. Use for understanding what changed between versions.
 
-**Files**:
-- `RELEASES/README.md` - Overview of release documentation
-- `RELEASES/v2.2.0.md` - v2.2.0 release notes
-- `RELEASES/v2.2.1.md` - v2.2.1 release notes
-- (Additional versions as released)
-
-**Use for**:
-- Understanding what changed between versions
-- Reading highlights and new features
-- Checking upgrade instructions per release
-- Viewing test/coverage stats
-
-**To check release notes for a specific version:**
 ```bash
 cd .claude/hooks-daemon
 cat RELEASES/v2.2.0.md
@@ -525,15 +436,13 @@ cat RELEASES/v2.2.0.md
 
 **Location**: `CLAUDE/UPGRADES/` (in daemon repository)
 
-**Purpose**: Contains LLM-optimized migration guides with step-by-step instructions.
+Contains LLM-optimized migration guides with step-by-step instructions, config examples, and verification scripts.
 
-**Structure**:
 ```
 CLAUDE/UPGRADES/
 ├── README.md                     # Upgrade system documentation
 ├── upgrade-template/             # Template for new upgrade guides
 ├── v1/                           # Upgrades FROM v1.x versions
-│   └── v1.10-to-v2.0/
 └── v2/                           # Upgrades FROM v2.x versions
     └── v2.0-to-v2.1/
         ├── v2.0-to-v2.1.md       # Main upgrade guide
@@ -543,12 +452,6 @@ CLAUDE/UPGRADES/
         ├── verification.sh       # Verification script
         └── examples/             # Expected outputs
 ```
-
-**Use for**:
-- Detailed step-by-step migration instructions
-- Understanding breaking changes
-- Config migration examples
-- Verification and rollback procedures
 
 ---
 
@@ -561,11 +464,9 @@ When upgrading across multiple versions, follow sequential upgrade path:
 ```bash
 cd .claude/hooks-daemon
 
-# Current version
 CURRENT=$(cat src/claude_code_hooks_daemon/version.py | grep "__version__" | cut -d'"' -f2)
 echo "Current: $CURRENT"
 
-# Available versions
 git fetch --tags
 LATEST=$(git describe --tags $(git rev-list --tags --max-count=1))
 echo "Latest: $LATEST"
@@ -596,9 +497,7 @@ ls -la CLAUDE/UPGRADES/v*/
 
 ### Patch Upgrades (v2.2.0 -> v2.2.1)
 
-- Bug fixes only
-- No config changes required
-- No breaking changes
+- Bug fixes only, no config changes, no breaking changes
 - Just update code and restart daemon
 
 ```bash
@@ -610,123 +509,75 @@ untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
 
 ### Minor Upgrades (v2.1.0 -> v2.2.0)
 
-- New features/handlers
-- May have config additions (backward compatible)
-- No breaking changes
+- New features/handlers, may have config additions (backward compatible)
 - Check UPGRADES guide for new config options
-
-```bash
-# After code update, check for new config options
-cat CLAUDE/UPGRADES/v2/v2.1-to-v2.2/config-additions.yaml
-# Add relevant new options to .claude/hooks-daemon.yaml
-```
 
 ### Major Upgrades (v2.x -> v3.0)
 
-- Breaking changes likely
-- Config structure may change
-- Handler API may change
+- Breaking changes likely, config structure may change
 - MUST follow UPGRADES guide step-by-step
-- Backup everything before proceeding
-
-```bash
-# Always read the full upgrade guide first
-cat CLAUDE/UPGRADES/v2/v2.x-to-v3.0/v2.x-to-v3.0.md
-
-# Follow migration steps exactly
-```
-
----
-
-## Config Migration
-
-### Check for Config Changes
-
-After updating code, compare your config with the new template:
-
-```bash
-cd .claude/hooks-daemon
-
-# View default config template
-cat install.py | grep -A 100 "DEFAULT_CONFIG"
-
-# Or regenerate fresh template (doesn't overwrite existing)
-untracked/venv/bin/python -c "
-from install import generate_hooks_daemon_config
-print(generate_hooks_daemon_config())
-"
-```
-
-### Apply Config Additions
-
-If upgrade guide includes `config-additions.yaml`:
-
-```bash
-# Read the additions
-cat CLAUDE/UPGRADES/v2/v2.0-to-v2.1/config-additions.yaml
-
-# Manually merge into your config
-# (DO NOT blindly replace - merge new sections only)
-```
-
-### Validate Config
-
-```bash
-cd .claude/hooks-daemon
-untracked/venv/bin/python -c "
-import yaml
-from pathlib import Path
-config = yaml.safe_load(Path('../hooks-daemon.yaml').read_text())
-print('Config valid:', 'handlers' in config and 'daemon' in config)
-"
-```
-
----
-
-## Verification Steps
-
-### Quick Verification
-
-```bash
-cd .claude/hooks-daemon
-VENV_PYTHON=untracked/venv/bin/python
-
-# 1. Version check
-$VENV_PYTHON -c "from claude_code_hooks_daemon.version import __version__; print(f'Version: {__version__}')"
-
-# 2. Daemon status
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli status
-
-# 3. Hook test
-echo '{"tool_name":"Bash","tool_input":{"command":"ls"}}' | ../../.claude/hooks/pre-tool-use
-```
-
-### Full Verification (for major upgrades)
-
-```bash
-cd .claude/hooks-daemon
-
-# Run tests (optional - for thorough verification)
-./scripts/qa/run_tests.sh
-
-# Check all QA passes
-./scripts/qa/run_all.sh
-```
-
-### Run Version-Specific Verification
-
-If upgrade guide includes verification script:
-
-```bash
-cd .claude/hooks-daemon
-bash CLAUDE/UPGRADES/v2/v2.0-to-v2.1/verification.sh
-```
 
 ---
 
 ## Rollback Instructions
 
-### Quick Rollback
+### Automatic Rollback (via Layer 2 Upgrade Script)
+
+The Layer 2 upgrade orchestrator (`scripts/upgrade_version.sh`) creates state snapshots before any changes. If the upgrade fails at any step, it automatically restores the snapshot.
+
+Snapshots are stored at:
+```
+.claude/hooks-daemon/untracked/upgrade-snapshots/{timestamp}/
+├── manifest.json       # Metadata: version, timestamp, files list
+└── files/
+    ├── hooks/          # All hook forwarder scripts
+    ├── hooks-daemon.yaml
+    ├── settings.json
+    └── init.sh
+```
+
+The 5 most recent snapshots are retained; older ones are automatically cleaned up.
+
+### Manual Rollback (from Snapshot)
+
+If you need to manually restore from a snapshot:
+
+```bash
+DAEMON_DIR=.claude/hooks-daemon
+
+# List available snapshots
+ls -la "$DAEMON_DIR/untracked/upgrade-snapshots/"
+
+# Pick the most recent
+SNAPSHOT=$(ls -d "$DAEMON_DIR/untracked/upgrade-snapshots/"* | sort -r | head -1)
+echo "Restoring from: $SNAPSHOT"
+
+# Stop daemon
+"$DAEMON_DIR/untracked/venv/bin/python" -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
+
+# Restore config
+cp "$SNAPSHOT/files/hooks-daemon.yaml" .claude/hooks-daemon.yaml
+
+# Restore settings
+cp "$SNAPSHOT/files/settings.json" .claude/settings.json 2>/dev/null || true
+
+# Restore hooks
+cp "$SNAPSHOT/files/hooks/"* .claude/hooks/ 2>/dev/null || true
+
+# Check manifest for original version
+cat "$SNAPSHOT/manifest.json"
+
+# Checkout original version (from manifest)
+cd "$DAEMON_DIR"
+git checkout <version-from-manifest>
+untracked/venv/bin/pip install -e .
+
+# Restart
+cd ../..
+"$DAEMON_DIR/untracked/venv/bin/python" -m claude_code_hooks_daemon.daemon.cli restart
+```
+
+### Quick Rollback (Config Only)
 
 ```bash
 cd .claude/hooks-daemon
@@ -763,32 +614,109 @@ rm -rf hooks-daemon
 
 ---
 
+## Config Migration
+
+### Automatic (via Layer 2 Upgrade)
+
+The Layer 2 upgrade script handles config migration automatically using the config preservation pipeline:
+
+1. Backs up current config
+2. Extracts your customizations (diff against old defaults)
+3. Merges customizations into new version's defaults
+4. Validates the merged result
+5. Reports any incompatibilities
+
+You only need to act if incompatibilities are reported.
+
+### Manual Config Migration
+
+After updating code, compare your config with the new template:
+
+```bash
+cd .claude/hooks-daemon
+VENV_PYTHON=untracked/venv/bin/python
+
+# Generate new default config
+$VENV_PYTHON -c "
+from claude_code_hooks_daemon.daemon.init_config import generate_config
+print(generate_config(mode='full'))
+" > /tmp/new_default_config.yaml
+
+# Diff against your config
+diff ../hooks-daemon.yaml /tmp/new_default_config.yaml
+```
+
+### Config Preservation CLI
+
+The daemon includes CLI commands for config operations:
+
+```bash
+VENV_PYTHON=.claude/hooks-daemon/untracked/venv/bin/python
+
+# Diff: find customizations between old default and user config
+$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli config-diff \
+  --old-default /tmp/old_default.yaml \
+  --user-config .claude/hooks-daemon.yaml
+
+# Merge: apply customizations to new default
+$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli config-merge \
+  --new-default /tmp/new_default.yaml \
+  --custom-diff /tmp/custom_diff.yaml
+
+# Validate: check config structure
+$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli config-validate \
+  --config .claude/hooks-daemon.yaml
+```
+
+---
+
+## Verification Steps
+
+### Quick Verification
+
+```bash
+cd .claude/hooks-daemon
+VENV_PYTHON=untracked/venv/bin/python
+
+# 1. Version check
+$VENV_PYTHON -c "from claude_code_hooks_daemon.version import __version__; print(f'Version: {__version__}')"
+
+# 2. Daemon status
+$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli status
+
+# 3. Hook test
+echo '{"tool_name":"Bash","tool_input":{"command":"ls"}}' | ../../.claude/hooks/pre-tool-use
+```
+
+### Full Verification (for major upgrades)
+
+```bash
+cd .claude/hooks-daemon
+
+# Run tests (optional - for thorough verification)
+./scripts/qa/run_tests.sh
+
+# Check all QA passes
+./scripts/qa/run_all.sh
+```
+
+---
+
 ## Troubleshooting
 
 **All commands below are run from the PROJECT ROOT** (not from inside `.claude/hooks-daemon/`).
 
 ### "PROTECTION NOT ACTIVE" Error During Upgrade
 
-**This is expected during upgrade.** When the daemon is stopped for code checkout, hook forwarders will report this error. It does NOT mean your system is broken.
-
-**What to do**: Continue with the upgrade steps. The daemon will be restarted as part of the upgrade process. This error will clear once the daemon is running again.
-
-**When to worry**: Only if this error persists AFTER the upgrade is complete and the daemon has been restarted.
+**This is expected during upgrade.** When the daemon is stopped for code checkout, hook forwarders will report this error. It does NOT mean your system is broken. Continue with the upgrade steps. The daemon will be restarted as part of the upgrade process.
 
 ### Update Fails to Pull
 
 ```bash
-# Check for local modifications in hooks-daemon
 git -C .claude/hooks-daemon status
-
-# If dirty, stash changes
 git -C .claude/hooks-daemon stash
-
-# Try update again
 git -C .claude/hooks-daemon fetch --tags
 git -C .claude/hooks-daemon checkout "$LATEST_TAG"
-
-# Restore stashed changes (if any)
 git -C .claude/hooks-daemon stash pop
 ```
 
@@ -827,7 +755,6 @@ If hooks still fail: Restart Claude Code session (only needed if new event types
 ### Config Validation Errors
 
 ```bash
-# Validate YAML syntax (from project root)
 python3 -c "
 import yaml
 try:
@@ -838,20 +765,9 @@ except Exception as e:
 "
 ```
 
-### Wrong Directory Errors
+### Layer 2 Upgrader Not Found (Legacy Fallback)
 
-If you see errors about missing files or directories:
-
-```bash
-# Check where you are
-pwd
-
-# Check if you are at the project root
-ls .claude/hooks-daemon.yaml 2>/dev/null && echo "At project root" || echo "NOT at project root"
-
-# If not at project root, find it
-PROJ=$(pwd); while [ "$PROJ" != "/" ]; do [ -f "$PROJ/.claude/hooks-daemon.yaml" ] && break; PROJ=$(dirname "$PROJ"); done; echo "Project root: $PROJ"
-```
+If you see "Layer 2 upgrader not found" during upgrade, the currently installed version predates the two-layer architecture. The legacy fallback (stop, checkout, pip install, restart) will handle the upgrade. After upgrading, future upgrades will use the full Layer 2 flow.
 
 ### Venv Broken After Update
 
@@ -905,17 +821,6 @@ if [ "$CURRENT" != "${LATEST#v}" ]; then
 else
   echo "Already at latest version"
 fi
-```
-
-### Reading Release Notes Before Update
-
-```bash
-git -C .claude/hooks-daemon fetch --tags
-LATEST=$(git -C .claude/hooks-daemon describe --tags $(git -C .claude/hooks-daemon rev-list --tags --max-count=1))
-
-# Preview release notes (without checking out)
-git -C .claude/hooks-daemon show "$LATEST:RELEASES/${LATEST}.md" 2>/dev/null || \
-  echo "Release notes will be available after checkout"
 ```
 
 ---

@@ -238,9 +238,72 @@ Some features require specific config versions. Document in upgrade guides:
 version: "1.0"  # Config format version
 ```
 
-## Emergency Rollback
+## State Snapshot System
 
-If upgrade fails:
+The Layer 2 upgrade orchestrator (`scripts/upgrade_version.sh`) creates full state snapshots before modifying any files. This enables automatic rollback on failure.
+
+### Snapshot Structure
+
+```
+{daemon_dir}/untracked/upgrade-snapshots/{timestamp}/
+├── manifest.json       # Metadata: version, timestamp, files list
+└── files/
+    ├── hooks/          # All hook forwarder scripts (.claude/hooks/*)
+    ├── hooks-daemon.yaml  # User config
+    ├── settings.json      # Hook registration
+    └── init.sh            # Daemon lifecycle script
+```
+
+### Snapshot Lifecycle
+
+1. **Created**: Before any upgrade modifications begin
+2. **Used for rollback**: If any upgrade step fails, the EXIT trap restores from snapshot
+3. **Retained**: 5 most recent snapshots kept; older ones cleaned up automatically
+4. **Manual access**: Snapshots persist in `untracked/upgrade-snapshots/` for manual recovery
+
+### Automatic Rollback
+
+The Layer 2 upgrade script sets an EXIT trap that triggers on any non-zero exit. The rollback:
+1. Restores all files from snapshot (hooks, config, settings.json)
+2. Checks out the original git version
+3. Restarts the daemon with restored state
+4. Reports rollback status
+
+### Manual Rollback from Snapshot
+
+```bash
+DAEMON_DIR=.claude/hooks-daemon
+
+# List available snapshots
+ls -la "$DAEMON_DIR/untracked/upgrade-snapshots/"
+
+# Pick the most recent
+SNAPSHOT=$(ls -d "$DAEMON_DIR/untracked/upgrade-snapshots/"* | sort -r | head -1)
+
+# View snapshot metadata
+cat "$SNAPSHOT/manifest.json"
+
+# Stop daemon
+"$DAEMON_DIR/untracked/venv/bin/python" -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
+
+# Restore files
+cp "$SNAPSHOT/files/hooks-daemon.yaml" .claude/hooks-daemon.yaml
+cp "$SNAPSHOT/files/settings.json" .claude/settings.json 2>/dev/null || true
+cp "$SNAPSHOT/files/hooks/"* .claude/hooks/ 2>/dev/null || true
+
+# Checkout original version (read from manifest.json)
+cd "$DAEMON_DIR"
+git checkout <version-from-manifest>
+untracked/venv/bin/pip install -e .
+
+# Restart
+cd ../..
+"$DAEMON_DIR/untracked/venv/bin/python" -m claude_code_hooks_daemon.daemon.cli restart
+```
+
+## Emergency Rollback (No Snapshots)
+
+If upgrade fails and no snapshots are available (e.g., upgrading from a version before the snapshot system):
 
 1. **Restore config backup**:
    ```bash
@@ -327,11 +390,18 @@ A: Yes! Use the template and have an LLM document changes between versions.
 **Q: What if verification fails?**
 A: Follow rollback instructions, then file an issue with error details.
 
+## Two-Layer Upgrade Architecture
+
+The upgrade system uses a two-layer design:
+
+- **Layer 1** (`scripts/upgrade.sh`): Minimal, stable script fetched via curl from GitHub. Detects project root, fetches tags, delegates to Layer 2 via `exec`. Falls back to legacy inline upgrade for older versions without Layer 2.
+- **Layer 2** (`scripts/upgrade_version.sh`): Version-specific orchestrator that sources the shared modular library (`scripts/install/*.sh`). Implements "Upgrade = Clean Reinstall + Config Preservation" with automatic rollback.
+
+The per-version upgrade guides in this directory complement the automated Layer 2 flow by documenting breaking changes, config migrations, and manual steps that require human/LLM decision-making.
+
 ## Future Enhancements
 
-- Automated upgrade scripts (for simple upgrades)
 - Version compatibility matrix
-- Migration helpers for complex changes
 - Templates for different upgrade types (minor, major, hotfix)
 
 ## Support
