@@ -351,6 +351,36 @@ class TestMainFunction:
         register_calls = mock_fc_instance.register.call_args_list
         assert isinstance(register_calls, list)
 
+    @patch("claude_code_hooks_daemon.hooks.post_tool_use.FrontController")
+    @patch("claude_code_hooks_daemon.hooks.post_tool_use.load_config_safe")
+    def test_skips_handler_when_init_raises_runtime_error(
+        self, mock_load_config: Mock, mock_fc_class: Mock
+    ) -> None:
+        """Handlers whose __init__ raises RuntimeError are skipped gracefully."""
+        config = {
+            "handlers": {
+                "post_tool_use": {
+                    "some_handler": {"enabled": True},
+                }
+            },
+            "daemon": {},
+        }
+        mock_load_config.return_value = config
+        mock_fc_instance = Mock()
+        mock_fc_class.return_value = mock_fc_instance
+
+        mock_handler_class = Mock(side_effect=RuntimeError("ProjectContext not initialized"))
+
+        with patch(
+            "claude_code_hooks_daemon.hooks.post_tool_use.get_builtin_handlers",
+            return_value={"some_handler": mock_handler_class},
+        ):
+            main()
+
+        register_calls = mock_fc_instance.register.call_args_list
+        assert len(register_calls) == 0
+        mock_fc_instance.run.assert_called_once()
+
     @patch("claude_code_hooks_daemon.hooks.post_tool_use.ConfigLoader.find_config")
     @patch("claude_code_hooks_daemon.hooks.post_tool_use.FrontController")
     @patch("claude_code_hooks_daemon.hooks.post_tool_use.load_config_safe")

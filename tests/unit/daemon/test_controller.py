@@ -506,6 +506,254 @@ class TestDaemonController:
         assert stats.errors == 1
 
 
+class TestControllerPluginLoadingEdgeCases:
+    """Tests for _load_plugins edge cases in DaemonController."""
+
+    def teardown_method(self) -> None:
+        """Reset ProjectContext after each test."""
+        ProjectContext.reset()
+
+    @pytest.fixture
+    def workspace_root(self, tmp_path: Path) -> Path:
+        """Create a workspace root with config file for testing."""
+        workspace = tmp_path / "test-workspace"
+        claude_dir = workspace / ".claude"
+        claude_dir.mkdir(parents=True)
+        config_file = claude_dir / "hooks-daemon.yaml"
+        config_file.write_text(
+            "version: '1.0'\n"
+            "daemon:\n"
+            "  idle_timeout_seconds: 600\n"
+            "  log_level: INFO\n"
+            "handlers:\n"
+            "  pre_tool_use: {}\n"
+        )
+        return workspace
+
+    def test_load_plugins_returns_zero_when_no_handlers_loaded(self, workspace_root: Path) -> None:
+        """_load_plugins returns 0 when PluginLoader returns empty handlers list."""
+        from claude_code_hooks_daemon.config.models import PluginsConfig
+
+        controller = DaemonController()
+        plugins_config = PluginsConfig(paths=[], plugins=[])
+
+        result = controller._load_plugins(plugins_config, workspace_root)
+
+        assert result == 0
+
+    def test_load_plugins_skips_handler_with_no_matching_plugin(self, workspace_root: Path) -> None:
+        """_load_plugins skips handler when class name doesn't match any plugin config."""
+        from claude_code_hooks_daemon.config.models import PluginConfig, PluginsConfig
+        from claude_code_hooks_daemon.constants import HandlerID, Priority
+        from claude_code_hooks_daemon.core import Handler, HookResult
+
+        # Create a mock handler that won't match any plugin's expected class name
+        class UnmatchedHandler(Handler):
+            def __init__(self) -> None:
+                super().__init__(
+                    handler_id=HandlerID.DESTRUCTIVE_GIT,
+                    priority=Priority.DESTRUCTIVE_GIT,
+                    terminal=False,
+                )
+
+            def matches(self, hook_input: dict[str, Any]) -> bool:
+                return False
+
+            def handle(self, hook_input: dict[str, Any]) -> HookResult:
+                return HookResult.allow()
+
+            def get_acceptance_tests(self) -> list:
+                return []
+
+        plugins_config = PluginsConfig(
+            paths=[],
+            plugins=[
+                PluginConfig(
+                    path="some_other_module",
+                    event_type="pre_tool_use",
+                    enabled=True,
+                ),
+            ],
+        )
+
+        controller = DaemonController()
+
+        # Patch at the module level where PluginLoader is imported inside _load_plugins
+        with patch(
+            "claude_code_hooks_daemon.plugins.loader.PluginLoader.load_from_plugins_config",
+            return_value=[UnmatchedHandler()],
+        ):
+            result = controller._load_plugins(plugins_config, workspace_root)
+
+        # Handler should be skipped (no matching plugin config for class name)
+        assert result == 0
+
+    def test_load_plugins_skips_handler_with_invalid_event_type(
+        self, workspace_root: Path, tmp_path: Path
+    ) -> None:
+        """_load_plugins skips handler when event_type string is invalid."""
+        from claude_code_hooks_daemon.config.models import PluginConfig, PluginsConfig
+        from claude_code_hooks_daemon.constants import HandlerID, Priority
+        from claude_code_hooks_daemon.core import Handler, HookResult
+
+        class SomeModule(Handler):
+            def __init__(self) -> None:
+                super().__init__(
+                    handler_id=HandlerID.DESTRUCTIVE_GIT,
+                    priority=Priority.DESTRUCTIVE_GIT,
+                    terminal=False,
+                )
+
+            def matches(self, hook_input: dict[str, Any]) -> bool:
+                return False
+
+            def handle(self, hook_input: dict[str, Any]) -> HookResult:
+                return HookResult.allow()
+
+            def get_acceptance_tests(self) -> list:
+                return []
+
+        # Use a valid Pydantic Literal but mock EventType.from_string to raise ValueError
+        plugins_config = PluginsConfig(
+            paths=[],
+            plugins=[
+                PluginConfig(
+                    path="some_module.py",
+                    event_type="pre_tool_use",
+                    enabled=True,
+                ),
+            ],
+        )
+
+        controller = DaemonController()
+
+        with (
+            patch(
+                "claude_code_hooks_daemon.plugins.loader.PluginLoader.load_from_plugins_config",
+                return_value=[SomeModule()],
+            ),
+            patch(
+                "claude_code_hooks_daemon.daemon.controller.EventType.from_string",
+                side_effect=ValueError("Invalid event type"),
+            ),
+        ):
+            result = controller._load_plugins(plugins_config, workspace_root)
+
+        # Handler should be skipped due to invalid event type
+        assert result == 0
+
+
+class TestControllerProcessEventErrors:
+    """Tests for process_event error handling."""
+
+    def teardown_method(self) -> None:
+        """Reset ProjectContext after each test."""
+        ProjectContext.reset()
+
+    @pytest.fixture
+    def workspace_root(self, tmp_path: Path) -> Path:
+        """Create a workspace root with config file for testing."""
+        workspace = tmp_path / "test-workspace"
+        claude_dir = workspace / ".claude"
+        claude_dir.mkdir(parents=True)
+        config_file = claude_dir / "hooks-daemon.yaml"
+        config_file.write_text(
+            "version: '1.0'\n"
+            "daemon:\n"
+            "  idle_timeout_seconds: 600\n"
+            "  log_level: INFO\n"
+            "handlers:\n"
+            "  pre_tool_use: {}\n"
+        )
+        return workspace
+
+    def _make_initialised_controller(self, workspace_root: Path) -> DaemonController:
+        """Create and initialise a controller not in degraded mode."""
+        controller = DaemonController()
+
+        with (
+            patch("subprocess.run") as mock_run,
+            patch(
+                "claude_code_hooks_daemon.daemon.controller.ConfigValidator.validate",
+                return_value=[],
+            ),
+        ):
+            mock_run.side_effect = [
+                Mock(returncode=0, stdout=b"/tmp/test\n"),
+                Mock(returncode=0, stdout=b"git@github.com:test/repo.git\n"),
+                Mock(returncode=0, stdout=b"/tmp/test\n"),
+            ]
+            controller.initialise(workspace_root=workspace_root)
+
+        assert controller.is_degraded is False
+        return controller
+
+    def test_process_event_router_exception_returns_error_result(
+        self, workspace_root: Path
+    ) -> None:
+        """process_event returns error result when router.route raises unexpected Exception."""
+        from claude_code_hooks_daemon.core.event import HookInput
+        from claude_code_hooks_daemon.core.hook_result import Decision
+        from claude_code_hooks_daemon.core.router import EventRouter
+
+        controller = self._make_initialised_controller(workspace_root)
+
+        event = HookEvent(
+            event=EventType.PRE_TOOL_USE,
+            hook_input=HookInput(
+                tool_name="Bash",
+                tool_input={"command": "ls"},
+                transcript_path="/tmp/transcript.jsonl",
+            ),
+        )
+
+        # Patch route at the class level since EventRouter uses __slots__
+        with patch.object(EventRouter, "route", side_effect=RuntimeError("Router exploded")):
+            result = controller.process_event(event)
+
+        # Should return error result (fail-open)
+        assert result.result.decision == Decision.ALLOW
+        context_text = " ".join(result.result.context)
+        assert "error" in context_text.lower() or "ERROR" in context_text
+        assert controller.get_stats().errors == 1
+
+    def test_process_event_records_error_on_handler_crash_in_context(
+        self, workspace_root: Path
+    ) -> None:
+        """process_event records error when handler exception is in result context."""
+        from claude_code_hooks_daemon.core.chain import ChainExecutionResult
+        from claude_code_hooks_daemon.core.event import HookInput
+        from claude_code_hooks_daemon.core.hook_result import HookResult as HR
+        from claude_code_hooks_daemon.core.router import EventRouter
+
+        controller = self._make_initialised_controller(workspace_root)
+
+        event = HookEvent(
+            event=EventType.PRE_TOOL_USE,
+            hook_input=HookInput(
+                tool_name="Bash",
+                tool_input={"command": "ls"},
+                transcript_path="/tmp/transcript.jsonl",
+            ),
+        )
+
+        # Mock route to return result with handler exception in context
+        mock_result = ChainExecutionResult(
+            result=HR(
+                context=["Handler exception: SomeHandler crashed with RuntimeError"],
+            ),
+            execution_time_ms=1.0,
+            handlers_matched=["some-handler"],
+        )
+
+        # Patch route at the class level since EventRouter uses __slots__
+        with patch.object(EventRouter, "route", return_value=mock_result):
+            result = controller.process_event(event)
+
+        # Stats should record error since context contains "Handler exception:"
+        assert controller.get_stats().errors == 1
+
+
 class TestGlobalController:
     """Tests for global controller functions."""
 

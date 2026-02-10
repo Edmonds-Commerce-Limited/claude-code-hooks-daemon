@@ -232,3 +232,26 @@ class TestHelloWorldNonTerminalBehavior:
         assert handler.terminal is False
         # This means if this handler matches and executes,
         # the FrontController will continue to next handler
+
+
+class TestHelloWorldGetAcceptanceTests:
+    """Test that all hello_world handlers provide acceptance tests."""
+
+    @pytest.mark.parametrize("handler_class,event_name,sample_input", ALL_HANDLERS)
+    def test_get_acceptance_tests_returns_non_empty_list(
+        self, handler_class, event_name, sample_input
+    ):
+        """get_acceptance_tests() should return a non-empty list."""
+        handler = handler_class()
+        tests = handler.get_acceptance_tests()
+        assert isinstance(tests, list)
+        assert len(tests) > 0
+
+    @pytest.mark.parametrize("handler_class,event_name,sample_input", ALL_HANDLERS)
+    def test_get_acceptance_tests_have_title(self, handler_class, event_name, sample_input):
+        """Each acceptance test should have a title."""
+        handler = handler_class()
+        tests = handler.get_acceptance_tests()
+        for test in tests:
+            assert hasattr(test, "title")
+            assert test.title

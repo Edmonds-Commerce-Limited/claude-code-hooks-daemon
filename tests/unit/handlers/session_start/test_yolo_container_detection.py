@@ -7,7 +7,7 @@ about running in a YOLO container environment during SessionStart.
 
 import json
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -703,3 +703,244 @@ class TestYoloContainerDetectionIntegration:
             result = handler.matches(hook_input)
             # Should fail open (not match)
             assert result is False
+
+    def test_matches_generic_exception_returns_false(self, monkeypatch):
+        """Test matches returns False on generic Exception in confidence calc."""
+        monkeypatch.setenv("CLAUDECODE", "1")
+
+        handler = YoloContainerDetectionHandler()
+
+        with patch.object(
+            handler, "_calculate_confidence_score", side_effect=Exception("Unexpected")
+        ):
+            hook_input = {"hook_event_name": "SessionStart"}
+            result = handler.matches(hook_input)
+            assert result is False
+
+
+class TestYoloContainerDetectionConfidenceConfigDir:
+    """Test confidence scoring with config_dir existing."""
+
+    def test_confidence_score_with_workspace_and_config_dir(self):
+        """Test /workspace root + config_dir existing gives 3 points."""
+        mock_config_dir_path = MagicMock(spec=Path)
+        mock_config_dir_path.exists.return_value = True
+
+        with (
+            patch(
+                "claude_code_hooks_daemon.handlers.session_start.yolo_container_detection.ProjectContext.project_root",
+                return_value=Path("/workspace"),
+            ),
+            patch(
+                "claude_code_hooks_daemon.handlers.session_start.yolo_container_detection.ProjectContext.config_dir",
+                return_value=mock_config_dir_path,
+            ),
+            patch("os.getuid", return_value=1000),
+        ):
+            handler = YoloContainerDetectionHandler()
+            score = handler._calculate_confidence_score()
+            assert score >= 3
+
+    def test_confidence_generic_exception_returns_zero(self):
+        """Test generic Exception in confidence scoring returns 0."""
+        handler = YoloContainerDetectionHandler()
+
+        with patch("os.environ.get", side_effect=Exception("Totally unexpected")):
+            score = handler._calculate_confidence_score()
+            assert score == 0
+
+
+class TestYoloContainerDetectionIndicatorEdgeCases:
+    """Test indicator detection edge cases."""
+
+    def test_indicators_with_workspace_root_and_claude_dir(self):
+        """Test indicators include /workspace with .claude/ present."""
+        mock_config_dir_path = MagicMock(spec=Path)
+        mock_config_dir_path.exists.return_value = True
+
+        with (
+            patch(
+                "claude_code_hooks_daemon.handlers.session_start.yolo_container_detection.ProjectContext.project_root",
+                return_value=Path("/workspace"),
+            ),
+            patch(
+                "claude_code_hooks_daemon.handlers.session_start.yolo_container_detection.ProjectContext.config_dir",
+                return_value=mock_config_dir_path,
+            ),
+            patch("os.getuid", return_value=1000),
+        ):
+            handler = YoloContainerDetectionHandler()
+            indicators = handler._get_detected_indicators()
+            assert any("/workspace" in ind for ind in indicators)
+
+    def test_indicators_with_socket_path_existing(self):
+        """Test indicators include socket path when it exists."""
+        handler = YoloContainerDetectionHandler()
+
+        original_exists = Path.exists
+
+        def selective_exists(self_path: Path) -> bool:
+            if "hooks-daemon/untracked/venv/socket" in str(self_path):
+                return True
+            return original_exists(self_path)
+
+        with (
+            patch.object(Path, "exists", selective_exists),
+            patch("os.getuid", return_value=1000),
+        ):
+            indicators = handler._get_detected_indicators()
+            assert any("socket" in ind.lower() for ind in indicators)
+
+    def test_indicators_socket_path_oserror(self):
+        """Test indicators handle OSError when checking socket path."""
+        handler = YoloContainerDetectionHandler()
+
+        original_exists = Path.exists
+
+        def exists_raises_for_socket(self_path: Path) -> bool:
+            if "hooks-daemon" in str(self_path):
+                raise OSError("Permission denied")
+            return original_exists(self_path)
+
+        with (
+            patch.object(Path, "exists", exists_raises_for_socket),
+            patch("os.getuid", return_value=1000),
+        ):
+            indicators = handler._get_detected_indicators()
+            # Should not crash, should skip socket indicator
+            assert isinstance(indicators, list)
+            assert not any("socket" in ind.lower() for ind in indicators)
+
+    def test_indicators_with_root_user_uid_zero(self):
+        """Test indicators include root user when uid=0."""
+        handler = YoloContainerDetectionHandler()
+
+        with patch("os.getuid", return_value=0):
+            indicators = handler._get_detected_indicators()
+            assert any("root" in ind.lower() or "UID 0" in ind for ind in indicators)
+
+    def test_indicators_getuid_attribute_error(self):
+        """Test indicators handle missing os.getuid (Windows)."""
+        handler = YoloContainerDetectionHandler()
+
+        with patch("os.getuid", side_effect=AttributeError("no getuid")):
+            indicators = handler._get_detected_indicators()
+            assert isinstance(indicators, list)
+            assert not any("root" in ind.lower() for ind in indicators)
+
+    def test_indicators_generic_exception_returns_empty(self):
+        """Test indicators return empty list on generic Exception."""
+        handler = YoloContainerDetectionHandler()
+
+        with patch("os.environ.get", side_effect=Exception("Totally unexpected")):
+            indicators = handler._get_detected_indicators()
+            assert indicators == []
+
+
+class TestYoloContainerDetectionIsResumeSession:
+    """Test _is_resume_session method."""
+
+    def test_is_resume_session_with_large_file(self, tmp_path):
+        """Test _is_resume_session returns True for file >100 bytes."""
+        handler = YoloContainerDetectionHandler()
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text("x" * 200)
+
+        hook_input = {"transcript_path": str(transcript)}
+        assert handler._is_resume_session(hook_input) is True
+
+    def test_is_resume_session_nonexistent_file(self, tmp_path):
+        """Test _is_resume_session returns False for non-existent file."""
+        handler = YoloContainerDetectionHandler()
+        hook_input = {"transcript_path": str(tmp_path / "nonexistent.jsonl")}
+        assert handler._is_resume_session(hook_input) is False
+
+    def test_is_resume_session_oserror(self, tmp_path):
+        """Test _is_resume_session returns False on OSError."""
+        handler = YoloContainerDetectionHandler()
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text("x" * 200)
+
+        hook_input = {"transcript_path": str(transcript)}
+        with patch("pathlib.Path.stat", side_effect=OSError("Permission denied")):
+            assert handler._is_resume_session(hook_input) is False
+
+
+class TestYoloContainerDetectionHandleEdgeCases:
+    """Test handle() edge cases."""
+
+    def test_handle_with_workflow_tips_disabled(self, monkeypatch):
+        """Test handle excludes workflow tips when disabled."""
+        monkeypatch.setenv("CLAUDECODE", "1")
+
+        handler = YoloContainerDetectionHandler()
+        handler.configure({"show_workflow_tips": False})
+
+        hook_input = {"hook_event_name": "SessionStart"}
+        result = handler.handle(hook_input)
+
+        context_text = " ".join(result.context)
+        assert "Container workflow implications" not in context_text
+
+    def test_handle_generic_exception_returns_deny(self, monkeypatch):
+        """Test handle returns DENY on generic Exception."""
+        monkeypatch.setenv("CLAUDECODE", "1")
+
+        handler = YoloContainerDetectionHandler()
+
+        with patch.object(handler, "_is_resume_session", side_effect=Exception("Unexpected error")):
+            hook_input = {"hook_event_name": "SessionStart"}
+            result = handler.handle(hook_input)
+            assert result.decision == "deny"
+            assert "YOLO handler error" in result.reason
+
+    def test_handle_oserror_returns_allow_with_warning(self, monkeypatch):
+        """Test handle returns ALLOW with warning on OSError."""
+        monkeypatch.setenv("CLAUDECODE", "1")
+
+        handler = YoloContainerDetectionHandler()
+
+        with patch.object(handler, "_is_resume_session", side_effect=OSError("File system error")):
+            hook_input = {"hook_event_name": "SessionStart"}
+            result = handler.handle(hook_input)
+            assert result.decision == "allow"
+            assert any("detection failed" in c for c in result.context)
+
+    def test_handle_resume_session_brief_message(self, monkeypatch, tmp_path):
+        """Test handle returns brief message for resume sessions."""
+        monkeypatch.setenv("CLAUDECODE", "1")
+
+        handler = YoloContainerDetectionHandler()
+
+        # Create a large transcript file to simulate resume
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text("x" * 200)
+
+        hook_input = {
+            "hook_event_name": "SessionStart",
+            "transcript_path": str(transcript),
+        }
+        result = handler.handle(hook_input)
+        assert result.decision == "allow"
+        # Resume gets brief message without workflow tips
+        context_text = " ".join(result.context)
+        assert "YOLO container" in context_text
+        assert "Container workflow implications" not in context_text
+
+    def test_matches_value_error_in_threshold_config(self, monkeypatch):
+        """Test matches returns False when config threshold is non-numeric."""
+        monkeypatch.setenv("CLAUDECODE", "1")
+
+        handler = YoloContainerDetectionHandler()
+        handler.configure({"min_confidence_score": "not_a_number"})
+
+        hook_input = {"hook_event_name": "SessionStart"}
+        result = handler.matches(hook_input)
+        assert result is False
+
+    def test_get_acceptance_tests(self):
+        """Test get_acceptance_tests returns list of tests."""
+        handler = YoloContainerDetectionHandler()
+        tests = handler.get_acceptance_tests()
+        assert isinstance(tests, list)
+        assert len(tests) > 0

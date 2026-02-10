@@ -369,3 +369,121 @@ def test_get_latest_version_returns_none_on_timeout(handler: VersionCheckHandler
 
         version = handler._get_latest_version()
         assert version is None
+
+
+def test_get_cache_file_fallback_on_runtime_error(handler: VersionCheckHandler) -> None:
+    """_get_cache_file falls back when ProjectContext raises RuntimeError."""
+    with patch(
+        "claude_code_hooks_daemon.handlers.session_start.version_check.ProjectContext.daemon_untracked_dir",
+        side_effect=RuntimeError("No project root"),
+    ):
+        cache_file = handler._get_cache_file()
+        assert "version_check_cache.json" in str(cache_file)
+        assert "untracked" in str(cache_file)
+
+
+def test_is_cache_valid_nonexistent_file(handler: VersionCheckHandler, tmp_path: Path) -> None:
+    """_is_cache_valid returns False for non-existent file."""
+    cache_file = tmp_path / "nonexistent_cache.json"
+    assert handler._is_cache_valid(cache_file) is False
+
+
+def test_write_cache_oserror(handler: VersionCheckHandler, tmp_path: Path) -> None:
+    """_write_cache handles OSError gracefully."""
+    # Use a path that can't be written to
+    cache_file = tmp_path / "nonexistent_dir" / "subdir" / "cache.json"
+    with patch("pathlib.Path.mkdir", side_effect=OSError("Permission denied")):
+        # Should not raise
+        handler._write_cache(cache_file, {"test": True})
+
+
+def test_get_latest_version_empty_lines(handler: VersionCheckHandler) -> None:
+    """_get_latest_version handles output with empty lines."""
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="\n\nabc123\trefs/tags/v2.8.0\n\n",
+        )
+
+        version = handler._get_latest_version()
+        assert version == "2.8.0"
+
+
+def test_get_latest_version_no_v_prefix_tag(handler: VersionCheckHandler) -> None:
+    """_get_latest_version returns tag without v prefix as-is."""
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="abc123\trefs/tags/2.8.0\n",
+        )
+
+        version = handler._get_latest_version()
+        assert version == "2.8.0"
+
+
+def test_get_latest_version_no_valid_tags(handler: VersionCheckHandler) -> None:
+    """_get_latest_version returns None when no valid tags found."""
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="",
+        )
+
+        version = handler._get_latest_version()
+        assert version is None
+
+
+def test_is_resume_session_oserror(handler: VersionCheckHandler, tmp_path: Path) -> None:
+    """_is_resume_session returns False on OSError."""
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text("x" * 200)
+
+    hook_input = {"transcript_path": str(transcript)}
+    with patch("pathlib.Path.stat", side_effect=OSError("Permission denied")):
+        assert handler._is_resume_session(hook_input) is False
+
+
+@patch("claude_code_hooks_daemon.handlers.session_start.version_check.__version__", "2.6.1")
+def test_handle_with_cached_outdated_result(
+    handler: VersionCheckHandler,
+    new_session_input: dict,
+    tmp_path: Path,
+) -> None:
+    """Handler re-checks when cache says we're outdated."""
+    # Create valid cache showing we're outdated
+    cache_file = tmp_path / "cache.json"
+    cache_data = {
+        "cached_at": time.time(),
+        "current_version": "2.6.1",
+        "latest_version": "2.7.0",
+        "is_outdated": True,
+    }
+    cache_file.write_text(json.dumps(cache_data))
+
+    with (
+        patch.object(handler, "_get_cache_file", return_value=cache_file),
+        patch(
+            "claude_code_hooks_daemon.handlers.session_start.version_check.subprocess.run"
+        ) as mock_run,
+    ):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="abc123\trefs/tags/v2.7.0\n",
+        )
+        result = handler.handle(new_session_input)
+
+    assert result.decision == Decision.ALLOW
+    assert len(result.context) > 0
+    assert "update available" in result.context[0].lower()
+
+
+def test_handle_generic_exception_returns_allow(
+    handler: VersionCheckHandler,
+    new_session_input: dict,
+) -> None:
+    """Handler returns ALLOW on generic Exception."""
+    with patch.object(handler, "_get_cache_file", side_effect=Exception("Unexpected")):
+        result = handler.handle(new_session_input)
+
+    assert result.decision == Decision.ALLOW
+    assert result.context == []

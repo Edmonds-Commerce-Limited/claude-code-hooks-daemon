@@ -323,6 +323,94 @@ class TestHedgingLanguageDetectorHandle:
         assert result.decision == Decision.ALLOW
 
 
+class TestGetLastAssistantMessageEdgeCases:
+    """Test _get_last_assistant_message edge cases for coverage."""
+
+    @pytest.fixture
+    def handler(self) -> Any:
+        from claude_code_hooks_daemon.handlers.stop.hedging_language_detector import (
+            HedgingLanguageDetectorHandler,
+        )
+
+        return HedgingLanguageDetectorHandler()
+
+    def test_skips_non_message_type(self, handler: Any) -> None:
+        """Should skip JSONL entries with type != 'message'."""
+        path = _make_transcript(
+            [
+                {"type": "tool_use", "tool": "Bash"},
+                _assistant_message("I believe this is correct"),
+            ]
+        )
+        # Should still find the assistant message after skipping tool_use
+        result = handler._get_last_assistant_message(path)
+        assert "I believe" in result
+
+    def test_skips_non_message_type_only(self, handler: Any) -> None:
+        """Should return empty string when only non-message types exist."""
+        path = _make_transcript(
+            [
+                {"type": "tool_use", "tool": "Bash"},
+                {"type": "tool_result", "output": "done"},
+            ]
+        )
+        result = handler._get_last_assistant_message(path)
+        assert result == ""
+
+    def test_skips_non_assistant_role(self, handler: Any) -> None:
+        """Should skip messages with non-assistant role."""
+        path = _make_transcript(
+            [
+                _human_message("Tell me about the file"),
+                {
+                    "type": "message",
+                    "message": {"role": "user", "content": [{"type": "text", "text": "hello"}]},
+                },
+            ]
+        )
+        result = handler._get_last_assistant_message(path)
+        assert result == ""
+
+    def test_handles_string_content_parts(self, handler: Any) -> None:
+        """Should handle string content parts (not just dict text blocks)."""
+        path = _make_transcript(
+            [
+                {
+                    "type": "message",
+                    "message": {
+                        "role": "assistant",
+                        "content": ["I believe this is a string part", "and another"],
+                    },
+                }
+            ]
+        )
+        result = handler._get_last_assistant_message(path)
+        assert "I believe" in result
+        assert "and another" in result
+
+    def test_handles_malformed_jsonl_line(self, handler: Any) -> None:
+        """Should continue past malformed JSONL lines."""
+        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False)
+        tmp.write("this is not valid json\n")
+        tmp.write(json.dumps(_assistant_message("I suspect something")) + "\n")
+        tmp.flush()
+        result = handler._get_last_assistant_message(tmp.name)
+        assert "I suspect" in result
+
+    def test_handles_oserror(self, handler: Any, tmp_path: Any) -> None:
+        """Should return empty string on OSError."""
+        # Use a directory path instead of a file to trigger OSError on open
+        result = handler._get_last_assistant_message(str(tmp_path))
+        assert result == ""
+
+    def test_handles_unicode_decode_error(self, handler: Any, tmp_path: Any) -> None:
+        """Should return empty string on UnicodeDecodeError."""
+        binary_file = tmp_path / "transcript.jsonl"
+        binary_file.write_bytes(b"\x80\x81\x82\x83\xff\xfe")
+        result = handler._get_last_assistant_message(str(binary_file))
+        assert result == ""
+
+
 class TestHedgingLanguageDetectorAcceptanceTests:
     """Test acceptance test definitions."""
 
@@ -335,3 +423,15 @@ class TestHedgingLanguageDetectorAcceptanceTests:
         handler = HedgingLanguageDetectorHandler()
         tests = handler.get_acceptance_tests()
         assert len(tests) > 0
+
+    def test_acceptance_tests_have_titles(self) -> None:
+        """Each acceptance test should have a title."""
+        from claude_code_hooks_daemon.handlers.stop.hedging_language_detector import (
+            HedgingLanguageDetectorHandler,
+        )
+
+        handler = HedgingLanguageDetectorHandler()
+        tests = handler.get_acceptance_tests()
+        for test in tests:
+            assert hasattr(test, "title")
+            assert test.title

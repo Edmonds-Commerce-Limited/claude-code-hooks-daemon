@@ -395,6 +395,133 @@ class TestHandleOutput:
             assert "code.claude.com" in context or "docs" in context.lower()
 
 
+class TestIsResumeSessionEdgeCases:
+    """Test _is_resume_session edge cases for coverage."""
+
+    @pytest.fixture
+    def handler(self) -> Any:
+        from claude_code_hooks_daemon.handlers.session_start.optimal_config_checker import (
+            OptimalConfigCheckerHandler,
+        )
+
+        return OptimalConfigCheckerHandler()
+
+    def test_nonexistent_transcript_path_returns_false(self, handler: Any) -> None:
+        """Non-existent transcript path returns False."""
+        hook_input = {HookInputField.TRANSCRIPT_PATH: "/nonexistent/path/transcript.jsonl"}
+        assert handler._is_resume_session(hook_input) is False
+
+    def test_stat_raises_oserror_returns_false(self, handler: Any, tmp_path: Any) -> None:
+        """OSError from path.stat() returns False."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text("x" * 200)
+        hook_input = {HookInputField.TRANSCRIPT_PATH: str(transcript)}
+        with patch("pathlib.Path.stat", side_effect=OSError("Permission denied")):
+            assert handler._is_resume_session(hook_input) is False
+
+    def test_value_error_returns_false(self, handler: Any) -> None:
+        """ValueError from Path construction returns False."""
+        hook_input = {HookInputField.TRANSCRIPT_PATH: "\x00invalid"}
+        assert handler._is_resume_session(hook_input) is False
+
+
+class TestReadGlobalSettingsEdgeCases:
+    """Test _read_global_settings edge cases for coverage."""
+
+    @pytest.fixture
+    def handler(self) -> Any:
+        from claude_code_hooks_daemon.handlers.session_start.optimal_config_checker import (
+            OptimalConfigCheckerHandler,
+        )
+
+        return OptimalConfigCheckerHandler()
+
+    def test_settings_file_does_not_exist_returns_empty(self, handler: Any) -> None:
+        """Returns empty dict when settings.json doesn't exist."""
+        with patch("pathlib.Path.exists", return_value=False):
+            result = handler._read_global_settings()
+            assert result == {}
+
+    def test_invalid_json_returns_empty(self, handler: Any, tmp_path: Any) -> None:
+        """Returns empty dict when settings.json has invalid JSON."""
+        settings_path = tmp_path / "settings.json"
+        settings_path.write_text("not valid json {{{")
+        with patch("pathlib.Path.home", return_value=tmp_path):
+            # Create the .claude directory structure
+            claude_dir = tmp_path / ".claude"
+            claude_dir.mkdir(exist_ok=True)
+            real_settings = claude_dir / "settings.json"
+            real_settings.write_text("not valid json {{{")
+            result = handler._read_global_settings()
+            assert result == {}
+
+    def test_oserror_returns_empty(self, handler: Any) -> None:
+        """Returns empty dict when OSError is raised."""
+        with patch("pathlib.Path.home", side_effect=OSError("Home not found")):
+            result = handler._read_global_settings()
+            assert result == {}
+
+
+class TestMaxOutputTokensNonNumeric:
+    """Test _check_max_output_tokens with non-numeric values."""
+
+    @pytest.fixture
+    def handler(self) -> Any:
+        from claude_code_hooks_daemon.handlers.session_start.optimal_config_checker import (
+            OptimalConfigCheckerHandler,
+        )
+
+        return OptimalConfigCheckerHandler()
+
+    def test_non_numeric_env_var_fails(self, handler: Any) -> None:
+        """Non-numeric CLAUDE_CODE_MAX_OUTPUT_TOKENS fails check."""
+        with patch.dict(os.environ, {"CLAUDE_CODE_MAX_OUTPUT_TOKENS": "abc"}):
+            result = handler._check_max_output_tokens()
+            assert result["passed"] is False
+
+
+class TestHandleMixedResults:
+    """Test handle() with mix of passing and failing checks."""
+
+    @pytest.fixture
+    def handler(self) -> Any:
+        from claude_code_hooks_daemon.handlers.session_start.optimal_config_checker import (
+            OptimalConfigCheckerHandler,
+        )
+
+        return OptimalConfigCheckerHandler()
+
+    def test_mixed_pass_fail_shows_ok_line(self, handler: Any) -> None:
+        """When some checks pass and some fail, output includes OK line."""
+        # Set some passing, some failing
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+                    "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1",
+                },
+            ),
+            patch.object(handler, "_read_global_settings", return_value={}),
+        ):
+            # Agent Teams and Bash Working Dir pass, others fail
+            env = os.environ.copy()
+            env.pop("CLAUDE_CODE_EFFORT_LEVEL", None)
+            env.pop("CLAUDE_CODE_MAX_OUTPUT_TOKENS", None)
+            with patch.dict(os.environ, env, clear=True):
+                with patch.dict(
+                    os.environ,
+                    {
+                        "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+                        "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1",
+                    },
+                ):
+                    result = handler.handle(_session_start_input())
+                    context = "\n".join(result.context)
+                    assert "OK:" in context
+                    assert "Agent Teams" in context or "Bash Working Directory" in context
+
+
 class TestAcceptanceTests:
     """Test acceptance test definitions."""
 
