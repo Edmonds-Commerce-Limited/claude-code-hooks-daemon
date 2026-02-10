@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-02-10
+
+### Added
+- **Config Preservation Engine**: Complete config migration system with differ, merger, validator, and CLI (Plan 00041)
+  - `config_differ.sh` - Detects changes between old and new default configs
+  - `config_merger.sh` - Merges user customizations with new defaults
+  - `config_validator.sh` - Validates merged config integrity
+  - `config_cli.sh` - User-facing commands for config operations
+  - 82 comprehensive tests for config preservation
+- **Modular Bash Install Library**: 14 reusable modules in `scripts/install/` for DRY install/upgrade architecture (Plan 00041)
+  - Core modules: `common.sh`, `logging.sh`, `validation.sh`, `backup.sh`
+  - Config modules: `config_differ.sh`, `config_merger.sh`, `config_validator.sh`, `config_cli.sh`
+  - Install modules: `git_operations.sh`, `venv_setup.sh`, `python_setup.sh`, `hook_scripts.sh`
+  - Upgrade modules: `upgrade_checks.sh`, `rollback.sh`
+- **Layer 2 Orchestrators**: Simplified install/upgrade entry points that delegate to modular library (Plan 00041)
+  - `install_version.sh` - Install orchestrator (116 lines, down from 307)
+  - `upgrade_version.sh` - Upgrade orchestrator (134 lines, down from 612)
+- **VersionCheckHandler**: SessionStart handler that displays current daemon version at session start
+- **Example Config File**: `.claude/hooks-daemon.yaml.example` with comprehensive handler documentation
+- **Dynamic Example Config Validation**: Test ensures all library handlers are present in example config
+
+### Changed
+- **Handler Registry Architecture**: HandlerID constants as single source of truth for config keys (Plan 00039)
+  - All handlers now use `HandlerID.HANDLER_NAME` for self-identification
+  - Config keys automatically derived from handler IDs
+  - Eliminates config key inconsistencies and typos
+- **Status Line Enhancement**: Emoticon-based context display with color-coded quarter circle icons
+  - Context usage now shows with colored emoticons matching percentage scheme
+  - More intuitive visual feedback for context consumption
+- **Install Architecture**: Layer 1 (modular library) + Layer 2 (orchestrators) separation (Plan 00041)
+  - `install.sh` simplified from 307 to 116 lines (delegates to `install_version.sh`)
+  - `upgrade.sh` simplified from 612 to 134 lines (delegates to `upgrade_version.sh`)
+  - All logic now in reusable, testable Bash modules
+- **Release Workflow Documentation**: Added mandatory QA and acceptance testing gates to release process
+  - QA verification gate after Opus review (all checks must pass)
+  - Acceptance testing gate after QA (all tests must pass)
+  - FAIL-FAST cycle for test failures
+
+### Fixed
+- **auto_continue_stop Handler**: Fixed camelCase `stopHookActive` field detection (Plan 00042)
+  - Handler now correctly detects stop_hook_active and stopHookActive
+  - Added comprehensive logging for field detection
+- **Upgrade Script Critical Fixes**: 8 critical fixes in upgrade process (Plan 00041)
+  - Fixed heredoc to prevent variable expansion in config
+  - Fixed hook script permissions (now executable after upgrade)
+  - Fixed timestamped config backups to prevent overwriting
+  - Fixed validation to skip when already on target version
+  - Fixed silent config validation error swallowing
+  - Fixed Python version detection and restart messaging
+  - Fixed config delegation to project agent
+  - Fixed hook script redeployment
+
 ## [2.6.1] - 2026-02-09
 
 ### Changed
