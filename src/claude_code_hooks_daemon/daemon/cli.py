@@ -1044,9 +1044,18 @@ def cmd_init_project_handlers(args: argparse.Namespace) -> int:
     # Create conftest.py with standard fixtures
     conftest_content = '''"""Shared test fixtures for project handlers."""
 
+import sys
+from pathlib import Path
 from typing import Any
 
 import pytest
+
+# Add each event-type subdirectory to sys.path so co-located tests
+# can import handler modules with --import-mode=importlib
+_handlers_root = Path(__file__).resolve().parent
+for _subdir in _handlers_root.iterdir():
+    if _subdir.is_dir() and not _subdir.name.startswith("_"):
+        sys.path.insert(0, str(_subdir))
 
 
 @pytest.fixture
@@ -1055,8 +1064,8 @@ def bash_hook_input():
 
     def _make(command: str) -> dict[str, Any]:
         return {
-            "toolName": "Bash",
-            "toolInput": {"command": command},
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
         }
 
     return _make
@@ -1068,8 +1077,8 @@ def write_hook_input():
 
     def _make(file_path: str, content: str = "") -> dict[str, Any]:
         return {
-            "toolName": "Write",
-            "toolInput": {"file_path": file_path, "content": content},
+            "tool_name": "Write",
+            "tool_input": {"file_path": file_path, "content": content},
         }
 
     return _make
@@ -1083,8 +1092,8 @@ def edit_hook_input():
         file_path: str, old_string: str = "", new_string: str = ""
     ) -> dict[str, Any]:
         return {
-            "toolName": "Edit",
-            "toolInput": {
+            "tool_name": "Edit",
+            "tool_input": {
                 "file_path": file_path,
                 "old_string": old_string,
                 "new_string": new_string,
@@ -1125,7 +1134,7 @@ class ExampleHandler(Handler):
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Match condition - customise this."""
-        tool_input = hook_input.get("toolInput", {})
+        tool_input = hook_input.get("tool_input", {})
         command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
         return "example-trigger" in command
 
