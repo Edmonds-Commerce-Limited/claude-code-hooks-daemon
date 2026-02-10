@@ -24,7 +24,7 @@ Implement first-class developer experience for project-level handler development
 - [✓] Create feature branch from latest main
 - [✓] Phase 1: Core Infrastructure
 - [✓] Phase 2: Developer Experience CLI
-- [ ] Phase 3: Documentation & Examples
+- [✓] Phase 3: Documentation & Examples
 - [ ] Phase 4: Dogfooding & Refinement
 - [ ] Phase 5: Release
 
@@ -118,41 +118,41 @@ Implement first-class developer experience for project-level handler development
 
 #### Tasks
 
-- [ ] **Create PROJECT_HANDLERS.md**
-  - [ ] Location: `CLAUDE/PROJECT_HANDLERS.md`
-  - [ ] Overview and motivation
-  - [ ] Quick start guide
-  - [ ] Directory structure conventions
-  - [ ] Handler development guide
-  - [ ] Testing best practices
-  - [ ] Common patterns and examples
-  - [ ] Troubleshooting section
-  - [ ] CLI reference
+- [✓] **Create PROJECT_HANDLERS.md**
+  - [✓] Location: `CLAUDE/PROJECT_HANDLERS.md`
+  - [✓] Overview and motivation
+  - [✓] Quick start guide
+  - [✓] Directory structure conventions
+  - [✓] Handler development guide
+  - [✓] Testing best practices
+  - [✓] Common patterns and examples
+  - [✓] Troubleshooting section
+  - [✓] CLI reference
 
-- [ ] **Update ARCHITECTURE.md**
-  - [ ] Add "Project Handler Loading" section
-  - [ ] Document discovery mechanism
-  - [ ] Document config schema
-  - [ ] Update loading pipeline diagram
+- [✓] **Update ARCHITECTURE.md**
+  - [✓] Add "Project Handler Loading" section
+  - [✓] Document discovery mechanism
+  - [✓] Document config schema
+  - [✓] Update loading pipeline diagram
 
-- [ ] **Update HANDLER_DEVELOPMENT.md**
-  - [ ] Add "Project-Level Handlers" section
-  - [ ] Differences from built-in handlers
-  - [ ] Testing with daemon infrastructure
-  - [ ] Acceptance testing integration
+- [✓] **Update HANDLER_DEVELOPMENT.md**
+  - [✓] Add "Project-Level Handlers" section
+  - [✓] Differences from built-in handlers
+  - [✓] Testing with daemon infrastructure
+  - [✓] Acceptance testing integration
 
-- [ ] **Create example handlers**
-  - [ ] Location: `examples/project-handlers/`
-  - [ ] Example 1: Vendor changes reminder (PreToolUse, advisory)
-  - [ ] Example 2: Branch naming enforcer (SessionStart, blocking)
-  - [ ] Example 3: Build asset checker (PostToolUse, advisory)
-  - [ ] Each with complete tests and documentation
-  - [ ] README.md explaining examples
+- [✓] **Create example handlers**
+  - [✓] Location: `examples/project-handlers/`
+  - [✓] Example 1: Vendor changes reminder (PreToolUse, advisory)
+  - [✓] Example 2: Branch naming enforcer (SessionStart, blocking)
+  - [✓] Example 3: Build asset checker (PostToolUse, advisory)
+  - [✓] Each with complete tests and documentation
+  - [✓] README.md explaining examples
 
-- [ ] **Update CLAUDE.md**
-  - [ ] Add "Project-Level Handlers" section
-  - [ ] Quick reference for LLM agents
-  - [ ] Links to detailed docs
+- [✓] **Update CLAUDE.md**
+  - [✓] Add "Project-Level Handlers" section
+  - [✓] Quick reference for LLM agents
+  - [✓] Links to detailed docs
 
 ### Phase 4: Dogfooding & Refinement
 
