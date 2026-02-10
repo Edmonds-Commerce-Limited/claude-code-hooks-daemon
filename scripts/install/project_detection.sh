@@ -32,8 +32,19 @@ detect_project_root() {
     local dir
     dir="$(pwd)"
 
+    # Primary signal: config file exists (ideal state)
     while [ "$dir" != "/" ]; do
         if [ -f "$dir/.claude/hooks-daemon.yaml" ]; then
+            echo "$dir"
+            return 0
+        fi
+        dir="$(dirname "$dir")"
+    done
+
+    # Fallback signal: daemon repo exists but config missing (broken install)
+    dir="$(pwd)"
+    while [ "$dir" != "/" ]; do
+        if [ -d "$dir/.claude/hooks-daemon/.git" ]; then
             echo "$dir"
             return 0
         fi
@@ -271,6 +282,14 @@ Make sure you're running this from within a Claude Code project."
     fi
 
     print_verbose "Project root: $PROJECT_ROOT"
+
+    # Check if config file is missing (detected via fallback signal)
+    NEEDS_CONFIG_REPAIR="false"
+    if [ ! -f "$PROJECT_ROOT/.claude/hooks-daemon.yaml" ]; then
+        NEEDS_CONFIG_REPAIR="true"
+        print_verbose "Config file missing - will be repaired during upgrade"
+    fi
+    export NEEDS_CONFIG_REPAIR
 
     # Validate structure
     validate_project_structure "$PROJECT_ROOT"

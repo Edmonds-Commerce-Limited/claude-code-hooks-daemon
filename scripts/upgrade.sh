@@ -46,6 +46,7 @@ echo "========================================"
 _info "Detecting project root..."
 PROJECT_ROOT=""
 SEARCH_DIR="$(pwd)"
+# Primary signal: config file exists (ideal state)
 while [ "$SEARCH_DIR" != "/" ]; do
     if [ -f "$SEARCH_DIR/.claude/hooks-daemon.yaml" ]; then
         PROJECT_ROOT="$SEARCH_DIR"
@@ -53,8 +54,20 @@ while [ "$SEARCH_DIR" != "/" ]; do
     fi
     SEARCH_DIR="$(dirname "$SEARCH_DIR")"
 done
+# Fallback signal: daemon repo exists but config missing (broken install)
+if [ -z "$PROJECT_ROOT" ]; then
+    SEARCH_DIR="$(pwd)"
+    while [ "$SEARCH_DIR" != "/" ]; do
+        if [ -d "$SEARCH_DIR/.claude/hooks-daemon/.git" ]; then
+            PROJECT_ROOT="$SEARCH_DIR"
+            _warn "Config file missing - will be repaired during upgrade"
+            break
+        fi
+        SEARCH_DIR="$(dirname "$SEARCH_DIR")"
+    done
+fi
 
-[ -n "$PROJECT_ROOT" ] || _fail "Could not find project root (no .claude/hooks-daemon.yaml in any parent directory)"
+[ -n "$PROJECT_ROOT" ] || _fail "Could not find project root (no .claude/hooks-daemon.yaml or .claude/hooks-daemon/.git in any parent directory)"
 _ok "Project root: $PROJECT_ROOT"
 
 # Step 2: Determine daemon directory and mode

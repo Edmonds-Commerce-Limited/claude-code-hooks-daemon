@@ -22,6 +22,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00043: Robust Upgrade Detection & Repair](Completed/00043-robust-upgrade-detection/PLAN.md) - 🟢 Complete (2026-02-10)
+  - Added fallback detection signal (`.claude/hooks-daemon/.git`) for broken installs missing config
+  - Updated both `project_detection.sh` and `upgrade.sh` with multi-signal detection
+  - `NEEDS_CONFIG_REPAIR` flag set when config missing, Layer 2 auto-repairs during upgrade
+  - **Completed**: 2026-02-10
+
 - [00041: DRY Install/Upgrade Architecture Refactoring](Completed/00041-dry-install-upgrade-architecture/PLAN.md) - 🟢 Complete (2026-02-10)
   - Eliminated ~800 lines of duplication between install.sh, install.py, and upgrade.sh
   - Two-layer architecture: Layer 1 (curl-fetched stable) + Layer 2 (version-specific modular)
@@ -269,8 +275,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 35
-- **Completed**: 34 (1 with reduced scope)
+- **Total Plans Created**: 36
+- **Completed**: 35 (1 with reduced scope)
 - **Active** (not started): 2
 - **Cancelled/Abandoned**: 0
 
