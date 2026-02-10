@@ -345,6 +345,29 @@ class InputValidationConfig(BaseModel):
     )
 
 
+class ProjectHandlersConfig(BaseModel):
+    """Configuration for project-level handlers.
+
+    Project handlers are discovered from a convention-based directory structure
+    within the project, mirroring the built-in handler event-type subdirectories.
+
+    Attributes:
+        enabled: Master switch for project handler loading
+        path: Path to project handlers directory (relative to workspace root)
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    enabled: bool = Field(
+        default=True,
+        description="Enable project handler loading",
+    )
+    path: str = Field(
+        default=".claude/project-handlers",
+        description="Path to project handlers directory (relative to workspace root)",
+    )
+
+
 class DaemonConfig(BaseModel):
     """Configuration for the daemon server.
 
@@ -453,6 +476,7 @@ class Config(BaseModel):
         daemon: Daemon server configuration
         handlers: Handler configurations by event type
         plugins: Plugin system configuration
+        project_handlers: Project-level handler configuration
     """
 
     model_config = ConfigDict(extra="allow")
@@ -461,6 +485,7 @@ class Config(BaseModel):
     daemon: DaemonConfig = Field(default_factory=DaemonConfig)
     handlers: HandlersConfig = Field(default_factory=HandlersConfig)
     plugins: PluginsConfig = Field(default_factory=PluginsConfig)
+    project_handlers: ProjectHandlersConfig = Field(default_factory=ProjectHandlersConfig)
 
     # Legacy field mapping
     settings: dict[str, Any] | None = Field(default=None, exclude=True)
