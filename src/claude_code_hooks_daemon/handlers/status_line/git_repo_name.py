@@ -41,7 +41,7 @@ class GitRepoNameHandler(Handler):
             HookResult with formatted repo name
         """
         repo_name = ProjectContext.git_repo_name()
-        return HookResult(context=[f"[{repo_name}]"])
+        return HookResult(context=[f"📁 {repo_name}"])
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for this handler."""

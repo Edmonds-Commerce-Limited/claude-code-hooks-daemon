@@ -1,6 +1,8 @@
 """Model and context percentage handler for status line.
 
-Formats color-coded model name with effort level and context percentage:
+Formats color-coded model name with effort level and context percentage using emoticons:
+
+Format: 🤖 Model(effort) | ◔ XX%
 
 Model colors (by model type):
 - Blue: Haiku models
@@ -13,11 +15,11 @@ Effort level colors (shown next to model for Opus):
 - Green: medium effort
 - Orange: high effort
 
-Context percentage colors (traffic light system):
-- Green (0-40%): Low usage, plenty of space
-- Yellow (41-60%): Moderate usage
-- Orange (61-80%): High usage, approaching limit
-- Red (81-100%): Critical usage, near or at limit
+Context usage (quarter circle icons with color-coded percentages):
+- ◔ Green (0-25%): 1/4 filled - Low usage, plenty of space
+- ◑ Yellow (26-50%): Right half filled - Moderate usage
+- ◕ Orange (51-75%): 3/4 filled - High usage, approaching limit
+- ● Red (76-100%): Full circle - Critical usage, near or at limit
 """
 
 import json
@@ -82,20 +84,13 @@ class ModelContextHandler(Handler):
 
         # Build model display with optional effort level suffix
         effort_suffix = self._get_effort_suffix(model_lower, reset)
-        model_part = f"{model_color}{model_display}{reset}{effort_suffix}"
+        model_part = f"🤖 {model_color}{model_display}{reset}{effort_suffix}"
 
-        # Color code context percentage by usage (traffic light system)
-        if used_pct <= 40:
-            ctx_color = "\033[42m\033[30m"  # Green bg, black text
-        elif used_pct <= 60:
-            ctx_color = "\033[43m\033[30m"  # Yellow bg, black text
-        elif used_pct <= 80:
-            ctx_color = "\033[48;5;208m\033[30m"  # Orange bg, black text
-        else:
-            ctx_color = "\033[41m\033[97m"  # Red bg, white text
+        # Get quarter circle icon and color based on usage threshold
+        ctx_icon, ctx_color = self._get_context_icon_and_color(used_pct)
 
-        # Format: "Model(effort) | Ctx: XX%"
-        status = f"{model_part} | Ctx: {ctx_color}{used_pct:.1f}%{reset}"
+        # Format: "🤖 Model(effort) | ◔ XX%"
+        status = f"{model_part} | {ctx_icon} {ctx_color}{used_pct:.1f}%{reset}"
 
         return HookResult(context=[status])
 
@@ -149,6 +144,24 @@ class ModelContextHandler(Handler):
             Path to ~/.claude/settings.json
         """
         return Path.home() / ".claude" / "settings.json"
+
+    def _get_context_icon_and_color(self, used_pct: float) -> tuple[str, str]:
+        """Get quarter circle icon and color based on context usage.
+
+        Args:
+            used_pct: Context usage percentage (0-100)
+
+        Returns:
+            Tuple of (icon, ansi_color_code)
+        """
+        if used_pct <= 25:
+            return "◔", "\033[42m\033[30m"  # 1/4 filled, green bg
+        elif used_pct <= 50:
+            return "◑", "\033[43m\033[30m"  # Right half filled, yellow bg
+        elif used_pct <= 75:
+            return "◕", "\033[48;5;208m\033[30m"  # 3/4 filled, orange bg
+        else:
+            return "●", "\033[41m\033[97m"  # Full, red bg
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for this handler."""

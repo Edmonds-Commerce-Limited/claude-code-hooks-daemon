@@ -103,26 +103,30 @@ class UsageTrackingHandler(Handler):
             return HookResult(context=[])
 
     def _colorize_percentage(self, percentage: float) -> str:
-        """Apply traffic light color coding to percentage.
+        """Apply quarter circle icon and color coding to percentage.
 
         Args:
             percentage: Usage percentage (0-100+)
 
         Returns:
-            Colored percentage string with ANSI codes
+            Colored percentage string with icon and ANSI codes
         """
-        # Traffic light system (same as ModelContextHandler)
-        if percentage <= 40:
-            color = "\033[42m\033[30m"  # Green bg, black text
-        elif percentage <= 60:
-            color = "\033[43m\033[30m"  # Yellow bg, black text
-        elif percentage <= 80:
-            color = "\033[48;5;208m\033[30m"  # Orange bg, black text
+        # Quarter circle icons with color coding (same as ModelContextHandler)
+        if percentage <= 25:
+            icon = "◔"
+            color = "\033[42m\033[30m"  # 1/4 filled, green bg
+        elif percentage <= 50:
+            icon = "◑"
+            color = "\033[43m\033[30m"  # Right half filled, yellow bg
+        elif percentage <= 75:
+            icon = "◕"
+            color = "\033[48;5;208m\033[30m"  # 3/4 filled, orange bg
         else:
-            color = "\033[41m\033[97m"  # Red bg, white text
+            icon = "●"
+            color = "\033[41m\033[97m"  # Full, red bg
         reset = "\033[0m"
 
-        return f"{color}{percentage:.1f}%{reset}"
+        return f"{icon} {color}{percentage:.1f}%{reset}"
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for this handler."""
