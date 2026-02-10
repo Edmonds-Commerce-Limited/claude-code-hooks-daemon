@@ -88,6 +88,7 @@ class Priority:
 
     WEB_SEARCH_YEAR = 55
     SUGGEST_STATUSLINE = 55
+    VERSION_CHECK = 55
 
     # Advisory handlers (Priority: 60)
     BRITISH_ENGLISH = 60

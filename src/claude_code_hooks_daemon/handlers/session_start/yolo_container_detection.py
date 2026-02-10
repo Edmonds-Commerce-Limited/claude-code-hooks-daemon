@@ -188,6 +188,30 @@ class YoloContainerDetectionHandler(Handler):
 
         return indicators
 
+    def _is_resume_session(self, hook_input: dict[str, Any]) -> bool:
+        """Check if this is a resumed session (transcript exists with content).
+
+        Args:
+            hook_input: SessionStart hook input
+
+        Returns:
+            True if resume, False if new session
+        """
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        if not transcript_path:
+            return False
+
+        try:
+            path = Path(transcript_path)
+            if not path.exists():
+                return False
+
+            # If file exists and has content (>100 bytes), it's a resume
+            return path.stat().st_size > 100
+
+        except (OSError, ValueError):
+            return False
+
     def matches(self, hook_input: dict[str, Any] | None) -> bool:
         """
         Check if this handler should run.
@@ -232,28 +256,38 @@ class YoloContainerDetectionHandler(Handler):
             HookResult with ALLOW decision and informational context
         """
         try:
+            # Check if this is a resume - if so, be brief
+            is_resume = self._is_resume_session(hook_input)
+
             # Build context messages
             context: list[str] = []
 
-            # Main detection message
-            context.append("🐳 Running in YOLO container environment (Claude Code CLI in sandbox)")
+            if is_resume:
+                # Brief message for resume - context already loaded
+                context.append("🐳 YOLO container (Claude Code CLI in sandbox)")
+            else:
+                # Detailed message for new sessions
+                # Main detection message
+                context.append(
+                    "🐳 Running in YOLO container environment (Claude Code CLI in sandbox)"
+                )
 
-            # Add detailed indicators if enabled
-            if self.config.get("show_detailed_indicators", True):
-                indicators = self._get_detected_indicators()
-                if indicators:
-                    context.append("Detected indicators:")
-                    for indicator in indicators:
-                        context.append(f"  • {indicator}")
+                # Add detailed indicators if enabled
+                if self.config.get("show_detailed_indicators", True):
+                    indicators = self._get_detected_indicators()
+                    if indicators:
+                        context.append("Detected indicators:")
+                        for indicator in indicators:
+                            context.append(f"  • {indicator}")
 
-            # Add workflow tips if enabled
-            if self.config.get("show_workflow_tips", True):
-                context.append("")
-                context.append("Container workflow implications:")
-                context.append("  • Full development environment available (git, gh, npm, pip)")
-                context.append("  • Storage is ephemeral - commit and push work to persist")
-                context.append("  • Running as root - install packages freely (apt, npm, pip)")
-                context.append("  • Fast iteration enabled (YOLO mode, no permission prompts)")
+                # Add workflow tips if enabled
+                if self.config.get("show_workflow_tips", True):
+                    context.append("")
+                    context.append("Container workflow implications:")
+                    context.append("  • Full development environment available (git, gh, npm, pip)")
+                    context.append("  • Storage is ephemeral - commit and push work to persist")
+                    context.append("  • Running as root - install packages freely (apt, npm, pip)")
+                    context.append("  • Fast iteration enabled (YOLO mode, no permission prompts)")
 
             return HookResult(decision=Decision.ALLOW, reason=None, context=context)
 

@@ -4,10 +4,12 @@ Suggests setting up the daemon-based status line in .claude/settings.json
 if not already configured. Provides example configuration for user reference.
 """
 
+import json
+from pathlib import Path
 from typing import Any
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.core import Decision, Handler, HookResult, ProjectContext
 
 
 class SuggestStatusLineHandler(Handler):
@@ -26,8 +28,61 @@ class SuggestStatusLineHandler(Handler):
             ],
         )
 
+    def _is_resume_session(self, hook_input: dict[str, Any]) -> bool:
+        """Check if this is a resumed session (transcript exists with content).
+
+        Args:
+            hook_input: SessionStart hook input
+
+        Returns:
+            True if resume, False if new session
+        """
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
+        if not transcript_path:
+            return False
+
+        try:
+            path = Path(transcript_path)
+            if not path.exists():
+                return False
+
+            # If file exists and has content (>100 bytes), it's a resume
+            return path.stat().st_size > 100
+
+        except (OSError, ValueError):
+            return False
+
+    def _is_statusline_configured(self) -> bool:
+        """Check if status line is already configured in .claude/settings.json.
+
+        Returns:
+            True if configured, False otherwise
+        """
+        try:
+            settings_file = ProjectContext.config_dir() / "settings.json"
+            if not settings_file.exists():
+                return False
+
+            with open(settings_file) as f:
+                settings = json.load(f)
+
+            # Check if statusLine is configured
+            return "statusLine" in settings
+
+        except (OSError, json.JSONDecodeError, RuntimeError):
+            # Can't check - assume not configured
+            return False
+
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """Always suggest (Claude will check if already configured)."""
+        """Only suggest on NEW sessions when status line is NOT configured."""
+        # Don't show on resume sessions
+        if self._is_resume_session(hook_input):
+            return False
+
+        # Don't show if already configured
+        if self._is_statusline_configured():
+            return False
+
         return True
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:

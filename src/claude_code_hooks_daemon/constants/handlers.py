@@ -222,17 +222,17 @@ class HandlerID:
     # QA enforcement handlers (Priority: 30-35)
     PYTHON_QA_SUPPRESSION = HandlerIDMeta(
         class_name="PythonQaSuppressionBlocker",
-        config_key="python_qa_suppression",
+        config_key="python_qa_suppression_blocker",
         display_name="python-qa-suppression-blocker",
     )
     PHP_QA_SUPPRESSION = HandlerIDMeta(
         class_name="PhpQaSuppressionBlocker",
-        config_key="php_qa_suppression",
+        config_key="php_qa_suppression_blocker",
         display_name="php-qa-suppression-blocker",
     )
     GO_QA_SUPPRESSION = HandlerIDMeta(
         class_name="GoQaSuppressionBlocker",
-        config_key="go_qa_suppression",
+        config_key="go_qa_suppression_blocker",
         display_name="go-qa-suppression-blocker",
     )
     ESLINT_DISABLE = HandlerIDMeta(
@@ -309,8 +309,13 @@ class HandlerID:
     )
     SUGGEST_STATUSLINE = HandlerIDMeta(
         class_name="SuggestStatusLineHandler",
-        config_key="suggest_statusline",
+        config_key="suggest_status_line",
         display_name="suggest-statusline",
+    )
+    VERSION_CHECK = HandlerIDMeta(
+        class_name="VersionCheckHandler",
+        config_key="version_check",
+        display_name="version-check",
     )
     PLAN_COMPLETION_ADVISOR = HandlerIDMeta(
         class_name="PlanCompletionAdvisorHandler",
@@ -348,7 +353,7 @@ class HandlerID:
     )
     SESSION_CLEANUP = HandlerIDMeta(
         class_name="CleanupHandler",
-        config_key="session_cleanup",
+        config_key="cleanup",
         display_name="session-cleanup",
     )
 
@@ -433,9 +438,9 @@ HandlerKey = Literal[
     "git_stash",
     "validate_sitemap",
     # QA enforcement handlers
-    "python_qa_suppression",
-    "php_qa_suppression",
-    "go_qa_suppression",
+    "python_qa_suppression_blocker",
+    "php_qa_suppression_blocker",
+    "go_qa_suppression_blocker",
     "eslint_disable",
     "validate_plan_number",
     "plan_number_helper",
@@ -450,7 +455,7 @@ HandlerKey = Literal[
     "task_completion_checker",
     "bash_error_detector",
     "web_search_year",
-    "suggest_statusline",
+    "suggest_status_line",
     "plan_completion_advisor",
     "global_npm_advisor",
     # Advisory handlers
@@ -459,7 +464,7 @@ HandlerKey = Literal[
     "notification_logger",
     "subagent_completion_logger",
     "remind_prompt_library",
-    "session_cleanup",
+    "cleanup",
     # Status line handlers
     "git_repo_name",
     "account_display",
