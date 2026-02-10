@@ -122,6 +122,10 @@ handlers:
       enabled: false       # Enable for projects using CLAUDE/Plan/
       priority: 48
 
+    validate_instruction_content: # Blocks ephemeral content in CLAUDE.md/README.md
+      enabled: false       # Enable to prevent implementation logs in instruction files
+      priority: 50
+
     npm_command:           # Restricts npm commands to approved list
       enabled: false       # Enable for strict npm usage control
       priority: 50
