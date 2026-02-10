@@ -562,3 +562,60 @@ class TestLockFileEditBlockerHandler:
         ]
         for operation in safe_operations:
             assert handler.matches(operation) is False, f"Should allow: {operation}"
+
+    # handle() - Safety check branch (matches returns False)
+    def test_handle_returns_allow_when_not_matching(self, handler):
+        """handle() returns ALLOW when input doesn't match a lock file."""
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/project/README.md",
+                "content": "content",
+            },
+        }
+        result = handler.handle(hook_input)
+        assert result.decision == "allow"
+
+    # handle() - Lock file name case mismatch (matched_lock_file is None)
+    def test_handle_unmatched_lock_file_name_case(self, handler):
+        """handle() uses fallback commands when lock file name doesn't exact-match."""
+        # Craft input where matches() returns True (endswith case-insensitive)
+        # but the extracted filename doesn't exact-match LOCK_FILES list
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/project/COMPOSER.LOCK",
+                "content": "content",
+            },
+        }
+        # matches() returns True via case-insensitive check
+        assert handler.matches(hook_input) is True
+
+        result = handler.handle(hook_input)
+        assert result.decision == "deny"
+        # The lock_file_name is "COMPOSER.LOCK" which won't match "composer.lock" exactly
+        # but the case-insensitive comparison in handle() should still find it
+        assert "BLOCKED" in result.reason
+
+    def test_handle_fallback_proper_commands(self, handler):
+        """handle() uses fallback when matched_lock_file is None."""
+        from unittest.mock import patch
+
+        # Bypass matches() check and provide a file_path that won't match LOCK_FILES
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/project/unknown.lockfile",
+                "content": "content",
+            },
+        }
+        with patch.object(handler, "matches", return_value=True):
+            result = handler.handle(hook_input)
+            assert result.decision == "deny"
+            assert "appropriate package manager commands" in result.reason
+
+    def test_get_acceptance_tests(self, handler):
+        """Handler returns acceptance tests."""
+        tests = handler.get_acceptance_tests()
+        assert isinstance(tests, list)
+        assert len(tests) > 0

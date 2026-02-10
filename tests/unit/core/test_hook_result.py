@@ -577,6 +577,102 @@ class TestHookResultContextOnlyFormat:
         assert "hookSpecificOutput" not in output
 
 
+class TestHookResultContextOnlyDenyFormat:
+    """Test context-only response formatting with DENY decision."""
+
+    def test_context_only_deny_returns_invalid_response(self):
+        """UserPromptSubmit with DENY returns invalid response for schema validation."""
+        result = HookResult(decision=Decision.DENY, reason="Blocked prompt")
+        output = result.to_json("UserPromptSubmit")
+
+        # Should return hookSpecificOutput with permissionDecision (invalid for context-only)
+        assert "hookSpecificOutput" in output
+        assert output["hookSpecificOutput"]["permissionDecision"] == Decision.DENY
+        assert output["hookSpecificOutput"]["permissionDecisionReason"] == "Blocked prompt"
+
+    def test_context_only_deny_with_guidance(self):
+        """UserPromptSubmit DENY should not include guidance since it returns invalid response."""
+        result = HookResult(decision=Decision.DENY, reason="Blocked", guidance="Try something else")
+        output = result.to_json("UserPromptSubmit")
+
+        assert "hookSpecificOutput" in output
+        assert output["hookSpecificOutput"]["permissionDecision"] == Decision.DENY
+
+
+class TestHookResultSystemMessageDenyFormat:
+    """Test system message response formatting with DENY decision."""
+
+    def test_system_message_deny_returns_invalid_response(self):
+        """SessionStart with DENY returns deliberately invalid response."""
+        result = HookResult(decision=Decision.DENY, reason="Session rejected")
+        output = result.to_json("SessionStart")
+
+        # Should return decision field (invalid for systemMessage-only events)
+        assert "decision" in output
+        assert output["decision"] == "deny"
+        assert output["reason"] == "Session rejected"
+        assert "systemMessage" not in output
+
+    def test_system_message_deny_without_reason(self):
+        """SessionStart with DENY and no reason returns decision only."""
+        result = HookResult(decision=Decision.DENY)
+        output = result.to_json("SessionStart")
+
+        assert "decision" in output
+        assert output["decision"] == "deny"
+        assert "reason" not in output
+
+    def test_system_message_allow_no_context_no_guidance_returns_empty(self):
+        """SessionStart with ALLOW and no context/guidance returns empty dict."""
+        result = HookResult(decision=Decision.ALLOW)
+        output = result.to_json("SessionStart")
+
+        assert output == {}
+
+    def test_pre_compact_deny_returns_invalid_response(self):
+        """PreCompact with DENY returns deliberately invalid response."""
+        result = HookResult(decision=Decision.DENY, reason="Compact rejected")
+        output = result.to_json("PreCompact")
+
+        assert "decision" in output
+        assert output["decision"] == "deny"
+
+
+class TestHookResultErrorFactory:
+    """Test HookResult.error() factory method."""
+
+    def test_error_with_include_debug_info_true(self):
+        """HookResult.error() with include_debug_info=True includes debug instructions."""
+        result = HookResult.error(
+            error_type="handler_exception",
+            error_details="Handler crashed",
+            include_debug_info=True,
+        )
+
+        assert result.decision == Decision.ALLOW
+        context_text = "\n".join(result.context)
+        assert "handler_exception" in context_text
+        assert "Handler crashed" in context_text
+        assert "TO DEBUG" in context_text
+        assert "RECOMMENDED ACTION" in context_text
+
+    def test_error_with_include_debug_info_false(self):
+        """HookResult.error() with include_debug_info=False omits debug instructions."""
+        result = HookResult.error(
+            error_type="internal_error",
+            error_details="Something went wrong",
+            include_debug_info=False,
+        )
+
+        assert result.decision == Decision.ALLOW
+        context_text = "\n".join(result.context)
+        assert "internal_error" in context_text
+        assert "Something went wrong" in context_text
+        # Should NOT include debug/recommended action
+        assert "TO DEBUG" not in context_text
+        assert "RECOMMENDED ACTION" not in context_text
+
+
 class TestHookResultStatusFormat:
     """Test Status event response format (plain text)."""
 

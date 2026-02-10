@@ -535,3 +535,32 @@ class TestTddEnforcementHandler:
 
         # Should ALLOW because test exists
         assert result.decision == "allow"
+
+    def test_get_test_file_path_controller_based_path(self, handler):
+        """_get_test_file_path should handle paths containing 'controller' dir."""
+        handler_path = "/workspace/controller/handlers/pre_tool_use/my_handler.py"
+        test_path = handler._get_test_file_path(handler_path)
+        assert test_path.name == "test_my_handler.py"
+        assert "controller" in str(test_path)
+        assert "tests" in str(test_path)
+
+    def test_get_test_file_path_no_src_no_controller(self, handler):
+        """_get_test_file_path uses fallback when neither 'src' nor 'controller' in path."""
+        handler_path = "/workspace/lib/handlers/pre_tool_use/my_handler.py"
+        test_path = handler._get_test_file_path(handler_path)
+        assert test_path.name == "test_my_handler.py"
+        # Falls back to parent.parent.parent / "tests" / test_filename
+        assert "tests" in str(test_path)
+
+    def test_get_test_file_path_src_with_only_package_and_file(self, handler):
+        """_get_test_file_path handles src/{package}/file.py (len(after_src)==2)."""
+        handler_path = "/workspace/src/mypackage/module.py"
+        test_path = handler._get_test_file_path(handler_path)
+        expected = Path("/workspace/tests/unit/test_module.py")
+        assert test_path == expected
+
+    def test_get_acceptance_tests_returns_non_empty(self, handler):
+        """get_acceptance_tests returns a non-empty list."""
+        tests = handler.get_acceptance_tests()
+        assert isinstance(tests, list)
+        assert len(tests) > 0

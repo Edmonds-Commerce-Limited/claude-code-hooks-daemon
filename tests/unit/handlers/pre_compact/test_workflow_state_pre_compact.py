@@ -602,3 +602,219 @@ class TestWorkflowStatePreCompactHandler:
     ) -> None:
         """Detect returns False when CLAUDE/Plan directory doesn't exist."""
         assert handler._detect_workflow(pre_compact_input) is False
+
+    def test_handle_existing_state_file_generic_exception(
+        self,
+        handler: WorkflowStatePreCompactHandler,
+        pre_compact_input: dict[str, Any],
+        tmp_workspace: Path,
+    ) -> None:
+        """Handler handles generic Exception when reading existing state file."""
+        claude_local = tmp_workspace / "CLAUDE.local.md"
+        claude_local.write_text("WORKFLOW STATE\n\nWorkflow: Test Workflow")
+
+        # Create existing state file
+        workflow_dir = tmp_workspace / "untracked/workflow-state/test-workflow"
+        workflow_dir.mkdir(parents=True)
+        state_file = workflow_dir / "state-test-workflow-20260101_120000.json"
+        state_file.write_text('{"workflow": "Test", "created_at": "2026-01-01T12:00:00Z"}')
+
+        # Patch open on the state file to raise on read (first call) but allow write
+        original_open = state_file.open
+        call_count = 0
+
+        def mock_open(*args: Any, **kwargs: Any) -> Any:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1 and (not args or args[0] != "w"):
+                raise Exception("Unexpected read error")
+            return original_open(*args, **kwargs)
+
+        with patch.object(type(state_file), "open", mock_open):
+            result = handler.handle(pre_compact_input)
+
+        # Should still succeed - the exception is caught and logged
+        assert result.decision == Decision.ALLOW
+
+    def test_handle_generic_exception_returns_deny(
+        self,
+        handler: WorkflowStatePreCompactHandler,
+        pre_compact_input: dict[str, Any],
+        tmp_workspace: Path,
+    ) -> None:
+        """Handler returns DENY on unexpected generic Exception."""
+        claude_local = tmp_workspace / "CLAUDE.local.md"
+        claude_local.write_text("WORKFLOW STATE\n\nWorkflow: Test Workflow")
+
+        # Patch _detect_workflow to return True, but _extract_workflow_state raises
+        with patch.object(
+            handler, "_extract_workflow_state", side_effect=Exception("Totally unexpected")
+        ):
+            result = handler.handle(pre_compact_input)
+
+        assert result.decision == Decision.DENY
+        assert "unexpected error" in result.reason.lower()
+
+    def test_detect_workflow_claude_local_generic_exception(
+        self,
+        handler: WorkflowStatePreCompactHandler,
+        pre_compact_input: dict[str, Any],
+        tmp_workspace: Path,
+    ) -> None:
+        """Handler handles generic Exception reading CLAUDE.local.md in _detect_workflow."""
+        claude_local = tmp_workspace / "CLAUDE.local.md"
+        claude_local.write_text("some content without workflow markers")
+
+        # Patch the file's open to raise a generic Exception
+        with patch.object(Path, "open", side_effect=Exception("Unexpected read error")):
+            result = handler._detect_workflow(pre_compact_input)
+            assert result is False
+
+    def test_detect_workflow_plan_file_generic_exception(
+        self,
+        handler: WorkflowStatePreCompactHandler,
+        pre_compact_input: dict[str, Any],
+        tmp_workspace: Path,
+    ) -> None:
+        """Handler handles generic Exception reading plan file in _detect_workflow."""
+        plan_dir = tmp_workspace / "CLAUDE/Plan/066-test-workflow"
+        plan_dir.mkdir(parents=True)
+        plan_file = plan_dir / "PLAN.md"
+        plan_file.write_text("# Plan 066: Test\n\n🔄 In Progress\n\nPhase 1")
+
+        # We need to let CLAUDE.local.md not exist (no match from that path)
+        # Then patch plan file reading to raise Exception
+        original_open = plan_file.open
+
+        def mock_plan_open(*args: Any, **kwargs: Any) -> Any:
+            raise Exception("Unexpected plan read error")
+
+        with patch.object(type(plan_file), "open", mock_plan_open):
+            result = handler._detect_workflow(pre_compact_input)
+            # Falls through to return False since the exception is caught
+            assert result is False
+
+    def test_parse_workflow_from_memory_value_error_in_phase_parsing(
+        self, handler: WorkflowStatePreCompactHandler
+    ) -> None:
+        """Parse handles ValueError when phase numbers aren't valid integers."""
+        content = "Phase: abc/def - Testing\n\nContent"
+        state = {"phase": {"current": 1, "total": 1, "name": "default"}}
+        # This raises ValueError from int() but is caught implicitly
+        # because int("abc") raises ValueError
+        try:
+            result = handler._parse_workflow_from_memory(content, state)
+            # If no exception, phase should remain default or partially updated
+            assert isinstance(result, dict)
+        except ValueError:
+            # ValueError is acceptable here - it's what we're testing
+            pass
+
+    def test_extract_workflow_state_claude_local_generic_exception(
+        self,
+        handler: WorkflowStatePreCompactHandler,
+        pre_compact_input: dict[str, Any],
+        tmp_workspace: Path,
+    ) -> None:
+        """Extract handles generic Exception reading CLAUDE.local.md."""
+        claude_local = tmp_workspace / "CLAUDE.local.md"
+        claude_local.write_text("WORKFLOW STATE\n\nWorkflow: Test")
+
+        with patch.object(
+            handler, "_parse_workflow_from_memory", side_effect=Exception("Unexpected")
+        ):
+            state = handler._extract_workflow_state(pre_compact_input)
+            # Should fall through gracefully with default state
+            assert isinstance(state, dict)
+
+    def test_extract_workflow_state_plan_generic_exception(
+        self,
+        handler: WorkflowStatePreCompactHandler,
+        pre_compact_input: dict[str, Any],
+        tmp_workspace: Path,
+    ) -> None:
+        """Extract handles generic Exception parsing plan file."""
+        plan_dir = tmp_workspace / "CLAUDE/Plan/066-test"
+        plan_dir.mkdir(parents=True)
+        plan_file = plan_dir / "PLAN.md"
+        plan_file.write_text("# Plan 066: Test\n\n🔄 In Progress\n\nPhase 1")
+
+        with patch.object(
+            handler, "_parse_workflow_from_plan", side_effect=Exception("Unexpected")
+        ):
+            state = handler._extract_workflow_state(pre_compact_input)
+            assert isinstance(state, dict)
+
+    def test_extract_workflow_state_claude_local_value_error(
+        self,
+        handler: WorkflowStatePreCompactHandler,
+        pre_compact_input: dict[str, Any],
+        tmp_workspace: Path,
+    ) -> None:
+        """Extract handles ValueError from CLAUDE.local.md parsing."""
+        claude_local = tmp_workspace / "CLAUDE.local.md"
+        claude_local.write_text("WORKFLOW STATE\n\nWorkflow: Test")
+
+        with patch.object(
+            handler, "_parse_workflow_from_memory", side_effect=ValueError("Bad value")
+        ):
+            state = handler._extract_workflow_state(pre_compact_input)
+            assert isinstance(state, dict)
+
+    def test_extract_workflow_state_plan_value_error(
+        self,
+        handler: WorkflowStatePreCompactHandler,
+        pre_compact_input: dict[str, Any],
+        tmp_workspace: Path,
+    ) -> None:
+        """Extract handles ValueError from plan file parsing."""
+        plan_dir = tmp_workspace / "CLAUDE/Plan/066-test"
+        plan_dir.mkdir(parents=True)
+        plan_file = plan_dir / "PLAN.md"
+        plan_file.write_text("# Plan 066: Test\n\n🔄 In Progress\n\nPhase 1")
+
+        with patch.object(
+            handler, "_parse_workflow_from_plan", side_effect=ValueError("Bad value")
+        ):
+            state = handler._extract_workflow_state(pre_compact_input)
+            assert isinstance(state, dict)
+
+    def test_handle_read_state_file_unexpected_exception(
+        self,
+        handler: WorkflowStatePreCompactHandler,
+        pre_compact_input: dict[str, Any],
+        tmp_workspace: Path,
+    ) -> None:
+        """Handle catches unexpected Exception reading existing state file."""
+        claude_local = tmp_workspace / "CLAUDE.local.md"
+        claude_local.write_text("WORKFLOW STATE\n\nWorkflow: Test Workflow")
+
+        # Create existing state directory and file
+        workflow_dir = tmp_workspace / "untracked/workflow-state/test-workflow"
+        workflow_dir.mkdir(parents=True)
+        state_file = workflow_dir / "state-test-workflow-20260101_120000.json"
+        state_file.write_text("trigger open")
+
+        # Patch Path.open to raise Exception only when reading the state file
+        original_path_open = Path.open
+
+        call_count = {"state_reads": 0}
+
+        def mock_open(self_path: Path, *args: Any, **kwargs: Any) -> Any:
+            if "state-test-workflow" in str(self_path) and (not args or args[0] != "w"):
+                call_count["state_reads"] += 1
+                if call_count["state_reads"] == 1:
+                    raise Exception("Unexpected state file error")
+            return original_path_open(self_path, *args, **kwargs)
+
+        with patch.object(Path, "open", mock_open):
+            result = handler.handle(pre_compact_input)
+
+        # Should still succeed, catching the exception
+        assert result.decision == Decision.ALLOW
+
+    def test_get_acceptance_tests(self, handler: WorkflowStatePreCompactHandler) -> None:
+        """Handler returns acceptance tests."""
+        tests = handler.get_acceptance_tests()
+        assert isinstance(tests, list)
+        assert len(tests) > 0

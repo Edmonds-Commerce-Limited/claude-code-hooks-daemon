@@ -296,6 +296,45 @@ class TestTranscriptReaderEdgeCases:
         assert len(msgs) == 1
 
 
+class TestTranscriptReaderParsingEdgeCases:
+    """Test edge cases in _parse method for missing coverage."""
+
+    def test_handles_non_dict_json_lines(self, tmp_path: Path) -> None:
+        """Reader should skip JSON lines that parse to non-dict (e.g., list, string)."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps([1, 2, 3])
+            + "\n"
+            + json.dumps("just a string")
+            + "\n"
+            + json.dumps({"type": "human", "message": {"content": "Valid"}})
+            + "\n"
+        )
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        msgs = reader.get_messages()
+        assert len(msgs) == 1
+        assert msgs[0].content == "Valid"
+
+    def test_get_last_n_messages_with_zero_returns_empty(self, tmp_path: Path) -> None:
+        """get_last_n_messages(0) should return empty list."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(json.dumps({"type": "human", "message": {"content": "Hello"}}) + "\n")
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        msgs = reader.get_last_n_messages(0)
+        assert msgs == []
+
+    def test_get_last_n_messages_with_negative_returns_empty(self, tmp_path: Path) -> None:
+        """get_last_n_messages(-1) should return empty list."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(json.dumps({"type": "human", "message": {"content": "Hello"}}) + "\n")
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        msgs = reader.get_last_n_messages(-1)
+        assert msgs == []
+
+
 class TestTranscriptMessage:
     """Test TranscriptMessage dataclass."""
 

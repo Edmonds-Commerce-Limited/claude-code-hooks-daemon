@@ -679,3 +679,53 @@ class TestPipeBlockerProgressiveVerbosity:
         assert len(result.reason) < 200
         assert "BLOCKED" in result.reason
         assert "temp file" in result.reason.lower() or "/tmp" in result.reason
+
+
+class TestPipeBlockerAdditionalCoverage:
+    """Additional tests for pipe blocker edge cases to boost coverage."""
+
+    @pytest.fixture
+    def handler(self):
+        """Create handler instance."""
+        return PipeBlockerHandler()
+
+    def test_no_match_tail_follow_piped(self, handler):
+        """Should NOT match tail -f even when piped (follow mode exception)."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "some_cmd | tail -f /var/log/syslog"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_no_match_head_bytes_piped(self, handler):
+        """Should NOT match head -c even when piped (byte count exception)."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "some_cmd | head -c 1024 file.bin"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_no_pipe_match_returns_false(self, handler):
+        """Should return False when pipe pattern does not match in _extract_source_command."""
+        # _extract_source_command returns None when no pipe match
+        result = handler._extract_source_command("ls -la")
+        assert result is None
+
+    def test_empty_before_pipe_returns_none(self, handler):
+        """Should return None when segment before pipe is empty."""
+        # Edge case: pipe immediately to tail with nothing before
+        result = handler._extract_source_command("| tail -n 10")
+        assert result is None
+
+    def test_extract_source_command_exception_returns_none(self, handler):
+        """Should return None when extraction raises unexpected exception."""
+        with patch.object(handler, "_pipe_pattern") as mock_pattern:
+            mock_pattern.search.side_effect = Exception("unexpected")
+            result = handler._extract_source_command("cmd | tail -n 10")
+        assert result is None
+
+    def test_get_acceptance_tests_returns_non_empty(self, handler):
+        """get_acceptance_tests returns a non-empty list."""
+        tests = handler.get_acceptance_tests()
+        assert isinstance(tests, list)
+        assert len(tests) > 0

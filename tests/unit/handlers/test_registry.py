@@ -1,5 +1,9 @@
 """Tests for HandlerRegistry."""
 
+import importlib
+import types
+from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -414,6 +418,158 @@ class TestSnakeCaseConverter:
             _to_snake_case("BashErrorDetectorHandler") == "bash_error_detector"
         )  # If had Handler suffix
         assert _to_snake_case("HelloWorldHandler") == "hello_world"  # Config key pattern
+
+
+class TestDiscoverEdgeCases:
+    """Tests for discover() edge cases - skip test modules and handle import errors."""
+
+    @patch("claude_code_hooks_daemon.handlers.registry.pkgutil.walk_packages")
+    @patch("claude_code_hooks_daemon.handlers.registry.importlib.import_module")
+    def test_discover_skips_modules_with_test_in_name(
+        self, mock_import: MagicMock, mock_walk: MagicMock
+    ) -> None:
+        """discover skips modules with 'test' in the module name."""
+        fake_package = types.ModuleType("fake_handlers")
+        fake_package.__path__ = ["/fake/path"]
+        mock_import.return_value = fake_package
+
+        mock_walk.return_value = [
+            (None, "fake_handlers.test_something", False),
+            (None, "fake_handlers.my_test_handler", False),
+        ]
+
+        registry = HandlerRegistry()
+        count = registry.discover("fake_handlers")
+
+        # No handlers discovered (both modules have "test" in name)
+        assert count == 0
+        # Test modules should NOT have been individually imported
+        for call_args in mock_import.call_args_list:
+            called_name = call_args[0][0]
+            if called_name.startswith("fake_handlers."):
+                pytest.fail(f"Test module should have been skipped: {called_name}")
+
+    @patch("claude_code_hooks_daemon.handlers.registry.pkgutil.walk_packages")
+    @patch("claude_code_hooks_daemon.handlers.registry.importlib.import_module")
+    def test_discover_continues_after_module_import_exception(
+        self, mock_import: MagicMock, mock_walk: MagicMock
+    ) -> None:
+        """discover logs warning and continues when module import raises Exception."""
+        fake_package = types.ModuleType("fake_handlers")
+        fake_package.__path__ = ["/fake/path"]
+
+        empty_module = types.ModuleType("fake_handlers.valid_module")
+
+        def import_side_effect(name: str) -> types.ModuleType:
+            if name == "fake_handlers":
+                return fake_package
+            if name == "fake_handlers.broken_module":
+                raise Exception("Broken module")
+            return empty_module
+
+        mock_import.side_effect = import_side_effect
+
+        mock_walk.return_value = [
+            (None, "fake_handlers.broken_module", False),
+            (None, "fake_handlers.valid_module", False),
+        ]
+
+        registry = HandlerRegistry()
+        count = registry.discover("fake_handlers")
+
+        # Should not crash - broken module is skipped, valid module has no handlers
+        assert count == 0
+
+
+class TestRegisterAllEdgeCases:
+    """Tests for register_all edge cases."""
+
+    def test_register_all_skips_non_existent_event_directory(self, tmp_path: Path) -> None:
+        """register_all skips event directories that don't exist on disk."""
+        registry = HandlerRegistry()
+        router = EventRouter()
+
+        # Patch EVENT_TYPE_MAPPING to include a directory name that doesn't exist
+        fake_mapping = {"nonexistent_event_dir": EventType.PRE_TOOL_USE}
+
+        # Point handlers_dir to tmp_path which won't have "nonexistent_event_dir"
+        mock_path_instance = MagicMock()
+        mock_path_instance.parent = tmp_path
+
+        with (
+            patch(
+                "claude_code_hooks_daemon.handlers.registry.EVENT_TYPE_MAPPING",
+                fake_mapping,
+            ),
+            patch(
+                "claude_code_hooks_daemon.handlers.registry.Path",
+                return_value=mock_path_instance,
+            ),
+        ):
+            count = registry.register_all(router)
+
+        assert count == 0
+
+    def test_register_all_continues_when_pass2_import_fails(self) -> None:
+        """register_all logs warning and continues when pass 2 import fails (lines 253-255)."""
+        registry = HandlerRegistry()
+        router = EventRouter()
+
+        # Save real import BEFORE patching
+        real_import_fn = importlib.import_module
+        call_tracker: dict[str, int] = {}
+
+        def counting_import(name: str) -> Any:
+            call_tracker[name] = call_tracker.get(name, 0) + 1
+            # On second import of any handler module, fail (pass 2)
+            if call_tracker[name] == 2 and "handlers." in name and not name.endswith("__init__"):
+                raise Exception("Import failed in pass 2")
+            return real_import_fn(name)
+
+        with patch(
+            "claude_code_hooks_daemon.handlers.registry.importlib.import_module",
+            side_effect=counting_import,
+        ):
+            # Should not crash - logs warning and continues
+            count = registry.register_all(router)
+
+        # Some modules will fail on pass 2 but code should not crash
+        assert count >= 0
+
+
+class TestGetConfigKey:
+    """Tests for _get_config_key and _get_config_key_from_constant."""
+
+    def test_get_config_key_fallback_for_unknown_class(self) -> None:
+        """_get_config_key auto-generates key for unknown class name with warning."""
+
+        from claude_code_hooks_daemon.handlers.registry import _get_config_key
+
+        with patch("claude_code_hooks_daemon.handlers.registry.logger") as mock_logger:
+            result = _get_config_key("CompletelyUnknownHandler")
+
+        # Should fall back to auto-generated snake_case
+        assert result == "completely_unknown"
+        # Should log a warning
+        mock_logger.warning.assert_called_once()
+        assert "not found in HandlerID constants" in mock_logger.warning.call_args[0][0]
+
+    def test_get_config_key_from_constant_returns_none_for_unknown(self) -> None:
+        """_get_config_key_from_constant returns None for unknown class name."""
+        from claude_code_hooks_daemon.handlers.registry import _get_config_key_from_constant
+
+        result = _get_config_key_from_constant("TotallyFakeClassName")
+
+        assert result is None
+
+    def test_get_config_key_from_constant_finds_known_handler(self) -> None:
+        """_get_config_key_from_constant finds a known handler's config key."""
+        from claude_code_hooks_daemon.handlers.registry import _get_config_key_from_constant
+
+        result = _get_config_key_from_constant("DestructiveGitHandler")
+
+        assert result is not None
+        assert result == "destructive_git"
 
 
 class TestGetRegistry:

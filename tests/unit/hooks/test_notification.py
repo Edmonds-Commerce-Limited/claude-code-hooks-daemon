@@ -331,6 +331,39 @@ class TestMainFunction:
         # Verify filtering logic executed
         assert isinstance(register_calls, list)
 
+    @patch("claude_code_hooks_daemon.hooks.notification.FrontController")
+    @patch("claude_code_hooks_daemon.hooks.notification.load_config_safe")
+    def test_skips_handler_when_init_raises_runtime_error(
+        self, mock_load_config: Mock, mock_fc_class: Mock
+    ) -> None:
+        """Handlers whose __init__ raises RuntimeError are skipped gracefully."""
+        config = {
+            "handlers": {
+                "notification": {
+                    "notification_logger": {"enabled": True},
+                }
+            },
+            "daemon": {},
+        }
+        mock_load_config.return_value = config
+        mock_fc_instance = Mock()
+        mock_fc_class.return_value = mock_fc_instance
+
+        # Mock the handler class to raise RuntimeError on init
+        mock_handler_class = Mock(side_effect=RuntimeError("ProjectContext not initialized"))
+
+        with patch(
+            "claude_code_hooks_daemon.hooks.notification.get_builtin_handlers",
+            return_value={"notification_logger": mock_handler_class},
+        ):
+            main()
+
+        # Handler should be skipped, no register calls for it
+        register_calls = mock_fc_instance.register.call_args_list
+        assert len(register_calls) == 0
+        # Controller should still run
+        mock_fc_instance.run.assert_called_once()
+
     @patch("claude_code_hooks_daemon.hooks.notification.ConfigLoader")
     @patch("claude_code_hooks_daemon.hooks.notification.FrontController")
     @patch("claude_code_hooks_daemon.hooks.notification.load_config_safe")

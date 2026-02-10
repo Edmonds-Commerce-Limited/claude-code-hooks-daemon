@@ -399,6 +399,98 @@ class TestLoadHandlersFromConfig:
         assert handlers[2].priority == 50
 
 
+class TestLoadHandlerEdgeCases:
+    """Test edge cases in load_handler for missing coverage."""
+
+    def test_load_handler_spec_returns_none(self, tmp_path: Path) -> None:
+        """load_handler returns None when spec_from_file_location returns None."""
+        from unittest.mock import patch
+
+        handler_file = tmp_path / "bad_spec.py"
+        handler_file.write_text("# empty module\n")
+
+        with patch(
+            "claude_code_hooks_daemon.plugins.loader.importlib.util.spec_from_file_location",
+            return_value=None,
+        ):
+            handler = PluginLoader.load_handler("bad_spec", tmp_path)
+
+        assert handler is None
+
+    def test_load_handler_spec_loader_none(self, tmp_path: Path) -> None:
+        """load_handler returns None when spec.loader is None."""
+        from unittest.mock import MagicMock, patch
+
+        handler_file = tmp_path / "no_loader.py"
+        handler_file.write_text("# empty module\n")
+
+        mock_spec = MagicMock()
+        mock_spec.loader = None
+
+        with patch(
+            "claude_code_hooks_daemon.plugins.loader.importlib.util.spec_from_file_location",
+            return_value=mock_spec,
+        ):
+            handler = PluginLoader.load_handler("no_loader", tmp_path)
+
+        assert handler is None
+
+    def test_load_handler_acceptance_tests_exception(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """load_handler logs warning when get_acceptance_tests() raises exception."""
+        plugin_file = tmp_path / "broken_tests_handler.py"
+        plugin_file.write_text('''"""Handler with broken acceptance tests."""
+from typing import Any
+from claude_code_hooks_daemon.core import Handler, HookResult, Decision
+from claude_code_hooks_daemon.constants import HandlerID, Priority
+
+
+class BrokenTestsHandler(Handler):
+    """Handler whose get_acceptance_tests raises."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            handler_id=HandlerID.DESTRUCTIVE_GIT,
+            priority=Priority.DESTRUCTIVE_GIT,
+            terminal=False,
+        )
+
+    def matches(self, hook_input: dict[str, Any]) -> bool:
+        return False
+
+    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+        return HookResult(decision=Decision.ALLOW)
+
+    def get_acceptance_tests(self) -> list:
+        raise RuntimeError("Tests are broken")
+''')
+
+        with caplog.at_level(logging.WARNING):
+            handler = PluginLoader.load_handler("broken_tests_handler", tmp_path)
+
+        # Handler should still load (fail-open)
+        assert handler is not None
+        assert isinstance(handler, Handler)
+        # Should log warning about failed acceptance tests
+        assert any("acceptance tests" in record.message.lower() for record in caplog.records)
+
+
+class TestLoadFromPluginsConfigEdgeCases:
+    """Test edge cases for load_from_plugins_config."""
+
+    def test_load_from_plugins_config_rejects_non_plugins_config(self) -> None:
+        """load_from_plugins_config returns empty list for non-PluginsConfig input."""
+        from typing import cast
+
+        from claude_code_hooks_daemon.config.models import PluginsConfig
+
+        # Deliberately pass wrong type using cast to avoid type error
+        wrong_input = cast("PluginsConfig", {"not": "right"})
+        handlers = PluginLoader.load_from_plugins_config(wrong_input)
+        assert handlers == []
+
+
 class TestLoadFromPluginsConfig:
     """Test loading handlers from PluginsConfig model (new API)."""
 

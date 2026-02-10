@@ -301,6 +301,37 @@ class TestMainFunction:
         # Handler should be registered or skipped based on tags
         # The actual behavior depends on CleanupHandler's tags
 
+    @patch("claude_code_hooks_daemon.hooks.session_end.FrontController")
+    @patch("claude_code_hooks_daemon.hooks.session_end.load_config_safe")
+    def test_skips_handler_when_init_raises_runtime_error(
+        self, mock_load_config: Mock, mock_fc_class: Mock
+    ) -> None:
+        """Handlers whose __init__ raises RuntimeError are skipped gracefully."""
+        config = {
+            "handlers": {
+                "session_end": {
+                    "cleanup_handler": {"enabled": True},
+                }
+            },
+            "daemon": {},
+        }
+        mock_load_config.return_value = config
+        mock_fc_instance = Mock()
+        mock_fc_class.return_value = mock_fc_instance
+
+        mock_handler_class = Mock(side_effect=RuntimeError("ProjectContext not initialized"))
+
+        with patch(
+            "claude_code_hooks_daemon.hooks.session_end.get_builtin_handlers",
+            return_value={"cleanup_handler": mock_handler_class},
+        ):
+            main()
+
+        # Handler should be skipped, no register calls
+        register_calls = mock_fc_instance.register.call_args_list
+        assert len(register_calls) == 0
+        mock_fc_instance.run.assert_called_once()
+
     @patch("claude_code_hooks_daemon.hooks.session_end.ConfigLoader")
     @patch("claude_code_hooks_daemon.hooks.session_end.FrontController")
     @patch("claude_code_hooks_daemon.hooks.session_end.load_config_safe")
