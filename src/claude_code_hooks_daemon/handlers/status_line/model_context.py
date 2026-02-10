@@ -86,11 +86,11 @@ class ModelContextHandler(Handler):
         effort_suffix = self._get_effort_suffix(model_lower, reset)
         model_part = f"🤖 {model_color}{model_display}{reset}{effort_suffix}"
 
-        # Get quarter circle icon and color based on usage threshold
-        ctx_icon, ctx_color = self._get_context_icon_and_color(used_pct)
+        # Get quarter circle icon and colors based on usage threshold
+        ctx_icon, icon_color, pct_color = self._get_context_icon_and_color(used_pct)
 
-        # Format: "🤖 Model(effort) | ◔ XX%"
-        status = f"{model_part} | {ctx_icon} {ctx_color}{used_pct:.1f}%{reset}"
+        # Format: "🤖 Model(effort) | ◔ XX%" with colored icon and percentage
+        status = f"{model_part} | {icon_color}{ctx_icon}{reset} {pct_color}{used_pct:.1f}%{reset}"
 
         return HookResult(context=[status])
 
@@ -145,23 +145,23 @@ class ModelContextHandler(Handler):
         """
         return Path.home() / ".claude" / "settings.json"
 
-    def _get_context_icon_and_color(self, used_pct: float) -> tuple[str, str]:
-        """Get quarter circle icon and color based on context usage.
+    def _get_context_icon_and_color(self, used_pct: float) -> tuple[str, str, str]:
+        """Get quarter circle icon, icon color, and percentage background color.
 
         Args:
             used_pct: Context usage percentage (0-100)
 
         Returns:
-            Tuple of (icon, ansi_color_code)
+            Tuple of (icon, icon_fg_color, percentage_bg_color)
         """
         if used_pct <= 25:
-            return "◔", "\033[42m\033[30m"  # 1/4 filled, green bg
+            return "◔", "\033[32m", "\033[42m\033[30m"  # 1/4 filled, green fg + bg
         elif used_pct <= 50:
-            return "◑", "\033[43m\033[30m"  # Right half filled, yellow bg
+            return "◑", "\033[33m", "\033[43m\033[30m"  # Right half, yellow fg + bg
         elif used_pct <= 75:
-            return "◕", "\033[48;5;208m\033[30m"  # 3/4 filled, orange bg
+            return "◕", "\033[38;5;208m", "\033[48;5;208m\033[30m"  # 3/4, orange fg + bg
         else:
-            return "●", "\033[41m\033[97m"  # Full, red bg
+            return "●", "\033[31m", "\033[41m\033[97m"  # Full, red fg + bg
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for this handler."""
