@@ -18,16 +18,17 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Create CLAUDE/QA.md documenting complete pipeline (automated + sub-agents)
   - **Priority**: High (architectural integrity)
 
-- [00041: DRY Install/Upgrade Architecture Refactoring](00041-dry-install-upgrade-architecture/PLAN.md) - In Progress (Phase 2 complete, Phase 3 starting)
-  - Eliminate ~800 lines of duplication between install.sh, install.py, and upgrade.sh
-  - Implement two-layer architecture (stable curl-fetched + version-specific modular)
-  - Add robust config preservation with diff/merge/validate for custom settings
-  - Implement full state rollback (code, config, hooks, venv, gitignore)
-  - Reduce entry scripts to under 100 lines each (from 308 and 612)
-  - **Priority**: High (architectural debt, maintenance burden)
 
 
 ## Completed Plans
+
+- [00041: DRY Install/Upgrade Architecture Refactoring](Completed/00041-dry-install-upgrade-architecture/PLAN.md) - 🟢 Complete (2026-02-10)
+  - Eliminated ~800 lines of duplication between install.sh, install.py, and upgrade.sh
+  - Two-layer architecture: Layer 1 (curl-fetched stable) + Layer 2 (version-specific modular)
+  - Config preservation engine: Python diff/merge/validate with 82 tests
+  - 14 composable bash modules in scripts/install/
+  - install.sh: 307→116 lines, upgrade.sh: 612→134 lines
+  - **Completed**: 2026-02-10
 
 - [00042: Fix Auto-Continue Stop Handler Bug](Completed/00042-auto-continue-stop-bug/PLAN.md) - 🟢 Complete (2026-02-10)
   - Fixed camelCase `stopHookActive` field not detected (infinite loop risk)
@@ -269,8 +270,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 35
-- **Completed**: 33 (1 with reduced scope)
-- **Active** (not started): 3
+- **Completed**: 34 (1 with reduced scope)
+- **Active** (not started): 2
 - **Cancelled/Abandoned**: 0
 
 ## Quick Links
