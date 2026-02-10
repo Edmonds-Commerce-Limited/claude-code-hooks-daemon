@@ -69,6 +69,25 @@ class AutoContinueStopHandler(Handler):
             ],
         )
 
+    def _is_stop_hook_active(self, hook_input: dict[str, Any]) -> bool:
+        """Check if stop hook is in re-entry state (prevents infinite loops).
+
+        Claude Code may send this field as snake_case (stop_hook_active) or
+        camelCase (stopHookActive). Pydantic extra="allow" preserves the
+        original casing, so we must check BOTH variants.
+
+        Args:
+            hook_input: Hook input dictionary
+
+        Returns:
+            True if stop hook is active (re-entry detected)
+        """
+        # Check both snake_case and camelCase variants
+        # Claude Code docs show snake_case, but camelCase is also possible
+        return bool(
+            hook_input.get("stop_hook_active", False) or hook_input.get("stopHookActive", False)
+        )
+
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if this is a confirmation question stop that should auto-continue.
 
@@ -78,29 +97,39 @@ class AutoContinueStopHandler(Handler):
         Returns:
             True if Claude asked a confirmation question and we should auto-continue
         """
-        # CRITICAL: Prevent infinite loops
-        if hook_input.get("stop_hook_active", False):
+        # CRITICAL: Prevent infinite loops - check both casing variants
+        if self._is_stop_hook_active(hook_input):
+            logger.debug("Stop hook is active (re-entry) - skipping to prevent infinite loop")
             return False
 
-        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH, "")
+        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
         if not transcript_path:
+            logger.debug("No transcript_path in hook_input - cannot check for confirmation")
             return False
 
         # Get the last assistant message from transcript
-        last_message = self._get_last_assistant_message(transcript_path)
+        last_message = self._get_last_assistant_message(str(transcript_path))
         if not last_message:
+            logger.debug("No assistant message found in transcript: %s", transcript_path)
             return False
 
         # Must contain a question mark
         if "?" not in last_message:
+            logger.debug("Last assistant message has no question mark - not a confirmation")
             return False
 
         # Check for error patterns - don't auto-continue on errors
         if self._contains_error_pattern(last_message):
+            logger.debug("Last message contains error pattern - not auto-continuing")
             return False
 
         # Check if it's a confirmation question
-        return self._contains_confirmation_pattern(last_message)
+        is_confirmation = self._contains_confirmation_pattern(last_message)
+        if is_confirmation:
+            logger.info("Confirmation question detected - will auto-continue")
+        else:
+            logger.debug("Question found but no confirmation pattern matched")
+        return is_confirmation
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Block the stop and tell Claude to auto-continue.
