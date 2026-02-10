@@ -228,14 +228,18 @@ class Handler:
    - Prevent data loss
    - Terminal: Yes
 
-2. **Workflow Handlers** (priority 25-45)
+2. **Code Quality Handlers** (priority 25-35)
+   - QA suppression blockers
+   - Lint enforcement
+   - Terminal: Yes
+
+3. **Workflow Handlers** (priority 36-55)
    - Enforce best practices
    - Provide guidance
    - Terminal: Configurable
 
-3. **Quality Handlers** (priority 50-60)
-   - Check code quality
-   - Warn about issues
+4. **Advisory Handlers** (priority 56-60)
+   - Warnings and suggestions
    - Terminal: Usually No
 
 ### 3. Hook Result (`core/hook_result.py`)
@@ -358,11 +362,12 @@ These remain in individual projects due to project-specific logic:
 **Recommended Priority Allocation**:
 
 ```
-5-9:   Architecture enforcement (controller pattern, etc.)
+0-9:   Test handlers (hello world, architecture enforcement)
 10-20: Safety (destructive operations, data loss prevention)
-21-30: Code quality (ESLint, TypeScript, formatting)
-31-45: Workflow enforcement (TDD, planning, documentation)
-46-60: Advisory (warnings, suggestions, non-blocking)
+25-35: Code quality (QA suppression blockers, ESLint disable)
+36-55: Workflow enforcement (TDD, planning, web search)
+56-60: Advisory (warnings, suggestions, non-blocking)
+100+:  Logging, metrics, and cleanup
 ```
 
 **Why Priority Matters**:
@@ -599,10 +604,10 @@ plugins:
 
 ## References
 
-- **Handler Development**: See `handler_development.md`
-- **Configuration Guide**: See `configuration.md`
-- **Migration Guide**: See `migration_guide.md`
-- **API Reference**: See `api.md` (coming soon)
+- **Handler Development**: See `HANDLER_DEVELOPMENT.md`
+- **Debugging Hooks**: See `DEBUGGING_HOOKS.md`
+- **Self-Install Mode**: See `SELF_INSTALL.md`
+- **Release Process**: See `development/RELEASING.md`
 
 ---
 

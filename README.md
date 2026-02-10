@@ -3,7 +3,7 @@
 ![Version](https://img.shields.io/badge/version-2.7.0-blue)
 ![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-4296%20passing-success)
+![Tests](https://img.shields.io/badge/tests-4693%20passing-success)
 ![Coverage](https://img.shields.io/badge/coverage-95%25%20required-success)
 
 High-performance daemon for Claude Code hooks using Unix socket IPC and front controller architecture.
@@ -42,8 +42,8 @@ A daemon-based hooks system that eliminates process spawn overhead (~21ms) with 
 - **Lazy startup** - Daemon starts on first hook call
 - **Auto-shutdown** - Exits after 10 minutes of inactivity
 - **Multi-project support** - Unique daemon per project directory
-- **42 production handlers** across 10 event types
-- **4296 tests** with 95% coverage requirement
+- **51 production handlers** across 10 event types
+- **4693 tests** with 95% coverage requirement
 - **Type-safe** - Full MyPy strict mode compliance
 - **Plugin system** - Easy to add project-specific handlers
 - **Deterministic validation** - Fast pattern matching and rule enforcement
@@ -239,43 +239,47 @@ The installer will warn if it detects this pattern.
 
 ---
 
-## Current Version: 2.5.0
+## Current Version: 2.7.0
 
-**Latest Changes:**
-- ✅ **Plugin System Enhancements** - Complete plugin support with acceptance testing and validation
-- ✅ **9 New Handlers** - Lock file protection, system package safety, orchestrator-only mode
-- ✅ **Hostname-Based Isolation** - Multi-environment daemon support with isolated runtime files
-- ✅ **Worktree Support** - CLI flags for git worktree isolation with --pid-file and --socket
-- ✅ **Programmatic Acceptance Testing** - Ephemeral playbook generation for all 59+ handlers
-- ✅ **Config Validation** - Startup validation with strict mode fail-fast behavior
-- ✅ **Agent Team Workflow** - Multi-role verification and honesty checking documentation
-- ✅ **Dependency Checking** - Integrated deptry for dependency validation in QA suite
+**Latest Changes (v2.7.0):**
+- ✅ **Optimal Config Checker** - SessionStart handler auditing 6 env/settings for optimal config
+- ✅ **Hedging Language Detector** - Stop handler detecting guessing language in agent output
+- ✅ **PHP QA CI Integration** - Enhanced PHP QA suppression handler (PR #20)
+- ✅ **Library/Plugin Separation** - Clean separation of library and plugin concerns (Plan 00034)
+- ✅ **Robust Upgrade Detection** - Handles broken installations gracefully (Plan 00043)
+- ✅ **Coverage Boost** - Test coverage increased from 94.40% to 96.33%
+- ✅ **Curl-to-File Install** - Improved install/update instructions using curl-to-file pattern
 
 ---
 
 ## Implementation Status
 
-### Implemented Event Types (42 Production Handlers)
+### Implemented Event Types (51 Production Handlers)
 
-**PreToolUse** (26 handlers):
+**PreToolUse** (31 handlers):
 - `destructive_git` - Blocks dangerous git operations (force push, hard reset, etc.)
 - `sed_blocker` - Blocks sed commands (encourages Edit tool usage)
 - `absolute_path` - Enforces relative paths in tool calls
 - `git_stash` - Discourages git stash with escape hatch
 - `tdd_enforcement` - Enforces test-driven development workflow
-- `tdd_advisor` - **NEW in v2.5** Provides TDD workflow guidance with task-based enforcement
+- `task_tdd_advisor` - Provides TDD workflow guidance with task-based enforcement
 - `eslint_disable` - Prevents disabling ESLint rules
 - `python_qa_suppression_blocker` - Blocks Python QA suppressions (# type: ignore, # noqa, etc.)
 - `php_qa_suppression_blocker` - Blocks PHP QA suppressions (@phpstan-ignore, phpcs:ignore, etc.)
 - `go_qa_suppression_blocker` - Blocks Go QA suppressions (//nolint, //lint:ignore, etc.)
-- `lock_file_edit_blocker` - **NEW in v2.5** Prevents editing package lock files (package-lock.json, yarn.lock, etc.)
-- `pip_break_system` - **NEW in v2.5** Blocks pip --break-system-packages flag
-- `sudo_pip` - **NEW in v2.5** Blocks sudo pip install commands
-- `curl_pipe_shell` - **NEW in v2.5** Blocks curl/wget piped to shell
-- `dangerous_permissions` - **NEW in v2.5** Blocks chmod 777 and similar unsafe permissions
-- `global_npm_advisor` - **NEW in v2.5** Advises against npm install -g (advisory)
-- `orchestrator_only` - **NEW in v2.5** Opt-in mode for orchestrator-only handlers
-- `plan_completion_move_advisor` - **NEW in v2.5** Guides moving completed plans to archive
+- `lock_file_edit_blocker` - Prevents editing package lock files (package-lock.json, yarn.lock, etc.)
+- `pip_break_system` - Blocks pip --break-system-packages flag
+- `sudo_pip` - Blocks sudo pip install commands
+- `curl_pipe_shell` - Blocks curl/wget piped to shell
+- `dangerous_permissions` - Blocks chmod 777 and similar unsafe permissions
+- `global_npm_advisor` - Advises against npm install -g (advisory)
+- `orchestrator_only` - Opt-in mode for orchestrator-only handlers
+- `plan_completion_advisor` - Guides moving completed plans to archive
+- `pipe_blocker` - Blocks expensive commands piped to tail/head
+- `daemon_restart_verifier` - Prevents commits if daemon cannot restart
+- `gh_issue_comments` - Ensures gh issue view includes --comments
+- `plan_number_helper` - Injects correct next plan number into context
+- `validate_instruction_content` - Validates CLAUDE.md/README.md content quality
 - `web_search_year` - Ensures web searches include current year (2026)
 - `british_english` - Warns on American English spellings
 - `worktree_file_copy` - Prevents accidental worktree file copies
@@ -290,9 +294,12 @@ The installer will warn if it detects this pattern.
 - `validate_sitemap` - Validates sitemap structure after writes
 - `validate_eslint_on_write` - Validates ESLint compliance after file writes
 
-**SessionStart** (2 handlers):
-- `yolo_container_detection` - **NEW in v2.1** Detects YOLO container environments with confidence scoring
+**SessionStart** (5 handlers):
+- `yolo_container_detection` - Detects YOLO container environments with confidence scoring
 - `workflow_state_restoration` - Restores workflow state after conversation compaction
+- `optimal_config_checker` - Checks Claude Code config for optimal settings (env vars, settings.json)
+- `suggest_statusline` - Suggests daemon-based status line setup
+- `version_check` - Checks if daemon is up-to-date with latest GitHub release
 
 **PreCompact** (2 handlers):
 - `transcript_archiver` - Archives conversation transcripts before compaction
@@ -303,8 +310,7 @@ The installer will warn if it detects this pattern.
 - `remind_validator` - Reminds about HTML validation
 - `subagent_completion_logger` - Logs subagent completion events
 
-**UserPromptSubmit** (2 handlers):
-- `auto_continue` - Automatically continues certain workflows
+**UserPromptSubmit** (1 handler):
 - `git_context_injector` - Injects git context into prompts
 
 **SessionEnd** (1 handler):
@@ -316,8 +322,10 @@ The installer will warn if it detects this pattern.
 **PermissionRequest** (1 handler):
 - `auto_approve_reads` - Auto-approves read-only operations
 
-**Stop** (1 handler):
+**Stop** (3 handlers):
 - `task_completion_checker` - Checks task completion status
+- `auto_continue_stop` - Auto-continues when Claude asks confirmation questions
+- `hedging_language_detector` - Detects guessing language in agent output
 
 ---
 
@@ -938,13 +946,13 @@ class MyHandler(Handler):
 - **Black** - Code formatting (line length 100)
 - **Ruff** - Python linting (auto-fixes violations)
 - **MyPy** - Strict type checking (all functions typed)
-- **Pytest** - 95% minimum coverage, 4261 tests
+- **Pytest** - 95% minimum coverage, 4693 tests
 - **Bandit** - Security vulnerability scanning
 
 All checks auto-fix by default (except MyPy and tests).
 
 **Current Test Stats:**
-- **4261 tests** across 40 test files
+- **4693 tests** across 172 test files
 - **95% coverage requirement**
 - All tests passing
 
@@ -1049,22 +1057,22 @@ claude-code-hooks-daemon/
 │   ├── core/              # Front controller, Handler base, HookResult
 │   ├── daemon/            # Server, CLI, DaemonController, paths
 │   ├── handlers/          # All handler implementations (by event type)
-│   │   ├── pre_tool_use/      # 26 production handlers
+│   │   ├── pre_tool_use/      # 31 production handlers
 │   │   ├── post_tool_use/     # 3 production handlers
-│   │   ├── session_start/     # 2 production handlers
+│   │   ├── session_start/     # 5 production handlers
 │   │   ├── session_end/       # 1 production handler
 │   │   ├── pre_compact/       # 2 production handlers
 │   │   ├── subagent_stop/     # 3 production handlers
-│   │   ├── user_prompt_submit/  # 2 production handlers
+│   │   ├── user_prompt_submit/  # 1 production handler
 │   │   ├── notification/      # 1 production handler
 │   │   ├── permission_request/  # 1 production handler
-│   │   └── stop/              # 1 production handler
+│   │   └── stop/              # 3 production handlers
 │   ├── config/            # YAML/JSON config loading
 │   ├── hooks/             # Entry point modules (one per event type)
 │   ├── plugins/           # Plugin system for custom handlers
 │   ├── qa/                # QA runner utilities
 │   └── version.py         # Version tracking
-├── tests/                 # 40 test files, 4261 tests, 95% coverage
+├── tests/                 # 172 test files, 4693 tests, 95% coverage
 │   ├── unit/              # Unit tests for all components
 │   ├── integration/       # Integration tests
 │   └── config/            # Configuration validation tests
@@ -1250,7 +1258,25 @@ MIT License - see LICENSE file for details.
 
 ## Changelog
 
-### v2.5.0 (Current)
+### v2.7.0 (Current)
+
+**New Handlers & Features:**
+- Optimal Config Checker - SessionStart handler auditing env/settings for optimal Claude Code config
+- Hedging Language Detector - Stop handler detecting guessing language in agent output
+- PHP QA CI Integration - Enhanced PHP QA suppression handler with CI awareness
+- Library/Plugin Separation - Clean separation of library and plugin concerns (Plan 00034)
+- Robust Upgrade Detection - Handles broken installations gracefully (Plan 00043)
+
+**Quality & Testing:**
+- Coverage boost from 94.40% to 96.33%
+- Significant test expansion across all handler types
+- Curl-to-file install/update instructions
+
+**Fixes:**
+- Restored dogfooding_reminder plugin
+- PR #20 post-merge QA fixes
+
+### v2.5.0
 
 **Plugin System & Multi-Environment:**
 - ✅ **Complete Plugin System Overhaul** - Event-type aware loading with acceptance testing (Plan 00024)
@@ -1336,4 +1362,4 @@ MIT License - see LICENSE file for details.
 
 ---
 
-**End of README** | Version 2.5.0 | Last Updated: 2026-02-09
+**End of README** | Version 2.7.0 | Last Updated: 2026-02-09

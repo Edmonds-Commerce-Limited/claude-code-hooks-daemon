@@ -373,11 +373,12 @@ Choose priority based on handler type:
 
 | Priority Range | Type | Examples |
 |----------------|------|----------|
-| 5-9 | Architecture | Controller pattern enforcement |
+| 0-9 | Test | Hello world, architecture enforcement |
 | 10-20 | Safety | Destructive git, sed blocker, data loss prevention |
-| 21-30 | Code Quality | ESLint disable, TypeScript errors |
-| 31-45 | Workflow | TDD enforcement, plan validation |
-| 46-60 | Advisory | British English warnings, suggestions |
+| 25-35 | Code Quality | QA suppression blockers, ESLint disable |
+| 36-55 | Workflow | TDD enforcement, plan validation, web search |
+| 56-60 | Advisory | British English warnings, suggestions |
+| 100+ | Logging | Notification logger, session cleanup |
 
 **Lower priority = runs first**
 
