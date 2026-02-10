@@ -33,7 +33,7 @@ handlers:
 
     sed_blocker:           # Blocks sed command usage (use Edit tool instead)
       enabled: true
-      priority: 10
+      priority: 11
 
     absolute_path:         # Enforces absolute paths in file operations
       enabled: true
@@ -45,11 +45,11 @@ handlers:
 
     curl_pipe_shell:       # Blocks dangerous curl | sh patterns
       enabled: true
-      priority: 15
+      priority: 16
 
     pipe_blocker:          # Blocks dangerous pipe patterns in bash commands
       enabled: true
-      priority: 15
+      priority: 17
 
     dangerous_permissions: # Warns about dangerous file permission changes
       enabled: true
@@ -57,7 +57,7 @@ handlers:
 
     git_stash:             # Warns about git stash (stashes can be lost)
       enabled: true
-      priority: 20
+      priority: 19
 
     lock_file_edit_blocker: # Prevents editing package lock files
       enabled: true
@@ -65,15 +65,15 @@ handlers:
 
     pip_break_system:      # Blocks pip commands that break system packages
       enabled: true
-      priority: 20
+      priority: 21
 
     sudo_pip:              # Blocks sudo pip (use venv instead)
       enabled: true
-      priority: 20
+      priority: 22
 
     daemon_restart_verifier: # Verifies daemon restart after code changes
       enabled: true
-      priority: 22
+      priority: 23
 
     # CODE QUALITY HANDLERS (Priority 25-45)
     python_qa_suppression_blocker:  # Blocks Python QA suppressions (# noqa, # type: ignore, etc)
@@ -99,13 +99,13 @@ handlers:
     # WORKFLOW HANDLERS (Priority 30-50)
     plan_number_helper:    # Provides correct next plan number (prevents broken bash discovery)
       enabled: true        # Enable when using CLAUDE/Plan/ structure
-      priority: 30
+      priority: 33
       options:
         track_plans_in_project: "CLAUDE/Plan"  # Must match markdown_organization setting
 
     task_tdd_advisor:      # Advises on TDD workflow for tasks
       enabled: true
-      priority: 35
+      priority: 36
 
     gh_issue_comments:     # Requires --comments flag for gh issue view
       enabled: true
@@ -113,7 +113,7 @@ handlers:
 
     validate_plan_number:  # Validates plan number format (001-, 002-, etc)
       enabled: true        # Enable for projects using CLAUDE/Plan/
-      priority: 40
+      priority: 41
 
     global_npm_advisor:    # Advises against global npm installs
       enabled: true
@@ -125,7 +125,7 @@ handlers:
 
     plan_workflow:         # Provides guidance when creating plans
       enabled: true        # Enable for projects using CLAUDE/Plan/
-      priority: 45
+      priority: 46
 
     plan_completion_advisor: # Advises on plan completion workflow
       enabled: true
@@ -133,7 +133,7 @@ handlers:
 
     npm_command:           # Restricts npm commands to approved list
       enabled: true        # Enable for strict npm usage control
-      priority: 50
+      priority: 49
 
     markdown_organization: # Enforces markdown file organization rules & plan tracking
       enabled: true        # Enable for md organization + plan tracking
@@ -172,8 +172,12 @@ handlers:
       priority: 10
 
     suggest_status_line:  # Suggests daemon-based status line setup
-      enabled: true         # Enable to suggest status line configuration
+      enabled: true      # Enable to suggest status line configuration
       priority: 55
+
+    version_check:  # Checks if daemon is up-to-date with latest release
+      enabled: true  # Notifies on new sessions if updates available (24h cache)
+      priority: 56
 
     workflow_state_restoration:  # Restores workflow state after compaction
       enabled: true              # Enable for workflow state management

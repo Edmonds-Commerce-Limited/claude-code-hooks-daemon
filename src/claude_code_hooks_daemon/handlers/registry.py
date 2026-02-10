@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from claude_code_hooks_daemon.constants import ConfigKey
+from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler import Handler
 
@@ -208,10 +209,10 @@ class HandlerRegistry:
                         and not attr.__name__.startswith("_")
                         and not inspect.isabstract(attr)
                     ):
-                        config_key = _to_snake_case(attr.__name__)
+                        config_key = _get_config_key(attr.__name__)
                         handler_config = event_config.get(config_key, {})
                         if handler_config.get(ConfigKey.ENABLED, True):
-                            # Use config key (snake_case class name) as registry key
+                            # Use config key from HandlerID constant
                             try:
                                 registry_key = f"{event_type.value}.{config_key}"
                                 options = handler_config.get(ConfigKey.OPTIONS, {})
@@ -263,8 +264,8 @@ class HandlerRegistry:
                         and not attr.__name__.startswith("_")
                         and not inspect.isabstract(attr)
                     ):
-                        # Check handler-specific config (use config key = snake_case class name)
-                        config_key = _to_snake_case(attr.__name__)
+                        # Check handler-specific config (use config key from HandlerID constant)
+                        config_key = _get_config_key(attr.__name__)
                         handler_config = event_config.get(config_key, {})
 
                         # Skip disabled handlers
@@ -354,6 +355,57 @@ def _to_snake_case(name: str) -> str:
         snake = snake[:-8]  # Remove "_handler"
 
     return snake
+
+
+def _get_config_key_from_constant(class_name: str) -> str | None:
+    """Look up config_key from HandlerID constant by class name.
+
+    Args:
+        class_name: Handler class name (e.g., "DestructiveGitHandler")
+
+    Returns:
+        config_key from HandlerID constant, or None if not found
+    """
+    from claude_code_hooks_daemon.constants.handlers import HandlerIDMeta
+
+    # Build reverse mapping: class_name -> HandlerID constant
+    for attr_name in dir(HandlerID):
+        if attr_name.startswith("_"):
+            continue
+
+        attr = getattr(HandlerID, attr_name)
+        if isinstance(attr, HandlerIDMeta) and attr.class_name == class_name:
+            return str(attr.config_key)
+
+    return None
+
+
+def _get_config_key(class_name: str) -> str:
+    """Get config key for a handler class.
+
+    Uses HandlerID constants as single source of truth, with fallback to
+    auto-generation for backward compatibility.
+
+    Args:
+        class_name: Handler class name (e.g., "DestructiveGitHandler")
+
+    Returns:
+        config_key for use in YAML config
+    """
+    # PRIMARY: Look up in HandlerID constants (single source of truth)
+    constant_key = _get_config_key_from_constant(class_name)
+    if constant_key is not None:
+        return constant_key
+
+    # FALLBACK: Auto-generate with deprecation warning
+    auto_key = _to_snake_case(class_name)
+    logger.warning(
+        "Handler %s not found in HandlerID constants, using auto-generated key '%s'. "
+        "Add a HandlerID constant for this handler.",
+        class_name,
+        auto_key,
+    )
+    return auto_key
 
 
 # Global registry instance
