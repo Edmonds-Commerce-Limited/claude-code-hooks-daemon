@@ -171,6 +171,61 @@ class TestInitProjectHandlers:
         config_content = config_file.read_text()
         assert "custom/path" in config_content
 
+    def test_conftest_uses_snake_case_keys(self, tmp_path: Path) -> None:
+        """Conftest fixtures must use snake_case keys matching daemon protocol."""
+        from claude_code_hooks_daemon.daemon.cli import cmd_init_project_handlers
+
+        project_path = _setup_project(tmp_path)
+        args = argparse.Namespace(project_root=project_path, force=False)
+
+        cmd_init_project_handlers(args)
+
+        conftest = project_path / ".claude" / "project-handlers" / "conftest.py"
+        content = conftest.read_text()
+
+        # Must use snake_case (daemon protocol)
+        assert '"tool_name"' in content, "conftest must use snake_case 'tool_name'"
+        assert '"tool_input"' in content, "conftest must use snake_case 'tool_input'"
+
+        # Must NOT use camelCase
+        assert '"toolName"' not in content, "conftest must not use camelCase 'toolName'"
+        assert '"toolInput"' not in content, "conftest must not use camelCase 'toolInput'"
+
+    def test_example_handler_uses_snake_case_keys(self, tmp_path: Path) -> None:
+        """Example handler must use snake_case keys matching daemon protocol."""
+        from claude_code_hooks_daemon.daemon.cli import cmd_init_project_handlers
+
+        project_path = _setup_project(tmp_path)
+        args = argparse.Namespace(project_root=project_path, force=False)
+
+        cmd_init_project_handlers(args)
+
+        handler = (
+            project_path / ".claude" / "project-handlers" / "pre_tool_use" / "example_handler.py"
+        )
+        content = handler.read_text()
+
+        # Must use snake_case (daemon protocol)
+        assert '"tool_input"' in content, "example handler must use snake_case 'tool_input'"
+
+        # Must NOT use camelCase
+        assert '"toolInput"' not in content, "example handler must not use camelCase 'toolInput'"
+
+    def test_conftest_includes_sys_path_setup(self, tmp_path: Path) -> None:
+        """Conftest must add event-type subdirectories to sys.path for co-located test imports."""
+        from claude_code_hooks_daemon.daemon.cli import cmd_init_project_handlers
+
+        project_path = _setup_project(tmp_path)
+        args = argparse.Namespace(project_root=project_path, force=False)
+
+        cmd_init_project_handlers(args)
+
+        conftest = project_path / ".claude" / "project-handlers" / "conftest.py"
+        content = conftest.read_text()
+
+        assert "sys.path" in content, "conftest must set up sys.path for co-located test imports"
+        assert "import sys" in content, "conftest must import sys"
+
     def test_returns_1_on_get_project_path_failure(self, tmp_path: Path) -> None:
         """init-project-handlers returns 1 when project path detection fails."""
         from claude_code_hooks_daemon.daemon.cli import cmd_init_project_handlers
