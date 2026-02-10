@@ -18,7 +18,7 @@ class VendorReminderHandler(Handler):
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        tool_input = hook_input.get("toolInput", {})
+        tool_input = hook_input.get("tool_input", {})
         command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
         return "vendor/" in command
 

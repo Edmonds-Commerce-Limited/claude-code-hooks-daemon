@@ -72,8 +72,8 @@ class ProjectHandlerLoader:
             logger.warning("Failed to import project handler %s: %s", file_path.name, e)
             return None
 
-        # Find the first concrete Handler subclass in the module
-        handler_class: type[Handler] | None = None
+        # Find concrete Handler subclasses in the module
+        handler_classes: list[type[Handler]] = []
         for attr_name in dir(module):
             attr = getattr(module, attr_name)
             if (
@@ -83,8 +83,18 @@ class ProjectHandlerLoader:
                 and not attr.__name__.startswith("_")
                 and not inspect.isabstract(attr)
             ):
-                handler_class = attr
-                break
+                handler_classes.append(attr)
+
+        if len(handler_classes) > 1:
+            class_names = [cls.__name__ for cls in handler_classes]
+            logger.warning(
+                "Multiple Handler subclasses found in %s: %s. Using first: %s",
+                file_path.name,
+                ", ".join(class_names),
+                class_names[0],
+            )
+
+        handler_class = handler_classes[0] if handler_classes else None
 
         if handler_class is None:
             logger.warning("No Handler subclass found in project handler file: %s", file_path.name)

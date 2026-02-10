@@ -356,7 +356,7 @@ class ProjectHandlersConfig(BaseModel):
         path: Path to project handlers directory (relative to workspace root)
     """
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     enabled: bool = Field(
         default=True,
