@@ -323,6 +323,74 @@ class TestHedgingLanguageDetectorHandle:
         assert result.decision == Decision.ALLOW
 
 
+class TestHedgingLanguageDetectorTranscriptParsing:
+    """Test edge cases in transcript JSONL parsing."""
+
+    @pytest.fixture
+    def handler(self) -> Any:
+        from claude_code_hooks_daemon.handlers.stop.hedging_language_detector import (
+            HedgingLanguageDetectorHandler,
+        )
+
+        return HedgingLanguageDetectorHandler()
+
+    def test_transcript_with_empty_lines(self, handler: Any) -> None:
+        """Empty lines in JSONL are skipped."""
+        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False)
+        tmp.write("\n")
+        tmp.write("\n")
+        tmp.write(json.dumps(_assistant_message("I believe this is right")) + "\n")
+        tmp.write("\n")
+        tmp.flush()
+        assert handler.matches({HookInputField.TRANSCRIPT_PATH: tmp.name}) is True
+
+    def test_transcript_with_non_message_type(self, handler: Any) -> None:
+        """Non-message type entries are skipped."""
+        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False)
+        tmp.write(json.dumps({"type": "tool_use", "tool": "Bash"}) + "\n")
+        tmp.write(json.dumps(_assistant_message("I believe this is right")) + "\n")
+        tmp.flush()
+        assert handler.matches({HookInputField.TRANSCRIPT_PATH: tmp.name}) is True
+
+    def test_transcript_with_string_content_parts(self, handler: Any) -> None:
+        """Content parts that are plain strings are handled."""
+        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False)
+        msg = {
+            "type": "message",
+            "message": {
+                "role": "assistant",
+                "content": ["I believe this is the problem"],
+            },
+        }
+        tmp.write(json.dumps(msg) + "\n")
+        tmp.flush()
+        assert handler.matches({HookInputField.TRANSCRIPT_PATH: tmp.name}) is True
+
+    def test_transcript_with_malformed_json_line(self, handler: Any) -> None:
+        """Malformed JSON lines are skipped gracefully."""
+        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False)
+        tmp.write("not valid json{{{}\n")
+        tmp.write(json.dumps(_assistant_message("I believe this is right")) + "\n")
+        tmp.flush()
+        assert handler.matches({HookInputField.TRANSCRIPT_PATH: tmp.name}) is True
+
+    def test_transcript_oserror_returns_empty(self, handler: Any) -> None:
+        """OSError when reading transcript returns empty string."""
+        result = handler._get_last_assistant_message("/nonexistent/path/transcript.jsonl")
+        assert result == ""
+
+    def test_transcript_unexpected_exception(self, handler: Any) -> None:
+        """Unexpected exception in transcript reading returns empty string."""
+        from unittest.mock import patch as mock_patch
+
+        with mock_patch(
+            "claude_code_hooks_daemon.handlers.stop.hedging_language_detector.Path"
+        ) as mock_path:
+            mock_path.return_value.exists.side_effect = TypeError("unexpected")
+            result = handler._get_last_assistant_message("/some/path")
+        assert result == ""
+
+
 class TestHedgingLanguageDetectorAcceptanceTests:
     """Test acceptance test definitions."""
 

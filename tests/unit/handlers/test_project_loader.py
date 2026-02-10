@@ -2,6 +2,7 @@
 
 import logging
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -186,4 +187,70 @@ class TestLoadHandlerFromFile:
         assert any(
             "Failed to load" in record.message or "Failed to import" in record.message
             for record in caplog.records
+        )
+
+    def test_load_handler_returns_none_when_spec_is_none(
+        self,
+        project_handlers_dir: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that None spec from spec_from_file_location is handled gracefully."""
+        handler_file = project_handlers_dir / "pre_tool_use" / "vendor_reminder.py"
+        with (
+            patch(
+                "claude_code_hooks_daemon.handlers.project_loader.importlib.util.spec_from_file_location",
+                return_value=None,
+            ),
+            caplog.at_level(logging.WARNING),
+        ):
+            result = ProjectHandlerLoader.load_handler_from_file(handler_file)
+
+        assert result is None
+        assert any("Failed to create module spec" in record.message for record in caplog.records)
+
+    def test_load_handler_returns_none_when_instantiation_fails(
+        self,
+        project_handlers_dir: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that handler instantiation failure is handled gracefully."""
+        handler_file = project_handlers_dir / "pre_tool_use" / "instantiation_error_handler.py"
+        with caplog.at_level(logging.WARNING):
+            result = ProjectHandlerLoader.load_handler_from_file(handler_file)
+
+        assert result is None
+        assert any(
+            "Failed to instantiate project handler" in record.message for record in caplog.records
+        )
+
+    def test_load_handler_warns_when_no_acceptance_tests(
+        self,
+        project_handlers_dir: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that handler with empty acceptance tests logs a warning."""
+        handler_file = project_handlers_dir / "pre_tool_use" / "no_acceptance_tests_handler.py"
+        with caplog.at_level(logging.WARNING):
+            result = ProjectHandlerLoader.load_handler_from_file(handler_file)
+
+        assert result is not None
+        assert result.name == "no-acceptance-tests"
+        assert any(
+            "does not define acceptance tests" in record.message for record in caplog.records
+        )
+
+    def test_load_handler_warns_when_acceptance_tests_raise(
+        self,
+        project_handlers_dir: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that handler with broken acceptance tests logs a warning."""
+        handler_file = project_handlers_dir / "pre_tool_use" / "broken_acceptance_tests_handler.py"
+        with caplog.at_level(logging.WARNING):
+            result = ProjectHandlerLoader.load_handler_from_file(handler_file)
+
+        assert result is not None
+        assert result.name == "broken-acceptance-tests"
+        assert any(
+            "failed to return acceptance tests" in record.message for record in caplog.records
         )
