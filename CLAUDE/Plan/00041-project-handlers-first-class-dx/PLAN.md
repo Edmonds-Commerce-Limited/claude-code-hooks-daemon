@@ -64,7 +64,7 @@ Implement first-class developer experience for project-level handler development
   - [✓] Prefer built-in handlers on conflict (log warning)
   - [✓] Write tests for conflict scenarios
 
-- [✓] **Run full QA**: `./scripts/qa/run_all.sh`
+- [✓] **Run full QA**: `./scripts/qa/run_all.sh` — All 7 checks passed, coverage 95.0%
 - [ ] **Verify daemon restarts**: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
 
 ### Phase 2: Developer Experience CLI
