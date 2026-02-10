@@ -274,13 +274,10 @@ handlers:
       priority: 60
 
 # Project-level handlers (custom handlers in .claude/hooks/handlers/)
-# Example:
-# plugins:
-#   - type: "file"
-#     path: ".claude/hooks/handlers/pre_tool_use/my_handler.py"
-#     class: "MyHandler"
-#     events: ["PreToolUse"]
-# Custom plugin configuration (optional)
-# plugins:
-#   paths: []
-#   plugins: []
+plugins:
+  paths: [".claude/hooks/handlers/session_start"]
+  plugins:
+    - path: dogfooding_reminder
+      event_type: session_start
+      enabled: true
+      priority: 35
