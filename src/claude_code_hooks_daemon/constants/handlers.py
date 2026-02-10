@@ -260,6 +260,11 @@ class HandlerID:
         config_key="markdown_organization",
         display_name="enforce-markdown-organization",
     )
+    VALIDATE_INSTRUCTION_CONTENT = HandlerIDMeta(
+        class_name="ValidateInstructionContentHandler",
+        config_key="validate_instruction_content",
+        display_name="validate-instruction-content",
+    )
 
     # Workflow handlers (Priority: 40-55)
     GH_ISSUE_COMMENTS = HandlerIDMeta(
@@ -446,6 +451,7 @@ HandlerKey = Literal[
     "plan_number_helper",
     "daemon_stats",
     "markdown_organization",
+    "validate_instruction_content",
     # Workflow handlers
     "gh_issue_comments",
     "yolo_container_detection",
