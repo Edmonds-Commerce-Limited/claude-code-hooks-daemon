@@ -173,12 +173,20 @@ def check_for_nested_installation(project_root: Path) -> str | None:
     # Check for nested hooks-daemon installation inside hooks-daemon
     # Having .claude/hooks-daemon/.claude is fine (the repo has its own .claude dir).
     # A true nested install is .claude/hooks-daemon/.claude/hooks-daemon.
-    nested_install = project_root / ".claude" / "hooks-daemon" / ".claude" / "hooks-daemon"
+    outer_hooks_daemon = project_root / ".claude" / "hooks-daemon"
+    nested_install = outer_hooks_daemon / ".claude" / "hooks-daemon"
     if nested_install.exists():
+        # If the outer .claude/hooks-daemon IS the hooks-daemon repo itself
+        # (identified by having pyproject.toml), then the inner .claude/hooks-daemon
+        # is just the repo's own dogfooding config directory, not a genuine nested
+        # installation. Skip the false positive.
+        if (outer_hooks_daemon / "pyproject.toml").is_file():
+            return None
+
         return (
             f"NESTED INSTALLATION DETECTED!\n"
             f"Found: {nested_install}\n"
-            f"Remove {project_root / '.claude' / 'hooks-daemon'} and reinstall."
+            f"Remove {outer_hooks_daemon} and reinstall."
         )
 
     return None
