@@ -26,6 +26,14 @@ from claude_code_hooks_daemon.daemon.paths import (
 class TestPathGeneration(unittest.TestCase):
     """Test suite for daemon path generation functions."""
 
+    def setUp(self):
+        """Mock Path.mkdir to prevent filesystem side effects in path generation tests."""
+        self.mkdir_patcher = patch.object(Path, "mkdir")
+        self.mkdir_patcher.start()
+
+    def tearDown(self):
+        self.mkdir_patcher.stop()
+
     def test_get_socket_path_format(self):
         """Test socket path follows expected format."""
         project_dir = Path("/home/dev/my-project")
@@ -203,6 +211,14 @@ class TestPathGeneration(unittest.TestCase):
 
 class TestUtilityFunctions(unittest.TestCase):
     """Test suite for utility functions."""
+
+    def setUp(self):
+        """Mock Path.mkdir to prevent filesystem side effects in path generation tests."""
+        self.mkdir_patcher = patch.object(Path, "mkdir")
+        self.mkdir_patcher.start()
+
+    def tearDown(self):
+        self.mkdir_patcher.stop()
 
     def test_get_project_hash_returns_8_characters(self):
         """Test get_project_hash returns 8-character hash."""
@@ -527,6 +543,14 @@ class TestSocketCleanup(unittest.TestCase):
 
 class TestHostnameIsolation(unittest.TestCase):
     """Test hostname-based path isolation."""
+
+    def setUp(self):
+        """Mock Path.mkdir to prevent filesystem side effects in path generation tests."""
+        self.mkdir_patcher = patch.object(Path, "mkdir")
+        self.mkdir_patcher.start()
+
+    def tearDown(self):
+        self.mkdir_patcher.stop()
 
     def test_socket_path_uses_raw_hostname(self):
         """Test socket path uses raw hostname as suffix."""

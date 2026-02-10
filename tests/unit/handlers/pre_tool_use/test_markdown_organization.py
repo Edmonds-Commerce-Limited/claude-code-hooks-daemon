@@ -353,12 +353,14 @@ class TestPlanningModeIntegration:
         return handler
 
     @pytest.fixture
-    def planning_write_input(self) -> dict[str, Any]:
+    def planning_write_input(self, tmp_path: Path) -> dict[str, Any]:
         """Create sample planning mode Write hook input."""
+        # Use tmp_path-based path to avoid filesystem permission errors
+        plans_path = tmp_path / "fake_home" / ".claude" / "plans" / "my-awesome-plan.md"
         return {
             "tool_name": "Write",
             "tool_input": {
-                "file_path": "/home/user/.claude/plans/my-awesome-plan.md",
+                "file_path": str(plans_path),
                 "content": "# My Awesome Plan\n\nThis is a test plan.",
             },
         }

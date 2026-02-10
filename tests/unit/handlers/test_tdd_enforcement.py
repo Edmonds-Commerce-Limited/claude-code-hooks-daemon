@@ -482,13 +482,15 @@ class TestTddEnforcementHandler:
         )
         assert test_path == expected, f"Expected {expected}, got {test_path}"
 
-    def test_handle_allows_hooks_daemon_handler_with_existing_test(self, handler):
+    @patch("pathlib.Path.exists")
+    def test_handle_allows_hooks_daemon_handler_with_existing_test(self, mock_exists, handler):
         """Regression test: Should allow hooks-daemon handler when test exists.
 
         Bug: Handler claims test is missing even when it exists at correct location.
         This test MUST FAIL before fix (false negative - blocks valid handler creation).
         """
-        # Test with actual filesystem - test file really exists
+        # Mock filesystem - test file exists
+        mock_exists.return_value = True
         hook_input = {
             "tool_name": "Write",
             "tool_input": {
@@ -498,7 +500,7 @@ class TestTddEnforcementHandler:
 
         result = handler.handle(hook_input)
 
-        # Should ALLOW because test exists, but currently DENIES (bug)
+        # Should ALLOW because test exists
         assert (
             result.decision == "allow"
         ), f"Should allow when test exists, but got: {result.reason}"
