@@ -257,3 +257,79 @@ class TestGitStashHandler:
         for cmd in creation_commands:
             hook_input = {"tool_name": "Bash", "tool_input": {"command": cmd}}
             assert handler.matches(hook_input) is True, f"Should block: {cmd}"
+
+    # Mode Configuration Tests
+    def test_default_mode_is_warn(self):
+        """Handler should default to 'warn' mode for backward compatibility."""
+        handler = GitStashHandler()
+        # Default mode should be 'warn'
+        assert hasattr(handler, "_mode")
+        assert handler._mode == "warn"
+
+    def test_accepts_deny_mode_configuration(self):
+        """Handler should accept 'deny' mode configuration."""
+        handler = GitStashHandler()
+        # Simulate config system setting mode
+        handler._mode = "deny"
+        assert handler._mode == "deny"
+
+    def test_accepts_warn_mode_configuration(self):
+        """Handler should accept 'warn' mode configuration."""
+        handler = GitStashHandler()
+        handler._mode = "warn"
+        assert handler._mode == "warn"
+
+    def test_deny_mode_returns_deny_decision(self):
+        """In 'deny' mode, handle() should return deny decision."""
+        handler = GitStashHandler()
+        handler._mode = "deny"
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash"}}
+        result = handler.handle(hook_input)
+        assert result.decision == "deny"
+
+    def test_deny_mode_provides_blocking_reason(self):
+        """In 'deny' mode, handle() should provide clear blocking reason."""
+        handler = GitStashHandler()
+        handler._mode = "deny"
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash"}}
+        result = handler.handle(hook_input)
+        assert result.reason is not None
+        assert "BLOCKED" in result.reason or "blocked" in result.reason.lower()
+
+    def test_deny_mode_provides_alternatives(self):
+        """In 'deny' mode, reason should still provide alternatives."""
+        handler = GitStashHandler()
+        handler._mode = "deny"
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash"}}
+        result = handler.handle(hook_input)
+        assert result.reason is not None
+        assert "git commit" in result.reason or "ALTERNATIVES" in result.reason
+
+    def test_warn_mode_returns_allow_decision(self):
+        """In 'warn' mode, handle() should return allow decision."""
+        handler = GitStashHandler()
+        handler._mode = "warn"
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash"}}
+        result = handler.handle(hook_input)
+        assert result.decision == "allow"
+
+    def test_warn_mode_provides_warning_guidance(self):
+        """In 'warn' mode, handle() should provide warning guidance."""
+        handler = GitStashHandler()
+        handler._mode = "warn"
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash"}}
+        result = handler.handle(hook_input)
+        assert result.guidance is not None
+        assert "WARNING" in result.guidance
+
+    def test_mode_only_affects_handle_not_matches(self):
+        """Mode configuration should not affect matches() behavior."""
+        deny_handler = GitStashHandler()
+        deny_handler._mode = "deny"
+        warn_handler = GitStashHandler()
+        warn_handler._mode = "warn"
+
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash"}}
+
+        # Both should match the same patterns
+        assert deny_handler.matches(hook_input) == warn_handler.matches(hook_input)
