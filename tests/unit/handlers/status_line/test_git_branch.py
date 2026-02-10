@@ -45,7 +45,7 @@ class TestGitBranchHandler:
 
         assert result.decision == "allow"
         assert len(result.context) == 1
-        assert "| main" in result.context[0]
+        assert "| ⎇ main" in result.context[0]
 
     def test_handle_not_a_git_repo(self, handler: GitBranchHandler, tmp_path: Path) -> None:
         """Test returns empty context when not in git repo."""
@@ -119,4 +119,4 @@ class TestGitBranchHandler:
 
         assert result.decision == "allow"
         assert len(result.context) == 1
-        assert "| develop" in result.context[0]
+        assert "| ⎇ develop" in result.context[0]

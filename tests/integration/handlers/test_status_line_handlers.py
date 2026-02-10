@@ -37,9 +37,8 @@ class TestGitRepoNameHandler:
         result = handler.handle(hook_input)
         assert result.context is not None
         assert len(result.context) > 0
-        # Context should contain bracketed repo name
-        assert "[" in result.context[0]
-        assert "]" in result.context[0]
+        # Context should contain repo name (with emoji prefix or brackets)
+        assert "test-repo" in result.context[0]
 
     def test_handler_is_non_terminal(self, handler: Any) -> None:
         assert handler.terminal is False

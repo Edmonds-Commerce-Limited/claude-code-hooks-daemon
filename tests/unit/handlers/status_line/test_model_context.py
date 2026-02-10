@@ -43,7 +43,9 @@ class TestModelContextHandler:
         assert len(result.context) == 1
         assert "Sonnet 4.5" in result.context[0]
         assert "42.5%" in result.context[0]
-        assert "Ctx:" in result.context[0]
+        assert "🤖" in result.context[0]  # Robot emoji for model
+        # Context is 42.5% which is 26-50% range, so should use ◑ (right half circle)
+        assert "◑" in result.context[0]
 
     def test_handle_with_defaults(self, handler: ModelContextHandler) -> None:
         """Test formatting with missing data uses defaults."""
@@ -55,15 +57,18 @@ class TestModelContextHandler:
         assert "0.0%" in result.context[0]
 
     def test_color_coding_green(self, handler: ModelContextHandler) -> None:
-        """Test green color for low usage (0-40%)."""
+        """Test green color for low usage (0-25%)."""
         hook_input = {
             "model": {"display_name": "Claude"},
-            "context_window": {"used_percentage": 30.0},
+            "context_window": {"used_percentage": 20.0},
         }
 
         result = handler.handle(hook_input)
-        # Check for green background ANSI code
+        # Check for green background ANSI code (used for percentage at 0-25%)
+        # Format: "\033[42m\033[30m" (green bg + black fg for percentage)
         assert "\033[42m" in result.context[0]
+        # Should also have quarter circle icon ◔
+        assert "◔" in result.context[0]
 
     def test_color_coding_yellow(self, handler: ModelContextHandler) -> None:
         """Test yellow color for moderate usage (41-60%)."""
