@@ -160,6 +160,7 @@ handlers:
   session_start:
     workflow_state_restoration: {enabled: true, priority: 10}  # Restore workflow state after compaction
     yolo_container_detection: {enabled: true, priority: 40}  # Detect YOLO container environments
+    optimal_config_checker: {enabled: true, priority: 52}  # Check Claude Code env for optimal settings
     suggest_status_line: {enabled: true, priority: 55}  # Suggest status line setup
     version_check: {enabled: true, priority: 56}  # Check for daemon updates on new sessions
 

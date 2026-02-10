@@ -398,6 +398,13 @@ class HandlerID:
         display_name="status-thinking-mode",
     )
 
+    # Optimal config checker (SessionStart handler)
+    OPTIMAL_CONFIG_CHECKER = HandlerIDMeta(
+        class_name="OptimalConfigCheckerHandler",
+        config_key="optimal_config_checker",
+        display_name="optimal-config-checker",
+    )
+
     # Hedging language detector (Stop handler)
     HEDGING_LANGUAGE_DETECTOR = HandlerIDMeta(
         class_name="HedgingLanguageDetectorHandler",
@@ -467,6 +474,7 @@ HandlerKey = Literal[
     "npm_command",
     "task_completion_checker",
     "hedging_language_detector",
+    "optimal_config_checker",
     "bash_error_detector",
     "web_search_year",
     "suggest_status_line",

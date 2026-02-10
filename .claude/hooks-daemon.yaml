@@ -171,6 +171,10 @@ handlers:
       enabled: true
       priority: 10
 
+    optimal_config_checker:  # Checks Claude Code env for optimal settings
+      enabled: true
+      priority: 52
+
     suggest_status_line:  # Suggests daemon-based status line setup
       enabled: true      # Enable to suggest status line configuration
       priority: 55
