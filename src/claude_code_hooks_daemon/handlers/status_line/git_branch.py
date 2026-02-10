@@ -69,7 +69,7 @@ class GitBranchHandler(Handler):
 
             branch = result.stdout.decode().strip()
             if branch:
-                return HookResult(context=[f"| {branch}"])
+                return HookResult(context=[f"| ⎇ {branch}"])
 
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as e:
             logger.debug("Failed to get git branch: %s", e)

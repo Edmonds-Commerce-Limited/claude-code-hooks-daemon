@@ -55,9 +55,9 @@ class ThinkingModeHandler(Handler):
             if "alwaysThinkingEnabled" in settings:
                 thinking_on = bool(settings["alwaysThinkingEnabled"])
                 if thinking_on:
-                    parts.append(f"thinking: {orange}On{reset}")
+                    parts.append(f"💭 {orange}On{reset}")
                 else:
-                    parts.append(f"thinking: {dim}Off{reset}")
+                    parts.append(f"💭 {dim}Off{reset}")
 
             return HookResult(context=parts)
         except Exception:

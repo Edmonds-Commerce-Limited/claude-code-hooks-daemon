@@ -47,7 +47,7 @@ class AccountDisplayHandler(Handler):
                 return HookResult(context=[])
 
             username = match.group(1)
-            return HookResult(context=[f"{username} |"])
+            return HookResult(context=[f"👤 {username} |"])
 
         except Exception:
             # Silent fail - don't break status line for account display issues
