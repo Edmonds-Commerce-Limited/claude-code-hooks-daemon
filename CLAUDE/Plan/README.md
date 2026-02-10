@@ -11,13 +11,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Research agent team sub-agent spawning capability
   - **Priority**: High (context management)
 
-- [00034: Library/Plugin Separation and QA Sub-Agent Integration](00034-library-plugin-separation-qa/PLAN.md) - Not Started
-  - Move dogfooding_reminder from library to plugin system
-  - Add library/plugin separation check to QA Agent role (AgentTeam.md)
-  - Update run_all.sh to indicate sub-agent QA needed
-  - Create CLAUDE/QA.md documenting complete pipeline (automated + sub-agents)
-  - **Priority**: High (architectural integrity)
-
 
 
 ## Completed Plans
@@ -26,6 +19,13 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Added fallback detection signal (`.claude/hooks-daemon/.git`) for broken installs missing config
   - Updated both `project_detection.sh` and `upgrade.sh` with multi-signal detection
   - `NEEDS_CONFIG_REPAIR` flag set when config missing, Layer 2 auto-repairs during upgrade
+  - **Completed**: 2026-02-10
+
+- [00034: Library/Plugin Separation and QA Sub-Agent Integration](Completed/00034-library-plugin-separation-qa/PLAN.md) - Complete (2026-02-10)
+  - Moved dogfooding_reminder from library to plugin system
+  - Created CLAUDE/QA.md documenting complete QA pipeline
+  - Updated run_all.sh with sub-agent QA reminder
+  - Plugin accidentally deleted by 3642c29, restored from git history
   - **Completed**: 2026-02-10
 
 - [00041: DRY Install/Upgrade Architecture Refactoring](Completed/00041-dry-install-upgrade-architecture/PLAN.md) - 🟢 Complete (2026-02-10)
@@ -276,8 +276,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 36
-- **Completed**: 35 (1 with reduced scope)
-- **Active** (not started): 2
+- **Completed**: 36 (1 with reduced scope)
+- **Active** (not started): 1
 - **Cancelled/Abandoned**: 0
 
 ## Quick Links
