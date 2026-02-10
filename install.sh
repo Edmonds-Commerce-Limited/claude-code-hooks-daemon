@@ -1,307 +1,116 @@
 #!/bin/bash
 #
-# Claude Code Hooks Daemon - One-Line Installer
+# Claude Code Hooks Daemon - One-Line Installer (Layer 1)
 #
 # Usage:
 #   curl -sSL https://raw.githubusercontent.com/EdmondsCommerce/claude-code-hooks-daemon/main/install.sh | bash
 #
-# This script:
+# This is a minimal Layer 1 script that:
 # 1. Validates project root (.claude and .git must exist)
 # 2. Clones daemon repository to .claude/hooks-daemon/
-# 3. Runs install_v2.py to set up hooks and config
-# 4. Installs Python package dependencies
+# 3. Delegates to Layer 2 (scripts/install_version.sh) for full setup
+# 4. Falls back to legacy install.py if Layer 2 not available
+#
+# Environment variables:
+#   DAEMON_BRANCH - Git branch/tag to install (default: main)
+#   FORCE         - Set to "true" to reinstall over existing installation
 #
 
 set -euo pipefail
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
 # Configuration
 DAEMON_REPO="https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon.git"
 DAEMON_BRANCH="${DAEMON_BRANCH:-main}"
-DRY_RUN="${DRY_RUN:-false}"
 FORCE="${FORCE:-false}"
 
-#
-# Print functions
-#
-print_header() {
-    echo ""
-    echo "============================================================"
-    echo "$1"
-    echo "============================================================"
-    echo ""
-}
+# Minimal output functions (can't source library before clone)
+if [ -t 1 ]; then
+    _RED='\033[0;31m'; _GREEN='\033[0;32m'; _YELLOW='\033[1;33m'
+    _BLUE='\033[0;34m'; _NC='\033[0m'
+else
+    _RED=''; _GREEN=''; _YELLOW=''; _BLUE=''; _NC=''
+fi
 
-print_success() {
-    echo -e "${GREEN}✓${NC} $1"
-}
+_ok()   { echo -e "${_GREEN}OK${_NC} $1"; }
+_err()  { echo -e "${_RED}ERR${_NC} $1" >&2; }
+_warn() { echo -e "${_YELLOW}WARN${_NC} $1"; }
+_info() { echo -e "${_BLUE}>>>${_NC} $1"; }
+_fail() { _err "$1"; echo ""; echo "Installation aborted."; exit 1; }
 
-print_error() {
-    echo -e "${RED}✗${NC} $1" >&2
-}
+# ============================================================
+# Main
+# ============================================================
 
-print_warning() {
-    echo -e "${YELLOW}⚠${NC}  $1"
-}
+echo ""
+echo "============================================================"
+echo " Claude Code Hooks Daemon - Installer"
+echo "============================================================"
+echo ""
 
-print_info() {
-    echo -e "${BLUE}→${NC} $1"
-}
+PROJECT_ROOT="$(pwd)"
+DAEMON_DIR="$PROJECT_ROOT/.claude/hooks-daemon"
 
-#
-# Fail fast with clear error message
-#
-fail_fast() {
-    print_error "$1"
-    echo ""
-    echo "Installation aborted."
-    exit 1
-}
+# Step 1: Minimal prerequisites (git required for clone)
+_info "Checking prerequisites..."
+command -v git &>/dev/null || _fail "git is not installed. Please install git first."
+_ok "git found"
 
-#
-# Check prerequisites
-#
-check_prerequisites() {
-    print_info "Checking prerequisites..."
+# Step 2: Validate project root
+_info "Validating project root..."
+[ -d ".claude" ] || _fail "No .claude directory found. Run from a Claude Code project root."
+[ -d ".git" ]    || _fail "No .git directory found. Run from a git repository root."
+_ok "Project root: $PROJECT_ROOT"
 
-    # Check for git
-    if ! command -v git &> /dev/null; then
-        fail_fast "git is not installed. Please install git first."
+# Step 3: Clone daemon repository
+_info "Checking daemon installation..."
+if [ -d "$DAEMON_DIR" ]; then
+    if [ "$FORCE" = "true" ]; then
+        _warn "Removing existing installation (FORCE=true)..."
+        rm -rf "$DAEMON_DIR"
+    else
+        _err "Daemon already installed at $DAEMON_DIR"
+        echo ""
+        echo "To reinstall: curl -sSL <url> | FORCE=true bash"
+        echo "Or remove:    rm -rf $DAEMON_DIR"
+        exit 1
     fi
-    print_success "git found"
+fi
 
-    # Check for Python 3
-    if ! command -v python3 &> /dev/null; then
-        fail_fast "python3 is not installed. Please install Python 3.11+ first."
-    fi
+_info "Cloning from $DAEMON_REPO (branch: $DAEMON_BRANCH)..."
+if ! git clone --branch "$DAEMON_BRANCH" --depth 1 "$DAEMON_REPO" "$DAEMON_DIR" >/dev/null 2>&1; then
+    _fail "Failed to clone daemon repository"
+fi
+_ok "Daemon cloned to $DAEMON_DIR"
 
-    # Check Python version (must be 3.11+)
-    local python_version=$(python3 -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
-    local major=$(echo "$python_version" | cut -d. -f1)
-    local minor=$(echo "$python_version" | cut -d. -f2)
+# Step 4: Delegate to Layer 2 (with fallback to legacy)
+LAYER2_SCRIPT="$DAEMON_DIR/scripts/install_version.sh"
 
-    if [[ "$major" -lt 3 ]] || [[ "$major" -eq 3 && "$minor" -lt 11 ]]; then
-        fail_fast "Python 3.11+ required. Found: $python_version"
-    fi
-    print_success "Python $python_version found"
+if [ -f "$LAYER2_SCRIPT" ]; then
+    _info "Delegating to version-specific installer..."
+    exec bash "$LAYER2_SCRIPT" "$PROJECT_ROOT" "$DAEMON_DIR"
+else
+    # Fallback: legacy install flow for older tags without Layer 2
+    _warn "Layer 2 installer not found (older version). Using legacy flow..."
 
-    # Check for uv (install if missing)
-    if ! command -v uv &> /dev/null; then
-        print_info "uv not found, installing..."
-        if ! curl -LsSf https://astral.sh/uv/install.sh | sh > /dev/null 2>&1; then
-            fail_fast "Failed to install uv. Please install manually: curl -LsSf https://astral.sh/uv/install.sh | sh"
-        fi
-        # Add uv to PATH for this session
+    # Legacy: install dependencies
+    _info "Installing dependencies with uv..."
+    if command -v uv &>/dev/null || {
+        curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null 2>&1
         export PATH="$HOME/.local/bin:$PATH"
-        if ! command -v uv &> /dev/null; then
-            fail_fast "uv installed but not found in PATH. Please restart your shell or run: export PATH=\"\$HOME/.local/bin:\$PATH\""
-        fi
-        print_success "uv installed"
+        command -v uv &>/dev/null
+    }; then
+        cd "$DAEMON_DIR"
+        mkdir -p untracked
+        echo "/untracked/" > untracked/.gitignore
+        UV_PROJECT_ENVIRONMENT="$(pwd)/untracked/venv" uv sync --project . >/dev/null 2>&1 || true
+        cd - >/dev/null
+    fi
+
+    # Legacy: run install.py
+    if [ -f "$DAEMON_DIR/install.py" ]; then
+        _info "Running legacy installer (install.py)..."
+        python3 "$DAEMON_DIR/install.py" --force
     else
-        print_success "uv found"
+        _fail "No installer found in cloned repository"
     fi
-}
-
-#
-# Validate project root
-#
-validate_project_root() {
-    print_info "Validating project root..."
-
-    local pwd="$(pwd)"
-
-    # Check for .claude directory
-    if [[ ! -d ".claude" ]]; then
-        fail_fast "No .claude directory found in current directory: $pwd
-This script must be run from a Claude Code project root.
-
-Expected directory structure:
-  your-project/
-  ├── .claude/
-  ├── .git/
-  └── ..."
-    fi
-    print_success ".claude directory exists"
-
-    # Check for .git directory
-    if [[ ! -d ".git" ]]; then
-        fail_fast "No .git directory found in current directory: $pwd
-This script must be run from a git repository root.
-
-Expected directory structure:
-  your-project/
-  ├── .claude/
-  ├── .git/
-  └── ..."
-    fi
-    print_success ".git directory exists"
-
-    print_success "Project root validated: $pwd"
-}
-
-#
-# Clone daemon repository
-#
-clone_daemon() {
-    local daemon_dir=".claude/hooks-daemon"
-
-    print_info "Checking daemon installation..."
-
-    # Check if daemon directory already exists
-    if [[ -d "$daemon_dir" ]]; then
-        if [[ "$FORCE" == "true" ]]; then
-            print_warning "Daemon already installed at $daemon_dir"
-            print_info "Removing existing installation (--force mode)..."
-            rm -rf "$daemon_dir"
-        else
-            print_error "Daemon already installed at $daemon_dir"
-            echo ""
-            echo "To reinstall, run with FORCE=true:"
-            echo "  curl -sSL ... | FORCE=true bash"
-            echo ""
-            echo "Or manually remove and reinstall:"
-            echo "  rm -rf $daemon_dir"
-            echo "  curl -sSL ... | bash"
-            exit 1
-        fi
-    fi
-
-    print_info "Cloning daemon from GitHub..."
-    print_info "Repository: $DAEMON_REPO"
-    print_info "Branch: $DAEMON_BRANCH"
-
-    if ! git clone --branch "$DAEMON_BRANCH" --depth 1 "$DAEMON_REPO" "$daemon_dir" > /dev/null 2>&1; then
-        fail_fast "Failed to clone daemon repository"
-    fi
-
-    print_success "Daemon cloned to $daemon_dir"
-}
-
-#
-# Ensure daemon directory is git-ignored in main project
-#
-ensure_gitignore() {
-    print_info "Ensuring daemon is git-ignored..."
-
-    local gitignore_file=".gitignore"
-    local ignore_entry="/.claude/hooks-daemon/"
-
-    # Create .gitignore if it doesn't exist
-    if [[ ! -f "$gitignore_file" ]]; then
-        echo "$ignore_entry" > "$gitignore_file"
-        print_success "Created .gitignore with daemon entry"
-        return
-    fi
-
-    # Check if entry already exists
-    if grep -qF "$ignore_entry" "$gitignore_file"; then
-        print_success "Daemon already in .gitignore"
-        return
-    fi
-
-    # Add entry to .gitignore
-    echo "" >> "$gitignore_file"
-    echo "# Claude Code Hooks Daemon (separate git repo)" >> "$gitignore_file"
-    echo "$ignore_entry" >> "$gitignore_file"
-    print_success "Added daemon to .gitignore"
-}
-
-#
-# Install Python dependencies
-#
-install_dependencies() {
-    local daemon_dir=".claude/hooks-daemon"
-
-    print_info "Installing Python dependencies with uv..."
-
-    cd "$daemon_dir"
-
-    # Create untracked dir with self-excluding .gitignore
-    mkdir -p untracked
-    echo "/untracked/" > untracked/.gitignore
-
-    # Use uv to sync dependencies to untracked/venv (not .venv)
-    # UV_PROJECT_ENVIRONMENT tells uv where to create the venv
-    if UV_PROJECT_ENVIRONMENT="$(pwd)/untracked/venv" uv sync --project . > /dev/null 2>&1; then
-        print_success "Dependencies installed (uv managed venv)"
-    else
-        print_warning "Failed to install dependencies via uv"
-        print_info "You may need to install manually:"
-        echo "  cd $daemon_dir"
-        echo "  UV_PROJECT_ENVIRONMENT=\$(pwd)/untracked/venv uv sync"
-    fi
-
-    cd - > /dev/null
-}
-
-#
-# Run install.py with --force flag
-#
-run_installer() {
-    local daemon_dir=".claude/hooks-daemon"
-
-    print_info "Running daemon installer..."
-
-    # Always use --force when called from bash installer
-    local install_cmd="python3 $daemon_dir/install.py --force"
-
-    if ! $install_cmd; then
-        fail_fast "Daemon installation failed"
-    fi
-}
-
-#
-# Print next steps
-#
-print_next_steps() {
-    print_header "Installation Complete!"
-
-    echo "The Claude Code Hooks Daemon has been installed successfully."
-    echo ""
-    echo "Next Steps:"
-    echo ""
-    echo "  1. Edit configuration (optional):"
-    echo "     vim .claude/hooks-daemon.yaml"
-    echo ""
-    echo "  2. Commit the hook scripts to your repository:"
-    echo "     git add .claude/hooks/ .claude/settings.json .claude/hooks-daemon.yaml"
-    echo "     git commit -m 'Add Claude Code hooks daemon'"
-    echo ""
-    echo "  3. Hooks will start automatically on next tool use"
-    echo ""
-    echo "Daemon Management:"
-    echo "  Status:  cd .claude/hooks-daemon && uv run python -m claude_code_hooks_daemon.daemon.cli status"
-    echo "  Config:  cd .claude/hooks-daemon && uv run python -m claude_code_hooks_daemon.daemon.cli init-config"
-    echo ""
-    echo "Documentation:"
-    echo "  README:       .claude/hooks-daemon/README.md"
-    echo ""
-    echo "Dependencies:"
-    echo "  Managed by:   uv (https://docs.astral.sh/uv/)"
-    echo "  Location:     .claude/hooks-daemon/untracked/venv/"
-    echo ""
-}
-
-#
-# Main installation flow
-#
-main() {
-    print_header "Claude Code Hooks Daemon - Installer"
-
-    check_prerequisites
-    validate_project_root
-    clone_daemon
-    ensure_gitignore
-    install_dependencies
-    run_installer
-    print_next_steps
-}
-
-# Run main function
-main "$@"
+fi
