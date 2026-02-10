@@ -18,8 +18,30 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Create CLAUDE/QA.md documenting complete pipeline (automated + sub-agents)
   - **Priority**: High (architectural integrity)
 
+- [00041: DRY Install/Upgrade Architecture Refactoring](00041-dry-install-upgrade-architecture/PLAN.md) - In Progress (Phase 2 complete, Phase 3 starting)
+  - Eliminate ~800 lines of duplication between install.sh, install.py, and upgrade.sh
+  - Implement two-layer architecture (stable curl-fetched + version-specific modular)
+  - Add robust config preservation with diff/merge/validate for custom settings
+  - Implement full state rollback (code, config, hooks, venv, gitignore)
+  - Reduce entry scripts to under 100 lines each (from 308 and 612)
+  - **Priority**: High (architectural debt, maintenance burden)
+
 
 ## Completed Plans
+
+- [00042: Fix Auto-Continue Stop Handler Bug](Completed/00042-auto-continue-stop-bug/PLAN.md) - 🟢 Complete (2026-02-10)
+  - Fixed camelCase `stopHookActive` field not detected (infinite loop risk)
+  - Added diagnostic logging throughout `matches()` for future debugging
+  - 7 new integration tests covering full DaemonController flow
+  - **Completed**: 2026-02-10
+
+- [00039: Handler Config Key Consistency](Completed/00039-handler-config-key-consistency/PLAN.md) - 🟢 Complete (2026-02-10)
+  - Fixed design flaw where HandlerID constants were ignored by registry
+  - Made HandlerID constants actual SSOT for config keys (eliminated auto-generation)
+  - Fixed 5 mismatches: python/php/go QA suppressions, suggest_statusline, session_cleanup
+  - Added validation with audit script (0 mismatches found post-fix)
+  - Bonus: Eliminated ALL duplicate priority warnings in daemon logs
+  - **Completed**: 2026-02-10
 
 - [00033: Status Line Enhancements (PowerShell Port)](Completed/00033-statusline-enhancements/PLAN.md) - 🟡 Complete with reduced scope (2026-02-09)
   - Scope reduced: OAuth tokens blocked from third-party API use since Jan 2026
@@ -246,9 +268,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 33
-- **Completed**: 31 (1 with reduced scope)
-- **Active** (not started): 2
+- **Total Plans Created**: 35
+- **Completed**: 33 (1 with reduced scope)
+- **Active** (not started): 3
 - **Cancelled/Abandoned**: 0
 
 ## Quick Links
