@@ -187,6 +187,72 @@ class TestAutoContinueStopHandlerMatchesTrue:
         }
         assert handler.matches(hook_input) is True
 
+    # Tests for patterns ported from php-qa-ci (Phase 2)
+    def test_matches_let_me_know_if_you_pattern(
+        self, handler: AutoContinueStopHandler, mock_transcript_path: Path
+    ) -> None:
+        """Should match 'let me know if you' pattern (ported from php-qa-ci)."""
+        self._write_transcript(
+            mock_transcript_path, "Let me know if you want me to continue with phase 2"
+        )
+        hook_input = {
+            "transcript_path": str(mock_transcript_path),
+            "stop_hook_active": False,
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_want_me_to_go_ahead_pattern(
+        self, handler: AutoContinueStopHandler, mock_transcript_path: Path
+    ) -> None:
+        """Should match 'want me to go ahead' pattern (ported from php-qa-ci)."""
+        self._write_transcript(
+            mock_transcript_path, "Do you want me to go ahead and implement the changes"
+        )
+        hook_input = {
+            "transcript_path": str(mock_transcript_path),
+            "stop_hook_active": False,
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_want_me_to_keep_going_pattern(
+        self, handler: AutoContinueStopHandler, mock_transcript_path: Path
+    ) -> None:
+        """Should match 'want me to keep going' pattern (ported from php-qa-ci)."""
+        self._write_transcript(
+            mock_transcript_path, "Do you want me to keep going with the refactoring"
+        )
+        hook_input = {
+            "transcript_path": str(mock_transcript_path),
+            "stop_hook_active": False,
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_if_youd_like_to_continue_pattern(
+        self, handler: AutoContinueStopHandler, mock_transcript_path: Path
+    ) -> None:
+        """Should match 'if you'd like' pattern (ported from php-qa-ci)."""
+        self._write_transcript(
+            mock_transcript_path, "If you'd like me to continue, I can proceed with the next step"
+        )
+        hook_input = {
+            "transcript_path": str(mock_transcript_path),
+            "stop_hook_active": False,
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_i_can_continue_with_pattern(
+        self, handler: AutoContinueStopHandler, mock_transcript_path: Path
+    ) -> None:
+        """Should match 'I can continue with' pattern (ported from php-qa-ci)."""
+        self._write_transcript(
+            mock_transcript_path, "I can continue with implementing the remaining features"
+        )
+        hook_input = {
+            "transcript_path": str(mock_transcript_path),
+            "stop_hook_active": False,
+        }
+        assert handler.matches(hook_input) is True
+
 
 class TestAutoContinueStopHandlerMatchesFalse:
     """Test cases where matches() should return False."""
