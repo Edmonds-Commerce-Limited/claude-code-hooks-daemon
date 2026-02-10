@@ -19,14 +19,16 @@ High-performance daemon for Claude Code hooks using Unix socket IPC and front co
 
 **Quick Install (AI-Assisted - Recommended):**
 ```
-Please read and follow the installation instructions from:
-https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-INSTALL.md
+Use curl to fetch and save this file:
+curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-INSTALL.md -o /tmp/LLM-INSTALL.md
+Then read /tmp/LLM-INSTALL.md and follow the instructions exactly.
 ```
 
 **Quick Update (AI-Assisted - Recommended):**
 ```
-Please read and follow the update instructions from:
-https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-UPDATE.md
+Use curl to fetch and save this file:
+curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-UPDATE.md -o /tmp/LLM-UPDATE.md
+Then read /tmp/LLM-UPDATE.md and follow the instructions exactly.
 ```
 
 ---
@@ -76,8 +78,9 @@ A daemon-based hooks system that eliminates process spawn overhead (~21ms) with 
 **Copy this into Claude Code:**
 
 ```
-Please read and follow the installation instructions from:
-https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-INSTALL.md
+Use curl to fetch and save this file:
+curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-INSTALL.md -o /tmp/LLM-INSTALL.md
+Then read /tmp/LLM-INSTALL.md and follow the instructions exactly.
 ```
 
 **Installation time:** ~30 seconds with AI assistance
@@ -136,8 +139,9 @@ The installer creates:
 **Copy this into Claude Code:**
 
 ```
-Please read and follow the update instructions from:
-https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-UPDATE.md
+Use curl to fetch and save this file:
+curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-UPDATE.md -o /tmp/LLM-UPDATE.md
+Then read /tmp/LLM-UPDATE.md and follow the instructions exactly.
 ```
 
 **Update time:** ~15 seconds with AI assistance
