@@ -136,6 +136,7 @@ class TestDogfoodingConfiguration:
         opt_in_handlers = frozenset(
             {
                 "orchestrator_only",  # Blocks all work tools, opt-in only
+                "validate_instruction_content",  # False positives on this project's own CLAUDE.md/README.md
             }
         )
 

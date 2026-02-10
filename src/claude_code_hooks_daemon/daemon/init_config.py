@@ -136,6 +136,7 @@ handlers:
     global_npm_advisor: {enabled: true, priority: 41}  # Advise on npm install -g (non-blocking)
     task_tdd_advisor: {enabled: true, priority: 45}  # Advise on TDD workflow for Task agents (non-blocking)
     plan_completion_advisor: {enabled: true, priority: 50}  # Advise on plan completion steps (git mv, README update)
+    validate_instruction_content: {enabled: true, priority: 50}  # Block ephemeral content in CLAUDE.md/README.md
     web_search_year: {enabled: true, priority: 55}   # Fix outdated years in searches
 
     # ADVISORY HANDLERS (Priority 56-60)

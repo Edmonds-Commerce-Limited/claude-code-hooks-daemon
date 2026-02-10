@@ -128,9 +128,9 @@ class TestImplementationLogs:
         self, handler: ValidateInstructionContentHandler, mock_write_tool_call: dict[str, Any]
     ) -> None:
         """Test blocks 'created file' implementation log."""
-        mock_write_tool_call["tool_input"]["content"] = (
-            "# Instructions\n\nCreated the file ProductService.php"
-        )
+        mock_write_tool_call["tool_input"][
+            "content"
+        ] = "# Instructions\n\nCreated the file ProductService.php"
         result = handler.handle(mock_write_tool_call)
         assert result.decision == "deny"
         assert "implementation logs" in result.reason.lower()
@@ -139,9 +139,9 @@ class TestImplementationLogs:
         self, handler: ValidateInstructionContentHandler, mock_write_tool_call: dict[str, Any]
     ) -> None:
         """Test blocks 'added class' implementation log."""
-        mock_write_tool_call["tool_input"]["content"] = (
-            "# Instructions\n\nAdded class CustomerService to handle logic"
-        )
+        mock_write_tool_call["tool_input"][
+            "content"
+        ] = "# Instructions\n\nAdded class CustomerService to handle logic"
         result = handler.handle(mock_write_tool_call)
         assert result.decision == "deny"
 
@@ -149,9 +149,9 @@ class TestImplementationLogs:
         self, handler: ValidateInstructionContentHandler, mock_write_tool_call: dict[str, Any]
     ) -> None:
         """Test blocks 'modified function' implementation log."""
-        mock_write_tool_call["tool_input"]["content"] = (
-            "# Instructions\n\nModified the function calculateTotal()"
-        )
+        mock_write_tool_call["tool_input"][
+            "content"
+        ] = "# Instructions\n\nModified the function calculateTotal()"
         result = handler.handle(mock_write_tool_call)
         assert result.decision == "deny"
 
@@ -159,9 +159,9 @@ class TestImplementationLogs:
         self, handler: ValidateInstructionContentHandler, mock_write_tool_call: dict[str, Any]
     ) -> None:
         """Test blocks 'updated directory' implementation log."""
-        mock_write_tool_call["tool_input"]["content"] = (
-            "# Instructions\n\nUpdated directory structure for services"
-        )
+        mock_write_tool_call["tool_input"][
+            "content"
+        ] = "# Instructions\n\nUpdated directory structure for services"
         result = handler.handle(mock_write_tool_call)
         assert result.decision == "deny"
 
@@ -169,9 +169,9 @@ class TestImplementationLogs:
         self, handler: ValidateInstructionContentHandler, mock_write_tool_call: dict[str, Any]
     ) -> None:
         """Test blocks 'implemented' feature log."""
-        mock_write_tool_call["tool_input"]["content"] = (
-            "# Instructions\n\nImplemented feature for email validation"
-        )
+        mock_write_tool_call["tool_input"][
+            "content"
+        ] = "# Instructions\n\nImplemented feature for email validation"
         result = handler.handle(mock_write_tool_call)
         assert result.decision == "deny"
 
@@ -183,7 +183,9 @@ class TestStatusIndicators:
         self, handler: ValidateInstructionContentHandler, mock_write_tool_call: dict[str, Any]
     ) -> None:
         """Test blocks checkmark with 'complete'."""
-        mock_write_tool_call["tool_input"]["content"] = "# Instructions\n\n✓ Complete implementation"
+        mock_write_tool_call["tool_input"][
+            "content"
+        ] = "# Instructions\n\n✓ Complete implementation"
         result = handler.handle(mock_write_tool_call)
         assert result.decision == "deny"
         assert "status indicators" in result.reason.lower()
@@ -229,9 +231,9 @@ class TestTimestamps:
         self, handler: ValidateInstructionContentHandler, mock_write_tool_call: dict[str, Any]
     ) -> None:
         """Test blocks timestamp in middle of text."""
-        mock_write_tool_call["tool_input"]["content"] = (
-            "# Instructions\n\nUpdated on 2025-12-25 with new features"
-        )
+        mock_write_tool_call["tool_input"][
+            "content"
+        ] = "# Instructions\n\nUpdated on 2025-12-25 with new features"
         result = handler.handle(mock_write_tool_call)
         assert result.decision == "deny"
 
@@ -243,7 +245,9 @@ class TestLlmSummaries:
         self, handler: ValidateInstructionContentHandler, mock_write_tool_call: dict[str, Any]
     ) -> None:
         """Test blocks '## Summary' heading."""
-        mock_write_tool_call["tool_input"]["content"] = "# Instructions\n\n## Summary\n\nThis project does X"
+        mock_write_tool_call["tool_input"][
+            "content"
+        ] = "# Instructions\n\n## Summary\n\nThis project does X"
         result = handler.handle(mock_write_tool_call)
         assert result.decision == "deny"
         assert "llm summaries" in result.reason.lower()
@@ -252,9 +256,9 @@ class TestLlmSummaries:
         self, handler: ValidateInstructionContentHandler, mock_write_tool_call: dict[str, Any]
     ) -> None:
         """Test blocks '## Key Points' heading."""
-        mock_write_tool_call["tool_input"]["content"] = (
-            "# Instructions\n\n## Key Points\n\n- Point one\n- Point two"
-        )
+        mock_write_tool_call["tool_input"][
+            "content"
+        ] = "# Instructions\n\n## Key Points\n\n- Point one\n- Point two"
         result = handler.handle(mock_write_tool_call)
         assert result.decision == "deny"
 
@@ -262,9 +266,9 @@ class TestLlmSummaries:
         self, handler: ValidateInstructionContentHandler, mock_write_tool_call: dict[str, Any]
     ) -> None:
         """Test blocks '## Overview' heading."""
-        mock_write_tool_call["tool_input"]["content"] = (
-            "# Instructions\n\n## Overview\n\nThis is an overview of changes"
-        )
+        mock_write_tool_call["tool_input"][
+            "content"
+        ] = "# Instructions\n\n## Overview\n\nThis is an overview of changes"
         result = handler.handle(mock_write_tool_call)
         assert result.decision == "deny"
 
@@ -293,7 +297,9 @@ class TestTestOutput:
         self, handler: ValidateInstructionContentHandler, mock_write_tool_call: dict[str, Any]
     ) -> None:
         """Test blocks 'X tests executed'."""
-        mock_write_tool_call["tool_input"]["content"] = "# Instructions\n\n15 tests executed successfully"
+        mock_write_tool_call["tool_input"][
+            "content"
+        ] = "# Instructions\n\n15 tests executed successfully"
         result = handler.handle(mock_write_tool_call)
         assert result.decision == "deny"
 
@@ -305,9 +311,9 @@ class TestFileListings:
         self, handler: ValidateInstructionContentHandler, mock_write_tool_call: dict[str, Any]
     ) -> None:
         """Test blocks file listing with .php extension."""
-        mock_write_tool_call["tool_input"]["content"] = (
-            "# Instructions\n\nsrc/Service/ProductService.php"
-        )
+        mock_write_tool_call["tool_input"][
+            "content"
+        ] = "# Instructions\n\nsrc/Service/ProductService.php"
         result = handler.handle(mock_write_tool_call)
         assert result.decision == "deny"
         assert "file listings" in result.reason.lower()
@@ -316,7 +322,9 @@ class TestFileListings:
         self, handler: ValidateInstructionContentHandler, mock_write_tool_call: dict[str, Any]
     ) -> None:
         """Test blocks file listing with .js extension."""
-        mock_write_tool_call["tool_input"]["content"] = "# Instructions\n\nassets/js/main.js modified"
+        mock_write_tool_call["tool_input"][
+            "content"
+        ] = "# Instructions\n\nassets/js/main.js modified"
         result = handler.handle(mock_write_tool_call)
         assert result.decision == "deny"
 
@@ -336,7 +344,9 @@ class TestChangeSummaries:
         self, handler: ValidateInstructionContentHandler, mock_write_tool_call: dict[str, Any]
     ) -> None:
         """Test blocks 'Added X lines'."""
-        mock_write_tool_call["tool_input"]["content"] = "# Instructions\n\nAdded 15 lines to implement feature"
+        mock_write_tool_call["tool_input"][
+            "content"
+        ] = "# Instructions\n\nAdded 15 lines to implement feature"
         result = handler.handle(mock_write_tool_call)
         assert result.decision == "deny"
         assert "change summaries" in result.reason.lower()
@@ -345,7 +355,9 @@ class TestChangeSummaries:
         self, handler: ValidateInstructionContentHandler, mock_write_tool_call: dict[str, Any]
     ) -> None:
         """Test blocks 'Removed X lines'."""
-        mock_write_tool_call["tool_input"]["content"] = "# Instructions\n\nRemoved 8 lines of dead code"
+        mock_write_tool_call["tool_input"][
+            "content"
+        ] = "# Instructions\n\nRemoved 8 lines of dead code"
         result = handler.handle(mock_write_tool_call)
         assert result.decision == "deny"
 
@@ -353,7 +365,9 @@ class TestChangeSummaries:
         self, handler: ValidateInstructionContentHandler, mock_write_tool_call: dict[str, Any]
     ) -> None:
         """Test blocks 'Changed X lines'."""
-        mock_write_tool_call["tool_input"]["content"] = "# Instructions\n\nChanged 3 lines for validation"
+        mock_write_tool_call["tool_input"][
+            "content"
+        ] = "# Instructions\n\nChanged 3 lines for validation"
         result = handler.handle(mock_write_tool_call)
         assert result.decision == "deny"
 
@@ -382,7 +396,9 @@ class TestCompletionIndicators:
         self, handler: ValidateInstructionContentHandler, mock_write_tool_call: dict[str, Any]
     ) -> None:
         """Test blocks 'Finished task'."""
-        mock_write_tool_call["tool_input"]["content"] = "# Instructions\n\nFinished task successfully"
+        mock_write_tool_call["tool_input"][
+            "content"
+        ] = "# Instructions\n\nFinished task successfully"
         result = handler.handle(mock_write_tool_call)
         assert result.decision == "deny"
 
@@ -515,13 +531,41 @@ Run tests with PHPUnit.
         result = handler.handle(mock_write_tool_call)
         assert result.decision == "allow"
 
+    def test_allows_instruction_about_generated_files(
+        self, handler: ValidateInstructionContentHandler, mock_write_tool_call: dict[str, Any]
+    ) -> None:
+        """Test allows instruction mentioning 'generated files' — not an implementation log."""
+        mock_write_tool_call["tool_input"][
+            "content"
+        ] = "**CRITICAL:** You MUST create .gitignore to prevent committing generated files."
+        result = handler.handle(mock_write_tool_call)
+        assert result.decision == "allow"
+
+    def test_allows_instruction_about_created_directory_structure(
+        self, handler: ValidateInstructionContentHandler, mock_write_tool_call: dict[str, Any]
+    ) -> None:
+        """Test allows imperative instructions like 'create the file'."""
+        mock_write_tool_call["tool_input"][
+            "content"
+        ] = "You must create the file `.env.local` before running the app."
+        result = handler.handle(mock_write_tool_call)
+        assert result.decision == "allow"
+
+    def test_blocks_past_tense_implementation_log(
+        self, handler: ValidateInstructionContentHandler, mock_write_tool_call: dict[str, Any]
+    ) -> None:
+        """Test still blocks past-tense implementation logs."""
+        mock_write_tool_call["tool_input"][
+            "content"
+        ] = "# Instructions\n\nCreated the file ProductService.php for handling products"
+        result = handler.handle(mock_write_tool_call)
+        assert result.decision == "deny"
+
     def test_allows_readme_with_features(
         self, handler: ValidateInstructionContentHandler, mock_write_tool_call: dict[str, Any]
     ) -> None:
         """Test allows README with feature descriptions."""
-        mock_write_tool_call["tool_input"][
-            "content"
-        ] = """# My Project
+        mock_write_tool_call["tool_input"]["content"] = """# My Project
 
 ## Features
 

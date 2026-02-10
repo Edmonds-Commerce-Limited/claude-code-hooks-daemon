@@ -9,6 +9,7 @@ from typing import Any, ClassVar
 
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
+from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import Handler
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest, TestType
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
@@ -25,7 +26,7 @@ class ValidateInstructionContentHandler(Handler):
 
     # Pattern categories - each represents a type of blocked content
     IMPLEMENTATION_LOGS: ClassVar[list[str]] = [
-        r"\b(?:created|added|modified|updated|implemented|built|generated)\s+(?:the\s+)?(?:file|directory|class|function|method|interface|trait|enum|feature)",
+        r"\b(?:created|added|modified|updated|implemented|built|generated)\s+(?:the\s+)?(?:file|directory|class|function|method|interface|trait|enum|feature)\s+\S",
     ]
 
     STATUS_INDICATORS: ClassVar[list[str]] = [
@@ -69,14 +70,14 @@ class ValidateInstructionContentHandler(Handler):
         Applies to Write and Edit tools operating on CLAUDE.md or README.md files.
         """
         tool_name = hook_input.get("tool_name", "")
-        if tool_name not in ("Write", "Edit"):
+        if tool_name not in (ToolName.WRITE, ToolName.EDIT):
             return False
 
         tool_input = hook_input.get("tool_input", {})
-        file_path = tool_input.get("file_path", "")
+        file_path: str = tool_input.get("file_path", "")
 
         # Check if file is CLAUDE.md or README.md (case-insensitive, any directory)
-        return file_path.upper().endswith(("CLAUDE.MD", "README.MD"))
+        return bool(file_path.upper().endswith(("CLAUDE.MD", "README.MD")))
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Validate content being written to instruction files.
@@ -88,9 +89,9 @@ class ValidateInstructionContentHandler(Handler):
         tool_name = hook_input.get("tool_name", "")
 
         # Get content to check based on tool type
-        if tool_name == "Write":
+        if tool_name == ToolName.WRITE:
             content = tool_input.get("content", "")
-        elif tool_name == "Edit":
+        elif tool_name == ToolName.EDIT:
             content = tool_input.get("new_string", "")
         else:
             return HookResult(
