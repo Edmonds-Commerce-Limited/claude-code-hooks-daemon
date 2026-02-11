@@ -47,7 +47,24 @@ cd ../..
 
 3. **GIT CLEAN STATE**: Working directory MUST be clean. Run `git status` - if not clean, commit/push first.
 
-4. **NO SESSION RESTART NEEDED**: Updates take effect after daemon restart only. Exception: Only if update adds NEW event types (new files in `.claude/hooks/`), then restart Claude Code.
+4. **RESTART REQUIRED for multi-version upgrades**: If upgrading across multiple minor/major versions, restart Claude Code after the upgrade to ensure all new hook event types are loaded. For patch upgrades within the same minor version, daemon restart is sufficient.
+
+---
+
+## Prerequisites
+
+**Python 3.11+ is required.** The daemon uses modern Python features that are not available in older versions.
+
+```bash
+# Check your Python version
+python3 --version  # Must be 3.11+
+
+# If too old, the upgrade script will search for python3.11/3.12/3.13 automatically
+# You can also specify explicitly:
+python3.12 --version
+```
+
+If no suitable Python is found, install Python 3.11+ before proceeding.
 
 ---
 
@@ -55,7 +72,7 @@ cd ../..
 
 The upgrade system uses a **two-layer architecture**:
 
-- **Layer 1** (`scripts/upgrade.sh`): Minimal curl-fetched script (~130 lines). Detects project root, fetches tags, determines target version, then delegates to Layer 2 via `exec`.
+- **Layer 1** (`scripts/upgrade.sh`): Minimal curl-fetched script (~130 lines). Requires `--project-root PATH` to specify the project directory. Fetches tags, checks out target version first (checkout-first strategy), then delegates to Layer 2 via `exec`.
 - **Layer 2** (`scripts/upgrade_version.sh`): Version-specific orchestrator implementing **"Upgrade = Clean Reinstall + Config Preservation"**. Sources a shared modular library (`scripts/install/*.sh`) for all operations.
 
 **Key principle**: Upgrade produces the same clean state as a fresh install, while preserving only user config customizations via a diff/merge/validate pipeline.
@@ -91,35 +108,36 @@ curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-cod
 # Review the script to ensure you're comfortable with it
 less /tmp/upgrade.sh
 
-# Run it (it handles all the git operations)
-bash /tmp/upgrade.sh
+# Run it with --project-root pointing to your project directory (REQUIRED)
+bash /tmp/upgrade.sh --project-root /path/to/your/project
 
 # Clean up
 rm /tmp/upgrade.sh
 ```
 
-This works for **any version** (including pre-v2.5.0 installations) and is the safest method since you can inspect what the script will do before running it. The script handles all the git fetch/checkout/pull operations.
+This works for **any version** (including pre-v2.5.0 installations) and is the safest method since you can inspect what the script will do before running it. The `--project-root` argument is required and must point to the directory containing your `.claude/` folder. The script handles all the git fetch/checkout/pull operations.
 
 ### Upgrade to Specific Version
 
 ```bash
 # Fetch and run with version argument
 curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/scripts/upgrade.sh -o /tmp/upgrade.sh
-bash /tmp/upgrade.sh v2.5.0
+bash /tmp/upgrade.sh --project-root /path/to/your/project v2.9.0
 rm /tmp/upgrade.sh
 ```
 
 ### What the Script Does (Two-Layer Flow)
 
 **Layer 1** (the curl-fetched script):
-- Auto-detects your project root (works from any subdirectory)
+- Uses `--project-root PATH` (required) to locate the project
 - Fetches latest tags from remote
 - Determines target version (latest tag or specified argument)
+- Checks out target version first (checkout-first strategy)
 - Delegates to Layer 2 via `exec`
 
 **Layer 2** (version-specific orchestrator):
-- Creates state snapshot for rollback (hooks, config, settings.json)
-- Backs up user config
+- Creates state snapshot for rollback (hooks, config, Claude Code `settings.json`)
+- Backs up user config and `settings.json` (Claude Code settings are preserved across upgrades)
 - Extracts user customizations (diff against old defaults)
 - Stops the daemon safely
 - Checks out target version code
@@ -131,8 +149,6 @@ rm /tmp/upgrade.sh
 - Starts daemon and verifies running
 - Cleans up old snapshots (keeps 5 most recent)
 - Rolls back automatically on any failure
-
-**Legacy fallback**: If upgrading to a version that predates the two-layer architecture, Layer 1 falls back to a legacy inline upgrade (stop, checkout, pip install, restart). This is expected for older tags.
 
 ### Why Fetch from GitHub?
 
@@ -220,7 +236,7 @@ echo '{"tool_name": "Bash", "tool_input": {"command": "git reset --hard HEAD"}}'
 # Expected: {"hookSpecificOutput": {"permissionDecision": "deny", ...}}
 ```
 
-**No Claude Code restart needed.** Daemon restart is sufficient. Exception: Restart Claude Code only if new hook event types were added (rare).
+**RESTART REQUIRED for multi-version upgrades**: If upgrading across multiple minor/major versions, restart Claude Code after the upgrade to ensure all new hook event types are loaded. For patch upgrades within the same minor version, daemon restart is sufficient.
 
 ---
 
@@ -765,9 +781,55 @@ except Exception as e:
 "
 ```
 
-### Layer 2 Upgrader Not Found (Legacy Fallback)
+### Socket Path Too Long (AF_UNIX Limit)
 
-If you see "Layer 2 upgrader not found" during upgrade, the currently installed version predates the two-layer architecture. The legacy fallback (stop, checkout, pip install, restart) will handle the upgrade. After upgrading, future upgrades will use the full Layer 2 flow.
+If your project path is very deep (>60 characters), the Unix socket path may exceed the 108-byte kernel limit.
+
+**Symptoms**: Daemon fails to start with "AF_UNIX path too long" or similar socket error.
+
+**Automatic fix**: The daemon automatically falls back to shorter paths:
+1. `$XDG_RUNTIME_DIR/hooks-daemon-{hash}.sock` (preferred)
+2. `/run/user/{uid}/hooks-daemon-{hash}.sock` (Linux)
+3. `/tmp/hooks-daemon-{hash}.sock` (last resort)
+
+**Manual override**: Set environment variable:
+```bash
+export CLAUDE_HOOKS_SOCKET_PATH=/tmp/my-project-daemon.sock
+```
+
+### Broken Install Recovery
+
+If your installation is in a broken state (missing venv, corrupt config, nested install artifacts):
+
+```bash
+# Download latest upgrade script
+curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/scripts/upgrade.sh -o /tmp/upgrade.sh
+
+# Run with explicit project root - it will clean up and rebuild
+bash /tmp/upgrade.sh --project-root /path/to/your/project
+rm /tmp/upgrade.sh
+```
+
+The upgrade script actively cleans up nested install artifacts and rebuilds the venv from scratch.
+
+### Plugin Config Breaking Change (v2.8.0+)
+
+Plugins now require an explicit `event_type` field. If you have custom plugins, update their config:
+
+**Before:**
+```yaml
+plugins:
+  my_plugin:
+    module: my_module
+```
+
+**After:**
+```yaml
+plugins:
+  my_plugin:
+    event_type: pre_tool_use  # Required since v2.8.0
+    module: my_module
+```
 
 ### Venv Broken After Update
 
@@ -822,6 +884,97 @@ else
   echo "Already at latest version"
 fi
 ```
+
+---
+
+## Feedback & Issue Reporting
+
+**IMPORTANT**: During the upgrade process, keep detailed notes of everything that happens. Create a feedback file that the user can optionally share with the project maintainers.
+
+### Create Feedback File
+
+After the upgrade completes (whether successful or not), create a detailed feedback file:
+
+```bash
+# Create feedback file at project root
+cat > upgrade-feedback-$(date +%Y%m%d).md << 'FEEDBACK'
+# Upgrade Feedback Report
+
+## Environment
+- **Date**: $(date +%Y-%m-%d)
+- **From Version**: [previous version]
+- **To Version**: [target version]
+- **OS**: [operating system and version]
+- **Python Version**: [python3 --version output]
+- **Default Python**: [which python3 output]
+- **Project Path Length**: [character count of project root path]
+
+## Upgrade Method
+- [ ] Automated (upgrade.sh)
+- [ ] Manual (step-by-step)
+
+## Results
+- **Overall**: SUCCESS / PARTIAL / FAILED
+- **Duration**: [how long it took]
+
+## Step-by-Step Log
+[Document each step: what command was run, what output was received, any errors or warnings]
+
+1. **Pre-flight checks**: ...
+2. **Daemon stop**: ...
+3. **Git checkout**: ...
+4. **Venv creation**: ...
+5. **Config migration**: ...
+6. **Daemon start**: ...
+7. **Verification**: ...
+
+## Issues Encountered
+[List any problems, workarounds, or unexpected behavior]
+
+1. **Issue**: [description]
+   **Severity**: Critical / Major / Minor / Cosmetic
+   **Workaround**: [what you did to get past it]
+   **Suggestion**: [how it could be improved]
+
+## Documentation Gaps
+[Note any missing, unclear, or incorrect documentation]
+
+1. [description of gap]
+
+## Suggestions
+[Any improvements to the upgrade process]
+
+1. [suggestion]
+
+## Config Changes
+[Note any config format changes that required manual intervention]
+
+## Warnings & Anomalies
+[Any warnings logged, unexpected behavior, or things that seemed wrong but didn't break anything]
+FEEDBACK
+```
+
+### What to Document
+
+During the upgrade, actively note:
+- **Every command** you run and its output (especially errors/warnings)
+- **Every decision point** where you had to choose between options
+- **Documentation inconsistencies** where docs said one thing but reality was different
+- **Missing prerequisites** that weren't mentioned in docs
+- **Confusing error messages** that didn't help you diagnose the issue
+- **Workarounds** you had to apply that shouldn't be necessary
+- **Time spent** on each step (helps identify bottlenecks)
+- **Path/permission issues** especially on different OS configurations
+
+### Sharing Feedback
+
+The feedback file can be shared with project maintainers to improve the upgrade process:
+
+1. Open an issue at the project's GitHub repository
+2. Attach or paste the feedback file content
+3. Maintainers use this real-world data to fix upgrade issues
+
+**Every piece of feedback makes the next upgrade smoother for everyone.**
 
 ---
 
