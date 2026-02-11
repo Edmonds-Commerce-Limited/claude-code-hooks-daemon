@@ -8,13 +8,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Create specialized sub-agents for workflow gates and orchestration
   - **Priority**: High (context management)
 
-- [00034: Model-Aware Agent Team Advisor](00034-sleepy-puzzling-backus/PLAN.md) - Not Started
+- [00034: Model-Aware Agent Team Advisor](00034-model-aware-agent-team-advisor/PLAN.md) - Not Started
   - Update Plan 00032 with model-aware agent team advisor handler
 
-- [00035: StatusLine Data Cache + Model-Aware Advisor](00035-sleepy-puzzling-backus/PLAN.md) - Not Started
+- [00035: StatusLine Data Cache + Model-Aware Advisor](00035-statusline-data-cache-model-advisor/PLAN.md) - Not Started
   - StatusLine data cache for model-awareness in PreToolUse events
-
-- [00036: (Unnamed Draft)](00036-sleepy-puzzling-backus/PLAN.md) - Empty/Draft
 
 - [00038: Library Handler Over-fitting](00038-library-handler-over-fitting/PLAN.md) - Not Started
   - Address handlers that over-fit to project-specific assumptions
@@ -312,8 +310,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 48
 - **Completed**: 39 (1 with reduced scope)
-- **Active**: 9 (1 in progress, 6 not started, 1 proposed, 1 empty draft)
-- **Cancelled/Abandoned**: 0
+- **Active**: 8 (1 in progress, 5 not started, 1 proposed, 1 cleanup)
+- **Cancelled/Abandoned**: 1 (00036 - empty draft, deleted)
 
 ## Quick Links
 
