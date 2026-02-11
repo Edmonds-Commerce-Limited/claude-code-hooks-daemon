@@ -4,14 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00046: Upgrade System Overhaul](00046-upgrade-system-overhaul/PLAN.md) - Not Started
-  - Fix root cause: Layer 1 checks for Layer 2 BEFORE checkout (always hits broken legacy fallback)
-  - Drop legacy fallback entirely - checkout first, then run Layer 2
-  - Add Python 3.11+ version detection with interpreter search
-  - Add AF_UNIX socket path length validation with XDG_RUNTIME_DIR fallback
-  - Improve config validation error messages, update LLM-UPDATE.md
-  - **Priority**: High (upgrade system broken for real users)
-
 - [00032: Sub-Agent Orchestration for Context Preservation](00032-subagent-orchestration-context-preservation/PLAN.md) - Not Started
   - Create specialized sub-agents for workflow gates and orchestration
   - Enforce sub-agent usage via PreToolUse handlers
@@ -22,6 +14,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 
 ## Completed Plans
+
+- [00046: Upgrade System Overhaul](Completed/00046-upgrade-system-overhaul/PLAN.md) - Complete (2026-02-11)
+  - Fixed Layer 1 checkout ordering, dropped legacy fallback, Python 3.11+ version detection
+  - AF_UNIX socket path length validation with XDG_RUNTIME_DIR fallback chain
+  - Config validation UX with user-friendly Pydantic error formatting
+  - Updated LLM-UPDATE.md documentation
 
 - [00043: Robust Upgrade Detection & Repair](Completed/00043-robust-upgrade-detection/PLAN.md) - 🟢 Complete (2026-02-10)
   - Added fallback detection signal (`.claude/hooks-daemon/.git`) for broken installs missing config
@@ -284,8 +282,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 37
-- **Completed**: 36 (1 with reduced scope)
-- **Active** (not started): 2
+- **Completed**: 37 (1 with reduced scope)
+- **Active** (not started): 1
 - **Cancelled/Abandoned**: 0
 
 ## Quick Links
