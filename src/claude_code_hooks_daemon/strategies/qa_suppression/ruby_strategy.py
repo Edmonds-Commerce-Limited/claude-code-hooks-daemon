@@ -9,10 +9,7 @@ _FORBIDDEN_PATTERNS: tuple[str, ...] = (
     r"#\s*rubocop:" + "disable",
     r"#\s*steep:" + "ignore",
 )
-_SKIP_DIRECTORIES: tuple[str, ...] = (
-    "vendor/",
-    "tmp/",
-)
+_SKIP_DIRECTORIES: tuple[str, ...] = ("vendor/",)
 _TOOL_NAMES: tuple[str, ...] = ("RuboCop", "Steep")
 _TOOL_DOCS_URLS: tuple[str, ...] = (
     "https://rubocop.org/",

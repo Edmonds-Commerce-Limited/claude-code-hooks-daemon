@@ -286,17 +286,18 @@ Final text with colour.
         result = handler.handle(hook_input)
         assert result.decision == "allow"
 
-    def test_handle_reason_contains_file_path(self, handler):
-        """handle() reason should include file path."""
+    def test_handle_context_contains_file_path(self, handler):
+        """handle() context should include file path."""
         hook_input = {
             "tool_name": "Write",
             "tool_input": {"file_path": "/workspace/CLAUDE/doc.md", "content": "This has color."},
         }
         result = handler.handle(hook_input)
-        assert "/workspace/CLAUDE/doc.md" in result.reason
+        context_text = "\n".join(result.context)
+        assert "/workspace/CLAUDE/doc.md" in context_text
 
-    def test_handle_reason_contains_american_word(self, handler):
-        """handle() reason should include the American spelling found."""
+    def test_handle_context_contains_american_word(self, handler):
+        """handle() context should include the American spelling found."""
         hook_input = {
             "tool_name": "Write",
             "tool_input": {
@@ -305,10 +306,11 @@ Final text with colour.
             },
         }
         result = handler.handle(hook_input)
-        assert "color" in result.reason
+        context_text = "\n".join(result.context)
+        assert "color" in context_text
 
-    def test_handle_reason_contains_british_suggestion(self, handler):
-        """handle() reason should include British spelling suggestion."""
+    def test_handle_context_contains_british_suggestion(self, handler):
+        """handle() context should include British spelling suggestion."""
         hook_input = {
             "tool_name": "Write",
             "tool_input": {
@@ -317,10 +319,11 @@ Final text with colour.
             },
         }
         result = handler.handle(hook_input)
-        assert "colour" in result.reason
+        context_text = "\n".join(result.context)
+        assert "colour" in context_text
 
-    def test_handle_reason_contains_line_number(self, handler):
-        """handle() reason should include line number of issue."""
+    def test_handle_context_contains_line_number(self, handler):
+        """handle() context should include line number of issue."""
         hook_input = {
             "tool_name": "Write",
             "tool_input": {
@@ -329,9 +332,10 @@ Final text with colour.
             },
         }
         result = handler.handle(hook_input)
-        assert "Line 2" in result.reason
+        context_text = "\n".join(result.context)
+        assert "Line 2" in context_text
 
-    def test_handle_reason_limits_to_5_issues(self, handler):
+    def test_handle_context_limits_to_5_issues(self, handler):
         """handle() should only show first 5 issues."""
         content_lines = ["This has color."] * 10  # 10 lines with 'color'
         hook_input = {
@@ -342,10 +346,11 @@ Final text with colour.
             },
         }
         result = handler.handle(hook_input)
+        context_text = "\n".join(result.context)
         # Should mention "5 more issue(s)" since 10 total - 5 shown = 5 remaining
-        assert "5 more issue" in result.reason
+        assert "5 more issue" in context_text
 
-    def test_handle_reason_shows_all_issues_when_5_or_fewer(self, handler):
+    def test_handle_context_shows_all_issues_when_5_or_fewer(self, handler):
         """handle() should show all issues when 5 or fewer."""
         hook_input = {
             "tool_name": "Write",
@@ -355,8 +360,9 @@ Final text with colour.
             },
         }
         result = handler.handle(hook_input)
+        context_text = "\n".join(result.context)
         # Should not mention "more issues"
-        assert "more issue" not in result.reason
+        assert "more issue" not in context_text
 
     def test_handle_provides_correct_spelling_guidance(self, handler):
         """handle() should provide guidance about British English."""
@@ -365,8 +371,9 @@ Final text with colour.
             "tool_input": {"file_path": "/workspace/CLAUDE/doc.md", "content": "This has color."},
         }
         result = handler.handle(hook_input)
-        assert "CORRECT SPELLING" in result.reason
-        assert "British English" in result.reason
+        context_text = "\n".join(result.context)
+        assert "CORRECT SPELLING" in context_text
+        assert "British English" in context_text
 
     def test_handle_mentions_intentional_quotes_exception(self, handler):
         """handle() should mention quotes as potential exception."""
@@ -375,16 +382,27 @@ Final text with colour.
             "tool_input": {"file_path": "/workspace/CLAUDE/doc.md", "content": "This has color."},
         }
         result = handler.handle(hook_input)
-        assert "quote" in result.reason.lower()
+        context_text = "\n".join(result.context)
+        assert "quote" in context_text.lower()
 
-    def test_handle_context_is_none(self, handler):
-        """handle() context should be None."""
+    def test_handle_reason_is_none_for_allow(self, handler):
+        """handle() reason should be None for advisory ALLOW decisions."""
         hook_input = {
             "tool_name": "Write",
             "tool_input": {"file_path": "/workspace/CLAUDE/doc.md", "content": "This has color."},
         }
         result = handler.handle(hook_input)
-        assert result.context == []
+        assert result.reason is None
+
+    def test_handle_context_is_populated_for_advisory(self, handler):
+        """handle() context should be populated with warning for advisory ALLOW decisions."""
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/workspace/CLAUDE/doc.md", "content": "This has color."},
+        }
+        result = handler.handle(hook_input)
+        assert len(result.context) > 0
+        assert isinstance(result.context, list)
 
     def test_handle_guidance_is_none(self, handler):
         """handle() guidance should be None."""
@@ -503,11 +521,13 @@ color here is detected again
         # Should match
         assert handler.matches(hook_input) is True
 
-        # Should allow with warning
+        # Should allow with warning in context (not reason)
         result = handler.handle(hook_input)
         assert result.decision == "allow"
-        assert "color" in result.reason
-        assert "colour" in result.reason
+        assert result.reason is None
+        context_text = "\n".join(result.context)
+        assert "color" in context_text
+        assert "colour" in context_text
 
     def test_full_workflow_edit_with_american_spelling(self, handler):
         """Complete workflow: Edit file introducing American spelling."""
@@ -523,11 +543,13 @@ color here is detected again
         # Should match
         assert handler.matches(hook_input) is True
 
-        # Should allow with warning
+        # Should allow with warning in context (not reason)
         result = handler.handle(hook_input)
         assert result.decision == "allow"
-        assert "behavior" in result.reason
-        assert "behaviour" in result.reason
+        assert result.reason is None
+        context_text = "\n".join(result.context)
+        assert "behavior" in context_text
+        assert "behaviour" in context_text
 
     def test_full_workflow_british_spelling_allowed(self, handler):
         """Complete workflow: British spelling should not trigger warning."""

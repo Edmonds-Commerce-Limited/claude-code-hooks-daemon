@@ -268,9 +268,9 @@ class TestTerminalHandlerBlocking:
         assert result.result.decision == Decision.ALLOW
         assert result.terminated_by is None, "No terminal handler should stop chain"
         assert "enforce-british-english" in result.handlers_executed
-        # Reason should contain the warning (handler puts message in reason, not context)
-        assert result.result.reason is not None
-        assert len(result.result.reason) > 0
+        # Advisory messages use context (not reason) for ALLOW decisions
+        assert result.result.reason is None
+        assert len(result.result.context) > 0
 
 
 class TestEndToEndBlockingScenarios:

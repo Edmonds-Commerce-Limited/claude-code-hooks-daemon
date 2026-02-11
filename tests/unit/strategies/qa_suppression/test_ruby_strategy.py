@@ -77,6 +77,29 @@ def test_tool_docs_urls_not_empty() -> None:
     assert len(strategy.tool_docs_urls) > 0
 
 
+def test_skip_directories_do_not_match_system_tmp() -> None:
+    """Skip directories must not match system /tmp/ paths.
+
+    Bug: "tmp/" in skip_directories matches /tmp/ in absolute paths like
+    /tmp/acceptance-test-qa-ruby/example.rb, causing the handler to
+    incorrectly skip files in system temp directories.
+    """
+    strategy = RubyQaSuppressionStrategy()
+    system_tmp_path = "/tmp/acceptance-test-qa-ruby/example.rb"
+    # None of the skip directories should match a system /tmp/ path
+    assert not any(skip_dir in system_tmp_path for skip_dir in strategy.skip_directories), (
+        f"Skip directories {strategy.skip_directories} incorrectly match "
+        f"system /tmp/ path: {system_tmp_path}"
+    )
+
+
+def test_skip_directories_match_project_relative_vendor() -> None:
+    """Skip directories should still match project-relative vendor/ paths."""
+    strategy = RubyQaSuppressionStrategy()
+    vendor_path = "/home/user/project/vendor/bundle/gems/example.rb"
+    assert any(skip_dir in vendor_path for skip_dir in strategy.skip_directories)
+
+
 def test_acceptance_tests_provided() -> None:
     """Should provide at least one acceptance test."""
     strategy = RubyQaSuppressionStrategy()

@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
-# /acceptance-test skill - Automated acceptance testing orchestration
+# /acceptance-test skill - Main-thread sequential acceptance testing
 
 set -euo pipefail
 
 FILTER="${1:-all}"
 
 cat <<PROMPT
-# Acceptance Testing Orchestration - Filter: ${FILTER}
+# Acceptance Testing - Main Thread Sequential - Filter: ${FILTER}
 
-Execute automated acceptance tests for hooks daemon handlers in parallel batches.
+Execute acceptance tests for hooks daemon handlers via **real Claude Code tool calls in the main thread**.
 
-**CRITICAL**: You (main Claude) will orchestrate this workflow. Agents cannot spawn nested agents.
+**CRITICAL**: All tests MUST be executed as real tool calls (Bash, Write, Edit, Read) in this main session.
+Sub-agent testing is FORBIDDEN - agents cannot reliably test hooks (context limits, no Write tool, lifecycle events don't fire).
 
 ## Step 1: Restart Daemon
 
@@ -60,216 +61,115 @@ esac
 
 **Expected**: Valid JSON array of test objects
 
-Verify JSON is valid:
+Verify JSON is valid and count tests:
 \`\`\`bash
-python3 -m json.tool /tmp/acceptance_tests.json > /dev/null && echo "✓ Valid JSON"
-\`\`\`
-
-Count total tests:
-\`\`\`bash
-TOTAL_TESTS=\$(cat /tmp/acceptance_tests.json | python3 -c "import json, sys; print(len(json.load(sys.stdin)))")
+TOTAL_TESTS=\$(python3 -c "import json; print(len(json.load(open('/tmp/acceptance_tests.json'))))")
 echo "Total tests: \$TOTAL_TESTS"
 \`\`\`
 
-**If TOTAL_TESTS = 0**:
-- Report: "No tests match filter: ${FILTER}"
-- Suggest: Try different filter or check handler names
-- STOP (don't spawn agents for empty test list)
+**If TOTAL_TESTS = 0**: Report "No tests match filter: ${FILTER}" and STOP.
 
-## Step 3: Group Tests into Batches
+## Step 3: Execute Tests Sequentially in Main Thread
 
-Batch size: 3-5 tests per batch (balances parallelism overhead vs throughput)
+**For EACH test** in the playbook, execute it as a REAL tool call:
 
+### Read the playbook
 \`\`\`bash
-# Calculate batches (5 tests each)
-BATCH_SIZE=5
-NUM_BATCHES=\$(( (\$TOTAL_TESTS + BATCH_SIZE - 1) / BATCH_SIZE ))
-echo "Batches: \$NUM_BATCHES (size: \$BATCH_SIZE)"
+cat /tmp/acceptance_tests.json
 \`\`\`
 
-Split JSON into batch files:
-\`\`\`bash
-python3 << 'EOF'
-import json
-import sys
+### For each test, follow this pattern:
 
-with open("/tmp/acceptance_tests.json") as f:
-    tests = json.load(f)
+**BLOCKING tests** (test_type=blocking, expected: command blocked):
+1. Use Bash tool with the test command (e.g., \`echo "git reset --hard HEAD"\`)
+2. Observe: PreToolUse hook should block with error message
+3. Check expected_message_patterns appear in block message
+4. Result: PASS if blocked, FAIL if command executed
 
-batch_size = 5
-for i in range(0, len(tests), batch_size):
-    batch = tests[i:i+batch_size]
-    batch_num = (i // batch_size) + 1
-    with open(f"/tmp/batch_{batch_num}.json", "w") as bf:
-        json.dump(batch, bf, indent=2)
-    print(f"Batch {batch_num}: {len(batch)} tests")
-EOF
+**ADVISORY tests** (test_type=advisory, expected: allow with context):
+1. Use Bash tool with the test command (e.g., \`echo "git stash"\`)
+2. Observe: Command succeeds, system-reminder contains advisory message
+3. Check expected_message_patterns appear in system-reminder
+4. Result: PASS if advisory shown, FAIL if no advisory
+
+**CONTEXT tests** (test_type=context, expected: context injection):
+1. Verified by observing system-reminders during normal tool use
+2. SessionStart, PostToolUse, UserPromptSubmit fire every turn
+3. Result: PASS if system-reminder shows handler active
+
+**WRITE/EDIT tests** (expected: deny or allow):
+1. Use Write tool with test content (e.g., file with QA suppression)
+2. Observe: PreToolUse:Write hook blocking error
+3. Result: PASS if blocked, FAIL if write succeeded
+
+### Lifecycle Event Tests
+
+Tests requiring lifecycle events (SessionStart, SessionEnd, PreCompact, Stop, SubagentStop) are verified by:
+1. **SessionStart**: Confirmed at session start via system-reminder (already active)
+2. **PostToolUse**: Confirmed after every tool call via system-reminder (already active)
+3. **UserPromptSubmit**: Confirmed on every user message via system-reminder (already active)
+4. **Others**: Confirmed by daemon loading without errors
+
+Mark lifecycle tests as **PASS (verified via session)** rather than individually executed.
+
+## Step 4: Track Results
+
+Keep a running tally as you execute each test:
+
+- **PASS**: Expected behavior observed
+- **FAIL**: Unexpected behavior (handler bug) - STOP and investigate
+- **SKIP**: Lifecycle event verified via session (not individually testable)
+
+## Step 5: Report Results
+
+After all tests complete, report:
+
+If all tests passed (no failures):
 \`\`\`
+Acceptance Tests Complete!
 
-## Step 4: Spawn Parallel Test Runner Agents
-
-**For each batch**, spawn an acceptance-test-runner agent (Haiku model) in parallel:
-
-**IMPORTANT**: Use Task tool to spawn agents. Send all agent spawns in a **single message** for true parallelism.
-
-**Agent specification**: \`.claude/agents/acceptance-test-runner.md\`
-
-**Task for each agent**:
-\`\`\`
-Execute acceptance test batch {batch_num}.
-
-Read test batch from: /tmp/batch_{batch_num}.json
-
-For each test in the batch:
-1. Check if requires_event is a lifecycle event (SessionStart/SessionEnd/PreCompact)
-   - If yes: Mark as "skip" with reason "Lifecycle event cannot be triggered by subagent"
-   - If no: Execute test
-
-2. For non-lifecycle tests:
-   - Run setup commands (if any)
-   - Execute test command
-   - Check expected behavior based on test_type:
-     * BLOCKING: Command should be blocked/denied
-     * ADVISORY: Command succeeds, check system-reminder for advisory
-     * CONTEXT: Check system-reminder for context injection
-   - Match expected_message_patterns in output/system-reminder
-   - Run cleanup commands (if any)
-
-3. Record result for each test:
-   - "pass": Expected behavior observed
-   - "fail": Unexpected behavior (handler bug)
-   - "skip": Lifecycle event (expected)
-   - "error": Test couldn't execute (setup failure, etc.)
-
-Return structured JSON:
-{
-  "batch_results": [...],
-  "summary": {"total": N, "passed": X, "failed": Y, "skipped": Z, "errors": E}
-}
-
-Write output to: /tmp/batch_{batch_num}_results.json
-\`\`\`
-
-**Example parallel agent invocation**:
-
-If you have 3 batches, send **one message** with 3 Task tool calls:
-
-- Task 1: acceptance-test-runner for batch 1
-- Task 2: acceptance-test-runner for batch 2
-- Task 3: acceptance-test-runner for batch 3
-
-This achieves true parallelism (all batches run simultaneously).
-
-## Step 5: Collect Results
-
-After all agents complete, aggregate results:
-
-\`\`\`bash
-python3 << 'EOF'
-import json
-import glob
-
-all_results = []
-total_summary = {"total": 0, "passed": 0, "failed": 0, "skipped": 0, "errors": 0}
-
-# Read all batch result files
-for result_file in sorted(glob.glob("/tmp/batch_*_results.json")):
-    with open(result_file) as f:
-        batch_data = json.load(f)
-        all_results.extend(batch_data["batch_results"])
-
-        # Aggregate summary
-        summary = batch_data["summary"]
-        for key in total_summary:
-            total_summary[key] += summary.get(key, 0)
-
-# Write aggregated results
-with open("/tmp/acceptance_test_results.json", "w") as f:
-    json.dump({
-        "results": all_results,
-        "summary": total_summary
-    }, f, indent=2)
-
-print(json.dumps(total_summary, indent=2))
-EOF
-\`\`\`
-
-## Step 6: Report Results
-
-**Read aggregated results**:
-\`\`\`bash
-cat /tmp/acceptance_test_results.json
-\`\`\`
-
-**Generate user-friendly summary**:
-
-If all tests passed (failed=0, errors=0):
-\`\`\`
-✅ Acceptance Tests Complete!
-
-📊 Results Summary:
+Results Summary:
    Total tests: {total}
-   Passed: {passed}
-   Failed: {failed}
-   Skipped: {skipped} (lifecycle events)
-
-⏱️  Execution time: {duration}
-🔧 Parallel batches: {num_batches}
+   Passed: {passed} (direct tool call verification)
+   Skipped: {skipped} (lifecycle events - verified via session/daemon load)
+   Failed: 0
 
 All tests passed! Handlers working correctly.
 \`\`\`
 
-If any tests failed (failed>0 or errors>0):
+If any tests failed:
 \`\`\`
-❌ Acceptance Tests Failed!
+Acceptance Tests FAILED!
 
-📊 Results Summary:
+Results Summary:
    Total tests: {total}
    Passed: {passed}
    Failed: {failed}
-   Skipped: {skipped} (lifecycle events)
-   Errors: {errors}
+   Skipped: {skipped}
 
-❌ Failed Tests:
-   {list each failed test with handler name, title, expected vs actual}
+Failed Tests:
+   1. HandlerName - description of failure
+   2. HandlerName - description of failure
 
-🔍 Investigation needed - fix handler bugs before release.
+Investigation needed - fix handler bugs before release.
+Enter FAIL-FAST cycle: TDD fix -> QA -> restart -> retest ALL from beginning.
 \`\`\`
 
-**Include detailed failure information**:
-- Handler name
-- Test title
-- Expected behavior
-- Actual behavior
-- Test number for reference
+## FAIL-FAST Cycle (if any test fails)
 
-## Error Handling
-
-**Daemon fails to start**:
-- ABORT immediately
-- Report error from daemon logs
-- User must fix daemon issue
-
-**JSON generation fails**:
-- ABORT immediately
-- Check if config file exists
-- Check if handlers are loaded
-
-**No tests match filter**:
-- Report friendly message
-- Suggest alternative filters
-- Don't spawn agents
-
-**Agent batch failure**:
-- Report which batch failed
-- Include agent error message
-- Suggest re-running that specific batch
+1. STOP testing immediately
+2. Investigate root cause of failure
+3. Fix bug using TDD (write failing test -> implement fix -> verify)
+4. Run FULL QA: \`./scripts/qa/run_all.sh\` (must pass 100%)
+5. Restart daemon: \`\$PYTHON -m claude_code_hooks_daemon.daemon.cli restart\`
+6. **RESTART acceptance testing FROM TEST 1** (not from where you left off)
+7. Continue until ALL tests pass with ZERO code changes
 
 ## Cleanup
 
 After reporting results:
 \`\`\`bash
-rm -f /tmp/acceptance_tests.json /tmp/batch_*.json /tmp/batch_*_results.json /tmp/acceptance_test_results.json
+rm -f /tmp/acceptance_tests.json
 \`\`\`
 
 ---

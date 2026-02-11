@@ -348,6 +348,12 @@ class MarkdownOrganizationHandler(Handler):
         if self._track_plans_in_project and self.is_planning_mode_write(file_path):
             return True  # Intercept to redirect
 
+        # Allow Claude Code auto-memory writes (e.g. ~/.claude/projects/*/memory/*.md)
+        # Check the raw path BEFORE resolve() because symlinks (e.g. ~/.claude -> project/.claude/ccy)
+        # can cause resolve() to map these paths back into the project root, falsely blocking them.
+        if "/.claude/projects/" in file_path and "/memory/" in file_path:
+            return False
+
         # CRITICAL: Only enforce rules for files WITHIN the project root
         # Files outside project root (like Claude Code auto memory) should be allowed
         # Only check absolute paths - relative paths are always within project
