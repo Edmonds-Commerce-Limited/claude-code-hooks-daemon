@@ -46,7 +46,10 @@ class ValidateInstructionContentHandler(Handler):
     ]
 
     FILE_LISTINGS: ClassVar[list[str]] = [
-        r"(?:src|tests?|vendor|config|public|assets|docs)/[a-zA-Z0-9_/\-]+\.(?:php|js|ts|tsx|jsx|md|yml|yaml|json|xml)",
+        # Only match file paths preceded by action verbs (change log style)
+        # e.g. "created src/Service/Foo.php" or "- modified tests/bar.js"
+        # Does NOT match documentation references like "See docs/foo.md for details"
+        r"(?:created|modified|updated|added|deleted|removed|changed)\s+(?:src|tests?|vendor|config|public|assets|docs)/[a-zA-Z0-9_/\-]+\.(?:php|js|ts|tsx|jsx|md|yml|yaml|json|xml)",
     ]
 
     CHANGE_SUMMARIES: ClassVar[list[str]] = [
