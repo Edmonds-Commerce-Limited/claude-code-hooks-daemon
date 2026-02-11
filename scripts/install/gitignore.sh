@@ -162,6 +162,69 @@ create_daemon_untracked_gitignore() {
 }
 
 #
+# ensure_claude_gitignore() - Create .claude/.gitignore if missing
+#
+# In normal mode, creates .claude/.gitignore with hooks-daemon/untracked/ entry
+# so that daemon runtime files are not tracked by git.
+#
+# Args:
+#   $1 - project_root: Path to project root
+#   $2 - install_mode: "self-install" or "normal"
+#
+# Returns:
+#   Exit code 0 on success, 1 on failure
+#
+ensure_claude_gitignore() {
+    local project_root="$1"
+    local install_mode="$2"
+
+    if [ -z "$project_root" ]; then
+        print_error "ensure_claude_gitignore: project_root parameter required"
+        return 1
+    fi
+
+    # Self-install mode doesn't need .claude/.gitignore for daemon
+    if [ "$install_mode" = "self-install" ]; then
+        print_verbose "Self-install mode: skipping .claude/.gitignore creation"
+        return 0
+    fi
+
+    local claude_dir="$project_root/.claude"
+    local claude_gitignore="$claude_dir/.gitignore"
+
+    # Ensure .claude directory exists
+    if [ ! -d "$claude_dir" ]; then
+        print_verbose ".claude directory not found, skipping .claude/.gitignore"
+        return 0
+    fi
+
+    # Create .claude/.gitignore if it doesn't exist
+    if [ ! -f "$claude_gitignore" ]; then
+        cat > "$claude_gitignore" <<EOF
+# Claude Code Hooks Daemon - runtime files
+hooks-daemon/untracked/
+EOF
+        print_success "Created .claude/.gitignore"
+        return 0
+    fi
+
+    # Check if entry already exists
+    if grep -q "hooks-daemon/untracked" "$claude_gitignore"; then
+        print_verbose ".claude/.gitignore already has daemon entry"
+        return 0
+    fi
+
+    # Append entry
+    cat >> "$claude_gitignore" <<EOF
+
+# Claude Code Hooks Daemon - runtime files
+hooks-daemon/untracked/
+EOF
+    print_success "Added daemon entry to .claude/.gitignore"
+    return 0
+}
+
+#
 # show_gitignore_instructions() - Display instructions for manual .gitignore setup
 #
 # Shows user how to manually add .gitignore entries if needed.
@@ -311,6 +374,12 @@ setup_all_gitignores() {
     if ! create_daemon_untracked_gitignore "$daemon_dir"; then
         print_error "Failed to create daemon untracked .gitignore"
         return 1
+    fi
+
+    # Create .claude/.gitignore if missing (normal mode only)
+    if ! ensure_claude_gitignore "$project_root" "$install_mode"; then
+        print_warning "Failed to create .claude/.gitignore"
+        # Non-fatal: continue to verification
     fi
 
     # Verify everything is correct

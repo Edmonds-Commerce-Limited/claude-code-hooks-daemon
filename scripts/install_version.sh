@@ -307,7 +307,7 @@ fi
 # ============================================================
 
 log_step "8" "Setting up .gitignore"
-setup_all_gitignores "$PROJECT_ROOT" "$DAEMON_DIR" "normal"
+setup_all_gitignores "$PROJECT_ROOT" "$DAEMON_DIR" "normal" || print_warning ".gitignore setup had warnings (non-fatal)"
 
 # ============================================================
 # Step 9: Deploy slash commands

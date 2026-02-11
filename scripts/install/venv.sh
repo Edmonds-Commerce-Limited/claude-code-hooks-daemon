@@ -64,6 +64,9 @@ create_venv() {
         python_flag="--python $HOOKS_DAEMON_PYTHON"
     fi
 
+    # Suppress "Failed to hardlink files" warning in containers/overlay filesystems
+    export UV_LINK_MODE=copy
+
     if [ "$quiet" = "true" ]; then
         if UV_PROJECT_ENVIRONMENT="$venv_path" uv sync --project "$daemon_dir" $python_flag > /dev/null 2>&1; then
             print_success "Virtual environment created at: $venv_path"
