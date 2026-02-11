@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.10.1] - 2026-02-11
+
+### Fixed
+- **Ghost Handler Cleanup**: Removed non-existent stats_cache_reader handler from config, deduplicated handler priorities (commit adf2ae6)
+  - Bug: Config referenced handler that was never implemented
+  - Bug: Multiple handlers shared same priority values
+  - Fix: Removed ghost handler entry from hooks-daemon.yaml
+  - Fix: Adjusted handler priorities to eliminate duplicates
+
+- **Socket Path Discovery Agreement**: Fixed init.sh and Python fallback logic to use same socket path discovery (commit 199dd00)
+  - Bug: init.sh bash script and Python installer.py used different socket path logic
+  - Bug: Could result in init.sh creating wrong directory structure
+  - Fix: Both now use consistent socket path discovery via daemon/paths.py
+
+- **.gitignore Auto-Creation**: Daemon now auto-creates .claude/.gitignore if missing, non-fatal if fails (commit 8285e7c)
+  - Bug: Missing .gitignore caused untracked daemon runtime files to appear in git status
+  - Bug: UV_LINK_MODE environment variable not set for uv package manager
+  - Fix: Auto-create .gitignore on daemon startup (non-fatal if permission denied)
+  - Fix: Set UV_LINK_MODE=copy in hooks-daemon.env for uv compatibility
+
+- **Validation False Positive**: Fixed validate_instruction_content handler false positive on documentation paths (commit f7d878c)
+  - Bug: Handler incorrectly flagged FILE_LISTINGS instructions in CLAUDE/ documentation paths
+  - Bug: Documentation files legitimately contain instruction examples that triggered validation
+  - Fix: Exclude CLAUDE/, RELEASES/, and .claude/ paths from FILE_LISTINGS validation
+
+- **Documentation Consistency**: Fixed 10 documentation inconsistencies and broken references (commit 684ad96, dddff9a)
+  - Bug: Broken internal documentation links
+  - Bug: Inconsistent success criteria descriptions
+  - Bug: Incorrect daemon restart command examples
+  - Bug: .gitignore auto-creation not documented
+  - Fix: Updated all broken references to correct paths
+  - Fix: Standardized success criteria wording across docs
+  - Fix: Corrected restart command format in all documentation
+
+### Changed
+- **Repository Cleanup**: Removed cruft and improved organization (Plan 00048, commit 45a45fc)
+  - Deleted spurious `/workspace/=5.9` file (accidental pip output redirect)
+  - Removed 4 stale worktrees (~700MB) from completed plans 00021 and 003
+  - Deleted empty plan 00036, renamed auto-named plans to descriptive names
+  - Moved historical `BUG_FIX_STOP_EVENT_SCHEMA.md` to completed plan directory
+  - Cleaned up stale config backup file
+
 ## [2.10.0] - 2026-02-11
 
 ### Added
