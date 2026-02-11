@@ -368,21 +368,48 @@ All tests passed! Handlers working correctly.
 Before proceeding to Step 9, confirm:
 1. [ ] Invoked acceptance-test skill (not just mentioned it)
 2. [ ] Used `args: "all"` (not filtered subset)
-3. [ ] Reviewed complete results output
-4. [ ] Verified failed=0, errors=0
-5. [ ] Total test count documented: ___ tests
-6. [ ] No handler bugs found
+3. [ ] **WAITED for ALL batch agents to COMPLETE** (not just launched them)
+4. [ ] Reviewed complete results output from EVERY batch
+5. [ ] Verified failed=0, errors=0 (discounting Write-tool/lifecycle skips)
+6. [ ] Total test count documented: ___ tests
+7. [ ] No handler bugs found
 
 **If you cannot check ALL boxes above, you MUST NOT proceed.**
+
+**ASYNC AGENT WARNING (v2.9.0 INCIDENT):**
+
+During the v2.9.0 release, acceptance test agents were launched in parallel but
+the release was committed, pushed, tagged, and published to GitHub WHILE AGENTS
+WERE STILL RUNNING. This is a CATASTROPHIC process violation. The release happened
+to be clean, but if any agent had found a real bug, the broken release would
+already have been live.
+
+**THE RULE: Launching agents is NOT the same as completing tests.**
+
+You MUST:
+1. Launch all batch agents (parallel is fine)
+2. **BLOCK and WAIT** for every single agent to return results
+3. **READ and VERIFY** every batch result (failed=0, errors=0)
+4. Only THEN proceed to Step 9
+
+Do NOT:
+- Commit while agents are running
+- Push while agents are running
+- Tag while agents are running
+- Create GitHub releases while agents are running
+- Assume results will be fine
+- Treat "launched" as "passed"
 
 **Why This Gate Exists:**
 - Unit tests don't catch integration issues with real Claude Code hook events
 - Handlers might pass unit tests but fail in actual usage
 - Real-world testing is the final safety check before release
 - **CORRECTNESS over SPEED** - A delayed release is better than a broken release
+- **Async agents complete LATER** - launching them does NOT mean they passed
 
 **Time Investment:**
 - **Automated**: 4-6 minutes for full suite (parallelized) - NON-NEGOTIABLE
+- **You MUST wait the full 4-6 minutes** - do NOT proceed early
 - **Issue investigation**: Variable (hours if bugs found)
 
 **Main Claude proceeds to Commit & Push (Step 9) ONLY if acceptance tests pass.**
