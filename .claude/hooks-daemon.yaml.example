@@ -24,7 +24,7 @@ handlers:
 
     sed_blocker:           # Blocks sed command usage (use Edit tool instead)
       enabled: true
-      priority: 10
+      priority: 11
 
     absolute_path:         # Enforces absolute paths in file operations
       enabled: true
@@ -32,7 +32,7 @@ handlers:
 
     curl_pipe_shell:       # Blocks dangerous curl | sh patterns
       enabled: true
-      priority: 15
+      priority: 14
 
     pipe_blocker:          # Blocks dangerous pipe patterns in bash commands
       enabled: true
@@ -44,11 +44,11 @@ handlers:
 
     git_stash:             # Warns about git stash (stashes can be lost)
       enabled: true
-      priority: 20
+      priority: 17
 
     lock_file_edit_blocker: # Prevents editing package lock files
       enabled: true
-      priority: 20
+      priority: 19
 
     pip_break_system:      # Blocks pip commands that break system packages
       enabled: true
@@ -56,7 +56,7 @@ handlers:
 
     sudo_pip:              # Blocks sudo pip (use venv instead)
       enabled: true
-      priority: 20
+      priority: 21
 
     daemon_restart_verifier: # Verifies daemon restart after code changes
       enabled: false       # Enable for daemon development projects
@@ -64,7 +64,7 @@ handlers:
 
     worktree_file_copy:    # Prevents copying files between git worktrees
       enabled: true
-      priority: 15
+      priority: 16
 
     # CODE QUALITY HANDLERS (Priority 25-45) - Optional but recommended
     qa_suppression:        # Unified multi-language QA suppression blocker (11 languages)
@@ -79,18 +79,18 @@ handlers:
 
     tdd_enforcement:       # Enforces test-first development
       enabled: false       # Enable for strict TDD workflow
-      priority: 35
+      priority: 32
 
     # WORKFLOW HANDLERS (Priority 30-50) - Enable based on your workflow
     plan_number_helper:    # Provides correct next plan number
       enabled: false       # Enable when using CLAUDE/Plan/ structure
-      priority: 30
+      priority: 33
       options:
         track_plans_in_project: "CLAUDE/Plan"  # Must match markdown_organization setting
 
     task_tdd_advisor:      # Advises on TDD workflow for tasks
       enabled: false       # Enable for TDD guidance
-      priority: 35
+      priority: 36
 
     gh_issue_comments:     # Requires --comments flag for gh issue view
       enabled: true
@@ -98,7 +98,7 @@ handlers:
 
     validate_plan_number:  # Validates plan number format (001-, 002-, etc)
       enabled: false       # Enable for projects using CLAUDE/Plan/
-      priority: 40
+      priority: 38
 
     global_npm_advisor:    # Advises against global npm installs
       enabled: true
@@ -110,7 +110,7 @@ handlers:
 
     plan_workflow:         # Provides guidance when creating plans
       enabled: false       # Enable for projects using CLAUDE/Plan/
-      priority: 45
+      priority: 44
 
     plan_completion_advisor: # Advises on plan completion workflow
       enabled: false       # Enable for projects using CLAUDE/Plan/
@@ -118,7 +118,7 @@ handlers:
 
     validate_instruction_content: # Blocks ephemeral content in CLAUDE.md/README.md
       enabled: false       # Enable to prevent implementation logs in instruction files
-      priority: 50
+      priority: 49
 
     npm_command:           # Restricts npm commands to approved list
       enabled: false       # Enable for strict npm usage control
@@ -126,7 +126,7 @@ handlers:
 
     markdown_organization: # Enforces markdown file organization rules & plan tracking
       enabled: false       # Enable for md organization + plan tracking
-      priority: 50
+      priority: 51
       options:
         track_plans_in_project: null  # Set to "CLAUDE/Plan" to enable plan tracking
         plan_workflow_docs: null      # Optional: path to workflow doc
@@ -170,7 +170,7 @@ handlers:
 
     version_check:  # Checks if daemon is up-to-date with latest release
       enabled: true  # Notifies on new sessions if updates available (24h cache)
-      priority: 55
+      priority: 56
 
     workflow_state_restoration:  # Restores workflow state after compaction
       enabled: false             # Enable for workflow state management
@@ -265,10 +265,6 @@ handlers:
     usage_tracking: # Tracks and displays usage statistics
       enabled: true
       priority: 60
-
-    stats_cache_reader: # Reads cached stats from data layer
-      enabled: true
-      priority: 70
 
 # Project-level handlers (custom handlers in .claude/hooks/handlers/)
 # Example:

@@ -397,13 +397,6 @@ class HandlerID:
         display_name="hedging-language-detector",
     )
 
-    # Stats cache reader (status line)
-    STATS_CACHE_READER = HandlerIDMeta(
-        class_name="StatsCacheReaderHandler",
-        config_key="stats_cache_reader",
-        display_name="status-stats-cache-reader",
-    )
-
 
 # Type-safe config key literal (for mypy/type checking)
 HandlerKey = Literal[
@@ -474,7 +467,6 @@ HandlerKey = Literal[
     "account_display",
     "model_context",
     "usage_tracking",
-    "stats_cache_reader",
     # Workflow state handlers
     "workflow_state_restoration",
     "workflow_state_pre_compact",

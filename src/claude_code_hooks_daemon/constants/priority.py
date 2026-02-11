@@ -110,7 +110,6 @@ class Priority:
     # These handlers set priority dynamically or don't use the standard system
     WORKFLOW_STATE_RESTORATION = 50  # Reasonable default
     WORKFLOW_STATE_PRE_COMPACT = 50  # Reasonable default
-    STATS_CACHE_READER = 20  # Reasonable default
 
 
 # Priority range constants (for validation and documentation)
