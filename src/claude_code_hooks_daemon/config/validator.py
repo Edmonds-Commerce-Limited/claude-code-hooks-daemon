@@ -408,7 +408,7 @@ class ConfigValidator:
                         if priority in priorities:
                             other_handler = priorities[priority]
                             # Log warning but don't add to errors (per user feedback)
-                            logger.warning(
+                            logger.debug(
                                 f"Duplicate priority {priority} in 'handlers.{event_type}': "
                                 f"'{handler_name}' and '{other_handler}' share priority. "
                                 f"Will use alphabetical order for deterministic sorting."

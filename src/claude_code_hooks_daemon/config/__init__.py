@@ -15,6 +15,7 @@ from claude_code_hooks_daemon.config.models import (
     PluginsConfig,
 )
 from claude_code_hooks_daemon.config.schema import ConfigSchema
+from claude_code_hooks_daemon.config.validation_ux import format_validation_error
 from claude_code_hooks_daemon.config.validator import ConfigValidator, ValidationError
 
 __all__ = [
@@ -31,4 +32,5 @@ __all__ = [
     "PluginConfig",
     "PluginsConfig",
     "ValidationError",
+    "format_validation_error",
 ]

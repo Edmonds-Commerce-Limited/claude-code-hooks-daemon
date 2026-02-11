@@ -112,7 +112,7 @@ class HandlerChain:
             for priority, handler_names in priority_map.items():
                 if len(handler_names) > 1:
                     sorted_names = sorted(handler_names)
-                    logger.warning(
+                    logger.debug(
                         f"Duplicate priority {priority} detected for handlers: {', '.join(sorted_names)}. "
                         f"Using alphabetical order for determinism: {' -> '.join(sorted_names)}"
                     )

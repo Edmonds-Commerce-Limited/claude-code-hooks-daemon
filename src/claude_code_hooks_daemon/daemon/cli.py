@@ -32,6 +32,8 @@ import time
 from pathlib import Path
 from typing import Any, Literal, cast
 
+from pydantic import ValidationError as PydanticValidationError
+
 from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants import Timeout
@@ -141,6 +143,19 @@ def _validate_installation(project_root: Path) -> Path:
             config_dict = ConfigLoader.load(config_file)
             config = Config.model_validate(config_dict)
             self_install = config.daemon.self_install_mode
+        except PydanticValidationError as e:
+            # FAIL FAST: Format Pydantic errors with user-friendly messages
+            from claude_code_hooks_daemon.config.validation_ux import format_validation_error
+
+            friendly_msg = format_validation_error(
+                e, config_dict if "config_dict" in dir() else None
+            )
+            print(
+                f"ERROR: Invalid configuration in {config_file}:\n\n{friendly_msg}\n\n"
+                "Fix the configuration file and try again.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         except Exception as e:
             # FAIL FAST: Config validation errors must abort with clear message
             print(
