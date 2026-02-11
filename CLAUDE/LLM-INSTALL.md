@@ -548,6 +548,97 @@ project/
 
 ---
 
+## Feedback & Issue Reporting
+
+**IMPORTANT**: During the installation process, keep detailed notes of everything that happens. Create a feedback file that the user can optionally share with the project maintainers to improve the install experience.
+
+### Create Feedback File
+
+After installation completes (whether successful or not), create a detailed feedback file at the project root:
+
+```bash
+cat > install-feedback-$(date +%Y%m%d).md << 'EOF'
+# Installation Feedback Report
+
+## Environment
+- **Date**: [today's date]
+- **Target Version**: [version installed]
+- **OS**: [operating system and version, e.g. uname -a output]
+- **Python Version**: [python3 --version output]
+- **Default Python Path**: [which python3 output]
+- **Project Path**: [absolute path to project root]
+- **Project Path Length**: [character count]
+
+## Installation Method
+- [ ] Automated (install.sh via curl)
+- [ ] Manual (step-by-step)
+
+## Results
+- **Overall**: SUCCESS / PARTIAL / FAILED
+- **Duration**: [approximate time taken]
+- **Daemon Status**: RUNNING / FAILED / NOT STARTED
+
+## Step-by-Step Log
+[Document each step: what command was run, what output was received, any errors or warnings]
+
+1. **Pre-flight checks**: ...
+2. **Prerequisites (git, python, uv)**: ...
+3. **Repository clone**: ...
+4. **Venv creation**: ...
+5. **Config generation**: ...
+6. **Hook deployment**: ...
+7. **Daemon start**: ...
+8. **Verification**: ...
+9. **Session restart**: ...
+
+## Issues Encountered
+[List any problems, workarounds, or unexpected behavior]
+
+1. **Issue**: [description]
+   **Severity**: Critical / Major / Minor / Cosmetic
+   **Workaround**: [what you did to get past it]
+   **Suggestion**: [how it could be improved]
+
+## Documentation Gaps
+[Note any missing, unclear, or incorrect documentation in LLM-INSTALL.md]
+
+1. [description of gap or inconsistency]
+
+## Suggestions
+[Any improvements to the installation process]
+
+1. [suggestion]
+
+## Warnings & Anomalies
+[Any warnings logged, unexpected behavior, or things that seemed wrong but didn't break anything]
+EOF
+```
+
+### What to Document During Installation
+
+Actively note throughout the process:
+- **Every command** you run and its output (especially errors/warnings)
+- **Every decision point** where you had to choose between options
+- **Documentation inconsistencies** where docs said one thing but reality was different
+- **Missing prerequisites** that weren't mentioned in docs
+- **Confusing error messages** that didn't help diagnose the issue
+- **Workarounds** applied that shouldn't be necessary
+- **Time spent** on each step (helps identify bottlenecks)
+- **Path/permission issues** especially on different OS configurations
+- **Python version issues** (system python too old, alternative interpreters found)
+
+### Sharing Feedback
+
+The feedback file can be shared with project maintainers to improve the install process:
+
+1. Open an issue at the project's GitHub repository
+2. Attach or paste the feedback file content
+3. Maintainers use this real-world data to fix installation issues
+
+**Every piece of feedback makes the next installation smoother for everyone.**
+
+---
+
 ## Bug Reports
 
 Include in issue:
