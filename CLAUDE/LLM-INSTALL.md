@@ -16,7 +16,7 @@
 
 6. **SESSION RESTART REQUIRED**: After installation completes, user MUST restart Claude session. Hooks won't activate until Claude reloads configuration. LLM MUST verify hooks work after restart.
 
-7. **GITIGNORE MANDATORY**: You MUST create `.claude/.gitignore` before committing (step 4). The installer will display the required content. Skipping this will commit generated files (hooks-daemon/, *.bak) which should NOT be in version control.
+7. **GITIGNORE**: The installer automatically creates `.gitignore` files (root and `.claude/.gitignore`). If auto-creation fails, follow the manual instructions displayed by the installer.
 
 ---
 
@@ -197,30 +197,24 @@ cd ../..
 - `.claude/settings.json` - Hook registration
 - `.claude/hooks-daemon.yaml` - Handler config
 
-**CRITICAL: .gitignore Content Displayed**
+**Note**: The installer automatically creates `.claude/.gitignore` with the correct entries. If auto-creation fails, it will display manual instructions.
 
-The installer will display a large banner with the REQUIRED `.claude/.gitignore` content. **YOU MUST** create the gitignore in step 4.
-
-Template source (single source of truth):
-https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/blob/main/.claude/.gitignore
-
-### 4. Create .gitignore & Commit (MANDATORY)
+### 4. Commit & Restart
 
 ```bash
-# CRITICAL: Create .claude/.gitignore FIRST (installer displayed the content)
-# Copy the template from installer output:
-cp .claude/hooks-daemon/.claude/.gitignore .claude/.gitignore
-
-# Verify it exists before committing
+# Verify .gitignore was auto-created
 ls -la .claude/.gitignore
 
-# Now commit (with .gitignore in place to exclude generated files)
+# If missing, copy from template:
+# cp .claude/hooks-daemon/.claude/.gitignore .claude/.gitignore
+
+# Commit (with .gitignore in place to exclude generated files)
 git add .claude/
 git commit -m "Install Claude Code Hooks Daemon" && git push
 ```
 
 **CRITICAL**:
-1. `.claude/.gitignore` MUST exist before `git add` or you'll commit hooks-daemon/
+1. Verify `.claude/.gitignore` exists before `git add` or you'll commit hooks-daemon/
 2. Tell user to **restart Claude session** (exit and re-enter). Hooks won't activate until Claude reloads `.claude/settings.json`.
 3. Do NOT proceed to step 5 until session restarts.
 
@@ -251,6 +245,21 @@ echo '{"tool_name": "Bash", "tool_input": {"command": "ls -la"}}' \
 **If all tests pass**: Hooks active.
 
 **If tests fail**: Check troubleshooting section below.
+
+### Installation Success Criteria
+
+A successful installation meets ALL of these conditions:
+
+1. **Daemon running**: `$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli status` shows `RUNNING`
+2. **Hooks deployed**: `.claude/hooks/pre-tool-use` and other hook scripts exist and are executable
+3. **Blocking works**: `echo '{"tool_name":"Bash","tool_input":{"command":"git reset --hard"}}' | .claude/hooks/pre-tool-use` returns a `deny` decision
+4. **Safe commands pass**: `echo '{"tool_name":"Bash","tool_input":{"command":"ls"}}' | .claude/hooks/pre-tool-use` returns `{}` (allow)
+5. **No DEGRADED MODE**: `$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli logs` shows no "DEGRADED MODE" warnings
+6. **Git clean**: `.claude/hooks-daemon/` is excluded via `.gitignore`, not tracked by git
+
+If any of these fail, see Troubleshooting section below.
+
+---
 
 ### 6. Configure Handlers (Optional)
 
@@ -533,7 +542,7 @@ Lower priority = runs first. Terminal handlers stop dispatch chain.
 ```
 project/
 ├── .claude/
-│   ├── .gitignore              # RECOMMENDED (not auto-created) - see README.md
+│   ├── .gitignore              # AUTO-CREATED by installer
 │   ├── init.sh                 # COMMIT - Daemon lifecycle
 │   ├── hooks-daemon.yaml       # COMMIT - Handler config
 │   ├── hooks-daemon.env        # COMMIT - Environment variables
@@ -554,9 +563,9 @@ project/
 ```
 
 **Git Integration:**
-- Installer RECOMMENDS creating `.claude/.gitignore` (does not create it automatically)
-- Recommended pattern uses self-exclusion (`*` then `!pattern` to un-ignore)
-- See README.md "Git Integration" section for recommended .gitignore pattern
+- Installer automatically creates `.claude/.gitignore` with daemon exclusion entries
+- Root `.gitignore` also updated automatically with `.claude/hooks-daemon/` entry
+- If auto-creation fails, manual instructions are displayed
 
 ---
 
