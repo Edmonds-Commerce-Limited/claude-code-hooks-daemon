@@ -362,5 +362,5 @@ changes
 **See Also**:
 - @CLAUDE/CodeLifecycle/Features.md - Feature development
 - @CLAUDE/CodeLifecycle/Bugs.md - Bug fixes
-- @CLAUDE/CodeLifecycle/TestingPyramid.md - Understanding test layers
+- @CLAUDE/AcceptanceTests/GENERATING.md - Acceptance test generation
 - @CLAUDE/PlanWorkflow.md - Planning standards

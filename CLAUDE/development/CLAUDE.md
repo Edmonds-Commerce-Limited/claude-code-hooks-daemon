@@ -20,9 +20,7 @@ This directory contains documentation for **developers working on the hooks daem
 ## Files in This Directory
 
 - **RELEASING.md** - Complete release process using `/release` skill
-- **TESTING.md** - Testing standards, QA automation, coverage requirements
-- **CONTRIBUTING_GUIDE.md** - Code review, PR process, branch strategy
-- **DEBUGGING.md** - Debugging the daemon itself (not user hooks)
+- **QA.md** - QA pipeline, automation, and coverage requirements
 
 ## When to Use This Directory
 
