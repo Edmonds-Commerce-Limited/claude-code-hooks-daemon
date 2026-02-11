@@ -70,6 +70,46 @@ _info() { echo -e "${_BLUE}>>>${_NC} $1"; }
 _fail() { _err "$1"; exit 1; }
 
 # ============================================================
+# Python version detection
+# ============================================================
+
+#
+# find_compatible_python() - Find a Python 3.11+ interpreter
+#
+# Checks python3, then searches for python3.13, python3.12, python3.11 in PATH.
+# Sets and exports HOOKS_DAEMON_PYTHON so Layer 2 scripts can use it.
+#
+# Returns:
+#   0 - compatible Python found (HOOKS_DAEMON_PYTHON exported)
+#   1 - no compatible Python found (exits via _fail)
+#
+find_compatible_python() {
+    local candidates=("python3" "python3.13" "python3.12" "python3.11")
+    local candidate
+
+    for candidate in "${candidates[@]}"; do
+        if command -v "$candidate" &>/dev/null; then
+            if "$candidate" -c 'import sys; v=sys.version_info; exit(0 if v >= (3,11) else 1)' 2>/dev/null; then
+                HOOKS_DAEMON_PYTHON="$(command -v "$candidate")"
+                export HOOKS_DAEMON_PYTHON
+                _ok "Compatible Python found: $HOOKS_DAEMON_PYTHON ($("$HOOKS_DAEMON_PYTHON" --version 2>&1))"
+                return 0
+            fi
+        fi
+    done
+
+    _fail "No compatible Python (3.11+) found.
+
+Searched for: ${candidates[*]}
+
+Please install Python 3.11 or higher:
+  Ubuntu/Debian: sudo apt-get install python3.11
+  macOS: brew install python@3.11
+  Fedora: sudo dnf install python3.11
+  Arch: sudo pacman -S python"
+}
+
+# ============================================================
 # Main
 # ============================================================
 
@@ -82,11 +122,14 @@ PROJECT_ROOT="$(cd "$PROJECT_ROOT" && pwd)" # Resolve to absolute path
 [ -d "$PROJECT_ROOT" ] || _fail "Project root does not exist: $PROJECT_ROOT"
 _ok "Project root: $PROJECT_ROOT"
 
-# Step 2: Determine daemon directory and mode
+# Step 2: Find compatible Python interpreter (3.11+)
+find_compatible_python
+
+# Step 3: Determine daemon directory and mode
 DAEMON_DIR="$PROJECT_ROOT/.claude/hooks-daemon"
 SELF_INSTALL="false"
-if [ -f "$PROJECT_ROOT/.claude/hooks-daemon.yaml" ] && command -v python3 &>/dev/null; then
-    SELF_INSTALL=$(python3 -c "
+if [ -f "$PROJECT_ROOT/.claude/hooks-daemon.yaml" ] && [ -n "${HOOKS_DAEMON_PYTHON:-}" ]; then
+    SELF_INSTALL=$("$HOOKS_DAEMON_PYTHON" -c "
 import yaml
 try:
     with open('$PROJECT_ROOT/.claude/hooks-daemon.yaml') as f:
@@ -103,7 +146,7 @@ fi
 [ -d "$DAEMON_DIR/.git" ] || _fail "Daemon directory is not a git repository: $DAEMON_DIR"
 _ok "Daemon directory: $DAEMON_DIR"
 
-# Step 3: Best-effort daemon stop (before checkout)
+# Step 4: Best-effort daemon stop (before checkout)
 VENV_PYTHON="$DAEMON_DIR/untracked/venv/bin/python"
 if [ -f "$VENV_PYTHON" ]; then
     _info "Stopping daemon..."
@@ -111,7 +154,7 @@ if [ -f "$VENV_PYTHON" ]; then
     sleep 1
 fi
 
-# Step 4: Fetch tags and determine target version
+# Step 5: Fetch tags and determine target version
 _info "Fetching latest tags..."
 git -C "$DAEMON_DIR" fetch --tags --quiet
 
@@ -127,12 +170,12 @@ git -C "$DAEMON_DIR" rev-parse "$TARGET_VERSION" &>/dev/null || \
     _fail "Version $TARGET_VERSION not found"
 _ok "Target version: $TARGET_VERSION"
 
-# Step 5: Checkout target version FIRST (before looking for Layer 2)
+# Step 6: Checkout target version FIRST (before looking for Layer 2)
 _info "Checking out $TARGET_VERSION..."
 git -C "$DAEMON_DIR" checkout "$TARGET_VERSION" --quiet
 _ok "Checked out $TARGET_VERSION"
 
-# Step 6: Clean up nested install artifacts
+# Step 7: Clean up nested install artifacts
 # When daemon repo has .claude/ in git (self-install dogfooding), normal installs
 # can end up with runtime artifacts at the wrong path:
 #   .claude/hooks-daemon/.claude/hooks-daemon/untracked/ (socket, pid, log files)
@@ -146,7 +189,7 @@ if [ "$SELF_INSTALL" != "true" ]; then
     fi
 fi
 
-# Step 7: Delegate to Layer 2 (now available after checkout)
+# Step 8: Delegate to Layer 2 (now available after checkout)
 LAYER2_SCRIPT="$DAEMON_DIR/scripts/upgrade_version.sh"
 
 if [ -f "$LAYER2_SCRIPT" ]; then

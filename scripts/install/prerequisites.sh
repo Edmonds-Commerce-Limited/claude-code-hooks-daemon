@@ -46,45 +46,40 @@ Installation:
 #   1 - python3 not found or version too old (also exits via fail_fast)
 #
 check_python3() {
-    # Check if python3 command exists
-    if ! command -v python3 &> /dev/null; then
-        fail_fast "python3 is not installed. Please install Python 3.11+ first.
+    # If Layer 1 already found a compatible Python, use it
+    if [ -n "${HOOKS_DAEMON_PYTHON:-}" ]; then
+        if "$HOOKS_DAEMON_PYTHON" -c 'import sys; v=sys.version_info; exit(0 if v >= (3,11) else 1)' 2>/dev/null; then
+            local found_version
+            found_version=$("$HOOKS_DAEMON_PYTHON" -c 'import sys; print(".".join(map(str, sys.version_info[:2])))' 2>/dev/null)
+            print_success "Python $found_version found (via HOOKS_DAEMON_PYTHON=$HOOKS_DAEMON_PYTHON)"
+            return 0
+        fi
+    fi
 
-Installation:
+    # Search for compatible Python: python3 first, then versioned candidates
+    local candidates=("python3" "python3.13" "python3.12" "python3.11")
+    local candidate
+
+    for candidate in "${candidates[@]}"; do
+        if command -v "$candidate" &> /dev/null; then
+            if "$candidate" -c 'import sys; v=sys.version_info; exit(0 if v >= (3,11) else 1)' 2>/dev/null; then
+                HOOKS_DAEMON_PYTHON="$(command -v "$candidate")"
+                export HOOKS_DAEMON_PYTHON
+                local found_version
+                found_version=$("$HOOKS_DAEMON_PYTHON" -c 'import sys; print(".".join(map(str, sys.version_info[:2])))' 2>/dev/null)
+                print_success "Python $found_version found ($HOOKS_DAEMON_PYTHON)"
+                return 0
+            fi
+        fi
+    done
+
+    fail_fast "No compatible Python (3.11+) found. Searched for: ${candidates[*]}
+
+Please install Python 3.11 or higher:
   Ubuntu/Debian: sudo apt-get install python3.11
   macOS: brew install python@3.11
-  Fedora: sudo dnf install python3.11"
-    fi
-
-    # Check Python version (must be 3.11+)
-    local python_version
-    python_version=$(python3 -c 'import sys; print(".".join(map(str, sys.version_info[:2])))' 2>/dev/null)
-
-    if [ -z "$python_version" ]; then
-        fail_fast "Could not determine Python version. python3 command failed."
-    fi
-
-    local major minor
-    major=$(echo "$python_version" | cut -d. -f1)
-    minor=$(echo "$python_version" | cut -d. -f2)
-
-    # Validate major.minor format
-    if ! [[ "$major" =~ ^[0-9]+$ ]] || ! [[ "$minor" =~ ^[0-9]+$ ]]; then
-        fail_fast "Invalid Python version format: $python_version"
-    fi
-
-    # Check version is 3.11+
-    if [[ "$major" -lt 3 ]] || [[ "$major" -eq 3 && "$minor" -lt 11 ]]; then
-        fail_fast "Python 3.11+ required. Found: $python_version
-
-Please upgrade Python:
-  Ubuntu/Debian: sudo apt-get install python3.11
-  macOS: brew install python@3.11
-  Fedora: sudo dnf install python3.11"
-    fi
-
-    print_success "Python $python_version found"
-    return 0
+  Fedora: sudo dnf install python3.11
+  Arch: sudo pacman -S python"
 }
 
 #

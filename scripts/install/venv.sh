@@ -58,8 +58,14 @@ create_venv() {
     # UV_PROJECT_ENVIRONMENT tells uv where to create the venv
     local venv_path="$daemon_dir/untracked/venv"
 
+    # If a specific Python interpreter was found, tell uv to use it
+    local python_flag=""
+    if [ -n "${HOOKS_DAEMON_PYTHON:-}" ]; then
+        python_flag="--python $HOOKS_DAEMON_PYTHON"
+    fi
+
     if [ "$quiet" = "true" ]; then
-        if UV_PROJECT_ENVIRONMENT="$venv_path" uv sync --project "$daemon_dir" > /dev/null 2>&1; then
+        if UV_PROJECT_ENVIRONMENT="$venv_path" uv sync --project "$daemon_dir" $python_flag > /dev/null 2>&1; then
             print_success "Virtual environment created at: $venv_path"
             return 0
         else
@@ -67,7 +73,7 @@ create_venv() {
             return 1
         fi
     else
-        if UV_PROJECT_ENVIRONMENT="$venv_path" uv sync --project "$daemon_dir"; then
+        if UV_PROJECT_ENVIRONMENT="$venv_path" uv sync --project "$daemon_dir" $python_flag; then
             print_success "Virtual environment created at: $venv_path"
             return 0
         else
