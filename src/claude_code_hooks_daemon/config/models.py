@@ -416,6 +416,10 @@ class DaemonConfig(BaseModel):
         default_factory=InputValidationConfig,
         description="Input validation configuration",
     )
+    languages: list[str] | None = Field(
+        default=None,
+        description="Project-level language filter. When set, only handlers for these languages are active. None = ALL languages.",
+    )
 
     @field_validator("socket_path", "pid_file_path", mode="before")
     @classmethod

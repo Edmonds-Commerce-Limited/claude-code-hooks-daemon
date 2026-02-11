@@ -68,11 +68,11 @@ class WebSearchYearHandler(Handler):
         return [
             AcceptanceTest(
                 title="Outdated year in search query",
-                command="Web search with outdated year in query",
+                command="Use the WebSearch tool with query 'Python best practices 2024'",
                 description="Advises current year for web searches (advisory)",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"current year", r"2026"],
-                safety_notes="Advisory handler - suggests improvements",
+                safety_notes="Advisory handler - suggests updating year. WebSearch may not be available to subagent.",
                 test_type=TestType.ADVISORY,
                 requires_event="PreToolUse with WebSearch tool",
             ),

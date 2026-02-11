@@ -163,7 +163,10 @@ class PluginLoader:
         return handlers
 
     @staticmethod
-    def load_from_plugins_config(plugins_config: "PluginsConfig") -> list[Handler]:
+    def load_from_plugins_config(
+        plugins_config: "PluginsConfig",
+        workspace_root: Path | None = None,
+    ) -> list[Handler]:
         """Load handlers from PluginsConfig model (new API).
 
         This is the preferred method for loading plugins, using the type-safe
@@ -171,6 +174,8 @@ class PluginLoader:
 
         Args:
             plugins_config: PluginsConfig instance from configuration file
+            workspace_root: Project root for resolving relative plugin paths.
+                If None, relative paths are resolved against CWD (fragile).
 
         Returns:
             List of loaded Handler instances, sorted by priority
@@ -206,15 +211,32 @@ class PluginLoader:
             # Determine search paths: plugin.path or global paths
             plugin_path = Path(plugin_config.path)
 
-            # If plugin.path is absolute or exists, use it directly
-            if plugin_path.is_absolute() or plugin_path.exists():
-                search_paths = [plugin_path.parent if plugin_path.suffix == ".py" else plugin_path]
+            # Resolve relative paths against workspace_root (not CWD)
+            if not plugin_path.is_absolute() and workspace_root is not None:
+                resolved_path = workspace_root / plugin_path
+            else:
+                resolved_path = plugin_path
+
+            # If plugin.path is a file or directory, use it directly
+            if resolved_path.is_absolute() and (
+                resolved_path.exists() or plugin_path.suffix == ".py"
+            ):
+                search_paths = [
+                    resolved_path.parent if resolved_path.suffix == ".py" else resolved_path
+                ]
                 handler_module = (
-                    plugin_path.stem if plugin_path.suffix == ".py" else plugin_path.name
+                    resolved_path.stem if resolved_path.suffix == ".py" else resolved_path.name
                 )
             else:
                 # Use global search paths with plugin.path as module name
-                search_paths = [Path(p) for p in plugins_config.paths]
+                raw_paths = [Path(p) for p in plugins_config.paths]
+                # Resolve relative search paths against workspace_root
+                if workspace_root is not None:
+                    search_paths = [
+                        workspace_root / p if not p.is_absolute() else p for p in raw_paths
+                    ]
+                else:
+                    search_paths = raw_paths
                 handler_module = plugin_config.path
 
             # Determine which handlers to load

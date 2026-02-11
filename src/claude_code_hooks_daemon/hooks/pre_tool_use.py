@@ -27,13 +27,7 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.british_english import (
 from claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git import (
     DestructiveGitHandler,
 )
-from claude_code_hooks_daemon.handlers.pre_tool_use.eslint_disable import (
-    EslintDisableHandler,
-)
 from claude_code_hooks_daemon.handlers.pre_tool_use.git_stash import GitStashHandler
-from claude_code_hooks_daemon.handlers.pre_tool_use.go_qa_suppression_blocker import (
-    GoQaSuppressionBlocker,
-)
 from claude_code_hooks_daemon.handlers.pre_tool_use.hello_world import (
     HelloWorldPreToolUseHandler,
 )
@@ -43,17 +37,11 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization import
 from claude_code_hooks_daemon.handlers.pre_tool_use.npm_command import (
     NpmCommandHandler,
 )
-from claude_code_hooks_daemon.handlers.pre_tool_use.php_qa_suppression_blocker import (
-    PhpQaSuppressionBlocker,
-)
 from claude_code_hooks_daemon.handlers.pre_tool_use.plan_time_estimates import (
     PlanTimeEstimatesHandler,
 )
 from claude_code_hooks_daemon.handlers.pre_tool_use.plan_workflow import (
     PlanWorkflowHandler,
-)
-from claude_code_hooks_daemon.handlers.pre_tool_use.python_qa_suppression_blocker import (
-    PythonQaSuppressionBlocker,
 )
 from claude_code_hooks_daemon.handlers.pre_tool_use.sed_blocker import SedBlockerHandler
 from claude_code_hooks_daemon.handlers.pre_tool_use.tdd_enforcement import (
@@ -83,10 +71,6 @@ def get_builtin_handlers() -> dict[str, type]:
         "absolute_path": AbsolutePathHandler,
         "web_search_year": WebSearchYearHandler,
         "british_english": BritishEnglishHandler,
-        "eslint_disable": EslintDisableHandler,
-        "python_qa_suppression_blocker": PythonQaSuppressionBlocker,
-        "php_qa_suppression_blocker": PhpQaSuppressionBlocker,
-        "go_qa_suppression_blocker": GoQaSuppressionBlocker,
         "tdd_enforcement": TddEnforcementHandler,
         "sed_blocker": SedBlockerHandler,
         "worktree_file_copy": WorktreeFileCopyHandler,

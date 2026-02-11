@@ -30,6 +30,39 @@ handlers:
       enabled: true
       priority: 55
 
+    # Enforce test-first development (TDD)
+    # tdd_enforcement:
+    #   enabled: true
+    #   priority: 35
+    #   options:
+    #     # Restrict TDD enforcement to specific languages (default: ALL languages)
+    #     # Uncomment and list only the languages you want enforced.
+    #     # If omitted or empty, ALL 11 languages are enforced.
+    #     languages:
+    #       - Python
+    #       - Go
+    #       - JavaScript/TypeScript
+    #       - PHP
+    #       - Rust
+    #       - Java
+    #       - C#
+    #       - Kotlin
+    #       - Ruby
+    #       - Swift
+    #       - Dart
+
+    # Block QA suppression comments across all languages (11 languages supported)
+    # qa_suppression:
+    #   enabled: true
+    #   priority: 30
+    #   options:
+    #     # Restrict enforcement to specific languages (default: ALL languages)
+    #     languages:
+    #       - Python
+    #       - Go
+    #       - JavaScript/TypeScript
+    #       - PHP
+
     # Warn on American English spellings
     british_english:
       enabled: true

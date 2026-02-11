@@ -142,13 +142,17 @@ class ValidateEslintOnWriteHandler(Handler):
 
         return [
             AcceptanceTest(
-                title="validate eslint on write handler test",
-                command='echo "test"',
-                description="Tests validate eslint on write handler functionality",
+                title="ESLint validation on TypeScript file write",
+                command=(
+                    "Use the Write tool to create file /tmp/acceptance-test-eslint/test.ts "
+                    'with content "const x = 1;"'
+                ),
+                description="Triggers ESLint validation after writing TypeScript file (PostToolUse advisory)",
                 expected_decision=Decision.ALLOW,
-                expected_message_patterns=[r".*"],
-                safety_notes="Context/utility handler - minimal testing required",
-                test_type=TestType.CONTEXT,
-                requires_event="PostToolUse event",
+                expected_message_patterns=[r"ESLint validation", r"test\.ts"],
+                safety_notes="Creates temporary TypeScript file in /tmp for validation testing",
+                test_type=TestType.ADVISORY,
+                setup_commands=["mkdir -p /tmp/acceptance-test-eslint"],
+                cleanup_commands=["rm -rf /tmp/acceptance-test-eslint"],
             ),
         ]

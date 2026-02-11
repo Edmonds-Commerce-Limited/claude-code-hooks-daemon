@@ -93,7 +93,6 @@ def class_name_to_snake_case(class_name: str) -> str:
     Examples:
         DestructiveGitHandler -> destructive_git
         SedBlockerHandler -> sed_blocker
-        PythonQaSuppressionBlocker -> python_qa_suppression_blocker
         AutoApproveReadsHandler -> auto_approve_reads
     """
     # Remove Handler suffix if present

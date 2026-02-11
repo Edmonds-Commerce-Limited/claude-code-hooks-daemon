@@ -76,25 +76,38 @@ handlers:
       priority: 23
 
     # CODE QUALITY HANDLERS (Priority 25-45)
-    python_qa_suppression_blocker:  # Blocks Python QA suppressions (# noqa, # type: ignore, etc)
-      enabled: true
-      priority: 26
-
-    php_qa_suppression_blocker:     # Blocks PHP QA suppressions (@phpstan-ignore, etc)
-      enabled: true
-      priority: 27
-
-    go_qa_suppression_blocker:      # Blocks Go QA suppressions (//nolint, etc)
-      enabled: true
-      priority: 28
-
-    eslint_disable:        # Prevents ESLint suppression comments
+    qa_suppression:        # Unified multi-language QA suppression blocker (11 languages)
       enabled: true
       priority: 30
+      # options:
+      #   # Restrict QA suppression enforcement to specific languages (default: ALL languages)
+      #   # Uncomment and list only the languages you want enforced.
+      #   # If omitted or empty, ALL 11 languages are enforced.
+      #   languages:
+      #     - Python
+      #     - Go
+      #     - JavaScript/TypeScript
+      #     - PHP
 
     tdd_enforcement:       # Enforces test-first development
       enabled: true
       priority: 35
+      # options:
+      #   # Restrict TDD enforcement to specific languages (default: ALL languages)
+      #   # Uncomment and list only the languages you want enforced.
+      #   # If omitted or empty, ALL 11 languages are enforced.
+      #   languages:
+      #     - Python
+      #     - Go
+      #     - JavaScript/TypeScript
+      #     - PHP
+      #     - Rust
+      #     - Java
+      #     - C#
+      #     - Kotlin
+      #     - Ruby
+      #     - Swift
+      #     - Dart
 
     # WORKFLOW HANDLERS (Priority 30-50)
     plan_number_helper:    # Provides correct next plan number (prevents broken bash discovery)

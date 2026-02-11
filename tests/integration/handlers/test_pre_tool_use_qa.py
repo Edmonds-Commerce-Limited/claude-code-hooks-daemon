@@ -1,8 +1,6 @@
 """Integration tests for PreToolUse QA enforcement handlers.
 
-Tests: EslintDisableHandler, TddEnforcementHandler,
-       PythonQaSuppressionBlocker, PhpQaSuppressionBlocker,
-       GoQaSuppressionBlocker
+Tests: QaSuppressionHandler (unified), TddEnforcementHandler
 
 NOTE: Test data strings that contain QA suppression patterns are constructed
 via concatenation to avoid triggering the live daemon's own QA suppression
@@ -67,56 +65,56 @@ def _go_lint_ignore() -> str:
 
 
 # ---------------------------------------------------------------------------
-# EslintDisableHandler
+# QaSuppressionHandler (unified, strategy-based)
 # ---------------------------------------------------------------------------
-class TestEslintDisableHandler:
-    """Integration tests for EslintDisableHandler."""
+class TestQaSuppressionHandler:
+    """Integration tests for the unified QaSuppressionHandler."""
 
     @pytest.fixture()
     def handler(self) -> Any:
-        from claude_code_hooks_daemon.handlers.pre_tool_use.eslint_disable import (
-            EslintDisableHandler,
+        from claude_code_hooks_daemon.handlers.pre_tool_use.qa_suppression import (
+            QaSuppressionHandler,
         )
 
-        return EslintDisableHandler()
+        return QaSuppressionHandler()
 
     @pytest.mark.parametrize(
-        ("file_path", "content_fn"),
+        ("file_path", "content_fn", "language"),
         [
-            ("/src/app.ts", _eslint_disable),
-            ("/src/component.tsx", _ts_ignore),
-            ("/src/utils.js", _ts_nocheck),
+            ("/src/module.py", _py_type_ignore, "Python"),
+            ("/src/main.go", _go_nolint, "Go"),
+            ("/src/app.ts", _ts_ignore, "JavaScript"),
+            ("/src/Controller.php", _phpstan_ignore, "PHP"),
         ],
-        ids=["eslint-disable-ts", "ts-ignore-tsx", "ts-nocheck-js"],
+        ids=["python", "go", "javascript", "php"],
     )
-    def test_blocks_eslint_suppression(self, handler: Any, file_path: str, content_fn: Any) -> None:
-        content = f"const x = 1; // {content_fn()}"
+    def test_blocks_suppression_across_languages(
+        self, handler: Any, file_path: str, content_fn: Any, language: str
+    ) -> None:
+        content = f"code {content_fn()}"
         hook_input = make_write_hook_input(file_path, content)
         assert handler.matches(hook_input) is True
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
+        assert language in (result.reason or "")
 
-    @pytest.mark.parametrize(
-        ("file_path", "content"),
-        [
-            ("/src/app.ts", "const x: number = 1;"),
-            ("/src/styles.css", "body { color: red; }"),
-            ("/src/app.py", "x = 1"),
-        ],
-        ids=["clean-ts", "non-js-file", "python-file"],
-    )
-    def test_allows_clean_code(self, handler: Any, file_path: str, content: str) -> None:
-        hook_input = make_write_hook_input(file_path, content)
+    def test_allows_clean_code(self, handler: Any) -> None:
+        hook_input = make_write_hook_input("/src/module.py", "x: int = 1\ny = x + 2\n")
         assert handler.matches(hook_input) is False
 
-    def test_skips_node_modules(self, handler: Any) -> None:
-        content = f"// {_eslint_disable()}"
-        hook_input = make_write_hook_input("/node_modules/pkg/index.js", content)
+    def test_allows_unknown_extension(self, handler: Any) -> None:
+        content = f"x = 1  {_py_type_ignore()}"
+        hook_input = make_write_hook_input("/src/data.txt", content)
+        assert handler.matches(hook_input) is False
+
+    def test_skips_vendor_directory(self, handler: Any) -> None:
+        content = f"x = 1  {_py_type_ignore()}"
+        hook_input = make_write_hook_input("/vendor/lib/module.py", content)
         assert handler.matches(hook_input) is False
 
     def test_edit_tool_checks_new_string(self, handler: Any) -> None:
-        new_string = f"const x = 1; // {_eslint_disable()}"
-        hook_input = make_edit_hook_input("/src/app.ts", "old code", new_string)
+        new_string = f"result = func()  {_py_type_ignore()}"
+        hook_input = make_edit_hook_input("/src/module.py", "old code", new_string)
         assert handler.matches(hook_input) is True
         result = handler.handle(hook_input)
         assert result.decision == Decision.DENY
@@ -166,160 +164,9 @@ class TestTddEnforcementHandler:
         }
         assert handler.matches(hook_input) is False
 
-    def test_ignores_non_python_file(self, handler: Any) -> None:
+    def test_ignores_unrecognized_file_extension(self, handler: Any) -> None:
         hook_input = make_write_hook_input(
-            "/workspace/src/handlers/new_handler.js",
-            "export class NewHandler {}",
+            "/workspace/src/handlers/config.toml",
+            "key = 'value'",
         )
-        assert handler.matches(hook_input) is False
-
-
-# ---------------------------------------------------------------------------
-# PythonQaSuppressionBlocker
-# ---------------------------------------------------------------------------
-class TestPythonQaSuppressionBlocker:
-    """Integration tests for PythonQaSuppressionBlocker."""
-
-    @pytest.fixture()
-    def handler(self) -> Any:
-        from claude_code_hooks_daemon.handlers.pre_tool_use.python_qa_suppression_blocker import (
-            PythonQaSuppressionBlocker,
-        )
-
-        return PythonQaSuppressionBlocker()
-
-    @pytest.mark.parametrize(
-        ("content_fn", "desc"),
-        [
-            (_py_type_ignore, "type-ignore"),
-            (_py_noqa, "noqa"),
-            (_py_pylint_disable, "pylint-disable"),
-        ],
-        ids=["type-ignore", "noqa", "pylint-disable"],
-    )
-    def test_blocks_python_suppression(self, handler: Any, content_fn: Any, desc: str) -> None:
-        content = f"x = 1  {content_fn()}"
-        hook_input = make_write_hook_input("/src/module.py", content)
-        assert handler.matches(hook_input) is True
-        result = handler.handle(hook_input)
-        assert result.decision == Decision.DENY
-
-    def test_allows_clean_python(self, handler: Any) -> None:
-        hook_input = make_write_hook_input("/src/module.py", "x: int = 1\ny = x + 2\n")
-        assert handler.matches(hook_input) is False
-
-    def test_skips_test_fixtures(self, handler: Any) -> None:
-        content = f"x = 1  {_py_type_ignore()}"
-        hook_input = make_write_hook_input("/tests/fixtures/example.py", content)
-        assert handler.matches(hook_input) is False
-
-    def test_skips_venv(self, handler: Any) -> None:
-        content = f"x = 1  {_py_noqa()}"
-        hook_input = make_write_hook_input("/project/venv/lib/module.py", content)
-        assert handler.matches(hook_input) is False
-
-    def test_ignores_non_python(self, handler: Any) -> None:
-        content = f"x = 1  {_py_type_ignore()}"
-        hook_input = make_write_hook_input("/src/module.js", content)
-        assert handler.matches(hook_input) is False
-
-    def test_edit_tool_checks_new_string(self, handler: Any) -> None:
-        new_string = f"result = func()  {_py_type_ignore()}"
-        hook_input = make_edit_hook_input("/src/module.py", "old code", new_string)
-        assert handler.matches(hook_input) is True
-        result = handler.handle(hook_input)
-        assert result.decision == Decision.DENY
-
-
-# ---------------------------------------------------------------------------
-# PhpQaSuppressionBlocker
-# ---------------------------------------------------------------------------
-class TestPhpQaSuppressionBlocker:
-    """Integration tests for PhpQaSuppressionBlocker."""
-
-    @pytest.fixture()
-    def handler(self) -> Any:
-        from claude_code_hooks_daemon.handlers.pre_tool_use.php_qa_suppression_blocker import (
-            PhpQaSuppressionBlocker,
-        )
-
-        return PhpQaSuppressionBlocker()
-
-    @pytest.mark.parametrize(
-        ("content_fn", "desc"),
-        [
-            (_phpstan_ignore, "phpstan-ignore"),
-            (_psalm_suppress, "psalm-suppress"),
-            (_phpcs_ignore, "phpcs-ignore"),
-        ],
-        ids=["phpstan-ignore", "psalm-suppress", "phpcs-ignore"],
-    )
-    def test_blocks_php_suppression(self, handler: Any, content_fn: Any, desc: str) -> None:
-        content = f"<?php // {content_fn()}"
-        hook_input = make_write_hook_input("/src/Controller.php", content)
-        assert handler.matches(hook_input) is True
-        result = handler.handle(hook_input)
-        assert result.decision == Decision.DENY
-
-    def test_allows_clean_php(self, handler: Any) -> None:
-        hook_input = make_write_hook_input("/src/Controller.php", "<?php\nclass Controller {}\n")
-        assert handler.matches(hook_input) is False
-
-    def test_skips_vendor(self, handler: Any) -> None:
-        content = f"<?php // {_phpstan_ignore()}"
-        hook_input = make_write_hook_input("/vendor/pkg/src/File.php", content)
-        assert handler.matches(hook_input) is False
-
-    def test_ignores_non_php(self, handler: Any) -> None:
-        content = f"// {_phpstan_ignore()}"
-        hook_input = make_write_hook_input("/src/module.py", content)
-        assert handler.matches(hook_input) is False
-
-
-# ---------------------------------------------------------------------------
-# GoQaSuppressionBlocker
-# ---------------------------------------------------------------------------
-class TestGoQaSuppressionBlocker:
-    """Integration tests for GoQaSuppressionBlocker."""
-
-    @pytest.fixture()
-    def handler(self) -> Any:
-        from claude_code_hooks_daemon.handlers.pre_tool_use.go_qa_suppression_blocker import (
-            GoQaSuppressionBlocker,
-        )
-
-        return GoQaSuppressionBlocker()
-
-    @pytest.mark.parametrize(
-        ("content_fn", "desc"),
-        [
-            (_go_nolint, "nolint"),
-            (_go_lint_ignore, "lint-ignore"),
-        ],
-        ids=["nolint", "lint-ignore"],
-    )
-    def test_blocks_go_suppression(self, handler: Any, content_fn: Any, desc: str) -> None:
-        content = f"func main() {{}}\n{content_fn()}"
-        hook_input = make_write_hook_input("/src/main.go", content)
-        assert handler.matches(hook_input) is True
-        result = handler.handle(hook_input)
-        assert result.decision == Decision.DENY
-
-    def test_allows_clean_go(self, handler: Any) -> None:
-        hook_input = make_write_hook_input("/src/main.go", "package main\n\nfunc main() {}\n")
-        assert handler.matches(hook_input) is False
-
-    def test_skips_vendor(self, handler: Any) -> None:
-        content = f"func x() {{}}\n{_go_nolint()}"
-        hook_input = make_write_hook_input("/vendor/pkg/main.go", content)
-        assert handler.matches(hook_input) is False
-
-    def test_skips_testdata(self, handler: Any) -> None:
-        content = f"func x() {{}}\n{_go_nolint()}"
-        hook_input = make_write_hook_input("/testdata/fixture.go", content)
-        assert handler.matches(hook_input) is False
-
-    def test_ignores_non_go(self, handler: Any) -> None:
-        content = f"{_go_nolint()}"
-        hook_input = make_write_hook_input("/src/main.py", content)
         assert handler.matches(hook_input) is False

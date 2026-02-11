@@ -66,12 +66,16 @@ class PlanWorkflowHandler(Handler):
         return [
             AcceptanceTest(
                 title="Writing to PLAN.md file",
-                command="Write to PLAN.md file in plan directory",
-                description="Provides plan workflow guidance (advisory)",
+                command=(
+                    "Use the Write tool to write to /tmp/acceptance-test-planwf/CLAUDE/Plan/099-test/PLAN.md"
+                    " with content '# Plan 099: Test Plan\\n\\n**Status**: Not Started'"
+                ),
+                description="Provides plan workflow guidance when writing PLAN.md (advisory)",
                 expected_decision=Decision.ALLOW,
-                expected_message_patterns=[r"plan", r"workflow"],
-                safety_notes="Advisory handler - provides context",
+                expected_message_patterns=[r"[Pp]lan", r"[Ww]orkflow"],
+                safety_notes="Uses /tmp path - safe. Advisory handler allows write and adds guidance.",
                 test_type=TestType.ADVISORY,
-                requires_event="PreToolUse with Write tool to PLAN.md",
+                setup_commands=["mkdir -p /tmp/acceptance-test-planwf/CLAUDE/Plan/099-test"],
+                cleanup_commands=["rm -rf /tmp/acceptance-test-planwf"],
             ),
         ]

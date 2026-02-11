@@ -47,7 +47,10 @@ class HandlerTag:
     JAVASCRIPT = "javascript"
     PHP = "php"
     GO = "go"
+    RUST = "rust"
+    JAVA = "java"
     BASH = "bash"
+    MULTI_LANGUAGE = "multi-language"
 
     # Safety/behavior tags
     SAFETY = "safety"
@@ -107,7 +110,10 @@ TagLiteral = Literal[
     "javascript",
     "php",
     "go",
+    "rust",
+    "java",
     "bash",
+    "multi-language",
     # Safety
     "safety",
     "blocking",

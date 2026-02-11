@@ -324,7 +324,7 @@ class TestHandlerSubclass:
         """Multiple handlers should maintain different priorities."""
         handler1 = ConcreteHandler(name="handler1", priority=Priority.DESTRUCTIVE_GIT)
         handler2 = ConcreteHandler(name="handler2", priority=Priority.GIT_CONTEXT_INJECTOR)
-        handler3 = ConcreteHandler(name="handler3", priority=Priority.ESLINT_DISABLE)
+        handler3 = ConcreteHandler(name="handler3", priority=Priority.QA_SUPPRESSION)
 
         assert handler1.priority < handler2.priority < handler3.priority
 
@@ -573,13 +573,13 @@ class TestHandlerIntegration:
         handlers = [
             ConcreteHandler(name="high", priority=Priority.HELLO_WORLD),
             ConcreteHandler(name="low", priority=Priority.DESTRUCTIVE_GIT),
-            ConcreteHandler(name="medium", priority=Priority.ESLINT_DISABLE),
+            ConcreteHandler(name="medium", priority=Priority.QA_SUPPRESSION),
         ]
 
         # Sort by priority (lower numbers execute first)
         sorted_handlers = sorted(handlers, key=lambda h: h.priority)
 
-        # HELLO_WORLD=5, DESTRUCTIVE_GIT=10, ESLINT_DISABLE=30
+        # HELLO_WORLD=5, DESTRUCTIVE_GIT=10, QA_SUPPRESSION=30
         assert sorted_handlers[0].name == "high"  # Priority 5
         assert sorted_handlers[1].name == "low"  # Priority 10
         assert sorted_handlers[2].name == "medium"  # Priority 30

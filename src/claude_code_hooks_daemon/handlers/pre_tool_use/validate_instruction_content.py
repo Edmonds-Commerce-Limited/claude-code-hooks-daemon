@@ -187,20 +187,30 @@ class ValidateInstructionContentHandler(Handler):
         return [
             AcceptanceTest(
                 title="Block implementation log in CLAUDE.md",
-                command='echo \'{"tool_name": "Write", "tool_input": {"file_path": "CLAUDE.md", "content": "Created the file ProductService.php"}}\' | cat',
+                command=(
+                    "Use the Write tool to write to /tmp/acceptance-test-validate/CLAUDE.md"
+                    " with content 'Created the file ProductService.php and added the class'"
+                ),
                 description="Prevents implementation logs from being written to instruction files",
                 expected_decision=Decision.DENY,
-                expected_message_patterns=[r"implementation logs"],
-                safety_notes="Uses echo - safe to execute",
+                expected_message_patterns=[r"implementation logs", r"BLOCKED"],
+                safety_notes="Uses /tmp path - safe. Handler blocks Write before file is created.",
                 test_type=TestType.BLOCKING,
+                setup_commands=["mkdir -p /tmp/acceptance-test-validate"],
+                cleanup_commands=["rm -rf /tmp/acceptance-test-validate"],
             ),
             AcceptanceTest(
                 title="Allow clean instructions in CLAUDE.md",
-                command='echo \'{"tool_name": "Write", "tool_input": {"file_path": "CLAUDE.md", "content": "# Instructions\\n\\nUse strict types"}}\' | cat',
-                description="Allows clean instructional content",
+                command=(
+                    "Use the Write tool to write to /tmp/acceptance-test-validate/CLAUDE.md"
+                    " with content '# Project Instructions\\n\\nUse strict typing for all modules.'"
+                ),
+                description="Allows clean instructional content without ephemeral patterns",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"validated"],
-                safety_notes="Uses echo - safe to execute",
+                safety_notes="Uses /tmp path - safe. Clean content should be allowed.",
                 test_type=TestType.ADVISORY,
+                setup_commands=["mkdir -p /tmp/acceptance-test-validate"],
+                cleanup_commands=["rm -rf /tmp/acceptance-test-validate"],
             ),
         ]

@@ -160,6 +160,7 @@ class HandlerRegistry:
         *,
         config: dict[str, dict[str, dict[str, Any]]] | None = None,
         workspace_root: Path | None = None,
+        project_languages: list[str] | None = None,
     ) -> int:
         """Register all discovered handlers with the router.
 
@@ -171,6 +172,7 @@ class HandlerRegistry:
             router: Event router to register handlers with
             config: Optional handler configuration from hooks-daemon.yaml
             workspace_root: Optional workspace root path for handlers
+            project_languages: Project-level language filter from daemon.languages config
 
         Returns:
             Number of handlers registered
@@ -319,6 +321,9 @@ class HandlerRegistry:
                             # Apply all options as private attributes (generic for all handlers)
                             for option_key, option_value in merged_options.items():
                                 setattr(instance, f"_{option_key}", option_value)
+
+                            # Inject project-level language filter
+                            instance._project_languages = project_languages
 
                             router.register(event_type, instance)
                             count += 1

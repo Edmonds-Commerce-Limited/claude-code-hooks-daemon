@@ -78,13 +78,21 @@ If using the sitemap skill, validation runs automatically in the modify→valida
 
         return [
             AcceptanceTest(
-                title="validate sitemap handler test",
-                command='echo "test"',
-                description="Tests validate sitemap handler functionality",
+                title="Sitemap validation reminder after edit",
+                command=(
+                    "Use the Write tool to create file /tmp/acceptance-test-sitemap/CLAUDE/Sitemap/test.md "
+                    'with content "# Test Sitemap"'
+                ),
+                description="Triggers sitemap validation reminder after editing sitemap file (PostToolUse advisory)",
                 expected_decision=Decision.ALLOW,
-                expected_message_patterns=[r".*"],
-                safety_notes="Context/utility handler - minimal testing required",
-                test_type=TestType.CONTEXT,
-                requires_event="PostToolUse event",
+                expected_message_patterns=[
+                    r"REMINDER.*Sitemap file modified",
+                    r"validate the sitemap",
+                    r"sitemap-validator",
+                ],
+                safety_notes="Creates temporary sitemap file in /tmp to test reminder functionality",
+                test_type=TestType.ADVISORY,
+                setup_commands=["mkdir -p /tmp/acceptance-test-sitemap/CLAUDE/Sitemap"],
+                cleanup_commands=["rm -rf /tmp/acceptance-test-sitemap"],
             ),
         ]

@@ -48,5 +48,6 @@ class HelloWorldSessionEndHandler(Handler):
                 expected_message_patterns=[r"SessionEnd hook system active"],
                 safety_notes="Test handler only - always allows with context message",
                 test_type=TestType.CONTEXT,
+                requires_event="SessionEnd event (cannot be triggered by subagent)",
             ),
         ]

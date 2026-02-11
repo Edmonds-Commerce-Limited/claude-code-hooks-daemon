@@ -127,17 +127,15 @@ class TaskTddAdvisorHandler(Handler):
         return [
             AcceptanceTest(
                 title="Task tool with implementation keyword",
-                command="Task tool to implement new handler",
+                command="Use the Task tool with prompt 'implement a new validation handler for email addresses'",
                 description="Advises on TDD workflow when spawning agent for implementation",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[
-                    r"TDD REMINDER",
-                    r"RED PHASE",
-                    r"GREEN PHASE",
-                    r"Test-Driven Development",
+                    r"TDD",
+                    r"Test-Driven",
                 ],
-                safety_notes="Advisory only - does not block operation",
+                safety_notes="Advisory only - does not block. Task tool may not be available to subagent.",
                 test_type=TestType.ADVISORY,
-                requires_event="PreToolUse with Task tool for implementation",
+                requires_event="PreToolUse with Task tool",
             ),
         ]

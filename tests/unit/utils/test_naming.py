@@ -23,9 +23,8 @@ class TestClassNameToConfigKey:
     def test_acronym_in_name(self) -> None:
         """Test handler names with acronyms."""
         assert class_name_to_config_key("TDDEnforcementHandler") == "tdd_enforcement"
-        # Note: Actual class name is EslintDisableHandler to avoid splitting issues
-        assert class_name_to_config_key("EslintDisableHandler") == "eslint_disable"
-        # If someone used ESLintDisableHandler (all caps), it would split oddly
+        assert class_name_to_config_key("QaSuppressionHandler") == "qa_suppression"
+        # If someone used all caps prefix, it would split oddly
         assert class_name_to_config_key("ESLintDisableHandler") == "es_lint_disable"
 
     def test_handler_suffix_removal(self) -> None:
@@ -60,10 +59,7 @@ class TestClassNameToConfigKey:
         assert class_name_to_config_key("WorktreeFileCopyHandler") == "worktree_file_copy"
 
         # QA handlers
-        assert (
-            class_name_to_config_key("PythonQaSuppressionBlocker")
-            == "python_qa_suppression_blocker"
-        )
+        assert class_name_to_config_key("QaSuppressionHandler") == "qa_suppression"
         assert class_name_to_config_key("MarkdownOrganizationHandler") == "markdown_organization"
 
         # Workflow handlers
@@ -99,7 +95,7 @@ class TestConfigKeyToDisplayName:
         """Test conversion of actual config keys from the codebase."""
         assert config_key_to_display_name("absolute_path") == "absolute-path"
         assert config_key_to_display_name("worktree_file_copy") == "worktree-file-copy"
-        assert config_key_to_display_name("python_qa_suppression") == "python-qa-suppression"
+        assert config_key_to_display_name("qa_suppression") == "qa-suppression"
         assert config_key_to_display_name("markdown_organization") == "markdown-organization"
 
 

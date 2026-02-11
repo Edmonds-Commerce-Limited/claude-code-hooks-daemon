@@ -1,7 +1,7 @@
 ---
 name: acceptance-test-runner
 description: Execute batches of acceptance tests in parallel. Tests handlers in real Claude Code session and returns structured JSON results.
-tools: Bash, Read, Glob, Grep
+tools: Bash, Read, Write, Edit, Glob, Grep
 model: haiku
 ---
 
@@ -11,7 +11,7 @@ model: haiku
 
 **Model**: Haiku (fast, cheap, designed for parallel batch execution)
 
-**Tools**: Bash, Read, Glob, Grep (read-only, no file modifications)
+**Tools**: Bash, Read, Write, Edit, Glob, Grep
 
 ## Overview
 
@@ -118,17 +118,61 @@ Expected: System-reminder contains injected context (git status, plan info, etc.
 - No context in system-reminder
 - Context doesn't match expected patterns
 
+## Write/Edit Tool Tests (CRITICAL)
+
+Many handlers intercept Write and Edit tool operations (PreToolUse hooks). To test these handlers, you MUST actually invoke the Write or Edit tool so the hook fires.
+
+**How Write/Edit tool tests work**:
+1. The test `command` field contains a natural language instruction telling you what Write/Edit operation to perform
+2. You MUST actually use the Write or Edit tool (not echo or Bash)
+3. The PreToolUse hook will fire and either BLOCK the operation (blocking test) or ADD ADVISORY context (advisory test)
+4. A BLOCKED write/edit = PASS for blocking tests
+5. An advisory message in system-reminder after write/edit = PASS for advisory tests
+
+**Important rules for Write/Edit tests**:
+- ALWAYS use the Write or Edit tool as instructed - never substitute with echo or Bash
+- Use `/tmp/acceptance-test-*` paths (safe, temporary, outside project)
+- If a blocking handler denies the Write/Edit, that IS the expected behavior (PASS)
+- Check system-reminder tags for hook messages after each Write/Edit attempt
+- NEVER skip a Write/Edit test - you have the tools to execute them
+
+**Example blocking test flow**:
+```
+Command: "Use Write tool to write to /tmp/acceptance-test-qa.py with content containing '# type: ignore'"
+1. Invoke Write tool with file_path=/tmp/acceptance-test-qa.py, content="x = 1  # type: ignore"
+2. Hook fires → handler blocks the write
+3. System-reminder shows: "BLOCKED: Python QA suppression comments..."
+4. Result: PASS (handler correctly blocked)
+```
+
+**Example advisory test flow**:
+```
+Command: "Use Write tool to write to /tmp/acceptance-test-docs/CLAUDE/docs/test.md with content containing 'color'"
+1. Invoke Write tool
+2. Hook fires → handler adds advisory but allows
+3. System-reminder shows: "American English detected..."
+4. Result: PASS (advisory correctly provided)
+```
+
 ## Lifecycle Event Handling (SKIP, not FAIL)
 
-Some tests require events that cannot be triggered by subagents:
+The following event types CANNOT be triggered by subagents and MUST be marked as "skip":
 - `SessionStart` - only fires when main session starts
 - `SessionEnd` - only fires when main session ends
 - `PreCompact` - only fires during conversation compaction
+- `Stop` - only fires when session stops
+- `SubagentStop` - only fires when subagent stops
+- `Status` - only fires for status checks
+- `Notification` - only fires for notifications
+- `PermissionRequest` - only fires for permission dialogs
+- `UserPromptSubmit` - only fires for user prompt submission
 
-**If `requires_event` is "SessionStart", "SessionEnd", or "PreCompact"**:
+**If `requires_event` matches any of the above lifecycle events**:
 - Mark result as "skip"
 - Provide reason: "Lifecycle event cannot be triggered by subagent"
 - Do NOT mark as "fail" - this is expected limitation
+
+**ALL other tests (Bash, Write, Edit, Read, WebSearch, Task tool tests) MUST be executed.** Never skip a test that can be executed with available tools.
 
 ## Setup and Cleanup
 

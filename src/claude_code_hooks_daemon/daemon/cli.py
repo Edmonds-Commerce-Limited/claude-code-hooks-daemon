@@ -341,6 +341,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         workspace_root=project_path,
         plugins_config=config.plugins,
         project_handlers_config=config.project_handlers,
+        project_languages=config.daemon.languages,
     )
 
     # Get the daemon config with proper paths
@@ -917,7 +918,7 @@ def cmd_generate_playbook(args: argparse.Namespace) -> int:
         # Load plugin handlers
         from claude_code_hooks_daemon.plugins.loader import PluginLoader
 
-        plugins = PluginLoader.load_from_plugins_config(config.plugins)
+        plugins = PluginLoader.load_from_plugins_config(config.plugins, project_path)
 
         # Create playbook generator
         from claude_code_hooks_daemon.daemon.playbook_generator import PlaybookGenerator

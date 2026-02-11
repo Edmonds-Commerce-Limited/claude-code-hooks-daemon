@@ -199,27 +199,35 @@ NEVER manually edit lock files with Write or Edit tools."""
         return [
             AcceptanceTest(
                 title="Write to package-lock.json",
-                command='echo "test"',
+                command="Use the Write tool to write to /tmp/acceptance-test-locks/package-lock.json with content '{}'",
                 description="Blocks direct editing of package-lock.json (corruption risk)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
-                    r"package-lock\.json",
+                    r"BLOCKED",
+                    r"lock file",
                     r"npm install",
-                    r"package manager",
                 ],
-                safety_notes="Uses echo - safe to test",
+                safety_notes="Uses /tmp path - safe. Handler blocks Write before file is created.",
                 test_type=TestType.BLOCKING,
+                setup_commands=["mkdir -p /tmp/acceptance-test-locks"],
+                cleanup_commands=["rm -rf /tmp/acceptance-test-locks"],
             ),
             AcceptanceTest(
                 title="Edit Cargo.lock",
-                command='echo "test"',
+                command="Use the Edit tool on /tmp/acceptance-test-locks/Cargo.lock with old_string 'old' and new_string 'new'",
                 description="Blocks direct editing of Cargo.lock",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
-                    r"Cargo\.lock",
+                    r"BLOCKED",
+                    r"lock file",
                     r"cargo update",
                 ],
-                safety_notes="Uses echo - safe to test",
+                safety_notes="Uses /tmp path - safe. Handler blocks Edit before file is modified.",
                 test_type=TestType.BLOCKING,
+                setup_commands=[
+                    "mkdir -p /tmp/acceptance-test-locks",
+                    "echo 'old content' > /tmp/acceptance-test-locks/Cargo.lock",
+                ],
+                cleanup_commands=["rm -rf /tmp/acceptance-test-locks"],
             ),
         ]
