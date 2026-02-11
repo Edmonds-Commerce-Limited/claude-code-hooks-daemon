@@ -1,6 +1,6 @@
 # Plan 00047: User Feedback Resolution (v2.10.0)
 
-**Status**: Not Started
+**Status**: Complete (2026-02-11)
 **Created**: 2026-02-11
 **Owner**: Claude
 **Priority**: High
@@ -127,44 +127,44 @@ These were reported in the v2.3.0→v2.9.0 upgrade feedback but are resolved:
 
 ### Phase 1: P0 Fixes (Config Template)
 
-- [ ] **Task 1.1**: Remove `stats_cache_reader` handler entry from `.claude/hooks-daemon.yaml.example`
-- [ ] **Task 1.2**: Remove orphaned `get_acceptance_tests()` from `stats_cache_reader.py` (lines 118-133)
-- [ ] **Task 1.3**: Remove `STATS_CACHE_READER` from `HandlerID` enum and `VALID_STATUS_LINE_HANDLER_KEYS`
-- [ ] **Task 1.4**: Assign unique priorities to ALL handlers in `.claude/hooks-daemon.yaml.example` (no duplicates within event types)
-- [ ] **Task 1.5**: Run QA: `./scripts/qa/run_all.sh`
-- [ ] **Task 1.6**: Restart daemon and verify no DEGRADED MODE
+- [x] **Task 1.1**: Remove `stats_cache_reader` handler entry from `.claude/hooks-daemon.yaml.example`
+- [x] **Task 1.2**: Remove orphaned `get_acceptance_tests()` from `stats_cache_reader.py` (lines 118-133)
+- [x] **Task 1.3**: Remove `STATS_CACHE_READER` from `HandlerID` enum and `VALID_STATUS_LINE_HANDLER_KEYS`
+- [x] **Task 1.4**: Assign unique priorities to ALL handlers in `.claude/hooks-daemon.yaml.example` (no duplicates within event types)
+- [x] **Task 1.5**: Run QA: `./scripts/qa/run_all.sh`
+- [x] **Task 1.6**: Restart daemon and verify no DEGRADED MODE
 
 ### Phase 2: P1 Fixes (Installer/UX)
 
-- [ ] **Task 2.1**: Add `ensure_claude_gitignore()` to `scripts/install/gitignore.sh` that auto-creates `.claude/.gitignore`
-- [ ] **Task 2.2**: Update `setup_all_gitignores()` to call `ensure_claude_gitignore()` before verification
-- [ ] **Task 2.3**: Make `.gitignore` warnings non-fatal in `install_version.sh` (don't propagate exit code 1)
-- [ ] **Task 2.4**: Set `UV_LINK_MODE=copy` in `scripts/install/venv.sh` before uv commands
-- [ ] **Task 2.5**: Run QA: `./scripts/qa/run_all.sh`
+- [x] **Task 2.1**: Add `ensure_claude_gitignore()` to `scripts/install/gitignore.sh` that auto-creates `.claude/.gitignore`
+- [x] **Task 2.2**: Update `setup_all_gitignores()` to call `ensure_claude_gitignore()` before verification
+- [x] **Task 2.3**: Make `.gitignore` warnings non-fatal in `install_version.sh` (don't propagate exit code 1)
+- [x] **Task 2.4**: Set `UV_LINK_MODE=copy` in `scripts/install/venv.sh` before uv commands
+- [x] **Task 2.5**: Run QA: `./scripts/qa/run_all.sh`
 
 ### Phase 3: P1 Fix (Socket Path Discovery)
 
-- [ ] **Task 3.1**: Write daemon socket path to discovery file on startup (`untracked/daemon.socket-path`)
-  - File in `src/claude_code_hooks_daemon/daemon/server.py` or startup logic
-- [ ] **Task 3.2**: Update `init.sh` to read discovery file when default socket doesn't exist
-- [ ] **Task 3.3**: Write TDD tests for socket path discovery
-- [ ] **Task 3.4**: Run QA: `./scripts/qa/run_all.sh`
-- [ ] **Task 3.5**: Test with deep path scenario
+- [x] **Task 3.1**: Write daemon socket path to discovery file on startup (`untracked/daemon.socket-path`)
+  - Implemented in `src/claude_code_hooks_daemon/daemon/paths.py` and `cli.py`
+- [x] **Task 3.2**: Update `init.sh` to read discovery file when default socket doesn't exist
+- [x] **Task 3.3**: Write TDD tests for socket path discovery
+- [x] **Task 3.4**: Run QA: `./scripts/qa/run_all.sh`
+- [x] **Task 3.5**: Test with deep path scenario
 
 ### Phase 4: Documentation Updates
 
-- [ ] **Task 4.1**: Fix conflicting .gitignore language in `CLAUDE/LLM-INSTALL.md`
-- [ ] **Task 4.2**: Add "Installation Success Criteria" section to `CLAUDE/LLM-INSTALL.md`
-- [ ] **Task 4.3**: Make "Restart Claude Code" a prominent numbered step in `CLAUDE/LLM-UPDATE.md`
-- [ ] **Task 4.4**: Add note about `.claude/` template directory in upgrade docs
-- [ ] **Task 4.5**: Review all docs for consistency with implemented fixes
+- [x] **Task 4.1**: Fix conflicting .gitignore language in `CLAUDE/LLM-INSTALL.md`
+- [x] **Task 4.2**: Add "Installation Success Criteria" section to `CLAUDE/LLM-INSTALL.md`
+- [x] **Task 4.3**: Make "Restart Claude Code" a prominent numbered step in `CLAUDE/LLM-UPDATE.md`
+- [x] **Task 4.4**: Add note about `.claude/` template directory in upgrade docs
+- [x] **Task 4.5**: Review all docs for consistency with implemented fixes
 
 ### Phase 5: Verification
 
-- [ ] **Task 5.1**: Full QA: `./scripts/qa/run_all.sh`
-- [ ] **Task 5.2**: Daemon restart verification
-- [ ] **Task 5.3**: Verify `.claude/hooks-daemon.yaml.example` loads without warnings
-- [ ] **Task 5.4**: Checkpoint commit
+- [x] **Task 5.1**: Full QA: `./scripts/qa/run_all.sh`
+- [x] **Task 5.2**: Daemon restart verification
+- [x] **Task 5.3**: Verify `.claude/hooks-daemon.yaml.example` loads without warnings
+- [x] **Task 5.4**: Checkpoint commit
 
 ## Dependencies
 
@@ -172,14 +172,14 @@ These were reported in the v2.3.0→v2.9.0 upgrade feedback but are resolved:
 
 ## Success Criteria
 
-- [ ] Fresh install using `.claude/hooks-daemon.yaml.example` produces NO degraded mode warnings
-- [ ] Zero duplicate priority warnings on daemon start
-- [ ] Installer exits 0 on successful install
-- [ ] `.claude/.gitignore` auto-created during install
-- [ ] No UV hardlink warning in containers
-- [ ] Documentation is consistent (no contradictions)
-- [ ] All QA checks pass
-- [ ] Daemon restarts successfully
+- [x] Fresh install using `.claude/hooks-daemon.yaml.example` produces NO degraded mode warnings
+- [x] Zero duplicate priority warnings on daemon start
+- [x] Installer exits 0 on successful install
+- [x] `.claude/.gitignore` auto-created during install
+- [x] No UV hardlink warning in containers
+- [x] Documentation is consistent (no contradictions)
+- [x] All QA checks pass
+- [x] Daemon restarts successfully
 
 ## Risks & Mitigations
 

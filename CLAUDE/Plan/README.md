@@ -28,13 +28,14 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00045: Proper Language Strategy](00045-proper-language-strategy/PLAN.md) - Proposed
   - Proper language strategy pattern implementation
 
-- [00047: User Feedback Resolution (v2.10.0)](00047-user-feedback-resolution/PLAN.md) - Not Started
-  - Fix broken default config (stats_cache_reader ghost handler), duplicate priorities
-  - Auto-create .claude/.gitignore, fix installer exit codes, UV_LINK_MODE
-  - Socket path discovery file for init.sh/Python fallback mismatch
-  - Documentation consistency fixes
-
 ## Completed Plans
+
+- [00047: User Feedback Resolution (v2.10.0)](Completed/00047-user-feedback-resolution/PLAN.md) - Complete
+  - Fixed ghost stats_cache_reader handler in default config (caused DEGRADED MODE)
+  - Deduplicated all handler priorities in yaml.example (18+ duplicates resolved)
+  - Auto-create .claude/.gitignore, non-fatal installer exit, UV_LINK_MODE=copy
+  - Socket path discovery file for init.sh/Python fallback path agreement
+  - Documentation consistency fixes in LLM-INSTALL.md and LLM-UPDATE.md
 
 - [00037: Daemon Data Layer](Completed/00037-daemon-data-layer/PLAN.md) - Complete
   - Persistent state and transcript access for daemon data layer
@@ -306,8 +307,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 47
-- **Completed**: 38 (1 with reduced scope)
-- **Active**: 9 (1 in progress, 6 not started, 1 proposed, 1 empty draft)
+- **Completed**: 39 (1 with reduced scope)
+- **Active**: 8 (1 in progress, 5 not started, 1 proposed, 1 empty draft)
 - **Cancelled/Abandoned**: 0
 
 ## Quick Links
