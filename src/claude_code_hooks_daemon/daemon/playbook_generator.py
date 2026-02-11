@@ -2,7 +2,8 @@
 
 This module generates acceptance test playbooks from handler definitions.
 Handlers implement get_acceptance_tests() which returns AcceptanceTest objects.
-This generator collects all tests and formats them as a markdown playbook.
+This generator collects all tests and formats them as a markdown playbook
+or structured JSON for automated test execution.
 """
 
 from __future__ import annotations
@@ -19,6 +20,11 @@ if TYPE_CHECKING:
     from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
 
 logger = logging.getLogger(__name__)
+
+
+# Type alias for collected test data tuple:
+# (handler_name, event_type_str, priority, tests, source)
+CollectedTests = list[tuple[str, str, int, list[AcceptanceTest], str]]
 
 
 class PlaybookGenerator:
@@ -46,59 +52,55 @@ class PlaybookGenerator:
         self._plugins = plugins or []
         self._project_handlers = project_handlers or []
 
-    def generate_markdown(self, include_disabled: bool = False) -> str:
-        """Generate acceptance test playbook in markdown format.
+    def _collect_tests(
+        self, include_disabled: bool = False
+    ) -> tuple[CollectedTests, CollectedTests]:
+        """Collect acceptance tests from all handler sources.
+
+        Shared logic used by both generate_markdown() and generate_json().
 
         Args:
             include_disabled: Include tests from disabled handlers
 
         Returns:
-            Complete playbook as markdown string
+            Tuple of (library_and_plugin_tests, project_handler_tests).
+            Each is a list of (handler_name, event_type, priority, tests, source) tuples
+            sorted by priority (lower = higher precedence).
         """
-        # Collect all acceptance tests from handlers
-        tests_by_handler: list[tuple[str, str, int, list[AcceptanceTest]]] = []
+        tests_by_handler: CollectedTests = []
 
-        # Iterate through all event types
+        # Iterate through all event types for registry handlers
         for event_dir_name, event_type in EVENT_TYPE_MAPPING.items():
             event_config = self._config.get(event_dir_name, {})
 
-            # Get all handler classes for this event type
             for handler_class_name in self._registry.list_handlers():
-                # Get handler class
                 handler_class = self._registry.get_handler_class(handler_class_name)
                 if not handler_class:
                     continue
 
-                # Check if handler belongs to this event type (by checking module path)
                 if event_dir_name not in handler_class.__module__:
                     continue
 
-                # Convert class name to config key (snake_case)
                 from claude_code_hooks_daemon.handlers.registry import _to_snake_case
 
                 config_key = _to_snake_case(handler_class_name)
                 handler_config = event_config.get(config_key, {})
 
-                # Check if handler is enabled
                 is_enabled = handler_config.get(ConfigKey.ENABLED, True)
 
                 if not is_enabled and not include_disabled:
                     logger.debug("Skipping disabled handler: %s", handler_class_name)
                     continue
 
-                # Instantiate handler to call get_acceptance_tests()
                 try:
                     instance = handler_class()
 
-                    # Get acceptance tests
                     if hasattr(instance, "get_acceptance_tests"):
                         tests = instance.get_acceptance_tests()
                         if tests:
-                            # Get handler priority (may be overridden in config)
                             priority = handler_config.get(ConfigKey.PRIORITY, instance.priority)
-
                             tests_by_handler.append(
-                                (handler_class_name, event_type.value, priority, tests)
+                                (handler_class_name, event_type.value, priority, tests, "library")
                             )
                             logger.debug(
                                 "Collected %d tests from %s", len(tests), handler_class_name
@@ -106,22 +108,19 @@ class PlaybookGenerator:
                 except Exception as e:
                     logger.warning("Failed to get tests from %s: %s", handler_class_name, e)
 
-        # Collect acceptance tests from plugin handlers
+        # Collect from plugin handlers
         for plugin_handler in self._plugins:
             try:
-                # Get acceptance tests from plugin
                 if hasattr(plugin_handler, "get_acceptance_tests"):
                     tests = plugin_handler.get_acceptance_tests()
                     if tests:
-                        # Get handler name and event type (plugins don't have event type in module path)
                         handler_name = plugin_handler.__class__.__name__
-                        # Plugins should have event_type attribute or we use "Plugin"
                         event_type_str = getattr(plugin_handler, "event_type", "Plugin")
                         if hasattr(event_type_str, "value"):
                             event_type_str = event_type_str.value
 
                         tests_by_handler.append(
-                            (handler_name, event_type_str, plugin_handler.priority, tests)
+                            (handler_name, event_type_str, plugin_handler.priority, tests, "plugin")
                         )
                         logger.debug("Collected %d tests from plugin %s", len(tests), handler_name)
             except Exception as e:
@@ -129,8 +128,8 @@ class PlaybookGenerator:
                     "Failed to get tests from plugin %s: %s", plugin_handler.__class__.__name__, e
                 )
 
-        # Collect acceptance tests from project handlers
-        project_tests_by_handler: list[tuple[str, str, int, list[AcceptanceTest]]] = []
+        # Collect from project handlers
+        project_tests_by_handler: CollectedTests = []
         for project_handler in self._project_handlers:
             try:
                 if hasattr(project_handler, "get_acceptance_tests"):
@@ -142,7 +141,13 @@ class PlaybookGenerator:
                             event_type_str = event_type_str.value
 
                         project_tests_by_handler.append(
-                            (handler_name, event_type_str, project_handler.priority, tests)
+                            (
+                                handler_name,
+                                event_type_str,
+                                project_handler.priority,
+                                tests,
+                                "project",
+                            )
                         )
                         logger.debug(
                             "Collected %d tests from project handler %s",
@@ -156,12 +161,105 @@ class PlaybookGenerator:
                     e,
                 )
 
-        # Sort handlers by priority (lower priority = higher precedence)
+        # Sort by priority (lower = higher precedence)
         tests_by_handler.sort(key=lambda x: x[2])
         project_tests_by_handler.sort(key=lambda x: x[2])
 
-        # Generate markdown
-        return self._format_playbook(tests_by_handler, project_tests_by_handler)
+        return tests_by_handler, project_tests_by_handler
+
+    def generate_markdown(self, include_disabled: bool = False) -> str:
+        """Generate acceptance test playbook in markdown format.
+
+        Args:
+            include_disabled: Include tests from disabled handlers
+
+        Returns:
+            Complete playbook as markdown string
+        """
+        tests_by_handler, project_tests_by_handler = self._collect_tests(include_disabled)
+
+        # Convert to old format (without source field) for _format_playbook compatibility
+        old_format: list[tuple[str, str, int, list[AcceptanceTest]]] = [
+            (name, evt, pri, tests) for name, evt, pri, tests, _src in tests_by_handler
+        ]
+        old_project: list[tuple[str, str, int, list[AcceptanceTest]]] = [
+            (name, evt, pri, tests) for name, evt, pri, tests, _src in project_tests_by_handler
+        ]
+
+        return self._format_playbook(old_format, old_project)
+
+    def generate_json(
+        self,
+        include_disabled: bool = False,
+        filter_type: str | None = None,
+        filter_handler: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Generate acceptance tests as structured JSON list.
+
+        Each test is a dictionary with all fields needed for automated execution.
+
+        Args:
+            include_disabled: Include tests from disabled handlers
+            filter_type: Filter by test type ("blocking", "advisory", "context")
+            filter_handler: Filter by handler name substring (case-insensitive)
+
+        Returns:
+            List of test dictionaries with fields:
+            - test_number: Sequential test number
+            - handler_name: Handler class name
+            - event_type: Event type string (e.g. "PreToolUse")
+            - priority: Handler priority
+            - source: Where handler came from ("library", "plugin", "project")
+            - title: Test title
+            - command: Command to execute
+            - description: Test description
+            - expected_decision: Expected decision string
+            - expected_message_patterns: List of regex patterns
+            - test_type: Test type ("blocking", "advisory", "context")
+            - setup_commands: Optional list of setup commands
+            - cleanup_commands: Optional list of cleanup commands
+            - safety_notes: Optional safety notes
+            - requires_event: Optional event type required
+        """
+        tests_by_handler, project_tests_by_handler = self._collect_tests(include_disabled)
+
+        # Combine all tests
+        all_handler_tests = tests_by_handler + project_tests_by_handler
+
+        result: list[dict[str, Any]] = []
+        test_number = 1
+
+        for handler_name, event_type, priority, tests, source in all_handler_tests:
+            for test in tests:
+                # Apply filter_type
+                if filter_type and test.test_type.value != filter_type:
+                    continue
+
+                # Apply filter_handler (case-insensitive substring match)
+                if filter_handler and filter_handler.lower() not in handler_name.lower():
+                    continue
+
+                test_dict: dict[str, Any] = {
+                    "test_number": test_number,
+                    "handler_name": handler_name,
+                    "event_type": event_type,
+                    "priority": priority,
+                    "source": source,
+                    "title": test.title,
+                    "command": test.command,
+                    "description": test.description,
+                    "expected_decision": test.expected_decision.value,
+                    "expected_message_patterns": test.expected_message_patterns,
+                    "test_type": test.test_type.value,
+                    "setup_commands": test.setup_commands,
+                    "cleanup_commands": test.cleanup_commands,
+                    "safety_notes": test.safety_notes,
+                    "requires_event": test.requires_event,
+                }
+                result.append(test_dict)
+                test_number += 1
+
+        return result
 
     def _format_playbook(
         self,
