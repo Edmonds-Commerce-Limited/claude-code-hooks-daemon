@@ -307,34 +307,79 @@ class TestTestOutput:
 class TestFileListings:
     """Test detection of file listings."""
 
-    def test_blocks_file_listing_with_php_extension(
+    def test_blocks_file_listing_with_action_verb_php(
         self, handler: ValidateInstructionContentHandler, mock_write_tool_call: dict[str, Any]
     ) -> None:
-        """Test blocks file listing with .php extension."""
+        """Test blocks change-log style file listing with action verb."""
         mock_write_tool_call["tool_input"][
             "content"
-        ] = "# Instructions\n\nsrc/Service/ProductService.php"
+        ] = "# Instructions\n\ncreated src/Service/ProductService.php"
         result = handler.handle(mock_write_tool_call)
         assert result.decision == "deny"
         assert "file listings" in result.reason.lower()
 
-    def test_blocks_file_listing_with_js_extension(
+    def test_blocks_file_listing_with_action_verb_js(
         self, handler: ValidateInstructionContentHandler, mock_write_tool_call: dict[str, Any]
     ) -> None:
-        """Test blocks file listing with .js extension."""
+        """Test blocks change-log style file listing with action verb."""
         mock_write_tool_call["tool_input"][
             "content"
-        ] = "# Instructions\n\nassets/js/main.js modified"
+        ] = "# Instructions\n\nmodified assets/js/main.js"
         result = handler.handle(mock_write_tool_call)
         assert result.decision == "deny"
 
-    def test_blocks_file_listing_with_md_extension(
+    def test_blocks_file_listing_with_action_verb_md(
         self, handler: ValidateInstructionContentHandler, mock_write_tool_call: dict[str, Any]
     ) -> None:
-        """Test blocks file listing with .md extension."""
-        mock_write_tool_call["tool_input"]["content"] = "# Instructions\n\ndocs/README.md exists"
+        """Test blocks change-log style file listing with action verb."""
+        mock_write_tool_call["tool_input"][
+            "content"
+        ] = "# Instructions\n\nupdated docs/architecture.md"
         result = handler.handle(mock_write_tool_call)
         assert result.decision == "deny"
+
+    def test_allows_bare_path_reference(
+        self, handler: ValidateInstructionContentHandler, mock_write_tool_call: dict[str, Any]
+    ) -> None:
+        """Test allows bare file path without action verb (documentation reference)."""
+        mock_write_tool_call["tool_input"][
+            "content"
+        ] = "# Instructions\n\nsrc/Service/ProductService.php"
+        result = handler.handle(mock_write_tool_call)
+        assert result.decision == "allow"
+
+    def test_allows_documentation_path_references(
+        self, handler: ValidateInstructionContentHandler, mock_write_tool_call: dict[str, Any]
+    ) -> None:
+        """Test allows file paths used as documentation references (not change logs).
+
+        Regression: CodeLifecycle/README.md was blocked because it references
+        paths like tests/unit/ and tests/integration/test_dogfooding*.py in
+        prose documentation. These are permanent references, not ephemeral logs.
+        """
+        mock_write_tool_call["tool_input"]["content"] = (
+            "# Code Lifecycle Documentation\n\n"
+            "## Existing Testing Infrastructure\n\n"
+            "- **Unit Tests**: `tests/unit/` (pytest, 95%+ coverage required)\n"
+            "- **Integration Tests**: `tests/integration/` (component interactions)\n"
+            "- **Dogfooding Tests**: `tests/integration/test_dogfooding*.py` (auto-verification)\n"
+        )
+        result = handler.handle(mock_write_tool_call)
+        assert (
+            result.decision == "allow"
+        ), f"Documentation path references should be allowed, got: {result.reason}"
+
+    def test_allows_single_path_in_prose(
+        self, handler: ValidateInstructionContentHandler, mock_write_tool_call: dict[str, Any]
+    ) -> None:
+        """Test allows a single file path reference in documentation prose."""
+        mock_write_tool_call["tool_input"][
+            "content"
+        ] = "# Instructions\n\nSee docs/architecture.md for design details"
+        result = handler.handle(mock_write_tool_call)
+        assert (
+            result.decision == "allow"
+        ), f"Single path in prose should be allowed, got: {result.reason}"
 
 
 class TestChangeSummaries:

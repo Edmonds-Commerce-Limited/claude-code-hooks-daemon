@@ -21,8 +21,8 @@ These documents prevent shipping broken code by enforcing a complete testing pyr
 
 ### Supporting Documentation
 
-- **@CLAUDE/CodeLifecycle/TestingPyramid.md** - Understanding the test layers
-- **@CLAUDE/CodeLifecycle/Checklists/** - Copy-paste checklists for workflows
+- **@CLAUDE/AcceptanceTests/GENERATING.md** - Acceptance test generation
+- **@CLAUDE/PlanWorkflow.md** - Planning workflow and templates
 
 ## The Critical Gap This Solves
 
@@ -69,4 +69,4 @@ This project has comprehensive testing already:
 - **Dogfooding Tests**: `tests/integration/test_dogfooding*.py` (auto-verification)
 - **QA Suite**: `./scripts/qa/run_all.sh` (6 automated checks)
 
-**See**: @CLAUDE/CodeLifecycle/TestingPyramid.md for complete explanation.
+Each lifecycle document (Features.md, Bugs.md, General.md) includes its own Definition of Done checklist.
