@@ -28,6 +28,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00045: Proper Language Strategy](00045-proper-language-strategy/PLAN.md) - Proposed
   - Proper language strategy pattern implementation
 
+- [00048: Repository Cruft Cleanup](00048-repo-cruft-cleanup/PLAN.md) - Not Started
+  - Delete spurious files, stale worktrees (~700MB), empty/duplicate plans, config backups
+  - Rename auto-named plan folders to descriptive names
+
 ## Completed Plans
 
 - [00047: User Feedback Resolution (v2.10.0)](Completed/00047-user-feedback-resolution/PLAN.md) - Complete
@@ -306,9 +310,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 47
+- **Total Plans Created**: 48
 - **Completed**: 39 (1 with reduced scope)
-- **Active**: 8 (1 in progress, 5 not started, 1 proposed, 1 empty draft)
+- **Active**: 9 (1 in progress, 6 not started, 1 proposed, 1 empty draft)
 - **Cancelled/Abandoned**: 0
 
 ## Quick Links
