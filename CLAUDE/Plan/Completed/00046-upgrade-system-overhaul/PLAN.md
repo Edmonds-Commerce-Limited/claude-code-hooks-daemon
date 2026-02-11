@@ -1,8 +1,8 @@
 # Plan 00046: Upgrade System Overhaul
 
-**Status**: Not Started
+**Status**: Complete (2026-02-11)
 **Created**: 2026-02-11
-**Owner**: TBD
+**Owner**: Claude Opus 4.6
 **Priority**: High
 **Estimated Effort**: 6-10 hours
 
@@ -95,95 +95,95 @@ The fix is simple but the impact is massive:
 
 ### Phase 1: Fix Layer 1 Script (Root Cause - Issues 1, 2, 5, 6, 7, 10)
 
-- [ ] **Task 1.1**: Rewrite upgrade.sh to checkout-first-then-delegate
-  - [ ] Remove entire legacy fallback block (lines 117-147)
-  - [ ] Move `git checkout` BEFORE Layer 2 check
-  - [ ] Add best-effort daemon stop before checkout (using old venv if exists)
-  - [ ] After checkout, check for Layer 2 and `exec` into it
-  - [ ] If Layer 2 missing after checkout: error with "target version too old, use fresh install"
-  - [ ] Add pre-flight Python version check (find python3.11+)
-- [ ] **Task 1.2**: Add Python version detection function to Layer 1
-  - [ ] Check `python3 --version` against minimum 3.11
-  - [ ] Search for `python3.13`, `python3.12`, `python3.11` if default too old
-  - [ ] Fail with clear message if no compatible Python found
-  - [ ] Pass discovered Python path to Layer 2 via environment variable
+- [x] **Task 1.1**: Rewrite upgrade.sh to checkout-first-then-delegate
+  - [x]Remove entire legacy fallback block (lines 117-147)
+  - [x]Move `git checkout` BEFORE Layer 2 check
+  - [x]Add best-effort daemon stop before checkout (using old venv if exists)
+  - [x]After checkout, check for Layer 2 and `exec` into it
+  - [x]If Layer 2 missing after checkout: error with "target version too old, use fresh install"
+  - [x]Add pre-flight Python version check (find python3.11+)
+- [x] **Task 1.2**: Add Python version detection function to Layer 1
+  - [x]Check `python3 --version` against minimum 3.11
+  - [x]Search for `python3.13`, `python3.12`, `python3.11` if default too old
+  - [x]Fail with clear message if no compatible Python found
+  - [x]Pass discovered Python path to Layer 2 via environment variable
 
 ### Phase 2: Add Python Version Detection to Layer 2 (Issue 3)
 
-- [ ] **Task 2.1**: Update `scripts/install/venv.sh` with Python version checking
-  - [ ] Add `find_compatible_python()` function
-  - [ ] Check `HOOKS_DAEMON_PYTHON` env var first (set by Layer 1)
-  - [ ] Fall back to searching PATH for python3.13/3.12/3.11
-  - [ ] Pass to `uv` via `--python` flag or `UV_PYTHON` env var
-  - [ ] Clear error message if no compatible Python found
-- [ ] **Task 2.2**: Update `scripts/install/prerequisites.sh`
-  - [ ] Add Python version to prerequisite checks
-  - [ ] Report which Python will be used
+- [x] **Task 2.1**: Update `scripts/install/venv.sh` with Python version checking
+  - [x]Add `find_compatible_python()` function
+  - [x]Check `HOOKS_DAEMON_PYTHON` env var first (set by Layer 1)
+  - [x]Fall back to searching PATH for python3.13/3.12/3.11
+  - [x]Pass to `uv` via `--python` flag or `UV_PYTHON` env var
+  - [x]Clear error message if no compatible Python found
+- [x] **Task 2.2**: Update `scripts/install/prerequisites.sh`
+  - [x]Add Python version to prerequisite checks
+  - [x]Report which Python will be used
 
 ### Phase 3: Fix Socket Path Length (Issues 4, 13)
 
-- [ ] **Task 3.1**: Add path length validation to `paths.py`
-  - [ ] Write failing tests for paths exceeding 104 chars (108 limit minus safety margin)
-  - [ ] Implement length check in `get_socket_path()`
-  - [ ] When too long: fall back to `$XDG_RUNTIME_DIR/hooks-daemon-{project-hash}.sock`
-  - [ ] If no XDG_RUNTIME_DIR: use `/run/user/{uid}/hooks-daemon-{project-hash}.sock`
-  - [ ] If neither available: use `/tmp/hooks-daemon-{project-hash}.sock` with logged warning
-  - [ ] Apply same logic to `get_pid_path()` and `get_log_path()`
-  - [ ] Log which path strategy was used
-- [ ] **Task 3.2**: Fix self-install mode path duplication
-  - [ ] Investigate duplicate `.claude/hooks-daemon/.claude/hooks-daemon/` in self-install
-  - [ ] Write failing test reproducing the doubled path
-  - [ ] Fix `ProjectContext.daemon_untracked_dir()` for self-install mode
-- [ ] **Task 3.3**: Update error message when socket creation fails
-  - [ ] Catch `OSError` for AF_UNIX path too long
-  - [ ] Suggest `CLAUDE_HOOKS_SOCKET_PATH` override in error message
-  - [ ] Document the 108-byte limit
+- [x] **Task 3.1**: Add path length validation to `paths.py`
+  - [x]Write failing tests for paths exceeding 104 chars (108 limit minus safety margin)
+  - [x]Implement length check in `get_socket_path()`
+  - [x]When too long: fall back to `$XDG_RUNTIME_DIR/hooks-daemon-{project-hash}.sock`
+  - [x]If no XDG_RUNTIME_DIR: use `/run/user/{uid}/hooks-daemon-{project-hash}.sock`
+  - [x]If neither available: use `/tmp/hooks-daemon-{project-hash}.sock` with logged warning
+  - [x]Apply same logic to `get_pid_path()` and `get_log_path()`
+  - [x]Log which path strategy was used
+- [x] **Task 3.2**: Fix self-install mode path duplication
+  - [x]Investigate duplicate `.claude/hooks-daemon/.claude/hooks-daemon/` in self-install
+  - [x]Write failing test reproducing the doubled path
+  - [x]Fix `ProjectContext.daemon_untracked_dir()` for self-install mode
+- [x] **Task 3.3**: Update error message when socket creation fails
+  - [x]Catch `OSError` for AF_UNIX path too long
+  - [x]Suggest `CLAUDE_HOOKS_SOCKET_PATH` override in error message
+  - [x]Document the 108-byte limit
 
 ### Phase 4: Improve Config Validation UX (Issues 9, 11)
 
-- [ ] **Task 4.1**: Add user-friendly config validation error messages
-  - [ ] Catch Pydantic `ValidationError` at daemon startup
-  - [ ] For "Field required" on plugins: show before/after format example
-  - [ ] For unknown fields: suggest closest valid field name
-  - [ ] Include link to upgrade guide if version change detected
-- [ ] **Task 4.2**: Verify duplicate priority warnings are resolved
-  - [ ] Confirm Plan 00039 fix is in v2.9.0
-  - [ ] If not: reduce duplicate priority warning to DEBUG level
+- [x] **Task 4.1**: Add user-friendly config validation error messages
+  - [x]Catch Pydantic `ValidationError` at daemon startup
+  - [x]For "Field required" on plugins: show before/after format example
+  - [x]For unknown fields: suggest closest valid field name
+  - [x]Include link to upgrade guide if version change detected
+- [x] **Task 4.2**: Verify duplicate priority warnings are resolved
+  - [x]Confirm Plan 00039 fix is in v2.9.0
+  - [x]If not: reduce duplicate priority warning to DEBUG level
 
 ### Phase 5: Documentation Updates (Issues 8, 12, 14, 15, 16)
 
-- [ ] **Task 5.1**: Update LLM-UPDATE.md
-  - [ ] Add Python 3.11+ requirement prominently in Prerequisites
-  - [ ] Add socket path length troubleshooting section
-  - [ ] Add settings.json coverage (what it is, how upgrade handles it)
-  - [ ] Change "No Claude Code restart needed" to prominent restart instruction for multi-version upgrades
-  - [ ] Remove references to legacy fallback (it no longer exists)
-  - [ ] Add "broken install recovery" section
-- [ ] **Task 5.2**: Update CLAUDE.md
-  - [ ] Add Python 3.11+ requirement to Quick Commands or Overview
-- [ ] **Task 5.3**: Add breaking changes documentation
-  - [ ] Document plugin `event_type` requirement in upgrade notes
-  - [ ] Add to release checklist: "If breaking config changes, create upgrade guide"
+- [x] **Task 5.1**: Update LLM-UPDATE.md
+  - [x]Add Python 3.11+ requirement prominently in Prerequisites
+  - [x]Add socket path length troubleshooting section
+  - [x]Add settings.json coverage (what it is, how upgrade handles it)
+  - [x]Change "No Claude Code restart needed" to prominent restart instruction for multi-version upgrades
+  - [x]Remove references to legacy fallback (it no longer exists)
+  - [x]Add "broken install recovery" section
+- [x] **Task 5.2**: Update CLAUDE.md
+  - [x]Add Python 3.11+ requirement to Quick Commands or Overview
+- [x] **Task 5.3**: Add breaking changes documentation
+  - [x]Document plugin `event_type` requirement in upgrade notes
+  - [x]Add to release checklist: "If breaking config changes, create upgrade guide"
 
 ### Phase 6: Testing & Verification
 
-- [ ] **Task 6.1**: Unit tests for paths.py changes
-  - [ ] Test socket path length > 104 triggers fallback
-  - [ ] Test XDG_RUNTIME_DIR usage
-  - [ ] Test /run/user/{uid} fallback
-  - [ ] Test /tmp fallback with warning
-  - [ ] Test self-install mode path resolution
-- [ ] **Task 6.2**: Integration test for upgrade.sh
-  - [ ] Test checkout-first flow works
-  - [ ] Test error when Layer 2 missing in target
-  - [ ] Test Python version detection finds alternatives
-- [ ] **Task 6.3**: Full QA suite
-  - [ ] Run `./scripts/qa/run_all.sh`
-  - [ ] Daemon restart verification
-- [ ] **Task 6.4**: Manual upgrade test
-  - [ ] Test upgrade from a pre-Layer-2 tag (e.g., v2.3.0) to current
-  - [ ] Verify Layer 2 runs after checkout
-  - [ ] Verify config preservation works
+- [x] **Task 6.1**: Unit tests for paths.py changes
+  - [x]Test socket path length > 104 triggers fallback
+  - [x]Test XDG_RUNTIME_DIR usage
+  - [x]Test /run/user/{uid} fallback
+  - [x]Test /tmp fallback with warning
+  - [x]Test self-install mode path resolution
+- [x] **Task 6.2**: Integration test for upgrade.sh
+  - [x]Test checkout-first flow works
+  - [x]Test error when Layer 2 missing in target
+  - [x]Test Python version detection finds alternatives
+- [x] **Task 6.3**: Full QA suite
+  - [x]Run `./scripts/qa/run_all.sh`
+  - [x]Daemon restart verification
+- [x] **Task 6.4**: Manual upgrade test
+  - [x]Test upgrade from a pre-Layer-2 tag (e.g., v2.3.0) to current
+  - [x]Verify Layer 2 runs after checkout
+  - [x]Verify config preservation works
 
 ## Dependencies
 
@@ -221,13 +221,13 @@ The fix is simple but the impact is massive:
 
 ## Success Criteria
 
-- [ ] Upgrade from v2.3.0 to latest works without manual intervention (Layer 2 runs)
-- [ ] Upgrade on system with Python 3.9 default finds and uses Python 3.11+
-- [ ] Upgrade in deeply nested project (>108 char socket path) works automatically
-- [ ] Config validation errors show helpful messages with before/after examples
-- [ ] LLM-UPDATE.md covers Python requirement, socket paths, settings.json, restart instruction
-- [ ] All QA checks pass
-- [ ] Legacy fallback code is deleted from upgrade.sh
+- [x] Upgrade from v2.3.0 to latest works without manual intervention (Layer 2 runs)
+- [x] Upgrade on system with Python 3.9 default finds and uses Python 3.11+
+- [x] Upgrade in deeply nested project (>108 char socket path) works automatically
+- [x] Config validation errors show helpful messages with before/after examples
+- [x] LLM-UPDATE.md covers Python requirement, socket paths, settings.json, restart instruction
+- [x] All QA checks pass (7/7 green)
+- [x] Legacy fallback code is deleted from upgrade.sh
 
 ## Risks & Mitigations
 
@@ -242,3 +242,7 @@ The fix is simple but the impact is massive:
 ### 2026-02-11
 - Plan created from two production upgrade feedback reports
 - User decision: drop legacy fallback entirely, checkout first then run Layer 2
+- All 6 phases completed with parallel agent execution (Phases 2-5 in parallel)
+- 9 commits total across all phases
+- All 7 QA checks pass, daemon loads successfully
+- 5309 tests pass (1 skipped - /run/user/0 on root)
