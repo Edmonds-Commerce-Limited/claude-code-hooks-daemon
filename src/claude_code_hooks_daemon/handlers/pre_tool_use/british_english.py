@@ -107,8 +107,8 @@ class BritishEnglishHandler(Handler):
             "If this is intentional (e.g., in a quote), you can ignore this warning.\n"
         )
 
-        # Return allow with warning message
-        return HookResult(decision=Decision.ALLOW, reason="".join(warning_parts))
+        # Return allow with warning in context (advisory messages use context, not reason)
+        return HookResult(decision=Decision.ALLOW, context=["".join(warning_parts)])
 
     def _check_british_english(self, content: str) -> list[dict[str, Any]]:
         """Check content for American spellings, skipping code blocks."""

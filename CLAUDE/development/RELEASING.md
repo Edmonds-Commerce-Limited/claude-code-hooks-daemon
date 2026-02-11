@@ -272,144 +272,100 @@ Overall Status: ✅ ALL CHECKS PASSED
 
 ### 8. Acceptance Testing Gate (Main Claude Executes) - 🚨 BLOCKING
 
-**CRITICAL BLOCKING GATE: Main Claude must execute acceptance tests using the skill.**
+**CRITICAL BLOCKING GATE: Main Claude must execute acceptance tests in the MAIN THREAD.**
 
-After QA passes, **main Claude MUST invoke the acceptance-test skill**:
+After QA passes, **main Claude MUST run acceptance tests via real Claude Code tool calls**.
 
-**STEP 8.1: Invoke Acceptance Test Skill**
+**🚫 SUB-AGENT TESTING IS FORBIDDEN**
 
-The `/release` skill will instruct main Claude to invoke the acceptance-test skill:
+Sub-agent acceptance testing strategies (parallel Haiku batches) are **permanently retired** as of v2.10.0:
+- Sub-agents run out of context on large test suites
+- Sub-agents cannot use Write/Edit tools (PreToolUse:Write tests always fail)
+- Lifecycle events only fire in the main session
+- Advisory system-reminder messages are only visible to the main session
+- The v2.9.0 incident proved async agents create race conditions with release gates
 
+**The ONLY valid acceptance test is a real tool call in the main thread.**
+
+**STEP 8.1: Restart Daemon**
+
+```bash
+$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
+$PYTHON -m claude_code_hooks_daemon.daemon.cli status
+# Expected: RUNNING
 ```
-Use Skill tool:
-- skill: "acceptance-test"
-- args: "all"
+
+**STEP 8.2: Generate Playbook**
+
+```bash
+$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-playbook > /tmp/playbook.md
 ```
 
-**This is MANDATORY. The skill MUST be invoked, not just mentioned.**
+Review to identify all tests to execute.
 
-**What the skill does:**
-- Restarts daemon with latest code
-- Generates test playbook as JSON from ALL handler definitions (no filtering)
-- Groups tests into batches (3-5 tests each)
-- Spawns parallel Haiku agents to execute ALL batches concurrently
-- Executes EVERY test (blocking, advisory, context types)
-- Reports comprehensive pass/fail/skip results
+**STEP 8.3: Execute ALL Tests Sequentially in Main Thread**
 
-**STEP 8.2: Verify Results**
+Work through EVERY test in the playbook using **real Claude Code tool calls**:
 
-Check the skill output for success criteria:
+- **BLOCKING tests**: Use Bash/Write/Edit tool with the test command. Verify the hook blocks it (error output contains expected patterns).
+- **ADVISORY tests**: Use Bash/Write tool. Verify system-reminder shows advisory context.
+- **CONTEXT/LIFECYCLE tests**: Verify system-reminders show handler active (SessionStart, PostToolUse, UserPromptSubmit confirmed by normal session usage; others confirmed by daemon loading without errors).
 
-**✅ SUCCESS CRITERIA** (all must be true):
-```
-✅ Acceptance Tests Complete!
+Mark PASS/FAIL for each test. Document any unexpected behaviour.
 
-📊 Results Summary:
-   Total tests: 90
-   Passed: 87
-   Failed: 0        ← MUST be 0
-   Errors: 0        ← MUST be 0
-   Skipped: 3 (lifecycle events)
+**STEP 8.4: Evaluate Results**
 
-All tests passed! Handlers working correctly.
-```
+**✅ SUCCESS CRITERIA**:
+- All blocking handlers correctly deny dangerous commands
+- All advisory handlers show context in system-reminders
+- Lifecycle handlers confirmed active via session system-reminders
+- Failed count = 0
 
 **❌ FAILURE CRITERIA** (any of these = ABORT):
-- `failed: > 0` (any test failures)
-- `errors: > 0` (any test errors)
-- No output (skill failed to run)
-- Daemon not running
+- Any blocking handler fails to block
+- Any advisory handler fails to show context
+- Daemon crashes during testing
+- Any unexpected behaviour
 
-**STEP 8.3: Decision Point**
-
-**If ALL tests passed (failed=0, errors=0)**:
-- ✅ Proceed to Commit & Push (Step 9)
-- Document total test count in release summary
-
-**If ANY test failed (failed>0 OR errors>0)**:
-- ❌ **ABORT RELEASE IMMEDIATELY**
-- ❌ **DO NOT PROCEED TO GIT OPERATIONS**
-- ❌ **DO NOT SKIP THIS GATE**
-
-**Step 8.2: Review Playbook**
-- Check for tests covering new/changed handlers
-- Verify test expectations are current
-- Add tests for any new features
-
-**Step 8.3: Execute ALL Tests**
-- Work through **EVERY test** in playbook (15+ tests)
-- Test in real Claude Code session with hook events
-- Mark PASS/FAIL for each test
-- Document any unexpected behavior
-
-**Step 8.4: Evaluate Results**
-
-**If ALL tests PASS:**
-- ✅ Proceed to Commit & Push (Step 9)
-
-**FAIL-FAST Cycle:**
-  1. Review failed test details from skill output
-  2. Investigate root cause
-  3. Fix bug using TDD (write failing test → implement fix → verify test passes)
-  4. Run FULL QA: `./scripts/qa/run_all.sh` (must pass 100%)
-  5. Restart daemon: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
-  6. **Re-invoke acceptance-test skill from scratch**: Use Skill tool with `skill: "acceptance-test"`, `args: "all"`
-  7. Continue until ALL tests pass with ZERO code changes
+**FAIL-FAST Cycle (if ANY test fails):**
+1. **STOP testing immediately**
+2. Investigate root cause
+3. Fix bug using TDD (write failing test, implement fix, verify)
+4. Run FULL QA: `./scripts/qa/run_all.sh` (must pass 100%)
+5. Restart daemon: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
+6. **RESTART acceptance testing FROM TEST 1** (not from where you left off)
+7. Continue until ALL tests pass with ZERO code changes
 
 **NO SHORTCUTS ALLOWED:**
 - ⛔ Cannot skip acceptance testing
-- ⛔ Cannot use partial test filters (MUST use `all`)
+- ⛔ Cannot delegate to sub-agents (MUST be main thread)
 - ⛔ Cannot ignore failures
 - ⛔ Cannot proceed with errors
-- ⛔ Skill MUST be invoked (not just mentioned or suggested)
+- ⛔ Must use real tool calls (not socket injection or mocks)
 
 **VERIFICATION CHECKPOINT:**
 
 Before proceeding to Step 9, confirm:
-1. [ ] Invoked acceptance-test skill (not just mentioned it)
-2. [ ] Used `args: "all"` (not filtered subset)
-3. [ ] **WAITED for ALL batch agents to COMPLETE** (not just launched them)
-4. [ ] Reviewed complete results output from EVERY batch
-5. [ ] Verified failed=0, errors=0 (discounting Write-tool/lifecycle skips)
-6. [ ] Total test count documented: ___ tests
-7. [ ] No handler bugs found
+1. [ ] Daemon is running
+2. [ ] Executed tests via real tool calls in main thread (NOT sub-agents)
+3. [ ] All blocking handlers verified (deny dangerous commands)
+4. [ ] All advisory handlers verified (show context in system-reminders)
+5. [ ] Lifecycle handlers confirmed active (system-reminders visible)
+6. [ ] Failed = 0
+7. [ ] Total test count documented: ___ tests
+8. [ ] No handler bugs found
 
 **If you cannot check ALL boxes above, you MUST NOT proceed.**
-
-**ASYNC AGENT WARNING (v2.9.0 INCIDENT):**
-
-During the v2.9.0 release, acceptance test agents were launched in parallel but
-the release was committed, pushed, tagged, and published to GitHub WHILE AGENTS
-WERE STILL RUNNING. This is a CATASTROPHIC process violation. The release happened
-to be clean, but if any agent had found a real bug, the broken release would
-already have been live.
-
-**THE RULE: Launching agents is NOT the same as completing tests.**
-
-You MUST:
-1. Launch all batch agents (parallel is fine)
-2. **BLOCK and WAIT** for every single agent to return results
-3. **READ and VERIFY** every batch result (failed=0, errors=0)
-4. Only THEN proceed to Step 9
-
-Do NOT:
-- Commit while agents are running
-- Push while agents are running
-- Tag while agents are running
-- Create GitHub releases while agents are running
-- Assume results will be fine
-- Treat "launched" as "passed"
 
 **Why This Gate Exists:**
 - Unit tests don't catch integration issues with real Claude Code hook events
 - Handlers might pass unit tests but fail in actual usage
 - Real-world testing is the final safety check before release
 - **CORRECTNESS over SPEED** - A delayed release is better than a broken release
-- **Async agents complete LATER** - launching them does NOT mean they passed
+- Only main-thread tool calls test the FULL hook pipeline (bash script -> socket -> daemon -> handler -> response)
 
 **Time Investment:**
-- **Automated**: 4-6 minutes for full suite (parallelized) - NON-NEGOTIABLE
-- **You MUST wait the full 4-6 minutes** - do NOT proceed early
+- **Full suite**: 15-30 minutes (sequential, main thread) - NON-NEGOTIABLE
 - **Issue investigation**: Variable (hours if bugs found)
 
 **Main Claude proceeds to Commit & Push (Step 9) ONLY if acceptance tests pass.**

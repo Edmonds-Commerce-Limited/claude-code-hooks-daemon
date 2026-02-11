@@ -7,6 +7,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.10.0] - 2026-02-11
+
+### Added
+- **Python 3.11+ Version Detection**: Bash scripts now validate Python version meets 3.11+ requirement (Plan 00046 Phase 2, commit ae7ac25)
+  - `scripts/prerequisites.sh` checks Python version before venv creation
+  - `scripts/upgrade.sh` validates Python version during upgrade
+  - `scripts/venv.sh` ensures compatible Python interpreter
+  - Clear error messages guide users to upgrade Python if version too old
+  - Prevents cryptic installation failures from unsupported Python versions
+
+- **Installation Feedback Instructions**: Added feedback file template to LLM-INSTALL.md (commit 6f32b84)
+  - Users can provide structured installation feedback
+  - Helps identify common installation pain points
+  - Template includes environment details, steps taken, and issue description
+
+### Changed
+- **Upgrade System Root Cause Fix**: Complete overhaul of upgrade workflow (Plan 00046 Phase 1, commit e3217ab)
+  - **checkout-first-then-delegate**: Upgrade script now checks out target version BEFORE delegating to it
+  - Eliminates "upgrade to broken version" failure mode where old script delegates to broken new script
+  - Dropped legacy fallback mode (upgrade.sh is now single source of truth)
+  - **Nested Install Protection**: Detects and prevents nested `.claude/hooks-daemon/hooks-daemon/` installations
+  - More robust upgrade path with better error handling
+
+- **Socket Path Length Validation**: AF_UNIX socket path length limits now enforced with fallback mechanism (Plan 00046 Phase 3, commit 98e6d5f, 5126237)
+  - **Path Length Check**: Validates socket path ≤ 107 characters (Linux AF_UNIX limit)
+  - **Fallback Hierarchy**: XDG_RUNTIME_DIR → /run/user/$(id -u) → /tmp/claude-hooks-{user}
+  - Self-install mode path detection improved in `_get_untracked_dir()` (commit 964ae31)
+  - Server.py catches OSError during bind and provides actionable error messages
+  - Integration tests verify fallback behavior when paths exceed limits
+
+- **Config Validation UX Improvements**: User-friendly Pydantic validation errors (Plan 00046 Phase 4, commit 2d86d5e, e27ea42)
+  - **Friendly Error Formatting**: Pydantic errors transformed into readable messages
+  - **Fuzzy Field Suggestions**: Suggests correct field names for typos (e.g., "enabeld" → "Did you mean: enabled?")
+  - **Duplicate Priority Logging**: Duplicate handler priorities demoted from WARNING to DEBUG
+  - Type annotation fixes and magic value elimination in validation_ux module
+
+- **LLM-UPDATE.md Documentation**: Comprehensive upgrade documentation updates (Plan 00046 Phase 5, commit 38853c9)
+  - Python 3.11+ requirement clearly documented
+  - Socket path troubleshooting section added
+  - Feedback template for upgrade issues
+  - Common failure modes and solutions documented
+
+### Fixed
+- **Upgrade Script Robustness**: Fixed critical upgrade system failure modes (Plan 00046 Phase 1)
+  - Bug: Old upgrade script could delegate to broken new version script
+  - Bug: Nested installations created `.claude/hooks-daemon/hooks-daemon/` structure
+  - Bug: Legacy fallback mode caused confusion and maintenance burden
+  - Fix: Checkout target version first, then run its scripts (no more delegation trust issues)
+  - Fix: Nested install detection prevents directory structure corruption
+
+- **Socket Path Length Failures**: Fixed daemon startup failures on deep directory paths (Plan 00046 Phase 3)
+  - Bug: AF_UNIX sockets limited to ~107 characters, deep project paths caused bind() failures
+  - Bug: Cryptic OSError messages didn't explain root cause
+  - Fix: Validate path length before bind, fallback to shorter paths (XDG_RUNTIME_DIR, /run/user, /tmp)
+  - Fix: Catch OSError in server.py with actionable error message
+
+- **Config Validation Errors**: Fixed confusing Pydantic error messages (Plan 00046 Phase 4)
+  - Bug: Raw Pydantic validation errors were cryptic for end users
+  - Bug: Typos in field names provided no suggestions
+  - Fix: Custom formatter translates Pydantic errors to friendly messages
+  - Fix: Fuzzy matching suggests correct field names
+
+### Documentation
+- **Plan 00046 Completion**: Six-phase upgrade system overhaul completed (commit 687cbac)
+  - Complete implementation plan with root cause analysis
+  - Technical decisions documented for all phases
+  - Success criteria verified for upgrade reliability
+- **Async Agent Warning**: Added critical warning to RELEASING.md about v2.9.0 incident (commit e131232)
+  - Documents the importance of waiting for ALL acceptance test agents to complete
+  - Prevents premature commits/pushes while tests still running
+
+### Style
+- **Black Formatting**: Auto-formatted server.py for line length compliance (commit 86b636e)
+
 ## [2.9.0] - 2026-02-11
 
 ### Added

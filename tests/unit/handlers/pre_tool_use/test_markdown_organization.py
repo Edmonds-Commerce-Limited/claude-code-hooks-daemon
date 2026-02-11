@@ -313,6 +313,24 @@ class TestMarkdownOrganizationHandler:
         ] = "/root/.claude/projects/my-project/memory/MEMORY.md"
         assert handler.matches(write_input) is False
 
+    def test_matches_returns_false_for_memory_path_with_symlink_resolving_into_project(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Handler allows memory writes even when symlinks resolve into project root.
+
+        Regression test: /root/.claude/ can be a symlink to /workspace/.claude/ccy/,
+        causing Path.resolve() to map memory paths into the project root. The handler
+        must detect auto-memory paths BEFORE resolve() to prevent false blocking.
+        """
+        memory_path = "/root/.claude/projects/-workspace/memory/MEMORY.md"
+        write_input["tool_input"]["file_path"] = memory_path
+
+        # Simulate symlink: resolve() maps /root/.claude/... -> /tmp/test/.claude/ccy/...
+        # which IS under project root /tmp/test, so relative_to would succeed
+        resolved_path = Path("/tmp/test/.claude/ccy/projects/-workspace/memory/MEMORY.md")
+        with patch.object(Path, "resolve", return_value=resolved_path):
+            assert handler.matches(write_input) is False
+
     def test_matches_returns_false_for_any_absolute_path_outside_project(
         self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
     ) -> None:
