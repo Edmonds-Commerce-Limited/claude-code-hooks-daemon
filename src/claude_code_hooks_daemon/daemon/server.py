@@ -324,7 +324,9 @@ class HooksDaemon:
 
         # Start Unix socket server
         try:
-            self.server = await asyncio.start_unix_server(self._handle_client, path=str(socket_path))
+            self.server = await asyncio.start_unix_server(
+                self._handle_client, path=str(socket_path)
+            )
         except OSError as e:
             # AF_UNIX socket path too long or other socket creation failure
             logger.error(
