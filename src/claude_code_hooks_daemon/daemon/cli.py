@@ -46,6 +46,7 @@ from claude_code_hooks_daemon.daemon.paths import (
 from claude_code_hooks_daemon.daemon.validation import (
     check_for_nested_installation,
     is_hooks_daemon_repo,
+    is_inside_daemon_directory,
 )
 
 from .init_config import generate_config
@@ -78,6 +79,12 @@ def get_project_path(override_path: Path | None = None) -> Path:
     while current != current.parent:
         claude_dir = current / ".claude"
         if claude_dir.is_dir():
+            # Skip if this candidate is inside a .claude/hooks-daemon/ directory tree.
+            # The daemon repo's own .claude/ (from self-install dogfooding) must not
+            # be mistaken for the real project's .claude/ directory.
+            if is_inside_daemon_directory(current):
+                current = current.parent
+                continue
             # Validate installation based on config
             try:
                 return _validate_installation(current)

@@ -158,35 +158,57 @@ def validate_installation_target(project_root: Path, self_install_requested: boo
     validate_not_nested(project_root)
 
 
-def check_for_nested_installation(project_root: Path) -> str | None:
-    """Check for nested installation and return error message if found.
+def is_inside_daemon_directory(candidate: Path) -> bool:
+    """Check if a candidate path is inside a .claude/hooks-daemon/ directory tree.
 
-    This is a lighter version of validate_not_nested that returns an error message
-    instead of raising an exception. Used by CLI for runtime validation.
+    When the hooks-daemon repo is installed at {project}/.claude/hooks-daemon/
+    and git checkout brings the repo's own .claude/ (self-install dogfooding files),
+    path detection can find {project}/.claude/hooks-daemon/.claude/ first and
+    incorrectly use .claude/hooks-daemon/ as the project root.
+
+    This function detects that scenario by checking if consecutive path components
+    contain ".claude" followed by "hooks-daemon".
+
+    Args:
+        candidate: Path to check (typically a candidate project root)
+
+    Returns:
+        True if path is inside a .claude/hooks-daemon/ directory tree
+    """
+    parts = candidate.resolve().parts
+    for i in range(len(parts) - 1):
+        if parts[i] == ".claude" and parts[i + 1] == "hooks-daemon":
+            return True
+    return False
+
+
+def check_for_nested_installation(project_root: Path) -> str | None:
+    """Check for nested installation and actively clean it up.
+
+    If .claude/hooks-daemon/.claude/hooks-daemon exists, it is a nested install
+    artifact (runtime files created when daemon used the wrong project root).
+    This function removes it and allows startup to continue.
 
     Args:
         project_root: Project root to check
 
     Returns:
-        Error message string if nested installation detected, None otherwise
+        Error message string if cleanup fails, None otherwise
     """
-    # Check for nested hooks-daemon installation inside hooks-daemon
-    # Having .claude/hooks-daemon/.claude is fine (the repo has its own .claude dir).
-    # A true nested install is .claude/hooks-daemon/.claude/hooks-daemon.
-    outer_hooks_daemon = project_root / ".claude" / "hooks-daemon"
-    nested_install = outer_hooks_daemon / ".claude" / "hooks-daemon"
+    nested_install = project_root / ".claude" / "hooks-daemon" / ".claude" / "hooks-daemon"
     if nested_install.exists():
         # If the outer .claude/hooks-daemon IS the hooks-daemon repo itself
         # (identified by having pyproject.toml), then the inner .claude/hooks-daemon
         # is just the repo's own dogfooding config directory, not a genuine nested
         # installation. Skip the false positive.
+        outer_hooks_daemon = project_root / ".claude" / "hooks-daemon"
         if (outer_hooks_daemon / "pyproject.toml").is_file():
             return None
 
-        return (
-            f"NESTED INSTALLATION DETECTED!\n"
-            f"Found: {nested_install}\n"
-            f"Remove {outer_hooks_daemon} and reinstall."
-        )
+        # Actively remove the nested install artifacts
+        import shutil
+
+        logger.warning("Removing nested install artifacts: %s", nested_install)
+        shutil.rmtree(nested_install)
 
     return None

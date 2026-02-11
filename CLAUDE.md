@@ -66,6 +66,36 @@ The `/release` skill includes TWO mandatory blocking gates that MUST pass before
 
 ---
 
+## ⚠️ CRITICAL: Checkpoint Commits (NON-NEGOTIABLE)
+
+**Make regular checkpoint commits throughout your work.** Do NOT accumulate large batches of changes.
+
+### Rules
+
+1. **Commit after each logical unit of work** - a completed phase, a passing TDD cycle, a bug fix
+2. **Commit before switching context** - before starting a new phase, before spawning agents, before research
+3. **Commit before risky operations** - before refactoring, before changing shared code
+4. **Never accumulate more than ~300 lines of uncommitted changes** - if you're approaching this, stop and commit
+
+### Why This Matters
+
+- Large uncommitted changesets are **impossible to roll back partially**
+- Context window compaction can lose track of what changed
+- Agent teams working in parallel need stable baselines
+- If something breaks, you lose ALL uncommitted work
+
+### Commit Message Format
+
+```bash
+# Checkpoint commits use descriptive prefixes
+git commit -m "Fix: Description of fix"
+git commit -m "Add: Description of addition"
+git commit -m "Refactor: Description of refactoring"
+git commit -m "Plan NNNNN: Phase N - Description"
+```
+
+---
+
 ## ⚠️ CRITICAL: Code Lifecycle (READ BEFORE MAKING CHANGES)
 
 **MANDATORY**: Read these documents BEFORE implementing changes:
