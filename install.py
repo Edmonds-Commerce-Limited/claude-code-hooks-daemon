@@ -525,43 +525,43 @@ def create_settings_json(project_root: Path, force: bool = False) -> None:
         print(f"✅ Backed up existing settings.json to {backup_file.relative_to(project_root)}")
 
     settings = {
-        "statusLine": {"type": "command", "command": ".claude/hooks/status-line"},
+        "statusLine": {"type": "command", "command": '"$CLAUDE_PROJECT_DIR"/.claude/hooks/status-line'},
         "hooks": {
             "PreToolUse": [
                 {
                     "hooks": [
-                        {"type": "command", "command": ".claude/hooks/pre-tool-use", "timeout": 60}
+                        {"type": "command", "command": '"$CLAUDE_PROJECT_DIR"/.claude/hooks/pre-tool-use', "timeout": 60}
                     ]
                 }
             ],
             "PostToolUse": [
                 {
                     "hooks": [
-                        {"type": "command", "command": ".claude/hooks/post-tool-use", "timeout": 60}
+                        {"type": "command", "command": '"$CLAUDE_PROJECT_DIR"/.claude/hooks/post-tool-use', "timeout": 60}
                     ]
                 }
             ],
             "SessionStart": [
-                {"hooks": [{"type": "command", "command": ".claude/hooks/session-start"}]}
+                {"hooks": [{"type": "command", "command": '"$CLAUDE_PROJECT_DIR"/.claude/hooks/session-start'}]}
             ],
             "Notification": [
-                {"hooks": [{"type": "command", "command": ".claude/hooks/notification"}]}
+                {"hooks": [{"type": "command", "command": '"$CLAUDE_PROJECT_DIR"/.claude/hooks/notification'}]}
             ],
             "PermissionRequest": [
-                {"hooks": [{"type": "command", "command": ".claude/hooks/permission-request"}]}
+                {"hooks": [{"type": "command", "command": '"$CLAUDE_PROJECT_DIR"/.claude/hooks/permission-request'}]}
             ],
             "PreCompact": [
-                {"hooks": [{"type": "command", "command": ".claude/hooks/pre-compact"}]}
+                {"hooks": [{"type": "command", "command": '"$CLAUDE_PROJECT_DIR"/.claude/hooks/pre-compact'}]}
             ],
             "SessionEnd": [
-                {"hooks": [{"type": "command", "command": ".claude/hooks/session-end"}]}
+                {"hooks": [{"type": "command", "command": '"$CLAUDE_PROJECT_DIR"/.claude/hooks/session-end'}]}
             ],
-            "Stop": [{"hooks": [{"type": "command", "command": ".claude/hooks/stop"}]}],
+            "Stop": [{"hooks": [{"type": "command", "command": '"$CLAUDE_PROJECT_DIR"/.claude/hooks/stop'}]}],
             "SubagentStop": [
-                {"hooks": [{"type": "command", "command": ".claude/hooks/subagent-stop"}]}
+                {"hooks": [{"type": "command", "command": '"$CLAUDE_PROJECT_DIR"/.claude/hooks/subagent-stop'}]}
             ],
             "UserPromptSubmit": [
-                {"hooks": [{"type": "command", "command": ".claude/hooks/user-prompt-submit"}]}
+                {"hooks": [{"type": "command", "command": '"$CLAUDE_PROJECT_DIR"/.claude/hooks/user-prompt-submit'}]}
             ],
         },
     }
