@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-02-10
+
+### Added
+- **Project-Level Handlers**: First-class support for per-project custom handlers (Plan 00041, PR #21)
+  - New `.claude/project_handlers/` directory structure for event-specific handlers
+  - Automatic loading and registration of project handlers alongside library handlers
+  - Priority-based execution with project handlers integrated into handler chains
+  - Full test coverage (96.33% overall project coverage)
+- **Project Handler CLI Commands**: Developer experience tools for scaffolding and managing project handlers
+  - `scaffold-project-handler` - Generate handler templates with proper structure
+  - `list-project-handlers` - Discover and validate project handlers
+  - `validate-project-handler` - Lint and test individual handlers
+- **Project Handler Documentation**: Comprehensive guides for creating custom handlers
+  - `CLAUDE/PROJECT_HANDLERS.md` - Complete project handler development guide
+  - `examples/project-handlers/` - Handler templates and examples for all event types
+- **Optimal Config Checker Handler**: SessionStart handler that validates daemon configuration (bce7fb4)
+  - Checks for missing/redundant handlers
+  - Suggests priority optimizations
+  - Validates configuration structure
+- **Hedging Language Detector Handler**: Stop hook handler that identifies uncertain language patterns (62669a7)
+  - Detects hedging phrases ("maybe", "possibly", "I think")
+  - Advisory handler for improving code quality communication
+- **Upgrade Detection Improvements**: Robust detection for broken installations (Plan 00043)
+  - Detects missing venv, broken symlinks, corrupted config
+  - Handles partial upgrades and installation failures
+  - Improved error messages and recovery guidance
+
+### Changed
+- **Library/Plugin Separation**: Clear architectural boundaries (Plan 00034)
+  - Library handlers in `src/claude_code_hooks_daemon/handlers/`
+  - Project handlers in `.claude/project_handlers/{event_type}/`
+  - Plugins in `.claude/hooks-daemon/plugins/`
+  - Improved modularity and maintainability
+- **PHP QA CI Integration**: Enhanced handlers for PHP quality checks (PR #20)
+  - PHPCS handler improvements
+  - PHPStan handler enhancements
+  - PHP-CS-Fixer integration
+- **Documentation Improvements**: Pre-release documentation drive
+  - Updated README.md with clearer project overview
+  - Enhanced CLAUDE.md with project handler documentation
+  - Added four new user guides in `docs/guides/` (getting started, configuration, handler reference, troubleshooting)
+  - Improved code examples throughout
+
+### Fixed
+- **Project Handler Config Passing**: Critical bug where project_handlers_config wasn't passed to daemon start (28c90e2)
+- **Handler Template Keys**: Use snake_case keys in scaffolded templates for consistency (a200687)
+- **Nested Installation Detection**: Prevent false positives when working on hooks-daemon repo itself (075450a)
+- **Dogfooding Reminder Plugin**: Restore plugin accidentally deleted in Plan 00034 (27827bd)
+- **Post-Merge QA Fixes**: Resolved all QA issues from PR #20 merge (f360f87)
+- **Install/Update Instructions**: Use curl-to-file pattern for more reliable downloads (2941f18)
+
 ## [2.7.0] - 2026-02-10
 
 ### Added
