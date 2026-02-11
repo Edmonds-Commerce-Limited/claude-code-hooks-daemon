@@ -123,6 +123,26 @@ def _get_fallback_runtime_dir(project_dir: Path, filename: str) -> Path:
     return Path("/tmp") / f"{base_name}.{filename}"  # nosec B108 - /tmp is last resort fallback
 
 
+def _get_untracked_dir(project_path: Path) -> Path:
+    """
+    Get the untracked directory for daemon runtime files.
+
+    Detects self-install mode (daemon source at project root) to use the
+    shorter path, avoiding unnecessary `.claude/hooks-daemon/` nesting.
+
+    Args:
+        project_path: Resolved absolute project directory path
+
+    Returns:
+        - Self-install mode: {project}/untracked
+        - Normal mode: {project}/.claude/hooks-daemon/untracked
+    """
+    # Self-install mode: daemon source exists at project root
+    if (project_path / "src" / "claude_code_hooks_daemon").is_dir():
+        return project_path / "untracked"
+    return project_path / ".claude" / "hooks-daemon" / "untracked"
+
+
 def get_socket_path(project_dir: Path | str) -> Path:
     """
     Generate Unix socket path for project-specific daemon.
@@ -149,8 +169,10 @@ def get_socket_path(project_dir: Path | str) -> Path:
         return Path(env_path)
 
     # Use daemon's untracked directory (secure, project-specific)
+    # Self-install mode uses shorter path: {project}/untracked/
+    # Normal mode uses: {project}/.claude/hooks-daemon/untracked/
     project_path = Path(project_dir).resolve()
-    untracked_dir = project_path / ".claude" / "hooks-daemon" / "untracked"
+    untracked_dir = _get_untracked_dir(project_path)
     untracked_dir.mkdir(parents=True, exist_ok=True)
 
     # Add hostname-based suffix for isolation
@@ -170,7 +192,8 @@ def get_pid_path(project_dir: Path | str) -> Path:
 
     SECURITY: Stored in daemon's untracked directory, not /tmp.
     Pattern: {project}/.claude/hooks-daemon/untracked/daemon.pid
-    Container: {project}/.claude/hooks-daemon/untracked/daemon-{hash}.pid
+    Self-install: {project}/untracked/daemon.pid
+    Container: daemon-{hostname}.pid
 
     Can be overridden via CLAUDE_HOOKS_PID_PATH environment variable
     (useful for testing to avoid collision with production daemon).
@@ -190,8 +213,10 @@ def get_pid_path(project_dir: Path | str) -> Path:
         return Path(env_path)
 
     # Use daemon's untracked directory (secure, project-specific)
+    # Self-install mode uses shorter path: {project}/untracked/
+    # Normal mode uses: {project}/.claude/hooks-daemon/untracked/
     project_path = Path(project_dir).resolve()
-    untracked_dir = project_path / ".claude" / "hooks-daemon" / "untracked"
+    untracked_dir = _get_untracked_dir(project_path)
     untracked_dir.mkdir(parents=True, exist_ok=True)
 
     # Add hostname-based suffix for isolation
@@ -211,7 +236,8 @@ def get_log_path(project_dir: Path | str) -> Path:
 
     SECURITY: Stored in daemon's untracked directory, not /tmp.
     Pattern: {project}/.claude/hooks-daemon/untracked/daemon.log
-    Container: {project}/.claude/hooks-daemon/untracked/daemon-{hash}.log
+    Self-install: {project}/untracked/daemon.log
+    Container: daemon-{hostname}.log
 
     Can be overridden via CLAUDE_HOOKS_LOG_PATH environment variable
     (useful for testing to avoid collision with production daemon).
@@ -231,8 +257,10 @@ def get_log_path(project_dir: Path | str) -> Path:
         return Path(env_path)
 
     # Use daemon's untracked directory (secure, project-specific)
+    # Self-install mode uses shorter path: {project}/untracked/
+    # Normal mode uses: {project}/.claude/hooks-daemon/untracked/
     project_path = Path(project_dir).resolve()
-    untracked_dir = project_path / ".claude" / "hooks-daemon" / "untracked"
+    untracked_dir = _get_untracked_dir(project_path)
     untracked_dir.mkdir(parents=True, exist_ok=True)
 
     # Add hostname-based suffix for isolation

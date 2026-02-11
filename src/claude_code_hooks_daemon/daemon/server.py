@@ -323,7 +323,17 @@ class HooksDaemon:
             socket_path.unlink()
 
         # Start Unix socket server
-        self.server = await asyncio.start_unix_server(self._handle_client, path=str(socket_path))
+        try:
+            self.server = await asyncio.start_unix_server(self._handle_client, path=str(socket_path))
+        except OSError as e:
+            # AF_UNIX socket path too long or other socket creation failure
+            logger.error(
+                "Failed to create Unix socket at %s (length=%d): %s",
+                socket_path,
+                len(str(socket_path)),
+                e,
+            )
+            raise
 
         # Set socket permissions (owner read/write, group read, world none)
         if socket_path:
