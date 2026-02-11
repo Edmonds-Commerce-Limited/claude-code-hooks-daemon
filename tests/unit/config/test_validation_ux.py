@@ -152,6 +152,7 @@ class TestDuplicatePriorityLogLevel:
 
     def test_duplicate_priority_logs_at_debug(self) -> None:
         """Duplicate priority messages should be at DEBUG level, not WARNING."""
+        from claude_code_hooks_daemon.constants.priority import Priority
         from claude_code_hooks_daemon.core import AcceptanceTest
         from claude_code_hooks_daemon.core.chain import HandlerChain
         from claude_code_hooks_daemon.core.handler import Handler
@@ -159,7 +160,9 @@ class TestDuplicatePriorityLogLevel:
 
         class FakeHandlerA(Handler):
             def __init__(self) -> None:
-                super().__init__(handler_id="fake-a", priority=10, terminal=False)
+                super().__init__(
+                    handler_id="fake-a", priority=Priority.DESTRUCTIVE_GIT, terminal=False
+                )
 
             def matches(self, hook_input: dict[str, Any]) -> bool:
                 return True
@@ -172,7 +175,9 @@ class TestDuplicatePriorityLogLevel:
 
         class FakeHandlerB(Handler):
             def __init__(self) -> None:
-                super().__init__(handler_id="fake-b", priority=10, terminal=False)
+                super().__init__(
+                    handler_id="fake-b", priority=Priority.DESTRUCTIVE_GIT, terminal=False
+                )
 
             def matches(self, hook_input: dict[str, Any]) -> bool:
                 return True

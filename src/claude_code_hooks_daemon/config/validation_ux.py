@@ -8,6 +8,7 @@ import difflib
 from typing import Any
 
 from pydantic import ValidationError
+from pydantic_core import ErrorDetails
 
 # Fields that are valid on PluginConfig
 _PLUGIN_VALID_FIELDS = frozenset({"path", "event_type", "handlers", "enabled"})
@@ -70,7 +71,7 @@ def _format_location(loc: tuple[str | int, ...]) -> str:
     return ".".join(str(part) for part in loc)
 
 
-def _format_missing_field(err: dict[str, Any], location: str) -> list[str]:
+def _format_missing_field(err: ErrorDetails, location: str) -> list[str]:
     """Format a 'field required' error with before/after example.
 
     Args:
@@ -100,7 +101,7 @@ def _format_missing_field(err: dict[str, Any], location: str) -> list[str]:
     return lines
 
 
-def _format_extra_field(err: dict[str, Any], location: str) -> list[str]:
+def _format_extra_field(err: ErrorDetails, location: str) -> list[str]:
     """Format an 'extra fields not permitted' error with suggestion.
 
     Uses fuzzy matching to suggest the closest valid field name.
