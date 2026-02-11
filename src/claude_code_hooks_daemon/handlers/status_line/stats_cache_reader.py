@@ -114,20 +114,3 @@ def calculate_weekly_usage(cache_data: dict[str, Any], model_id: str) -> float:
         return 0.0
 
     return (total_tokens / weekly_limit) * 100
-
-    def get_acceptance_tests(self) -> list[Any]:
-        """Return acceptance tests for this handler."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, Decision, TestType
-
-        return [
-            AcceptanceTest(
-                title="stats cache reader handler test",
-                command='echo "test"',
-                description="Tests stats cache reader handler functionality",
-                expected_decision=Decision.ALLOW,
-                expected_message_patterns=[r".*"],
-                safety_notes="Context/utility handler - minimal testing required",
-                test_type=TestType.CONTEXT,
-                requires_event="StatusLine event",
-            ),
-        ]
