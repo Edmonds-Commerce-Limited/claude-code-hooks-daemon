@@ -47,7 +47,7 @@ cd ../..
 
 3. **GIT CLEAN STATE**: Working directory MUST be clean. Run `git status` - if not clean, commit/push first.
 
-4. **RESTART REQUIRED for multi-version upgrades**: If upgrading across multiple minor/major versions, restart Claude Code after the upgrade to ensure all new hook event types are loaded. For patch upgrades within the same minor version, daemon restart is sufficient.
+4. **RESTART CLAUDE CODE after upgrade**: After upgrading, the user MUST restart their Claude Code session (exit and re-enter) to load new hook event types and settings. This is required for ALL minor/major upgrades and recommended for patch upgrades. Daemon restart alone is NOT sufficient for new event types.
 
 ---
 
@@ -236,7 +236,7 @@ echo '{"tool_name": "Bash", "tool_input": {"command": "git reset --hard HEAD"}}'
 # Expected: {"hookSpecificOutput": {"permissionDecision": "deny", ...}}
 ```
 
-**RESTART REQUIRED for multi-version upgrades**: If upgrading across multiple minor/major versions, restart Claude Code after the upgrade to ensure all new hook event types are loaded. For patch upgrades within the same minor version, daemon restart is sufficient.
+**RESTART CLAUDE CODE**: After upgrading, tell the user to restart their Claude Code session (exit and re-enter). New hook event types and settings changes only take effect after a session restart.
 
 ---
 
@@ -811,6 +811,12 @@ rm /tmp/upgrade.sh
 ```
 
 The upgrade script actively cleans up nested install artifacts and rebuilds the venv from scratch.
+
+### `.claude/` Directory Inside Daemon Repo (Not a Nested Install)
+
+The daemon repository contains a `.claude/` directory with project-level handler templates and example configurations. This is **intentional** and is NOT a nested installation. The nested installation detector specifically checks for `.claude/hooks-daemon/.claude/hooks-daemon` (double-nested), not `.claude/hooks-daemon/.claude/`.
+
+If you see `.claude/` inside `.claude/hooks-daemon/`, this is normal and expected.
 
 ### Plugin Config Breaking Change (v2.8.0+)
 
