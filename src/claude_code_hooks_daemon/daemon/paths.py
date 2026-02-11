@@ -274,6 +274,53 @@ def get_log_path(project_dir: Path | str) -> Path:
     return path
 
 
+def write_socket_discovery_file(project_dir: Path | str, socket_path: Path | str) -> None:
+    """Write the actual socket path to a discovery file.
+
+    When the daemon uses a fallback socket path (e.g., XDG_RUNTIME_DIR)
+    because the default path exceeds the AF_UNIX length limit, bash hook
+    forwarders (init.sh) need to discover the actual socket location.
+
+    The discovery file is written to the default untracked directory
+    (which init.sh can always compute) and contains the actual socket path.
+
+    Args:
+        project_dir: Path to project directory
+        socket_path: Actual socket path the daemon is listening on
+    """
+    project_path = Path(project_dir).resolve()
+    untracked_dir = _get_untracked_dir(project_path)
+    untracked_dir.mkdir(parents=True, exist_ok=True)
+
+    suffix = _get_hostname_suffix()
+    discovery_file = untracked_dir / f"daemon{suffix}.socket-path"
+
+    try:
+        discovery_file.write_text(str(socket_path))
+        logger.debug("Wrote socket discovery file: %s -> %s", discovery_file, socket_path)
+    except OSError as e:
+        logger.warning("Failed to write socket discovery file: %s", e)
+
+
+def cleanup_socket_discovery_file(project_dir: Path | str) -> None:
+    """Remove the socket discovery file on daemon shutdown.
+
+    Args:
+        project_dir: Path to project directory
+    """
+    project_path = Path(project_dir).resolve()
+    untracked_dir = _get_untracked_dir(project_path)
+    suffix = _get_hostname_suffix()
+    discovery_file = untracked_dir / f"daemon{suffix}.socket-path"
+
+    try:
+        if discovery_file.exists():
+            discovery_file.unlink()
+            logger.debug("Removed socket discovery file: %s", discovery_file)
+    except OSError as e:
+        logger.warning("Failed to cleanup socket discovery file: %s", e)
+
+
 def is_pid_alive(pid: int) -> bool:
     """
     Check if process with given PID is running.

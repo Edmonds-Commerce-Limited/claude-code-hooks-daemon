@@ -204,7 +204,8 @@ _abs_project_path=$(realpath "$PROJECT_PATH")
 
 # Determine untracked directory path
 # Must match ProjectContext.daemon_untracked_dir() logic
-_untracked_dir="$_abs_project_path/.claude/hooks-daemon/untracked"
+# Use HOOKS_DAEMON_ROOT_DIR (set by .env in self-install, defaults to .claude/hooks-daemon)
+_untracked_dir="${HOOKS_DAEMON_ROOT_DIR}/untracked"
 
 # Create untracked directory if it doesn't exist
 mkdir -p "$_untracked_dir"
@@ -215,6 +216,20 @@ _hostname_suffix=$(_get_hostname_suffix)
 # Allow environment variable overrides (for testing)
 SOCKET_PATH="${CLAUDE_HOOKS_SOCKET_PATH:-$_untracked_dir/daemon${_hostname_suffix}.sock}"
 PID_PATH="${CLAUDE_HOOKS_PID_PATH:-$_untracked_dir/daemon${_hostname_suffix}.pid}"
+
+# Socket discovery file: when the default socket path exceeds the AF_UNIX
+# length limit (108 bytes), the Python daemon falls back to a shorter path
+# (XDG_RUNTIME_DIR, /run/user/, or /tmp) and writes the actual socket path
+# to a discovery file. Read it if the default socket doesn't exist.
+if [[ -z "${CLAUDE_HOOKS_SOCKET_PATH:-}" ]] && [[ ! -S "$SOCKET_PATH" ]]; then
+    _discovery_file="$_untracked_dir/daemon${_hostname_suffix}.socket-path"
+    if [[ -f "$_discovery_file" ]]; then
+        _discovered_path=$(cat "$_discovery_file" 2>/dev/null)
+        if [[ -n "$_discovered_path" ]] && [[ -S "$_discovered_path" ]]; then
+            SOCKET_PATH="$_discovered_path"
+        fi
+    fi
+fi
 
 # Daemon startup timeout (deciseconds - 1/10th second units)
 DAEMON_STARTUP_TIMEOUT=50

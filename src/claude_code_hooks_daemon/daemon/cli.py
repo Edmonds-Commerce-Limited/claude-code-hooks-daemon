@@ -377,6 +377,16 @@ def cmd_start(args: argparse.Namespace) -> int:
 
     daemon = HooksDaemon(daemon_config, controller)
 
+    # Write socket discovery file so bash hook forwarders (init.sh)
+    # can find the daemon when the socket path differs from the default
+    # (e.g., AF_UNIX path length fallback to XDG_RUNTIME_DIR)
+    from claude_code_hooks_daemon.daemon.paths import (
+        cleanup_socket_discovery_file,
+        write_socket_discovery_file,
+    )
+
+    write_socket_discovery_file(project_path, daemon_config.socket_path)
+
     try:
         asyncio.run(daemon.start())
     except Exception as e:
@@ -385,6 +395,8 @@ def cmd_start(args: argparse.Namespace) -> int:
 
         traceback.print_exc()
         sys.exit(1)
+    finally:
+        cleanup_socket_discovery_file(project_path)
 
     sys.exit(0)
 
