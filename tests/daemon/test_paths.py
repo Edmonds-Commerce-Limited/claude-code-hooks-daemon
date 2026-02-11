@@ -13,6 +13,7 @@ from claude_code_hooks_daemon.daemon.paths import (
     _UNIX_SOCKET_PATH_LIMIT,
     cleanup_pid_file,
     cleanup_socket,
+    cleanup_socket_discovery_file,
     get_log_path,
     get_pid_path,
     get_project_hash,
@@ -21,6 +22,7 @@ from claude_code_hooks_daemon.daemon.paths import (
     is_pid_alive,
     read_pid_file,
     write_pid_file,
+    write_socket_discovery_file,
 )
 
 
@@ -773,6 +775,73 @@ class TestSocketPathLengthFallback(unittest.TestCase):
 
             # Env override should be returned as-is, no length check
             self.assertEqual(socket_path, Path(long_override))
+
+
+class TestSocketDiscoveryFile(unittest.TestCase):
+    """Test socket discovery file write/read/cleanup for AF_UNIX fallback."""
+
+    def setUp(self):
+        """Create temporary directory for test project."""
+        self.tmpdir = tempfile.mkdtemp()
+        self.project_dir = Path(self.tmpdir) / "project"
+        self.project_dir.mkdir()
+
+    def tearDown(self):
+        """Clean up temporary directory."""
+        import shutil
+
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_write_creates_discovery_file(self):
+        """write_socket_discovery_file creates file with socket path."""
+        socket_path = "/run/user/1000/hooks-daemon-abc123.sock"
+        with patch.dict(os.environ, {"HOSTNAME": "test"}, clear=False):
+            write_socket_discovery_file(self.project_dir, socket_path)
+
+            # Discovery file should exist in untracked dir
+            untracked = self.project_dir / ".claude" / "hooks-daemon" / "untracked"
+            discovery = untracked / "daemon-test.socket-path"
+            self.assertTrue(discovery.exists())
+            self.assertEqual(discovery.read_text(), socket_path)
+
+    def test_cleanup_removes_discovery_file(self):
+        """cleanup_socket_discovery_file removes the file."""
+        with patch.dict(os.environ, {"HOSTNAME": "test"}, clear=False):
+            # Write first
+            write_socket_discovery_file(self.project_dir, "/tmp/test.sock")
+
+            untracked = self.project_dir / ".claude" / "hooks-daemon" / "untracked"
+            discovery = untracked / "daemon-test.socket-path"
+            self.assertTrue(discovery.exists())
+
+            # Cleanup
+            cleanup_socket_discovery_file(self.project_dir)
+            self.assertFalse(discovery.exists())
+
+    def test_cleanup_noop_when_no_file(self):
+        """cleanup_socket_discovery_file is safe when file doesn't exist."""
+        with patch.dict(os.environ, {"HOSTNAME": "test"}, clear=False):
+            # Should not raise
+            cleanup_socket_discovery_file(self.project_dir)
+
+    def test_write_overwrites_existing(self):
+        """write_socket_discovery_file overwrites previous content."""
+        with patch.dict(os.environ, {"HOSTNAME": "test"}, clear=False):
+            write_socket_discovery_file(self.project_dir, "/old/path.sock")
+            write_socket_discovery_file(self.project_dir, "/new/path.sock")
+
+            untracked = self.project_dir / ".claude" / "hooks-daemon" / "untracked"
+            discovery = untracked / "daemon-test.socket-path"
+            self.assertEqual(discovery.read_text(), "/new/path.sock")
+
+    def test_hostname_suffix_in_discovery_filename(self):
+        """Discovery file uses hostname suffix for isolation."""
+        with patch.dict(os.environ, {"HOSTNAME": "my-host"}, clear=False):
+            write_socket_discovery_file(self.project_dir, "/tmp/test.sock")
+
+            untracked = self.project_dir / ".claude" / "hooks-daemon" / "untracked"
+            discovery = untracked / "daemon-my-host.socket-path"
+            self.assertTrue(discovery.exists())
 
 
 if __name__ == "__main__":
