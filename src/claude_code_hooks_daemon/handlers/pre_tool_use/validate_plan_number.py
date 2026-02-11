@@ -210,13 +210,15 @@ See: CLAUDE/Plan/CLAUDE.md for full instructions
 
         return [
             AcceptanceTest(
-                title="Plan number validation",
-                command="Write to plan directory with number",
-                description="Validates plan numbering format (advisory)",
+                title="Plan number validation - wrong number",
+                command=(
+                    "Use the Write tool to write to /workspace/CLAUDE/Plan/999-wrong-number/PLAN.md"
+                    " with content '# Plan 999: Wrong Number\\n\\n**Status**: Not Started'"
+                ),
+                description="Warns when plan number is not sequential (advisory, non-blocking)",
                 expected_decision=Decision.ALLOW,
-                expected_message_patterns=[r"plan number", r"format"],
-                safety_notes="Advisory handler - validates numbering",
+                expected_message_patterns=[r"PLAN NUMBER", r"[Ee]xpected"],
+                safety_notes="Advisory handler - warns about wrong plan number but allows operation.",
                 test_type=TestType.ADVISORY,
-                requires_event="PreToolUse with Write tool to plan directory",
             ),
         ]

@@ -96,24 +96,6 @@ def test_example_config_workflow_handlers_disabled(example_config: dict) -> None
             )
 
 
-def test_example_config_qa_handlers_disabled(example_config: dict) -> None:
-    """QA suppression blockers should be disabled by default (opt-in strict mode)."""
-    pre_tool_use = example_config["handlers"]["pre_tool_use"]
-
-    qa_handlers = [
-        "python_qa_suppression_blocker",
-        "php_qa_suppression_blocker",
-        "go_qa_suppression_blocker",
-        "eslint_disable",
-    ]
-
-    for handler in qa_handlers:
-        if handler in pre_tool_use:
-            assert (
-                pre_tool_use[handler]["enabled"] is False
-            ), f"QA handler {handler} should be disabled by default (opt-in for strict mode)"
-
-
 def test_example_config_all_events_covered(example_config: dict) -> None:
     """All event types should be present in example config."""
     handlers = example_config["handlers"]

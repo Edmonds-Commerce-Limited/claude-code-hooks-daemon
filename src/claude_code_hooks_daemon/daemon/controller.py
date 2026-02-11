@@ -134,6 +134,7 @@ class DaemonController:
         workspace_root: Path | None = None,
         plugins_config: "PluginsConfig | None" = None,
         project_handlers_config: "ProjectHandlersConfig | None" = None,
+        project_languages: list[str] | None = None,
     ) -> None:
         """Initialise the controller with handlers.
 
@@ -145,6 +146,7 @@ class DaemonController:
             workspace_root: Optional workspace root path (FAIL FAST if None)
             plugins_config: Optional plugin configuration from hooks-daemon.yaml
             project_handlers_config: Optional project handlers configuration
+            project_languages: Project-level language filter from daemon.languages config
 
         Raises:
             ValueError: If workspace_root is None (FAIL FAST requirement)
@@ -174,7 +176,10 @@ class DaemonController:
         # Discover and register built-in handlers
         self._registry.discover()
         count = self._registry.register_all(
-            self._router, config=handler_config, workspace_root=workspace_root
+            self._router,
+            config=handler_config,
+            workspace_root=workspace_root,
+            project_languages=project_languages,
         )
 
         logger.info("Registered %d built-in handlers", count)
@@ -217,7 +222,7 @@ class DaemonController:
         from claude_code_hooks_daemon.plugins.loader import PluginLoader
 
         # Load all handlers from plugins config
-        handlers = PluginLoader.load_from_plugins_config(plugins_config)
+        handlers = PluginLoader.load_from_plugins_config(plugins_config, workspace_root)
 
         if not handlers:
             logger.debug("No plugin handlers loaded")

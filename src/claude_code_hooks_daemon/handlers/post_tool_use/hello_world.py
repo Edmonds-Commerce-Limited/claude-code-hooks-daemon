@@ -41,12 +41,12 @@ class HelloWorldPostToolUseHandler(Handler):
 
         return [
             AcceptanceTest(
-                title="Hello world test",
-                command='echo "test"',
-                description="Test handler that confirms PostToolUse hook is active",
+                title="PostToolUse hello world confirmation",
+                command='echo "PostToolUse test"',
+                description="Handler fires on every tool use to confirm PostToolUse hook is active (advisory context)",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"PostToolUse hook system active"],
-                safety_notes="Test handler only - always allows with context message",
+                safety_notes="Test handler - fires on any tool use, provides confirmation message",
                 test_type=TestType.CONTEXT,
             ),
         ]

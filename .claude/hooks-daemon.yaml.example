@@ -67,21 +67,15 @@ handlers:
       priority: 15
 
     # CODE QUALITY HANDLERS (Priority 25-45) - Optional but recommended
-    python_qa_suppression_blocker:  # Blocks Python QA suppressions (# noqa, # type: ignore, etc)
-      enabled: false  # Enable for strict Python quality control
-      priority: 26
-
-    php_qa_suppression_blocker:     # Blocks PHP QA suppressions (@phpstan-ignore, etc)
-      enabled: false  # Enable for strict PHP quality control
-      priority: 27
-
-    go_qa_suppression_blocker:      # Blocks Go QA suppressions (//nolint, etc)
-      enabled: false  # Enable for strict Go quality control
-      priority: 28
-
-    eslint_disable:        # Prevents ESLint suppression comments
-      enabled: false       # Enable for strict JavaScript/TypeScript quality control
+    qa_suppression:        # Unified multi-language QA suppression blocker (11 languages)
+      enabled: false       # Enable for strict code quality control
       priority: 30
+      # options:
+      #   languages:       # Restrict to specific languages (default: ALL)
+      #     - Python
+      #     - Go
+      #     - JavaScript/TypeScript
+      #     - PHP
 
     tdd_enforcement:       # Enforces test-first development
       enabled: false       # Enable for strict TDD workflow

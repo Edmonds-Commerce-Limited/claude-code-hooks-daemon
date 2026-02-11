@@ -116,12 +116,16 @@ class PlanCompletionAdvisorHandler(Handler):
         return [
             AcceptanceTest(
                 title="Writing PLAN.md with Status: Complete",
-                command="Write to PLAN.md with **Status**: Complete",
-                description="Provides advisory about git mv and README.md updates",
+                command=(
+                    "Use the Write tool to write to /tmp/acceptance-test-plancomp/CLAUDE/Plan/098-test/PLAN.md"
+                    " with content '# Plan 098\\n\\n**Status**: Complete (2026-02-11)\\n\\nDone.'"
+                ),
+                description="Provides advisory about git mv and README.md updates when completing a plan",
                 expected_decision=Decision.ALLOW,
-                expected_message_patterns=[r"git mv", r"README\.md", r"Completed"],
-                safety_notes="Advisory handler - provides context only",
+                expected_message_patterns=[r"git mv", r"README", r"[Cc]omplete"],
+                safety_notes="Uses /tmp path - safe. Advisory handler allows write and adds guidance.",
                 test_type=TestType.ADVISORY,
-                requires_event="PreToolUse with Write tool to PLAN.md",
+                setup_commands=["mkdir -p /tmp/acceptance-test-plancomp/CLAUDE/Plan/098-test"],
+                cleanup_commands=["rm -rf /tmp/acceptance-test-plancomp"],
             ),
         ]

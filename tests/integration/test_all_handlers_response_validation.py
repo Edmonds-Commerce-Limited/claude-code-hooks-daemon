@@ -298,58 +298,6 @@ class TestBritishEnglishHandler:
             response_validator.assert_valid("PreToolUse", response)
 
 
-class TestEslintDisableHandler:
-    """Test EslintDisableHandler response validation."""
-
-    @pytest.fixture
-    def handler(self):
-        from claude_code_hooks_daemon.handlers.pre_tool_use.eslint_disable import (
-            EslintDisableHandler,
-        )
-
-        return EslintDisableHandler()
-
-    @pytest.mark.parametrize(
-        "hook_input,expected_decision,description",
-        [
-            # Blocked ESLint suppressions
-            (
-                {
-                    "tool_name": "Write",
-                    "tool_input": {"content": "// eslint-disable-next-line\nconst x = 1;"},
-                },
-                Decision.DENY,
-                "Block eslint-disable-next-line",
-            ),
-            (
-                {
-                    "tool_name": "Edit",
-                    "tool_input": {"new_string": "/* eslint-disable */\ncode();"},
-                },
-                Decision.DENY,
-                "Block eslint-disable comment",
-            ),
-            # Allowed code
-            (
-                {"tool_name": "Write", "tool_input": {"content": "const x = 1;\nconsole.log(x);"}},
-                Decision.ALLOW,
-                "Allow normal JavaScript",
-            ),
-        ],
-    )
-    def test_response_validity(
-        self, handler, hook_input, expected_decision, description, response_validator
-    ):
-        """Test handler returns valid PreToolUse response."""
-        if handler.matches(hook_input):
-            result = handler.handle(hook_input)
-            assert result.decision == expected_decision, f"Failed: {description}"
-            response = result.to_json("PreToolUse")
-            response_validator.assert_valid("PreToolUse", response)
-        else:
-            assert expected_decision == Decision.ALLOW
-
-
 class TestTddEnforcementHandler:
     """Test TddEnforcementHandler response validation."""
 

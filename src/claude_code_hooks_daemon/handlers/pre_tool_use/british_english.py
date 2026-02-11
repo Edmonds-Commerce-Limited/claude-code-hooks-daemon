@@ -148,12 +148,16 @@ class BritishEnglishHandler(Handler):
         return [
             AcceptanceTest(
                 title="American spellings in markdown",
-                command="Write markdown file with American spellings like 'color', 'organization'",
+                command=(
+                    "Use the Write tool to write to /tmp/acceptance-test-british/docs/style-guide.md"
+                    " with content 'The color of the organization logo should favor readability.'"
+                ),
                 description="Advises British spellings but allows operation (advisory)",
                 expected_decision=Decision.ALLOW,
-                expected_message_patterns=[r"colour", r"organisation", r"British"],
-                safety_notes="Advisory handler - does not block operations",
+                expected_message_patterns=[r"colour", r"British"],
+                safety_notes="Uses /tmp path - safe. Advisory handler allows write but warns.",
                 test_type=TestType.ADVISORY,
-                requires_event="PreToolUse with Write tool to .md file in docs/",
+                setup_commands=["mkdir -p /tmp/acceptance-test-british/docs"],
+                cleanup_commands=["rm -rf /tmp/acceptance-test-british"],
             ),
         ]

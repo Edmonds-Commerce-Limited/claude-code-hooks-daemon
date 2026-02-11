@@ -114,10 +114,7 @@ handlers:
     git_stash: {enabled: true, priority: 20}         # Warn about git stash
 
     # CODE QUALITY HANDLERS (Priority 25-35)
-    python_qa_suppression_blocker: {enabled: true, priority: 30}  # Block Python QA suppressions
-    php_qa_suppression_blocker: {enabled: true, priority: 30}     # Block PHP QA suppressions
-    go_qa_suppression_blocker: {enabled: true, priority: 30}      # Block Go QA suppressions
-    eslint_disable: {enabled: true, priority: 30}    # Block ESLint suppressions
+    qa_suppression: {enabled: true, priority: 30}  # Unified multi-language QA suppression blocker (11 languages)
     validate_plan_number: {enabled: true, priority: 30}  # Validate plan number format
     plan_number_helper: {enabled: true, priority: 30}  # Provide correct next plan number
     markdown_organization:  # Plan tracking and markdown organization
@@ -128,7 +125,25 @@ handlers:
         plan_workflow_docs: "CLAUDE/PlanWorkflow.md"    # Path to workflow doc
 
     # WORKFLOW HANDLERS (Priority 36-55)
-    tdd_enforcement: {enabled: true, priority: 15}   # Enforce test-first development
+    tdd_enforcement:  # Enforce test-first development
+      enabled: true
+      priority: 15
+      # options:
+      #   # Restrict TDD enforcement to specific languages (default: ALL languages)
+      #   # Uncomment and list only the languages you want enforced.
+      #   # If omitted or empty, ALL 11 languages are enforced.
+      #   languages:
+      #     - Python
+      #     - Go
+      #     - JavaScript/TypeScript
+      #     - PHP
+      #     - Rust
+      #     - Java
+      #     - C#
+      #     - Kotlin
+      #     - Ruby
+      #     - Swift
+      #     - Dart
     gh_issue_comments: {enabled: true, priority: 40}  # Require --comments on gh issue view
     plan_time_estimates: {enabled: true, priority: 40}  # Block time estimates in plans
     global_npm_advisor: {enabled: true, priority: 40}  # Advise on npm install -g (non-blocking)

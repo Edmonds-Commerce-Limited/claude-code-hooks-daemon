@@ -129,13 +129,17 @@ class PlanTimeEstimatesHandler(Handler):
 
         return [
             AcceptanceTest(
-                title="Plan time estimate validation",
-                command="Write to PLAN.md with time estimates",
-                description="Validates time estimate format in plans (advisory)",
-                expected_decision=Decision.ALLOW,
-                expected_message_patterns=[r"time estimate", r"plan"],
-                safety_notes="Advisory handler - validates format",
-                test_type=TestType.ADVISORY,
-                requires_event="PreToolUse with Write tool to PLAN.md",
+                title="Block time estimates in plan",
+                command=(
+                    "Use the Write tool to write to /tmp/acceptance-test-plantime/Plan/001-test/PLAN.md"
+                    " with content '# Plan 001\\n\\n**Estimated Effort**: 4 hours\\n\\nTask list here.'"
+                ),
+                description="Blocks time estimates in plan documents (plans focus on WHAT not WHEN)",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[r"time estimate", r"BLOCKED"],
+                safety_notes="Uses /tmp path - safe. Handler blocks Write before file is created.",
+                test_type=TestType.BLOCKING,
+                setup_commands=["mkdir -p /tmp/acceptance-test-plantime/Plan/001-test"],
+                cleanup_commands=["rm -rf /tmp/acceptance-test-plantime"],
             ),
         ]

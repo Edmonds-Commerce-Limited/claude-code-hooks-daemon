@@ -82,9 +82,6 @@ class TestConfigKeyConsistency:
         After the fix, their constants now match the auto-generated keys.
         """
         previously_broken = [
-            "PYTHON_QA_SUPPRESSION",
-            "PHP_QA_SUPPRESSION",
-            "GO_QA_SUPPRESSION",
             "SESSION_CLEANUP",
             "SUGGEST_STATUSLINE",
         ]
@@ -106,7 +103,7 @@ class TestConfigKeyConsistency:
         """
         test_cases = [
             ("SuggestStatusLineHandler", "suggest_status_line"),
-            ("PythonQaSuppressionBlocker", "python_qa_suppression_blocker"),
+            ("QaSuppressionHandler", "qa_suppression"),
             ("CleanupHandler", "cleanup"),
             ("DestructiveGitHandler", "destructive_git"),
             ("TddEnforcementHandler", "tdd_enforcement"),

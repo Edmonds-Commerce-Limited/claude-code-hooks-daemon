@@ -170,13 +170,12 @@ class PlanNumberHelperHandler(Handler):
 
         return [
             AcceptanceTest(
-                title="Plan number suggestion",
-                command="Create new plan directory",
-                description="Suggests next plan number (advisory)",
-                expected_decision=Decision.ALLOW,
-                expected_message_patterns=[r"plan number", r"next"],
-                safety_notes="Advisory handler - suggests numbering",
-                test_type=TestType.ADVISORY,
-                requires_event="PreToolUse creating plan directory",
+                title="Block broken plan number discovery",
+                command="ls -d CLAUDE/Plan/0* 2>/dev/null | sort -V | tail -1",
+                description="Blocks broken bash commands that try to discover plan numbers and provides correct next number",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[r"BLOCKED", r"plan number"],
+                safety_notes="Handler blocks broken command and provides correct plan number instead.",
+                test_type=TestType.BLOCKING,
             ),
         ]

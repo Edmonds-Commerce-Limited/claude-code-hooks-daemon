@@ -43,10 +43,11 @@ class HelloWorldSubagentStopHandler(Handler):
             AcceptanceTest(
                 title="Hello world test",
                 command='echo "test"',
-                description="Test handler that confirms Stop hook is active",
+                description="Test handler that confirms SubagentStop hook is active",
                 expected_decision=Decision.ALLOW,
-                expected_message_patterns=[r"Stop hook system active"],
+                expected_message_patterns=[r"SubagentStop hook system active"],
                 safety_notes="Test handler only - always allows with context message",
                 test_type=TestType.CONTEXT,
+                requires_event="SubagentStop event (cannot be triggered by subagent)",
             ),
         ]

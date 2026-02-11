@@ -456,13 +456,17 @@ class MarkdownOrganizationHandler(Handler):
 
         return [
             AcceptanceTest(
-                title="Markdown file organization",
-                command="Write markdown file",
-                description="Advises markdown organization best practices (advisory)",
-                expected_decision=Decision.ALLOW,
-                expected_message_patterns=[r"markdown", r"organization"],
-                safety_notes="Advisory handler - suggests structure",
-                test_type=TestType.ADVISORY,
-                requires_event="PreToolUse with Write tool to .md file",
+                title="Block markdown in wrong location",
+                command=(
+                    "Use the Write tool to write to /tmp/acceptance-test-mdorg/random-notes.md"
+                    " with content '# Some Notes\\n\\nRandom markdown file.'"
+                ),
+                description="Blocks markdown files written to non-standard locations",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[r"WRONG LOCATION", r"allowed"],
+                safety_notes="Uses /tmp path - safe. Handler blocks non-standard markdown locations.",
+                test_type=TestType.BLOCKING,
+                setup_commands=["mkdir -p /tmp/acceptance-test-mdorg"],
+                cleanup_commands=["rm -rf /tmp/acceptance-test-mdorg"],
             ),
         ]

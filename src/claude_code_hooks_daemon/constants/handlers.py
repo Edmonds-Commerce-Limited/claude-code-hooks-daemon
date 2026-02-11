@@ -220,25 +220,10 @@ class HandlerID:
     )
 
     # QA enforcement handlers (Priority: 30-35)
-    PYTHON_QA_SUPPRESSION = HandlerIDMeta(
-        class_name="PythonQaSuppressionBlocker",
-        config_key="python_qa_suppression_blocker",
-        display_name="python-qa-suppression-blocker",
-    )
-    PHP_QA_SUPPRESSION = HandlerIDMeta(
-        class_name="PhpQaSuppressionBlocker",
-        config_key="php_qa_suppression_blocker",
-        display_name="php-qa-suppression-blocker",
-    )
-    GO_QA_SUPPRESSION = HandlerIDMeta(
-        class_name="GoQaSuppressionBlocker",
-        config_key="go_qa_suppression_blocker",
-        display_name="go-qa-suppression-blocker",
-    )
-    ESLINT_DISABLE = HandlerIDMeta(
-        class_name="EslintDisableHandler",
-        config_key="eslint_disable",
-        display_name="enforce-no-eslint-disable",
+    QA_SUPPRESSION = HandlerIDMeta(
+        class_name="QaSuppressionHandler",
+        config_key="qa_suppression",
+        display_name="qa-suppression-blocker",
     )
     VALIDATE_PLAN_NUMBER = HandlerIDMeta(
         class_name="ValidatePlanNumberHandler",
@@ -457,10 +442,7 @@ HandlerKey = Literal[
     "git_stash",
     "validate_sitemap",
     # QA enforcement handlers
-    "python_qa_suppression_blocker",
-    "php_qa_suppression_blocker",
-    "go_qa_suppression_blocker",
-    "eslint_disable",
+    "qa_suppression",
     "validate_plan_number",
     "plan_number_helper",
     "daemon_stats",
