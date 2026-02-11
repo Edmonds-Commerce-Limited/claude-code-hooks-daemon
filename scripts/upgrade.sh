@@ -1,25 +1,59 @@
 #!/bin/bash
 #
-# Claude Code Hooks Daemon - Self-Locating Upgrade Script (Layer 1)
+# Claude Code Hooks Daemon - Upgrade Script (Layer 1)
 #
 # SECURITY: Always fetch the latest version from GitHub before running:
 #   curl -fsSL https://raw.githubusercontent.com/.../scripts/upgrade.sh -o /tmp/upgrade.sh
 #   less /tmp/upgrade.sh   # Review contents
-#   bash /tmp/upgrade.sh   # Execute
+#   bash /tmp/upgrade.sh --project-root /path/to/project [VERSION]
 #
 # This is a minimal Layer 1 script that:
-# 1. Detects project root (walks up directory tree)
-# 2. Determines current and target versions
-# 3. Delegates to Layer 2 (scripts/upgrade_version.sh) for full upgrade
-# 4. Falls back to legacy inline upgrade if Layer 2 not available
+# 1. Takes explicit project root (no magic detection)
+# 2. Stops daemon (best-effort)
+# 3. Checks out target version
+# 4. Cleans up nested install artifacts
+# 5. Delegates to Layer 2 (scripts/upgrade_version.sh)
 #
 # Arguments:
-#   VERSION - Git tag to upgrade to (optional, defaults to latest tag)
+#   --project-root PATH  - REQUIRED: Project root directory
+#   VERSION              - Git tag to upgrade to (optional, defaults to latest)
 #
 
 set -euo pipefail
 
-TARGET_VERSION="${1:-}"
+# ============================================================
+# Argument parsing
+# ============================================================
+
+PROJECT_ROOT=""
+TARGET_VERSION=""
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --project-root)
+            [ -n "${2:-}" ] || { echo "ERR --project-root requires a path argument" >&2; exit 1; }
+            PROJECT_ROOT="$2"
+            shift 2
+            ;;
+        --help|-h)
+            echo "Usage: upgrade.sh --project-root PATH [VERSION]"
+            echo ""
+            echo "  --project-root PATH  Project root directory (REQUIRED)"
+            echo "  VERSION              Git tag to upgrade to (default: latest)"
+            exit 0
+            ;;
+        -*)
+            echo "ERR Unknown option: $1" >&2
+            echo "Usage: upgrade.sh --project-root PATH [VERSION]" >&2
+            exit 1
+            ;;
+        *)
+            # Positional arg = version
+            TARGET_VERSION="$1"
+            shift
+            ;;
+    esac
+done
 
 # Minimal output functions
 if [ -t 1 ]; then
@@ -42,36 +76,15 @@ _fail() { _err "$1"; exit 1; }
 echo -e "${_BOLD}Claude Code Hooks Daemon - Upgrade${_NC}"
 echo "========================================"
 
-# Step 1: Detect project root
-_info "Detecting project root..."
-PROJECT_ROOT=""
-SEARCH_DIR="$(pwd)"
-# Primary signal: config file exists (ideal state)
-while [ "$SEARCH_DIR" != "/" ]; do
-    if [ -f "$SEARCH_DIR/.claude/hooks-daemon.yaml" ]; then
-        PROJECT_ROOT="$SEARCH_DIR"
-        break
-    fi
-    SEARCH_DIR="$(dirname "$SEARCH_DIR")"
-done
-# Fallback signal: daemon repo exists but config missing (broken install)
-if [ -z "$PROJECT_ROOT" ]; then
-    SEARCH_DIR="$(pwd)"
-    while [ "$SEARCH_DIR" != "/" ]; do
-        if [ -d "$SEARCH_DIR/.claude/hooks-daemon/.git" ]; then
-            PROJECT_ROOT="$SEARCH_DIR"
-            _warn "Config file missing - will be repaired during upgrade"
-            break
-        fi
-        SEARCH_DIR="$(dirname "$SEARCH_DIR")"
-    done
-fi
-
-[ -n "$PROJECT_ROOT" ] || _fail "Could not find project root (no .claude/hooks-daemon.yaml or .claude/hooks-daemon/.git in any parent directory)"
+# Step 1: Validate project root
+[ -n "$PROJECT_ROOT" ] || _fail "--project-root is required.\nUsage: upgrade.sh --project-root /path/to/project [VERSION]"
+PROJECT_ROOT="$(cd "$PROJECT_ROOT" && pwd)" # Resolve to absolute path
+[ -d "$PROJECT_ROOT" ] || _fail "Project root does not exist: $PROJECT_ROOT"
 _ok "Project root: $PROJECT_ROOT"
 
 # Step 2: Determine daemon directory and mode
 DAEMON_DIR="$PROJECT_ROOT/.claude/hooks-daemon"
+SELF_INSTALL="false"
 if [ -f "$PROJECT_ROOT/.claude/hooks-daemon.yaml" ] && command -v python3 &>/dev/null; then
     SELF_INSTALL=$(python3 -c "
 import yaml
@@ -90,7 +103,15 @@ fi
 [ -d "$DAEMON_DIR/.git" ] || _fail "Daemon directory is not a git repository: $DAEMON_DIR"
 _ok "Daemon directory: $DAEMON_DIR"
 
-# Step 3: Fetch tags and determine target version
+# Step 3: Best-effort daemon stop (before checkout)
+VENV_PYTHON="$DAEMON_DIR/untracked/venv/bin/python"
+if [ -f "$VENV_PYTHON" ]; then
+    _info "Stopping daemon..."
+    "$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
+    sleep 1
+fi
+
+# Step 4: Fetch tags and determine target version
 _info "Fetching latest tags..."
 git -C "$DAEMON_DIR" fetch --tags --quiet
 
@@ -98,50 +119,41 @@ if [ -z "$TARGET_VERSION" ]; then
     TARGET_VERSION=$(git -C "$DAEMON_DIR" describe --tags \
         "$(git -C "$DAEMON_DIR" rev-list --tags --max-count=1)" 2>/dev/null || echo "")
     if [ -z "$TARGET_VERSION" ]; then
-        _warn "No tags found. Using main branch."
-        TARGET_VERSION="main"
+        _fail "No tags found. Specify a version explicitly."
     fi
 fi
 
-# Verify target exists
 git -C "$DAEMON_DIR" rev-parse "$TARGET_VERSION" &>/dev/null || \
     _fail "Version $TARGET_VERSION not found"
 _ok "Target version: $TARGET_VERSION"
 
-# Step 4: Delegate to Layer 2 (with fallback to legacy)
+# Step 5: Checkout target version FIRST (before looking for Layer 2)
+_info "Checking out $TARGET_VERSION..."
+git -C "$DAEMON_DIR" checkout "$TARGET_VERSION" --quiet
+_ok "Checked out $TARGET_VERSION"
+
+# Step 6: Clean up nested install artifacts
+# When daemon repo has .claude/ in git (self-install dogfooding), normal installs
+# can end up with runtime artifacts at the wrong path:
+#   .claude/hooks-daemon/.claude/hooks-daemon/untracked/ (socket, pid, log files)
+# This is a nested install artifact, not a legitimate directory.
+if [ "$SELF_INSTALL" != "true" ]; then
+    NESTED_INSTALL="$DAEMON_DIR/.claude/hooks-daemon"
+    if [ -d "$NESTED_INSTALL" ]; then
+        _warn "Cleaning up nested install artifacts: $NESTED_INSTALL"
+        rm -rf "$NESTED_INSTALL"
+        _ok "Nested install artifacts removed"
+    fi
+fi
+
+# Step 7: Delegate to Layer 2 (now available after checkout)
 LAYER2_SCRIPT="$DAEMON_DIR/scripts/upgrade_version.sh"
 
 if [ -f "$LAYER2_SCRIPT" ]; then
     _info "Delegating to version-specific upgrader..."
     exec bash "$LAYER2_SCRIPT" "$PROJECT_ROOT" "$DAEMON_DIR" "$TARGET_VERSION"
 else
-    # Fallback: legacy inline upgrade for older versions
-    _warn "Layer 2 upgrader not found. Using legacy upgrade flow..."
-
-    VENV_PYTHON="$DAEMON_DIR/untracked/venv/bin/python"
-
-    # Stop daemon
-    _info "Stopping daemon..."
-    [ -f "$VENV_PYTHON" ] && "$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
-    sleep 1
-
-    # Checkout target
-    _info "Checking out $TARGET_VERSION..."
-    git -C "$DAEMON_DIR" checkout "$TARGET_VERSION" --quiet
-
-    # Reinstall
-    VENV_PIP="$(dirname "$VENV_PYTHON")/pip"
-    if [ -f "$VENV_PIP" ]; then
-        _info "Installing package..."
-        "$VENV_PIP" install -e "$DAEMON_DIR" --quiet
-    fi
-
-    # Restart daemon
-    _info "Restarting daemon..."
-    "$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli start 2>/dev/null || true
-    sleep 1
-    "$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli status 2>&1 || true
-
-    echo ""
-    _ok "Legacy upgrade complete. Restart Claude Code to activate."
+    _fail "Layer 2 upgrader not found at: $LAYER2_SCRIPT
+Target version $TARGET_VERSION does not include the upgrade system.
+Use a fresh install instead: see CLAUDE/LLM-INSTALL.md"
 fi
