@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from claude_code_hooks_daemon.daemon.paths import (
+    _UNIX_SOCKET_PATH_LIMIT,
     cleanup_pid_file,
     cleanup_socket,
     get_log_path,
@@ -128,17 +129,17 @@ class TestPathGeneration(unittest.TestCase):
         self.assertEqual(socket1, socket2)
 
     def test_project_name_truncation(self):
-        """Test long project names are handled correctly."""
+        """Test long project names trigger socket path length fallback."""
         long_name = "this-is-a-very-long-project-name-that-exceeds-twenty-characters"
         project_dir = Path(f"/home/dev/{long_name}")
 
         socket_path = get_socket_path(project_dir)
 
-        # Path should be under the project directory (no truncation needed)
-        self.assertIn(long_name, str(socket_path))
-
-        # Should still be in untracked directory
-        self.assertIn(".claude/hooks-daemon/untracked", str(socket_path))
+        # Long project name causes full path to exceed _UNIX_SOCKET_PATH_LIMIT,
+        # so it should fall back to a shorter runtime directory
+        project_hash = get_project_hash(project_dir)
+        self.assertIn(f"hooks-daemon-{project_hash}", str(socket_path))
+        self.assertTrue(str(socket_path).endswith(".sock"))
 
     def test_relative_vs_absolute_paths(self):
         """Test relative and absolute paths produce different hashes."""
@@ -629,6 +630,149 @@ class TestHostnameIsolation(unittest.TestCase):
             socket2 = get_socket_path("/workspace")
             self.assertEqual(socket1, socket2)
             self.assertTrue(str(socket1).endswith("daemon-test-machine.sock"))
+
+
+class TestSocketPathLengthFallback(unittest.TestCase):
+    """Test AF_UNIX socket path length validation with fallback."""
+
+    def setUp(self):
+        """Mock Path.mkdir to prevent filesystem side effects."""
+        self.mkdir_patcher = patch.object(Path, "mkdir")
+        self.mkdir_patcher.start()
+
+    def tearDown(self):
+        self.mkdir_patcher.stop()
+
+    def test_socket_path_under_limit_uses_project_dir(self):
+        """Normal path under 104 chars stays in project untracked dir."""
+        # Short project path should stay in project directory
+        project_dir = Path("/home/dev/proj")
+        with patch.dict(os.environ, {"HOSTNAME": "h"}, clear=False):
+            # Remove override env vars
+            os.environ.pop("CLAUDE_HOOKS_SOCKET_PATH", None)
+            os.environ.pop("CLAUDE_HOOKS_PID_PATH", None)
+            os.environ.pop("CLAUDE_HOOKS_LOG_PATH", None)
+
+            socket_path = get_socket_path(project_dir)
+
+            # Should be in the project's untracked directory
+            self.assertIn(".claude/hooks-daemon/untracked", str(socket_path))
+            self.assertTrue(str(socket_path).startswith("/home/dev/proj/"))
+            # Verify path is indeed under the limit
+            self.assertLessEqual(len(str(socket_path)), _UNIX_SOCKET_PATH_LIMIT)
+
+    def test_socket_path_over_limit_uses_xdg_runtime_dir(self):
+        """When path > 104 chars AND XDG_RUNTIME_DIR is set, use XDG fallback."""
+        # Create a deep path that will exceed 104 chars
+        deep_path = "/home/user/projects/client/" + "a" * 80 + "/deep-nested-project"
+        with tempfile.TemporaryDirectory() as xdg_dir:
+            env = {
+                "HOSTNAME": "h",
+                "XDG_RUNTIME_DIR": xdg_dir,
+            }
+            with patch.dict(os.environ, env, clear=False):
+                os.environ.pop("CLAUDE_HOOKS_SOCKET_PATH", None)
+
+                socket_path = get_socket_path(deep_path)
+                project_hash = get_project_hash(deep_path)
+
+                # Should be in XDG_RUNTIME_DIR, not project dir
+                self.assertTrue(str(socket_path).startswith(xdg_dir))
+                self.assertIn(f"hooks-daemon-{project_hash}", str(socket_path))
+                self.assertTrue(str(socket_path).endswith(".sock"))
+
+    def test_socket_path_over_limit_uses_run_user(self):
+        """When path > 104 chars, no XDG_RUNTIME_DIR, use /run/user/{uid}."""
+        deep_path = "/home/user/projects/client/" + "a" * 80 + "/deep-nested-project"
+        uid = os.getuid()
+        run_user_dir = Path(f"/run/user/{uid}")
+
+        with patch.dict(os.environ, {"HOSTNAME": "h"}, clear=False):
+            os.environ.pop("CLAUDE_HOOKS_SOCKET_PATH", None)
+            os.environ.pop("XDG_RUNTIME_DIR", None)
+
+            # Only test this fallback if /run/user/{uid} actually exists
+            if run_user_dir.is_dir():
+                socket_path = get_socket_path(deep_path)
+                project_hash = get_project_hash(deep_path)
+
+                self.assertTrue(str(socket_path).startswith(str(run_user_dir)))
+                self.assertIn(f"hooks-daemon-{project_hash}", str(socket_path))
+                self.assertTrue(str(socket_path).endswith(".sock"))
+            else:
+                # If /run/user/{uid} doesn't exist, skip gracefully
+                self.skipTest(f"/run/user/{uid} does not exist on this system")
+
+    def test_socket_path_over_limit_uses_tmp_fallback(self):
+        """When neither XDG nor /run/user available, use /tmp fallback."""
+        deep_path = "/home/user/projects/client/" + "a" * 80 + "/deep-nested-project"
+
+        with patch.dict(os.environ, {"HOSTNAME": "h"}, clear=False):
+            os.environ.pop("CLAUDE_HOOKS_SOCKET_PATH", None)
+            os.environ.pop("XDG_RUNTIME_DIR", None)
+
+            # Mock Path.is_dir to always return False (no XDG, no /run/user)
+            with patch.object(Path, "is_dir", return_value=False):
+                socket_path = get_socket_path(deep_path)
+                project_hash = get_project_hash(deep_path)
+
+                self.assertTrue(
+                    str(socket_path).startswith("/tmp/"),  # nosec B108
+                    f"Expected /tmp/ prefix, got: {socket_path}",
+                )
+                self.assertIn(f"hooks-daemon-{project_hash}", str(socket_path))
+                self.assertTrue(str(socket_path).endswith(".sock"))
+
+    def test_pid_path_follows_socket_fallback(self):
+        """get_pid_path uses same fallback logic for long paths."""
+        deep_path = "/home/user/projects/client/" + "a" * 80 + "/deep-nested-project"
+        with tempfile.TemporaryDirectory() as xdg_dir:
+            env = {
+                "HOSTNAME": "h",
+                "XDG_RUNTIME_DIR": xdg_dir,
+            }
+            with patch.dict(os.environ, env, clear=False):
+                os.environ.pop("CLAUDE_HOOKS_PID_PATH", None)
+
+                pid_path = get_pid_path(deep_path)
+                project_hash = get_project_hash(deep_path)
+
+                # Should fallback to XDG dir
+                self.assertTrue(str(pid_path).startswith(xdg_dir))
+                self.assertIn(f"hooks-daemon-{project_hash}", str(pid_path))
+                self.assertTrue(str(pid_path).endswith(".pid"))
+
+    def test_log_path_follows_socket_fallback(self):
+        """get_log_path uses same fallback logic for long paths."""
+        deep_path = "/home/user/projects/client/" + "a" * 80 + "/deep-nested-project"
+        with tempfile.TemporaryDirectory() as xdg_dir:
+            env = {
+                "HOSTNAME": "h",
+                "XDG_RUNTIME_DIR": xdg_dir,
+            }
+            with patch.dict(os.environ, env, clear=False):
+                os.environ.pop("CLAUDE_HOOKS_LOG_PATH", None)
+
+                log_path = get_log_path(deep_path)
+                project_hash = get_project_hash(deep_path)
+
+                # Should fallback to XDG dir
+                self.assertTrue(str(log_path).startswith(xdg_dir))
+                self.assertIn(f"hooks-daemon-{project_hash}", str(log_path))
+                self.assertTrue(str(log_path).endswith(".log"))
+
+    def test_env_override_bypasses_length_check(self):
+        """CLAUDE_HOOKS_SOCKET_PATH env var still works regardless of length."""
+        long_override = "/some/very/long/path/" + "x" * 200 + "/daemon.sock"
+        with patch.dict(
+            os.environ,
+            {"CLAUDE_HOOKS_SOCKET_PATH": long_override},
+            clear=False,
+        ):
+            socket_path = get_socket_path("/any/project")
+
+            # Env override should be returned as-is, no length check
+            self.assertEqual(socket_path, Path(long_override))
 
 
 if __name__ == "__main__":
