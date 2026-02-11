@@ -1,9 +1,9 @@
 # Claude Code Hooks Daemon
 
-![Version](https://img.shields.io/badge/version-2.8.0-blue)
+![Version](https://img.shields.io/badge/version-2.9.0-blue)
 ![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-4693%20passing-success)
+![Tests](https://img.shields.io/badge/tests-5285%20passing-success)
 ![Coverage](https://img.shields.io/badge/coverage-95%25%20required-success)
 
 High-performance daemon for Claude Code hooks using Unix socket IPC and front controller architecture.
@@ -42,8 +42,8 @@ A daemon-based hooks system that eliminates process spawn overhead (~21ms) with 
 - **Lazy startup** - Daemon starts on first hook call
 - **Auto-shutdown** - Exits after 10 minutes of inactivity
 - **Multi-project support** - Unique daemon per project directory
-- **51 production handlers** across 10 event types
-- **4693 tests** with 95% coverage requirement
+- **48 production handlers** across 10 event types (11 language strategies)
+- **5285 tests** with 95% coverage requirement
 - **Type-safe** - Full MyPy strict mode compliance
 - **Plugin system** - Easy to add project-specific handlers
 - **Deterministic validation** - Fast pattern matching and rule enforcement
@@ -239,34 +239,31 @@ The installer will warn if it detects this pattern.
 
 ---
 
-## Current Version: 2.7.0
+## Current Version: 2.9.0
 
-**Latest Changes (v2.7.0):**
-- ✅ **Optimal Config Checker** - SessionStart handler auditing 6 env/settings for optimal config
-- ✅ **Hedging Language Detector** - Stop handler detecting guessing language in agent output
-- ✅ **PHP QA CI Integration** - Enhanced PHP QA suppression handler (PR #20)
-- ✅ **Library/Plugin Separation** - Clean separation of library and plugin concerns (Plan 00034)
-- ✅ **Robust Upgrade Detection** - Handles broken installations gracefully (Plan 00043)
-- ✅ **Coverage Boost** - Test coverage increased from 94.40% to 96.33%
-- ✅ **Curl-to-File Install** - Improved install/update instructions using curl-to-file pattern
+**Latest Changes (v2.9.0):**
+- ✅ **Strategy Pattern Architecture** - Unified language-aware handlers with 11 language strategies (Plan 00045)
+- ✅ **Massive Code Deduplication** - 4 per-language handlers replaced by 1 strategy-based handler
+- ✅ **11 Language Support** - Python, JavaScript, TypeScript, PHP, Go, Rust, Java, Ruby, Kotlin, Swift, C#, Dart
+- ✅ **Automated Acceptance Testing** - `/acceptance-test` skill with parallel execution (4-6 min vs 30+ min)
+- ✅ **Protocol-Based Design** - Structural typing with QaSuppressionStrategy and TddStrategy protocols
+- ✅ **5285 Passing** - 472 new for strategy pattern (up from 4813)
+- ✅ **Hook Path Robustness** - Hooks immune to CWD changes using `$CLAUDE_PROJECT_DIR`
 
 ---
 
 ## Implementation Status
 
-### Implemented Event Types (51 Production Handlers)
+### Implemented Event Types (48 Production Handlers + 11 Language Strategies)
 
-**PreToolUse** (31 handlers):
+**PreToolUse** (28 handlers):
 - `destructive_git` - Blocks dangerous git operations (force push, hard reset, etc.)
 - `sed_blocker` - Blocks sed commands (encourages Edit tool usage)
 - `absolute_path` - Enforces relative paths in tool calls
 - `git_stash` - Discourages git stash with escape hatch
-- `tdd_enforcement` - Enforces test-driven development workflow
+- `tdd_enforcement` - Enforces test-driven development workflow (uses TDD strategy registry)
 - `task_tdd_advisor` - Provides TDD workflow guidance with task-based enforcement
-- `eslint_disable` - Prevents disabling ESLint rules
-- `python_qa_suppression_blocker` - Blocks Python QA suppressions (# type: ignore, # noqa, etc.)
-- `php_qa_suppression_blocker` - Blocks PHP QA suppressions (@phpstan-ignore, phpcs:ignore, etc.)
-- `go_qa_suppression_blocker` - Blocks Go QA suppressions (//nolint, //lint:ignore, etc.)
+- `qa_suppression` - **NEW v2.9**: Unified QA suppression blocker with 11 language strategies (Python, JS, TS, PHP, Go, Rust, Java, Ruby, Kotlin, Swift, C#, Dart)
 - `lock_file_edit_blocker` - Prevents editing package lock files (package-lock.json, yarn.lock, etc.)
 - `pip_break_system` - Blocks pip --break-system-packages flag
 - `sudo_pip` - Blocks sudo pip install commands
@@ -952,7 +949,7 @@ class MyHandler(Handler):
 All checks auto-fix by default (except MyPy and tests).
 
 **Current Test Stats:**
-- **4693 tests** across 172 test files
+- **5285 tests** across 202 test files
 - **95% coverage requirement**
 - All tests passing
 
@@ -1258,7 +1255,33 @@ MIT License - see LICENSE file for details.
 
 ## Changelog
 
-### v2.7.0 (Current)
+### v2.9.0 (Current)
+
+**Strategy Pattern Architecture:**
+- Unified QA suppression handler with 11 language strategies (Python, JS, TS, PHP, Go, Rust, Java, Ruby, Kotlin, Swift, C#, Dart)
+- TDD enforcement refactored to use strategy registry
+- 4 per-language handlers replaced by 1 strategy-based handler
+- Protocol-based design with structural typing
+- Extension-to-strategy registry for automatic language detection
+- 5285 total validations (472 new for strategy pattern)
+
+**Automated Acceptance Testing:**
+- `/acceptance-test` skill with parallel Haiku agent execution
+- Reduces testing time from 30+ minutes to 4-6 minutes (80% improvement)
+- Structured JSON results for automated release gates
+
+**Fixes:**
+- Hook paths now robust against CWD changes using `$CLAUDE_PROJECT_DIR`
+
+### v2.8.0
+
+**Project-Level Handlers:**
+- First-class support for per-project custom handlers
+- Auto-discovery and loading from `.claude/project_handlers/`
+- CLI commands: scaffold, list, validate handlers
+- Complete integration with library handlers
+
+### v2.7.0
 
 **New Handlers & Features:**
 - Optimal Config Checker - SessionStart handler auditing env/settings for optimal Claude Code config

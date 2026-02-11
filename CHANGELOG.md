@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.9.0] - 2026-02-11
+
+### Added
+- **Strategy Pattern Architecture for Language-Aware Handlers** (Plan 00045, commit 7adbc39)
+  - **Unified QA Suppression Handler**: Single `QaSuppressionHandler` replaces 4 per-language handlers (eslint_disable, python/php/go_qa_suppression_blocker)
+  - **11 Language Strategies**: Python, JavaScript/TypeScript, PHP, Go, Rust, Java, Ruby, Kotlin, Swift, C#, Dart
+  - **Protocol-Based Design**: Structural typing with `QaSuppressionStrategy` and `TddStrategy` protocols
+  - **Extension-to-Strategy Registry**: Maps file extensions to language strategies with config-filtered loading
+  - **Project Languages Config**: New `project_languages` config option to filter strategies by active languages
+  - **TDD Strategy Refactoring**: TddEnforcementHandler now uses strategy registry for language-specific test detection
+  - **Strategy Pattern QA Checker**: New `scripts/qa/run_strategy_pattern_check.sh` enforces pattern compliance
+  - **Comprehensive Strategy Tests**: 5285 total tests (up from 4813), 95%+ coverage maintained
+  - **New Strategies Module**: `src/claude_code_hooks_daemon/strategies/` with QA suppression and TDD strategies
+  - **Strategy Documentation**: Complete TDD strategy documentation in `strategies/tdd/CLAUDE.md`
+
+- **Automated Acceptance Testing Skill**: `/acceptance-test` skill for parallel handler validation (Plan 00044, commit 95e2286)
+  - AcceptanceTestRunnerAgent: Haiku-based parallel test execution across batches
+  - PlaybookGenerator: Converts handler definitions to structured JSON test playbooks
+  - CLI integration: `generate-playbook` command for ephemeral test generation
+  - Parallel batch execution: Groups tests (3-5 per batch) and runs concurrently
+  - Structured JSON results: Pass/fail/skip/error counts for automated release gates
+  - Reduces acceptance testing time from 30+ minutes to 4-6 minutes
+  - Integration with release workflow as mandatory blocking gate (Step 8)
+
+### Changed
+- **Handler Architecture**: Transition from duplicated per-language handlers to strategy pattern
+  - 4 handlers deleted (eslint_disable, python/php/go_qa_suppression_blocker)
+  - 1 new unified handler added (qa_suppression)
+  - Net reduction: 3 handlers, massive code deduplication
+  - Language support expanded from 4 to 11 languages through strategies
+- **Plugin Loader Enhancement**: Plugin paths now resolve relative to `workspace_root` instead of CWD
+  - Fixes plugin loading issues when daemon started from different directories
+  - More robust plugin discovery for project-level handlers
+- **Config Schema**: Added `project_languages` field to daemon config for strategy filtering
+- **Test Organization**: Strategy tests organized by module (qa_suppression/, tdd/)
+
+### Fixed
+- **Hook Path Robustness**: Hook paths now use `$CLAUDE_PROJECT_DIR` to handle CWD changes in Bash commands (commit cc2bd1b)
+  - Bug: Relative paths like `.claude/hooks/pre-tool-use` broke when Bash tool changed CWD
+  - Fix: Updated installer to generate `"$CLAUDE_PROJECT_DIR"/.claude/hooks/*` patterns
+  - Tests: Added unit tests for installer hook path generation and integration tests for settings validation
+  - All hooks now robust against CWD changes during command execution
+
+### Removed
+- **Deprecated Handlers**: Replaced by unified strategy-based handlers
+  - `eslint_disable` - Replaced by QaSuppressionHandler with JavaScript strategy
+  - `python_qa_suppression_blocker` - Replaced by QaSuppressionHandler with Python strategy
+  - `php_qa_suppression_blocker` - Replaced by QaSuppressionHandler with PHP strategy
+  - `go_qa_suppression_blocker` - Replaced by QaSuppressionHandler with Go strategy
+- **language_config.py**: Deleted in favor of strategy implementations with direct pattern definitions
+
 ## [2.8.0] - 2026-02-10
 
 ### Added
