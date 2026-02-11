@@ -730,7 +730,7 @@ Error: API rate limit exceeded
 - `/release` skill specification: `.claude/skills/release/skill.md`
 - Release agent: `.claude/agents/release-agent.md`
 - Contributing: `/CONTRIBUTING.md`
-- Testing: `/CLAUDE/development/TESTING.md` (TODO)
+- QA Pipeline: `/CLAUDE/development/QA.md`
 
 ## Version History
 

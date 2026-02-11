@@ -78,7 +78,7 @@ def test_bug_XXX_handler_integration_failure():
 
 ### Acceptance Test (if handler-related)
 
-Add to `CLAUDE/AcceptanceTests/PLAYBOOK.md` if bug affects real-world usage.
+Add acceptance test via `get_acceptance_tests()` method if bug affects real-world usage.
 
 **Run tests - they MUST FAIL**:
 ```bash
@@ -340,5 +340,5 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli restart
 
 **See Also**:
 - @CLAUDE/CodeLifecycle/Features.md - Feature development lifecycle
-- @CLAUDE/CodeLifecycle/TestingPyramid.md - Test layer explanation
-- @CLAUDE/AcceptanceTests/PLAYBOOK.md - FAIL-FAST cycle details
+- @CLAUDE/CodeLifecycle/General.md - General code changes
+- @CLAUDE/AcceptanceTests/GENERATING.md - Acceptance test generation

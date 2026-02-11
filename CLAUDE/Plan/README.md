@@ -6,14 +6,32 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00032: Sub-Agent Orchestration for Context Preservation](00032-subagent-orchestration-context-preservation/PLAN.md) - Not Started
   - Create specialized sub-agents for workflow gates and orchestration
-  - Enforce sub-agent usage via PreToolUse handlers
-  - Preserve main thread context by delegating heavy operations
-  - Research agent team sub-agent spawning capability
   - **Priority**: High (context management)
 
+- [00034: Model-Aware Agent Team Advisor](00034-sleepy-puzzling-backus/PLAN.md) - Not Started
+  - Update Plan 00032 with model-aware agent team advisor handler
 
+- [00035: StatusLine Data Cache + Model-Aware Advisor](00035-sleepy-puzzling-backus/PLAN.md) - Not Started
+  - StatusLine data cache for model-awareness in PreToolUse events
+
+- [00036: (Unnamed Draft)](00036-sleepy-puzzling-backus/PLAN.md) - Empty/Draft
+
+- [00038: Library Handler Over-fitting](00038-library-handler-over-fitting/PLAN.md) - Not Started
+  - Address handlers that over-fit to project-specific assumptions
+
+- [00041: Project-Level Handlers First-Class DX](00041-project-handlers-first-class-dx/PLAN.md) - In Progress
+  - First-class developer experience for project-level handlers
+
+- [00044: Acceptance Testing Skill](00044-acceptance-testing-skill/PLAN.md) - Not Started
+  - Acceptance testing skill and agent
+
+- [00045: Proper Language Strategy](00045-proper-language-strategy/PLAN.md) - Proposed
+  - Proper language strategy pattern implementation
 
 ## Completed Plans
+
+- [00037: Daemon Data Layer](Completed/00037-daemon-data-layer/PLAN.md) - Complete
+  - Persistent state and transcript access for daemon data layer
 
 - [00046: Upgrade System Overhaul](Completed/00046-upgrade-system-overhaul/PLAN.md) - Complete (2026-02-11)
   - Fixed Layer 1 checkout ordering, dropped legacy fallback, Python 3.11+ version detection
@@ -281,9 +299,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 37
-- **Completed**: 37 (1 with reduced scope)
-- **Active** (not started): 1
+- **Total Plans Created**: 46
+- **Completed**: 38 (1 with reduced scope)
+- **Active**: 8 (1 in progress, 5 not started, 1 proposed, 1 empty draft)
 - **Cancelled/Abandoned**: 0
 
 ## Quick Links

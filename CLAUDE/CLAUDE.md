@@ -56,7 +56,7 @@ This directory contains documentation optimized for LLM consumption (Claude, GPT
 
 **development/** - Documentation for daemon repository development
 - **RELEASING.md** - Release process using `/release` skill
-- **TESTING.md** - Testing standards and QA workflows (TODO)
+- **QA.md** - QA pipeline and automation
 - For developers working on the daemon codebase itself
 
 ## What NOT to Put Here

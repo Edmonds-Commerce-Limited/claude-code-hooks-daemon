@@ -46,10 +46,17 @@ Before installing, make sure you have:
 From your **project root** (the directory containing `.claude/` and `.git/`):
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/install.sh | bash
+# Download the installer
+curl -sSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/install.sh -o /tmp/hooks-daemon-install.sh
+
+# Inspect it (good security practice)
+cat /tmp/hooks-daemon-install.sh
+
+# Run it
+bash /tmp/hooks-daemon-install.sh
 ```
 
-This one-line installer will:
+This installer will:
 
 1. Validate prerequisites (git, Python 3.11+)
 2. Clone the daemon to `.claude/hooks-daemon/`
@@ -62,7 +69,8 @@ This one-line installer will:
 ### Install a Specific Version
 
 ```bash
-DAEMON_BRANCH=v2.7.0 curl -sSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/install.sh -o /tmp/hooks-daemon-install.sh
+DAEMON_BRANCH=v2.7.0 bash /tmp/hooks-daemon-install.sh
 ```
 
 ### Create .gitignore (Required After Install)

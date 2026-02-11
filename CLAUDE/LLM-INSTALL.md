@@ -88,12 +88,23 @@ fi
 
 ## Quick Install (Recommended)
 
-The one-line installer handles everything via the two-layer architecture:
+The installer handles everything via the two-layer architecture:
 
 ```bash
 # From your project root (must have .claude/ and .git/)
-curl -sSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/install.sh | bash
+
+# Step 1: Download the installer script
+curl -sSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/install.sh -o /tmp/hooks-daemon-install.sh
+
+# Step 2: Inspect it (good security practice)
+cat /tmp/hooks-daemon-install.sh
+
+# Step 3: Run it
+bash /tmp/hooks-daemon-install.sh
 ```
+
+> **Note**: We intentionally avoid `curl | bash` because the daemon itself blocks that
+> pattern as a security risk. Practice what we preach.
 
 This will:
 1. Validate prerequisites (git required)
@@ -119,10 +130,11 @@ This will:
 
 ```bash
 # Install specific version
-DAEMON_BRANCH=v2.5.0 curl -sSL .../install.sh | bash
+curl -sSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/install.sh -o /tmp/hooks-daemon-install.sh
+DAEMON_BRANCH=v2.5.0 bash /tmp/hooks-daemon-install.sh
 
 # Force reinstall
-FORCE=true curl -sSL .../install.sh | bash
+FORCE=true bash /tmp/hooks-daemon-install.sh
 ```
 
 ---

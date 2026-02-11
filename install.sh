@@ -3,7 +3,7 @@
 # Claude Code Hooks Daemon - One-Line Installer (Layer 1)
 #
 # Usage:
-#   curl -sSL https://raw.githubusercontent.com/EdmondsCommerce/claude-code-hooks-daemon/main/install.sh | bash
+#   curl -sSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/install.sh -o /tmp/hooks-daemon-install.sh && bash /tmp/hooks-daemon-install.sh
 #
 # This is a minimal Layer 1 script that:
 # 1. Validates project root (.claude and .git must exist)

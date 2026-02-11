@@ -199,49 +199,44 @@ Overall Status: ✅ ALL CHECKS PASSED
 
 ## Phase 7: Acceptance Testing (Pre-Release)
 
-Before releasing, add handler to acceptance test playbook.
+Before releasing, add acceptance tests to your handler via the `get_acceptance_tests()` method.
 
-### Update PLAYBOOK.md
+### Add Programmatic Acceptance Tests
 
-Edit `CLAUDE/AcceptanceTests/PLAYBOOK.md`:
+Override `get_acceptance_tests()` in your handler to return test definitions:
 
-```markdown
-## Test N: [HandlerName]
-
-**Handler ID**: handler-id
-**Event**: PreToolUse/PostToolUse/etc.
-**Priority**: XX
-**Type**: Blocking/Advisory (terminal=true/false)
-
-### Test N.1: [Positive Case]
-
-**Command**: [Command that should trigger handler]
-**Expected**: [Expected behavior - blocked/advised/context]
-**Result**: [ ] PASS [ ] FAIL
-
-### Test N.2: [Negative Case]
-
-**Command**: [Command that should NOT trigger]
-**Expected**: Allowed without interference
-**Result**: [ ] PASS [ ] FAIL
+```python
+def get_acceptance_tests(self) -> list[AcceptanceTest]:
+    return [
+        AcceptanceTest(
+            test_id="positive-case",
+            description="Blocks dangerous command",
+            hook_input={...},
+            expected_decision="deny",
+        ),
+        AcceptanceTest(
+            test_id="negative-case",
+            description="Allows safe command",
+            hook_input={...},
+            expected_decision="allow",
+        ),
+    ]
 ```
 
-### Update expected-responses.yaml
+### Generate and Execute Playbook
 
-Add expected response patterns to `CLAUDE/AcceptanceTests/validation/expected-responses.yaml`.
+```bash
+# Generate fresh playbook from code
+$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-playbook > /tmp/playbook.md
+```
 
-### Execute Acceptance Tests
+Execute tests in a real Claude Code session. See `CLAUDE/AcceptanceTests/GENERATING.md` for details.
 
-Follow `CLAUDE/AcceptanceTests/PLAYBOOK.md` manually:
-1. Start fresh Claude Code session
-2. Execute each test scenario
-3. Verify expected behavior
-4. Document results
-5. **If ANY test fails**: Return to Phase 2 (fix bug with TDD)
+**If ANY test fails**: Return to Phase 2 (fix bug with TDD)
 
 **FAIL-FAST Cycle**:
 ```
-Test fails → Fix with TDD → Full QA → Daemon restart → START PLAYBOOK FROM TEST 1.1
+Test fails → Fix with TDD → Full QA → Daemon restart → RESTART ALL TESTS FROM BEGINNING
 ```
 
 ## Phase 8: Live Testing
@@ -290,11 +285,11 @@ A feature is DONE when ALL of the following are verified:
 - [ ] Expected output: "ALL CHECKS PASSED"
 
 ### 6. Acceptance Tests (Before Release)
-- [ ] PLAYBOOK.md updated with handler tests
-- [ ] PLAYBOOK.md executed manually
-- [ ] All relevant handler tests pass
+- [ ] Handler implements `get_acceptance_tests()` with test definitions
+- [ ] Generated playbook includes handler tests (`generate-playbook`)
+- [ ] All relevant handler tests pass in real Claude Code session
 - [ ] Results documented
-- [ ] See: `CLAUDE/AcceptanceTests/PLAYBOOK.md`
+- [ ] See: `CLAUDE/AcceptanceTests/GENERATING.md`
 
 ### 7. Live Testing
 - [ ] Handler tested in real Claude Code session
@@ -344,7 +339,7 @@ Complete testing pyramid:
 ---
 
 **See Also**:
-- @CLAUDE/CodeLifecycle/TestingPyramid.md - Detailed test layer explanation
-- @CLAUDE/CodeLifecycle/Checklists/feature-checklist.md - Copy-paste checklist
-- @CLAUDE/AcceptanceTests/PLAYBOOK.md - Acceptance testing guide
+- @CLAUDE/CodeLifecycle/Bugs.md - Bug fix lifecycle
+- @CLAUDE/CodeLifecycle/General.md - General code changes
+- @CLAUDE/AcceptanceTests/GENERATING.md - Acceptance test generation
 - @CLAUDE/PlanWorkflow.md - Planning standards

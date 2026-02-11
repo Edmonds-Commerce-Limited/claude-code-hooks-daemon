@@ -360,7 +360,7 @@ generate-playbook | grep "## Test" | cut -d: -f2
 ## 📚 RELATED DOCUMENTATION
 
 - **Handler Development**: `CLAUDE/HANDLER_DEVELOPMENT.md`
-- **Plugin Development**: `CLAUDE/Plugin/ACCEPTANCE_TESTING.md`
+- **Plugin Development**: See `CLAUDE/PROJECT_HANDLERS.md` for project-level handler guide
 - **Plan 00025**: `CLAUDE/Plan/00025-programmatic-acceptance-tests/PLAN.md`
 - **Release Process**: `CLAUDE/development/RELEASING.md`
 
