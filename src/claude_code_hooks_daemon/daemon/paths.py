@@ -16,6 +16,10 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# AF_UNIX socket path limit (108 bytes on Linux, 104 bytes on macOS)
+# Use conservative limit for cross-platform compatibility
+_UNIX_SOCKET_PATH_LIMIT = 104
+
 
 def _get_hostname_suffix() -> str:
     """
@@ -79,6 +83,46 @@ def get_project_name(project_path: Path | str) -> str:
     return name[:20]
 
 
+def _get_fallback_runtime_dir(project_dir: Path, filename: str) -> Path:
+    """
+    Get fallback path when project path exceeds Unix socket length limit.
+
+    Tries directories in order of preference:
+    1. $XDG_RUNTIME_DIR (standard on modern Linux)
+    2. /run/user/{uid} (common on Linux)
+    3. /tmp (last resort, with warning logged)
+
+    Args:
+        project_dir: Resolved project directory path
+        filename: File extension without dot (e.g. "sock", "pid", "log")
+
+    Returns:
+        Path in a shorter directory using project hash for uniqueness
+    """
+    project_hash = get_project_hash(project_dir)
+    base_name = f"hooks-daemon-{project_hash}"
+
+    # Try XDG_RUNTIME_DIR first (standard)
+    xdg_dir = os.environ.get("XDG_RUNTIME_DIR")
+    if xdg_dir and Path(xdg_dir).is_dir():
+        fallback_dir = Path(xdg_dir)
+        logger.info("Socket path too long, using XDG_RUNTIME_DIR: %s", fallback_dir)
+        return fallback_dir / f"{base_name}.{filename}"
+
+    # Try /run/user/{uid} (common on Linux)
+    run_user = Path(f"/run/user/{os.getuid()}")
+    if run_user.is_dir():
+        logger.info("Socket path too long, using /run/user: %s", run_user)
+        return run_user / f"{base_name}.{filename}"
+
+    # Last resort: /tmp (with warning)
+    logger.warning(
+        "Socket path too long and no XDG_RUNTIME_DIR or /run/user available. "
+        "Using /tmp for runtime files. Set CLAUDE_HOOKS_SOCKET_PATH to override."
+    )
+    return Path("/tmp") / f"{base_name}.{filename}"  # nosec B108 - /tmp is last resort fallback
+
+
 def get_socket_path(project_dir: Path | str) -> Path:
     """
     Generate Unix socket path for project-specific daemon.
@@ -111,7 +155,13 @@ def get_socket_path(project_dir: Path | str) -> Path:
 
     # Add hostname-based suffix for isolation
     suffix = _get_hostname_suffix()
-    return untracked_dir / f"daemon{suffix}.sock"
+    path = untracked_dir / f"daemon{suffix}.sock"
+
+    # Fallback if path exceeds AF_UNIX socket length limit
+    if len(str(path)) > _UNIX_SOCKET_PATH_LIMIT:
+        return _get_fallback_runtime_dir(project_path, "sock")
+
+    return path
 
 
 def get_pid_path(project_dir: Path | str) -> Path:
@@ -146,7 +196,13 @@ def get_pid_path(project_dir: Path | str) -> Path:
 
     # Add hostname-based suffix for isolation
     suffix = _get_hostname_suffix()
-    return untracked_dir / f"daemon{suffix}.pid"
+    path = untracked_dir / f"daemon{suffix}.pid"
+
+    # Fallback if path exceeds AF_UNIX socket length limit (consistency with socket)
+    if len(str(path)) > _UNIX_SOCKET_PATH_LIMIT:
+        return _get_fallback_runtime_dir(project_path, "pid")
+
+    return path
 
 
 def get_log_path(project_dir: Path | str) -> Path:
@@ -181,7 +237,13 @@ def get_log_path(project_dir: Path | str) -> Path:
 
     # Add hostname-based suffix for isolation
     suffix = _get_hostname_suffix()
-    return untracked_dir / f"daemon{suffix}.log"
+    path = untracked_dir / f"daemon{suffix}.log"
+
+    # Fallback if path exceeds AF_UNIX socket length limit (consistency with socket)
+    if len(str(path)) > _UNIX_SOCKET_PATH_LIMIT:
+        return _get_fallback_runtime_dir(project_path, "log")
+
+    return path
 
 
 def is_pid_alive(pid: int) -> bool:
