@@ -168,22 +168,42 @@ unset HOSTNAME → daemon-a1b2c3d4.sock
 
 ## Engineering Principles
 
-**CRITICAL: Follow these for ALL code changes:**
+**CRITICAL: Follow these for ALL code changes.**
 
-1. **FAIL FAST** - Detect errors early, validate at boundaries, explicit error handling
-2. **YAGNI** - Don't build for hypothetical futures
-3. **DRY** - Single source of truth for all logic
-4. **SINGLE SOURCE OF TRUTH** - Config is truth, code reads config, never hardcode
-5. **PROPER NOT QUICK** - No workarounds, fix root causes
-6. **TYPE SAFETY** - Full type annotations, strict mypy, no `Any` without justification
-7. **TEST COVERAGE** - 95% minimum, integration tests for all flows
-8. **SCHEMA VALIDATION** - Validate all external data
+### SOLID Principles
 
-**When in doubt:**
+1. **Single Responsibility** - Each class/module has ONE reason to change. Config is config. Strategy is strategy. Handler is handler. Never mix data and behavior in the same class.
+2. **Open/Closed** - Open for extension, closed for modification. Use Strategy Pattern for language-aware handlers — add new languages by adding new strategy implementations, not by modifying existing if/elif chains.
+3. **Liskov Substitution** - Any strategy implementation must be substitutable for another through the shared Protocol interface. No special-casing by type name.
+4. **Interface Segregation** - Keep Protocol interfaces focused. `TddStrategy` only has TDD methods, not QA suppression methods. Clients should never depend on methods they don't use.
+5. **Dependency Inversion** - Depend on abstractions (Protocols), not concretions. Handlers depend on `TddStrategy` Protocol, never on `PythonTddStrategy` directly.
+
+### Core Standards
+
+6. **FAIL FAST** - Detect errors early, validate at boundaries, explicit error handling. If something is wrong, crash immediately with a clear message — never silently continue.
+7. **DRY** - Single source of truth for all logic. If you see the same pattern repeated, extract it. Common test directories, directory matching — shared utilities, not copy-paste.
+8. **YAGNI** - Don't build for hypothetical futures. Implement what's needed now, design for extensibility through patterns (Strategy, Protocol), not through premature abstraction.
+9. **NO MAGIC** - Zero magic strings or numbers. Every string literal and numeric value must be a named constant. `"/src/"` in an if-statement is magic — `_SOURCE_DIRECTORIES` tuple is not. Use constants modules, class constants, or module-level named tuples.
+10. **SINGLE SOURCE OF TRUTH** - Config is truth, code reads config, never hardcode. Language configurations define language properties. Strategies define language behavior. Handlers orchestrate.
+11. **PROPER NOT QUICK** - No workarounds, fix root causes. Three similar lines of code is better than a wrong abstraction, but six identical blocks means you need a proper pattern.
+12. **TYPE SAFETY** - Full type annotations, strict mypy, no `Any` without justification. Use `Protocol` for interfaces, not `ABC` (structural typing over nominal).
+13. **TEST COVERAGE** - 95% minimum, integration tests for all flows. Each strategy independently TDD-able with its own test file.
+14. **SCHEMA VALIDATION** - Validate all external data at system boundaries.
+
+### Design Patterns
+
+- **Strategy Pattern** - Use for ALL language-aware handlers. Define a Protocol interface, implement per-language strategies, register in a registry. Handler delegates to strategies — zero language-specific logic in handlers.
+- **Registry Pattern** - Map file extensions to strategies. Support config-filtered loading (only active project languages) with fallback to all strategies.
+- **Test-Driven Development** - RED (failing test) → GREEN (minimal pass) → REFACTOR. Each strategy gets its own test file for independent TDD.
+
+### When in Doubt
+
 - Read the config, don't guess
 - Fix the root cause, don't work around it
 - Add tests first, then implement
 - Validate with schemas, don't assume
+- If you see an if/elif chain on type/language names, use Strategy Pattern instead
+- If a handler has language-specific logic, it belongs in a strategy not the handler
 
 ## Security Standards
 
