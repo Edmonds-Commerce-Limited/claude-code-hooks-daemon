@@ -885,7 +885,7 @@ def cmd_generate_playbook(args: argparse.Namespace) -> int:
     """Generate acceptance test playbook from handler definitions.
 
     Args:
-        args: Command-line arguments with include_disabled flag
+        args: Command-line arguments with format, filter options, and include_disabled flag
 
     Returns:
         0 if playbook generated successfully, 1 otherwise
@@ -931,12 +931,24 @@ def cmd_generate_playbook(args: argparse.Namespace) -> int:
             plugins=plugins,
         )
 
-        # Generate markdown playbook
+        # Get command-line arguments
         include_disabled = getattr(args, "include_disabled", False)
-        markdown = generator.generate_markdown(include_disabled=include_disabled)
+        output_format = getattr(args, "format", "markdown")
+        filter_type = getattr(args, "filter_type", None)
+        filter_handler = getattr(args, "filter_handler", None)
 
-        # Print to stdout
-        print(markdown)
+        # Generate playbook in requested format
+        if output_format == "json":
+            tests = generator.generate_json(
+                include_disabled=include_disabled,
+                filter_type=filter_type,
+                filter_handler=filter_handler,
+            )
+            print(json.dumps(tests, indent=2))
+        else:
+            # Markdown format (default)
+            markdown = generator.generate_markdown(include_disabled=include_disabled)
+            print(markdown)
 
         return 0
 
@@ -1529,6 +1541,21 @@ def main() -> int:
         "--include-disabled",
         action="store_true",
         help="Include tests from disabled handlers",
+    )
+    parser_gen_playbook.add_argument(
+        "--format",
+        choices=["markdown", "json"],
+        default="markdown",
+        help="Output format: markdown (default) or json",
+    )
+    parser_gen_playbook.add_argument(
+        "--filter-type",
+        choices=["blocking", "advisory", "context"],
+        help="Filter tests by type (json format only)",
+    )
+    parser_gen_playbook.add_argument(
+        "--filter-handler",
+        help="Filter tests by handler name substring (json format only)",
     )
     parser_gen_playbook.set_defaults(func=cmd_generate_playbook)
 

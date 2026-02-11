@@ -69,22 +69,89 @@ Follow the Release Agent specification (.claude/agents/release-agent.md) for:
 Stop and return results. Next stages (acceptance tests, then Opus review) will be handled by main Claude.
 \`\`\`
 
-## Stage 2: Acceptance Test Gate (You Handle This)
+## Stage 2: Acceptance Test Gate (You Handle This) - 🚨 BLOCKING
 
-**MANDATORY after Stage 1 QA validation passes but BEFORE proceeding to documentation review.**
+**CRITICAL BLOCKING GATE - MANDATORY - NO SHORTCUTS ALLOWED**
 
-After the Release Agent completes Stage 1 (QA passed, version updated, changelog/release notes generated), YOU (main Claude) must execute acceptance tests:
+After Stage 1 (QA passed, version updated, changelog/release notes generated), YOU (main Claude) MUST execute ALL acceptance tests before proceeding.
 
-1. **Read the playbook** at \`CLAUDE/AcceptanceTests/PLAYBOOK.md\`
-2. **Check for coverage gaps** - if new handlers were added since the playbook was last updated, update the playbook with tests for those handlers first
-3. **Execute every test** in the playbook sequentially
-4. **Record PASS/FAIL** for each test
-5. **If ANY test fails**: STOP the release. Investigate and fix the handler bug. Do NOT proceed until all tests pass.
-6. **Report results** to the user: total pass/fail counts and any issues found
+**STEP 2.1: Invoke Acceptance Test Skill**
 
-**CRITICAL**: Do NOT skip this stage. A delayed release is better than a broken release.
+Use the Skill tool to invoke the acceptance-test skill:
 
-**Reference:** \`CLAUDE/development/RELEASING.md\` "Acceptance Testing" section
+\`\`\`
+Skill tool:
+- skill: "acceptance-test"
+- args: "all"
+\`\`\`
+
+This is MANDATORY. You MUST invoke the skill, not just mention it or suggest it to the user.
+
+**What this does**:
+- Restarts daemon with latest code
+- Generates complete test playbook from ALL handler definitions (no filtering)
+- Groups tests into batches (3-5 tests each)
+- Spawns parallel Haiku agents to execute ALL batches concurrently
+- Executes EVERY test (blocking, advisory, context types)
+- Reports comprehensive pass/fail/skip results
+
+**STEP 2.2: Verify Results**
+
+Check the output summary:
+
+**✅ SUCCESS CRITERIA** (all must be true):
+- \`failed: 0\` (zero failures)
+- \`errors: 0\` (zero errors)
+- \`skipped: N\` (lifecycle events only - this is normal)
+- Message: "All tests passed! Handlers working correctly."
+
+**❌ FAILURE CRITERIA** (any of these = ABORT):
+- \`failed: > 0\` (any test failures)
+- \`errors: > 0\` (any test errors)
+- No output (skill failed to run)
+- Daemon not running
+
+**STEP 2.3: Decision Point**
+
+**If ALL tests passed (failed=0, errors=0)**:
+- ✅ Proceed to Stage 3 (Opus Review)
+- Document total test count in release notes
+
+**If ANY test failed (failed>0 OR errors>0)**:
+- ❌ **ABORT RELEASE IMMEDIATELY**
+- ❌ **DO NOT PROCEED TO OPUS REVIEW**
+- ❌ **DO NOT SKIP THIS GATE**
+- Enter FAIL-FAST cycle:
+  1. Review failed test details from output
+  2. Investigate root cause
+  3. Fix handler bug using TDD
+  4. Run full QA: \`./scripts/qa/run_all.sh\`
+  5. Restart daemon
+  6. **Re-run \`/acceptance-test all\` from scratch**
+  7. Repeat until passed=100%, failed=0, errors=0
+
+**NO SHORTCUTS**:
+- ⛔ Cannot skip acceptance testing
+- ⛔ Cannot use partial test filters (must use \`all\`)
+- ⛔ Cannot ignore failures
+- ⛔ Cannot proceed with errors
+- ⛔ Cannot use manual testing as substitute for automated
+
+**VERIFICATION CHECKPOINT**:
+
+Before proceeding to Stage 3, you MUST confirm:
+
+1. [ ] Ran \`/acceptance-test all\` (not filtered subset)
+2. [ ] Reviewed complete results output
+3. [ ] Verified failed=0, errors=0
+4. [ ] Total test count documented: ___ tests
+5. [ ] No handler bugs found
+
+**If you cannot check ALL boxes above, you MUST NOT proceed.**
+
+**Time Investment**: 4-6 minutes for full automated suite. This is NON-NEGOTIABLE.
+
+**Reference:** \`CLAUDE/development/RELEASING.md\` "Acceptance Testing Gate" section
 
 ## Stage 3: Opus Review (You Handle This)
 

@@ -884,3 +884,596 @@ def test_generate_markdown_plugins_parameter_defaults_to_empty() -> None:
     # Should work without plugins parameter
     assert "# Acceptance Testing Playbook" in markdown
     assert "**Total Tests**: 0" in markdown
+
+
+# Tests for generate_json() and _collect_tests()
+
+
+def test_collect_tests_returns_correct_structure() -> None:
+    """Test that _collect_tests returns tuples with source field."""
+    test = AcceptanceTest(
+        title="Test collect",
+        command="echo test",
+        description="Test _collect_tests structure",
+        expected_decision=Decision.ALLOW,
+        expected_message_patterns=[],
+    )
+
+    MockHandlerWithTests.__module__ = "claude_code_hooks_daemon.handlers.pre_tool_use.collect"
+
+    registry = HandlerRegistry()
+    registry._handlers["MockHandlerWithTests"] = MockHandlerWithTests
+
+    config = {"pre_tool_use": {"mock_handler_with_tests": {"enabled": True, "priority": 10}}}
+
+    generator = PlaybookGenerator(config=config, registry=registry)
+
+    with patch.object(MockHandlerWithTests, "get_acceptance_tests", return_value=[test]):
+        library_tests, project_tests = generator._collect_tests()
+
+    # Should return library tests with source field
+    assert len(library_tests) == 1
+    assert len(project_tests) == 0
+
+    handler_name, event_type, priority, tests, source = library_tests[0]
+    assert handler_name == "MockHandlerWithTests"
+    assert event_type == "PreToolUse"
+    assert priority == 10
+    assert len(tests) == 1
+    assert source == "library"
+
+
+def test_generate_json_empty_registry() -> None:
+    """Test generating JSON with no handlers."""
+    config: dict[str, Any] = {}
+    registry = HandlerRegistry()
+    generator = PlaybookGenerator(config=config, registry=registry)
+
+    json_tests = generator.generate_json()
+
+    # Should return empty list
+    assert isinstance(json_tests, list)
+    assert len(json_tests) == 0
+
+
+def test_generate_json_single_handler() -> None:
+    """Test generating JSON with a single handler."""
+    test = AcceptanceTest(
+        title="JSON test",
+        command="echo 'json test'",
+        description="Test JSON generation",
+        expected_decision=Decision.DENY,
+        expected_message_patterns=["blocked", "denied"],
+        test_type=TestType.BLOCKING,
+        setup_commands=["echo 'setup'"],
+        cleanup_commands=["echo 'cleanup'"],
+        safety_notes="Safe test",
+    )
+
+    MockHandlerWithTests.__module__ = "claude_code_hooks_daemon.handlers.pre_tool_use.json"
+
+    registry = HandlerRegistry()
+    registry._handlers["MockHandlerWithTests"] = MockHandlerWithTests
+
+    config = {"pre_tool_use": {"mock_handler_with_tests": {"enabled": True, "priority": 10}}}
+
+    generator = PlaybookGenerator(config=config, registry=registry)
+
+    with patch.object(MockHandlerWithTests, "get_acceptance_tests", return_value=[test]):
+        json_tests = generator.generate_json()
+
+    # Should return list with one test
+    assert len(json_tests) == 1
+
+    test_dict = json_tests[0]
+    assert test_dict["test_number"] == 1
+    assert test_dict["handler_name"] == "MockHandlerWithTests"
+    assert test_dict["event_type"] == "PreToolUse"
+    assert test_dict["priority"] == 10
+    assert test_dict["source"] == "library"
+    assert test_dict["title"] == "JSON test"
+    assert test_dict["command"] == "echo 'json test'"
+    assert test_dict["description"] == "Test JSON generation"
+    assert test_dict["expected_decision"] == "deny"
+    assert test_dict["expected_message_patterns"] == ["blocked", "denied"]
+    assert test_dict["test_type"] == "blocking"
+    assert test_dict["setup_commands"] == ["echo 'setup'"]
+    assert test_dict["cleanup_commands"] == ["echo 'cleanup'"]
+    assert test_dict["safety_notes"] == "Safe test"
+    assert test_dict["requires_event"] is None
+
+
+def test_generate_json_filter_by_type_blocking() -> None:
+    """Test filtering JSON output by test type (blocking)."""
+    blocking_test = AcceptanceTest(
+        title="Blocking test",
+        command="echo blocking",
+        description="Blocking type",
+        expected_decision=Decision.DENY,
+        expected_message_patterns=[],
+        test_type=TestType.BLOCKING,
+    )
+
+    advisory_test = AcceptanceTest(
+        title="Advisory test",
+        command="echo advisory",
+        description="Advisory type",
+        expected_decision=Decision.ALLOW,
+        expected_message_patterns=[],
+        test_type=TestType.ADVISORY,
+    )
+
+    MockHandlerWithTests.__module__ = "claude_code_hooks_daemon.handlers.pre_tool_use.filter_type"
+
+    registry = HandlerRegistry()
+    registry._handlers["MockHandlerWithTests"] = MockHandlerWithTests
+
+    config = {"pre_tool_use": {"mock_handler_with_tests": {"enabled": True}}}
+
+    generator = PlaybookGenerator(config=config, registry=registry)
+
+    with patch.object(
+        MockHandlerWithTests, "get_acceptance_tests", return_value=[blocking_test, advisory_test]
+    ):
+        # Filter for blocking only
+        json_tests = generator.generate_json(filter_type="blocking")
+
+    # Should only return blocking test
+    assert len(json_tests) == 1
+    assert json_tests[0]["title"] == "Blocking test"
+    assert json_tests[0]["test_type"] == "blocking"
+
+
+def test_generate_json_filter_by_type_advisory() -> None:
+    """Test filtering JSON output by test type (advisory)."""
+    blocking_test = AcceptanceTest(
+        title="Blocking test",
+        command="echo blocking",
+        description="Blocking type",
+        expected_decision=Decision.DENY,
+        expected_message_patterns=[],
+        test_type=TestType.BLOCKING,
+    )
+
+    advisory_test = AcceptanceTest(
+        title="Advisory test",
+        command="echo advisory",
+        description="Advisory type",
+        expected_decision=Decision.ALLOW,
+        expected_message_patterns=[],
+        test_type=TestType.ADVISORY,
+    )
+
+    MockHandlerWithTests.__module__ = (
+        "claude_code_hooks_daemon.handlers.pre_tool_use.filter_advisory"
+    )
+
+    registry = HandlerRegistry()
+    registry._handlers["MockHandlerWithTests"] = MockHandlerWithTests
+
+    config = {"pre_tool_use": {"mock_handler_with_tests": {"enabled": True}}}
+
+    generator = PlaybookGenerator(config=config, registry=registry)
+
+    with patch.object(
+        MockHandlerWithTests, "get_acceptance_tests", return_value=[blocking_test, advisory_test]
+    ):
+        # Filter for advisory only
+        json_tests = generator.generate_json(filter_type="advisory")
+
+    # Should only return advisory test
+    assert len(json_tests) == 1
+    assert json_tests[0]["title"] == "Advisory test"
+    assert json_tests[0]["test_type"] == "advisory"
+
+
+def test_generate_json_filter_by_handler_name() -> None:
+    """Test filtering JSON output by handler name substring."""
+    test1 = AcceptanceTest(
+        title="Git test",
+        command="echo git",
+        description="Git handler test",
+        expected_decision=Decision.DENY,
+        expected_message_patterns=[],
+    )
+
+    test2 = AcceptanceTest(
+        title="Npm test",
+        command="echo npm",
+        description="Npm handler test",
+        expected_decision=Decision.ALLOW,
+        expected_message_patterns=[],
+    )
+
+    class GitHandler(MockHandlerWithTests):
+        pass
+
+    class NpmHandler(MockHandlerWithTests):
+        pass
+
+    GitHandler.__module__ = "claude_code_hooks_daemon.handlers.pre_tool_use.git"
+    NpmHandler.__module__ = "claude_code_hooks_daemon.handlers.pre_tool_use.npm"
+
+    registry = HandlerRegistry()
+    registry._handlers["GitHandler"] = GitHandler
+    registry._handlers["NpmHandler"] = NpmHandler
+
+    config = {
+        "pre_tool_use": {
+            "git": {"enabled": True},
+            "npm": {"enabled": True},
+        }
+    }
+
+    generator = PlaybookGenerator(config=config, registry=registry)
+
+    with patch.object(GitHandler, "__init__", return_value=None):
+        with patch.object(GitHandler, "get_acceptance_tests", return_value=[test1]):
+            with patch.object(GitHandler, "priority", 10):
+                with patch.object(NpmHandler, "__init__", return_value=None):
+                    with patch.object(NpmHandler, "get_acceptance_tests", return_value=[test2]):
+                        with patch.object(NpmHandler, "priority", 20):
+                            # Filter for Git handler only
+                            json_tests = generator.generate_json(filter_handler="Git")
+
+    # Should only return Git handler test
+    assert len(json_tests) == 1
+    assert json_tests[0]["handler_name"] == "GitHandler"
+    assert json_tests[0]["title"] == "Git test"
+
+
+def test_generate_json_filter_handler_case_insensitive() -> None:
+    """Test that handler name filtering is case-insensitive."""
+    test = AcceptanceTest(
+        title="Test",
+        command="echo test",
+        description="Test case insensitive filtering",
+        expected_decision=Decision.ALLOW,
+        expected_message_patterns=[],
+    )
+
+    MockHandlerWithTests.__module__ = "claude_code_hooks_daemon.handlers.pre_tool_use.case"
+
+    registry = HandlerRegistry()
+    registry._handlers["MockHandlerWithTests"] = MockHandlerWithTests
+
+    config = {"pre_tool_use": {"mock_handler_with_tests": {"enabled": True}}}
+
+    generator = PlaybookGenerator(config=config, registry=registry)
+
+    with patch.object(MockHandlerWithTests, "get_acceptance_tests", return_value=[test]):
+        # Filter with lowercase substring
+        json_tests = generator.generate_json(filter_handler="mock")
+
+    # Should match "MockHandlerWithTests"
+    assert len(json_tests) == 1
+    assert json_tests[0]["handler_name"] == "MockHandlerWithTests"
+
+
+def test_generate_json_combined_filters() -> None:
+    """Test using both filter_type and filter_handler together."""
+    blocking_test = AcceptanceTest(
+        title="Git blocking",
+        command="echo git blocking",
+        description="Git blocking test",
+        expected_decision=Decision.DENY,
+        expected_message_patterns=[],
+        test_type=TestType.BLOCKING,
+    )
+
+    advisory_test = AcceptanceTest(
+        title="Git advisory",
+        command="echo git advisory",
+        description="Git advisory test",
+        expected_decision=Decision.ALLOW,
+        expected_message_patterns=[],
+        test_type=TestType.ADVISORY,
+    )
+
+    blocking_test2 = AcceptanceTest(
+        title="Npm blocking",
+        command="echo npm blocking",
+        description="Npm blocking test",
+        expected_decision=Decision.DENY,
+        expected_message_patterns=[],
+        test_type=TestType.BLOCKING,
+    )
+
+    class GitHandler(MockHandlerWithTests):
+        pass
+
+    class NpmHandler(MockHandlerWithTests):
+        pass
+
+    GitHandler.__module__ = "claude_code_hooks_daemon.handlers.pre_tool_use.git_combined"
+    NpmHandler.__module__ = "claude_code_hooks_daemon.handlers.pre_tool_use.npm_combined"
+
+    registry = HandlerRegistry()
+    registry._handlers["GitHandler"] = GitHandler
+    registry._handlers["NpmHandler"] = NpmHandler
+
+    config = {
+        "pre_tool_use": {
+            "git": {"enabled": True},
+            "npm": {"enabled": True},
+        }
+    }
+
+    generator = PlaybookGenerator(config=config, registry=registry)
+
+    with patch.object(GitHandler, "__init__", return_value=None):
+        with patch.object(
+            GitHandler, "get_acceptance_tests", return_value=[blocking_test, advisory_test]
+        ):
+            with patch.object(GitHandler, "priority", 10):
+                with patch.object(NpmHandler, "__init__", return_value=None):
+                    with patch.object(
+                        NpmHandler, "get_acceptance_tests", return_value=[blocking_test2]
+                    ):
+                        with patch.object(NpmHandler, "priority", 20):
+                            # Filter for Git handler AND blocking type
+                            json_tests = generator.generate_json(
+                                filter_type="blocking", filter_handler="Git"
+                            )
+
+    # Should only return Git blocking test
+    assert len(json_tests) == 1
+    assert json_tests[0]["handler_name"] == "GitHandler"
+    assert json_tests[0]["title"] == "Git blocking"
+    assert json_tests[0]["test_type"] == "blocking"
+
+
+def test_generate_json_test_numbering() -> None:
+    """Test that test numbers are sequential across handlers."""
+    test1 = AcceptanceTest(
+        title="Test 1",
+        command="echo 1",
+        description="First test",
+        expected_decision=Decision.ALLOW,
+        expected_message_patterns=[],
+    )
+
+    test2 = AcceptanceTest(
+        title="Test 2",
+        command="echo 2",
+        description="Second test",
+        expected_decision=Decision.ALLOW,
+        expected_message_patterns=[],
+    )
+
+    class Handler1(MockHandlerWithTests):
+        pass
+
+    class Handler2(MockHandlerWithTests):
+        pass
+
+    Handler1.__module__ = "claude_code_hooks_daemon.handlers.pre_tool_use.h1"
+    Handler2.__module__ = "claude_code_hooks_daemon.handlers.pre_tool_use.h2"
+
+    registry = HandlerRegistry()
+    registry._handlers["Handler1"] = Handler1
+    registry._handlers["Handler2"] = Handler2
+
+    config = {
+        "pre_tool_use": {
+            "h1": {"enabled": True, "priority": 10},
+            "h2": {"enabled": True, "priority": 20},
+        }
+    }
+
+    generator = PlaybookGenerator(config=config, registry=registry)
+
+    with patch.object(Handler1, "__init__", return_value=None):
+        with patch.object(Handler1, "get_acceptance_tests", return_value=[test1]):
+            with patch.object(Handler1, "priority", 10):
+                with patch.object(Handler2, "__init__", return_value=None):
+                    with patch.object(Handler2, "get_acceptance_tests", return_value=[test2]):
+                        with patch.object(Handler2, "priority", 20):
+                            json_tests = generator.generate_json()
+
+    # Should have sequential test numbers
+    assert len(json_tests) == 2
+    assert json_tests[0]["test_number"] == 1
+    assert json_tests[1]["test_number"] == 2
+
+
+def test_generate_json_includes_plugin_handlers() -> None:
+    """Test that plugin handlers are included in JSON output with source=plugin."""
+    plugin_test = AcceptanceTest(
+        title="Plugin JSON test",
+        command="echo plugin",
+        description="Plugin test in JSON",
+        expected_decision=Decision.ALLOW,
+        expected_message_patterns=[],
+    )
+
+    class MockPluginHandler(Handler):
+        def __init__(self) -> None:
+            from claude_code_hooks_daemon.constants.handlers import HandlerIDMeta
+
+            super().__init__(
+                handler_id=HandlerIDMeta(
+                    class_name="MockPluginHandler",
+                    config_key="mock_plugin",
+                    display_name="mock-plugin",
+                ),
+                priority=Priority.HELLO_WORLD,
+                terminal=False,
+            )
+
+        def matches(self, hook_input: dict[str, Any]) -> bool:
+            return True
+
+        def handle(self, hook_input: dict[str, Any]) -> HookResult:
+            return HookResult(decision=Decision.ALLOW)
+
+        def get_acceptance_tests(self) -> list[AcceptanceTest]:
+            return [plugin_test]
+
+    plugin_handler = MockPluginHandler()
+
+    registry = HandlerRegistry()
+    config: dict[str, Any] = {}
+
+    generator = PlaybookGenerator(config=config, registry=registry, plugins=[plugin_handler])
+
+    json_tests = generator.generate_json()
+
+    # Should include plugin test with source=plugin
+    assert len(json_tests) == 1
+    assert json_tests[0]["handler_name"] == "MockPluginHandler"
+    assert json_tests[0]["source"] == "plugin"
+    assert json_tests[0]["title"] == "Plugin JSON test"
+
+
+def test_generate_json_includes_project_handlers() -> None:
+    """Test that project handlers are included in JSON output with source=project."""
+    project_test = AcceptanceTest(
+        title="Project JSON test",
+        command="echo project",
+        description="Project handler test",
+        expected_decision=Decision.ALLOW,
+        expected_message_patterns=[],
+    )
+
+    class MockProjectHandler(Handler):
+        def __init__(self) -> None:
+            from claude_code_hooks_daemon.constants.handlers import HandlerIDMeta
+
+            super().__init__(
+                handler_id=HandlerIDMeta(
+                    class_name="MockProjectHandler",
+                    config_key="mock_project",
+                    display_name="mock-project",
+                ),
+                priority=Priority.HELLO_WORLD,
+                terminal=False,
+            )
+
+        def matches(self, hook_input: dict[str, Any]) -> bool:
+            return True
+
+        def handle(self, hook_input: dict[str, Any]) -> HookResult:
+            return HookResult(decision=Decision.ALLOW)
+
+        def get_acceptance_tests(self) -> list[AcceptanceTest]:
+            return [project_test]
+
+    project_handler = MockProjectHandler()
+
+    registry = HandlerRegistry()
+    config: dict[str, Any] = {}
+
+    generator = PlaybookGenerator(
+        config=config, registry=registry, project_handlers=[project_handler]
+    )
+
+    json_tests = generator.generate_json()
+
+    # Should include project test with source=project
+    assert len(json_tests) == 1
+    assert json_tests[0]["handler_name"] == "MockProjectHandler"
+    assert json_tests[0]["source"] == "project"
+    assert json_tests[0]["title"] == "Project JSON test"
+
+
+def test_generate_json_all_sources_combined() -> None:
+    """Test that library, plugin, and project handlers are all combined in JSON."""
+    library_test = AcceptanceTest(
+        title="Library test",
+        command="echo library",
+        description="From library",
+        expected_decision=Decision.ALLOW,
+        expected_message_patterns=[],
+    )
+
+    plugin_test = AcceptanceTest(
+        title="Plugin test",
+        command="echo plugin",
+        description="From plugin",
+        expected_decision=Decision.ALLOW,
+        expected_message_patterns=[],
+    )
+
+    project_test = AcceptanceTest(
+        title="Project test",
+        command="echo project",
+        description="From project",
+        expected_decision=Decision.ALLOW,
+        expected_message_patterns=[],
+    )
+
+    # Library handler
+    MockHandlerWithTests.__module__ = "claude_code_hooks_daemon.handlers.pre_tool_use.all_sources"
+
+    # Plugin handler
+    class MockPluginHandler(Handler):
+        def __init__(self) -> None:
+            from claude_code_hooks_daemon.constants.handlers import HandlerIDMeta
+
+            super().__init__(
+                handler_id=HandlerIDMeta(
+                    class_name="PluginHandler",
+                    config_key="plugin",
+                    display_name="plugin",
+                ),
+                priority=Priority.BRITISH_ENGLISH,
+                terminal=False,
+            )
+
+        def matches(self, hook_input: dict[str, Any]) -> bool:
+            return True
+
+        def handle(self, hook_input: dict[str, Any]) -> HookResult:
+            return HookResult(decision=Decision.ALLOW)
+
+        def get_acceptance_tests(self) -> list[AcceptanceTest]:
+            return [plugin_test]
+
+    # Project handler
+    class MockProjectHandler(Handler):
+        def __init__(self) -> None:
+            from claude_code_hooks_daemon.constants.handlers import HandlerIDMeta
+
+            super().__init__(
+                handler_id=HandlerIDMeta(
+                    class_name="ProjectHandler",
+                    config_key="project",
+                    display_name="project",
+                ),
+                priority=Priority.PLAN_WORKFLOW,  # Workflow range priority
+                terminal=False,
+            )
+
+        def matches(self, hook_input: dict[str, Any]) -> bool:
+            return True
+
+        def handle(self, hook_input: dict[str, Any]) -> HookResult:
+            return HookResult(decision=Decision.ALLOW)
+
+        def get_acceptance_tests(self) -> list[AcceptanceTest]:
+            return [project_test]
+
+    registry = HandlerRegistry()
+    registry._handlers["MockHandlerWithTests"] = MockHandlerWithTests
+
+    config = {"pre_tool_use": {"mock_handler_with_tests": {"enabled": True}}}
+
+    generator = PlaybookGenerator(
+        config=config,
+        registry=registry,
+        plugins=[MockPluginHandler()],
+        project_handlers=[MockProjectHandler()],
+    )
+
+    with patch.object(MockHandlerWithTests, "get_acceptance_tests", return_value=[library_test]):
+        json_tests = generator.generate_json()
+
+    # Should have all three tests
+    assert len(json_tests) == 3
+
+    sources = {test["source"] for test in json_tests}
+    assert sources == {"library", "plugin", "project"}
+
+    titles = {test["title"] for test in json_tests}
+    assert titles == {"Library test", "Plugin test", "Project test"}

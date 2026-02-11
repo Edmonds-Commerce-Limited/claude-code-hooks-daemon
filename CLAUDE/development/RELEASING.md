@@ -272,14 +272,64 @@ Overall Status: ✅ ALL CHECKS PASSED
 
 ### 8. Acceptance Testing Gate (Main Claude Executes) - 🚨 BLOCKING
 
-**CRITICAL BLOCKING GATE: Main Claude must execute acceptance test playbook.**
+**CRITICAL BLOCKING GATE: Main Claude must execute acceptance tests using the skill.**
 
-After QA passes, **main Claude MUST run acceptance tests manually**:
+After QA passes, **main Claude MUST invoke the acceptance-test skill**:
 
-**Step 8.1: Generate Fresh Playbook**
-```bash
-python -m claude_code_hooks_daemon.daemon.cli generate-playbook > /tmp/playbook.md
+**STEP 8.1: Invoke Acceptance Test Skill**
+
+The `/release` skill will instruct main Claude to invoke the acceptance-test skill:
+
 ```
+Use Skill tool:
+- skill: "acceptance-test"
+- args: "all"
+```
+
+**This is MANDATORY. The skill MUST be invoked, not just mentioned.**
+
+**What the skill does:**
+- Restarts daemon with latest code
+- Generates test playbook as JSON from ALL handler definitions (no filtering)
+- Groups tests into batches (3-5 tests each)
+- Spawns parallel Haiku agents to execute ALL batches concurrently
+- Executes EVERY test (blocking, advisory, context types)
+- Reports comprehensive pass/fail/skip results
+
+**STEP 8.2: Verify Results**
+
+Check the skill output for success criteria:
+
+**✅ SUCCESS CRITERIA** (all must be true):
+```
+✅ Acceptance Tests Complete!
+
+📊 Results Summary:
+   Total tests: 90
+   Passed: 87
+   Failed: 0        ← MUST be 0
+   Errors: 0        ← MUST be 0
+   Skipped: 3 (lifecycle events)
+
+All tests passed! Handlers working correctly.
+```
+
+**❌ FAILURE CRITERIA** (any of these = ABORT):
+- `failed: > 0` (any test failures)
+- `errors: > 0` (any test errors)
+- No output (skill failed to run)
+- Daemon not running
+
+**STEP 8.3: Decision Point**
+
+**If ALL tests passed (failed=0, errors=0)**:
+- ✅ Proceed to Commit & Push (Step 9)
+- Document total test count in release summary
+
+**If ANY test failed (failed>0 OR errors>0)**:
+- ❌ **ABORT RELEASE IMMEDIATELY**
+- ❌ **DO NOT PROCEED TO GIT OPERATIONS**
+- ❌ **DO NOT SKIP THIS GATE**
 
 **Step 8.2: Review Playbook**
 - Check for tests covering new/changed handlers
@@ -297,15 +347,33 @@ python -m claude_code_hooks_daemon.daemon.cli generate-playbook > /tmp/playbook.
 **If ALL tests PASS:**
 - ✅ Proceed to Commit & Push (Step 9)
 
-**If ANY test FAILS:**
-- ❌ **ABORT RELEASE IMMEDIATELY**
-- **FAIL-FAST Cycle:**
-  1. Investigate root cause
-  2. Fix bug using TDD (write failing test → implement fix → verify test passes)
-  3. Run FULL QA: `./scripts/qa/run_all.sh` (must pass 100%)
-  4. Restart daemon: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
-  5. **RESTART acceptance testing FROM TEST 1.1** (not from where you left off)
-  6. Continue until ALL tests pass with ZERO code changes
+**FAIL-FAST Cycle:**
+  1. Review failed test details from skill output
+  2. Investigate root cause
+  3. Fix bug using TDD (write failing test → implement fix → verify test passes)
+  4. Run FULL QA: `./scripts/qa/run_all.sh` (must pass 100%)
+  5. Restart daemon: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
+  6. **Re-invoke acceptance-test skill from scratch**: Use Skill tool with `skill: "acceptance-test"`, `args: "all"`
+  7. Continue until ALL tests pass with ZERO code changes
+
+**NO SHORTCUTS ALLOWED:**
+- ⛔ Cannot skip acceptance testing
+- ⛔ Cannot use partial test filters (MUST use `all`)
+- ⛔ Cannot ignore failures
+- ⛔ Cannot proceed with errors
+- ⛔ Skill MUST be invoked (not just mentioned or suggested)
+
+**VERIFICATION CHECKPOINT:**
+
+Before proceeding to Step 9, confirm:
+1. [ ] Invoked acceptance-test skill (not just mentioned it)
+2. [ ] Used `args: "all"` (not filtered subset)
+3. [ ] Reviewed complete results output
+4. [ ] Verified failed=0, errors=0
+5. [ ] Total test count documented: ___ tests
+6. [ ] No handler bugs found
+
+**If you cannot check ALL boxes above, you MUST NOT proceed.**
 
 **Why This Gate Exists:**
 - Unit tests don't catch integration issues with real Claude Code hook events
@@ -313,11 +381,9 @@ python -m claude_code_hooks_daemon.daemon.cli generate-playbook > /tmp/playbook.
 - Real-world testing is the final safety check before release
 - **CORRECTNESS over SPEED** - A delayed release is better than a broken release
 
-**Expected Time Investment:**
-- Playbook generation: 2 minutes
-- Test execution: 20-30 minutes (15+ tests)
-- Issue investigation: Variable (hours if bugs found)
-- **Minimum: 30 minutes**
+**Time Investment:**
+- **Automated**: 4-6 minutes for full suite (parallelized) - NON-NEGOTIABLE
+- **Issue investigation**: Variable (hours if bugs found)
 
 **Main Claude proceeds to Commit & Push (Step 9) ONLY if acceptance tests pass.**
 
