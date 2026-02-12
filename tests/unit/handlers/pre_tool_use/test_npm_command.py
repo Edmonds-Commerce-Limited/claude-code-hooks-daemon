@@ -637,3 +637,13 @@ class TestNpmCommandHandler:
         }
         result = advisory_handler.handle(hook_input)
         assert "llm:lint" in result.reason
+
+    def test_advisory_mode_includes_guide_path(self, advisory_handler: NpmCommandHandler) -> None:
+        """Advisory message includes path to LLM command wrapper guide."""
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "npm run build"},
+        }
+        result = advisory_handler.handle(hook_input)
+        assert "Full guide:" in result.reason
+        assert "llm-command-wrappers.md" in result.reason

@@ -380,6 +380,10 @@ class MarkdownOrganizationHandler(Handler):
 
         # Check allowed locations with PRECISE pattern matching (not simple 'in' checks)
 
+        # 0. src/claude_code_hooks_daemon/guides/ - Shipped guide files (part of daemon package)
+        if re.match(r"^src/claude_code_hooks_daemon/guides/.*\.md$", normalized, re.IGNORECASE):
+            return False  # Allow
+
         # 1. CLAUDE/ - Allow all files and subdirectories, BUT validate plan number format
         if normalized.lower().startswith("claude/"):
             # Special validation for CLAUDE/Plan/ directories

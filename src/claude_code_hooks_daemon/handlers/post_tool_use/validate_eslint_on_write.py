@@ -18,6 +18,7 @@ from claude_code_hooks_daemon.constants import (
 )
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult, ProjectContext
 from claude_code_hooks_daemon.core.utils import get_file_path
+from claude_code_hooks_daemon.utils.guides import get_llm_command_guide_path
 from claude_code_hooks_daemon.utils.npm import has_llm_commands_in_package_json
 
 
@@ -85,6 +86,7 @@ class ValidateEslintOnWriteHandler(Handler):
 
         # Advisory mode: no llm: commands in package.json - skip validation
         if not self.has_llm_commands:
+            guide_path = get_llm_command_guide_path()
             return HookResult(
                 decision=Decision.ALLOW,
                 reason=(
@@ -97,6 +99,7 @@ class ValidateEslintOnWriteHandler(Handler):
                     f"Example package.json script:\n"
                     f'  "llm:lint": "eslint . --format json --output-file ./var/qa/eslint-cache.json '
                     f'&& eslint . --format compact"\n\n'
+                    f"Full guide: {guide_path}\n\n"
                     f"ESLint validation skipped (no llm: commands detected in package.json)."
                 ),
             )
