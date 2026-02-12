@@ -123,6 +123,11 @@ handlers:
       options:
         track_plans_in_project: "CLAUDE/Plan"           # Path to plan folder
         plan_workflow_docs: "CLAUDE/PlanWorkflow.md"    # Path to workflow doc
+        # allowed_markdown_paths:                       # Override built-in allowed locations
+        #   - "^CLAUDE/.*\\.md$"
+        #   - "^docs/.*\\.md$"
+        #   - "^untracked/.*\\.md$"
+        #   - "^RELEASES/.*\\.md$"
 
     # WORKFLOW HANDLERS (Priority 36-55)
     tdd_enforcement:  # Enforce test-first development

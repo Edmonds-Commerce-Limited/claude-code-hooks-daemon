@@ -137,6 +137,19 @@ handlers:
         #   monorepo_subproject_patterns:
         #     - "packages/[^/]+"    # matches packages/frontend, packages/backend, etc.
         #     - "apps/[^/]+"        # matches apps/web, apps/mobile, etc.
+        #
+        # Custom allowed markdown paths: uncomment to OVERRIDE all built-in paths.
+        # Each entry is a regex matched against the project-relative file path.
+        # When set, ONLY paths matching these patterns are allowed.
+        # CLAUDE.md, README.md, CHANGELOG.md are always allowed regardless.
+        # Built-in defaults (used when this is not set):
+        #   allowed_markdown_paths:
+        #     - "^CLAUDE/.*\\.md$"                              # LLM documentation
+        #     - "^docs/.*\\.md$"                                # Human-facing docs
+        #     - "^untracked/.*\\.md$"                           # Temporary docs
+        #     - "^RELEASES/.*\\.md$"                            # Release notes
+        #     - "^eslint-rules/.*\\.md$"                        # ESLint rule docs
+        #     - "^src/claude_code_hooks_daemon/guides/.*\\.md$" # Shipped guides
         #     - "cluster"           # matches a single top-level sub-project folder
         #     - "services"          # matches another top-level sub-project folder
         monorepo_subproject_patterns: null
