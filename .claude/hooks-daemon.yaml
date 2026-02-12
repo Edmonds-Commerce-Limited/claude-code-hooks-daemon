@@ -308,3 +308,7 @@ plugins:
       event_type: session_start
       enabled: true
       priority: 35
+
+project_handlers:
+  enabled: true
+  path: .claude/project-handlers
