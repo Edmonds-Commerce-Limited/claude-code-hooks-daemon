@@ -90,7 +90,8 @@ class Priority:
     SUGGEST_STATUSLINE = 55
     VERSION_CHECK = 55
 
-    # Advisory handlers (Priority: 60)
+    # Advisory handlers (Priority: 55-60)
+    CRITICAL_THINKING_ADVISORY = 55
     BRITISH_ENGLISH = 60
 
     # Logging/cleanup handlers (Priority: 100)
