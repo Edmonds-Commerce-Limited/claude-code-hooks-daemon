@@ -31,6 +31,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Rename auto-named plan folders to descriptive names
 
 
+- [00051: Critical Thinking Advisory Handler](00051-critical-thinking-advisory/PLAN.md) - Not Started
+  - UserPromptSubmit handler that encourages critical evaluation of user instructions
+  - Multi-gate filter (prompt length + random sampling + cooldown) to avoid context flooding
+  - **Priority**: Medium (UX improvement for agent quality)
+
 ## Completed Plans
 
 - [00050: Display Config Key in Handler Block/Deny Output](Completed/00050-handler-config-key-in-errors/PLAN.md) - Complete
@@ -317,9 +322,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 50
+- **Total Plans Created**: 51
 - **Completed**: 41 (1 with reduced scope)
-- **Active**: 8 (1 in progress, 5 not started, 1 proposed, 1 cleanup)
+- **Active**: 9 (1 in progress, 6 not started, 1 proposed, 1 cleanup)
 - **Cancelled/Abandoned**: 1 (00036 - empty draft, deleted)
 
 ## Quick Links
