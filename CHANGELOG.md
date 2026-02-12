@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.12.0] - 2026-02-12
+
+### Added
+- **LintOnEditHandler with Strategy Pattern**: New PostToolUse:Edit handler providing instant linting feedback for 9 languages (Plan 00054, commits 340d806, b7a7d9f, 8db361d, 9b56161)
+  - Strategy-based architecture with Protocol interface for language-specific linting
+  - 9 language strategies: Python (ruff), JavaScript/TypeScript (eslint), Ruby (rubocop), PHP (phpcs), Go (golangci-lint), Rust (clippy), Java (checkstyle), C/C++ (clang-tidy), Shell (shellcheck)
+  - Registry pattern with config-filtered loading (only active project languages)
+  - Each strategy independently TDD-able with its own test file
+  - Priority 30 (code quality tier), non-terminal to allow other handlers
+  - Comprehensive negative acceptance tests for all 9 strategies
+  - Uses `sys.executable` for Python linting instead of hardcoded binary paths (commit 9f94158)
+
+- **WorkingDirectoryHandler**: New SessionStart handler displaying current working directory in orange when it differs from project root (commits fe59c0c, aee79cd)
+  - Helps users identify when Claude Code's cwd != project root
+  - Orange color (38;2;255;165;0) for visual prominence
+  - Priority 58 (workflow tier), non-terminal
+  - Only displays when cwd differs from project root (reduces noise)
+
+- **CurrentTimeHandler**: New SessionStart handler displaying current timestamp in status line (commit 4b7f7b6)
+  - Shows ISO 8601 timestamp (YYYY-MM-DD HH:MM:SS) at session start
+  - Priority 59 (workflow tier), non-terminal
+  - Helps users track session timing and context freshness
+
+- **DaemonLocationGuardHandler**: New PreToolUse:Bash handler enforcing daemon directory security (commits 48837e5, 0d91040, cf9c6f1, Plan 00056)
+  - Blocks bash commands attempting to run daemon CLI outside `.claude/hooks-daemon/` installation directory
+  - Prevents accidental execution from incorrect locations (e.g., workspace root in self-install mode)
+  - Whitelisting system for allowed daemon directories via `project_root` config
+  - Priority 15 (safety tier), terminal (blocks execution)
+  - 100% test coverage with positive/negative cases
+
+### Fixed
+- **TDD Handler Multi-Path Detection**: Fixed bug where TDD handler only detected first test directory convention (commits b3cb0ba, 0a743fb, e5adfb5, Plan 00055)
+  - Bug: Handler checked if `tests/` OR `test/` existed, but stopped after first match
+  - Bug: Projects with both conventions (Python `tests/` + Node `test/`) weren't fully detected
+  - Fix: Handler now detects ALL matching test directory conventions
+  - Added comprehensive test coverage for single and multi-convention projects
+
 ## [2.11.0] - 2026-02-12
 
 ### Added
