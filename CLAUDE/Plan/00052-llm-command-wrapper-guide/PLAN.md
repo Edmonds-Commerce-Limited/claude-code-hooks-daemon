@@ -292,28 +292,60 @@ def get_llm_command_guide_path() -> str:
 
 ### Concept
 
-A standalone GitHub repo of ready-made LLM command wrapper scripts - one per tool. Users grab individual scripts via raw URL rather than cloning the whole repo.
+A standalone GitHub repo of ready-made LLM command wrapper scripts - one per tool, organised by language ecosystem. Users grab individual scripts via raw URL rather than cloning the whole repo.
 
 ```
 llm-command-wrappers/
-  eslint/
-    llm-lint.sh          # The wrapper script
-    schema.json          # JSON output schema
-    README.md            # Usage + example jq queries
-  pytest/
-    llm-test.sh
-    schema.json
-    README.md
-  phpstan/
-    llm-analyse.sh
-    schema.json
-    README.md
-  ruff/
-    llm-lint.sh
-    ...
+  node-typescript/
+    eslint/
+      llm-lint.sh
+      schema.json
+      README.md
+    jest/
+      llm-test.sh
+      schema.json
+      README.md
+    tsc/
+      llm-typecheck.sh
+      schema.json
+      README.md
+  python/
+    pytest/
+      llm-test.sh
+      schema.json
+      README.md
+    ruff/
+      llm-lint.sh
+      schema.json
+      README.md
+    mypy/
+      llm-typecheck.sh
+      schema.json
+      README.md
+  php/
+    phpstan/
+      llm-analyse.sh
+      schema.json
+      README.md
+    phpunit/
+      llm-test.sh
+      schema.json
+      README.md
+  go/
+    golangci-lint/
+      llm-lint.sh
+      schema.json
+      README.md
+  ruby/
+    rubocop/
+      llm-lint.sh
+      schema.json
+      README.md
 ```
 
-**Usage**: `curl -O https://raw.githubusercontent.com/.../eslint/llm-lint.sh`
+**Usage**: `curl -O https://raw.githubusercontent.com/.../python/pytest/llm-test.sh`
+
+**Why language-first**: Tools within an ecosystem share conventions, dependencies, and assumptions. Grouping ESLint next to pytest makes no sense - they're different worlds. Language-first lets users browse by their stack.
 
 ### Implementation Language Considerations
 
@@ -342,11 +374,11 @@ For each tool, check:
 
 ### Repo Structure
 
-Each tool directory is self-contained:
-- `llm-{action}.sh` - Entry point (thin shell that delegates to language-specific logic)
-- `schema.json` - JSON Schema for the output format
-- `README.md` - Usage, jq examples, version requirements
-- Optional: `llm-{action}.py` or `llm-{action}.js` for the heavy lifting
+Each tool directory is self-contained within its language folder:
+- `{language}/{tool}/llm-{action}.sh` - Entry point (thin shell that delegates)
+- `{language}/{tool}/schema.json` - JSON Schema for the output format
+- `{language}/{tool}/README.md` - Usage, jq examples, version requirements
+- Optional: `{language}/{tool}/llm-{action}.py` or `.js` for the heavy lifting
 
 ### Action Items (When We Get To This)
 
