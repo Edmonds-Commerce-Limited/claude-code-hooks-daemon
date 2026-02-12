@@ -11,8 +11,10 @@ import traceback
 from datetime import datetime
 from typing import Any
 
+from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler import Handler
-from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
+from claude_code_hooks_daemon.core.router import _DISABLE_FOOTER_TEMPLATE
 from claude_code_hooks_daemon.core.utils import get_workspace_root
 
 
@@ -94,17 +96,20 @@ class FrontController:
                         for h in handlers_matched[:-1]:
                             result.add_handler(h)
 
+                        self._inject_config_key_footer(result, handler)
                         return result
                     else:
                         # Non-terminal handler - accumulate context and continue
                         accumulated_context.extend(result.context)
                         final_result = result
+                        current_handler = handler  # Track last matching handler
 
             # No terminal handler matched - return last non-terminal result or default allow
             if final_result:
                 # Merge accumulated context
                 if accumulated_context:
                     final_result.context = accumulated_context
+                self._inject_config_key_footer(final_result, current_handler)
                 return final_result
             else:
                 # No handlers matched at all
@@ -123,6 +128,39 @@ class FrontController:
                 error_details=error_msg,
                 include_debug_info=True,
             )
+
+    def _inject_config_key_footer(self, result: HookResult, handler: Handler | None) -> None:
+        """Append config path footer to DENY/ASK results.
+
+        Modifies the result in-place to include the fully-qualified config
+        path so users can easily disable the handler that blocked them.
+
+        Args:
+            result: HookResult to potentially modify
+            handler: Handler that produced the result (for config_key lookup)
+        """
+        if result.decision not in (Decision.DENY, Decision.ASK):
+            return
+        if handler is None:
+            return
+
+        # Convert event_name (e.g. "PreToolUse") to config key (e.g. "pre_tool_use")
+        try:
+            event_type = EventType.from_string(self.event_name)
+            event_config_key = event_type.name.lower()
+        except ValueError:
+            # Unknown event type - skip injection rather than crash
+            return
+
+        footer = _DISABLE_FOOTER_TEMPLATE.format(
+            event_config_key=event_config_key,
+            handler_config_key=handler.config_key,
+        )
+
+        if result.reason is None:
+            result.reason = footer.lstrip("\n")
+        else:
+            result.reason = result.reason + footer
 
     def run(self) -> None:
         """Main entry point - read stdin, dispatch, write output."""
