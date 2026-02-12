@@ -16,11 +16,6 @@ class DaemonLocationGuardHandler(Handler):
     Daemon commands should always be run from the project root.
     """
 
-    # Official upgrade command pattern (whitelisted)
-    OFFICIAL_UPGRADE_PATTERN = re.compile(
-        r"cd\s+\.claude/hooks-daemon\s+&&\s+git\s+pull\s+&&\s+cd\s+\.\./\.\.\s+&&.*upgrade"
-    )
-
     def __init__(self) -> None:
         super().__init__(
             handler_id=HandlerID.DAEMON_LOCATION_GUARD,
@@ -41,16 +36,11 @@ class DaemonLocationGuardHandler(Handler):
         Allows:
         - cd to other directories
         - ls/grep/other operations on hooks-daemon directory
-        - Official upgrade command pattern
         """
         if hook_input.get("tool_name") != "Bash":
             return False
 
         command = hook_input.get("tool_input", {}).get("command", "")
-
-        # Whitelist the official upgrade command
-        if self.OFFICIAL_UPGRADE_PATTERN.search(command):
-            return False
 
         # Match cd into hooks-daemon directory (relative or absolute paths)
         cd_pattern = re.compile(r"\bcd\s+(?:[./]*|/).*?\.claude/hooks-daemon\b")
@@ -77,9 +67,20 @@ class DaemonLocationGuardHandler(Handler):
             "  $PYTHON -m claude_code_hooks_daemon.daemon.cli status\n"
             "  $PYTHON -m claude_code_hooks_daemon.daemon.cli restart\n"
             "  $PYTHON -m claude_code_hooks_daemon.daemon.cli logs\n\n"
-            "📦 OFFICIAL UPGRADE COMMAND (whitelisted):\n"
-            "  cd .claude/hooks-daemon && git pull && cd ../.. && ./scripts/upgrade.sh\n\n"
-            "💡 TIP: Never cd into .claude/hooks-daemon/ unless running the official upgrade command."
+            "📦 CORRECT UPGRADE PROCESS:\n\n"
+            "  # Download latest upgrade script\n"
+            "  curl -fsSL https://raw.githubusercontent.com/anthropics/claude-code-hooks-daemon/main/scripts/upgrade.sh -o /tmp/upgrade.sh\n\n"
+            "  # Review it\n"
+            "  less /tmp/upgrade.sh\n\n"
+            "  # Run it (script handles all git operations)\n"
+            "  bash /tmp/upgrade.sh --project-root /workspace\n\n"
+            "  # Clean up\n"
+            "  rm /tmp/upgrade.sh\n\n"
+            "💡 The upgrade script handles all git operations internally.\n"
+            "   You never need to cd into .claude/hooks-daemon for upgrades.\n\n"
+            "⚠️  Manual upgrade (last resort only):\n"
+            "    If the script fails, you can temporarily disable this handler:\n"
+            "    .claude/hooks-daemon.yaml → daemon_location_guard.enabled: false"
         )
 
         return HookResult(
@@ -107,19 +108,6 @@ class DaemonLocationGuardHandler(Handler):
                     r"CORRECT USAGE",
                 ],
                 safety_notes="Using echo to test blocking - safe command",
-                test_type=TestType.BLOCKING,
-                requires_event="PreToolUse:Bash",
-            ),
-            AcceptanceTest(
-                title="daemon location guard allows official upgrade command",
-                command='echo "cd .claude/hooks-daemon && git pull && cd ../.. && ./scripts/upgrade.sh"',
-                description=(
-                    "Verify handler whitelists the official upgrade command pattern. "
-                    "Should allow the official upgrade workflow."
-                ),
-                expected_decision=Decision.ALLOW,
-                expected_message_patterns=[],
-                safety_notes="Using echo to test - safe command",
                 test_type=TestType.BLOCKING,
                 requires_event="PreToolUse:Bash",
             ),
