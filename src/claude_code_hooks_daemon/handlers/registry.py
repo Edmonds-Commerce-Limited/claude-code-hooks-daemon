@@ -324,7 +324,7 @@ class HandlerRegistry:
                             for option_key, option_value in merged_options.items():
                                 setattr(instance, f"_{option_key}", option_value)
 
-                            # Inject project-level language filter
+                            # Inject project-level language filter (via setattr like other options)
                             instance._project_languages = project_languages
 
                             router.register(event_type, instance)
