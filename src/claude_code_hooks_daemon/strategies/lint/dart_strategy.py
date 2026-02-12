@@ -44,17 +44,32 @@ class DartLintStrategy:
 
         return [
             AcceptanceTest(
-                title="Lint validation on Dart file write",
+                title="Dart lint - valid code passes",
                 command=(
                     "Use the Write tool to create file "
-                    "/tmp/acceptance-test-lint-dart/main.dart "
+                    "/tmp/acceptance-test-lint-dart/valid.dart "
                     "with content \"void main() { print('hello'); }\""
                 ),
-                description="Triggers lint validation after writing Dart file",
+                description="Valid Dart code should pass lint validation",
                 expected_decision=Decision.ALLOW,
-                expected_message_patterns=[r"Dart", r"lint"],
+                expected_message_patterns=[],
                 safety_notes="Uses /tmp path - safe. Creates temporary Dart file.",
                 test_type=TestType.ADVISORY,
+                setup_commands=["mkdir -p /tmp/acceptance-test-lint-dart"],
+                cleanup_commands=["rm -rf /tmp/acceptance-test-lint-dart"],
+            ),
+            AcceptanceTest(
+                title="Dart lint - invalid code blocked",
+                command=(
+                    "Use the Write tool to create file "
+                    "/tmp/acceptance-test-lint-dart/invalid.dart "
+                    "with content \"void main( { print('hello'); }\""
+                ),
+                description="Invalid Dart code (missing closing paren) should be blocked",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[r"Dart lint FAILED", r"invalid.dart"],
+                safety_notes="Uses /tmp path - safe. Creates temporary Dart file with syntax error.",
+                test_type=TestType.BLOCKING,
                 setup_commands=["mkdir -p /tmp/acceptance-test-lint-dart"],
                 cleanup_commands=["rm -rf /tmp/acceptance-test-lint-dart"],
             ),

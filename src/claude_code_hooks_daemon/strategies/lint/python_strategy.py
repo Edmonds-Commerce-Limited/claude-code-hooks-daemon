@@ -7,7 +7,7 @@ from claude_code_hooks_daemon.strategies.lint.common import COMMON_SKIP_PATHS
 # Language-specific constants
 _LANGUAGE_NAME = "Python"
 _EXTENSIONS: tuple[str, ...] = (".py",)
-_DEFAULT_LINT_COMMAND = "python -m py_compile {file}"
+_DEFAULT_LINT_COMMAND = "python3 -m py_compile {file}"
 _EXTENDED_LINT_COMMAND = "ruff check {file}"
 
 
@@ -44,17 +44,32 @@ class PythonLintStrategy:
 
         return [
             AcceptanceTest(
-                title="Lint validation on Python file write",
+                title="Python lint - valid code passes",
                 command=(
                     "Use the Write tool to create file "
-                    "/tmp/acceptance-test-lint-python/test.py "
+                    "/tmp/acceptance-test-lint-python/valid.py "
                     "with content \"def hello():\\n    print('hello')\""
                 ),
-                description="Triggers lint validation after writing Python file",
+                description="Valid Python code should pass lint validation",
                 expected_decision=Decision.ALLOW,
-                expected_message_patterns=[r"Python", r"lint"],
+                expected_message_patterns=[],
                 safety_notes="Uses /tmp path - safe. Creates temporary Python file.",
                 test_type=TestType.ADVISORY,
+                setup_commands=["mkdir -p /tmp/acceptance-test-lint-python"],
+                cleanup_commands=["rm -rf /tmp/acceptance-test-lint-python"],
+            ),
+            AcceptanceTest(
+                title="Python lint - invalid code blocked",
+                command=(
+                    "Use the Write tool to create file "
+                    "/tmp/acceptance-test-lint-python/invalid.py "
+                    "with content \"def hello(\\n    print('hello')\""
+                ),
+                description="Invalid Python code (missing closing paren) should be blocked",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[r"Python lint FAILED", r"invalid.py", r"SyntaxError"],
+                safety_notes="Uses /tmp path - safe. Creates temporary Python file with syntax error.",
+                test_type=TestType.BLOCKING,
                 setup_commands=["mkdir -p /tmp/acceptance-test-lint-python"],
                 cleanup_commands=["rm -rf /tmp/acceptance-test-lint-python"],
             ),

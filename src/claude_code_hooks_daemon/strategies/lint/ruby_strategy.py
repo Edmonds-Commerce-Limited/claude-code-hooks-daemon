@@ -44,17 +44,32 @@ class RubyLintStrategy:
 
         return [
             AcceptanceTest(
-                title="Lint validation on Ruby file write",
+                title="Ruby lint - valid code passes",
                 command=(
                     "Use the Write tool to create file "
-                    "/tmp/acceptance-test-lint-ruby/test.rb "
+                    "/tmp/acceptance-test-lint-ruby/valid.rb "
                     "with content \"puts 'hello'\""
                 ),
-                description="Triggers lint validation after writing Ruby file",
+                description="Valid Ruby code should pass lint validation",
                 expected_decision=Decision.ALLOW,
-                expected_message_patterns=[r"Ruby", r"lint"],
+                expected_message_patterns=[],
                 safety_notes="Uses /tmp path - safe. Creates temporary Ruby file.",
                 test_type=TestType.ADVISORY,
+                setup_commands=["mkdir -p /tmp/acceptance-test-lint-ruby"],
+                cleanup_commands=["rm -rf /tmp/acceptance-test-lint-ruby"],
+            ),
+            AcceptanceTest(
+                title="Ruby lint - invalid code blocked",
+                command=(
+                    "Use the Write tool to create file "
+                    "/tmp/acceptance-test-lint-ruby/invalid.rb "
+                    "with content \"def hello\\n  puts 'missing end'\""
+                ),
+                description="Invalid Ruby code (missing end) should be blocked",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[r"Ruby lint FAILED", r"invalid.rb"],
+                safety_notes="Uses /tmp path - safe. Creates temporary Ruby file with syntax error.",
+                test_type=TestType.BLOCKING,
                 setup_commands=["mkdir -p /tmp/acceptance-test-lint-ruby"],
                 cleanup_commands=["rm -rf /tmp/acceptance-test-lint-ruby"],
             ),

@@ -44,17 +44,32 @@ class SwiftLintStrategy:
 
         return [
             AcceptanceTest(
-                title="Lint validation on Swift file write",
+                title="Swift lint - valid code passes",
                 command=(
                     "Use the Write tool to create file "
-                    "/tmp/acceptance-test-lint-swift/main.swift "
+                    "/tmp/acceptance-test-lint-swift/valid.swift "
                     'with content "print(\\"hello\\")"'
                 ),
-                description="Triggers lint validation after writing Swift file",
+                description="Valid Swift code should pass lint validation",
                 expected_decision=Decision.ALLOW,
-                expected_message_patterns=[r"Swift", r"lint"],
+                expected_message_patterns=[],
                 safety_notes="Uses /tmp path - safe. Creates temporary Swift file.",
                 test_type=TestType.ADVISORY,
+                setup_commands=["mkdir -p /tmp/acceptance-test-lint-swift"],
+                cleanup_commands=["rm -rf /tmp/acceptance-test-lint-swift"],
+            ),
+            AcceptanceTest(
+                title="Swift lint - invalid code blocked",
+                command=(
+                    "Use the Write tool to create file "
+                    "/tmp/acceptance-test-lint-swift/invalid.swift "
+                    'with content "print(\\"hello"'
+                ),
+                description="Invalid Swift code (unclosed string) should be blocked",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[r"Swift lint FAILED", r"invalid.swift"],
+                safety_notes="Uses /tmp path - safe. Creates temporary Swift file with syntax error.",
+                test_type=TestType.BLOCKING,
                 setup_commands=["mkdir -p /tmp/acceptance-test-lint-swift"],
                 cleanup_commands=["rm -rf /tmp/acceptance-test-lint-swift"],
             ),

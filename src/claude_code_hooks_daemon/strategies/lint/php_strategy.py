@@ -44,17 +44,32 @@ class PhpLintStrategy:
 
         return [
             AcceptanceTest(
-                title="Lint validation on PHP file write",
+                title="PHP lint - valid code passes",
                 command=(
                     "Use the Write tool to create file "
-                    "/tmp/acceptance-test-lint-php/test.php "
+                    "/tmp/acceptance-test-lint-php/valid.php "
                     "with content \"<?php echo 'hello'; ?>\""
                 ),
-                description="Triggers lint validation after writing PHP file",
+                description="Valid PHP code should pass lint validation",
                 expected_decision=Decision.ALLOW,
-                expected_message_patterns=[r"PHP", r"lint"],
+                expected_message_patterns=[],
                 safety_notes="Uses /tmp path - safe. Creates temporary PHP file.",
                 test_type=TestType.ADVISORY,
+                setup_commands=["mkdir -p /tmp/acceptance-test-lint-php"],
+                cleanup_commands=["rm -rf /tmp/acceptance-test-lint-php"],
+            ),
+            AcceptanceTest(
+                title="PHP lint - invalid code blocked",
+                command=(
+                    "Use the Write tool to create file "
+                    "/tmp/acceptance-test-lint-php/invalid.php "
+                    "with content \"<?php echo 'hello' ?>\""
+                ),
+                description="Invalid PHP code (missing semicolon) should be blocked",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[r"PHP lint FAILED", r"invalid.php"],
+                safety_notes="Uses /tmp path - safe. Creates temporary PHP file with syntax error.",
+                test_type=TestType.BLOCKING,
                 setup_commands=["mkdir -p /tmp/acceptance-test-lint-php"],
                 cleanup_commands=["rm -rf /tmp/acceptance-test-lint-php"],
             ),

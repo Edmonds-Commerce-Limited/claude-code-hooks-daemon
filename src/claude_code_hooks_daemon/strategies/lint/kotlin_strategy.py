@@ -44,17 +44,32 @@ class KotlinLintStrategy:
 
         return [
             AcceptanceTest(
-                title="Lint validation on Kotlin file write",
+                title="Kotlin lint - valid code passes",
                 command=(
                     "Use the Write tool to create file "
-                    "/tmp/acceptance-test-lint-kotlin/Main.kt "
+                    "/tmp/acceptance-test-lint-kotlin/valid.kt "
                     'with content "fun main() { println(\\"hello\\") }"'
                 ),
-                description="Triggers lint validation after writing Kotlin file",
+                description="Valid Kotlin code should pass lint validation",
                 expected_decision=Decision.ALLOW,
-                expected_message_patterns=[r"Kotlin", r"lint"],
+                expected_message_patterns=[],
                 safety_notes="Uses /tmp path - safe. Creates temporary Kotlin file.",
                 test_type=TestType.ADVISORY,
+                setup_commands=["mkdir -p /tmp/acceptance-test-lint-kotlin"],
+                cleanup_commands=["rm -rf /tmp/acceptance-test-lint-kotlin"],
+            ),
+            AcceptanceTest(
+                title="Kotlin lint - invalid code blocked",
+                command=(
+                    "Use the Write tool to create file "
+                    "/tmp/acceptance-test-lint-kotlin/invalid.kt "
+                    'with content "fun main( { println(\\"hello\\") }"'
+                ),
+                description="Invalid Kotlin code (missing closing paren) should be blocked",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[r"Kotlin lint FAILED", r"invalid.kt"],
+                safety_notes="Uses /tmp path - safe. Creates temporary Kotlin file with syntax error.",
+                test_type=TestType.BLOCKING,
                 setup_commands=["mkdir -p /tmp/acceptance-test-lint-kotlin"],
                 cleanup_commands=["rm -rf /tmp/acceptance-test-lint-kotlin"],
             ),
