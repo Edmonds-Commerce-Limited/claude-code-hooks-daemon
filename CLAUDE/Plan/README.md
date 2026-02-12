@@ -17,6 +17,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00038: Library Handler Over-fitting](00038-library-handler-over-fitting/PLAN.md) - Not Started
   - Address handlers that over-fit to project-specific assumptions
 
+- [00041: Project-Level Handlers First-Class DX](00041-project-handlers-first-class-dx/PLAN.md) - In Progress
+  - Phases 1-4 complete. Phase 5 (release prep: migration guide, changelog, final QA) remaining
+
 - [00045: Proper Language Strategy](00045-proper-language-strategy/PLAN.md) - Proposed
   - Proper language strategy pattern implementation
 
@@ -26,9 +29,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00048: Repository Cruft Cleanup](Completed/00048-repo-cruft-cleanup/PLAN.md) - Complete
   - Spurious files deleted, empty plans removed, auto-named folders renamed
-
-- [00041: Project-Level Handlers First-Class DX](Completed/00041-project-handlers-first-class-dx/PLAN.md) - Complete (reduced scope)
-  - Phases 1-3 complete: scaffolding CLI, validation, test runner. Phase 4-5 (external dogfooding) deferred
 
 - [00053: LLM QA Wrapper Script](Completed/00053-llm-qa-wrappers/PLAN.md) - Complete
   - Unified `scripts/qa/llm_qa.py` producing ~16 lines vs 200+ from run_all.sh
@@ -327,8 +327,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 53
-- **Completed**: 46 (2 with reduced scope)
-- **Active**: 5 (5 not started/proposed)
+- **Completed**: 45 (1 with reduced scope)
+- **Active**: 6 (1 in progress, 5 not started/proposed)
 - **Cancelled/Abandoned**: 2 (00036 - empty draft deleted, 00044 - approach retired)
 
 ## Quick Links
