@@ -286,6 +286,77 @@ def get_llm_command_guide_path() -> str:
 - [ ] Daemon loads successfully
 - [ ] Guide is readable and useful when an LLM reads it
 
+## Future Phase: Standalone Wrapper Repository
+
+**Status**: Deferred (separate project, tackle after daemon guide is done)
+
+### Concept
+
+A standalone GitHub repo of ready-made LLM command wrapper scripts - one per tool. Users grab individual scripts via raw URL rather than cloning the whole repo.
+
+```
+llm-command-wrappers/
+  eslint/
+    llm-lint.sh          # The wrapper script
+    schema.json          # JSON output schema
+    README.md            # Usage + example jq queries
+  pytest/
+    llm-test.sh
+    schema.json
+    README.md
+  phpstan/
+    llm-analyse.sh
+    schema.json
+    README.md
+  ruff/
+    llm-lint.sh
+    ...
+```
+
+**Usage**: `curl -O https://raw.githubusercontent.com/.../eslint/llm-lint.sh`
+
+### Implementation Language Considerations
+
+JSON generation in bash is fragile. Wrapper scripts need a real language. Options:
+
+| Language | Availability Assumption | Pros | Cons |
+|----------|------------------------|------|------|
+| **Node.js** | Claude Code users always have it | Native JSON, cross-platform | Not available in non-Node projects without Claude Code |
+| **Python 3.11+** | Hooks daemon requires it | Native JSON, always available if daemon installed | Version fragmentation on some systems |
+| **The tool's own language** | By definition available | Natural fit, no extra dependency | Different language per wrapper, inconsistent |
+
+**Recommended approach**: Each wrapper checks what's available:
+1. If it's a language-specific tool (e.g., pytest), use that language (Python)
+2. If Node is available (Claude Code context), use Node for the JSON bits
+3. Fallback: Python 3.11+ (daemon dependency guarantees it)
+
+### Per-Tool Considerations
+
+For each tool, check:
+1. **Does it have native JSON output?** (e.g., `eslint --format json`, `pytest --json-report`, `ruff --output-format json`)
+   - If yes: wrapper is thin (just redirects JSON to file + summarises)
+   - If no: wrapper must parse text output and generate JSON (needs real language)
+2. **What's the output structure?** Define a schema per tool
+3. **What are the common jq queries?** Document per tool
+4. **Version compatibility** - which tool versions support JSON output?
+
+### Repo Structure
+
+Each tool directory is self-contained:
+- `llm-{action}.sh` - Entry point (thin shell that delegates to language-specific logic)
+- `schema.json` - JSON Schema for the output format
+- `README.md` - Usage, jq examples, version requirements
+- Optional: `llm-{action}.py` or `llm-{action}.js` for the heavy lifting
+
+### Action Items (When We Get To This)
+
+- [ ] Create GitHub repo `llm-command-wrappers`
+- [ ] Define the wrapper contract (stdout format, JSON contract, exit codes)
+- [ ] Audit popular tools for native JSON output support
+- [ ] Implement first batch: ESLint, pytest, ruff, mypy, PHPStan
+- [ ] Update daemon guide (Plan 052 Phase 1) to reference the repo
+- [ ] Update NPM advisory handler to link to specific wrapper scripts
+
 ## Notes & Updates
 
 ### 2026-02-12
@@ -293,3 +364,6 @@ def get_llm_command_guide_path() -> str:
 - Key idea: ship a detailed guide as a prompt file that LLMs can read to implement wrappers
 - Guide lives in the daemon package so it's available everywhere the daemon is installed
 - Handlers reference the guide by path instead of inlining verbose advice
+- Added future phase: standalone repo of ready-made wrapper scripts (grab individually via raw URL)
+- Language choice: use the tool's own language where possible, Node for Claude Code context, Python 3.11+ as fallback
+- Each tool needs audit for native JSON output support before writing wrapper
