@@ -48,7 +48,7 @@ class PhpLintStrategy:
                 command=(
                     "Use the Write tool to create file "
                     "/tmp/acceptance-test-lint-php/test.php "
-                    'with content "<?php echo \'hello\'; ?>"'
+                    "with content \"<?php echo 'hello'; ?>\""
                 ),
                 description="Triggers lint validation after writing PHP file",
                 expected_decision=Decision.ALLOW,

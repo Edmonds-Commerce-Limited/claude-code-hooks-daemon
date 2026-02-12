@@ -25,6 +25,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00054: Lint-on-Edit Handler with Strategy Pattern](Completed/00054-lint-on-edit-strategy-pattern/PLAN.md) - Complete
+  - Language-aware lint validation handler using Strategy Pattern (9 languages)
+  - Shell/bash support added (default: bash -n, extended: shellcheck)
+  - Per-language default and extended lint commands with config overrides
+  - Full TDD, 145 tests (119 strategy + 26 handler), QA passing, daemon verified
+
 - [00041: Project-Level Handlers First-Class DX](Completed/00041-project-handlers-first-class-dx/PLAN.md) - Complete
   - First-class project-level handler system: auto-discovery, CLI scaffolding/validation/testing, examples, docs
   - All 5 phases complete: core infrastructure, CLI DX, documentation, dogfooding, release prep
@@ -328,9 +334,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 53
-- **Completed**: 46 (1 with reduced scope)
-- **Active**: 5 (all not started/proposed)
+- **Total Plans Created**: 54
+- **Completed**: 47 (1 with reduced scope)
+- **Active**: 4 (all not started/proposed)
 - **Cancelled/Abandoned**: 2 (00036 - empty draft deleted, 00044 - approach retired)
 
 ## Quick Links

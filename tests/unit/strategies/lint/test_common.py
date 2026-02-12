@@ -1,7 +1,5 @@
 """Tests for Lint Strategy common utilities."""
 
-import pytest
-
 from claude_code_hooks_daemon.strategies.lint.common import (
     COMMON_SKIP_PATHS,
     matches_skip_path,
@@ -62,4 +60,6 @@ class TestMatchesSkipPath:
         assert matches_skip_path("/workspace/anything/foo.py", ()) is False
 
     def test_matches_venv(self) -> None:
-        assert matches_skip_path("/workspace/.venv/lib/python3.12/site.py", COMMON_SKIP_PATHS) is True
+        assert (
+            matches_skip_path("/workspace/.venv/lib/python3.12/site.py", COMMON_SKIP_PATHS) is True
+        )

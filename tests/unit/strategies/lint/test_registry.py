@@ -4,7 +4,6 @@ from typing import Any
 
 import pytest
 
-from claude_code_hooks_daemon.strategies.lint.protocol import LintStrategy
 from claude_code_hooks_daemon.strategies.lint.registry import LintStrategyRegistry
 
 
@@ -120,7 +119,9 @@ class TestFilterByLanguages:
         registry.filter_by_languages([])
         assert len(registry.registered_languages) == 3
 
-    def test_filter_removes_all_extensions_of_language(self, registry: LintStrategyRegistry) -> None:
+    def test_filter_removes_all_extensions_of_language(
+        self, registry: LintStrategyRegistry
+    ) -> None:
         registry.filter_by_languages(["Python"])
         assert registry.get_strategy("/workspace/script.sh") is None
         assert registry.get_strategy("/workspace/script.bash") is None

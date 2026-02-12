@@ -2,8 +2,8 @@
 
 import pytest
 
-from claude_code_hooks_daemon.strategies.lint.protocol import LintStrategy
 from claude_code_hooks_daemon.strategies.lint.php_strategy import PhpLintStrategy
+from claude_code_hooks_daemon.strategies.lint.protocol import LintStrategy
 
 
 @pytest.fixture()
