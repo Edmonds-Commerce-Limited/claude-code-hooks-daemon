@@ -222,10 +222,12 @@ class HandlerRegistry:
                                 if self._workspace_root:
                                     options["workspace_root"] = self._workspace_root
                                 options_registry[registry_key] = options
-                            except (
-                                Exception
-                            ):  # nosec B110 - handler config options are optional, non-critical
-                                pass
+                            except Exception:
+                                logger.debug(
+                                    "Failed to collect options for handler '%s': %s",
+                                    config_key,
+                                    exc_info=True,
+                                )
 
         # PASS 2: Register handlers with inherited options
         count = 0

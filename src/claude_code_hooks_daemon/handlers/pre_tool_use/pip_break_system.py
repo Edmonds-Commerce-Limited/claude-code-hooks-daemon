@@ -32,7 +32,7 @@ class PipBreakSystemHandler(Handler):
     def __init__(self) -> None:
         """Initialize handler with safety-critical priority."""
         super().__init__(
-            name=HandlerID.PIP_BREAK_SYSTEM.display_name,
+            handler_id=HandlerID.PIP_BREAK_SYSTEM,
             priority=Priority.PIP_BREAK_SYSTEM,
             terminal=True,
         )
