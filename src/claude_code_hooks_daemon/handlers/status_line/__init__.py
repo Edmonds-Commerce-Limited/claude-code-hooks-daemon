@@ -16,6 +16,9 @@ from claude_code_hooks_daemon.handlers.status_line.model_context import ModelCon
 from claude_code_hooks_daemon.handlers.status_line.usage_tracking import (
     UsageTrackingHandler,
 )
+from claude_code_hooks_daemon.handlers.status_line.working_directory import (
+    WorkingDirectoryHandler,
+)
 
 __all__ = [
     "AccountDisplayHandler",
@@ -25,4 +28,5 @@ __all__ = [
     "GitRepoNameHandler",
     "ModelContextHandler",
     "UsageTrackingHandler",
+    "WorkingDirectoryHandler",
 ]

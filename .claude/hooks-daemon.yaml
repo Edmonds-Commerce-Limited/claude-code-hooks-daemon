@@ -302,6 +302,10 @@ handlers:
       enabled: true
       priority: 25
 
+    working_directory:  # Shows current working directory when different from project root
+      enabled: true
+      priority: 25
+
     daemon_stats:   # Shows daemon uptime, memory, log level
       enabled: true
       priority: 30

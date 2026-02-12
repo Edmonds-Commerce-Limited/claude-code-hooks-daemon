@@ -110,6 +110,7 @@ class Priority:
     THINKING_MODE = 12
     CURRENT_TIME = 14
     USAGE_TRACKING = 15
+    WORKING_DIRECTORY = 25
 
     # Special handlers (no fixed priority in catalog)
     # These handlers set priority dynamically or don't use the standard system
