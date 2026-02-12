@@ -31,7 +31,8 @@ echo "Running mypy type checker..."
 
 # Run mypy with machine-readable output
 # Note: mypy doesn't output JSON natively, so we parse text output
-if venv_tool mypy src/ --no-error-summary 2>&1 | tee "${OUTPUT_FILE}.raw"; then
+# --no-color-output ensures clean text for regex parsing (ANSI codes break the parser)
+if venv_tool mypy src/ --no-error-summary --no-color-output 2>&1 | tee "${OUTPUT_FILE}.raw"; then
     EXIT_CODE=0
 else
     EXIT_CODE=$?

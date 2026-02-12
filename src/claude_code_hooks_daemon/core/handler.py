@@ -46,6 +46,7 @@ class Handler(ABC):
     """
 
     __slots__ = (
+        "_project_languages",
         "config_key",
         "depends_on",
         "handler_id",
@@ -55,6 +56,8 @@ class Handler(ABC):
         "tags",
         "terminal",
     )
+
+    _project_languages: list[str] | None
 
     def __init__(
         self,

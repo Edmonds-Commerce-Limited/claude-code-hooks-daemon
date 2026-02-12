@@ -174,7 +174,8 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli status
 $PYTHON -m claude_code_hooks_daemon.daemon.cli restart
 
 # Development
-./scripts/qa/run_all.sh          # QA before commits
+./scripts/qa/llm_qa.py all       # QA before commits (LLM-optimized, ~16 lines)
+./scripts/qa/run_all.sh          # QA before commits (verbose, human-readable)
 ./scripts/debug_hooks.sh start   # Debug hook events
 ```
 
