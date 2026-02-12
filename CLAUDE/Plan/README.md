@@ -30,6 +30,17 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Delete spurious files, stale worktrees (~700MB), empty/duplicate plans, config backups
   - Rename auto-named plan folders to descriptive names
 
+- [00049: NPM Handler - LLM Command Detection & Advisory Mode](00049-npm-handler-llm-detection/PLAN.md) - Not Started
+  - Convert NPM handlers from hard blocking to smart advisory based on llm: command detection
+  - Detect package.json scripts, only enforce when llm: commands exist, otherwise advise
+  - **Priority**: Medium (UX improvement for projects without llm: wrappers)
+
+- [00050: Display Config Key in Handler Block/Deny Output](00050-handler-config-key-in-errors/PLAN.md) - Not Started
+  - Append fully-qualified config path (e.g., `handlers.pre_tool_use.destructive_git`) to every DENY/ASK message
+  - PHPStan-inspired: users can instantly see which config key to disable
+  - Implemented at FrontController level (zero handler modifications)
+  - **Priority**: Medium (UX improvement for handler discoverability)
+
 ## Completed Plans
 
 - [00047: User Feedback Resolution (v2.10.0)](Completed/00047-user-feedback-resolution/PLAN.md) - Complete
@@ -308,9 +319,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 48
+- **Total Plans Created**: 50
 - **Completed**: 39 (1 with reduced scope)
-- **Active**: 8 (1 in progress, 5 not started, 1 proposed, 1 cleanup)
+- **Active**: 10 (1 in progress, 7 not started, 1 proposed, 1 cleanup)
 - **Cancelled/Abandoned**: 1 (00036 - empty draft, deleted)
 
 ## Quick Links
