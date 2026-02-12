@@ -34,6 +34,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00053: LLM QA Wrapper Script](Completed/00053-llm-qa-wrappers/PLAN.md) - Complete
+  - Unified `scripts/qa/llm_qa.py` producing ~16 lines vs 200+ from run_all.sh
+  - Fixed run_type_check.sh ANSI color codes breaking JSON error parsing
+  - Fixed Handler missing _project_languages in __slots__/type annotation
+
 - [00052: LLM Command Wrapper Guide & Handler Integration](Completed/00052-llm-command-wrapper-guide/PLAN.md) - Complete
   - Language-agnostic guide shipped with daemon, utility for path resolution, handler advisory references guide
 
@@ -324,8 +329,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 52
-- **Completed**: 43 (1 with reduced scope)
+- **Total Plans Created**: 53
+- **Completed**: 44 (1 with reduced scope)
 - **Active**: 8 (1 in progress, 5 not started, 1 proposed, 1 cleanup)
 - **Cancelled/Abandoned**: 1 (00036 - empty draft, deleted)
 
