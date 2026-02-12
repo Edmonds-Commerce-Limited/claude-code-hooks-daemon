@@ -36,6 +36,9 @@ class DestructiveGitHandler(Handler):
             r"\bgit\s+stash\s+(?:drop|clear)\b",
             # Block force push
             r"\bgit\s+push\s+.*--force\b",
+            # Block force branch deletion (bypasses merge check, can lose unmerged work)
+            # Uses (?-i:) to match only uppercase -D (lowercase -d is safe, checks merge status)
+            r"\bgit\s+branch\s+.*(?-i:-D)\b",
         ]
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
@@ -115,6 +118,10 @@ class DestructiveGitHandler(Handler):
         elif re.search(r"\bgit\s+push\s+.*--force\b", command, re.IGNORECASE):
             specific_reason = (
                 "git push --force can overwrite remote history and destroy team members' work"
+            )
+        elif re.search(r"\bgit\s+branch\s+.*(?-i:-D)\b", command, re.IGNORECASE):
+            specific_reason = (
+                "git branch -D force-deletes a branch without checking if it has been merged"
             )
         else:
             specific_reason = "This git command destroys uncommitted changes permanently"
@@ -209,6 +216,18 @@ class DestructiveGitHandler(Handler):
                     r"permanently",
                 ],
                 safety_notes="Uses non-existent file path - would fail harmlessly if executed",
+                test_type=TestType.BLOCKING,
+            ),
+            AcceptanceTest(
+                title="git branch -D",
+                command='echo "git branch -D NONEXISTENT_SAFE_TEST_BRANCH"',
+                description="Blocks git branch -D (force-deletes branch without merge check)",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"force-deletes.*branch",
+                    r"merged",
+                ],
+                safety_notes="Uses non-existent branch - would fail harmlessly if executed",
                 test_type=TestType.BLOCKING,
             ),
             AcceptanceTest(

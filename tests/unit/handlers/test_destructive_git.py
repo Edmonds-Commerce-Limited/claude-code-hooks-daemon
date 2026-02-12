@@ -29,9 +29,9 @@ class TestDestructiveGitHandler:
         assert handler.terminal is True
 
     def test_init_creates_destructive_patterns_list(self, handler):
-        """Handler should initialize with 7 destructive patterns."""
+        """Handler should initialize with 8 destructive patterns."""
         assert hasattr(handler, "destructive_patterns")
-        assert len(handler.destructive_patterns) == 7
+        assert len(handler.destructive_patterns) == 8
 
     # matches() - Pattern 1: git reset --hard
     def test_matches_git_reset_hard(self, handler):
@@ -199,6 +199,30 @@ class TestDestructiveGitHandler:
         """Should match 'git stash clear' command."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash clear"}}
         assert handler.matches(hook_input) is True
+
+    # matches() - Pattern 8: git branch -D (force delete)
+    def test_matches_git_branch_force_delete(self, handler):
+        """Should match 'git branch -D' command."""
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git branch -D feature"}}
+        assert handler.matches(hook_input) is True
+
+    def test_matches_git_branch_force_delete_with_path(self, handler):
+        """Should match 'git branch -D' with branch name containing slashes."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git branch -D feature/my-branch"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_git_branch_force_delete_case_insensitive(self, handler):
+        """Should match 'git branch -D' case-insensitively."""
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "GIT BRANCH -D mybranch"}}
+        assert handler.matches(hook_input) is True
+
+    def test_matches_git_branch_lowercase_d_returns_false(self, handler):
+        """Should NOT match 'git branch -d' (safe delete with merge check)."""
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git branch -d feature"}}
+        assert handler.matches(hook_input) is False
 
     # matches() - Negative Cases: Safe git commands
     def test_matches_git_reset_soft_returns_false(self, handler):
@@ -375,6 +399,19 @@ class TestDestructiveGitHandler:
         assert result.decision == "deny"
         assert "git restore discards all local changes to files permanently" in result.reason
 
+    def test_handle_git_branch_force_delete_reason(self, handler):
+        """handle() should provide specific reason for git branch -D."""
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 0
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git branch -D feature"}}
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
+        assert result.decision == "deny"
+        assert "git branch -D force-deletes a branch" in result.reason
+
     def test_handle_generic_destructive_reason(self, handler):
         """handle() should provide generic reason for other patterns."""
         mock_dl = MagicMock()
@@ -525,6 +562,7 @@ class TestDestructiveGitHandler:
             "git restore --worktree file.txt",
             "git stash drop",
             "git stash clear",
+            "git branch -D feature",
         ]
         for cmd in destructive_commands:
             hook_input = {"tool_name": "Bash", "tool_input": {"command": cmd}}
@@ -547,6 +585,7 @@ class TestDestructiveGitHandler:
             "git commit -m 'message'",
             "git add .",
             "git push",
+            "git branch -d feature",
         ]
         for cmd in safe_commands:
             hook_input = {"tool_name": "Bash", "tool_input": {"command": cmd}}

@@ -81,7 +81,7 @@ class LockFileEditBlockerHandler(Handler):
     def __init__(self) -> None:
         """Initialize handler with safety-critical priority."""
         super().__init__(
-            name=HandlerID.LOCK_FILE_EDIT_BLOCKER.display_name,
+            handler_id=HandlerID.LOCK_FILE_EDIT_BLOCKER,
             priority=Priority.LOCK_FILE_EDIT_BLOCKER,
             terminal=True,
         )

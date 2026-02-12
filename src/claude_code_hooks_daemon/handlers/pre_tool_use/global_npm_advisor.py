@@ -35,7 +35,7 @@ class GlobalNpmAdvisorHandler(Handler):
     def __init__(self) -> None:
         """Initialize handler with workflow advisory priority."""
         super().__init__(
-            name=HandlerID.GLOBAL_NPM_ADVISOR.display_name,
+            handler_id=HandlerID.GLOBAL_NPM_ADVISOR,
             priority=Priority.GLOBAL_NPM_ADVISOR,
             terminal=False,  # Non-blocking
         )

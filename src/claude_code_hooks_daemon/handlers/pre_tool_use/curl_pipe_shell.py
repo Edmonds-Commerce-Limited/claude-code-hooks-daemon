@@ -38,7 +38,7 @@ class CurlPipeShellHandler(Handler):
     def __init__(self) -> None:
         """Initialize handler with safety-critical priority."""
         super().__init__(
-            name=HandlerID.CURL_PIPE_SHELL.display_name,
+            handler_id=HandlerID.CURL_PIPE_SHELL,
             priority=Priority.CURL_PIPE_SHELL,
             terminal=True,
         )

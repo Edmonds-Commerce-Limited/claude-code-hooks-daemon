@@ -36,7 +36,7 @@ class DangerousPermissionsHandler(Handler):
     def __init__(self) -> None:
         """Initialize handler with safety-critical priority."""
         super().__init__(
-            name=HandlerID.DANGEROUS_PERMISSIONS.display_name,
+            handler_id=HandlerID.DANGEROUS_PERMISSIONS,
             priority=Priority.DANGEROUS_PERMISSIONS,
             terminal=True,
         )

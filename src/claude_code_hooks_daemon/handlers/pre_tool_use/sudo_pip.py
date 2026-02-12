@@ -31,7 +31,7 @@ class SudoPipHandler(Handler):
     def __init__(self) -> None:
         """Initialize handler with safety-critical priority."""
         super().__init__(
-            name=HandlerID.SUDO_PIP.display_name,
+            handler_id=HandlerID.SUDO_PIP,
             priority=Priority.SUDO_PIP,
             terminal=True,
         )
