@@ -387,6 +387,13 @@ class HandlerID:
         display_name="status-thinking-mode",
     )
 
+    # Working directory status (status line)
+    WORKING_DIRECTORY = HandlerIDMeta(
+        class_name="WorkingDirectoryHandler",
+        config_key="working_directory",
+        display_name="status-working-directory",
+    )
+
     # Optimal config checker (SessionStart handler)
     OPTIMAL_CONFIG_CHECKER = HandlerIDMeta(
         class_name="OptimalConfigCheckerHandler",
@@ -481,6 +488,7 @@ HandlerKey = Literal[
     "account_display",
     "model_context",
     "usage_tracking",
+    "working_directory",
     # Workflow state handlers
     "workflow_state_restoration",
     "workflow_state_pre_compact",
