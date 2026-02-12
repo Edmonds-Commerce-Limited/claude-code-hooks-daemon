@@ -10,6 +10,7 @@ from typing import Any, ClassVar
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.utils.guides import get_llm_command_guide_path
 from claude_code_hooks_daemon.utils.npm import has_llm_commands_in_package_json
 
 
@@ -132,6 +133,7 @@ class NpmCommandHandler(Handler):
 
         # Advisory mode: no llm: commands in package.json
         if not self.has_llm_commands:
+            guide_path = get_llm_command_guide_path()
             return HookResult(
                 decision=Decision.ALLOW,
                 reason=(
@@ -144,6 +146,7 @@ class NpmCommandHandler(Handler):
                     f"Example package.json script:\n"
                     f'  "llm:{npm_cmd if npm_match else suggested}": '
                     f'"<tool> --format json --output-file ./var/qa/<tool>-cache.json"\n\n'
+                    f"Full guide: {guide_path}\n\n"
                     f"This command will run for now, but consider adding llm: wrappers."
                 ),
             )

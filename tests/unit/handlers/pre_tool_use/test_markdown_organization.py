@@ -255,6 +255,22 @@ class TestMarkdownOrganizationHandler:
         write_input["tool_input"]["file_path"] = "eslint-rules/test.md"
         assert handler.matches(write_input) is False
 
+    def test_matches_returns_false_for_daemon_guides(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Handler allows markdown in src/claude_code_hooks_daemon/guides/ directory."""
+        write_input["tool_input"][
+            "file_path"
+        ] = "src/claude_code_hooks_daemon/guides/llm-command-wrappers.md"
+        assert handler.matches(write_input) is False
+
+    def test_matches_returns_true_for_other_src_markdown(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Handler still blocks markdown in other src/ locations."""
+        write_input["tool_input"]["file_path"] = "src/claude_code_hooks_daemon/other.md"
+        assert handler.matches(write_input) is True
+
     def test_matches_returns_false_for_page_colocated_files(
         self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
     ) -> None:

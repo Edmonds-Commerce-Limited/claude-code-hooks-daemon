@@ -431,6 +431,30 @@ class TestValidateEslintOnWriteHandler:
         mock_run.assert_not_called()
 
     @patch("subprocess.run")
+    def test_advisory_mode_includes_guide_path(self, mock_run: MagicMock, tmp_path: Path) -> None:
+        """Advisory mode includes path to LLM command wrapper guide."""
+        with patch(
+            "claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write.has_llm_commands_in_package_json",
+            return_value=False,
+        ):
+            handler = ValidateEslintOnWriteHandler(workspace_root=tmp_path)
+
+        test_file = tmp_path / "test.ts"
+        test_file.write_text("const x = 1;")
+
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(test_file)},
+        }
+
+        result = handler.handle(hook_input)
+
+        assert result.decision == Decision.ALLOW
+        assert "Full guide:" in result.reason
+        assert "llm-command-wrappers.md" in result.reason
+        mock_run.assert_not_called()
+
+    @patch("subprocess.run")
     def test_enforcement_mode_runs_eslint(self, mock_run: MagicMock, tmp_path: Path) -> None:
         """Enforcement mode (llm commands exist) runs ESLint as before."""
         with patch(
