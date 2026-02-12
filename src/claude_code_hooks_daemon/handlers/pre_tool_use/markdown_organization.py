@@ -51,6 +51,9 @@ class MarkdownOrganizationHandler(Handler):
         self._workspace_root: Path = ProjectContext.project_root()
         self._track_plans_in_project: str | None = None  # Path to plan folder or None
         self._plan_workflow_docs: str | None = None  # Path to workflow doc or None
+        self._monorepo_subproject_patterns: list[str] | None = (
+            None  # Regex patterns for sub-projects
+        )
 
     def normalize_path(self, file_path: str) -> str:
         """Normalize file path to project-relative format.
@@ -129,6 +132,30 @@ class MarkdownOrganizationHandler(Handler):
         return bool(
             re.match(r"^src/pages/articles/.*/article-[^/]+\.md$", normalized, re.IGNORECASE)
         )
+
+    def strip_monorepo_prefix(self, normalized_path: str) -> str | None:
+        """Strip monorepo sub-project prefix from a normalized path.
+
+        If the path matches a configured monorepo sub-project pattern,
+        returns the path relative to the sub-project root. Otherwise
+        returns None (no match).
+
+        Args:
+            normalized_path: Already-normalized file path (no leading slash)
+
+        Returns:
+            Sub-project-relative path, or None if no pattern matches
+        """
+        if not self._monorepo_subproject_patterns:
+            return None
+
+        for pattern in self._monorepo_subproject_patterns:
+            # Pattern must match at the start of the path followed by /
+            match = re.match(rf"^({pattern})/(.+)$", normalized_path)
+            if match:
+                return match.group(2)
+
+        return None
 
     def is_planning_mode_write(self, file_path: str) -> bool:
         """Check if this is a Claude Code planning mode write.
@@ -378,8 +405,28 @@ class MarkdownOrganizationHandler(Handler):
         if self.is_page_colocated_file(file_path):
             return False
 
-        # Check allowed locations with PRECISE pattern matching (not simple 'in' checks)
+        # Check monorepo sub-project paths: strip prefix and validate remainder
+        subproject_relative = self.strip_monorepo_prefix(normalized)
+        if subproject_relative is not None:
+            # Path is within a configured monorepo sub-project.
+            # Apply the same organization rules to the sub-project-relative path.
+            return self._is_invalid_location(subproject_relative)
 
+        # For root-level paths, apply organization rules directly
+        return self._is_invalid_location(normalized)
+
+    def _is_invalid_location(self, normalized: str) -> bool:
+        """Check if a normalized path is in an invalid markdown location.
+
+        Applies organization rules to a path that is already relative to
+        a project root (either the repo root or a monorepo sub-project).
+
+        Args:
+            normalized: Project-relative normalized path
+
+        Returns:
+            True if the location is INVALID (should be blocked)
+        """
         # 0. src/claude_code_hooks_daemon/guides/ - Shipped guide files (part of daemon package)
         if re.match(r"^src/claude_code_hooks_daemon/guides/.*\.md$", normalized, re.IGNORECASE):
             return False  # Allow

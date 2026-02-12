@@ -635,3 +635,160 @@ class TestPlanningModeIntegration:
         # Should return DENY with error message
         assert result.decision == Decision.DENY
         assert "does not exist" in result.reason.lower() or "not found" in result.reason.lower()
+
+
+class TestMonorepoSupport:
+    """Tests for monorepo sub-project markdown organization.
+
+    In a monorepo, sub-projects at paths like packages/frontend/ may have
+    their own CLAUDE/Plan/ structures. This requires explicit config to
+    designate the repo as a monorepo.
+    """
+
+    @pytest.fixture
+    def handler(self, tmp_path: Path) -> MarkdownOrganizationHandler:
+        """Create handler with monorepo config."""
+        handler = MarkdownOrganizationHandler()
+        handler._workspace_root = tmp_path
+        return handler
+
+    @pytest.fixture
+    def write_input(self) -> dict[str, Any]:
+        """Create sample Write hook input."""
+        return {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "", "content": "Test content"},
+        }
+
+    # ── Sub-project CLAUDE/ paths should be ALLOWED when monorepo enabled ──
+
+    def test_allows_subproject_claude_plan_with_monorepo_config(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Sub-project CLAUDE/Plan/ paths allowed when monorepo patterns configured."""
+        handler._monorepo_subproject_patterns = [r"packages/[^/]+"]
+        write_input["tool_input"]["file_path"] = "packages/frontend/CLAUDE/Plan/00001-foo/PLAN.md"
+        assert handler.matches(write_input) is False  # Allowed
+
+    def test_allows_subproject_claude_root_with_monorepo_config(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Sub-project CLAUDE/ root files allowed when monorepo patterns configured."""
+        handler._monorepo_subproject_patterns = [r"packages/[^/]+"]
+        write_input["tool_input"]["file_path"] = "packages/backend/CLAUDE/ARCHITECTURE.md"
+        assert handler.matches(write_input) is False  # Allowed
+
+    def test_allows_subproject_docs_with_monorepo_config(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Sub-project docs/ paths allowed when monorepo patterns configured."""
+        handler._monorepo_subproject_patterns = [r"packages/[^/]+"]
+        write_input["tool_input"]["file_path"] = "packages/frontend/docs/setup.md"
+        assert handler.matches(write_input) is False  # Allowed
+
+    def test_allows_subproject_untracked_with_monorepo_config(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Sub-project untracked/ paths allowed when monorepo patterns configured."""
+        handler._monorepo_subproject_patterns = [r"packages/[^/]+"]
+        write_input["tool_input"]["file_path"] = "packages/frontend/untracked/scratch.md"
+        assert handler.matches(write_input) is False  # Allowed
+
+    def test_allows_subproject_releases_with_monorepo_config(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Sub-project RELEASES/ paths allowed when monorepo patterns configured."""
+        handler._monorepo_subproject_patterns = [r"packages/[^/]+"]
+        write_input["tool_input"]["file_path"] = "packages/api/RELEASES/v1.0.0.md"
+        assert handler.matches(write_input) is False  # Allowed
+
+    # ── Sub-project invalid paths should still be BLOCKED ──
+
+    def test_blocks_subproject_invalid_location_with_monorepo_config(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Sub-project markdown in invalid locations still blocked in monorepo mode."""
+        handler._monorepo_subproject_patterns = [r"packages/[^/]+"]
+        write_input["tool_input"]["file_path"] = "packages/frontend/random/notes.md"
+        assert handler.matches(write_input) is True  # Blocked
+
+    def test_blocks_subproject_plan_without_number(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Sub-project plans without numeric prefix still blocked in monorepo mode."""
+        handler._monorepo_subproject_patterns = [r"packages/[^/]+"]
+        write_input["tool_input"]["file_path"] = "packages/frontend/CLAUDE/Plan/no-number/PLAN.md"
+        assert handler.matches(write_input) is True  # Blocked
+
+    # ── Without monorepo config, sub-project paths should be BLOCKED ──
+
+    def test_subproject_without_monorepo_config_falls_through_to_normalize(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Without monorepo config, paths fall through to normalize_path.
+
+        normalize_path strips to the first project marker (CLAUDE/, src/, etc.),
+        so paths containing these markers are accidentally allowed. This is
+        existing behavior we preserve for backward compatibility. The monorepo
+        config is needed for paths that DON'T contain markers (e.g. RELEASES/).
+        """
+        # No _monorepo_subproject_patterns set (default None)
+        # CLAUDE/ marker in path means normalize_path strips to CLAUDE/Plan/...
+        write_input["tool_input"]["file_path"] = "packages/frontend/CLAUDE/Plan/00001-foo/PLAN.md"
+        assert handler.matches(write_input) is False  # Allowed (via marker stripping)
+
+        # But RELEASES/ is NOT in normalize_path markers, so it's blocked
+        write_input["tool_input"]["file_path"] = "packages/api/RELEASES/v1.0.0.md"
+        assert handler.matches(write_input) is True  # Blocked (no marker match)
+
+    # ── Multiple patterns ──
+
+    def test_allows_multiple_subproject_patterns(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Multiple monorepo patterns all work."""
+        handler._monorepo_subproject_patterns = [r"packages/[^/]+", r"apps/[^/]+"]
+
+        write_input["tool_input"]["file_path"] = "packages/frontend/CLAUDE/test.md"
+        assert handler.matches(write_input) is False  # Allowed
+
+        write_input["tool_input"]["file_path"] = "apps/web/CLAUDE/test.md"
+        assert handler.matches(write_input) is False  # Allowed
+
+    # ── Nested depth patterns ──
+
+    def test_allows_deeper_subproject_patterns(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Deeper monorepo patterns work (e.g. org/team/project)."""
+        handler._monorepo_subproject_patterns = [r"org/[^/]+/[^/]+"]
+        write_input["tool_input"]["file_path"] = "org/myteam/myapp/CLAUDE/Plan/00001-foo/PLAN.md"
+        assert handler.matches(write_input) is False  # Allowed
+
+    # ── Non-matching paths unaffected ──
+
+    def test_monorepo_config_does_not_affect_root_project_paths(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Root-level CLAUDE/ paths still work when monorepo config is set."""
+        handler._monorepo_subproject_patterns = [r"packages/[^/]+"]
+        write_input["tool_input"]["file_path"] = "CLAUDE/Plan/00001-foo/PLAN.md"
+        assert handler.matches(write_input) is False  # Allowed (root project)
+
+    def test_monorepo_config_does_not_affect_unmatched_paths(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Paths not matching monorepo patterns still blocked normally."""
+        handler._monorepo_subproject_patterns = [r"packages/[^/]+"]
+        write_input["tool_input"]["file_path"] = "other/directory/notes.md"
+        assert handler.matches(write_input) is True  # Blocked
+
+    # ── CLAUDE.md and README.md in sub-projects ──
+
+    def test_allows_subproject_claude_md_with_monorepo_config(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """CLAUDE.md in sub-projects allowed (already allowed anywhere via adhoc check)."""
+        handler._monorepo_subproject_patterns = [r"packages/[^/]+"]
+        write_input["tool_input"]["file_path"] = "packages/frontend/CLAUDE.md"
+        assert handler.matches(write_input) is False  # Allowed
