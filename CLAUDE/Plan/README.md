@@ -31,18 +31,14 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Rename auto-named plan folders to descriptive names
 
 
-- [00052: LLM Command Wrapper Guide & Handler Integration](00052-llm-command-wrapper-guide/PLAN.md) - Not Started
-  - Language-agnostic guide for creating llm: prefixed command wrappers (shipped with daemon)
-  - Covers philosophy, stdout contract, JSON output, jq patterns, examples for 5+ ecosystems
-  - Handlers reference guide by path instead of inlining verbose advice
-  - **Priority**: Medium (enabler for cross-language LLM command adoption)
-
-- [00051: Critical Thinking Advisory Handler](00051-critical-thinking-advisory/PLAN.md) - Not Started
-  - UserPromptSubmit handler that encourages critical evaluation of user instructions
-  - Multi-gate filter (prompt length + random sampling + cooldown) to avoid context flooding
-  - **Priority**: Medium (UX improvement for agent quality)
 
 ## Completed Plans
+
+- [00052: LLM Command Wrapper Guide & Handler Integration](Completed/00052-llm-command-wrapper-guide/PLAN.md) - Complete
+  - Language-agnostic guide shipped with daemon, utility for path resolution, handler advisory references guide
+
+- [00051: Critical Thinking Advisory Handler](Completed/00051-critical-thinking-advisory/PLAN.md) - Complete
+  - UserPromptSubmit handler with multi-gate filter (length + random + cooldown)
 
 - [00050: Display Config Key in Handler Block/Deny Output](Completed/00050-handler-config-key-in-errors/PLAN.md) - Complete
   - Append fully-qualified config path to every DENY/ASK message (PHPStan-inspired UX)
@@ -329,8 +325,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 52
-- **Completed**: 41 (1 with reduced scope)
-- **Active**: 10 (1 in progress, 7 not started, 1 proposed, 1 cleanup)
+- **Completed**: 43 (1 with reduced scope)
+- **Active**: 8 (1 in progress, 5 not started, 1 proposed, 1 cleanup)
 - **Cancelled/Abandoned**: 1 (00036 - empty draft, deleted)
 
 ## Quick Links
