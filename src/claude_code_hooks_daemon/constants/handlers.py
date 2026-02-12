@@ -318,7 +318,12 @@ class HandlerID:
         display_name="advise-global-npm",
     )
 
-    # Advisory handlers (Priority: 60)
+    # Advisory handlers (Priority: 55-60)
+    CRITICAL_THINKING_ADVISORY = HandlerIDMeta(
+        class_name="CriticalThinkingAdvisoryHandler",
+        config_key="critical_thinking_advisory",
+        display_name="critical-thinking-advisory",
+    )
     BRITISH_ENGLISH = HandlerIDMeta(
         class_name="BritishEnglishHandler",
         config_key="british_english",
@@ -456,6 +461,7 @@ HandlerKey = Literal[
     "plan_completion_advisor",
     "global_npm_advisor",
     # Advisory handlers
+    "critical_thinking_advisory",
     "british_english",
     # Logging/cleanup handlers
     "notification_logger",

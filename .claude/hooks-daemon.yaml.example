@@ -212,6 +212,10 @@ handlers:
       enabled: true
       priority: 10
 
+    critical_thinking_advisory:  # Periodic advisory encouraging critical evaluation
+      enabled: false              # Enable for critical thinking nudges on substantial prompts
+      priority: 55
+
   # Other hook events
   permission_request:
     auto_approve_reads:  # Auto-approves read-only file operations

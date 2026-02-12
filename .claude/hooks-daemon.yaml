@@ -236,6 +236,10 @@ handlers:
       enabled: true
       priority: 10
 
+    critical_thinking_advisory:  # Periodic advisory encouraging critical evaluation
+      enabled: true
+      priority: 55
+
     # auto_continue:  # Auto-continues on 'continue' keyword
     #   enabled: false # Optional - enable for auto-continue behavior
     #   priority: 20
