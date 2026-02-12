@@ -130,6 +130,16 @@ handlers:
       options:
         track_plans_in_project: null  # Set to "CLAUDE/Plan" to enable plan tracking
         plan_workflow_docs: null      # Optional: path to workflow doc
+        # Monorepo support: uncomment and list sub-project directory patterns.
+        # Each entry is a regex matching a sub-project root directory.
+        # Sub-projects get their own CLAUDE/, docs/, RELEASES/, untracked/ etc.
+        # Examples:
+        #   monorepo_subproject_patterns:
+        #     - "packages/[^/]+"    # matches packages/frontend, packages/backend, etc.
+        #     - "apps/[^/]+"        # matches apps/web, apps/mobile, etc.
+        #     - "cluster"           # matches a single top-level sub-project folder
+        #     - "services"          # matches another top-level sub-project folder
+        monorepo_subproject_patterns: null
 
     # TOOL USAGE HANDLERS (Priority 50-60)
     web_search_year:       # Fixes year in web search queries (uses current year)
