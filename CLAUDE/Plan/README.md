@@ -17,8 +17,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00038: Library Handler Over-fitting](00038-library-handler-over-fitting/PLAN.md) - Not Started
   - Address handlers that over-fit to project-specific assumptions
 
-- [00041: Project-Level Handlers First-Class DX](00041-project-handlers-first-class-dx/PLAN.md) - In Progress
-  - Phases 1-4 complete. Phase 5 (release prep: migration guide, changelog, final QA) remaining
 
 - [00045: Proper Language Strategy](00045-proper-language-strategy/PLAN.md) - Proposed
   - Proper language strategy pattern implementation
@@ -26,6 +24,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 
 ## Completed Plans
+
+- [00041: Project-Level Handlers First-Class DX](Completed/00041-project-handlers-first-class-dx/PLAN.md) - Complete
+  - First-class project-level handler system: auto-discovery, CLI scaffolding/validation/testing, examples, docs
+  - All 5 phases complete: core infrastructure, CLI DX, documentation, dogfooding, release prep
 
 - [00048: Repository Cruft Cleanup](Completed/00048-repo-cruft-cleanup/PLAN.md) - Complete
   - Spurious files deleted, empty plans removed, auto-named folders renamed
@@ -327,8 +329,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 53
-- **Completed**: 45 (1 with reduced scope)
-- **Active**: 6 (1 in progress, 5 not started/proposed)
+- **Completed**: 46 (1 with reduced scope)
+- **Active**: 5 (all not started/proposed)
 - **Cancelled/Abandoned**: 2 (00036 - empty draft deleted, 00044 - approach retired)
 
 ## Quick Links

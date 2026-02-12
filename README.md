@@ -45,7 +45,7 @@ A daemon-based hooks system that eliminates process spawn overhead (~21ms) with 
 - **48 production handlers** across 10 event types (11 language strategies)
 - **5285 tests** with 95% coverage requirement
 - **Type-safe** - Full MyPy strict mode compliance
-- **Plugin system** - Easy to add project-specific handlers
+- **Project-level handlers** - First-class support for per-project custom handlers with auto-discovery
 - **Deterministic validation** - Fast pattern matching and rule enforcement
 
 ### Architectural Principle: Deterministic vs Agent-Based Hooks
@@ -735,28 +735,31 @@ handlers:
 
 #### Creating Your Own Project-Specific Handlers
 
-For your own project-specific handlers, use the plugin system:
+Projects can define their own handlers in `.claude/project-handlers/`. These are auto-discovered by convention, co-located with tests, and use the same Handler ABC as built-in handlers.
 
-1. Create a custom handler with `project-specific` tag:
-   ```python
-   class MyProjectHandler(Handler):
-       def __init__(self) -> None:
-           super().__init__(
-               name="my-project-validator",
-               priority=50,
-               tags=["project-specific", "validation"]
-           )
-   ```
+```bash
+# Scaffold project-handlers directory with example handler and tests
+$PYTHON -m claude_code_hooks_daemon.daemon.cli init-project-handlers
 
-2. Load via plugin configuration:
-   ```yaml
-   plugins:
-     plugins:
-       - path: ./my_project_handlers
-         enabled: true
-   ```
+# Validate handlers load correctly
+$PYTHON -m claude_code_hooks_daemon.daemon.cli validate-project-handlers
 
-See the Plugin System documentation for details.
+# Run project handler tests
+$PYTHON -m claude_code_hooks_daemon.daemon.cli test-project-handlers --verbose
+```
+
+**Directory structure**: Event-type subdirectories (`pre_tool_use/`, `post_tool_use/`, etc.) with handler `.py` files and co-located `test_` files.
+
+```yaml
+# .claude/hooks-daemon.yaml
+project_handlers:
+  enabled: true
+  path: .claude/project-handlers  # Default location
+```
+
+See `CLAUDE/PROJECT_HANDLERS.md` for the complete developer guide and examples.
+
+> **Migrating from plugins?** Project-level handlers replace the legacy plugin system for per-project customisation. Key differences: auto-discovery (no config per handler), event-type directories (no manual `hook_event_name` checks in `matches()`), co-located tests, and CLI tooling. The legacy plugin system still works for backward compatibility.
 
 ---
 
