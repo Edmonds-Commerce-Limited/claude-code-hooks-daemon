@@ -287,6 +287,10 @@ handlers:
       enabled: true
       priority: 12
 
+    current_time:   # Shows current local time (24-hour format)
+      enabled: true
+      priority: 14
+
     usage_tracking: # Tracks and displays usage statistics
       enabled: true
       priority: 60

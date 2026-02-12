@@ -105,8 +105,9 @@ class Priority:
     GIT_REPO_NAME = 3
     ACCOUNT_DISPLAY = 5
     MODEL_CONTEXT = 10
-    USAGE_TRACKING = 15
     THINKING_MODE = 12
+    CURRENT_TIME = 14
+    USAGE_TRACKING = 15
 
     # Special handlers (no fixed priority in catalog)
     # These handlers set priority dynamically or don't use the standard system
