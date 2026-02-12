@@ -51,7 +51,10 @@ class WorkingDirectoryHandler(Handler):
         # Calculate relative path
         try:
             relative_path = current_path.relative_to(project_path)
-            return HookResult(context=[f"| 📁 {relative_path}"])
+            # Display path in orange to make it visually distinct
+            orange = "\033[38;5;208m"
+            reset = "\033[0m"
+            return HookResult(context=[f"| 📁 {orange}{relative_path}{reset}"])
         except ValueError:
             # current_dir is not relative to project_dir (e.g., different drive on Windows)
             return HookResult(context=[])

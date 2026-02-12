@@ -65,7 +65,7 @@ class TestWorkingDirectoryHandler:
 
         assert result.decision == "allow"
         assert len(result.context) == 1
-        assert result.context[0] == "| 📁 src/handlers"
+        assert result.context[0] == "| 📁 \033[38;5;208msrc/handlers\033[0m"
 
     def test_handle_returns_relative_path_with_single_level(self, handler):
         """Should return relative path for single level subdirectory."""
@@ -79,7 +79,7 @@ class TestWorkingDirectoryHandler:
 
         assert result.decision == "allow"
         assert len(result.context) == 1
-        assert result.context[0] == "| 📁 tests"
+        assert result.context[0] == "| 📁 \033[38;5;208mtests\033[0m"
 
     def test_handle_returns_relative_path_with_deep_nesting(self, handler):
         """Should return relative path for deeply nested directories."""
@@ -93,7 +93,7 @@ class TestWorkingDirectoryHandler:
 
         assert result.decision == "allow"
         assert len(result.context) == 1
-        assert result.context[0] == "| 📁 a/b/c/d/e"
+        assert result.context[0] == "| 📁 \033[38;5;208ma/b/c/d/e\033[0m"
 
     # handle() Tests - Missing Data
     def test_handle_returns_empty_when_no_workspace_data(self, handler):
@@ -140,7 +140,7 @@ class TestWorkingDirectoryHandler:
 
         assert result.decision == "allow"
         assert len(result.context) == 1
-        assert result.context[0] == "| 📁 src"
+        assert result.context[0] == "| 📁 \033[38;5;208msrc\033[0m"
 
     def test_handle_with_windows_style_paths(self, handler):
         """Should handle Windows-style paths correctly on Windows.
