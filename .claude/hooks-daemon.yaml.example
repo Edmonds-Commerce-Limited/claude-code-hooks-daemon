@@ -171,6 +171,10 @@ handlers:
       enabled: true
       priority: 10
 
+    lint_on_edit:              # Language-aware lint validation after Write/Edit
+      enabled: false           # Enable for automatic lint validation (Shell, Python, Go, Rust, etc.)
+      priority: 25
+
     validate_eslint_on_write:  # Runs ESLint after file writes
       enabled: false           # Enable for automatic ESLint validation
       priority: 20

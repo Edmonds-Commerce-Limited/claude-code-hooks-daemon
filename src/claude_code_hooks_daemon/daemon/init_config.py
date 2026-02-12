@@ -166,6 +166,7 @@ handlers:
   # PostToolUse - After tool execution
   post_tool_use:
     bash_error_detector: {enabled: true, priority: 50}  # Detect bash errors
+    lint_on_edit: {enabled: true, priority: 25}  # Language-aware lint validation after Write/Edit
     validate_eslint_on_write: {enabled: true, priority: 10}  # Run ESLint after file writes
 
   # PermissionRequest - Auto-approve decisions

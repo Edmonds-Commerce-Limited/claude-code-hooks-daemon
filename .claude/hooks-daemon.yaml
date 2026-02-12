@@ -184,6 +184,10 @@ handlers:
       enabled: true            # Enable for automatic ESLint validation
       priority: 20
 
+    lint_on_edit:              # Language-aware lint validation after Write/Edit
+      enabled: true
+      priority: 25
+
   # SessionStart handlers (run when session starts)
   session_start:
     yolo_container_detection:  # Detects YOLO development environments (Docker, etc)
