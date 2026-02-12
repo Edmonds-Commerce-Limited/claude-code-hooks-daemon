@@ -31,6 +31,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Rename auto-named plan folders to descriptive names
 
 
+- [00052: LLM Command Wrapper Guide & Handler Integration](00052-llm-command-wrapper-guide/PLAN.md) - Not Started
+  - Language-agnostic guide for creating llm: prefixed command wrappers (shipped with daemon)
+  - Covers philosophy, stdout contract, JSON output, jq patterns, examples for 5+ ecosystems
+  - Handlers reference guide by path instead of inlining verbose advice
+  - **Priority**: Medium (enabler for cross-language LLM command adoption)
+
 - [00051: Critical Thinking Advisory Handler](00051-critical-thinking-advisory/PLAN.md) - Not Started
   - UserPromptSubmit handler that encourages critical evaluation of user instructions
   - Multi-gate filter (prompt length + random sampling + cooldown) to avoid context flooding
@@ -322,9 +328,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 51
+- **Total Plans Created**: 52
 - **Completed**: 41 (1 with reduced scope)
-- **Active**: 9 (1 in progress, 6 not started, 1 proposed, 1 cleanup)
+- **Active**: 10 (1 in progress, 7 not started, 1 proposed, 1 cleanup)
 - **Cancelled/Abandoned**: 1 (00036 - empty draft, deleted)
 
 ## Quick Links
