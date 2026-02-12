@@ -132,6 +132,14 @@ Hook events fire at key moments (PreToolUse, PostToolUse, SessionStart, etc.) an
 
 **See [CLAUDE/Code/HooksSystem.md](CLAUDE/Code/HooksSystem.md) for complete hook system documentation.**
 
+### Blocking Handler False Positives in Commit Messages
+
+Blocking handlers match patterns in the full Bash command string, including git commit messages. If you put a literal dangerous command in a commit message (e.g., describing a fix for "force branch delete"), the handler will block the commit.
+
+**This is intentional and must NOT be "fixed"**. The same false-positive matching is what enables safe acceptance testing - we test blocking handlers by embedding dangerous commands in strings (e.g., `echo "git reset --hard"`) and verifying the handler blocks them. Removing string matching would break acceptance tests.
+
+**Solution**: Simply avoid putting literal blocked patterns in commit messages. Describe the fix in different words (e.g., "force branch delete blocker" instead of the literal command). This is trivial to work around.
+
 ## ⚠️ Self-Install Mode (CRITICAL)
 
 **This project dogfoods itself** - it runs from workspace root, not `.claude/hooks-daemon/`.
