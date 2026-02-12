@@ -118,6 +118,11 @@ class HandlerID:
         config_key="destructive_git",
         display_name="prevent-destructive-git",
     )
+    DAEMON_LOCATION_GUARD = HandlerIDMeta(
+        class_name="DaemonLocationGuardHandler",
+        config_key="daemon_location_guard",
+        display_name="daemon-location-guard",
+    )
     SED_BLOCKER = HandlerIDMeta(
         class_name="SedBlockerHandler",
         config_key="sed_blocker",
@@ -422,6 +427,7 @@ HandlerKey = Literal[
     # Safety handlers
     "daemon_restart_verifier",
     "destructive_git",
+    "daemon_location_guard",
     "sed_blocker",
     "pip_break_system",
     "sudo_pip",

@@ -4,6 +4,7 @@ version: "2.0"
 daemon:
   idle_timeout_seconds: 600  # Auto-shutdown after 10 minutes of inactivity
   log_level: INFO
+  project_root: ../../  # Project root relative to this config file (always ../../)
 
   # Input validation (v2.2.0+) - Catch malformed events at front controller layer
   input_validation:
@@ -21,6 +22,10 @@ handlers:
     destructive_git:       # Blocks git reset --hard, git clean -f, etc
       enabled: true
       priority: 10
+
+    daemon_location_guard: # Prevents cd into .claude/hooks-daemon (run commands from project root)
+      enabled: true
+      priority: 11
 
     sed_blocker:           # Blocks sed command usage (use Edit tool instead)
       enabled: true

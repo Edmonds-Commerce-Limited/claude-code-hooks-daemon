@@ -102,6 +102,7 @@ handlers:
     # SAFETY HANDLERS (Priority 10-20)
     daemon_restart_verifier: {enabled: true, priority: 10}  # Suggest daemon restart verification (advisory)
     destructive_git: {enabled: true, priority: 10}   # Block git reset --hard, clean -f
+    daemon_location_guard: {enabled: true, priority: 11}  # Prevent cd into .claude/hooks-daemon
     sed_blocker: {enabled: true, priority: 10}       # Block sed (use Edit tool instead)
     pip_break_system: {enabled: true, priority: 10}  # Block pip --break-system-packages
     sudo_pip: {enabled: true, priority: 10}          # Block sudo pip
