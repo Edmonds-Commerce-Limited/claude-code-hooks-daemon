@@ -151,13 +151,12 @@ handlers:
     markdown_organization: # Enforces markdown file organization rules & plan tracking
       enabled: true        # Enable for md organization + plan tracking
       priority: 50
+      # Full docs: docs/guides/HANDLER_REFERENCE.md -> markdown_organization
       options:
         track_plans_in_project: "CLAUDE/Plan"     # Path to plan folder (null to disable)
         plan_workflow_docs: "CLAUDE/PlanWorkflow.md"  # Optional: workflow doc to reference
-        # allowed_markdown_paths: override built-in allowed locations with custom regex patterns.
-        # When set, ONLY paths matching these patterns are allowed (overrides ALL defaults).
-        # CLAUDE.md, README.md, CHANGELOG.md are always allowed regardless.
-        # Uncomment and customise to override built-in defaults:
+        # allowed_markdown_paths: OVERRIDES all built-in path rules with custom regex.
+        # In monorepos, patterns match AFTER prefix stripping. See HANDLER_REFERENCE.md.
         #   allowed_markdown_paths:
         #     - "^CLAUDE/.*\\.md$"
         #     - "^docs/.*\\.md$"

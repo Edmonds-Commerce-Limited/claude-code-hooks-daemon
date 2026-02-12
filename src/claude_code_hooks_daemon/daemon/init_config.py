@@ -120,10 +120,11 @@ handlers:
     markdown_organization:  # Plan tracking and markdown organization
       enabled: true
       priority: 35
+      # Full docs: docs/guides/HANDLER_REFERENCE.md -> markdown_organization
       options:
         track_plans_in_project: "CLAUDE/Plan"           # Path to plan folder
         plan_workflow_docs: "CLAUDE/PlanWorkflow.md"    # Path to workflow doc
-        # allowed_markdown_paths:                       # Override built-in allowed locations
+        # allowed_markdown_paths: OVERRIDES built-in path rules. See HANDLER_REFERENCE.md.
         #   - "^CLAUDE/.*\\.md$"
         #   - "^docs/.*\\.md$"
         #   - "^untracked/.*\\.md$"
