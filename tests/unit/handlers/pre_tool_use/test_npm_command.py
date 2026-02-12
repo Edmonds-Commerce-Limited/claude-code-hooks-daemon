@@ -4,6 +4,7 @@ Comprehensive test coverage for npm/npx command enforcement.
 """
 
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -16,8 +17,21 @@ class TestNpmCommandHandler:
 
     @pytest.fixture
     def handler(self) -> NpmCommandHandler:
-        """Create handler instance."""
-        return NpmCommandHandler()
+        """Create handler instance with llm commands detected (enforcement mode)."""
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.npm_command.has_llm_commands_in_package_json",
+            return_value=True,
+        ):
+            return NpmCommandHandler()
+
+    @pytest.fixture
+    def advisory_handler(self) -> NpmCommandHandler:
+        """Create handler instance without llm commands (advisory mode)."""
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.npm_command.has_llm_commands_in_package_json",
+            return_value=False,
+        ):
+            return NpmCommandHandler()
 
     # Tests for matches() method - npm run commands
 
@@ -533,3 +547,93 @@ class TestNpmCommandHandler:
         assert "Minimal stdout" in result.reason
         assert "Verbose JSON logging" in result.reason
         assert "Machine-readable output" in result.reason
+
+    # Tests for has_llm_commands caching
+
+    def test_has_llm_commands_cached_at_init(self) -> None:
+        """has_llm_commands is cached at __init__ time."""
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.npm_command.has_llm_commands_in_package_json",
+            return_value=True,
+        ) as mock_detect:
+            handler = NpmCommandHandler()
+            assert handler.has_llm_commands is True
+            mock_detect.assert_called_once()
+
+    def test_has_llm_commands_false_when_no_llm_scripts(self) -> None:
+        """has_llm_commands is False when no llm: scripts exist."""
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.npm_command.has_llm_commands_in_package_json",
+            return_value=False,
+        ):
+            handler = NpmCommandHandler()
+            assert handler.has_llm_commands is False
+
+    # Tests for advisory mode (no llm: commands)
+
+    def test_advisory_mode_allows_npm_run_build(self, advisory_handler: NpmCommandHandler) -> None:
+        """Advisory mode allows npm run build with advisory message."""
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "npm run build"},
+        }
+        result = advisory_handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW
+        assert "ADVISORY" in result.reason
+        assert "llm:" in result.reason
+
+    def test_advisory_mode_allows_npm_run_lint(self, advisory_handler: NpmCommandHandler) -> None:
+        """Advisory mode allows npm run lint with advisory message."""
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "npm run lint"},
+        }
+        result = advisory_handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW
+        assert "ADVISORY" in result.reason
+
+    def test_advisory_mode_allows_npx_tsc(self, advisory_handler: NpmCommandHandler) -> None:
+        """Advisory mode allows npx tsc with advisory message."""
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "npx tsc --noEmit"},
+        }
+        result = advisory_handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW
+        assert "ADVISORY" in result.reason
+
+    def test_advisory_mode_includes_recommendation(
+        self, advisory_handler: NpmCommandHandler
+    ) -> None:
+        """Advisory message includes recommendation to create llm: wrappers."""
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "npm run test"},
+        }
+        result = advisory_handler.handle(hook_input)
+        assert "RECOMMENDATION" in result.reason
+        assert "llm:" in result.reason
+        assert "package.json" in result.reason
+
+    def test_advisory_mode_still_blocks_piped_commands(
+        self, advisory_handler: NpmCommandHandler
+    ) -> None:
+        """Advisory mode still blocks piped commands (always pointless)."""
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "npm run test | grep error"},
+        }
+        result = advisory_handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert "Piping npm/npx commands is pointless" in result.reason
+
+    def test_advisory_mode_includes_example_script(
+        self, advisory_handler: NpmCommandHandler
+    ) -> None:
+        """Advisory message includes example package.json script."""
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "npm run lint"},
+        }
+        result = advisory_handler.handle(hook_input)
+        assert "llm:lint" in result.reason

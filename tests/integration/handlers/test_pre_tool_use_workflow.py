@@ -7,6 +7,7 @@ Tests: NpmCommandHandler, GhIssueCommentsHandler, GlobalNpmAdvisorHandler,
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -30,7 +31,11 @@ class TestNpmCommandHandler:
             NpmCommandHandler,
         )
 
-        return NpmCommandHandler()
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.npm_command.has_llm_commands_in_package_json",
+            return_value=True,
+        ):
+            return NpmCommandHandler()
 
     @pytest.mark.parametrize(
         "command",
