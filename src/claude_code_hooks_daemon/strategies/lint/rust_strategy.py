@@ -45,17 +45,32 @@ class RustLintStrategy:
 
         return [
             AcceptanceTest(
-                title="Lint validation on Rust file write",
+                title="Rust lint - valid code passes",
                 command=(
                     "Use the Write tool to create file "
-                    "/tmp/acceptance-test-lint-rust/lib.rs "
+                    "/tmp/acceptance-test-lint-rust/valid.rs "
                     'with content "pub fn hello() {}"'
                 ),
-                description="Triggers lint validation after writing Rust file",
+                description="Valid Rust code should pass lint validation",
                 expected_decision=Decision.ALLOW,
-                expected_message_patterns=[r"Rust", r"lint"],
+                expected_message_patterns=[],
                 safety_notes="Uses /tmp path - safe. Creates temporary Rust file.",
                 test_type=TestType.ADVISORY,
+                setup_commands=["mkdir -p /tmp/acceptance-test-lint-rust"],
+                cleanup_commands=["rm -rf /tmp/acceptance-test-lint-rust"],
+            ),
+            AcceptanceTest(
+                title="Rust lint - invalid code blocked",
+                command=(
+                    "Use the Write tool to create file "
+                    "/tmp/acceptance-test-lint-rust/invalid.rs "
+                    'with content "pub fn hello( {}"'
+                ),
+                description="Invalid Rust code (missing closing paren) should be blocked",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[r"Rust lint FAILED", r"invalid.rs"],
+                safety_notes="Uses /tmp path - safe. Creates temporary Rust file with syntax error.",
+                test_type=TestType.BLOCKING,
                 setup_commands=["mkdir -p /tmp/acceptance-test-lint-rust"],
                 cleanup_commands=["rm -rf /tmp/acceptance-test-lint-rust"],
             ),

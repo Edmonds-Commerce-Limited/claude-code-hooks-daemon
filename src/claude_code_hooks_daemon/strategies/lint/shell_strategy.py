@@ -44,17 +44,32 @@ class ShellLintStrategy:
 
         return [
             AcceptanceTest(
-                title="Lint validation on Shell script write",
+                title="Shell lint - valid code passes",
                 command=(
                     "Use the Write tool to create file "
-                    "/tmp/acceptance-test-lint-shell/test.sh "
+                    "/tmp/acceptance-test-lint-shell/valid.sh "
                     'with content "#!/bin/bash\\necho hello"'
                 ),
-                description="Triggers lint validation after writing Shell script",
+                description="Valid Shell script should pass lint validation",
                 expected_decision=Decision.ALLOW,
-                expected_message_patterns=[r"Shell", r"lint"],
+                expected_message_patterns=[],
                 safety_notes="Uses /tmp path - safe. Creates temporary shell script.",
                 test_type=TestType.ADVISORY,
+                setup_commands=["mkdir -p /tmp/acceptance-test-lint-shell"],
+                cleanup_commands=["rm -rf /tmp/acceptance-test-lint-shell"],
+            ),
+            AcceptanceTest(
+                title="Shell lint - invalid code blocked",
+                command=(
+                    "Use the Write tool to create file "
+                    "/tmp/acceptance-test-lint-shell/invalid.sh "
+                    'with content "#!/bin/bash\\nif [ -f file ]; then\\necho missing fi"'
+                ),
+                description="Invalid Shell script (missing fi) should be blocked",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[r"Shell lint FAILED", r"invalid.sh", r"syntax error"],
+                safety_notes="Uses /tmp path - safe. Creates temporary shell script with syntax error.",
+                test_type=TestType.BLOCKING,
                 setup_commands=["mkdir -p /tmp/acceptance-test-lint-shell"],
                 cleanup_commands=["rm -rf /tmp/acceptance-test-lint-shell"],
             ),

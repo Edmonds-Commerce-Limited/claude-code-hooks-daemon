@@ -44,17 +44,32 @@ class GoLintStrategy:
 
         return [
             AcceptanceTest(
-                title="Lint validation on Go file write",
+                title="Go lint - valid code passes",
                 command=(
                     "Use the Write tool to create file "
-                    "/tmp/acceptance-test-lint-go/main.go "
+                    "/tmp/acceptance-test-lint-go/valid.go "
                     'with content "package main\\nfunc main() {}"'
                 ),
-                description="Triggers lint validation after writing Go file",
+                description="Valid Go code should pass lint validation",
                 expected_decision=Decision.ALLOW,
-                expected_message_patterns=[r"Go", r"lint"],
+                expected_message_patterns=[],
                 safety_notes="Uses /tmp path - safe. Creates temporary Go file.",
                 test_type=TestType.ADVISORY,
+                setup_commands=["mkdir -p /tmp/acceptance-test-lint-go"],
+                cleanup_commands=["rm -rf /tmp/acceptance-test-lint-go"],
+            ),
+            AcceptanceTest(
+                title="Go lint - invalid code blocked",
+                command=(
+                    "Use the Write tool to create file "
+                    "/tmp/acceptance-test-lint-go/invalid.go "
+                    'with content "package main\\nfunc main() {\\n    x := \\"unclosed"'
+                ),
+                description="Invalid Go code (unclosed string) should be blocked",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[r"Go lint FAILED", r"invalid.go"],
+                safety_notes="Uses /tmp path - safe. Creates temporary Go file with syntax error.",
+                test_type=TestType.BLOCKING,
                 setup_commands=["mkdir -p /tmp/acceptance-test-lint-go"],
                 cleanup_commands=["rm -rf /tmp/acceptance-test-lint-go"],
             ),

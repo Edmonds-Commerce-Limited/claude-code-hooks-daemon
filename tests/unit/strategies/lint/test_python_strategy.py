@@ -24,7 +24,7 @@ class TestProperties:
         assert strategy.extensions == (".py",)
 
     def test_default_lint_command(self, strategy: PythonLintStrategy) -> None:
-        assert strategy.default_lint_command == "python -m py_compile {file}"
+        assert strategy.default_lint_command == "python3 -m py_compile {file}"
 
     def test_extended_lint_command(self, strategy: PythonLintStrategy) -> None:
         assert strategy.extended_lint_command == "ruff check {file}"
