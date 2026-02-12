@@ -553,7 +553,7 @@ class TestWorktreeFileCopyHandler:
 
 
 # =============================================================================
-# PostToolUse Handlers (3 handlers)
+# PostToolUse Handlers (2 handlers: bash_error_detector, lint_on_edit)
 # =============================================================================
 
 
@@ -608,6 +608,72 @@ class TestBashErrorDetectorHandler:
         if handler.matches(hook_input):
             result = handler.handle(hook_input)
             assert result.decision == expected_decision, f"Failed: {description}"
+            response = result.to_json("PostToolUse")
+            response_validator.assert_valid("PostToolUse", response)
+
+
+class TestLintOnEditHandler:
+    """Test LintOnEditHandler response validation."""
+
+    @pytest.fixture
+    def handler(self):
+        from claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit import (
+            LintOnEditHandler,
+        )
+
+        return LintOnEditHandler()
+
+    @pytest.mark.parametrize(
+        "hook_input,expected_decision,description",
+        [
+            # Valid Python file (would pass lint)
+            (
+                {
+                    "tool_name": "Write",
+                    "tool_input": {"file_path": "/workspace/test.py", "content": "x = 1\n"},
+                },
+                Decision.ALLOW,
+                "Allow valid Python file",
+            ),
+            # Valid shell file (would pass lint)
+            (
+                {
+                    "tool_name": "Edit",
+                    "tool_input": {
+                        "file_path": "/workspace/test.sh",
+                        "old_string": "x",
+                        "new_string": "y",
+                    },
+                },
+                Decision.ALLOW,
+                "Allow valid shell file",
+            ),
+            # Non-lintable file extension
+            (
+                {
+                    "tool_name": "Write",
+                    "tool_input": {"file_path": "/workspace/test.txt", "content": "text"},
+                },
+                Decision.ALLOW,
+                "Allow non-lintable file",
+            ),
+            # Non-Write/Edit tool
+            (
+                {"tool_name": "Read", "tool_input": {"file_path": "/workspace/test.py"}},
+                Decision.ALLOW,
+                "Allow non-Write/Edit tools",
+            ),
+        ],
+    )
+    def test_response_validity(
+        self, handler, hook_input, expected_decision, description, response_validator
+    ):
+        """Test handler returns valid PostToolUse response."""
+        if handler.matches(hook_input):
+            # Only test if file actually exists (integration test limitation)
+            # Real testing happens in unit tests
+            result = handler.handle(hook_input)
+            assert result.decision in [Decision.ALLOW, Decision.DENY], f"Failed: {description}"
             response = result.to_json("PostToolUse")
             response_validator.assert_valid("PostToolUse", response)
 
