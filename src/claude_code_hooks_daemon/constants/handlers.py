@@ -384,6 +384,13 @@ class HandlerID:
         display_name="optimal-config-checker",
     )
 
+    # Lint on edit (PostToolUse handler)
+    LINT_ON_EDIT = HandlerIDMeta(
+        class_name="LintOnEditHandler",
+        config_key="lint_on_edit",
+        display_name="lint-on-edit",
+    )
+
     # Hedging language detector (Stop handler)
     HEDGING_LANGUAGE_DETECTOR = HandlerIDMeta(
         class_name="HedgingLanguageDetectorHandler",
@@ -433,6 +440,8 @@ HandlerKey = Literal[
     "daemon_stats",
     "markdown_organization",
     "validate_instruction_content",
+    # Lint on edit
+    "lint_on_edit",
     # Workflow handlers
     "gh_issue_comments",
     "yolo_container_detection",

@@ -48,7 +48,7 @@ class DartLintStrategy:
                 command=(
                     "Use the Write tool to create file "
                     "/tmp/acceptance-test-lint-dart/main.dart "
-                    'with content "void main() { print(\'hello\'); }"'
+                    "with content \"void main() { print('hello'); }\""
                 ),
                 description="Triggers lint validation after writing Dart file",
                 expected_decision=Decision.ALLOW,

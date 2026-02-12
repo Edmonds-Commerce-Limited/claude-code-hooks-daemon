@@ -49,6 +49,7 @@ class Timeout:
 
     # Handler-specific timeouts (seconds, used in subprocess calls)
     ESLINT_CHECK = 30  # 30 seconds (ESLint validation)
+    LINT_CHECK = 15  # 15 seconds (generic lint validation)
     GIT_STATUS_SHORT = 0.5  # 0.5 seconds (quick git status check)
     GIT_CONTEXT = 5  # 5 seconds (git context gathering)
     VALIDATION_CHECK = 5  # 5 seconds (installation validation subprocess)

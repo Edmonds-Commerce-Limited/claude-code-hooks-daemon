@@ -24,7 +24,10 @@ class TestProperties:
         assert strategy.extensions == (".rs",)
 
     def test_default_lint_command(self, strategy: RustLintStrategy) -> None:
-        assert strategy.default_lint_command == "rustc --edition 2021 --crate-type lib -Z parse-only {file}"
+        assert (
+            strategy.default_lint_command
+            == "rustc --edition 2021 --crate-type lib -Z parse-only {file}"
+        )
 
     def test_extended_lint_command(self, strategy: RustLintStrategy) -> None:
         assert strategy.extended_lint_command == "clippy-driver {file}"

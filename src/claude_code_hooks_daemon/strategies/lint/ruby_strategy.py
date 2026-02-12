@@ -48,7 +48,7 @@ class RubyLintStrategy:
                 command=(
                     "Use the Write tool to create file "
                     "/tmp/acceptance-test-lint-ruby/test.rb "
-                    'with content "puts \'hello\'"'
+                    "with content \"puts 'hello'\""
                 ),
                 description="Triggers lint validation after writing Ruby file",
                 expected_decision=Decision.ALLOW,

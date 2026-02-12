@@ -2,8 +2,8 @@
 
 import pytest
 
-from claude_code_hooks_daemon.strategies.lint.protocol import LintStrategy
 from claude_code_hooks_daemon.strategies.lint.go_strategy import GoLintStrategy
+from claude_code_hooks_daemon.strategies.lint.protocol import LintStrategy
 
 
 @pytest.fixture()

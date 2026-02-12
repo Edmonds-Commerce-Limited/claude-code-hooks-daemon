@@ -59,6 +59,9 @@ class Priority:
     GIT_BRANCH = 20
     GIT_STASH = 20
 
+    # Lint on edit (Priority: 25 - code quality range)
+    LINT_ON_EDIT = 25
+
     # QA enforcement handlers (Priority: 30-35)
     QA_SUPPRESSION = 30
     VALIDATE_PLAN_NUMBER = 30
