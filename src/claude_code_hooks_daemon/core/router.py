@@ -9,12 +9,17 @@ from typing import TYPE_CHECKING, Any
 
 from claude_code_hooks_daemon.core.chain import ChainExecutionResult, HandlerChain
 from claude_code_hooks_daemon.core.event import EventType
-from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.core.handler import Handler
 
 logger = logging.getLogger(__name__)
+
+# Format string for the config key disable footer appended to DENY/ASK reasons
+_DISABLE_FOOTER_TEMPLATE = (
+    "\n\nTo disable: handlers.{event_config_key}.{handler_config_key}  (set enabled: false)"
+)
 
 
 class EventRouter:
@@ -113,7 +118,59 @@ class EventRouter:
                 json.dumps(hook_input, indent=2, default=str),
             )
 
-        return chain.execute(hook_input, strict_mode=strict_mode)
+        execution_result = chain.execute(hook_input, strict_mode=strict_mode)
+
+        # Inject config key footer into DENY/ASK results
+        self._inject_config_key_footer(execution_result, event_type, chain)
+
+        return execution_result
+
+    def _inject_config_key_footer(
+        self,
+        execution_result: ChainExecutionResult,
+        event_type: EventType,
+        chain: HandlerChain,
+    ) -> None:
+        """Append config path footer to DENY/ASK results.
+
+        Modifies the result in-place to include the fully-qualified config
+        path so users can easily disable the handler that blocked them.
+
+        Args:
+            execution_result: Result from chain execution
+            event_type: Event type for building config path
+            chain: Handler chain to look up handler config_key
+        """
+        result = execution_result.result
+        if result.decision not in (Decision.DENY, Decision.ASK):
+            return
+
+        # Find the handler that produced the result to get its config_key
+        handler_name = execution_result.terminated_by
+        if handler_name is None:
+            # Non-terminal handler - use last executed handler
+            if execution_result.handlers_executed:
+                handler_name = execution_result.handlers_executed[-1]
+            else:
+                return
+
+        handler = chain.get(handler_name)
+        if handler is None:
+            return
+
+        # event_type.name is SCREAMING_SNAKE_CASE (e.g. PRE_TOOL_USE)
+        # .lower() gives the config key format (e.g. pre_tool_use)
+        event_config_key = event_type.name.lower()
+        footer = _DISABLE_FOOTER_TEMPLATE.format(
+            event_config_key=event_config_key,
+            handler_config_key=handler.config_key,
+        )
+
+        # Append footer to reason (handle None reason)
+        if result.reason is None:
+            result.reason = footer.lstrip("\n")
+        else:
+            result.reason = result.reason + footer
 
     def route_by_string(self, event_type_str: str, hook_input: dict[str, Any]) -> HookResult:
         """Route with string event type.

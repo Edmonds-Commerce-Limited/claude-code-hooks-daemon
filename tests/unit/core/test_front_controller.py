@@ -217,12 +217,13 @@ class TestTerminalHandlerDispatch:
     ):
         """Terminal handler result should be returned immediately."""
         mock_terminal_handler.matches.return_value = True
+        mock_terminal_handler.config_key = "test_terminal_handler"
         front_controller.register(mock_terminal_handler)
 
         result = front_controller.dispatch({"tool_name": "Bash"})
 
         assert result.decision == Decision.DENY
-        assert result.reason == "Terminal handler blocked"
+        assert result.reason.startswith("Terminal handler blocked")
 
     def test_terminal_handler_no_match_continues(self, front_controller):
         """Terminal handler that doesn't match should continue dispatch."""
@@ -254,12 +255,14 @@ class TestTerminalHandlerDispatch:
         handler1.terminal = True
         handler1.matches.return_value = True
         handler1.handle.return_value = HookResult(decision=Decision.DENY, reason="First")
+        handler1.config_key = "handler1"
 
         handler2 = MagicMock(spec=Handler)
         handler2.priority = 20
         handler2.terminal = True
         handler2.matches.return_value = True
         handler2.handle.return_value = HookResult(decision=Decision.ASK, reason="Second")
+        handler2.config_key = "handler2"
 
         front_controller.register(handler1)
         front_controller.register(handler2)
@@ -267,7 +270,7 @@ class TestTerminalHandlerDispatch:
         result = front_controller.dispatch({"tool_name": "Bash"})
 
         assert result.decision == Decision.DENY
-        assert result.reason == "First"
+        assert result.reason.startswith("First")
 
 
 # Non-Terminal Handler Dispatch Tests
@@ -285,6 +288,7 @@ class TestNonTerminalHandlerDispatch:
         handler1.handle.return_value = HookResult(
             decision=Decision.ALLOW, context="Context from handler1"
         )
+        handler1.config_key = "handler1"
 
         handler2 = MagicMock(spec=Handler)
         handler2.priority = 20
@@ -293,6 +297,7 @@ class TestNonTerminalHandlerDispatch:
         handler2.handle.return_value = HookResult(
             decision=Decision.DENY, reason="Blocked by handler2"
         )
+        handler2.config_key = "handler2"
 
         front_controller.register(handler1)
         front_controller.register(handler2)
@@ -305,7 +310,7 @@ class TestNonTerminalHandlerDispatch:
 
         # Terminal handler result wins
         assert result.decision == Decision.DENY
-        assert result.reason == "Blocked by handler2"
+        assert result.reason.startswith("Blocked by handler2")
 
     def test_non_terminal_handler_context_accumulated(self, front_controller):
         """Non-terminal handler context should be accumulated."""
