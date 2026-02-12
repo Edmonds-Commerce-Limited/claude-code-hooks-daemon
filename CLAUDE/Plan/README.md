@@ -25,6 +25,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00056: Fix DaemonLocationGuardHandler Whitelisting](Completed/00056-fix-daemon-location-guard-whitelisting/PLAN.md) - Complete
+  - Removed incorrect official upgrade command whitelisting pattern
+  - Updated guidance with correct upgrade process using curl and bash upgrade script
+  - Test count reduced from 15 to 14 tests, acceptance tests from 2 to 1
+  - All QA checks pass, daemon loads successfully
+
 - [00054: Lint-on-Edit Handler with Strategy Pattern](Completed/00054-lint-on-edit-strategy-pattern/PLAN.md) - Complete
   - Language-aware lint validation handler using Strategy Pattern (9 languages)
   - Shell/bash support added (default: bash -n, extended: shellcheck)
@@ -334,8 +340,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 55
-- **Completed**: 48 (1 with reduced scope)
+- **Total Plans Created**: 56
+- **Completed**: 49 (1 with reduced scope)
 - **Active**: 4 (all not started/proposed)
 - **Cancelled/Abandoned**: 2 (00036 - empty draft deleted, 00044 - approach retired)
 
