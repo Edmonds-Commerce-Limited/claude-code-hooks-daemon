@@ -198,6 +198,11 @@ class HandlerID:
         config_key="git_branch",
         display_name="status-git-branch",
     )
+    CURRENT_TIME = HandlerIDMeta(
+        class_name="CurrentTimeHandler",
+        config_key="current_time",
+        display_name="status-current-time",
+    )
     PIPE_BLOCKER = HandlerIDMeta(
         class_name="PipeBlockerHandler",
         config_key="pipe_blocker",
@@ -431,6 +436,7 @@ HandlerKey = Literal[
     "worktree_file_copy",
     "git_context_injector",
     "git_branch",
+    "current_time",
     "pipe_blocker",
     "git_stash",
     # QA enforcement handlers

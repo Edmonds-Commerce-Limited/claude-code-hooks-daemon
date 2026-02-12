@@ -8,6 +8,7 @@ and daemon health information.
 from claude_code_hooks_daemon.handlers.status_line.account_display import (
     AccountDisplayHandler,
 )
+from claude_code_hooks_daemon.handlers.status_line.current_time import CurrentTimeHandler
 from claude_code_hooks_daemon.handlers.status_line.daemon_stats import DaemonStatsHandler
 from claude_code_hooks_daemon.handlers.status_line.git_branch import GitBranchHandler
 from claude_code_hooks_daemon.handlers.status_line.git_repo_name import GitRepoNameHandler
@@ -18,6 +19,7 @@ from claude_code_hooks_daemon.handlers.status_line.usage_tracking import (
 
 __all__ = [
     "AccountDisplayHandler",
+    "CurrentTimeHandler",
     "DaemonStatsHandler",
     "GitBranchHandler",
     "GitRepoNameHandler",
