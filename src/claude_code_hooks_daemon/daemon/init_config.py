@@ -120,7 +120,7 @@ handlers:
     markdown_organization:  # Plan tracking and markdown organization
       enabled: true
       priority: 35
-      # Full docs: docs/guides/HANDLER_REFERENCE.md -> markdown_organization
+      # Docs: docs/guides/handlers/markdown_organization.md
       options:
         track_plans_in_project: "CLAUDE/Plan"           # Path to plan folder
         plan_workflow_docs: "CLAUDE/PlanWorkflow.md"    # Path to workflow doc

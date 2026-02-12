@@ -751,67 +751,9 @@ handlers:
 | **Type** | Blocking |
 | **Event** | PreToolUse |
 
-**Description:** Enforces markdown file organization rules and plan tracking. Intercepts Claude Code planning mode writes to `~/.claude/plans/` and redirects them to the project's `CLAUDE/Plan/` structure when configured.
+**Full documentation:** [`docs/guides/handlers/markdown_organization.md`](handlers/markdown_organization.md)
 
-**Config example:**
-```yaml
-handlers:
-  pre_tool_use:
-    markdown_organization:
-      enabled: true
-      priority: 50
-      options:
-        track_plans_in_project: "CLAUDE/Plan"
-        plan_workflow_docs: "CLAUDE/PlanWorkflow.md"
-        # allowed_markdown_paths: [...]           # See "Custom Allowed Paths" below
-        # monorepo_subproject_patterns: [...]     # See "Monorepo Support" below
-```
-
-**Options:**
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `track_plans_in_project` | `string \| null` | `null` | Path to plan folder (e.g. `"CLAUDE/Plan"`). Enables planning mode redirect. |
-| `plan_workflow_docs` | `string \| null` | `null` | Path to workflow doc referenced in redirect context. |
-| `allowed_markdown_paths` | `list[string] \| null` | `null` | Regex patterns for allowed locations. **Overrides ALL built-in paths when set.** |
-| `monorepo_subproject_patterns` | `list[string] \| null` | `null` | Regex patterns matching sub-project root directories. |
-
-**Custom Allowed Paths:**
-
-When `allowed_markdown_paths` is set, it **completely replaces** the built-in allowed locations (`CLAUDE/`, `docs/`, `untracked/`, `RELEASES/`, `eslint-rules/`). Only paths matching at least one regex pattern are allowed; everything else is blocked.
-
-`CLAUDE.md`, `README.md`, and `CHANGELOG.md` are always allowed regardless (checked before path rules).
-
-```yaml
-options:
-  allowed_markdown_paths:
-    - "^CLAUDE/.*\\.md$"        # LLM documentation
-    - "^docs/.*\\.md$"          # Human-facing docs
-    - "^content/blog/.*\\.md$"  # Blog content (project-specific)
-```
-
-**Monorepo Support:**
-
-When `monorepo_subproject_patterns` is set, matched paths have their sub-project prefix stripped before path rules are applied. This means the **same rules apply uniformly** to root and all sub-projects.
-
-```yaml
-options:
-  monorepo_subproject_patterns:
-    - "packages/[^/]+"   # packages/frontend/, packages/backend/, etc.
-    - "apps/[^/]+"       # apps/web/, apps/mobile/, etc.
-```
-
-**Monorepo + Custom Paths interaction:**
-
-Custom `allowed_markdown_paths` patterns match against the **sub-project-relative path** (after prefix stripping), not the full path. This is intentional - write rules once, apply everywhere.
-
-| Input path | Monorepo strips to | Custom pattern matches against |
-|---|---|---|
-| `docs/guide.md` | *(no match, used as-is)* | `docs/guide.md` |
-| `packages/frontend/docs/guide.md` | `docs/guide.md` | `docs/guide.md` |
-| `packages/backend/CLAUDE/test.md` | `CLAUDE/test.md` | `CLAUDE/test.md` |
-
-**Gotcha:** A pattern like `^packages/frontend/docs/.*` will **never match** because the prefix is already stripped. Use `^docs/.*` instead.
+Enforces markdown file organization rules, plan tracking, custom allowed paths, and monorepo support. See per-handler docs for all options, monorepo interaction, and examples.
 
 ---
 
