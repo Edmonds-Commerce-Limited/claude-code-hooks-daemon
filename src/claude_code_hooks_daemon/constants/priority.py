@@ -45,7 +45,6 @@ class Priority:
     LOCK_FILE_EDIT_BLOCKER = 10
     AUTO_APPROVE_READS = 10
     VALIDATE_ESLINT_ON_WRITE = 10
-    REMIND_VALIDATOR = 10
     TRANSCRIPT_ARCHIVER = 10
 
     ABSOLUTE_PATH = 12
@@ -59,7 +58,6 @@ class Priority:
     GIT_CONTEXT_INJECTOR = 20
     GIT_BRANCH = 20
     GIT_STASH = 20
-    VALIDATE_SITEMAP = 20
 
     # QA enforcement handlers (Priority: 30-35)
     QA_SUPPRESSION = 30
@@ -105,7 +103,7 @@ class Priority:
     ACCOUNT_DISPLAY = 5
     MODEL_CONTEXT = 10
     USAGE_TRACKING = 15
-    THINKING_MODE = 25
+    THINKING_MODE = 12
 
     # Special handlers (no fixed priority in catalog)
     # These handlers set priority dynamically or don't use the standard system

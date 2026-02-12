@@ -18,16 +18,13 @@ class TestGetBuiltinHandlers:
         handlers = get_builtin_handlers()
 
         assert isinstance(handlers, dict)
-        assert (
-            len(handlers) == 3
-        )  # remind_validator, remind_prompt_library, subagent_completion_logger
+        assert len(handlers) == 2  # remind_prompt_library, subagent_completion_logger
 
     def test_contains_all_expected_handlers(self) -> None:
         """All expected handler names are present."""
         handlers = get_builtin_handlers()
 
         expected = [
-            "remind_validator",
             "remind_prompt_library",
             "subagent_completion_logger",
         ]
@@ -42,14 +39,10 @@ class TestGetBuiltinHandlers:
         from claude_code_hooks_daemon.handlers.subagent_stop.remind_prompt_library import (
             RemindPromptLibraryHandler,
         )
-        from claude_code_hooks_daemon.handlers.subagent_stop.remind_validator import (
-            RemindValidatorHandler,
-        )
         from claude_code_hooks_daemon.handlers.subagent_stop.subagent_completion_logger import (
             SubagentCompletionLoggerHandler,
         )
 
-        assert handlers["remind_validator"] == RemindValidatorHandler
         assert handlers["remind_prompt_library"] == RemindPromptLibraryHandler
         assert handlers["subagent_completion_logger"] == SubagentCompletionLoggerHandler
 
@@ -61,7 +54,7 @@ class TestLoadConfigSafe:
         """Config loaded successfully when file exists."""
         config_file = tmp_path / "hooks-daemon.yaml"
         config_file.write_text(
-            "version: '1.0'\nhandlers:\n  subagent_stop:\n    remind_validator:\n      enabled: true\n"
+            "version: '1.0'\nhandlers:\n  subagent_stop:\n    remind_prompt_library:\n      enabled: true\n"
         )
 
         config = load_config_safe(config_file)
@@ -115,8 +108,8 @@ class TestMainFunction:
         config = {
             "handlers": {
                 "subagent_stop": {
-                    "remind_validator": {"enabled": True, "priority": 50},
-                    "remind_prompt_library": {"enabled": False},
+                    "remind_prompt_library": {"enabled": True, "priority": 50},
+                    "subagent_completion_logger": {"enabled": False},
                 }
             },
             "daemon": {},
@@ -127,8 +120,8 @@ class TestMainFunction:
 
         main()
 
-        # Should register remind_validator and subagent_completion_logger (defaults to enabled)
-        # but not remind_prompt_library (disabled)
+        # Should register remind_prompt_library
+        # but not subagent_completion_logger (disabled)
         register_calls = mock_fc_instance.register.call_args_list
         assert len(register_calls) >= 1
 
@@ -144,7 +137,7 @@ class TestMainFunction:
         config = {
             "handlers": {
                 "subagent_stop": {
-                    "remind_validator": {},  # No 'enabled' key
+                    "remind_prompt_library": {},  # No 'enabled' key
                 }
             },
             "daemon": {},
@@ -167,7 +160,7 @@ class TestMainFunction:
         config = {
             "handlers": {
                 "subagent_stop": {
-                    "remind_validator": {"enabled": True, "priority": 99},
+                    "remind_prompt_library": {"enabled": True, "priority": 99},
                 }
             },
             "daemon": {},
@@ -217,7 +210,6 @@ class TestMainFunction:
         config = {
             "handlers": {
                 "subagent_stop": {
-                    "remind_validator": {"enabled": True, "priority": 10},
                     "remind_prompt_library": {"enabled": True, "priority": 20},
                     "subagent_completion_logger": {"enabled": True, "priority": 30},
                 }
@@ -231,12 +223,11 @@ class TestMainFunction:
         main()
 
         register_calls = mock_fc_instance.register.call_args_list
-        assert len(register_calls) == 3
+        assert len(register_calls) == 2
 
         registered_handlers = [call[0][0] for call in register_calls]
         priorities = {type(h).__name__: h.priority for h in registered_handlers}
 
-        assert priorities["RemindValidatorHandler"] == 10
         assert priorities["RemindPromptLibraryHandler"] == 20
         assert priorities["SubagentCompletionLoggerHandler"] == 30
 
@@ -259,7 +250,6 @@ class TestMainFunction:
         config = {
             "handlers": {
                 "subagent_stop": {
-                    "remind_validator": {"enabled": False},
                     "remind_prompt_library": {"enabled": False},
                     "subagent_completion_logger": {"enabled": False},
                 }
@@ -302,7 +292,7 @@ class TestMainFunction:
             "handlers": {
                 "subagent_stop": {
                     "enable_tags": ["workflow"],
-                    "remind_validator": {"enabled": True},
+                    "remind_prompt_library": {"enabled": True},
                     "subagent_completion_logger": {"enabled": True},
                 }
             },
@@ -328,8 +318,9 @@ class TestMainFunction:
         config = {
             "handlers": {
                 "subagent_stop": {
-                    "disable_tags": ["workflow"],
-                    "remind_validator": {"enabled": True},
+                    "disable_tags": ["logging"],
+                    "remind_prompt_library": {"enabled": False},
+                    "subagent_completion_logger": {"enabled": True},
                 }
             },
             "daemon": {},
@@ -341,5 +332,5 @@ class TestMainFunction:
         main()
 
         register_calls = mock_fc_instance.register.call_args_list
-        # remind_validator has 'workflow' tag so should be filtered out
+        # subagent_completion_logger has 'logging' tag so should be filtered out
         assert len(register_calls) == 0

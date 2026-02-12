@@ -160,10 +160,6 @@ handlers:
       enabled: false           # Enable for automatic ESLint validation
       priority: 20
 
-    validate_sitemap:          # Validates sitemap structure after writes
-      enabled: false           # Enable for sitemap validation
-      priority: 30
-
   # SessionStart handlers (run when session starts)
   session_start:
     yolo_container_detection:  # Detects YOLO development environments (Docker, etc)
@@ -211,10 +207,6 @@ handlers:
     remind_prompt_library:  # Reminds about prompt library after agent work
       enabled: false        # Enable if using prompt library system
       priority: 20
-
-    remind_validator:       # Reminds about HTML validation
-      enabled: false        # Enable for validation reminders
-      priority: 30
 
   # UserPromptSubmit handlers (run when user submits prompt)
   user_prompt_submit:
@@ -272,9 +264,9 @@ handlers:
       enabled: true
       priority: 40
 
-    thinking_mode:  # Shows current thinking mode
+    thinking_mode:  # Shows current thinking mode (displayed next to model)
       enabled: true
-      priority: 50
+      priority: 12
 
     usage_tracking: # Tracks and displays usage statistics
       enabled: true

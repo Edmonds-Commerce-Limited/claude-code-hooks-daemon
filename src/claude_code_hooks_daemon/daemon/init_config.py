@@ -161,7 +161,6 @@ handlers:
   post_tool_use:
     bash_error_detector: {enabled: true, priority: 50}  # Detect bash errors
     validate_eslint_on_write: {enabled: true, priority: 10}  # Run ESLint after file writes
-    validate_sitemap: {enabled: true, priority: 20}  # Validate sitemap structure
 
   # PermissionRequest - Auto-approve decisions
   permission_request:
@@ -197,7 +196,6 @@ handlers:
   subagent_stop:
     subagent_completion_logger: {enabled: true, priority: 10}  # Log subagent completion
     remind_prompt_library: {enabled: true, priority: 20}  # Remind about prompt library
-    remind_validator: {enabled: true, priority: 10}  # Remind about HTML validation
 
   # PreCompact - Before conversation compaction
   pre_compact:

@@ -18,7 +18,7 @@ class TestGetBuiltinHandlers:
         handlers = get_builtin_handlers()
 
         assert isinstance(handlers, dict)
-        assert len(handlers) == 3  # bash_error_detector, validate_eslint_on_write, validate_sitemap
+        assert len(handlers) == 2  # bash_error_detector, validate_eslint_on_write
 
     def test_contains_bash_error_detector_handler(self) -> None:
         """Bash error detector handler is present."""
@@ -32,12 +32,6 @@ class TestGetBuiltinHandlers:
 
         assert "validate_eslint_on_write" in handlers
 
-    def test_contains_validate_sitemap_handler(self) -> None:
-        """Validate sitemap handler is present."""
-        handlers = get_builtin_handlers()
-
-        assert "validate_sitemap" in handlers
-
     def test_handler_classes_are_importable(self) -> None:
         """Handler classes can be instantiated."""
         handlers = get_builtin_handlers()
@@ -48,13 +42,9 @@ class TestGetBuiltinHandlers:
         from claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write import (
             ValidateEslintOnWriteHandler,
         )
-        from claude_code_hooks_daemon.handlers.post_tool_use.validate_sitemap import (
-            ValidateSitemapHandler,
-        )
 
         assert handlers["bash_error_detector"] == BashErrorDetectorHandler
         assert handlers["validate_eslint_on_write"] == ValidateEslintOnWriteHandler
-        assert handlers["validate_sitemap"] == ValidateSitemapHandler
 
 
 class TestLoadConfigSafe:
@@ -288,7 +278,6 @@ class TestMainFunction:
                 "post_tool_use": {
                     "bash_error_detector": {"enabled": False},
                     "validate_eslint_on_write": {"enabled": False},
-                    "validate_sitemap": {"enabled": False},
                 }
             },
             "daemon": {},

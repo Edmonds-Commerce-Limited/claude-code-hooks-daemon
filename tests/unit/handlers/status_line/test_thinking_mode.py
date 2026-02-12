@@ -24,7 +24,7 @@ class TestThinkingModeHandler:
         assert handler.name == "status-thinking-mode"
 
     def test_init_priority(self, handler: ThinkingModeHandler) -> None:
-        assert handler.priority == 25
+        assert handler.priority == 12
 
     def test_init_terminal_false(self, handler: ThinkingModeHandler) -> None:
         assert handler.terminal is False

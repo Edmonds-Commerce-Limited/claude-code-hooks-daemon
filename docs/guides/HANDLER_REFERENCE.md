@@ -915,28 +915,6 @@ handlers:
 
 ---
 
-#### validate_sitemap
-
-| Property | Value |
-|----------|-------|
-| **Config key** | `validate_sitemap` |
-| **Priority** | 30 |
-| **Type** | Advisory |
-| **Event** | PostToolUse |
-
-**Description:** Reminds to validate sitemap files after editing files in the `CLAUDE/Sitemap/` directory. Project-specific handler for maintaining sitemap integrity.
-
-**Config example:**
-```yaml
-handlers:
-  post_tool_use:
-    validate_sitemap:
-      enabled: true
-      priority: 30
-```
-
----
-
 ## SessionStart Handlers
 
 These handlers run when a new Claude Code session begins. They provide environment information and configuration checks.
@@ -1241,28 +1219,6 @@ handlers:
 
 ---
 
-#### remind_validator
-
-| Property | Value |
-|----------|-------|
-| **Config key** | `remind_validator` |
-| **Priority** | 30 |
-| **Type** | Advisory |
-| **Event** | SubagentStop |
-
-**Description:** Reminds to run validator agents after builder agents complete. Maps builder agent types to their corresponding validators (e.g., "sitemap-modifier" should be followed by "sitemap-validator").
-
-**Config example:**
-```yaml
-handlers:
-  subagent_stop:
-    remind_validator:
-      enabled: true
-      priority: 30
-```
-
----
-
 ## UserPromptSubmit Handlers
 
 These handlers run when the user submits a prompt.
@@ -1491,7 +1447,6 @@ These handlers generate the terminal status line displayed by Claude Code. They 
 | `british_english` | PreToolUse | 60 | Warns about American spellings |
 | `bash_error_detector` | PostToolUse | 10 | Detects errors in bash output |
 | `validate_eslint_on_write` | PostToolUse | 20 | Runs ESLint after .ts/.tsx writes |
-| `validate_sitemap` | PostToolUse | 30 | Reminds to validate sitemaps |
 | `yolo_container_detection` | SessionStart | 10 | Detects container environments |
 | `optimal_config_checker` | SessionStart | 52 | Audits Claude Code settings |
 | `suggest_status_line` | SessionStart | 55 | Suggests status line setup |
@@ -1504,7 +1459,6 @@ These handlers generate the terminal status line displayed by Claude Code. They 
 | `hedging_language_detector` | Stop | 30 | Detects guessing language |
 | `subagent_completion_logger` | SubagentStop | 10 | Logs subagent completions |
 | `remind_prompt_library` | SubagentStop | 20 | Reminds about prompt library |
-| `remind_validator` | SubagentStop | 30 | Reminds to run validators |
 | `git_context_injector` | UserPromptSubmit | 10 | Injects git status context |
 | `notification_logger` | Notification | 10 | Logs notifications |
 

@@ -158,11 +158,6 @@ class HandlerID:
         config_key="validate_eslint_on_write",
         display_name="validate-eslint-on-write",
     )
-    REMIND_VALIDATOR = HandlerIDMeta(
-        class_name="RemindValidatorHandler",
-        config_key="remind_validator",
-        display_name="remind-validate-after-builder",
-    )
     TRANSCRIPT_ARCHIVER = HandlerIDMeta(
         class_name="TranscriptArchiverHandler",
         config_key="transcript_archiver",
@@ -213,12 +208,6 @@ class HandlerID:
         config_key="git_stash",
         display_name="block-git-stash",
     )
-    VALIDATE_SITEMAP = HandlerIDMeta(
-        class_name="ValidateSitemapHandler",
-        config_key="validate_sitemap",
-        display_name="validate-sitemap-on-edit",
-    )
-
     # QA enforcement handlers (Priority: 30-35)
     QA_SUPPRESSION = HandlerIDMeta(
         class_name="QaSuppressionHandler",
@@ -428,7 +417,6 @@ HandlerKey = Literal[
     "dangerous_permissions",
     "auto_approve_reads",
     "validate_eslint_on_write",
-    "remind_validator",
     "transcript_archiver",
     "absolute_path",
     "tdd_enforcement",
@@ -438,7 +426,6 @@ HandlerKey = Literal[
     "git_branch",
     "pipe_blocker",
     "git_stash",
-    "validate_sitemap",
     # QA enforcement handlers
     "qa_suppression",
     "validate_plan_number",

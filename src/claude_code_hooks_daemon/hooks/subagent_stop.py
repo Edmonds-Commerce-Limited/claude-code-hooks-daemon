@@ -24,9 +24,6 @@ from claude_code_hooks_daemon.handlers.subagent_stop.hello_world import (
 from claude_code_hooks_daemon.handlers.subagent_stop.remind_prompt_library import (
     RemindPromptLibraryHandler,
 )
-from claude_code_hooks_daemon.handlers.subagent_stop.remind_validator import (
-    RemindValidatorHandler,
-)
 from claude_code_hooks_daemon.handlers.subagent_stop.subagent_completion_logger import (
     SubagentCompletionLoggerHandler,
 )
@@ -39,7 +36,6 @@ def get_builtin_handlers() -> dict[str, type]:
         Dictionary mapping handler names to handler classes
     """
     return {
-        "remind_validator": RemindValidatorHandler,
         "remind_prompt_library": RemindPromptLibraryHandler,
         "subagent_completion_logger": SubagentCompletionLoggerHandler,
     }
