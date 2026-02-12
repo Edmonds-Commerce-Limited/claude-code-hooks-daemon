@@ -930,22 +930,118 @@ class TestAllowedMarkdownPaths:
         assert handler.matches(write_input) is False  # Allowed
 
     # ── Interacts correctly with monorepo ──
+    #
+    # KEY DESIGN: Monorepo prefix is stripped in matches() BEFORE _is_invalid_location()
+    # is called. So custom paths match against the sub-project-relative path, not the
+    # full path. This means the same patterns work for root AND sub-projects (DRY).
+    #
+    # Flow: "packages/frontend/docs/guide.md"
+    #   -> strip_monorepo_prefix() -> "docs/guide.md"
+    #   -> _is_invalid_location("docs/guide.md")
+    #   -> _check_custom_paths("docs/guide.md")
 
-    def test_custom_paths_used_for_monorepo_subproject(
+    def test_custom_paths_match_subproject_relative_path(
         self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
     ) -> None:
-        """Custom paths are applied to monorepo sub-project relative paths too."""
+        """Custom paths match against sub-project-relative path (after prefix stripping).
+
+        "packages/frontend/docs/guide.md" -> stripped to "docs/guide.md" -> matches "^docs/".
+        """
         handler._monorepo_subproject_patterns = [r"packages/[^/]+"]
         handler._allowed_markdown_paths = [r"^docs/.*\.md$", r"^CLAUDE/.*\.md$"]
-        # Sub-project relative path is "docs/guide.md" -> matches custom paths
         write_input["tool_input"]["file_path"] = "packages/frontend/docs/guide.md"
         assert handler.matches(write_input) is False  # Allowed
 
-    def test_custom_paths_block_monorepo_subproject_invalid(
+    def test_custom_paths_block_subproject_invalid_location(
         self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
     ) -> None:
-        """Custom paths block invalid monorepo sub-project paths."""
+        """Custom paths block sub-project paths that don't match any pattern."""
         handler._monorepo_subproject_patterns = [r"packages/[^/]+"]
         handler._allowed_markdown_paths = [r"^docs/.*\.md$"]
         write_input["tool_input"]["file_path"] = "packages/frontend/random/notes.md"
         assert handler.matches(write_input) is True  # Blocked
+
+    def test_same_pattern_works_for_root_and_subproject(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Same custom pattern allows both root and sub-project paths.
+
+        This is the key DRY benefit: write rules once, apply everywhere.
+        """
+        handler._monorepo_subproject_patterns = [r"packages/[^/]+"]
+        handler._allowed_markdown_paths = [r"^docs/.*\.md$"]
+
+        # Root project path
+        write_input["tool_input"]["file_path"] = "docs/guide.md"
+        assert handler.matches(write_input) is False  # Allowed (root)
+
+        # Sub-project path (stripped to same "docs/guide.md")
+        write_input["tool_input"]["file_path"] = "packages/frontend/docs/guide.md"
+        assert handler.matches(write_input) is False  # Allowed (sub-project)
+
+    def test_full_monorepo_path_pattern_does_not_match(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Patterns matching the full path (including prefix) won't work.
+
+        GOTCHA: "^packages/frontend/docs/" won't match because the monorepo
+        prefix is already stripped before custom paths are checked. The path
+        _is_invalid_location receives is "docs/guide.md", not
+        "packages/frontend/docs/guide.md".
+        """
+        handler._monorepo_subproject_patterns = [r"packages/[^/]+"]
+        handler._allowed_markdown_paths = [r"^packages/frontend/docs/.*\.md$"]
+        write_input["tool_input"]["file_path"] = "packages/frontend/docs/guide.md"
+        assert handler.matches(write_input) is True  # BLOCKED (prefix already stripped)
+
+    def test_custom_paths_override_builtin_for_subprojects(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Custom paths override built-in CLAUDE/ allowance in sub-projects too.
+
+        If custom paths don't include CLAUDE/, sub-project CLAUDE/ is blocked.
+        """
+        handler._monorepo_subproject_patterns = [r"packages/[^/]+"]
+        handler._allowed_markdown_paths = [r"^content/.*\.md$"]  # No CLAUDE/
+        write_input["tool_input"]["file_path"] = "packages/frontend/CLAUDE/test.md"
+        assert handler.matches(write_input) is True  # Blocked (custom paths don't include CLAUDE/)
+
+    def test_empty_custom_paths_blocks_all_subproject_markdown(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Empty custom paths list blocks all markdown in sub-projects too."""
+        handler._monorepo_subproject_patterns = [r"packages/[^/]+"]
+        handler._allowed_markdown_paths = []
+        write_input["tool_input"]["file_path"] = "packages/frontend/docs/guide.md"
+        assert handler.matches(write_input) is True  # Blocked
+
+    def test_adhoc_files_still_allowed_in_subproject_with_custom_paths(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """CLAUDE.md/README.md still allowed in sub-projects even with restrictive custom paths.
+
+        Adhoc file check happens BEFORE monorepo stripping and custom path checking.
+        """
+        handler._monorepo_subproject_patterns = [r"packages/[^/]+"]
+        handler._allowed_markdown_paths = [r"^content/.*\.md$"]
+        write_input["tool_input"]["file_path"] = "packages/frontend/CLAUDE.md"
+        assert handler.matches(write_input) is False  # Allowed (adhoc file bypasses all)
+
+    def test_multiple_subprojects_share_same_custom_rules(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """All sub-projects use the same custom path rules uniformly."""
+        handler._monorepo_subproject_patterns = [r"packages/[^/]+", r"apps/[^/]+"]
+        handler._allowed_markdown_paths = [r"^docs/.*\.md$", r"^CLAUDE/.*\.md$"]
+
+        # packages/frontend allowed
+        write_input["tool_input"]["file_path"] = "packages/frontend/docs/api.md"
+        assert handler.matches(write_input) is False
+
+        # apps/web allowed
+        write_input["tool_input"]["file_path"] = "apps/web/CLAUDE/ARCHITECTURE.md"
+        assert handler.matches(write_input) is False
+
+        # packages/backend blocked (not in custom paths)
+        write_input["tool_input"]["file_path"] = "packages/backend/src/notes.md"
+        assert handler.matches(write_input) is True

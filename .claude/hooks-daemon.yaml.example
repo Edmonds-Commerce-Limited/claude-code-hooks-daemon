@@ -127,22 +127,24 @@ handlers:
     markdown_organization: # Enforces markdown file organization rules & plan tracking
       enabled: false       # Enable for md organization + plan tracking
       priority: 51
+      # Full docs: docs/guides/HANDLER_REFERENCE.md -> markdown_organization
       options:
         track_plans_in_project: null  # Set to "CLAUDE/Plan" to enable plan tracking
         plan_workflow_docs: null      # Optional: path to workflow doc
-        # Monorepo support: uncomment and list sub-project directory patterns.
-        # Each entry is a regex matching a sub-project root directory.
-        # Sub-projects get their own CLAUDE/, docs/, RELEASES/, untracked/ etc.
-        # Examples:
+        #
+        # Monorepo support: regex patterns matching sub-project root directories.
+        # Sub-projects get the same organization rules as the root project.
+        # See docs/guides/HANDLER_REFERENCE.md -> "Monorepo Support"
         #   monorepo_subproject_patterns:
         #     - "packages/[^/]+"    # matches packages/frontend, packages/backend, etc.
         #     - "apps/[^/]+"        # matches apps/web, apps/mobile, etc.
         #
-        # Custom allowed markdown paths: uncomment to OVERRIDE all built-in paths.
-        # Each entry is a regex matched against the project-relative file path.
-        # When set, ONLY paths matching these patterns are allowed.
+        # Custom allowed markdown paths: OVERRIDES all built-in path rules.
+        # Each entry is a regex matched against the project-relative path.
+        # In monorepos, patterns match AFTER sub-project prefix stripping (same
+        # rules apply to root and all sub-projects). See HANDLER_REFERENCE.md.
         # CLAUDE.md, README.md, CHANGELOG.md are always allowed regardless.
-        # Built-in defaults (used when this is not set):
+        # Built-in defaults (used when this option is absent):
         #   allowed_markdown_paths:
         #     - "^CLAUDE/.*\\.md$"                              # LLM documentation
         #     - "^docs/.*\\.md$"                                # Human-facing docs
