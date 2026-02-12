@@ -7,6 +7,106 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.11.0] - 2026-02-12
+
+### Added
+- **LLM-Optimized QA Script**: New `scripts/qa/llm_qa.py` wrapper producing ~16 lines of structured output instead of 200+ verbose lines (Plan 00053, commits da71c17, 5b1f1fa)
+  - Unified QA runner supporting individual tools or all checks
+  - JSON output with jq hints for drill-down investigation
+  - Cross-checks tool exit codes against JSON to catch reporting inaccuracies
+  - `--read-only` mode for non-interactive environments
+  - Project-level handler enforces usage of LLM script over verbose `run_all.sh` (commit cedb3c0)
+
+- **Per-Handler Documentation Structure**: Handler-specific documentation files in `docs/guides/handlers/` (commit 7763c05)
+  - One markdown file per complex handler with full configuration options
+  - First extraction: `markdown_organization.md` with monorepo interaction and custom paths
+  - `HANDLER_REFERENCE.md` links to per-handler files instead of duplicating content
+  - Config templates include doc links for each handler
+
+- **Monorepo Support for Markdown Organization Handler**: Sub-project directory configuration (commits 21c0349, da7d750)
+  - New `_monorepo_subproject_patterns` config option for regex patterns matching sub-project directories
+  - Sub-projects can have their own `CLAUDE/`, `docs/`, `untracked/`, `RELEASES/`, `eslint-rules/` directories
+  - 13 new tests covering monorepo allow/block scenarios
+  - Backward compatible with existing single-project configurations
+
+- **Configurable Allowed Markdown Paths**: Custom regex patterns for markdown organization handler (commit 10ed5dd)
+  - New `allowed_markdown_paths` config option overrides ALL built-in path checks
+  - `CLAUDE.md`, `README.md`, `CHANGELOG.md` remain always-allowed regardless of custom patterns
+  - Documented as commented defaults in YAML config for easy customization
+  - 19 tests covering interaction with monorepo configuration
+
+- **Critical Thinking Advisory Handler**: New UserPromptSubmit handler to encourage deeper analysis (commits 2c4266d, 4a30b6e, 51e530e)
+  - Triggers on complex tasks involving architecture, refactoring, or multi-file changes
+  - Advises LLMs to consider edge cases, dependencies, and failure modes before implementation
+  - Non-blocking advisory mode with configurable trigger patterns
+  - New HandlerID.CRITICAL_THINKING_ADVISORY constant
+
+- **LLM Command Wrapper Guide**: Comprehensive language-agnostic guide for wrapping CLI tools (commits 2c4266d, ca50a3b, 5bc354c, 8dfdcfc)
+  - New `guides/` package with `llm-command-wrappers.md` documentation
+  - Covers JSON output, error handling, context awareness, and LLM-optimized formatting
+  - NPM and ESLint advisory handlers reference guide path
+  - Markdown organization handler allows `guides/` directory
+  - New `get_llm_command_guide_path()` utility function
+
+- **Config Key Injection in DENY/ASK Responses**: Infrastructure-level feature for user-friendly handler disabling (commits b428e54, fa82460)
+  - EventRouter and FrontController inject config paths into all DENY/ASK responses
+  - Users see exact config path to disable blocking handler immediately
+  - Zero individual handler changes needed (handled at routing layer)
+  - Example: "To disable this handler, set `handlers.pre_tool_use.destructive_git.enabled: false`"
+
+- **Force Branch Deletion Blocking**: Extended destructive git handler to catch forced branch deletions (commit f0a03b9)
+  - Blocks `git branch -D` and `git branch --delete --force` patterns
+  - Added to existing destructive git safety checks
+
+- **Blocking Handler False Positives Documentation**: New CLAUDE.md section explaining intentional string matching behavior (commit 80a2f25)
+  - Documents why handlers match patterns in commit messages (enables acceptance testing)
+  - Explains false positives are intentional and trivial to work around
+  - Provides examples and workarounds for describing fixes without triggering blocks
+
+### Changed
+- **MyPy Color Output Disabled**: Fixed false-negative error reporting in type checking (commit da71c17)
+  - Bug: ANSI color codes broke mypy error parsing in JSON output
+  - Bug: `run_type_check.sh` reported 0 errors when mypy found real errors
+  - Fix: Added `--no-color-output` flag to mypy invocation
+  - JSON results now accurately reflect actual type checking errors
+
+- **Handler Class Attributes**: Added missing `_project_languages` to `__slots__` and type annotations (commit da71c17)
+  - Fix: MyPy `attr-defined` error for handlers using project language detection
+  - Ensures strict type safety for handler class attributes
+
+- **Thinking Mode Status Priority**: Moved from priority 25 to 12 for better visibility (commit 990bb1f)
+  - Displays next to model name in session start messages
+  - More prominent position for critical thinking advisory context
+
+- **NPM Handler LLM Command Detection & Advisory Mode**: NPM handler now detects `llm:` commands in package.json (commits fa82460, c5e2283, baeb7ae)
+  - New shared utility `utils/npm.py` with `has_llm_commands_in_package_json()` function
+  - **NpmCommandHandler**: DENY when `llm:` commands exist (blocks raw npm), ALLOW with advisory when absent
+  - **ValidateEslintOnWriteHandler**: Run ESLint when `llm:` commands exist, skip with advisory when absent
+  - Advisory messages reference LLM command wrapper guide for proper usage patterns
+  - Encourages teams to use LLM-optimized wrappers instead of raw CLI tools
+
+### Fixed
+- **Type Check JSON Accuracy**: Cross-validation prevents false-negative QA reports (commit da71c17)
+  - `llm_qa.py` now cross-checks tool exit codes against JSON results
+  - Catches cases where JSON reports success but tool exited with error code
+  - Prevents silent failures in CI/CD pipelines
+
+- **Deprecated Handler Attribute**: Fixed 6 handlers using deprecated `name=` parameter instead of `handler_id=` (commit f0a03b9)
+  - Updated handlers to use HandlerID constants for self-identification
+  - Maintains consistency with handler registry architecture from Plan 00039
+  - Affected handlers: pip_break_system, sudo_pip, curl_pipe_shell, dangerous_permissions, global_npm_advisor, lock_file_edit_blocker
+
+- **Silent Exception Suppression**: Fixed registry.py silently hiding import errors (commit f0a03b9)
+  - Bug: Bare try/except/pass suppressed handler loading failures without logging
+  - Fix: Added explicit error logging before suppression
+  - Maintains FAIL FAST principle - errors are now visible in daemon logs
+
+### Removed
+- **Project-Specific Hangover Handlers**: Cleaned up two handlers that belonged in project-level config (commit 990bb1f)
+  - Removed `validate_sitemap` handler (PostToolUse) - project-specific validation
+  - Removed `remind_validator` handler (SubagentStop) - project-specific reminder
+  - Updated all constants, configs, tests, docs, and install template
+
 ## [2.10.1] - 2026-02-11
 
 ### Fixed
