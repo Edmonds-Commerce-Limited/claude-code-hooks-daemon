@@ -9,9 +9,11 @@ from claude_code_hooks_daemon.utils.naming import (
     config_key_to_display_name,
     display_name_to_config_key,
 )
+from claude_code_hooks_daemon.utils.npm import has_llm_commands_in_package_json
 
 __all__ = [
     "class_name_to_config_key",
     "config_key_to_display_name",
     "display_name_to_config_key",
+    "has_llm_commands_in_package_json",
 ]

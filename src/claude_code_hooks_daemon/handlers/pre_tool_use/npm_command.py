@@ -1,4 +1,8 @@
-"""NpmCommandHandler - enforces llm: prefixed npm commands and blocks direct npx usage."""
+"""NpmCommandHandler - enforces llm: prefixed npm commands and blocks direct npx usage.
+
+When llm: commands exist in package.json, enforces their usage (DENY raw commands).
+When llm: commands do NOT exist, allows with advisory about creating them.
+"""
 
 import re
 from typing import Any, ClassVar
@@ -6,6 +10,7 @@ from typing import Any, ClassVar
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.utils.npm import has_llm_commands_in_package_json
 
 
 class NpmCommandHandler(Handler):
@@ -48,6 +53,7 @@ class NpmCommandHandler(Handler):
                 HandlerTag.NON_TERMINAL,
             ],
         )
+        self.has_llm_commands: bool = has_llm_commands_in_package_json()
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if this is an npm run or npx command that needs validation."""
@@ -124,6 +130,25 @@ class NpmCommandHandler(Handler):
                 # Fallback if pattern doesn't match
                 return HookResult(decision=Decision.ALLOW, reason="Could not parse npm/npx command")
 
+        # Advisory mode: no llm: commands in package.json
+        if not self.has_llm_commands:
+            return HookResult(
+                decision=Decision.ALLOW,
+                reason=(
+                    f"⚠️  ADVISORY: Consider creating llm: prefixed npm commands\n\n"
+                    f"You're using: {blocked_cmd}\n\n"
+                    f"RECOMMENDATION: Create llm: wrappers in package.json for better LLM integration\n"
+                    f"  • Minimal stdout (summary only: exit code, counts, timing)\n"
+                    f"  • Verbose JSON files in ./var/qa/ (optimized for jq queries)\n"
+                    f"  • Machine-readable output (parse with jq, not grep/sed)\n\n"
+                    f"Example package.json script:\n"
+                    f'  "llm:{npm_cmd if npm_match else suggested}": '
+                    f'"<tool> --format json --output-file ./var/qa/<tool>-cache.json"\n\n'
+                    f"This command will run for now, but consider adding llm: wrappers."
+                ),
+            )
+
+        # Enforcement mode: llm: commands exist in package.json
         return HookResult(
             decision=Decision.DENY,
             reason=(
@@ -148,11 +173,15 @@ class NpmCommandHandler(Handler):
 
         return [
             AcceptanceTest(
-                title="npm command guidance",
-                command='echo "npm install"',
-                description="Provides npm command best practices (advisory)",
-                expected_decision=Decision.ALLOW,
-                expected_message_patterns=[r"npm", r"package"],
+                title="npm command enforcement (llm: commands exist)",
+                command='echo "npm run build"',
+                description=(
+                    "Blocks raw npm commands when llm: wrappers exist in package.json. "
+                    "If this project has llm: scripts, expect DENY. "
+                    "If not, expect ALLOW with advisory."
+                ),
+                expected_decision=Decision.DENY if self.has_llm_commands else Decision.ALLOW,
+                expected_message_patterns=[r"llm:", r"npm"],
                 safety_notes="Uses echo - safe to test",
                 test_type=TestType.ADVISORY,
             ),

@@ -14,7 +14,15 @@ def mock_project_context():
         yield mock
 
 
-import pytest
+@pytest.fixture(autouse=True)
+def mock_llm_commands_detection():
+    """Mock llm commands detection - default to True (enforcement mode)."""
+    with patch(
+        "claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write.has_llm_commands_in_package_json",
+        return_value=True,
+    ) as mock:
+        yield mock
+
 
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.core.hook_result import Decision
@@ -349,3 +357,99 @@ class TestValidateEslintOnWriteHandler:
         assert "--human" in call_args[0][0]
         assert call_args[1]["cwd"] == str(tmp_path)
         assert call_args[1]["timeout"] == 30
+
+    # Tests for has_llm_commands caching
+
+    def test_has_llm_commands_cached_at_init(self, tmp_path: Path) -> None:
+        """has_llm_commands is cached at __init__ time."""
+        with patch(
+            "claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write.has_llm_commands_in_package_json",
+            return_value=True,
+        ) as mock_detect:
+            handler = ValidateEslintOnWriteHandler(workspace_root=tmp_path)
+            assert handler.has_llm_commands is True
+            mock_detect.assert_called_once()
+
+    def test_has_llm_commands_false_when_no_llm_scripts(self, tmp_path: Path) -> None:
+        """has_llm_commands is False when no llm: scripts exist."""
+        with patch(
+            "claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write.has_llm_commands_in_package_json",
+            return_value=False,
+        ):
+            handler = ValidateEslintOnWriteHandler(workspace_root=tmp_path)
+            assert handler.has_llm_commands is False
+
+    # Tests for advisory mode (no llm: commands)
+
+    @patch("subprocess.run")
+    def test_advisory_mode_skips_eslint_validation(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
+        """Advisory mode skips ESLint validation and returns ALLOW with advisory."""
+        with patch(
+            "claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write.has_llm_commands_in_package_json",
+            return_value=False,
+        ):
+            handler = ValidateEslintOnWriteHandler(workspace_root=tmp_path)
+
+        test_file = tmp_path / "test.ts"
+        test_file.write_text("const x = 1;")
+
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(test_file)},
+        }
+
+        result = handler.handle(hook_input)
+
+        assert result.decision == Decision.ALLOW
+        assert "ADVISORY" in result.reason
+        mock_run.assert_not_called()
+
+    @patch("subprocess.run")
+    def test_advisory_mode_suggests_llm_lint(self, mock_run: MagicMock, tmp_path: Path) -> None:
+        """Advisory mode suggests creating llm:lint script."""
+        with patch(
+            "claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write.has_llm_commands_in_package_json",
+            return_value=False,
+        ):
+            handler = ValidateEslintOnWriteHandler(workspace_root=tmp_path)
+
+        test_file = tmp_path / "component.tsx"
+        test_file.write_text("export const App = () => <div />;")
+
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(test_file)},
+        }
+
+        result = handler.handle(hook_input)
+
+        assert result.decision == Decision.ALLOW
+        assert "llm:lint" in result.reason
+        assert "package.json" in result.reason
+        mock_run.assert_not_called()
+
+    @patch("subprocess.run")
+    def test_enforcement_mode_runs_eslint(self, mock_run: MagicMock, tmp_path: Path) -> None:
+        """Enforcement mode (llm commands exist) runs ESLint as before."""
+        with patch(
+            "claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write.has_llm_commands_in_package_json",
+            return_value=True,
+        ):
+            handler = ValidateEslintOnWriteHandler(workspace_root=tmp_path)
+
+        test_file = tmp_path / "test.ts"
+        test_file.write_text("const x = 1;")
+
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(test_file)},
+        }
+
+        result = handler.handle(hook_input)
+
+        assert result.decision == Decision.ALLOW
+        mock_run.assert_called_once()
