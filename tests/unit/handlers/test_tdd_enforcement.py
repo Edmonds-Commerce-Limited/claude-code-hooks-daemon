@@ -1037,3 +1037,107 @@ class TestTddEnforcementHandler:
         }
         # scripts/ is not in src/ or handlers/, so should not match
         assert handler.matches(hook_input) is False
+
+    # Regression tests for Plan 00055: Multi-path detection bug
+    def test_bug_mirror_structure_allows_file_creation(self, handler):
+        """Regression test: Should find test in tests/{package}/ mirror structure.
+
+        Bug: Handler only checks tests/unit/ (strips package), missing valid tests
+        in mirror structure like tests/mypackage/services/test_user.py.
+
+        This test MUST FAIL before fix (false positive - blocks valid file creation).
+        """
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/workspace/src/mypackage/services/user.py"},
+        }
+
+        # Simulate: test file EXISTS in mirror location, NOT in stripped location
+        # After fix, handler checks multiple paths and finds the mirror location
+        def path_exists_side_effect(self):
+            path_str = str(self)
+            # Mirror location: EXISTS (PHP PSR-4, Java style)
+            if path_str == "/workspace/tests/mypackage/services/test_user.py":
+                return True
+            # Current location (strips package): does NOT exist
+            if path_str == "/workspace/tests/unit/services/test_user.py":
+                return False
+            # Fallback location: does NOT exist
+            return False
+
+        with patch.object(Path, "exists", path_exists_side_effect):
+            result = handler.handle(hook_input)
+
+        # EXPECTED: Should ALLOW (test exists in mirror structure)
+        # ACTUAL (before fix): Will DENY (handler only checks stripped path, gets False)
+        assert result.decision == "allow", (
+            f"Should ALLOW when test exists in mirror structure. " f"Got decision={result.decision}"
+        )
+
+    def test_bug_current_structure_still_works(self, handler):
+        """Ensure existing Python convention (strip package) still works after fix."""
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/workspace/src/mypackage/services/user.py"},
+        }
+
+        # Simulate: test exists in current Python convention (tests/unit/services/)
+        def path_exists_side_effect(self):
+            path_str = str(self)
+            # Current location (strips package): EXISTS
+            if path_str == "/workspace/tests/unit/services/test_user.py":
+                return True
+            # Mirror location: does NOT exist
+            if path_str == "/workspace/tests/mypackage/services/test_user.py":
+                return False
+            return False
+
+        with patch.object(Path, "exists", path_exists_side_effect):
+            result = handler.handle(hook_input)
+
+        assert result.decision == "allow", (
+            "Should ALLOW when test exists in current Python convention "
+            "(tests/unit/services/test_user.py)"
+        )
+
+    def test_no_test_in_any_location_denies(self, handler):
+        """Should deny if test doesn't exist in ANY candidate location."""
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/workspace/src/mypackage/services/user.py"},
+        }
+
+        # Simulate: no test exists anywhere
+        with patch.object(Path, "exists", return_value=False):
+            result = handler.handle(hook_input)
+
+        assert result.decision == "deny", "Should DENY when test missing in all locations"
+        assert (
+            "Searched locations:" in result.reason
+        ), "Error message should show all searched locations"
+
+    def test_php_psr4_mirror_structure(self, handler):
+        """PHP PSR-4 should work with mirror structure (real-world scenario).
+
+        PHP source: src/SupFeeds/Logging/DTO/File.php
+        PHP test: tests/SupFeeds/Logging/DTO/FileTest.php (mirrors full structure)
+        """
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/workspace/src/SupFeeds/Logging/DTO/File.php"},
+        }
+
+        # Simulate: test exists in mirror location
+        def path_exists_side_effect(self):
+            path_str = str(self)
+            # Mirror location: EXISTS (PSR-4 style)
+            if path_str == "/workspace/tests/SupFeeds/Logging/DTO/FileTest.php":
+                return True
+            return False
+
+        with patch.object(Path, "exists", path_exists_side_effect):
+            result = handler.handle(hook_input)
+
+        assert (
+            result.decision == "allow"
+        ), "Should ALLOW PHP file when test exists in PSR-4 mirror structure"
