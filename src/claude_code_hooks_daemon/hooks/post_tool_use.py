@@ -27,9 +27,6 @@ from claude_code_hooks_daemon.handlers.post_tool_use.hello_world import (
 from claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write import (
     ValidateEslintOnWriteHandler,
 )
-from claude_code_hooks_daemon.handlers.post_tool_use.validate_sitemap import (
-    ValidateSitemapHandler,
-)
 
 
 def get_builtin_handlers() -> dict[str, type]:
@@ -41,7 +38,6 @@ def get_builtin_handlers() -> dict[str, type]:
     return {
         "bash_error_detector": BashErrorDetectorHandler,
         "validate_eslint_on_write": ValidateEslintOnWriteHandler,
-        "validate_sitemap": ValidateSitemapHandler,
     }
 
 

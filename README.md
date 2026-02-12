@@ -286,9 +286,8 @@ The installer will warn if it detects this pattern.
 - `plan_time_estimates` - Prevents time estimates in plans
 - `markdown_organization` - Enforces markdown organization rules
 
-**PostToolUse** (3 handlers):
+**PostToolUse** (2 handlers):
 - `bash_error_detector` - Detects and reports bash command errors
-- `validate_sitemap` - Validates sitemap structure after writes
 - `validate_eslint_on_write` - Validates ESLint compliance after file writes
 
 **SessionStart** (5 handlers):
@@ -302,9 +301,8 @@ The installer will warn if it detects this pattern.
 - `transcript_archiver` - Archives conversation transcripts before compaction
 - `workflow_state_pre_compact` - Saves workflow state before compaction
 
-**SubagentStop** (3 handlers):
+**SubagentStop** (2 handlers):
 - `remind_prompt_library` - Reminds about prompt library after subagent work
-- `remind_validator` - Reminds about HTML validation
 - `subagent_completion_logger` - Logs subagent completion events
 
 **UserPromptSubmit** (1 handler):
@@ -417,10 +415,6 @@ handlers:
     bash_error_detector:    # Detect bash command errors
       enabled: false        # Optional - enable for error detection
       priority: 10
-
-    validate_sitemap:       # Validate sitemap structure
-      enabled: false        # Optional - enable for sitemap validation
-      priority: 20
 
   # SessionStart handlers - Run at session start
   session_start:
@@ -833,7 +827,6 @@ For detailed architecture documentation, see `CLAUDE/ARCHITECTURE.md`.
 
 **Post-Execution Checks:**
 - `bash_error_detector` (Priority 10) - Detects bash command failures
-- `validate_sitemap` (Priority 20) - Validates sitemap XML structure
 - `validate_eslint_on_write` (Priority 30) - Validates ESLint compliance
 
 ---

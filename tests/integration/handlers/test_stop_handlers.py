@@ -1,8 +1,7 @@
 """Integration tests for Stop and SubagentStop handlers.
 
 Tests: TaskCompletionCheckerHandler, AutoContinueStopHandler,
-       SubagentCompletionLoggerHandler, RemindValidatorHandler,
-       RemindPromptLibraryHandler
+       SubagentCompletionLoggerHandler, RemindPromptLibraryHandler
 """
 
 from __future__ import annotations
@@ -179,74 +178,6 @@ class TestSubagentCompletionLoggerHandler:
 
     def test_handler_is_non_terminal(self, handler: Any) -> None:
         assert handler.terminal is False
-
-
-# ---------------------------------------------------------------------------
-# RemindValidatorHandler
-# ---------------------------------------------------------------------------
-class TestRemindValidatorHandler:
-    """Integration tests for RemindValidatorHandler."""
-
-    @pytest.fixture()
-    def handler(self) -> Any:
-        from claude_code_hooks_daemon.handlers.subagent_stop.remind_validator import (
-            RemindValidatorHandler,
-        )
-
-        return RemindValidatorHandler()
-
-    def test_does_not_match_without_builder_agent(self, handler: Any) -> None:
-        # Without a transcript containing a builder agent, should not match
-        hook_input = make_subagent_stop_input()
-        assert handler.matches(hook_input) is False
-
-    def test_matches_when_builder_agent_completed(self, handler: Any, tmp_path: Any) -> None:
-        # Create transcript with a known builder agent
-        transcript = tmp_path / "transcript.jsonl"
-        entry = {
-            "type": "message",
-            "message": {
-                "role": "assistant",
-                "content": [
-                    {
-                        "type": "tool_use",
-                        "name": "Task",
-                        "input": {"subagent_type": "sitemap-modifier"},
-                    }
-                ],
-            },
-        }
-        transcript.write_text(json.dumps(entry) + "\n")
-
-        hook_input = make_subagent_stop_input(transcript_path=str(transcript))
-        assert handler.matches(hook_input) is True
-
-    def test_handle_returns_allow_with_reminder(self, handler: Any, tmp_path: Any) -> None:
-        transcript = tmp_path / "transcript.jsonl"
-        entry = {
-            "type": "message",
-            "message": {
-                "role": "assistant",
-                "content": [
-                    {
-                        "type": "tool_use",
-                        "name": "Task",
-                        "input": {"subagent_type": "sitemap-modifier"},
-                    }
-                ],
-            },
-        }
-        transcript.write_text(json.dumps(entry) + "\n")
-
-        hook_input = make_subagent_stop_input(transcript_path=str(transcript))
-        result = handler.handle(hook_input)
-        assert result.decision == Decision.ALLOW
-        assert result.context is not None
-        assert len(result.context) > 0
-        assert "sitemap-validator" in result.context[0]
-
-    def test_handler_is_terminal(self, handler: Any) -> None:
-        assert handler.terminal is True
 
 
 # ---------------------------------------------------------------------------

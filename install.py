@@ -692,10 +692,6 @@ handlers:
     #   enabled: false            # Optional - enable for automatic ESLint validation
     #   priority: 10
 
-    # validate_sitemap:          # Validates sitemap structure after writes
-    #   enabled: false            # Optional - enable for sitemap validation
-    #   priority: 20
-
   # SessionStart handlers (run when session starts)
   session_start:
     yolo_container_detection:     # Detects YOLO container environments (enabled by default)
@@ -723,10 +719,6 @@ handlers:
     # remind_prompt_library:  # Reminds about prompt library after agent work
     #   enabled: false         # Optional - enable for prompt library reminders
     #   priority: 10
-
-    # remind_validator:       # Reminds about HTML validation
-    #   enabled: false         # Optional - enable for validation reminders
-    #   priority: 20
 
   # UserPromptSubmit handlers (run when user submits prompt)
   user_prompt_submit:

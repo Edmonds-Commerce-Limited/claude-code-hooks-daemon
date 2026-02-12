@@ -355,7 +355,6 @@ class TestConfigHandlerCoverage:
         "yolo_container_detection",
         # Reminder handlers - optional
         "remind_prompt_library",
-        "remind_validator",
         # Stop handlers - optional
         "auto_continue_stop",
         "task_completion_checker",
@@ -363,7 +362,6 @@ class TestConfigHandlerCoverage:
         "pipe_blocker",
         # ESLint validation - optional
         "validate_eslint_on_write",
-        "validate_sitemap",
         # Status line handlers - project-specific
         "suggest_status_line",
     }

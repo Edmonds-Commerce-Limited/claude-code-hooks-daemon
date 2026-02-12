@@ -1,7 +1,6 @@
 """Integration tests for PostToolUse handlers.
 
-Tests: BashErrorDetectorHandler, ValidateEslintOnWriteHandler,
-       ValidateSitemapHandler
+Tests: BashErrorDetectorHandler, ValidateEslintOnWriteHandler
 """
 
 from __future__ import annotations
@@ -133,46 +132,4 @@ class TestValidateEslintOnWriteHandler:
 
     def test_skips_dist(self, handler: Any) -> None:
         hook_input = make_post_tool_write_input("/project/dist/bundle.ts")
-        assert handler.matches(hook_input) is False
-
-
-# ---------------------------------------------------------------------------
-# ValidateSitemapHandler
-# ---------------------------------------------------------------------------
-class TestValidateSitemapHandler:
-    """Integration tests for ValidateSitemapHandler."""
-
-    @pytest.fixture()
-    def handler(self) -> Any:
-        from claude_code_hooks_daemon.handlers.post_tool_use.validate_sitemap import (
-            ValidateSitemapHandler,
-        )
-
-        return ValidateSitemapHandler()
-
-    def test_matches_sitemap_markdown(self, handler: Any) -> None:
-        hook_input = make_post_tool_write_input("/workspace/CLAUDE/Sitemap/pages.md")
-        assert handler.matches(hook_input) is True
-        result = handler.handle(hook_input)
-        assert result.decision == Decision.ALLOW
-        assert result.context is not None
-        assert len(result.context) > 0
-
-    def test_ignores_non_sitemap_files(self, handler: Any) -> None:
-        hook_input = make_post_tool_write_input("/workspace/src/module.py")
-        assert handler.matches(hook_input) is False
-
-    def test_ignores_sitemap_claude_md(self, handler: Any) -> None:
-        hook_input = make_post_tool_write_input("/workspace/CLAUDE/Sitemap/CLAUDE.md")
-        assert handler.matches(hook_input) is False
-
-    def test_ignores_non_markdown(self, handler: Any) -> None:
-        hook_input = make_post_tool_write_input("/workspace/CLAUDE/Sitemap/data.json")
-        assert handler.matches(hook_input) is False
-
-    def test_non_write_not_matched(self, handler: Any) -> None:
-        hook_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "cat CLAUDE/Sitemap/pages.md"},
-        }
         assert handler.matches(hook_input) is False
