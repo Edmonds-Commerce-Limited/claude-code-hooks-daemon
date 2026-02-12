@@ -305,6 +305,25 @@ Review to identify all tests to execute.
 
 **STEP 8.3: Execute ALL Tests Sequentially in Main Thread**
 
+**🚨 ABSOLUTE REQUIREMENT: EVERY SINGLE TEST MUST BE EXECUTED 🚨**
+
+**There is NO such thing as "critical tests" or "subset testing"**:
+- ❌ You CANNOT test only "new handlers"
+- ❌ You CANNOT test only "blocking handlers"
+- ❌ You CANNOT skip "simple handlers"
+- ❌ You CANNOT prioritize "important tests"
+- ❌ You CANNOT do a "quick smoke test"
+
+**ALL 127+ TESTS ARE EQUALLY CRITICAL. NO EXCEPTIONS. NO SHORTCUTS.**
+
+Every handler must be verified. Every test case must pass. One skipped test = invalid release.
+
+**Why every test matters**:
+- A "simple" handler might have a regression
+- A "less critical" handler might block the entire daemon
+- An "unchanged" handler might be affected by infrastructure changes
+- You will NOT know which test would have caught the bug you skipped
+
 Work through EVERY test in the playbook using **real Claude Code tool calls**:
 
 - **BLOCKING tests**: Use Bash/Write/Edit tool with the test command. Verify the hook blocks it (error output contains expected patterns).
@@ -312,6 +331,8 @@ Work through EVERY test in the playbook using **real Claude Code tool calls**:
 - **CONTEXT/LIFECYCLE tests**: Verify system-reminders show handler active (SessionStart, PostToolUse, UserPromptSubmit confirmed by normal session usage; others confirmed by daemon loading without errors).
 
 Mark PASS/FAIL for each test. Document any unexpected behaviour.
+
+**Test execution is sequential, one at a time, in order. No parallel execution. No batching. No sampling.**
 
 **STEP 8.4: Evaluate Results**
 
