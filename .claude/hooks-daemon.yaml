@@ -154,6 +154,17 @@ handlers:
       options:
         track_plans_in_project: "CLAUDE/Plan"     # Path to plan folder (null to disable)
         plan_workflow_docs: "CLAUDE/PlanWorkflow.md"  # Optional: workflow doc to reference
+        # allowed_markdown_paths: override built-in allowed locations with custom regex patterns.
+        # When set, ONLY paths matching these patterns are allowed (overrides ALL defaults).
+        # CLAUDE.md, README.md, CHANGELOG.md are always allowed regardless.
+        # Uncomment and customise to override built-in defaults:
+        #   allowed_markdown_paths:
+        #     - "^CLAUDE/.*\\.md$"
+        #     - "^docs/.*\\.md$"
+        #     - "^untracked/.*\\.md$"
+        #     - "^RELEASES/.*\\.md$"
+        #     - "^eslint-rules/.*\\.md$"
+        #     - "^src/claude_code_hooks_daemon/guides/.*\\.md$"
 
     # TOOL USAGE HANDLERS (Priority 50-60)
     web_search_year:       # Fixes year in web search queries (uses current year)

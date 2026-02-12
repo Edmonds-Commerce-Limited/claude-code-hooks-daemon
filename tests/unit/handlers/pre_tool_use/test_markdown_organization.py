@@ -792,3 +792,160 @@ class TestMonorepoSupport:
         handler._monorepo_subproject_patterns = [r"packages/[^/]+"]
         write_input["tool_input"]["file_path"] = "packages/frontend/CLAUDE.md"
         assert handler.matches(write_input) is False  # Allowed
+
+
+class TestAllowedMarkdownPaths:
+    """Tests for configurable allowed markdown paths via regex patterns.
+
+    When _allowed_markdown_paths is set, it OVERRIDES all built-in path checks
+    in _is_invalid_location(). Projects can define exactly where markdown files
+    are allowed to be created.
+    """
+
+    @pytest.fixture
+    def handler(self, tmp_path: Path) -> MarkdownOrganizationHandler:
+        """Create handler with mocked workspace."""
+        handler = MarkdownOrganizationHandler()
+        handler._workspace_root = tmp_path
+        return handler
+
+    @pytest.fixture
+    def write_input(self) -> dict[str, Any]:
+        """Create sample Write hook input."""
+        return {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "", "content": "Test content"},
+        }
+
+    # ── Config attribute defaults ──
+
+    def test_default_allowed_markdown_paths_is_none(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        """Default _allowed_markdown_paths is None (use built-in logic)."""
+        assert handler._allowed_markdown_paths is None
+
+    # ── Custom paths override built-in logic ──
+
+    def test_custom_paths_allow_matching_location(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Custom allowed paths permit matching locations."""
+        handler._allowed_markdown_paths = [r"^content/.*\.md$"]
+        write_input["tool_input"]["file_path"] = "content/blog/post.md"
+        assert handler.matches(write_input) is False  # Allowed
+
+    def test_custom_paths_block_non_matching_location(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Custom allowed paths block non-matching locations."""
+        handler._allowed_markdown_paths = [r"^content/.*\.md$"]
+        write_input["tool_input"]["file_path"] = "src/random.md"
+        assert handler.matches(write_input) is True  # Blocked
+
+    def test_custom_paths_override_builtin_claude_dir(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Custom paths override built-in CLAUDE/ allowance.
+
+        If project defines custom paths that don't include CLAUDE/,
+        then CLAUDE/ is no longer allowed (overrides ALL built-in paths).
+        """
+        handler._allowed_markdown_paths = [r"^content/.*\.md$"]
+        write_input["tool_input"]["file_path"] = "CLAUDE/test.md"
+        assert handler.matches(write_input) is True  # Blocked (not in custom paths)
+
+    def test_custom_paths_override_builtin_docs_dir(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Custom paths override built-in docs/ allowance."""
+        handler._allowed_markdown_paths = [r"^content/.*\.md$"]
+        write_input["tool_input"]["file_path"] = "docs/guide.md"
+        assert handler.matches(write_input) is True  # Blocked (not in custom paths)
+
+    # ── Multiple regex patterns ──
+
+    def test_multiple_patterns_any_match_allows(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Any matching pattern in the list allows the write."""
+        handler._allowed_markdown_paths = [
+            r"^CLAUDE/.*\.md$",
+            r"^docs/.*\.md$",
+            r"^content/.*\.md$",
+        ]
+        write_input["tool_input"]["file_path"] = "docs/api.md"
+        assert handler.matches(write_input) is False  # Allowed (matches second pattern)
+
+    def test_multiple_patterns_none_match_blocks(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """When no pattern matches, the write is blocked."""
+        handler._allowed_markdown_paths = [
+            r"^CLAUDE/.*\.md$",
+            r"^docs/.*\.md$",
+        ]
+        write_input["tool_input"]["file_path"] = "random/notes.md"
+        assert handler.matches(write_input) is True  # Blocked
+
+    # ── Empty list blocks everything ──
+
+    def test_empty_list_blocks_all_markdown(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Empty allowed_markdown_paths list blocks all markdown writes."""
+        handler._allowed_markdown_paths = []
+        write_input["tool_input"]["file_path"] = "CLAUDE/test.md"
+        assert handler.matches(write_input) is True  # Blocked
+
+    # ── Adhoc files still allowed even with custom paths ──
+
+    def test_claude_md_still_allowed_with_custom_paths(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """CLAUDE.md, README.md, CHANGELOG.md still allowed regardless of custom paths.
+
+        These are checked BEFORE _is_invalid_location, so they bypass custom paths.
+        """
+        handler._allowed_markdown_paths = [r"^content/.*\.md$"]
+        write_input["tool_input"]["file_path"] = "CLAUDE.md"
+        assert handler.matches(write_input) is False  # Allowed (adhoc file)
+
+    def test_readme_md_still_allowed_with_custom_paths(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """README.md still allowed with custom paths."""
+        handler._allowed_markdown_paths = [r"^content/.*\.md$"]
+        write_input["tool_input"]["file_path"] = "README.md"
+        assert handler.matches(write_input) is False  # Allowed (adhoc file)
+
+    # ── Case insensitive matching ──
+
+    def test_patterns_are_case_insensitive(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Regex patterns should match case-insensitively."""
+        handler._allowed_markdown_paths = [r"^claude/.*\.md$"]
+        write_input["tool_input"]["file_path"] = "CLAUDE/test.md"
+        assert handler.matches(write_input) is False  # Allowed
+
+    # ── Interacts correctly with monorepo ──
+
+    def test_custom_paths_used_for_monorepo_subproject(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Custom paths are applied to monorepo sub-project relative paths too."""
+        handler._monorepo_subproject_patterns = [r"packages/[^/]+"]
+        handler._allowed_markdown_paths = [r"^docs/.*\.md$", r"^CLAUDE/.*\.md$"]
+        # Sub-project relative path is "docs/guide.md" -> matches custom paths
+        write_input["tool_input"]["file_path"] = "packages/frontend/docs/guide.md"
+        assert handler.matches(write_input) is False  # Allowed
+
+    def test_custom_paths_block_monorepo_subproject_invalid(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Custom paths block invalid monorepo sub-project paths."""
+        handler._monorepo_subproject_patterns = [r"packages/[^/]+"]
+        handler._allowed_markdown_paths = [r"^docs/.*\.md$"]
+        write_input["tool_input"]["file_path"] = "packages/frontend/random/notes.md"
+        assert handler.matches(write_input) is True  # Blocked

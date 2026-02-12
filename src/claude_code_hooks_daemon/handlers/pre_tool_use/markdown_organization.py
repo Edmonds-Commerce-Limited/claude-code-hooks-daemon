@@ -54,6 +54,7 @@ class MarkdownOrganizationHandler(Handler):
         self._monorepo_subproject_patterns: list[str] | None = (
             None  # Regex patterns for sub-projects
         )
+        self._allowed_markdown_paths: list[str] | None = None  # Regex patterns for allowed paths
 
     def normalize_path(self, file_path: str) -> str:
         """Normalize file path to project-relative format.
@@ -420,6 +421,39 @@ class MarkdownOrganizationHandler(Handler):
 
         Applies organization rules to a path that is already relative to
         a project root (either the repo root or a monorepo sub-project).
+
+        When _allowed_markdown_paths is configured, those regex patterns
+        OVERRIDE all built-in path checks. Any path matching at least one
+        pattern is allowed; everything else is blocked.
+
+        Args:
+            normalized: Project-relative normalized path
+
+        Returns:
+            True if the location is INVALID (should be blocked)
+        """
+        # When custom allowed paths are configured, they override ALL built-in logic
+        if self._allowed_markdown_paths is not None:
+            return self._check_custom_paths(normalized)
+
+        return self._check_builtin_paths(normalized)
+
+    def _check_custom_paths(self, normalized: str) -> bool:
+        """Check path against custom allowed_markdown_paths regex patterns.
+
+        Args:
+            normalized: Project-relative normalized path
+
+        Returns:
+            True if the location is INVALID (no pattern matches)
+        """
+        for pattern in self._allowed_markdown_paths or []:
+            if re.match(pattern, normalized, re.IGNORECASE):
+                return False  # Allowed - matches a custom pattern
+        return True  # Blocked - no pattern matched
+
+    def _check_builtin_paths(self, normalized: str) -> bool:
+        """Check path against built-in allowed locations.
 
         Args:
             normalized: Project-relative normalized path
