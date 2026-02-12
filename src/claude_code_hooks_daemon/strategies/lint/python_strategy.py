@@ -1,5 +1,6 @@
 """Python lint strategy implementation."""
 
+import sys
 from typing import Any
 
 from claude_code_hooks_daemon.strategies.lint.common import COMMON_SKIP_PATHS
@@ -7,7 +8,8 @@ from claude_code_hooks_daemon.strategies.lint.common import COMMON_SKIP_PATHS
 # Language-specific constants
 _LANGUAGE_NAME = "Python"
 _EXTENSIONS: tuple[str, ...] = (".py",)
-_DEFAULT_LINT_COMMAND = "python3 -m py_compile {file}"
+# Use the same Python interpreter running the daemon (works in any environment)
+_DEFAULT_LINT_COMMAND = f"{sys.executable} -m py_compile {{file}}"
 _EXTENDED_LINT_COMMAND = "ruff check {file}"
 
 

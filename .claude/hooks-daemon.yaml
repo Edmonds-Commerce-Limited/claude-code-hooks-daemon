@@ -187,6 +187,15 @@ handlers:
     lint_on_edit:              # Language-aware lint validation after Write/Edit
       enabled: true
       priority: 25
+      # Optional: Override lint commands per language
+      # command_overrides:
+      #   Python:
+      #     default: "/usr/bin/python3.11 -m py_compile {file}"  # Custom Python path
+      #     extended: "ruff check {file}"
+      #   Shell:
+      #     default: "bash -n {file}"
+      #     extended: null  # Disable shellcheck
+      # Default: Uses sys.executable for Python, standard binaries for others
 
   # SessionStart handlers (run when session starts)
   session_start:
