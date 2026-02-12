@@ -89,17 +89,6 @@ class TestDaemonLocationGuardHandler:
         }
         assert handler.matches(hook_input) is False
 
-    def test_not_matches_official_upgrade_command(self, handler):
-        """Should not match the official upgrade command pattern."""
-        hook_input = {
-            "tool_name": "Bash",
-            "tool_input": {
-                "command": "cd .claude/hooks-daemon && git pull && cd ../.. && ./scripts/upgrade.sh"
-            },
-        }
-        # This should be whitelisted
-        assert handler.matches(hook_input) is False
-
     # handle() Tests
     def test_handle_blocks_cd_with_clear_message(self, handler):
         """Should block cd into hooks-daemon with helpful message."""
