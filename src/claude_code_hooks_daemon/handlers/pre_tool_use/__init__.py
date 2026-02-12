@@ -2,6 +2,7 @@
 
 from .absolute_path import AbsolutePathHandler
 from .british_english import BritishEnglishHandler
+from .daemon_location_guard import DaemonLocationGuardHandler
 from .destructive_git import DestructiveGitHandler
 from .gh_issue_comments import GhIssueCommentsHandler
 from .git_stash import GitStashHandler
@@ -21,6 +22,7 @@ from .worktree_file_copy import WorktreeFileCopyHandler
 __all__ = [
     "AbsolutePathHandler",
     "BritishEnglishHandler",
+    "DaemonLocationGuardHandler",
     "DestructiveGitHandler",
     "GhIssueCommentsHandler",
     "GitStashHandler",
