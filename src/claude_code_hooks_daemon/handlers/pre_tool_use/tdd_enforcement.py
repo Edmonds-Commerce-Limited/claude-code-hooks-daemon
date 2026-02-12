@@ -111,7 +111,7 @@ class TddEnforcementHandler(Handler):
         return strategy.is_production_source(file_path)
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
-        """Check if test file exists, deny if not."""
+        """Check if test file exists in ANY valid location, deny if not."""
         source_path = get_file_path(hook_input)
         if not source_path:
             return HookResult(decision=Decision.ALLOW)
@@ -120,15 +120,17 @@ class TddEnforcementHandler(Handler):
         if strategy is None:
             return HookResult(decision=Decision.ALLOW)
 
-        test_file_path = self._get_test_file_path(source_path, strategy)
+        # Get multiple candidate test paths (checks mirror, current, fallback)
+        candidate_paths = self._get_test_file_paths(source_path, strategy)
 
-        # Check if test file exists
-        if test_file_path.exists():
+        # Check if ANY candidate exists
+        existing_test = next((path for path in candidate_paths if path.exists()), None)
+        if existing_test:
             return HookResult(decision=Decision.ALLOW)
 
-        # Test file doesn't exist — block with helpful message
+        # None exist - block with helpful message showing all searched locations
         source_filename = Path(source_path).name
-        test_filename = test_file_path.name
+        test_filename = candidate_paths[0].name  # Show primary candidate
 
         return HookResult(
             decision=Decision.DENY,
@@ -137,6 +139,9 @@ class TddEnforcementHandler(Handler):
                 f"without test file\n\n"
                 f"Source file: {source_filename}\n"
                 f"Missing test: {test_filename}\n\n"
+                f"Searched locations:\n"
+                + "\n".join(f"  - {path}" for path in candidate_paths)
+                + "\n\n"
                 f"PHILOSOPHY: Test-Driven Development\n"
                 f"In TDD, we write the test first, then implement the code.\n"
                 f"This ensures:\n"
@@ -145,8 +150,8 @@ class TddEnforcementHandler(Handler):
                 f"  - Design-focused implementation\n"
                 f"  - Prevents untested code in production\n\n"
                 f"REQUIRED ACTION:\n"
-                f"1. Create the test file first:\n"
-                f"   {test_file_path}\n\n"
+                f"1. Create the test file first at one of these locations:\n"
+                f"   {candidate_paths[0]}\n\n"
                 f"2. Write comprehensive tests for the module\n"
                 f"   - Test public API with various inputs\n"
                 f"   - Test edge cases and error conditions\n\n"
@@ -161,6 +166,8 @@ class TddEnforcementHandler(Handler):
 
     def _get_test_file_path(self, source_path: str, strategy: TddStrategy) -> Path:
         """Get the expected test file path for a source file.
+
+        DEPRECATED: Use _get_test_file_paths() (plural) for multi-path detection.
 
         Uses strategy to compute language-correct test filename.
         Path mapping: src/{package}/{subdir}/.../file -> tests/unit/{subdir}/.../test_file
@@ -181,6 +188,73 @@ class TddEnforcementHandler(Handler):
 
         # Fallback for non-src/ paths (e.g., controller-based structure)
         return self._map_fallback_test_path(source_path, path_parts, test_filename)
+
+    def _get_test_file_paths(self, source_path: str, strategy: TddStrategy) -> list[Path]:
+        """Get ordered list of candidate test file paths for a source file.
+
+        Tries multiple conventions before declaring test missing:
+        1. Mirror mapping (tests/ mirrors src/ structure exactly)
+        2. Current mapping (strips package, uses tests/unit/)
+        3. Fallback mapping (controller-relative or parent-relative)
+
+        Returns paths in priority order (most specific to least specific).
+        """
+        candidates: list[Path] = []
+        source_filename = Path(source_path).name
+        test_filename = strategy.compute_test_filename(source_filename)
+        path_parts = Path(source_path).parts
+
+        # Strategy 1: Mirror mapping (NEW - PHP PSR-4, Java, etc.)
+        if _SRC_DIR in path_parts:
+            mirror_path = self._map_src_to_tests_mirror(path_parts, test_filename)
+            if mirror_path is not None:
+                candidates.append(mirror_path)
+
+        # Strategy 2: Current mapping (Python convention - strip package)
+        if _SRC_DIR in path_parts:
+            current_path = self._map_src_to_test_path(path_parts, test_filename)
+            if current_path is not None:
+                candidates.append(current_path)
+
+        # Strategy 3: Fallback mapping
+        fallback_path = self._map_fallback_test_path(source_path, path_parts, test_filename)
+        candidates.append(fallback_path)
+
+        return candidates
+
+    @staticmethod
+    def _map_src_to_tests_mirror(path_parts: tuple[str, ...], test_filename: str) -> Path | None:
+        """Map src/{package}/{subdir}/.../file to tests/{package}/{subdir}/.../test_file.
+
+        Mirrors the FULL src/ structure under tests/ (no package stripping).
+        Handles PHP PSR-4, Java standard layout, and other full-mirror conventions.
+
+        Example:
+            src/SupFeeds/Logging/DTO/File.php
+            -> tests/SupFeeds/Logging/DTO/FileTest.php
+        """
+        try:
+            src_idx = path_parts.index(_SRC_DIR)
+
+            # Workspace root is everything before src/
+            workspace_parts = path_parts[:src_idx]
+            workspace_root = Path(*workspace_parts) if workspace_parts else Path(_DEFAULT_WORKSPACE)
+
+            # Parts after src/: {package}/{subdir}/.../file.ext
+            # Keep ALL subdirs (don't strip package)
+            after_src = path_parts[src_idx + 1 :]
+
+            if len(after_src) >= 1:
+                # after_src[:-1] = ALL subdirectories to mirror (including package)
+                # after_src[-1] = filename (replaced with test_filename)
+                sub_dirs = after_src[:-1]
+                test_file_path = workspace_root / _TEST_DIR
+                for sub_dir in sub_dirs:
+                    test_file_path = test_file_path / sub_dir
+                return test_file_path / test_filename
+        except (ValueError, IndexError):
+            pass
+        return None
 
     @staticmethod
     def _map_src_to_test_path(path_parts: tuple[str, ...], test_filename: str) -> Path | None:
