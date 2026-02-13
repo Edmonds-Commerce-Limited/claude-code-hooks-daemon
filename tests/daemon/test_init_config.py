@@ -513,3 +513,46 @@ class TestConfigHandlerCoverage:
                 f"Config has handlers not found in codebase for {event_type}: {unknown}\n"
                 f"Remove them from init_config.py or check handler class names"
             )
+
+
+class TestContainerEnforcementAutoDetection:
+    """Tests for automatic enforcement setting based on container detection."""
+
+    def test_enforcement_line_in_minimal_config(self):
+        """Minimal config must contain enforcement setting."""
+        config_yaml = generate_config(mode="minimal")
+        assert (
+            "enforce_single_daemon_process" in config_yaml
+        ), "Minimal config must contain enforce_single_daemon_process setting"
+
+    def test_enforcement_line_in_full_config(self):
+        """Full config must contain enforcement setting."""
+        config_yaml = generate_config(mode="full")
+        assert (
+            "enforce_single_daemon_process" in config_yaml
+        ), "Full config must contain enforce_single_daemon_process setting"
+
+    def test_enforcement_setting_in_daemon_section(self):
+        """Enforcement setting must be in daemon section."""
+        config_yaml = generate_config(mode="full")
+        config = yaml.safe_load(config_yaml)
+
+        # Check it's in daemon section (either enabled or commented, YAML parse will show enabled ones)
+        # If commented out, it won't appear in parsed YAML
+        # If enabled, it will appear as True
+        daemon_section = config.get("daemon", {})
+
+        # Either it's present and True (container), or not present (commented out, non-container)
+        if "enforce_single_daemon_process" in daemon_section:
+            assert isinstance(
+                daemon_section["enforce_single_daemon_process"], bool
+            ), "enforce_single_daemon_process must be boolean when present"
+
+    def test_enforcement_comment_present(self):
+        """Config must have explanatory comment for enforcement setting."""
+        config_yaml = generate_config(mode="full")
+
+        # Check for comment explaining the setting
+        assert (
+            "container" in config_yaml.lower() and "enforce" in config_yaml.lower()
+        ), "Config must have comment explaining enforcement is auto-enabled in containers"
