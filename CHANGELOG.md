@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.13.0] - 2026-02-13
+
+### Added
+- **Single Daemon Process Enforcement**: New `enforce_single_daemon_process` configuration option (Plan 00057, commits fc43d03, 3b0df03, 17b3420, a491809, c07e2bb)
+  - Prevents multiple daemon instances from running simultaneously
+  - In containers: Kills ALL other daemon processes system-wide on startup (SIGTERM → SIGKILL)
+  - Outside containers: Only cleans up stale PID files (safe for multi-project environments)
+  - Auto-detection: Configuration generation auto-enables in container environments
+  - 2-second timeout for graceful shutdown before force kill
+  - Comprehensive testing with process lifecycle verification
+
+### Changed
+- **Acceptance Testing Methodology**: Shifted from batch sub-agent execution to realistic manual testing (commit 7cd9baa)
+  - Acceptance tests now emphasize realistic execution in main thread
+  - Updated documentation to reflect practical testing approach
+  - Improved guidance for EXECUTABLE, OBSERVABLE, and VERIFIED_BY_LOAD test categories
+
+- **Plan Execution Strategy Framework**: Clarified model capabilities for plan orchestration (commits 2983fa6, bc10236)
+  - **CRITICAL**: Haiku 4.5 CANNOT orchestrate plans (only Opus/Sonnet)
+  - Documented execution strategy selection matrix (Single-Threaded, Sub-Agent Orchestration, Sub-Agent Teams)
+  - Clear guidance on when to use Opus vs Sonnet for plan execution
+
+### Fixed
+- **MarkdownOrganizationHandler Completed/ Folder Bug**: Fixed handler failing when Completed/ subdirectory exists (Plan 00059, commits b496d68, 8f1d0df, 38b9d42)
+  - Bug: Handler crashed when encountering `Completed/` folders in plan directory structure
+  - Fix: Updated directory traversal logic to handle nested completion folders
+  - Added comprehensive test coverage for folder structure edge cases
+
+- **PHP QA Suppression Pattern Gaps**: Fixed critical bug in PHP QA suppression detection (Plan 00058, commits 6ae79e4, 7252bfe)
+  - **CRITICAL BUG**: Handler failed to detect certain PHP QA suppression comment formats
+  - Bug: Pattern matching didn't cover all valid PHP suppression syntaxes
+  - Fix: Extended regex patterns to match full spectrum of PHP QA tools (PHPStan, Psalm, PHPCS)
+  - Added regression tests for all suppression comment formats
+
 ## [2.12.0] - 2026-02-12
 
 ### Added
