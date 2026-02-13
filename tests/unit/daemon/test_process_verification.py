@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import psutil
 
+from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.daemon.process_verification import (
     find_all_daemon_processes,
     is_process_running,
@@ -187,7 +188,7 @@ class TestKillDaemonProcess:
 
         assert result is True
         mock_process.terminate.assert_called_once()
-        mock_process.wait.assert_called_once_with(timeout=2)
+        mock_process.wait.assert_called_once_with(timeout=Timeout.PROCESS_KILL_WAIT)
 
     def test_kill_process_uses_sigkill_if_sigterm_fails(self) -> None:
         """Uses SIGKILL if process doesn't respond to SIGTERM."""
@@ -200,7 +201,7 @@ class TestKillDaemonProcess:
 
         assert result is True
         mock_process.terminate.assert_called_once()
-        mock_process.wait.assert_called_once_with(timeout=2)
+        mock_process.wait.assert_called_once_with(timeout=Timeout.PROCESS_KILL_WAIT)
         mock_process.kill.assert_called_once()
 
     def test_kill_process_handles_non_existent_pid(self) -> None:

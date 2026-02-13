@@ -9,6 +9,8 @@ import os
 
 import psutil
 
+from claude_code_hooks_daemon.constants import Timeout
+
 logger = logging.getLogger(__name__)
 
 # Process name pattern to search for
@@ -83,7 +85,7 @@ def kill_daemon_process(pid: int) -> bool:
 
         # Wait up to 2 seconds for process to exit
         try:
-            process.wait(timeout=2)
+            process.wait(timeout=Timeout.PROCESS_KILL_WAIT)
         except psutil.TimeoutExpired:
             # Process didn't exit, force kill (SIGKILL)
             logger.warning(f"Process {pid} did not respond to SIGTERM, using SIGKILL")

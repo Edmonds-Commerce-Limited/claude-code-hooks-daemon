@@ -5,14 +5,16 @@ Fails silently if stats cannot be retrieved to avoid breaking the status line.
 """
 
 import logging
+from types import ModuleType
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult, get_data_layer
 from claude_code_hooks_daemon.daemon.controller import get_controller
 
+psutil: ModuleType | None
 try:
-    import psutil  # type: ignore[import-untyped]
+    import psutil
 except ImportError:
     psutil = None
 
