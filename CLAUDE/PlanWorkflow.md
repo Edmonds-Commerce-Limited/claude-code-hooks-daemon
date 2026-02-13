@@ -15,6 +15,79 @@ This document defines the standard planning workflow for all work on the Claude 
 5. **Iterate Rapidly** - Plans are living documents, update as you learn
 6. **Test First (TDD)** - Write failing tests before implementation
 7. **Debug First** - Introspect hook events before writing handlers
+8. **Orchestrate Intelligently** - Use sub-agents and teams for parallel execution when possible
+
+---
+
+## Execution Strategies
+
+Plans should specify the recommended execution approach based on complexity and model capabilities.
+
+### Strategy Selection Matrix
+
+| Plan Complexity | Recommended Model | Execution Strategy | Rationale |
+|----------------|-------------------|-------------------|-----------|
+| **Simple** (single handler, straightforward logic) | Sonnet 4.5 | Sub-Agent Orchestration | Sonnet delegates independent tasks to specialized agents |
+| **Medium** (multiple handlers, some dependencies) | Sonnet 4.5 | Sub-Agent Orchestration | Sonnet coordinates sequential phases with parallel tasks |
+| **Complex** (architectural changes, many dependencies) | Opus 4.6 | Sub-Agent Teams | Opus manages team of agents with task coordination |
+| **Critical** (releases, major refactors) | Opus 4.6 | Sub-Agent Teams | Opus provides strategic oversight and decision-making |
+
+### Execution Strategy Definitions
+
+**1. Single-Threaded**
+- Main agent executes all work directly
+- No delegation to sub-agents
+- Use for: Quick fixes, documentation updates, simple one-file changes
+- Avoid for: Plans with >3 phases or >10 tasks
+
+**2. Sub-Agent Orchestration** (Sonnet preferred)
+- Main agent (Sonnet) spawns specialized sub-agents for independent tasks
+- Main agent coordinates but doesn't micromanage
+- Sub-agents work in parallel when possible
+- Use for: Multi-phase work, parallel test execution, independent modules
+- Example: Main Sonnet spawns Explore agent for codebase research, then spawns python-developer for implementation
+
+**3. Sub-Agent Teams** (Opus preferred)
+- Main agent (Opus) creates team with task list
+- Team members claim tasks autonomously
+- Main agent provides strategic guidance and reviews
+- Use for: Large-scale refactors, coordinated multi-file changes, releases
+- Example: Opus creates team with researcher, developer, tester agents; each claims tasks from shared task list
+
+### Model-Specific Guidance
+
+**When executing as Sonnet 4.5:**
+- Default to Sub-Agent Orchestration for multi-phase plans
+- Spawn agents for independent tasks (Explore for research, python-developer for TDD implementation)
+- Use multiple parallel agents when tasks are independent
+- Keep main thread for coordination and decision-making
+
+**When executing as Opus 4.6:**
+- Default to Sub-Agent Teams for complex plans
+- Create team structure with clear roles
+- Use shared task list for coordination
+- Provide strategic oversight and architectural decisions
+- Review sub-agent output for quality and consistency
+
+**When executing as Haiku 4.5:**
+- Default to Single-Threaded (Haiku cannot spawn sub-agents)
+- Focus on small, well-defined tasks
+- Avoid complex plans requiring parallelization
+
+### Choosing Recommended Executor
+
+Plans should specify **Recommended Executor** in the header:
+
+```markdown
+**Recommended Executor**: Opus | Sonnet | Haiku
+```
+
+**Guidelines**:
+- **Opus**: Architectural changes, releases, critical refactors, >20 tasks
+- **Sonnet**: Most feature work, handler implementations, bug fixes, 5-20 tasks
+- **Haiku**: Documentation, simple fixes, single-file changes, <5 tasks
+
+The recommended executor is a **hint**, not a requirement. Users can execute with any model, but the recommendation guides optimal strategy.
 
 ---
 
@@ -57,7 +130,8 @@ Every `PLAN.md` must follow this structure:
 **Created**: YYYY-MM-DD
 **Owner**: [Name/Agent]
 **Priority**: High | Medium | Low
-**Estimated Effort**: [Hours/Days]
+**Recommended Executor**: Opus | Sonnet | Haiku
+**Execution Strategy**: Sub-Agent Orchestration | Sub-Agent Teams | Single-Threaded
 
 ## Overview
 
@@ -753,16 +827,20 @@ When Claude Code (or other AI agents) work on this project:
 
 1. **Always check for existing plans** before starting work
 2. **Create plan if none exists** for work > 2 hours
-3. **Debug hook events first** - Before writing handlers:
+3. **Choose execution strategy** based on current model and plan complexity:
+   - **Sonnet**: Default to Sub-Agent Orchestration
+   - **Opus**: Default to Sub-Agent Teams
+   - **Haiku**: Default to Single-Threaded
+4. **Debug hook events first** - Before writing handlers:
    - Use `scripts/debug_hooks.sh` to capture event flow
    - Analyze logs to understand what events fire
    - See CLAUDE/DEBUGGING_HOOKS.md for complete guide
-4. **Follow TDD workflow** - Write failing tests before implementation
-5. **Update task status in real-time** as you work
-6. **Run QA before commits** - `./scripts/qa/run_all.sh` must pass
-7. **Document blockers immediately** if you get stuck
-8. **Ask user for approval** before marking plan complete
-9. **Reference plans in all commits** for traceability
+5. **Follow TDD workflow** - Write failing tests before implementation
+6. **Update task status in real-time** as you work
+7. **Run QA before commits** - `./scripts/qa/run_all.sh` must pass
+8. **Document blockers immediately** if you get stuck
+9. **Ask user for approval** before marking plan complete
+10. **Reference plans in all commits** for traceability
 
 ### Agent Workflow Example
 

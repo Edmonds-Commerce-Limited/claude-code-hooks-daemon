@@ -4,6 +4,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00057: Single Daemon Process Enforcement](00057-single-daemon-process-enforcement/PLAN.md) - Not Started
+  - Configurable single daemon process enforcement with container detection
+  - Auto-enables in container environments for safety
+  - **Priority**: Medium
+
 - [00032: Sub-Agent Orchestration for Context Preservation](00032-subagent-orchestration-context-preservation/PLAN.md) - Not Started
   - Create specialized sub-agents for workflow gates and orchestration
   - **Priority**: High (context management)
@@ -340,9 +345,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 56
+- **Total Plans Created**: 57
 - **Completed**: 49 (1 with reduced scope)
-- **Active**: 4 (all not started/proposed)
+- **Active**: 5 (all not started/proposed)
 - **Cancelled/Abandoned**: 2 (00036 - empty draft deleted, 00044 - approach retired)
 
 ## Quick Links
