@@ -77,3 +77,23 @@ class TestDaemonConfig:
         for level in ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]:
             config = DaemonConfig(socket_path=Path("/tmp/test.sock"), log_level=level)
             assert config.log_level == LogLevel(level)
+
+    def test_enforce_single_daemon_process_defaults_to_false(self) -> None:
+        """Test that enforce_single_daemon_process defaults to False."""
+        config = DaemonConfig(socket_path=Path("/tmp/test.sock"))
+        assert config.enforce_single_daemon_process is False
+
+    def test_enforce_single_daemon_process_can_be_enabled(self) -> None:
+        """Test that enforce_single_daemon_process can be set to True."""
+        config = DaemonConfig(
+            socket_path=Path("/tmp/test.sock"), enforce_single_daemon_process=True
+        )
+        assert config.enforce_single_daemon_process is True
+
+    def test_enforce_single_daemon_process_rejects_non_bool(self) -> None:
+        """Test that enforce_single_daemon_process rejects truly invalid values."""
+        with pytest.raises(ValidationError, match="Input should be a valid boolean"):
+            DaemonConfig(
+                socket_path=Path("/tmp/test.sock"),
+                enforce_single_daemon_process={"invalid": "dict"},
+            )
