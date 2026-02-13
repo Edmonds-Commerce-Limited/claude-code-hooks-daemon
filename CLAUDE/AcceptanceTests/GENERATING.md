@@ -46,6 +46,25 @@ python -m claude_code_hooks_daemon.daemon.cli generate-playbook > /tmp/playbook.
 rm /tmp/playbook.md
 ```
 
+### Test Categories
+
+The playbook contains three categories of tests:
+
+**1. EXECUTABLE (Blocking + Advisory)** (~89 tests):
+- PreToolUse handlers that block or advise on commands
+- **Must be tested by running commands** in main thread
+- Time: 20-30 minutes
+
+**2. OBSERVABLE (Context - Visible)** (~3 checks):
+- SessionStart, UserPromptSubmit, PostToolUse handlers
+- **Verified by checking system-reminders** in current session
+- Time: 30 seconds (just look at existing system-reminders)
+
+**3. VERIFIED_BY_LOAD (Context - Untriggerable)** (~37 handlers):
+- SessionEnd, PreCompact, Stop, SubagentStop, Status, Notification, PermissionRequest
+- **Cannot be triggered on demand** - verified by daemon loading + unit tests passing
+- Time: 0 minutes (already verified by daemon restart)
+
 ### Advanced Options
 
 ```bash
@@ -60,8 +79,11 @@ generate-playbook --format yaml      # For pipelines
 # Filter by handler
 generate-playbook | grep "DestructiveGit"
 
-# Count tests
-generate-playbook | grep "### Test" | wc -l
+# Count EXECUTABLE tests (what you'll actually run)
+generate-playbook | grep -E "^\*\*Type\*\*: (Blocking|Advisory)" | wc -l
+
+# Count OBSERVABLE tests (quick context checks)
+generate-playbook | grep -E "(SessionStart|UserPromptSubmit|PostToolUse)" | grep "^\*\*Type\*\*: Context" | wc -l
 ```
 
 ---
@@ -177,6 +199,26 @@ generate-playbook > /tmp/playbook.md
 
 ## 📝 EXECUTING TESTS
 
+### Test Categories & How to Test Them
+
+**EXECUTABLE Tests (Blocking + Advisory):**
+- Must be tested by running commands in main thread
+- Execute each test sequentially
+- Mark PASS/FAIL based on observed behaviour
+
+**OBSERVABLE Tests (Lifecycle - Visible in Context):**
+- Check system-reminders in current session
+- Look for "SessionStart hook system active"
+- Look for "UserPromptSubmit hook system active"
+- Look for "PostToolUse hook system active"
+- No commands needed - just verify messages visible
+
+**VERIFIED_BY_LOAD Tests (Lifecycle - Untriggerable):**
+- Skip these tests entirely
+- Cannot be triggered on demand
+- Verified by daemon loading successfully + unit tests passing
+- Examples: SessionEnd, PreCompact, Stop, SubagentStop, Status, Notification, PermissionRequest
+
 ### Test Format
 
 Generated playbooks contain tests in this format:
@@ -197,11 +239,11 @@ Generated playbooks contain tests in this format:
 **Safety**: Uses non-existent ref - harmless if executed
 ```
 
-### Marking Results
+### Marking Results for EXECUTABLE Tests
 
 - Execute each test command
-- Mark [ ] PASS if behavior matches expected
-- Mark [ ] FAIL if behavior doesn't match
+- Mark [ ] PASS if behaviour matches expected
+- Mark [ ] FAIL if behaviour doesn't match
 - Document any failures
 
 ### For Blocking Handlers
@@ -209,8 +251,12 @@ Generated playbooks contain tests in this format:
 ❌ **FAIL** = Command executed (protection failed!)
 
 ### For Advisory Handlers
-✅ **PASS** = Command ALLOWED with advisory context shown
+✅ **PASS** = Command ALLOWED with advisory context shown in system-reminders
 ❌ **FAIL** = Command blocked OR no advisory shown
+
+### For Context Handlers
+- **OBSERVABLE**: Check system-reminders for expected messages
+- **VERIFIED_BY_LOAD**: Skip test - verified by daemon load + unit tests
 
 ---
 

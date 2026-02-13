@@ -13,7 +13,42 @@ from claude_code_hooks_daemon.core.hook_result import Decision
 
 
 class TestType(StrEnum):
-    """Type of acceptance test."""
+    """Type of acceptance test.
+
+    Test types determine how handlers are verified during acceptance testing:
+
+    BLOCKING (EXECUTABLE):
+        - PreToolUse handlers that deny dangerous commands
+        - Must be tested by running commands and verifying they're blocked
+        - Examples: destructive_git, sed_blocker, force_push
+        - Testing method: Run command with echo, verify hook blocks it
+
+    ADVISORY (EXECUTABLE):
+        - PreToolUse/PostToolUse handlers that provide context without blocking
+        - Must be tested by running commands and checking system-reminders
+        - Examples: git_status, plan_number, tdd_enforcement
+        - Testing method: Run command, verify advisory context appears
+
+    CONTEXT (OBSERVABLE or VERIFIED_BY_LOAD):
+        - Lifecycle handlers that fire on events (SessionStart, PostToolUse, etc.)
+        - Two sub-categories:
+
+        OBSERVABLE (verify in session):
+            - SessionStart: Visible in system-reminders at session start
+            - UserPromptSubmit: Visible in system-reminders on user messages
+            - PostToolUse: Visible in system-reminders after tool calls
+            - Testing method: Check system-reminders for expected messages
+
+        VERIFIED_BY_LOAD (trust daemon + unit tests):
+            - SessionEnd: Fires when session ends (untestable in-session)
+            - PreCompact: Fires during context compaction (untriggerable)
+            - Stop, SubagentStop, Status, Notification, PermissionRequest
+            - Testing method: Daemon loads successfully + unit tests pass
+
+    Acceptance testing focuses on EXECUTABLE tests (~89 tests, 20-30 min).
+    OBSERVABLE tests are quick context checks (30 sec).
+    VERIFIED_BY_LOAD handlers are trusted without manual testing.
+    """
 
     BLOCKING = "blocking"
     ADVISORY = "advisory"

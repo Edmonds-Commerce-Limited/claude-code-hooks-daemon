@@ -309,14 +309,52 @@ class PlaybookGenerator:
         lines.append("")
 
         # Instructions section
+        lines.append("## Test Categories")
+        lines.append("")
+        lines.append("Tests are organized into three categories based on how they're verified:")
+        lines.append("")
+        lines.append("### 1. EXECUTABLE Tests (Blocking + Advisory)")
+        lines.append("- **Must be tested** by running commands in main thread")
+        lines.append("- PreToolUse handlers that block or provide advisory context")
+        lines.append("- Run command, verify expected behaviour (block or advisory message)")
+        lines.append("- **Time**: 20-30 minutes for ~89 tests")
+        lines.append("")
+        lines.append("### 2. OBSERVABLE Tests (Context - Visible)")
+        lines.append("- **Quick check** in system-reminders during normal session")
+        lines.append("- SessionStart, UserPromptSubmit, PostToolUse lifecycle handlers")
+        lines.append("- Just verify messages visible in your current context")
+        lines.append("- **Time**: 30 seconds (no commands needed)")
+        lines.append("")
+        lines.append("### 3. VERIFIED_BY_LOAD Tests (Context - Untriggerable)")
+        lines.append("- **Skip these tests** - cannot be triggered on demand")
+        lines.append(
+            "- SessionEnd, PreCompact, Stop, SubagentStop, Status, Notification, PermissionRequest"
+        )
+        lines.append("- Verified by daemon loading successfully + unit tests passing")
+        lines.append("- **Time**: 0 minutes (already verified by Prerequisites step)")
+        lines.append("")
+        lines.append("---")
+        lines.append("")
         lines.append("## Instructions")
         lines.append("")
-        lines.append("For each test below:")
-        lines.append("")
+        lines.append("**For EXECUTABLE tests (Blocking/Advisory):**")
         lines.append("1. Execute the command in a Claude Code session")
-        lines.append("2. Verify the expected behavior occurs")
+        lines.append("2. Verify the expected behaviour occurs")
         lines.append("3. Mark the test as PASS or FAIL")
         lines.append("4. If any test fails, stop and fix the issue before continuing")
+        lines.append("")
+        lines.append(
+            "**For OBSERVABLE tests (Context - SessionStart/UserPromptSubmit/PostToolUse):**"
+        )
+        lines.append("1. Look at system-reminders in your current session")
+        lines.append(
+            "2. Verify you see the expected messages (e.g., 'SessionStart hook system active')"
+        )
+        lines.append("3. No commands needed - just verify messages visible")
+        lines.append("")
+        lines.append("**For VERIFIED_BY_LOAD tests (Context - Untriggerable):**")
+        lines.append("1. Skip these tests entirely")
+        lines.append("2. Already verified by daemon loading successfully in Prerequisites")
         lines.append("")
         lines.append("---")
         lines.append("")
@@ -342,8 +380,17 @@ class PlaybookGenerator:
                 lines.append(f"#### Test {test_number}: {test.title}")
                 lines.append("")
 
-                # Test details
-                lines.append(f"**Type**: {test.test_type.value.title()}")
+                # Test details with category annotation for Context tests
+                test_type_str = test.test_type.value.title()
+                if test.test_type.value == "context":
+                    # Determine if OBSERVABLE or VERIFIED_BY_LOAD
+                    observable_events = {"SessionStart", "UserPromptSubmit", "PostToolUse"}
+                    if event_type in observable_events:
+                        test_type_str = f"{test_type_str} (OBSERVABLE - check system-reminders)"
+                    else:
+                        test_type_str = f"{test_type_str} (VERIFIED_BY_LOAD - skip test)"
+
+                lines.append(f"**Type**: {test_type_str}")
                 lines.append(f"**Expected Decision**: {test.expected_decision.value}")
                 lines.append("")
 
@@ -415,7 +462,18 @@ class PlaybookGenerator:
                 for test in tests:
                     lines.append(f"#### Test {test_number}: {test.title}")
                     lines.append("")
-                    lines.append(f"**Type**: {test.test_type.value.title()}")
+
+                    # Test details with category annotation for Context tests
+                    test_type_str = test.test_type.value.title()
+                    if test.test_type.value == "context":
+                        # Determine if OBSERVABLE or VERIFIED_BY_LOAD
+                        observable_events = {"SessionStart", "UserPromptSubmit", "PostToolUse"}
+                        if event_type in observable_events:
+                            test_type_str = f"{test_type_str} (OBSERVABLE - check system-reminders)"
+                        else:
+                            test_type_str = f"{test_type_str} (VERIFIED_BY_LOAD - skip test)"
+
+                    lines.append(f"**Type**: {test_type_str}")
                     lines.append(f"**Expected Decision**: {test.expected_decision.value}")
                     lines.append("")
                     lines.append(f"**Description**: {test.description}")
