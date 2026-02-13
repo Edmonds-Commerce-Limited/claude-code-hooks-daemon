@@ -32,19 +32,14 @@ Plans should specify the recommended execution approach based on complexity and 
 | **Complex** (architectural changes, many dependencies) | Opus 4.6 | Sub-Agent Teams | Opus manages team of agents with task coordination |
 | **Critical** (releases, major refactors) | Opus 4.6 | Sub-Agent Teams | Opus provides strategic oversight and decision-making |
 
-**Important**: Haiku 4.5 is **NOT recommended** for plan execution. Haiku should only be used for:
-- Running scripts and utility commands
-- Very basic single-file edits
-- Reading and reporting information
-- Supporting roles within teams (never as orchestrator/lead)
+**Haiku 4.5 CANNOT orchestrate plans.** Only Opus and Sonnet are valid executors.
 
 ### Execution Strategy Definitions
 
 **1. Single-Threaded**
-- Main agent executes all work directly
+- Main agent (Sonnet or Opus) executes all work directly
 - No delegation to sub-agents
-- Use for: Quick fixes, documentation updates, simple one-file changes
-- Avoid for: Plans with >3 phases or >10 tasks
+- Use for: Quick fixes, documentation updates, simple changes
 
 **2. Sub-Agent Orchestration** (Sonnet preferred)
 - Main agent (Sonnet) spawns specialized sub-agents for independent tasks
@@ -75,30 +70,23 @@ Plans should specify the recommended execution approach based on complexity and 
 - Provide strategic oversight and architectural decisions
 - Review sub-agent output for quality and consistency
 
-**When executing as Haiku 4.5:**
-- **Haiku should NOT execute plans as the main orchestrator**
-- Haiku is suitable only for:
-  - Running utility scripts
-  - Basic file operations (single file read/write)
-  - Supporting roles within teams (claiming and executing simple tasks)
-- If you are Haiku and assigned a plan, recommend that the user switch to Sonnet or Opus
+**Haiku 4.5:**
+- CANNOT orchestrate plans
+- Use only for: utility scripts, basic file operations, team support roles
 
 ### Choosing Recommended Executor
 
-Plans should specify **Recommended Executor** in the header:
+Plans specify **Recommended Executor** in the header:
 
 ```markdown
 **Recommended Executor**: Opus | Sonnet
 ```
 
 **Guidelines**:
-- **Opus**: Architectural changes, releases, critical refactors, >20 tasks, complex coordination
-- **Sonnet**: Most feature work, handler implementations, bug fixes, medium complexity (5-20 tasks)
-- **Haiku**: **NOT RECOMMENDED** for plan execution - Use for scripts and basic utilities only
+- **Opus**: Architectural changes, releases, critical refactors, complex coordination
+- **Sonnet**: Feature work, handler implementations, bug fixes, standard complexity
 
-**Minimum requirement**: Sonnet 4.5 is the **minimum model** for plan orchestration. Haiku lacks the context window and capability for effective plan execution and sub-agent coordination.
-
-The recommended executor is a **hint**, not a requirement, but users should be aware that using Haiku as main orchestrator will result in poor outcomes.
+**Minimum**: Sonnet 4.5. Haiku cannot orchestrate plans.
 
 ---
 
