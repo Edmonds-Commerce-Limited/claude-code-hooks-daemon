@@ -309,7 +309,50 @@ plugins:
 4. Merge with defaults
 5. Instantiate and register handlers
 
-### 5. Plugin System (`plugins/loader.py`)
+### 5. Daemon Startup & Process Enforcement (`daemon/enforcement.py`)
+
+**Single Daemon Process Enforcement**:
+
+Prevents multiple daemon instances from running simultaneously. Behaviour varies by environment:
+
+**Container Environments** (Docker, Podman, YOLO mode):
+- System-wide enforcement: Only ONE daemon process allowed anywhere in the system
+- Aggressive cleanup: Kills ALL other `claude_code_hooks_daemon` processes
+- Safe assumption: Container is dedicated to one project
+- Detection: Automatic via confidence scoring (>= 3 indicators)
+
+**Non-Container Environments**:
+- Conservative cleanup: Only removes stale PID files for current project
+- No process killing: Multiple projects may have their own daemons
+- Safety first: Don't interfere with other users/projects
+
+**Process Termination**:
+```python
+# Graceful → Forceful escalation
+process.terminate()  # SIGTERM
+process.wait(timeout=2)  # 2-second grace period
+# If still running:
+process.kill()  # SIGKILL
+```
+
+**Configuration**:
+```yaml
+daemon:
+  enforce_single_daemon_process: true  # Auto-enabled in containers during init
+```
+
+**When Enforcement Runs**:
+- On daemon startup (`cmd_start()` in `cli.py`)
+- Before checking if daemon already running
+- Only if `enforce_single_daemon_process: true` in config
+
+**Container Detection**:
+- Uses confidence scoring from `utils/container_detection.py`
+- Checks: `/.dockerenv`, cgroup paths, YOLO env vars, filesystem indicators
+- Threshold: >= 3 indicators = container environment
+- Auto-enables enforcement during config generation (`init_config.py`)
+
+### 6. Plugin System (`plugins/loader.py`)
 
 **Plugin Loading**:
 

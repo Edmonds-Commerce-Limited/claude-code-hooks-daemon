@@ -401,6 +401,7 @@ daemon:
   idle_timeout_seconds: 600
   log_level: INFO
   self_install_mode: true  # For this project only
+  enforce_single_daemon_process: true  # Auto-enabled in containers
 handlers:
   pre_tool_use:
     destructive_git: {enabled: true, priority: 10}
@@ -408,6 +409,31 @@ project_handlers:
   enabled: true
   path: .claude/project-handlers
 ```
+
+### Single Daemon Process Enforcement
+
+**Purpose**: Prevents multiple daemon instances from running simultaneously.
+
+**How it works**:
+- **In containers** (YOLO mode, Docker, Podman): Kills ALL other daemon processes system-wide on startup
+- **Outside containers**: Only cleans up stale PID files (safe for multi-project environments)
+- **Auto-detection**: Configuration generation auto-enables this setting in container environments
+
+**Configuration**:
+```yaml
+daemon:
+  enforce_single_daemon_process: true  # Auto-enabled if container detected during init
+```
+
+**When to enable**:
+- ✅ Container environments (auto-enabled)
+- ✅ Single-user development machines
+- ❌ Shared servers with multiple users/projects
+
+**Behavior**:
+- Container: Terminates all other `hooks-daemon` processes (SIGTERM → SIGKILL)
+- Non-container: Only removes stale PID files for current project
+- 2-second timeout for graceful shutdown before force kill
 
 ## QA Requirements
 

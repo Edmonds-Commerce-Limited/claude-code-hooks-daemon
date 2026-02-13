@@ -195,7 +195,14 @@ cd ../..
 - `.claude/init.sh` - Daemon lifecycle functions
 - `.claude/hooks/*` - Forwarder scripts
 - `.claude/settings.json` - Hook registration
-- `.claude/hooks-daemon.yaml` - Handler config
+- `.claude/hooks-daemon.yaml` - Handler config (with container auto-detection)
+
+**Container Auto-Detection**:
+- During config generation, the installer detects container environments (Docker, Podman, YOLO mode)
+- If container detected, automatically enables `enforce_single_daemon_process: true`
+- In containers: Ensures only ONE daemon process runs system-wide (kills duplicates)
+- Outside containers: Only cleans stale PID files (safe for multi-project setups)
+- No manual configuration needed - works automatically based on environment
 
 **Note**: The installer automatically creates `.claude/.gitignore` with the correct entries. If auto-creation fails, it will display manual instructions.
 
