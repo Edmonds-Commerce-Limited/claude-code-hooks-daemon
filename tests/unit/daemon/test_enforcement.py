@@ -4,8 +4,6 @@ import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from claude_code_hooks_daemon.daemon.enforcement import enforce_single_daemon
 
 
@@ -33,14 +31,17 @@ class TestEnforceSingleDaemon:
 
         current_pid = os.getpid()
 
-        with patch(
-            "claude_code_hooks_daemon.daemon.enforcement.is_container_environment", return_value=True
-        ), patch(
-            "claude_code_hooks_daemon.daemon.enforcement.find_all_daemon_processes",
-            return_value=[current_pid],
-        ), patch(
-            "claude_code_hooks_daemon.daemon.enforcement.kill_daemon_process"
-        ) as mock_kill:
+        with (
+            patch(
+                "claude_code_hooks_daemon.daemon.enforcement.is_container_environment",
+                return_value=True,
+            ),
+            patch(
+                "claude_code_hooks_daemon.daemon.enforcement.find_all_daemon_processes",
+                return_value=[current_pid],
+            ),
+            patch("claude_code_hooks_daemon.daemon.enforcement.kill_daemon_process") as mock_kill,
+        ):
             enforce_single_daemon(config=mock_config, pid_path=Path("/tmp/test.pid"))
 
         # Should not kill anything (only daemon is current process)
@@ -55,14 +56,17 @@ class TestEnforceSingleDaemon:
         other_pid_1 = current_pid + 1000
         other_pid_2 = current_pid + 2000
 
-        with patch(
-            "claude_code_hooks_daemon.daemon.enforcement.is_container_environment", return_value=True
-        ), patch(
-            "claude_code_hooks_daemon.daemon.enforcement.find_all_daemon_processes",
-            return_value=[current_pid, other_pid_1, other_pid_2],
-        ), patch(
-            "claude_code_hooks_daemon.daemon.enforcement.kill_daemon_process"
-        ) as mock_kill:
+        with (
+            patch(
+                "claude_code_hooks_daemon.daemon.enforcement.is_container_environment",
+                return_value=True,
+            ),
+            patch(
+                "claude_code_hooks_daemon.daemon.enforcement.find_all_daemon_processes",
+                return_value=[current_pid, other_pid_1, other_pid_2],
+            ),
+            patch("claude_code_hooks_daemon.daemon.enforcement.kill_daemon_process") as mock_kill,
+        ):
             enforce_single_daemon(config=mock_config, pid_path=Path("/tmp/test.pid"))
 
         # Should kill the other daemons
@@ -78,16 +82,23 @@ class TestEnforceSingleDaemon:
         pid_path = Path("/tmp/test.pid")
         stale_pid = 99999
 
-        with patch(
-            "claude_code_hooks_daemon.daemon.enforcement.is_container_environment", return_value=False
-        ), patch(
-            "claude_code_hooks_daemon.daemon.enforcement.find_all_daemon_processes",
-            return_value=[],
-        ), patch("claude_code_hooks_daemon.daemon.enforcement.read_pid_file", return_value=stale_pid), patch(
-            "claude_code_hooks_daemon.daemon.enforcement.is_process_running", return_value=False
-        ), patch(
-            "claude_code_hooks_daemon.daemon.enforcement.cleanup_pid_file"
-        ) as mock_cleanup:
+        with (
+            patch(
+                "claude_code_hooks_daemon.daemon.enforcement.is_container_environment",
+                return_value=False,
+            ),
+            patch(
+                "claude_code_hooks_daemon.daemon.enforcement.find_all_daemon_processes",
+                return_value=[],
+            ),
+            patch(
+                "claude_code_hooks_daemon.daemon.enforcement.read_pid_file", return_value=stale_pid
+            ),
+            patch(
+                "claude_code_hooks_daemon.daemon.enforcement.is_process_running", return_value=False
+            ),
+            patch("claude_code_hooks_daemon.daemon.enforcement.cleanup_pid_file") as mock_cleanup,
+        ):
             enforce_single_daemon(config=mock_config, pid_path=pid_path)
 
         # Should clean up stale PID file
@@ -101,14 +112,17 @@ class TestEnforceSingleDaemon:
         current_pid = os.getpid()
         other_pid = current_pid + 1000
 
-        with patch(
-            "claude_code_hooks_daemon.daemon.enforcement.is_container_environment", return_value=False
-        ), patch(
-            "claude_code_hooks_daemon.daemon.enforcement.find_all_daemon_processes",
-            return_value=[current_pid, other_pid],
-        ), patch(
-            "claude_code_hooks_daemon.daemon.enforcement.kill_daemon_process"
-        ) as mock_kill:
+        with (
+            patch(
+                "claude_code_hooks_daemon.daemon.enforcement.is_container_environment",
+                return_value=False,
+            ),
+            patch(
+                "claude_code_hooks_daemon.daemon.enforcement.find_all_daemon_processes",
+                return_value=[current_pid, other_pid],
+            ),
+            patch("claude_code_hooks_daemon.daemon.enforcement.kill_daemon_process") as mock_kill,
+        ):
             enforce_single_daemon(config=mock_config, pid_path=Path("/tmp/test.pid"))
 
         # Outside container: should NOT kill other daemons (could be other projects)
@@ -119,13 +133,17 @@ class TestEnforceSingleDaemon:
         mock_config = MagicMock()
         mock_config.daemon.enforce_single_daemon_process = True
 
-        with patch(
-            "claude_code_hooks_daemon.daemon.enforcement.is_container_environment", return_value=True
-        ), patch(
-            "claude_code_hooks_daemon.daemon.enforcement.find_all_daemon_processes", return_value=[]
-        ), patch(
-            "claude_code_hooks_daemon.daemon.enforcement.kill_daemon_process"
-        ) as mock_kill:
+        with (
+            patch(
+                "claude_code_hooks_daemon.daemon.enforcement.is_container_environment",
+                return_value=True,
+            ),
+            patch(
+                "claude_code_hooks_daemon.daemon.enforcement.find_all_daemon_processes",
+                return_value=[],
+            ),
+            patch("claude_code_hooks_daemon.daemon.enforcement.kill_daemon_process") as mock_kill,
+        ):
             enforce_single_daemon(config=mock_config, pid_path=Path("/tmp/test.pid"))
 
         # No daemons to kill
