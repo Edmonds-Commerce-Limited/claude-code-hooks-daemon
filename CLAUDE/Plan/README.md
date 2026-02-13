@@ -4,12 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00059: Fix MarkdownOrganizationHandler Completed/ Folder](00059-fix-markdown-handler-completed-folder/PLAN.md) - Not Started
-  - **BLOCKER**: Handler blocks edits to `CLAUDE/Plan/Completed/` folder
-  - Discovered during plan audit when trying to fix documentation in 5 completed plans
-  - Pattern validation extracts "Completed" as folder name, rejects because no numeric prefix
-  - **Priority**: High (blocks documentation fixes for plans 00048-00052)
-
 - [00058: Fix PHP QA Suppression Pattern Gaps](00058-php-qa-suppression-pattern-gaps/PLAN.md) - In Progress
   - **CRITICAL BUG**: PHP QA suppression handler missing 8 patterns (@phpstan-ignore, phpcs:disable, etc.)
   - User's project experiencing "serious issues" due to bypassed quality controls
@@ -35,6 +29,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 
 ## Completed Plans
+
+- [00059: Fix MarkdownOrganizationHandler Completed/ Folder](Completed/00059-fix-markdown-handler-completed-folder/PLAN.md) - Complete
+  - Fixed handler to allow edits to CLAUDE/Plan/Completed/, Cancelled/, Archive/ folders
+  - Added _PLAN_SUBDIRECTORIES constant for known subdirectories
+  - Comprehensive test coverage with backward compatibility verified
+  - Updated documentation in 5 affected plans (00048-00052)
 
 - [00057: Single Daemon Process Enforcement](Completed/00057-single-daemon-process-enforcement/PLAN.md) - Complete
   - System-wide daemon process enforcement with automatic container detection
@@ -355,9 +355,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 57
-- **Completed**: 50 (1 with reduced scope)
-- **Active**: 4 (all not started/proposed)
+- **Total Plans Created**: 59
+- **Completed**: 51 (1 with reduced scope)
+- **Active**: 1 (in progress)
 - **Cancelled/Abandoned**: 2 (00036 - empty draft deleted, 00044 - approach retired)
 
 ## Quick Links
