@@ -3,7 +3,7 @@
 import logging
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import (
     HandlerID,
@@ -17,6 +17,9 @@ from claude_code_hooks_daemon.core.utils import get_file_path
 from claude_code_hooks_daemon.handlers.utils.plan_numbering import get_next_plan_number
 
 logger = logging.getLogger(__name__)
+
+# Known CLAUDE/Plan/ subdirectories that should allow nested plan folders
+_PLAN_SUBDIRECTORIES: Final[tuple[str, ...]] = ("completed", "cancelled", "archive")
 
 
 class MarkdownOrganizationHandler(Handler):
@@ -470,10 +473,24 @@ class MarkdownOrganizationHandler(Handler):
             # Special validation for CLAUDE/Plan/ directories
             if normalized.lower().startswith("claude/plan/"):
                 # Extract plan folder pattern: CLAUDE/Plan/{folder}/PLAN.md
+                # OR: CLAUDE/Plan/{subdirectory}/{folder}/PLAN.md
                 plan_match = re.match(r"^claude/plan/([^/]+)/", normalized, re.IGNORECASE)
                 if plan_match:
-                    folder_name = plan_match.group(1)
-                    # Check if folder starts with a number
+                    folder_name = plan_match.group(1).lower()
+
+                    # Check if first segment is a known subdirectory (Completed, Cancelled, Archive)
+                    if folder_name in _PLAN_SUBDIRECTORIES:
+                        # For subdirectories, validate the SECOND path segment
+                        subdir_match = re.match(
+                            r"^claude/plan/[^/]+/([^/]+)/", normalized, re.IGNORECASE
+                        )
+                        if subdir_match:
+                            folder_name = subdir_match.group(1)
+                        else:
+                            # Subdirectory without nested plan folder - allow
+                            return False
+
+                    # Validate folder name has numeric prefix
                     number_match = re.match(r"^(\d+)-", folder_name)
                     if number_match:
                         # Validate plan number has at least 3 digits

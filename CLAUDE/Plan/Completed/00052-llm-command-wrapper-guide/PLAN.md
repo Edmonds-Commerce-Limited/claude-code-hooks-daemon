@@ -1,6 +1,6 @@
 # Plan 052: LLM Command Wrapper Guide & Handler Integration
 
-**Status**: Complete
+**Status**: Complete (2026-02-12)
 **Created**: 2026-02-12
 **Owner**: TBD
 **Priority**: Medium
@@ -194,36 +194,36 @@ def get_llm_command_guide_path() -> str:
 
 ### Phase 1: Write the Guide
 
-- [ ] **Create guide file**
-  - [ ] Create `src/claude_code_hooks_daemon/guides/` directory
-  - [ ] Create `__init__.py` for package
-  - [ ] Write `llm-command-wrappers.md` with full content
-  - [ ] Cover philosophy, pattern, naming, stdout contract, JSON contract
-  - [ ] Add examples for: JavaScript, Python, PHP, Go, Ruby
-  - [ ] Add common jq patterns section
-  - [ ] Add directory convention section
+- [x] **Create guide file**
+  - [x] Create `src/claude_code_hooks_daemon/guides/` directory
+  - [x] Create `__init__.py` for package
+  - [x] Write `llm-command-wrappers.md` with full content
+  - [x] Cover philosophy, pattern, naming, stdout contract, JSON contract
+  - [x] Add examples for: JavaScript, Python, PHP, Go, Ruby
+  - [x] Add common jq patterns section
+  - [x] Add directory convention section
 
 ### Phase 2: Guide Path Resolution
 
-- [ ] **Create utility for guide path**
-  - [ ] Write tests for `get_llm_command_guide_path()`
-  - [ ] Implement using `__file__`-relative path (simplest, works in dev and installed)
-  - [ ] Add constant for guide filename
+- [x] **Create utility for guide path**
+  - [x] Write tests for `get_llm_command_guide_path()`
+  - [x] Implement using `__file__`-relative path (simplest, works in dev and installed)
+  - [x] Add constant for guide filename
 
 ### Phase 3: Update NPM Advisory Handler
 
-- [ ] **Update advisory messages**
-  - [ ] Modify NpmCommandHandler advisory to reference guide path
-  - [ ] Modify ValidateEslintOnWriteHandler advisory to reference guide path
-  - [ ] Keep inline summary but add "Full guide: {path}" line
-  - [ ] Update tests for new message format
+- [x] **Update advisory messages**
+  - [x] Modify NpmCommandHandler advisory to reference guide path
+  - [x] Modify ValidateEslintOnWriteHandler advisory to reference guide path
+  - [x] Keep inline summary but add "Full guide: {path}" line
+  - [x] Update tests for new message format
 
 ### Phase 4: QA & Verification
 
-- [ ] **Run full QA suite**: `./scripts/qa/run_all.sh`
-- [ ] **Restart daemon**: verify loads successfully
-- [ ] **Live testing**: verify advisory shows guide path
-- [ ] **Verify guide is readable**: confirm file exists at resolved path
+- [x] **Run full QA suite**: `./scripts/qa/run_all.sh`
+- [x] **Restart daemon**: verify loads successfully
+- [x] **Live testing**: verify advisory shows guide path
+- [x] **Verify guide is readable**: confirm file exists at resolved path
 
 ## Dependencies
 
@@ -278,13 +278,13 @@ def get_llm_command_guide_path() -> str:
 
 ## Success Criteria
 
-- [ ] Guide file exists and covers 5+ language ecosystems
-- [ ] Guide explains the full pattern (philosophy, stdout contract, JSON contract, jq)
-- [ ] Guide is accessible via utility function from any handler
-- [ ] NPM advisory handler references guide path
-- [ ] Full QA suite passes
-- [ ] Daemon loads successfully
-- [ ] Guide is readable and useful when an LLM reads it
+- [x] Guide file exists and covers 5+ language ecosystems
+- [x] Guide explains the full pattern (philosophy, stdout contract, JSON contract, jq)
+- [x] Guide is accessible via utility function from any handler
+- [x] NPM advisory handler references guide path
+- [x] Full QA suite passes
+- [x] Daemon loads successfully
+- [x] Guide is readable and useful when an LLM reads it
 
 ## Future Phase: Standalone Wrapper Repository
 

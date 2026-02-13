@@ -1,6 +1,6 @@
 # Plan 051: Critical Thinking Advisory Handler (UserPromptSubmit)
 
-**Status**: Complete
+**Status**: Complete (2026-02-12)
 **Created**: 2026-02-12
 **Owner**: TBD
 **Priority**: Medium
@@ -142,52 +142,52 @@ _ADVISORY_MESSAGES: Final[tuple[str, ...]]    # Pool of rotating messages
 
 ### Phase 1: Design
 
-- [ ] **Finalise message pool**
-  - [ ] Write 3-5 concise advisory messages (1-2 lines each)
-  - [ ] Ensure messages are varied and non-preachy
-  - [ ] Review for token efficiency (shorter is better)
+- [x] **Finalise message pool**
+  - [x] Write 3-5 concise advisory messages (1-2 lines each)
+  - [x] Ensure messages are varied and non-preachy
+  - [x] Review for token efficiency (shorter is better)
 
 ### Phase 2: TDD Implementation
 
-- [ ] **Add constants**
-  - [ ] Add HandlerID.CRITICAL_THINKING_ADVISORY to constants
-  - [ ] Add priority constant
+- [x] **Add constants**
+  - [x] Add HandlerID.CRITICAL_THINKING_ADVISORY to constants
+  - [x] Add priority constant
 
-- [ ] **Write failing tests**
-  - [ ] Test: Handler initialises with correct ID, priority, terminal=False
-  - [ ] Test: matches() returns False for short prompts (< 80 chars)
-  - [ ] Test: matches() returns True for long prompts (>= 80 chars)
-  - [ ] Test: handle() returns ALLOW without context when random gate fails
-  - [ ] Test: handle() returns ALLOW without context when cooldown active
-  - [ ] Test: handle() returns ALLOW with context when all gates pass
-  - [ ] Test: Context message is from the advisory message pool
-  - [ ] Test: Cooldown resets after firing (tracks last_fired_count)
-  - [ ] Test: Multiple calls respect cooldown window
-  - [ ] Test: acceptance tests defined
+- [x] **Write failing tests**
+  - [x] Test: Handler initialises with correct ID, priority, terminal=False
+  - [x] Test: matches() returns False for short prompts (< 80 chars)
+  - [x] Test: matches() returns True for long prompts (>= 80 chars)
+  - [x] Test: handle() returns ALLOW without context when random gate fails
+  - [x] Test: handle() returns ALLOW without context when cooldown active
+  - [x] Test: handle() returns ALLOW with context when all gates pass
+  - [x] Test: Context message is from the advisory message pool
+  - [x] Test: Cooldown resets after firing (tracks last_fired_count)
+  - [x] Test: Multiple calls respect cooldown window
+  - [x] Test: acceptance tests defined
 
-- [ ] **Implement handler**
-  - [ ] Create handler file
-  - [ ] Implement matches() with length gate
-  - [ ] Implement handle() with random + cooldown gates
-  - [ ] Add advisory message pool
-  - [ ] Verify all tests pass
+- [x] **Implement handler**
+  - [x] Create handler file
+  - [x] Implement matches() with length gate
+  - [x] Implement handle() with random + cooldown gates
+  - [x] Add advisory message pool
+  - [x] Verify all tests pass
 
 ### Phase 3: Integration
 
-- [ ] **Register in config**
-  - [ ] Add to hooks-daemon.yaml under user_prompt_submit
-  - [ ] Set enabled: true, appropriate priority
+- [x] **Register in config**
+  - [x] Add to hooks-daemon.yaml under user_prompt_submit
+  - [x] Set enabled: true, appropriate priority
 
-- [ ] **Update constants modules**
-  - [ ] Add HandlerID entry
-  - [ ] Add Priority entry if needed
+- [x] **Update constants modules**
+  - [x] Add HandlerID entry
+  - [x] Add Priority entry if needed
 
 ### Phase 4: QA & Verification
 
-- [ ] **Run full QA suite**: `./scripts/qa/run_all.sh`
-- [ ] **Restart daemon**: verify loads successfully
-- [ ] **Dogfooding tests**: verify config integration
-- [ ] **Live testing**: verify advisory appears occasionally on long prompts
+- [x] **Run full QA suite**: `./scripts/qa/run_all.sh`
+- [x] **Restart daemon**: verify loads successfully
+- [x] **Dogfooding tests**: verify config integration
+- [x] **Live testing**: verify advisory appears occasionally on long prompts
 
 ## Dependencies
 
@@ -245,14 +245,14 @@ _ADVISORY_MESSAGES: Final[tuple[str, ...]]    # Pool of rotating messages
 
 ## Success Criteria
 
-- [ ] Handler fires approximately 1 in 15-20 prompts during normal work
-- [ ] Never fires on short prompts (< 80 chars)
-- [ ] Never fires back-to-back (cooldown enforced)
-- [ ] Advisory messages are concise (< 300 chars each)
-- [ ] All unit tests pass with 95%+ coverage
-- [ ] Full QA suite passes
-- [ ] Daemon loads successfully
-- [ ] Live testing confirms occasional firing on substantial prompts
+- [x] Handler fires approximately 1 in 15-20 prompts during normal work
+- [x] Never fires on short prompts (< 80 chars)
+- [x] Never fires back-to-back (cooldown enforced)
+- [x] Advisory messages are concise (< 300 chars each)
+- [x] All unit tests pass with 95%+ coverage
+- [x] Full QA suite passes
+- [x] Daemon loads successfully
+- [x] Live testing confirms occasional firing on substantial prompts
 
 ## Risks & Mitigations
 

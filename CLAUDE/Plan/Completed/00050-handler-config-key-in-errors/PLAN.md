@@ -142,66 +142,66 @@ This is:
 
 ### Phase 1: Research & Design
 
-- [ ] ⬜ **Identify injection point**
-  - [ ] ⬜ Read FrontController dispatch logic
-  - [ ] ⬜ Identify where handler results are processed
-  - [ ] ⬜ Confirm event_type is available at that point
-  - [ ] ⬜ Verify config_key is accessible from handler instance
+- [x] **Identify injection point**
+  - [x] Read FrontController dispatch logic
+  - [x] Identify where handler results are processed
+  - [x] Confirm event_type is available at that point
+  - [x] Verify config_key is accessible from handler instance
 
-- [ ] ⬜ **Verify event type mapping**
-  - [ ] ⬜ Confirm event type names match YAML section names (pre_tool_use, post_tool_use, etc.)
-  - [ ] ⬜ Handle any naming mismatches (e.g., camelCase vs snake_case)
+- [x] **Verify event type mapping**
+  - [x] Confirm event type names match YAML section names (pre_tool_use, post_tool_use, etc.)
+  - [x] Handle any naming mismatches (e.g., camelCase vs snake_case)
 
 ### Phase 2: TDD Implementation
 
-- [ ] ⬜ **Write failing tests for config key injection**
-  - [ ] ⬜ Test: DENY result includes config path in reason
-  - [ ] ⬜ Test: ASK result includes config path in reason
-  - [ ] ⬜ Test: ALLOW result does NOT include config path
-  - [ ] ⬜ Test: Config path format is `handlers.{event_type}.{config_key}`
-  - [ ] ⬜ Test: Works for pre_tool_use handlers
-  - [ ] ⬜ Test: Works for post_tool_use handlers
-  - [ ] ⬜ Test: Works for other event types (session_start, stop, etc.)
-  - [ ] ⬜ Test: Reason is None edge case (DENY without reason)
+- [x] **Write failing tests for config key injection**
+  - [x] Test: DENY result includes config path in reason
+  - [x] Test: ASK result includes config path in reason
+  - [x] Test: ALLOW result does NOT include config path
+  - [x] Test: Config path format is `handlers.{event_type}.{config_key}`
+  - [x] Test: Works for pre_tool_use handlers
+  - [x] Test: Works for post_tool_use handlers
+  - [x] Test: Works for other event types (session_start, stop, etc.)
+  - [x] Test: Reason is None edge case (DENY without reason)
 
-- [ ] ⬜ **Implement injection in FrontController**
-  - [ ] ⬜ Add config path append after handler returns DENY/ASK
-  - [ ] ⬜ Use consistent format string
-  - [ ] ⬜ Handle edge case where reason is None
-  - [ ] ⬜ Ensure formatting doesn't break JSON serialisation
+- [x] **Implement injection in FrontController**
+  - [x] Add config path append after handler returns DENY/ASK
+  - [x] Use consistent format string
+  - [x] Handle edge case where reason is None
+  - [x] Ensure formatting doesn't break JSON serialisation
 
-- [ ] ⬜ **Verify all existing tests still pass**
-  - [ ] ⬜ Update any tests that assert exact reason strings
-  - [ ] ⬜ Ensure acceptance test patterns still match (they use regex)
+- [x] **Verify all existing tests still pass**
+  - [x] Update any tests that assert exact reason strings
+  - [x] Ensure acceptance test patterns still match (they use regex)
 
 ### Phase 3: Integration & Testing
 
-- [ ] ⬜ **Integration tests**
-  - [ ] ⬜ Test full dispatch flow with real handler returning DENY
-  - [ ] ⬜ Verify config path appears in final JSON output
-  - [ ] ⬜ Test with progressive verbosity handlers (terse/standard/verbose all get footer)
+- [x] **Integration tests**
+  - [x] Test full dispatch flow with real handler returning DENY
+  - [x] Verify config path appears in final JSON output
+  - [x] Test with progressive verbosity handlers (terse/standard/verbose all get footer)
 
-- [ ] ⬜ **Verify no regressions**
-  - [ ] ⬜ Run full test suite
-  - [ ] ⬜ Ensure 95%+ coverage maintained
+- [x] **Verify no regressions**
+  - [x] Run full test suite
+  - [x] Ensure 95%+ coverage maintained
 
 ### Phase 4: QA & Verification
 
-- [ ] ⬜ **Run full QA suite**
-  - [ ] ⬜ Run: `./scripts/qa/run_all.sh`
-  - [ ] ⬜ Fix any QA issues
-  - [ ] ⬜ Verify all checks pass
+- [x] **Run full QA suite**
+  - [x] Run: `./scripts/qa/run_all.sh`
+  - [x] Fix any QA issues
+  - [x] Verify all checks pass
 
-- [ ] ⬜ **Daemon verification**
-  - [ ] ⬜ Restart daemon: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
-  - [ ] ⬜ Verify status: `$PYTHON -m claude_code_hooks_daemon.daemon.cli status`
-  - [ ] ⬜ Check logs for errors
+- [x] **Daemon verification**
+  - [x] Restart daemon: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
+  - [x] Verify status: `$PYTHON -m claude_code_hooks_daemon.daemon.cli status`
+  - [x] Check logs for errors
 
-- [ ] ⬜ **Live testing**
-  - [ ] ⬜ Trigger a blocking handler (e.g., destructive git)
-  - [ ] ⬜ Verify config path appears in error output
-  - [ ] ⬜ Verify path is correct and maps to actual YAML config
-  - [ ] ⬜ Verify ALLOW responses are unchanged
+- [x] **Live testing**
+  - [x] Trigger a blocking handler (e.g., destructive git)
+  - [x] Verify config path appears in error output
+  - [x] Verify path is correct and maps to actual YAML config
+  - [x] Verify ALLOW responses are unchanged
 
 ## Dependencies
 
@@ -265,15 +265,15 @@ This is:
 
 ## Success Criteria
 
-- [ ] Every DENY/ASK handler response includes fully-qualified config path
-- [ ] Config path format: `handlers.{event_type}.{config_key}`
-- [ ] Zero changes to individual handler `handle()` methods
-- [ ] Implementation in FrontController (single injection point)
-- [ ] ALLOW responses unchanged
-- [ ] All existing tests pass (updated for new footer)
-- [ ] Full QA suite passes
-- [ ] Daemon loads successfully
-- [ ] Live testing confirms config path appears in real block messages
+- [x] Every DENY/ASK handler response includes fully-qualified config path
+- [x] Config path format: `handlers.{event_type}.{config_key}`
+- [x] Zero changes to individual handler `handle()` methods
+- [x] Implementation in FrontController (single injection point)
+- [x] ALLOW responses unchanged
+- [x] All existing tests pass (updated for new footer)
+- [x] Full QA suite passes
+- [x] Daemon loads successfully
+- [x] Live testing confirms config path appears in real block messages
 
 ## Risks & Mitigations
 
