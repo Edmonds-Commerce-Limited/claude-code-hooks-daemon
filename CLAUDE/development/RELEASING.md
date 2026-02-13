@@ -287,7 +287,7 @@ Sub-agent acceptance testing strategies (parallel Haiku batches) are **permanent
 
 **The ONLY valid acceptance test is a real tool call in the main thread.**
 
-**STEP 8.1: Restart Daemon**
+**STEP 8.1: Restart Daemon & Verify Load**
 
 ```bash
 $PYTHON -m claude_code_hooks_daemon.daemon.cli restart
@@ -295,56 +295,58 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli status
 # Expected: RUNNING
 ```
 
-**STEP 8.2: Generate Playbook**
+**This verifies:** All handlers load successfully (including SessionEnd, PreCompact, Stop, SubagentStop, Status, Notification, PermissionRequest handlers that cannot be triggered on demand).
+
+**STEP 8.2: Verify OBSERVABLE Handlers**
+
+Check that lifecycle handlers are active by looking at **existing system-reminders** in your current session:
+
+- [ ] **SessionStart**: Look for "SessionStart hook system active" in system-reminders
+- [ ] **UserPromptSubmit**: Look for "UserPromptSubmit hook system active" in system-reminders
+- [ ] **PostToolUse**: Look for "PostToolUse hook system active" in system-reminders (appears after every tool call)
+
+**Time: 30 seconds** - just verify these messages are visible in your context.
+
+**STEP 8.3: Generate Playbook for EXECUTABLE Tests**
 
 ```bash
 $PYTHON -m claude_code_hooks_daemon.daemon.cli generate-playbook > /tmp/playbook.md
 ```
 
-Review to identify all tests to execute.
+**STEP 8.4: Execute EXECUTABLE Tests Sequentially in Main Thread**
 
-**STEP 8.3: Execute ALL Tests Sequentially in Main Thread**
+**Execute BLOCKING and ADVISORY tests only** (~89 tests total):
 
-**🚨 ABSOLUTE REQUIREMENT: EVERY SINGLE TEST MUST BE EXECUTED 🚨**
+- **BLOCKING tests** (~65 tests): PreToolUse handlers that deny dangerous commands
+  - Use Bash/Write/Edit tool with the test command
+  - Verify the hook blocks it (error output contains expected patterns)
 
-**There is NO such thing as "critical tests" or "subset testing"**:
-- ❌ You CANNOT test only "new handlers"
-- ❌ You CANNOT test only "blocking handlers"
-- ❌ You CANNOT skip "simple handlers"
-- ❌ You CANNOT prioritize "important tests"
-- ❌ You CANNOT do a "quick smoke test"
+- **ADVISORY tests** (~24 tests): PreToolUse/PostToolUse handlers that provide context
+  - Use Bash/Write/Edit tool with the test command
+  - Verify system-reminder shows advisory context
 
-**ALL 127+ TESTS ARE EQUALLY CRITICAL. NO EXCEPTIONS. NO SHORTCUTS.**
+**Skip CONTEXT tests** for untriggerable lifecycle events (SessionEnd, PreCompact, Stop, SubagentStop, Status, Notification, PermissionRequest). These handlers are verified by:
+- Daemon loading successfully (Step 8.1)
+- Unit tests passing (QA suite in Step 7)
+- Cannot be triggered on demand for manual testing
 
-Every handler must be verified. Every test case must pass. One skipped test = invalid release.
+Mark PASS/FAIL for each executable test. Document any unexpected behaviour.
 
-**Why every test matters**:
-- A "simple" handler might have a regression
-- A "less critical" handler might block the entire daemon
-- An "unchanged" handler might be affected by infrastructure changes
-- You will NOT know which test would have caught the bug you skipped
+**Test execution is sequential, one at a time, in order. No parallel execution.**
 
-Work through EVERY test in the playbook using **real Claude Code tool calls**:
-
-- **BLOCKING tests**: Use Bash/Write/Edit tool with the test command. Verify the hook blocks it (error output contains expected patterns).
-- **ADVISORY tests**: Use Bash/Write tool. Verify system-reminder shows advisory context.
-- **CONTEXT/LIFECYCLE tests**: Verify system-reminders show handler active (SessionStart, PostToolUse, UserPromptSubmit confirmed by normal session usage; others confirmed by daemon loading without errors).
-
-Mark PASS/FAIL for each test. Document any unexpected behaviour.
-
-**Test execution is sequential, one at a time, in order. No parallel execution. No batching. No sampling.**
-
-**STEP 8.4: Evaluate Results**
+**STEP 8.5: Evaluate Results**
 
 **✅ SUCCESS CRITERIA**:
-- All blocking handlers correctly deny dangerous commands
-- All advisory handlers show context in system-reminders
-- Lifecycle handlers confirmed active via session system-reminders
+- All EXECUTABLE blocking handlers correctly deny dangerous commands (~65 tests)
+- All EXECUTABLE advisory handlers show context in system-reminders (~24 tests)
+- OBSERVABLE lifecycle handlers visible in system-reminders (SessionStart, UserPromptSubmit, PostToolUse)
+- VERIFIED_BY_LOAD handlers loaded successfully (daemon restart succeeded)
 - Failed count = 0
 
 **❌ FAILURE CRITERIA** (any of these = ABORT):
 - Any blocking handler fails to block
 - Any advisory handler fails to show context
+- Any observable handler not visible in system-reminders
 - Daemon crashes during testing
 - Any unexpected behaviour
 
@@ -354,7 +356,7 @@ Mark PASS/FAIL for each test. Document any unexpected behaviour.
 3. Fix bug using TDD (write failing test, implement fix, verify)
 4. Run FULL QA: `./scripts/qa/run_all.sh` (must pass 100%)
 5. Restart daemon: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
-6. **RESTART acceptance testing FROM TEST 1** (not from where you left off)
+6. **RESTART acceptance testing FROM STEP 8.1** (restart daemon verification)
 7. Continue until ALL tests pass with ZERO code changes
 
 **NO SHORTCUTS ALLOWED:**
@@ -367,13 +369,13 @@ Mark PASS/FAIL for each test. Document any unexpected behaviour.
 **VERIFICATION CHECKPOINT:**
 
 Before proceeding to Step 9, confirm:
-1. [ ] Daemon is running
-2. [ ] Executed tests via real tool calls in main thread (NOT sub-agents)
-3. [ ] All blocking handlers verified (deny dangerous commands)
-4. [ ] All advisory handlers verified (show context in system-reminders)
-5. [ ] Lifecycle handlers confirmed active (system-reminders visible)
+1. [ ] Daemon is running (Step 8.1)
+2. [ ] OBSERVABLE handlers confirmed (SessionStart, UserPromptSubmit, PostToolUse visible in system-reminders)
+3. [ ] EXECUTABLE blocking tests executed and passed (~65 tests)
+4. [ ] EXECUTABLE advisory tests executed and passed (~24 tests)
+5. [ ] VERIFIED_BY_LOAD handlers loaded (daemon started successfully + unit tests passed)
 6. [ ] Failed = 0
-7. [ ] Total test count documented: ___ tests
+7. [ ] Total executable tests: ~89 (blocking + advisory)
 8. [ ] No handler bugs found
 
 **If you cannot check ALL boxes above, you MUST NOT proceed.**
@@ -385,8 +387,16 @@ Before proceeding to Step 9, confirm:
 - **CORRECTNESS over SPEED** - A delayed release is better than a broken release
 - Only main-thread tool calls test the FULL hook pipeline (bash script -> socket -> daemon -> handler -> response)
 
+**Test Categories Explained:**
+- **EXECUTABLE**: PreToolUse blocking/advisory handlers - must be tested by running commands
+- **OBSERVABLE**: Lifecycle handlers visible in system-reminders during normal session usage
+- **VERIFIED_BY_LOAD**: Lifecycle handlers that cannot be triggered on demand (SessionEnd, PreCompact, Stop, etc.) - verified by daemon loading successfully + unit tests passing
+
 **Time Investment:**
-- **Full suite**: 15-30 minutes (sequential, main thread) - NON-NEGOTIABLE
+- **Daemon restart**: 30 seconds
+- **Observable checks**: 30 seconds (just look at system-reminders)
+- **Executable tests**: 20-30 minutes (~89 tests)
+- **Total**: 20-30 minutes (not including issue investigation)
 - **Issue investigation**: Variable (hours if bugs found)
 
 **Main Claude proceeds to Commit & Push (Step 9) ONLY if acceptance tests pass.**
