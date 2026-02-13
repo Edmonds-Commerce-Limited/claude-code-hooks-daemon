@@ -6,11 +6,22 @@ from typing import Any
 _LANGUAGE_NAME = "PHP"
 _EXTENSIONS: tuple[str, ...] = (".php",)
 _FORBIDDEN_PATTERNS: tuple[str, ...] = (
+    # PHPStan patterns (all variants)
     r"@phpstan-" + "ignore-next-line",
-    r"@psalm-" + "suppress",
-    r"phpcs:" + "ignore",
-    r"@codingStandards" + "IgnoreLine",
     r"@phpstan-" + "ignore-line",
+    r"@phpstan-" + "ignore",  # Base pattern - catches all @phpstan-ignore variants
+    # Psalm patterns
+    r"@psalm-" + "suppress",
+    # PHPCS patterns (current syntax)
+    r"phpcs:" + "ignore",
+    r"phpcs:" + "disable",
+    r"phpcs:" + "enable",
+    r"phpcs:" + "ignoreFile",
+    # PHPCS patterns (deprecated, removed in v4.0)
+    r"@codingStandards" + "IgnoreLine",
+    r"@codingStandards" + "IgnoreStart",
+    r"@codingStandards" + "IgnoreEnd",
+    r"@codingStandards" + "IgnoreFile",
 )
 _SKIP_DIRECTORIES: tuple[str, ...] = (
     "tests/fixtures/",
@@ -57,12 +68,40 @@ class PhpQaSuppressionStrategy:
 
         return [
             AcceptanceTest(
-                title="PHP QA suppression blocked",
+                title="PHP @phpstan-ignore-next-line blocked",
                 command=(
-                    'Write file_path="/tmp/acceptance-test-qa-php/example.php"'
+                    'Write file_path="/tmp/acceptance-test-qa-php/phpstan-next-line.php"'
                     ' content="<?php /** @phpstan-' + "ignore-next-line" + ' */ $x = 1;"'
                 ),
-                description="Should block PHP QA suppression comment",
+                description="Should block @phpstan-ignore-next-line suppression",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=["suppression", "BLOCKED", "PHP"],
+                test_type=TestType.BLOCKING,
+                safety_notes="Uses /tmp path - safe",
+                setup_commands=["mkdir -p /tmp/acceptance-test-qa-php"],
+                cleanup_commands=["rm -rf /tmp/acceptance-test-qa-php"],
+            ),
+            AcceptanceTest(
+                title="PHP @phpstan-ignore (with identifier) blocked",
+                command=(
+                    'Write file_path="/tmp/acceptance-test-qa-php/phpstan-ignore.php"'
+                    ' content="<?php /** @phpstan-' + "ignore" + ' argument.type */ $x = 1;"'
+                ),
+                description="Should block @phpstan-ignore with error identifier (modern pattern)",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=["suppression", "BLOCKED", "PHP"],
+                test_type=TestType.BLOCKING,
+                safety_notes="Uses /tmp path - safe",
+                setup_commands=["mkdir -p /tmp/acceptance-test-qa-php"],
+                cleanup_commands=["rm -rf /tmp/acceptance-test-qa-php"],
+            ),
+            AcceptanceTest(
+                title="PHP phpcs:disable blocked",
+                command=(
+                    'Write file_path="/tmp/acceptance-test-qa-php/phpcs-disable.php"'
+                    ' content="<?php // phpcs:' + "disable" + '\\n$x = 1;"'
+                ),
+                description="Should block phpcs:disable block-level suppression",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=["suppression", "BLOCKED", "PHP"],
                 test_type=TestType.BLOCKING,

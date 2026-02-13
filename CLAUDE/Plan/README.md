@@ -4,6 +4,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00058: Fix PHP QA Suppression Pattern Gaps](00058-php-qa-suppression-pattern-gaps/PLAN.md) - In Progress
+  - **CRITICAL BUG**: PHP QA suppression handler missing 8 patterns (@phpstan-ignore, phpcs:disable, etc.)
+  - User's project experiencing "serious issues" due to bypassed quality controls
+  - **Priority**: High (quality enforcement broken)
+
 - [00032: Sub-Agent Orchestration for Context Preservation](00032-subagent-orchestration-context-preservation/PLAN.md) - Not Started
   - Create specialized sub-agents for workflow gates and orchestration
   - **Priority**: High (context management)
