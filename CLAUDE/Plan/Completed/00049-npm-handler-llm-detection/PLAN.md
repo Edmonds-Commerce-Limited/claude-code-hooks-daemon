@@ -88,95 +88,95 @@ This command will run for now, but consider adding llm: wrappers.
 
 ### Phase 1: Design & Research
 
-- [ ] ⬜ **Research package.json detection**
-  - [ ] ⬜ Identify best way to locate package.json (ProjectContext.project_root())
-  - [ ] ⬜ Determine how to parse scripts section (json.loads)
-  - [ ] ⬜ Design startup caching in ProjectContext (parse once, cache for daemon lifetime)
+- [x] ⬜ **Research package.json detection**
+  - [x] ⬜ Identify best way to locate package.json (ProjectContext.project_root())
+  - [x] ⬜ Determine how to parse scripts section (json.loads)
+  - [x] ⬜ Design startup caching in ProjectContext (parse once, cache for daemon lifetime)
 
-- [ ] ⬜ **Design detection logic**
-  - [ ] ⬜ Define what counts as "has llm: commands" (threshold: 1+ scripts starting with "llm:")
-  - [ ] ⬜ Design fallback behaviour if package.json is malformed/missing
-  - [ ] ⬜ Add to ProjectContext singleton (computed once at daemon startup)
+- [x] ⬜ **Design detection logic**
+  - [x] ⬜ Define what counts as "has llm: commands" (threshold: 1+ scripts starting with "llm:")
+  - [x] ⬜ Design fallback behaviour if package.json is malformed/missing
+  - [x] ⬜ Add to ProjectContext singleton (computed once at daemon startup)
 
-- [ ] ⬜ **Design advisory messages**
-  - [ ] ⬜ Draft advisory text for NpmCommandHandler
-  - [ ] ⬜ Draft advisory text for ValidateEslintOnWriteHandler
-  - [ ] ⬜ Include specific examples based on command being run
+- [x] ⬜ **Design advisory messages**
+  - [x] ⬜ Draft advisory text for NpmCommandHandler
+  - [x] ⬜ Draft advisory text for ValidateEslintOnWriteHandler
+  - [x] ⬜ Include specific examples based on command being run
 
 ### Phase 2: TDD Implementation
 
-- [ ] ⬜ **Create shared detection utility**
-  - [ ] ⬜ Write failing tests for `_detect_llm_commands_in_package_json()`
-    - [ ] ⬜ Test: Returns True when package.json has llm: scripts
-    - [ ] ⬜ Test: Returns False when package.json has no llm: scripts
-    - [ ] ⬜ Test: Returns False when package.json missing
-    - [ ] ⬜ Test: Returns False when package.json malformed
-    - [ ] ⬜ Test: Returns False when scripts section missing
-  - [ ] ⬜ Implement utility function to pass tests
-  - [ ] ⬜ Location: `src/claude_code_hooks_daemon/utils/npm.py`
-  - [ ] ⬜ Function reads package.json at project root, checks for llm: prefixed scripts
+- [x] ⬜ **Create shared detection utility**
+  - [x] ⬜ Write failing tests for `_detect_llm_commands_in_package_json()`
+    - [x] ⬜ Test: Returns True when package.json has llm: scripts
+    - [x] ⬜ Test: Returns False when package.json has no llm: scripts
+    - [x] ⬜ Test: Returns False when package.json missing
+    - [x] ⬜ Test: Returns False when package.json malformed
+    - [x] ⬜ Test: Returns False when scripts section missing
+  - [x] ⬜ Implement utility function to pass tests
+  - [x] ⬜ Location: `src/claude_code_hooks_daemon/utils/npm.py`
+  - [x] ⬜ Function reads package.json at project root, checks for llm: prefixed scripts
 
-- [ ] ⬜ **Update NpmCommandHandler**
-  - [ ] ⬜ Write failing tests for new advisory behaviour
-    - [ ] ⬜ Test: DENY when llm: commands exist (current behaviour)
-    - [ ] ⬜ Test: ALLOW with advisory when llm: commands don't exist
-    - [ ] ⬜ Test: Advisory message includes helpful guidance
-    - [ ] ⬜ Test: `self.has_llm_commands` cached in memory (no repeated file reads)
-  - [ ] ⬜ Modify `__init__()` to call detection utility and cache boolean in `self.has_llm_commands`
-  - [ ] ⬜ Modify `handle()` to check `self.has_llm_commands` (zero I/O overhead)
-  - [ ] ⬜ Add advisory path with Decision.ALLOW when `self.has_llm_commands == False`
-  - [ ] ⬜ Update acceptance tests
-  - [ ] ⬜ Refactor for clarity
+- [x] ⬜ **Update NpmCommandHandler**
+  - [x] ⬜ Write failing tests for new advisory behaviour
+    - [x] ⬜ Test: DENY when llm: commands exist (current behaviour)
+    - [x] ⬜ Test: ALLOW with advisory when llm: commands don't exist
+    - [x] ⬜ Test: Advisory message includes helpful guidance
+    - [x] ⬜ Test: `self.has_llm_commands` cached in memory (no repeated file reads)
+  - [x] ⬜ Modify `__init__()` to call detection utility and cache boolean in `self.has_llm_commands`
+  - [x] ⬜ Modify `handle()` to check `self.has_llm_commands` (zero I/O overhead)
+  - [x] ⬜ Add advisory path with Decision.ALLOW when `self.has_llm_commands == False`
+  - [x] ⬜ Update acceptance tests
+  - [x] ⬜ Refactor for clarity
 
-- [ ] ⬜ **Update ValidateEslintOnWriteHandler**
-  - [ ] ⬜ Write failing tests for conditional validation
-    - [ ] ⬜ Test: DENY on ESLint errors when llm: commands exist
-    - [ ] ⬜ Test: ALLOW with advisory when llm: commands don't exist
-    - [ ] ⬜ Test: Advisory suggests creating llm:lint script
-    - [ ] ⬜ Test: `self.has_llm_commands` cached in memory (no repeated file reads)
-  - [ ] ⬜ Modify `__init__()` to call detection utility and cache boolean in `self.has_llm_commands`
-  - [ ] ⬜ Modify `handle()` to check `self.has_llm_commands` (zero I/O overhead)
-  - [ ] ⬜ Skip ESLint validation entirely if `self.has_llm_commands == False` (just advise)
-  - [ ] ⬜ Add advisory branch
-  - [ ] ⬜ Update acceptance tests
-  - [ ] ⬜ Refactor for clarity
+- [x] ⬜ **Update ValidateEslintOnWriteHandler**
+  - [x] ⬜ Write failing tests for conditional validation
+    - [x] ⬜ Test: DENY on ESLint errors when llm: commands exist
+    - [x] ⬜ Test: ALLOW with advisory when llm: commands don't exist
+    - [x] ⬜ Test: Advisory suggests creating llm:lint script
+    - [x] ⬜ Test: `self.has_llm_commands` cached in memory (no repeated file reads)
+  - [x] ⬜ Modify `__init__()` to call detection utility and cache boolean in `self.has_llm_commands`
+  - [x] ⬜ Modify `handle()` to check `self.has_llm_commands` (zero I/O overhead)
+  - [x] ⬜ Skip ESLint validation entirely if `self.has_llm_commands == False` (just advise)
+  - [x] ⬜ Add advisory branch
+  - [x] ⬜ Update acceptance tests
+  - [x] ⬜ Refactor for clarity
 
 ### Phase 3: Integration & Testing
 
-- [ ] ⬜ **Integration tests**
-  - [ ] ⬜ Test with project that HAS llm: commands (enforce mode)
-  - [ ] ⬜ Test with project that LACKS llm: commands (advisory mode)
-  - [ ] ⬜ Test with no package.json (advisory mode)
-  - [ ] ⬜ Verify handlers parse package.json ONCE at `__init__()` time
-  - [ ] ⬜ Verify `handle()` method has zero file I/O (just checks `self.has_llm_commands`)
+- [x] ⬜ **Integration tests**
+  - [x] ⬜ Test with project that HAS llm: commands (enforce mode)
+  - [x] ⬜ Test with project that LACKS llm: commands (advisory mode)
+  - [x] ⬜ Test with no package.json (advisory mode)
+  - [x] ⬜ Verify handlers parse package.json ONCE at `__init__()` time
+  - [x] ⬜ Verify `handle()` method has zero file I/O (just checks `self.has_llm_commands`)
 
-- [ ] ⬜ **Verify coverage**
-  - [ ] ⬜ Run coverage report for modified handlers
-  - [ ] ⬜ Ensure 95%+ coverage maintained
-  - [ ] ⬜ Add missing tests if needed
+- [x] ⬜ **Verify coverage**
+  - [x] ⬜ Run coverage report for modified handlers
+  - [x] ⬜ Ensure 95%+ coverage maintained
+  - [x] ⬜ Add missing tests if needed
 
 ### Phase 4: Documentation & QA
 
-- [ ] ⬜ **Update documentation**
-  - [ ] ⬜ Update handler comments/docstrings
-  - [ ] ⬜ Update CLAUDE.md if needed
-  - [ ] ⬜ Document detection logic in code
+- [x] ⬜ **Update documentation**
+  - [x] ⬜ Update handler comments/docstrings
+  - [x] ⬜ Update CLAUDE.md if needed
+  - [x] ⬜ Document detection logic in code
 
-- [ ] ⬜ **Run full QA suite**
-  - [ ] ⬜ Run: `./scripts/qa/run_all.sh`
-  - [ ] ⬜ Fix any QA issues
-  - [ ] ⬜ Verify all checks pass
+- [x] ⬜ **Run full QA suite**
+  - [x] ⬜ Run: `./scripts/qa/run_all.sh`
+  - [x] ⬜ Fix any QA issues
+  - [x] ⬜ Verify all checks pass
 
-- [ ] ⬜ **Daemon verification**
-  - [ ] ⬜ Restart daemon: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
-  - [ ] ⬜ Verify status: `$PYTHON -m claude_code_hooks_daemon.daemon.cli status`
-  - [ ] ⬜ Check logs for errors
+- [x] ⬜ **Daemon verification**
+  - [x] ⬜ Restart daemon: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
+  - [x] ⬜ Verify status: `$PYTHON -m claude_code_hooks_daemon.daemon.cli status`
+  - [x] ⬜ Check logs for errors
 
-- [ ] ⬜ **Live testing**
-  - [ ] ⬜ Test in Node.js project WITH llm: commands (should block)
-  - [ ] ⬜ Test in Node.js project WITHOUT llm: commands (should advise)
-  - [ ] ⬜ Test in Python project (should advise - no package.json)
-  - [ ] ⬜ Verify advisory messages are helpful
+- [x] ⬜ **Live testing**
+  - [x] ⬜ Test in Node.js project WITH llm: commands (should block)
+  - [x] ⬜ Test in Node.js project WITHOUT llm: commands (should advise)
+  - [x] ⬜ Test in Python project (should advise - no package.json)
+  - [x] ⬜ Verify advisory messages are helpful
 
 ## Dependencies
 
@@ -272,16 +272,16 @@ This command will run for now, but consider adding llm: wrappers.
 
 ## Success Criteria
 
-- [ ] NpmCommandHandler detects llm: command presence
-- [ ] ValidateEslintOnWriteHandler detects llm: command presence
-- [ ] Handlers DENY when llm: commands exist (maintain enforcement)
-- [ ] Handlers ALLOW with advisory when llm: commands absent
-- [ ] Advisory messages are clear and actionable
-- [ ] All unit tests pass with 95%+ coverage
-- [ ] Integration tests pass for both modes
-- [ ] Full QA suite passes
-- [ ] Daemon loads successfully
-- [ ] Live testing in both scenarios works
+- [x] NpmCommandHandler detects llm: command presence
+- [x] ValidateEslintOnWriteHandler detects llm: command presence
+- [x] Handlers DENY when llm: commands exist (maintain enforcement)
+- [x] Handlers ALLOW with advisory when llm: commands absent
+- [x] Advisory messages are clear and actionable
+- [x] All unit tests pass with 95%+ coverage
+- [x] Integration tests pass for both modes
+- [x] Full QA suite passes
+- [x] Daemon loads successfully
+- [x] Live testing in both scenarios works
 
 ## Risks & Mitigations
 

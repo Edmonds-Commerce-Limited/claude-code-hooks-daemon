@@ -199,6 +199,43 @@ class TestMarkdownOrganizationHandler:
         write_input["tool_input"]["file_path"] = "CLAUDE/Plan/066-test-plan/PLAN.md"
         assert handler.matches(write_input) is False
 
+    def test_matches_returns_false_for_completed_plan_directory(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Handler allows markdown in CLAUDE/Plan/Completed/NNN-*/ directories."""
+        write_input["tool_input"][
+            "file_path"
+        ] = "CLAUDE/Plan/Completed/00051-critical-thinking/PLAN.md"
+        assert handler.matches(write_input) is False
+
+    def test_matches_returns_false_for_cancelled_plan_directory(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Handler allows markdown in CLAUDE/Plan/Cancelled/NNN-*/ directories."""
+        write_input["tool_input"]["file_path"] = "CLAUDE/Plan/Cancelled/00012-old-feature/PLAN.md"
+        assert handler.matches(write_input) is False
+
+    def test_matches_returns_false_for_archive_plan_directory(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Handler allows markdown in CLAUDE/Plan/Archive/NNN-*/ directories."""
+        write_input["tool_input"]["file_path"] = "CLAUDE/Plan/Archive/00003-legacy/PLAN.md"
+        assert handler.matches(write_input) is False
+
+    def test_matches_returns_true_for_invalid_subfolder_in_plan(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Handler blocks markdown in CLAUDE/Plan/InvalidFolder/ without numeric plan."""
+        write_input["tool_input"]["file_path"] = "CLAUDE/Plan/InvalidFolder/file.md"
+        assert handler.matches(write_input) is True
+
+    def test_matches_returns_true_for_non_numeric_plan_in_completed(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Handler blocks CLAUDE/Plan/Completed/bad-name/ (no numeric prefix)."""
+        write_input["tool_input"]["file_path"] = "CLAUDE/Plan/Completed/bad-name/PLAN.md"
+        assert handler.matches(write_input) is True
+
     def test_matches_returns_false_for_claude_root_level(
         self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
     ) -> None:
