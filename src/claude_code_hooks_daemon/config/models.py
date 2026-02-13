@@ -420,6 +420,10 @@ class DaemonConfig(BaseModel):
         default=None,
         description="Project-level language filter. When set, only handlers for these languages are active. None = ALL languages.",
     )
+    enforce_single_daemon_process: bool = Field(
+        default=False,
+        description="Enforce single daemon process per project. When enabled, checks for multiple daemon processes and cleans them up. Auto-enabled in container environments. Requires process verification to prevent killing wrong processes.",
+    )
 
     @field_validator("socket_path", "pid_file_path", mode="before")
     @classmethod
