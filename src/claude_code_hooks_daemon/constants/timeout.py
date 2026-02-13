@@ -58,3 +58,6 @@ class Timeout:
     # QA runner timeouts (seconds)
     QA_TEST_TIMEOUT = 120  # 2 minutes (mypy, individual tool checks)
     QA_LONG_TIMEOUT = 300  # 5 minutes (pytest, full test suite)
+
+    # Process management timeouts (seconds)
+    PROCESS_KILL_WAIT = 2  # 2 seconds (wait for SIGTERM before SIGKILL)
