@@ -280,6 +280,18 @@ def cmd_start(args: argparse.Namespace) -> int:
     socket_path = _resolve_socket_path(args, project_path)
     pid_path = _resolve_pid_path(args, project_path)
 
+    # Load config for enforcement check
+    config_path = project_path / ".claude" / "hooks-daemon.yaml"
+    try:
+        config = Config.load(config_path)
+    except FileNotFoundError:
+        config = Config()  # Use defaults if no config file
+
+    # Enforce single daemon process (if enabled)
+    from claude_code_hooks_daemon.daemon.enforcement import enforce_single_daemon
+
+    enforce_single_daemon(config=config, pid_path=pid_path)
+
     # Check if already running
     pid = read_pid_file(str(pid_path))
     if pid is not None:
