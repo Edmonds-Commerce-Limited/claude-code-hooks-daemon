@@ -1,7 +1,8 @@
 # Plan 00057: Single Daemon Process Enforcement
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-02-13
+**Started**: 2026-02-13
 **Owner**: Claude Sonnet 4.5
 **Priority**: Medium
 **Recommended Executor**: Sonnet
@@ -9,21 +10,24 @@
 
 ## Overview
 
-Implement a robust single daemon process enforcement system that prevents multiple daemon instances from running simultaneously. This is particularly valuable in container environments where it's safe to aggressively ensure only one daemon process exists.
+Implement a robust single daemon process enforcement system that prevents multiple daemon instances from running simultaneously in the entire process tree. This is particularly valuable in container environments where it's safe to aggressively ensure only one daemon process exists system-wide.
+
+**Key Insight**: In containers, we can assume the container is dedicated to our project, so we enforce a single `claude_code_hooks_daemon` process across the ENTIRE system (not per-project).
 
 The system will include:
 - Container detection during install/upgrade
 - Configurable single-process enforcement
-- Robust process verification (not just PID file checking)
-- Safe process cleanup when multiple daemons detected
+- Simple process name matching (no project path verification needed in containers)
+- Aggressive cleanup of ALL daemon processes in containers
 
 ## Goals
 
 - Add `enforce_single_daemon_process` config option to DaemonConfig
-- Implement robust daemon process detection and verification
+- Implement simple daemon process detection by name (system-wide)
 - Create container detection utility for install/upgrade phase
 - Auto-enable enforcement in container environments
-- Ensure zero false positives (don't kill unrelated processes)
+- In containers: Kill ALL `claude_code_hooks_daemon` processes except the one starting
+- Outside containers: Only clean up stale PID files (conservative)
 - Maintain backward compatibility (feature is opt-in by default)
 
 ## Non-Goals
@@ -82,13 +86,16 @@ The daemon start process (`cmd_start()` in `cli.py`) currently:
 - Multiple daemon processes could exist if PID files are in different locations
 - No protection against accidental multiple starts
 
-### Container Safety
+### Container Safety - System-Wide Enforcement
 
 In containerized environments (Docker, Podman):
-- Only one project per container (isolated workspace)
-- Safe to aggressively enforce single daemon
+- Container is dedicated to our project (single workspace)
+- Safe to enforce single daemon process **across entire system**
 - Root access available for process management
-- No risk of killing daemons from other projects
+- No risk of killing daemons from other projects (no other projects exist)
+- **Simplified approach**: Just search for `claude_code_hooks_daemon` in process list
+
+**Key simplification**: In containers, we don't need to verify project paths. We can just ensure there's only ONE `claude_code_hooks_daemon` process running anywhere in the system.
 
 Existing container detection: `handlers/session_start/yolo_container_detection.py` has robust multi-indicator detection system.
 
@@ -96,16 +103,16 @@ Existing container detection: `handlers/session_start/yolo_container_detection.p
 
 ### Phase 1: Design & Configuration
 
-- [ ] ⬜ **Design process verification algorithm**
-  - [ ] ⬜ Define what makes a process "our daemon"
-  - [ ] ⬜ Design PID validation strategy (process exists, correct command, correct project)
-  - [ ] ⬜ Design cleanup strategy (when is it safe to kill?)
-  - [ ] ⬜ Document edge cases and error handling
+- [x] ✅ **Design process verification algorithm**
+  - [x] ✅ Define what makes a process "our daemon" - Process name contains `claude_code_hooks_daemon`
+  - [x] ✅ Design PID validation strategy - System-wide in containers, project-specific outside
+  - [x] ✅ Design cleanup strategy - Kill ALL daemons in containers, stale PID only outside
+  - [x] ✅ Document edge cases and error handling - Container vs non-container behavior
 
-- [ ] ⬜ **Add config option to DaemonConfig**
-  - [ ] ⬜ Add `enforce_single_daemon_process: bool` field (default False)
-  - [ ] ⬜ Update config schema and examples
-  - [ ] ⬜ Write tests for config loading with new field
+- [x] ✅ **Add config option to DaemonConfig**
+  - [x] ✅ Add `enforce_single_daemon_process: bool` field (default False)
+  - [x] ✅ Update config schema and examples
+  - [x] ✅ Write tests for config loading with new field
   - [ ] ⬜ Run QA: `./scripts/qa/run_all.sh`
 
 ### Phase 2: Container Detection Utility
@@ -131,22 +138,21 @@ Existing container detection: `handlers/session_start/yolo_container_detection.p
 
 ### Phase 3: Process Verification Logic
 
-- [ ] ⬜ **TDD: Write process verification tests**
-  - [ ] ⬜ Create `tests/unit/daemon/test_process_verification.py`
-  - [ ] ⬜ Write failing test: PID exists and process running
-  - [ ] ⬜ Write failing test: PID exists but process dead (stale)
-  - [ ] ⬜ Write failing test: PID exists but different process
-  - [ ] ⬜ Write failing test: No PID file
-  - [ ] ⬜ Write failing test: Multiple daemon processes detected
+- [x] ✅ **TDD: Write process verification tests**
+  - [x] ✅ Create `tests/unit/daemon/test_process_verification.py`
+  - [x] ✅ Write failing test: Find all daemon processes (by name)
+  - [x] ✅ Write failing test: No daemon processes exist
+  - [x] ✅ Write failing test: Single daemon process exists
+  - [x] ✅ Write failing test: Multiple daemon processes exist
+  - [x] ✅ Write failing test: Process name matching works correctly
 
-- [ ] ⬜ **Implement process verification**
-  - [ ] ⬜ Create `daemon/process_verification.py` module
-  - [ ] ⬜ Implement `is_daemon_running(pid: int, project_path: Path) -> bool`
-  - [ ] ⬜ Implement `find_all_daemon_processes(project_path: Path) -> list[int]`
-  - [ ] ⬜ Implement `verify_daemon_process(pid: int) -> bool`
-  - [ ] ⬜ Make tests pass
-  - [ ] ⬜ Refactor for clarity
-  - [ ] ⬜ Run QA: `./scripts/qa/run_all.sh`
+- [x] ✅ **Implement process verification**
+  - [x] ✅ Create `daemon/process_verification.py` module
+  - [x] ✅ Implement `find_all_daemon_processes() -> list[int]` - System-wide search by name
+  - [x] ✅ Implement `kill_daemon_process(pid: int) -> bool` - Safe process termination
+  - [x] ✅ Make tests pass (16/16 passing)
+  - [x] ✅ Refactor for clarity
+  - [x] ✅ Run QA: All checks passing (Format, Lint, Types, Tests with 95%+ coverage)
 
 ### Phase 4: Enforcement Logic
 
@@ -215,40 +221,48 @@ Existing container detection: `handlers/session_start/yolo_container_detection.p
 
 ## Technical Decisions
 
-### Decision 1: Process Verification Strategy
-**Context**: Need to verify a PID actually belongs to our daemon, not a reused PID.
+### Decision 1: Process Verification Strategy (UPDATED)
+**Context**: Need to find all daemon processes to enforce single-instance constraint.
 
-**Options Considered**:
+**Original Options Considered**:
 1. Check PID only (current behavior) - Fast but unreliable
-2. Check PID + process name - Reliable but could match other Python processes
-3. Check PID + process name + command-line args - Most reliable, some overhead
-4. Check PID + socket connection test - Most reliable but expensive
+2. Check PID + process name - Simple, works for containers
+3. Check PID + process name + command-line args - More complex, not needed
+4. Check PID + socket connection test - Too expensive
 
-**Decision**: Use option 3 (PID + process name + command-line args)
-- Checks process exists (`os.kill(pid, 0)` or `/proc/{pid}`)
-- Checks process command contains "claude_code_hooks_daemon"
-- Checks process was started from correct project path
-- Fast enough for startup check (<10ms)
-- Reliable across platforms (psutil or /proc on Linux, ps on macOS)
+**Decision**: Use option 2 (PID + process name matching) - **SIMPLIFIED**
+- In containers: Search for ANY process with `claude_code_hooks_daemon` in name/cmdline
+- No need to verify project paths (container is dedicated to our project)
+- Use `psutil` for cross-platform process enumeration
+- Fast enumeration (<10ms for typical process list)
+- Container-safe: Only one project exists, so all daemons are ours
 
-**Date**: 2026-02-13
+**Why simplified?** User clarification: In containers, enforce single daemon **system-wide** (not per-project). This eliminates need for project path verification.
 
-### Decision 2: Cleanup Strategy
+**Date**: 2026-02-13 (Updated)
+
+### Decision 2: Cleanup Strategy (UPDATED)
 **Context**: When should we kill existing daemon processes?
 
 **Options Considered**:
-1. Always kill all daemons - Too aggressive, could kill valid daemons
+1. Always kill all daemons - Too aggressive outside containers
 2. Never kill, just warn - Too passive, doesn't solve the problem
-3. Kill only if in container - Safe but limits feature usefulness
+3. Kill only if in container - Safe and effective
 4. Kill if config enabled AND (in container OR stale PID) - Balanced approach
 
-**Decision**: Use option 4 (conditional aggressive cleanup)
-- In containers: Kill all daemon processes for this project
-- Outside containers: Only clean up stale PID files
-- Requires `enforce_single_daemon_process: true` in config
+**Decision**: Use option 3/4 hybrid (container-aware aggressive cleanup) - **SIMPLIFIED**
+- **In containers + enforcement enabled**: Kill ALL `claude_code_hooks_daemon` processes system-wide
+- **Outside containers + enforcement enabled**: Only clean up stale PID for current project
+- Always requires `enforce_single_daemon_process: true` in config
 - Log all cleanup actions for debugging
+- System-wide enforcement in containers (no project path checks)
 
-**Date**: 2026-02-13
+**Why this approach?**
+- Containers are single-project environments
+- Safe to kill ALL daemon processes in container (no other projects)
+- Outside containers, be conservative (could be multiple projects)
+
+**Date**: 2026-02-13 (Updated)
 
 ### Decision 3: Container Detection Threshold
 **Context**: When to auto-enable enforcement during install?
