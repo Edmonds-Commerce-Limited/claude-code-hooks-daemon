@@ -188,7 +188,8 @@ cd ../..
 ## Documentation
 
 ### Core Concepts
-- [Plan Workflow](docs/PLAN_WORKFLOW.md) - Structured planning system with handler support
+- [Workflows](docs/WORKFLOWS.md) - Repeatable processes that survive compaction (release, QA, etc.)
+- [Plan System](docs/PLAN_SYSTEM.md) - Structured planning with numbered folders
 - [Handler Development](CLAUDE/HANDLER_DEVELOPMENT.md) - Creating custom handlers
 - [Architecture](CLAUDE/ARCHITECTURE.md) - System design and components
 
