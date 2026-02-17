@@ -4,10 +4,12 @@ import importlib.util
 import inspect
 import logging
 import sys
+import traceback
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from claude_code_hooks_daemon.core import Handler
+from claude_code_hooks_daemon.utils.error_formatter import format_plugin_load_error
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.config.models import PluginsConfig
@@ -82,7 +84,17 @@ class PluginLoader:
             spec.loader.exec_module(module)
 
         except Exception as e:
-            logger.error(f"Failed to import plugin {handler_name}: {e}")
+            # Try to provide enhanced error message
+            tb_text = traceback.format_exc()
+            enhanced_error = format_plugin_load_error(tb_text, str(module_path))
+
+            if enhanced_error:
+                logger.error(
+                    f"Failed to import plugin {handler_name}:\n{enhanced_error.format_for_display()}"
+                )
+            else:
+                logger.error(f"Failed to import plugin {handler_name}: {e}")
+
             return None
 
         # Find the Handler class (try both with and without "Handler" suffix)
@@ -111,7 +123,17 @@ class PluginLoader:
             # They must call super().__init__(handler_id=..., priority=..., terminal=...)
             handler = handler_class_raw()
         except Exception as e:
-            logger.error(f"Failed to instantiate handler {class_name}: {e}")
+            # Try to provide enhanced error message
+            tb_text = traceback.format_exc()
+            enhanced_error = format_plugin_load_error(tb_text, str(module_path))
+
+            if enhanced_error:
+                logger.error(
+                    f"Failed to instantiate handler {class_name}:\n{enhanced_error.format_for_display()}"
+                )
+            else:
+                logger.error(f"Failed to instantiate handler {class_name}: {e}")
+
             return None
 
         # Validate acceptance tests
