@@ -4,18 +4,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00063: FAIL FAST - Plugin Handler Bug & Error Hiding Audit](00063-fail-fast-plugin-handler-audit/PLAN.md) - Not Started
+- [00063: FAIL FAST - Plugin Handler Bug & Error Hiding Audit](00063-fail-fast-plugin-handler-audit/PLAN.md) - In Progress
   - **CRITICAL BUG**: Plugin handlers with `Handler` suffix silently skipped, daemon continues with no protection
   - Root cause: Asymmetry between PluginLoader (handles suffix) and DaemonController (doesn't)
   - Comprehensive audit to find ALL error hiding patterns violating FAIL FAST principles
   - Convert warnings to crashes, eliminate silent failures throughout codebase
   - **Priority**: CRITICAL (violates core engineering principles, leaves users unprotected)
-
-- [00062: Breaking Changes Lifecycle - Complete Documentation Loop](00062-breaking-changes-lifecycle/PLAN.md) - Not Started
-  - **CRITICAL PROCESS FIX**: Close the loop from release process → upgrade guides → config migration → validation
-  - Users upgrading across multiple versions encounter unknown handler errors without guidance
-  - 7 phases: historical docs, release process updates, smart config migration, pre-upgrade validation, guide enforcement, release notes format, testing
-  - **Priority**: High (systemic upgrade documentation gap)
 
 - [00058: Fix PHP QA Suppression Pattern Gaps](00058-php-qa-suppression-pattern-gaps/PLAN.md) - In Progress
   - **CRITICAL BUG**: PHP QA suppression handler missing 8 patterns (@phpstan-ignore, phpcs:disable, etc.)
@@ -41,6 +35,14 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 
 ## Completed Plans
+
+- [00062: Breaking Changes Lifecycle](Completed/00062-breaking-changes-lifecycle/PLAN.md) - Complete
+  - Fixed systemic breaking changes documentation gap causing unknown handler errors during upgrades
+  - Created historical upgrade guides for v2.10 through v2.13
+  - Automated breaking changes detection in release process with upgrade guide template generation
+  - Implemented smart upgrade validation with pre-flight checks and guide reading enforcement
+  - Updated release notes format with BREAKING CHANGES sections
+  - Total: 5842+ lines, 25 files created, 27 tests added, 7 phases completed
 
 - [00061: Hooks Daemon User-Facing Skill](Completed/00061-hooks-daemon-user-skill/PLAN.md) - Complete
   - Deployed `/hooks-daemon` skill to user projects with 4 subcommands (upgrade, health, dev-handlers, logs)
