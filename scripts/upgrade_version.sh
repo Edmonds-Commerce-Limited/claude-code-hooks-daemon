@@ -175,6 +175,74 @@ if [ -f "$VENV_PYTHON" ]; then
     run_pre_install_checks "$PROJECT_ROOT" "$VENV_PYTHON" "$DAEMON_DIR" "false" || true
 fi
 
+# Pre-upgrade compatibility check (validates BEFORE any changes)
+if [ -f "$TARGET_CONFIG" ] && [ -f "$VENV_PYTHON" ]; then
+    print_info "Checking config compatibility with target version..."
+
+    COMPAT_RESULT=$("$VENV_PYTHON" -c "
+import json
+import sys
+from pathlib import Path
+
+try:
+    from claude_code_hooks_daemon.install.upgrade_compatibility import CompatibilityChecker
+
+    changelog_path = Path('$DAEMON_DIR/CHANGELOG.md')
+    if not changelog_path.exists():
+        print('WARNING: CHANGELOG.md not found, skipping compatibility check', file=sys.stderr)
+        sys.exit(0)
+
+    # Load user config
+    import yaml
+    with open('$TARGET_CONFIG') as f:
+        user_config = yaml.safe_load(f)
+
+    # Check compatibility
+    checker = CompatibilityChecker(
+        changelog_path=changelog_path,
+        current_version='$CURRENT_VERSION',
+        target_version='$TARGET_VERSION'
+    )
+
+    report = checker.check_compatibility(user_config)
+
+    if not report.is_compatible:
+        print(checker.generate_user_friendly_report(report), file=sys.stderr)
+        print('', file=sys.stderr)
+        print('INCOMPATIBILITIES DETECTED', file=sys.stderr)
+        print('', file=sys.stderr)
+        print('Your config references handlers that are incompatible with $TARGET_VERSION.', file=sys.stderr)
+        print('', file=sys.stderr)
+        print('OPTIONS:', file=sys.stderr)
+        print('  1. Fix config issues manually and re-run upgrade', file=sys.stderr)
+        print('  2. Use --force to proceed anyway (config will be updated automatically)', file=sys.stderr)
+        print('', file=sys.stderr)
+
+        # Check for --force flag
+        import os
+        if '--force' not in os.environ.get('UPGRADE_FLAGS', ''):
+            sys.exit(1)
+        else:
+            print('--force flag detected, proceeding with upgrade...', file=sys.stderr)
+    else:
+        print('✓ All handlers compatible with target version', file=sys.stderr)
+
+except Exception as e:
+    print(f'WARNING: Compatibility check failed: {e}', file=sys.stderr)
+    sys.exit(0)
+" 2>&1)
+    COMPAT_EXIT=$?
+
+    if [ $COMPAT_EXIT -ne 0 ]; then
+        echo "$COMPAT_RESULT"
+        if [[ "$*" == *"--force"* ]]; then
+            print_warning "Proceeding despite incompatibilities (--force flag)"
+        else
+            fail_fast "Config compatibility check failed. Use --force to proceed anyway."
+        fi
+    fi
+fi
+
 # ============================================================
 # Step 3: Create state snapshot
 # ============================================================
@@ -219,6 +287,162 @@ CONFIG_BACKUP=""
 if [ -f "$TARGET_CONFIG" ]; then
     CONFIG_BACKUP=$(backup_config "$PROJECT_ROOT")
     print_verbose "Config backup: $CONFIG_BACKUP"
+fi
+
+# Breaking changes detection (compare old vs new default config)
+if [ -f "$TARGET_CONFIG" ] && [ -f "$OLD_DEFAULT_CONFIG" ] && [ -f "$VENV_PYTHON" ]; then
+    print_info "Analyzing config for breaking changes..."
+
+    # Run config diff analyzer
+    DIFF_RESULT=$("$SCRIPT_DIR/install/config_diff_analyzer.sh" "$TARGET_CONFIG" "$OLD_DEFAULT_CONFIG" 2>&1 || echo "{}")
+
+    # Parse diff result and detect breaking changes
+    "$VENV_PYTHON" -c "
+import json
+import sys
+from pathlib import Path
+
+try:
+    from claude_code_hooks_daemon.install.breaking_changes_detector import BreakingChangesDetector
+
+    changelog_path = Path('$DAEMON_DIR/CHANGELOG.md')
+    if not changelog_path.exists():
+        sys.exit(0)
+
+    # Parse diff result
+    diff_data = json.loads('''$DIFF_RESULT''')
+    removed_handlers = diff_data.get('removed', [])
+    renamed_handlers = diff_data.get('renamed', {})
+
+    if not removed_handlers and not renamed_handlers:
+        sys.exit(0)
+
+    # Generate warnings for breaking changes
+    detector = BreakingChangesDetector(changelog_path)
+    warnings = detector.generate_warnings(
+        removed_handlers=removed_handlers,
+        renamed_handlers=renamed_handlers
+    )
+
+    if warnings:
+        print('', file=sys.stderr)
+        print('⚠️  BREAKING CHANGES DETECTED IN CONFIG', file=sys.stderr)
+        print('=' * 70, file=sys.stderr)
+        for warning in warnings:
+            print(warning, file=sys.stderr)
+            print('', file=sys.stderr)
+        print('Your config will be automatically updated during merge.', file=sys.stderr)
+        print('Review the config after upgrade completes.', file=sys.stderr)
+        print('', file=sys.stderr)
+
+except Exception as e:
+    print(f'WARNING: Breaking changes detection failed: {e}', file=sys.stderr)
+" || true
+fi
+
+# ============================================================
+# Step 5a: Upgrade guide reading enforcement
+# ============================================================
+
+# Detect version jump and list required upgrade guides
+if [ "$CURRENT_VERSION" != "unknown" ] && [ -f "$VENV_PYTHON" ]; then
+    print_info "Checking for required upgrade guides..."
+
+    GUIDE_CHECK=$("$VENV_PYTHON" -c "
+import sys
+from pathlib import Path
+
+try:
+    from claude_code_hooks_daemon.install.upgrade_compatibility import CompatibilityChecker
+
+    changelog_path = Path('$DAEMON_DIR/CHANGELOG.md')
+    if not changelog_path.exists():
+        sys.exit(0)
+
+    checker = CompatibilityChecker(
+        changelog_path=changelog_path,
+        current_version='$CURRENT_VERSION',
+        target_version='$TARGET_VERSION'
+    )
+
+    # Get suggested upgrade guides
+    guides = checker.suggest_upgrade_guides(Path('$DAEMON_DIR'))
+
+    if not guides:
+        sys.exit(0)
+
+    print('', file=sys.stderr)
+    print('📚 REQUIRED READING: Upgrade Guides', file=sys.stderr)
+    print('=' * 70, file=sys.stderr)
+    print(f'Upgrading from v{checker.current_version} to v{checker.target_version}', file=sys.stderr)
+    print(f'You are skipping {len(guides)} intermediate version(s).', file=sys.stderr)
+    print('', file=sys.stderr)
+    print('Please review the following upgrade guides:', file=sys.stderr)
+    for guide in guides:
+        print(f'  • {guide}', file=sys.stderr)
+    print('', file=sys.stderr)
+
+    # Write guide list to temp file for bash to read
+    with open('/tmp/upgrade_guides_list.txt', 'w') as f:
+        for guide in guides:
+            f.write(str(guide) + '\n')
+
+    print('GUIDES_FOUND', file=sys.stderr)
+
+except Exception as e:
+    print(f'WARNING: Upgrade guide check failed: {e}', file=sys.stderr)
+    sys.exit(0)
+" 2>&1)
+
+    if echo "$GUIDE_CHECK" | grep -q "GUIDES_FOUND"; then
+        # Interactive prompt (unless --skip-reading-confirmation flag)
+        if [[ "$*" != *"--skip-reading-confirmation"* ]]; then
+            echo ""
+            echo "Have you read all upgrade guides? (yes/no/show)"
+            read -r -p "> " response
+
+            while true; do
+                case "$response" in
+                    yes|y|Y)
+                        print_success "Proceeding with upgrade..."
+                        break
+                        ;;
+                    show|s|S)
+                        # Display guides using pager
+                        if [ -f /tmp/upgrade_guides_list.txt ]; then
+                            while IFS= read -r guide_path; do
+                                if [ -f "$guide_path" ]; then
+                                    echo ""
+                                    echo "========================================="
+                                    echo "Displaying: $guide_path"
+                                    echo "========================================="
+                                    ${PAGER:-less} "$guide_path"
+                                fi
+                            done < /tmp/upgrade_guides_list.txt
+                        fi
+                        echo ""
+                        echo "Have you read all upgrade guides? (yes/no/show)"
+                        read -r -p "> " response
+                        ;;
+                    no|n|N)
+                        echo ""
+                        print_warning "Please review upgrade guides before proceeding."
+                        print_info "Guides location: $DAEMON_DIR/CLAUDE/UPGRADES/"
+                        fail_fast "Upgrade aborted - read guides and try again"
+                        ;;
+                    *)
+                        echo "Please answer 'yes', 'no', or 'show'"
+                        read -r -p "> " response
+                        ;;
+                esac
+            done
+
+            # Cleanup temp file
+            rm -f /tmp/upgrade_guides_list.txt
+        else
+            print_info "--skip-reading-confirmation flag detected, skipping guide confirmation"
+        fi
+    fi
 fi
 
 # ============================================================
