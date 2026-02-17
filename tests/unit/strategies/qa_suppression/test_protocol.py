@@ -1,5 +1,7 @@
 """Tests for QA Suppression Strategy Protocol."""
 
+import pytest
+
 from claude_code_hooks_daemon.strategies.qa_suppression.protocol import (
     QaSuppressionStrategy,
 )
@@ -79,3 +81,38 @@ def test_protocol_has_expected_attributes() -> None:
     assert "tool_names" in protocol_attrs
     assert "tool_docs_urls" in protocol_attrs
     assert "get_acceptance_tests" in protocol_attrs
+
+
+class TestRealImplementationsSatisfyProtocol:
+    """Test that all real strategy implementations satisfy the protocol."""
+
+    @pytest.mark.parametrize(
+        "strategy_class",
+        [
+            "PythonQaSuppressionStrategy",
+            "GoQaSuppressionStrategy",
+            "JavaScriptQaSuppressionStrategy",
+            "PhpQaSuppressionStrategy",
+            "RustQaSuppressionStrategy",
+            "JavaQaSuppressionStrategy",
+            "CSharpQaSuppressionStrategy",
+            "KotlinQaSuppressionStrategy",
+            "RubyQaSuppressionStrategy",
+            "SwiftQaSuppressionStrategy",
+            "DartQaSuppressionStrategy",
+        ],
+    )
+    def test_strategy_satisfies_protocol(self, strategy_class: str) -> None:
+        """Test that each real strategy implementation satisfies QaSuppressionStrategy protocol."""
+        # Import the strategy class dynamically
+        module_name = strategy_class.replace("QaSuppressionStrategy", "").lower()
+        module_path = f"claude_code_hooks_daemon.strategies.qa_suppression.{module_name}_strategy"
+
+        module = __import__(module_path, fromlist=[strategy_class])
+        strategy_cls = getattr(module, strategy_class)
+
+        # Instantiate and check isinstance
+        strategy = strategy_cls()
+        assert isinstance(
+            strategy, QaSuppressionStrategy
+        ), f"{strategy_class} should satisfy QaSuppressionStrategy protocol"

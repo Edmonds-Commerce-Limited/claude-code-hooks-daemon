@@ -79,3 +79,36 @@ class TestValidStrategyProperties:
 
     def test_get_acceptance_tests(self, strategy: _ValidLintStrategy) -> None:
         assert strategy.get_acceptance_tests() == []
+
+
+class TestRealImplementationsSatisfyProtocol:
+    """Test that all real strategy implementations satisfy the protocol."""
+
+    @pytest.mark.parametrize(
+        "strategy_class",
+        [
+            "PythonLintStrategy",
+            "ShellLintStrategy",
+            "GoLintStrategy",
+            "RustLintStrategy",
+            "PhpLintStrategy",
+            "RubyLintStrategy",
+            "DartLintStrategy",
+            "KotlinLintStrategy",
+            "SwiftLintStrategy",
+        ],
+    )
+    def test_strategy_satisfies_protocol(self, strategy_class: str) -> None:
+        """Test that each real strategy implementation satisfies LintStrategy protocol."""
+        # Import the strategy class dynamically
+        module_name = strategy_class.replace("LintStrategy", "").lower()
+        module_path = f"claude_code_hooks_daemon.strategies.lint.{module_name}_strategy"
+
+        module = __import__(module_path, fromlist=[strategy_class])
+        strategy_cls = getattr(module, strategy_class)
+
+        # Instantiate and check isinstance
+        strategy = strategy_cls()
+        assert isinstance(
+            strategy, LintStrategy
+        ), f"{strategy_class} should satisfy LintStrategy protocol"
