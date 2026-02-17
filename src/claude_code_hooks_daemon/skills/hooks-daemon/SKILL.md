@@ -61,10 +61,60 @@ See [references/troubleshooting.md](references/troubleshooting.md) for common is
 
 ## Implementation
 
-Execute the requested command:
+Parse subcommand and route to appropriate script:
 
 ```bash
-$ARGUMENTS
+# Get skill directory (where this SKILL.md is located)
+SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Parse subcommand from $ARGUMENTS
+SUBCOMMAND="${1:-help}"
+shift || true  # Remove subcommand from arguments
+
+# Route to appropriate script
+case "$SUBCOMMAND" in
+    upgrade)
+        bash "$SKILL_DIR/scripts/upgrade.sh" "$@"
+        ;;
+
+    health)
+        bash "$SKILL_DIR/scripts/health-check.sh" "$@"
+        ;;
+
+    dev-handlers)
+        bash "$SKILL_DIR/scripts/init-handlers.sh" "$@"
+        ;;
+
+    logs|status|restart|handlers|validate-config)
+        # Forward to daemon CLI wrapper
+        bash "$SKILL_DIR/scripts/daemon-cli.sh" "$SUBCOMMAND" "$@"
+        ;;
+
+    help|--help|-h|"")
+        # Show help (this SKILL.md content)
+        echo "Usage: /hooks-daemon <command> [args...]"
+        echo ""
+        echo "Available commands:"
+        echo "  upgrade [VERSION]     Upgrade daemon to new version"
+        echo "  health                Check daemon health and status"
+        echo "  dev-handlers          Scaffold new project handlers"
+        echo "  logs [--follow]       View daemon logs"
+        echo "  status                Show daemon status"
+        echo "  restart               Restart daemon"
+        echo "  handlers              List loaded handlers"
+        echo ""
+        echo "For detailed documentation, see the skill files or run:"
+        echo "  /hooks-daemon <command> --help"
+        ;;
+
+    *)
+        echo "Error: Unknown subcommand: $SUBCOMMAND"
+        echo ""
+        echo "Usage: /hooks-daemon <command> [args...]"
+        echo "Run '/hooks-daemon help' for available commands."
+        exit 1
+        ;;
+esac
 ```
 
 **Note**: All daemon management commands require manual user approval. The daemon will not auto-invoke these operations.
