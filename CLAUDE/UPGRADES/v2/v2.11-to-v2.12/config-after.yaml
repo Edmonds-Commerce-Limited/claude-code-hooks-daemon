@@ -1,0 +1,59 @@
+# Example v2.12 configuration with new handler name
+# This shows typical config AFTER upgrading to v2.12
+
+version: "2.0"
+
+daemon:
+  idle_timeout_seconds: 600
+  log_level: INFO
+
+handlers:
+  # PreToolUse handlers
+  pre_tool_use:
+    destructive_git:
+      enabled: true
+      priority: 10
+
+    sed_blocker:
+      enabled: true
+      priority: 11
+
+    tdd_enforcement:
+      enabled: true
+      priority: 35
+
+  # PostToolUse handlers
+  post_tool_use:
+    bash_error_detector:
+      enabled: true
+      priority: 10
+
+    # NEW HANDLER NAME (v2.12)
+    lint_on_edit:  # ← Renamed from validate_eslint_on_write
+      enabled: true
+      priority: 25
+      # Optional: Restrict to specific languages (default: ALL 9 languages)
+      # options:
+      #   languages:
+      #     - JavaScript/TypeScript  # ESLint for JS/TS (same as before)
+      #     - Python                 # NEW: Python linting
+      #     - Shell                  # NEW: Shell script linting
+      # Optional: Override lint commands per language
+      # options:
+      #   command_overrides:
+      #     Python:
+      #       default: "python -m py_compile {file}"
+      #       extended: "ruff check {file}"
+      #     Shell:
+      #       default: "bash -n {file}"
+      #       extended: "shellcheck {file}"
+
+  # SessionStart handlers
+  session_start:
+    yolo_container_detection:
+      enabled: true
+      priority: 10
+
+    version_check:
+      enabled: true
+      priority: 56
