@@ -30,6 +30,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00060: Release Blocker Handler](Completed/00060-release-blocker-handler/PLAN.md) - Complete
+  - PROJECT HANDLER that blocks session ending during releases until acceptance tests complete
+  - Detects release context by checking git status for modified version files
+  - Priority 12 with terminal behaviour and infinite loop prevention
+  - Addresses AI acceptance test avoidance behaviour from v2.13.0 release
+
 - [00059: Fix MarkdownOrganizationHandler Completed/ Folder](Completed/00059-fix-markdown-handler-completed-folder/PLAN.md) - Complete
   - Fixed handler to allow edits to CLAUDE/Plan/Completed/, Cancelled/, Archive/ folders
   - Added _PLAN_SUBDIRECTORIES constant for known subdirectories
@@ -355,8 +361,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 59
-- **Completed**: 51 (1 with reduced scope)
+- **Total Plans Created**: 60
+- **Completed**: 52 (1 with reduced scope)
 - **Active**: 1 (in progress)
 - **Cancelled/Abandoned**: 2 (00036 - empty draft deleted, 00044 - approach retired)
 
