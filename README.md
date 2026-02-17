@@ -185,6 +185,29 @@ cd ../..
 
 ---
 
+## Documentation
+
+### Core Concepts
+- [Plan Workflow](docs/PLAN_WORKFLOW.md) - Structured planning system with handler support
+- [Handler Development](CLAUDE/HANDLER_DEVELOPMENT.md) - Creating custom handlers
+- [Architecture](CLAUDE/ARCHITECTURE.md) - System design and components
+
+### Installation & Updates
+- [Installation Guide (AI-Optimized)](CLAUDE/LLM-INSTALL.md) - Complete installation instructions
+- [Update Guide (AI-Optimized)](CLAUDE/LLM-UPDATE.md) - Upgrade instructions with breaking changes
+- [Configuration Guide](CLAUDE/ARCHITECTURE.md#configuration-system) - Handler and daemon configuration
+
+### Development
+- [Contributing](CONTRIBUTING.md) - Contribution guidelines and QA requirements
+- [Releasing](CLAUDE/development/RELEASING.md) - Release process using `/release` skill
+- [Debugging Hooks](CLAUDE/DEBUGGING_HOOKS.md) - Hook debugging workflow
+- [QA Pipeline](CLAUDE/development/QA.md) - Quality assurance automation
+
+### Troubleshooting
+- [Bug Reporting](BUG_REPORTING.md) - Debug info generation and issue reporting
+
+---
+
 ## Git Integration
 
 **⚠️ CRITICAL:** You MUST create `.claude/.gitignore` to prevent committing generated files.

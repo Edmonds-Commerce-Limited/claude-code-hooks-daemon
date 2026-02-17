@@ -140,6 +140,40 @@ Blocking handlers match patterns in the full Bash command string, including git 
 
 **Solution**: Simply avoid putting literal blocked patterns in commit messages. Describe the fix in different words (e.g., "force branch delete blocker" instead of the literal command). This is trivial to work around.
 
+## Plan Workflow System
+
+**This project uses a structured Plan Workflow system for organizing development work.**
+
+**Full Documentation**: [docs/PLAN_WORKFLOW.md](../docs/PLAN_WORKFLOW.md)
+
+### Quick Reference
+
+**Structure**: Numbered folders in `CLAUDE/Plan/NNNNN-description/` with standardized `PLAN.md` documents
+
+**Lifecycle**: Not Started → In Progress → Complete (moved to `Completed/`)
+
+**Handlers Supporting Workflow**:
+- `markdown_organization` - Enforces CLAUDE/Plan/ structure, allows editing PLAN.md and supporting docs
+- `workflow_state_pre_compact` - Preserves workflow state before context compaction
+- `workflow_state_restoration` - Restores workflow state after compaction with required reading
+- `plan_completion_advisor` - Reminds to move completed plans to Completed/ and update README.md
+
+**When to Use**:
+- Work taking > 2 hours
+- Multi-phase implementation
+- Architectural decisions needed
+- Work that may be interrupted/resumed
+
+**Key Benefits**:
+- Context preservation across AI sessions
+- Explicit task breakdown and tracking
+- Historical knowledge archive
+- Collaboration between people and AI agents
+
+**See**: [docs/PLAN_WORKFLOW.md](../docs/PLAN_WORKFLOW.md) for complete guide including setup instructions, templates, and examples.
+
+---
+
 ## ⚠️ Self-Install Mode (CRITICAL)
 
 **This project dogfoods itself** - it runs from workspace root, not `.claude/hooks-daemon/`.
