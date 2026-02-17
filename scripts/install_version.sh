@@ -317,17 +317,38 @@ log_step "9" "Deploying slash commands"
 deploy_slash_commands "$PROJECT_ROOT" "$DAEMON_DIR" "normal"
 
 # ============================================================
-# Step 10: Start daemon and verify
+# Step 10: Deploy skills
 # ============================================================
 
-log_step "10" "Starting daemon"
+log_step "10" "Deploying user-facing skills"
+
+"$VENV_PYTHON" -c "
+from pathlib import Path
+from claude_code_hooks_daemon.install.skills import deploy_skills
+
+daemon_source = Path('$DAEMON_DIR')
+project_root = Path('$PROJECT_ROOT')
+
+try:
+    deploy_skills(daemon_source, project_root)
+    print('✓ Skills deployed to .claude/skills/hooks-daemon/')
+except Exception as e:
+    print(f'✗ Skill deployment failed: {e}')
+    exit(1)
+"
+
+# ============================================================
+# Step 11: Start daemon and verify
+# ============================================================
+
+log_step "11" "Starting daemon"
 restart_daemon_verified "$VENV_PYTHON"
 
 # ============================================================
-# Step 11: Post-install validation
+# Step 12: Post-install validation
 # ============================================================
 
-log_step "11" "Running post-install validation"
+log_step "12" "Running post-install validation"
 run_post_install_checks "$PROJECT_ROOT" "$VENV_PYTHON" "$DAEMON_DIR" "false"
 
 # ============================================================
