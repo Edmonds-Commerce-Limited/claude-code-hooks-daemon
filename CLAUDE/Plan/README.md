@@ -26,13 +26,14 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00045: Proper Language Strategy](00045-proper-language-strategy/PLAN.md) - Proposed
   - Proper language strategy pattern implementation
 
-- [00061: Hooks Daemon User-Facing Skill](00061-hooks-daemon-user-skill/PLAN.md) - Not Started
-  - Deploy `/hooks-daemon` skill to user projects with subcommands (upgrade, health, dev-handlers, logs)
-  - Fix v2.13.0 breaking change: better error messages for plugin handler abstract method violations
-  - Single skill with argument-driven routing (not multiple skills)
-
 
 ## Completed Plans
+
+- [00061: Hooks Daemon User-Facing Skill](Completed/00061-hooks-daemon-user-skill/PLAN.md) - Complete
+  - Deployed `/hooks-daemon` skill to user projects with 4 subcommands (upgrade, health, dev-handlers, logs)
+  - Fixed v2.13.0 breaking change: enhanced error messages for plugin handler abstract method violations
+  - Single skill with bash routing to wrapper scripts deployed during install/upgrade
+  - Enhanced error formatter detects abstract method violations and provides version-aware guidance
 
 - [00060: Release Blocker Handler](Completed/00060-release-blocker-handler/PLAN.md) - Complete
   - PROJECT HANDLER that blocks session ending during releases until acceptance tests complete
@@ -366,8 +367,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 61
-- **Completed**: 52 (1 with reduced scope)
-- **Active**: 7 (1 in progress, 6 not started)
+- **Completed**: 53 (1 with reduced scope)
+- **Active**: 6 (1 in progress, 5 not started)
 - **Cancelled/Abandoned**: 2 (00036 - empty draft deleted, 00044 - approach retired)
 
 ## Quick Links
