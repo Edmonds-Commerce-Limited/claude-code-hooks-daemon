@@ -176,6 +176,70 @@ Fix: Use different version
 
 **NO auto-fixing**: User must manually resolve all issues before retry.
 
+## Workflow State Management
+
+**CRITICAL**: The release process is a formal workflow that MUST use workflow state management for compaction resilience.
+
+### Workflow Setup
+
+**At workflow start**, main Claude MUST create workflow state file:
+
+```bash
+mkdir -p ./untracked/workflow-state/release
+cat > ./untracked/workflow-state/release/state-release-$(date +%Y%m%d_%H%M%S).json << 'EOF'
+{
+  "workflow": "Release Process",
+  "workflow_type": "release",
+  "phase": {
+    "current": 1,
+    "total": 14,
+    "name": "Pre-Release Validation",
+    "status": "in_progress"
+  },
+  "required_reading": [
+    "@CLAUDE/development/RELEASING.md",
+    "@.claude/skills/release/SKILL.md",
+    "@docs/WORKFLOWS.md"
+  ],
+  "context": {
+    "version": "TBD",
+    "bump_type": "TBD"
+  },
+  "key_reminders": [
+    "All validation checks must pass before proceeding",
+    "QA gate is BLOCKING - must pass before commit",
+    "Acceptance testing gate is BLOCKING - must pass before commit"
+  ],
+  "created_at": "TIMESTAMP"
+}
+EOF
+```
+
+### Phase Transitions
+
+**Update workflow state** at each phase transition by editing the existing state file (preserve `created_at`):
+- Update `phase.current` and `phase.name`
+- Update `context` with new information (version, breaking changes detected, etc.)
+- Add to `key_reminders` for critical phase-specific requirements
+
+### Workflow Completion
+
+**Delete workflow state** when release completes successfully:
+
+```bash
+rm -rf ./untracked/workflow-state/release/
+```
+
+### Compaction Resilience
+
+If conversation compacts mid-release:
+1. **WorkflowStatePreCompactHandler** saves current phase to state file
+2. **WorkflowStateRestorationHandler** restores on session resume with guidance
+3. Agent reads all required files with @ syntax
+4. Agent continues from last phase
+
+This ensures releases can survive compaction without losing progress or context.
+
 ## Orchestration Details
 
 This skill orchestrates a multi-stage release process through main Claude. The release agent cannot spawn nested agents, so main Claude manages the workflow.

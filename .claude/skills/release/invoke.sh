@@ -4,6 +4,7 @@
 set -euo pipefail
 
 VERSION="${1:-auto}"
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
 cat <<PROMPT
 # Release Orchestration for Version: ${VERSION}
@@ -11,6 +12,89 @@ cat <<PROMPT
 Execute the release management process in stages using agent orchestration.
 
 **CRITICAL:** Agents cannot spawn nested agents. You (main Claude) will orchestrate this workflow by invoking agents sequentially.
+
+## Workflow State Management (MANDATORY)
+
+**This is a formal workflow that MUST use workflow state for compaction resilience.**
+
+### Create Workflow State (Do This FIRST)
+
+\`\`\`bash
+mkdir -p ./untracked/workflow-state/release
+cat > ./untracked/workflow-state/release/state-release-${TIMESTAMP}.json << 'EOF'
+{
+  "workflow": "Release Process",
+  "workflow_type": "release",
+  "phase": {
+    "current": 1,
+    "total": 14,
+    "name": "Pre-Release Validation",
+    "status": "in_progress"
+  },
+  "required_reading": [
+    "@CLAUDE/development/RELEASING.md",
+    "@.claude/skills/release/SKILL.md",
+    "@docs/WORKFLOWS.md"
+  ],
+  "context": {
+    "version": "${VERSION}",
+    "bump_type": "TBD"
+  },
+  "key_reminders": [
+    "All validation checks must pass before proceeding",
+    "QA gate is BLOCKING - must pass before commit",
+    "Acceptance testing gate is BLOCKING - must pass before commit",
+    "Opus reviews DOCUMENTATION ONLY, not code"
+  ],
+  "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOF
+\`\`\`
+
+### Release Workflow Phases (14 Total)
+
+1. **Pre-Release Validation** - Git state, QA checks, GitHub CLI auth
+2. **Version Detection** - Auto-detect or manual version specification
+3. **Version Updates** - Update version across all files
+4. **Changelog Generation** - Parse commits, categorize changes
+5. **Release Notes Creation** - Generate RELEASES/vX.Y.Z.md
+6. **Breaking Changes Detection** - Scan changelog for breaking changes
+7. **Upgrade Guide Generation** - Create upgrade guide if breaking changes
+8. **Upgrade Guide Verification Gate** - Verify guide complete (BLOCKING if breaking changes)
+9. **QA Verification Gate** - Run ./scripts/qa/run_all.sh (BLOCKING)
+10. **Acceptance Testing Gate** - Execute full test playbook (BLOCKING)
+11. **Opus Documentation Review** - Opus validates documentation
+12. **Commit & Push** - Git commit and push to origin
+13. **Tag & GitHub Release** - Create git tag and GitHub release
+14. **Verification & Cleanup** - Verify release published, delete workflow state
+
+### Update Workflow State at Phase Transitions
+
+After each phase completes, update the existing state file (preserve \`created_at\`):
+
+\`\`\`bash
+# Example: Moving to Phase 9 (QA Verification Gate)
+# Edit ./untracked/workflow-state/release/state-release-${TIMESTAMP}.json
+# Update: phase.current = 9, phase.name = "QA Verification Gate"
+# Add to context: changelog_generated = true, opus_approved = true
+# Add to key_reminders: "QA gate is BLOCKING - must run ./scripts/qa/run_all.sh"
+\`\`\`
+
+### Delete Workflow State at Completion
+
+When release completes successfully (Phase 14):
+
+\`\`\`bash
+rm -rf ./untracked/workflow-state/release/
+\`\`\`
+
+### Compaction Resilience
+
+If conversation compacts mid-release:
+- **WorkflowStatePreCompactHandler** saves current phase automatically
+- **WorkflowStateRestorationHandler** provides guidance on resume with @ syntax
+- You MUST read all required files when resuming
+- Continue from last completed phase
 
 ## Stage 1: Release Preparation & Execution
 
