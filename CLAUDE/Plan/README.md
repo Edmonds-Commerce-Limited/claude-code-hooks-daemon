@@ -4,6 +4,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00062: Breaking Changes Lifecycle - Complete Documentation Loop](00062-breaking-changes-lifecycle/PLAN.md) - Not Started
+  - **CRITICAL PROCESS FIX**: Close the loop from release process → upgrade guides → config migration → validation
+  - Users upgrading across multiple versions encounter unknown handler errors without guidance
+  - 7 phases: historical docs, release process updates, smart config migration, pre-upgrade validation, guide enforcement, release notes format, testing
+  - **Priority**: High (systemic upgrade documentation gap)
+
 - [00058: Fix PHP QA Suppression Pattern Gaps](00058-php-qa-suppression-pattern-gaps/PLAN.md) - In Progress
   - **CRITICAL BUG**: PHP QA suppression handler missing 8 patterns (@phpstan-ignore, phpcs:disable, etc.)
   - User's project experiencing "serious issues" due to bypassed quality controls
