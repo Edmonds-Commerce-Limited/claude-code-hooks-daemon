@@ -65,7 +65,7 @@ class ConfigValidator:
     _handler_cache: ClassVar[dict[str, set[str]]] = {}
 
     @staticmethod
-    def get_available_handlers(event_type: str) -> set[str]:
+    def get_available_handlers(event_type: str, strict_mode: bool = False) -> set[str]:
         """Get available handler names for a specific event type.
 
         Discovers handler classes by scanning the handlers package and
@@ -73,6 +73,7 @@ class ConfigValidator:
 
         Args:
             event_type: Event type (e.g., "pre_tool_use")
+            strict_mode: If True, FAIL FAST on import errors (TIER 2)
 
         Returns:
             Set of valid handler names for this event type
@@ -117,12 +118,31 @@ class ConfigValidator:
                             handler_config_name = ConfigValidator._to_snake_case(attr.__name__)
                             handlers.add(handler_config_name)
                 except (ImportError, SyntaxError, AttributeError) as e:
-                    logger.debug("Failed to import handler module %s: %s", modname, e)
+                    if strict_mode:
+                        # TIER 2: FAIL FAST in strict mode
+                        raise RuntimeError(
+                            f"Failed to import handler module {modname} in strict mode: {e}"
+                        ) from e
+                    else:
+                        # Non-strict: Log and continue (graceful)
+                        logger.debug("Failed to import handler module %s: %s", modname, e)
                 except Exception as e:
-                    logger.error("Unexpected error importing %s: %s", modname, e, exc_info=True)
+                    if strict_mode:
+                        # TIER 2: FAIL FAST in strict mode
+                        raise RuntimeError(
+                            f"Unexpected error importing {modname} in strict mode: {e}"
+                        ) from e
+                    else:
+                        # Non-strict: Log error and continue
+                        logger.error("Unexpected error importing %s: %s", modname, e, exc_info=True)
 
-        except ImportError:
-            # Event type has no handlers package (that's ok)
+        except ImportError as e:
+            if strict_mode:
+                # TIER 2: FAIL FAST in strict mode
+                raise RuntimeError(
+                    f"Failed to import handlers package for {event_type} in strict mode: {e}"
+                ) from e
+            # Non-strict: Event type has no handlers package (that's ok)
             pass
 
         # Cache the result
@@ -180,6 +200,9 @@ class ConfigValidator:
         """
         errors: list[str] = []
 
+        # Extract strict_mode from config (default False)
+        strict_mode = config.get("daemon", {}).get("strict_mode", False)
+
         # Validate version
         errors.extend(ConfigValidator._validate_version(config))
 
@@ -189,7 +212,7 @@ class ConfigValidator:
         # Validate handlers section
         errors.extend(
             ConfigValidator._validate_handlers(
-                config, validate_handler_names=validate_handler_names
+                config, validate_handler_names=validate_handler_names, strict_mode=strict_mode
             )
         )
 
@@ -283,13 +306,14 @@ class ConfigValidator:
 
     @staticmethod
     def _validate_handlers(
-        config: dict[str, Any], *, validate_handler_names: bool = True
+        config: dict[str, Any], *, validate_handler_names: bool = True, strict_mode: bool = False
     ) -> list[str]:
         """Validate handlers configuration section.
 
         Args:
             config: Configuration dictionary
             validate_handler_names: If False, skip handler name validation (for testing)
+            strict_mode: If True, FAIL FAST on handler discovery errors
 
         Returns:
             List of error messages
@@ -325,8 +349,9 @@ class ConfigValidator:
                 continue
 
             # Discover available handlers for this event type (if validation enabled)
+            # Pass strict_mode to fail fast on import errors in strict mode
             available_handlers = (
-                ConfigValidator.get_available_handlers(event_type)
+                ConfigValidator.get_available_handlers(event_type, strict_mode=strict_mode)
                 if validate_handler_names
                 else set()
             )
