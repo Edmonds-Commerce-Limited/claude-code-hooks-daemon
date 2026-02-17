@@ -1348,9 +1348,11 @@ def cmd_validate_project_handlers(args: argparse.Namespace) -> int:
             if py_file.name.startswith("_") or py_file.name.startswith("test_"):
                 continue
 
-            handler = ProjectHandlerLoader.load_handler_from_file(py_file)
-            if handler is None:
+            try:
+                handler = ProjectHandlerLoader.load_handler_from_file(py_file)
+            except RuntimeError as e:
                 print(f"  ERROR: Failed to load {dir_name}/{py_file.name}")
+                print(f"    - {e}")
                 total_warnings += 1
                 continue
 

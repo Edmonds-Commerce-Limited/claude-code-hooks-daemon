@@ -19,6 +19,11 @@ class TestDiscoverHandlers:
         """Return path to test project handler fixtures."""
         return Path(__file__).parent.parent.parent / "fixtures" / "project_handlers"
 
+    @pytest.fixture
+    def error_cases_dir(self) -> Path:
+        """Return path to error case fixtures (intentionally broken handlers)."""
+        return Path(__file__).parent.parent.parent / "fixtures" / "project_handlers_error_cases"
+
     def test_discover_handlers_finds_valid_handlers(self, project_handlers_dir: Path) -> None:
         """Test that discover_handlers finds handlers in event-type subdirectories."""
         results = ProjectHandlerLoader.discover_handlers(project_handlers_dir)
@@ -83,17 +88,17 @@ class TestDiscoverHandlers:
         results = ProjectHandlerLoader.discover_handlers(tmp_path)
         assert results == []
 
-    def test_discover_handlers_handles_syntax_errors_gracefully(
-        self, project_handlers_dir: Path, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """Test that syntax errors in handler files are logged and skipped."""
-        with caplog.at_level(logging.WARNING):
-            results = ProjectHandlerLoader.discover_handlers(project_handlers_dir)
+    def test_discover_handlers_crashes_on_syntax_errors(self, error_cases_dir: Path) -> None:
+        """Test that any error in handler files crashes (TIER 1: project handlers).
 
-        # Should still load the valid handlers
-        handler_names = [h.name for _, h in results]
-        assert "vendor-reminder" in handler_names
-        assert "build-checker" in handler_names
+        Project handlers are explicitly written by the user - any error must
+        be immediately visible, not silently skipped. Discovery stops at the
+        first error encountered.
+        """
+        # The error_cases directory contains multiple error types
+        # Discovery should crash when it tries to load the first one
+        with pytest.raises(RuntimeError, match="Failed to .* project handler"):
+            ProjectHandlerLoader.discover_handlers(error_cases_dir)
 
     def test_discover_handlers_ignores_non_event_directories(self, tmp_path: Path) -> None:
         """Test that directories not matching event types are ignored."""
@@ -146,6 +151,11 @@ class TestLoadHandlerFromFile:
         """Return path to test project handler fixtures."""
         return Path(__file__).parent.parent.parent / "fixtures" / "project_handlers"
 
+    @pytest.fixture
+    def error_cases_dir(self) -> Path:
+        """Return path to error case fixtures (intentionally broken handlers)."""
+        return Path(__file__).parent.parent.parent / "fixtures" / "project_handlers_error_cases"
+
     def test_load_valid_handler(self, project_handlers_dir: Path) -> None:
         """Test loading a valid handler from a file."""
         handler_file = project_handlers_dir / "pre_tool_use" / "vendor_reminder.py"
@@ -156,72 +166,54 @@ class TestLoadHandlerFromFile:
         assert handler.name == "vendor-reminder"
         assert handler.priority == 45
 
-    def test_load_handler_returns_none_for_nonexistent_file(self) -> None:
-        """Test that loading from non-existent file returns None."""
-        handler = ProjectHandlerLoader.load_handler_from_file(Path("/nonexistent/handler.py"))
-        assert handler is None
+    def test_load_handler_crashes_for_nonexistent_file(self) -> None:
+        """Test that loading from non-existent file crashes (TIER 1: project handlers)."""
+        with pytest.raises(RuntimeError, match="Project handler file not found"):
+            ProjectHandlerLoader.load_handler_from_file(Path("/nonexistent/handler.py"))
 
-    def test_load_handler_returns_none_for_syntax_error(self, project_handlers_dir: Path) -> None:
-        """Test that loading file with syntax errors returns None."""
-        handler_file = project_handlers_dir / "session_start" / "syntax_error_handler.py"
-        handler = ProjectHandlerLoader.load_handler_from_file(handler_file)
-        assert handler is None
-
-    def test_load_handler_returns_none_for_non_handler_class(self, tmp_path: Path) -> None:
-        """Test that file without Handler subclass returns None."""
-        handler_file = tmp_path / "not_a_handler.py"
-        handler_file.write_text('"""Not a handler."""\n\nclass NotAHandler:\n    pass\n')
-        handler = ProjectHandlerLoader.load_handler_from_file(handler_file)
-        assert handler is None
-
-    def test_load_handler_logs_errors(
-        self,
-        project_handlers_dir: Path,
-        caplog: pytest.LogCaptureFixture,
-    ) -> None:
-        """Test that loading errors are logged."""
-        handler_file = project_handlers_dir / "session_start" / "syntax_error_handler.py"
-        with caplog.at_level(logging.WARNING):
+    def test_load_handler_crashes_for_syntax_error(self, error_cases_dir: Path) -> None:
+        """Test that loading file with syntax errors crashes (TIER 1: project handlers)."""
+        handler_file = error_cases_dir / "session_start" / "syntax_error_handler.py"
+        with pytest.raises(RuntimeError, match="Failed to import project handler"):
             ProjectHandlerLoader.load_handler_from_file(handler_file)
 
-        assert any(
-            "Failed to load" in record.message or "Failed to import" in record.message
-            for record in caplog.records
-        )
+    def test_load_handler_crashes_for_non_handler_class(self, tmp_path: Path) -> None:
+        """Test that file without Handler subclass crashes (TIER 1: project handlers)."""
+        handler_file = tmp_path / "not_a_handler.py"
+        handler_file.write_text('"""Not a handler."""\n\nclass NotAHandler:\n    pass\n')
+        with pytest.raises(RuntimeError, match="No Handler subclass found"):
+            ProjectHandlerLoader.load_handler_from_file(handler_file)
 
-    def test_load_handler_returns_none_when_spec_is_none(
+    def test_load_handler_crashes_on_errors(
+        self,
+        error_cases_dir: Path,
+    ) -> None:
+        """Test that loading errors crash (TIER 1: project handlers)."""
+        handler_file = error_cases_dir / "session_start" / "syntax_error_handler.py"
+        with pytest.raises(RuntimeError, match="Failed to import project handler"):
+            ProjectHandlerLoader.load_handler_from_file(handler_file)
+
+    def test_load_handler_crashes_when_spec_is_none(
         self,
         project_handlers_dir: Path,
-        caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Test that None spec from spec_from_file_location is handled gracefully."""
+        """Test that None spec from spec_from_file_location crashes (TIER 1)."""
         handler_file = project_handlers_dir / "pre_tool_use" / "vendor_reminder.py"
-        with (
-            patch(
-                "claude_code_hooks_daemon.handlers.project_loader.importlib.util.spec_from_file_location",
-                return_value=None,
-            ),
-            caplog.at_level(logging.WARNING),
+        with patch(
+            "claude_code_hooks_daemon.handlers.project_loader.importlib.util.spec_from_file_location",
+            return_value=None,
         ):
-            result = ProjectHandlerLoader.load_handler_from_file(handler_file)
+            with pytest.raises(RuntimeError, match="Failed to create module spec"):
+                ProjectHandlerLoader.load_handler_from_file(handler_file)
 
-        assert result is None
-        assert any("Failed to create module spec" in record.message for record in caplog.records)
-
-    def test_load_handler_returns_none_when_instantiation_fails(
+    def test_load_handler_crashes_when_instantiation_fails(
         self,
-        project_handlers_dir: Path,
-        caplog: pytest.LogCaptureFixture,
+        error_cases_dir: Path,
     ) -> None:
-        """Test that handler instantiation failure is handled gracefully."""
-        handler_file = project_handlers_dir / "pre_tool_use" / "instantiation_error_handler.py"
-        with caplog.at_level(logging.WARNING):
-            result = ProjectHandlerLoader.load_handler_from_file(handler_file)
-
-        assert result is None
-        assert any(
-            "Failed to instantiate project handler" in record.message for record in caplog.records
-        )
+        """Test that handler instantiation failure crashes (TIER 1: project handlers)."""
+        handler_file = error_cases_dir / "pre_tool_use" / "instantiation_error_handler.py"
+        with pytest.raises(RuntimeError, match="Failed to instantiate project handler"):
+            ProjectHandlerLoader.load_handler_from_file(handler_file)
 
     def test_load_handler_warns_when_no_acceptance_tests(
         self,
@@ -241,11 +233,15 @@ class TestLoadHandlerFromFile:
 
     def test_load_handler_warns_when_acceptance_tests_raise(
         self,
-        project_handlers_dir: Path,
+        error_cases_dir: Path,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Test that handler with broken acceptance tests logs a warning."""
-        handler_file = project_handlers_dir / "pre_tool_use" / "broken_acceptance_tests_handler.py"
+        """Test that handler with broken acceptance tests logs a warning.
+
+        Note: Acceptance test failures are warnings, not crashes (TIER 3).
+        The handler can still run even if acceptance tests are broken.
+        """
+        handler_file = error_cases_dir / "pre_tool_use" / "broken_acceptance_tests_handler.py"
         with caplog.at_level(logging.WARNING):
             result = ProjectHandlerLoader.load_handler_from_file(handler_file)
 
@@ -255,15 +251,14 @@ class TestLoadHandlerFromFile:
             "failed to return acceptance tests" in record.message for record in caplog.records
         )
 
-    def test_load_handler_warns_on_multiple_handler_subclasses(
+    def test_load_handler_crashes_on_multiple_handler_subclasses(
         self,
         tmp_path: Path,
-        caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Test that a warning is logged when multiple Handler subclasses exist in one file.
+        """Test that multiple Handler subclasses in one file crashes (TIER 1).
 
         Regression test for M2: When multiple Handler subclasses are found,
-        only the first is used but the user should be warned.
+        it's ambiguous which to use - crash instead of guessing.
         """
         handler_code = '''"""Handler file with multiple Handler subclasses."""
 from typing import Any
@@ -301,9 +296,5 @@ class SecondHandler(Handler):
         handler_file = tmp_path / "multi_handler.py"
         handler_file.write_text(handler_code)
 
-        with caplog.at_level(logging.WARNING):
-            result = ProjectHandlerLoader.load_handler_from_file(handler_file)
-
-        assert result is not None
-        assert result.name == "first-handler"
-        assert any("Multiple Handler subclasses" in record.message for record in caplog.records)
+        with pytest.raises(RuntimeError, match="Multiple Handler subclasses found"):
+            ProjectHandlerLoader.load_handler_from_file(handler_file)
