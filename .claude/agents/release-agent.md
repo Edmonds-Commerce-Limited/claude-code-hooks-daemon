@@ -222,11 +222,15 @@ untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
 **Compare:** https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/compare/v[PREV]...v[CURRENT]
 ```
 
-### 6. Breaking Changes Detection & Upgrade Guide Generation
+### 6. Breaking Changes Detection & Documentation
 
 **CRITICAL**: This step is MANDATORY after changelog/release notes generation.
 
-**Detection Strategy:**
+This step has TWO outputs:
+1. **Upgrade guide** in CLAUDE/UPGRADES/ (for users upgrading between versions)
+2. **BREAKING CHANGES section** in RELEASES/vX.Y.Z.md (for users reading release notes)
+
+#### Part A: Detection Strategy
 
 Scan the generated CHANGELOG.md entry for breaking change indicators:
 
@@ -255,9 +259,9 @@ If any of the following detected, flag as breaking change:
 - Minimum version requirement changed
 - Default behavior changed (marked as BREAKING)
 
-**Upgrade Guide Template Generation:**
+#### Part B: Upgrade Guide Generation
 
-If breaking changes detected:
+If breaking changes detected, generate upgrade guide in CLAUDE/UPGRADES/:
 
 1. **Determine Version Jump**:
    - Current version: vX.Y (from last tag)
@@ -372,6 +376,87 @@ If breaking changes detected:
    -->
    ```
 
+#### Part C: Release Notes BREAKING CHANGES Section
+
+**CRITICAL**: If breaking changes detected, MUST add prominent section to RELEASES/vX.Y.Z.md
+
+**Location**: Insert immediately AFTER "## Highlights" section, BEFORE "## Changes" section
+
+**Format**: Follow template at `CLAUDE/UPGRADES/upgrade-template/BREAKING-CHANGES-TEMPLATE.md`
+
+**Structure**:
+```markdown
+## ⚠️ BREAKING CHANGES
+
+### Handler Removals
+
+- **`{handler_id}`** ({event_type}) - Removed in vX.Y.Z
+  - **Why**: [Clear explanation of why this handler was removed]
+  - **Migration**: [Actionable steps - remove from config, migrate to project handlers, use alternative]
+  - **Guide**: [Link to upgrade guide in CLAUDE/UPGRADES/]
+
+### Handler Renames
+
+- **`{new_handler_id}`** (renamed from `{old_handler_id}`) - Renamed in vX.Y.Z
+  - **Why**: [Clear explanation of why this handler was renamed - often feature expansion]
+  - **Migration**: Update config to use new name `{new_handler_id}`
+  - **Guide**: [Link to upgrade guide in CLAUDE/UPGRADES/]
+
+### Configuration Changes
+
+- **`{config_field}`** - [Removed/Renamed/Changed] in vX.Y.Z
+  - **Why**: [Explanation of change]
+  - **Migration**: [How to update configuration]
+  - **Guide**: [Link to upgrade guide in CLAUDE/UPGRADES/]
+```
+
+**Content Guidelines**:
+- **Why**: Be specific and technical (not vague like "we decided to remove it")
+- **Migration**: Be actionable and precise (config examples, exact steps)
+- **Guide Links**: Use relative paths from RELEASES/ directory: `../CLAUDE/UPGRADES/v{major}/v{old}-to-v{new}/v{old}-to-v{new}.md`
+
+**Examples**:
+
+**Handler Removal** (v2.11.0):
+```markdown
+### Handler Removals
+
+- **`validate_sitemap`** (PostToolUse) - Removed in v2.11.0
+  - **Why**: Project-specific validation code that doesn't belong in core daemon. This handler reminded users to validate sitemap files after editing markdown in `CLAUDE/Sitemap/`, which is specific to one project's workflow.
+  - **Migration**: Remove from config, or migrate to project-level handlers (`.claude/project-handlers/`) if needed. See upgrade guide for recreation example.
+  - **Guide**: [v2.10-to-v2.11 Upgrade Guide](../CLAUDE/UPGRADES/v2/v2.10-to-v2.11/v2.10-to-v2.11.md)
+```
+
+**Handler Rename** (v2.12.0):
+```markdown
+### Handler Renames
+
+- **`lint_on_edit`** (renamed from `validate_eslint_on_write`) - Renamed in v2.12.0
+  - **Why**: Handler extended from ESLint-only to 9 languages (Python, JavaScript, TypeScript, Ruby, PHP, Go, Rust, Java, C/C++, Shell) using Strategy Pattern architecture. The old name was too specific.
+  - **Migration**: Update `.claude/hooks-daemon.yaml` config to use new handler name:
+    ```yaml
+    # Before (v2.11.0)
+    handlers:
+      post_tool_use:
+        validate_eslint_on_write:
+          enabled: true
+
+    # After (v2.12.0)
+    handlers:
+      post_tool_use:
+        lint_on_edit:
+          enabled: true
+    ```
+  - **Guide**: [v2.11-to-v2.12 Upgrade Guide](../CLAUDE/UPGRADES/v2/v2.11-to-v2.12/v2.11-to-v2.12.md)
+```
+
+**Important**:
+- Only add BREAKING CHANGES section if breaking changes detected
+- Do NOT add empty section
+- Section MUST be highly visible (emoji, clear heading)
+- Links MUST be relative paths (not GitHub URLs)
+- Config examples MUST be syntactically correct YAML
+
 **Output Summary:**
 
 After detection and generation, output:
@@ -392,10 +477,16 @@ After detection and generation, output:
   ✅ config-after.yaml
   ✅ README.md
 
+**Release Notes Update:**
+- ✅ BREAKING CHANGES section added to RELEASES/vX.Y.Z.md
+- Location: After "## Highlights", before "## Changes"
+- Contains: {count} handler removals, {count} handler renames, {count} config changes
+
 **Human Review Required:**
-- Complete deprecation reasons for removed handlers
-- Add migration examples for breaking changes
-- Customize verification steps
+- Complete deprecation reasons for removed handlers (upgrade guide)
+- Add migration examples for breaking changes (upgrade guide)
+- Customize verification steps (upgrade guide)
+- Verify BREAKING CHANGES section in release notes is accurate
 
 **OR** (if no breaking changes):
 
@@ -404,9 +495,10 @@ After detection and generation, output:
 - No handler renames
 - No API changes marked BREAKING
 - No upgrade guide needed
+- No BREAKING CHANGES section added to release notes
 ```
 
-**CRITICAL**: If breaking changes detected but upgrade guide generation fails, ABORT release and report error to main Claude.
+**CRITICAL**: If breaking changes detected but upgrade guide OR release notes generation fails, ABORT release and report error to main Claude.
 
 ### 7. Documentation Review
 
@@ -420,6 +512,7 @@ After detection and generation, output:
 - [ ] Test counts and coverage numbers accurate
 - [ ] Breaking changes flagged (if any detected)
 - [ ] Upgrade guide exists and complete (if breaking changes)
+- [ ] **BREAKING CHANGES section in release notes** (if breaking changes detected)
 
 **Content Validation:**
 - [ ] Changelog entries match actual changes
@@ -428,6 +521,8 @@ After detection and generation, output:
 - [ ] Technical accuracy of descriptions
 - [ ] Grammar and spelling
 - [ ] Upgrade guide completeness (if breaking changes detected)
+- [ ] **BREAKING CHANGES section placement** (after Highlights, before Changes)
+- [ ] **BREAKING CHANGES section format** (follows template, relative links, correct YAML)
 
 ### 8. Output Summary & Stop
 
@@ -477,10 +572,13 @@ This agent's job ends here. Output a comprehensive summary:
 - Handler removed: {handler_id}
 - Handler renamed: {old_id} → {new_id}
 - Upgrade guide created: CLAUDE/UPGRADES/v{major}/v{old}-to-v{new}/
+- BREAKING CHANGES section added to RELEASES/vX.Y.Z.md
 - ⚠️  Human review required (see upgrade guide)
 
 [If no breaking changes:]
 ✅ No breaking changes detected
+- No upgrade guide needed
+- No BREAKING CHANGES section added
 
 **Status:** ✅ Ready for Opus review
 
