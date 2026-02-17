@@ -740,9 +740,9 @@ plugins:
 
         # Verify error message mentions plugin loading failure
         error_output = result.stderr.decode()
-        assert "Failed to load plugin handler" in error_output or "RuntimeError" in error_output, (
-            "Error message should mention plugin loading failure"
-        )
+        assert (
+            "Failed to load plugin handler" in error_output or "RuntimeError" in error_output
+        ), "Error message should mention plugin loading failure"
 
         # Verify daemon is NOT running
         status_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "status"]
@@ -756,7 +756,11 @@ plugins:
         )
 
         # Status should indicate daemon is NOT running
-        assert "RUNNING" not in status_result.stdout, "Daemon should NOT be running after crash"
+        # Check for "Daemon: RUNNING" specifically, not just "RUNNING"
+        # (to avoid matching "NOT RUNNING")
+        assert (
+            "Daemon: RUNNING" not in status_result.stdout
+        ), "Daemon should NOT be running after crash"
 
         # No cleanup needed - daemon never started
 
