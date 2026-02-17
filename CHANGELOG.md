@@ -7,39 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.13.0] - 2026-02-13
+## [2.13.0] - 2026-02-17
 
 ### Added
-- **Single Daemon Process Enforcement**: New `enforce_single_daemon_process` configuration option (Plan 00057, commits fc43d03, 3b0df03, 17b3420, a491809, c07e2bb)
+- **ReleaseBlockerHandler**: New project-specific Stop event handler enforcing acceptance testing gate during releases (Plan 00060, commits 1de40fc, 1796310, 6841e8c)
+  - Detects release context by checking for modified version files (pyproject.toml, version.py, README.md, CHANGELOG.md, RELEASES/*.md)
+  - Blocks Stop events during releases with clear message referencing RELEASING.md Step 8
+  - Prevents infinite loops via stop_hook_active flag, fails safely on git errors
+  - Priority 12 (before AutoContinueStop at 15)
+  - Addresses AI acceptance test avoidance behavior
+  - 22 unit tests + 4 integration tests, all passing
+
+- **Single Daemon Process Enforcement**: New `enforce_single_daemon_process` configuration option (Plan 00057, commits fc43d03, 3b0df03, 17b3420, a491809, c07e2bb, 6c38904, 6b6adca)
   - Prevents multiple daemon instances from running simultaneously
   - In containers: Kills ALL other daemon processes system-wide on startup (SIGTERM → SIGKILL)
   - Outside containers: Only cleans up stale PID files (safe for multi-project environments)
   - Auto-detection: Configuration generation auto-enables in container environments
   - 2-second timeout for graceful shutdown before force kill
-  - Comprehensive testing with process lifecycle verification
+  - 40 new tests, 95.1% coverage maintained, 0 regressions
+
+- **Plan Execution Strategy Framework**: Added execution strategy guidance to planning workflow (commit b960f23)
+  - Strategy selection matrix (Simple/Medium/Complex/Critical complexity levels)
+  - Three strategies: Single-Threaded, Sub-Agent Orchestration, Sub-Agent Teams
+  - Model-specific guidance for optimal execution approach
+  - New plan header fields: Recommended Executor, Execution Strategy
 
 ### Changed
-- **Acceptance Testing Methodology**: Shifted from batch sub-agent execution to realistic manual testing (commit 7cd9baa)
-  - Acceptance tests now emphasize realistic execution in main thread
-  - Updated documentation to reflect practical testing approach
-  - Improved guidance for EXECUTABLE, OBSERVABLE, and VERIFIED_BY_LOAD test categories
+- **Acceptance Testing Methodology**: Made acceptance testing realistic and efficient (commit 7cd9baa)
+  - Categorized tests: EXECUTABLE (89 tests, 20-30 min), OBSERVABLE (10 tests, 30 sec), VERIFIED_BY_LOAD (30 tests, 0 min)
+  - Updated RELEASING.md Step 8 with realistic categories and time estimates
+  - Enhanced playbook generator with category annotations
+  - Reduced testing burden from 127+ unrealistic tests to 89 achievable tests
+  - Clear expectations about what to test vs skip
 
-- **Plan Execution Strategy Framework**: Clarified model capabilities for plan orchestration (commits 2983fa6, bc10236)
+- **Plan Execution Guidance**: Clarified model capabilities for plan orchestration (commits 2983fa6, bc10236)
   - **CRITICAL**: Haiku 4.5 CANNOT orchestrate plans (only Opus/Sonnet)
-  - Documented execution strategy selection matrix (Single-Threaded, Sub-Agent Orchestration, Sub-Agent Teams)
+  - Removed soft language and waffling about model capabilities
+  - Minimum: Sonnet 4.5 for plan orchestration (hard requirement)
   - Clear guidance on when to use Opus vs Sonnet for plan execution
 
-### Fixed
-- **MarkdownOrganizationHandler Completed/ Folder Bug**: Fixed handler failing when Completed/ subdirectory exists (Plan 00059, commits b496d68, 8f1d0df, 38b9d42)
-  - Bug: Handler crashed when encountering `Completed/` folders in plan directory structure
-  - Fix: Updated directory traversal logic to handle nested completion folders
-  - Added comprehensive test coverage for folder structure edge cases
+- **MarkdownOrganizationHandler**: Added support for plan subdirectories (Plan 00059, commits b496d68, 8f1d0df, 38b9d42)
+  - Now allows edits to Completed/, Cancelled/, Archive/ subdirectories
+  - Added _PLAN_SUBDIRECTORIES constant for validation
+  - Fixed validation logic to check subdirectory paths correctly
+  - Updated 5 completed plans with proper status and completion dates
 
-- **PHP QA Suppression Pattern Gaps**: Fixed critical bug in PHP QA suppression detection (Plan 00058, commits 6ae79e4, 7252bfe)
-  - **CRITICAL BUG**: Handler failed to detect certain PHP QA suppression comment formats
-  - Bug: Pattern matching didn't cover all valid PHP suppression syntaxes
-  - Fix: Extended regex patterns to match full spectrum of PHP QA tools (PHPStan, Psalm, PHPCS)
-  - Added regression tests for all suppression comment formats
+### Fixed
+- **PHP QA Suppression Pattern Gaps**: Fixed CRITICAL bug allowing developers to bypass quality controls (Plan 00058, commits 6ae79e4, 7252bfe)
+  - **SECURITY**: Handler was missing 8 suppression patterns, allowing unblocked suppressions
+  - Added @phpstan-ignore, phpcs:disable/enable, phpcs:ignoreFile, @codingStandardsIgnore patterns
+  - Added 8 comprehensive TDD regression tests
+  - Added 3 acceptance tests for critical patterns
+  - All patterns now use string concatenation to avoid self-matching
+
+- **Black Formatting**: Fixed formatting issues in test_enforcement.py (commit 609a2ef)
+
+- **QA Issues**: Fixed magic value violations and type errors after Phase 2 & 3 of Plan 00057 (commit c4270d3)
+  - Added Timeout.PROCESS_KILL_WAIT constant (2 seconds)
+  - Properly typed psutil optional import with ModuleType annotation
 
 ## [2.12.0] - 2026-02-12
 
