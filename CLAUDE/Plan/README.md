@@ -4,6 +4,13 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00063: FAIL FAST - Plugin Handler Bug & Error Hiding Audit](00063-fail-fast-plugin-handler-audit/PLAN.md) - Not Started
+  - **CRITICAL BUG**: Plugin handlers with `Handler` suffix silently skipped, daemon continues with no protection
+  - Root cause: Asymmetry between PluginLoader (handles suffix) and DaemonController (doesn't)
+  - Comprehensive audit to find ALL error hiding patterns violating FAIL FAST principles
+  - Convert warnings to crashes, eliminate silent failures throughout codebase
+  - **Priority**: CRITICAL (violates core engineering principles, leaves users unprotected)
+
 - [00062: Breaking Changes Lifecycle - Complete Documentation Loop](00062-breaking-changes-lifecycle/PLAN.md) - Not Started
   - **CRITICAL PROCESS FIX**: Close the loop from release process → upgrade guides → config migration → validation
   - Users upgrading across multiple versions encounter unknown handler errors without guidance
@@ -372,9 +379,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 61
+- **Total Plans Created**: 62
 - **Completed**: 53 (1 with reduced scope)
-- **Active**: 6 (1 in progress, 5 not started)
+- **Active**: 7 (1 in progress, 6 not started)
 - **Cancelled/Abandoned**: 2 (00036 - empty draft deleted, 00044 - approach retired)
 
 ## Quick Links
