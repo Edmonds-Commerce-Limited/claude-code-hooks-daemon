@@ -320,10 +320,31 @@ log_step "12" "Redeploying slash commands"
 deploy_slash_commands "$PROJECT_ROOT" "$DAEMON_DIR" "normal"
 
 # ============================================================
-# Step 13: Restart daemon and verify
+# Step 13: Redeploy skills
 # ============================================================
 
-log_step "13" "Restarting daemon"
+log_step "13" "Redeploying user-facing skills"
+
+"$VENV_PYTHON" -c "
+from pathlib import Path
+from claude_code_hooks_daemon.install.skills import deploy_skills
+
+daemon_source = Path('$DAEMON_DIR')
+project_root = Path('$PROJECT_ROOT')
+
+try:
+    deploy_skills(daemon_source, project_root)
+    print('✓ Skills redeployed to .claude/skills/hooks-daemon/')
+except Exception as e:
+    print(f'✗ Skill redeployment failed: {e}')
+    exit(1)
+"
+
+# ============================================================
+# Step 14: Restart daemon and verify
+# ============================================================
+
+log_step "14" "Restarting daemon"
 
 if ! restart_daemon_verified "$VENV_PYTHON"; then
     print_error "Daemon failed to start after upgrade"
@@ -344,17 +365,17 @@ if ! restart_daemon_verified "$VENV_PYTHON"; then
 fi
 
 # ============================================================
-# Step 14: Post-upgrade validation
+# Step 15: Post-upgrade validation
 # ============================================================
 
-log_step "14" "Running post-upgrade validation"
+log_step "15" "Running post-upgrade validation"
 run_post_install_checks "$PROJECT_ROOT" "$VENV_PYTHON" "$DAEMON_DIR" "false" || true
 
 # ============================================================
-# Step 15: Cleanup old snapshots
+# Step 16: Cleanup old snapshots
 # ============================================================
 
-log_step "15" "Cleanup"
+log_step "16" "Cleanup"
 cleanup_old_snapshots "$DAEMON_DIR" 3
 
 # Get new version
