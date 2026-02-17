@@ -1,4 +1,4 @@
-# Plan Workflow System
+# Plan System
 
 A structured planning methodology for organizing development work through numbered folders and standardized documentation. Originally developed for the Claude Code Hooks Daemon but applicable to any software project.
 
@@ -8,26 +8,36 @@ A structured planning methodology for organizing development work through number
 
 ---
 
+## Important Distinction
+
+**Plans vs Workflows** - These are two completely separate concepts:
+
+- **Plans** (this document): Numbered folders (`00001-`, `00002-`, etc.) for tracking development work. Each plan has a `PLAN.md` with tasks, goals, and status.
+- **Workflows** (see [WORKFLOWS.md](WORKFLOWS.md)): Repeatable processes (like `page-orchestration`, `qa-skill`, `release`) that survive conversation compaction through state files.
+
+This document covers **Plans only**. For workflow documentation, see [WORKFLOWS.md](WORKFLOWS.md).
+
+---
+
 ## Table of Contents
 
 1. [Overview & Philosophy](#overview--philosophy)
 2. [Core Concepts](#core-concepts)
 3. [Directory Structure](#directory-structure)
 4. [Plan Document Template](#plan-document-template)
-5. [Handlers Supporting Plan Workflow](#handlers-supporting-plan-workflow)
-6. [Setting Up Plan Workflow](#setting-up-plan-workflow)
-7. [Customization Guide](#customization-guide)
-8. [Best Practices](#best-practices)
-9. [Integration with Other Tools](#integration-with-other-tools)
-10. [Examples](#examples)
+5. [Setting Up Plan System](#setting-up-plan-system)
+6. [Customization Guide](#customization-guide)
+7. [Best Practices](#best-practices)
+8. [Integration with Other Tools](#integration-with-other-tools)
+9. [Examples](#examples)
 
 ---
 
 ## Overview & Philosophy
 
-### What is Plan Workflow?
+### What is the Plan System?
 
-Plan Workflow is a structured approach to organizing development work through:
+The Plan System is a structured approach to organizing development work through:
 
 - **Numbered folders** (sequential, zero-padded) containing all plan-related documentation
 - **Standardized PLAN.md** format with tasks, goals, decisions, and progress tracking
@@ -385,11 +395,11 @@ Every `PLAN.md` follows this structure:
 
 ---
 
-## Handlers Supporting Plan Workflow
+## Optional Handler Support
 
-The Claude Code Hooks Daemon includes handlers that enforce and support the Plan Workflow system:
+The Claude Code Hooks Daemon includes optional handlers that support the Plan System:
 
-### 1. MarkdownOrganizationHandler
+### 1. MarkdownOrganizationHandler (Optional)
 
 **Event**: PostToolUse (Write/Edit)
 **Priority**: 40
@@ -402,7 +412,6 @@ The Claude Code Hooks Daemon includes handlers that enforce and support the Plan
 - Blocks markdown files outside approved locations
 - Allows edits to PLAN.md and supporting docs within plan folders
 - Allows Completed/, Cancelled/, Archive/ subdirectories
-- Intercepts Claude Code planning mode writes and redirects to project structure
 
 **Configuration**:
 ```yaml
@@ -412,98 +421,9 @@ handlers:
       enabled: true
       priority: 40
       track_plans_in_project: "CLAUDE/Plan"
-      plan_workflow_docs: "CLAUDE/PlanWorkflow.md"
 ```
 
-**Example block**:
-```
-🚫 BLOCKED: Markdown files must be in approved locations
-
-Allowed locations:
-- CLAUDE/ (documentation)
-- docs/ (project docs)
-- CLAUDE/Plan/ (plan documents)
-
-Blocked: random-notes.md in project root
-
-Move to: CLAUDE/random-notes.md or docs/notes.md
-```
-
-### 2. WorkflowStatePreCompactHandler
-
-**Event**: PreCompact
-**Priority**: 50
-**Type**: Non-blocking (context injection)
-
-**Purpose**: Preserves workflow state before context compaction.
-
-**What it does**:
-- Detects if agent is in a formal workflow (active plan with "In Progress" status)
-- Saves workflow state to `untracked/workflow-state/{workflow-name}/state-{workflow-name}-{timestamp}.json`
-- Extracts plan number, current phase, required reading list
-- State file persists across compaction cycles
-
-**Why this matters**:
-- AI context gets compressed during long sessions
-- Without state preservation, AI forgets which plan it's working on
-- State file enables restoration after compaction
-
-**State file format**:
-```json
-{
-  "workflow": "Plan 00042: Feature Implementation",
-  "workflow_type": "handler_implementation",
-  "phase": {
-    "current": 2,
-    "total": 4,
-    "name": "TDD Implementation",
-    "status": "in_progress"
-  },
-  "required_reading": [
-    "@CLAUDE/PlanWorkflow.md",
-    "@CLAUDE/Plan/00042-feature/PLAN.md"
-  ],
-  "context": {
-    "plan_number": 42,
-    "plan_name": "00042-feature"
-  },
-  "created_at": "2026-02-17T10:30:00Z"
-}
-```
-
-### 3. WorkflowStateRestorationHandler
-
-**Event**: SessionStart (source=compact)
-**Priority**: Default
-**Type**: Non-blocking (advisory)
-
-**Purpose**: Restores workflow state after compaction.
-
-**What it does**:
-- Fires when session resumes after context compaction
-- Reads most recent workflow state file
-- Provides advisory with required reading list (using @ syntax)
-- Forces AI to re-read plan documents before continuing
-
-**Example advisory**:
-```
-⚠️ WORKFLOW RESTORED AFTER COMPACTION ⚠️
-
-Workflow: Plan 00042: Feature Implementation
-Type: handler_implementation
-Phase: 2/4 - TDD Implementation (in_progress)
-
-REQUIRED READING (read ALL now with @ syntax):
-@CLAUDE/PlanWorkflow.md
-@CLAUDE/Plan/00042-feature/PLAN.md
-
-ACTION REQUIRED:
-1. Read ALL files listed above using @ syntax
-2. Confirm understanding of workflow phase
-3. DO NOT proceed with assumptions or hallucinated logic
-```
-
-### 4. PlanCompletionAdvisorHandler
+### 2. PlanCompletionAdvisorHandler (Optional)
 
 **Event**: PreToolUse (Write/Edit)
 **Priority**: 36
@@ -526,7 +446,7 @@ Plan 00042-feature appears to be marked as complete. Remember to:
 3. Update plan statistics in README.md (increment Completed count, update total)
 ```
 
-### 5. GitContextInjectorHandler (Optional)
+### 3. GitContextInjectorHandler (Optional)
 
 **Event**: UserPromptSubmit
 **Priority**: 50
@@ -544,33 +464,19 @@ Plan 00042: Implement feature X
 Refs: CLAUDE/Plan/00042-feature/PLAN.md
 ```
 
+**Note**: These handlers are optional. The Plan System works without the hooks daemon - it's simply a documentation convention using numbered folders and PLAN.md files.
+
 ---
 
-## Setting Up Plan Workflow
+## Setting Up Plan System
 
 ### Prerequisites
 
 1. **Git repository** (plan folders tracked in version control)
-2. **Claude Code Hooks Daemon installed** (optional but recommended for handler support)
-3. **Markdown editor** (any text editor works)
+2. **Markdown editor** (any text editor works)
+3. **Claude Code Hooks Daemon** (optional - for automated enforcement)
 
-### Step 1: Install Hooks Daemon (Optional)
-
-The hooks daemon provides automated enforcement and context preservation. See [Installation Guide](../CLAUDE/LLM-INSTALL.md).
-
-**Quick install**:
-```bash
-cd .claude
-git clone https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon.git hooks-daemon
-cd hooks-daemon
-git checkout v2.13.0  # Use latest stable version
-python3 -m venv untracked/venv
-untracked/venv/bin/pip install -e .
-untracked/venv/bin/python install.py
-cd ../..
-```
-
-### Step 2: Initialize Directory Structure
+### Step 1: Initialize Directory Structure
 
 ```bash
 # Create plan directory structure
@@ -609,39 +515,11 @@ See @CLAUDE/PlanWorkflow.md for full planning workflow.
 EOF
 ```
 
-### Step 3: Copy Plan Template
+### Step 2: Copy Plan Template
 
 Save the [Plan Document Template](#plan-document-template) as `CLAUDE/Plan/TEMPLATE.md` for easy reference.
 
-### Step 4: Configure Handlers (If Using Daemon)
-
-Edit `.claude/hooks-daemon.yaml`:
-
-```yaml
-handlers:
-  post_tool_use:
-    markdown_organization:
-      enabled: true
-      priority: 40
-      track_plans_in_project: "CLAUDE/Plan"
-      plan_workflow_docs: "CLAUDE/PlanWorkflow.md"
-
-  pre_compact:
-    workflow_state_pre_compact:
-      enabled: true
-      priority: 50
-
-  session_start:
-    workflow_state_restoration:
-      enabled: true
-
-  pre_tool_use:
-    plan_completion_advisor:
-      enabled: true
-      priority: 36
-```
-
-### Step 5: Create Your First Plan
+### Step 3: Create Your First Plan
 
 ```bash
 # Create plan folder
@@ -654,13 +532,27 @@ cp CLAUDE/Plan/TEMPLATE.md CLAUDE/Plan/00001-my-first-feature/PLAN.md
 # Then update README.md to add plan to Active Plans section
 ```
 
-### Step 6: Git Integration
+### Step 4: Configure Handlers (Optional)
 
-Add to `.gitignore`:
+If using the Claude Code Hooks Daemon, edit `.claude/hooks-daemon.yaml`:
+
+```yaml
+handlers:
+  post_tool_use:
+    markdown_organization:
+      enabled: true
+      priority: 40
+      track_plans_in_project: "CLAUDE/Plan"
+
+  pre_tool_use:
+    plan_completion_advisor:
+      enabled: true
+      priority: 36
 ```
-# Plan workflow state (generated files)
-untracked/workflow-state/
-```
+
+See [Installation Guide](../CLAUDE/LLM-INSTALL.md) for daemon installation.
+
+### Step 5: Git Integration
 
 Add to `.git/info/exclude` (or `.gitignore` if shared):
 ```

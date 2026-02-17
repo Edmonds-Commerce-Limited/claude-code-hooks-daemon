@@ -140,37 +140,43 @@ Blocking handlers match patterns in the full Bash command string, including git 
 
 **Solution**: Simply avoid putting literal blocked patterns in commit messages. Describe the fix in different words (e.g., "force branch delete blocker" instead of the literal command). This is trivial to work around.
 
-## Plan Workflow System
+## Plans vs Workflows (CRITICAL DISTINCTION)
 
-**This project uses a structured Plan Workflow system for organizing development work.**
+**These are TWO COMPLETELY SEPARATE concepts:**
 
-**Full Documentation**: [docs/PLAN_WORKFLOW.md](../docs/PLAN_WORKFLOW.md)
+### Plans (Development Work Tracking)
 
-### Quick Reference
+**Purpose**: Track development work in numbered folders (`CLAUDE/Plan/00001-`, `00002-`, etc.)
 
-**Structure**: Numbered folders in `CLAUDE/Plan/NNNNN-description/` with standardized `PLAN.md` documents
+**Documentation**: [docs/PLAN_SYSTEM.md](../docs/PLAN_SYSTEM.md)
+
+**Structure**: Numbered folders with `PLAN.md` files containing tasks, goals, status
 
 **Lifecycle**: Not Started → In Progress → Complete (moved to `Completed/`)
 
-**Handlers Supporting Workflow**:
-- `markdown_organization` - Enforces CLAUDE/Plan/ structure, allows editing PLAN.md and supporting docs
-- `workflow_state_pre_compact` - Preserves workflow state before context compaction
+**Optional Handlers**:
+- `markdown_organization` - Enforces CLAUDE/Plan/ structure
+- `plan_completion_advisor` - Reminds to move completed plans to Completed/
+
+**When to Use**: Work taking > 2 hours, multi-phase implementation, architectural decisions
+
+### Workflows (Repeatable Processes)
+
+**Purpose**: Repeatable processes that survive conversation compaction (release, QA, etc.)
+
+**Documentation**: [docs/WORKFLOWS.md](../docs/WORKFLOWS.md)
+
+**Structure**: State files in `./untracked/workflow-state/{workflow-name}/` with phase tracking
+
+**Lifecycle**: Start → Phase transitions → Complete (delete state file)
+
+**Required Handlers**:
+- `workflow_state_pre_compact` - Preserves workflow state before compaction
 - `workflow_state_restoration` - Restores workflow state after compaction with required reading
-- `plan_completion_advisor` - Reminds to move completed plans to Completed/ and update README.md
 
-**When to Use**:
-- Work taking > 2 hours
-- Multi-phase implementation
-- Architectural decisions needed
-- Work that may be interrupted/resumed
+**When to Use**: Formal multi-phase processes that need to survive compaction (releases, complex orchestrations)
 
-**Key Benefits**:
-- Context preservation across AI sessions
-- Explicit task breakdown and tracking
-- Historical knowledge archive
-- Collaboration between people and AI agents
-
-**See**: [docs/PLAN_WORKFLOW.md](../docs/PLAN_WORKFLOW.md) for complete guide including setup instructions, templates, and examples.
+**Key Difference**: Plans are for tracking development work. Workflows are for repeatable processes like releases that must survive compaction.
 
 ---
 
