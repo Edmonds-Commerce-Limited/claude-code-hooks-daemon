@@ -405,20 +405,107 @@ preserve_config_for_upgrade() {
     report_incompatibilities "$venv_python" "$merge_output"
     local report_exit=$?
 
+    # Step 4a: Detect and document breaking changes
+    print_info "Step 4a/5: Detecting breaking changes..."
+    local migration_notes="$project_root/.claude/config-migration-notes.txt"
+
+    "$venv_python" -c "
+import json
+import sys
+from pathlib import Path
+from datetime import datetime
+
+try:
+    from claude_code_hooks_daemon.install.breaking_changes_detector import BreakingChangesDetector
+
+    # Determine current and target versions
+    daemon_dir = Path('$old_default_config').parent.parent.parent
+    changelog_path = daemon_dir / 'CHANGELOG.md'
+
+    if not changelog_path.exists():
+        sys.exit(0)
+
+    # Parse merge output to get config diff
+    merge_data = json.loads('''$merge_output''')
+    conflicts = merge_data.get('conflicts', [])
+
+    # Look for handler removal/rename conflicts
+    removed_handlers = []
+    renamed_handlers = {}
+
+    for conflict in conflicts:
+        path = conflict.get('path', '')
+        conflict_type = conflict.get('conflict_type', '')
+
+        if 'handlers.' in path and conflict_type in ('removed_in_new', 'value_changed'):
+            # Extract handler name from path like 'handlers.pre_tool_use.validate_sitemap'
+            parts = path.split('.')
+            if len(parts) >= 3:
+                handler_name = parts[2]
+                removed_handlers.append(handler_name)
+
+    if not removed_handlers and not renamed_handlers:
+        sys.exit(0)
+
+    # Generate warnings
+    detector = BreakingChangesDetector(changelog_path)
+    warnings = detector.generate_warnings(
+        removed_handlers=removed_handlers,
+        renamed_handlers=renamed_handlers
+    )
+
+    if warnings:
+        # Write migration notes to file
+        with open('$migration_notes', 'w') as f:
+            f.write('=' * 70 + '\n')
+            f.write('Config Migration Notes\n')
+            f.write('Generated: ' + datetime.now().strftime('%Y-%m-%d %H:%M:%S') + '\n')
+            f.write('=' * 70 + '\n')
+            f.write('\n')
+            f.write('BREAKING CHANGES DETECTED DURING UPGRADE\n')
+            f.write('\n')
+            for warning in warnings:
+                f.write(warning + '\n')
+                f.write('\n')
+            f.write('ACTIONS TAKEN:\n')
+            f.write('- Config automatically updated during merge\n')
+            f.write('- Incompatible handlers removed or updated\n')
+            f.write('- Config backup saved (see above for path)\n')
+            f.write('\n')
+            f.write('REVIEW:\n')
+            f.write('- Check .claude/hooks-daemon.yaml for changes\n')
+            f.write('- Verify daemon starts successfully\n')
+            f.write('- See upgrade guides in CLAUDE/UPGRADES/ for details\n')
+
+        print(f'✓ Migration notes written to {Path(\"$migration_notes\").name}', file=sys.stderr)
+
+except Exception as e:
+    print(f'WARNING: Breaking changes documentation failed: {e}', file=sys.stderr)
+" || true
+
     # Step 5: Summary
     print_info "Step 5/5: Config preservation summary"
 
     if [ $report_exit -eq 0 ] && [ $validate_exit -eq 0 ]; then
         print_success "Config preserved cleanly - all customizations applied"
+        if [ -f "$migration_notes" ]; then
+            print_info "Migration notes: $migration_notes"
+        fi
         return 0
     elif [ $validate_exit -eq 0 ]; then
         print_warning "Config preserved with conflicts (see above)"
         print_info "Backup: $backup_path"
+        if [ -f "$migration_notes" ]; then
+            print_info "Migration notes: $migration_notes"
+        fi
         return 0
     else
         print_warning "Config preserved but has validation issues"
         print_info "Backup: $backup_path"
         print_info "You may need to manually adjust: $config_file"
+        if [ -f "$migration_notes" ]; then
+            print_info "Migration notes: $migration_notes"
+        fi
         return 0
     fi
 }
