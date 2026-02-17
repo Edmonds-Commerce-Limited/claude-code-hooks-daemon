@@ -1,8 +1,8 @@
 """Tests for skill deployment system."""
 
 import shutil
+from collections.abc import Generator
 from pathlib import Path
-from typing import Generator
 
 import pytest
 
@@ -57,9 +57,7 @@ def daemon_source(tmp_path: Path) -> Generator[Path, None, None]:
 class TestDeploySkills:
     """Test skill deployment to user projects."""
 
-    def test_deploy_skills_creates_directory(
-        self, temp_project: Path, daemon_source: Path
-    ) -> None:
+    def test_deploy_skills_creates_directory(self, temp_project: Path, daemon_source: Path) -> None:
         """Test that deploy_skills creates .claude/skills/hooks-daemon directory."""
         # Act
         deploy_skills(daemon_source, temp_project)
@@ -85,9 +83,7 @@ class TestDeploySkills:
         # Verify content
         assert (target_dir / "SKILL.md").read_text() == "# Hooks Daemon Skill\n"
 
-    def test_deploy_skills_copies_scripts(
-        self, temp_project: Path, daemon_source: Path
-    ) -> None:
+    def test_deploy_skills_copies_scripts(self, temp_project: Path, daemon_source: Path) -> None:
         """Test that deploy_skills copies script files."""
         # Act
         deploy_skills(daemon_source, temp_project)
@@ -179,9 +175,7 @@ class TestDeploySkills:
         assert (target_refs / "troubleshooting.md").exists()
         assert (target_refs / "troubleshooting.md").read_text() == "# Troubleshooting\n"
 
-    def test_deploy_skills_version_alignment(
-        self, temp_project: Path, daemon_source: Path
-    ) -> None:
+    def test_deploy_skills_version_alignment(self, temp_project: Path, daemon_source: Path) -> None:
         """Test that deployed skills match daemon version (placeholder test)."""
         # This will be implemented when version tracking is added
         # For now, just verify skills were deployed
