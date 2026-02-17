@@ -541,8 +541,8 @@ class TestControllerPluginLoadingEdgeCases:
 
         assert result == 0
 
-    def test_load_plugins_skips_handler_with_no_matching_plugin(self, workspace_root: Path) -> None:
-        """_load_plugins skips handler when class name doesn't match any plugin config."""
+    def test_load_plugins_crashes_on_handler_with_no_matching_plugin(self, workspace_root: Path) -> None:
+        """_load_plugins CRASHES when class name doesn't match any plugin config (FAIL FAST)."""
         from claude_code_hooks_daemon.config.models import PluginConfig, PluginsConfig
         from claude_code_hooks_daemon.constants import HandlerID, Priority
         from claude_code_hooks_daemon.core import Handler, HookResult
@@ -583,15 +583,14 @@ class TestControllerPluginLoadingEdgeCases:
             "claude_code_hooks_daemon.plugins.loader.PluginLoader.load_from_plugins_config",
             return_value=[UnmatchedHandler()],
         ):
-            result = controller._load_plugins(plugins_config, workspace_root)
+            # FAIL FAST: Should crash if handler can't be matched to config
+            with pytest.raises(RuntimeError, match="Failed to register plugin handler"):
+                controller._load_plugins(plugins_config, workspace_root)
 
-        # Handler should be skipped (no matching plugin config for class name)
-        assert result == 0
-
-    def test_load_plugins_skips_handler_with_invalid_event_type(
+    def test_load_plugins_crashes_on_handler_with_invalid_event_type(
         self, workspace_root: Path, tmp_path: Path
     ) -> None:
-        """_load_plugins skips handler when event_type string is invalid."""
+        """_load_plugins CRASHES when event_type string is invalid (FAIL FAST)."""
         from claude_code_hooks_daemon.config.models import PluginConfig, PluginsConfig
         from claude_code_hooks_daemon.constants import HandlerID, Priority
         from claude_code_hooks_daemon.core import Handler, HookResult
@@ -637,10 +636,9 @@ class TestControllerPluginLoadingEdgeCases:
                 side_effect=ValueError("Invalid event type"),
             ),
         ):
-            result = controller._load_plugins(plugins_config, workspace_root)
-
-        # Handler should be skipped due to invalid event type
-        assert result == 0
+            # FAIL FAST: Should crash on invalid event type
+            with pytest.raises(RuntimeError, match="Invalid event type"):
+                controller._load_plugins(plugins_config, workspace_root)
 
 
 class TestControllerProcessEventErrors:
