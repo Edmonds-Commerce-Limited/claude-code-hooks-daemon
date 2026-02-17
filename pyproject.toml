@@ -129,16 +129,16 @@ extend-exclude = '''
   | __pycache__
   | dist
   | build
+  | tests/fixtures/project_handlers_error_cases
 )
 | tests/fixtures/plugins/syntax_error_handler\.py
-| tests/fixtures/project_handlers/session_start/syntax_error_handler\.py
 '''
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
-extend-exclude = ["tests/fixtures/plugins/syntax_error_handler.py", "tests/fixtures/project_handlers/session_start/syntax_error_handler.py"]
+extend-exclude = ["tests/fixtures/plugins/syntax_error_handler.py", "tests/fixtures/project_handlers_error_cases/**/*.py"]
 
 [tool.ruff.lint]
 select = [
@@ -198,7 +198,7 @@ strict_optional = true
 enable_error_code = ["truthy-bool", "redundant-expr", "unused-awaitable"]
 exclude = [
     'tests/fixtures/plugins/syntax_error_handler\.py$',
-    'tests/fixtures/project_handlers/session_start/syntax_error_handler\.py$',
+    'tests/fixtures/project_handlers_error_cases/.*\.py$',
 ]
 
 [[tool.mypy.overrides]]

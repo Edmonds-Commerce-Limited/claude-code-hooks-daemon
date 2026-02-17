@@ -41,7 +41,7 @@ class ProjectHandlerLoader:
     """
 
     @staticmethod
-    def load_handler_from_file(file_path: Path) -> Handler | None:
+    def load_handler_from_file(file_path: Path) -> Handler:
         """Load a single handler from a Python file.
 
         Uses importlib.util.spec_from_file_location to dynamically load
@@ -51,26 +51,30 @@ class ProjectHandlerLoader:
             file_path: Absolute path to a Python file containing a Handler subclass
 
         Returns:
-            Handler instance if successful, None otherwise
+            Handler instance
+
+        Raises:
+            RuntimeError: If handler fails to load (TIER 1: project handlers always crash)
         """
         if not file_path.exists():
-            logger.warning("Project handler file not found: %s", file_path)
-            return None
+            raise RuntimeError(f"Project handler file not found: {file_path}")
 
         module_name = f"project_handler_{file_path.stem}_{id(file_path)}"
 
         try:
             spec = importlib.util.spec_from_file_location(module_name, file_path)
             if spec is None or spec.loader is None:
-                logger.warning("Failed to create module spec for project handler: %s", file_path)
-                return None
+                raise RuntimeError(f"Failed to create module spec for project handler: {file_path}")
 
             module = importlib.util.module_from_spec(spec)
             sys.modules[module_name] = module
             spec.loader.exec_module(module)
+        except RuntimeError:
+            # Re-raise our own RuntimeErrors
+            raise
         except Exception as e:
-            logger.warning("Failed to import project handler %s: %s", file_path.name, e)
-            return None
+            # TIER 1: FAIL FAST - project handlers are explicitly configured
+            raise RuntimeError(f"Failed to import project handler {file_path.name}: {e}") from e
 
         # Find concrete Handler subclasses in the module
         handler_classes: list[type[Handler]] = []
@@ -87,29 +91,29 @@ class ProjectHandlerLoader:
 
         if len(handler_classes) > 1:
             class_names = [cls.__name__ for cls in handler_classes]
-            logger.warning(
-                "Multiple Handler subclasses found in %s: %s. Using first: %s",
-                file_path.name,
-                ", ".join(class_names),
-                class_names[0],
+            # TIER 1: Multiple handlers is ambiguous - crash
+            raise RuntimeError(
+                f"Multiple Handler subclasses found in {file_path.name}: {', '.join(class_names)}. "
+                f"Each project handler file should contain exactly one Handler subclass."
             )
 
-        handler_class = handler_classes[0] if handler_classes else None
+        if not handler_classes:
+            # TIER 1: No handler found - crash
+            raise RuntimeError(
+                f"No Handler subclass found in project handler file: {file_path.name}. "
+                f"File must contain a concrete Handler subclass."
+            )
 
-        if handler_class is None:
-            logger.warning("No Handler subclass found in project handler file: %s", file_path.name)
-            return None
+        handler_class = handler_classes[0]
 
         # Instantiate the handler
         try:
             handler = handler_class()
         except Exception as e:
-            logger.warning(
-                "Failed to instantiate project handler from %s: %s",
-                file_path.name,
-                e,
-            )
-            return None
+            # TIER 1: FAIL FAST - instantiation failure means broken handler
+            raise RuntimeError(
+                f"Failed to instantiate project handler from {file_path.name}: {e}"
+            ) from e
 
         # Validate acceptance tests (warn but don't fail)
         try:
@@ -173,9 +177,9 @@ class ProjectHandlerLoader:
                 if py_file.name.startswith("test_"):
                     continue
 
+                # TIER 1: Project handlers always crash on failure (no try/except)
                 handler = ProjectHandlerLoader.load_handler_from_file(py_file)
-                if handler is not None:
-                    results.append((event_type, handler))
+                results.append((event_type, handler))
 
         logger.info(
             "Discovered %d project handlers from %s",
