@@ -561,3 +561,37 @@ class TestValidationPerformance:
 
         per_validation = elapsed / 1000
         assert per_validation < 5.0, f"Validation took {per_validation}ms (target: <5ms)"
+
+
+class TestJsonschemaImportError:
+    """Test validation behavior when jsonschema is not installed."""
+
+    def test_validate_input_returns_error_when_jsonschema_missing(self, monkeypatch):
+        """validate_input returns error message when jsonschema import fails."""
+        import builtins
+        import sys
+
+        # Save original import
+        original_import = builtins.__import__
+
+        # Mock import to raise ImportError
+        def mock_import(name, *args, **kwargs):
+            if name == "jsonschema" or name.startswith("jsonschema."):
+                raise ImportError("No module named 'jsonschema'")
+            return original_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", mock_import)
+
+        # Clear any cached jsonschema imports
+        modules_to_clear = [m for m in sys.modules if m.startswith("jsonschema")]
+        for module in modules_to_clear:
+            del sys.modules[module]
+
+        hook_input = {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Bash",
+        }
+
+        errors = validate_input("PreToolUse", hook_input)
+        assert len(errors) == 1
+        assert "jsonschema not installed" in errors[0]
