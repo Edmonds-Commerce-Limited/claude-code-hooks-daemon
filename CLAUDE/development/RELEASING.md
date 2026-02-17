@@ -35,8 +35,9 @@ The `/release` skill orchestrates the complete release workflow through a multi-
 - **Stage 1**: Release Agent (Sonnet) prepares files
 - **Stage 2**: Opus Agent reviews for accuracy
 - **Stage 3**: Main Claude runs QA verification (BLOCKING GATE)
-- **Stage 4**: Main Claude runs acceptance tests (BLOCKING GATE)
-- **Stage 5**: Main Claude commits, tags, and publishes
+- **Stage 4**: Main Claude checks breaking changes (BLOCKING GATE)
+- **Stage 5**: Main Claude runs acceptance tests (BLOCKING GATE)
+- **Stage 6**: Main Claude commits, tags, and publishes
 
 **Important:** Agents cannot spawn nested agents. Main Claude orchestrates by invoking agents sequentially.
 
@@ -44,10 +45,11 @@ The `/release` skill orchestrates the complete release workflow through a multi-
 
 **The following steps are MANDATORY and BLOCKING. Release CANNOT proceed if these fail:**
 
-1. **QA Verification Gate** (after Opus review, before commit)
-2. **Acceptance Testing Gate** (after QA passes, before commit)
+1. **QA Verification Gate** (Step 7: after Opus review, before commit)
+2. **Breaking Changes Check** (Step 6.5: after QA passes, before acceptance tests)
+3. **Acceptance Testing Gate** (Step 8: after breaking changes check, before commit)
 
-**If either gate fails, the release is ABORTED. No exceptions.**
+**If ANY gate fails, the release is ABORTED. No exceptions.**
 
 ### 1. Pre-Release Validation (Automated)
 
@@ -268,7 +270,247 @@ Overall Status: ✅ ALL CHECKS PASSED
 - Documentation changes could introduce issues
 - This is the final verification before irreversible git operations
 
-**Main Claude proceeds to Acceptance Testing Gate (Step 8) ONLY if all QA checks pass.**
+**Main Claude proceeds to Breaking Changes Check (Step 6.5) ONLY if all QA checks pass.**
+
+### 6.5. Breaking Changes Check (Main Claude Executes) - 🚨 BLOCKING
+
+**CRITICAL BLOCKING GATE: Main Claude must verify upgrade guides exist for breaking changes.**
+
+After QA passes, **main Claude MUST check for breaking changes and verify upgrade documentation exists**.
+
+**Why This Gate Exists:**
+- v2.11 and v2.12 shipped with breaking changes but no upgrade documentation
+- Users had no migration path when handlers were removed or renamed
+- This gate prevents releasing breaking changes without upgrade guides
+
+**STEP 6.5.1: Scan CHANGELOG.md for Breaking Change Indicators**
+
+Breaking changes are detected by scanning the changelog entry for this release:
+
+```bash
+# View the changelog entry for this release
+# (Located at top of CHANGELOG.md after Step 4: Changelog Generation)
+```
+
+**Breaking Change Indicators:**
+1. **"Removed" section** with any entries
+   - Handler removals
+   - Deprecated feature removals
+   - API removals
+
+2. **"Changed" section** with "BREAKING" keyword
+   - Handler renames
+   - Config format changes
+   - API signature changes
+
+3. **Keywords anywhere in changelog:**
+   - "BREAKING"
+   - "breaking change"
+   - "incompatible"
+   - "renamed" (for handlers/config)
+
+**Examples from v2.11 and v2.12:**
+
+v2.11 (CHANGELOG.md lines 200-204):
+```markdown
+### Removed
+- **Project-Specific Hangover Handlers**: Cleaned up two handlers...
+  - Removed `validate_sitemap` handler (PostToolUse)
+  - Removed `remind_validator` handler (SubagentStop)
+```
+
+v2.12 (CHANGELOG.md lines 72-79):
+```markdown
+### Added
+- **LintOnEditHandler with Strategy Pattern**: New PostToolUse:Edit handler...
+  (Note: This actually RENAMED validate_eslint_on_write → lint_on_edit,
+   which is a breaking change but wasn't marked clearly)
+```
+
+**STEP 6.5.2: Check for Upgrade Guide (If Breaking Changes Found)**
+
+If ANY breaking change indicators detected, verify upgrade guide exists:
+
+```bash
+# Determine version from release
+VERSION="X.Y.Z"  # e.g., "2.12.0"
+
+# Extract major version
+MAJOR_VERSION="${VERSION%%.*}"  # e.g., "2"
+
+# Calculate previous version (assumes patch/minor bump)
+# For v2.12.0, previous is v2.11.0
+PREV_VERSION="X.Y.0"  # Determine from git tags
+
+# Check for upgrade guide
+UPGRADE_PATH="CLAUDE/UPGRADES/v${MAJOR_VERSION}/v${PREV_VERSION}-to-v${VERSION}"
+
+if [ ! -d "$UPGRADE_PATH" ]; then
+  echo "❌ BREAKING CHANGES DETECTED - NO UPGRADE GUIDE"
+  exit 1
+fi
+
+# Verify required files exist
+ls -la "$UPGRADE_PATH/"
+# Expected files:
+# - README.md (or vX.Y-to-vX.Z.md)
+# - config-before.yaml (if config changes)
+# - config-after.yaml (if config changes)
+# - migration-script.sh (optional)
+# - verification.sh (optional)
+```
+
+**Expected Upgrade Guide Structure:**
+
+Based on template at `CLAUDE/UPGRADES/upgrade-template/`:
+
+```
+CLAUDE/UPGRADES/v2/v2.11-to-v2.12/
+├── README.md (or v2.11-to-v2.12.md)  # Main upgrade guide
+├── config-before.yaml                # Config before upgrade (if applicable)
+├── config-after.yaml                 # Config after upgrade (if applicable)
+├── migration-script.sh               # Automated migration (optional)
+└── verification.sh                   # Post-upgrade verification (optional)
+```
+
+**Upgrade Guide MUST Include:**
+
+From template at `CLAUDE/UPGRADES/upgrade-template/README.md`:
+
+1. **Summary** - One paragraph describing changes
+2. **Version Compatibility** - Source/target versions, breaking changes flag
+3. **Pre-Upgrade Checklist** - Backup steps, verification commands
+4. **Changes Overview** - Detailed breakdown:
+   - New/modified/removed handlers
+   - Configuration changes
+   - Migration steps
+5. **Step-by-Step Upgrade Instructions** - Complete upgrade workflow
+6. **Verification Steps** - How to verify upgrade succeeded
+7. **Rollback Instructions** - How to revert if issues found
+
+**STEP 6.5.3: Verify Upgrade Guide Links in Release Notes**
+
+If breaking changes exist, release notes MUST reference upgrade guide:
+
+```bash
+# Check RELEASES/vX.Y.Z.md for upgrade guide link
+grep -i "upgrade guide" RELEASES/vX.Y.Z.md
+grep -i "breaking" RELEASES/vX.Y.Z.md
+
+# Expected format in release notes:
+# ⚠️ BREAKING CHANGES
+#
+# This release contains breaking changes. See the upgrade guide for migration instructions:
+# [Upgrade Guide: vX.Y → vX.Z](../../CLAUDE/UPGRADES/v2/vX.Y-to-vX.Z/)
+```
+
+**If upgrade guide link missing**, add BREAKING CHANGES section to release notes:
+
+```markdown
+## ⚠️ BREAKING CHANGES
+
+This release contains breaking changes. **Read the upgrade guide before upgrading.**
+
+**Breaking Changes:**
+- [List breaking changes from changelog]
+
+**Upgrade Guide:** [vX.Y → vX.Z](../../CLAUDE/UPGRADES/v2/vX.Y-to-vX.Z/)
+
+**Migration Steps:**
+1. Read upgrade guide completely
+2. Backup your configuration
+3. Follow upgrade instructions
+4. Run verification script
+```
+
+**STEP 6.5.4: Decision Matrix**
+
+| Breaking Changes Detected? | Upgrade Guide Exists? | Action |
+|---------------------------|----------------------|--------|
+| ✅ Yes | ✅ Yes | Proceed to Step 8 (Acceptance Testing) |
+| ✅ Yes | ❌ No | **ABORT RELEASE** - Create upgrade guide first |
+| ❌ No | N/A | Proceed to Step 8 (Acceptance Testing) |
+
+**✅ SUCCESS CRITERIA (Breaking Changes Present):**
+- Upgrade guide directory exists at correct path
+- Upgrade guide contains all required sections
+- Release notes reference upgrade guide with clear warning
+- Migration steps documented for all breaking changes
+
+**✅ SUCCESS CRITERIA (No Breaking Changes):**
+- No "Removed" section in changelog
+- No "BREAKING" keywords in changelog
+- No handler renames or config format changes
+
+**❌ FAILURE CRITERIA (Any of these = ABORT):**
+- Breaking changes detected but no upgrade guide
+- Upgrade guide exists but missing required sections
+- Release notes don't reference upgrade guide
+- Migration steps unclear or incomplete
+
+**If Check Fails:**
+
+```
+❌ BREAKING CHANGES CHECK FAILED
+
+Breaking changes detected in changelog:
+- Removed: validate_sitemap handler
+- Removed: remind_validator handler
+
+Expected upgrade guide location:
+  CLAUDE/UPGRADES/v2/v2.10-to-v2.11/
+
+Upgrade guide does NOT exist.
+
+ACTION REQUIRED:
+1. Create upgrade guide using template:
+   cp -r CLAUDE/UPGRADES/upgrade-template/ CLAUDE/UPGRADES/v2/v2.10-to-v2.11/
+2. Fill in upgrade guide following template instructions
+3. Document migration steps for all breaking changes
+4. Add BREAKING CHANGES section to release notes
+5. Re-run /release from beginning
+
+DO NOT PROCEED WITH RELEASE.
+```
+
+**Creating Upgrade Guide:**
+
+```bash
+# Use template
+PREV_VERSION="2.11"
+NEW_VERSION="2.12"
+MAJOR_VERSION="2"
+
+UPGRADE_DIR="CLAUDE/UPGRADES/v${MAJOR_VERSION}/v${PREV_VERSION}-to-v${NEW_VERSION}"
+
+# Copy template
+cp -r CLAUDE/UPGRADES/upgrade-template/ "$UPGRADE_DIR/"
+
+# Edit files
+# 1. Update README.md with actual changes from CHANGELOG.md
+# 2. Create config-before.yaml (current config snapshot)
+# 3. Create config-after.yaml (new config format)
+# 4. Write migration-script.sh (optional automated migration)
+# 5. Write verification.sh (optional post-upgrade checks)
+
+# Commit upgrade guide
+git add "$UPGRADE_DIR/"
+git commit -m "Add upgrade guide: v${PREV_VERSION} → v${NEW_VERSION}"
+```
+
+**VERIFICATION CHECKPOINT:**
+
+Before proceeding to Step 8, confirm:
+1. [ ] Scanned CHANGELOG.md for breaking change indicators
+2. [ ] If breaking changes found: Upgrade guide exists at correct path
+3. [ ] If breaking changes found: Upgrade guide contains all required sections
+4. [ ] If breaking changes found: Release notes reference upgrade guide
+5. [ ] If breaking changes found: Migration steps documented
+6. [ ] If no breaking changes: Confirmed no indicators in changelog
+
+**If you cannot check ALL applicable boxes above, you MUST NOT proceed.**
+
+**Main Claude proceeds to Acceptance Testing Gate (Step 8) ONLY if breaking changes check passes.**
 
 ### 8. Acceptance Testing Gate (Main Claude Executes) - 🚨 BLOCKING
 
