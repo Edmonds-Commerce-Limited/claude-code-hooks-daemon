@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.constants.events import EventID
 from claude_code_hooks_daemon.install.upgrade_compatibility import (
     CompatibilityChecker,
     CompatibilityReport,
@@ -61,13 +62,13 @@ class TestHandlerCompatibility:
         """HandlerCompatibility can be initialized with all fields."""
         compat = HandlerCompatibility(
             handler_name="destructive_git",
-            event_type="pre_tool_use",
+            event_type=EventID.PRE_TOOL_USE,
             status=CompatibilityStatus.COMPATIBLE,
             message="Handler is compatible",
         )
 
         assert compat.handler_name == "destructive_git"
-        assert compat.event_type == "pre_tool_use"
+        assert compat.event_type == EventID.PRE_TOOL_USE
         assert compat.status == CompatibilityStatus.COMPATIBLE
         assert compat.message == "Handler is compatible"
 
