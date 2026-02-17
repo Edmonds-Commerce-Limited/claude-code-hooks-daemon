@@ -541,7 +541,9 @@ class TestControllerPluginLoadingEdgeCases:
 
         assert result == 0
 
-    def test_load_plugins_crashes_on_handler_with_no_matching_plugin(self, workspace_root: Path) -> None:
+    def test_load_plugins_crashes_on_handler_with_no_matching_plugin(
+        self, workspace_root: Path
+    ) -> None:
         """_load_plugins CRASHES when class name doesn't match any plugin config (FAIL FAST)."""
         from claude_code_hooks_daemon.config.models import PluginConfig, PluginsConfig
         from claude_code_hooks_daemon.constants import HandlerID, Priority
