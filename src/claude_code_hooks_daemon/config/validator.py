@@ -18,6 +18,7 @@ import re
 from typing import Any, ClassVar
 
 from claude_code_hooks_daemon.constants import ConfigKey, EventID
+from claude_code_hooks_daemon.utils.strict_mode import handle_tier2_error
 
 logger = logging.getLogger(__name__)
 
@@ -118,22 +119,21 @@ class ConfigValidator:
                             handler_config_name = ConfigValidator._to_snake_case(attr.__name__)
                             handlers.add(handler_config_name)
                 except (ImportError, SyntaxError, AttributeError) as e:
-                    if strict_mode:
-                        # TIER 2: FAIL FAST in strict mode
-                        raise RuntimeError(
-                            f"Failed to import handler module {modname} in strict mode: {e}"
-                        ) from e
-                    else:
-                        # Non-strict: Log and continue (graceful)
-                        logger.debug("Failed to import handler module %s: %s", modname, e)
+                    # TIER 2: Crash in strict_mode, log debug in non-strict
+                    handle_tier2_error(
+                        error=e,
+                        strict_mode=strict_mode,
+                        error_message=f"Failed to import handler module {modname} in strict mode",
+                        graceful_message=f"Failed to import handler module {modname}",
+                    )
                 except Exception as e:
+                    # TIER 2: Crash in strict_mode, log error in non-strict
                     if strict_mode:
-                        # TIER 2: FAIL FAST in strict mode
                         raise RuntimeError(
                             f"Unexpected error importing {modname} in strict mode: {e}"
                         ) from e
                     else:
-                        # Non-strict: Log error and continue
+                        # Non-strict: Log error with full traceback
                         logger.error("Unexpected error importing %s: %s", modname, e, exc_info=True)
 
         except ImportError as e:
@@ -143,6 +143,7 @@ class ConfigValidator:
                     f"Failed to import handlers package for {event_type} in strict mode: {e}"
                 ) from e
             # Non-strict: Event type has no handlers package (that's ok)
+            # Silent pass - this is legitimate, not an error
             pass
 
         # Cache the result

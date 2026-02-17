@@ -24,6 +24,7 @@ from claude_code_hooks_daemon.core.hook_result import HookResult
 from claude_code_hooks_daemon.core.input_schemas import get_input_schema
 from claude_code_hooks_daemon.daemon.config import DaemonConfig
 from claude_code_hooks_daemon.daemon.memory_log_handler import MemoryLogHandler
+from claude_code_hooks_daemon.utils.strict_mode import handle_tier2_error
 
 # Global memory log handler - accessible for log queries
 _memory_log_handler: MemoryLogHandler | None = None
@@ -246,6 +247,9 @@ class HooksDaemon:
 
         Returns:
             Draft7Validator instance or None if schema not found
+
+        Raises:
+            RuntimeError: If jsonschema import fails in strict_mode
         """
         if event_type not in self._input_validators:
             schema = get_input_schema(event_type)
@@ -254,8 +258,17 @@ class HooksDaemon:
                     from jsonschema import Draft7Validator
 
                     self._input_validators[event_type] = Draft7Validator(schema)
-                except ImportError:
-                    logger.warning("jsonschema not installed - input validation disabled")
+                except ImportError as e:
+                    # TIER 2: Crash in strict_mode, log warning in non-strict
+                    handle_tier2_error(
+                        error=e,
+                        strict_mode=self.config.strict_mode,
+                        error_message=(
+                            "Input validation is required in strict_mode but jsonschema is not installed. "
+                            "Install with: pip install jsonschema"
+                        ),
+                        graceful_message="jsonschema not installed - input validation disabled",
+                    )
                     return None
         return self._input_validators.get(event_type)
 
