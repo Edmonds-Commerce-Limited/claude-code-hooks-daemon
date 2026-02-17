@@ -310,3 +310,64 @@ class TestEventRouter:
         assert counts["PreToolUse"] == 0
         assert counts["PostToolUse"] == 1
         assert counts["Stop"] == 1
+
+    def test_route_with_deny_no_handlers_executed(self, router: EventRouter, monkeypatch) -> None:
+        """Route should handle DENY result with no handlers executed (empty list).
+
+        This tests line 155: early return when handlers_executed is empty.
+        This is an edge case where chain returns DENY but no handlers were tracked.
+        """
+        from claude_code_hooks_daemon.core.chain import ChainExecutionResult, HandlerChain
+
+        def mock_execute(self, hook_input, strict_mode=False):
+            # Return DENY result but with empty handlers_executed list
+            return ChainExecutionResult(
+                result=HookResult.deny(reason="Edge case denial"),
+                handlers_executed=[],  # Empty list - no handlers executed
+                terminated_by=None,  # Non-terminal
+            )
+
+        # Monkey-patch the HandlerChain.execute method
+        monkeypatch.setattr(HandlerChain, "execute", mock_execute)
+
+        hook_input = {"toolName": "Bash"}
+        result = router.route(EventType.PRE_TOOL_USE, hook_input)
+
+        # Should handle the edge case gracefully (line 155 early return)
+        # Reason should be unchanged (no footer appended)
+        assert result.result.decision == Decision.DENY
+        assert result.result.reason == "Edge case denial"
+        assert len(result.handlers_executed) == 0
+
+    def test_route_with_handler_not_in_chain(self, router: EventRouter) -> None:
+        """Route should handle case where handler name doesn't exist in chain.
+
+        This tests line 159: early return when handler is not found in chain.
+        This can happen if execution_result references a handler that was
+        dynamically unregistered or never existed.
+        """
+        # Create a mock execution result with a handler that doesn't exist
+        from claude_code_hooks_daemon.core.chain import ChainExecutionResult
+
+        # Create a handler and route normally first
+        handler = MockHandler(name="existing-handler", terminal=True)
+        handler.handle_result = HookResult.deny(reason="Blocked")
+        router.register(EventType.PRE_TOOL_USE, handler)
+
+        # Unregister the handler before the footer is appended
+        # This simulates a race condition or dynamic handler removal
+        router.unregister(EventType.PRE_TOOL_USE, "existing-handler")
+
+        # Now manually create an execution result that references the missing handler
+        fake_result = ChainExecutionResult(
+            result=HookResult.deny(reason="Test denial"),
+            handlers_executed=["non-existent-handler"],
+            terminated_by="non-existent-handler",
+        )
+
+        # Manually call _inject_config_key_footer to test line 159
+        chain = router.get_chain(EventType.PRE_TOOL_USE)
+        router._inject_config_key_footer(fake_result, EventType.PRE_TOOL_USE, chain)
+
+        # Result reason should be unchanged (no footer appended due to missing handler)
+        assert fake_result.result.reason == "Test denial"

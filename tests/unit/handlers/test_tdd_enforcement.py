@@ -333,6 +333,15 @@ class TestTddEnforcementHandler:
         result = handler.handle(hook_input)
         assert result.guidance is None
 
+    def test_handle_unknown_extension_returns_allow(self, handler):
+        """handle() should return ALLOW for unknown file extensions (no strategy found)."""
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/workspace/src/config/settings.toml"},
+        }
+        result = handler.handle(hook_input)
+        assert result.decision.value == "allow"
+
     # _get_test_file_path() Tests
     def test_get_test_file_path_converts_handler_to_test_filename(self, handler):
         """_get_test_file_path() should convert handler filename to test filename."""
