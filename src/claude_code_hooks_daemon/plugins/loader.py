@@ -285,8 +285,12 @@ class PluginLoader:
                 if handler is not None:
                     loaded_handlers.append(handler)
                 else:
-                    logger.warning(
-                        f"Failed to load plugin handler from module '{module_name}' (path: '{plugin_config.path}')"
+                    # FAIL FAST: If a configured plugin can't be loaded, CRASH
+                    raise RuntimeError(
+                        f"Failed to load plugin handler from module '{module_name}' "
+                        f"(path: '{plugin_config.path}'). "
+                        f"Check the plugin file exists and contains a valid Handler class. "
+                        f"See daemon logs above for specific loading errors."
                     )
 
         # Sort by priority (lower number = higher priority)

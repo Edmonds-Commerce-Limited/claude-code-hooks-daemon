@@ -549,8 +549,8 @@ class TestLoadFromPluginsConfig:
 
         assert handlers == []
 
-    def test_load_from_plugins_config_no_paths(self) -> None:
-        """Test loading with no paths falls back to plugin path."""
+    def test_load_from_plugins_config_no_paths_crashes_on_missing(self) -> None:
+        """Test loading with no paths CRASHES if plugin can't be loaded (FAIL FAST)."""
         from claude_code_hooks_daemon.config.models import PluginConfig, PluginsConfig
 
         plugins_config = PluginsConfig(
@@ -562,11 +562,9 @@ class TestLoadFromPluginsConfig:
             ],
         )
 
-        # Should try to load from the absolute path in plugin.path
-        handlers = PluginLoader.load_from_plugins_config(plugins_config)
-
-        # Will fail to load (path doesn't exist), but should not crash
-        assert handlers == []
+        # FAIL FAST: Should crash if configured plugin can't be loaded
+        with pytest.raises(RuntimeError, match="Failed to load plugin handler"):
+            PluginLoader.load_from_plugins_config(plugins_config)
 
     def test_load_from_plugins_config_with_specific_handlers(self, plugin_dir: Path) -> None:
         """Test loading only specific handler classes from a plugin."""
@@ -616,8 +614,8 @@ class TestLoadFromPluginsConfig:
         assert handlers[1].priority == 40
         assert handlers[2].priority == 50
 
-    def test_load_from_plugins_config_invalid_plugin_continues(self, plugin_dir: Path) -> None:
-        """Test that invalid plugins don't stop other plugins from loading."""
+    def test_load_from_plugins_config_invalid_plugin_crashes(self, plugin_dir: Path) -> None:
+        """Test that invalid plugins CRASH immediately (FAIL FAST)."""
         from claude_code_hooks_daemon.config.models import PluginConfig, PluginsConfig
 
         plugins_config = PluginsConfig(
@@ -628,14 +626,13 @@ class TestLoadFromPluginsConfig:
                 ),  # Will fail
                 PluginConfig(
                     path="custom_handler", event_type="pre_tool_use", enabled=True
-                ),  # Should succeed
+                ),  # Would succeed, but never reached
             ],
         )
 
-        handlers = PluginLoader.load_from_plugins_config(plugins_config)
-
-        assert len(handlers) == 1
-        assert handlers[0].name == "test-custom"
+        # FAIL FAST: Should crash on first invalid plugin, not continue
+        with pytest.raises(RuntimeError, match="Failed to load plugin handler"):
+            PluginLoader.load_from_plugins_config(plugins_config)
 
     def test_load_from_plugins_config_absolute_path_in_plugin(self, plugin_dir: Path) -> None:
         """Test loading plugin with absolute path in plugin.path."""

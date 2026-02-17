@@ -254,30 +254,35 @@ class DaemonController:
                 plugin_module = Path(plugin.path).stem
                 # The handler class name would be PascalCase of the module name
                 expected_class = PluginLoader.snake_to_pascal(plugin_module)
+                expected_class_with_suffix = f"{expected_class}Handler"
 
-                if handler.__class__.__name__ == expected_class:
+                # Check both base class name and with Handler suffix
+                # This mirrors the logic in PluginLoader.load_handler() which tries both variants
+                if handler.__class__.__name__ in (expected_class, expected_class_with_suffix):
                     event_type_str = plugin.event_type
                     break
 
             if event_type_str is None:
-                logger.warning(
-                    "Could not determine event type for plugin handler '%s' "
-                    "(class: %s), skipping",
-                    handler.name,
-                    handler.__class__.__name__,
+                # FAIL FAST: If a configured plugin handler can't be registered, CRASH
+                # Users MUST know their protection is down - silent failures are unacceptable
+                raise RuntimeError(
+                    f"Failed to register plugin handler '{handler.name}' "
+                    f"(class: {handler.__class__.__name__}). "
+                    f"Could not match handler class to any plugin configuration entry. "
+                    f"This indicates a mismatch between the loaded handler and the plugin config. "
+                    f"Check your plugin configuration in .claude/hooks-daemon.yaml."
                 )
-                continue
 
             # Convert event type string to EventType enum
             try:
                 event_type = EventType.from_string(event_type_str)
-            except ValueError:
-                logger.error(
-                    "Invalid event type '%s' for plugin handler '%s', skipping",
-                    event_type_str,
-                    handler.name,
-                )
-                continue
+            except ValueError as e:
+                # FAIL FAST: Invalid event type in config is a fatal error
+                raise RuntimeError(
+                    f"Invalid event type '{event_type_str}' for plugin handler '{handler.name}'. "
+                    f"Event type must be one of: {', '.join(et.value for et in EventType)}. "
+                    f"Check your plugin configuration in .claude/hooks-daemon.yaml."
+                ) from e
 
             # Register handler with the router
             self._router.register(event_type, handler)

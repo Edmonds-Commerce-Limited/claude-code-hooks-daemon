@@ -654,12 +654,13 @@ plugins:
 class TestPluginDaemonErrorHandling:
     """Tests for error handling when loading plugins through daemon."""
 
-    def test_daemon_starts_with_missing_plugin_path(
+    def test_daemon_crashes_with_missing_plugin_path(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Daemon starts successfully even if plugin path doesn't exist.
+        """Daemon CRASHES if configured plugin path doesn't exist (FAIL FAST).
 
-        Plugins should fail-open - missing plugins shouldn't prevent daemon startup.
+        Configured plugins that can't be loaded must crash the daemon.
+        Users MUST know their protection is down.
         """
         # Set unique paths for test daemon isolation
         test_id = tmp_path.name[-20:]
@@ -724,24 +725,26 @@ plugins:
       enabled: true
 """)
 
-        # Start daemon - should succeed even with missing plugin
+        # Start daemon - should CRASH with missing plugin (FAIL FAST)
         start_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "start"]
-        with open("/dev/null", "w") as devnull:
-            result = subprocess.run(
-                start_cmd,
-                cwd=tmp_path,
-                env=test_env,
-                stdout=devnull,
-                stderr=devnull,
-                timeout=Timeout.SOCKET_CONNECT,
-            )
+        result = subprocess.run(
+            start_cmd,
+            cwd=tmp_path,
+            env=test_env,
+            capture_output=True,
+            timeout=Timeout.SOCKET_CONNECT,
+        )
 
-        # Daemon should start successfully (fail-open for plugins)
-        assert result.returncode == 0, "Daemon should start even with missing plugins"
+        # Daemon MUST crash if configured plugin can't be loaded
+        assert result.returncode != 0, "Daemon must crash with missing plugin (FAIL FAST)"
 
-        time.sleep(1)
+        # Verify error message mentions plugin loading failure
+        error_output = result.stderr.decode()
+        assert "Failed to load plugin handler" in error_output or "RuntimeError" in error_output, (
+            "Error message should mention plugin loading failure"
+        )
 
-        # Verify running
+        # Verify daemon is NOT running
         status_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "status"]
         status_result = subprocess.run(
             status_cmd,
@@ -752,17 +755,10 @@ plugins:
             timeout=Timeout.SOCKET_CONNECT,
         )
 
-        assert "RUNNING" in status_result.stdout, "Daemon should be running"
+        # Status should indicate daemon is NOT running
+        assert "RUNNING" not in status_result.stdout, "Daemon should NOT be running after crash"
 
-        # Cleanup
-        stop_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "stop"]
-        subprocess.run(
-            stop_cmd,
-            cwd=tmp_path,
-            env=test_env,
-            capture_output=True,
-            timeout=Timeout.SOCKET_CONNECT,
-        )
+        # No cleanup needed - daemon never started
 
     # NOTE: Removed test_daemon_logs_plugin_loading_status
     # The daemon uses in-memory logging (MemoryLogHandler) by design.
