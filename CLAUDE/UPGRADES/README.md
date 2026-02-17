@@ -41,15 +41,36 @@ CLAUDE/UPGRADES/
 │       ├── config-after.yaml
 │       └── examples/
 └── v2/                                 # v2.x.x upgrades
-    └── v2.0-to-v2.1/
-        ├── v2.0-to-v2.1.md
-        ├── config-additions.yaml
+    ├── v2.0-to-v2.1/
+    │   ├── v2.0-to-v2.1.md
+    │   ├── config-additions.yaml
+    │   ├── config-before.yaml
+    │   ├── config-after.yaml
+    │   ├── verification.sh
+    │   └── examples/
+    │       ├── yolo-detection-output.json
+    │       └── session-start-test.sh
+    ├── v2.10-to-v2.11/                 # Breaking: Removed project-specific handlers
+    │   ├── v2.10-to-v2.11.md
+    │   ├── config-before.yaml
+    │   ├── config-after.yaml
+    │   ├── migration-script.sh
+    │   ├── verification.sh
+    │   ├── README.md
+    │   └── SUMMARY.md
+    ├── v2.11-to-v2.12/                 # Breaking: Handler rename (validate_eslint_on_write → lint_on_edit)
+    │   ├── v2.11-to-v2.12.md
+    │   ├── config-before.yaml
+    │   ├── config-after.yaml
+    │   ├── migration-script.sh
+    │   ├── verification.sh
+    │   └── README.md
+    └── v2.12-to-v2.13/                 # Safe upgrade, no breaking changes
+        ├── v2.12-to-v2.13.md
         ├── config-before.yaml
         ├── config-after.yaml
         ├── verification.sh
-        └── examples/
-            ├── yolo-detection-output.json
-            └── session-start-test.sh
+        └── README.md
 ```
 
 **Version Organization Rules**:

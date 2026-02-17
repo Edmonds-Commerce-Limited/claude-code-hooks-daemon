@@ -1,0 +1,67 @@
+# Example configuration BEFORE upgrade (v2.10.x)
+#
+# This shows a typical v2.10 configuration that includes the removed handlers.
+
+version: "2.0"
+
+daemon:
+  idle_timeout_seconds: 600
+  log_level: INFO
+
+handlers:
+  pre_tool_use:
+    destructive_git:
+      enabled: true
+      priority: 10
+
+    sed_blocker:
+      enabled: true
+      priority: 11
+
+    absolute_path:
+      enabled: true
+      priority: 12
+
+  post_tool_use:
+    bash_error_detector:
+      enabled: true
+      priority: 10
+
+    # REMOVED IN v2.11: Project-specific sitemap validation
+    validate_sitemap:
+      enabled: true
+      priority: 50
+
+  session_start:
+    yolo_container_detection:
+      enabled: true
+      priority: 10
+
+  pre_compact:
+    transcript_archiver:
+      enabled: true
+      priority: 10
+
+  session_end:
+    cleanup:
+      enabled: true
+      priority: 10
+
+  subagent_stop:
+    subagent_completion_logger:
+      enabled: true
+      priority: 10
+
+    # REMOVED IN v2.11: Project-specific validator reminders
+    remind_validator:
+      enabled: true
+      priority: 50
+
+  user_prompt_submit:
+    git_context_injector:
+      enabled: true
+      priority: 10
+
+project_handlers:
+  enabled: true
+  path: .claude/project-handlers

@@ -1,0 +1,90 @@
+# Example v2.13.0 Configuration
+# NO CHANGES REQUIRED - This is the SAME config as v2.12.0
+# Optional new features are shown in comments below
+
+version: 1.0
+
+daemon:
+  idle_timeout_seconds: 600
+  log_level: INFO
+  self_install_mode: false
+
+  # NEW in v2.13.0 (OPTIONAL): Single daemon process enforcement
+  # Auto-enabled in containers (YOLO, Docker, Podman)
+  # Manually enable on single-user development machines
+  # enforce_single_daemon_process: true
+
+handlers:
+  # PreToolUse Handlers
+  pre_tool_use:
+    destructive_git:
+      enabled: true
+      priority: 10
+
+    sed_blocker:
+      enabled: true
+      priority: 11
+
+    pip_break_system:
+      enabled: true
+      priority: 12
+
+    npm_audit_blocker:
+      enabled: true
+      priority: 45
+
+    tdd_enforcement:
+      enabled: true
+      priority: 30
+      options:
+        languages:
+          - Python
+          - JavaScript/TypeScript
+
+    qa_suppression:
+      enabled: true
+      priority: 27
+      options:
+        languages:
+          - Python
+          - PHP
+          # PHP now blocks 8 additional suppression patterns (v2.13.0 fix)
+
+  # PostToolUse Handlers
+  post_tool_use:
+    lint_on_edit:
+      enabled: true
+      priority: 25
+      options:
+        languages:
+          - Python
+          - JavaScript/TypeScript
+
+    notification_logger:
+      enabled: true
+      priority: 100
+
+  # SessionStart Handlers
+  session_start:
+    session_initializer:
+      enabled: true
+      priority: 50
+
+# Project Handlers
+project_handlers:
+  enabled: true  # ReleaseBlockerHandler auto-discovered (v2.13.0)
+  path: .claude/project-handlers
+
+# ------------------------------------------------------------
+# SUMMARY OF v2.13.0 CHANGES:
+# ------------------------------------------------------------
+#
+# ✅ NO BREAKING CHANGES
+#
+# Optional New Features:
+# 1. daemon.enforce_single_daemon_process (auto-enabled in containers)
+# 2. ReleaseBlockerHandler (auto-discovered project handler)
+# 3. PHP QA suppression fix (8 new patterns blocked automatically)
+#
+# Your v2.12.0 config works without modifications!
+# ------------------------------------------------------------

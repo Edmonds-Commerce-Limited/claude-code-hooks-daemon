@@ -1,0 +1,64 @@
+# Example configuration AFTER upgrade (v2.11.0)
+#
+# This shows the configuration after removing obsolete handler references.
+
+version: "2.0"
+
+daemon:
+  idle_timeout_seconds: 600
+  log_level: INFO
+
+handlers:
+  pre_tool_use:
+    destructive_git:
+      enabled: true
+      priority: 10
+
+    sed_blocker:
+      enabled: true
+      priority: 11
+
+    absolute_path:
+      enabled: true
+      priority: 12
+
+  post_tool_use:
+    bash_error_detector:
+      enabled: true
+      priority: 10
+
+    # validate_sitemap removed in v2.11 - migrate to project handlers if needed
+    # See: .claude/hooks-daemon/CLAUDE/PROJECT_HANDLERS.md
+
+  session_start:
+    yolo_container_detection:
+      enabled: true
+      priority: 10
+
+  pre_compact:
+    transcript_archiver:
+      enabled: true
+      priority: 10
+
+  session_end:
+    cleanup:
+      enabled: true
+      priority: 10
+
+  subagent_stop:
+    subagent_completion_logger:
+      enabled: true
+      priority: 10
+
+    # remind_validator removed in v2.11 - migrate to project handlers if needed
+    # See: .claude/hooks-daemon/CLAUDE/PROJECT_HANDLERS.md
+
+  user_prompt_submit:
+    git_context_injector:
+      enabled: true
+      priority: 10
+
+# If you need the removed handlers' functionality, recreate as project handlers
+project_handlers:
+  enabled: true
+  path: .claude/project-handlers

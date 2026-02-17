@@ -1,0 +1,44 @@
+# Example v2.11 configuration with old handler name
+# This shows typical config BEFORE upgrading to v2.12
+
+version: "2.0"
+
+daemon:
+  idle_timeout_seconds: 600
+  log_level: INFO
+
+handlers:
+  # PreToolUse handlers
+  pre_tool_use:
+    destructive_git:
+      enabled: true
+      priority: 10
+
+    sed_blocker:
+      enabled: true
+      priority: 11
+
+    tdd_enforcement:
+      enabled: true
+      priority: 35
+
+  # PostToolUse handlers
+  post_tool_use:
+    bash_error_detector:
+      enabled: true
+      priority: 10
+
+    # OLD HANDLER NAME (v2.11)
+    validate_eslint_on_write:  # ← This needs to be renamed
+      enabled: true
+      priority: 25
+
+  # SessionStart handlers
+  session_start:
+    yolo_container_detection:
+      enabled: true
+      priority: 10
+
+    version_check:
+      enabled: true
+      priority: 56

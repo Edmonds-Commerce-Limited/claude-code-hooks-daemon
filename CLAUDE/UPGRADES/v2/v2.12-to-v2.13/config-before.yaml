@@ -1,0 +1,69 @@
+# Example v2.12.0 Configuration
+# This config continues to work in v2.13.0 without any changes
+
+version: 1.0
+
+daemon:
+  idle_timeout_seconds: 600
+  log_level: INFO
+  self_install_mode: false
+
+handlers:
+  # PreToolUse Handlers
+  pre_tool_use:
+    destructive_git:
+      enabled: true
+      priority: 10
+
+    sed_blocker:
+      enabled: true
+      priority: 11
+
+    pip_break_system:
+      enabled: true
+      priority: 12
+
+    npm_audit_blocker:
+      enabled: true
+      priority: 45
+
+    tdd_enforcement:
+      enabled: true
+      priority: 30
+      options:
+        languages:
+          - Python
+          - JavaScript/TypeScript
+
+    qa_suppression:
+      enabled: true
+      priority: 27
+      options:
+        languages:
+          - Python
+          - PHP
+
+  # PostToolUse Handlers
+  post_tool_use:
+    lint_on_edit:
+      enabled: true
+      priority: 25
+      options:
+        languages:
+          - Python
+          - JavaScript/TypeScript
+
+    notification_logger:
+      enabled: true
+      priority: 100
+
+  # SessionStart Handlers
+  session_start:
+    session_initializer:
+      enabled: true
+      priority: 50
+
+# Project Handlers
+project_handlers:
+  enabled: true
+  path: .claude/project-handlers
