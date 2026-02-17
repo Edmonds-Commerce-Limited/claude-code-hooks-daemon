@@ -1,5 +1,7 @@
 """Tests for TDD Strategy Protocol."""
 
+import pytest
+
 from claude_code_hooks_daemon.strategies.tdd.protocol import TddStrategy
 
 
@@ -74,3 +76,38 @@ def test_protocol_has_expected_methods() -> None:
     assert "should_skip" in protocol_attrs
     assert "compute_test_filename" in protocol_attrs
     assert "get_acceptance_tests" in protocol_attrs
+
+
+class TestRealImplementationsSatisfyProtocol:
+    """Test that all real strategy implementations satisfy the protocol."""
+
+    @pytest.mark.parametrize(
+        "strategy_class",
+        [
+            "PythonTddStrategy",
+            "GoTddStrategy",
+            "JavaScriptTddStrategy",
+            "PhpTddStrategy",
+            "RustTddStrategy",
+            "JavaTddStrategy",
+            "CSharpTddStrategy",
+            "KotlinTddStrategy",
+            "RubyTddStrategy",
+            "SwiftTddStrategy",
+            "DartTddStrategy",
+        ],
+    )
+    def test_strategy_satisfies_protocol(self, strategy_class: str) -> None:
+        """Test that each real strategy implementation satisfies TddStrategy protocol."""
+        # Import the strategy class dynamically
+        module_name = strategy_class.replace("TddStrategy", "").lower()
+        module_path = f"claude_code_hooks_daemon.strategies.tdd.{module_name}_strategy"
+
+        module = __import__(module_path, fromlist=[strategy_class])
+        strategy_cls = getattr(module, strategy_class)
+
+        # Instantiate and check isinstance
+        strategy = strategy_cls()
+        assert isinstance(
+            strategy, TddStrategy
+        ), f"{strategy_class} should satisfy TddStrategy protocol"

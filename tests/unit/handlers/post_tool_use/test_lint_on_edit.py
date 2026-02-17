@@ -301,6 +301,168 @@ class TestLanguageFilter:
         assert handler.matches(hook_input) is True
 
 
+class TestCommandOverrides:
+    """Test command override functionality."""
+
+    @patch("claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit.subprocess")
+    def test_default_command_override(self, mock_subprocess: MagicMock, tmp_path: Path) -> None:
+        """Test that default command can be overridden via config."""
+        handler = LintOnEditHandler()
+        handler._command_overrides = {"Python": {"default": "custom-lint {file}", "extended": None}}
+
+        test_file = tmp_path / "app.py"
+        test_file.write_text("x = 1")
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = ""
+        mock_result.stderr = ""
+        mock_subprocess.run.return_value = mock_result
+
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(test_file)},
+        }
+        result = handler.handle(hook_input)
+        assert result.decision.value == "allow"
+
+        # Verify custom command was used (only called once since extended is None)
+        assert mock_subprocess.run.call_count == 1
+        call_args = mock_subprocess.run.call_args[0][0]
+        assert "custom-lint" in call_args[0]
+
+    @patch("claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit.subprocess")
+    def test_extended_command_override(self, mock_subprocess: MagicMock, tmp_path: Path) -> None:
+        """Test that extended command can be overridden via config."""
+        handler = LintOnEditHandler()
+        handler._command_overrides = {"Shell": {"extended": "custom-shellcheck {file}"}}
+
+        test_file = tmp_path / "script.sh"
+        test_file.write_text("#!/bin/bash\necho hello")
+
+        pass_result = MagicMock()
+        pass_result.returncode = 0
+        pass_result.stdout = ""
+        pass_result.stderr = ""
+
+        # Default passes, then extended with custom command
+        mock_subprocess.run.return_value = pass_result
+
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(test_file)},
+        }
+        result = handler.handle(hook_input)
+        assert result.decision.value == "allow"
+
+        # Should call subprocess twice (default + extended)
+        assert mock_subprocess.run.call_count >= 2
+
+    @patch("claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit.subprocess")
+    def test_extended_command_disabled_via_null_override(
+        self, mock_subprocess: MagicMock, tmp_path: Path
+    ) -> None:
+        """Test that extended command can be disabled by setting to None."""
+        handler = LintOnEditHandler()
+        handler._command_overrides = {"Shell": {"extended": None}}
+
+        test_file = tmp_path / "script.sh"
+        test_file.write_text("#!/bin/bash\necho hello")
+
+        pass_result = MagicMock()
+        pass_result.returncode = 0
+        pass_result.stdout = ""
+        pass_result.stderr = ""
+        mock_subprocess.run.return_value = pass_result
+
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(test_file)},
+        }
+        result = handler.handle(hook_input)
+        assert result.decision.value == "allow"
+
+        # Should only call default lint (extended disabled)
+        assert mock_subprocess.run.call_count == 1
+
+
+class TestEdgeCases:
+    """Test edge cases and error paths."""
+
+    def test_apply_language_filter_called_only_once(self, tmp_path: Path) -> None:
+        """Test that language filter is applied only once (lazy initialization)."""
+        handler = LintOnEditHandler()
+        handler._languages = ["Python"]
+
+        # First call should apply filter
+        py_file = tmp_path / "app.py"
+        py_file.write_text("x = 1")
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(py_file)},
+        }
+        handler.matches(hook_input)
+        assert handler._languages_applied is True
+
+        # Second call should return early (line 68)
+        handler.matches(hook_input)
+        # If we get here without error, early return worked
+
+    def test_handle_unknown_file_extension_returns_allow(self, handler: LintOnEditHandler) -> None:
+        """Test that handle returns ALLOW for unknown file extensions."""
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/tmp/unknown.xyz"},
+        }
+        result = handler.handle(hook_input)
+        assert result.decision.value == "allow"
+
+    @patch("claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit.subprocess")
+    def test_lint_error_with_both_stdout_and_stderr(
+        self, mock_subprocess: MagicMock, handler: LintOnEditHandler, tmp_path: Path
+    ) -> None:
+        """Test that both stdout and stderr are included in error message."""
+        test_file = tmp_path / "app.py"
+        test_file.write_text("x = 1")
+
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stdout = "Error in stdout"
+        mock_result.stderr = "Error in stderr"
+        mock_subprocess.run.return_value = mock_result
+
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(test_file)},
+        }
+        result = handler.handle(hook_input)
+        assert result.decision.value == "deny"
+        assert "Error in stdout" in (result.reason or "")
+        assert "Error in stderr" in (result.reason or "")
+
+    @patch("claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit.subprocess")
+    def test_lint_error_with_only_stderr(
+        self, mock_subprocess: MagicMock, handler: LintOnEditHandler, tmp_path: Path
+    ) -> None:
+        """Test that stderr is used when stdout is empty."""
+        test_file = tmp_path / "app.py"
+        test_file.write_text("x = 1")
+
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stdout = ""
+        mock_result.stderr = "Error in stderr only"
+        mock_subprocess.run.return_value = mock_result
+
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(test_file)},
+        }
+        result = handler.handle(hook_input)
+        assert result.decision.value == "deny"
+        assert "Error in stderr only" in (result.reason or "")
+
+
 class TestAcceptanceTests:
     def test_returns_list(self, handler: LintOnEditHandler) -> None:
         tests = handler.get_acceptance_tests()
