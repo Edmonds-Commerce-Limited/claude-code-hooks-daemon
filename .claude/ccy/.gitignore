@@ -1,0 +1,5 @@
+# CCY session data - NEVER commit sensitive files
+# Only .gitignore and Dockerfile are safe to track
+*
+!.gitignore
+!Dockerfile
