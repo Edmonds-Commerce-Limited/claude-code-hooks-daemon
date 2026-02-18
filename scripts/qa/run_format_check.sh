@@ -14,6 +14,7 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 OUTPUT_FILE="${PROJECT_ROOT}/untracked/qa/format.json"
 
 # Source venv management
+# shellcheck source=../venv-include.bash
 source "${PROJECT_ROOT}/scripts/venv-include.bash"
 
 cd "${PROJECT_ROOT}"

@@ -15,6 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # Source venv management functions
+# shellcheck source=./venv-include.bash
 source "${SCRIPT_DIR}/venv-include.bash"
 
 cd "${PROJECT_ROOT}"
