@@ -152,8 +152,8 @@ class TestModelContextHandler:
 
         assert len(result.context) == 1
         assert "Opus 4.6" in result.context[0]
-        # Medium effort: first two bars lit in green, third dim
-        assert "\033[32m▌▌" in result.context[0]
+        # Medium effort: first two bars lit in orange, third dim grey
+        assert "\033[38;5;208m▌▌" in result.context[0]
 
     def test_opus_shows_effort_bars_low_blue(
         self, handler: ModelContextHandler, tmp_path: Path
@@ -170,8 +170,8 @@ class TestModelContextHandler:
         with patch.object(handler, "_get_settings_path", return_value=settings_file):
             result = handler.handle(hook_input)
 
-        # Low effort: first bar lit in blue, remaining dim
-        assert "\033[34m▌" in result.context[0]
+        # Low effort: first bar lit in orange, remaining dim grey
+        assert "\033[38;5;208m▌" in result.context[0]
 
     def test_opus_shows_effort_bars_high_orange(
         self, handler: ModelContextHandler, tmp_path: Path
@@ -222,7 +222,7 @@ class TestModelContextHandler:
             result = handler.handle(hook_input)
 
         assert "Haiku 3.5" in result.context[0]
-        assert "\033[32m▌▌" in result.context[0]
+        assert "\033[38;5;208m▌▌" in result.context[0]
 
     def test_no_effort_when_not_set(self, handler: ModelContextHandler, tmp_path: Path) -> None:
         """Should not show effort bars when effortLevel is not set in settings."""
