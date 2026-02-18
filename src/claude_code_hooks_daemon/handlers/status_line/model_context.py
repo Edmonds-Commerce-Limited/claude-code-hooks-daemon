@@ -1,8 +1,8 @@
 """Model and context percentage handler for status line.
 
-Formats color-coded model name with effort level and context percentage using emoticons:
+Formats color-coded model name with effort level signal bars and context percentage:
 
-Format: 🤖 Model(effort) | ◔ XX%
+Format: 🤖 Model ▂▄█ | ◔ XX%
 
 Model colors (by model type):
 - Blue: Haiku models
@@ -10,10 +10,12 @@ Model colors (by model type):
 - Orange: Opus models
 - White: Unknown/other models
 
-Effort level colors (shown next to model for Opus):
-- Blue: low effort
-- Green: medium effort
-- Orange: high effort
+Effort level signal bars (shown for all models when effortLevel is set):
+- Low:    ▂░░  (one bar lit, blue)
+- Medium: ▂▄░  (two bars lit, green)
+- High:   ▂▄█  (all bars lit, orange)
+
+Unlit bars are rendered in dim grey. Bars omitted when effortLevel not in settings.
 
 Context usage (quarter circle icons with color-coded percentages):
 - ◔ Green (0-25%): 1/4 filled - Low usage, plenty of space
@@ -38,6 +40,14 @@ EFFORT_COLORS: dict[str, str] = {
     "medium": "\033[32m",  # Green
     "high": "\033[38;5;208m",  # Orange
 }
+
+# Signal bar characters (ascending height: quarter, half, full block)
+_EFFORT_BAR_1 = "▂"
+_EFFORT_BAR_2 = "▄"
+_EFFORT_BAR_3 = "█"
+
+# ANSI dim grey for unlit effort bars
+_EFFORT_DIM = "\033[2;37m"
 
 
 class ModelContextHandler(Handler):
@@ -95,27 +105,39 @@ class ModelContextHandler(Handler):
         return HookResult(context=[status])
 
     def _get_effort_suffix(self, model_lower: str, reset: str) -> str:
-        """Get effort level suffix for Opus models.
+        """Get effort level signal bars for all models.
 
-        Only shows effort level for Opus models since effort/reasoning
-        budget is most relevant there.
+        Shows three signal bars (▂▄█) where lit bars reflect the effort level:
+        - Low:    ▂ lit (blue), ▄█ dim
+        - Medium: ▂▄ lit (green), █ dim
+        - High:   ▂▄█ all lit (orange)
 
         Args:
-            model_lower: Lowercased model display name
+            model_lower: Lowercased model display name (unused, kept for API compat)
             reset: ANSI reset code
 
         Returns:
-            Formatted effort suffix like "(medium)" or empty string
+            Formatted effort bars like " ▂▄█" or empty string when not set
         """
-        if "opus" not in model_lower:
-            return ""
-
         effort_level = self._read_effort_level()
         if effort_level is None:
             return ""
 
         effort_color = EFFORT_COLORS.get(effort_level, "\033[37m")
-        return f"({effort_color}{effort_level}{reset})"
+
+        if effort_level == "low":
+            bars = (
+                f"{effort_color}{_EFFORT_BAR_1}{_EFFORT_DIM}{_EFFORT_BAR_2}{_EFFORT_BAR_3}{reset}"
+            )
+        elif effort_level == "medium":
+            bars = (
+                f"{effort_color}{_EFFORT_BAR_1}{_EFFORT_BAR_2}{_EFFORT_DIM}{_EFFORT_BAR_3}{reset}"
+            )
+        else:
+            # High (or unknown): all bars lit
+            bars = f"{effort_color}{_EFFORT_BAR_1}{_EFFORT_BAR_2}{_EFFORT_BAR_3}{reset}"
+
+        return f" {bars}"
 
     def _read_effort_level(self) -> str | None:
         """Read effort level from Claude settings.

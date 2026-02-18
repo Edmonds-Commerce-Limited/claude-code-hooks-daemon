@@ -135,10 +135,10 @@ class TestModelContextHandler:
         # Should use green color (0% usage)
         assert "\033[42m" in result.context[0]
 
-    def test_opus_shows_effort_level_medium(
+    def test_opus_shows_effort_bars_medium(
         self, handler: ModelContextHandler, tmp_path: Path
     ) -> None:
-        """Opus model should show effort level next to model name."""
+        """Opus model should show effort signal bars next to model name."""
         hook_input = {
             "model": {"display_name": "Opus 4.6"},
             "context_window": {"used_percentage": 30.0},
@@ -152,14 +152,13 @@ class TestModelContextHandler:
 
         assert len(result.context) == 1
         assert "Opus 4.6" in result.context[0]
-        assert "medium" in result.context[0]
-        # Green color for medium effort
-        assert "\033[32mmedium" in result.context[0]
+        # Medium effort: first two bars lit in green, third dim
+        assert "\033[32m▂▄" in result.context[0]
 
-    def test_opus_shows_effort_level_low_blue(
+    def test_opus_shows_effort_bars_low_blue(
         self, handler: ModelContextHandler, tmp_path: Path
     ) -> None:
-        """Low effort should be colored blue."""
+        """Low effort should show one bar lit in blue."""
         hook_input = {
             "model": {"display_name": "Opus 4.6"},
             "context_window": {"used_percentage": 30.0},
@@ -171,14 +170,13 @@ class TestModelContextHandler:
         with patch.object(handler, "_get_settings_path", return_value=settings_file):
             result = handler.handle(hook_input)
 
-        assert "low" in result.context[0]
-        # Blue color for low effort
-        assert "\033[34mlow" in result.context[0]
+        # Low effort: first bar lit in blue, remaining dim
+        assert "\033[34m▂" in result.context[0]
 
-    def test_opus_shows_effort_level_high_orange(
+    def test_opus_shows_effort_bars_high_orange(
         self, handler: ModelContextHandler, tmp_path: Path
     ) -> None:
-        """High effort should be colored orange."""
+        """High effort should show all three bars lit in orange."""
         hook_input = {
             "model": {"display_name": "Opus 4.6"},
             "context_window": {"used_percentage": 30.0},
@@ -190,17 +188,31 @@ class TestModelContextHandler:
         with patch.object(handler, "_get_settings_path", return_value=settings_file):
             result = handler.handle(hook_input)
 
-        assert "high" in result.context[0]
-        # Orange color for high effort
-        assert "\033[38;5;208mhigh" in result.context[0]
+        # High effort: all three bars lit in orange
+        assert "\033[38;5;208m▂▄█" in result.context[0]
 
-    def test_sonnet_does_not_show_effort(
-        self, handler: ModelContextHandler, tmp_path: Path
-    ) -> None:
-        """Sonnet model should NOT show effort level."""
+    def test_sonnet_shows_effort_bars(self, handler: ModelContextHandler, tmp_path: Path) -> None:
+        """Sonnet model should also show effort bars (effort applies to all models)."""
         hook_input = {
-            "model": {"display_name": "Sonnet 4.5"},
+            "model": {"display_name": "Sonnet 4.6"},
             "context_window": {"used_percentage": 30.0},
+        }
+        settings = {"effortLevel": "high"}
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text(json.dumps(settings))
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_file):
+            result = handler.handle(hook_input)
+
+        # Sonnet should now show effort bars too
+        assert "Sonnet 4.6" in result.context[0]
+        assert "\033[38;5;208m▂▄█" in result.context[0]
+
+    def test_haiku_shows_effort_bars(self, handler: ModelContextHandler, tmp_path: Path) -> None:
+        """Haiku model should also show effort bars."""
+        hook_input = {
+            "model": {"display_name": "Haiku 3.5"},
+            "context_window": {"used_percentage": 10.0},
         }
         settings = {"effortLevel": "medium"}
         settings_file = tmp_path / "settings.json"
@@ -209,13 +221,11 @@ class TestModelContextHandler:
         with patch.object(handler, "_get_settings_path", return_value=settings_file):
             result = handler.handle(hook_input)
 
-        assert "medium" not in result.context[0]
-        assert "effort" not in result.context[0].lower()
+        assert "Haiku 3.5" in result.context[0]
+        assert "\033[32m▂▄" in result.context[0]
 
-    def test_opus_no_effort_when_not_set(
-        self, handler: ModelContextHandler, tmp_path: Path
-    ) -> None:
-        """Opus should not show effort suffix when effortLevel is not set."""
+    def test_no_effort_when_not_set(self, handler: ModelContextHandler, tmp_path: Path) -> None:
+        """Should not show effort bars when effortLevel is not set in settings."""
         hook_input = {
             "model": {"display_name": "Opus 4.6"},
             "context_window": {"used_percentage": 30.0},
@@ -228,13 +238,13 @@ class TestModelContextHandler:
             result = handler.handle(hook_input)
 
         assert "Opus 4.6" in result.context[0]
-        # No parenthesized effort
-        assert "(" not in result.context[0] or "Ctx:" in result.context[0]
+        # No effort bars present
+        assert "▂" not in result.context[0]
 
-    def test_opus_no_effort_when_settings_missing(
+    def test_no_effort_when_settings_missing(
         self, handler: ModelContextHandler, tmp_path: Path
     ) -> None:
-        """Opus should handle missing settings file gracefully."""
+        """Should handle missing settings file gracefully - no bars shown."""
         hook_input = {
             "model": {"display_name": "Opus 4.6"},
             "context_window": {"used_percentage": 30.0},
@@ -246,3 +256,4 @@ class TestModelContextHandler:
 
         assert "Opus 4.6" in result.context[0]
         assert len(result.context) == 1
+        assert "▂" not in result.context[0]
