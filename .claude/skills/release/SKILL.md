@@ -45,8 +45,9 @@ Automate the complete release process: version updates, changelog generation, Op
 7. **Submits** to Opus agent for documentation review
 8. **🚨 UPGRADE GUIDE GATE** - Verify upgrade guide complete if breaking changes (BLOCKING)
 9. **🚨 QA VERIFICATION GATE** - Main Claude runs `./scripts/qa/run_all.sh` (BLOCKING)
-10. **🚨 ACCEPTANCE TESTING GATE** - Main Claude executes full acceptance test playbook (BLOCKING)
-11. **Commits** and pushes changes (only after gates pass)
+10. **🚨 CODE REVIEW GATE** - Main Claude reviews code diff since last tag (BLOCKING)
+11. **🚨 ACCEPTANCE TESTING GATE** - Main Claude executes acceptance tests: full suite for MAJOR/MINOR, targeted or skipped for PATCH (BLOCKING)
+12. **Commits** and pushes changes (only after gates pass)
 12. **Tags** release and creates GitHub release
 13. **Verifies** release published successfully
 
@@ -85,11 +86,17 @@ Opus Review ←→ Fix Issues (if needed)
     ABORT if missing or incomplete
     ↓
 🚨 QA VERIFICATION GATE (BLOCKING)
-    Main Claude runs: ./scripts/qa/run_all.sh
+    Main Claude runs: ./scripts/qa/run_all.sh (8 checks)
     ABORT if any check fails
     ↓
+🚨 CODE REVIEW GATE (BLOCKING)
+    Main Claude reviews git diff since last tag
+    ABORT if bugs/security issues found
+    ↓
 🚨 ACCEPTANCE TESTING GATE (BLOCKING)
-    Main Claude executes full playbook
+    MAJOR/MINOR: full test suite
+    PATCH + handler changes: targeted tests only
+    PATCH + no handler changes: skip (document reason)
     ABORT if any test fails
     ↓
 Commit & Push
@@ -350,9 +357,16 @@ Main Claude executes:
 
 Main Claude runs full QA suite manually - see RELEASING.md Step 7.
 
+### Stage 4.5: Code Review Gate (Step 7.5 - BLOCKING GATE)
+
+Main Claude reviews `git diff <last-tag>..HEAD -- src/` for bugs, security issues, and quality problems - see RELEASING.md Step 7.5.
+
 ### Stage 5: Acceptance Testing Gate (Step 8 - BLOCKING GATE)
 
-Main Claude executes acceptance tests in main thread - see RELEASING.md Step 8.
+Main Claude executes acceptance tests - scope depends on bump type:
+- MAJOR/MINOR: full test suite - see RELEASING.md Step 8
+- PATCH + handler changes: targeted tests for changed handlers only
+- PATCH + no handler changes: skip, document reason in release notes
 
 ### Stage 6: Finalization (Steps 9-11)
 

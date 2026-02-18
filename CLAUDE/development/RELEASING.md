@@ -510,7 +510,39 @@ Before proceeding to Step 8, confirm:
 
 **If you cannot check ALL applicable boxes above, you MUST NOT proceed.**
 
-**Main Claude proceeds to Acceptance Testing Gate (Step 8) ONLY if breaking changes check passes.**
+**Main Claude proceeds to Code Review Gate (Step 7.5) ONLY if breaking changes check passes.**
+
+### 7.5. Code Review Gate (Main Claude Executes) - 🚨 BLOCKING
+
+**CRITICAL BLOCKING GATE: Main Claude must review the actual code changes in this release.**
+
+**Purpose**: Catch bugs, security issues, and quality problems before releasing. This is distinct from Opus's documentation review (Step 6) — this reviews the *code*, not the release notes.
+
+**STEP 7.5.1: Get the code diff**
+
+```bash
+LAST_TAG=$(git describe --tags --abbrev=0)
+git log --oneline "${LAST_TAG}..HEAD"
+git diff "${LAST_TAG}..HEAD" -- src/
+```
+
+**STEP 7.5.2: Review checklist**
+
+- [ ] No obvious bugs or logic errors in handler `matches()` / `handle()` logic
+- [ ] No security anti-patterns (shell injection, hardcoded secrets, unvalidated external input)
+- [ ] Handler priority ranges correct (10-20 safety, 25-35 quality, 36-55 workflow, 100+ logging)
+- [ ] Tests exist alongside every handler change (check `tests/` mirror of `src/`)
+- [ ] No magic strings or numbers (named constants used)
+- [ ] SOLID principles followed — no `if/elif` chains on language/type names
+- [ ] No accidental debug code, temporary workarounds, or leftover TODOs
+- [ ] Shell scripts use shellcheck-compatible patterns (no `shell=True`, no `/tmp` for runtime files)
+
+**STEP 7.5.3: Decision**
+
+- ✅ Code looks correct → Proceed to Step 8 (Acceptance Testing)
+- ❌ Issues found → **ABORT release**, fix issues, re-run `/release` from beginning
+
+**Main Claude proceeds to Acceptance Testing Gate (Step 8) ONLY if code review passes.**
 
 ### 8. Acceptance Testing Gate (Main Claude Executes) - 🚨 BLOCKING
 
@@ -528,6 +560,36 @@ Sub-agent acceptance testing strategies (parallel Haiku batches) are **permanent
 - The v2.9.0 incident proved async agents create race conditions with release gates
 
 **The ONLY valid acceptance test is a real tool call in the main thread.**
+
+**STEP 8.0: Determine Acceptance Testing Scope**
+
+Check the bump type determined in Step 2 (Version Detection):
+
+```bash
+LAST_TAG=$(git describe --tags --abbrev=0)
+# Check for handler code changes since last tag
+HANDLER_CHANGES=$(git diff "${LAST_TAG}..HEAD" --name-only -- src/claude_code_hooks_daemon/handlers/)
+echo "Handler changes: ${HANDLER_CHANGES:-none}"
+```
+
+| Bump Type | Handler Changes? | Action |
+|-----------|-----------------|--------|
+| MAJOR | Any | **Full acceptance test suite** (Steps 8.1–8.5) |
+| MINOR | Any | **Full acceptance test suite** (Steps 8.1–8.5) |
+| PATCH | Yes | **Targeted tests** for changed handlers only (see below) |
+| PATCH | No | **Skip acceptance tests** — document reason in release notes |
+
+**PATCH release with no handler changes** (e.g. shell script fix, docs, config):
+- Document in release notes: `"PATCH release — no handler changes, acceptance testing not required"`
+- Proceed directly to Step 9 (Commit & Push)
+
+**PATCH release with handler changes**:
+- Identify changed handlers from `HANDLER_CHANGES` output
+- Run `generate-playbook`, then execute only tests for those specific handlers
+- Document which handlers were tested and results
+- Proceed to Step 9 once targeted tests pass
+
+**MAJOR/MINOR release — continue with full suite below:**
 
 **STEP 8.1: Restart Daemon & Verify Load**
 
