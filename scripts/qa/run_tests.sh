@@ -15,6 +15,7 @@ OUTPUT_FILE="${PROJECT_ROOT}/untracked/qa/tests.json"
 COVERAGE_FILE="${PROJECT_ROOT}/untracked/qa/coverage.json"
 
 # Source venv management
+# shellcheck source=../venv-include.bash
 source "${PROJECT_ROOT}/scripts/venv-include.bash"
 
 cd "${PROJECT_ROOT}"

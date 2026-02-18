@@ -40,7 +40,7 @@ The `/release` skill includes TWO mandatory blocking gates that MUST pass before
 
 1. **QA Verification Gate** (after Opus review):
    - Main Claude manually runs: `./scripts/qa/run_all.sh`
-   - ALL 6 checks must pass (Magic Values, Format, Lint, Type Check, Tests, Security)
+   - ALL 8 checks must pass (Magic Values, Format, Lint, Type Check, Tests, Security, Dependencies, Shell Check)
    - If ANY check fails → ABORT release immediately
 
 2. **Acceptance Testing Gate** (after QA passes):
@@ -478,7 +478,7 @@ daemon:
 ## QA Requirements
 
 **MUST pass before commits:**
-- Black (format), Ruff (lint), MyPy (types), Pytest (95% coverage), Bandit (security)
+- Black (format), Ruff (lint), MyPy (types), Pytest (95% coverage), Bandit (security), shellcheck (shell scripts)
 - Run: `./scripts/qa/run_all.sh`
 
 **See CONTRIBUTING.md for QA standards and CI/CD details**

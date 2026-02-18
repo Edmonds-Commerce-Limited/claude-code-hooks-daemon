@@ -93,6 +93,16 @@ else
 fi
 echo ""
 
+echo "8. Running Shell Check..."
+echo "----------------------------------------"
+if ! "${SCRIPT_DIR}/run_shell_check.sh"; then
+    OVERALL_EXIT_CODE=1
+    echo "❌ Shell check FAILED"
+else
+    echo "✅ Shell check PASSED"
+fi
+echo ""
+
 # Print overall summary
 echo "========================================"
 echo "QA Summary"
@@ -109,6 +119,7 @@ results = {
     "Tests": "untracked/qa/tests.json",
     "Security Check": "untracked/qa/security.json",
     "Dependencies": "untracked/qa/dependencies.json",
+    "Shell Check": "untracked/qa/shell_check.json",
 }
 
 all_passed = True
