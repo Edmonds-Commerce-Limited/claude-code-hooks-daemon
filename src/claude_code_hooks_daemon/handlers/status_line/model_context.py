@@ -11,11 +11,12 @@ Model colors (by model type):
 - White: Unknown/other models
 
 Effort level signal bars (shown for all models when effortLevel is set):
-- Low:    ▂░░  (one bar lit, blue)
-- Medium: ▂▄░  (two bars lit, green)
-- High:   ▂▄█  (all bars lit, orange)
+- Low:    ▌░░  (one bar lit, blue)
+- Medium: ▌▌░  (two bars lit, green)
+- High:   ▌▌▌  (all bars lit, orange)
 
-Unlit bars are rendered in dim grey. Bars omitted when effortLevel not in settings.
+Matches Claude Code's own ▌▌▌ bar style. Unlit bars rendered in dim grey.
+Bars omitted when effortLevel not in settings.
 
 Context usage (quarter circle icons with color-coded percentages):
 - ◔ Green (0-25%): 1/4 filled - Low usage, plenty of space
@@ -41,10 +42,8 @@ EFFORT_COLORS: dict[str, str] = {
     "high": "\033[38;5;208m",  # Orange
 }
 
-# Signal bar characters (ascending height: quarter, half, full block)
-_EFFORT_BAR_1 = "▂"
-_EFFORT_BAR_2 = "▄"
-_EFFORT_BAR_3 = "█"
+# Signal bar character - three identical left-half blocks matching Claude Code UI (▌▌▌)
+_EFFORT_BAR = "▌"
 
 # ANSI dim grey for unlit effort bars
 _EFFORT_DIM = "\033[2;37m"
@@ -117,7 +116,7 @@ class ModelContextHandler(Handler):
             reset: ANSI reset code
 
         Returns:
-            Formatted effort bars like " ▂▄█" or empty string when not set
+            Formatted effort bars like " ▌▌▌" or empty string when not set
         """
         effort_level = self._read_effort_level()
         if effort_level is None:
@@ -126,16 +125,12 @@ class ModelContextHandler(Handler):
         effort_color = EFFORT_COLORS.get(effort_level, "\033[37m")
 
         if effort_level == "low":
-            bars = (
-                f"{effort_color}{_EFFORT_BAR_1}{_EFFORT_DIM}{_EFFORT_BAR_2}{_EFFORT_BAR_3}{reset}"
-            )
+            bars = f"{effort_color}{_EFFORT_BAR}{_EFFORT_DIM}{_EFFORT_BAR}{_EFFORT_BAR}{reset}"
         elif effort_level == "medium":
-            bars = (
-                f"{effort_color}{_EFFORT_BAR_1}{_EFFORT_BAR_2}{_EFFORT_DIM}{_EFFORT_BAR_3}{reset}"
-            )
+            bars = f"{effort_color}{_EFFORT_BAR}{_EFFORT_BAR}{_EFFORT_DIM}{_EFFORT_BAR}{reset}"
         else:
             # High (or unknown): all bars lit
-            bars = f"{effort_color}{_EFFORT_BAR_1}{_EFFORT_BAR_2}{_EFFORT_BAR_3}{reset}"
+            bars = f"{effort_color}{_EFFORT_BAR}{_EFFORT_BAR}{_EFFORT_BAR}{reset}"
 
         return f" {bars}"
 
