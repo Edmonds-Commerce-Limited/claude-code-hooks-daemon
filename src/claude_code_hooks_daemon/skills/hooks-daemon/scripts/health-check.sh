@@ -60,13 +60,13 @@ if [ -f "$CONFIG_FILE" ]; then
     echo "✓ Config file: $CONFIG_FILE"
 
     # Validate config
-    if "$PYTHON" -m claude_code_hooks_daemon.daemon.cli validate-config 2>&1 | grep -q "valid"; then
+    if "$PYTHON" -m claude_code_hooks_daemon.daemon.cli config-validate "$CONFIG_FILE" 2>&1 | grep -q '"valid": true'; then
         echo "✓ Config validation: PASSED"
     else
         echo "⚠️  Config validation: FAILED"
         echo ""
         echo "Run for details:"
-        echo "  $PYTHON -m claude_code_hooks_daemon.daemon.cli validate-config"
+        echo "  $PYTHON -m claude_code_hooks_daemon.daemon.cli config-validate $CONFIG_FILE"
     fi
 else
     echo "❌ Config file missing: $CONFIG_FILE"
