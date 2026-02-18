@@ -7,6 +7,131 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.14.0] - 2026-02-18
+
+### Added
+
+- **NEW: /hooks-daemon User Skill** (Plan 00061, commits bd3eb72, dda0dcc, 7fc9415, d18fb50, 649d6d4, 37a0b52, ab73b82, a6222fe)
+  - User-facing skill deployed to `.claude/skills/hooks-daemon/` during installation
+  - Single skill with argument-driven routing (manual invocation only)
+  - **Subcommands**:
+    - `upgrade` - Upgrade daemon to new version (auto-detect, specific version, force reinstall)
+    - `health` - Comprehensive health check (status, config, handlers, logs, DEGRADED MODE recovery)
+    - `dev-handlers` - Scaffold project-level handlers with TDD workflow guidance
+    - `logs` - View daemon logs
+    - `status` - Check daemon status
+    - `restart` - Restart daemon
+    - `handlers` - List loaded handlers
+  - **Documentation**: 5 markdown files (main skill + upgrade + health + dev-handlers + troubleshooting)
+  - **Deployment**: Integrated with install_version.sh (Step 10) and upgrade_version.sh (Step 13)
+  - **Skills packaged WITH daemon** and deployed during installation/upgrade
+  - Enhanced error messages for plugin handler abstract method violations (v2.13.0 breaking change fix)
+
+- **Breaking Changes Lifecycle Infrastructure** (Plan 00062, commits aac0f3e, d5b002b, 0454d9e, 5205851, c94af3e, d0094ce, 19f65af)
+  - **Historical Upgrade Guides**: Created comprehensive guides for v2.10→v2.11, v2.11→v2.12, v2.12→v2.13
+  - **Automated Breaking Changes Detection**: RELEASING.md Step 6.5 blocking gate
+  - **Smart Upgrade Validation**: Pre-upgrade compatibility checks, config diff analysis, breaking changes warnings
+  - **Upgrade Guide Enforcement**: Interactive reading confirmation before proceeding
+  - **New Components**:
+    - `breaking_changes_detector.py` - Parses CHANGELOG.md for breaking change markers (14 tests)
+    - `upgrade_compatibility.py` - Validates user config against target version (13 tests)
+    - `config_diff_analyzer.sh` - Compares handler names with fuzzy rename detection
+  - **Upgrade Script Integration**: Three safety gates (before/during/after upgrade)
+  - **Release Notes Format**: BREAKING CHANGES sections with handler removals/renames
+  - Total: 5,842+ lines of code/docs, 25 new files, 27 tests
+
+- **Test Coverage Improvements**: Increased coverage from 94.89% to 95.2% (commits b8eeb89, bb364a7)
+  - Core module and handler test coverage improvements
+  - Protocol and strategy test coverage enhancements
+  - ImportError tests for input_schemas.py (100% coverage)
+  - Edge case tests for router.py (100% coverage)
+  - Unknown extension tests for tdd_enforcement.py (95.24% coverage)
+  - Protocol isinstance tests for TDD, QA Suppression, and Lint strategies
+  - Lazy import tests for lint module
+
+- **Release Workflow State Management** (commit 5be1cf0)
+  - Release process now uses workflow state files for compaction resilience
+  - State tracking for 14 release phases
+  - Enables WorkflowStatePreCompactHandler/RestorationHandler integration
+  - State files: `./untracked/workflow-state/release/state-release-TIMESTAMP.json`
+
+- **Comprehensive Plan Workflow Documentation** (commit 15e3591)
+  - New `docs/PLAN_WORKFLOW.md` (1,600 lines, 41KB)
+  - Complete guide to structured planning with numbered folders
+  - 10 major sections covering philosophy, setup, customization, examples
+  - Documents 5 handlers supporting workflow automation
+  - Step-by-step setup instructions for new projects
+  - Real-world examples (feature, refactoring, bug fix plans)
+  - Project-agnostic design (works with any codebase)
+
+- **Error Hiding Audit Script** (Plan 00063 Phase 2, commit 7eaf65d)
+  - AST-based audit tool detecting silent error patterns
+  - Detects: silent try/except/pass, silent continue, return None on errors, log-and-continue, bare except
+  - Found 93 violations across 27 files (systemic problem documented)
+
+- **Effort Level Signal Bars in Status Line** (commits 6ab6e70, 3fca72c)
+  - Added effort level signal bars (▌▌▌) to status line for all models
+  - Enhanced display for Claude 4+ models
+  - Bars visually indicate current effort level during AI processing
+
+### Changed
+
+- **FAIL FAST Enforcement** (Plan 00063, commits ef650d3, 887f52c)
+  - **Project Handlers (TIER 1)**: Always crash on errors (no graceful failure)
+    - Changed ProjectHandlerLoader return type from `Handler | None` to `Handler`
+    - All errors raise RuntimeError immediately (file not found, import errors, no Handler class, multiple classes, instantiation failure)
+    - Updated 8 tests to expect RuntimeError instead of None
+    - Moved error fixtures to `project_handlers_error_cases/` directory
+  - **Library Handlers (TIER 2)**: Strict mode controlled (handler discovery, optional features)
+    - ConfigValidator.get_available_handlers() accepts strict_mode parameter
+    - In strict_mode=True: CRASH on handler discovery import errors
+    - In strict_mode=False: Log and continue gracefully
+  - **New DRY Utility**: `utils/strict_mode.py` with `handle_tier2_error()` and `crash_in_strict_mode()` helpers (7 tests)
+  - **Plugin Loading**: Daemon CRASHES if configured handlers can't be loaded (not warns)
+
+- **Documentation Structure** (commit 8c4c88b)
+  - Separated Plans from Workflows documentation for clarity
+  - **Plans**: Development work tracking (CLAUDE/Plan/, docs/PLAN_SYSTEM.md)
+  - **Workflows**: Repeatable processes surviving compaction (docs/WORKFLOWS.md)
+  - Clear distinction between optional vs required handlers for each system
+  - Renamed `docs/PLAN_WORKFLOW.md` → `docs/PLAN_SYSTEM.md`
+  - Created new `docs/WORKFLOWS.md` documenting workflow concept properly
+
+- **MarkdownOrganizationHandler**: Allow edits to `src/claude_code_hooks_daemon/skills/` (commit dda0dcc)
+  - Enables writing SKILL.md and supporting docs during skill development
+  - Skills are packaged with daemon (not deployed separately)
+
+### Fixed
+
+- **CRITICAL: Plugin Handler Suffix Bug** (Plan 00063 Phase 1, commit ef650d3)
+  - Plugin handlers with "Handler" suffix now register correctly
+  - Root cause: Asymmetry between PluginLoader.load_handler() (correctly handles suffix) and DaemonController._load_plugins() (only checked base name)
+  - **Before**: MyPluginHandler silently skipped with warning, daemon ran unprotected
+  - **After**: Daemon checks both ClassName and ClassNameHandler variants, CRASHES if configured handler can't be matched
+  - Added test_load_plugin_with_handler_suffix (Handler suffix now works)
+  - Added test_daemon_crashes_on_unmatched_plugin_handler (FAIL FAST enforcement)
+  - Updated 6 tests expecting old buggy behavior to expect CRASH
+
+- **Documentation Organization** (commits 8c4c88b, 15e3591)
+  - Fixed Plans vs Workflows documentation confusion
+  - Previously conflated two separate concepts in single location
+  - Now properly separated with clear purposes and lifecycles
+  - Enhanced task breakdown guidance and completion checklist procedures
+
+- **Test Bug**: Fixed test_plugin_daemon_integration.py assertion matching "NOT RUNNING" (commit 99eeee7)
+  - Changed to check for "Daemon: RUNNING" specifically
+
+- **Import Error**: Fixed test_upgrade_compatibility.py import (commit d0094ce)
+  - Changed `constants.event` → `constants.events`
+
+- **Effort Level Signal Bars Styling** (commits 95a6b4d, 0b031b1)
+  - Fixed bar colours: orange (active) / grey (inactive) matching Claude Code UI
+  - Fixed bar character to ▌▌▌ matching Claude Code's actual effort UI
+
+- **Black Formatting**: Applied formatting fixes (commits 04a0125, d0094ce)
+  - Fixed test_enforcement.py formatting issues
+  - Fixed test_controller.py formatting issues
+
 ## [2.13.0] - 2026-02-17
 
 ### Added

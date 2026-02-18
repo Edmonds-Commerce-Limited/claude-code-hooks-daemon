@@ -70,6 +70,7 @@ class RubyLintStrategy:
                 expected_message_patterns=[r"Ruby lint FAILED", r"invalid.rb"],
                 safety_notes="Uses /tmp path - safe. Creates temporary Ruby file with syntax error.",
                 test_type=TestType.BLOCKING,
+                required_tools=["ruby"],
                 setup_commands=["mkdir -p /tmp/acceptance-test-lint-ruby"],
                 cleanup_commands=["rm -rf /tmp/acceptance-test-lint-ruby"],
             ),

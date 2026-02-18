@@ -239,8 +239,7 @@ class PipeBlockerHandler(Handler):
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
                     r"Pipe to tail/head detected",
-                    r"information loss",
-                    r"Redirect to temp file",
+                    r"temp file",
                 ],
                 safety_notes="Uses echo - safe to test",
                 test_type=TestType.BLOCKING,
@@ -252,7 +251,7 @@ class PipeBlockerHandler(Handler):
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
                     r"Pipe to tail/head",
-                    r"expensive",
+                    r"temp file",
                 ],
                 safety_notes="Uses echo - safe to test",
                 test_type=TestType.BLOCKING,

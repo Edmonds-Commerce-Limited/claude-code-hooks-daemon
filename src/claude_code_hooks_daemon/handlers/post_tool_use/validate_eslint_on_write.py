@@ -89,6 +89,11 @@ class ValidateEslintOnWriteHandler(Handler):
             guide_path = get_llm_command_guide_path()
             return HookResult(
                 decision=Decision.ALLOW,
+                context=[
+                    f"⚠️  ESLint advisory: {file_path_obj.name} written - consider adding llm:lint",
+                    "No llm: commands in package.json. ESLint validation skipped.",
+                    f"Full guide: {guide_path}",
+                ],
                 reason=(
                     f"⚠️  ADVISORY: Consider creating llm:lint for ESLint validation\n\n"
                     f"File written: {file_path_obj.name}\n\n"

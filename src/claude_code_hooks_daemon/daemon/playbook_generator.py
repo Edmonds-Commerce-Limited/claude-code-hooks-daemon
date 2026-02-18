@@ -9,6 +9,7 @@ or structured JSON for automated test execution.
 from __future__ import annotations
 
 import logging
+import shutil
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -255,6 +256,8 @@ class PlaybookGenerator:
                     "cleanup_commands": test.cleanup_commands,
                     "safety_notes": test.safety_notes,
                     "requires_event": test.requires_event,
+                    "required_tools": test.required_tools,
+                    "tools_available": all(shutil.which(t) for t in (test.required_tools or [])),
                 }
                 result.append(test_dict)
                 test_number += 1
@@ -380,6 +383,21 @@ class PlaybookGenerator:
                 lines.append(f"#### Test {test_number}: {test.title}")
                 lines.append("")
 
+                # Skip if required tools are not installed
+                if test.required_tools:
+                    missing = [t for t in test.required_tools if not shutil.which(t)]
+                    if missing:
+                        missing_str = ", ".join(f"`{t}`" for t in missing)
+                        lines.append(f"**⚠️ SKIP**: Required tool(s) not installed: {missing_str}")
+                        lines.append(f"*Install {', '.join(missing)} to enable this test.*")
+                        lines.append("")
+                        lines.append("**Result**: SKIP (tool not available)")
+                        lines.append("")
+                        lines.append("---")
+                        lines.append("")
+                        test_number += 1
+                        continue
+
                 # Test details with category annotation for Context tests
                 test_type_str = test.test_type.value.title()
                 if test.test_type.value == "context":
@@ -462,6 +480,23 @@ class PlaybookGenerator:
                 for test in tests:
                     lines.append(f"#### Test {test_number}: {test.title}")
                     lines.append("")
+
+                    # Skip if required tools are not installed
+                    if test.required_tools:
+                        missing = [t for t in test.required_tools if not shutil.which(t)]
+                        if missing:
+                            missing_str = ", ".join(f"`{t}`" for t in missing)
+                            lines.append(
+                                f"**⚠️ SKIP**: Required tool(s) not installed: {missing_str}"
+                            )
+                            lines.append(f"*Install {', '.join(missing)} to enable this test.*")
+                            lines.append("")
+                            lines.append("**Result**: SKIP (tool not available)")
+                            lines.append("")
+                            lines.append("---")
+                            lines.append("")
+                            test_number += 1
+                            continue
 
                     # Test details with category annotation for Context tests
                     test_type_str = test.test_type.value.title()

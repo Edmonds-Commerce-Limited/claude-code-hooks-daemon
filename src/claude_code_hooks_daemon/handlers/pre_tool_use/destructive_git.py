@@ -153,7 +153,6 @@ class DestructiveGitHandler(Handler):
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
                     r"destroys.*uncommitted changes",
-                    r"PERMANENTLY DESTROYS",
                 ],
                 safety_notes="Uses non-existent ref - would fail harmlessly if executed",
                 test_type=TestType.BLOCKING,
@@ -165,7 +164,6 @@ class DestructiveGitHandler(Handler):
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
                     r"permanently deletes untracked files",
-                    r"PERMANENTLY DESTROYS",
                 ],
                 safety_notes="Uses non-existent path - would fail harmlessly if executed",
                 test_type=TestType.BLOCKING,

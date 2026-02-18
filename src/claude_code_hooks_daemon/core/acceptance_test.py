@@ -74,6 +74,9 @@ class AcceptanceTest:
         cleanup_commands: Commands to run after test (e.g., remove test files)
         requires_event: Event type required for test (if not normally triggerable)
         test_type: Type of test (BLOCKING, ADVISORY, CONTEXT)
+        required_tools: Optional list of executables that must be in PATH for this
+            test to run. If any are missing the test is skipped. Use for language
+            linters that may not be installed (e.g. ["go"], ["rustc"], ["swiftc"]).
     """
 
     title: str
@@ -86,6 +89,7 @@ class AcceptanceTest:
     cleanup_commands: list[str] | None = None
     requires_event: str | None = None
     test_type: TestType = TestType.BLOCKING
+    required_tools: list[str] | None = None
 
     def __post_init__(self) -> None:
         """Validate fields after initialization."""

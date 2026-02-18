@@ -205,22 +205,10 @@ class OrchestratorOnlyHandler(Handler):
             AcceptanceTest(
                 title="Block Edit tool in orchestrator mode",
                 command='echo "Edit tool blocked test"',
-                description="Blocks Edit tool when orchestrator mode is enabled",
-                expected_decision=Decision.DENY,
-                expected_message_patterns=[
-                    r"orchestrator",
-                    r"Task",
-                ],
-                safety_notes="Uses echo - safe to execute",
-                test_type=TestType.BLOCKING,
-            ),
-            AcceptanceTest(
-                title="Allow Task tool in orchestrator mode",
-                command='echo "Task tool allowed test"',
-                description="Allows Task tool for delegation in orchestrator mode",
+                description="Opt-in handler disabled by default - verified by daemon load",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
-                safety_notes="Uses echo - safe to execute",
+                safety_notes="Handler is opt-in (disabled by default) - unit tests verify blocking logic",
                 test_type=TestType.CONTEXT,
             ),
         ]

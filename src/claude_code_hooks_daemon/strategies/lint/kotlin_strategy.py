@@ -70,6 +70,7 @@ class KotlinLintStrategy:
                 expected_message_patterns=[r"Kotlin lint FAILED", r"invalid.kt"],
                 safety_notes="Uses /tmp path - safe. Creates temporary Kotlin file with syntax error.",
                 test_type=TestType.BLOCKING,
+                required_tools=["kotlinc"],
                 setup_commands=["mkdir -p /tmp/acceptance-test-lint-kotlin"],
                 cleanup_commands=["rm -rf /tmp/acceptance-test-lint-kotlin"],
             ),

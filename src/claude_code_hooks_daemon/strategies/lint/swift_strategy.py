@@ -70,6 +70,7 @@ class SwiftLintStrategy:
                 expected_message_patterns=[r"Swift lint FAILED", r"invalid.swift"],
                 safety_notes="Uses /tmp path - safe. Creates temporary Swift file with syntax error.",
                 test_type=TestType.BLOCKING,
+                required_tools=["swiftc"],
                 setup_commands=["mkdir -p /tmp/acceptance-test-lint-swift"],
                 cleanup_commands=["rm -rf /tmp/acceptance-test-lint-swift"],
             ),
