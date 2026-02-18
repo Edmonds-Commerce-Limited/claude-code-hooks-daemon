@@ -71,6 +71,7 @@ class RustLintStrategy:
                 expected_message_patterns=[r"Rust lint FAILED", r"invalid.rs"],
                 safety_notes="Uses /tmp path - safe. Creates temporary Rust file with syntax error.",
                 test_type=TestType.BLOCKING,
+                required_tools=["rustc"],
                 setup_commands=["mkdir -p /tmp/acceptance-test-lint-rust"],
                 cleanup_commands=["rm -rf /tmp/acceptance-test-lint-rust"],
             ),

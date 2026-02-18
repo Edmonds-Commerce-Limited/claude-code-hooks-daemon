@@ -180,10 +180,13 @@ class LintOnEditHandler(Handler):
                 )
 
         except FileNotFoundError:
-            # Linter not installed - graceful degradation
+            # Linter not installed - advisory allow (visible in system-reminders)
             return HookResult(
                 decision=Decision.ALLOW,
-                reason=f"Lint tool not found: {command_parts[0]} (skipping)",
+                context=[
+                    f"⚠️ {language_name} lint tool not found ({command_parts[0]}) "
+                    f"- install to enable lint checking"
+                ],
             )
         except subprocess.TimeoutExpired:
             return HookResult(

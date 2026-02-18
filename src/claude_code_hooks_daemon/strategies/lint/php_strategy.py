@@ -70,6 +70,7 @@ class PhpLintStrategy:
                 expected_message_patterns=[r"PHP lint FAILED", r"invalid.php"],
                 safety_notes="Uses /tmp path - safe. Creates temporary PHP file with syntax error.",
                 test_type=TestType.BLOCKING,
+                required_tools=["php"],
                 setup_commands=["mkdir -p /tmp/acceptance-test-lint-php"],
                 cleanup_commands=["rm -rf /tmp/acceptance-test-lint-php"],
             ),

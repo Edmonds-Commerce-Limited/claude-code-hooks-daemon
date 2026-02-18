@@ -242,6 +242,15 @@ class TestGitStashHandler:
             hook_input = {"tool_name": "Bash", "tool_input": {"command": cmd}}
             assert handler.matches(hook_input) is False, f"Should allow: {cmd}"
 
+    def test_matches_git_stash_in_echo_quotes(self, handler):
+        """Regression: Should match 'git stash' inside echo quoted string.
+
+        Bug: Pattern (?:\\s|$) does not match trailing quote after 'git stash'.
+        Fix: Use (?=\\W|$) lookahead to match any non-word char or end-of-string.
+        """
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": 'echo "git stash"'}}
+        assert handler.matches(hook_input) is True
+
     def test_blocks_all_creation_variants(self, handler):
         """Should block all stash creation variants."""
         creation_commands = [
@@ -253,6 +262,8 @@ class TestGitStashHandler:
             "git stash save 'message'",
             "git stash -- file.txt",
             "git stash push -u",
+            'echo "git stash"',
+            "echo 'git stash push'",
         ]
         for cmd in creation_commands:
             hook_input = {"tool_name": "Bash", "tool_input": {"command": cmd}}

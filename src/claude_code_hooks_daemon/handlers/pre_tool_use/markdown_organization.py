@@ -570,15 +570,15 @@ class MarkdownOrganizationHandler(Handler):
             AcceptanceTest(
                 title="Block markdown in wrong location",
                 command=(
-                    "Use the Write tool to write to /tmp/acceptance-test-mdorg/random-notes.md"
+                    "Use the Write tool to write to /workspace/random-notes.md"
                     " with content '# Some Notes\\n\\nRandom markdown file.'"
                 ),
-                description="Blocks markdown files written to non-standard locations",
+                description="Blocks markdown files written to non-standard locations within the project",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"WRONG LOCATION", r"allowed"],
-                safety_notes="Uses /tmp path - safe. Handler blocks non-standard markdown locations.",
+                safety_notes="Writes to workspace root - handler blocks before file is created.",
                 test_type=TestType.BLOCKING,
-                setup_commands=["mkdir -p /tmp/acceptance-test-mdorg"],
-                cleanup_commands=["rm -rf /tmp/acceptance-test-mdorg"],
+                setup_commands=[],
+                cleanup_commands=[],
             ),
         ]

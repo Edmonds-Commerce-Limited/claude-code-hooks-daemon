@@ -95,19 +95,22 @@ class DaemonRestartVerifierHandler(Handler):
             "The 5-handler import bug would have been caught by this check!"
         )
 
-        return HookResult.allow(guidance=guidance)
+        return HookResult(
+            decision=Decision.ALLOW,
+            context=["💡 RECOMMENDED: Verify daemon restart before committing"],
+            guidance=guidance,
+        )
 
     def get_acceptance_tests(self) -> list[AcceptanceTest]:
         """Return acceptance tests for daemon restart verifier."""
         return [
             AcceptanceTest(
                 title="Daemon restart verification advisory",
-                command="git status",
+                command="echo \"git commit -m 'test WIP'\"",
                 description="Suggests verifying daemon restart before git commits (advisory only)",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"RECOMMENDED", r"restart"],
-                safety_notes="Advisory handler - suggests best practice",
+                safety_notes="Uses echo - safe to test. Handler matches git commit in command string.",
                 test_type=TestType.ADVISORY,
-                requires_event="PreToolUse on git commit in hooks daemon repo",
             ),
         ]

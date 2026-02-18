@@ -113,7 +113,7 @@ class TaskTddAdvisorHandler(Handler):
                 f"This is advisory only - proceeding with task..."
             ),
             context=[
-                "TDD_WORKFLOW: Reminder to follow RED-GREEN-REFACTOR cycle",
+                "TDD_WORKFLOW: Test-Driven Development (RED-GREEN-REFACTOR) cycle required",
                 "TEST_FIRST: Write failing tests before implementation",
                 "QA_VERIFICATION: Run full QA suite after implementation",
                 "DAEMON_RESTART: Verify daemon loads successfully",

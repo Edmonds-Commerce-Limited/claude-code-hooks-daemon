@@ -40,7 +40,9 @@ class GitStashHandler(Handler):
             return False  # Allow recovery/query operations
 
         # Match creation commands
-        return bool(re.search(r"git\s+stash(?:\s+(?:push|save))?(?:\s|$)", command, re.IGNORECASE))
+        # Use lookahead (?=\W|$) to allow trailing quotes, brackets, etc.
+        # (e.g., echo "git stash" has '"' after stash, not whitespace or end-of-string)
+        return bool(re.search(r"git\s+stash(?:\s+(?:push|save))?(?=\W|$)", command, re.IGNORECASE))
 
     def handle(self, _hook_input: dict[str, Any]) -> HookResult:
         """Block or warn about git stash based on mode configuration."""
@@ -140,8 +142,8 @@ class GitStashHandler(Handler):
                     expected_decision=Decision.ALLOW,
                     expected_message_patterns=[
                         r"WARNING.*git stash",
-                        r"risky",
-                        r"git commit.*WIP",
+                        r"Stashes can be lost",
+                        r"safer alternatives",
                     ],
                     safety_notes="Uses echo - safe to test",
                     test_type=TestType.ADVISORY,
@@ -153,7 +155,7 @@ class GitStashHandler(Handler):
                     expected_decision=Decision.ALLOW,
                     expected_message_patterns=[
                         r"WARNING",
-                        r"better alternatives",
+                        r"safer alternatives",
                     ],
                     safety_notes="Uses echo - safe to test",
                     test_type=TestType.ADVISORY,

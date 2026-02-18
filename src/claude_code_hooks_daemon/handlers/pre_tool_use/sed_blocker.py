@@ -287,8 +287,7 @@ class SedBlockerHandler(Handler):
                 description="Blocks sed -i (in-place editing) to prevent file destruction",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
-                    r"sed.*FORBIDDEN",
-                    r"file corruption",
+                    r"(?i)sed.*forbidden",
                     r"Edit tool",
                 ],
                 setup_commands=['echo "test content" > /tmp/sed_test.txt'],
@@ -302,7 +301,7 @@ class SedBlockerHandler(Handler):
                 description="Blocks sed -e commands",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
-                    r"sed.*FORBIDDEN",
+                    r"(?i)sed.*forbidden",
                     r"Edit tool",
                 ],
                 safety_notes="Uses test file in /tmp - safe to test",

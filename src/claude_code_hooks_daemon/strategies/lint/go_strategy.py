@@ -70,6 +70,7 @@ class GoLintStrategy:
                 expected_message_patterns=[r"Go lint FAILED", r"invalid.go"],
                 safety_notes="Uses /tmp path - safe. Creates temporary Go file with syntax error.",
                 test_type=TestType.BLOCKING,
+                required_tools=["go"],
                 setup_commands=["mkdir -p /tmp/acceptance-test-lint-go"],
                 cleanup_commands=["rm -rf /tmp/acceptance-test-lint-go"],
             ),

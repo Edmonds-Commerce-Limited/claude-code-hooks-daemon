@@ -100,12 +100,12 @@ class GhIssueCommentsHandler(Handler):
 
         return [
             AcceptanceTest(
-                title="GitHub issue comment guidance",
-                command='echo "gh issue comment 123"',
-                description="Provides GitHub CLI guidance (advisory)",
-                expected_decision=Decision.ALLOW,
-                expected_message_patterns=[r"GitHub", r"issue"],
+                title="gh issue view without --comments is blocked",
+                command='echo "gh issue view 123"',
+                description="Blocks gh issue view without --comments flag",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[r"BLOCKED", r"--comments"],
                 safety_notes="Uses echo - safe to test",
-                test_type=TestType.ADVISORY,
+                test_type=TestType.BLOCKING,
             ),
         ]

@@ -116,12 +116,12 @@ class BashErrorDetectorHandler(Handler):
         return [
             AcceptanceTest(
                 title="Bash command error detection",
-                command="ls /nonexistent/path",
-                description="Detects command failures (PostToolUse advisory)",
+                command='echo "Error: operation failed"',
+                description="Detects error/failed keywords in successful Bash command output",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"error", r"failed"],
-                safety_notes="Non-existent path - harmless failure",
+                safety_notes="echo command always succeeds - safe to test",
                 test_type=TestType.ADVISORY,
-                requires_event="PostToolUse after failed Bash command",
+                requires_event="PostToolUse after Bash command with error keywords",
             ),
         ]

@@ -70,6 +70,7 @@ class DartLintStrategy:
                 expected_message_patterns=[r"Dart lint FAILED", r"invalid.dart"],
                 safety_notes="Uses /tmp path - safe. Creates temporary Dart file with syntax error.",
                 test_type=TestType.BLOCKING,
+                required_tools=["dart"],
                 setup_commands=["mkdir -p /tmp/acceptance-test-lint-dart"],
                 cleanup_commands=["rm -rf /tmp/acceptance-test-lint-dart"],
             ),
