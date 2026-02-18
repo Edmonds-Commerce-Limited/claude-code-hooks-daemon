@@ -150,14 +150,59 @@ Follow the Release Agent specification (.claude/agents/release-agent.md) for:
 - Display release notes preview
 - Confirm ready for review
 
-Stop and return results. Next stages (acceptance tests, then Opus review) will be handled by main Claude.
+Stop and return results. Next stages (code review, acceptance tests, then Opus review) will be handled by main Claude.
 \`\`\`
+
+## Stage 1.5: Code Review Gate (You Handle This) - 🚨 BLOCKING
+
+After Stage 1 completes, YOU (main Claude) MUST review the actual code changes before proceeding.
+
+\`\`\`bash
+LAST_TAG=\$(git describe --tags --abbrev=0)
+git log --oneline "\${LAST_TAG}..HEAD"
+git diff "\${LAST_TAG}..HEAD" -- src/
+\`\`\`
+
+**Review checklist:**
+- [ ] No obvious bugs in handler \`matches()\` / \`handle()\` logic
+- [ ] No security anti-patterns (shell injection, hardcoded secrets, unvalidated input)
+- [ ] Handler priority ranges correct (10-20 safety, 25-35 quality, 36-55 workflow)
+- [ ] Tests exist alongside every handler change
+- [ ] No magic strings/numbers (named constants used)
+- [ ] SOLID principles — no \`if/elif\` chains on language/type names
+- [ ] No debug code, workarounds, or leftover TODOs
+
+**If code looks correct**: Proceed to Stage 2 (Acceptance Testing).
+**If issues found**: ABORT, fix issues, re-run \`/release\`.
 
 ## Stage 2: Acceptance Test Gate (You Handle This) - 🚨 BLOCKING
 
 **CRITICAL BLOCKING GATE - MANDATORY - NO SHORTCUTS ALLOWED**
 
-After Stage 1 (QA passed, version updated, changelog/release notes generated), YOU (main Claude) MUST execute ALL acceptance tests before proceeding.
+After Stage 1.5 (code review passed), YOU (main Claude) MUST determine acceptance testing scope based on bump type.
+
+**STEP 2.0: Determine Acceptance Testing Scope**
+
+\`\`\`bash
+LAST_TAG=\$(git describe --tags --abbrev=0)
+HANDLER_CHANGES=\$(git diff "\${LAST_TAG}..HEAD" --name-only -- src/claude_code_hooks_daemon/handlers/)
+echo "Handler changes: \${HANDLER_CHANGES:-none}"
+\`\`\`
+
+| Bump Type | Handler Changes? | Action |
+|-----------|-----------------|--------|
+| MAJOR | Any | Full acceptance test suite (Steps 2.1+) |
+| MINOR | Any | Full acceptance test suite (Steps 2.1+) |
+| PATCH | Yes | Targeted tests for changed handlers only |
+| PATCH | No | Skip — document reason in release notes, go to Stage 3 |
+
+**PATCH + no handler changes**: Add to release notes:
+\`"PATCH release — no handler changes, acceptance testing not required"\`
+Then skip to Stage 3 (Opus Review).
+
+**PATCH + handler changes**: Run \`generate-playbook\`, execute only tests for changed handlers, document results. Then proceed to Stage 3.
+
+**MAJOR/MINOR — continue with full suite below:**
 
 **STEP 2.1: Invoke Acceptance Test Skill**
 
