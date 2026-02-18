@@ -33,23 +33,24 @@ class TestModelContextHandler:
     def test_handle_with_full_data(self, handler: ModelContextHandler) -> None:
         """Test formatting with full model and context data."""
         hook_input = {
-            "model": {"display_name": "Sonnet 4.5"},
+            "model": {"id": "claude-sonnet-4-6", "display_name": "Sonnet 4.6"},
             "context_window": {"used_percentage": 42.5},
         }
 
-        result = handler.handle(hook_input)
+        with patch.object(handler, "_get_settings_path", return_value=Path("/nonexistent")):
+            result = handler.handle(hook_input)
 
         assert result.decision == "allow"
         assert len(result.context) == 1
-        assert "Sonnet 4.5" in result.context[0]
+        assert "Sonnet 4.6" in result.context[0]
         assert "42.5%" in result.context[0]
-        assert "🤖" in result.context[0]  # Robot emoji for model
-        # Context is 42.5% which is 26-50% range, so should use ◑ (right half circle)
+        assert "🤖" in result.context[0]
         assert "◑" in result.context[0]
 
     def test_handle_with_defaults(self, handler: ModelContextHandler) -> None:
         """Test formatting with missing data uses defaults."""
-        result = handler.handle({})
+        with patch.object(handler, "_get_settings_path", return_value=Path("/nonexistent")):
+            result = handler.handle({})
 
         assert result.decision == "allow"
         assert len(result.context) == 1
@@ -59,194 +60,156 @@ class TestModelContextHandler:
     def test_color_coding_green(self, handler: ModelContextHandler) -> None:
         """Test green color for low usage (0-25%)."""
         hook_input = {
-            "model": {"display_name": "Claude"},
+            "model": {"id": "", "display_name": "Claude"},
             "context_window": {"used_percentage": 20.0},
         }
 
-        result = handler.handle(hook_input)
-        # Check for green background ANSI code (used for percentage at 0-25%)
-        # Format: "\033[42m\033[30m" (green bg + black fg for percentage)
+        with patch.object(handler, "_get_settings_path", return_value=Path("/nonexistent")):
+            result = handler.handle(hook_input)
+
         assert "\033[42m" in result.context[0]
-        # Should also have quarter circle icon ◔
         assert "◔" in result.context[0]
 
     def test_color_coding_yellow(self, handler: ModelContextHandler) -> None:
         """Test yellow color for moderate usage (41-60%)."""
         hook_input = {
-            "model": {"display_name": "Claude"},
+            "model": {"id": "", "display_name": "Claude"},
             "context_window": {"used_percentage": 50.0},
         }
 
-        result = handler.handle(hook_input)
-        # Check for yellow background ANSI code
+        with patch.object(handler, "_get_settings_path", return_value=Path("/nonexistent")):
+            result = handler.handle(hook_input)
+
         assert "\033[43m" in result.context[0]
 
     def test_color_coding_orange(self, handler: ModelContextHandler) -> None:
         """Test orange color for high usage (61-80%)."""
         hook_input = {
-            "model": {"display_name": "Claude"},
+            "model": {"id": "", "display_name": "Claude"},
             "context_window": {"used_percentage": 70.0},
         }
 
-        result = handler.handle(hook_input)
-        # Check for orange background ANSI code
+        with patch.object(handler, "_get_settings_path", return_value=Path("/nonexistent")):
+            result = handler.handle(hook_input)
+
         assert "\033[48;5;208m" in result.context[0]
 
     def test_color_coding_red(self, handler: ModelContextHandler) -> None:
         """Test red color for critical usage (81-100%)."""
         hook_input = {
-            "model": {"display_name": "Claude"},
+            "model": {"id": "", "display_name": "Claude"},
             "context_window": {"used_percentage": 90.0},
         }
 
-        result = handler.handle(hook_input)
-        # Check for red background ANSI code
+        with patch.object(handler, "_get_settings_path", return_value=Path("/nonexistent")):
+            result = handler.handle(hook_input)
+
         assert "\033[41m" in result.context[0]
 
     def test_color_reset_included(self, handler: ModelContextHandler) -> None:
         """Test that ANSI reset code is included."""
         hook_input = {
-            "model": {"display_name": "Claude"},
+            "model": {"id": "", "display_name": "Claude"},
             "context_window": {"used_percentage": 50.0},
         }
 
-        result = handler.handle(hook_input)
-        # Check for reset code
+        with patch.object(handler, "_get_settings_path", return_value=Path("/nonexistent")):
+            result = handler.handle(hook_input)
+
         assert "\033[0m" in result.context[0]
 
     def test_handle_with_null_used_percentage(self, handler: ModelContextHandler) -> None:
         """Test handling when used_percentage is None (fixes TypeError bug).
 
         Early in a session, Claude Code may send null for used_percentage.
-        The handler must gracefully handle this and default to 0.0%.
         """
         hook_input = {
-            "model": {"display_name": "Sonnet 4.5"},
+            "model": {"id": "claude-sonnet-4-6", "display_name": "Sonnet 4.6"},
             "context_window": {"used_percentage": None},
         }
 
-        # Should not raise TypeError: '<=' not supported between NoneType and int
-        result = handler.handle(hook_input)
+        with patch.object(handler, "_get_settings_path", return_value=Path("/nonexistent")):
+            result = handler.handle(hook_input)
 
         assert result.decision == "allow"
-        assert len(result.context) == 1
-        assert "Sonnet 4.5" in result.context[0]
+        assert "Sonnet 4.6" in result.context[0]
         assert "0.0%" in result.context[0]
-        # Should use green color (0% usage)
         assert "\033[42m" in result.context[0]
 
-    def test_opus_shows_effort_bars_medium(
+    # --- Effort bars: explicit settings ---
+
+    def test_explicit_medium_effort_shows_two_bars(
         self, handler: ModelContextHandler, tmp_path: Path
     ) -> None:
-        """Opus model should show effort signal bars next to model name."""
+        """Explicitly set medium effort shows two orange bars, one dim."""
         hook_input = {
-            "model": {"display_name": "Opus 4.6"},
+            "model": {"id": "claude-sonnet-4-6", "display_name": "Sonnet 4.6"},
             "context_window": {"used_percentage": 30.0},
         }
-        settings = {"effortLevel": "medium"}
         settings_file = tmp_path / "settings.json"
-        settings_file.write_text(json.dumps(settings))
+        settings_file.write_text(json.dumps({"effortLevel": "medium"}))
 
         with patch.object(handler, "_get_settings_path", return_value=settings_file):
             result = handler.handle(hook_input)
 
-        assert len(result.context) == 1
-        assert "Opus 4.6" in result.context[0]
-        # Medium effort: first two bars lit in orange, third dim grey
         assert "\033[38;5;208m▌▌" in result.context[0]
 
-    def test_opus_shows_effort_bars_low_blue(
+    def test_explicit_low_effort_shows_one_bar(
         self, handler: ModelContextHandler, tmp_path: Path
     ) -> None:
-        """Low effort should show one bar lit in blue."""
+        """Explicitly set low effort shows one orange bar, two dim."""
         hook_input = {
-            "model": {"display_name": "Opus 4.6"},
+            "model": {"id": "claude-opus-4-6", "display_name": "Opus 4.6"},
             "context_window": {"used_percentage": 30.0},
         }
-        settings = {"effortLevel": "low"}
         settings_file = tmp_path / "settings.json"
-        settings_file.write_text(json.dumps(settings))
+        settings_file.write_text(json.dumps({"effortLevel": "low"}))
 
         with patch.object(handler, "_get_settings_path", return_value=settings_file):
             result = handler.handle(hook_input)
 
-        # Low effort: first bar lit in orange, remaining dim grey
         assert "\033[38;5;208m▌" in result.context[0]
 
-    def test_opus_shows_effort_bars_high_orange(
+    def test_explicit_high_effort_shows_three_bars(
         self, handler: ModelContextHandler, tmp_path: Path
     ) -> None:
-        """High effort should show all three bars lit in orange."""
+        """Explicitly set high effort shows all three orange bars."""
         hook_input = {
-            "model": {"display_name": "Opus 4.6"},
+            "model": {"id": "claude-opus-4-6", "display_name": "Opus 4.6"},
             "context_window": {"used_percentage": 30.0},
         }
-        settings = {"effortLevel": "high"}
         settings_file = tmp_path / "settings.json"
-        settings_file.write_text(json.dumps(settings))
+        settings_file.write_text(json.dumps({"effortLevel": "high"}))
 
         with patch.object(handler, "_get_settings_path", return_value=settings_file):
             result = handler.handle(hook_input)
 
-        # High effort: all three bars lit in orange
         assert "\033[38;5;208m▌▌▌" in result.context[0]
 
-    def test_sonnet_shows_effort_bars(self, handler: ModelContextHandler, tmp_path: Path) -> None:
-        """Sonnet model should also show effort bars (effort applies to all models)."""
-        hook_input = {
-            "model": {"display_name": "Sonnet 4.6"},
-            "context_window": {"used_percentage": 30.0},
-        }
-        settings = {"effortLevel": "high"}
-        settings_file = tmp_path / "settings.json"
-        settings_file.write_text(json.dumps(settings))
+    # --- Effort bars: default "high" for Claude 4+ when not in settings ---
 
-        with patch.object(handler, "_get_settings_path", return_value=settings_file):
-            result = handler.handle(hook_input)
-
-        # Sonnet should now show effort bars too
-        assert "Sonnet 4.6" in result.context[0]
-        assert "\033[38;5;208m▌▌▌" in result.context[0]
-
-    def test_haiku_shows_effort_bars(self, handler: ModelContextHandler, tmp_path: Path) -> None:
-        """Haiku model should also show effort bars."""
-        hook_input = {
-            "model": {"display_name": "Haiku 3.5"},
-            "context_window": {"used_percentage": 10.0},
-        }
-        settings = {"effortLevel": "medium"}
-        settings_file = tmp_path / "settings.json"
-        settings_file.write_text(json.dumps(settings))
-
-        with patch.object(handler, "_get_settings_path", return_value=settings_file):
-            result = handler.handle(hook_input)
-
-        assert "Haiku 3.5" in result.context[0]
-        assert "\033[38;5;208m▌▌" in result.context[0]
-
-    def test_no_effort_when_not_set(self, handler: ModelContextHandler, tmp_path: Path) -> None:
-        """Should not show effort bars when effortLevel is not set in settings."""
-        hook_input = {
-            "model": {"display_name": "Opus 4.6"},
-            "context_window": {"used_percentage": 30.0},
-        }
-        settings = {"alwaysThinkingEnabled": True}
-        settings_file = tmp_path / "settings.json"
-        settings_file.write_text(json.dumps(settings))
-
-        with patch.object(handler, "_get_settings_path", return_value=settings_file):
-            result = handler.handle(hook_input)
-
-        assert "Opus 4.6" in result.context[0]
-        # No effort bars present
-        assert "▌" not in result.context[0]
-
-    def test_no_effort_when_settings_missing(
+    def test_claude4_defaults_to_high_bars_when_effort_absent(
         self, handler: ModelContextHandler, tmp_path: Path
     ) -> None:
-        """Should handle missing settings file gracefully - no bars shown."""
+        """Claude 4+ with no effortLevel in settings shows high bars (Claude Code default)."""
         hook_input = {
-            "model": {"display_name": "Opus 4.6"},
+            "model": {"id": "claude-sonnet-4-6", "display_name": "Sonnet 4.6"},
+            "context_window": {"used_percentage": 30.0},
+        }
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text(json.dumps({"alwaysThinkingEnabled": True}))
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_file):
+            result = handler.handle(hook_input)
+
+        assert "\033[38;5;208m▌▌▌" in result.context[0]
+
+    def test_claude4_defaults_to_high_bars_when_settings_missing(
+        self, handler: ModelContextHandler, tmp_path: Path
+    ) -> None:
+        """Claude 4+ with no settings file at all shows high bars (Claude Code default)."""
+        hook_input = {
+            "model": {"id": "claude-opus-4-6", "display_name": "Opus 4.6"},
             "context_window": {"used_percentage": 30.0},
         }
         settings_file = tmp_path / "nonexistent.json"
@@ -254,6 +217,71 @@ class TestModelContextHandler:
         with patch.object(handler, "_get_settings_path", return_value=settings_file):
             result = handler.handle(hook_input)
 
-        assert "Opus 4.6" in result.context[0]
-        assert len(result.context) == 1
+        assert "\033[38;5;208m▌▌▌" in result.context[0]
+
+    def test_haiku4_defaults_to_high_bars_when_effort_absent(
+        self, handler: ModelContextHandler, tmp_path: Path
+    ) -> None:
+        """Haiku 4.x with no effortLevel also defaults to high bars."""
+        hook_input = {
+            "model": {"id": "claude-haiku-4-5-20251001", "display_name": "Haiku 4.5"},
+            "context_window": {"used_percentage": 10.0},
+        }
+        settings_file = tmp_path / "nonexistent.json"
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_file):
+            result = handler.handle(hook_input)
+
+        assert "\033[38;5;208m▌▌▌" in result.context[0]
+
+    # --- No bars for pre-4.x models ---
+
+    def test_claude3_no_bars_when_effort_not_in_settings(
+        self, handler: ModelContextHandler, tmp_path: Path
+    ) -> None:
+        """Claude 3.x models don't support effort - no bars shown."""
+        hook_input = {
+            "model": {"id": "claude-3-5-sonnet-20241022", "display_name": "Claude 3.5 Sonnet"},
+            "context_window": {"used_percentage": 30.0},
+        }
+        settings_file = tmp_path / "nonexistent.json"
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_file):
+            result = handler.handle(hook_input)
+
         assert "▌" not in result.context[0]
+
+    def test_no_model_id_no_bars(self, handler: ModelContextHandler, tmp_path: Path) -> None:
+        """Missing model ID shows no effort bars (safe default)."""
+        hook_input = {
+            "model": {"display_name": "Claude"},
+            "context_window": {"used_percentage": 30.0},
+        }
+        settings_file = tmp_path / "nonexistent.json"
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_file):
+            result = handler.handle(hook_input)
+
+        assert "▌" not in result.context[0]
+
+    # --- _model_supports_effort unit tests ---
+
+    def test_model_supports_effort_sonnet46(self, handler: ModelContextHandler) -> None:
+        """claude-sonnet-4-6 supports effort."""
+        assert handler._model_supports_effort("claude-sonnet-4-6") is True
+
+    def test_model_supports_effort_opus46(self, handler: ModelContextHandler) -> None:
+        """claude-opus-4-6 supports effort."""
+        assert handler._model_supports_effort("claude-opus-4-6") is True
+
+    def test_model_supports_effort_haiku45(self, handler: ModelContextHandler) -> None:
+        """claude-haiku-4-5-20251001 supports effort."""
+        assert handler._model_supports_effort("claude-haiku-4-5-20251001") is True
+
+    def test_model_supports_effort_claude3_false(self, handler: ModelContextHandler) -> None:
+        """claude-3-5-sonnet-20241022 does not support effort."""
+        assert handler._model_supports_effort("claude-3-5-sonnet-20241022") is False
+
+    def test_model_supports_effort_empty_false(self, handler: ModelContextHandler) -> None:
+        """Empty model ID does not support effort."""
+        assert handler._model_supports_effort("") is False
