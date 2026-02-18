@@ -153,7 +153,7 @@ class TestModelContextHandler:
         assert len(result.context) == 1
         assert "Opus 4.6" in result.context[0]
         # Medium effort: first two bars lit in green, third dim
-        assert "\033[32m▂▄" in result.context[0]
+        assert "\033[32m▌▌" in result.context[0]
 
     def test_opus_shows_effort_bars_low_blue(
         self, handler: ModelContextHandler, tmp_path: Path
@@ -171,7 +171,7 @@ class TestModelContextHandler:
             result = handler.handle(hook_input)
 
         # Low effort: first bar lit in blue, remaining dim
-        assert "\033[34m▂" in result.context[0]
+        assert "\033[34m▌" in result.context[0]
 
     def test_opus_shows_effort_bars_high_orange(
         self, handler: ModelContextHandler, tmp_path: Path
@@ -189,7 +189,7 @@ class TestModelContextHandler:
             result = handler.handle(hook_input)
 
         # High effort: all three bars lit in orange
-        assert "\033[38;5;208m▂▄█" in result.context[0]
+        assert "\033[38;5;208m▌▌▌" in result.context[0]
 
     def test_sonnet_shows_effort_bars(self, handler: ModelContextHandler, tmp_path: Path) -> None:
         """Sonnet model should also show effort bars (effort applies to all models)."""
@@ -206,7 +206,7 @@ class TestModelContextHandler:
 
         # Sonnet should now show effort bars too
         assert "Sonnet 4.6" in result.context[0]
-        assert "\033[38;5;208m▂▄█" in result.context[0]
+        assert "\033[38;5;208m▌▌▌" in result.context[0]
 
     def test_haiku_shows_effort_bars(self, handler: ModelContextHandler, tmp_path: Path) -> None:
         """Haiku model should also show effort bars."""
@@ -222,7 +222,7 @@ class TestModelContextHandler:
             result = handler.handle(hook_input)
 
         assert "Haiku 3.5" in result.context[0]
-        assert "\033[32m▂▄" in result.context[0]
+        assert "\033[32m▌▌" in result.context[0]
 
     def test_no_effort_when_not_set(self, handler: ModelContextHandler, tmp_path: Path) -> None:
         """Should not show effort bars when effortLevel is not set in settings."""
@@ -239,7 +239,7 @@ class TestModelContextHandler:
 
         assert "Opus 4.6" in result.context[0]
         # No effort bars present
-        assert "▂" not in result.context[0]
+        assert "▌" not in result.context[0]
 
     def test_no_effort_when_settings_missing(
         self, handler: ModelContextHandler, tmp_path: Path
@@ -256,4 +256,4 @@ class TestModelContextHandler:
 
         assert "Opus 4.6" in result.context[0]
         assert len(result.context) == 1
-        assert "▂" not in result.context[0]
+        assert "▌" not in result.context[0]
