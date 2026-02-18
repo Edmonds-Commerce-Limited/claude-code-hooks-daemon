@@ -11,11 +11,11 @@ Model colors (by model type):
 - White: Unknown/other models
 
 Effort level signal bars (shown for all models when effortLevel is set):
-- Low:    ▌░░  (one bar lit, blue)
-- Medium: ▌▌░  (two bars lit, green)
-- High:   ▌▌▌  (all bars lit, orange)
+- Low:    ▌░░  (one bar orange,  two dim grey)
+- Medium: ▌▌░  (two bars orange, one dim grey)
+- High:   ▌▌▌  (all three bars orange)
 
-Matches Claude Code's own ▌▌▌ bar style. Unlit bars rendered in dim grey.
+Matches Claude Code's own ▌▌▌ bar style - always orange active, grey inactive.
 Bars omitted when effortLevel not in settings.
 
 Context usage (quarter circle icons with color-coded percentages):
@@ -35,12 +35,8 @@ from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 
 logger = logging.getLogger(__name__)
 
-# Effort level color mapping: blue=low, green=medium, orange=high
-EFFORT_COLORS: dict[str, str] = {
-    "low": "\033[34m",  # Blue
-    "medium": "\033[32m",  # Green
-    "high": "\033[38;5;208m",  # Orange
-}
+# Active effort bar color (orange) - matches Claude Code UI
+_EFFORT_ACTIVE = "\033[38;5;208m"
 
 # Signal bar character - three identical left-half blocks matching Claude Code UI (▌▌▌)
 _EFFORT_BAR = "▌"
@@ -106,10 +102,10 @@ class ModelContextHandler(Handler):
     def _get_effort_suffix(self, model_lower: str, reset: str) -> str:
         """Get effort level signal bars for all models.
 
-        Shows three signal bars (▂▄█) where lit bars reflect the effort level:
-        - Low:    ▂ lit (blue), ▄█ dim
-        - Medium: ▂▄ lit (green), █ dim
-        - High:   ▂▄█ all lit (orange)
+        Shows three signal bars where active bars are orange, inactive dim grey:
+        - Low:    ▌ orange, ▌▌ dim
+        - Medium: ▌▌ orange, ▌ dim
+        - High:   ▌▌▌ all orange
 
         Args:
             model_lower: Lowercased model display name (unused, kept for API compat)
@@ -122,15 +118,13 @@ class ModelContextHandler(Handler):
         if effort_level is None:
             return ""
 
-        effort_color = EFFORT_COLORS.get(effort_level, "\033[37m")
-
         if effort_level == "low":
-            bars = f"{effort_color}{_EFFORT_BAR}{_EFFORT_DIM}{_EFFORT_BAR}{_EFFORT_BAR}{reset}"
+            bars = f"{_EFFORT_ACTIVE}{_EFFORT_BAR}{_EFFORT_DIM}{_EFFORT_BAR}{_EFFORT_BAR}{reset}"
         elif effort_level == "medium":
-            bars = f"{effort_color}{_EFFORT_BAR}{_EFFORT_BAR}{_EFFORT_DIM}{_EFFORT_BAR}{reset}"
+            bars = f"{_EFFORT_ACTIVE}{_EFFORT_BAR}{_EFFORT_BAR}{_EFFORT_DIM}{_EFFORT_BAR}{reset}"
         else:
-            # High (or unknown): all bars lit
-            bars = f"{effort_color}{_EFFORT_BAR}{_EFFORT_BAR}{_EFFORT_BAR}{reset}"
+            # High (or unknown): all bars orange
+            bars = f"{_EFFORT_ACTIVE}{_EFFORT_BAR}{_EFFORT_BAR}{_EFFORT_BAR}{reset}"
 
         return f" {bars}"
 
