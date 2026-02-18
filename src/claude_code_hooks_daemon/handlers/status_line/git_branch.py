@@ -25,6 +25,8 @@ class GitBranchHandler(Handler):
             terminal=False,
             tags=[HandlerTag.STATUS, HandlerTag.GIT, HandlerTag.NON_TERMINAL],
         )
+        self._default_branch: str | None = None
+        self._default_branch_detected: bool = False
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Always run for status events."""
@@ -69,7 +71,20 @@ class GitBranchHandler(Handler):
 
             branch = result.stdout.decode().strip()
             if branch:
-                return HookResult(context=[f"| ⎇ {branch}"])
+                if not self._default_branch_detected:
+                    self._default_branch = self._get_default_branch(cwd)
+                    self._default_branch_detected = True
+                green = "\033[32m"
+                orange = "\033[38;5;208m"
+                grey = "\033[37m"
+                reset = "\033[0m"
+                if self._default_branch is None:
+                    color = grey
+                elif branch == self._default_branch:
+                    color = green
+                else:
+                    color = orange
+                return HookResult(context=[f"| ⎇ {color}{branch}{reset}"])
 
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as e:
             logger.debug("Failed to get git branch: %s", e)
@@ -77,6 +92,44 @@ class GitBranchHandler(Handler):
             logger.error("Unexpected error in git branch handler: %s", e, exc_info=True)
 
         return HookResult(context=[])
+
+    def _get_default_branch(self, cwd: str) -> str | None:
+        """Detect the default branch for the repo.
+
+        Strategy:
+        1. Try git symbolic-ref refs/remotes/origin/HEAD (fast, no network)
+        2. Fall back to checking if 'main' or 'master' exist locally
+        3. Return None if undetermined (branch will be shown orange)
+        """
+        try:
+            result = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
+                ["git", "symbolic-ref", "refs/remotes/origin/HEAD"],
+                cwd=cwd,
+                capture_output=True,
+                timeout=Timeout.GIT_STATUS_SHORT,
+                check=False,
+            )
+            if result.returncode == 0:
+                # Output: refs/remotes/origin/main → extract "main"
+                return result.stdout.decode().strip().split("/")[-1]
+
+            # Fallback: check common default branch names locally
+            for candidate in ("main", "master"):
+                result = (
+                    subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
+                        ["git", "show-ref", "--verify", f"refs/heads/{candidate}"],
+                        cwd=cwd,
+                        capture_output=True,
+                        timeout=Timeout.GIT_STATUS_SHORT,
+                        check=False,
+                    )
+                )
+                if result.returncode == 0:
+                    return candidate
+        except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+            logger.debug("Failed to detect default branch: %s", e)
+
+        return None
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for this handler."""
