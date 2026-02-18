@@ -2,7 +2,7 @@
 
 Formats color-coded model name with effort level signal bars and context percentage:
 
-Format: 🤖 Model ▂▄█ | ◔ XX%
+Format: 🤖 Model ▌▌▌ | ◔ XX%
 
 Model colors (by model type):
 - Blue: Haiku models
@@ -10,13 +10,17 @@ Model colors (by model type):
 - Orange: Opus models
 - White: Unknown/other models
 
-Effort level signal bars (shown for all models when effortLevel is set):
+Effort level signal bars (shown for Claude 4+ models):
 - Low:    ▌░░  (one bar orange,  two dim grey)
 - Medium: ▌▌░  (two bars orange, one dim grey)
 - High:   ▌▌▌  (all three bars orange)
 
 Matches Claude Code's own ▌▌▌ bar style - always orange active, grey inactive.
-Bars omitted when effortLevel not in settings.
+
+Effort level source (in priority order):
+1. effortLevel key in ~/.claude/settings.json (set explicitly via /model)
+2. Default "high" for Claude 4+ models (Claude Code default, not written to settings)
+3. No bars for pre-4.x models (effort feature not available)
 
 Context usage (quarter circle icons with color-coded percentages):
 - ◔ Green (0-25%): 1/4 filled - Low usage, plenty of space
@@ -27,6 +31,7 @@ Context usage (quarter circle icons with color-coded percentages):
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +48,17 @@ _EFFORT_BAR = "▌"
 
 # ANSI dim grey for unlit effort bars
 _EFFORT_DIM = "\033[2;37m"
+
+# Claude Code default effort level when effortLevel absent from settings
+_EFFORT_DEFAULT = "high"
+
+# Minimum Claude major version that supports effort configuration
+_EFFORT_MIN_MAJOR_VERSION = 4
+
+# Regex to extract major version from Claude 4+ model IDs
+# Matches: claude-sonnet-4-6, claude-opus-4-6, claude-haiku-4-5-20251001
+# Does NOT match Claude 3.x format: claude-3-5-sonnet-20241022
+_MODEL_VERSION_PATTERN = re.compile(r"claude-(?:opus|sonnet|haiku)-(\d+)-")
 
 
 class ModelContextHandler(Handler):
@@ -70,7 +86,9 @@ class ModelContextHandler(Handler):
             HookResult with formatted status text in context list
         """
         # Extract data with safe defaults
-        model_display = hook_input.get("model", {}).get("display_name", "Claude")
+        model_data = hook_input.get("model", {})
+        model_display = model_data.get("display_name", "Claude")
+        model_id = model_data.get("id", "")
         ctx_data = hook_input.get("context_window", {})
         used_pct = ctx_data.get("used_percentage") or 0
 
@@ -87,34 +105,32 @@ class ModelContextHandler(Handler):
 
         reset = "\033[0m"
 
-        # Build model display with optional effort level suffix
-        effort_suffix = self._get_effort_suffix(model_lower, reset)
+        # Build model display with optional effort signal bars
+        effort_suffix = self._get_effort_suffix(model_id, reset)
         model_part = f"🤖 {model_color}{model_display}{reset}{effort_suffix}"
 
         # Get quarter circle icon and colors based on usage threshold
         ctx_icon, icon_color, pct_color = self._get_context_icon_and_color(used_pct)
 
-        # Format: "🤖 Model(effort) | ◔ XX%" with colored icon and percentage
+        # Format: "🤖 Model ▌▌▌ | ◔ XX%" with colored icon and percentage
         status = f"{model_part} | {icon_color}{ctx_icon}{reset} {pct_color}{used_pct:.1f}%{reset}"
 
         return HookResult(context=[status])
 
-    def _get_effort_suffix(self, model_lower: str, reset: str) -> str:
-        """Get effort level signal bars for all models.
+    def _get_effort_suffix(self, model_id: str, reset: str) -> str:
+        """Get effort level signal bars for Claude 4+ models.
 
-        Shows three signal bars where active bars are orange, inactive dim grey:
-        - Low:    ▌ orange, ▌▌ dim
-        - Medium: ▌▌ orange, ▌ dim
-        - High:   ▌▌▌ all orange
+        Shows three signal bars (▌▌▌) where active bars are orange, inactive dim grey.
+        Reads effortLevel from settings; defaults to "high" for Claude 4+ when unset.
 
         Args:
-            model_lower: Lowercased model display name (unused, kept for API compat)
+            model_id: Model ID string (e.g. "claude-sonnet-4-6")
             reset: ANSI reset code
 
         Returns:
-            Formatted effort bars like " ▌▌▌" or empty string when not set
+            Formatted effort bars like " ▌▌▌" or empty string for unsupported models
         """
-        effort_level = self._read_effort_level()
+        effort_level = self._read_effort_level(model_id)
         if effort_level is None:
             return ""
 
@@ -128,25 +144,57 @@ class ModelContextHandler(Handler):
 
         return f" {bars}"
 
-    def _read_effort_level(self) -> str | None:
-        """Read effort level from Claude settings.
+    def _read_effort_level(self, model_id: str) -> str | None:
+        """Determine effort level for the given model.
+
+        Priority:
+        1. effortLevel from ~/.claude/settings.json (explicitly set via /model)
+        2. _EFFORT_DEFAULT ("high") for Claude 4+ models (Claude Code default)
+        3. None for pre-4.x models (effort not supported)
+
+        Args:
+            model_id: Model ID string (e.g. "claude-sonnet-4-6")
 
         Returns:
-            Effort level string (low/medium/high) or None if not set
+            Effort level string (low/medium/high) or None if not applicable
         """
         try:
             settings_path = self._get_settings_path()
-            if not settings_path.exists():
-                return None
-            raw = settings_path.read_text()
-            settings: dict[str, Any] = json.loads(raw)
+            settings: dict[str, Any] = {}
+            if settings_path.exists():
+                raw = settings_path.read_text()
+                settings = json.loads(raw)
+
             level = settings.get("effortLevel")
             if level is not None:
                 return str(level)
+
+            # Not in settings - use default "high" for Claude 4+ (not written when default)
+            if self._model_supports_effort(model_id):
+                return _EFFORT_DEFAULT
+
             return None
         except (json.JSONDecodeError, OSError):
             logger.info("Error reading effort level from settings")
             return None
+
+    def _model_supports_effort(self, model_id: str) -> bool:
+        """Check if model supports effort configuration (Claude 4+).
+
+        Claude 4+ model IDs follow: claude-{family}-{major}-{minor}
+        e.g. claude-sonnet-4-6, claude-opus-4-6, claude-haiku-4-5-20251001
+
+        Args:
+            model_id: Model ID string to check
+
+        Returns:
+            True if model is Claude 4 or later
+        """
+        match = _MODEL_VERSION_PATTERN.search(model_id)
+        if match:
+            major = int(match.group(1))
+            return major >= _EFFORT_MIN_MAJOR_VERSION
+        return False
 
     def _get_settings_path(self) -> Path:
         """Get path to Claude settings file.
