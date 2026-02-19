@@ -4,6 +4,7 @@ from .absolute_path import AbsolutePathHandler
 from .british_english import BritishEnglishHandler
 from .daemon_location_guard import DaemonLocationGuardHandler
 from .destructive_git import DestructiveGitHandler
+from .error_hiding_blocker import ErrorHidingBlockerHandler
 from .gh_issue_comments import GhIssueCommentsHandler
 from .git_stash import GitStashHandler
 from .markdown_organization import MarkdownOrganizationHandler
@@ -24,6 +25,7 @@ __all__ = [
     "BritishEnglishHandler",
     "DaemonLocationGuardHandler",
     "DestructiveGitHandler",
+    "ErrorHidingBlockerHandler",
     "GhIssueCommentsHandler",
     "GitStashHandler",
     "MarkdownOrganizationHandler",

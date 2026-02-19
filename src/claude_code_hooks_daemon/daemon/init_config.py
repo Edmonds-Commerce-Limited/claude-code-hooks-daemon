@@ -131,6 +131,7 @@ class ConfigTemplate:
             "    curl_pipe_shell: {enabled: true, priority: 10}   # Block curl | bash patterns\n"
             "    lock_file_edit_blocker: {enabled: true, priority: 10}  # Block direct editing of package manager lock files\n"
             "    absolute_path: {enabled: true, priority: 12}     # Require absolute paths\n"
+            "    error_hiding_blocker: {enabled: true, priority: 13}  # Block error-hiding patterns (|| true, except: pass, catch(e){})\n"
             "    pipe_blocker: {enabled: true, priority: 15}      # Block dangerous pipe patterns\n"
             "    worktree_file_copy: {enabled: true, priority: 15}  # Prevent worktree file copies\n"
             "    dangerous_permissions: {enabled: true, priority: 15}  # Block chmod 777, chown root\n"

@@ -44,6 +44,10 @@ handlers:
       enabled: true
       priority: 12
 
+    error_hiding_blocker:  # Blocks error-hiding patterns in written code (|| true, except: pass, etc)
+      enabled: true
+      priority: 13
+
     worktree_file_copy:    # Prevents copying files between git worktrees
       enabled: true
       priority: 15
