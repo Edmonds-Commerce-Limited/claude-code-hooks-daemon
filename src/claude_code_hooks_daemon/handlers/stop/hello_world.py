@@ -37,7 +37,12 @@ class HelloWorldStopHandler(Handler):
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for hello world handler."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+        from claude_code_hooks_daemon.core import (
+            AcceptanceTest,
+            Decision,
+            RecommendedModel,
+            TestType,
+        )
 
         return [
             AcceptanceTest(
@@ -49,5 +54,7 @@ class HelloWorldStopHandler(Handler):
                 safety_notes="Test handler only - always allows with context message",
                 test_type=TestType.CONTEXT,
                 requires_event="Stop event (cannot be triggered by subagent)",
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=True,
             ),
         ]

@@ -166,7 +166,12 @@ class PlanNumberHelperHandler(Handler):
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Plan Number Helper."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, Decision, TestType
+        from claude_code_hooks_daemon.core import (
+            AcceptanceTest,
+            Decision,
+            RecommendedModel,
+            TestType,
+        )
 
         return [
             AcceptanceTest(
@@ -177,5 +182,7 @@ class PlanNumberHelperHandler(Handler):
                 expected_message_patterns=[r"BLOCKED", r"plan number"],
                 safety_notes="Handler blocks broken command and provides correct plan number instead.",
                 test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
         ]

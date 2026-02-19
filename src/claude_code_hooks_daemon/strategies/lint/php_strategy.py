@@ -40,7 +40,12 @@ class PhpLintStrategy:
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for PHP lint strategy."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, Decision, TestType
+        from claude_code_hooks_daemon.core import (
+            AcceptanceTest,
+            Decision,
+            RecommendedModel,
+            TestType,
+        )
 
         return [
             AcceptanceTest(
@@ -57,6 +62,8 @@ class PhpLintStrategy:
                 test_type=TestType.ADVISORY,
                 setup_commands=["mkdir -p /tmp/acceptance-test-lint-php"],
                 cleanup_commands=["rm -rf /tmp/acceptance-test-lint-php"],
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="PHP lint - invalid code blocked",
@@ -73,5 +80,7 @@ class PhpLintStrategy:
                 required_tools=["php"],
                 setup_commands=["mkdir -p /tmp/acceptance-test-lint-php"],
                 cleanup_commands=["rm -rf /tmp/acceptance-test-lint-php"],
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
         ]

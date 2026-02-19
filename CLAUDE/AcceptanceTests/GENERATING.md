@@ -298,6 +298,45 @@ def get_acceptance_tests(self) -> list[AcceptanceTest]:
 - **test_type**: BLOCKING, ADVISORY, or CONTEXT
 - **setup_commands**: Optional setup steps
 - **cleanup_commands**: Optional cleanup steps
+- **recommended_model**: Which Claude model to use — `haiku` (fast/cheap for blocking tests), `sonnet` (for advisory/context), `opus` (for complex scenarios)
+- **requires_main_thread**: `True` = must run in the main Claude Code session (lifecycle events not visible to sub-agents); `False` = safe to delegate to a Haiku sub-agent
+
+---
+
+## 🤖 SUB-AGENT EXECUTION (Efficient Testing)
+
+### What Was Verified
+
+Hook visibility in sub-agents was empirically tested by spawning a general-purpose sub-agent and observing which hook events fire. Results:
+
+| Hook Event | Fires in Sub-Agent? | Notes |
+|-----------|---------------------|-------|
+| PreToolUse (blocking) | ✅ Yes | Sub-agent commands are blocked correctly |
+| PostToolUse (advisory) | ✅ Yes | system-reminders visible to sub-agent |
+| SessionStart | ❌ No | Only fires once in main session at startup |
+| UserPromptSubmit | ❌ No | Not triggered by sub-agent prompts |
+| Write tool | ✅ Yes | Sub-agents CAN use Write — TDD hooks fire normally |
+
+### Execution Routing Rules
+
+These rules are encoded in every `AcceptanceTest` via `recommended_model` and `requires_main_thread`:
+
+| test_type | Handler Event | recommended_model | requires_main_thread | Rationale |
+|-----------|---------------|-------------------|----------------------|-----------|
+| BLOCKING | PreToolUse | haiku | False | Blocking hooks fire in sub-agents; Haiku is fast/cheap |
+| ADVISORY | PreToolUse/PostToolUse | sonnet | False | Advisory context visible in sub-agents; Sonnet for judgement |
+| CONTEXT (Observable) | SessionStart, UserPromptSubmit | sonnet | True | These events don't fire in sub-agents |
+| CONTEXT (Verified-by-load) | SessionEnd, PreCompact, Stop, etc. | sonnet | True | Untriggerable on demand; main session only |
+
+### Efficient Execution Strategy
+
+The generated playbook includes an "Execution Routing" section with this breakdown. For large test suites:
+
+1. **Main thread first**: Run all `requires_main_thread=True` tests (OBSERVABLE/CONTEXT) — takes ~1 minute
+2. **Parallel Haiku sub-agents**: Dispatch all `requires_main_thread=False, recommended_model=haiku` BLOCKING tests in batches — these are the bulk (~65 tests) and run fast in parallel
+3. **Sonnet sub-agents or main thread**: Handle ADVISORY tests
+
+This approach dramatically reduces wall-clock time for acceptance testing compared to sequential main-thread execution.
 
 ---
 

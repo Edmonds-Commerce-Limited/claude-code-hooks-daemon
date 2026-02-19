@@ -278,7 +278,7 @@ class SedBlockerHandler(Handler):
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for sed blocker handler."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
         return [
             AcceptanceTest(
@@ -294,6 +294,8 @@ class SedBlockerHandler(Handler):
                 cleanup_commands=["rm -f /tmp/sed_test.txt"],
                 safety_notes="Uses test file in /tmp - safe to test",
                 test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="sed -e command",
@@ -306,5 +308,7 @@ class SedBlockerHandler(Handler):
                 ],
                 safety_notes="Uses test file in /tmp - safe to test",
                 test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
         ]

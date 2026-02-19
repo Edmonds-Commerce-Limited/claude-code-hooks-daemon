@@ -126,7 +126,7 @@ NEVER pipe network content directly to a shell."""
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for curl pipe shell handler."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
         return [
             AcceptanceTest(
@@ -141,6 +141,8 @@ NEVER pipe network content directly to a shell."""
                 ],
                 safety_notes="Uses echo - safe to test",
                 test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="wget piped to sh",
@@ -153,5 +155,7 @@ NEVER pipe network content directly to a shell."""
                 ],
                 safety_notes="Uses echo - safe to test",
                 test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
         ]

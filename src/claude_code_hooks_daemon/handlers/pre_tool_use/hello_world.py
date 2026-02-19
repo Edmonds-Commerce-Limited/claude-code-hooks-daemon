@@ -37,7 +37,7 @@ class HelloWorldPreToolUseHandler(Handler):
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for hello world handler."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
         return [
             AcceptanceTest(
@@ -48,5 +48,7 @@ class HelloWorldPreToolUseHandler(Handler):
                 expected_message_patterns=[r"PreToolUse hook system active"],
                 safety_notes="Test handler - fires on any tool use, provides confirmation message",
                 test_type=TestType.CONTEXT,
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=True,
             ),
         ]

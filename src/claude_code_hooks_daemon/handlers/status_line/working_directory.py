@@ -65,7 +65,7 @@ class WorkingDirectoryHandler(Handler):
         This handler displays working directory in status line.
         Verification: Check system-reminders show directory segment when in subdirectory.
         """
-        from claude_code_hooks_daemon.core import TestType
+        from claude_code_hooks_daemon.core import RecommendedModel, TestType
 
         return [
             AcceptanceTest(
@@ -81,5 +81,7 @@ class WorkingDirectoryHandler(Handler):
                 safety_notes="Context/utility handler - minimal testing required",
                 test_type=TestType.CONTEXT,
                 requires_event="StatusLine event",
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=True,
             )
         ]

@@ -63,7 +63,7 @@ class WebSearchYearHandler(Handler):
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Web Search Year."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
         return [
             AcceptanceTest(
@@ -75,5 +75,7 @@ class WebSearchYearHandler(Handler):
                 safety_notes="Advisory handler - suggests updating year. WebSearch may not be available to subagent.",
                 test_type=TestType.ADVISORY,
                 requires_event="PreToolUse with WebSearch tool",
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=False,
             ),
         ]

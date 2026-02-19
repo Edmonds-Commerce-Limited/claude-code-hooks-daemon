@@ -96,7 +96,7 @@ class GhIssueCommentsHandler(Handler):
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Gh Issue Comments."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
         return [
             AcceptanceTest(
@@ -107,5 +107,7 @@ class GhIssueCommentsHandler(Handler):
                 expected_message_patterns=[r"BLOCKED", r"--comments"],
                 safety_notes="Uses echo - safe to test",
                 test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
         ]

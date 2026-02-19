@@ -194,7 +194,7 @@ NEVER manually edit lock files with Write or Edit tools."""
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for lock file edit blocker handler."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
         return [
             AcceptanceTest(
@@ -211,6 +211,8 @@ NEVER manually edit lock files with Write or Edit tools."""
                 test_type=TestType.BLOCKING,
                 setup_commands=["mkdir -p /tmp/acceptance-test-locks"],
                 cleanup_commands=["rm -rf /tmp/acceptance-test-locks"],
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="Edit Cargo.lock",
@@ -229,5 +231,7 @@ NEVER manually edit lock files with Write or Edit tools."""
                     "echo 'old content' > /tmp/acceptance-test-locks/Cargo.lock",
                 ],
                 cleanup_commands=["rm -rf /tmp/acceptance-test-locks"],
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
         ]

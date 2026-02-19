@@ -258,7 +258,9 @@ class PlaybookGenerator:
                     "requires_event": test.requires_event,
                     "required_tools": test.required_tools,
                     "tools_available": all(shutil.which(t) for t in (test.required_tools or [])),
-                    "recommended_model": test.recommended_model.value if test.recommended_model else None,
+                    "recommended_model": (
+                        test.recommended_model.value if test.recommended_model else None
+                    ),
                     "requires_main_thread": test.requires_main_thread,
                 }
                 result.append(test_dict)
@@ -340,22 +342,94 @@ class PlaybookGenerator:
         lines.append("")
         lines.append("---")
         lines.append("")
+        lines.append("## Execution Routing")
+        lines.append("")
+        lines.append("Each test specifies two fields that tell you HOW and WHERE to run it:")
+        lines.append("")
+        lines.append("### Recommended Model")
+        lines.append("")
+        lines.append("The `Recommended Model` field (haiku / sonnet / opus) tells you which")
+        lines.append("Claude model to use when running this test:")
+        lines.append("")
+        lines.append("| Model | When to use |")
+        lines.append("|-------|-------------|")
+        lines.append(
+            "| **haiku** | Simple blocking tests — run command, verify it was denied. Fast and cheap. |"
+        )
+        lines.append(
+            "| **sonnet** | Advisory/context tests — need to verify system-reminder content or nuanced output. |"
+        )
+        lines.append("| **opus** | Complex judgment tests requiring high-quality reasoning. |")
+        lines.append("")
+        lines.append("If `Recommended Model` is absent, use your own judgment.")
+        lines.append("")
+        lines.append("### Requires Main Thread")
+        lines.append("")
+        lines.append(
+            "The `Requires Main Thread` field (yes / no) tells you where the test must run:"
+        )
+        lines.append("")
+        lines.append("| Value | Meaning |")
+        lines.append("|-------|---------|")
+        lines.append(
+            "| **no** | Can run in a sub-agent. Safe to delegate to a parallel Haiku/Sonnet sub-agent. |"
+        )
+        lines.append(
+            "| **yes** | Must run in THIS session (main thread). Do NOT delegate to a sub-agent. |"
+        )
+        lines.append("")
+        lines.append("**Why `requires_main_thread: yes`?**")
+        lines.append(
+            "- SessionStart / UserPromptSubmit system-reminders are NOT visible to sub-agents."
+        )
+        lines.append(
+            "- Lifecycle events (SessionEnd, PreCompact, Stop, etc.) cannot be triggered on demand."
+        )
+        lines.append(
+            "- These tests must be verified by looking at THIS session's context directly."
+        )
+        lines.append("")
+        lines.append("**Why `requires_main_thread: no`?**")
+        lines.append("- Verified experimentally: sub-agents ARE blocked by PreToolUse hooks.")
+        lines.append("- Sub-agents DO see PostToolUse system-reminders in their own context.")
+        lines.append("- These tests can run safely in parallel sub-agents for speed.")
+        lines.append("")
+        lines.append("### Efficient Execution Strategy")
+        lines.append("")
+        lines.append(
+            "1. **Collect all tests where `Requires Main Thread: no`** → batch into parallel sub-agents"
+        )
+        lines.append("   - Group by `Recommended Model` to use the right model for each batch")
+        lines.append("   - Haiku sub-agents for blocking tests (cheapest, fastest)")
+        lines.append("   - Sonnet sub-agents for advisory tests")
+        lines.append(
+            "2. **Run tests where `Requires Main Thread: yes` sequentially** in this session"
+        )
+        lines.append(
+            "   - These are typically OBSERVABLE context checks (just look at system-reminders)"
+        )
+        lines.append("   - Or VERIFIED_BY_LOAD (skip — already confirmed by daemon restart above)")
+        lines.append("")
+        lines.append("---")
+        lines.append("")
         lines.append("## Instructions")
         lines.append("")
         lines.append("**For EXECUTABLE tests (Blocking/Advisory):**")
-        lines.append("1. Execute the command in a Claude Code session")
-        lines.append("2. Verify the expected behaviour occurs")
-        lines.append("3. Mark the test as PASS or FAIL")
-        lines.append("4. If any test fails, stop and fix the issue before continuing")
+        lines.append("1. Check `Requires Main Thread` — if `no`, delegate to a sub-agent")
+        lines.append("2. Execute the command (Bash, Write, Edit as specified)")
+        lines.append("3. Verify the expected behaviour occurs (block message or advisory context)")
+        lines.append("4. Mark the test as PASS or FAIL")
+        lines.append("5. If any test fails, stop and fix the issue before continuing")
         lines.append("")
         lines.append(
             "**For OBSERVABLE tests (Context - SessionStart/UserPromptSubmit/PostToolUse):**"
         )
-        lines.append("1. Look at system-reminders in your current session")
+        lines.append("1. These require `Requires Main Thread: yes` — do NOT delegate")
+        lines.append("2. Look at system-reminders in your current session")
         lines.append(
-            "2. Verify you see the expected messages (e.g., 'SessionStart hook system active')"
+            "3. Verify you see the expected messages (e.g., 'SessionStart hook system active')"
         )
-        lines.append("3. No commands needed - just verify messages visible")
+        lines.append("4. No commands needed - just verify messages visible")
         lines.append("")
         lines.append("**For VERIFIED_BY_LOAD tests (Context - Untriggerable):**")
         lines.append("1. Skip these tests entirely")
@@ -414,7 +488,9 @@ class PlaybookGenerator:
                 lines.append(f"**Expected Decision**: {test.expected_decision.value}")
                 if test.recommended_model:
                     lines.append(f"**Recommended Model**: {test.recommended_model.value}")
-                lines.append(f"**Requires Main Thread**: {'yes' if test.requires_main_thread else 'no'}")
+                lines.append(
+                    f"**Requires Main Thread**: {'yes' if test.requires_main_thread else 'no'}"
+                )
                 lines.append("")
 
                 # Description
@@ -517,7 +593,9 @@ class PlaybookGenerator:
                     lines.append(f"**Expected Decision**: {test.expected_decision.value}")
                     if test.recommended_model:
                         lines.append(f"**Recommended Model**: {test.recommended_model.value}")
-                    lines.append(f"**Requires Main Thread**: {'yes' if test.requires_main_thread else 'no'}")
+                    lines.append(
+                        f"**Requires Main Thread**: {'yes' if test.requires_main_thread else 'no'}"
+                    )
                     lines.append("")
                     lines.append(f"**Description**: {test.description}")
                     lines.append("")

@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.core import AcceptanceTest, Decision, Handler
-from claude_code_hooks_daemon.core.acceptance_test import TestType
+from claude_code_hooks_daemon.core.acceptance_test import RecommendedModel, TestType
 from claude_code_hooks_daemon.core.hook_result import HookResult
 from claude_code_hooks_daemon.daemon.playbook_generator import PlaybookGenerator
 from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
@@ -1477,3 +1477,180 @@ def test_generate_json_all_sources_combined() -> None:
 
     titles = {test["title"] for test in json_tests}
     assert titles == {"Library test", "Plugin test", "Project test"}
+
+
+def test_generate_markdown_shows_recommended_model_when_set() -> None:
+    """Test that recommended_model is shown in markdown when set."""
+    test = AcceptanceTest(
+        title="Haiku blocking test",
+        command='echo "blocked"',
+        description="Blocks dangerous command",
+        expected_decision=Decision.DENY,
+        expected_message_patterns=["blocked"],
+        test_type=TestType.BLOCKING,
+        recommended_model=RecommendedModel.HAIKU,
+        requires_main_thread=False,
+    )
+
+    MockHandlerWithTests.__module__ = "claude_code_hooks_daemon.handlers.pre_tool_use.test_model"
+    registry = HandlerRegistry()
+    registry._handlers["MockHandlerWithTests"] = MockHandlerWithTests
+    config = {"pre_tool_use": {"mock_handler_with_tests": {"enabled": True}}}
+    generator = PlaybookGenerator(config=config, registry=registry)
+
+    with patch.object(MockHandlerWithTests, "get_acceptance_tests", return_value=[test]):
+        markdown = generator.generate_markdown()
+
+    assert "**Recommended Model**: haiku" in markdown
+    assert "**Requires Main Thread**: no" in markdown
+
+
+def test_generate_markdown_omits_recommended_model_when_none() -> None:
+    """Test that recommended_model line is omitted when not set."""
+    test = AcceptanceTest(
+        title="Test without model",
+        command='echo "test"',
+        description="No model specified",
+        expected_decision=Decision.ALLOW,
+        expected_message_patterns=[],
+    )
+
+    MockHandlerWithTests.__module__ = "claude_code_hooks_daemon.handlers.pre_tool_use.test_none"
+    registry = HandlerRegistry()
+    registry._handlers["MockHandlerWithTests"] = MockHandlerWithTests
+    config = {"pre_tool_use": {"mock_handler_with_tests": {"enabled": True}}}
+    generator = PlaybookGenerator(config=config, registry=registry)
+
+    with patch.object(MockHandlerWithTests, "get_acceptance_tests", return_value=[test]):
+        markdown = generator.generate_markdown()
+
+    assert "**Recommended Model**" not in markdown
+    assert "**Requires Main Thread**: no" in markdown
+
+
+def test_generate_markdown_context_observable_event_type() -> None:
+    """Test that CONTEXT tests in observable event types show OBSERVABLE annotation."""
+    test = AcceptanceTest(
+        title="SessionStart check",
+        command="echo session",
+        description="Check session start fires",
+        expected_decision=Decision.ALLOW,
+        expected_message_patterns=["active"],
+        test_type=TestType.CONTEXT,
+        recommended_model=RecommendedModel.SONNET,
+        requires_main_thread=True,
+    )
+
+    MockHandlerWithTests.__module__ = "claude_code_hooks_daemon.handlers.session_start.test"
+    registry = HandlerRegistry()
+    registry._handlers["MockHandlerWithTests"] = MockHandlerWithTests
+    config = {"session_start": {"mock_handler_with_tests": {"enabled": True}}}
+    generator = PlaybookGenerator(config=config, registry=registry)
+
+    with patch.object(MockHandlerWithTests, "get_acceptance_tests", return_value=[test]):
+        markdown = generator.generate_markdown()
+
+    assert "OBSERVABLE - check system-reminders" in markdown
+    assert "**Recommended Model**: sonnet" in markdown
+    assert "**Requires Main Thread**: yes" in markdown
+
+
+def test_generate_json_includes_recommended_model_and_requires_main_thread() -> None:
+    """Test that JSON output includes recommended_model and requires_main_thread fields."""
+    test = AcceptanceTest(
+        title="Typed test",
+        command="echo typed",
+        description="Test with model and thread fields",
+        expected_decision=Decision.DENY,
+        expected_message_patterns=["blocked"],
+        test_type=TestType.BLOCKING,
+        recommended_model=RecommendedModel.HAIKU,
+        requires_main_thread=False,
+    )
+
+    MockHandlerWithTests.__module__ = "claude_code_hooks_daemon.handlers.pre_tool_use.typed"
+    registry = HandlerRegistry()
+    registry._handlers["MockHandlerWithTests"] = MockHandlerWithTests
+    config = {"pre_tool_use": {"mock_handler_with_tests": {"enabled": True}}}
+    generator = PlaybookGenerator(config=config, registry=registry)
+
+    with patch.object(MockHandlerWithTests, "get_acceptance_tests", return_value=[test]):
+        json_tests = generator.generate_json()
+
+    assert len(json_tests) == 1
+    assert json_tests[0]["recommended_model"] == "haiku"
+    assert json_tests[0]["requires_main_thread"] is False
+
+
+def test_generate_json_recommended_model_none_when_not_set() -> None:
+    """Test that JSON recommended_model is None when not set on AcceptanceTest."""
+    test = AcceptanceTest(
+        title="No model test",
+        command="echo no-model",
+        description="No recommended model set",
+        expected_decision=Decision.ALLOW,
+        expected_message_patterns=[],
+    )
+
+    MockHandlerWithTests.__module__ = "claude_code_hooks_daemon.handlers.pre_tool_use.nomodel"
+    registry = HandlerRegistry()
+    registry._handlers["MockHandlerWithTests"] = MockHandlerWithTests
+    config = {"pre_tool_use": {"mock_handler_with_tests": {"enabled": True}}}
+    generator = PlaybookGenerator(config=config, registry=registry)
+
+    with patch.object(MockHandlerWithTests, "get_acceptance_tests", return_value=[test]):
+        json_tests = generator.generate_json()
+
+    assert len(json_tests) == 1
+    assert json_tests[0]["recommended_model"] is None
+    assert json_tests[0]["requires_main_thread"] is False
+
+
+def test_generate_markdown_project_handler_with_recommended_model() -> None:
+    """Test that project handlers show recommended_model in markdown."""
+    from claude_code_hooks_daemon.constants.handlers import HandlerIDMeta
+
+    test = AcceptanceTest(
+        title="Project advisory test",
+        command="echo advisory",
+        description="Project handler advisory",
+        expected_decision=Decision.ALLOW,
+        expected_message_patterns=["context"],
+        test_type=TestType.ADVISORY,
+        recommended_model=RecommendedModel.SONNET,
+        requires_main_thread=False,
+    )
+
+    class MockProjectHandlerWithModel(Handler):
+        def __init__(self) -> None:
+            super().__init__(
+                handler_id=HandlerIDMeta(
+                    class_name="ProjectHandler",
+                    config_key="project",
+                    display_name="project",
+                ),
+                priority=Priority.PLAN_WORKFLOW,
+                terminal=False,
+            )
+
+        def matches(self, hook_input: dict[str, Any]) -> bool:
+            return True
+
+        def handle(self, hook_input: dict[str, Any]) -> HookResult:
+            return HookResult(decision=Decision.ALLOW)
+
+        def get_acceptance_tests(self) -> list[AcceptanceTest]:
+            return [test]
+
+    registry = HandlerRegistry()
+    config: dict[str, Any] = {}
+    generator = PlaybookGenerator(
+        config=config,
+        registry=registry,
+        project_handlers=[MockProjectHandlerWithModel()],
+    )
+
+    markdown = generator.generate_markdown()
+
+    assert "**Recommended Model**: sonnet" in markdown
+    assert "**Requires Main Thread**: no" in markdown

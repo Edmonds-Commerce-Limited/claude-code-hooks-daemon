@@ -24,6 +24,7 @@ from claude_code_hooks_daemon.core import (
     Handler,
     HookResult,
     ProjectContext,
+    RecommendedModel,
     TestType,
 )
 from claude_code_hooks_daemon.daemon.validation import is_hooks_daemon_repo
@@ -112,5 +113,7 @@ class DaemonRestartVerifierHandler(Handler):
                 expected_message_patterns=[r"RECOMMENDED", r"restart"],
                 safety_notes="Uses echo - safe to test. Handler matches git commit in command string.",
                 test_type=TestType.ADVISORY,
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=False,
             ),
         ]

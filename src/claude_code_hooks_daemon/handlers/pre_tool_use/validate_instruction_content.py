@@ -11,7 +11,7 @@ from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import Handler
-from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest, TestType
+from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest, RecommendedModel, TestType
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 
 
@@ -201,6 +201,8 @@ class ValidateInstructionContentHandler(Handler):
                 test_type=TestType.BLOCKING,
                 setup_commands=["mkdir -p /tmp/acceptance-test-validate"],
                 cleanup_commands=["rm -rf /tmp/acceptance-test-validate"],
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="Allow clean instructions in CLAUDE.md",
@@ -215,5 +217,7 @@ class ValidateInstructionContentHandler(Handler):
                 test_type=TestType.ADVISORY,
                 setup_commands=["mkdir -p /tmp/acceptance-test-validate"],
                 cleanup_commands=["rm -rf /tmp/acceptance-test-validate"],
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=False,
             ),
         ]

@@ -36,7 +36,7 @@ class CurrentTimeHandler(Handler):
         This handler displays current time in status line.
         Verification: Check system-reminders show time segment in HH:MM format.
         """
-        from claude_code_hooks_daemon.core import Decision, TestType
+        from claude_code_hooks_daemon.core import Decision, RecommendedModel, TestType
 
         return [
             AcceptanceTest(
@@ -52,5 +52,7 @@ class CurrentTimeHandler(Handler):
                 safety_notes="Context/utility handler - minimal testing required",
                 test_type=TestType.CONTEXT,
                 requires_event="StatusLine event",
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=True,
             )
         ]

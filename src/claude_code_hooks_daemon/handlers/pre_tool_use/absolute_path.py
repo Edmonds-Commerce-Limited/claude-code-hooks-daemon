@@ -68,7 +68,7 @@ class AbsolutePathHandler(Handler):
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for absolute path handler."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
         return [
             AcceptanceTest(
@@ -82,6 +82,8 @@ class AbsolutePathHandler(Handler):
                 ],
                 safety_notes="Handler blocks before any file I/O occurs.",
                 test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="Write with relative path",
@@ -93,5 +95,7 @@ class AbsolutePathHandler(Handler):
                 ],
                 safety_notes="Handler blocks before any file I/O occurs.",
                 test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
         ]

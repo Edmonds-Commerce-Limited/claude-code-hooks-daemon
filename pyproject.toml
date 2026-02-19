@@ -74,13 +74,11 @@ addopts = [
     "-ra",
     "--strict-markers",
     "--strict-config",
-    "--cov=src/claude_code_hooks_daemon",
-    "--cov-branch",
-    "--cov-report=term-missing:skip-covered",
-    "--cov-report=html",
-    "--cov-report=xml",
-    "--cov-report=json:untracked/qa/coverage.json",
 ]
+# Coverage flags are NOT in addopts so that running a single test file
+# (e.g. pytest tests/unit/core/test_foo.py) doesn't trigger coverage on
+# the full source tree and fail the 95% threshold.
+# Coverage is applied by scripts/qa/run_tests.sh during QA runs only.
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",

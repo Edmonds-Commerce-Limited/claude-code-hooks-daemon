@@ -51,7 +51,12 @@ class KotlinQaSuppressionStrategy:
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Kotlin QA suppression strategy."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, Decision, TestType
+        from claude_code_hooks_daemon.core import (
+            AcceptanceTest,
+            Decision,
+            RecommendedModel,
+            TestType,
+        )
 
         return [
             AcceptanceTest(
@@ -67,5 +72,7 @@ class KotlinQaSuppressionStrategy:
                 safety_notes="Uses /tmp path - safe",
                 setup_commands=["mkdir -p /tmp/acceptance-test-qa-kotlin"],
                 cleanup_commands=["rm -rf /tmp/acceptance-test-qa-kotlin"],
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
         ]

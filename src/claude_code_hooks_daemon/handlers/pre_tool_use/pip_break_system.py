@@ -122,7 +122,7 @@ NEVER use --break-system-packages as default behavior."""
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for pip break system handler."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
         return [
             AcceptanceTest(
@@ -137,6 +137,8 @@ NEVER use --break-system-packages as default behavior."""
                 ],
                 safety_notes="Uses echo - safe to test",
                 test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="python3 -m pip install --break-system-packages",
@@ -149,5 +151,7 @@ NEVER use --break-system-packages as default behavior."""
                 ],
                 safety_notes="Uses echo - safe to test",
                 test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
         ]
