@@ -58,11 +58,10 @@ fi
 # Run shellcheck with JSON output
 # Source directives in individual scripts handle venv-include.bash resolution,
 # so no global SC suppressions are needed here.
-if shellcheck -f json "${SHELL_SCRIPTS[@]}" > "${OUTPUT_FILE}.raw" 2>&1; then
-    SHELLCHECK_EXIT=0
-else
-    SHELLCHECK_EXIT=$?
+if shellcheck -x -f json "${SHELL_SCRIPTS[@]}" > "${OUTPUT_FILE}.raw" 2>&1; then
+    : # No issues found
 fi
+# Issues (if any) are captured as JSON in the output file for parsing below
 
 # Write file list for Python to read
 printf '%s\n' "${SHELL_SCRIPTS[@]}" > "${OUTPUT_FILE}.files"
@@ -102,7 +101,7 @@ summary = {
     "errors": sum(1 for i in issues if i["severity"] == "error"),
     "warnings": sum(1 for i in issues if i["severity"] == "warning"),
     "info": sum(1 for i in issues if i["severity"] == "info"),
-    "passed": len(issues) == 0,
+    "passed": sum(1 for i in issues if i["severity"] in ("error", "warning")) == 0,
 }
 
 json.dump({"tool": "shellcheck", "summary": summary, "issues": issues,

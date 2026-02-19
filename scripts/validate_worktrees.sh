@@ -25,8 +25,6 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 WORKTREES_DIR="${PROJECT_ROOT}/untracked/worktrees"
-RESULTS_FILE="/tmp/worktree_qa_results_$$.txt"
-
 # Track results
 declare -a PASSED_WTS=()
 declare -a FAILED_WTS=()

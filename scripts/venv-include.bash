@@ -57,7 +57,7 @@ ensure_venv() {
 # Install project dependencies (like composer install)
 #
 install_deps() {
-    local force_reinstall="${1:-false}"
+    local force_reinstall="${FORCE_REINSTALL:-false}"
 
     ensure_venv || return 1
 
