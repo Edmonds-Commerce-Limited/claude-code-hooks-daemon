@@ -91,7 +91,7 @@ class DaemonLocationGuardHandler(Handler):
 
     def get_acceptance_tests(self) -> list[AcceptanceTest]:
         """Return acceptance tests for this handler."""
-        from claude_code_hooks_daemon.core import TestType
+        from claude_code_hooks_daemon.core import RecommendedModel, TestType
 
         return [
             AcceptanceTest(
@@ -110,5 +110,7 @@ class DaemonLocationGuardHandler(Handler):
                 safety_notes="Using echo to test blocking - safe command",
                 test_type=TestType.BLOCKING,
                 requires_event="PreToolUse:Bash",
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
         ]

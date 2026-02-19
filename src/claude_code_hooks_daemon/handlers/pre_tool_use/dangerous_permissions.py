@@ -126,7 +126,7 @@ The correct solution is almost never 777."""
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for dangerous permissions handler."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
         return [
             AcceptanceTest(
@@ -141,6 +141,8 @@ The correct solution is almost never 777."""
                 ],
                 safety_notes="Uses echo - safe to test",
                 test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="chmod a+rwx",
@@ -153,5 +155,7 @@ The correct solution is almost never 777."""
                 ],
                 safety_notes="Uses echo - safe to test",
                 test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
         ]

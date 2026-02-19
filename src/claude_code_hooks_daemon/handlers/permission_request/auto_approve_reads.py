@@ -64,7 +64,12 @@ class AutoApproveReadsHandler(Handler):
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Auto Approve Reads."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+        from claude_code_hooks_daemon.core import (
+            AcceptanceTest,
+            Decision,
+            RecommendedModel,
+            TestType,
+        )
 
         return [
             AcceptanceTest(
@@ -76,5 +81,7 @@ class AutoApproveReadsHandler(Handler):
                 safety_notes="Read-only operations are safe",
                 test_type=TestType.CONTEXT,
                 requires_event="PermissionRequest for Read tool",
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=True,
             ),
         ]

@@ -101,7 +101,7 @@ class GitStashHandler(Handler):
         In 'warn' mode (default): Allows with advisory warnings
         In 'deny' mode: Hard blocks with alternatives
         """
-        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
         mode = getattr(self, "_mode", "warn")
 
@@ -119,6 +119,8 @@ class GitStashHandler(Handler):
                     ],
                     safety_notes="Uses echo - safe to test",
                     test_type=TestType.BLOCKING,
+                    recommended_model=RecommendedModel.HAIKU,
+                    requires_main_thread=False,
                 ),
                 AcceptanceTest(
                     title="git stash push (deny mode)",
@@ -131,6 +133,8 @@ class GitStashHandler(Handler):
                     ],
                     safety_notes="Uses echo - safe to test",
                     test_type=TestType.BLOCKING,
+                    recommended_model=RecommendedModel.HAIKU,
+                    requires_main_thread=False,
                 ),
             ]
         else:
@@ -147,6 +151,8 @@ class GitStashHandler(Handler):
                     ],
                     safety_notes="Uses echo - safe to test",
                     test_type=TestType.ADVISORY,
+                    recommended_model=RecommendedModel.SONNET,
+                    requires_main_thread=False,
                 ),
                 AcceptanceTest(
                     title="git stash push (warn mode)",
@@ -159,5 +165,7 @@ class GitStashHandler(Handler):
                     ],
                     safety_notes="Uses echo - safe to test",
                     test_type=TestType.ADVISORY,
+                    recommended_model=RecommendedModel.SONNET,
+                    requires_main_thread=False,
                 ),
             ]

@@ -52,7 +52,12 @@ class PhpTddStrategy:
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for PHP TDD strategy."""
 
-        from claude_code_hooks_daemon.core import AcceptanceTest, Decision, TestType
+        from claude_code_hooks_daemon.core import (
+            AcceptanceTest,
+            Decision,
+            RecommendedModel,
+            TestType,
+        )
 
         return [
             AcceptanceTest(
@@ -69,5 +74,7 @@ class PhpTddStrategy:
                 test_type=TestType.BLOCKING,
                 setup_commands=["mkdir -p /tmp/acceptance-test-tdd-php/src/Services"],
                 cleanup_commands=["rm -rf /tmp/acceptance-test-tdd-php"],
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
         ]

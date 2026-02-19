@@ -101,7 +101,7 @@ class CriticalThinkingAdvisoryHandler(Handler):
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for this handler."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
         return [
             AcceptanceTest(
@@ -119,5 +119,7 @@ class CriticalThinkingAdvisoryHandler(Handler):
                 safety_notes="Advisory only - never blocks. May not fire every time due to random gate.",
                 test_type=TestType.CONTEXT,
                 requires_event="UserPromptSubmit event (cannot be triggered by subagent)",
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=True,
             ),
         ]

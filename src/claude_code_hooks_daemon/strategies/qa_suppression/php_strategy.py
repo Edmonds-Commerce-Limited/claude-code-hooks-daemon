@@ -64,7 +64,12 @@ class PhpQaSuppressionStrategy:
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for PHP QA suppression strategy."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, Decision, TestType
+        from claude_code_hooks_daemon.core import (
+            AcceptanceTest,
+            Decision,
+            RecommendedModel,
+            TestType,
+        )
 
         return [
             AcceptanceTest(
@@ -80,6 +85,8 @@ class PhpQaSuppressionStrategy:
                 safety_notes="Uses /tmp path - safe",
                 setup_commands=["mkdir -p /tmp/acceptance-test-qa-php"],
                 cleanup_commands=["rm -rf /tmp/acceptance-test-qa-php"],
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="PHP @phpstan-ignore (with identifier) blocked",
@@ -94,6 +101,8 @@ class PhpQaSuppressionStrategy:
                 safety_notes="Uses /tmp path - safe",
                 setup_commands=["mkdir -p /tmp/acceptance-test-qa-php"],
                 cleanup_commands=["rm -rf /tmp/acceptance-test-qa-php"],
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="PHP phpcs:disable blocked",
@@ -108,5 +117,7 @@ class PhpQaSuppressionStrategy:
                 safety_notes="Uses /tmp path - safe",
                 setup_commands=["mkdir -p /tmp/acceptance-test-qa-php"],
                 cleanup_commands=["rm -rf /tmp/acceptance-test-qa-php"],
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
         ]

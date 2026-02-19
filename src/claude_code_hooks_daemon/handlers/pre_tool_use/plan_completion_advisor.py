@@ -111,7 +111,7 @@ class PlanCompletionAdvisorHandler(Handler):
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Plan Completion Advisor."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
         return [
             AcceptanceTest(
@@ -127,5 +127,7 @@ class PlanCompletionAdvisorHandler(Handler):
                 test_type=TestType.ADVISORY,
                 setup_commands=["mkdir -p /tmp/acceptance-test-plancomp/CLAUDE/Plan/098-test"],
                 cleanup_commands=["rm -rf /tmp/acceptance-test-plancomp"],
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=False,
             ),
         ]

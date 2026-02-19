@@ -564,7 +564,7 @@ class MarkdownOrganizationHandler(Handler):
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Markdown Organization."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
         return [
             AcceptanceTest(
@@ -580,5 +580,7 @@ class MarkdownOrganizationHandler(Handler):
                 test_type=TestType.BLOCKING,
                 setup_commands=[],
                 cleanup_commands=[],
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
         ]

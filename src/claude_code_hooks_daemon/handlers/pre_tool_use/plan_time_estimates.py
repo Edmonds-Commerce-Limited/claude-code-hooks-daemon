@@ -125,7 +125,7 @@ class PlanTimeEstimatesHandler(Handler):
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Plan Time Estimates."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
         return [
             AcceptanceTest(
@@ -141,5 +141,7 @@ class PlanTimeEstimatesHandler(Handler):
                 test_type=TestType.BLOCKING,
                 setup_commands=["mkdir -p /tmp/acceptance-test-plantime/Plan/001-test"],
                 cleanup_commands=["rm -rf /tmp/acceptance-test-plantime"],
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
         ]

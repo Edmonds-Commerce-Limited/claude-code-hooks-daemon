@@ -111,7 +111,7 @@ class BashErrorDetectorHandler(Handler):
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Bash Error Detector."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
         return [
             AcceptanceTest(
@@ -123,5 +123,7 @@ class BashErrorDetectorHandler(Handler):
                 safety_notes="echo command always succeeds - safe to test",
                 test_type=TestType.ADVISORY,
                 requires_event="PostToolUse after Bash command with error keywords",
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=False,
             ),
         ]

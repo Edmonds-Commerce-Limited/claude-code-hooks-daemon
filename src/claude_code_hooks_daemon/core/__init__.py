@@ -29,7 +29,6 @@ from claude_code_hooks_daemon.core.transcript_reader import (
 __all__ = [
     "AcceptanceTest",
     "ChainExecutionResult",
-    "RecommendedModel",
     "DaemonDataLayer",
     "Decision",
     "EventRouter",
@@ -43,6 +42,7 @@ __all__ = [
     "HookInput",
     "HookResult",
     "ProjectContext",
+    "RecommendedModel",
     "SessionState",
     "TestType",
     "ToolInput",

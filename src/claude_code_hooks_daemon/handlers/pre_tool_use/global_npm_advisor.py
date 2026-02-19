@@ -126,7 +126,7 @@ Proceeding with global install..."""
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Global Npm Advisor."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
         return [
             AcceptanceTest(
@@ -137,5 +137,7 @@ Proceeding with global install..."""
                 expected_message_patterns=[r"global.*npm", r"local install"],
                 safety_notes="Uses echo - safe to test",
                 test_type=TestType.ADVISORY,
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=False,
             ),
         ]

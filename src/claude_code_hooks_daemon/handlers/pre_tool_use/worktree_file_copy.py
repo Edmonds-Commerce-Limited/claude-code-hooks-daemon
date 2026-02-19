@@ -72,7 +72,7 @@ class WorktreeFileCopyHandler(Handler):
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for worktree file copy handler."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
         return [
             AcceptanceTest(
@@ -87,6 +87,8 @@ class WorktreeFileCopyHandler(Handler):
                 ],
                 safety_notes="Uses echo - safe to test",
                 test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="rsync from worktree to main repo",
@@ -99,5 +101,7 @@ class WorktreeFileCopyHandler(Handler):
                 ],
                 safety_notes="Uses echo - safe to test",
                 test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
         ]

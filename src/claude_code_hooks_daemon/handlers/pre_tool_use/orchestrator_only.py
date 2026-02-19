@@ -199,7 +199,7 @@ class OrchestratorOnlyHandler(Handler):
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for orchestrator-only handler."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
         return [
             AcceptanceTest(
@@ -210,5 +210,7 @@ class OrchestratorOnlyHandler(Handler):
                 expected_message_patterns=[],
                 safety_notes="Handler is opt-in (disabled by default) - unit tests verify blocking logic",
                 test_type=TestType.CONTEXT,
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=True,
             ),
         ]

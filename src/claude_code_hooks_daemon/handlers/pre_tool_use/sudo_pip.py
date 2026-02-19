@@ -119,7 +119,7 @@ NEVER use sudo pip install as default behavior."""
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for sudo pip handler."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
         return [
             AcceptanceTest(
@@ -134,6 +134,8 @@ NEVER use sudo pip install as default behavior."""
                 ],
                 safety_notes="Uses echo - safe to test",
                 test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="sudo python3 -m pip install",
@@ -146,5 +148,7 @@ NEVER use sudo pip install as default behavior."""
                 ],
                 safety_notes="Uses echo - safe to test",
                 test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
         ]

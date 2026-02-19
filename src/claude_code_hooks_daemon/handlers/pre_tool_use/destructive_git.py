@@ -143,7 +143,7 @@ class DestructiveGitHandler(Handler):
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for destructive git handler."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
         return [
             AcceptanceTest(
@@ -156,6 +156,8 @@ class DestructiveGitHandler(Handler):
                 ],
                 safety_notes="Uses non-existent ref - would fail harmlessly if executed",
                 test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="git clean -f",
@@ -167,6 +169,8 @@ class DestructiveGitHandler(Handler):
                 ],
                 safety_notes="Uses non-existent path - would fail harmlessly if executed",
                 test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="git push --force",
@@ -179,6 +183,8 @@ class DestructiveGitHandler(Handler):
                 ],
                 safety_notes="Uses non-existent remote/branch - would fail harmlessly if executed",
                 test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="git stash drop",
@@ -191,6 +197,8 @@ class DestructiveGitHandler(Handler):
                 ],
                 safety_notes="Uses non-existent stash index - would fail harmlessly if executed",
                 test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="git checkout --",
@@ -203,6 +211,8 @@ class DestructiveGitHandler(Handler):
                 ],
                 safety_notes="Uses non-existent file path - would fail harmlessly if executed",
                 test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="git restore",
@@ -215,6 +225,8 @@ class DestructiveGitHandler(Handler):
                 ],
                 safety_notes="Uses non-existent file path - would fail harmlessly if executed",
                 test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="git branch -D",
@@ -227,6 +239,8 @@ class DestructiveGitHandler(Handler):
                 ],
                 safety_notes="Uses non-existent branch - would fail harmlessly if executed",
                 test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="git stash clear",
@@ -239,5 +253,7 @@ class DestructiveGitHandler(Handler):
                 ],
                 safety_notes="Safe to test - only clears stash (recoverable via reflog)",
                 test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
         ]

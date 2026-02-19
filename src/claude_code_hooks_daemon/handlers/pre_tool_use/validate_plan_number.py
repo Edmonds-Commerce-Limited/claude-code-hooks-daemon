@@ -206,7 +206,7 @@ See: CLAUDE/Plan/CLAUDE.md for full instructions
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Validate Plan Number."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
         return [
             AcceptanceTest(
@@ -220,5 +220,7 @@ See: CLAUDE/Plan/CLAUDE.md for full instructions
                 expected_message_patterns=[r"PLAN NUMBER", r"[Ee]xpected"],
                 safety_notes="Advisory handler - warns about wrong plan number but allows operation.",
                 test_type=TestType.ADVISORY,
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=False,
             ),
         ]

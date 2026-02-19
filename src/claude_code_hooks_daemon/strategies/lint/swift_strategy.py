@@ -40,7 +40,12 @@ class SwiftLintStrategy:
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Swift lint strategy."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, Decision, TestType
+        from claude_code_hooks_daemon.core import (
+            AcceptanceTest,
+            Decision,
+            RecommendedModel,
+            TestType,
+        )
 
         return [
             AcceptanceTest(
@@ -57,6 +62,8 @@ class SwiftLintStrategy:
                 test_type=TestType.ADVISORY,
                 setup_commands=["mkdir -p /tmp/acceptance-test-lint-swift"],
                 cleanup_commands=["rm -rf /tmp/acceptance-test-lint-swift"],
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="Swift lint - invalid code blocked",
@@ -73,5 +80,7 @@ class SwiftLintStrategy:
                 required_tools=["swiftc"],
                 setup_commands=["mkdir -p /tmp/acceptance-test-lint-swift"],
                 cleanup_commands=["rm -rf /tmp/acceptance-test-lint-swift"],
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
             ),
         ]

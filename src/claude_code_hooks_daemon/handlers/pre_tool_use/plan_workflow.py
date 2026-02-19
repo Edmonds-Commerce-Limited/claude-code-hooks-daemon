@@ -61,7 +61,7 @@ class PlanWorkflowHandler(Handler):
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Plan Workflow."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
 
         return [
             AcceptanceTest(
@@ -77,5 +77,7 @@ class PlanWorkflowHandler(Handler):
                 test_type=TestType.ADVISORY,
                 setup_commands=["mkdir -p /tmp/acceptance-test-planwf/CLAUDE/Plan/099-test"],
                 cleanup_commands=["rm -rf /tmp/acceptance-test-planwf"],
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=False,
             ),
         ]
