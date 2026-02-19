@@ -36,6 +36,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00064: PipeBlocker Strategy Pattern Redesign](Completed/00064-pipe-blocker-strategy-redesign/PLAN.md) - Complete
+  - Replaced over-eager whitelist-only logic with three-tier whitelist/blacklist/unknown system
+  - Added pipe_blocker strategy domain: 8 language strategies (Universal, Python, JS, Shell, Go, Rust, Java, Ruby)
+  - Differentiated messages: blacklisted → "expensive command"; unknown → "unrecognized, add to extra_whitelist"
+  - Full TDD coverage, QA suite green, daemon verified running
+
 - [00062: Breaking Changes Lifecycle](Completed/00062-breaking-changes-lifecycle/PLAN.md) - Complete
   - Fixed systemic breaking changes documentation gap causing unknown handler errors during upgrades
   - Created historical upgrade guides for v2.10 through v2.13
@@ -381,9 +387,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 62
-- **Completed**: 53 (1 with reduced scope)
-- **Active**: 7 (1 in progress, 6 not started)
+- **Total Plans Created**: 64
+- **Completed**: 54 (1 with reduced scope)
+- **Active**: 6 (2 in progress, 4 not started)
 - **Cancelled/Abandoned**: 2 (00036 - empty draft deleted, 00044 - approach retired)
 
 ## Quick Links
