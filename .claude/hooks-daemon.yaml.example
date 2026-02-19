@@ -35,6 +35,10 @@ handlers:
       enabled: true
       priority: 12
 
+    error_hiding_blocker:  # Blocks error-hiding patterns (|| true, empty catch, except: pass, etc.)
+      enabled: true
+      priority: 13
+
     curl_pipe_shell:       # Blocks dangerous curl | sh patterns
       enabled: true
       priority: 14
