@@ -4,6 +4,7 @@ When llm: commands exist in package.json, runs ESLint validation (enforcement mo
 When llm: commands do NOT exist, skips validation and advises about creating llm:lint.
 """
 
+import os
 import subprocess  # nosec B404 - subprocess used for eslint validation only (trusted tool)
 from pathlib import Path
 from typing import Any, ClassVar
@@ -126,12 +127,24 @@ class ValidateEslintOnWriteHandler(Handler):
             ]
             cwd = str(self.workspace_root)
 
+            # Prepend node_modules/.bin so tsx is resolvable even when the daemon
+            # runs with a restricted system PATH (no node_modules/.bin included).
+            env = os.environ.copy()
+            bin_path = self.workspace_root / "node_modules" / ".bin"
+            if bin_path.exists():
+                env["PATH"] = str(bin_path) + os.pathsep + env.get("PATH", "")
+
             if is_worktree:
                 print("  [Detected worktree file - using ESLint wrapper for consistent config]")
 
             result = (
                 subprocess.run(  # nosec B603 - eslint/npx are trusted tools, file path validated
-                    command, cwd=cwd, capture_output=True, text=True, timeout=Timeout.ESLINT_CHECK
+                    command,
+                    cwd=cwd,
+                    capture_output=True,
+                    text=True,
+                    timeout=Timeout.ESLINT_CHECK,
+                    env=env,
                 )
             )
 

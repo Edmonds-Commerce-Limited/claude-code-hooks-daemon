@@ -477,3 +477,65 @@ class TestValidateEslintOnWriteHandler:
 
         assert result.decision == Decision.ALLOW
         mock_run.assert_called_once()
+
+
+class TestNodeModulesBinPath:
+    """Tests for node_modules/.bin PATH injection (Bug 1 fix)."""
+
+    @pytest.fixture
+    def handler(self, tmp_path: Path) -> ValidateEslintOnWriteHandler:
+        return ValidateEslintOnWriteHandler(workspace_root=tmp_path)
+
+    @patch("subprocess.run")
+    def test_node_modules_bin_prepended_to_path_when_exists(
+        self, mock_run: MagicMock, handler: ValidateEslintOnWriteHandler, tmp_path: Path
+    ) -> None:
+        """subprocess.run env must include node_modules/.bin when directory exists."""
+        bin_dir = tmp_path / "node_modules" / ".bin"
+        bin_dir.mkdir(parents=True)
+
+        test_file = tmp_path / "test.ts"
+        test_file.write_text("const x = 1;")
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        hook_input = {"tool_name": "Write", "tool_input": {"file_path": str(test_file)}}
+        handler.handle(hook_input)
+
+        call_kwargs = mock_run.call_args[1]
+        assert "env" in call_kwargs
+        assert str(bin_dir) in call_kwargs["env"]["PATH"]
+
+    @patch("subprocess.run")
+    def test_node_modules_bin_first_in_path(
+        self, mock_run: MagicMock, handler: ValidateEslintOnWriteHandler, tmp_path: Path
+    ) -> None:
+        """node_modules/.bin must appear BEFORE other PATH entries."""
+        bin_dir = tmp_path / "node_modules" / ".bin"
+        bin_dir.mkdir(parents=True)
+
+        test_file = tmp_path / "test.ts"
+        test_file.write_text("const x = 1;")
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        hook_input = {"tool_name": "Write", "tool_input": {"file_path": str(test_file)}}
+        handler.handle(hook_input)
+
+        env_path = mock_run.call_args[1]["env"]["PATH"]
+        entries = env_path.split(":")
+        assert entries[0] == str(bin_dir)
+
+    @patch("subprocess.run")
+    def test_env_passed_even_without_node_modules(
+        self, mock_run: MagicMock, handler: ValidateEslintOnWriteHandler, tmp_path: Path
+    ) -> None:
+        """env kwarg must be passed even when node_modules/.bin does not exist."""
+        # tmp_path has no node_modules
+        test_file = tmp_path / "test.ts"
+        test_file.write_text("const x = 1;")
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        hook_input = {"tool_name": "Write", "tool_input": {"file_path": str(test_file)}}
+        handler.handle(hook_input)
+
+        call_kwargs = mock_run.call_args[1]
+        assert "env" in call_kwargs
