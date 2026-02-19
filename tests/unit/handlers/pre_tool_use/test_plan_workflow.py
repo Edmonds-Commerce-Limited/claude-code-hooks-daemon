@@ -121,74 +121,94 @@ class TestPlanWorkflowHandler:
 
     # Tests for handle() method
 
-    def test_handle_allows_with_guidance(self, handler: PlanWorkflowHandler) -> None:
-        """Handler allows operation with workflow guidance."""
+    def test_handle_allows_with_context(self, handler: PlanWorkflowHandler) -> None:
+        """Handler allows operation with workflow context (shown as additionalContext)."""
         hook_input: dict[str, Any] = {
             "tool_name": "Write",
             "tool_input": {"file_path": "/workspace/CLAUDE/Plan/001-test/PLAN.md"},
         }
         result = handler.handle(hook_input)
         assert result.decision == Decision.ALLOW
-        assert result.guidance is not None
+        assert result.context, "Advisory must be in context list"
+        assert result.guidance is None
 
-    def test_handle_guidance_includes_file_path(self, handler: PlanWorkflowHandler) -> None:
-        """Handler guidance includes the file path."""
+    def test_handle_context_includes_file_path(self, handler: PlanWorkflowHandler) -> None:
+        """Handler context includes the file path."""
         hook_input: dict[str, Any] = {
             "tool_name": "Write",
             "tool_input": {"file_path": "/workspace/CLAUDE/Plan/042-feature/PLAN.md"},
         }
         result = handler.handle(hook_input)
-        assert "/workspace/CLAUDE/Plan/042-feature/PLAN.md" in result.guidance
+        assert "/workspace/CLAUDE/Plan/042-feature/PLAN.md" in result.context[0]
 
-    def test_handle_guidance_includes_task_status_icons(self, handler: PlanWorkflowHandler) -> None:
-        """Handler guidance mentions task status icons."""
+    def test_handle_context_includes_task_status_icons(self, handler: PlanWorkflowHandler) -> None:
+        """Handler context mentions task status icons."""
         hook_input: dict[str, Any] = {
             "tool_name": "Write",
             "tool_input": {"file_path": "/workspace/CLAUDE/Plan/001-test/PLAN.md"},
         }
         result = handler.handle(hook_input)
-        assert "⬜" in result.guidance
-        assert "🔄" in result.guidance
-        assert "✅" in result.guidance
-        assert "not started" in result.guidance
-        assert "in progress" in result.guidance
-        assert "completed" in result.guidance
+        assert "⬜" in result.context[0]
+        assert "🔄" in result.context[0]
+        assert "✅" in result.context[0]
+        assert "not started" in result.context[0]
+        assert "in progress" in result.context[0]
+        assert "completed" in result.context[0]
 
-    def test_handle_guidance_includes_success_criteria(self, handler: PlanWorkflowHandler) -> None:
-        """Handler guidance mentions success criteria."""
+    def test_handle_context_includes_success_criteria(self, handler: PlanWorkflowHandler) -> None:
+        """Handler context mentions success criteria."""
         hook_input: dict[str, Any] = {
             "tool_name": "Write",
             "tool_input": {"file_path": "/workspace/CLAUDE/Plan/001-test/PLAN.md"},
         }
         result = handler.handle(hook_input)
-        assert "Success Criteria" in result.guidance
+        assert "Success Criteria" in result.context[0]
 
-    def test_handle_guidance_includes_manageable_phases(self, handler: PlanWorkflowHandler) -> None:
-        """Handler guidance mentions breaking into phases."""
+    def test_handle_context_includes_manageable_phases(self, handler: PlanWorkflowHandler) -> None:
+        """Handler context mentions breaking into phases."""
         hook_input: dict[str, Any] = {
             "tool_name": "Write",
             "tool_input": {"file_path": "/workspace/CLAUDE/Plan/001-test/PLAN.md"},
         }
         result = handler.handle(hook_input)
-        assert "manageable phases" in result.guidance
+        assert "manageable phases" in result.context[0]
 
-    def test_handle_guidance_includes_status_updates(self, handler: PlanWorkflowHandler) -> None:
-        """Handler guidance mentions updating task status."""
+    def test_handle_context_includes_status_updates(self, handler: PlanWorkflowHandler) -> None:
+        """Handler context mentions updating task status."""
         hook_input: dict[str, Any] = {
             "tool_name": "Write",
             "tool_input": {"file_path": "/workspace/CLAUDE/Plan/001-test/PLAN.md"},
         }
         result = handler.handle(hook_input)
-        assert "Update task status" in result.guidance
+        assert "Update task status" in result.context[0]
 
-    def test_handle_guidance_references_guidelines(self, handler: PlanWorkflowHandler) -> None:
-        """Handler guidance references full guidelines document."""
+    def test_handle_context_references_guidelines(self, handler: PlanWorkflowHandler) -> None:
+        """Handler context references full guidelines document."""
         hook_input: dict[str, Any] = {
             "tool_name": "Write",
             "tool_input": {"file_path": "/workspace/CLAUDE/Plan/001-test/PLAN.md"},
         }
         result = handler.handle(hook_input)
-        assert "CLAUDE/PlanWorkflow.md" in result.guidance
+        assert "CLAUDE/PlanWorkflow.md" in result.context[0]
+
+    def test_handle_uses_context_not_guidance(self, handler: PlanWorkflowHandler) -> None:
+        """Regression test: advisory MUST be returned as context, not guidance.
+
+        Bug: PlanWorkflowHandler returned guidance=... but Claude Code only
+        surfaces additionalContext (context list) in system-reminders for
+        PreToolUse events. guidance is silently ignored, making the advisory
+        invisible to the agent.
+
+        Fix: return context=[guidance_text] so advisory appears in system-reminders.
+        """
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/workspace/CLAUDE/Plan/001-test/PLAN.md"},
+        }
+        result = handler.handle(hook_input)
+        assert result.context, "Advisory must be in context list (shown as additionalContext)"
+        assert result.guidance is None, "guidance field is not shown in PreToolUse system-reminders"
+        assert any("Workflow" in c for c in result.context), "Context must contain 'Workflow'"
 
     # Tests for handler metadata
 

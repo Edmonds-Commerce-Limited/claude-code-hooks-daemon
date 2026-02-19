@@ -57,7 +57,7 @@ class PlanWorkflowHandler(Handler):
             "See CLAUDE/PlanWorkflow.md for full guidelines."
         )
 
-        return HookResult(decision=Decision.ALLOW, guidance=guidance)
+        return HookResult(decision=Decision.ALLOW, context=[guidance])
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Plan Workflow."""
