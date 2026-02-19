@@ -15,6 +15,7 @@
 # Ensure output.sh is loaded
 if [ -z "${OUTPUT_SH_LOADED+x}" ]; then
     INSTALL_LIB_DIR="$(dirname "${BASH_SOURCE[0]}")"
+    # shellcheck source=output.sh
     source "$INSTALL_LIB_DIR/output.sh"
 fi
 
@@ -203,7 +204,6 @@ restart_daemon_verified() {
     print_verbose "Checking daemon status..."
     local status_output
     status_output=$(get_daemon_status "$venv_python")
-    local status_exit_code=$?
 
     # Step 4: Verify running
     if ! echo "$status_output" | grep -qE "(Daemon|Status): RUNNING"; then

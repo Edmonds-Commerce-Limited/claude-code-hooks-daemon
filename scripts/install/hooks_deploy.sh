@@ -185,7 +185,8 @@ set_hook_permissions() {
     done
 
     # Check if permissions stuck (git core.fileMode=false detection)
-    local test_file=$(echo "$hook_files" | awk 'NR==1')
+    local test_file
+    test_file=$(echo "$hook_files" | awk 'NR==1')
     if [ -f "$test_file" ] && [ ! -x "$test_file" ]; then
         print_warning "Hook permissions may not persist (git core.fileMode=false)"
         print_info "Hooks will still work, but permissions won't be tracked by git"

@@ -34,10 +34,9 @@ echo "Running Bandit security scanner..."
 # Note: Bandit uses -f json for JSON format, -r for recursive
 # Skip ONLY test assertions (B101) - we run bandit on src/ not tests/
 if venv_tool bandit -r src/ -f json -o "${OUTPUT_FILE}.raw" -s B101 2>&1; then
-    EXIT_CODE=0
-else
-    EXIT_CODE=$?
+    : # No issues found
 fi
+# Issues (if any) are captured as JSON in the output file for parsing below
 
 # Parse bandit JSON output and transform to our format
 python3 << 'EOF' > "${OUTPUT_FILE}"

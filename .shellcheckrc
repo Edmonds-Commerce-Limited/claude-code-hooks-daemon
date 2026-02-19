@@ -1,0 +1,3 @@
+# Resolve source= directives relative to the script being analysed,
+# not the shellcheck invocation directory.
+source-path=SCRIPTDIR

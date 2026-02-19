@@ -27,7 +27,7 @@ class TestProperties:
         assert strategy.default_lint_command == "bash -n {file}"
 
     def test_extended_lint_command(self, strategy: ShellLintStrategy) -> None:
-        assert strategy.extended_lint_command == "shellcheck {file}"
+        assert strategy.extended_lint_command == "shellcheck -x {file}"
 
     def test_skip_paths_is_tuple(self, strategy: ShellLintStrategy) -> None:
         assert isinstance(strategy.skip_paths, tuple)

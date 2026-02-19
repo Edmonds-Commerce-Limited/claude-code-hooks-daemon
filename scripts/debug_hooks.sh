@@ -7,7 +7,6 @@
 set -euo pipefail
 
 VENV_PYTHON="untracked/venv/bin/python"
-CONFIG_FILE=".claude/hooks-daemon.yaml"
 BACKUP_FILE=".claude/hooks-daemon.yaml.debug_backup"
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 

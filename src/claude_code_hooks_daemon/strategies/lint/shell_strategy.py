@@ -8,7 +8,7 @@ from claude_code_hooks_daemon.strategies.lint.common import COMMON_SKIP_PATHS
 _LANGUAGE_NAME = "Shell"
 _EXTENSIONS: tuple[str, ...] = (".sh", ".bash")
 _DEFAULT_LINT_COMMAND = "bash -n {file}"
-_EXTENDED_LINT_COMMAND = "shellcheck {file}"
+_EXTENDED_LINT_COMMAND = "shellcheck -x {file}"
 
 
 class ShellLintStrategy:

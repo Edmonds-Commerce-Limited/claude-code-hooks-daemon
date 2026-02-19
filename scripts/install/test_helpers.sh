@@ -35,7 +35,8 @@ create_test_project() {
     local mode="${1:-normal}"
 
     # Create unique test directory
-    local test_id="test_$$_$(date +%s)"
+    local test_id
+    test_id="test_$$_$(date +%s)"
     local test_project="/tmp/hooks_daemon_test_$test_id"
 
     print_verbose "Creating test project: $test_project (mode: $mode)"

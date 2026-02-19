@@ -37,13 +37,10 @@ echo "Running deptry dependency checker..."
 # Run deptry on src/ only, capture output
 # Only check DEP001 (missing) and DEP004 (misplaced) - the real issues
 # DEP002 (unused) and DEP003 (transitive/self) are configured as ignored in pyproject.toml
-DEPTRY_OUTPUT=""
-DEPTRY_EXIT=0
-if DEPTRY_OUTPUT=$(venv_tool deptry src/ --json-output "${OUTPUT_FILE}.raw" 2>&1); then
-    DEPTRY_EXIT=0
-else
-    DEPTRY_EXIT=$?
+if venv_tool deptry src/ --json-output "${OUTPUT_FILE}.raw" 2>&1; then
+    : # No issues found
 fi
+# Issues (if any) are captured as JSON in the output file for parsing below
 
 # Parse deptry JSON output and transform to our format
 "${VENV_PYTHON}" << 'PYEOF' > "${OUTPUT_FILE}"
