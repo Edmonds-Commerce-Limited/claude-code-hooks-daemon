@@ -12,6 +12,27 @@ from enum import StrEnum
 from claude_code_hooks_daemon.core.hook_result import Decision
 
 
+class RecommendedModel(StrEnum):
+    """Recommended model for running an acceptance test.
+
+    Used by test runners to route tests to the most efficient model:
+
+    HAIKU: Simple pattern-matching tests that verify a command is blocked
+        or allowed. Fast and cheap. Can run in parallel sub-agents.
+        Use for: BLOCKING tests with echo/bash commands or Write tool.
+
+    SONNET: Tests requiring advisory context verification or moderate
+        reasoning. Use for: ADVISORY tests and most CONTEXT tests.
+
+    OPUS: Tests requiring high-quality judgment or complex verification.
+        Use for: nuanced advisory tests or architectural validation.
+    """
+
+    HAIKU = "haiku"
+    SONNET = "sonnet"
+    OPUS = "opus"
+
+
 class TestType(StrEnum):
     """Type of acceptance test.
 
@@ -77,6 +98,13 @@ class AcceptanceTest:
         required_tools: Optional list of executables that must be in PATH for this
             test to run. If any are missing the test is skipped. Use for language
             linters that may not be installed (e.g. ["go"], ["rustc"], ["swiftc"]).
+        recommended_model: Suggested model for running this test. HAIKU for simple
+            blocking tests, SONNET for advisory/context tests, OPUS for complex
+            judgment tests. None means no preference.
+        requires_main_thread: If True, test must run in the main Claude Code session
+            (not a sub-agent). Required for SessionStart/UserPromptSubmit CONTEXT
+            tests and VERIFIED_BY_LOAD tests. BLOCKING and ADVISORY tests can run
+            in sub-agents (requires_main_thread=False).
     """
 
     title: str
@@ -90,6 +118,8 @@ class AcceptanceTest:
     requires_event: str | None = None
     test_type: TestType = TestType.BLOCKING
     required_tools: list[str] | None = None
+    recommended_model: RecommendedModel | None = None
+    requires_main_thread: bool = False
 
     def __post_init__(self) -> None:
         """Validate fields after initialization."""
