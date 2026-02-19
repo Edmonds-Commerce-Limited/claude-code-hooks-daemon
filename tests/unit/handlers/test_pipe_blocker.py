@@ -1,268 +1,415 @@
-"""Comprehensive tests for PipeBlockerHandler."""
-
-from unittest.mock import MagicMock, patch
+"""Comprehensive tests for redesigned PipeBlockerHandler (three-tier logic)."""
 
 import pytest
 
 from claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker import PipeBlockerHandler
 
 
-class TestPipeBlockerHandler:
-    """Test suite for PipeBlockerHandler."""
+class TestPipeBlockerHandlerInit:
+    """Tests for handler initialization."""
 
     @pytest.fixture
-    def handler(self):
-        """Create handler instance."""
+    def handler(self) -> PipeBlockerHandler:
         return PipeBlockerHandler()
 
-    # ===================================================================================
-    # Phase 1: Initialization Tests (5 tests)
-    # ===================================================================================
-
-    def test_init_sets_correct_name(self, handler):
-        """Handler name should be 'pipe-blocker'."""
+    def test_init_sets_correct_name(self, handler: PipeBlockerHandler) -> None:
         assert handler.name == "pipe-blocker"
 
-    def test_init_sets_correct_priority(self, handler):
-        """Handler priority should be 15."""
+    def test_init_sets_correct_priority(self, handler: PipeBlockerHandler) -> None:
         assert handler.priority == 15
 
-    def test_init_sets_correct_terminal_flag(self, handler):
-        """Handler should be terminal."""
+    def test_init_sets_correct_terminal_flag(self, handler: PipeBlockerHandler) -> None:
         assert handler.terminal is True
 
-    def test_init_sets_correct_tags(self, handler):
-        """Handler should have correct tags."""
+    def test_init_sets_correct_tags(self, handler: PipeBlockerHandler) -> None:
         expected_tags = ["safety", "bash", "blocking", "terminal"]
         assert handler.tags == expected_tags
 
-    def test_init_sets_default_allowed_pipe_sources(self, handler):
-        """Handler should initialize with default whitelist."""
-        # Default whitelist should include common filtering commands
-        expected_defaults = ["grep", "rg", "awk", "sed", "jq", "cut", "sort", "uniq"]
-        assert hasattr(handler, "_allowed_pipe_sources")
-        assert isinstance(handler._allowed_pipe_sources, list)
-        # Check that key defaults are present
-        for cmd in expected_defaults:
-            assert cmd in handler._allowed_pipe_sources
+    def test_init_has_registry(self, handler: PipeBlockerHandler) -> None:
+        from claude_code_hooks_daemon.strategies.pipe_blocker.registry import (
+            PipeBlockerStrategyRegistry,
+        )
 
-    # ===================================================================================
-    # Phase 3: Basic Pipe Detection Tests (10+ tests)
-    # ===================================================================================
+        assert hasattr(handler, "_registry")
+        assert isinstance(handler._registry, PipeBlockerStrategyRegistry)
 
-    def test_matches_find_piped_to_tail(self, handler):
-        """Should match expensive find command piped to tail."""
-        hook_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "find . -name '*.py' | tail -n 20"},
-        }
-        assert handler.matches(hook_input) is True
+    def test_init_has_whitelist(self, handler: PipeBlockerHandler) -> None:
+        assert hasattr(handler, "_whitelist")
+        assert isinstance(handler._whitelist, list)
+        assert len(handler._whitelist) > 0
 
-    def test_matches_npm_test_piped_to_head(self, handler):
-        """Should match expensive npm test piped to head."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "npm run test | head -n 10"}}
-        assert handler.matches(hook_input) is True
+    def test_init_has_empty_extra_whitelist_by_default(self, handler: PipeBlockerHandler) -> None:
+        assert hasattr(handler, "_extra_whitelist")
+        assert handler._extra_whitelist == []
 
-    def test_no_match_tail_without_pipe(self, handler):
-        """Should NOT match direct file operation without pipe."""
+    def test_init_has_empty_extra_blacklist_by_default(self, handler: PipeBlockerHandler) -> None:
+        assert hasattr(handler, "_extra_blacklist")
+        assert handler._extra_blacklist == []
+
+    def test_init_extra_whitelist_from_options(self) -> None:
+        handler = PipeBlockerHandler(options={"extra_whitelist": [r"^custom-cmd\b"]})
+        assert len(handler._extra_whitelist) == 1
+
+    def test_init_extra_blacklist_from_options(self) -> None:
+        handler = PipeBlockerHandler(options={"extra_blacklist": [r"^my_tool\b"]})
+        assert handler._extra_blacklist == [r"^my_tool\b"]
+
+
+# ===================================================================================
+# Phase 2: Pipe Detection — no pipe, tail -f, head -c, wrong tool
+# ===================================================================================
+
+
+class TestPipeBlockerBasicDetection:
+    """Tests for basic pipe-to-tail/head detection."""
+
+    @pytest.fixture
+    def handler(self) -> PipeBlockerHandler:
+        return PipeBlockerHandler()
+
+    def test_no_match_tail_without_pipe(self, handler: PipeBlockerHandler) -> None:
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "tail -n 20 /var/log/syslog"}}
         assert handler.matches(hook_input) is False
 
-    def test_no_match_tail_follow_mode(self, handler):
-        """Should NOT match tail -f (follow mode)."""
+    def test_no_match_tail_follow_mode(self, handler: PipeBlockerHandler) -> None:
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "tail -f /var/log/syslog"}}
         assert handler.matches(hook_input) is False
 
-    def test_no_match_head_byte_count(self, handler):
-        """Should NOT match head -c (byte count mode)."""
+    def test_no_match_head_byte_count(self, handler: PipeBlockerHandler) -> None:
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "head -c 1024 file.txt"}}
         assert handler.matches(hook_input) is False
 
-    def test_no_match_empty_command(self, handler):
-        """Should NOT match empty command."""
+    def test_no_match_empty_command(self, handler: PipeBlockerHandler) -> None:
         hook_input = {"tool_name": "Bash", "tool_input": {"command": ""}}
         assert handler.matches(hook_input) is False
 
-    def test_no_match_non_bash_tool(self, handler):
-        """Should NOT match non-Bash tool."""
+    def test_no_match_non_bash_tool(self, handler: PipeBlockerHandler) -> None:
         hook_input = {"tool_name": "Write", "tool_input": {"file_path": "/tmp/test.txt"}}
         assert handler.matches(hook_input) is False
 
-    def test_no_match_missing_command_field(self, handler):
-        """Should NOT match when command field is missing."""
+    def test_no_match_missing_command_field(self, handler: PipeBlockerHandler) -> None:
         hook_input = {"tool_name": "Bash", "tool_input": {}}
         assert handler.matches(hook_input) is False
 
-    def test_matches_case_insensitive_tail(self, handler):
-        """Should match TAIL with uppercase."""
+    def test_no_match_missing_tool_input_dict(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {"tool_name": "Bash"}
+        assert handler.matches(hook_input) is False
+
+    def test_no_match_none_command_value(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": None}}
+        assert handler.matches(hook_input) is False
+
+    def test_no_match_command_with_no_pipes(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "npm run test"}}
+        assert handler.matches(hook_input) is False
+
+    def test_no_match_pipe_to_wc(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "find . -name '*.py' | wc -l"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_matches_case_insensitive_tail(self, handler: PipeBlockerHandler) -> None:
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | TAIL -n 10"}}
         assert handler.matches(hook_input) is True
 
-    def test_matches_case_insensitive_head(self, handler):
-        """Should match Head with mixed case."""
+    def test_matches_case_insensitive_head(self, handler: PipeBlockerHandler) -> None:
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "docker ps | Head -n 5"}}
         assert handler.matches(hook_input) is True
 
-    def test_matches_spacing_variation_no_space(self, handler):
-        """Should match pipe with no space before tail."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "ls -la|tail -n 10"}}
-        assert handler.matches(hook_input) is True
-
-    def test_matches_spacing_variation_multiple_spaces(self, handler):
-        """Should match pipe with multiple spaces."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "ls -la |  tail -n 10"}}
-        assert handler.matches(hook_input) is True
-
-    def test_matches_docker_ps_piped_to_tail(self, handler):
-        """Should match docker ps piped to tail."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "docker ps -a | tail -n 20"}}
-        assert handler.matches(hook_input) is True
-
-    def test_matches_git_log_piped_to_head(self, handler):
-        """Should match git log piped to head."""
+    def test_no_match_tail_follow_piped(self, handler: PipeBlockerHandler) -> None:
         hook_input = {
             "tool_name": "Bash",
-            "tool_input": {"command": "git log --oneline | head -n 10"},
+            "tool_input": {"command": "some_cmd | tail -f /var/log/syslog"},
         }
-        assert handler.matches(hook_input) is True
+        assert handler.matches(hook_input) is False
 
-    # ===================================================================================
-    # Phase 4: Whitelist Logic Tests (25+ tests)
-    # ===================================================================================
+    def test_no_match_head_bytes_piped(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "some_cmd | head -c 1024 file.bin"},
+        }
+        assert handler.matches(hook_input) is False
 
-    def test_no_match_grep_piped_to_tail(self, handler):
-        """Should NOT match grep piped to tail (whitelisted)."""
+
+# ===================================================================================
+# Phase 3: Whitelist Logic — grep, awk, ls, cat, git tag, etc.
+# ===================================================================================
+
+
+class TestPipeBlockerWhitelist:
+    """Tests for whitelist logic (always allow)."""
+
+    @pytest.fixture
+    def handler(self) -> PipeBlockerHandler:
+        return PipeBlockerHandler()
+
+    def test_no_match_grep_piped_to_tail(self, handler: PipeBlockerHandler) -> None:
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "grep error /var/log/syslog | tail -n 20"},
         }
         assert handler.matches(hook_input) is False
 
-    def test_no_match_rg_piped_to_head(self, handler):
-        """Should NOT match ripgrep piped to head (whitelisted)."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "rg 'pattern' . | head -n 10"}}
+    def test_no_match_rg_piped_to_head(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "rg 'pattern' . | head -n 10"},
+        }
         assert handler.matches(hook_input) is False
 
-    def test_no_match_awk_piped_to_tail(self, handler):
-        """Should NOT match awk piped to tail (whitelisted)."""
+    def test_no_match_awk_piped_to_tail(self, handler: PipeBlockerHandler) -> None:
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "awk '{print $1}' data.txt | tail -n 5"},
         }
         assert handler.matches(hook_input) is False
 
-    def test_no_match_jq_piped_to_tail(self, handler):
-        """Should NOT match jq piped to tail (whitelisted)."""
+    def test_no_match_jq_piped_to_tail(self, handler: PipeBlockerHandler) -> None:
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "jq '.items' data.json | tail -n 15"},
         }
         assert handler.matches(hook_input) is False
 
-    def test_no_match_sed_piped_to_head(self, handler):
-        """Should NOT match sed piped to head (whitelisted)."""
+    def test_no_match_sed_piped_to_head(self, handler: PipeBlockerHandler) -> None:
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "sed -n '1,100p' file.txt | head -n 20"},
         }
         assert handler.matches(hook_input) is False
 
-    def test_no_match_cut_piped_to_tail(self, handler):
-        """Should NOT match cut piped to tail (whitelisted)."""
+    def test_no_match_cut_piped_to_tail(self, handler: PipeBlockerHandler) -> None:
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "cut -d: -f1 /etc/passwd | tail -n 10"},
         }
         assert handler.matches(hook_input) is False
 
-    def test_no_match_sort_piped_to_head(self, handler):
-        """Should NOT match sort piped to head (whitelisted)."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "sort names.txt | head -n 5"}}
+    def test_no_match_sort_piped_to_head(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "sort names.txt | head -n 5"},
+        }
         assert handler.matches(hook_input) is False
 
-    def test_no_match_uniq_piped_to_tail(self, handler):
-        """Should NOT match uniq piped to tail (whitelisted)."""
+    def test_no_match_uniq_piped_to_tail(self, handler: PipeBlockerHandler) -> None:
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "uniq -c data.txt | tail -n 20"},
         }
         assert handler.matches(hook_input) is False
 
-    def test_no_match_tr_piped_to_head(self, handler):
-        """Should NOT match tr piped to head (whitelisted)."""
+    def test_no_match_tr_piped_to_head(self, handler: PipeBlockerHandler) -> None:
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "tr '[:lower:]' '[:upper:]' < file.txt | head -n 10"},
         }
         assert handler.matches(hook_input) is False
 
-    def test_no_match_wc_piped_to_tail(self, handler):
-        """Should NOT match wc piped to tail (whitelisted)."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "wc -l *.txt | tail -n 5"}}
+    def test_no_match_wc_piped_to_tail(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "wc -l *.txt | tail -n 5"},
+        }
         assert handler.matches(hook_input) is False
 
-    def test_no_match_complex_chain_grep_awk_tail(self, handler):
-        """Should NOT match complex chain ending with whitelisted command."""
+    def test_no_match_ls_piped_to_head(self, handler: PipeBlockerHandler) -> None:
+        """ls is now in UNIVERSAL_WHITELIST_PATTERNS — should be allowed."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "ls -la /tmp | head -n 15"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_no_match_ls_pipe_no_space(self, handler: PipeBlockerHandler) -> None:
+        """ls without space before pipe — still whitelisted."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "ls -la|tail -n 10"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_no_match_ls_pipe_multiple_spaces(self, handler: PipeBlockerHandler) -> None:
+        """ls with extra spaces — still whitelisted."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "ls -la |  tail -n 10"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_no_match_cat_piped_to_tail(self, handler: PipeBlockerHandler) -> None:
+        """cat is now in UNIVERSAL_WHITELIST_PATTERNS — should be allowed."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "cat /var/log/syslog | tail -n 20"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_no_match_echo_piped_to_tail(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "echo 'some output' | tail -n 5"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_no_match_git_tag_piped_to_tail(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git tag -l | tail -n 5"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_no_match_git_status_piped_to_head(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git status --short | head -n 20"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_no_match_git_diff_piped_to_tail(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git diff HEAD | tail -n 30"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_no_match_complex_chain_grep_awk_tail(self, handler: PipeBlockerHandler) -> None:
+        """Complex chain ending with whitelisted command."""
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "cat large.log | grep error | awk '{print $2}' | tail -n 10"},
         }
         assert handler.matches(hook_input) is False
 
-    def test_no_match_command_chain_grep_tail(self, handler):
-        """Should NOT match command chain with grep before tail."""
+    def test_no_match_command_chain_grep_tail(self, handler: PipeBlockerHandler) -> None:
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "npm test && grep FAIL output.log | tail -n 5"},
         }
         assert handler.matches(hook_input) is False
 
-    def test_matches_non_whitelisted_docker_tail(self, handler):
-        """Should match non-whitelisted docker command piped to tail."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "docker ps -a | tail -n 20"}}
-        assert handler.matches(hook_input) is True
-
-    def test_matches_non_whitelisted_npm_head(self, handler):
-        """Should match non-whitelisted npm command piped to head."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "npm run test | head -n 10"}}
-        assert handler.matches(hook_input) is True
-
-    def test_matches_non_whitelisted_find_tail(self, handler):
-        """Should match non-whitelisted find command piped to tail."""
+    def test_no_match_grep_with_options_piped_to_tail(self, handler: PipeBlockerHandler) -> None:
         hook_input = {
             "tool_name": "Bash",
-            "tool_input": {"command": "find . -name '*.log' | tail -n 50"},
+            "tool_input": {"command": "grep -rn 'error' /var/log/ | tail -n 25"},
         }
-        assert handler.matches(hook_input) is True
-
-    def test_no_match_grep_case_insensitive(self, handler):
-        """Should match whitelisted command with case insensitivity."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "GREP error log | tail -n 5"}}
         assert handler.matches(hook_input) is False
 
-    def test_matches_cat_piped_to_tail(self, handler):
-        """Should match cat (not whitelisted) piped to tail."""
-        hook_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "cat /var/log/syslog | tail -n 20"},
-        }
-        assert handler.matches(hook_input) is True
-
-    def test_matches_ls_piped_to_head(self, handler):
-        """Should match ls (not whitelisted) piped to head."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "ls -la /tmp | head -n 15"}}
-        assert handler.matches(hook_input) is True
-
-    def test_no_match_multiple_pipes_ending_with_grep(self, handler):
-        """Should NOT match if last command before tail is whitelisted."""
+    def test_no_match_multiple_pipes_ending_with_grep(self, handler: PipeBlockerHandler) -> None:
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "docker ps | grep running | tail -n 10"},
         }
         assert handler.matches(hook_input) is False
 
-    def test_matches_multiple_pipes_ending_with_docker(self, handler):
-        """Should match if last command before tail is not whitelisted."""
+    def test_no_match_grep_case_insensitive(self, handler: PipeBlockerHandler) -> None:
+        """Whitelist matching is case-insensitive."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "GREP error log | tail -n 5"},
+        }
+        assert handler.matches(hook_input) is False
+
+
+# ===================================================================================
+# Phase 4: Blocking Logic — blacklisted and unknown commands
+# ===================================================================================
+
+
+class TestPipeBlockerBlocking:
+    """Tests for commands that SHOULD be blocked (blacklisted or unknown)."""
+
+    @pytest.fixture
+    def handler(self) -> PipeBlockerHandler:
+        return PipeBlockerHandler()
+
+    # Blacklisted (known expensive)
+    def test_matches_pytest_piped_to_tail(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "pytest tests/ | tail -20"}}
+        assert handler.matches(hook_input) is True
+
+    def test_matches_npm_test_piped_to_head(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "npm run test | head -n 10"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_npm_test_piped_to_tail(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "npm test | tail -5"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_mypy_piped_to_tail(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "mypy src/ | tail -20"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_go_test_piped_to_tail(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "go test ./... | tail -20"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_cargo_test_piped_to_tail(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "cargo test | tail -20"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_rspec_piped_to_head(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "rspec spec/ | head -n 30"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_make_piped_to_tail(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "make build | tail -20"},
+        }
+        assert handler.matches(hook_input) is True
+
+    # Unknown (not in whitelist or blacklist)
+    def test_matches_find_piped_to_tail(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "find . -name '*.py' | tail -n 20"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_docker_ps_piped_to_tail(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "docker ps -a | tail -n 20"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_git_log_piped_to_head(self, handler: PipeBlockerHandler) -> None:
+        """git log is NOT whitelisted (only git tag, status, diff are)."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git log --oneline | head -n 10"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_multiple_tail_head_in_pipeline(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "find . | tail -n 100 | head -n 10"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_multiple_pipes_ending_with_docker(self, handler: PipeBlockerHandler) -> None:
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {
@@ -271,461 +418,442 @@ class TestPipeBlockerHandler:
         }
         assert handler.matches(hook_input) is True
 
-    def test_no_match_grep_with_options_piped_to_tail(self, handler):
-        """Should NOT match grep with various options piped to tail."""
-        hook_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "grep -rn 'error' /var/log/ | tail -n 25"},
-        }
-        assert handler.matches(hook_input) is False
-
-    def test_custom_whitelist_allows_custom_command(self):
-        """Should respect custom whitelist from options."""
-        handler = PipeBlockerHandler(options={"allowed_pipe_sources": ["custom-cmd"]})
-        hook_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "custom-cmd --flag | tail -n 10"},
-        }
-        assert handler.matches(hook_input) is False
-
-    def test_custom_whitelist_blocks_default_commands(self):
-        """Should block default commands when custom whitelist provided."""
-        handler = PipeBlockerHandler(options={"allowed_pipe_sources": ["custom-cmd"]})
-        hook_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "grep pattern file | tail -n 10"},
-        }
-        assert handler.matches(hook_input) is True
-
-    def test_empty_whitelist_blocks_all(self):
-        """Should block all commands when whitelist is empty."""
-        handler = PipeBlockerHandler(options={"allowed_pipe_sources": []})
-        hook_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "grep pattern file | tail -n 10"},
-        }
-        assert handler.matches(hook_input) is True
-
-    # ===================================================================================
-    # Phase 5: Edge Cases Tests (15+ tests)
-    # ===================================================================================
-
-    def test_no_match_git_commit_with_tail_in_message(self, handler):
-        """Should NOT match git commit with 'tail' in commit message."""
-        hook_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "git commit -m 'Fix tail behavior' && git push"},
-        }
-        assert handler.matches(hook_input) is False
-
-    def test_no_match_echo_with_tail_in_string(self, handler):
-        """Should NOT match echo with 'tail' in the string."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "echo 'tail command example'"}}
-        assert handler.matches(hook_input) is False
-
-    def test_matches_malformed_pipe_with_tail(self, handler):
-        """Should handle malformed pipe gracefully."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "cmd | "}}
-        # Should not match because there's no tail/head after pipe
-        assert handler.matches(hook_input) is False
-
-    def test_matches_multiple_tail_head_in_pipeline(self, handler):
-        """Should match multiple tail/head in pipeline."""
-        hook_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "find . | tail -n 100 | head -n 10"},
-        }
-        # Should match because find is piped to tail
-        assert handler.matches(hook_input) is True
-
-    def test_no_match_subshell_with_tail_string(self, handler):
-        """Should handle subshell appropriately."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "VAR=$(echo tail)"}}
-        # No pipe to tail command, just a string
-        assert handler.matches(hook_input) is False
-
-    def test_matches_tail_in_file_path(self, handler):
-        """Should NOT match tail when it's part of a file path."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "cat /home/tail/file.txt"}}
-        # No pipe to tail
-        assert handler.matches(hook_input) is False
-
-    def test_no_match_none_command_value(self, handler):
-        """Should handle None command value gracefully."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": None}}
-        assert handler.matches(hook_input) is False
-
-    def test_no_match_empty_string_command(self, handler):
-        """Should handle empty string command gracefully."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": ""}}
-        assert handler.matches(hook_input) is False
-
-    def test_no_match_missing_tool_input_dict(self, handler):
-        """Should handle missing tool_input dict gracefully."""
-        hook_input = {"tool_name": "Bash"}
-        assert handler.matches(hook_input) is False
-
-    def test_no_match_command_with_no_pipes(self, handler):
-        """Should NOT match commands without any pipes."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "npm run test"}}
-        assert handler.matches(hook_input) is False
-
-    def test_no_match_pipe_to_wc(self, handler):
-        """Should NOT match pipe to wc (not tail/head)."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . -name '*.py' | wc -l"}}
-        assert handler.matches(hook_input) is False
-
-    def test_matches_tail_with_multiple_flags(self, handler):
-        """Should match tail with various flags."""
+    def test_matches_tail_with_multiple_flags(self, handler: PipeBlockerHandler) -> None:
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "docker logs container | tail -n 20 -v"},
         }
         assert handler.matches(hook_input) is True
 
-    def test_no_match_head_with_follow_like_flag(self, handler):
-        """Should match head even with other flags (only -c is exception)."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "ls -la | head -n 10 -v"}}
-        # head -v is not an exception like head -c
-        assert handler.matches(hook_input) is True
-
-    def test_matches_command_with_quotes_containing_pipe(self, handler):
-        """Should handle quoted strings with pipe characters."""
+    def test_matches_head_with_non_c_flag(self, handler: PipeBlockerHandler) -> None:
+        """head -v is not an exception (only head -c is)."""
         hook_input = {
             "tool_name": "Bash",
-            "tool_input": {"command": "echo 'this | is | fine' && find . | tail -n 10"},
+            "tool_input": {"command": "docker logs c | head -n 10 -v"},
         }
-        # The actual pipe to tail should still be detected
         assert handler.matches(hook_input) is True
 
-    def test_no_match_heredoc_with_tail(self, handler):
-        """Should handle heredoc appropriately."""
+
+# ===================================================================================
+# Phase 5: Extra Whitelist / Extra Blacklist Options
+# ===================================================================================
+
+
+class TestPipeBlockerExtraOptions:
+    """Tests for extra_whitelist and extra_blacklist options."""
+
+    def test_extra_whitelist_allows_custom_command(self) -> None:
+        handler = PipeBlockerHandler(options={"extra_whitelist": [r"^custom-cmd\b"]})
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "custom-cmd --flag | tail -n 10"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_extra_whitelist_does_not_break_universal_whitelist(self) -> None:
+        """Adding extra_whitelist does not remove the universal whitelist."""
+        handler = PipeBlockerHandler(options={"extra_whitelist": [r"^custom-cmd\b"]})
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "grep pattern file | tail -n 10"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_extra_blacklist_blocks_custom_command(self) -> None:
+        """extra_blacklist adds to the blacklist for handle() differentiation."""
+        handler = PipeBlockerHandler(options={"extra_blacklist": [r"^my_tool\b"]})
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "my_tool --run | tail -n 10"},
+        }
+        # matches() still returns True for unknown my_tool
+        assert handler.matches(hook_input) is True
+        # handle() should use blacklisted message
+        result = handler.handle(hook_input)
+        assert "information" in result.reason.lower()
+
+    def test_extra_whitelist_multi_word_command(self) -> None:
+        handler = PipeBlockerHandler(options={"extra_whitelist": [r"^git\s+log\b"]})
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git log --oneline | tail -n 10"},
+        }
+        assert handler.matches(hook_input) is False
+
+
+# ===================================================================================
+# Phase 6: Edge Cases
+# ===================================================================================
+
+
+class TestPipeBlockerEdgeCases:
+    """Edge case tests for pipe blocker."""
+
+    @pytest.fixture
+    def handler(self) -> PipeBlockerHandler:
+        return PipeBlockerHandler()
+
+    def test_no_match_git_commit_with_tail_in_message(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git commit -m 'Fix tail behavior' && git push"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_no_match_echo_with_tail_in_string(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "echo 'tail command example'"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_no_match_malformed_pipe_no_tail_head(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "cmd | "}}
+        assert handler.matches(hook_input) is False
+
+    def test_no_match_subshell_with_tail_string(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "VAR=$(echo tail)"}}
+        assert handler.matches(hook_input) is False
+
+    def test_no_match_tail_in_file_path(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "cat /home/tail/file.txt"}}
+        assert handler.matches(hook_input) is False
+
+    def test_no_match_heredoc_with_tail(self, handler: PipeBlockerHandler) -> None:
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "cat <<EOF\ntail example\nEOF"},
         }
-        # No actual pipe to tail command
         assert handler.matches(hook_input) is False
 
-    # ===================================================================================
-    # Phase 6: handle() Method Tests (12+ tests)
-    # ===================================================================================
-
-    def test_handle_returns_deny_decision(self, handler):
-        """Should return DENY decision."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
-        from claude_code_hooks_daemon.core import Decision
-
-        assert result.decision == Decision.DENY
-
-    def test_handle_reason_contains_blocked_command(self, handler):
-        """Reason should contain the blocked command."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "docker ps -a | tail -n 20"}}
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 1
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
-        assert "docker ps -a | tail -n 20" in result.reason
-
-    def test_handle_reason_explains_why_blocked(self, handler):
-        """Reason should explain information loss."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "npm test | head -n 10"}}
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 1
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
-        assert "information" in result.reason.lower()
-        # Should mention the problem with re-running
-        assert "re-run" in result.reason.lower() or "rerun" in result.reason.lower()
-
-    def test_handle_reason_suggests_temp_file(self, handler):
-        """Reason should suggest redirecting to temp file."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 1
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
-        assert "temp" in result.reason.lower() or "/tmp" in result.reason
-
-    def test_handle_reason_shows_whitelist(self, handler):
-        """Reason should show whitelist commands."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "docker ps | tail -n 20"}}
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 3
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
-        # Should mention at least some whitelist commands
-        assert "grep" in result.reason.lower() or "awk" in result.reason.lower()
-
-    def test_handle_message_is_clear_and_actionable(self, handler):
-        """Message should be clear and provide alternatives."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 1
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
-        # Should have some structure (sections)
-        assert "BLOCKED" in result.reason or "blocked" in result.reason.lower()
-        # Should provide alternative
-        assert ">" in result.reason or "redirect" in result.reason.lower()
-
-    def test_handle_with_head_command(self, handler):
-        """Should handle head command appropriately."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "ls -la | head -n 5"}}
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 1
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
-        from claude_code_hooks_daemon.core import Decision
-
-        assert result.decision == Decision.DENY
-        assert "head" in result.reason.lower()
-
-    def test_handle_with_complex_command(self, handler):
-        """Should handle complex command appropriately."""
+    def test_matches_command_with_quotes_containing_pipe(self, handler: PipeBlockerHandler) -> None:
         hook_input = {
             "tool_name": "Bash",
-            "tool_input": {"command": "find . -name '*.log' -exec cat {} \\; | tail -n 100"},
+            "tool_input": {"command": "echo 'this | is | fine' && find . | tail -n 10"},
         }
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+        assert handler.matches(hook_input) is True
+
+
+# ===================================================================================
+# Phase 7: handle() method — blacklisted vs unknown messages
+# ===================================================================================
+
+
+class TestPipeBlockerHandleBlacklisted:
+    """Tests for handle() when command is blacklisted (known expensive)."""
+
+    @pytest.fixture
+    def handler(self) -> PipeBlockerHandler:
+        return PipeBlockerHandler()
+
+    def test_handle_returns_deny_for_blacklisted(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "pytest | tail -n 20"}}
+        result = handler.handle(hook_input)
         from claude_code_hooks_daemon.core import Decision
 
         assert result.decision == Decision.DENY
 
-    def test_handle_mentions_source_command(self, handler):
-        """Reason should mention the source command being piped."""
+    def test_blacklisted_reason_mentions_command(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "pytest tests/ | tail -20"}}
+        result = handler.handle(hook_input)
+        assert "pytest tests/ | tail -20" in result.reason
+
+    def test_blacklisted_reason_mentions_information_loss(
+        self, handler: PipeBlockerHandler
+    ) -> None:
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "npm test | head -n 10"}}
+        result = handler.handle(hook_input)
+        assert "information" in result.reason.lower()
+
+    def test_blacklisted_reason_mentions_rerun(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "npm test | head -n 10"}}
+        result = handler.handle(hook_input)
+        assert "re-run" in result.reason.lower() or "rerun" in result.reason.lower()
+
+    def test_blacklisted_reason_suggests_temp_file(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "mypy src/ | tail -20"}}
+        result = handler.handle(hook_input)
+        assert "temp" in result.reason.lower() or "/tmp" in result.reason
+
+    def test_blacklisted_reason_names_source_command(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "cargo test | tail -20"}}
+        result = handler.handle(hook_input)
+        assert "cargo" in result.reason.lower()
+
+    def test_blacklisted_reason_has_sections(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "pytest | tail -20"}}
+        result = handler.handle(hook_input)
+        assert "\n\n" in result.reason
+
+    def test_blacklisted_reason_has_blocked_marker(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "pytest | tail -20"}}
+        result = handler.handle(hook_input)
+        assert "🚫" in result.reason or "BLOCKED" in result.reason
+
+    def test_blacklisted_reason_does_not_mention_extra_whitelist(
+        self, handler: PipeBlockerHandler
+    ) -> None:
+        """Blacklisted message should NOT mention extra_whitelist (different from unknown)."""
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "pytest | tail -20"}}
+        result = handler.handle(hook_input)
+        assert "extra_whitelist" not in result.reason
+
+
+class TestPipeBlockerHandleUnknown:
+    """Tests for handle() when command is unknown (not in whitelist or blacklist)."""
+
+    @pytest.fixture
+    def handler(self) -> PipeBlockerHandler:
+        return PipeBlockerHandler()
+
+    def test_handle_returns_deny_for_unknown(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
+        result = handler.handle(hook_input)
+        from claude_code_hooks_daemon.core import Decision
+
+        assert result.decision == Decision.DENY
+
+    def test_unknown_reason_mentions_command(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "docker ps -a | tail -n 20"},
+        }
+        result = handler.handle(hook_input)
+        assert "docker ps -a | tail -n 20" in result.reason
+
+    def test_unknown_reason_mentions_extra_whitelist(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
+        result = handler.handle(hook_input)
+        assert "extra_whitelist" in result.reason
+
+    def test_unknown_reason_suggests_temp_file(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
+        result = handler.handle(hook_input)
+        assert "temp" in result.reason.lower() or "/tmp" in result.reason
+
+    def test_unknown_reason_shows_whitelist_examples(self, handler: PipeBlockerHandler) -> None:
+        """Unknown message should list some whitelisted commands as examples."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "docker ps | tail -n 20"},
+        }
+        result = handler.handle(hook_input)
+        assert "grep" in result.reason.lower() or "awk" in result.reason.lower()
+
+    def test_unknown_reason_mentions_source_command(self, handler: PipeBlockerHandler) -> None:
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "docker logs container | tail -n 50"},
         }
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 1
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
-        # Should identify docker as the expensive command
+        result = handler.handle(hook_input)
         assert "docker" in result.reason.lower()
 
-    def test_handle_reason_format_has_sections(self, handler):
-        """Reason should have clear sections."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "npm run test | tail -n 20"}}
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 1
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
-        # Check for section markers (newlines, headers)
-        assert "\n\n" in result.reason  # Should have paragraph breaks
-
-    def test_handle_includes_emoji_or_marker(self, handler):
-        """Reason should include visual marker for clarity."""
+    def test_unknown_reason_has_blocked_marker(self, handler: PipeBlockerHandler) -> None:
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
-        # Should have some visual indicator
-        assert "🚫" in result.reason or "BLOCKED" in result.reason or "❌" in result.reason
+        result = handler.handle(hook_input)
+        assert "🚫" in result.reason or "BLOCKED" in result.reason
 
-    def test_handle_with_tail_flag(self, handler):
-        """Should handle tail with -n flag appropriately."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "docker ps | tail -n 20"}}
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 1
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+    def test_unknown_reason_has_sections(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
+        result = handler.handle(hook_input)
+        assert "\n\n" in result.reason
+
+    def test_unknown_reason_does_not_mention_rerun(self, handler: PipeBlockerHandler) -> None:
+        """Unknown message should NOT mention re-run (that's blacklisted-only messaging)."""
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
+        result = handler.handle(hook_input)
+        assert "re-run" not in result.reason.lower() and "rerun" not in result.reason.lower()
+
+    def test_handle_head_command_reason_mentions_head(self, handler: PipeBlockerHandler) -> None:
+        """Reason should mention head when that's the dest command."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "docker ps | head -n 5"},
+        }
+        result = handler.handle(hook_input)
+        # Command appears in reason message
+        assert "head" in result.reason.lower()
+
+    def test_handle_with_complex_command(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "find . -name '*.log' -exec cat {} \\; | tail -n 100"},
+        }
+        result = handler.handle(hook_input)
         from claude_code_hooks_daemon.core import Decision
 
         assert result.decision == Decision.DENY
-        assert result.reason is not None
-        assert len(result.reason) > 50  # Should be a helpful message
+
+    def test_handle_long_message(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "docker ps | tail -n 20"}}
+        result = handler.handle(hook_input)
+        assert len(result.reason) > 50
 
 
-class TestPipeBlockerProgressiveVerbosity:
-    """Test progressive verbosity based on block count."""
+# ===================================================================================
+# Phase 8: Message Differentiation — blacklisted vs unknown have different messages
+# ===================================================================================
+
+
+class TestPipeBlockerMessageDifferentiation:
+    """Tests that blacklisted and unknown commands produce different messages."""
 
     @pytest.fixture
-    def handler(self):
-        """Create handler instance."""
+    def handler(self) -> PipeBlockerHandler:
         return PipeBlockerHandler()
 
-    @pytest.fixture
-    def hook_input(self):
-        """Create sample hook input."""
-        return {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
+    def test_blacklisted_has_information_loss_message(self, handler: PipeBlockerHandler) -> None:
+        """Blacklisted commands get 'information loss' message."""
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "pytest | tail -20"}}
+        result = handler.handle(hook_input)
+        assert "information" in result.reason.lower()
 
-    def test_terse_reason_on_first_block(self, handler, hook_input):
-        """First block should return terse message."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 0
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+    def test_unknown_has_extra_whitelist_message(self, handler: PipeBlockerHandler) -> None:
+        """Unknown commands get 'add to extra_whitelist' message."""
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -20"}}
+        result = handler.handle(hook_input)
+        assert "extra_whitelist" in result.reason
 
-        # Terse message should be short
-        assert len(result.reason) < 200
-        # Should contain key elements
-        assert "BLOCKED" in result.reason
-        assert "temp file" in result.reason.lower() or "/tmp" in result.reason
+    def test_blacklisted_does_not_have_extra_whitelist(self, handler: PipeBlockerHandler) -> None:
+        """Blacklisted message should NOT suggest adding to whitelist."""
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "pytest | tail -20"}}
+        result = handler.handle(hook_input)
+        assert "extra_whitelist" not in result.reason
 
-    def test_standard_reason_on_second_block(self, handler, hook_input):
-        """Second block should return standard message without whitelist."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 1
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+    def test_unknown_does_not_have_information_loss(self, handler: PipeBlockerHandler) -> None:
+        """Unknown message should NOT claim information loss (we don't know if expensive)."""
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -20"}}
+        result = handler.handle(hook_input)
+        # find is unknown, not blacklisted, so no 'information loss' message
+        assert "information" not in result.reason.lower()
 
-        # Standard message should contain WHY BLOCKED section
-        assert "WHY BLOCKED" in result.reason
-        # Should NOT contain whitelist section
-        assert "WHITELISTED COMMANDS" not in result.reason
+    def test_both_have_deny_decision(self, handler: PipeBlockerHandler) -> None:
+        from claude_code_hooks_daemon.core import Decision
 
-    def test_standard_reason_on_third_block(self, handler, hook_input):
-        """Third block should return standard message without whitelist."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 2
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
+        blacklisted = {"tool_name": "Bash", "tool_input": {"command": "pytest | tail -20"}}
+        unknown = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -20"}}
+        assert handler.handle(blacklisted).decision == Decision.DENY
+        assert handler.handle(unknown).decision == Decision.DENY
 
-        # Standard message should contain WHY BLOCKED section
-        assert "WHY BLOCKED" in result.reason
-        # Should NOT contain whitelist section
-        assert "WHITELISTED COMMANDS" not in result.reason
-
-    def test_verbose_reason_on_fourth_block(self, handler, hook_input):
-        """Fourth block should return verbose message with whitelist."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 3
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
-
-        # Verbose message should contain whitelist section
-        assert "WHITELISTED COMMANDS" in result.reason
-
-    def test_verbose_reason_on_many_blocks(self, handler, hook_input):
-        """Many blocks should return verbose message with whitelist."""
-        mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.return_value = 10
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            return_value=mock_dl,
-        ):
-            result = handler.handle(hook_input)
-
-        # Verbose message should contain whitelist section
-        assert "WHITELISTED COMMANDS" in result.reason
-
-    def test_data_layer_error_falls_back_to_terse(self, handler, hook_input):
-        """Data layer error should fall back to terse message."""
-        with patch(
-            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
-            side_effect=Exception("Data layer error"),
-        ):
-            result = handler.handle(hook_input)
-
-        # Should fall back to terse message (block count 0)
-        assert len(result.reason) < 200
-        assert "BLOCKED" in result.reason
-        assert "temp file" in result.reason.lower() or "/tmp" in result.reason
+    def test_both_have_blocked_marker(self, handler: PipeBlockerHandler) -> None:
+        blacklisted = {"tool_name": "Bash", "tool_input": {"command": "pytest | tail -20"}}
+        unknown = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -20"}}
+        assert "BLOCKED" in handler.handle(blacklisted).reason
+        assert "BLOCKED" in handler.handle(unknown).reason
 
 
-class TestPipeBlockerAdditionalCoverage:
-    """Additional tests for pipe blocker edge cases to boost coverage."""
+# ===================================================================================
+# Phase 9: _extract_source_segment and internal helpers
+# ===================================================================================
+
+
+class TestPipeBlockerExtractSourceSegment:
+    """Tests for _extract_source_segment helper method."""
 
     @pytest.fixture
-    def handler(self):
-        """Create handler instance."""
+    def handler(self) -> PipeBlockerHandler:
         return PipeBlockerHandler()
 
-    def test_no_match_tail_follow_piped(self, handler):
-        """Should NOT match tail -f even when piped (follow mode exception)."""
-        hook_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "some_cmd | tail -f /var/log/syslog"},
-        }
-        assert handler.matches(hook_input) is False
+    def test_no_pipe_returns_empty_string(self, handler: PipeBlockerHandler) -> None:
+        assert handler._extract_source_segment("ls -la") == ""
 
-    def test_no_match_head_bytes_piped(self, handler):
-        """Should NOT match head -c even when piped (byte count exception)."""
-        hook_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "some_cmd | head -c 1024 file.bin"},
-        }
-        assert handler.matches(hook_input) is False
+    def test_empty_before_pipe_returns_empty_string(self, handler: PipeBlockerHandler) -> None:
+        assert handler._extract_source_segment("| tail -n 10") == ""
 
-    def test_no_pipe_match_returns_false(self, handler):
-        """Should return False when pipe pattern does not match in _extract_source_command."""
-        # _extract_source_command returns None when no pipe match
-        result = handler._extract_source_command("ls -la")
-        assert result is None
+    def test_simple_command(self, handler: PipeBlockerHandler) -> None:
+        assert handler._extract_source_segment("find . | tail -n 20") == "find ."
 
-    def test_empty_before_pipe_returns_none(self, handler):
-        """Should return None when segment before pipe is empty."""
-        # Edge case: pipe immediately to tail with nothing before
-        result = handler._extract_source_command("| tail -n 10")
-        assert result is None
+    def test_multiword_command(self, handler: PipeBlockerHandler) -> None:
+        assert handler._extract_source_segment("npm test | tail -5") == "npm test"
 
-    def test_extract_source_command_exception_returns_none(self, handler):
-        """Should return None when extraction raises unexpected exception."""
+    def test_chain_takes_last_segment(self, handler: PipeBlockerHandler) -> None:
+        result = handler._extract_source_segment("npm test && grep FAIL | tail -5")
+        assert result == "grep FAIL"
+
+    def test_multiple_pipes_takes_last(self, handler: PipeBlockerHandler) -> None:
+        result = handler._extract_source_segment("docker ps | grep running | tail -n 10")
+        assert result == "grep running"
+
+    def test_exception_returns_empty_string(self, handler: PipeBlockerHandler) -> None:
+        from unittest.mock import patch
+
         with patch.object(handler, "_pipe_pattern") as mock_pattern:
             mock_pattern.search.side_effect = Exception("unexpected")
-            result = handler._extract_source_command("cmd | tail -n 10")
-        assert result is None
+            result = handler._extract_source_segment("cmd | tail -n 10")
+        assert result == ""
 
-    def test_get_acceptance_tests_returns_non_empty(self, handler):
-        """get_acceptance_tests returns a non-empty list."""
+
+class TestPipeBlockerInternalHelpers:
+    """Tests for _matches_whitelist and _matches_blacklist."""
+
+    @pytest.fixture
+    def handler(self) -> PipeBlockerHandler:
+        return PipeBlockerHandler()
+
+    def test_matches_whitelist_empty_segment(self, handler: PipeBlockerHandler) -> None:
+        assert handler._matches_whitelist("") is False
+
+    def test_matches_whitelist_grep(self, handler: PipeBlockerHandler) -> None:
+        assert handler._matches_whitelist("grep -rn error /logs") is True
+
+    def test_matches_whitelist_ls(self, handler: PipeBlockerHandler) -> None:
+        assert handler._matches_whitelist("ls -la") is True
+
+    def test_matches_whitelist_cat(self, handler: PipeBlockerHandler) -> None:
+        assert handler._matches_whitelist("cat /etc/passwd") is True
+
+    def test_matches_whitelist_git_tag(self, handler: PipeBlockerHandler) -> None:
+        assert handler._matches_whitelist("git tag -l") is True
+
+    def test_matches_whitelist_pytest_not_whitelisted(self, handler: PipeBlockerHandler) -> None:
+        assert handler._matches_whitelist("pytest tests/") is False
+
+    def test_matches_blacklist_empty_segment(self, handler: PipeBlockerHandler) -> None:
+        assert handler._matches_blacklist("") is False
+
+    def test_matches_blacklist_pytest(self, handler: PipeBlockerHandler) -> None:
+        assert handler._matches_blacklist("pytest tests/") is True
+
+    def test_matches_blacklist_npm_test(self, handler: PipeBlockerHandler) -> None:
+        assert handler._matches_blacklist("npm test") is True
+
+    def test_matches_blacklist_go_test(self, handler: PipeBlockerHandler) -> None:
+        assert handler._matches_blacklist("go test ./...") is True
+
+    def test_matches_blacklist_make(self, handler: PipeBlockerHandler) -> None:
+        assert handler._matches_blacklist("make build") is True
+
+    def test_matches_blacklist_find_not_blacklisted(self, handler: PipeBlockerHandler) -> None:
+        assert handler._matches_blacklist("find . -name *.py") is False
+
+    def test_matches_blacklist_extra_blacklist(self) -> None:
+        handler = PipeBlockerHandler(options={"extra_blacklist": [r"^my_tool\b"]})
+        assert handler._matches_blacklist("my_tool --run") is True
+
+
+# ===================================================================================
+# Phase 10: acceptance tests
+# ===================================================================================
+
+
+class TestPipeBlockerAcceptanceTests:
+    """Tests for get_acceptance_tests()."""
+
+    @pytest.fixture
+    def handler(self) -> PipeBlockerHandler:
+        return PipeBlockerHandler()
+
+    def test_returns_non_empty_list(self, handler: PipeBlockerHandler) -> None:
         tests = handler.get_acceptance_tests()
         assert isinstance(tests, list)
         assert len(tests) > 0
+
+    def test_includes_blacklisted_test(self, handler: PipeBlockerHandler) -> None:
+        tests = handler.get_acceptance_tests()
+        titles = [t.title for t in tests]
+        assert any("blacklisted" in title.lower() for title in titles)
+
+    def test_includes_unknown_test(self, handler: PipeBlockerHandler) -> None:
+        tests = handler.get_acceptance_tests()
+        titles = [t.title for t in tests]
+        assert any("unknown" in title.lower() for title in titles)

@@ -1,84 +1,112 @@
-"""PipeBlockerHandler - blocks expensive commands piped to tail/head."""
+"""PipeBlockerHandler - three-tier decision for commands piped to tail/head.
+
+Three-tier logic:
+  1. Matches whitelist?  → ALLOW (grep, awk, jq, ls, git tag, etc.)
+  2. Matches blacklist?  → DENY: "expensive command, use temp file"
+  3. Unknown?           → DENY: "unrecognized, add to extra_whitelist or use temp file"
+
+Uses Strategy Pattern: all language-specific blacklist patterns are delegated to
+PipeBlockerStrategy implementations registered in PipeBlockerStrategyRegistry.
+The handler itself has ZERO language awareness.
+"""
 
 import re
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult, get_data_layer
+from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_bash_command
+from claude_code_hooks_daemon.strategies.pipe_blocker.common import UNIVERSAL_WHITELIST_PATTERNS
+from claude_code_hooks_daemon.strategies.pipe_blocker.registry import PipeBlockerStrategyRegistry
+
+# Config key hints shown in unknown-command message
+_CONFIG_HINT_EXTRA_WHITELIST = "extra_whitelist"
+_CONFIG_HINT_HANDLER = "handlers.pre_tool_use.pipe_blocker"
+_CONFIG_YAML_KEY = "pipe_blocker"
 
 
 class PipeBlockerHandler(Handler):
     """Block expensive commands piped to tail/head to prevent information loss.
 
-    Blocks:
-        Expensive operations piped to tail/head (e.g., npm test | tail -n 20)
+    Three-tier decision system:
+    1. Whitelist (universal + extra_whitelist): always ALLOW
+    2. Blacklist (language strategies + extra_blacklist): always DENY with
+       "expensive command" message
+    3. Unknown: DENY with "unrecognized command, add to extra_whitelist" message
 
-    Allows:
-        - Filtering commands piped to tail/head (grep, awk, jq - already filtered)
-        - Direct file operations (tail -n 20 file.txt - no pipe)
-        - tail -f (follow mode) and head -c (byte count)
+    Language-specific blacklists are managed by PipeBlockerStrategy implementations
+    in the pipe_blocker strategy domain. The handler has zero language awareness.
 
-    Rationale:
-        When expensive commands are piped to tail/head, critical information may be lost.
-        If the needed data isn't in those N truncated lines, the ENTIRE expensive command
-        must be re-run. Redirecting to a temp file allows selective extraction without re-runs.
+    Configuration options (set via YAML config):
+        extra_whitelist: list[str] - Additional regex patterns to always allow.
+            Example: ["^git\\\\s+log\\\\b"]  — allows git log | tail
+        extra_blacklist: list[str] - Additional regex patterns to always block.
+            Example: ["^my_test_runner\\\\b"]
+        languages: list[str] — Restrict to specific language blacklists.
+            Universal is always active. If unset, ALL language blacklists are used.
     """
 
     def __init__(self, options: dict[str, Any] | None = None) -> None:
-        """Initialize handler with default or custom whitelist."""
+        """Initialize with optional per-project extra whitelist/blacklist."""
         super().__init__(
             handler_id=HandlerID.PIPE_BLOCKER,
             priority=Priority.PIPE_BLOCKER,
             tags=[HandlerTag.SAFETY, HandlerTag.BASH, HandlerTag.BLOCKING, HandlerTag.TERMINAL],
         )
+        options = options or {}
 
-        # Default whitelist: commands that already filter/process output
-        default_whitelist = [
-            "grep",  # Text search
-            "rg",  # Ripgrep
-            "awk",  # Text processing
-            "sed",  # Stream editor
-            "jq",  # JSON processor
-            "cut",  # Column extraction
-            "sort",  # Sorting
-            "uniq",  # Deduplication
-            "tr",  # Character translation
-            "wc",  # Word/line count
+        # Strategy registry for language-specific blacklists
+        self._registry = PipeBlockerStrategyRegistry.create_default()
+
+        # Project-level extra whitelist/blacklist (from options/config)
+        self._extra_whitelist: list[re.Pattern[str]] = [
+            re.compile(p, re.IGNORECASE) for p in options.get("extra_whitelist", [])
+        ]
+        self._extra_blacklist: list[str] = list(options.get("extra_blacklist", []))
+
+        # Language filtering (applied lazily on first use)
+        self._languages: list[str] | None = None
+        self._languages_applied: bool = False
+
+        # Pre-compiled universal whitelist patterns
+        self._whitelist: list[re.Pattern[str]] = [
+            re.compile(p, re.IGNORECASE) for p in UNIVERSAL_WHITELIST_PATTERNS
         ]
 
-        # Allow user customization via options
-        options = options or {}
-        self._allowed_pipe_sources = options.get("allowed_pipe_sources", default_whitelist)
+        # Pipe detection patterns
+        self._pipe_pattern: re.Pattern[str] = re.compile(r"\|\s*(tail|head)\b", re.IGNORECASE)
+        self._tail_follow_pattern: re.Pattern[str] = re.compile(r"\btail\s+-[a-z]*f", re.IGNORECASE)
+        self._head_bytes_pattern: re.Pattern[str] = re.compile(r"\bhead\s+-[a-z]*c", re.IGNORECASE)
 
-        # Compile regex patterns for efficient matching
-        # Match: | tail or | head (case insensitive, flexible spacing)
-        self._pipe_pattern = re.compile(r"\|\s*(tail|head)\b", re.IGNORECASE)
-        # Match: tail -f or head -c (exceptions to allow)
-        self._tail_follow_pattern = re.compile(r"\btail\s+-[a-z]*f", re.IGNORECASE)
-        self._head_bytes_pattern = re.compile(r"\bhead\s+-[a-z]*c", re.IGNORECASE)
+    def _apply_language_filter(self) -> None:
+        """Apply language filter to registry on first use (lazy)."""
+        if self._languages_applied:
+            return
+        self._languages_applied = True
+        effective_languages = self._languages or getattr(self, "_project_languages", None)
+        if effective_languages:
+            self._registry.filter_by_languages(effective_languages)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """Check if command pipes expensive operation to tail/head.
+        """Check if command pipes a non-whitelisted operation to tail/head.
 
-        Returns True if:
+        Returns True (block) if:
         - Bash tool with pipe to tail/head
         - NOT tail -f or head -c (these are allowed)
-        - NOT a whitelisted filtering command before the pipe
+        - Source segment does NOT match whitelist (universal + extra_whitelist)
 
-        Returns False if:
+        Returns False (allow) if:
         - Not a Bash tool
         - No pipe to tail/head
-        - Direct file operation (no pipe)
         - tail -f or head -c
-        - Whitelisted command before pipe
+        - Source segment is whitelisted (cheap filtering/output commands)
         """
-        # Only check Bash commands
+        self._apply_language_filter()
+
         command = get_bash_command(hook_input)
         if not command:
             return False
 
-        # Check if command has pipe to tail/head
         if not self._pipe_pattern.search(command):
             return False
 
@@ -88,78 +116,82 @@ class PipeBlockerHandler(Handler):
         if self._head_bytes_pattern.search(command):
             return False
 
-        # Check if source command is whitelisted (filtering commands are safe)
-        source_cmd = self._extract_source_command(command)
-        # Block unless source command is whitelisted
-        return not (
-            source_cmd and source_cmd.lower() in [cmd.lower() for cmd in self._allowed_pipe_sources]
-        )
+        # Extract full source segment before pipe to tail/head
+        source_segment = self._extract_source_segment(command)
 
-    def _extract_source_command(self, command: str) -> str | None:
-        """Extract the command immediately before pipe to tail/head.
+        # Step 1: Whitelist check — if whitelisted, always allow
+        if self._matches_whitelist(source_segment):
+            return False
+
+        # Steps 2 & 3: Blacklisted or unknown → block
+        return True
+
+    def _extract_source_segment(self, command: str) -> str:
+        """Extract full segment before pipe to tail/head.
+
+        Returns the FULL segment text (not just first word), enabling
+        multi-word pattern matching like r'^npm\\s+test\\b'.
 
         Examples:
-            "find . | tail -n 20" -> "find"
-            "grep error log | tail" -> "grep"
-            "docker ps | grep running | tail" -> "grep"
-            "npm test && grep FAIL | tail" -> "grep"
+            "find . | tail -n 20"           -> "find ."
+            "npm test | tail -5"            -> "npm test"
+            "go test ./... | tail -20"      -> "go test ./..."
+            "grep err log | awk '{p}' | tail" -> "awk '{p}'"
+            "npm test && grep FAIL | tail"  -> "grep FAIL"
 
-        Returns:
-            Command name (first word of last segment before tail/head), or None if extraction fails.
+        Returns empty string if extraction fails (treated as unknown command).
         """
         try:
-            # Find the position of | tail or | head
             match = self._pipe_pattern.search(command)
             if not match:
-                return None
+                return ""
 
             # Get everything before the pipe to tail/head
             before_pipe = command[: match.start()]
 
-            # Handle command chains (&&, ||, ;) - take the last segment
+            # Handle command chains (&&, ||, ;) — take the last segment
             for separator in ["&&", "||", ";"]:
                 if separator in before_pipe:
                     before_pipe = before_pipe.rsplit(separator, 1)[-1]
 
-            # Handle multiple pipes - take the last segment
+            # Handle multiple pipes — take the last segment
             if "|" in before_pipe:
                 before_pipe = before_pipe.rsplit("|", 1)[-1]
 
-            # Extract first word (the command name)
-            before_pipe = before_pipe.strip()
-            if not before_pipe:
-                return None
+            return before_pipe.strip()
 
-            # Get first word (command name)
-            parts = before_pipe.split()
-            if not parts:
-                return None
+        except Exception:  # nosec B110 - fail-safe: extraction error → empty string (unknown)
+            return ""
 
-            return parts[0]
+    def _matches_whitelist(self, source_segment: str) -> bool:
+        """Check if source segment matches the whitelist (never block)."""
+        if not source_segment:
+            return False
+        for pattern in self._whitelist:
+            if pattern.search(source_segment):
+                return True
+        for pattern in self._extra_whitelist:
+            if pattern.search(source_segment):
+                return True
+        return False
 
-        except Exception:
-            # Fail-safe: if extraction fails, return None (will block by default)
-            return None
+    def _matches_blacklist(self, source_segment: str) -> bool:
+        """Check if source segment matches any blacklisted pattern (known expensive)."""
+        if not source_segment:
+            return False
+        # Check language strategy patterns
+        for pattern_str in self._registry.get_blacklist_patterns():
+            if re.search(pattern_str, source_segment, re.IGNORECASE):
+                return True
+        # Check extra blacklist from config
+        for pattern_str in self._extra_blacklist:
+            if re.search(pattern_str, source_segment, re.IGNORECASE):
+                return True
+        return False
 
-    def _get_block_count(self) -> int:
-        """Get number of previous blocks by this handler."""
-        try:
-            return get_data_layer().history.count_blocks_by_handler(self.name)
-        except Exception:
-            return 0
-
-    def _terse_reason(self, source_cmd: str | None, command: str) -> str:
-        """Return terse blocking message for first block."""
-        source_name = source_cmd if source_cmd else "command"
-        return (
-            f"🚫 BLOCKED: Pipe to tail/head detected\n\n"
-            f"Use temp file instead:\n"
-            f"  {source_name} > /tmp/out.txt"
-        )
-
-    def _standard_reason(self, source_cmd: str | None, command: str) -> str:
-        """Return standard blocking message (without whitelist section)."""
-        source_name = source_cmd if source_cmd else "expensive operation"
+    def _blacklisted_reason(self, source_segment: str, command: str) -> str:
+        """Return block message for known-expensive commands (blacklisted)."""
+        source_name = source_segment.split()[0] if source_segment else "command"
         return (
             f"🚫 BLOCKED: Pipe to tail/head detected\n\n"
             f"COMMAND: {command}\n\n"
@@ -172,74 +204,74 @@ class PipeBlockerHandler(Handler):
             f"  Redirect to temp file for selective extraction:\n\n"
             f"  # Redirect full output to temp file\n"
             f'  TEMP_FILE="/tmp/output_$$.txt"\n'
-            f"  {source_cmd or 'command'} > \"$TEMP_FILE\"\n\n"
+            f"  {source_segment or 'command'} > \"$TEMP_FILE\"\n\n"
             f"  # Extract what you need (can run multiple times)\n"
             f'  tail -n 20 "$TEMP_FILE"\n'
             f"  grep 'error' \"$TEMP_FILE\"\n"
-            f"  # etc.\n"
+            f"  # etc.\n\n"
+            f"To disable: {_CONFIG_HINT_HANDLER}  (set enabled: false)"
         )
 
-    def _verbose_reason(self, source_cmd: str | None, command: str) -> str:
-        """Return verbose blocking message with whitelist section."""
-        source_name = source_cmd if source_cmd else "expensive operation"
+    def _unknown_reason(self, source_segment: str, command: str) -> str:
+        """Return block message for unrecognized commands (not in whitelist or blacklist)."""
+        source_name = source_segment.split()[0] if source_segment else "command"
         return (
             f"🚫 BLOCKED: Pipe to tail/head detected\n\n"
             f"COMMAND: {command}\n\n"
             f"WHY BLOCKED:\n"
-            f"  • Piping {source_name} to tail/head causes information loss\n"
-            f"  • If needed data isn't in those N truncated lines, the ENTIRE\n"
-            f"    expensive command must be re-run\n"
-            f"  • This wastes time and resources\n\n"
+            f"  • This command is unrecognized by the pipe blocker\n"
+            f"  • If it is cheap/safe to pipe, add it to {_CONFIG_HINT_EXTRA_WHITELIST} in "
+            f".claude/hooks-daemon.yaml:\n\n"
+            f"    {_CONFIG_YAML_KEY}:\n"
+            f"      {_CONFIG_HINT_EXTRA_WHITELIST}:\n"
+            f'        - "^{source_name}\\\\b"\n\n'
+            f"  • If it IS expensive, use a temp file instead\n\n"
             f"✅ RECOMMENDED ALTERNATIVE:\n"
             f"  Redirect to temp file for selective extraction:\n\n"
             f"  # Redirect full output to temp file\n"
             f'  TEMP_FILE="/tmp/output_$$.txt"\n'
-            f"  {source_cmd or 'command'} > \"$TEMP_FILE\"\n\n"
+            f"  {source_segment or 'command'} > \"$TEMP_FILE\"\n\n"
             f"  # Extract what you need (can run multiple times)\n"
             f'  tail -n 20 "$TEMP_FILE"\n'
             f"  grep 'error' \"$TEMP_FILE\"\n"
             f"  # etc.\n\n"
             f"INFO: WHITELISTED COMMANDS (piping is OK):\n"
-            f"  Commands that already filter output: {', '.join(self._allowed_pipe_sources)}\n\n"
-            f"  Example: grep error /var/log/syslog | tail -n 20  (allowed)\n"
+            f"  Commands that already filter output: grep, rg, awk, sed, jq, ls, cat, etc.\n\n"
+            f"  Example: grep error /var/log/syslog | tail -n 20  (allowed)\n\n"
+            f"To disable: {_CONFIG_HINT_HANDLER}  (set enabled: false)"
         )
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
-        """Block the operation with progressive verbosity."""
-        # Extract the blocked command
+        """Block with blacklisted or unknown message based on pattern match."""
         command = get_bash_command(hook_input) or "unknown command"
+        source_segment = self._extract_source_segment(command)
 
-        # Extract source command for context
-        source_cmd = self._extract_source_command(command)
-
-        # Get block count and select appropriate verbosity level
-        block_count = self._get_block_count()
-
-        if block_count == 0:
-            # First block: terse message
-            reason = self._terse_reason(source_cmd, command)
-        elif block_count <= 2:
-            # Blocks 1-2: standard message
-            reason = self._standard_reason(source_cmd, command)
+        # Differentiate: known expensive vs unrecognized
+        if self._matches_blacklist(source_segment):
+            reason = self._blacklisted_reason(source_segment, command)
         else:
-            # Blocks 3+: verbose message with whitelist
-            reason = self._verbose_reason(source_cmd, command)
+            reason = self._unknown_reason(source_segment, command)
 
         return HookResult(decision=Decision.DENY, reason=reason)
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for pipe blocker handler."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
+        from claude_code_hooks_daemon.core import (
+            AcceptanceTest,
+            Decision,
+            RecommendedModel,
+            TestType,
+        )
 
         return [
             AcceptanceTest(
-                title="npm test piped to tail",
+                title="npm test piped to tail (blacklisted)",
                 command='echo "npm test | tail -5"',
-                description="Blocks expensive commands piped to tail (information loss)",
+                description="Blocks expensive npm test piped to tail (blacklisted command)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
                     r"Pipe to tail/head detected",
-                    r"temp file",
+                    r"expensive",
                 ],
                 safety_notes="Uses echo - safe to test",
                 test_type=TestType.BLOCKING,
@@ -247,13 +279,27 @@ class PipeBlockerHandler(Handler):
                 requires_main_thread=False,
             ),
             AcceptanceTest(
-                title="pytest piped to head",
+                title="pytest piped to head (blacklisted)",
                 command='echo "pytest | head -20"',
-                description="Blocks pytest piped to head",
+                description="Blocks pytest piped to head (blacklisted command)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
                     r"Pipe to tail/head",
-                    r"temp file",
+                    r"expensive",
+                ],
+                safety_notes="Uses echo - safe to test",
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="find piped to tail (unknown command)",
+                command="echo \"find . -name '*.py' | tail -20\"",
+                description="Blocks unknown find command piped to tail",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"Pipe to tail/head",
+                    r"extra_whitelist",
                 ],
                 safety_notes="Uses echo - safe to test",
                 test_type=TestType.BLOCKING,
