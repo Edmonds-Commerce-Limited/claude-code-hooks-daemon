@@ -258,6 +258,8 @@ class PlaybookGenerator:
                     "requires_event": test.requires_event,
                     "required_tools": test.required_tools,
                     "tools_available": all(shutil.which(t) for t in (test.required_tools or [])),
+                    "recommended_model": test.recommended_model.value if test.recommended_model else None,
+                    "requires_main_thread": test.requires_main_thread,
                 }
                 result.append(test_dict)
                 test_number += 1
@@ -410,6 +412,9 @@ class PlaybookGenerator:
 
                 lines.append(f"**Type**: {test_type_str}")
                 lines.append(f"**Expected Decision**: {test.expected_decision.value}")
+                if test.recommended_model:
+                    lines.append(f"**Recommended Model**: {test.recommended_model.value}")
+                lines.append(f"**Requires Main Thread**: {'yes' if test.requires_main_thread else 'no'}")
                 lines.append("")
 
                 # Description
@@ -510,6 +515,9 @@ class PlaybookGenerator:
 
                     lines.append(f"**Type**: {test_type_str}")
                     lines.append(f"**Expected Decision**: {test.expected_decision.value}")
+                    if test.recommended_model:
+                        lines.append(f"**Recommended Model**: {test.recommended_model.value}")
+                    lines.append(f"**Requires Main Thread**: {'yes' if test.requires_main_thread else 'no'}")
                     lines.append("")
                     lines.append(f"**Description**: {test.description}")
                     lines.append("")

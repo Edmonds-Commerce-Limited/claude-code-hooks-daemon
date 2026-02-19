@@ -4,7 +4,7 @@ This module exports the primary classes and utilities for
 building and running hook handlers.
 """
 
-from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest, TestType
+from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest, RecommendedModel, TestType
 from claude_code_hooks_daemon.core.chain import ChainExecutionResult, HandlerChain
 from claude_code_hooks_daemon.core.data_layer import (
     DaemonDataLayer,
@@ -29,6 +29,7 @@ from claude_code_hooks_daemon.core.transcript_reader import (
 __all__ = [
     "AcceptanceTest",
     "ChainExecutionResult",
+    "RecommendedModel",
     "DaemonDataLayer",
     "Decision",
     "EventRouter",
