@@ -100,6 +100,31 @@ The daemon ships with 48 production handlers across 10 event types, covering the
 
 ---
 
+## Status Line
+
+The daemon can drive Claude Code's built-in status line, giving you a persistent at-a-glance view of your session:
+
+```
+claude-sonnet-4-5 | ctx: 34% | main | ✓ daemon
+```
+
+It shows the current model, context window usage, git branch, and whether the daemon is healthy — updated automatically on every interaction.
+
+**Setup** — add to `.claude/settings.json`:
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": ".claude/hooks/status-line"
+  }
+}
+```
+
+If you haven't configured it yet, the daemon will suggest it on your next new session. If the daemon ever fails to start, the status line shows `⚠️ DAEMON FAILED` so the problem is immediately visible rather than silently degraded.
+
+---
+
 ## Project-Level Handlers
 
 Add your own handlers in `.claude/project-handlers/` — auto-discovered on daemon restart, co-located with tests, with full CLI support:
