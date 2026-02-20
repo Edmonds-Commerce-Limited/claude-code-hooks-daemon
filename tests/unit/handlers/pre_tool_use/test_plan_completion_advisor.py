@@ -298,8 +298,8 @@ class TestPlanCompletionAdvisorHandler:
         result = handler.handle(hook_input)
         assert result.decision == Decision.ALLOW
 
-    def test_handle_returns_guidance(self, handler: PlanCompletionAdvisorHandler) -> None:
-        """Handler returns guidance text (not empty)."""
+    def test_handle_returns_context(self, handler: PlanCompletionAdvisorHandler) -> None:
+        """Handler returns advisory text in context list (not empty)."""
         hook_input: dict[str, Any] = {
             "tool_name": "Write",
             "tool_input": {
@@ -308,11 +308,11 @@ class TestPlanCompletionAdvisorHandler:
             },
         }
         result = handler.handle(hook_input)
-        assert result.guidance is not None
-        assert len(result.guidance) > 0
+        assert result.context
+        assert len(result.context[0]) > 0
 
     def test_handle_includes_git_mv_command(self, handler: PlanCompletionAdvisorHandler) -> None:
-        """Handler guidance includes correct git mv command with folder name."""
+        """Handler context includes correct git mv command with folder name."""
         hook_input: dict[str, Any] = {
             "tool_name": "Write",
             "tool_input": {
@@ -321,12 +321,12 @@ class TestPlanCompletionAdvisorHandler:
             },
         }
         result = handler.handle(hook_input)
-        assert "git mv" in result.guidance
-        assert "00014-eliminate-cwd" in result.guidance
-        assert "CLAUDE/Plan/Completed/" in result.guidance
+        assert "git mv" in result.context[0]
+        assert "00014-eliminate-cwd" in result.context[0]
+        assert "CLAUDE/Plan/Completed/" in result.context[0]
 
     def test_handle_mentions_readme_update(self, handler: PlanCompletionAdvisorHandler) -> None:
-        """Handler guidance mentions README.md update."""
+        """Handler context mentions README.md update."""
         hook_input: dict[str, Any] = {
             "tool_name": "Write",
             "tool_input": {
@@ -335,10 +335,10 @@ class TestPlanCompletionAdvisorHandler:
             },
         }
         result = handler.handle(hook_input)
-        assert "README.md" in result.guidance
+        assert "README.md" in result.context[0]
 
     def test_handle_mentions_plan_statistics(self, handler: PlanCompletionAdvisorHandler) -> None:
-        """Handler guidance mentions plan statistics update."""
+        """Handler context mentions plan statistics update."""
         hook_input: dict[str, Any] = {
             "tool_name": "Write",
             "tool_input": {
@@ -347,7 +347,7 @@ class TestPlanCompletionAdvisorHandler:
             },
         }
         result = handler.handle(hook_input)
-        assert "statistic" in result.guidance.lower()
+        assert "statistic" in result.context[0].lower()
 
     def test_handle_extracts_correct_folder_for_different_plans(
         self, handler: PlanCompletionAdvisorHandler
@@ -361,7 +361,7 @@ class TestPlanCompletionAdvisorHandler:
             },
         }
         result = handler.handle(hook_input)
-        assert "00027-plan-completion-move-advisor" in result.guidance
+        assert "00027-plan-completion-move-advisor" in result.context[0]
 
     def test_handle_works_with_edit_tool(self, handler: PlanCompletionAdvisorHandler) -> None:
         """Handler works correctly when triggered via Edit tool."""
@@ -375,9 +375,9 @@ class TestPlanCompletionAdvisorHandler:
         }
         result = handler.handle(hook_input)
         assert result.decision == Decision.ALLOW
-        assert result.guidance is not None
-        assert "git mv" in result.guidance
-        assert "00014-eliminate-cwd" in result.guidance
+        assert result.context
+        assert "git mv" in result.context[0]
+        assert "00014-eliminate-cwd" in result.context[0]
 
     # ===== Acceptance tests =====
 
@@ -387,3 +387,25 @@ class TestPlanCompletionAdvisorHandler:
         """Handler provides at least one acceptance test."""
         tests = handler.get_acceptance_tests()
         assert len(tests) >= 1
+
+    def test_handle_uses_context_not_guidance(self, handler: PlanCompletionAdvisorHandler) -> None:
+        """Regression test: advisory MUST be returned as context, not guidance.
+
+        Bug: PlanCompletionAdvisorHandler returned guidance=... but Claude Code only
+        surfaces additionalContext (context list) in system-reminders for PreToolUse
+        events. guidance is silently ignored, making the advisory invisible.
+
+        Fix: return context=[guidance_text] so advisory appears in system-reminders.
+        """
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/workspace/CLAUDE/Plan/00014-eliminate-cwd/PLAN.md",
+                "content": "# Plan 00014\n\n**Status**: Complete\n",
+            },
+        }
+        result = handler.handle(hook_input)
+        assert result.context, "Advisory must be in context list (shown as additionalContext)"
+        assert result.guidance is None, "guidance field is not shown in PreToolUse system-reminders"
+        assert any("git mv" in c for c in result.context), "Context must contain 'git mv'"
+        assert any("README" in c for c in result.context), "Context must contain 'README'"

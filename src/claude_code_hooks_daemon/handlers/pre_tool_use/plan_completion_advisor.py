@@ -107,7 +107,7 @@ class PlanCompletionAdvisorHandler(Handler):
             "(increment Completed count, update total)"
         )
 
-        return HookResult(decision=Decision.ALLOW, guidance=guidance)
+        return HookResult(decision=Decision.ALLOW, context=[guidance])
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Plan Completion Advisor."""
