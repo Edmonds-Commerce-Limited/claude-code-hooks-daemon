@@ -199,26 +199,51 @@ def format_violation_report(violations: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def write_json_output(violations: list[dict[str, Any]], output_path: Path) -> None:
+    """Write violations as JSON to output_path for QA pipeline consumption."""
+    import json
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    data = {
+        "summary": {
+            "passed": len(violations) == 0,
+            "total_violations": len(violations),
+        },
+        "violations": violations,
+    }
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+
 def main() -> int:
     """Main entry point."""
     workspace = Path(__file__).parent.parent.parent
 
-    print("Auditing codebase for error hiding patterns...")
-    print(f"Workspace: {workspace}\n")
+    json_mode = "--json" in sys.argv
+
+    if not json_mode:
+        print("Auditing codebase for error hiding patterns...")
+        print(f"Workspace: {workspace}\n")
 
     # Audit src/ directory (production code only)
     src_violations = audit_directory(workspace / "src")
 
-    # Print report
-    print(format_violation_report(src_violations))
+    if json_mode:
+        output_path = workspace / "untracked" / "qa" / "error_hiding.json"
+        write_json_output(src_violations, output_path)
+    else:
+        # Print report
+        print(format_violation_report(src_violations))
 
     # Summary
     if src_violations:
-        print(f"\n⚠️  Action Required: Fix {len(src_violations)} violation(s)")
-        print("These patterns violate FAIL FAST principles.")
+        if not json_mode:
+            print(f"\n⚠️  Action Required: Fix {len(src_violations)} violation(s)")
+            print("These patterns violate FAIL FAST principles.")
         return 1
 
-    print("✅ All checks passed - no error hiding detected!")
+    if not json_mode:
+        print("✅ All checks passed - no error hiding detected!")
     return 0
 
 

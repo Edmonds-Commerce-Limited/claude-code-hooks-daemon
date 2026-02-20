@@ -103,6 +103,16 @@ else
 fi
 echo ""
 
+echo "9. Running Error Hiding Audit..."
+echo "----------------------------------------"
+if ! "${PROJECT_ROOT}/untracked/venv/bin/python" "${SCRIPT_DIR}/audit_error_hiding.py" --json; then
+    OVERALL_EXIT_CODE=1
+    echo "❌ Error hiding audit FAILED"
+else
+    echo "✅ Error hiding audit PASSED"
+fi
+echo ""
+
 # Print overall summary
 echo "========================================"
 echo "QA Summary"
@@ -120,6 +130,7 @@ results = {
     "Security Check": "untracked/qa/security.json",
     "Dependencies": "untracked/qa/dependencies.json",
     "Shell Check": "untracked/qa/shell_check.json",
+    "Error Hiding": "untracked/qa/error_hiding.json",
 }
 
 all_passed = True
