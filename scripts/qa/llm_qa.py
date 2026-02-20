@@ -88,6 +88,11 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="dependencies.json",
         jq_hint="jq '.issues[]'",
     ),
+    "error_hiding": ToolConfig(
+        command=_python("audit_error_hiding.py") + ["--json"],
+        json_file="error_hiding.json",
+        jq_hint="jq '.violations[] | {file, line, rule, message}'",
+    ),
 }
 
 ALL_TOOL_NAMES = list(TOOL_REGISTRY)
@@ -139,6 +144,11 @@ def _summarize_dependencies(data: dict) -> str:
     return f"{total} issues"
 
 
+def _summarize_error_hiding(data: dict) -> str:
+    total = data.get("summary", {}).get("total_violations", 0)
+    return f"{total} violations"
+
+
 SUMMARIZERS: dict[str, Summarizer] = {
     "magic_values": _summarize_magic_values,
     "format": _summarize_format,
@@ -147,6 +157,7 @@ SUMMARIZERS: dict[str, Summarizer] = {
     "tests": _summarize_tests,
     "security": _summarize_security,
     "dependencies": _summarize_dependencies,
+    "error_hiding": _summarize_error_hiding,
 }
 
 
