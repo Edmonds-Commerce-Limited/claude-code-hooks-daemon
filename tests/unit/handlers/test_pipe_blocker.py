@@ -849,6 +849,9 @@ class TestPipeBlockerAcceptanceTests:
         assert len(tests) > 0
 
     def test_includes_blacklisted_test(self, handler: PipeBlockerHandler) -> None:
+        # Blacklisted tests use "false && CMD | tail -N" pattern:
+        # false exits 1, && short-circuits so CMD never runs, but source segment
+        # extracted is CMD (after && split) which matches the blacklist.
         tests = handler.get_acceptance_tests()
         titles = [t.title for t in tests]
         assert any("blacklisted" in title.lower() for title in titles)

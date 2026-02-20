@@ -41,3 +41,25 @@ class TestAcceptanceTests:
     def test_returns_at_least_one_test(self, strategy: PhpLintStrategy) -> None:
         tests = strategy.get_acceptance_tests()
         assert len(tests) >= 1
+
+    def test_invalid_test_uses_genuinely_invalid_php(self, strategy: PhpLintStrategy) -> None:
+        """Regression test: invalid PHP content must actually fail php -l.
+
+        Bug: '<?php echo 'hello' ?>' is valid PHP — php -l returns exit 0.
+        The closing '?>' makes the missing semicolon acceptable in PHP.
+        Fix: use content with missing semicolons between statements (e.g.
+        two echo statements where the first is missing its semicolon).
+        """
+        from claude_code_hooks_daemon.core import Decision
+
+        tests = strategy.get_acceptance_tests()
+        blocking_tests = [t for t in tests if t.expected_decision == Decision.DENY]
+        assert blocking_tests, "PHP strategy must have at least one blocking acceptance test"
+
+        blocking_test = blocking_tests[0]
+        # The invalid content must NOT use the '?>' ending trick — that makes
+        # missing semicolons valid PHP. Must use content that genuinely fails.
+        assert "?>" not in blocking_test.command, (
+            "Invalid PHP test must not end with '?>' — that allows missing semicolons. "
+            "Use multiple statements where a semicolon is required between them."
+        )

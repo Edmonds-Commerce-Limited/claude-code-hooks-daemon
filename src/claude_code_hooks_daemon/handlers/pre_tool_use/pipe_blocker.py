@@ -263,45 +263,71 @@ class PipeBlockerHandler(Handler):
             TestType,
         )
 
+        # Safe no-op patterns for pipe blocker acceptance tests:
+        #
+        # Blacklisted commands (npm test, pytest): use "false && CMD | tail -N"
+        #   - bash: | binds tighter than &&, so parsed as: false && (CMD | tail -N)
+        #   - false exits 1 → && short-circuits → CMD never executes (safe if hook fails)
+        #   - _extract_source_segment splits on && separator → source = "npm test" / "pytest"
+        #   - source matches blacklist → DENY with "expensive" message ✓ (blacklist path exercised)
+        #
+        # Unknown commands (find): use [[ "CMD | tail -N" == 0 ]]
+        #   - bash: evaluates false string comparison (exit 1), no side effects
+        #   - source segment = '[[ "find ...' → not in blacklist → "unknown" path → extra_whitelist ✓
+        #
+        # Never use: echo (whitelisted), real direct commands (execute if hook fails)
         return [
             AcceptanceTest(
-                title="npm test piped to tail (blacklisted)",
-                command='echo "npm test | tail -5"',
-                description="Blocks expensive npm test piped to tail (blacklisted command)",
+                title="npm test piped to tail (blacklisted — expensive path)",
+                command="false && npm test | tail -5",
+                description=(
+                    "Blocks npm test | tail via blacklist path (expensive message). "
+                    "'false &&' short-circuits so npm test never executes. "
+                    "_extract_source_segment splits on && → source='npm test' → blacklist match."
+                ),
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
                     r"Pipe to tail/head detected",
                     r"expensive",
                 ],
-                safety_notes="Uses echo - safe to test",
+                safety_notes=(
+                    "Safe no-op: 'false' exits 1, && short-circuits, npm test never runs. "
+                    "bash precedence: | > && so parsed as: false && (npm test | tail -5)"
+                ),
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),
             AcceptanceTest(
-                title="pytest piped to head (blacklisted)",
-                command='echo "pytest | head -20"',
-                description="Blocks pytest piped to head (blacklisted command)",
+                title="pytest piped to head (blacklisted — expensive path)",
+                command="false && pytest | head -20",
+                description=(
+                    "Blocks pytest | head via blacklist path (expensive message). "
+                    "'false &&' short-circuits so pytest never executes."
+                ),
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
                     r"Pipe to tail/head",
                     r"expensive",
                 ],
-                safety_notes="Uses echo - safe to test",
+                safety_notes=("Safe no-op: 'false' exits 1, && short-circuits, pytest never runs."),
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),
             AcceptanceTest(
-                title="find piped to tail (unknown command)",
-                command="echo \"find . -name '*.py' | tail -20\"",
-                description="Blocks unknown find command piped to tail",
+                title="find piped to tail (unknown command — extra_whitelist path)",
+                command='[[ "find /tmp -name test.py | tail -20" == 0 ]]',
+                description=(
+                    "Blocks find | tail via unknown-command path (extra_whitelist hint). "
+                    "find is not in blacklist so handler suggests adding to extra_whitelist."
+                ),
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[
                     r"Pipe to tail/head",
                     r"extra_whitelist",
                 ],
-                safety_notes="Uses echo - safe to test",
+                safety_notes="No-op: [[ ... ]] evaluates to false (exit 1), no side effects",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
