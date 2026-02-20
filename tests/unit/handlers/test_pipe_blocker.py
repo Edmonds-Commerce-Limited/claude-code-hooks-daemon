@@ -598,6 +598,36 @@ class TestPipeBlockerHandleBlacklisted:
         result = handler.handle(hook_input)
         assert "extra_whitelist" not in result.reason
 
+    def test_blacklisted_reason_redirects_stdout_and_stderr(
+        self, handler: PipeBlockerHandler
+    ) -> None:
+        """Snippet redirects both stdout and stderr to the temp file."""
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "pytest | tail -20"}}
+        result = handler.handle(hook_input)
+        assert '> "$TEMP_FILE" 2>&1' in result.reason
+
+    def test_blacklisted_reason_captures_exit_code(self, handler: PipeBlockerHandler) -> None:
+        """Snippet captures the exit code after running the command."""
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "pytest | tail -20"}}
+        result = handler.handle(hook_input)
+        assert "EXIT_CODE=$?" in result.reason
+
+    def test_blacklisted_reason_echoes_completed_ok_on_success(
+        self, handler: PipeBlockerHandler
+    ) -> None:
+        """Snippet echoes 'Completed OK' when exit code is 0."""
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "pytest | tail -20"}}
+        result = handler.handle(hook_input)
+        assert "Completed OK" in result.reason
+
+    def test_blacklisted_reason_echoes_completed_with_errors_on_failure(
+        self, handler: PipeBlockerHandler
+    ) -> None:
+        """Snippet echoes 'Completed with errors' when exit code is non-zero."""
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "pytest | tail -20"}}
+        result = handler.handle(hook_input)
+        assert "Completed with errors (exit code: $EXIT_CODE)" in result.reason
+
 
 class TestPipeBlockerHandleUnknown:
     """Tests for handle() when command is unknown (not in whitelist or blacklist)."""
@@ -663,6 +693,34 @@ class TestPipeBlockerHandleUnknown:
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
         result = handler.handle(hook_input)
         assert "re-run" not in result.reason.lower() and "rerun" not in result.reason.lower()
+
+    def test_unknown_reason_redirects_stdout_and_stderr(self, handler: PipeBlockerHandler) -> None:
+        """Snippet redirects both stdout and stderr to the temp file."""
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
+        result = handler.handle(hook_input)
+        assert '> "$TEMP_FILE" 2>&1' in result.reason
+
+    def test_unknown_reason_captures_exit_code(self, handler: PipeBlockerHandler) -> None:
+        """Snippet captures the exit code after running the command."""
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
+        result = handler.handle(hook_input)
+        assert "EXIT_CODE=$?" in result.reason
+
+    def test_unknown_reason_echoes_completed_ok_on_success(
+        self, handler: PipeBlockerHandler
+    ) -> None:
+        """Snippet echoes 'Completed OK' when exit code is 0."""
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
+        result = handler.handle(hook_input)
+        assert "Completed OK" in result.reason
+
+    def test_unknown_reason_echoes_completed_with_errors_on_failure(
+        self, handler: PipeBlockerHandler
+    ) -> None:
+        """Snippet echoes 'Completed with errors' when exit code is non-zero."""
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | tail -n 20"}}
+        result = handler.handle(hook_input)
+        assert "Completed with errors (exit code: $EXIT_CODE)" in result.reason
 
     def test_handle_head_command_reason_mentions_head(self, handler: PipeBlockerHandler) -> None:
         """Reason should mention head when that's the dest command."""
