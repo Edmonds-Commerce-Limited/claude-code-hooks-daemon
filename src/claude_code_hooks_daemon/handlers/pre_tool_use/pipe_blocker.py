@@ -201,14 +201,14 @@ class PipeBlockerHandler(Handler):
             f"    expensive command must be re-run\n"
             f"  • This wastes time and resources\n\n"
             f"✅ RECOMMENDED ALTERNATIVE:\n"
-            f"  Redirect to temp file for selective extraction:\n\n"
-            f"  # Redirect full output to temp file\n"
+            f"  Redirect to temp file, capture exit code, then inspect selectively:\n\n"
             f'  TEMP_FILE="/tmp/output_$$.txt"\n'
-            f"  {source_segment or 'command'} > \"$TEMP_FILE\"\n\n"
-            f"  # Extract what you need (can run multiple times)\n"
-            f'  tail -n 20 "$TEMP_FILE"\n'
-            f"  grep 'error' \"$TEMP_FILE\"\n"
-            f"  # etc.\n\n"
+            f"  {source_segment or 'command'} > \"$TEMP_FILE\" 2>&1\n"
+            f"  EXIT_CODE=$?\n"
+            f'  if [ $EXIT_CODE -eq 0 ]; then echo "Completed OK"; '
+            f'else echo "Completed with errors (exit code: $EXIT_CODE) - check /tmp/output.txt"; fi\n\n'
+            f"  # Agent sees 'Completed OK' → no need to read the file\n"
+            f"  # Agent sees 'Completed with errors' → read /tmp/output.txt to diagnose\n\n"
             f"To disable: {_CONFIG_HINT_HANDLER}  (set enabled: false)"
         )
 
@@ -227,14 +227,14 @@ class PipeBlockerHandler(Handler):
             f'        - "^{source_name}\\\\b"\n\n'
             f"  • If it IS expensive, use a temp file instead\n\n"
             f"✅ RECOMMENDED ALTERNATIVE:\n"
-            f"  Redirect to temp file for selective extraction:\n\n"
-            f"  # Redirect full output to temp file\n"
+            f"  Redirect to temp file, capture exit code, then inspect selectively:\n\n"
             f'  TEMP_FILE="/tmp/output_$$.txt"\n'
-            f"  {source_segment or 'command'} > \"$TEMP_FILE\"\n\n"
-            f"  # Extract what you need (can run multiple times)\n"
-            f'  tail -n 20 "$TEMP_FILE"\n'
-            f"  grep 'error' \"$TEMP_FILE\"\n"
-            f"  # etc.\n\n"
+            f"  {source_segment or 'command'} > \"$TEMP_FILE\" 2>&1\n"
+            f"  EXIT_CODE=$?\n"
+            f'  if [ $EXIT_CODE -eq 0 ]; then echo "Completed OK"; '
+            f'else echo "Completed with errors (exit code: $EXIT_CODE) - check /tmp/output.txt"; fi\n\n'
+            f"  # Agent sees 'Completed OK' → no need to read the file\n"
+            f"  # Agent sees 'Completed with errors' → read /tmp/output.txt to diagnose\n\n"
             f"INFO: WHITELISTED COMMANDS (piping is OK):\n"
             f"  Commands that already filter output: grep, rg, awk, sed, jq, ls, cat, etc.\n\n"
             f"  Example: grep error /var/log/syslog | tail -n 20  (allowed)\n\n"

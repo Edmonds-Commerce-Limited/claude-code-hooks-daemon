@@ -20,7 +20,7 @@ class EnforceLlmQaHandler(Handler):
     def __init__(self) -> None:
         super().__init__(
             handler_id="enforce-llm-qa",
-            priority=15,
+            priority=41,
             terminal=True,
             tags=["project", "blocking", "qa"],
         )
