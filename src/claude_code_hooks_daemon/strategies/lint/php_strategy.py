@@ -70,9 +70,14 @@ class PhpLintStrategy:
                 command=(
                     "Use the Write tool to create file "
                     "/tmp/acceptance-test-lint-php/invalid.php "
-                    "with content \"<?php echo 'hello' ?>\""
+                    "with content \"<?php\\necho 'hello'\\necho 'world';\""
                 ),
-                description="Invalid PHP code (missing semicolon) should be blocked",
+                description=(
+                    "Invalid PHP code (missing semicolon between echo statements) "
+                    "should be blocked. Note: '<?php echo x ?>' is VALID PHP — "
+                    "closing ?> makes the semicolon optional. Use multiple statements "
+                    "instead so semicolon is required."
+                ),
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"PHP lint FAILED", r"invalid.php"],
                 safety_notes="Uses /tmp path - safe. Creates temporary PHP file with syntax error.",

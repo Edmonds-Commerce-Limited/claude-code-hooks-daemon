@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.15.0] - 2026-02-19
+
+### Added
+
+- **ErrorHidingBlockerHandler** (PreToolUse:Write, priority 13): New safety handler that blocks error-hiding patterns before files are written to disk. Uses Strategy Pattern with 5 language strategies (Shell, Python, JavaScript/TypeScript, Go, Java). Detects patterns including `|| true`, `|| :`, `set +e`, `except: pass`, empty catch blocks, swallowed exceptions, and other silent failure constructs that mask bugs. Implements Plan 00063 Phase 3.
+- **PipeBlockerHandler Strategy Pattern redesign** (Plan 00064): PipeBlocker refactored from monolithic implementation to Strategy Pattern architecture. 8 language strategies shipped: Shell, Python, JavaScript/TypeScript, Go, Java, Ruby, Rust, and Universal. Registry-based design allows adding new strategies without modifying handler logic.
+- **Shellcheck QA integration** (check 8): Added `shellcheck -x` as QA pipeline check #8. All shell scripts must pass shellcheck with zero errors and zero warnings. `.shellcheckrc` configuration file added with `source-path=SCRIPTDIR` for proper source-following.
+- **Color-coded git branch in status line**: Branch name in the status line now renders green for the default branch, orange for non-default branches, and grey when the branch is unknown.
+- **Code review gate in release process** (Step 7.5): New blocking gate added to RELEASING.md requiring review of the code diff (`git diff LAST_TAG..HEAD -- src/`) before proceeding to acceptance testing. Ensures bugs and anti-patterns are caught before release.
+- **Acceptance test scoping by bump type**: MAJOR and MINOR releases require the full acceptance test suite. PATCH releases with handler changes require targeted tests for changed handlers only. PATCH releases with no handler changes may skip acceptance testing with documented rationale in release notes.
+- **`recommended_model` and `requires_main_thread` fields on `AcceptanceTest`**: New metadata fields on the `AcceptanceTest` dataclass allow test definitions to declare which model is recommended for execution and whether the test must run in the main Claude Code thread (not a sub-agent).
+- **`RecommendedModel` enum**: Type-safe enum for specifying recommended model in acceptance test metadata (`OPUS`, `SONNET`, `HAIKU`).
+
+### Fixed
+
+- **Shellcheck warnings across all shell scripts**: Resolved all shellcheck warnings including SC2034 (unused variables), SC2155 (declare and assign separately), SC2120/SC2119 (function argument handling), and SC1091 (source file following). All scripts now pass `shellcheck -x` with zero issues.
+- **ESLint PATH in validate_eslint_on_write**: Prepend `node_modules/.bin` to PATH in the subprocess call so locally-installed ESLint binaries are found without requiring global installation.
+- **health-check.sh wrong command name**: Fixed health-check.sh using the incorrect `config-validate` command; updated to the correct `validate-config` command name.
+- **Dockerfile GPG key dearmoring for Dart SDK**: Fixed Dart SDK apt repository setup in the CCY Dockerfile by properly dearmoring the GPG key before adding it to the apt trusted keyring.
+- **CCY Dockerfile tracking**: Fixed `.gitignore` rule that prevented the CCY Dockerfile from being tracked by git; removed the blanket `ccy/` ignore pattern.
+- **PipeBlocker acceptance test commands**: Fixed acceptance test commands. Original `echo`-wrapped commands were silently allowed (echo is whitelisted). Final pattern: `false && CMD | tail -N` for blacklisted commands (bash `|` binds tighter than `&&` so `false` short-circuits before CMD runs; `_extract_source_segment` splits on `&&` leaving `CMD` as source → blacklist path exercised, "expensive" message verified). Unknown-command test uses `[[ "CMD | tail" == 0 ]]` no-op (safe string comparison, no execution).
+
 ## [2.14.0] - 2026-02-18
 
 ### Added
