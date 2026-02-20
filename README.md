@@ -110,6 +110,10 @@ claude-sonnet-4-5 | ctx: 34% | main | ✓ daemon
 
 It shows the current model, context window usage, git branch, and whether the daemon is healthy — updated automatically on every interaction.
 
+```
+📁 claude-code-hooks-daemon 👤 joseph | 🤖 Sonnet 4.6 ▌▌▌ | ◑ 45.0% | 🕐 15:15 | ⎇ main | 🪝 45.7s : 37MB : DEBUG : 🛡️
+```
+
 **Setup** — add to `.claude/settings.json`:
 
 ```json

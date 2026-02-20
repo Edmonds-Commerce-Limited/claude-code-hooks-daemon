@@ -47,6 +47,9 @@ class AccountDisplayHandler(Handler):
                 return HookResult(context=[])
 
             username = match.group(1)
+            # Strip org prefix (e.g. "client_user_b" → "joseph")
+            if "_" in username:
+                username = username.split("_", 1)[1]
             return HookResult(context=[f"👤 {username} |"])
 
         except Exception:
