@@ -127,7 +127,7 @@ class ValidateInstructionContentHandler(Handler):
 
         return HookResult(
             decision=Decision.ALLOW,
-            reason="Content validated - no ephemeral patterns detected",
+            context=["Content validated - no ephemeral patterns detected"],
         )
 
     def _find_blocked_pattern(self, content: str) -> str | None:
