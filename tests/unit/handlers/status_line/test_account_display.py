@@ -32,7 +32,7 @@ class TestAccountDisplayHandler:
         """Test formatting with valid .last-launch.conf file."""
         conf_content = """
 # Last launch configuration
-LAST_TOKEN="ballicom_rohil"
+LAST_TOKEN="acme_rohil"
 LAST_TIME="2025-01-29T10:30:00Z"
 """
         with patch("pathlib.Path.exists", return_value=True):
@@ -41,8 +41,8 @@ LAST_TIME="2025-01-29T10:30:00Z"
 
         assert result.decision == "allow"
         assert len(result.context) == 1
-        assert "rohil" in result.context[0]
-        assert result.context[0] == "👤 rohil |"
+        assert "acme_rohil" in result.context[0]
+        assert result.context[0] == "👤 acme_rohil |"
 
     def test_handle_with_different_username(self, handler: AccountDisplayHandler) -> None:
         """Test formatting with different username."""
@@ -53,7 +53,7 @@ LAST_TIME="2025-01-29T10:30:00Z"
                 result = handler.handle({})
 
         assert result.decision == "allow"
-        assert result.context == ["👤 doe |"]
+        assert result.context == ["👤 john_doe |"]
 
     def test_handle_with_missing_file(self, handler: AccountDisplayHandler) -> None:
         """Test handling when .last-launch.conf doesn't exist."""
