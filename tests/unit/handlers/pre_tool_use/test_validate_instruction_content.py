@@ -623,3 +623,26 @@ Run tests with PHPUnit.
 Run `composer install` to set up."""
         result = handler.handle(mock_write_tool_call)
         assert result.decision == "allow"
+
+
+class TestRegressionContextNotReason:
+    """Regression tests: advisory MUST use context, not reason."""
+
+    def test_allow_uses_context_not_reason_for_advisory(
+        self, handler: ValidateInstructionContentHandler, mock_write_tool_call: dict[str, Any]
+    ) -> None:
+        """Regression test: clean-content ALLOW must return context, not reason.
+
+        Bug: handler returned reason="Content validated..." but Claude Code only
+        surfaces additionalContext (context list) in system-reminders for
+        PreToolUse ALLOW events. The reason field is silently ignored.
+
+        Fix: return context=["Content validated..."] so advisory appears.
+        """
+        mock_write_tool_call["tool_input"]["content"] = "# Instructions\n\nUse strict typing."
+        result = handler.handle(mock_write_tool_call)
+        assert result.decision == "allow"
+        assert result.context, "Advisory must be in context list (shown as additionalContext)"
+        assert any(
+            "validated" in c.lower() for c in result.context
+        ), "Context must contain 'validated'"
