@@ -105,14 +105,10 @@ The daemon ships with 48 production handlers across 10 event types, covering the
 The daemon can drive Claude Code's built-in status line, giving you a persistent at-a-glance view of your session:
 
 ```
-claude-sonnet-4-5 | ctx: 34% | main | ✓ daemon
-```
-
-It shows the current model, context window usage, git branch, and whether the daemon is healthy — updated automatically on every interaction.
-
-```
 📁 claude-code-hooks-daemon 👤 joseph | 🤖 Sonnet 4.6 ▌▌▌ | ◑ 45.0% | 🕐 15:15 | ⎇ main | 🪝 45.7s : 37MB : DEBUG : 🛡️
 ```
+
+It shows the repo name, account, model and thinking mode, context usage, time, git branch, and daemon stats — updated automatically on every interaction.
 
 **Setup** — add to `.claude/settings.json`:
 
