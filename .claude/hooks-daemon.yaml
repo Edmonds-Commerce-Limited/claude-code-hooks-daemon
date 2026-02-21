@@ -39,6 +39,9 @@ handlers:
     sed_blocker:           # Blocks sed command usage (use Edit tool instead)
       enabled: true
       priority: 11
+      # options:
+      #   blocking_mode: strict              # strict (default): block Bash + Write tool creating shell scripts with sed
+      #   blocking_mode: direct_invocation_only  # Only block Bash tool direct invocation; allow Write to create scripts
 
     absolute_path:         # Enforces absolute paths in file operations
       enabled: true

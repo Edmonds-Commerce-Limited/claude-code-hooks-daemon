@@ -966,3 +966,139 @@ class TestSedBlockerProgressiveVerbosity:
         assert len(result.reason) < 200
         assert "BLOCKED" in result.reason
         assert "Edit tool" in result.reason
+
+
+class TestSedBlockerHandlerBlockingMode:
+    """Tests for SedBlockerHandler blocking_mode option.
+
+    blocking_mode controls which tool invocations are blocked:
+    - "strict" (default): Block both Bash direct invocation AND Write creating shell scripts
+    - "direct_invocation_only": Only block Bash direct invocation, allow Write to create scripts
+    """
+
+    @pytest.fixture
+    def strict_handler(self):
+        """Create handler in strict mode (default, no _blocking_mode set)."""
+        return SedBlockerHandler()
+
+    @pytest.fixture
+    def direct_invocation_handler(self):
+        """Create handler in direct_invocation_only mode."""
+        handler = SedBlockerHandler()
+        handler._blocking_mode = "direct_invocation_only"
+        return handler
+
+    # Tests for strict mode (default behaviour)
+
+    def test_default_mode_blocks_write_sh_with_sed(self, strict_handler):
+        """Default strict mode should block Write creating .sh file with sed."""
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/workspace/script.sh",
+                "content": "#!/bin/bash\nsed -i 's/foo/bar/g' file.txt",
+            },
+        }
+        assert strict_handler.matches(hook_input) is True
+
+    def test_default_mode_blocks_write_bash_with_sed(self, strict_handler):
+        """Default strict mode should block Write creating .bash file with sed."""
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/workspace/script.bash",
+                "content": "#!/bin/bash\ncat file.txt | sed 's/old/new/'",
+            },
+        }
+        assert strict_handler.matches(hook_input) is True
+
+    def test_explicit_strict_mode_blocks_write_sh_with_sed(self, strict_handler):
+        """Explicit strict mode should block Write creating .sh file with sed."""
+        strict_handler._blocking_mode = "strict"
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/workspace/script.sh",
+                "content": "#!/bin/bash\nsed -i 's/foo/bar/g' file.txt",
+            },
+        }
+        assert strict_handler.matches(hook_input) is True
+
+    # Tests for direct_invocation_only mode
+
+    def test_direct_invocation_only_allows_write_sh_with_sed(self, direct_invocation_handler):
+        """direct_invocation_only mode should allow Write creating .sh file with sed."""
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/workspace/script.sh",
+                "content": "#!/bin/bash\nsed -i 's/foo/bar/g' file.txt",
+            },
+        }
+        assert direct_invocation_handler.matches(hook_input) is False
+
+    def test_direct_invocation_only_allows_write_bash_with_sed(self, direct_invocation_handler):
+        """direct_invocation_only mode should allow Write creating .bash file with sed."""
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/workspace/script.bash",
+                "content": "#!/bin/bash\ncat file.txt | sed 's/old/new/'",
+            },
+        }
+        assert direct_invocation_handler.matches(hook_input) is False
+
+    def test_direct_invocation_only_allows_write_sh_with_sed_in_function(
+        self, direct_invocation_handler
+    ):
+        """direct_invocation_only mode should allow Write creating .sh with sed in a function."""
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/workspace/functions.sh",
+                "content": "#!/bin/bash\nfunction update_file() {\n    sed -i 's/pattern/replacement/g' \"$1\"\n}\n",
+            },
+        }
+        assert direct_invocation_handler.matches(hook_input) is False
+
+    def test_direct_invocation_only_still_blocks_bash_sed(self, direct_invocation_handler):
+        """direct_invocation_only mode should still block Bash direct sed invocation."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "sed -i 's/foo/bar/g' file.txt"},
+        }
+        assert direct_invocation_handler.matches(hook_input) is True
+
+    def test_direct_invocation_only_still_blocks_bash_sed_with_find(
+        self, direct_invocation_handler
+    ):
+        """direct_invocation_only mode should still block sed via find -exec in Bash."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "find . -name '*.txt' -exec sed -i 's/foo/bar/g' {} \\;"},
+        }
+        assert direct_invocation_handler.matches(hook_input) is True
+
+    def test_direct_invocation_only_still_allows_markdown_writes(self, direct_invocation_handler):
+        """direct_invocation_only mode should still allow Write to .md files with sed."""
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/workspace/README.md",
+                "content": "# Usage\n\nDo not use sed, use Edit instead.",
+            },
+        }
+        assert direct_invocation_handler.matches(hook_input) is False
+
+    def test_direct_invocation_only_still_allows_non_shell_file_writes(
+        self, direct_invocation_handler
+    ):
+        """direct_invocation_only mode should still allow Write to non-shell files with sed."""
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/workspace/code.py",
+                "content": "# This Python file mentions sed but that is fine",
+            },
+        }
+        assert direct_invocation_handler.matches(hook_input) is False
