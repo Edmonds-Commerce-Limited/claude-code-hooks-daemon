@@ -1,9 +1,12 @@
 """NotificationLoggerHandler - logs all notifications to a file."""
 
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
@@ -61,9 +64,8 @@ class NotificationLoggerHandler(Handler):
             with log_file.open("a") as f:
                 f.write(json.dumps(log_entry) + "\n")
 
-        except OSError:
-            # Silently ignore file write errors (don't block on logging failures)
-            pass
+        except OSError as e:
+            logger.warning("Failed to write notification log: %s", e)
 
         return HookResult(decision=Decision.ALLOW)
 
