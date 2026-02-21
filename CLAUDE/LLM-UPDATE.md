@@ -446,6 +446,28 @@ This project uses [claude-code-hooks-daemon](https://github.com/Edmonds-Commerce
 
 Keep the section terse — 10 lines maximum. Do not duplicate if already present; update in place.
 
+### Also: Check Config Header
+
+Verify `.claude/hooks-daemon.yaml` has the restart-reminder header:
+
+```bash
+grep -q "AFTER EDITING THIS FILE" .claude/hooks-daemon.yaml && echo "OK" || echo "Header missing"
+```
+
+If missing, prepend this comment block to the top of `.claude/hooks-daemon.yaml`:
+
+```yaml
+# Claude Code Hooks Daemon - Handler Configuration
+#
+# AFTER EDITING THIS FILE: restart the daemon for changes to take effect:
+#   /hooks-daemon restart      (slash command shortcut)
+#
+# Verify it is running: /hooks-daemon health
+#
+# Full handler reference: .claude/hooks-daemon/CLAUDE/HANDLER_DEVELOPMENT.md
+
+```
+
 ---
 
 ## Post-Update: Planning Workflow Check (Optional)
