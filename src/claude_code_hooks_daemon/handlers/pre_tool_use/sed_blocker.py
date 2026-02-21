@@ -1,4 +1,4 @@
-"""SedBlockerHandler - blocks ALL sed command usage to prevent file destruction."""
+"""SedBlockerHandler - blocks sed command usage to prevent file destruction."""
 
 import re
 from typing import Any
@@ -12,6 +12,25 @@ from claude_code_hooks_daemon.constants import (
 )
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult, get_data_layer
 from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_content, get_file_path
+
+
+class SedBlockingMode:
+    """Blocking mode options for SedBlockerHandler.
+
+    Controls which tool invocations trigger the sed block:
+
+    STRICT (default):
+        Block both Bash direct invocation and Write tool creating shell scripts with sed.
+        Safest option - prevents any sed from being written or executed.
+
+    DIRECT_INVOCATION_ONLY:
+        Only block Bash tool direct invocation of sed.
+        Allows Write tool to create shell scripts that contain sed commands.
+        Use when scripts that wrap sed are acceptable, but direct Claude sed calls are not.
+    """
+
+    STRICT = "strict"
+    DIRECT_INVOCATION_ONLY = "direct_invocation_only"
 
 
 class SedBlockerHandler(Handler):
@@ -62,20 +81,23 @@ class SedBlockerHandler(Handler):
                 return not self._is_safe_readonly_command(command)
 
         # Case 2: Write tool - block shell scripts containing sed, allow markdown
-        if tool_name == ToolName.WRITE:
-            file_path = get_file_path(hook_input)
-            if not file_path:
-                return False
+        # Only applies in strict mode; direct_invocation_only skips this check
+        blocking_mode = getattr(self, "_blocking_mode", SedBlockingMode.STRICT)
+        if blocking_mode != SedBlockingMode.DIRECT_INVOCATION_ONLY:
+            if tool_name == ToolName.WRITE:
+                file_path = get_file_path(hook_input)
+                if not file_path:
+                    return False
 
-            # ALLOW: Markdown files (documentation for humans)
-            if file_path.endswith(".md"):
-                return False
+                # ALLOW: Markdown files (documentation for humans)
+                if file_path.endswith(".md"):
+                    return False
 
-            # BLOCK: Shell scripts with sed
-            if file_path.endswith(".sh") or file_path.endswith(".bash"):
-                content = get_file_content(hook_input)
-                if content and self._sed_pattern.search(content):
-                    return True
+                # BLOCK: Shell scripts with sed
+                if file_path.endswith(".sh") or file_path.endswith(".bash"):
+                    content = get_file_content(hook_input)
+                    if content and self._sed_pattern.search(content):
+                        return True
 
         return False
 
