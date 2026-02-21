@@ -594,7 +594,9 @@ HOOKS_DAEMON_ROOT_DIR="{daemon_root}"
     print(f"✅ Created {env_file.relative_to(project_root)}")
 
 
-def create_daemon_config(project_root: Path, force: bool = False) -> None:
+def create_daemon_config(
+    project_root: Path, force: bool = False, self_install: bool = False
+) -> None:
     """Create .claude/hooks-daemon.yaml configuration."""
     config_file = project_root / ".claude" / "hooks-daemon.yaml"
 
@@ -610,7 +612,31 @@ def create_daemon_config(project_root: Path, force: bool = False) -> None:
         config_file.rename(backup_file)
         print(f"✅ Backed up existing hooks-daemon.yaml to {backup_file.relative_to(project_root)}")
 
-    config = """version: "1.0"
+    # Restart command differs between self-install and normal install
+    if self_install:
+        python_cmd = "untracked/venv/bin/python"
+        docs_ref = "CLAUDE/LLM-INSTALL.md"
+    else:
+        python_cmd = ".claude/hooks-daemon/untracked/venv/bin/python"
+        docs_ref = ".claude/hooks-daemon/CLAUDE/LLM-INSTALL.md"
+
+    header = (
+        "# Claude Code Hooks Daemon - Handler Configuration\n"
+        "#\n"
+        "# AFTER EDITING THIS FILE: restart the daemon for changes to take effect:\n"
+        f"#   {python_cmd} -m claude_code_hooks_daemon.daemon.cli restart\n"
+        "#\n"
+        "# Verify it is running:\n"
+        f"#   {python_cmd} -m claude_code_hooks_daemon.daemon.cli status\n"
+        "#   Expected output: Daemon: RUNNING\n"
+        "#\n"
+        "# Slash command shortcut (if installed): /hooks-daemon restart\n"
+        "#\n"
+        f"# Full handler reference: {docs_ref}\n"
+        "\n"
+    )
+
+    config = header + """version: "1.0"
 
 # Daemon configuration
 daemon:
@@ -1274,7 +1300,7 @@ def main() -> int:
     # Create configuration files
     print("\n📝 Creating configuration files...")
     create_settings_json(project_root, force=args.force)
-    create_daemon_config(project_root, force=args.force)
+    create_daemon_config(project_root, force=args.force, self_install=self_install)
 
     # Create daemon environment file for self-installation
     if self_install:

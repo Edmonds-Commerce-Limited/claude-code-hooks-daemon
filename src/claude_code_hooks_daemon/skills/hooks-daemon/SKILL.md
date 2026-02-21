@@ -1,7 +1,7 @@
 ---
 name: hooks-daemon
-description: Manage Claude Code Hooks Daemon - upgrade versions, check health, and develop project-level handlers
-argument-hint: "[upgrade|health|dev-handlers|logs] [args...]"
+description: Manage Claude Code Hooks Daemon - upgrade versions, check health, restart, and develop project-level handlers
+argument-hint: "[upgrade|health|restart|dev-handlers|logs] [args...]"
 disable-model-invocation: true
 user-invocable: true
 allowed-tools: Bash, Read, Write, Edit
@@ -23,6 +23,16 @@ Update to a new version of the hooks daemon:
 
 See [upgrade.md](upgrade.md) for detailed upgrade documentation.
 
+### Restart Daemon
+**Required after editing `.claude/hooks-daemon.yaml` or project handlers:**
+```bash
+/hooks-daemon restart
+```
+
+The daemon caches config at startup — restart picks up any config or handler changes.
+
+See [restart.md](restart.md) for details.
+
 ### Check Health & Status
 Verify daemon is running correctly:
 ```bash
@@ -43,6 +53,12 @@ See [dev-handlers.md](dev-handlers.md) for handler development guide.
 
 ## Quick Start
 
+After editing `.claude/hooks-daemon.yaml`:
+```bash
+/hooks-daemon restart   # Apply config changes
+/hooks-daemon health    # Verify it's running
+```
+
 If you're experiencing issues:
 ```bash
 # 1. Check daemon status
@@ -51,8 +67,8 @@ If you're experiencing issues:
 # 2. View recent logs
 /hooks-daemon logs
 
-# 3. If needed, restart manually
-$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
+# 3. Restart to recover
+/hooks-daemon restart
 ```
 
 ## Troubleshooting
@@ -95,13 +111,15 @@ case "$SUBCOMMAND" in
         echo "Usage: /hooks-daemon <command> [args...]"
         echo ""
         echo "Available commands:"
-        echo "  upgrade [VERSION]     Upgrade daemon to new version"
+        echo "  restart               Restart daemon (required after config changes)"
         echo "  health                Check daemon health and status"
+        echo "  upgrade [VERSION]     Upgrade daemon to new version"
         echo "  dev-handlers          Scaffold new project handlers"
         echo "  logs [--follow]       View daemon logs"
         echo "  status                Show daemon status"
-        echo "  restart               Restart daemon"
         echo "  handlers              List loaded handlers"
+        echo ""
+        echo "After editing .claude/hooks-daemon.yaml, always run: /hooks-daemon restart"
         echo ""
         echo "For detailed documentation, see the skill files or run:"
         echo "  /hooks-daemon <command> --help"
