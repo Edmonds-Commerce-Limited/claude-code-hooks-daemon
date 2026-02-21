@@ -333,4 +333,28 @@ class SedBlockerHandler(Handler):
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),
+            AcceptanceTest(
+                title="Write tool: shell script with sed (strict mode)",
+                command="/workspace/untracked/test_sed_acceptance.sh",
+                description=(
+                    "In strict mode (default), blocks Write tool from creating shell scripts "
+                    "containing sed. Use the Write tool to write "
+                    "/workspace/untracked/test_sed_acceptance.sh with "
+                    "content: '#!/bin/bash\\nsed -i \\'s/foo/bar/g\\' file.txt'. "
+                    "The hook should block the Write call before the file is created. "
+                    "NOTE: In direct_invocation_only mode this would be allowed."
+                ),
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"(?i)sed.*forbidden",
+                    r"Edit tool",
+                ],
+                safety_notes=(
+                    "Test uses Write tool to attempt creating a script - the hook blocks it "
+                    "before the file is written. Only applies in default strict mode."
+                ),
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
+            ),
         ]

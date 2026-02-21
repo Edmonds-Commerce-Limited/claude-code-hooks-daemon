@@ -69,9 +69,9 @@ handlers:
 | **Type** | Blocking |
 | **Event** | PreToolUse |
 
-**Description:** Blocks all `sed` command usage. Claude frequently gets sed syntax wrong, which can cause large-scale file corruption, especially with `find -exec sed`. The Edit tool is the safe alternative for file modifications.
+**Description:** Blocks `sed` command usage. Claude frequently gets sed syntax wrong, which can cause large-scale file corruption, especially with `find -exec sed`. The Edit tool is the safe alternative for file modifications.
 
-**What it blocks:**
+**What it blocks (strict mode, default):**
 - Bash commands containing `sed` (direct execution)
 - Shell scripts (.sh/.bash) being written that contain `sed`
 
@@ -94,6 +94,24 @@ handlers:
     sed_blocker:
       enabled: true
       priority: 11
+```
+
+**Options:**
+
+| Option | Values | Default | Description |
+|--------|--------|---------|-------------|
+| `blocking_mode` | `strict`, `direct_invocation_only` | `strict` | Controls which invocations are blocked |
+
+- **`strict`** (default): Blocks both Bash direct invocation *and* the Write tool creating shell scripts that contain `sed`. Safest option.
+- **`direct_invocation_only`**: Only blocks Bash tool direct invocation. Allows the Write tool to create shell scripts containing `sed`. Use when wrapper scripts around `sed` are acceptable but direct Claude `sed` calls are not.
+
+```yaml
+handlers:
+  pre_tool_use:
+    sed_blocker:
+      enabled: true
+      options:
+        blocking_mode: direct_invocation_only  # allow writing scripts that contain sed
 ```
 
 ---
