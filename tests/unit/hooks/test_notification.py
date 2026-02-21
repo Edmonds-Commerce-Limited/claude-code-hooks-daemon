@@ -351,6 +351,7 @@ class TestMainFunction:
 
         # Mock the handler class to raise RuntimeError on init
         mock_handler_class = Mock(side_effect=RuntimeError("ProjectContext not initialized"))
+        mock_handler_class.__name__ = "MockNotificationLoggerHandler"
 
         with patch(
             "claude_code_hooks_daemon.hooks.notification.get_builtin_handlers",

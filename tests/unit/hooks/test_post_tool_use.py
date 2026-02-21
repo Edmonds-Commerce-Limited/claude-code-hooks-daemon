@@ -360,6 +360,7 @@ class TestMainFunction:
         mock_fc_class.return_value = mock_fc_instance
 
         mock_handler_class = Mock(side_effect=RuntimeError("ProjectContext not initialized"))
+        mock_handler_class.__name__ = "MockPostToolUseHandler"
 
         with patch(
             "claude_code_hooks_daemon.hooks.post_tool_use.get_builtin_handlers",

@@ -5,10 +5,12 @@ This script is called by Claude Code before each tool use.
 It loads configuration and dispatches to registered handlers.
 """
 
+import logging
 import sys
 from pathlib import Path
 from typing import Any
 
+logger = logging.getLogger(__name__)
 # Allow running as standalone script
 if __name__ == "__main__":
     # Add package to path for imports
@@ -139,9 +141,10 @@ def main() -> None:
         # Instantiate handler to get its tags
         try:
             handler = handler_class()
-        except RuntimeError:
-            # Skip handlers that require ProjectContext when it's not initialized
-            # (This happens in edge cases like no config file)
+        except RuntimeError as e:
+            logger.warning(
+                "Skipping handler %s (requires ProjectContext): %s", handler_class.__name__, e
+            )
             continue
 
         # Tag-based filtering

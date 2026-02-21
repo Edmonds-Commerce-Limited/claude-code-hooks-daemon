@@ -17,6 +17,7 @@ Exit codes:
 """
 
 import ast
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,7 @@ class ErrorHidingVisitor(ast.NodeVisitor):
     def __init__(self, filepath: Path) -> None:
         self.filepath = filepath
         self.violations: list[dict[str, Any]] = []
+        self._seen: set[tuple[str, int, str]] = set()
         self.in_test_file = "test_" in filepath.name or filepath.parts[-2] == "tests"
 
     def visit_Try(self, node: ast.Try) -> None:
@@ -116,11 +118,16 @@ class ErrorHidingVisitor(ast.NodeVisitor):
         return False
 
     def _add_violation(self, node: ast.AST, rule: str, message: str) -> None:
-        """Add a violation to the list."""
+        """Add a violation to the list, deduplicating by (file, line, rule)."""
+        line: int = getattr(node, "lineno", 0)
+        key = (str(self.filepath), line, rule)
+        if key in self._seen:
+            return
+        self._seen.add(key)
         self.violations.append(
             {
                 "file": str(self.filepath),
-                "line": node.lineno,
+                "line": line,
                 "rule": rule,
                 "message": message,
                 "description": VIOLATION_TYPES.get(rule, "Unknown violation"),
@@ -199,6 +206,41 @@ def format_violation_report(violations: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def load_exclusions(script_dir: Path) -> list[dict[str, Any]]:
+    """Load intentional-pattern exclusions from JSON file."""
+    exclusions_file = script_dir / "error_hiding_exclusions.json"
+    if not exclusions_file.exists():
+        return []
+    try:
+        with open(exclusions_file, encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("exclusions", [])
+    except Exception as e:
+        print(f"Warning: could not load exclusions file: {e}", file=sys.stderr)
+        return []
+
+
+def apply_exclusions(
+    violations: list[dict[str, Any]], exclusions: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Remove violations that match an intentional-pattern exclusion entry."""
+    if not exclusions:
+        return violations
+
+    filtered = []
+    for v in violations:
+        excluded = False
+        for excl in exclusions:
+            file_suffix = excl.get("file", "")
+            excl_lines: list[int] = excl.get("lines", [])
+            if v["file"].endswith(file_suffix) and v["line"] in excl_lines:
+                excluded = True
+                break
+        if not excluded:
+            filtered.append(v)
+    return filtered
+
+
 def write_json_output(violations: list[dict[str, Any]], output_path: Path) -> None:
     """Write violations as JSON to output_path for QA pipeline consumption."""
     import json
@@ -227,6 +269,11 @@ def main() -> int:
 
     # Audit src/ directory (production code only)
     src_violations = audit_directory(workspace / "src")
+
+    # Apply exclusions for intentional patterns (documented in error_hiding_exclusions.json)
+    script_dir = Path(__file__).parent
+    exclusions = load_exclusions(script_dir)
+    src_violations = apply_exclusions(src_violations, exclusions)
 
     if json_mode:
         output_path = workspace / "untracked" / "qa" / "error_hiding.json"

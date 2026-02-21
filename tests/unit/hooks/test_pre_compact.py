@@ -284,6 +284,7 @@ class TestMainFunction:
         mock_fc_class.return_value = mock_fc_instance
 
         mock_handler_class = Mock(side_effect=RuntimeError("ProjectContext not initialized"))
+        mock_handler_class.__name__ = "MockPreCompactHandler"
 
         with patch(
             "claude_code_hooks_daemon.hooks.pre_compact.get_builtin_handlers",

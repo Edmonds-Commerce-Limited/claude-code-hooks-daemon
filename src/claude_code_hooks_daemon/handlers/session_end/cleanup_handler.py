@@ -1,8 +1,11 @@
 """CleanupHandler - cleans up temporary files at session end."""
 
 import contextlib
+import logging
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
@@ -57,9 +60,8 @@ class CleanupHandler(Handler):
                     with contextlib.suppress(OSError):
                         temp_file.unlink()
 
-        except OSError:
-            # Silently ignore cleanup errors (don't block session end)
-            pass
+        except OSError as e:
+            logger.warning("Failed to clean up temp dir: %s", e)
 
         return HookResult(decision=Decision.ALLOW)
 

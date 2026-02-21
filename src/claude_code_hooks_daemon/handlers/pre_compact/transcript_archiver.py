@@ -1,9 +1,12 @@
 """TranscriptArchiverHandler - archives conversation transcript before compaction."""
 
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from claude_code_hooks_daemon.constants import DaemonPath, HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
@@ -64,9 +67,8 @@ class TranscriptArchiverHandler(Handler):
             with archive_file.open("w") as f:
                 json.dump(archive_data, f, indent=2)
 
-        except OSError:
-            # Silently ignore file write errors
-            pass
+        except OSError as e:
+            logger.warning("Failed to archive transcript: %s", e)
 
         return HookResult(decision=Decision.ALLOW)
 

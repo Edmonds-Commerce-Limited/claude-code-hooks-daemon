@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.15.1] - 2026-02-20
+
+### Added
+
+- **Status line section in README**: New documentation section describing the status line hook, its format, and the colon-separator convention with upgrade indicator.
+- **Error hiding audit exclusions file** (`scripts/qa/error_hiding_exclusions.json`): Formal exclusion list documenting 75 intentional fail-open patterns (plugin discovery, container detection, JSONL parsing loops, daemon infrastructure) with documented reasons. Distinguishes intentional error handling from genuine error hiding.
+
+### Changed
+
+- **README rewritten to lead with developer experience value proposition**: README restructured to open with concrete developer pain points and benefits rather than technical implementation details.
+- **Error hiding audit integrated into QA pipeline**: The error-hiding audit check is now a formal step in the QA pipeline, ensuring all future code changes are validated against error-hiding patterns automatically. Includes deduplication logic and exclusion file support.
+- **Status line section uses colon separators and upgrade indicator**: Status line hook output format updated to use consistent colon separators and includes an upgrade indicator when a newer daemon version is available.
+
+### Fixed
+
+- **Silent error hiding in monitoring handlers**: Four monitoring handlers (`notification_logger`, `transcript_archiver`, `cleanup_handler`, `subagent_completion_logger`) silently swallowed `OSError` exceptions with bare `pass`. Fixed to log at `WARNING` level so failures are visible in daemon logs without disrupting operation.
+- **Silent error hiding in hook dispatchers**: All 10 hook entry points (`hooks/*.py`) silently continued past `RuntimeError` when instantiating handlers that require `ProjectContext`. Fixed to log handler name and error at `WARNING` level.
+- **enforce-llm-qa priority collision** (15 to 41): `enforce_llm_qa` handler priority corrected from 15 (which collided with `error_hiding_blocker` at priority 13 in the safety range) to 41 (workflow range). Improves pipe blocker snippet in documentation.
+- **Status line example replaced with actual output**: Replaced an invented/illustrative status line example in documentation with the real output produced by the daemon.
+
 ## [2.15.0] - 2026-02-19
 
 ### Added
