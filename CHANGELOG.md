@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.15.2] - 2026-02-21
+
+### Added
+
+- **Config header restart reminder in generated hooks-daemon.yaml**: New installations now receive a restart-reminder header comment at the top of the generated `.claude/hooks-daemon.yaml` config file, showing the exact daemon restart command. Reduces friction when users edit their config and forget to restart the daemon.
+- **`/hooks-daemon restart` subcommand documentation**: Added restart as a first-class documented subcommand in `skills/hooks-daemon/SKILL.md`, with a dedicated `skills/hooks-daemon/restart.md` reference doc covering syntax, examples, and when to use it.
+- **Post-installation and post-update CLAUDE.md instructions**: `CLAUDE/LLM-INSTALL.md` and `CLAUDE/LLM-UPDATE.md` now include a "Post-Installation: Update Project CLAUDE.md" and "Post-Update: Update Project CLAUDE.md" section instructing LLM agents to add a `### Hooks Daemon` section to project CLAUDE.md files after installation or upgrade.
+- **Check Config Header guidance in install/update docs**: `CLAUDE/LLM-INSTALL.md` and `CLAUDE/LLM-UPDATE.md` include a "Also: Check Config Header" subsection instructing agents to verify the restart-reminder header is present in `hooks-daemon.yaml` and add it if missing.
+
 ## [2.15.1] - 2026-02-20
 
 ### Added
