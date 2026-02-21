@@ -322,6 +322,47 @@ cat /tmp/handler-status.txt
 
 ---
 
+## Post-Installation: Update Project CLAUDE.md
+
+Add a `### Hooks Daemon` section to the **project's root `CLAUDE.md`** so future agents working in this project know how to manage the daemon.
+
+### Check if Section Exists
+
+```bash
+grep -n "### Hooks Daemon" CLAUDE.md 2>/dev/null || echo "MISSING - add section"
+```
+
+### Add or Update the Section
+
+If missing (or outdated), append the following to the **bottom** of the project's root `CLAUDE.md`:
+
+```markdown
+### Hooks Daemon
+
+This project uses [claude-code-hooks-daemon](https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon) for automated code quality and workflow enforcement.
+
+**After editing `.claude/hooks-daemon.yaml`** — restart the daemon:
+```bash
+/hooks-daemon restart
+```
+
+**Check status**: `/hooks-daemon health`
+
+**Key files**:
+- `.claude/hooks-daemon.yaml` — handler configuration (enable/disable handlers)
+- `.claude/project-handlers/` — project-specific custom handlers (if any)
+
+**Documentation**: `.claude/hooks-daemon/CLAUDE/LLM-INSTALL.md`
+```
+
+### Rules
+
+- Keep the section terse — 10 lines maximum
+- Do not duplicate if a `### Hooks Daemon` section already exists; update it in place instead
+- This section is for **project agents**, not end users — focus on operational commands
+
+---
+
 ## Post-Installation: Planning Workflow Adoption (Optional)
 
 The daemon includes a comprehensive planning workflow system with numbered plan directories and enforcement handlers. Check if you want to adopt this approach.

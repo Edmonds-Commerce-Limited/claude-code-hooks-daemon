@@ -411,6 +411,43 @@ untracked/venv/bin/python scripts/handler_status.py
 
 ---
 
+## Post-Update: Update Project CLAUDE.md
+
+After upgrading, verify the `### Hooks Daemon` section in the project's root `CLAUDE.md` is present and current.
+
+### Check
+
+```bash
+grep -n "### Hooks Daemon" CLAUDE.md 2>/dev/null || echo "MISSING - add section"
+```
+
+### Update if Missing or Outdated
+
+If the section is missing, add it. If it exists but references old paths or commands, update it in place. The canonical content is:
+
+```markdown
+### Hooks Daemon
+
+This project uses [claude-code-hooks-daemon](https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon) for automated code quality and workflow enforcement.
+
+**After editing `.claude/hooks-daemon.yaml`** — restart the daemon:
+```bash
+/hooks-daemon restart
+```
+
+**Check status**: `/hooks-daemon health`
+
+**Key files**:
+- `.claude/hooks-daemon.yaml` — handler configuration (enable/disable handlers)
+- `.claude/project-handlers/` — project-specific custom handlers (if any)
+
+**Documentation**: `.claude/hooks-daemon/CLAUDE/LLM-INSTALL.md`
+```
+
+Keep the section terse — 10 lines maximum. Do not duplicate if already present; update in place.
+
+---
+
 ## Post-Update: Planning Workflow Check (Optional)
 
 After updating, check if you want to adopt or sync with the daemon's planning workflow system.
