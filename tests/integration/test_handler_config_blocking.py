@@ -683,11 +683,11 @@ class TestMarkdownOrganizationHandlerIntegration:
 
         result = router.route(EventType.PRE_TOOL_USE, hook_input)
 
-        # Verify interception and redirect
-        assert result.result.decision == Decision.ALLOW
+        # Verify interception and redirect (DENY — handler already saved content)
+        assert result.result.decision == Decision.DENY
         assert result.terminated_by == "enforce-markdown-organization"
-        assert result.result.context is not None
-        assert len(result.result.context) > 0
+        assert result.result.reason is not None
+        assert "PLAN SAVED" in result.result.reason
 
         # Verify plan folder was created
         created_folders = list(plan_dir.iterdir())

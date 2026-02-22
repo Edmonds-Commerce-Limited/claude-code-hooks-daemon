@@ -521,8 +521,8 @@ class TestPlanningModeIntegration:
 
         result = handler.handle(planning_write_input)
 
-        # Should allow the write (we handled it)
-        assert result.decision == Decision.ALLOW
+        # Should DENY the write (handler already saved content — no write needed)
+        assert result.decision == Decision.DENY
 
         # Should create plan folder
         created_folder = plan_dir / "00001-my-awesome-plan"
@@ -616,12 +616,11 @@ class TestPlanningModeIntegration:
 
         result = handler.handle(planning_write_input)
 
-        assert result.decision == Decision.ALLOW
-        assert result.context is not None
-        assert len(result.context) > 0
-        context_text = result.context[0]
-        assert "00001-my-awesome-plan" in context_text
-        assert "CLAUDE/Plan/" in context_text
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "00001-my-awesome-plan" in result.reason
+        assert "CLAUDE/Plan/" in result.reason
+        assert "PLAN SAVED" in result.reason
 
     @patch(
         "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
@@ -650,7 +649,7 @@ class TestPlanningModeIntegration:
         # Should create folder with -2 suffix (same number, different suffix)
         created_folder = plan_dir / "00002-my-awesome-plan-2"
         assert created_folder.exists()
-        assert result.decision == Decision.ALLOW
+        assert result.decision == Decision.DENY
 
     @patch(
         "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
