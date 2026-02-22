@@ -271,16 +271,7 @@ python -m claude_code_hooks_daemon.daemon.cli restart
 
 **Option 2: Check handler options**
 
-Some handlers have configurable options that affect their behaviour. For example, `git_stash` supports `warn` mode (advisory) instead of `deny` mode (blocking):
-
-```yaml
-handlers:
-  pre_tool_use:
-    git_stash:
-      enabled: true
-      options:
-        mode: "warn"  # Allow with warning instead of blocking
-```
+Some handlers have configurable options that affect their behaviour (e.g. switching from blocking to advisory mode). For the full list of per-handler options, values, and config examples, see **[Handler Reference](HANDLER_REFERENCE.md)**.
 
 **Option 3: Adjust handler priority**
 

@@ -240,6 +240,10 @@ Then restart the daemon:
 $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli restart
 ```
 
+### Handler Options
+
+Many handlers have configurable options (e.g. `blocking_mode`, `mode`, `priority`). For the full per-handler options reference, see **[Handler Reference → Options](HANDLER_REFERENCE.md)**.
+
 ---
 
 ## Verifying It Works
