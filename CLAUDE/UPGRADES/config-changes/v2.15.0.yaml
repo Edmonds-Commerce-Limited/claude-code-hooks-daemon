@@ -1,0 +1,15 @@
+version: "2.15.0"
+date: "2026-02-19"
+breaking: false
+upgrade_guide: null
+config_changes:
+  added:
+    - key: handlers.pre_tool_use.error_hiding_blocker
+      description: "Blocks error-hiding patterns before files are written (5 language strategies: Shell, Python, JS/TS, Go, Java)."
+      example_yaml: |
+        error_hiding_blocker:
+          enabled: true
+          priority: 13
+  renamed: []
+  removed: []
+  changed: []

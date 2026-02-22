@@ -1,0 +1,15 @@
+version: "2.7.0"
+date: "2026-02-10"
+breaking: false
+upgrade_guide: null
+config_changes:
+  added:
+    - key: handlers.session_start.version_check
+      description: "Checks if the daemon is up-to-date with the latest release at session start."
+      example_yaml: |
+        version_check:
+          enabled: true
+          priority: 56
+  renamed: []
+  removed: []
+  changed: []

@@ -1071,6 +1071,70 @@ def cmd_config_validate(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_check_config_migrations(args: argparse.Namespace) -> int:
+    """Run config migration advisory between two daemon versions.
+
+    Compares manifests between --from and --to versions against the user's
+    config file, reporting renamed keys still in use and new options available.
+
+    Args:
+        args: Parsed CLI arguments with from_version, to_version, config,
+              format, and optional manifests_dir
+
+    Returns:
+        0 if no warnings or suggestions, 1 if warnings/suggestions present,
+        2 on error
+    """
+    from claude_code_hooks_daemon.install.config_cli import (
+        list_known_versions,
+        run_check_config_migrations,
+    )
+
+    from_version: str = args.from_version
+    to_version: str = args.to_version
+    output_format: str = args.format
+
+    # Resolve config path
+    if args.config:
+        config_path = Path(args.config)
+    else:
+        project_path = get_project_path(getattr(args, "project_root", None))
+        config_path = project_path / ".claude" / "hooks-daemon.yaml"
+
+    # Resolve optional manifests dir override
+    manifests_dir: Path | None = (
+        Path(args.manifests_dir) if getattr(args, "manifests_dir", None) else None
+    )
+
+    try:
+        result = run_check_config_migrations(
+            from_version=from_version,
+            to_version=to_version,
+            user_config_path=config_path,
+            output_format=output_format,
+            manifests_dir=manifests_dir,
+        )
+    except FileNotFoundError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+    except ValueError as e:
+        err_msg = str(e)
+        print(f"ERROR: {err_msg}", file=sys.stderr)
+        if "from_version" in err_msg or "to_version" in err_msg:
+            known = list_known_versions(manifests_dir=manifests_dir)
+            if known:
+                print(f"Known versions: {', '.join(known)}", file=sys.stderr)
+        return 2
+
+    if output_format == "json":
+        print(json.dumps(result, indent=2))
+    else:
+        print(result.get("text", ""))
+
+    has_issues = result["has_warnings"] or result["has_suggestions"]
+    return 1 if has_issues else 0
+
+
 def cmd_init_project_handlers(args: argparse.Namespace) -> int:
     """Scaffold project-handlers directory structure.
 
@@ -1643,6 +1707,46 @@ def main() -> int:
         "config_path", type=str, help="Path to config YAML to validate"
     )
     parser_config_validate.set_defaults(func=cmd_config_validate)
+
+    # check-config-migrations command
+    parser_check_migrations = subparsers.add_parser(
+        "check-config-migrations",
+        help="Show config options added/renamed since your previous version",
+    )
+    parser_check_migrations.add_argument(
+        "--from",
+        dest="from_version",
+        required=True,
+        metavar="VERSION",
+        help="Version you are upgrading from (e.g. 2.10.0)",
+    )
+    parser_check_migrations.add_argument(
+        "--to",
+        dest="to_version",
+        required=True,
+        metavar="VERSION",
+        help="Version you are upgrading to (e.g. 2.15.2)",
+    )
+    parser_check_migrations.add_argument(
+        "--config",
+        metavar="PATH",
+        default=None,
+        help="Path to hooks-daemon.yaml (default: auto-detect from project root)",
+    )
+    parser_check_migrations.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format: text (default) or json",
+    )
+    parser_check_migrations.add_argument(
+        "--manifests-dir",
+        dest="manifests_dir",
+        metavar="PATH",
+        default=None,
+        help="Override manifest directory (for testing)",
+    )
+    parser_check_migrations.set_defaults(func=cmd_check_config_migrations)
 
     # init-project-handlers command
     parser_init_ph = subparsers.add_parser(

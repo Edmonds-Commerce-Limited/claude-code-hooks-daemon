@@ -362,6 +362,59 @@ for event_type, handler_names in available.items():
 "
 ```
 
+### Method 4: Version-Specific Config Migration Advisory (Recommended)
+
+The most targeted approach — tells you exactly which new config options are available for your specific upgrade path:
+
+```bash
+cd .claude/hooks-daemon
+VENV_PYTHON=untracked/venv/bin/python
+
+# Replace with your actual versions
+PREVIOUS_VERSION="2.8.0"
+NEW_VERSION="2.15.2"
+
+$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli check-config-migrations \
+  --from "$PREVIOUS_VERSION" \
+  --to "$NEW_VERSION" \
+  --config ../.claude/hooks-daemon.yaml
+```
+
+**Output interpretation:**
+- **Exit code 0**: Config is up to date — no new options to review
+- **Exit code 1**: New options available — review and add what's relevant
+
+Example output:
+```
+Config Migration Advisory: v2.8.0 → v2.15.2
+
+💡 New Options Available (since v2.8.0):
+
+  v2.9.0: daemon.project_languages
+    Optional list of active project languages used to filter strategy-based handlers.
+    Example:
+      daemon:
+        project_languages:
+          - Python
+          - JavaScript/TypeScript
+
+  v2.13.0: daemon.enforce_single_daemon_process
+    Prevents multiple daemon instances. Auto-enabled in container environments.
+    Example:
+      daemon:
+        enforce_single_daemon_process: true
+
+  ... (more options)
+
+Run with --help for all options.
+```
+
+**Why this is better than Methods 1-3:**
+- Version-aware: only shows options NEW since your previous version (not ones you already have)
+- Filters out already-configured options automatically
+- Includes descriptions and examples from the version manifests
+- Machine-readable: exit code 0/1 for scripting
+
 ### What to Do with New Handlers
 
 1. **Read the handler documentation**:
@@ -741,6 +794,13 @@ $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli config-merge \
 # Validate: check config structure
 $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli config-validate \
   --config .claude/hooks-daemon.yaml
+
+# Migration advisory: see new options for your upgrade path
+$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli check-config-migrations \
+  --from PREVIOUS_VERSION \
+  --to NEW_VERSION \
+  --config .claude/hooks-daemon.yaml
+# Exit code 0 = up to date, 1 = new options available
 ```
 
 ---

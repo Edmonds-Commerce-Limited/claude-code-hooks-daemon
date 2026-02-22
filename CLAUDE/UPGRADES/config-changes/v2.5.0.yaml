@@ -1,0 +1,62 @@
+version: "2.5.0"
+date: "2026-02-09"
+breaking: false
+upgrade_guide: null
+config_changes:
+  added:
+    - key: daemon.strict_mode
+      description: "FAIL FAST on all errors; crashes daemon on handler loading failures instead of continuing."
+      example_yaml: |
+        daemon:
+          strict_mode: true
+    - key: handlers.pre_tool_use.lock_file_edit_blocker
+      description: "Prevents editing package lock files (package-lock.json, yarn.lock, composer.lock)."
+      example_yaml: |
+        lock_file_edit_blocker:
+          enabled: true
+          priority: 20
+    - key: handlers.pre_tool_use.pip_break_system
+      description: "Blocks use of the pip --break-system-packages flag."
+      example_yaml: |
+        pip_break_system:
+          enabled: true
+          priority: 21
+    - key: handlers.pre_tool_use.sudo_pip
+      description: "Blocks sudo pip install commands."
+      example_yaml: |
+        sudo_pip:
+          enabled: true
+          priority: 22
+    - key: handlers.pre_tool_use.curl_pipe_shell
+      description: "Blocks curl/wget output piped directly to a shell interpreter (curl | bash, wget | sh)."
+      example_yaml: |
+        curl_pipe_shell:
+          enabled: true
+          priority: 16
+    - key: handlers.pre_tool_use.dangerous_permissions
+      description: "Blocks chmod 777 and similarly unsafe permission changes."
+      example_yaml: |
+        dangerous_permissions:
+          enabled: true
+          priority: 18
+    - key: handlers.pre_tool_use.global_npm_advisor
+      description: "Advisory: warns against npm install -g (global installs)."
+      example_yaml: |
+        global_npm_advisor:
+          enabled: true
+          priority: 42
+    - key: handlers.pre_tool_use.plan_completion_advisor
+      description: "Reminds to move completed plans to the Completed/ archive folder."
+      example_yaml: |
+        plan_completion_advisor:
+          enabled: true
+          priority: 48
+    - key: handlers.pre_tool_use.task_tdd_advisor
+      description: "Advisory: reminds to follow TDD workflow when creating tasks."
+      example_yaml: |
+        task_tdd_advisor:
+          enabled: true
+          priority: 36
+  renamed: []
+  removed: []
+  changed: []

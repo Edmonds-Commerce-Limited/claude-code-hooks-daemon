@@ -1,0 +1,27 @@
+version: "2.8.0"
+date: "2026-02-10"
+breaking: false
+upgrade_guide: null
+config_changes:
+  added:
+    - key: project_handlers
+      description: "Enable project-level custom handlers loaded from a local directory alongside built-in handlers."
+      example_yaml: |
+        project_handlers:
+          enabled: true
+          path: .claude/project-handlers
+    - key: handlers.session_start.optimal_config_checker
+      description: "Checks Claude Code environment for optimal settings (input span, streaming) at session start."
+      example_yaml: |
+        optimal_config_checker:
+          enabled: true
+          priority: 52
+    - key: handlers.stop.hedging_language_detector
+      description: "Advisory: detects uncertain language patterns (maybe, possibly, I think) in stop events."
+      example_yaml: |
+        hedging_language_detector:
+          enabled: true
+          priority: 30
+  renamed: []
+  removed: []
+  changed: []

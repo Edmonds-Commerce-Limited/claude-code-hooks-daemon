@@ -1,0 +1,32 @@
+version: "2.3.0"
+date: "2026-01-29"
+breaking: true
+upgrade_guide: null
+config_changes:
+  added:
+    - key: handlers.pre_tool_use.pipe_blocker
+      description: "Blocks dangerous pipe patterns in bash commands (| head, | tail, etc)."
+      example_yaml: |
+        pipe_blocker:
+          enabled: true
+          priority: 17
+    - key: handlers.session_start
+      description: "New event section for session start handlers."
+      example_yaml: |
+        handlers:
+          session_start: {}
+    - key: handlers.stop.auto_continue_stop
+      description: "Auto-continues after stop events based on configurable criteria."
+      example_yaml: |
+        auto_continue_stop:
+          enabled: true
+          priority: 10
+  renamed: []
+  removed: []
+  changed:
+    - key: handlers.*.*
+      description: "Handler-specific options must now be nested under an explicit `options:` key rather than flat fields."
+      migration_note: "Move any handler-specific fields (e.g. blocking_mode, languages) under an `options:` dict for each handler."
+    - key: handlers.pre_tool_use.gh_issue_comments
+      description: "gh_issue_comments handler moved from user_prompt_submit to pre_tool_use event section."
+      migration_note: "Move the gh_issue_comments entry from handlers.user_prompt_submit to handlers.pre_tool_use in your config."

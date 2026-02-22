@@ -11,6 +11,8 @@ import pytest
 import yaml
 
 from claude_code_hooks_daemon.install.config_cli import (
+    list_known_versions,
+    run_check_config_migrations,
     run_config_diff,
     run_config_merge,
     run_config_validate,
@@ -205,3 +207,145 @@ class TestRunConfigValidate:
 
         with pytest.raises(ValueError, match="YAML dictionary"):
             run_config_validate(config_path=config_path)
+
+
+_MINIMAL_MANIFEST = """\
+version: "{version}"
+date: "2026-01-01"
+breaking: false
+config_changes:
+  added: []
+  renamed: []
+  removed: []
+  changed: []
+"""
+
+_MANIFEST_WITH_ADDED = """\
+version: "2.13.0"
+date: "2026-02-17"
+breaking: false
+config_changes:
+  added:
+    - key: daemon.enforce_single_daemon_process
+      description: "Prevents multiple daemon instances"
+  renamed: []
+  removed: []
+  changed: []
+"""
+
+
+class TestRunCheckConfigMigrations:
+    """Tests for run_check_config_migrations."""
+
+    def _write_config(self, path: Path, config: dict) -> Path:
+        p = path / "hooks-daemon.yaml"
+        p.write_text(yaml.dump(config))
+        return p
+
+    def _write_manifest(self, d: Path, version: str, content: str) -> None:
+        (d / f"v{version}.yaml").write_text(content)
+
+    def test_returns_advisory_dict_structure(self, tmp_path: Path) -> None:
+        md = tmp_path / "manifests"
+        md.mkdir()
+        self._write_manifest(md, "2.13.0", _MANIFEST_WITH_ADDED)
+        cfg = self._write_config(tmp_path, {"handlers": {}, "daemon": {}})
+
+        result = run_check_config_migrations(
+            from_version="2.12.0",
+            to_version="2.13.0",
+            user_config_path=cfg,
+            manifests_dir=md,
+        )
+
+        assert "from_version" in result
+        assert "to_version" in result
+        assert "has_warnings" in result
+        assert "has_suggestions" in result
+        assert "warnings" in result
+        assert "suggestions" in result
+
+    def test_text_format_includes_text_key(self, tmp_path: Path) -> None:
+        md = tmp_path / "manifests"
+        md.mkdir()
+        cfg = self._write_config(tmp_path, {"handlers": {}, "daemon": {}})
+
+        result = run_check_config_migrations(
+            from_version="2.12.0",
+            to_version="2.13.0",
+            user_config_path=cfg,
+            output_format="text",
+            manifests_dir=md,
+        )
+
+        assert "text" in result
+        assert isinstance(result["text"], str)
+
+    def test_json_format_omits_text_key(self, tmp_path: Path) -> None:
+        md = tmp_path / "manifests"
+        md.mkdir()
+        cfg = self._write_config(tmp_path, {"handlers": {}, "daemon": {}})
+
+        result = run_check_config_migrations(
+            from_version="2.12.0",
+            to_version="2.13.0",
+            user_config_path=cfg,
+            output_format="json",
+            manifests_dir=md,
+        )
+
+        assert "text" not in result
+
+    def test_suggestion_when_new_option_not_in_user_config(self, tmp_path: Path) -> None:
+        md = tmp_path / "manifests"
+        md.mkdir()
+        self._write_manifest(md, "2.13.0", _MANIFEST_WITH_ADDED)
+        cfg = self._write_config(tmp_path, {"handlers": {}, "daemon": {}})
+
+        result = run_check_config_migrations(
+            from_version="2.12.0",
+            to_version="2.13.0",
+            user_config_path=cfg,
+            manifests_dir=md,
+        )
+
+        assert result["has_suggestions"] is True
+        assert len(result["suggestions"]) == 1
+        assert result["suggestions"][0]["key"] == "daemon.enforce_single_daemon_process"
+
+    def test_nonexistent_config_raises_file_not_found(self, tmp_path: Path) -> None:
+        md = tmp_path / "manifests"
+        md.mkdir()
+        with pytest.raises(FileNotFoundError):
+            run_check_config_migrations(
+                from_version="2.12.0",
+                to_version="2.13.0",
+                user_config_path=tmp_path / "missing.yaml",
+                manifests_dir=md,
+            )
+
+    def test_from_greater_than_to_raises_value_error(self, tmp_path: Path) -> None:
+        md = tmp_path / "manifests"
+        md.mkdir()
+        cfg = self._write_config(tmp_path, {})
+        with pytest.raises(ValueError):
+            run_check_config_migrations(
+                from_version="2.15.0",
+                to_version="2.10.0",
+                user_config_path=cfg,
+                manifests_dir=md,
+            )
+
+
+class TestListKnownVersions:
+    """Tests for list_known_versions in config_cli."""
+
+    def test_delegates_to_migrations_module(self, tmp_path: Path) -> None:
+        (tmp_path / "v2.2.0.yaml").write_text('version: "2.2.0"\n')
+        (tmp_path / "v2.3.0.yaml").write_text('version: "2.3.0"\n')
+        result = list_known_versions(manifests_dir=tmp_path)
+        assert result == ["2.2.0", "2.3.0"]
+
+    def test_returns_empty_for_missing_dir(self, tmp_path: Path) -> None:
+        result = list_known_versions(manifests_dir=tmp_path / "missing")
+        assert result == []
