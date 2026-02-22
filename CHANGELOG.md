@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.16.1] - 2026-02-22
+
+### Fixed
+
+- **Upgrade early-exit skips skill and slash-command deployment**: When the installed version already matched the target version, `scripts/upgrade_version.sh` would exit early after only restarting the daemon, bypassing hook script deployment, `settings.json`, `.gitignore`, slash commands, and skills deployment. Projects on v2.16.0 that had not yet received skills (introduced in Plan 00061, 17 Feb 2026) could not get skills deployed by re-running the upgrade script. Replaced the minimal early-exit path with the full idempotent deployment sequence so all deployment steps run safely regardless of whether a version change occurred.
+
 ## [2.16.0] - 2026-02-22
 
 ### Added
