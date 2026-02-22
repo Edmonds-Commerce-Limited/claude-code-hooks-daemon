@@ -218,3 +218,37 @@ class TestValidationResultGuidanceWithWarnings:
         assert "Handler Y is deprecated" in guidance
         assert "Field X is invalid" in guidance
         assert ".claude/hooks-daemon.yaml.example" in guidance
+
+
+class TestConfigValidatorEdgeCases:
+    """Test edge cases in ConfigValidator.validate() and _extract_errors()."""
+
+    def test_validate_unexpected_exception_returns_invalid(self) -> None:
+        """validate() catches unexpected exceptions and returns invalid result (lines 102-106)."""
+        from unittest.mock import patch
+
+        validator = ConfigValidator()
+        config: dict[str, Any] = {"version": "2.0"}
+
+        with patch(
+            "claude_code_hooks_daemon.install.config_validator.Config.model_validate",
+            side_effect=RuntimeError("Unexpected internal error"),
+        ):
+            result = validator.validate(config)
+
+        assert result.valid is False
+        assert len(result.errors) == 1
+        assert "Unexpected validation error" in result.errors[0]
+        assert "Unexpected internal error" in result.errors[0]
+
+    def test_extract_errors_formats_error_without_location(self) -> None:
+        """_extract_errors() formats error without location path (line 127)."""
+        from unittest.mock import MagicMock
+
+        validator = ConfigValidator()
+        mock_error = MagicMock()
+        mock_error.errors.return_value = [
+            {"loc": (), "msg": "value is required", "type": "missing"}
+        ]
+        result = validator._extract_errors(mock_error)
+        assert result == ["value is required (type: missing)"]
