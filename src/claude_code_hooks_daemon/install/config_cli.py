@@ -14,6 +14,13 @@ import yaml
 
 from claude_code_hooks_daemon.install.config_differ import ConfigDiffer
 from claude_code_hooks_daemon.install.config_merger import ConfigMerger
+from claude_code_hooks_daemon.install.config_migrations import (
+    format_advisory_for_llm,
+    generate_migration_advisory,
+)
+from claude_code_hooks_daemon.install.config_migrations import (
+    list_known_versions as _list_known_versions,
+)
 from claude_code_hooks_daemon.install.config_validator import ConfigValidator
 
 
@@ -101,6 +108,88 @@ def run_config_merge(
     result = merger.merge(new_default_config=new_default_config, diff=diff)
 
     return result.to_dict()
+
+
+def run_check_config_migrations(
+    from_version: str,
+    to_version: str,
+    user_config_path: Path,
+    output_format: str = "text",
+    manifests_dir: Path | None = None,
+) -> dict[str, Any]:
+    """Generate config migration advisory between two daemon versions.
+
+    Loads all manifests between from_version and to_version, compares against
+    the user's config, and returns warnings (renamed/removed keys still in
+    config) and suggestions (new options not yet configured).
+
+    Args:
+        from_version: Version user is upgrading from (excluded from range)
+        to_version: Version user is upgrading to (included in range)
+        user_config_path: Path to user's hooks-daemon.yaml
+        output_format: 'text' for human-readable, 'json' for machine-readable
+        manifests_dir: Override manifest directory (for testing)
+
+    Returns:
+        Dictionary with advisory results (JSON-serializable).
+        Keys: warnings, suggestions, from_version, to_version, has_warnings,
+              has_suggestions, text (if format='text')
+
+    Raises:
+        FileNotFoundError: If user config file doesn't exist
+        ValueError: If from_version > to_version
+    """
+    if not user_config_path.exists():
+        raise FileNotFoundError(f"Config file not found: {user_config_path}")
+
+    advisory = generate_migration_advisory(
+        from_version=from_version,
+        to_version=to_version,
+        user_config_path=user_config_path,
+        manifests_dir=manifests_dir,
+    )
+
+    result: dict[str, Any] = {
+        "from_version": advisory.from_version,
+        "to_version": advisory.to_version,
+        "has_warnings": bool(advisory.warnings),
+        "has_suggestions": bool(advisory.suggestions),
+        "warnings": [
+            {
+                "key": w.key,
+                "message": w.message,
+                "version": w.version,
+                "migration_note": w.migration_note,
+            }
+            for w in advisory.warnings
+        ],
+        "suggestions": [
+            {
+                "key": s.key,
+                "description": s.description,
+                "version": s.version,
+                "example_yaml": s.example_yaml,
+            }
+            for s in advisory.suggestions
+        ],
+    }
+
+    if output_format == "text":
+        result["text"] = format_advisory_for_llm(advisory)
+
+    return result
+
+
+def list_known_versions(manifests_dir: Path | None = None) -> list[str]:
+    """Return sorted list of versions with available manifests.
+
+    Args:
+        manifests_dir: Override manifest directory (for testing)
+
+    Returns:
+        Sorted list of version strings (oldest first)
+    """
+    return _list_known_versions(manifests_dir=manifests_dir)
 
 
 def run_config_validate(

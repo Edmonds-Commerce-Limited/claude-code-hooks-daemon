@@ -1,0 +1,48 @@
+version: "2.11.0"
+date: "2026-02-12"
+breaking: true
+upgrade_guide: "CLAUDE/UPGRADES/v2/v2.10-to-v2.11/"
+config_changes:
+  added:
+    - key: handlers.pre_tool_use.markdown_organization.options.monorepo_subproject_patterns
+      description: "Regex patterns matching monorepo sub-project directories to allow markdown files within them."
+      example_yaml: |
+        markdown_organization:
+          enabled: true
+          options:
+            monorepo_subproject_patterns:
+              - "packages/[^/]+"
+    - key: handlers.pre_tool_use.markdown_organization.options.allowed_markdown_paths
+      description: "Custom regex patterns that override all built-in markdown path rules."
+      example_yaml: |
+        markdown_organization:
+          enabled: true
+          options:
+            allowed_markdown_paths:
+              - "^CLAUDE/.*\\.md$"
+              - "^docs/.*\\.md$"
+    - key: handlers.user_prompt_submit.critical_thinking_advisory
+      description: "Advisory: encourages deeper analysis before implementation on complex tasks."
+      example_yaml: |
+        critical_thinking_advisory:
+          enabled: true
+          priority: 55
+    - key: handlers.pre_tool_use.tdd_enforcement.options.languages
+      description: "Optional list to restrict TDD enforcement to specific programming languages."
+      example_yaml: |
+        tdd_enforcement:
+          enabled: true
+          options:
+            languages:
+              - Python
+              - Go
+  renamed: []
+  removed:
+    - key: handlers.post_tool_use.validate_sitemap
+      migration_note: "Project-specific handler removed from library. Move to .claude/project-handlers/post_tool_use/ if still needed."
+    - key: handlers.subagent_stop.remind_validator
+      migration_note: "Project-specific handler removed from library. Move to .claude/project-handlers/subagent_stop/ if still needed."
+  changed:
+    - key: handlers.pre_tool_use.markdown_organization.options.track_plans_in_project
+      description: "Planning mode redirect now available: intercepts ~/.claude/plans/ writes and redirects to CLAUDE/Plan/."
+      migration_note: "Add track_plans_in_project: \"CLAUDE/Plan\" to markdown_organization options to enable plan tracking."

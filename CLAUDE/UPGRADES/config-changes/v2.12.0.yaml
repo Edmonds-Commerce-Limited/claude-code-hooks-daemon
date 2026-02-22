@@ -1,0 +1,33 @@
+version: "2.12.0"
+date: "2026-02-12"
+breaking: false
+upgrade_guide: null
+config_changes:
+  added:
+    - key: handlers.post_tool_use.lint_on_edit
+      description: "Runs language-aware linting after Write/Edit tool calls (9 languages: Python, JS/TS, Ruby, PHP, Go, Rust, Java, C/C++, Shell)."
+      example_yaml: |
+        lint_on_edit:
+          enabled: true
+          priority: 25
+    - key: handlers.session_start.working_directory
+      description: "Displays current working directory in orange at session start when it differs from the project root."
+      example_yaml: |
+        working_directory:
+          enabled: true
+          priority: 25
+    - key: handlers.session_start.current_time
+      description: "Shows current timestamp at session start for context freshness tracking."
+      example_yaml: |
+        current_time:
+          enabled: true
+          priority: 59
+    - key: handlers.pre_tool_use.daemon_location_guard
+      description: "Blocks daemon CLI commands run from the wrong directory (safety guard for self-install mode)."
+      example_yaml: |
+        daemon_location_guard:
+          enabled: true
+          priority: 11
+  renamed: []
+  removed: []
+  changed: []

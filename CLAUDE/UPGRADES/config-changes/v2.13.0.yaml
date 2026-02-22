@@ -1,0 +1,22 @@
+version: "2.13.0"
+date: "2026-02-17"
+breaking: false
+upgrade_guide: null
+config_changes:
+  added:
+    - key: daemon.enforce_single_daemon_process
+      description: "Prevents multiple daemon instances running simultaneously; in containers kills all others, outside containers only cleans up stale PID files."
+      example_yaml: |
+        daemon:
+          enforce_single_daemon_process: true  # Auto-enabled in container environments
+    - key: handlers.pre_tool_use.plan_number_helper
+      description: "Provides the correct next plan number when a user tries to discover it via broken bash commands."
+      example_yaml: |
+        plan_number_helper:
+          enabled: true
+          priority: 33
+          options:
+            track_plans_in_project: "CLAUDE/Plan"
+  renamed: []
+  removed: []
+  changed: []

@@ -1,0 +1,37 @@
+version: "2.9.0"
+date: "2026-02-11"
+breaking: true
+upgrade_guide: "CLAUDE/UPGRADES/v2/v2.8-to-v2.9/"
+config_changes:
+  added:
+    - key: handlers.pre_tool_use.qa_suppression
+      description: "Unified QA suppression blocker for 11 languages, replacing four separate per-language handlers."
+      example_yaml: |
+        qa_suppression:
+          enabled: true
+          priority: 30
+          options:
+            languages:  # Optional: restrict to specific languages
+              - Python
+              - JavaScript/TypeScript
+    - key: daemon.project_languages
+      description: "Optional list of active project languages used to filter strategy-based handlers."
+      example_yaml: |
+        daemon:
+          project_languages:
+            - Python
+            - JavaScript/TypeScript
+  renamed: []
+  removed:
+    - key: handlers.pre_tool_use.eslint_disable
+      migration_note: "Replaced by the qa_suppression handler with a JavaScript/TypeScript strategy."
+    - key: handlers.pre_tool_use.python_qa_suppression_blocker
+      migration_note: "Replaced by the qa_suppression handler with a Python strategy."
+    - key: handlers.pre_tool_use.php_qa_suppression_blocker
+      migration_note: "Replaced by the qa_suppression handler with a PHP strategy."
+    - key: handlers.pre_tool_use.go_qa_suppression_blocker
+      migration_note: "Replaced by the qa_suppression handler with a Go strategy."
+  changed:
+    - key: hooks scripts (.claude/hooks/*)
+      description: "Hook scripts updated to use $CLAUDE_PROJECT_DIR prefix for robustness across working directory changes."
+      migration_note: "Re-run the installer or manually update .claude/hooks/* scripts to use the '\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/...' pattern."
