@@ -22,6 +22,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00067: Fix Upgrade Early-Exit Skips Skill/Slash-Command Deployment](Completed/00067-fix-upgrade-early-exit-skips-deployments/PLAN.md) - Complete
+  - Replaced minimal early-exit (daemon restart only) with full idempotent deployment sequence
+  - Now re-deploys hook scripts, settings.json, .gitignore, slash commands, and skills when already at target version
+  - Fixes projects on v2.16.0 that couldn't get skills deployed (added in Plan 00061) via re-running upgrade
+
 - [00058: Fix PHP QA Suppression Pattern Gaps](Completed/00058-php-qa-suppression-pattern-gaps/PLAN.md) - Complete
   - Added 8 missing PHP suppression patterns (@phpstan-ignore, phpcs:disable/enable/ignoreFile, @codingStandards*)
   - All patterns now blocked via strategy pattern; acceptance tests verified
@@ -398,7 +403,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 67
-- **Completed**: 58 (1 with reduced scope)
+- **Completed**: 59 (1 with reduced scope)
 - **Active**: 4 (1 in progress, 3 not started)
 - **Cancelled/Abandoned**: 3 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045)
 
