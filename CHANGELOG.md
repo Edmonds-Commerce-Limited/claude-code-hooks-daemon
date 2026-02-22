@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.16.0] - 2026-02-22
+
+### Added
+
+- **Version-aware config migration advisory system**: New PostToolUse handler (`version_aware_config_migration`) that detects when the daemon version in the active session differs from the installed daemon version and advises the user to run the config migration tool. Prevents users from running stale configurations after upgrades.
+- **`blocking_mode` option for SedBlockerHandler**: SedBlockerHandler now supports a `blocking_mode` configuration option (`block` or `warn`) allowing teams to choose between hard-blocking dangerous sed patterns or issuing an advisory warning. Full docs and acceptance test included.
+- **`/configure` skill**: New `/configure` skill enabling structured configuration of the daemon through a guided workflow. Provides a SSOT-aligned approach to setting daemon options.
+- **Coverage tests to reach 95.1% threshold**: Additional unit tests added to bring overall test coverage from below threshold to 95.1%, satisfying the mandatory 95% coverage gate.
+
+### Fixed
+
+- **Plan file race condition in planning mode redirect**: `plan_completion_advisor` handler now correctly returns `DENY` after redirecting to planning mode, preventing the hook from falling through to allow when it should be blocking.
+- **PipeBlocker false positives on grep alternation patterns**: `pipe_blocker` handler no longer triggers false positives on grep commands using alternation patterns (e.g. `grep "foo\|bar"`). Whitelist expanded to cover common safe pipe-including patterns.
+
 ## [2.15.2] - 2026-02-21
 
 ### Added
