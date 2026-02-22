@@ -111,7 +111,7 @@ class TestPipeBlockerBasicDetection:
         assert handler.matches(hook_input) is False
 
     def test_matches_case_insensitive_tail(self, handler: PipeBlockerHandler) -> None:
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "find . | TAIL -n 10"}}
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "npm test | TAIL -n 10"}}
         assert handler.matches(hook_input) is True
 
     def test_matches_case_insensitive_head(self, handler: PipeBlockerHandler) -> None:
@@ -379,15 +379,8 @@ class TestPipeBlockerBlocking:
         }
         assert handler.matches(hook_input) is True
 
-    # Unknown (not in whitelist or blacklist)
-    def test_matches_find_piped_to_tail(self, handler: PipeBlockerHandler) -> None:
-        hook_input = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "find . -name '*.py' | tail -n 20"},
-        }
-        assert handler.matches(hook_input) is True
-
     def test_matches_docker_ps_piped_to_tail(self, handler: PipeBlockerHandler) -> None:
+        """docker ps is unknown (not in whitelist or blacklist) — should be blocked."""
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "docker ps -a | tail -n 20"},
@@ -405,7 +398,7 @@ class TestPipeBlockerBlocking:
     def test_matches_multiple_tail_head_in_pipeline(self, handler: PipeBlockerHandler) -> None:
         hook_input = {
             "tool_name": "Bash",
-            "tool_input": {"command": "find . | tail -n 100 | head -n 10"},
+            "tool_input": {"command": "npm test | tail -n 100 | head -n 10"},
         }
         assert handler.matches(hook_input) is True
 
@@ -529,7 +522,7 @@ class TestPipeBlockerEdgeCases:
     def test_matches_command_with_quotes_containing_pipe(self, handler: PipeBlockerHandler) -> None:
         hook_input = {
             "tool_name": "Bash",
-            "tool_input": {"command": "echo 'this | is | fine' && find . | tail -n 10"},
+            "tool_input": {"command": "echo 'this | is | fine' && docker ps | tail -n 10"},
         }
         assert handler.matches(hook_input) is True
 
@@ -918,3 +911,110 @@ class TestPipeBlockerAcceptanceTests:
         tests = handler.get_acceptance_tests()
         titles = [t.title for t in tests]
         assert any("unknown" in title.lower() for title in titles)
+
+
+# ===================================================================================
+# Phase 11: Whitelist expansion — find, ps, df and escaped-pipe bug fix
+# ===================================================================================
+
+
+class TestPipeBlockerWhitelistExpansion:
+    """Tests for find/ps/df whitelist additions and grep escaped-pipe bug fix."""
+
+    @pytest.fixture
+    def handler(self) -> PipeBlockerHandler:
+        return PipeBlockerHandler()
+
+    # --- find ---
+
+    def test_no_match_find_piped_to_tail(self, handler: PipeBlockerHandler) -> None:
+        """find is whitelisted — piping to tail should be allowed."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "find . -name '*.py' | tail -n 20"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_no_match_find_piped_to_head(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "find /workspace -name '*.md' | head -n 10"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_no_match_find_with_complex_args_piped_to_tail(
+        self, handler: PipeBlockerHandler
+    ) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "find . -type f -name '*.log' -mtime -7 | tail -n 50"},
+        }
+        assert handler.matches(hook_input) is False
+
+    # --- ps ---
+
+    def test_no_match_ps_piped_to_head(self, handler: PipeBlockerHandler) -> None:
+        """ps is whitelisted — piping to head should be allowed."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "ps aux | head -n 20"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_no_match_ps_piped_to_tail(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "ps -ef | tail -n 10"},
+        }
+        assert handler.matches(hook_input) is False
+
+    # --- df ---
+
+    def test_no_match_df_piped_to_head(self, handler: PipeBlockerHandler) -> None:
+        """df is whitelisted — piping to head should be allowed."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "df -h | head -n 10"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_no_match_df_piped_to_tail(self, handler: PipeBlockerHandler) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "df -h | tail -n 5"},
+        }
+        assert handler.matches(hook_input) is False
+
+    # --- grep escaped-pipe bug fix ---
+
+    def test_no_match_grep_with_escaped_alternation_pipe_piped_to_head(
+        self, handler: PipeBlockerHandler
+    ) -> None:
+        """Regression: grep 'pat\\|alt' file | head was blocked because _extract_source_segment
+        split on \\| inside the grep pattern, producing a non-grep source segment."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": 'grep -n "Configuration\\|config.*example" /workspace/CLAUDE.md | head -20'
+            },
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_no_match_grep_with_multiple_escaped_pipes_piped_to_head(
+        self, handler: PipeBlockerHandler
+    ) -> None:
+        """Multiple \\| in grep pattern should not confuse segment extraction."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": 'grep -n "foo\\|bar\\|baz" /some/file | head -5'},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_no_match_grep_with_escaped_pipe_piped_to_tail(
+        self, handler: PipeBlockerHandler
+    ) -> None:
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": 'grep "error\\|warning" /var/log/syslog | tail -n 30'},
+        }
+        assert handler.matches(hook_input) is False
