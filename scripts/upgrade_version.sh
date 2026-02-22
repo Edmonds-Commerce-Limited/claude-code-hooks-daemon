@@ -159,11 +159,39 @@ print_info "Current git ref: ${ROLLBACK_REF:-unknown}"
 # Check if already at target version
 if [ "$ROLLBACK_REF" = "$TARGET_VERSION" ]; then
     print_success "Already at version $TARGET_VERSION"
-    print_info "Skipping code checkout, running validation only..."
+    print_info "Running idempotent deployment steps to ensure files are current..."
 
-    # Just verify and restart
-    if [ -f "$VENV_PYTHON" ]; then
-        restart_daemon_verified "$VENV_PYTHON" || true
+    deploy_all_hooks "$PROJECT_ROOT" "$DAEMON_DIR" "normal"
+
+    if [ -f "$SETTINGS_JSON_SOURCE" ]; then
+        cp "$SETTINGS_JSON_SOURCE" "$PROJECT_ROOT/.claude/settings.json"
+    fi
+
+    setup_all_gitignores "$PROJECT_ROOT" "$DAEMON_DIR" "normal" || print_warning ".gitignore setup had warnings (non-fatal)"
+
+    deploy_slash_commands "$PROJECT_ROOT" "$DAEMON_DIR" "normal"
+
+    "$VENV_PYTHON" -c "
+from pathlib import Path
+from claude_code_hooks_daemon.install.skills import deploy_skills
+
+daemon_source = Path('$DAEMON_DIR')
+project_root = Path('$PROJECT_ROOT')
+
+try:
+    deploy_skills(daemon_source, project_root)
+    print('✓ Skills redeployed to .claude/skills/hooks-daemon/')
+except Exception as e:
+    print(f'✗ Skill redeployment failed: {e}')
+    exit(1)
+"
+
+    if ! restart_daemon_verified "$VENV_PYTHON"; then
+        print_warning "Daemon restart had issues; check status manually"
+    fi
+
+    if ! run_post_install_checks "$PROJECT_ROOT" "$VENV_PYTHON" "$DAEMON_DIR" "false"; then
+        print_warning "Post-install checks had warnings (non-fatal)"
     fi
 
     print_success "Upgrade verification complete"
