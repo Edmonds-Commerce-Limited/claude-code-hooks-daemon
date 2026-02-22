@@ -41,8 +41,8 @@ class TestPipeBlockerIntegration:
         assert len(result.handlers_matched) > 0, "Should have matched handlers"
         assert HandlerID.PIPE_BLOCKER.display_name in result.handlers_matched
 
-    def test_find_pipe_tail_blocks_as_unknown_through_router(self) -> None:
-        """Test find | tail is blocked as unknown command through full pipeline."""
+    def test_docker_ps_pipe_tail_blocks_as_unknown_through_router(self) -> None:
+        """Test docker ps | tail is blocked as unknown command through full pipeline."""
         router = EventRouter()
         handler = PipeBlockerHandler()
         router.register(EventType.PRE_TOOL_USE, handler)
@@ -51,7 +51,7 @@ class TestPipeBlockerIntegration:
             "hook_event_name": "PreToolUse",
             "tool_name": "Bash",
             "tool_input": {
-                "command": 'find . -name "*.py" | tail -10',
+                "command": "docker ps -a | tail -10",
             },
             "session_id": "test-session",
         }

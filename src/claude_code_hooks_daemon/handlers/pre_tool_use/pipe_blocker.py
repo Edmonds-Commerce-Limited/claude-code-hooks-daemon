@@ -154,9 +154,11 @@ class PipeBlockerHandler(Handler):
                 if separator in before_pipe:
                     before_pipe = before_pipe.rsplit(separator, 1)[-1]
 
-            # Handle multiple pipes — take the last segment
-            if "|" in before_pipe:
-                before_pipe = before_pipe.rsplit("|", 1)[-1]
+            # Handle multiple actual (unescaped) pipes — take the last segment.
+            # Use negative lookbehind to avoid splitting on \| inside grep patterns.
+            parts = re.split(r"(?<!\\)\|", before_pipe)
+            if len(parts) > 1:
+                before_pipe = parts[-1]
 
             return before_pipe.strip()
 
@@ -316,11 +318,11 @@ class PipeBlockerHandler(Handler):
                 requires_main_thread=False,
             ),
             AcceptanceTest(
-                title="find piped to tail (unknown command — extra_whitelist path)",
-                command='[[ "find /tmp -name test.py | tail -20" == 0 ]]',
+                title="docker ps piped to tail (unknown command — extra_whitelist path)",
+                command='[[ "docker ps -a | tail -20" == 0 ]]',
                 description=(
-                    "Blocks find | tail via unknown-command path (extra_whitelist hint). "
-                    "find is not in blacklist so handler suggests adding to extra_whitelist."
+                    "Blocks docker ps | tail via unknown-command path (extra_whitelist hint). "
+                    "docker ps is not in blacklist so handler suggests adding to extra_whitelist."
                 ),
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[

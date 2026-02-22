@@ -34,4 +34,7 @@ UNIVERSAL_WHITELIST_PATTERNS: tuple[str, ...] = (
     r"^pwd\b",
     r"^env\b",
     r"^printenv\b",
+    r"^find\b",
+    r"^ps\b",
+    r"^df\b",
 )

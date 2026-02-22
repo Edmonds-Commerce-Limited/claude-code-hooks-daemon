@@ -1,9 +1,9 @@
 """Regression tests for pipe blocker behavior under three-tier decision system.
 
 These tests document the CORRECT behavior after the strategy-pattern redesign:
-- Tier 1 (whitelist):  ls, grep, cat, etc. → ALLOW (matches() returns False)
+- Tier 1 (whitelist):  ls, grep, cat, find, ps, df, etc. → ALLOW (matches() returns False)
 - Tier 2 (blacklist):  pytest, npm test, etc. → DENY "expensive command"
-- Tier 3 (unknown):    find, docker ps, etc. → DENY "unrecognized, add to extra_whitelist"
+- Tier 3 (unknown):    docker ps, etc. → DENY "unrecognized, add to extra_whitelist"
 """
 
 from claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker import PipeBlockerHandler
@@ -33,8 +33,12 @@ class TestPipeBlockerRegressionBehavior:
             hook_input
         ), "Handler should NOT match ls | tail (ls is whitelisted)"
 
-    def test_blocks_find_pipe_tail(self) -> None:
-        """Test that find piped to tail is blocked as an unknown command."""
+    def test_does_not_block_find_pipe_tail(self) -> None:
+        """Test that find piped to tail is ALLOWED (find is whitelisted).
+
+        find was moved to Tier 1 (whitelist) — it is a cheap filesystem listing
+        command and safe to pipe to tail/head for output truncation.
+        """
         handler = PipeBlockerHandler()
 
         hook_input = {
@@ -44,15 +48,10 @@ class TestPipeBlockerRegressionBehavior:
             },
         }
 
-        # find is unknown (not whitelisted, not blacklisted) — should block
-        assert handler.matches(hook_input), "Handler should match find | tail (unknown command)"
-
-        # Handler SHOULD deny with "unrecognized" message (tier 3: unknown path)
-        result = handler.handle(hook_input)
-        assert result.decision == "deny", "Handler should deny find | tail"
-        assert (
-            "extra_whitelist" in result.reason
-        ), "Unknown command reason should mention extra_whitelist"
+        # find is whitelisted — handler should NOT match (not blocked)
+        assert not handler.matches(
+            hook_input
+        ), "Handler should NOT match find | tail (find is whitelisted)"
 
     def test_does_not_block_grep_pipe_tail(self) -> None:
         """Test that whitelisted commands (grep) are allowed through."""
