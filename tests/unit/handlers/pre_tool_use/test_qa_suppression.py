@@ -392,3 +392,42 @@ class TestQaSuppressionAcceptanceTests:
         tests = handler.get_acceptance_tests()
         # Should have tests from multiple languages
         assert len(tests) >= 11  # At least one per language
+
+
+class TestQaSuppressionEdgeCases:
+    """Test edge cases in matches() and handle() guard clauses."""
+
+    def test_matches_returns_false_when_no_file_path(self) -> None:
+        """matches() returns False when Write tool_input has no file_path (line 112)."""
+        from claude_code_hooks_daemon.handlers.pre_tool_use.qa_suppression import (
+            QaSuppressionHandler,
+        )
+
+        handler = QaSuppressionHandler()
+        hook_input: dict[str, Any] = {"tool_name": "Write", "tool_input": {}}
+        assert handler.matches(hook_input) is False
+
+    def test_handle_returns_allow_when_no_file_path(self) -> None:
+        """handle() returns ALLOW when hook_input has no file_path (line 138)."""
+        from claude_code_hooks_daemon.handlers.pre_tool_use.qa_suppression import (
+            QaSuppressionHandler,
+        )
+
+        handler = QaSuppressionHandler()
+        hook_input: dict[str, Any] = {"tool_name": "Write", "tool_input": {}}
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW
+
+    def test_handle_returns_allow_when_no_content(self) -> None:
+        """handle() returns ALLOW when file_path present but content is empty (line 146)."""
+        from claude_code_hooks_daemon.handlers.pre_tool_use.qa_suppression import (
+            QaSuppressionHandler,
+        )
+
+        handler = QaSuppressionHandler()
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/workspace/src/app/main.py", "content": ""},
+        }
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW

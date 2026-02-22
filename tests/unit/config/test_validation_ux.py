@@ -147,6 +147,58 @@ class TestFormatValidationError:
         assert "event_type" in message
 
 
+class TestFormatExtraFieldBranches:
+    """Tests for _format_extra_field() branch coverage (lines 122-125, 132)."""
+
+    def test_plugins_location_uses_plugin_valid_fields(self) -> None:
+        """Extra field inside 'plugins' location uses _PLUGIN_VALID_FIELDS (lines 122-123)."""
+        from claude_code_hooks_daemon.config.validation_ux import _format_extra_field
+
+        err: dict[str, Any] = {
+            "loc": ("plugins", "plugins", 0, "xyz_unknown_field"),
+            "msg": "Extra inputs are not permitted",
+            "type": "extra_forbidden",
+        }
+        lines = _format_extra_field(err, "plugins.plugins.0.xyz_unknown_field")
+
+        # Field is in plugins location → _PLUGIN_VALID_FIELDS used
+        # "xyz_unknown_field" has no close match → "Valid fields" listed (line 132)
+        assert any("xyz_unknown_field" in line for line in lines)
+        assert any("Valid fields" in line for line in lines)
+        assert any("path" in line for line in lines)
+
+    def test_other_location_uses_empty_valid_fields(self) -> None:
+        """Extra field at non-handlers/non-plugins location uses frozenset() (lines 124-125)."""
+        from claude_code_hooks_daemon.config.validation_ux import _format_extra_field
+
+        err: dict[str, Any] = {
+            "loc": ("daemon", "unknown_field"),
+            "msg": "Extra inputs are not permitted",
+            "type": "extra_forbidden",
+        }
+        lines = _format_extra_field(err, "daemon.unknown_field")
+
+        # else branch → frozenset() → if valid_fields: is False → no suggestions
+        assert any("unknown_field" in line for line in lines)
+        assert not any("Did you mean" in line for line in lines)
+        assert not any("Valid fields" in line for line in lines)
+
+    def test_handlers_location_no_close_match_lists_valid_fields(self) -> None:
+        """No close match for handlers extra field lists all valid fields (line 132)."""
+        from claude_code_hooks_daemon.config.validation_ux import _format_extra_field
+
+        err: dict[str, Any] = {
+            "loc": ("handlers", "pre_tool_use", "destructive_git", "zzz_nomatch"),
+            "msg": "Extra inputs are not permitted",
+            "type": "extra_forbidden",
+        }
+        lines = _format_extra_field(err, "handlers.pre_tool_use.destructive_git.zzz_nomatch")
+
+        # handlers location, no close match to enabled/priority/options → lists all (line 132)
+        assert any("Valid fields" in line for line in lines)
+        assert any("enabled" in line for line in lines)
+
+
 class TestDuplicatePriorityLogLevel:
     """Tests for duplicate priority warnings being DEBUG not WARNING."""
 

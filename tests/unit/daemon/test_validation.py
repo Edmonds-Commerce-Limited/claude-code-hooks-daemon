@@ -401,3 +401,32 @@ class TestCheckForNestedInstallation:
         # Cleaned up, not blocking
         assert result is None
         assert not nested_install.exists()
+
+
+class TestLoadConfigSafeUnexpectedException:
+    """Test load_config_safe() unexpected exception branch (lines 78-80)."""
+
+    def test_load_config_safe_returns_none_on_unexpected_exception(self, tmp_path: Path) -> None:
+        """load_config_safe() returns None when an unexpected exception occurs (lines 78-80)."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        config_file = claude_dir / "hooks-daemon.yaml"
+        config_file.write_text("version: '2.0'\n")
+
+        with patch("yaml.safe_load", side_effect=RuntimeError("unexpected parse failure")):
+            result = load_config_safe(tmp_path)
+
+        assert result is None
+
+
+class TestValidateNotNested:
+    """Test validate_not_nested() raises InstallationError on nested install (line 99)."""
+
+    def test_validate_not_nested_raises_on_nested_install(self, tmp_path: Path) -> None:
+        """validate_not_nested() raises InstallationError when nested install returns error (line 99)."""
+        with patch(
+            "claude_code_hooks_daemon.daemon.validation.check_for_nested_installation",
+            return_value="Nested installation detected at /some/path",
+        ):
+            with pytest.raises(InstallationError, match="Nested installation detected"):
+                validate_not_nested(tmp_path)
