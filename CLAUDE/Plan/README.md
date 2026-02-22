@@ -36,6 +36,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00065: Version-Aware Config Migration Advisory System](Completed/00065-version-aware-config-migration/PLAN.md) - Complete
+  - Machine-readable YAML manifests per version tracking all config changes (19 manifests v2.2.0→v2.15.2)
+  - New `check-config-migrations` CLI command: compares user config against version range, reports new options
+  - Integration tests against real manifests (31 tests) + unit TDD suite
+  - LLM-UPDATE.md updated with Method 4 for version-specific advisory step
+
 - [00066: Fix Plan File Race Condition](Completed/00066-plan-file-race-condition/PLAN.md) - Complete
   - Fixed TOCTOU race: `handle_planning_mode_write()` returned `ALLOW` after writing the redirect stub, causing Claude's Write tool to detect file modification and loop infinitely
   - Fix: return `DENY` (content already saved; block the Write tool from overwriting the stub)
@@ -392,8 +398,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 64
-- **Completed**: 54 (1 with reduced scope)
+- **Total Plans Created**: 65
+- **Completed**: 55 (1 with reduced scope)
 - **Active**: 6 (2 in progress, 4 not started)
 - **Cancelled/Abandoned**: 2 (00036 - empty draft deleted, 00044 - approach retired)
 
