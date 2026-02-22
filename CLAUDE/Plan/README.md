@@ -5,16 +5,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Active Plans
 
 - [00063: FAIL FAST - Plugin Handler Bug & Error Hiding Audit](00063-fail-fast-plugin-handler-audit/PLAN.md) - In Progress
-  - **CRITICAL BUG**: Plugin handlers with `Handler` suffix silently skipped, daemon continues with no protection
-  - Root cause: Asymmetry between PluginLoader (handles suffix) and DaemonController (doesn't)
-  - Comprehensive audit to find ALL error hiding patterns violating FAIL FAST principles
-  - Convert warnings to crashes, eliminate silent failures throughout codebase
-  - **Priority**: CRITICAL (violates core engineering principles, leaves users unprotected)
-
-- [00058: Fix PHP QA Suppression Pattern Gaps](00058-php-qa-suppression-pattern-gaps/PLAN.md) - In Progress
-  - **CRITICAL BUG**: PHP QA suppression handler missing 8 patterns (@phpstan-ignore, phpcs:disable, etc.)
-  - User's project experiencing "serious issues" due to bypassed quality controls
-  - **Priority**: High (quality enforcement broken)
+  - **Phase 1 DONE**: Plugin handler suffix bug fixed, warning converted to crash (daemon fails on unregistered handler)
+  - **Phase 2 PENDING**: Comprehensive audit for ALL error hiding patterns in codebase (audit script, fix violations)
+  - **Priority**: High
 
 - [00032: Sub-Agent Orchestration for Context Preservation](00032-subagent-orchestration-context-preservation/PLAN.md) - Not Started
   - Create specialized sub-agents for workflow gates and orchestration
@@ -26,15 +19,21 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00035: StatusLine Data Cache + Model-Aware Advisor](00035-statusline-data-cache-model-advisor/PLAN.md) - Not Started
   - StatusLine data cache for model-awareness in PreToolUse events
 
-- [00038: Library Handler Over-fitting](00038-library-handler-over-fitting/PLAN.md) - Not Started
-  - Address handlers that over-fit to project-specific assumptions
-
-
-- [00045: Proper Language Strategy](00045-proper-language-strategy/PLAN.md) - Proposed
-  - Proper language strategy pattern implementation
-
 
 ## Completed Plans
+
+- [00058: Fix PHP QA Suppression Pattern Gaps](Completed/00058-php-qa-suppression-pattern-gaps/PLAN.md) - Complete
+  - Added 8 missing PHP suppression patterns (@phpstan-ignore, phpcs:disable/enable/ignoreFile, @codingStandards*)
+  - All patterns now blocked via strategy pattern; acceptance tests verified
+
+- [00045: Proper Language Strategy](Completed/00045-proper-language-strategy/PLAN.md) - Complete
+  - Unified three inconsistent language-aware systems into ONE canonical strategy pattern
+  - Single `qa_suppression.py` handler with 11 language strategies (Python, Go, PHP, JS, Rust, Java, C#, Kotlin, Ruby, Swift, Dart)
+  - Removed old individual QA suppression handlers; TDD handler updated to use `_project_languages`
+  - Backward-compat config mapping in registry; old handlers fully deprecated and removed
+
+- [00038: Library Handler Over-fitting](Completed/00038-library-handler-over-fitting/PLAN.md) - Cancelled
+  - Superseded by Plan 00045 which resolved the core issue via unified language strategy pattern
 
 - [00065: Version-Aware Config Migration Advisory System](Completed/00065-version-aware-config-migration/PLAN.md) - Complete
   - Machine-readable YAML manifests per version tracking all config changes (19 manifests v2.2.0→v2.15.2)
@@ -398,10 +397,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 65
-- **Completed**: 55 (1 with reduced scope)
-- **Active**: 6 (2 in progress, 4 not started)
-- **Cancelled/Abandoned**: 2 (00036 - empty draft deleted, 00044 - approach retired)
+- **Total Plans Created**: 67
+- **Completed**: 58 (1 with reduced scope)
+- **Active**: 4 (1 in progress, 3 not started)
+- **Cancelled/Abandoned**: 3 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045)
 
 ## Quick Links
 

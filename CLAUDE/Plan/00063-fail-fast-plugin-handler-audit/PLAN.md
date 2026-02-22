@@ -1,6 +1,6 @@
 # Plan 00063: FAIL FAST - Plugin Handler Bug & Error Hiding Audit
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-02-17
 **Owner**: Claude Sonnet 4.5
 **Priority**: CRITICAL
@@ -58,20 +58,20 @@ if handler.__class__.__name__ == expected_class:              # "SystemPathsHand
 
 ### Phase 1: Fix Immediate Bug (CRITICAL)
 
-- [ ] ⬜ **Fix Handler suffix matching** in `daemon/controller.py` line 258
-  - [ ] ⬜ Change from `== expected_class` to `in (expected_class, f"{expected_class}Handler")`
-  - [ ] ⬜ Add comment explaining the logic
-- [ ] ⬜ **Convert warning to CRASH**
-  - [ ] ⬜ Replace warning log with `raise RuntimeError()` with clear message
-  - [ ] ⬜ Include handler name, class name, config path in error
-  - [ ] ⬜ Daemon MUST NOT START if any configured handler can't be registered
-- [ ] ⬜ **Write failing test** for bug
-  - [ ] ⬜ Test plugin handler with `Handler` suffix loads and registers
-  - [ ] ⬜ Test daemon crashes if handler can't be matched to config
-- [ ] ⬜ **Verify fix**
-  - [ ] ⬜ Test passes with fix
-  - [ ] ⬜ Run full QA: `./scripts/qa/run_all.sh`
-  - [ ] ⬜ Restart daemon: verify RUNNING
+- [x] ✅ **Fix Handler suffix matching** in `daemon/controller.py` line 258
+  - [x] ✅ Change from `== expected_class` to `in (expected_class, f"{expected_class}Handler")`
+  - [x] ✅ Add comment explaining the logic
+- [x] ✅ **Convert warning to CRASH**
+  - [x] ✅ Replace warning log with `raise RuntimeError()` with clear message
+  - [x] ✅ Include handler name, class name, config path in error
+  - [x] ✅ Daemon MUST NOT START if any configured handler can't be registered
+- [x] ✅ **Write failing test** for bug
+  - [x] ✅ Test plugin handler with `Handler` suffix loads and registers
+  - [x] ✅ Test daemon crashes if handler can't be matched to config
+- [x] ✅ **Verify fix**
+  - [x] ✅ Test passes with fix
+  - [x] ✅ Run full QA: `./scripts/qa/run_all.sh`
+  - [x] ✅ Restart daemon: verify RUNNING
 
 ### Phase 2: Comprehensive Error Hiding Audit
 
