@@ -4,11 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00066: Fix Plan File Race Condition](00066-plan-file-race-condition/PLAN.md) - Not Started
-  - **BUG**: `handle_planning_mode_write()` returns `ALLOW` after writing the stub, causing Claude's Write tool to detect modification and fail — TOCTOU loop
-  - Fix: return `DENY` instead of `ALLOW` (content already saved; no write needed)
-  - **Priority**: Medium (workaround exists: exit plan mode)
-
 - [00063: FAIL FAST - Plugin Handler Bug & Error Hiding Audit](00063-fail-fast-plugin-handler-audit/PLAN.md) - In Progress
   - **CRITICAL BUG**: Plugin handlers with `Handler` suffix silently skipped, daemon continues with no protection
   - Root cause: Asymmetry between PluginLoader (handles suffix) and DaemonController (doesn't)
@@ -40,6 +35,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 
 ## Completed Plans
+
+- [00066: Fix Plan File Race Condition](Completed/00066-plan-file-race-condition/PLAN.md) - Complete
+  - Fixed TOCTOU race: `handle_planning_mode_write()` returned `ALLOW` after writing the redirect stub, causing Claude's Write tool to detect file modification and loop infinitely
+  - Fix: return `DENY` (content already saved; block the Write tool from overwriting the stub)
+  - Acceptance tested: single write attempt, DENY + "PLAN SAVED SUCCESSFULLY", content saved correctly
 
 - [00064: PipeBlocker Strategy Pattern Redesign](Completed/00064-pipe-blocker-strategy-redesign/PLAN.md) - Complete
   - Replaced over-eager whitelist-only logic with three-tier whitelist/blacklist/unknown system
