@@ -302,28 +302,34 @@ class MarkdownOrganizationHandler(Handler):
 
             logger.info(f"Planning mode write redirected: {file_path} -> {plan_folder}/PLAN.md")
 
-            # Build context with workflow docs reference if configured
-            context_parts = [
-                f"Planning mode write successfully redirected.\n\n"
-                f"Your plan has been saved to: `{self._track_plans_in_project}/{folder_name}/PLAN.md`\n\n"
-                f"A redirect stub was created at: `{file_path}`\n\n"
-                f"**ACTION REQUIRED**: The plan folder has a temporary name.\n"
-                f"Please rename `{folder_name}/` to `{next_number}-descriptive-name/` "
-                f"based on the plan content. Keep the number prefix intact."
+            # Build reason — DENY blocks the Write tool from executing on the original
+            # path (which would overwrite the redirect stub). Content is already saved.
+            reason_parts = [
+                f"PLAN SAVED SUCCESSFULLY\n\n"
+                f"Your plan content has been automatically redirected to project version control.\n\n"
+                f"Saved to: `{self._track_plans_in_project}/{folder_name}/PLAN.md`\n\n"
+                f"A redirect stub was written to: `{file_path}`\n\n"
+                f"Do NOT retry this write — the content is already saved.\n\n"
+                f"**IMPORTANT**: The plan folder currently has a temporary name: `{folder_name}`\n\n"
+                f"**You MUST rename this folder** to a descriptive name based on the plan content:\n"
+                f"1. Read the plan to understand what it's about\n"
+                f"2. Choose a clear, descriptive kebab-case name\n"
+                f"3. Rename: `{self._track_plans_in_project}/{folder_name}/` → "
+                f"`{self._track_plans_in_project}/{next_number}-descriptive-name/`\n"
+                f"4. Keep the plan number prefix ({next_number}-) intact\n"
             ]
 
-            # Phase 4: Inject workflow docs guidance if configured
             if self._plan_workflow_docs:
                 workflow_path = self._workspace_root / self._plan_workflow_docs
                 if workflow_path.exists():
-                    context_parts.append(
-                        f"\n\n**Workflow Documentation**: See `{self._plan_workflow_docs}` "
-                        f"for plan structure and conventions."
+                    reason_parts.append(
+                        "\nIf this plan is relevant to the current work and not already "
+                        "complete, continue working on it.\n"
                     )
 
             return HookResult(
-                decision=Decision.ALLOW,
-                context=context_parts,
+                decision=Decision.DENY,
+                reason="".join(reason_parts),
             )
 
         except FileNotFoundError as e:

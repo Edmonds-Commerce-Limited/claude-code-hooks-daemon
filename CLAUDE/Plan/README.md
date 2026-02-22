@@ -4,6 +4,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00066: Fix Plan File Race Condition](00066-plan-file-race-condition/PLAN.md) - Not Started
+  - **BUG**: `handle_planning_mode_write()` returns `ALLOW` after writing the stub, causing Claude's Write tool to detect modification and fail — TOCTOU loop
+  - Fix: return `DENY` instead of `ALLOW` (content already saved; no write needed)
+  - **Priority**: Medium (workaround exists: exit plan mode)
+
 - [00063: FAIL FAST - Plugin Handler Bug & Error Hiding Audit](00063-fail-fast-plugin-handler-audit/PLAN.md) - In Progress
   - **CRITICAL BUG**: Plugin handlers with `Handler` suffix silently skipped, daemon continues with no protection
   - Root cause: Asymmetry between PluginLoader (handles suffix) and DaemonController (doesn't)
