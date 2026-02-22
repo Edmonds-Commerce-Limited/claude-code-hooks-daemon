@@ -222,6 +222,8 @@ handlers:
       show_workflow_tips: true         # Show container workflow tips
 ```
 
+For the complete per-handler options reference (all handlers, all options, defaults, and examples), see **[Handler Reference](HANDLER_REFERENCE.md)**.
+
 ### Parent-Child Handler Relationships
 
 Some handlers share configuration through a parent-child relationship. The child handler inherits `options` from the parent, avoiding duplication:

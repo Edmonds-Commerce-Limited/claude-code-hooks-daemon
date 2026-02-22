@@ -450,6 +450,8 @@ project_handlers:
   path: .claude/project-handlers
 ```
 
+Handler options (e.g. `blocking_mode`, `mode`) are not shown above. See **[docs/guides/HANDLER_REFERENCE.md](docs/guides/HANDLER_REFERENCE.md)** for the full per-handler options reference.
+
 ### Single Daemon Process Enforcement
 
 **Purpose**: Prevents multiple daemon instances from running simultaneously.
