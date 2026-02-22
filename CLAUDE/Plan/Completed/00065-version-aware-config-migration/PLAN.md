@@ -39,18 +39,18 @@ The user specifically raised this when asking why grep was still being blocked a
 
 **Goal**: Define and validate the YAML schema for config-change manifests.
 
-- [ ] Write failing tests for `ConfigMigrationManifest` dataclass parsing:
+- [x] Write failing tests for `ConfigMigrationManifest` dataclass parsing:
   - Valid manifest with all field types (added, renamed, removed, changed)
   - Minimal manifest (no changes)
   - Invalid manifest (missing required fields)
-- [ ] Implement `src/claude_code_hooks_daemon/install/config_migrations.py`:
+- [x] Implement `src/claude_code_hooks_daemon/install/config_migrations.py`:
   - `ConfigChangeEntry` dataclass (key, description, example_yaml, migration_note)
   - `ConfigMigrationManifest` dataclass (version, date, breaking, added, renamed, removed, changed, upgrade_guide)
   - `load_manifest(version: str) -> ConfigMigrationManifest | None` — loads from `CLAUDE/UPGRADES/config-changes/`
   - `load_manifests_between(from_version: str, to_version: str) -> list[ConfigMigrationManifest]` — returns all manifests in version order
-- [ ] Create manifest schema file `CLAUDE/UPGRADES/config-changes/SCHEMA.md` documenting the format
-- [ ] Create first manifest `CLAUDE/UPGRADES/config-changes/v2.2.0.yaml` (base version, empty changes)
-- [ ] Run QA: `./scripts/qa/run_all.sh`
+- [x] Create manifest schema file `CLAUDE/UPGRADES/config-changes/SCHEMA.md` documenting the format
+- [x] Create first manifest `CLAUDE/UPGRADES/config-changes/v2.2.0.yaml` (base version, empty changes)
+- [x] Run QA: `./scripts/qa/run_all.sh`
 
 **Manifest format**:
 ```yaml
@@ -82,22 +82,22 @@ config_changes:
 
 **Goal**: Implement the advisory logic that compares manifests against a user's config.
 
-- [ ] Write failing tests for `generate_migration_advisory()`:
+- [x] Write failing tests for `generate_migration_advisory()`:
   - User has old key that was renamed → warns "rename X → Y"
   - User has removed handler still in config → warns "X was removed"
   - User missing a new option → advises "new option Y available"
   - User already has new option → silently skips
   - No changes between versions → returns empty advisory
   - Multiple versions span → aggregates all changes
-- [ ] Implement `generate_migration_advisory(from_version, to_version, user_config_path) -> MigrationAdvisory`:
+- [x] Implement `generate_migration_advisory(from_version, to_version, user_config_path) -> MigrationAdvisory`:
   - `MigrationAdvisory` dataclass with lists: `warnings` (breaking), `suggestions` (new options), `summary`
   - Reads user's `hooks-daemon.yaml` to check which keys are present
   - Cross-references manifests: for each renamed/removed key, check if user still has old key
   - For each added key, check if user already has it (if not, include in suggestions)
-- [ ] Implement `format_advisory_for_llm(advisory: MigrationAdvisory) -> str`:
+- [x] Implement `format_advisory_for_llm(advisory: MigrationAdvisory) -> str`:
   - Structured text output for LLM-UPDATE.md integration
   - Clear sections: `⚠️ Action Required` (breaking), `💡 New Options Available`, `✅ No Changes Needed`
-- [ ] Run QA
+- [x] Run QA
 
 ---
 
@@ -105,19 +105,19 @@ config_changes:
 
 **Goal**: Register `check-config-migrations` in daemon CLI.
 
-- [ ] Write failing tests for CLI command:
+- [x] Write failing tests for CLI command:
   - `check-config-migrations --from 2.10.0 --to 2.12.0` produces advisory output
   - `--from` version greater than `--to` → error
   - Unknown version → error with list of known versions
   - `--format json` flag for machine-readable output
-- [ ] Add `cmd_check_config_migrations()` to `src/claude_code_hooks_daemon/daemon/cli.py`:
+- [x] Add `cmd_check_config_migrations()` to `src/claude_code_hooks_daemon/daemon/cli.py`:
   - Arguments: `--from VERSION`, `--to VERSION`, `--config PATH`, `--format [text|json]`
   - Default config path: auto-detect from project root (same as other config commands)
   - Calls `generate_migration_advisory()` then `format_advisory_for_llm()`
   - Exit code 0 = no warnings, 1 = warnings/suggestions present
-- [ ] Register in CLI argument parser alongside existing `config-diff`, `config-merge`, `config-validate`
-- [ ] Run daemon restart verification: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
-- [ ] Run QA
+- [x] Register in CLI argument parser alongside existing `config-diff`, `config-merge`, `config-validate`
+- [x] Run daemon restart verification: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
+- [x] Run QA
 
 ---
 
@@ -148,9 +148,9 @@ Versions to backfill (from CHANGELOG analysis):
 | v2.15.1 | No | Minor changes |
 | v2.15.2 | No | Config header change |
 
-- [ ] Read CHANGELOG.md in detail and create manifest for each version
-- [ ] Validate all manifests parse correctly via unit test: `test_all_manifests_parse_correctly()`
-- [ ] Cross-reference with existing upgrade guides (v2.10→11, v2.11→12, v2.12→13) to ensure consistency
+- [x] Read CHANGELOG.md in detail and create manifest for each version
+- [x] Validate all manifests parse correctly via unit test: `test_all_manifests_parse_correctly()`
+- [x] Cross-reference with existing upgrade guides (v2.10→11, v2.11→12, v2.12→13) to ensure consistency
 
 ---
 
@@ -158,7 +158,7 @@ Versions to backfill (from CHANGELOG analysis):
 
 **Goal**: Add advisory step to the upgrade workflow so users automatically see what's new.
 
-- [ ] Add new step to LLM-UPDATE.md after upgrade completes:
+- [x] Add new step to LLM-UPDATE.md after upgrade completes:
   ```
   ## Step N: Check Config Migration Advisory
 
@@ -171,18 +171,18 @@ Versions to backfill (from CHANGELOG analysis):
 
   If any suggestions appear, review the new options and decide whether to enable them.
   ```
-- [ ] Add advisory output example (what the LLM will see)
-- [ ] Add note that advisory is informational — new options are opt-in
+- [x] Add advisory output example (what the LLM will see)
+- [x] Add note that advisory is informational — new options are opt-in
 
 ---
 
 ### Phase 6: Integration Tests & QA
 
-- [ ] Integration test: full advisory from v2.10.0 to v2.15.2 produces expected suggestions
-- [ ] Integration test: user config with renamed key gets correct warning
-- [ ] Integration test: user config with all new options already set → empty advisory
-- [ ] Run full QA: `./scripts/qa/run_all.sh`
-- [ ] Run daemon restart: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
+- [x] Integration test: full advisory from v2.10.0 to v2.15.2 produces expected suggestions
+- [x] Integration test: user config with renamed key gets correct warning
+- [x] Integration test: user config with all new options already set → empty advisory
+- [x] Run full QA: `./scripts/qa/run_all.sh`
+- [x] Run daemon restart: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
 
 ---
 
