@@ -825,28 +825,6 @@ handlers:
 
 ---
 
-#### orchestrator_only
-
-| Property | Value |
-|----------|-------|
-| **Config key** | `orchestrator_only` |
-| **Priority** | 8 |
-| **Type** | Blocking |
-| **Event** | PreToolUse |
-
-**Description:** Enforces an orchestration-only pattern for the main Claude thread. When enabled, blocks all work tools (Edit, Write, NotebookEdit, mutating Bash) and only allows orchestration tools (Task, Read, Glob, Grep, etc.) so the main thread delegates all implementation to subagents. Disabled by default -- must be explicitly enabled.
-
-**Config example:**
-```yaml
-handlers:
-  pre_tool_use:
-    orchestrator_only:
-      enabled: false  # opt-in only
-      priority: 8
-```
-
----
-
 ### Advisory Handlers (Priority 60)
 
 #### british_english
@@ -1415,7 +1393,6 @@ These handlers generate the terminal status line displayed by Claude Code. They 
 
 | Config Key | Event | Priority | What It Blocks |
 |------------|-------|----------|----------------|
-| `orchestrator_only` | PreToolUse | 8 | All work tools (opt-in) |
 | `destructive_git` | PreToolUse | 10 | git reset --hard, clean -f, push --force, etc. |
 | `sed_blocker` | PreToolUse | 10 | All sed commands |
 | `absolute_path` | PreToolUse | 12 | Relative paths in Read/Write/Edit |
@@ -1490,7 +1467,6 @@ Priority determines execution order. Lower numbers run first.
 | Range | Category | Examples |
 |-------|----------|----------|
 | 5 | Test | hello_world (disabled by default) |
-| 8 | Orchestrator | orchestrator_only (opt-in) |
 | 10-23 | Safety | destructive_git, sed_blocker, pip_break_system |
 | 25-35 | Code Quality | eslint_disable, tdd_enforcement |
 | 36-55 | Workflow | gh_issue_comments, npm_command, markdown_organization |
