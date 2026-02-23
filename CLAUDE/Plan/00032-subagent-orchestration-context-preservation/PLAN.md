@@ -1,9 +1,9 @@
 # Plan 00032: Sub-Agent Orchestration for Context Preservation
 
-**Status**: Not Started
+**Status**: On Hold (2026-02-23) - Waiting for upstream delegate mode fix
 **Created**: 2026-02-06
 **Owner**: Main Claude (Orchestrator)
-**Priority**: High
+**Priority**: High (blocked by upstream)
 
 ## Overview
 
@@ -349,6 +349,31 @@ Implement comprehensive sub-agent orchestration to preserve main thread context.
 3. Should enforcement be advisory or blocking? (Decided: advisory)
 
 **Next Steps**:
-- Begin Phase 1: Research agent team sub-agent capability
-- Document findings
-- Proceed based on results
+- ⏸️ PLAN ON HOLD - Waiting for upstream delegate mode fix
+- Monitor GitHub issues: #23447, #25037, #14859, #7881
+- When delegate mode is fixed, reassess scope (may need minimal daemon work)
+- See RESEARCH-2026-02-23.md for full findings
+
+### 2026-02-23 - Research Complete, Plan Put On Hold
+
+**Research conducted by**: Main Claude (Opus 4.6) with Explore + general-purpose sub-agents
+
+**Critical Findings**:
+
+1. **PreToolUse/PostToolUse hooks have NO agent identification** - `session_id` is shared across main thread and all subagents. Our `OrchestratorOnlyHandler` (Plan 00019) cannot distinguish orchestrator from teammate. If enabled, it blocks everyone.
+
+2. **Delegate mode is the upstream solution but is broken** - Claude Code has built-in delegate mode (Shift+Tab) that restricts the lead to coordination-only tools. However, it currently cascades to teammates, stripping them of file system tools too. Tracked in GitHub issues #23447, #24073, #24307, #25037.
+
+3. **Plan mode is a partial workaround** - Task tool IS allowed in plan mode, but Bash is completely blocked (can't even run `git status`). Unknown if it also cascades.
+
+4. **Agent hierarchy in hooks is requested but not implemented** - GitHub Issue #14859 requests `agent_id`, `parent_agent_id` on ALL hook events. If implemented, our handler approach would become viable.
+
+**Decision**: Hold this plan. Delegate mode is exactly what we need and is a first-class platform feature. Building workarounds in the hooks daemon would be fragile, incomplete, and superseded once upstream fixes land.
+
+**What to monitor**:
+- [#23447](https://github.com/anthropics/claude-code/issues/23447) - Primary delegate mode cascade bug
+- [#25037](https://github.com/anthropics/claude-code/issues/25037) - Latest duplicate with active discussion
+- [#14859](https://github.com/anthropics/claude-code/issues/14859) - Agent hierarchy in hook events
+- [#7881](https://github.com/anthropics/claude-code/issues/7881) - Subagent identification in hooks
+
+**Full research document**: [RESEARCH-2026-02-23.md](RESEARCH-2026-02-23.md)
