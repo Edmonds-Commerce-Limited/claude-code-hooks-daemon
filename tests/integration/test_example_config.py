@@ -162,7 +162,6 @@ def test_example_config_includes_all_library_handlers(example_config: dict) -> N
 
     Excluded handlers:
     - Test handlers (hello_world_*, test_server)
-    - Internal-only handlers (orchestrator_only)
     """
     # Get all handler constants from HandlerID class
     all_handlers = []
@@ -186,7 +185,6 @@ def test_example_config_includes_all_library_handlers(example_config: dict) -> N
         "hello_world_notification",
         "hello_world_permission_request",
         "test_server",
-        "orchestrator_only",
     }
 
     library_handlers = [h for h in all_handlers if h not in excluded_handlers]
@@ -235,7 +233,6 @@ def test_example_config_no_test_handlers(example_config: dict) -> None:
         "hello_world_notification",
         "hello_world_permission_request",
         "test_server",
-        "orchestrator_only",
     ]
 
     found_test_handlers = [h for h in test_handlers if h in config_handlers]
