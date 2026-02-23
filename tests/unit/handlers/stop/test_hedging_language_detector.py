@@ -202,6 +202,39 @@ class TestHedgingLanguageDetectorMatches:
         )
         assert handler.matches({HookInputField.TRANSCRIPT_PATH: path}) is True
 
+    def test_matches_likely_standalone(self, handler: Any) -> None:
+        """Detect standalone 'likely' - speculation about verifiable facts."""
+        path = _make_transcript([_assistant_message("They themselves likely completed fine")])
+        assert handler.matches({HookInputField.TRANSCRIPT_PATH: path}) is True
+
+    def test_matches_probably_standalone(self, handler: Any) -> None:
+        """Detect standalone 'probably' - speculation about verifiable facts."""
+        path = _make_transcript(
+            [_assistant_message("The issue probably stems from a missing dependency")]
+        )
+        assert handler.matches({HookInputField.TRANSCRIPT_PATH: path}) is True
+
+    def test_matches_apparently(self, handler: Any) -> None:
+        """Detect 'apparently' - unverified claim presented as fact."""
+        path = _make_transcript(
+            [_assistant_message("Apparently the system restarted during the upgrade")]
+        )
+        assert handler.matches({HookInputField.TRANSCRIPT_PATH: path}) is True
+
+    def test_matches_seemingly(self, handler: Any) -> None:
+        """Detect 'seemingly' - surface-level assessment without verification."""
+        path = _make_transcript(
+            [_assistant_message("The seemingly unrelated config change caused the failure")]
+        )
+        assert handler.matches({HookInputField.TRANSCRIPT_PATH: path}) is True
+
+    def test_matches_possibly(self, handler: Any) -> None:
+        """Detect 'possibly' - speculation about verifiable facts."""
+        path = _make_transcript(
+            [_assistant_message("This was possibly caused by a race condition")]
+        )
+        assert handler.matches({HookInputField.TRANSCRIPT_PATH: path}) is True
+
     # --- Case insensitivity ---
 
     def test_matches_case_insensitive(self, handler: Any) -> None:

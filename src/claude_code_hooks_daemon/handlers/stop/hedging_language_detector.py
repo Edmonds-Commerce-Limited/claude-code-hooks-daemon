@@ -7,7 +7,7 @@ guess instead of research, things go very wrong.
 
 Detected patterns:
 - Memory-based guessing: "if I recall", "IIRC", "from memory"
-- Uncertainty hedging: "should probably", "most likely", "presumably"
+- Uncertainty hedging: "likely", "probably", "apparently", "seemingly", "possibly", "presumably"
 - Weak confidence: "I'm not sure but", "I'm pretty sure", "I believe"
 """
 
@@ -49,6 +49,11 @@ class HedgingLanguageDetectorHandler(Handler):
     # Uncertainty hedging - agent unsure about verifiable facts
     UNCERTAINTY_PATTERNS: ClassVar[list[str]] = [
         r"\bshould probably\b",
+        r"\blikely\b",
+        r"\bprobably\b",
+        r"\bapparently\b",
+        r"\bseemingly\b",
+        r"\bpossibly\b",
         r"\bmost likely\b",
         r"\bpresumably\b",
         r"\bI assume\b",
@@ -144,7 +149,8 @@ class HedgingLanguageDetectorHandler(Handler):
                             text_parts.append(part)
 
                     return " ".join(text_parts)
-                except (json.JSONDecodeError, ValueError):
+                except (json.JSONDecodeError, ValueError) as e:
+                    logger.debug("Skipping malformed JSONL line: %s", e)
                     continue
 
             return ""
