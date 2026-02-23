@@ -9,15 +9,19 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - **Phase 2 PENDING**: Comprehensive audit for ALL error hiding patterns in codebase (audit script, fix violations)
   - **Priority**: High
 
-- [00032: Sub-Agent Orchestration for Context Preservation](00032-subagent-orchestration-context-preservation/PLAN.md) - Not Started
-  - Create specialized sub-agents for workflow gates and orchestration
-  - **Priority**: High (context management)
+- [00032: Sub-Agent Orchestration for Context Preservation](00032-subagent-orchestration-context-preservation/PLAN.md) - On Hold
+  - Waiting for upstream Claude Code delegate mode fix (cascades to teammates, breaking agent teams)
+  - Blocked by: GitHub issues #23447, #25037 (delegate mode cascade bug)
+  - Also watching: #14859 (agent hierarchy in hook events), #7881 (subagent identification)
+  - Research document: see RESEARCH file in plan folder
 
-- [00034: Model-Aware Agent Team Advisor](00034-model-aware-agent-team-advisor/PLAN.md) - Not Started
-  - Update Plan 00032 with model-aware agent team advisor handler
+- [00034: Model-Aware Agent Team Advisor](00034-model-aware-agent-team-advisor/PLAN.md) - On Hold
+  - Depends on Plan 00032 orchestration infrastructure
+  - Will reassess when delegate mode is fixed upstream
 
-- [00035: StatusLine Data Cache + Model-Aware Advisor](00035-statusline-data-cache-model-advisor/PLAN.md) - Not Started
-  - StatusLine data cache for model-awareness in PreToolUse events
+- [00035: StatusLine Data Cache + Model-Aware Advisor](00035-statusline-data-cache-model-advisor/PLAN.md) - On Hold
+  - Depends on Plan 00032 orchestration infrastructure
+  - SessionState cache still viable when upstream unblocks
 
 
 ## Completed Plans
@@ -389,9 +393,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Generated verification reports
   - **Completed**: 2026-01-27 in ~1 hour (parallel execution)
 
-## Blocked Plans
+## Blocked / On Hold Plans
 
-- None
+- **00032, 00034, 00035** - On hold pending upstream Claude Code delegate mode fix (GitHub #23447, #25037)
 
 ## Cancelled Plans
 
@@ -404,7 +408,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - **Total Plans Created**: 67
 - **Completed**: 59 (1 with reduced scope)
-- **Active**: 4 (1 in progress, 3 not started)
+- **Active**: 1 (in progress)
+- **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 3 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045)
 
 ## Quick Links
