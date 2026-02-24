@@ -12,10 +12,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from claude_code_hooks_daemon.config.validator import ConfigValidator
+from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
 from claude_code_hooks_daemon.core.chain import ChainExecutionResult
 from claude_code_hooks_daemon.core.data_layer import get_data_layer
 from claude_code_hooks_daemon.core.event import EventType, HookEvent
 from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.core.mode import ModeManager
+from claude_code_hooks_daemon.core.mode_interceptor import get_interceptor_for_mode
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.router import EventRouter
 from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
@@ -109,6 +112,7 @@ class DaemonController:
         "_config_errors",
         "_degraded",
         "_initialised",
+        "_mode_manager",
         "_registry",
         "_router",
         "_stats",
@@ -127,6 +131,7 @@ class DaemonController:
         self._initialised = False
         self._degraded = False
         self._config_errors: list[str] = []
+        self._mode_manager = self._init_mode_manager(config)
 
     def initialise(
         self,
@@ -413,6 +418,56 @@ class DaemonController:
                 e,
             )
 
+    @staticmethod
+    def _init_mode_manager(config: "DaemonConfig | None") -> ModeManager:
+        """Initialize ModeManager from config.
+
+        Args:
+            config: Optional daemon configuration with default_mode field.
+
+        Returns:
+            Initialized ModeManager (falls back to DEFAULT on invalid mode).
+        """
+        if config is None:
+            return ModeManager()
+
+        mode_str = getattr(config, "default_mode", DaemonMode.DEFAULT.value)
+        try:
+            mode = DaemonMode(mode_str)
+        except ValueError:
+            logger.warning(
+                "Invalid default_mode '%s' in config, falling back to '%s'",
+                mode_str,
+                DaemonMode.DEFAULT.value,
+            )
+            mode = DaemonMode.DEFAULT
+
+        return ModeManager(initial_mode=mode)
+
+    def get_mode(self) -> dict[str, Any]:
+        """Get current daemon mode as dictionary.
+
+        Returns:
+            Dictionary with mode and custom_message fields.
+        """
+        return self._mode_manager.to_dict()
+
+    def set_mode(
+        self,
+        mode: DaemonMode,
+        custom_message: str | None = None,
+    ) -> bool:
+        """Set daemon mode.
+
+        Args:
+            mode: New daemon mode.
+            custom_message: Optional custom message.
+
+        Returns:
+            True if mode changed, False if unchanged.
+        """
+        return self._mode_manager.set_mode(mode, custom_message)
+
     def process_event(self, event: HookEvent) -> ChainExecutionResult:
         """Process a hook event.
 
@@ -440,6 +495,26 @@ class DaemonController:
         try:
             # Convert HookInput to dict for handlers (use Python field names, not camelCase aliases)
             hook_input_dict = event.hook_input.model_dump(by_alias=False)
+
+            # Mode interceptor: short-circuit before handler chain
+            interceptor = get_interceptor_for_mode(
+                self._mode_manager.current_mode,
+                self._mode_manager.custom_message,
+            )
+            if interceptor is not None:
+                intercept_result = interceptor.intercept(event.event_type, hook_input_dict)
+                if intercept_result is not None:
+                    processing_time = (time.perf_counter() - start_time) * 1000
+                    self._stats.record_request(event.event_type.value, processing_time)
+                    logger.info(
+                        "Mode interceptor short-circuited %s event (mode=%s)",
+                        event.event_type.value,
+                        self._mode_manager.current_mode.value,
+                    )
+                    return ChainExecutionResult(
+                        result=intercept_result,
+                        execution_time_ms=processing_time,
+                    )
 
             # Update data layer SessionState on StatusLine events
             if event.event_type == EventType.STATUS_LINE:
@@ -531,6 +606,7 @@ class DaemonController:
             "initialised": self._initialised,
             "stats": self._stats.to_dict(),
             "handlers": self._router.get_handler_count(),
+            ModeConstant.KEY_MODE: self._mode_manager.current_mode.value,
         }
 
         if self._degraded:
