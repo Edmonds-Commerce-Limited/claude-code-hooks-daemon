@@ -37,6 +37,7 @@ from pydantic import ValidationError as PydanticValidationError
 from claude_code_hooks_daemon.config.loader import ConfigLoader
 from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants import Timeout
+from claude_code_hooks_daemon.constants.modes import DaemonMode
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.paths import (
     cleanup_pid_file,
@@ -871,8 +872,68 @@ def cmd_config(args: argparse.Namespace) -> int:
     return 0
 
 
+def _get_current_mode(args: argparse.Namespace) -> dict[str, Any] | None:
+    """Best-effort query of current daemon mode before restart.
+
+    Returns the mode result dict or None on any failure.
+    Uses early returns for each failure point — restart must always proceed.
+
+    Args:
+        args: Command-line arguments (for project_root, socket/pid overrides)
+
+    Returns:
+        Mode result dict with 'mode' and 'custom_message' keys, or None
+    """
+    project_path = get_project_path(getattr(args, "project_root", None))
+    socket_path = _resolve_socket_path(args, project_path)
+    pid_path = _resolve_pid_path(args, project_path)
+
+    pid = read_pid_file(str(pid_path))
+    if pid is None:
+        return None
+
+    request = {"event": "_system", "hook_input": {"action": "get_mode"}}
+    response = send_daemon_request(socket_path, request)
+
+    if response is None or "error" in response:
+        return None
+
+    return cast("dict[str, Any]", response.get("result"))
+
+
+def _print_mode_advisory(pre_mode: dict[str, Any]) -> None:
+    """Print mode status advisory after restart.
+
+    Only prints when the pre-restart mode was non-default, since that means
+    the mode was lost during restart and the user needs to know.
+
+    Args:
+        pre_mode: Mode result dict from _get_current_mode
+    """
+    mode = pre_mode.get("mode", DaemonMode.DEFAULT.value)
+    if mode == DaemonMode.DEFAULT.value:
+        return
+
+    custom_message = pre_mode.get("custom_message")
+
+    print(f"\nMode before restart: {mode}", end="")
+    if custom_message:
+        print(f' (message: "{custom_message}")')
+    else:
+        print()
+    print(f"Mode after restart:  {DaemonMode.DEFAULT.value} (reset to config default)")
+
+    restore_cmd = f"  set-mode {mode}"
+    if custom_message:
+        restore_cmd += f' -m "{custom_message}"'
+    print(f"\nTo restore previous mode:\n{restore_cmd}")
+
+
 def cmd_restart(args: argparse.Namespace) -> int:
     """Restart daemon (stop + start).
+
+    Queries the current mode before stopping so it can print an advisory
+    if a non-default mode was active (since mode resets on restart).
 
     Args:
         args: Command-line arguments
@@ -880,12 +941,21 @@ def cmd_restart(args: argparse.Namespace) -> int:
     Returns:
         0 if daemon restarted successfully, 1 otherwise
     """
+    # Query current mode before stopping (best-effort, ignore failures)
+    pre_mode = _get_current_mode(args)
+
     # Stop daemon
     cmd_stop(args)
 
     # Start daemon
     time.sleep(0.5)  # Brief delay between stop and start
-    return cmd_start(args)
+    result = cmd_start(args)
+
+    # After successful start, print mode advisory if non-default mode was lost
+    if result == 0 and pre_mode is not None:
+        _print_mode_advisory(pre_mode)
+
+    return result
 
 
 def cmd_repair(args: argparse.Namespace) -> int:
