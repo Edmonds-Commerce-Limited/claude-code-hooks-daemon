@@ -29,6 +29,9 @@ class Priority:
     This ensures priorities are never magic numbers and makes refactoring safe.
     """
 
+    # Default priority for handlers that don't specify one (matches Handler.__init__ default)
+    DEFAULT = 50
+
     # Test handlers (Priority: 5)
     HELLO_WORLD = 5
 

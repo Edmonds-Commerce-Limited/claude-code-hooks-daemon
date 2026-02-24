@@ -268,6 +268,36 @@ class TestRegisterAll:
         assert destructive_handler is not None
         assert destructive_handler.priority == 999
 
+    def test_register_all_with_none_priority_keeps_default(
+        self, registry: HandlerRegistry, router: EventRouter
+    ) -> None:
+        """register_all should NOT override priority when config value is None.
+
+        Regression test for Plan 00070: PyYAML parses 'priority:' with no
+        value as None, which would set handler.priority = None and crash
+        the chain sort.
+        """
+        config = {
+            "pre_tool_use": {
+                "destructive_git": {"priority": None},
+            }
+        }
+
+        registry.register_all(router, config=config)
+
+        # Find the destructive git handler
+        pre_handlers = router.get_chain(EventType.PRE_TOOL_USE)
+        destructive_handler = None
+        for handler in pre_handlers.handlers:
+            if "destructive" in handler.name.lower():
+                destructive_handler = handler
+                break
+
+        # Should keep original priority (not None)
+        assert destructive_handler is not None
+        assert destructive_handler.priority is not None
+        assert isinstance(destructive_handler.priority, int)
+
     def test_register_all_with_enable_tags(
         self, registry: HandlerRegistry, router: EventRouter
     ) -> None:

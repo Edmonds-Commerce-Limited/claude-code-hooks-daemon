@@ -22,6 +22,7 @@ import logging
 import sys
 from pathlib import Path
 
+from claude_code_hooks_daemon.constants import Priority
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.handlers.registry import EVENT_TYPE_MAPPING
@@ -114,6 +115,17 @@ class ProjectHandlerLoader:
             raise RuntimeError(
                 f"Failed to instantiate project handler from {file_path.name}: {e}"
             ) from e
+
+        # Validate priority is not None (Plan 00070: defence in depth)
+        if handler.priority is None:
+            logger.warning(
+                "Project handler '%s' from %s has None priority — applying default (%d). "
+                "Set an explicit priority in __init__().",
+                handler.name,
+                file_path.name,
+                Priority.DEFAULT,
+            )
+            handler.priority = Priority.DEFAULT
 
         # Validate acceptance tests (warn but don't fail)
         try:

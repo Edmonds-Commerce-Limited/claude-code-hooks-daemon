@@ -232,6 +232,35 @@ class TestHandlerChain:
         assert handlers[1] is h3  # priority 30
         assert handlers[2] is h1  # priority 50
 
+    def test_handlers_property_handles_none_priority(self) -> None:
+        """handlers property should handle None priority without crashing.
+
+        Regression test for Plan 00070: handler.priority = None caused
+        TypeError in sort: '<' not supported between NoneType and int.
+        Defence in depth — chain should apply default priority if None.
+        """
+        chain = HandlerChain()
+        h1 = MockHandler("h1", priority=10)
+        h2 = MockHandler("h2", priority=30)
+
+        # Simulate a handler whose priority was set to None (e.g., from bad config)
+        h_broken = MockHandler("h_broken", priority=50)
+        h_broken.priority = None
+
+        chain.add(h1)
+        chain.add(h_broken)
+        chain.add(h2)
+
+        # Should NOT raise TypeError — should sort with default priority (50)
+        handlers = chain.handlers
+
+        assert len(handlers) == 3
+        # h_broken should be treated as priority 50 (default applied)
+        assert handlers[0] is h1  # priority 10
+        assert handlers[1] is h2  # priority 30
+        assert handlers[2].name == "h_broken"
+        assert handlers[2].priority == 50  # Default applied
+
     def test_handlers_property_caches_sort(self) -> None:
         """handlers property caches sort result."""
         chain = HandlerChain()
