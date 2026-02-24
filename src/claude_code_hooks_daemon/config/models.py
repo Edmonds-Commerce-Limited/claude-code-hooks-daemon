@@ -424,6 +424,10 @@ class DaemonConfig(BaseModel):
         default=False,
         description="Enforce single daemon process per project. When enabled, checks for multiple daemon processes and cleans them up. Auto-enabled in container environments. Requires process verification to prevent killing wrong processes.",
     )
+    default_mode: str = Field(
+        default="default",
+        description="Default daemon mode on startup. Values: 'default' (normal operation), 'unattended' (blocks Stop events to keep Claude working).",
+    )
 
     @field_validator("socket_path", "pid_file_path", mode="before")
     @classmethod
