@@ -26,6 +26,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00068: Daemon Modes System](Completed/00068-daemon-modes-system/PLAN.md) - Complete
+  - Runtime-mutable daemon modes with "unattended" mode that blocks all Stop events unconditionally
+  - ModeManager + ModeInterceptor pre-dispatch pattern, Controller/Server/CLI integration, /mode skill
+  - 6 phases: constants, interceptor, controller, IPC, CLI, skill + config
+
 - [00067: Fix Upgrade Early-Exit Skips Skill/Slash-Command Deployment](Completed/00067-fix-upgrade-early-exit-skips-deployments/PLAN.md) - Complete
   - Replaced minimal early-exit (daemon restart only) with full idempotent deployment sequence
   - Now re-deploys hook scripts, settings.json, .gitignore, slash commands, and skills when already at target version
@@ -406,8 +411,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 67
-- **Completed**: 59 (1 with reduced scope)
+- **Total Plans Created**: 68
+- **Completed**: 60 (1 with reduced scope)
 - **Active**: 1 (in progress)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 3 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045)

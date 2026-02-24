@@ -3,8 +3,6 @@
 from typing import Any
 from unittest.mock import Mock
 
-import pytest
-
 from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
 
 
@@ -37,9 +35,7 @@ class TestServerGetModeAction:
         server.controller = controller
         server._is_new_controller = True
 
-        response = server._handle_system_request(
-            {"action": ModeConstant.ACTION_GET_MODE}, None
-        )
+        response = server._handle_system_request({"action": ModeConstant.ACTION_GET_MODE}, None)
 
         assert "result" in response
         assert response["result"][ModeConstant.KEY_MODE] == DaemonMode.DEFAULT.value
@@ -66,9 +62,7 @@ class TestServerGetModeAction:
         server.controller = controller
         server._is_new_controller = True
 
-        response = server._handle_system_request(
-            {"action": ModeConstant.ACTION_GET_MODE}, None
-        )
+        response = server._handle_system_request({"action": ModeConstant.ACTION_GET_MODE}, None)
 
         assert response["result"][ModeConstant.KEY_MODE] == DaemonMode.UNATTENDED.value
         assert response["result"][ModeConstant.KEY_CUSTOM_MESSAGE] == "finish tasks"
