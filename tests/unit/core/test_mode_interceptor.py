@@ -22,16 +22,12 @@ class TestGetInterceptorForMode:
         assert isinstance(result, UnattendedModeInterceptor)
 
     def test_unattended_mode_with_custom_message(self) -> None:
-        result = get_interceptor_for_mode(
-            DaemonMode.UNATTENDED, custom_message="finish tasks"
-        )
+        result = get_interceptor_for_mode(DaemonMode.UNATTENDED, custom_message="finish tasks")
         assert result is not None
         assert isinstance(result, UnattendedModeInterceptor)
 
     def test_default_mode_ignores_custom_message(self) -> None:
-        result = get_interceptor_for_mode(
-            DaemonMode.DEFAULT, custom_message="ignored"
-        )
+        result = get_interceptor_for_mode(DaemonMode.DEFAULT, custom_message="ignored")
         assert result is None
 
 
@@ -69,25 +65,19 @@ class TestUnattendedModeInterceptor:
     def test_reentry_protection_snake_case(self) -> None:
         """Should return None if stop_hook_active is True (prevents infinite loops)."""
         interceptor = UnattendedModeInterceptor()
-        result = interceptor.intercept(
-            EventType.STOP, {"stop_hook_active": True}
-        )
+        result = interceptor.intercept(EventType.STOP, {"stop_hook_active": True})
         assert result is None
 
     def test_reentry_protection_camel_case(self) -> None:
         """Should return None if stopHookActive is True (prevents infinite loops)."""
         interceptor = UnattendedModeInterceptor()
-        result = interceptor.intercept(
-            EventType.STOP, {"stopHookActive": True}
-        )
+        result = interceptor.intercept(EventType.STOP, {"stopHookActive": True})
         assert result is None
 
     def test_no_reentry_when_false(self) -> None:
         """Should intercept when stop_hook_active is False."""
         interceptor = UnattendedModeInterceptor()
-        result = interceptor.intercept(
-            EventType.STOP, {"stop_hook_active": False}
-        )
+        result = interceptor.intercept(EventType.STOP, {"stop_hook_active": False})
         assert result is not None
         assert result.decision == Decision.DENY
 

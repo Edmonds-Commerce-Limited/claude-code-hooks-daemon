@@ -49,6 +49,14 @@ class Controller(Protocol):
         """Get registered handlers."""
         ...
 
+    def get_mode(self) -> dict[str, Any]:
+        """Get current daemon mode."""
+        ...
+
+    def set_mode(self, mode: DaemonMode, custom_message: str | None = None) -> bool:
+        """Set daemon mode."""
+        ...
+
 
 @runtime_checkable
 class LegacyController(Protocol):
@@ -652,9 +660,7 @@ class HooksDaemon:
                     mode = DaemonMode(mode_str)
                 except ValueError:
                     valid_modes = ", ".join(m.value for m in DaemonMode)
-                    response = {
-                        "error": f"Invalid mode: '{mode_str}'. Valid modes: {valid_modes}"
-                    }
+                    response = {"error": f"Invalid mode: '{mode_str}'. Valid modes: {valid_modes}"}
                 else:
                     custom_message = hook_input.get(ModeConstant.KEY_CUSTOM_MESSAGE)
                     if self._is_new_controller and isinstance(self.controller, Controller):

@@ -22,9 +22,7 @@ class ModeInterceptor(Protocol):
     means the event should proceed to the normal handler chain.
     """
 
-    def intercept(
-        self, event_type: EventType, hook_input: dict[str, Any]
-    ) -> HookResult | None:
+    def intercept(self, event_type: EventType, hook_input: dict[str, Any]) -> HookResult | None:
         """Intercept an event before handler dispatch.
 
         Args:
@@ -54,9 +52,7 @@ class UnattendedModeInterceptor:
         """
         self._custom_message = custom_message
 
-    def intercept(
-        self, event_type: EventType, hook_input: dict[str, Any]
-    ) -> HookResult | None:
+    def intercept(self, event_type: EventType, hook_input: dict[str, Any]) -> HookResult | None:
         """Intercept Stop events unconditionally.
 
         Args:
@@ -72,9 +68,7 @@ class UnattendedModeInterceptor:
 
         # Re-entry protection: check both snake_case and camelCase variants
         # Mirrors AutoContinueStopHandler._is_stop_hook_active()
-        if hook_input.get("stop_hook_active", False) or hook_input.get(
-            "stopHookActive", False
-        ):
+        if hook_input.get("stop_hook_active", False) or hook_input.get("stopHookActive", False):
             logger.debug("Unattended mode: stop_hook_active detected, skipping to prevent loop")
             return None
 
