@@ -26,6 +26,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00069: Restart Mode Preservation Advisory](Completed/00069-restart-mode-advisory/PLAN.md) - Complete
+  - Prints advisory when daemon restarts with non-default mode active (e.g. unattended)
+  - Shows lost mode and exact restore command; no output for default mode
+  - 11 new tests, TDD implementation
+
 - [00068: Daemon Modes System](Completed/00068-daemon-modes-system/PLAN.md) - Complete
   - Runtime-mutable daemon modes with "unattended" mode that blocks all Stop events unconditionally
   - ModeManager + ModeInterceptor pre-dispatch pattern, Controller/Server/CLI integration, /mode skill
@@ -411,8 +416,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 68
-- **Completed**: 60 (1 with reduced scope)
+- **Total Plans Created**: 69
+- **Completed**: 61 (1 with reduced scope)
 - **Active**: 1 (in progress)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 3 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045)
