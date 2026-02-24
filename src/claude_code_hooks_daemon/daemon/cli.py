@@ -653,6 +653,97 @@ def cmd_health(args: argparse.Namespace) -> int:
     return 0 if status == "healthy" else 1
 
 
+def cmd_get_mode(args: argparse.Namespace) -> int:
+    """Get current daemon mode.
+
+    Args:
+        args: Command-line arguments
+
+    Returns:
+        0 if successful, 1 otherwise
+    """
+    project_path = get_project_path(getattr(args, "project_root", None))
+    socket_path = _resolve_socket_path(args, project_path)
+    pid_path = _resolve_pid_path(args, project_path)
+
+    pid = read_pid_file(str(pid_path))
+    if pid is None:
+        print("Daemon not running", file=sys.stderr)
+        return 1
+
+    request = {"event": "_system", "hook_input": {"action": "get_mode"}}
+    response = send_daemon_request(socket_path, request)
+
+    if response is None:
+        print("No response from daemon", file=sys.stderr)
+        return 1
+
+    if "error" in response:
+        print(f"ERROR: {response['error']}", file=sys.stderr)
+        return 1
+
+    result = response.get("result", {})
+    mode = result.get("mode", "unknown")
+    custom_message = result.get("custom_message")
+
+    if getattr(args, "json", False):
+        print(json.dumps(result, indent=2))
+    else:
+        print(f"Mode: {mode}")
+        if custom_message:
+            print(f"Message: {custom_message}")
+
+    return 0
+
+
+def cmd_set_mode(args: argparse.Namespace) -> int:
+    """Set daemon mode.
+
+    Args:
+        args: Command-line arguments
+
+    Returns:
+        0 if successful, 1 otherwise
+    """
+    project_path = get_project_path(getattr(args, "project_root", None))
+    socket_path = _resolve_socket_path(args, project_path)
+    pid_path = _resolve_pid_path(args, project_path)
+
+    pid = read_pid_file(str(pid_path))
+    if pid is None:
+        print("Daemon not running", file=sys.stderr)
+        return 1
+
+    hook_input: dict[str, Any] = {
+        "action": "set_mode",
+        "mode": args.mode,
+    }
+    if getattr(args, "message", None):
+        hook_input["custom_message"] = args.message
+
+    request = {"event": "_system", "hook_input": hook_input}
+    response = send_daemon_request(socket_path, request)
+
+    if response is None:
+        print("No response from daemon", file=sys.stderr)
+        return 1
+
+    if "error" in response:
+        print(f"ERROR: {response['error']}", file=sys.stderr)
+        return 1
+
+    result = response.get("result", {})
+    status = result.get("status", "unknown")
+    mode = result.get("mode", "unknown")
+    custom_message = result.get("custom_message")
+
+    print(f"Mode: {mode} ({status})")
+    if custom_message:
+        print(f"Message: {custom_message}")
+
+    return 0
+
+
 def cmd_handlers(args: argparse.Namespace) -> int:
     """List registered handlers.
 
@@ -1611,6 +1702,29 @@ def main() -> int:
     # health command
     parser_health = subparsers.add_parser("health", help="Check daemon health")
     parser_health.set_defaults(func=cmd_health)
+
+    # get-mode command
+    parser_get_mode = subparsers.add_parser("get-mode", help="Get current daemon mode")
+    parser_get_mode.add_argument(
+        "--json",
+        action="store_true",
+        help="Output as JSON",
+    )
+    parser_get_mode.set_defaults(func=cmd_get_mode)
+
+    # set-mode command
+    parser_set_mode = subparsers.add_parser("set-mode", help="Set daemon mode")
+    parser_set_mode.add_argument(
+        "mode",
+        choices=["default", "unattended"],
+        help="Mode to set: default (normal), unattended (block Stop events)",
+    )
+    parser_set_mode.add_argument(
+        "-m",
+        "--message",
+        help="Custom message for the mode (e.g., task instructions for unattended mode)",
+    )
+    parser_set_mode.set_defaults(func=cmd_set_mode)
 
     # handlers command
     parser_handlers = subparsers.add_parser("handlers", help="List registered handlers")
