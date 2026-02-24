@@ -4,6 +4,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00070: Fix NoneType Priority Comparison Crash](00070-none-priority-crash/PLAN.md) - Not Started
+  - Daemon crashes with TypeError when handler has `priority: null` in config
+  - Multi-layer defence: validator, registry, chain sort, project handler loader
+  - **Priority**: High
+
 - [00063: FAIL FAST - Plugin Handler Bug & Error Hiding Audit](00063-fail-fast-plugin-handler-audit/PLAN.md) - In Progress
   - **Phase 1 DONE**: Plugin handler suffix bug fixed, warning converted to crash (daemon fails on unregistered handler)
   - **Phase 2 PENDING**: Comprehensive audit for ALL error hiding patterns in codebase (audit script, fix violations)
@@ -416,9 +421,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 69
+- **Total Plans Created**: 70
 - **Completed**: 61 (1 with reduced scope)
-- **Active**: 1 (in progress)
+- **Active**: 2 (1 in progress, 1 not started)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 3 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045)
 
