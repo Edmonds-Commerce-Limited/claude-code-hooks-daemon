@@ -39,6 +39,7 @@ from claude_code_hooks_daemon.constants.config import ConfigKey
 from claude_code_hooks_daemon.constants.events import EventID, EventIDMeta, EventKey
 from claude_code_hooks_daemon.constants.formatting import FormatLimit
 from claude_code_hooks_daemon.constants.handlers import HandlerID, HandlerIDMeta, HandlerKey
+from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
 from claude_code_hooks_daemon.constants.paths import DaemonPath, ProjectPath
 from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.constants.protocol import (
@@ -54,6 +55,8 @@ from claude_code_hooks_daemon.constants.validation import ValidationLimit
 __all__ = [
     # Config key constants
     "ConfigKey",
+    # Mode constants
+    "DaemonMode",
     # Path constants
     "DaemonPath",
     # Event constants
@@ -71,6 +74,8 @@ __all__ = [
     # Protocol field constants
     "HookInputField",
     "HookOutputField",
+    # Mode constant values
+    "ModeConstant",
     "PermissionDecision",
     # Priority constants
     "Priority",

@@ -17,6 +17,7 @@ from claude_code_hooks_daemon.core.front_controller import FrontController
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.handler_history import HandlerDecisionRecord, HandlerHistory
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
+from claude_code_hooks_daemon.core.mode import ModeManager
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.router import EventRouter
 from claude_code_hooks_daemon.core.session_state import SessionState
@@ -41,6 +42,7 @@ __all__ = [
     "HookEvent",
     "HookInput",
     "HookResult",
+    "ModeManager",
     "ProjectContext",
     "RecommendedModel",
     "SessionState",
