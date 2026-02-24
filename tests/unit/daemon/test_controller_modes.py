@@ -1,7 +1,6 @@
 """Tests for DaemonController mode integration."""
 
 from pathlib import Path
-from typing import Any, Generator
 from unittest.mock import Mock, patch
 
 import pytest
@@ -163,9 +162,7 @@ class TestControllerModeIntercept:
         assert result.result.decision == Decision.DENY
         assert "UNATTENDED" in (result.result.reason or "")
 
-    def test_unattended_mode_does_not_intercept_pre_tool_use(
-        self, workspace_root: Path
-    ) -> None:
+    def test_unattended_mode_does_not_intercept_pre_tool_use(self, workspace_root: Path) -> None:
         """Unattended mode should not affect PreToolUse events."""
         controller = _init_controller(workspace_root, mode=DaemonMode.UNATTENDED)
         event = _make_pre_tool_use_event()

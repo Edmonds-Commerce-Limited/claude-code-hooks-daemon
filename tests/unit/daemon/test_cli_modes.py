@@ -1,9 +1,6 @@
 """Tests for CLI mode commands (get-mode, set-mode)."""
 
-from typing import Any
 from unittest.mock import Mock, patch
-
-import pytest
 
 from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
 
@@ -20,21 +17,11 @@ class TestCmdGetMode:
         args.json = False
 
         with (
-            patch(
-                "claude_code_hooks_daemon.daemon.cli.get_project_path"
-            ) as mock_project,
-            patch(
-                "claude_code_hooks_daemon.daemon.cli._resolve_socket_path"
-            ) as mock_socket,
-            patch(
-                "claude_code_hooks_daemon.daemon.cli._resolve_pid_path"
-            ) as mock_pid,
-            patch(
-                "claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=123
-            ),
-            patch(
-                "claude_code_hooks_daemon.daemon.cli.send_daemon_request"
-            ) as mock_send,
+            patch("claude_code_hooks_daemon.daemon.cli.get_project_path") as mock_project,
+            patch("claude_code_hooks_daemon.daemon.cli._resolve_socket_path") as mock_socket,
+            patch("claude_code_hooks_daemon.daemon.cli._resolve_pid_path") as mock_pid,
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=123),
+            patch("claude_code_hooks_daemon.daemon.cli.send_daemon_request") as mock_send,
         ):
             mock_project.return_value = "/tmp/project"
             mock_socket.return_value = "/tmp/sock"
@@ -61,9 +48,7 @@ class TestCmdGetMode:
             patch("claude_code_hooks_daemon.daemon.cli.get_project_path"),
             patch("claude_code_hooks_daemon.daemon.cli._resolve_socket_path"),
             patch("claude_code_hooks_daemon.daemon.cli._resolve_pid_path"),
-            patch(
-                "claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=None
-            ),
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=None),
         ):
             result = cmd_get_mode(args)
 
@@ -81,12 +66,8 @@ class TestCmdGetMode:
             patch("claude_code_hooks_daemon.daemon.cli.get_project_path"),
             patch("claude_code_hooks_daemon.daemon.cli._resolve_socket_path"),
             patch("claude_code_hooks_daemon.daemon.cli._resolve_pid_path"),
-            patch(
-                "claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=123
-            ),
-            patch(
-                "claude_code_hooks_daemon.daemon.cli.send_daemon_request"
-            ) as mock_send,
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=123),
+            patch("claude_code_hooks_daemon.daemon.cli.send_daemon_request") as mock_send,
         ):
             mock_send.return_value = {
                 "result": {
@@ -116,12 +97,8 @@ class TestCmdSetMode:
             patch("claude_code_hooks_daemon.daemon.cli.get_project_path"),
             patch("claude_code_hooks_daemon.daemon.cli._resolve_socket_path"),
             patch("claude_code_hooks_daemon.daemon.cli._resolve_pid_path"),
-            patch(
-                "claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=123
-            ),
-            patch(
-                "claude_code_hooks_daemon.daemon.cli.send_daemon_request"
-            ) as mock_send,
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=123),
+            patch("claude_code_hooks_daemon.daemon.cli.send_daemon_request") as mock_send,
         ):
             mock_send.return_value = {
                 "result": {
@@ -152,12 +129,8 @@ class TestCmdSetMode:
             patch("claude_code_hooks_daemon.daemon.cli.get_project_path"),
             patch("claude_code_hooks_daemon.daemon.cli._resolve_socket_path"),
             patch("claude_code_hooks_daemon.daemon.cli._resolve_pid_path"),
-            patch(
-                "claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=123
-            ),
-            patch(
-                "claude_code_hooks_daemon.daemon.cli.send_daemon_request"
-            ) as mock_send,
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=123),
+            patch("claude_code_hooks_daemon.daemon.cli.send_daemon_request") as mock_send,
         ):
             mock_send.return_value = {
                 "result": {
@@ -187,9 +160,7 @@ class TestCmdSetMode:
             patch("claude_code_hooks_daemon.daemon.cli.get_project_path"),
             patch("claude_code_hooks_daemon.daemon.cli._resolve_socket_path"),
             patch("claude_code_hooks_daemon.daemon.cli._resolve_pid_path"),
-            patch(
-                "claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=None
-            ),
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=None),
         ):
             result = cmd_set_mode(args)
 
@@ -208,12 +179,8 @@ class TestCmdSetMode:
             patch("claude_code_hooks_daemon.daemon.cli.get_project_path"),
             patch("claude_code_hooks_daemon.daemon.cli._resolve_socket_path"),
             patch("claude_code_hooks_daemon.daemon.cli._resolve_pid_path"),
-            patch(
-                "claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=123
-            ),
-            patch(
-                "claude_code_hooks_daemon.daemon.cli.send_daemon_request"
-            ) as mock_send,
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=123),
+            patch("claude_code_hooks_daemon.daemon.cli.send_daemon_request") as mock_send,
         ):
             mock_send.return_value = {"error": "Invalid mode: 'bogus'"}
 
