@@ -1128,6 +1128,7 @@ def cmd_generate_playbook(args: argparse.Namespace) -> int:
         plugins = PluginLoader.load_from_plugins_config(config.plugins, project_path)
 
         # Create playbook generator
+        from claude_code_hooks_daemon.daemon.cli_acceptance_tests import get_cli_acceptance_tests
         from claude_code_hooks_daemon.daemon.playbook_generator import PlaybookGenerator
 
         # Convert HandlersConfig to dictionary
@@ -1137,6 +1138,7 @@ def cmd_generate_playbook(args: argparse.Namespace) -> int:
             config=handlers_dict,
             registry=registry,
             plugins=plugins,
+            cli_acceptance_tests=get_cli_acceptance_tests(),
         )
 
         # Get command-line arguments

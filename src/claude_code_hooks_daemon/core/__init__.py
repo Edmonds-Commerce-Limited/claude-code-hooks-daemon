@@ -6,6 +6,7 @@ building and running hook handlers.
 
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest, RecommendedModel, TestType
 from claude_code_hooks_daemon.core.chain import ChainExecutionResult, HandlerChain
+from claude_code_hooks_daemon.core.cli_acceptance_test import CliAcceptanceTest
 from claude_code_hooks_daemon.core.data_layer import (
     DaemonDataLayer,
     get_data_layer,
@@ -30,6 +31,7 @@ from claude_code_hooks_daemon.core.transcript_reader import (
 __all__ = [
     "AcceptanceTest",
     "ChainExecutionResult",
+    "CliAcceptanceTest",
     "DaemonDataLayer",
     "Decision",
     "EventRouter",

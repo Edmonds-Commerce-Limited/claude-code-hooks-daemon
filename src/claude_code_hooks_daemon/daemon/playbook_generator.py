@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from claude_code_hooks_daemon.constants import ConfigKey
 from claude_code_hooks_daemon.core import AcceptanceTest
+from claude_code_hooks_daemon.core.cli_acceptance_test import CliAcceptanceTest
 from claude_code_hooks_daemon.handlers.registry import EVENT_TYPE_MAPPING
 
 if TYPE_CHECKING:
@@ -31,7 +32,7 @@ CollectedTests = list[tuple[str, str, int, list[AcceptanceTest], str]]
 class PlaybookGenerator:
     """Generate acceptance test playbooks from handler definitions."""
 
-    __slots__ = ("_config", "_plugins", "_project_handlers", "_registry")
+    __slots__ = ("_cli_acceptance_tests", "_config", "_plugins", "_project_handlers", "_registry")
 
     def __init__(
         self,
@@ -39,6 +40,7 @@ class PlaybookGenerator:
         registry: HandlerRegistry,
         plugins: list[Any] | None = None,
         project_handlers: list[Any] | None = None,
+        cli_acceptance_tests: list[CliAcceptanceTest] | None = None,
     ) -> None:
         """Initialize playbook generator.
 
@@ -47,11 +49,13 @@ class PlaybookGenerator:
             registry: Handler registry with discovered handlers
             plugins: Optional list of plugin handler instances to include in playbook
             project_handlers: Optional list of project handler instances to include in playbook
+            cli_acceptance_tests: Optional list of CLI feature acceptance tests
         """
         self._config = config
         self._registry = registry
         self._plugins = plugins or []
         self._project_handlers = project_handlers or []
+        self._cli_acceptance_tests = cli_acceptance_tests or []
 
     def _collect_tests(
         self, include_disabled: bool = False
@@ -265,6 +269,24 @@ class PlaybookGenerator:
                 }
                 result.append(test_dict)
                 test_number += 1
+
+        # CLI feature tests
+        for cli_test in self._cli_acceptance_tests:
+            cli_dict: dict[str, Any] = {
+                "test_number": test_number,
+                "title": cli_test.title,
+                "command": cli_test.command,
+                "description": cli_test.description,
+                "expected_stdout_patterns": cli_test.expected_stdout_patterns,
+                "expected_exit_code": cli_test.expected_exit_code,
+                "source": "cli",
+                "test_type": "cli",
+                "setup_commands": cli_test.setup_commands,
+                "cleanup_commands": cli_test.cleanup_commands,
+                "safety_notes": cli_test.safety_notes,
+            }
+            result.append(cli_dict)
+            test_number += 1
 
         return result
 
@@ -638,6 +660,64 @@ class PlaybookGenerator:
                     lines.append("")
 
                     test_number += 1
+
+        # CLI Feature Tests section (if any)
+        if self._cli_acceptance_tests:
+            lines.append("## CLI Feature Tests")
+            lines.append("")
+            lines.append(
+                "These tests verify CLI command behaviour (not hook handlers). "
+                "Execute each command and verify expected stdout output."
+            )
+            lines.append("")
+
+            for cli_test in self._cli_acceptance_tests:
+                lines.append(f"#### Test {test_number}: {cli_test.title}")
+                lines.append("")
+                lines.append("**Type**: CLI Feature")
+                lines.append(f"**Expected Exit Code**: {cli_test.expected_exit_code}")
+                lines.append("")
+                lines.append(f"**Description**: {cli_test.description}")
+                lines.append("")
+
+                if cli_test.setup_commands:
+                    lines.append("**Setup**:")
+                    lines.append("```bash")
+                    for cmd in cli_test.setup_commands:
+                        lines.append(cmd)
+                    lines.append("```")
+                    lines.append("")
+
+                lines.append("**Command**:")
+                lines.append("```bash")
+                lines.append(cli_test.command)
+                lines.append("```")
+                lines.append("")
+
+                if cli_test.expected_stdout_patterns:
+                    lines.append("**Expected Stdout Patterns**:")
+                    for pattern in cli_test.expected_stdout_patterns:
+                        lines.append(f"- `{pattern}`")
+                    lines.append("")
+
+                if cli_test.safety_notes:
+                    lines.append(f"**Safety**: {cli_test.safety_notes}")
+                    lines.append("")
+
+                if cli_test.cleanup_commands:
+                    lines.append("**Cleanup**:")
+                    lines.append("```bash")
+                    for cmd in cli_test.cleanup_commands:
+                        lines.append(cmd)
+                    lines.append("```")
+                    lines.append("")
+
+                lines.append("**Result**: [ ] PASS [ ] FAIL")
+                lines.append("")
+                lines.append("---")
+                lines.append("")
+
+                test_number += 1
 
         # Total handler count including project handlers
         total_handler_count = len(tests_by_handler)
