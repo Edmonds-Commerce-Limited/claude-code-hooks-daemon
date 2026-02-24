@@ -20,6 +20,7 @@ import time
 from functools import partial
 from typing import Any, Protocol, runtime_checkable
 
+from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
 from claude_code_hooks_daemon.core.hook_result import HookResult
 from claude_code_hooks_daemon.core.input_schemas import get_input_schema
 from claude_code_hooks_daemon.daemon.config import DaemonConfig
@@ -631,6 +632,52 @@ class HooksDaemon:
             else:
                 handlers = {}
             response = {"result": {"handlers": handlers}}
+
+        elif action == ModeConstant.ACTION_GET_MODE:
+            if self._is_new_controller and isinstance(self.controller, Controller):
+                mode_result = self.controller.get_mode()
+            else:
+                mode_result = {
+                    ModeConstant.KEY_MODE: DaemonMode.DEFAULT.value,
+                    ModeConstant.KEY_CUSTOM_MESSAGE: None,
+                }
+            response = {"result": mode_result}
+
+        elif action == ModeConstant.ACTION_SET_MODE:
+            mode_str = hook_input.get(ModeConstant.KEY_MODE)
+            if mode_str is None:
+                response = {"error": "Missing 'mode' field in set_mode request"}
+            else:
+                try:
+                    mode = DaemonMode(mode_str)
+                except ValueError:
+                    valid_modes = ", ".join(m.value for m in DaemonMode)
+                    response = {
+                        "error": f"Invalid mode: '{mode_str}'. Valid modes: {valid_modes}"
+                    }
+                else:
+                    custom_message = hook_input.get(ModeConstant.KEY_CUSTOM_MESSAGE)
+                    if self._is_new_controller and isinstance(self.controller, Controller):
+                        changed = self.controller.set_mode(mode, custom_message=custom_message)
+                    else:
+                        changed = False
+                    status = (
+                        ModeConstant.STATUS_CHANGED if changed else ModeConstant.STATUS_UNCHANGED
+                    )
+                    mode_info = (
+                        self.controller.get_mode()
+                        if self._is_new_controller and isinstance(self.controller, Controller)
+                        else {
+                            ModeConstant.KEY_MODE: mode_str,
+                            ModeConstant.KEY_CUSTOM_MESSAGE: custom_message,
+                        }
+                    )
+                    response = {
+                        "result": {
+                            ModeConstant.KEY_STATUS: status,
+                            **mode_info,
+                        }
+                    }
 
         elif action == "log_marker":
             # Log a boundary marker message
