@@ -323,6 +323,25 @@ class TestValidateHandlers:
         assert "must be boolean" in errors[0]
         assert "str" in errors[0]
 
+    def test_priority_none_value(self) -> None:
+        """priority: null (None) in config should return error.
+
+        Regression test for Plan 00070: PyYAML parses 'priority:' with no
+        value as None, which crashed the daemon during handler chain sorting.
+        """
+        config = {
+            "handlers": {
+                "pre_tool_use": {
+                    "my_handler": {"enabled": True, "priority": None},
+                }
+            }
+        }
+        errors = ConfigValidator._validate_handlers(config, validate_handler_names=False)
+        assert len(errors) == 1
+        assert "priority" in errors[0]
+        assert "must be integer" in errors[0]
+        assert "NoneType" in errors[0]
+
     def test_priority_wrong_type(self) -> None:
         """priority field with wrong type should return error."""
         config = {

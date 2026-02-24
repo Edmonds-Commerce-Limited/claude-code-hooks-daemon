@@ -10,6 +10,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from claude_code_hooks_daemon.constants import Priority
 from claude_code_hooks_daemon.core.hook_result import HookResult
 
 if TYPE_CHECKING:
@@ -101,6 +102,17 @@ class HandlerChain:
     def handlers(self) -> list["Handler"]:
         """Get handlers in priority order (then alphabetically by name for ties)."""
         if not self._sorted:
+            # Defence in depth: fix any None priorities before sorting (Plan 00070)
+            for handler in self._handlers:
+                if handler.priority is None:
+                    logger.warning(
+                        "Handler '%s' has None priority — applying default (%d). "
+                        "Set an explicit priority in the handler or config.",
+                        handler.name,
+                        Priority.DEFAULT,
+                    )
+                    handler.priority = Priority.DEFAULT
+
             # Check for duplicate priorities and log warnings
             priority_map: dict[int, list[str]] = {}
             for handler in self._handlers:

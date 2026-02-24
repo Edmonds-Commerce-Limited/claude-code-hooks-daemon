@@ -298,3 +298,48 @@ class SecondHandler(Handler):
 
         with pytest.raises(RuntimeError, match="Multiple Handler subclasses found"):
             ProjectHandlerLoader.load_handler_from_file(handler_file)
+
+    def test_load_handler_applies_default_priority_when_none(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that handler with None priority gets default (50) applied.
+
+        Regression test for Plan 00070: project handlers that somehow end
+        up with priority=None should get the default applied and a warning logged.
+        """
+        handler_code = '''"""Handler that sets priority to None."""
+from typing import Any
+from claude_code_hooks_daemon.core import Handler, HookResult, AcceptanceTest, TestType
+from claude_code_hooks_daemon.core.hook_result import Decision
+
+class NullPriorityHandler(Handler):
+    def __init__(self) -> None:
+        super().__init__(handler_id="null-priority", priority=50)
+        # Simulate priority being set to None after init
+        setattr(self, "priority", None)
+    def matches(self, hook_input: dict[str, Any]) -> bool:
+        return True
+    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+        return HookResult(decision=Decision.ALLOW)
+    def get_acceptance_tests(self) -> list[AcceptanceTest]:
+        return [AcceptanceTest(
+            title="test", command="echo test", description="test",
+            expected_decision=Decision.ALLOW, expected_message_patterns=[],
+            test_type=TestType.BLOCKING,
+        )]
+'''
+        handler_file = tmp_path / "null_priority_handler.py"
+        handler_file.write_text(handler_code)
+
+        with caplog.at_level(logging.WARNING):
+            handler = ProjectHandlerLoader.load_handler_from_file(handler_file)
+
+        assert handler is not None
+        assert handler.priority == 50  # Default applied
+        assert isinstance(handler.priority, int)
+        assert any(
+            "None priority" in record.message or "default" in record.message.lower()
+            for record in caplog.records
+        )

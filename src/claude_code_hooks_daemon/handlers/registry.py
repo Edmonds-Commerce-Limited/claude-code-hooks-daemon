@@ -303,9 +303,11 @@ class HandlerRegistry:
                                 )
                                 continue
 
-                            # Override priority from config if specified
-                            if ConfigKey.PRIORITY in handler_config:
-                                instance.priority = handler_config[ConfigKey.PRIORITY]
+                            # Override priority from config if specified and not None
+                            # (PyYAML parses 'priority:' with no value as None — Plan 00070)
+                            config_priority = handler_config.get(ConfigKey.PRIORITY)
+                            if config_priority is not None:
+                                instance.priority = config_priority
 
                             # Apply options inheritance if handler shares options with parent
                             registry_key = f"{event_type.value}.{config_key}"
