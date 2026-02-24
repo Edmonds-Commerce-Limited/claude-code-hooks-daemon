@@ -52,6 +52,14 @@ class FakeController:
         """Return registered handlers."""
         return {"PreToolUse": [{"name": "test", "priority": 50}]}
 
+    def get_mode(self) -> dict[str, Any]:
+        """Return current mode."""
+        return {"mode": "default", "custom_message": None}
+
+    def set_mode(self, mode: Any, custom_message: str | None = None) -> bool:
+        """Set daemon mode."""
+        return True
+
 
 class FakeLegacyController:
     """Controller implementing the legacy protocol."""
