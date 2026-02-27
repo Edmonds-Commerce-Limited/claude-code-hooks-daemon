@@ -67,7 +67,10 @@ If you're experiencing issues:
 # 2. View recent logs
 /hooks-daemon logs
 
-# 3. Restart to recover
+# 3. Generate a bug report with full diagnostics
+/hooks-daemon bug-report "description of the issue"
+
+# 4. Restart to recover
 /hooks-daemon restart
 ```
 
@@ -101,7 +104,7 @@ case "$SUBCOMMAND" in
         bash "$SKILL_DIR/scripts/init-handlers.sh" "$@"
         ;;
 
-    logs|status|restart|handlers|validate-config)
+    logs|status|restart|handlers|validate-config|bug-report)
         # Forward to daemon CLI wrapper
         bash "$SKILL_DIR/scripts/daemon-cli.sh" "$SUBCOMMAND" "$@"
         ;;
@@ -118,6 +121,7 @@ case "$SUBCOMMAND" in
         echo "  logs [--follow]       View daemon logs"
         echo "  status                Show daemon status"
         echo "  handlers              List loaded handlers"
+        echo "  bug-report DESC       Generate bug report with diagnostics"
         echo ""
         echo "After editing .claude/hooks-daemon.yaml, always run: /hooks-daemon restart"
         echo ""
