@@ -308,6 +308,38 @@ class TestGitBranchColorCoding:
         assert self._GREEN not in result.context[0]
         assert self._ORANGE not in result.context[0]
 
+    def test_handle_git_called_process_error_silent_fail(
+        self, handler: GitBranchHandler, tmp_path: Path
+    ) -> None:
+        """Test silent failure on CalledProcessError (e.g. git branch --show-current fails)."""
+        import subprocess
+
+        hook_input = {"workspace": {"current_dir": str(tmp_path)}}
+
+        mock_result_toplevel = MagicMock()
+        mock_result_toplevel.returncode = 0
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                mock_result_toplevel,
+                subprocess.CalledProcessError(1, "git"),
+            ]
+            result = handler.handle(hook_input)
+
+        assert result.decision == "allow"
+        assert len(result.context) == 0
+
+    def test_get_default_branch_timeout_returns_none(
+        self, handler: GitBranchHandler, tmp_path: Path
+    ) -> None:
+        """_get_default_branch returns None when subprocess times out."""
+        import subprocess
+
+        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("git", 5)):
+            result = handler._get_default_branch(str(tmp_path))
+
+        assert result is None
+
     def test_default_branch_detection_cached(
         self, handler: GitBranchHandler, tmp_path: Path
     ) -> None:

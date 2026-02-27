@@ -285,3 +285,28 @@ class TestModelContextHandler:
     def test_model_supports_effort_empty_false(self, handler: ModelContextHandler) -> None:
         """Empty model ID does not support effort."""
         assert handler._model_supports_effort("") is False
+
+    def test_read_effort_level_returns_none_on_oserror(
+        self, handler: ModelContextHandler, tmp_path: Path
+    ) -> None:
+        """_read_effort_level returns None when settings file raises OSError."""
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text('{"effortLevel": "medium"}')
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_file):
+            with patch("pathlib.Path.read_text", side_effect=OSError("permission denied")):
+                result = handler._read_effort_level("claude-sonnet-4-6")
+
+        assert result is None
+
+    def test_read_effort_level_returns_none_on_invalid_json(
+        self, handler: ModelContextHandler, tmp_path: Path
+    ) -> None:
+        """_read_effort_level returns None when settings file has invalid JSON."""
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text("{invalid json{{")
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_file):
+            result = handler._read_effort_level("claude-sonnet-4-6")
+
+        assert result is None

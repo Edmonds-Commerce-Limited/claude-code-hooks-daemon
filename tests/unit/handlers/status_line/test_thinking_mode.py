@@ -142,3 +142,20 @@ class TestThinkingModeHandler:
     def test_get_acceptance_tests(self, handler: ThinkingModeHandler) -> None:
         tests = handler.get_acceptance_tests()
         assert len(tests) > 0
+
+    def test_handle_returns_empty_on_unexpected_exception(
+        self, handler: ThinkingModeHandler
+    ) -> None:
+        """Should return empty context and log when an unexpected exception occurs."""
+        with patch.object(handler, "_read_settings", side_effect=RuntimeError("unexpected")):
+            result = handler.handle({})
+
+        assert result.context == []
+
+    def test_get_settings_path_returns_claude_settings(
+        self, handler: ThinkingModeHandler
+    ) -> None:
+        """_get_settings_path should return ~/.claude/settings.json."""
+        path = handler._get_settings_path()
+        assert path.name == "settings.json"
+        assert path.parent.name == ".claude"
