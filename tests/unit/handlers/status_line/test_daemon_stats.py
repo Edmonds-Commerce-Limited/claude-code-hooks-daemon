@@ -398,7 +398,9 @@ class TestDaemonStatsHandler:
 
         upgrade_parts = [p for p in result.context if "📦" in p]
         assert len(upgrade_parts) == 1
-        assert "2.16.0" in upgrade_parts[0]
+        assert "2.15.0" in upgrade_parts[0]  # Current version shown
+        assert "2.16.0" in upgrade_parts[0]  # Upgrade version shown
+        assert "→" in upgrade_parts[0]  # Arrow indicating upgrade direction
         assert upgrade_parts[0].startswith(":")
 
     def test_handle_hides_upgrade_indicator_when_up_to_date(

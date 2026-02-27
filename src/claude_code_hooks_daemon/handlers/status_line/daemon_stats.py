@@ -106,8 +106,11 @@ class DaemonStatsHandler(Handler):
                     cache_data = json.loads(cache_file.read_text())
                     if cache_data.get("is_outdated"):
                         latest = cache_data.get("latest_version", "")
-                        if latest:
-                            parts.append(f": 📦 v{latest}")
+                        current = cache_data.get("current_version", "")
+                        if latest and current:
+                            parts.append(f": 📦 v{current} → v{latest}")
+                        elif latest:
+                            parts.append(f": 📦 upgrade → v{latest}")
             except Exception as e:
                 logger.debug("Failed to read version cache: %s", e)
 
