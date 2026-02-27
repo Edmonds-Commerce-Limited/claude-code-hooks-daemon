@@ -83,6 +83,40 @@ class TestValidatePlanNumberHandler:
         }
         assert handler.matches(hook_input) is True
 
+    def test_does_not_match_git_mv_to_completed(self, handler: ValidatePlanNumberHandler) -> None:
+        """Handler does not match git mv archiving a plan to Completed/."""
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": (
+                    "mkdir -p CLAUDE/Plan/Completed && "
+                    "git mv CLAUDE/Plan/023-defence-before-fix-skill "
+                    "CLAUDE/Plan/Completed/023-defence-before-fix-skill"
+                )
+            },
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_does_not_match_write_to_completed_folder(
+        self, handler: ValidatePlanNumberHandler
+    ) -> None:
+        """Handler does not match Write operations under Completed/."""
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/workspace/CLAUDE/Plan/Completed/023-old-plan/PLAN.md"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_does_not_match_mkdir_completed_folder(
+        self, handler: ValidatePlanNumberHandler
+    ) -> None:
+        """Handler does not match mkdir for Completed/ subdirectory."""
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "mkdir -p CLAUDE/Plan/Completed/023-old-plan"},
+        }
+        assert handler.matches(hook_input) is False
+
     def test_does_not_match_write_outside_plan_folder(
         self, handler: ValidatePlanNumberHandler
     ) -> None:

@@ -77,8 +77,12 @@ class ValidatePlanNumberHandler(Handler):
                 if self._is_heredoc_command(command):
                     return False
 
-                # Match mkdir for plan folders
-                if re.search(r"mkdir.*?CLAUDE/Plan/(\d{3})-([^\s/]+)", command):
+                # Match mkdir for plan folders (not Completed/ subdirectory)
+                # Use [^&;]* instead of .*? to prevent spanning across && or ;
+                # command boundaries into unrelated git mv arguments
+                if re.search(
+                    r"mkdir[^&;]*CLAUDE/Plan/(\d{3})-([^\s/]+)", command
+                ) and not re.search(r"mkdir[^&;]*CLAUDE/Plan/Completed/", command):
                     return True
 
         return False
@@ -121,7 +125,7 @@ class ValidatePlanNumberHandler(Handler):
         elif tool_name == ToolName.BASH:
             command = get_bash_command(hook_input)
             if command:
-                match = re.search(r"mkdir.*?CLAUDE/Plan/(\d{3})-([^\s/]+)", command)
+                match = re.search(r"mkdir[^&;]*CLAUDE/Plan/(\d{3})-([^\s/]+)", command)
                 if match:
                     plan_number = int(match.group(1))
                     plan_name = match.group(2)
