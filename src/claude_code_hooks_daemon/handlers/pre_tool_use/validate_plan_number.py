@@ -67,7 +67,7 @@ class ValidatePlanNumberHandler(Handler):
 
                 # Match plan folder creation (direct children of Plan/ only)
                 # CLAUDE/Plan/NNN-name/ matches, CLAUDE/Plan/Subfolder/NNN-name/ does not
-                if re.search(r"CLAUDE/Plans?/(\d{3})-([^/]+)/", file_path):
+                if re.search(r"CLAUDE/Plans?/(\d+)-([^/]+)/", file_path):
                     return True
 
         # Check Bash mkdir commands
@@ -81,7 +81,7 @@ class ValidatePlanNumberHandler(Handler):
                 # Match mkdir for plan folders (direct children of Plan/ only)
                 # Use [^&;]* instead of .*? to prevent spanning across && or ;
                 # command boundaries into unrelated git mv arguments
-                if re.search(r"mkdir[^&;]*CLAUDE/Plans?/(\d{3})-([^\s/]+)", command):
+                if re.search(r"mkdir[^&;]*CLAUDE/Plans?/(\d+)-([^\s/]+)", command):
                     return True
 
         return False
@@ -116,7 +116,7 @@ class ValidatePlanNumberHandler(Handler):
         if tool_name == ToolName.WRITE:
             file_path = get_file_path(hook_input)
             if file_path:
-                match = re.search(r"CLAUDE/Plans?/(\d{3})-([^/]+)/", file_path)
+                match = re.search(r"CLAUDE/Plans?/(\d+)-([^/]+)/", file_path)
                 if match:
                     plan_number = int(match.group(1))
                     plan_name = match.group(2)
@@ -124,7 +124,7 @@ class ValidatePlanNumberHandler(Handler):
         elif tool_name == ToolName.BASH:
             command = get_bash_command(hook_input)
             if command:
-                match = re.search(r"mkdir[^&;]*CLAUDE/Plans?/(\d{3})-([^\s/]+)", command)
+                match = re.search(r"mkdir[^&;]*CLAUDE/Plans?/(\d+)-([^\s/]+)", command)
                 if match:
                     plan_number = int(match.group(1))
                     plan_name = match.group(2)
@@ -144,9 +144,9 @@ class ValidatePlanNumberHandler(Handler):
             error_message = f"""
 PLAN NUMBER INCORRECT
 
-You are creating: CLAUDE/Plan/{plan_number:03d}-{plan_name}/
-Highest existing plan: {highest:03d}
-Expected next number: {expected_number:03d}
+You are creating: CLAUDE/Plan/{plan_number}-{plan_name}/
+Highest existing plan: {highest}
+Expected next number: {expected_number}
 
 BOTH active plans (CLAUDE/Plan/) AND completed plans (CLAUDE/Plan/Completed/) were checked.
 
@@ -154,7 +154,7 @@ HOW TO FIND CORRECT NUMBER:
 
 Run this command BEFORE creating a plan:
 ```bash
-find CLAUDE/Plan -maxdepth 2 -type d -name '[0-9]*' | grep -oP '/\\K\\d{{3}}(?=-)' | sort -n | tail -1
+find CLAUDE/Plan -maxdepth 2 -type d -name '[0-9]*' | grep -oP '/\\K\\d+(?=-)' | sort -n | tail -1
 ```
 
 This searches BOTH directories and returns the highest number.
@@ -162,11 +162,11 @@ Next plan number = highest + 1
 
 YOU MUST FIX THIS NOW:
 
-Use the correct plan number: {expected_number:03d}
+Use the correct plan number: {expected_number}
 
 Example:
 ```bash
-mkdir -p CLAUDE/Plan/{expected_number:03d}-{plan_name}
+mkdir -p CLAUDE/Plan/{expected_number}-{plan_name}
 ```
 
 See: CLAUDE/Plan/CLAUDE.md for full instructions
@@ -182,7 +182,7 @@ See: CLAUDE/Plan/CLAUDE.md for full instructions
 
         Scans direct children of the plan root AND all non-numbered
         organizational subfolders (Completed/, Archive/, Backlog/, etc.).
-        Any subfolder whose name does not start with a 3-digit number
+        Any subfolder whose name does not start with a number
         is treated as organizational and its children are scanned.
         """
         plan_root = self.workspace_root / "CLAUDE/Plan"
@@ -191,7 +191,7 @@ See: CLAUDE/Plan/CLAUDE.md for full instructions
             return 0
 
         plan_dirs: list[str] = []
-        _numbered_dir_re = re.compile(r"^(\d{3})-")
+        _numbered_dir_re = re.compile(r"^(\d+)-")
 
         for item in plan_root.iterdir():
             if not item.is_dir():
