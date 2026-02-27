@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.17.3] - 2026-02-27
+
+### Fixed
+
+- **Upgrade Skill Version String Bug**: Fixed the `/hooks-daemon upgrade` skill passing the literal string `"latest"` as the target version instead of resolving the actual latest release tag. This caused the upgrade script to fail when attempting to checkout a non-existent `latest` ref.
+
 ## [2.17.2] - 2026-02-27
 
 ### Fixed
