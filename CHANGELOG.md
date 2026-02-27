@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.17.0] - 2026-02-27
+
+### Added
+
+- **Daemon Modes System**: Runtime-mutable operating modes with "unattended" mode that blocks Stop events, preventing accidental daemon shutdown during unattended operations. Includes full IPC support (`get_mode`/`set_mode` actions), controller integration, CLI commands (`get-mode`/`set-mode`), and `/mode` skill for interactive mode management.
+- **Restart Mode Preservation Advisory**: New advisory that detects when daemon modes are configured and reminds users that `restart` resets modes to defaults, recommending `set_mode` after restart to restore desired modes.
+- **CLI Acceptance Test System**: New `generate-playbook` CLI command and `CliAcceptanceTest` infrastructure for non-handler features (daemon modes, CLI commands), extending acceptance testing beyond handler-only coverage.
+- **Priority.DEFAULT Constant**: New named constant (`Priority.DEFAULT = 50`) as single source of truth for the default handler priority value.
+- **Bug Report Generator**: New `bug-report` CLI subcommand that generates comprehensive structured markdown reports with daemon version, system info, daemon status, configuration, loaded handlers, recent logs, environment variables, and health summary. Works gracefully when daemon is not running. Accessible via CLI (`bug-report "description"`) and skill (`/hooks-daemon bug-report`).
+
+### Fixed
+
+- **NoneType Priority Comparison Crash**: Fixed `TypeError: '<' not supported between instances of 'NoneType' and 'int'` when a handler has `priority=None`. Defence-in-depth fix across four layers: validator rejects `priority: null` in config, registry skips None priority override, chain sort applies default before sorting, and project loader validates priority post-instantiation.
+- **Hedging Language Detector Misses Standalone Adverbs**: Fixed hedging language detector failing to match standalone hedging adverbs (e.g., "probably", "maybe") that weren't part of longer phrases.
+
+### Removed
+
+- **OrchestratorOnlyHandler**: Removed dead code handler that was never enabled in any configuration, superseded by upstream Claude Code delegate mode.
+
 ## [2.16.1] - 2026-02-22
 
 ### Fixed
