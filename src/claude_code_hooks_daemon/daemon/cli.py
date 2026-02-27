@@ -18,12 +18,15 @@ Provides:
 - init-project-handlers: Scaffold project-handlers directory structure
 - validate-project-handlers: Validate project handler files
 - test-project-handlers: Run project handler tests
+- bug-report: Generate comprehensive bug report with diagnostics
 """
 
 import argparse
 import asyncio
+import datetime
 import json
 import os
+import platform
 import signal
 import socket
 import subprocess  # nosec B404 - subprocess used for daemon management (systemctl) only
@@ -1701,6 +1704,295 @@ def cmd_test_project_handlers(args: argparse.Namespace) -> int:
         return 1
 
 
+_BUG_REPORT_LOG_LINES = 100
+_BUG_REPORT_DIR_NAME = "bug-reports"
+_BUG_REPORT_ENV_VARS = (
+    "HOSTNAME",
+    "CLAUDE_HOOKS_SOCKET_PATH",
+    "CLAUDE_HOOKS_PID_PATH",
+    "CLAUDE_HOOKS_LOG_PATH",
+    "HOOKS_DAEMON_ROOT_DIR",
+    "HOOKS_DAEMON_MODE",
+    "VIRTUAL_ENV",
+)
+
+
+def cmd_bug_report(args: argparse.Namespace) -> int:
+    """Generate comprehensive bug report with system diagnostics.
+
+    Collects daemon version, system info, daemon status, configuration,
+    loaded handlers, recent logs, environment variables, and a health
+    summary into a structured markdown report.
+
+    The report is generated even when the daemon is not running — missing
+    sections are noted with appropriate messages.
+
+    Args:
+        args: Command-line arguments with description, output
+
+    Returns:
+        0 if report generated successfully, 1 on error
+    """
+    project_path = get_project_path(getattr(args, "project_root", None))
+    pid_path = _resolve_pid_path(args, project_path)
+    socket_path = _resolve_socket_path(args, project_path)
+    description: str = getattr(args, "description", "No description provided")
+
+    # Gather all sections
+    sections: list[str] = []
+    health_checks: list[tuple[str, bool]] = []
+
+    # --- Header ---
+    now = datetime.datetime.now(tz=datetime.UTC)
+    sections.append(f"# Bug Report: {description}\n")
+    sections.append(f"**Generated:** {now.strftime('%Y-%m-%d %H:%M:%S UTC')}\n")
+
+    # --- Daemon Version ---
+    sections.append("## Daemon Version\n")
+    try:
+        from claude_code_hooks_daemon.version import __version__
+
+        sections.append(f"- **Version:** {__version__}")
+        health_checks.append(("Version detected", True))
+    except ImportError:
+        sections.append("- **Version:** UNKNOWN (import failed)")
+        health_checks.append(("Version detected", False))
+
+    # Git commit hash
+    git_hash = _bug_report_git_hash(project_path)
+    sections.append(f"- **Git Commit:** {git_hash}")
+
+    # Install mode
+    config_path = project_path / ".claude" / "hooks-daemon.yaml"
+    is_self_install = _bug_report_self_install_mode(config_path)
+    sections.append(f"- **Install Mode:** {'self-install' if is_self_install else 'normal'}\n")
+
+    # --- System Info ---
+    sections.append("## System Info\n")
+    sections.append(f"- **OS:** {platform.system()} {platform.release()}")
+    sections.append(f"- **Architecture:** {platform.machine()}")
+    sections.append(f"- **Python:** {platform.python_version()}")
+    sections.append(f"- **Hostname:** {os.environ.get('HOSTNAME', platform.node())}\n")
+    health_checks.append(("System info collected", True))
+
+    # --- Daemon Status ---
+    sections.append("## Daemon Status\n")
+    pid = read_pid_file(str(pid_path))
+    daemon_running = pid is not None
+
+    if daemon_running:
+        sections.append("- **Status:** RUNNING")
+        sections.append(f"- **PID:** {pid}")
+        sections.append(
+            f"- **Socket:** {socket_path} ({'exists' if socket_path.exists() else 'MISSING'})"
+        )
+        sections.append(f"- **PID File:** {pid_path}")
+        health_checks.append(("Daemon running", True))
+    else:
+        sections.append("- **Status:** NOT RUNNING")
+        sections.append(f"- **Socket:** {socket_path}")
+        sections.append(f"- **PID File:** {pid_path}")
+        health_checks.append(("Daemon running", False))
+
+    # Query daemon for health info if running
+    if daemon_running:
+        health_resp = send_daemon_request(
+            socket_path, {"event": "_system", "hook_input": {"action": "health"}}
+        )
+        if health_resp and "result" in health_resp:
+            result = health_resp["result"]
+            stats = result.get("stats", {})
+            sections.append(f"- **Uptime:** {stats.get('uptime_seconds', 0):.1f}s")
+            sections.append(f"- **Requests Processed:** {stats.get('requests_processed', 0)}")
+            sections.append(f"- **Errors:** {stats.get('errors', 0)}")
+            health_checks.append(("Health query succeeded", True))
+        else:
+            sections.append("- **Health Query:** Failed (no response)")
+            health_checks.append(("Health query succeeded", False))
+    sections.append("")
+
+    # --- Configuration ---
+    sections.append("## Configuration\n")
+    if config_path.exists():
+        config_content = config_path.read_text()
+        sections.append(f"**Path:** `{config_path}`\n")
+        sections.append("```yaml")
+        sections.append(config_content.rstrip())
+        sections.append("```\n")
+        health_checks.append(("Config file exists", True))
+    else:
+        sections.append(f"**Path:** `{config_path}` — FILE NOT FOUND\n")
+        health_checks.append(("Config file exists", False))
+
+    # --- Loaded Handlers ---
+    sections.append("## Loaded Handlers\n")
+    if daemon_running:
+        handlers_resp = send_daemon_request(
+            socket_path, {"event": "_system", "hook_input": {"action": "handlers"}}
+        )
+        if handlers_resp and "result" in handlers_resp:
+            handlers = handlers_resp["result"].get("handlers", {})
+            total = sum(
+                len(h_list) if isinstance(h_list, list) else h_list for h_list in handlers.values()
+            )
+            sections.append(f"**Total:** {total}\n")
+            for event_type, handler_list in handlers.items():
+                if not handler_list:
+                    continue
+                sections.append(f"**{event_type}:**")
+                if isinstance(handler_list, list):
+                    for h in handler_list:
+                        terminal = "T" if h.get("terminal", True) else "-"
+                        sections.append(
+                            f"- [{terminal}] {h.get('priority', 50):3d} {h.get('name', 'unknown')}"
+                        )
+                else:
+                    sections.append(f"- Count: {handler_list}")
+                sections.append("")
+            health_checks.append(("Handlers loaded", True))
+        else:
+            sections.append("Daemon running but handler query failed.\n")
+            health_checks.append(("Handlers loaded", False))
+    else:
+        sections.append("Daemon not running — cannot query handlers.\n")
+        health_checks.append(("Handlers loaded", False))
+
+    # --- Recent Logs ---
+    sections.append("## Recent Logs\n")
+    if daemon_running:
+        logs_resp = send_daemon_request(
+            socket_path,
+            {
+                "event": "_system",
+                "hook_input": {"action": "get_logs", "count": _BUG_REPORT_LOG_LINES},
+            },
+        )
+        if logs_resp and "result" in logs_resp:
+            logs = logs_resp["result"].get("logs", [])
+            if logs:
+                sections.append(f"Last {len(logs)} log entries:\n")
+                sections.append("```")
+                for log_line in logs:
+                    sections.append(log_line)
+                sections.append("```\n")
+            else:
+                sections.append("No logs in buffer.\n")
+            health_checks.append(("Logs accessible", True))
+        else:
+            sections.append("Daemon running but log query failed.\n")
+            health_checks.append(("Logs accessible", False))
+    else:
+        sections.append("Daemon not running — cannot query logs.\n")
+        health_checks.append(("Logs accessible", False))
+
+    # --- Environment ---
+    sections.append("## Environment\n")
+    for var_name in _BUG_REPORT_ENV_VARS:
+        value = os.environ.get(var_name)
+        display = value if value is not None else "(not set)"
+        sections.append(f"- `{var_name}`: {display}")
+    sections.append("")
+
+    # --- Bug Description ---
+    sections.append("## Bug Description\n")
+    sections.append(description)
+    sections.append("")
+
+    # --- Health Summary ---
+    sections.append("## Health Summary\n")
+    for check_name, passed in health_checks:
+        icon = "PASS" if passed else "FAIL"
+        sections.append(f"- [{icon}] {check_name}")
+    passed_count = sum(1 for _, p in health_checks if p)
+    total_count = len(health_checks)
+    sections.append(f"\n**Result:** {passed_count}/{total_count} checks passed\n")
+
+    # --- Assemble report ---
+    report = "\n".join(sections)
+
+    # --- Write output ---
+    output_target: str | None = getattr(args, "output", None)
+
+    if output_target == "-":
+        print(report)
+        return 0
+
+    if output_target is None:
+        # Default path: {untracked}/bug-reports/bug-report-{timestamp}.md
+        untracked_dir = _bug_report_untracked_dir(project_path, is_self_install)
+        reports_dir = untracked_dir / _BUG_REPORT_DIR_NAME
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = now.strftime("%Y%m%d-%H%M%S")
+        output_path = reports_dir / f"bug-report-{timestamp}.md"
+    else:
+        output_path = Path(output_target)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    output_path.write_text(report)
+    print(f"Bug report saved to: {output_path}")
+    return 0
+
+
+def _bug_report_git_hash(project_path: Path) -> str:
+    """Get git commit hash for the daemon source.
+
+    Args:
+        project_path: Project root directory
+
+    Returns:
+        Short git hash or 'unknown' if not available
+    """
+    try:
+        # SECURITY: Only trusted system tool (git) with list args, no shell
+        result = subprocess.run(  # nosec B603, B607
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=Timeout.GIT_CONTEXT,
+            cwd=str(project_path),
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        # Git not available or not a git repo — non-critical for bug reports
+        return "unknown"
+    return "unknown"
+
+
+def _bug_report_self_install_mode(config_path: Path) -> bool:
+    """Check if the daemon is in self-install mode.
+
+    Args:
+        config_path: Path to hooks-daemon.yaml
+
+    Returns:
+        True if self_install_mode is enabled
+    """
+    if not config_path.exists():
+        return False
+    try:
+        config_dict = ConfigLoader.load(config_path)
+        return bool(config_dict.get("daemon", {}).get("self_install_mode", False))
+    except Exception:
+        # Config parsing failure is non-critical for bug reports — default to normal mode
+        return False
+
+
+def _bug_report_untracked_dir(project_path: Path, is_self_install: bool) -> Path:
+    """Get the untracked directory for bug report output.
+
+    Args:
+        project_path: Project root directory
+        is_self_install: Whether running in self-install mode
+
+    Returns:
+        Path to the untracked directory
+    """
+    if is_self_install:
+        return project_path / "untracked"
+    return project_path / ".claude" / "hooks-daemon" / "untracked"
+
+
 def main() -> int:
     """Main CLI entry point.
 
@@ -1965,6 +2257,25 @@ def main() -> int:
         help="Verbose test output",
     )
     parser_test_ph.set_defaults(func=cmd_test_project_handlers)
+
+    # bug-report command
+    parser_bug_report = subparsers.add_parser(
+        "bug-report",
+        help="Generate comprehensive bug report with system diagnostics",
+    )
+    parser_bug_report.add_argument(
+        "description",
+        type=str,
+        help="Brief description of the bug",
+    )
+    parser_bug_report.add_argument(
+        "-o",
+        "--output",
+        type=str,
+        default=None,
+        help="Output file path (default: auto-generated in untracked/bug-reports/). Use '-' for stdout.",
+    )
+    parser_bug_report.set_defaults(func=cmd_bug_report)
 
     # Parse arguments
     args = parser.parse_args()
