@@ -578,6 +578,88 @@ class TestValidatePlanNumberHandler:
         assert "find CLAUDE/Plan -maxdepth 2 -type d -name '[0-9]*'" in result.context[0]
         assert "mkdir -p CLAUDE/Plan/043-wrong" in result.context[0]
 
+    # Tests for TOCTOU race condition: mkdir creates dir before Write fires
+
+    def test_handle_write_allows_when_dir_already_created_by_mkdir(
+        self, handler: ValidatePlanNumberHandler, plan_root: Path
+    ) -> None:
+        """Write to plan dir should not false-positive when mkdir already created it.
+
+        Scenario: mkdir creates CLAUDE/Plan/024-name/, then Write creates PLAN.md.
+        The handler fires on Write, sees 024 as highest (from mkdir), and would
+        incorrectly demand 025. Fix: allow plan_number == highest.
+        """
+        (plan_root / "023-old-plan").mkdir()
+        # mkdir already created the target directory before Write fires
+        (plan_root / "024-dto-phpstan-rules").mkdir()
+
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/workspace/CLAUDE/Plan/024-dto-phpstan-rules/PLAN.md"},
+        }
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW
+        assert not result.context  # No warning — number is valid
+
+    def test_handle_write_allows_when_dir_is_highest_from_completed(
+        self, handler: ValidatePlanNumberHandler, plan_root: Path
+    ) -> None:
+        """Write should also work when mkdir dir matches highest from any subfolder.
+
+        Scenario: Completed has 023, mkdir creates 024, Write fires and sees 024
+        as highest. Should allow since plan_number == highest.
+        """
+        completed = plan_root / "Completed"
+        completed.mkdir()
+        (completed / "023-completed-plan").mkdir()
+        # mkdir already created the target directory
+        (plan_root / "024-new-plan").mkdir()
+
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/workspace/CLAUDE/Plan/024-new-plan/PLAN.md"},
+        }
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW
+        assert not result.context
+
+    def test_handle_write_still_rejects_genuinely_wrong_number(
+        self, handler: ValidatePlanNumberHandler, plan_root: Path
+    ) -> None:
+        """Write with wrong number should still be rejected even with relaxed check.
+
+        plan_number 030 is neither highest (024) nor highest+1 (025).
+        """
+        (plan_root / "023-old").mkdir()
+        (plan_root / "024-current").mkdir()
+
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/workspace/CLAUDE/Plan/030-wrong/PLAN.md"},
+        }
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW  # advisory
+        assert result.context
+        assert "PLAN NUMBER INCORRECT" in result.context[0]
+
+    def test_handle_write_still_rejects_low_number_with_existing_dir(
+        self, handler: ValidatePlanNumberHandler, plan_root: Path
+    ) -> None:
+        """Write with too-low number should still be rejected.
+
+        plan_number 020 is lower than highest (024), not equal or +1.
+        """
+        (plan_root / "024-current").mkdir()
+
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/workspace/CLAUDE/Plan/020-old/PLAN.md"},
+        }
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW
+        assert result.context
+        assert "PLAN NUMBER INCORRECT" in result.context[0]
+
     # Tests for handler metadata
 
     def test_handler_has_correct_name(self, handler: ValidatePlanNumberHandler) -> None:

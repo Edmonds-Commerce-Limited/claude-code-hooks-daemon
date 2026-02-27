@@ -137,7 +137,10 @@ class ValidatePlanNumberHandler(Handler):
         expected_number = highest + 1
 
         # Validate number
-        if plan_number != expected_number:
+        # Allow plan_number == highest (TOCTOU: mkdir already created the dir
+        # before Write fires, so the new dir is already counted as "highest")
+        # Allow plan_number == highest + 1 (normal case: dir not yet created)
+        if plan_number != expected_number and plan_number != highest:
             error_message = f"""
 PLAN NUMBER INCORRECT
 
