@@ -65,11 +65,29 @@ class TestValidatePlanNumberHandler:
         }
         assert handler.matches(hook_input) is True
 
+    def test_matches_write_operation_with_5_digit_plan(
+        self, handler: ValidatePlanNumberHandler
+    ) -> None:
+        """Handler matches Write operation with 5-digit plan number."""
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/workspace/CLAUDE/Plan/00072-new-feature/PLAN.md"},
+        }
+        assert handler.matches(hook_input) is True
+
     def test_matches_bash_mkdir_with_plan_folder(self, handler: ValidatePlanNumberHandler) -> None:
         """Handler matches Bash mkdir command for plan folder."""
         hook_input: dict[str, Any] = {
             "tool_name": "Bash",
             "tool_input": {"command": "mkdir -p CLAUDE/Plan/001-test-plan"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_bash_mkdir_with_5_digit_plan(self, handler: ValidatePlanNumberHandler) -> None:
+        """Handler matches Bash mkdir with 5-digit plan number."""
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "mkdir -p CLAUDE/Plan/00072-new-feature"},
         }
         assert handler.matches(hook_input) is True
 
@@ -378,9 +396,8 @@ class TestValidatePlanNumberHandler:
     def test_get_highest_plan_number_ignores_invalid_format(
         self, handler: ValidatePlanNumberHandler, plan_root: Path
     ) -> None:
-        """_get_highest_plan_number ignores directories with invalid format."""
+        """_get_highest_plan_number ignores directories without digit-dash prefix."""
         (plan_root / "005-valid").mkdir()
-        (plan_root / "1-invalid").mkdir()  # Not 3 digits
         (plan_root / "abc-invalid").mkdir()  # No digits
         highest = handler._get_highest_plan_number()
         assert highest == 5
@@ -388,11 +405,41 @@ class TestValidatePlanNumberHandler:
     def test_get_highest_plan_number_three_digit_format(
         self, handler: ValidatePlanNumberHandler, plan_root: Path
     ) -> None:
-        """_get_highest_plan_number requires three-digit format."""
+        """_get_highest_plan_number handles three-digit plan numbers."""
         (plan_root / "099-high").mkdir()
         (plan_root / "100-higher").mkdir()
         highest = handler._get_highest_plan_number()
         assert highest == 100
+
+    def test_get_highest_plan_number_five_digit_format(
+        self, handler: ValidatePlanNumberHandler, plan_root: Path
+    ) -> None:
+        """_get_highest_plan_number handles 5-digit plan numbers (this project's format)."""
+        (plan_root / "00070-old-plan").mkdir()
+        (plan_root / "00071-current-plan").mkdir()
+        completed = plan_root / "Completed"
+        completed.mkdir()
+        (completed / "00065-archived").mkdir()
+        highest = handler._get_highest_plan_number()
+        assert highest == 71
+
+    def test_get_highest_plan_number_mixed_digit_widths(
+        self, handler: ValidatePlanNumberHandler, plan_root: Path
+    ) -> None:
+        """_get_highest_plan_number works with mixed 3-digit and 5-digit plans."""
+        (plan_root / "001-three-digit").mkdir()
+        (plan_root / "00072-five-digit").mkdir()
+        highest = handler._get_highest_plan_number()
+        assert highest == 72
+
+    def test_get_highest_plan_number_single_digit(
+        self, handler: ValidatePlanNumberHandler, plan_root: Path
+    ) -> None:
+        """_get_highest_plan_number handles single-digit plan numbers."""
+        (plan_root / "1-first").mkdir()
+        (plan_root / "2-second").mkdir()
+        highest = handler._get_highest_plan_number()
+        assert highest == 2
 
     # Tests for handle() method - Write operations
 
@@ -434,9 +481,9 @@ class TestValidatePlanNumberHandler:
         assert result.decision == Decision.ALLOW  # Non-terminal handler
         assert result.context
         assert "PLAN NUMBER INCORRECT" in result.context[0]
-        assert "You are creating: CLAUDE/Plan/010-new-plan/" in result.context[0]
-        assert "Highest existing plan: 005" in result.context[0]
-        assert "Expected next number: 006" in result.context[0]
+        assert "You are creating: CLAUDE/Plan/10-new-plan/" in result.context[0]
+        assert "Highest existing plan: 5" in result.context[0]
+        assert "Expected next number: 6" in result.context[0]
 
     def test_handle_write_incorrect_plan_number_too_low(
         self, handler: ValidatePlanNumberHandler, plan_root: Path
@@ -451,7 +498,7 @@ class TestValidatePlanNumberHandler:
         assert result.decision == Decision.ALLOW
         assert result.context
         assert "PLAN NUMBER INCORRECT" in result.context[0]
-        assert "Expected next number: 011" in result.context[0]
+        assert "Expected next number: 11" in result.context[0]
 
     def test_handle_write_with_completed_plans(
         self, handler: ValidatePlanNumberHandler, plan_root: Path
@@ -488,9 +535,51 @@ class TestValidatePlanNumberHandler:
         result = handler.handle(hook_input)
         assert result.decision == Decision.ALLOW
         assert result.context
-        assert "Highest existing plan: 030" in result.context[0]
-        assert "Expected next number: 031" in result.context[0]
+        assert "Highest existing plan: 30" in result.context[0]
+        assert "Expected next number: 31" in result.context[0]
         assert "BOTH active plans" in result.context[0]
+
+    # Tests for handle() with 5-digit plan numbers
+
+    def test_handle_write_5_digit_correct_sequential(
+        self, handler: ValidatePlanNumberHandler, plan_root: Path
+    ) -> None:
+        """Handler allows 5-digit plan number that is sequential."""
+        (plan_root / "00071-existing").mkdir()
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/workspace/CLAUDE/Plan/00072-new-plan/PLAN.md"},
+        }
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW
+        assert not result.context
+
+    def test_handle_write_5_digit_wrong_number(
+        self, handler: ValidatePlanNumberHandler, plan_root: Path
+    ) -> None:
+        """Handler warns for 5-digit plan with wrong number."""
+        (plan_root / "00071-existing").mkdir()
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/workspace/CLAUDE/Plan/00099-wrong/PLAN.md"},
+        }
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW
+        assert result.context
+        assert "PLAN NUMBER INCORRECT" in result.context[0]
+
+    def test_handle_bash_mkdir_5_digit_correct(
+        self, handler: ValidatePlanNumberHandler, plan_root: Path
+    ) -> None:
+        """Handler allows 5-digit mkdir plan number that is sequential."""
+        (plan_root / "00071-existing").mkdir()
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "mkdir -p CLAUDE/Plan/00072-new-plan"},
+        }
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW
+        assert not result.context
 
     # Tests for handle() method - Bash operations
 
@@ -520,7 +609,7 @@ class TestValidatePlanNumberHandler:
         assert result.decision == Decision.ALLOW
         assert result.context
         assert "PLAN NUMBER INCORRECT" in result.context[0]
-        assert "Expected next number: 008" in result.context[0]
+        assert "Expected next number: 8" in result.context[0]
 
     def test_handle_bash_mkdir_with_flags(
         self, handler: ValidatePlanNumberHandler, plan_root: Path
@@ -576,7 +665,7 @@ class TestValidatePlanNumberHandler:
         result = handler.handle(hook_input)
         assert result.context
         assert "find CLAUDE/Plan -maxdepth 2 -type d -name '[0-9]*'" in result.context[0]
-        assert "mkdir -p CLAUDE/Plan/043-wrong" in result.context[0]
+        assert "mkdir -p CLAUDE/Plan/43-wrong" in result.context[0]
 
     # Tests for TOCTOU race condition: mkdir creates dir before Write fires
 

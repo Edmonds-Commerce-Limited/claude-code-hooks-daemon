@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.17.2] - 2026-02-27
+
+### Fixed
+
+- **Plan Number Validation TOCTOU Race Condition**: Fixed false positive where the `validate_plan_number` handler incorrectly demanded the next sequential plan number when a preceding `mkdir` had already created the plan directory before the `Write` tool created `PLAN.md`. The handler now accepts `plan_number == highest` (directory already created by mkdir) in addition to `plan_number == highest + 1` (normal new-plan case).
+- **Plan Number Handler False Positives on Archive Operations**: Fixed `validate_plan_number` handler incorrectly triggering when archiving plans via `git mv` to `CLAUDE/Plan/Completed/` or any organisational subfolder. Changed regex from `.*?` to `[^&;]*` to prevent matching across `&&`/`;` command boundaries into unrelated `git mv` arguments. Handler now matches only direct children of the `Plan/` root and scans all non-numbered organisational subfolders when detecting the highest existing plan number.
+- **Plan Number Handler Hardcoded 3-Digit Width**: Fixed `validate_plan_number` handler silently ignoring plan numbers with more or fewer than 3 digits. The handler used `\d{3}` regex which only matched exactly 3-digit numbers (e.g. `001`), causing it to completely skip validation for 5-digit plans like `00072` used by this project. Changed all regex patterns to `\d+` to support any digit width. Removed hardcoded `:03d` zero-padding from error messages.
+
 ## [2.17.1] - 2026-02-27
 
 ### Fixed
