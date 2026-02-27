@@ -4,7 +4,7 @@
   "exclusions": [
     {
       "file": "config/models.py",
-      "lines": [549],
+      "lines": [553],
       "rule": "silent-pass",
       "reason": "load_or_default(): FileNotFoundError is expected when config file disappears between exists() check and read (TOCTOU). Falls through to return cls() which creates a safe default. This is not hiding an error - it IS the intended fallback."
     },
@@ -46,31 +46,31 @@
     },
     {
       "file": "daemon/server.py",
-      "lines": [257],
+      "lines": [266],
       "rule": "return-none-on-error",
       "reason": "Schema validator loading: returns None when schema not available. Callers check for None and skip validation or use strict mode. Schema validation is optional safety layer, not blocking."
     },
     {
       "file": "daemon/server.py",
-      "lines": [663, 666],
+      "lines": [716, 719],
       "rule": "log-and-continue",
       "reason": "Stale PID file check: log-and-continue when reading/parsing stale PID file. Already logged. Daemon startup should continue even if stale PID file is unreadable."
     },
     {
       "file": "daemon/cli.py",
-      "lines": [91],
+      "lines": [95],
       "rule": "silent-pass",
       "reason": "Directory search loop: except SystemExit: pass when searching upward for .claude directory. SystemExit during path resolution means we hit filesystem root - continue searching is the correct behaviour."
     },
     {
       "file": "daemon/cli.py",
-      "lines": [210],
+      "lines": [214],
       "rule": "return-none-on-error",
       "reason": "send_request(): Returns None on socket connection failure. Callers check for None and display appropriate error messages to user. Socket unavailability is a normal operational state (daemon not running)."
     },
     {
       "file": "daemon/playbook_generator.py",
-      "lines": [96, 114, 135],
+      "lines": [100, 118, 139],
       "rule": "log-and-continue",
       "reason": "Acceptance test collection from handlers: log-and-continue when a handler fails to provide tests. One handler failing should not prevent playbook generation from other handlers. Already logged."
     },
@@ -82,7 +82,7 @@
     },
     {
       "file": "handlers/project_loader.py",
-      "lines": [119],
+      "lines": [131],
       "rule": "log-and-continue",
       "reason": "Project handler acceptance test validation: log-and-continue. Acceptance test retrieval failure is non-fatal for handler loading. Already logged at warning level."
     },
