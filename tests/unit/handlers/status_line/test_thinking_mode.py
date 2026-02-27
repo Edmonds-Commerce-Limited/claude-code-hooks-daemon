@@ -152,9 +152,7 @@ class TestThinkingModeHandler:
 
         assert result.context == []
 
-    def test_get_settings_path_returns_claude_settings(
-        self, handler: ThinkingModeHandler
-    ) -> None:
+    def test_get_settings_path_returns_claude_settings(self, handler: ThinkingModeHandler) -> None:
         """_get_settings_path should return ~/.claude/settings.json."""
         path = handler._get_settings_path()
         assert path.name == "settings.json"
