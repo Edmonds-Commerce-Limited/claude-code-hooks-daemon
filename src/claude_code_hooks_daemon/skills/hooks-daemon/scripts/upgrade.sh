@@ -27,13 +27,13 @@ if [ ! -f "$PROJECT_ROOT/.claude/hooks-daemon.yaml" ]; then
 fi
 
 DAEMON_DIR="$PROJECT_ROOT/.claude/hooks-daemon"
-TARGET_VERSION="${1:-latest}"
+TARGET_VERSION="${1:-}"
 
 echo "Claude Code Hooks Daemon - Upgrade"
 echo ""
 echo "Project:        $PROJECT_ROOT"
 echo "Daemon:         $DAEMON_DIR"
-echo "Target version: $TARGET_VERSION"
+echo "Target version: ${TARGET_VERSION:-latest (auto-detect)}"
 echo ""
 
 # Check if daemon directory exists
@@ -60,4 +60,8 @@ echo "Executing upgrade..."
 echo ""
 
 cd "$PROJECT_ROOT"
-bash "$UPGRADE_SCRIPT" --project-root "$PROJECT_ROOT" "$TARGET_VERSION"
+if [ -n "$TARGET_VERSION" ]; then
+    bash "$UPGRADE_SCRIPT" --project-root "$PROJECT_ROOT" "$TARGET_VERSION"
+else
+    bash "$UPGRADE_SCRIPT" --project-root "$PROJECT_ROOT"
+fi
