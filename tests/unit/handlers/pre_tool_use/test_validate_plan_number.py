@@ -97,6 +97,21 @@ class TestValidatePlanNumberHandler:
         }
         assert handler.matches(hook_input) is False
 
+    def test_does_not_match_git_mv_to_any_subfolder(
+        self, handler: ValidatePlanNumberHandler
+    ) -> None:
+        """Handler does not match git mv archiving a plan to any organizational subfolder."""
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": (
+                    "mkdir -p CLAUDE/Plan/Archive && "
+                    "git mv CLAUDE/Plan/023-old CLAUDE/Plan/Archive/023-old"
+                )
+            },
+        }
+        assert handler.matches(hook_input) is False
+
     def test_does_not_match_write_to_completed_folder(
         self, handler: ValidatePlanNumberHandler
     ) -> None:
@@ -107,6 +122,19 @@ class TestValidatePlanNumberHandler:
         }
         assert handler.matches(hook_input) is False
 
+    def test_does_not_match_write_to_any_organizational_subfolder(
+        self, handler: ValidatePlanNumberHandler
+    ) -> None:
+        """Handler does not match Write under any non-numbered subfolder of Plan."""
+        for subfolder in ["Archive", "Backlog", "OnHold", "v1"]:
+            hook_input: dict[str, Any] = {
+                "tool_name": "Write",
+                "tool_input": {
+                    "file_path": f"/workspace/CLAUDE/Plan/{subfolder}/023-old-plan/PLAN.md"
+                },
+            }
+            assert handler.matches(hook_input) is False, f"Should not match subfolder {subfolder}"
+
     def test_does_not_match_mkdir_completed_folder(
         self, handler: ValidatePlanNumberHandler
     ) -> None:
@@ -114,6 +142,16 @@ class TestValidatePlanNumberHandler:
         hook_input: dict[str, Any] = {
             "tool_name": "Bash",
             "tool_input": {"command": "mkdir -p CLAUDE/Plan/Completed/023-old-plan"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_does_not_match_mkdir_any_organizational_subfolder(
+        self, handler: ValidatePlanNumberHandler
+    ) -> None:
+        """Handler does not match mkdir under any non-numbered subfolder of Plan."""
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "mkdir -p CLAUDE/Plan/Archive/023-old-plan"},
         }
         assert handler.matches(hook_input) is False
 
@@ -312,6 +350,20 @@ class TestValidatePlanNumberHandler:
         (completed_dir / "015-completed").mkdir()
         highest = handler._get_highest_plan_number()
         assert highest == 15
+
+    def test_get_highest_plan_number_scans_all_organizational_subfolders(
+        self, handler: ValidatePlanNumberHandler, plan_root: Path
+    ) -> None:
+        """_get_highest_plan_number scans ALL non-numbered subfolders, not just Completed/."""
+        (plan_root / "005-active").mkdir()
+        archive_dir = plan_root / "Archive"
+        archive_dir.mkdir()
+        (archive_dir / "020-archived").mkdir()
+        backlog_dir = plan_root / "Backlog"
+        backlog_dir.mkdir()
+        (backlog_dir / "025-backlogged").mkdir()
+        highest = handler._get_highest_plan_number()
+        assert highest == 25
 
     def test_get_highest_plan_number_ignores_non_numbered_dirs(
         self, handler: ValidatePlanNumberHandler, plan_root: Path
