@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.17.1] - 2026-02-27
+
+### Fixed
+
+- **Upgrade Skill Missing --project-root Argument**: Fixed the `/hooks-daemon upgrade` skill wrapper script failing with "ERR --project-root requires a path argument". The skill wrapper was not passing the required `--project-root` argument to the daemon's upgrade script, causing all skill-based upgrades to fail.
+
 ## [2.17.0] - 2026-02-27
 
 ### Added
