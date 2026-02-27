@@ -26,6 +26,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00072: Bug Report Generator](Completed/00072-bug-report-generator/PLAN.md) - Complete
+  - Added `bug-report` CLI subcommand generating structured markdown reports with full diagnostics
+  - Skill integration via `/hooks-daemon bug-report` routing
+  - 18 TDD unit tests, all QA checks passing
+
 - [00070: Fix NoneType Priority Comparison Crash](Completed/00070-none-priority-crash/PLAN.md) - Complete
   - Fixed daemon crash when handler has `priority: null` in config (TypeError during chain sort)
   - Multi-layer defence: chain sort fallback, registry skip, project loader validation, Priority.DEFAULT constant
@@ -421,8 +426,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 70
-- **Completed**: 62 (1 with reduced scope)
+- **Total Plans Created**: 72
+- **Completed**: 63 (1 with reduced scope)
 - **Active**: 1 (in progress)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 3 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045)
