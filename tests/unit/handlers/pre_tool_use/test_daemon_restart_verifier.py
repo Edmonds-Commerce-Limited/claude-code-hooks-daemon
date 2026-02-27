@@ -118,6 +118,32 @@ def test_handle_when_not_hooks_daemon_repo() -> None:
     assert result.decision == Decision.ALLOW
 
 
+def test_does_not_match_empty_command() -> None:
+    """Test does not match when command is empty string."""
+    handler = DaemonRestartVerifierHandler()
+
+    hook_input = {"tool_name": "Bash", "tool_input": {"command": ""}}
+
+    with patch(
+        "claude_code_hooks_daemon.handlers.pre_tool_use.daemon_restart_verifier.is_hooks_daemon_repo",
+        return_value=True,
+    ):
+        assert handler.matches(hook_input) is False
+
+
+def test_does_not_match_non_commit_command_in_hooks_repo() -> None:
+    """Test does not match non-commit command even in hooks daemon repo."""
+    handler = DaemonRestartVerifierHandler()
+
+    hook_input = {"tool_name": "Bash", "tool_input": {"command": "git push origin main"}}
+
+    with patch(
+        "claude_code_hooks_daemon.handlers.pre_tool_use.daemon_restart_verifier.is_hooks_daemon_repo",
+        return_value=True,
+    ):
+        assert handler.matches(hook_input) is False
+
+
 def test_get_acceptance_tests() -> None:
     """Test handler provides acceptance tests."""
     handler = DaemonRestartVerifierHandler()

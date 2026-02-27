@@ -443,6 +443,40 @@ class TestDaemonStatsHandler:
         upgrade_parts = [p for p in result.context if "📦" in p]
         assert len(upgrade_parts) == 0
 
+    def test_handle_psutil_oserror_silent_fail(self, handler: DaemonStatsHandler) -> None:
+        """Test continues when psutil.Process().memory_info() raises OSError."""
+        mock_stats = MagicMock()
+        mock_stats.uptime_seconds = 60.0
+        mock_stats.errors = 0
+
+        mock_controller = MagicMock()
+        mock_controller.get_stats.return_value = mock_stats
+
+        mock_process = MagicMock()
+        mock_process.memory_info.side_effect = OSError("permission denied")
+
+        mock_psutil = MagicMock()
+        mock_psutil.Process = MagicMock(return_value=mock_process)
+
+        with (
+            patch(
+                "claude_code_hooks_daemon.handlers.status_line.daemon_stats.get_controller",
+                return_value=mock_controller,
+            ),
+            patch(
+                "claude_code_hooks_daemon.handlers.status_line.daemon_stats.psutil",
+                mock_psutil,
+            ),
+            patch("logging.getLogger") as mock_logger,
+        ):
+            mock_logger.return_value.level = 20
+            result = handler.handle({})
+
+        # Should still return stats, just without memory
+        assert result.decision == "allow"
+        assert len(result.context) >= 1
+        assert "MB" not in result.context[0]
+
     def test_handle_hides_upgrade_indicator_when_no_cache(
         self, handler: DaemonStatsHandler, tmp_path: "Path"
     ) -> None:

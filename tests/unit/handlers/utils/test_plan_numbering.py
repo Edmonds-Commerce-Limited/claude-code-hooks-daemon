@@ -145,3 +145,14 @@ class TestGetNextPlanNumber:
         (temp_plan_dir / "templates").mkdir()
         result = get_next_plan_number(temp_plan_dir)
         assert result == "00002"
+
+    def test_scan_directory_skips_non_directory_entries(self, temp_plan_dir: Path) -> None:
+        """scan_directory skips entries that are not directories (files, etc.)."""
+        # Create an archive dir with a plan inside and a file alongside it
+        archive = temp_plan_dir / "archive"
+        archive.mkdir()
+        (archive / "00003-archived-plan").mkdir()
+        # Place a file directly in archive - should be ignored by the dir check
+        (archive / "README.md").write_text("notes")
+        result = get_next_plan_number(temp_plan_dir)
+        assert result == "00004"
