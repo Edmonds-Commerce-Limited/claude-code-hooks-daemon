@@ -60,4 +60,4 @@ echo "Executing upgrade..."
 echo ""
 
 cd "$PROJECT_ROOT"
-bash "$UPGRADE_SCRIPT" "$TARGET_VERSION"
+bash "$UPGRADE_SCRIPT" --project-root "$PROJECT_ROOT" "$TARGET_VERSION"
