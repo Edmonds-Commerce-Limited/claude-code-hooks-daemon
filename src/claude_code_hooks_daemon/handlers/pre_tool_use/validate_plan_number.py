@@ -65,8 +65,9 @@ class ValidatePlanNumberHandler(Handler):
                 if self._is_documentation_file(file_path):
                     return False
 
-                # Match plan folder creation
-                if re.search(r"CLAUDE/Plan/(\d{3})-([^/]+)/", file_path):
+                # Match plan folder creation (direct children of Plan/ only)
+                # CLAUDE/Plan/NNN-name/ matches, CLAUDE/Plan/Subfolder/NNN-name/ does not
+                if re.search(r"CLAUDE/Plans?/(\d{3})-([^/]+)/", file_path):
                     return True
 
         # Check Bash mkdir commands
@@ -77,12 +78,10 @@ class ValidatePlanNumberHandler(Handler):
                 if self._is_heredoc_command(command):
                     return False
 
-                # Match mkdir for plan folders (not Completed/ subdirectory)
+                # Match mkdir for plan folders (direct children of Plan/ only)
                 # Use [^&;]* instead of .*? to prevent spanning across && or ;
                 # command boundaries into unrelated git mv arguments
-                if re.search(
-                    r"mkdir[^&;]*CLAUDE/Plan/(\d{3})-([^\s/]+)", command
-                ) and not re.search(r"mkdir[^&;]*CLAUDE/Plan/Completed/", command):
+                if re.search(r"mkdir[^&;]*CLAUDE/Plans?/(\d{3})-([^\s/]+)", command):
                     return True
 
         return False
@@ -117,7 +116,7 @@ class ValidatePlanNumberHandler(Handler):
         if tool_name == ToolName.WRITE:
             file_path = get_file_path(hook_input)
             if file_path:
-                match = re.search(r"CLAUDE/Plan/(\d{3})-([^/]+)/", file_path)
+                match = re.search(r"CLAUDE/Plans?/(\d{3})-([^/]+)/", file_path)
                 if match:
                     plan_number = int(match.group(1))
                     plan_name = match.group(2)
@@ -125,7 +124,7 @@ class ValidatePlanNumberHandler(Handler):
         elif tool_name == ToolName.BASH:
             command = get_bash_command(hook_input)
             if command:
-                match = re.search(r"mkdir[^&;]*CLAUDE/Plan/(\d{3})-([^\s/]+)", command)
+                match = re.search(r"mkdir[^&;]*CLAUDE/Plans?/(\d{3})-([^\s/]+)", command)
                 if match:
                     plan_number = int(match.group(1))
                     plan_name = match.group(2)
@@ -176,25 +175,34 @@ See: CLAUDE/Plan/CLAUDE.md for full instructions
         return HookResult(decision=Decision.ALLOW)
 
     def _get_highest_plan_number(self) -> int:
-        """Find highest plan number from both active and completed plans."""
+        """Find highest plan number from all plan locations.
+
+        Scans direct children of the plan root AND all non-numbered
+        organizational subfolders (Completed/, Archive/, Backlog/, etc.).
+        Any subfolder whose name does not start with a 3-digit number
+        is treated as organizational and its children are scanned.
+        """
         plan_root = self.workspace_root / "CLAUDE/Plan"
 
         if not plan_root.exists():
             return 0
 
-        plan_dirs = []
+        plan_dirs: list[str] = []
+        _numbered_dir_re = re.compile(r"^(\d{3})-")
 
-        # Active plans
         for item in plan_root.iterdir():
-            if item.is_dir() and re.match(r"^\d{3}-", item.name):
-                plan_dirs.append(item.name)
+            if not item.is_dir():
+                continue
 
-        # Completed plans
-        completed_dir = plan_root / "Completed"
-        if completed_dir.exists():
-            for item in completed_dir.iterdir():
-                if item.is_dir() and re.match(r"^\d{3}-", item.name):
-                    plan_dirs.append(item.name)
+            if _numbered_dir_re.match(item.name):
+                # Direct numbered plan (e.g. CLAUDE/Plan/023-feature/)
+                plan_dirs.append(item.name)
+            else:
+                # Organizational subfolder (e.g. Completed/, Archive/)
+                # Scan its children for numbered plan folders
+                for child in item.iterdir():
+                    if child.is_dir() and _numbered_dir_re.match(child.name):
+                        plan_dirs.append(child.name)
 
         if not plan_dirs:
             return 0
@@ -202,7 +210,7 @@ See: CLAUDE/Plan/CLAUDE.md for full instructions
         # Extract numbers and find highest
         numbers = []
         for dirname in plan_dirs:
-            match = re.match(r"^(\d{3})-", dirname)
+            match = _numbered_dir_re.match(dirname)
             if match:
                 numbers.append(int(match.group(1)))
 
