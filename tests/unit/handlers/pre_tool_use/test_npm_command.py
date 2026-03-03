@@ -201,6 +201,32 @@ class TestNpmCommandHandler:
         }
         assert handler.matches(hook_input) is False
 
+    def test_does_not_match_npx_with_logical_or(self, handler: NpmCommandHandler) -> None:
+        """Handler must NOT match || (logical OR) as a pipe operator."""
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "npx hooks-daemon restart 2>/dev/null || npx claude-code-hooks-daemon restart 2>/dev/null"
+            },
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_does_not_match_npm_run_with_logical_or(self, handler: NpmCommandHandler) -> None:
+        """Handler must NOT match || (logical OR) in npm run commands."""
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "npm run llm:build || echo 'build failed'"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_does_not_match_npm_run_with_logical_and(self, handler: NpmCommandHandler) -> None:
+        """Handler must NOT match && (logical AND) - only real pipes."""
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "npm run llm:test && npm run llm:lint"},
+        }
+        assert handler.matches(hook_input) is False
+
     # Tests for matches() method - edge cases
 
     def test_does_not_match_non_bash_tool(self, handler: NpmCommandHandler) -> None:

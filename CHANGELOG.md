@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.18.0] - 2026-03-03
+
+### Added
+
+- **LspEnforcementHandler**: New PreToolUse handler that steers LLMs toward LSP tools (goToDefinition, findReferences, workspaceSymbol, hover, documentSymbol) instead of Grep/Bash grep for symbol lookups. Detects symbol-like search patterns — class/def definitions, PascalCase and snake_case identifiers, import statements — and blocks or advises the LLM to use semantic LSP operations instead of slow, imprecise text searches. Supports three modes: `block_once` (default, deny first attempt), `advisory` (always allow with guidance), and `strict` (always deny). Also supports configurable `no_lsp_mode` behaviour when `ENABLE_LSP_TOOL` env var is not set: `block` (default), `advisory` (downgrade), or `disable` (handler inactive). Priority 38 (workflow range).
+
+### Fixed
+
+- **Status Line Upgrade Indicator**: Fixed the upgrade-available indicator in the daemon status line showing only the target version. The indicator now displays both the current version and the target version (e.g. `v2.17.3 → v2.18.0`) so users immediately see what they are upgrading from and to. Falls back to `upgrade → vX.Y.Z` if current version is unavailable in the cache.
+- **NpmCommandHandler False Positive on Logical OR**: Fixed the pipe detection regex in NpmCommandHandler matching `||` (logical OR) as a pipe operator. Commands like `npx hooks-daemon restart 2>/dev/null || npx claude-code-hooks-daemon restart` were incorrectly blocked with "Piping npm/npx commands is pointless". The regex now uses lookahead/lookbehind (`(?<!\|)\|(?!\|)`) to only match single `|` pipe operators.
+
 ## [2.17.3] - 2026-02-27
 
 ### Fixed
