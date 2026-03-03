@@ -32,8 +32,8 @@ from claude_code_hooks_daemon.constants import (
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult, get_data_layer
 from claude_code_hooks_daemon.core.utils import get_bash_command
 
-
 # --- Mode constants ---
+
 
 class LspEnforcementMode:
     """Handler mode options."""
@@ -75,18 +75,20 @@ _SNAKE_CASE = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$")
 _REGEX_METACHAR_PATTERN = re.compile(r"[.*+?{}()|\\^\[\]$]")
 
 # Comment markers / annotation patterns (not symbols)
-_COMMENT_MARKERS = frozenset({
-    "TODO",
-    "FIXME",
-    "HACK",
-    "XXX",
-    "NOTE",
-    "WARN",
-    "WARNING",
-    "DEPRECATED",
-    "BUG",
-    "REVIEW",
-})
+_COMMENT_MARKERS = frozenset(
+    {
+        "TODO",
+        "FIXME",
+        "HACK",
+        "XXX",
+        "NOTE",
+        "WARN",
+        "WARNING",
+        "DEPRECATED",
+        "BUG",
+        "REVIEW",
+    }
+)
 
 # Minimum length for a standalone lowercase identifier to be considered a symbol
 _MIN_IDENTIFIER_LENGTH = 8
@@ -96,8 +98,7 @@ _BASH_GREP_PATTERN = re.compile(r"(?:^|\s|&&|\|\||;)\s*(?:grep|rg)\s+")
 
 # Extract the search pattern from a bash grep/rg command
 _BASH_GREP_EXTRACT = re.compile(
-    r'(?:grep|rg)\s+(?:-[a-zA-Z]*\s+)*["\']([^"\']+)["\']'
-    r"|(?:grep|rg)\s+(?:-[a-zA-Z]*\s+)*(\S+)"
+    r'(?:grep|rg)\s+(?:-[a-zA-Z]*\s+)*["\']([^"\']+)["\']' r"|(?:grep|rg)\s+(?:-[a-zA-Z]*\s+)*(\S+)"
 )
 
 # --- LSP operation mapping ---
@@ -285,9 +286,7 @@ class LspEnforcementHandler(Handler):
             return HookResult(decision=Decision.DENY, reason=reason)
         return HookResult(decision=Decision.ALLOW, reason=reason)
 
-    def _build_reason(
-        self, pattern: str, suggested_op: str, lsp_available: bool
-    ) -> str:
+    def _build_reason(self, pattern: str, suggested_op: str, lsp_available: bool) -> str:
         """Build the guidance message for the LLM."""
         lines = [
             f"LSP tool available for this lookup: pattern '{pattern}' looks like a symbol search.",
@@ -303,11 +302,13 @@ class LspEnforcementHandler(Handler):
         ]
 
         if not lsp_available:
-            lines.extend([
-                "",
-                "NOTE: LSP is not currently configured.",
-                f"Set {_LSP_ENV_VAR}=1 in your environment to enable LSP tools.",
-            ])
+            lines.extend(
+                [
+                    "",
+                    "NOTE: LSP is not currently configured.",
+                    f"Set {_LSP_ENV_VAR}=1 in your environment to enable LSP tools.",
+                ]
+            )
 
         return "\n".join(lines)
 

@@ -151,6 +151,8 @@ class ConfigTemplate:
             '        #   - "^untracked/.*\\\\.md$"\n'
             '        #   - "^RELEASES/.*\\\\.md$"\n'
             "\n"
+            "    lsp_enforcement: {enabled: false, priority: 38}  # Steer toward LSP tools instead of Grep\n"
+            "\n"
             "    # WORKFLOW HANDLERS (Priority 36-55)\n"
             "    tdd_enforcement:  # Enforce test-first development\n"
             "      enabled: true\n"

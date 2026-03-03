@@ -121,6 +121,13 @@ handlers:
       #     - Swift
       #     - Dart
 
+    lsp_enforcement:       # Steers LLMs toward LSP tools instead of Grep/Bash grep for symbol lookups
+      enabled: true
+      priority: 38
+      options:
+        mode: block_once       # advisory | block_once | strict
+        no_lsp_mode: block     # block | advisory | disable
+
     # WORKFLOW HANDLERS (Priority 30-50)
     plan_number_helper:    # Provides correct next plan number (prevents broken bash discovery)
       enabled: true        # Enable when using CLAUDE/Plan/ structure

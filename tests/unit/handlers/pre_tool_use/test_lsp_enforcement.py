@@ -329,6 +329,46 @@ class TestLspEnforcementMatchesNegative:
         }
         assert handler.matches(hook_input) is False
 
+    def test_no_match_bash_empty_command(self, handler: Any) -> None:
+        """Bash with empty command should not trigger."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": ""},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_no_match_bash_grep_no_extractable_pattern(self, handler: Any) -> None:
+        """Bash grep where pattern can't be extracted should not trigger."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "grep"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_no_match_import_without_symbol(self, handler: Any) -> None:
+        """Import with non-symbol name should not trigger."""
+        hook_input = {
+            "tool_name": "Grep",
+            "tool_input": {"pattern": "from os"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_matches_import_short_pascal(self, handler: Any) -> None:
+        """Import with short PascalCase name like 'import Path' should trigger."""
+        hook_input = {
+            "tool_name": "Grep",
+            "tool_input": {"pattern": "import Path"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_no_match_long_lowercase_identifier(self, handler: Any) -> None:
+        """Long lowercase word without underscores is not clearly a symbol."""
+        hook_input = {
+            "tool_name": "Grep",
+            "tool_input": {"pattern": "something"},
+        }
+        assert handler.matches(hook_input) is False
+
     def test_no_match_lsp_tool(self, handler: Any) -> None:
         """LSP tool itself should never trigger (would create infinite loop)."""
         hook_input = {
@@ -341,6 +381,23 @@ class TestLspEnforcementMatchesNegative:
             },
         }
         assert handler.matches(hook_input) is False
+
+
+class TestLspEnforcementBlockCount:
+    """Test _get_block_count exception handling."""
+
+    def test_block_count_returns_zero_on_exception(self) -> None:
+        """_get_block_count returns 0 when data layer raises."""
+        from claude_code_hooks_daemon.handlers.pre_tool_use.lsp_enforcement import (
+            LspEnforcementHandler,
+        )
+
+        handler = LspEnforcementHandler()
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.lsp_enforcement.get_data_layer"
+        ) as mock_dl:
+            mock_dl.side_effect = RuntimeError("no data layer")
+            assert handler._get_block_count() == 0
 
 
 class TestLspEnforcementHandleBlockOnce:
@@ -396,7 +453,7 @@ class TestLspEnforcementHandleAdvisory:
         )
 
         h = LspEnforcementHandler()
-        setattr(h, "_mode", "advisory")
+        h._mode = "advisory"
         return h
 
     def test_advisory_always_allows(self, handler: Any) -> None:
@@ -431,7 +488,7 @@ class TestLspEnforcementHandleStrict:
         )
 
         h = LspEnforcementHandler()
-        setattr(h, "_mode", "strict")
+        h._mode = "strict"
         return h
 
     def test_strict_always_denies(self, handler: Any) -> None:
@@ -464,7 +521,7 @@ class TestLspEnforcementNoLspMode:
         )
 
         h = LspEnforcementHandler()
-        setattr(h, "_no_lsp_mode", no_lsp_mode)
+        h._no_lsp_mode = no_lsp_mode
         return h
 
     def test_no_lsp_block_mode_still_matches(self) -> None:
