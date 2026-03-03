@@ -26,6 +26,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00075: LSP Enforcement Handler](Completed/00075-lsp-enforcement-handler/PLAN.md) - Complete
+  - PreToolUse handler detecting Grep/Bash(grep/rg) symbol lookups, steers toward LSP tools
+  - Configurable modes: block_once (default), advisory, strict; no_lsp_mode: block/advisory/disable
+  - 59 unit tests, 96.28% coverage, 3 acceptance tests, all QA passing
+
 - [00072: Bug Report Generator](Completed/00072-bug-report-generator/PLAN.md) - Complete
   - Added `bug-report` CLI subcommand generating structured markdown reports with full diagnostics
   - Skill integration via `/hooks-daemon bug-report` routing
@@ -426,8 +431,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 72
-- **Completed**: 63 (1 with reduced scope)
+- **Total Plans Created**: 73
+- **Completed**: 64 (1 with reduced scope)
 - **Active**: 1 (in progress)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 3 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045)
