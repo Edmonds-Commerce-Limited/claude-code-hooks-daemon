@@ -75,6 +75,9 @@ class ToolName:
     # Notebook operations
     NOTEBOOK_EDIT = "NotebookEdit"
 
+    # Code intelligence
+    LSP = "LSP"
+
 
 # Type alias for valid tool names (for type checking)
 ToolNameLiteral = Literal[
@@ -98,6 +101,7 @@ ToolNameLiteral = Literal[
     "ExitPlanMode",
     "AskUserQuestion",
     "NotebookEdit",
+    "LSP",
 ]
 
 
