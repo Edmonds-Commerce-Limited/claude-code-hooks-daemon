@@ -74,6 +74,9 @@ class Priority:
 
     MARKDOWN_ORGANIZATION = 35
 
+    # LSP enforcement (Priority: 38)
+    LSP_ENFORCEMENT = 38
+
     # Workflow handlers (Priority: 35-55)
     GH_ISSUE_COMMENTS = 40
     YOLO_CONTAINER_DETECTION = 40

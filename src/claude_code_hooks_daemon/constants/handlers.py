@@ -248,6 +248,13 @@ class HandlerID:
         display_name="validate-instruction-content",
     )
 
+    # LSP enforcement (Priority: 38 - workflow range)
+    LSP_ENFORCEMENT = HandlerIDMeta(
+        class_name="LspEnforcementHandler",
+        config_key="lsp_enforcement",
+        display_name="enforce-lsp-usage",
+    )
+
     # Workflow handlers (Priority: 40-55)
     GH_ISSUE_COMMENTS = HandlerIDMeta(
         class_name="GhIssueCommentsHandler",
@@ -458,6 +465,8 @@ HandlerKey = Literal[
     "validate_instruction_content",
     # Lint on edit
     "lint_on_edit",
+    # LSP enforcement
+    "lsp_enforcement",
     # Workflow handlers
     "gh_issue_comments",
     "yolo_container_detection",
