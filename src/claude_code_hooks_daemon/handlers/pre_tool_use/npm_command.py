@@ -64,7 +64,8 @@ class NpmCommandHandler(Handler):
 
         # Check if npm/npx command is being piped (grep, awk, sed, tee, etc.)
         # llm: commands write to cache files, so piping is pointless
-        pipe_match = re.search(r"\b(npm\s+run|npx)\s+[a-z:]+.*?\s*\|", command)
+        # Use lookbehind/lookahead to exclude || (logical OR) from matching as pipe
+        pipe_match = re.search(r"\b(npm\s+run|npx)\s+[a-z:]+.*?\s*(?<!\|)\|(?!\|)", command)
         if pipe_match:
             return True  # Block ALL piped npm/npx commands (including llm:)
 
@@ -90,8 +91,8 @@ class NpmCommandHandler(Handler):
         if not command:
             return HookResult(decision=Decision.ALLOW, reason="No command found in hook input")
 
-        # Check if command is being piped
-        pipe_match = re.search(r"\b(npm\s+run|npx)\s+([a-z:]+).*?\s*\|", command)
+        # Check if command is being piped (exclude || logical OR)
+        pipe_match = re.search(r"\b(npm\s+run|npx)\s+([a-z:]+).*?\s*(?<!\|)\|(?!\|)", command)
         if pipe_match:
             pipe_match.group(1)
             cmd_name = pipe_match.group(2)
