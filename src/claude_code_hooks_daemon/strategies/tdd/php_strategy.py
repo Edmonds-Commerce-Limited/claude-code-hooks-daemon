@@ -1,5 +1,6 @@
 """PHP TDD strategy implementation."""
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,26 @@ _EXTENSIONS: tuple[str, ...] = (".php",)
 _SOURCE_DIRECTORIES: tuple[str, ...] = ("/src/", "/app/")
 _SKIP_DIRECTORIES: tuple[str, ...] = ("tests/fixtures/", "vendor/")
 _TEST_SUFFIX = "Test"
+_INTERFACE_SUFFIX = "Interface"
+
+# Content-based detection patterns for PHP declarations.
+# Matches `interface Foo` at the start of a line (with optional whitespace).
+_PHP_INTERFACE_PATTERN = re.compile(r"^\s*interface\s+\w+", re.MULTILINE)
+# Matches `class Foo`, `abstract class Foo`, `final class Foo`, `readonly class Foo`,
+# and combinations thereof.
+_PHP_CLASS_PATTERN = re.compile(r"^\s*(?:(?:abstract|final|readonly)\s+)*class\s+\w+", re.MULTILINE)
+
+
+def _is_interface_only_content(content: str) -> bool:
+    """Check if PHP content declares only interfaces (no classes).
+
+    Returns True if the file contains at least one interface declaration
+    and zero class declarations. Files with both are NOT skipped because
+    the class needs testing.
+    """
+    has_interface = bool(_PHP_INTERFACE_PATTERN.search(content))
+    has_class = bool(_PHP_CLASS_PATTERN.search(content))
+    return has_interface and not has_class
 
 
 class PhpTddStrategy:
@@ -42,8 +63,20 @@ class PhpTddStrategy:
     def is_production_source(self, file_path: str) -> bool:
         return matches_directory(file_path, _SOURCE_DIRECTORIES)
 
-    def should_skip(self, file_path: str) -> bool:
-        return matches_directory(file_path, _SKIP_DIRECTORIES)
+    def should_skip(self, file_path: str, content: str = "") -> bool:
+        if matches_directory(file_path, _SKIP_DIRECTORIES):
+            return True
+
+        # Filename convention: *Interface.php (e.g., UserRepositoryInterface.php)
+        basename = Path(file_path).stem
+        if basename.endswith(_INTERFACE_SUFFIX):
+            return True
+
+        # Content inspection: file declares interface but no class
+        if content and _is_interface_only_content(content):
+            return True
+
+        return False
 
     def compute_test_filename(self, source_filename: str) -> str:
         basename = Path(source_filename).stem

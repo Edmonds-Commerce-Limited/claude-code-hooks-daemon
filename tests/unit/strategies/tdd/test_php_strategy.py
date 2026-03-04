@@ -76,6 +76,80 @@ def test_should_skip_normal_source_files() -> None:
     assert strategy.should_skip("/workspace/app/Controller.php") is False
 
 
+def test_should_skip_interface_files_by_filename() -> None:
+    """Interface files should be skipped based on *Interface.php naming convention."""
+    strategy = PhpTddStrategy()
+    assert (
+        strategy.should_skip("/workspace/src/Service/TransactionManagementServiceInterface.php")
+        is True
+    )
+    assert strategy.should_skip("/workspace/app/Repository/UserRepositoryInterface.php") is True
+    assert strategy.should_skip("/workspace/src/Contract/PaymentGatewayInterface.php") is True
+
+
+def test_should_skip_interface_filename_not_triggered_by_substring() -> None:
+    """Files with 'Interface' in the name but not as suffix should NOT be skipped."""
+    strategy = PhpTddStrategy()
+    assert strategy.should_skip("/workspace/src/Service/InterfaceManager.php") is False
+    assert strategy.should_skip("/workspace/src/Service/InterfaceValidator.php") is False
+
+
+def test_should_skip_interface_by_content() -> None:
+    """Files containing only interface declarations should be skipped via content inspection."""
+    strategy = PhpTddStrategy()
+    content = (
+        "<?php\n\nnamespace App\\Service;\n\n"
+        "interface PaymentGateway\n{\n    public function charge(): void;\n}\n"
+    )
+    assert (
+        strategy.should_skip("/workspace/src/Service/PaymentGateway.php", content=content) is True
+    )
+
+
+def test_should_not_skip_class_by_content() -> None:
+    """Files containing class declarations should NOT be skipped."""
+    strategy = PhpTddStrategy()
+    content = (
+        "<?php\n\nnamespace App\\Service;\n\n"
+        "class PaymentService\n{\n    public function process(): void {}\n}\n"
+    )
+    assert (
+        strategy.should_skip("/workspace/src/Service/PaymentService.php", content=content) is False
+    )
+
+
+def test_should_not_skip_file_with_both_interface_and_class() -> None:
+    """Files containing both interface and class should NOT be skipped (class needs testing)."""
+    strategy = PhpTddStrategy()
+    content = (
+        "<?php\n\ninterface Loggable\n{\n    public function log(): void;\n}\n\n"
+        "class Logger implements Loggable\n{\n    public function log(): void {}\n}\n"
+    )
+    assert strategy.should_skip("/workspace/src/Logger.php", content=content) is False
+
+
+def test_should_not_skip_abstract_class_by_content() -> None:
+    """Abstract classes are not interfaces — they should NOT be skipped."""
+    strategy = PhpTddStrategy()
+    content = (
+        "<?php\n\nabstract class BaseService\n{\n"
+        "    abstract public function execute(): void;\n}\n"
+    )
+    assert strategy.should_skip("/workspace/src/Service/BaseService.php", content=content) is False
+
+
+def test_should_not_match_interface_in_implements_clause() -> None:
+    """The word 'interface' in an implements clause should NOT trigger skip."""
+    strategy = PhpTddStrategy()
+    content = (
+        "<?php\n\nclass PaymentService implements PaymentInterface\n{\n"
+        "    public function pay(): void {}\n}\n"
+    )
+    assert (
+        strategy.should_skip("/workspace/src/Service/PaymentService.php", content=content) is False
+    )
+
+
 def test_compute_test_filename() -> None:
     """Should compute test filename with 'Test' suffix before extension."""
     strategy = PhpTddStrategy()
