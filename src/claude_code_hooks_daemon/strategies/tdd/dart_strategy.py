@@ -41,7 +41,7 @@ class DartTddStrategy:
     def is_production_source(self, file_path: str) -> bool:
         return matches_directory(file_path, _SOURCE_DIRECTORIES)
 
-    def should_skip(self, file_path: str) -> bool:
+    def should_skip(self, file_path: str, content: str = "") -> bool:
         return matches_directory(file_path, _SKIP_DIRECTORIES)
 
     def compute_test_filename(self, source_filename: str) -> str:

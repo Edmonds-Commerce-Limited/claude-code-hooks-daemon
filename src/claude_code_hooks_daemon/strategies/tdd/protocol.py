@@ -43,8 +43,14 @@ class TddStrategy(Protocol):
         """
         ...
 
-    def should_skip(self, file_path: str) -> bool:
-        """Check if a file should be skipped (vendor, build dirs, etc.)."""
+    def should_skip(self, file_path: str, content: str = "") -> bool:
+        """Check if a file should be skipped (vendor, build dirs, interfaces, etc.).
+
+        Args:
+            file_path: Path to the file being written.
+            content: Optional file content for content-based detection
+                (e.g., PHP interface declarations).
+        """
         ...
 
     def compute_test_filename(self, source_filename: str) -> str:

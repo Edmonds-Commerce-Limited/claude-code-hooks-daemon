@@ -15,7 +15,7 @@ from claude_code_hooks_daemon.constants import (
     ToolName,
 )
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
-from claude_code_hooks_daemon.core.utils import get_file_path
+from claude_code_hooks_daemon.core.utils import get_file_content, get_file_path
 from claude_code_hooks_daemon.strategies.tdd import TddStrategyRegistry
 from claude_code_hooks_daemon.strategies.tdd.protocol import TddStrategy
 
@@ -102,7 +102,8 @@ class TddEnforcementHandler(Handler):
             return False  # Unknown language — allow through
 
         # Delegate all decisions to strategy (zero language logic here)
-        if strategy.should_skip(file_path):
+        content = get_file_content(hook_input) or ""
+        if strategy.should_skip(file_path, content):
             return False
 
         if strategy.is_test_file(file_path):
