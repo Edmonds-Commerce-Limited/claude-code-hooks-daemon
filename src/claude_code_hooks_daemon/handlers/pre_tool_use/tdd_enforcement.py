@@ -234,56 +234,50 @@ class TddEnforcementHandler(Handler):
             src/SupFeeds/Logging/DTO/File.php
             -> tests/SupFeeds/Logging/DTO/FileTest.php
         """
-        try:
-            src_idx = path_parts.index(_SRC_DIR)
+        src_idx = path_parts.index(_SRC_DIR)
 
-            # Workspace root is everything before src/
-            workspace_parts = path_parts[:src_idx]
-            workspace_root = Path(*workspace_parts) if workspace_parts else Path(_DEFAULT_WORKSPACE)
+        # Workspace root is everything before src/
+        workspace_parts = path_parts[:src_idx]
+        workspace_root = Path(*workspace_parts) if workspace_parts else Path(_DEFAULT_WORKSPACE)
 
-            # Parts after src/: {package}/{subdir}/.../file.ext
-            # Keep ALL subdirs (don't strip package)
-            after_src = path_parts[src_idx + 1 :]
+        # Parts after src/: {package}/{subdir}/.../file.ext
+        # Keep ALL subdirs (don't strip package)
+        after_src = path_parts[src_idx + 1 :]
 
-            if len(after_src) >= 1:
-                # after_src[:-1] = ALL subdirectories to mirror (including package)
-                # after_src[-1] = filename (replaced with test_filename)
-                sub_dirs = after_src[:-1]
-                test_file_path = workspace_root / _TEST_DIR
-                for sub_dir in sub_dirs:
-                    test_file_path = test_file_path / sub_dir
-                return test_file_path / test_filename
-        except (ValueError, IndexError):
-            pass
+        if len(after_src) >= 1:
+            # after_src[:-1] = ALL subdirectories to mirror (including package)
+            # after_src[-1] = filename (replaced with test_filename)
+            sub_dirs = after_src[:-1]
+            test_file_path = workspace_root / _TEST_DIR
+            for sub_dir in sub_dirs:
+                test_file_path = test_file_path / sub_dir
+            return test_file_path / test_filename
         return None
 
     @staticmethod
     def _map_src_to_test_path(path_parts: tuple[str, ...], test_filename: str) -> Path | None:
         """Map src/{package}/{subdir}/.../file to tests/unit/{subdir}/.../test_file."""
-        try:
-            src_idx = path_parts.index(_SRC_DIR)
+        src_idx = path_parts.index(_SRC_DIR)
 
-            # Workspace root is everything before src/
-            workspace_parts = path_parts[:src_idx]
-            workspace_root = Path(*workspace_parts) if workspace_parts else Path(_DEFAULT_WORKSPACE)
+        # Workspace root is everything before src/
+        workspace_parts = path_parts[:src_idx]
+        workspace_root = Path(*workspace_parts) if workspace_parts else Path(_DEFAULT_WORKSPACE)
 
-            # Parts after src/: {package}/{subdir}/.../file.ext
-            after_src = path_parts[src_idx + 1 :]
+        # Parts after src/: {package}/{subdir}/.../file.ext
+        after_src = path_parts[src_idx + 1 :]
 
-            if len(after_src) > 2:
-                # after_src[0] = package name (skip)
-                # after_src[1:-1] = subdirectories to mirror
-                # after_src[-1] = filename (replaced with test_filename)
-                sub_dirs = after_src[1:-1]
-                test_file_path = workspace_root / _TEST_DIR / _TEST_UNIT_DIR
-                for sub_dir in sub_dirs:
-                    test_file_path = test_file_path / sub_dir
-                return test_file_path / test_filename
-            elif len(after_src) == 2:
-                # src/{package}/file.ext -> tests/unit/test_file.ext
-                return workspace_root / _TEST_DIR / _TEST_UNIT_DIR / test_filename
-        except (ValueError, IndexError):
-            pass
+        if len(after_src) > 2:
+            # after_src[0] = package name (skip)
+            # after_src[1:-1] = subdirectories to mirror
+            # after_src[-1] = filename (replaced with test_filename)
+            sub_dirs = after_src[1:-1]
+            test_file_path = workspace_root / _TEST_DIR / _TEST_UNIT_DIR
+            for sub_dir in sub_dirs:
+                test_file_path = test_file_path / sub_dir
+            return test_file_path / test_filename
+        elif len(after_src) == 2:
+            # src/{package}/file.ext -> tests/unit/test_file.ext
+            return workspace_root / _TEST_DIR / _TEST_UNIT_DIR / test_filename
         return None
 
     @staticmethod
