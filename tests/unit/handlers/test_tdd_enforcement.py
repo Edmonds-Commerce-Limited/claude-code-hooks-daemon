@@ -5,7 +5,14 @@ from unittest.mock import patch
 
 import pytest
 
-from claude_code_hooks_daemon.handlers.pre_tool_use.tdd_enforcement import TddEnforcementHandler
+from claude_code_hooks_daemon.handlers.pre_tool_use.tdd_enforcement import (
+    _DEFAULT_TEST_LOCATIONS,
+    _TEST_LOCATION_COLLOCATED,
+    _TEST_LOCATION_SEPARATE,
+    _TEST_LOCATION_TEST_SUBDIR,
+    _TEST_SUBDIR_NAME,
+    TddEnforcementHandler,
+)
 from claude_code_hooks_daemon.strategies.tdd.go_strategy import GoTddStrategy
 from claude_code_hooks_daemon.strategies.tdd.java_strategy import JavaTddStrategy
 from claude_code_hooks_daemon.strategies.tdd.javascript_strategy import JavaScriptTddStrategy
@@ -1150,3 +1157,278 @@ class TestTddEnforcementHandler:
         assert (
             result.decision == "allow"
         ), "Should ALLOW PHP file when test exists in PSR-4 mirror structure"
+
+    # ================================================================
+    # Collocated Test Location Support (Plan 00076)
+    # ================================================================
+
+    # --- Phase 1: Constants and Config ---
+
+    def test_constants_test_location_separate(self):
+        """Module constant _TEST_LOCATION_SEPARATE should be 'separate'."""
+        assert _TEST_LOCATION_SEPARATE == "separate"
+
+    def test_constants_test_location_collocated(self):
+        """Module constant _TEST_LOCATION_COLLOCATED should be 'collocated'."""
+        assert _TEST_LOCATION_COLLOCATED == "collocated"
+
+    def test_constants_test_location_test_subdir(self):
+        """Module constant _TEST_LOCATION_TEST_SUBDIR should be 'test_subdir'."""
+        assert _TEST_LOCATION_TEST_SUBDIR == "test_subdir"
+
+    def test_constants_test_subdir_name(self):
+        """Module constant _TEST_SUBDIR_NAME should be '__tests__'."""
+        assert _TEST_SUBDIR_NAME == "__tests__"
+
+    def test_constants_default_test_locations(self):
+        """_DEFAULT_TEST_LOCATIONS should contain all three location types."""
+        assert _DEFAULT_TEST_LOCATIONS == frozenset({"separate", "collocated", "test_subdir"})
+
+    def test_init_test_locations_defaults_to_none(self):
+        """Handler _test_locations should default to None."""
+        handler = TddEnforcementHandler()
+        assert handler._test_locations is None
+
+    def test_effective_test_locations_returns_all_when_none(self):
+        """_effective_test_locations returns all 3 when _test_locations is None."""
+        handler = TddEnforcementHandler()
+        handler._test_locations = None
+        assert handler._effective_test_locations == _DEFAULT_TEST_LOCATIONS
+
+    def test_effective_test_locations_returns_all_when_empty(self):
+        """_effective_test_locations returns all 3 when _test_locations is empty."""
+        handler = TddEnforcementHandler()
+        handler._test_locations = []
+        assert handler._effective_test_locations == _DEFAULT_TEST_LOCATIONS
+
+    def test_effective_test_locations_respects_config(self):
+        """_effective_test_locations returns frozenset of configured values."""
+        handler = TddEnforcementHandler()
+        handler._test_locations = ["collocated", "test_subdir"]
+        assert handler._effective_test_locations == frozenset({"collocated", "test_subdir"})
+
+    def test_effective_test_locations_single_value(self):
+        """_effective_test_locations works with single config value."""
+        handler = TddEnforcementHandler()
+        handler._test_locations = ["separate"]
+        assert handler._effective_test_locations == frozenset({"separate"})
+
+    # --- Phase 2: Collocated Path Method ---
+
+    def test_map_collocated_test_path_typescript(self):
+        """Collocated: src/pkg/utils/helpers.ts -> src/pkg/utils/helpers.test.ts."""
+        result = TddEnforcementHandler._map_collocated_test_path(
+            "/workspace/src/pkg/utils/helpers.ts", "helpers.test.ts"
+        )
+        assert result == Path("/workspace/src/pkg/utils/helpers.test.ts")
+
+    def test_map_collocated_test_path_python(self):
+        """Collocated: src/mypackage/services/user.py -> src/mypackage/services/test_user.py."""
+        result = TddEnforcementHandler._map_collocated_test_path(
+            "/workspace/src/mypackage/services/user.py", "test_user.py"
+        )
+        assert result == Path("/workspace/src/mypackage/services/test_user.py")
+
+    def test_map_collocated_test_path_go(self):
+        """Collocated: src/pkg/server/handler.go -> src/pkg/server/handler_test.go."""
+        result = TddEnforcementHandler._map_collocated_test_path(
+            "/workspace/src/pkg/server/handler.go", "handler_test.go"
+        )
+        assert result == Path("/workspace/src/pkg/server/handler_test.go")
+
+    def test_map_collocated_test_path_deeply_nested(self):
+        """Collocated: works for deeply nested paths."""
+        result = TddEnforcementHandler._map_collocated_test_path(
+            "/workspace/src/a/b/c/d/e/file.ts", "file.test.ts"
+        )
+        assert result == Path("/workspace/src/a/b/c/d/e/file.test.ts")
+
+    # --- Phase 3: Test Subdir Path Method ---
+
+    def test_map_test_subdir_path_typescript(self):
+        """Test subdir: src/pkg/utils/helpers.ts -> src/pkg/utils/__tests__/helpers.test.ts."""
+        result = TddEnforcementHandler._map_test_subdir_path(
+            "/workspace/src/pkg/utils/helpers.ts", "helpers.test.ts"
+        )
+        assert result == Path("/workspace/src/pkg/utils/__tests__/helpers.test.ts")
+
+    def test_map_test_subdir_path_python(self):
+        """Test subdir: src/mypackage/services/user.py -> src/mypackage/services/__tests__/test_user.py."""
+        result = TddEnforcementHandler._map_test_subdir_path(
+            "/workspace/src/mypackage/services/user.py", "test_user.py"
+        )
+        assert result == Path("/workspace/src/mypackage/services/__tests__/test_user.py")
+
+    def test_map_test_subdir_path_go(self):
+        """Test subdir: src/pkg/server/handler.go -> src/pkg/server/__tests__/handler_test.go."""
+        result = TddEnforcementHandler._map_test_subdir_path(
+            "/workspace/src/pkg/server/handler.go", "handler_test.go"
+        )
+        assert result == Path("/workspace/src/pkg/server/__tests__/handler_test.go")
+
+    def test_map_test_subdir_path_deeply_nested(self):
+        """Test subdir: works for deeply nested paths."""
+        result = TddEnforcementHandler._map_test_subdir_path(
+            "/workspace/src/a/b/c/d/e/file.ts", "file.test.ts"
+        )
+        assert result == Path("/workspace/src/a/b/c/d/e/__tests__/file.test.ts")
+
+    # --- Phase 4: Integration with _get_test_file_paths ---
+
+    def test_get_test_file_paths_includes_collocated_candidate(self, handler):
+        """_get_test_file_paths() should include collocated candidate in results."""
+        from claude_code_hooks_daemon.strategies.tdd.javascript_strategy import (
+            JavaScriptTddStrategy,
+        )
+
+        paths = handler._get_test_file_paths(
+            "/workspace/src/mypackage/utils/helpers.ts", JavaScriptTddStrategy()
+        )
+        collocated = Path("/workspace/src/mypackage/utils/helpers.test.ts")
+        assert collocated in paths, f"Collocated path {collocated} not in {paths}"
+
+    def test_get_test_file_paths_includes_test_subdir_candidate(self, handler):
+        """_get_test_file_paths() should include __tests__/ candidate in results."""
+        from claude_code_hooks_daemon.strategies.tdd.javascript_strategy import (
+            JavaScriptTddStrategy,
+        )
+
+        paths = handler._get_test_file_paths(
+            "/workspace/src/mypackage/utils/helpers.ts", JavaScriptTddStrategy()
+        )
+        test_subdir = Path("/workspace/src/mypackage/utils/__tests__/helpers.test.ts")
+        assert test_subdir in paths, f"Test subdir path {test_subdir} not in {paths}"
+
+    def test_get_test_file_paths_config_separate_only(self):
+        """Config ['separate'] should exclude collocated and test_subdir candidates."""
+        from claude_code_hooks_daemon.strategies.tdd.javascript_strategy import (
+            JavaScriptTddStrategy,
+        )
+
+        handler = TddEnforcementHandler()
+        handler._test_locations = ["separate"]
+        paths = handler._get_test_file_paths(
+            "/workspace/src/mypackage/utils/helpers.ts", JavaScriptTddStrategy()
+        )
+        collocated = Path("/workspace/src/mypackage/utils/helpers.test.ts")
+        test_subdir = Path("/workspace/src/mypackage/utils/__tests__/helpers.test.ts")
+        assert collocated not in paths, "Collocated should be excluded with ['separate']"
+        assert test_subdir not in paths, "Test subdir should be excluded with ['separate']"
+
+    def test_get_test_file_paths_config_collocated_only(self):
+        """Config ['collocated'] should exclude separate and test_subdir candidates."""
+        from claude_code_hooks_daemon.strategies.tdd.javascript_strategy import (
+            JavaScriptTddStrategy,
+        )
+
+        handler = TddEnforcementHandler()
+        handler._test_locations = ["collocated"]
+        paths = handler._get_test_file_paths(
+            "/workspace/src/mypackage/utils/helpers.ts", JavaScriptTddStrategy()
+        )
+        collocated = Path("/workspace/src/mypackage/utils/helpers.test.ts")
+        assert collocated in paths, "Collocated should be included"
+        # Separate-style paths (mirror + unit) should NOT be present
+        mirror = Path("/workspace/tests/mypackage/utils/helpers.test.ts")
+        unit = Path("/workspace/tests/unit/utils/helpers.test.ts")
+        assert mirror not in paths, "Mirror path should be excluded with ['collocated']"
+        assert unit not in paths, "Unit path should be excluded with ['collocated']"
+
+    def test_get_test_file_paths_config_collocated_and_test_subdir(self):
+        """Config ['collocated', 'test_subdir'] should include both, exclude separate."""
+        from claude_code_hooks_daemon.strategies.tdd.javascript_strategy import (
+            JavaScriptTddStrategy,
+        )
+
+        handler = TddEnforcementHandler()
+        handler._test_locations = ["collocated", "test_subdir"]
+        paths = handler._get_test_file_paths(
+            "/workspace/src/mypackage/utils/helpers.ts", JavaScriptTddStrategy()
+        )
+        collocated = Path("/workspace/src/mypackage/utils/helpers.test.ts")
+        test_subdir = Path("/workspace/src/mypackage/utils/__tests__/helpers.test.ts")
+        assert collocated in paths, "Collocated should be included"
+        assert test_subdir in paths, "Test subdir should be included"
+        # No separate-style paths
+        mirror = Path("/workspace/tests/mypackage/utils/helpers.test.ts")
+        assert mirror not in paths, "Mirror should be excluded"
+
+    def test_handle_allows_when_collocated_test_exists_go(self):
+        """handle() should ALLOW when collocated Go test exists (e.g., handler_test.go)."""
+        handler = TddEnforcementHandler()
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/workspace/src/pkg/server/handler.go"},
+        }
+
+        def path_exists_side_effect(self):
+            path_str = str(self)
+            # Collocated test exists (Go convention)
+            if path_str == "/workspace/src/pkg/server/handler_test.go":
+                return True
+            return False
+
+        with patch.object(Path, "exists", path_exists_side_effect):
+            result = handler.handle(hook_input)
+
+        assert (
+            result.decision == "allow"
+        ), "Should ALLOW Go file when collocated test (handler_test.go) exists"
+
+    def test_handle_allows_when_collocated_test_exists_js(self):
+        """handle() should ALLOW when collocated JS test exists (e.g., helpers.test.ts)."""
+        handler = TddEnforcementHandler()
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/workspace/src/mypackage/utils/helpers.ts"},
+        }
+
+        def path_exists_side_effect(self):
+            path_str = str(self)
+            if path_str == "/workspace/src/mypackage/utils/helpers.test.ts":
+                return True
+            return False
+
+        with patch.object(Path, "exists", path_exists_side_effect):
+            result = handler.handle(hook_input)
+
+        assert (
+            result.decision == "allow"
+        ), "Should ALLOW TS file when collocated test (helpers.test.ts) exists"
+
+    def test_handle_allows_when_tests_subdir_test_exists(self):
+        """handle() should ALLOW when __tests__/ subdirectory test exists."""
+        handler = TddEnforcementHandler()
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/workspace/src/mypackage/utils/helpers.ts"},
+        }
+
+        def path_exists_side_effect(self):
+            path_str = str(self)
+            if path_str == "/workspace/src/mypackage/utils/__tests__/helpers.test.ts":
+                return True
+            return False
+
+        with patch.object(Path, "exists", path_exists_side_effect):
+            result = handler.handle(hook_input)
+
+        assert result.decision == "allow", "Should ALLOW TS file when __tests__/ test exists"
+
+    def test_regression_existing_mirror_tests_still_found(self, handler):
+        """Regression: existing mirror/unit test detection must still work."""
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/workspace/src/mypackage/services/user.py"},
+        }
+
+        def path_exists_side_effect(self):
+            path_str = str(self)
+            if path_str == "/workspace/tests/mypackage/services/test_user.py":
+                return True
+            return False
+
+        with patch.object(Path, "exists", path_exists_side_effect):
+            result = handler.handle(hook_input)
+
+        assert result.decision == "allow", "Regression: mirror-structure tests must still be found"
