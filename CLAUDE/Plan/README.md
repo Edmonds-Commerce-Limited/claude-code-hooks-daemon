@@ -26,6 +26,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00076: TDD Collocated Test Support](Completed/00076-tdd-collocated-test-support/PLAN.md) - Complete
+  - Added `test_locations` config option with 3 styles: separate, collocated, __tests__/ subdir
+  - Fixes false blocking of Go, React/Vitest/Jest, Dart collocated test conventions
+  - Handler-only change (zero strategy modifications), 27 new tests
+
 - [00075: LSP Enforcement Handler](Completed/00075-lsp-enforcement-handler/PLAN.md) - Complete
   - PreToolUse handler detecting Grep/Bash(grep/rg) symbol lookups, steers toward LSP tools
   - Configurable modes: block_once (default), advisory, strict; no_lsp_mode: block/advisory/disable
@@ -431,8 +436,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 73
-- **Completed**: 64 (1 with reduced scope)
+- **Total Plans Created**: 74
+- **Completed**: 65 (1 with reduced scope)
 - **Active**: 1 (in progress)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 3 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045)
