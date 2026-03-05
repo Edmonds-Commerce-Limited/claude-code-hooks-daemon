@@ -25,6 +25,15 @@ _TEST_UNIT_DIR = "unit"
 _SRC_DIR = "src"
 _DEFAULT_WORKSPACE = "/workspace"
 
+# Test location style constants (Plan 00076: collocated test support)
+_TEST_LOCATION_SEPARATE = "separate"
+_TEST_LOCATION_COLLOCATED = "collocated"
+_TEST_LOCATION_TEST_SUBDIR = "test_subdir"
+_TEST_SUBDIR_NAME = "__tests__"
+_DEFAULT_TEST_LOCATIONS = frozenset(
+    {_TEST_LOCATION_SEPARATE, _TEST_LOCATION_COLLOCATED, _TEST_LOCATION_TEST_SUBDIR}
+)
+
 
 class TddEnforcementHandler(Handler):
     """Enforce TDD by blocking production file creation without corresponding test file.
@@ -60,6 +69,9 @@ class TddEnforcementHandler(Handler):
         # Set by registry via setattr after __init__
         self._languages: list[str] | None = None
         self._languages_applied: bool = False
+        # Config option: test location styles to check (None = ALL styles)
+        # Set via setattr after __init__ from handler options
+        self._test_locations: list[str] | None = None
 
     def _apply_language_filter(self) -> None:
         """Apply language filter to registry on first use (lazy).
@@ -77,6 +89,17 @@ class TddEnforcementHandler(Handler):
         effective_languages = self._languages or getattr(self, "_project_languages", None)
         if effective_languages:
             self._registry.filter_by_languages(effective_languages)
+
+    @property
+    def _effective_test_locations(self) -> frozenset[str]:
+        """Return the active test location styles.
+
+        Returns all 3 styles when _test_locations is None or empty,
+        otherwise returns a frozenset of the configured values.
+        """
+        if not self._test_locations:
+            return _DEFAULT_TEST_LOCATIONS
+        return frozenset(self._test_locations)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if this is a Write operation to a production source file.
@@ -194,32 +217,46 @@ class TddEnforcementHandler(Handler):
         """Get ordered list of candidate test file paths for a source file.
 
         Tries multiple conventions before declaring test missing:
-        1. Mirror mapping (tests/ mirrors src/ structure exactly)
-        2. Current mapping (strips package, uses tests/unit/)
-        3. Fallback mapping (controller-relative or parent-relative)
+        1. Mirror mapping (tests/ mirrors src/ structure exactly) [separate]
+        2. Current mapping (strips package, uses tests/unit/) [separate]
+        3. Fallback mapping (controller-relative or parent-relative) [separate]
+        4. Collocated (test file next to source file) [collocated]
+        5. Test subdirectory (__tests__/ next to source file) [test_subdir]
 
         Returns paths in priority order (most specific to least specific).
+        Controlled by _effective_test_locations config.
         """
         candidates: list[Path] = []
         source_filename = Path(source_path).name
         test_filename = strategy.compute_test_filename(source_filename)
         path_parts = Path(source_path).parts
+        effective_locations = self._effective_test_locations
 
-        # Strategy 1: Mirror mapping (NEW - PHP PSR-4, Java, etc.)
-        if _SRC_DIR in path_parts:
-            mirror_path = self._map_src_to_tests_mirror(path_parts, test_filename)
-            if mirror_path is not None:
-                candidates.append(mirror_path)
+        # Separate test directory strategies (mirror, unit, fallback)
+        if _TEST_LOCATION_SEPARATE in effective_locations:
+            # Strategy 1: Mirror mapping (PHP PSR-4, Java, etc.)
+            if _SRC_DIR in path_parts:
+                mirror_path = self._map_src_to_tests_mirror(path_parts, test_filename)
+                if mirror_path is not None:
+                    candidates.append(mirror_path)
 
-        # Strategy 2: Current mapping (Python convention - strip package)
-        if _SRC_DIR in path_parts:
-            current_path = self._map_src_to_test_path(path_parts, test_filename)
-            if current_path is not None:
-                candidates.append(current_path)
+            # Strategy 2: Current mapping (Python convention - strip package)
+            if _SRC_DIR in path_parts:
+                current_path = self._map_src_to_test_path(path_parts, test_filename)
+                if current_path is not None:
+                    candidates.append(current_path)
 
-        # Strategy 3: Fallback mapping
-        fallback_path = self._map_fallback_test_path(source_path, path_parts, test_filename)
-        candidates.append(fallback_path)
+            # Strategy 3: Fallback mapping
+            fallback_path = self._map_fallback_test_path(source_path, path_parts, test_filename)
+            candidates.append(fallback_path)
+
+        # Collocated: test file next to source file
+        if _TEST_LOCATION_COLLOCATED in effective_locations:
+            candidates.append(self._map_collocated_test_path(source_path, test_filename))
+
+        # Test subdirectory: __tests__/ next to source file
+        if _TEST_LOCATION_TEST_SUBDIR in effective_locations:
+            candidates.append(self._map_test_subdir_path(source_path, test_filename))
 
         return candidates
 
@@ -292,6 +329,22 @@ class TddEnforcementHandler(Handler):
             controller_dir = Path(source_path).parent.parent.parent
 
         return controller_dir / _TEST_DIR / test_filename
+
+    @staticmethod
+    def _map_collocated_test_path(source_path: str, test_filename: str) -> Path:
+        """Map source file to collocated test path (same directory).
+
+        Example: src/pkg/utils/helpers.ts -> src/pkg/utils/helpers.test.ts
+        """
+        return Path(source_path).parent / test_filename
+
+    @staticmethod
+    def _map_test_subdir_path(source_path: str, test_filename: str) -> Path:
+        """Map source file to __tests__/ subdirectory test path.
+
+        Example: src/pkg/utils/helpers.ts -> src/pkg/utils/__tests__/helpers.test.ts
+        """
+        return Path(source_path).parent / _TEST_SUBDIR_NAME / test_filename
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests aggregated from all registered strategies."""

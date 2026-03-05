@@ -120,6 +120,14 @@ handlers:
       #     - Ruby
       #     - Swift
       #     - Dart
+      #   # Test file location styles to check (default: all three)
+      #   # - separate: tests/ directory tree (existing behavior)
+      #   # - collocated: test file next to source (e.g., handler_test.go)
+      #   # - test_subdir: __tests__/ subdirectory next to source
+      #   test_locations:
+      #     - separate
+      #     - collocated
+      #     - test_subdir
 
     lsp_enforcement:       # Steers LLMs toward LSP tools instead of Grep/Bash grep for symbol lookups
       enabled: true
