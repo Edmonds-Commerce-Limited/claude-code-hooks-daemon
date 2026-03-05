@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.18.0] - 2026-03-03
+## [2.18.0] - 2026-03-05
 
 ### Added
 
@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Status Line Upgrade Indicator**: Fixed the upgrade-available indicator in the daemon status line showing only the target version. The indicator now displays both the current version and the target version (e.g. `v2.17.3 → v2.18.0`) so users immediately see what they are upgrading from and to. Falls back to `upgrade → vX.Y.Z` if current version is unavailable in the cache.
 - **NpmCommandHandler False Positive on Logical OR**: Fixed the pipe detection regex in NpmCommandHandler matching `||` (logical OR) as a pipe operator. Commands like `npx hooks-daemon restart 2>/dev/null || npx claude-code-hooks-daemon restart` were incorrectly blocked with "Piping npm/npx commands is pointless". The regex now uses lookahead/lookbehind (`(?<!\|)\|(?!\|)`) to only match single `|` pipe operators.
+- **PHP TDD Strategy Interface Skipping**: Fixed TDD enforcement handler requiring test files for PHP interface files, which have no behaviour to test. Added two detection methods: filename convention (`*Interface.php` suffix) and content inspection (files declaring `interface` without `class`). Extended the `should_skip()` protocol method to accept an optional `content` parameter across all 11 language strategies for content-aware skip decisions.
+- **Silent Exception Hiding in TDD Handler Path Mapping**: Removed `try/except (ValueError, IndexError): pass` blocks that silently swallowed errors in TDD handler path mapping. Callers already guard with `if _SRC_DIR in path_parts` before calling, so these exceptions cannot occur in practice. Removing them enables fail-fast behaviour for real bugs.
+- **Skill Tool Invocation Clarification**: Fixed CLAUDE.md install templates (LLM-INSTALL.md, LLM-UPDATE.md) incorrectly showing `/hooks-daemon restart` in bash code blocks, causing Claude to attempt running it as a bash command instead of using the Skill tool. Updated to clearly instruct Claude to use the Skill tool. Also changed `disable-model-invocation` from `true` to `false` so Claude can invoke the hooks-daemon skill.
 
 ## [2.17.3] - 2026-02-27
 
