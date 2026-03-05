@@ -339,14 +339,16 @@ If missing (or outdated), append the following to the **bottom** of the project'
 ```markdown
 ### Hooks Daemon
 
-This project uses [claude-code-hooks-daemon](https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon) for automated code quality and workflow enforcement.
+This project uses [claude-code-hooks-daemon](https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon) for automated safety and workflow enforcement.
 
-**After editing `.claude/hooks-daemon.yaml`** — restart the daemon:
-```bash
-/hooks-daemon restart
-```
+After editing `.claude/hooks-daemon.yaml` — restart the daemon using the `hooks-daemon` skill:
 
-**Check status**: `/hooks-daemon health`
+- **Restart**: use the `hooks-daemon` skill with args `restart`
+- **Health check**: use the `hooks-daemon` skill with args `health`
+
+> **Important**: `/hooks-daemon` is a **skill** (slash command), not a bash command.
+> Invoke it using the Skill tool, e.g. `Skill(skill="hooks-daemon", args="restart")`.
+> Do NOT attempt to run `/hooks-daemon` as a bash command — it will fail.
 
 **Key files**:
 - `.claude/hooks-daemon.yaml` — handler configuration (enable/disable handlers)
@@ -368,10 +370,13 @@ If missing, prepend this comment block to the top of `.claude/hooks-daemon.yaml`
 ```yaml
 # Claude Code Hooks Daemon - Handler Configuration
 #
-# AFTER EDITING THIS FILE: restart the daemon for changes to take effect:
-#   /hooks-daemon restart      (slash command shortcut)
+# AFTER EDITING THIS FILE: restart the daemon for changes to take effect.
+#   User: type /hooks-daemon restart
+#   Claude: use Skill tool with skill="hooks-daemon" args="restart"
 #
-# Verify it is running: /hooks-daemon health
+# Verify it is running:
+#   User: type /hooks-daemon health
+#   Claude: use Skill tool with skill="hooks-daemon" args="health"
 #
 # Full handler reference: .claude/hooks-daemon/CLAUDE/HANDLER_DEVELOPMENT.md
 
