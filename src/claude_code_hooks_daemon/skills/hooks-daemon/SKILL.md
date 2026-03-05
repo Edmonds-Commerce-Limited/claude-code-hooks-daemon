@@ -2,7 +2,7 @@
 name: hooks-daemon
 description: Manage Claude Code Hooks Daemon - upgrade versions, check health, restart, and develop project-level handlers
 argument-hint: "[upgrade|health|restart|dev-handlers|logs] [args...]"
-disable-model-invocation: true
+disable-model-invocation: false
 user-invocable: true
 allowed-tools: Bash, Read, Write, Edit
 ---
