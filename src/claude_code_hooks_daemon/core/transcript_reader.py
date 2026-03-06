@@ -112,9 +112,13 @@ class TranscriptReader:
         self._path = transcript_path
         self._loaded = False
 
-        path = Path(transcript_path)
-        if not path.exists():
-            logger.warning("Transcript file not found: %s", transcript_path)
+        try:
+            path = Path(transcript_path)
+            if not path.exists():
+                logger.warning("Transcript file not found: %s", transcript_path)
+                return
+        except Exception as e:
+            logger.debug("TranscriptReader: Error checking path %s: %s", transcript_path, e)
             return
 
         self._parse(path)
@@ -139,43 +143,52 @@ class TranscriptReader:
         Args:
             path: Path to JSONL file
         """
-        with path.open("r") as f:
-            for line_num, line in enumerate(f, 1):
-                line = line.strip()
-                if not line:
-                    continue
+        try:
+            with path.open("r") as f:
+                for line_num, line in enumerate(f, 1):
+                    line = line.strip()
+                    if not line:
+                        continue
 
-                try:
-                    data = json.loads(line)
-                except json.JSONDecodeError:
-                    logger.debug("TranscriptReader: Skipping malformed JSON at line %d", line_num)
-                    continue
+                    try:
+                        data = json.loads(line)
+                    except json.JSONDecodeError:
+                        logger.debug(
+                            "TranscriptReader: Skipping malformed JSON at line %d", line_num
+                        )
+                        continue
 
-                if not isinstance(data, dict):
-                    continue
+                    if not isinstance(data, dict):
+                        continue
 
-                entry_type = data.get("type")
-                if entry_type is None:
-                    continue
+                    entry_type = data.get("type")
+                    if entry_type is None:
+                        continue
 
-                if entry_type == "message":
-                    # Real Claude Code format
-                    self._parse_message_entry(data)
-                elif entry_type in ("human", "assistant"):
-                    # Legacy/test format
-                    message_data = data.get("message", {})
-                    content = (
-                        message_data.get("content", "") if isinstance(message_data, dict) else ""
-                    )
-                    self._messages.append(
-                        TranscriptMessage(role=entry_type, content=content, raw=data)
-                    )
-                elif entry_type == "tool_use":
-                    tool_name = data.get("tool_name", "")
-                    tool_input = data.get("tool_input", {})
-                    self._tool_uses.append(
-                        ToolUse(tool_name=tool_name, tool_input=tool_input, raw=data)
-                    )
+                    if entry_type == "message":
+                        # Real Claude Code format
+                        self._parse_message_entry(data)
+                    elif entry_type in ("human", "assistant"):
+                        # Legacy/test format
+                        message_data = data.get("message", {})
+                        content = (
+                            message_data.get("content", "")
+                            if isinstance(message_data, dict)
+                            else ""
+                        )
+                        self._messages.append(
+                            TranscriptMessage(role=entry_type, content=content, raw=data)
+                        )
+                    elif entry_type == "tool_use":
+                        tool_name = data.get("tool_name", "")
+                        tool_input = data.get("tool_input", {})
+                        self._tool_uses.append(
+                            ToolUse(tool_name=tool_name, tool_input=tool_input, raw=data)
+                        )
+        except (OSError, UnicodeDecodeError) as e:
+            logger.debug("TranscriptReader: Failed to read %s: %s", path, e)
+        except Exception as e:
+            logger.error("TranscriptReader: Unexpected error reading %s: %s", path, e)
 
     def _parse_message_entry(self, data: dict[str, Any]) -> None:
         """Parse a real Claude Code message entry (type=message).
