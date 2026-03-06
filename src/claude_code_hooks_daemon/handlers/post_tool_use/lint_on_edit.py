@@ -140,6 +140,25 @@ class LintOnEditHandler(Handler):
 
         return default_cmd, extended_cmd
 
+    @staticmethod
+    def _find_module_root(file_path: str, marker_file: str) -> str | None:
+        """Find the nearest parent directory containing a marker file (e.g., go.mod).
+
+        Walks up from the file's directory to find the module/project root.
+        Returns the directory path if found, None otherwise.
+        """
+        current = Path(file_path).parent
+        while current != current.parent:
+            if (current / marker_file).exists():
+                return str(current)
+            current = current.parent
+        return None
+
+    # Map of language names to their module root marker files
+    _MODULE_ROOT_MARKERS: dict[str, str] = {
+        "Go": "go.mod",
+    }
+
     def _run_lint_command(
         self, command_template: str, file_path: str, language_name: str
     ) -> HookResult | None:
@@ -149,7 +168,22 @@ class LintOnEditHandler(Handler):
             HookResult with DENY if lint fails, None if lint passes.
             HookResult with ALLOW if linter not found or times out (graceful degradation).
         """
-        command = command_template.replace(_FILE_PLACEHOLDER, file_path)
+        # Find module/project root for languages that require it (e.g., Go needs go.mod)
+        working_dir: str | None = None
+        marker = self._MODULE_ROOT_MARKERS.get(language_name)
+        if marker:
+            working_dir = self._find_module_root(file_path, marker)
+
+        # For Go, vet the package directory (not single file) since Go packages span
+        # multiple files and single-file vetting can't resolve cross-file references
+        effective_path = file_path
+        if language_name == "Go" and working_dir:
+            pkg_dir = str(Path(file_path).parent)
+            # Convert absolute path to module-relative package path for go vet
+            if pkg_dir.startswith(working_dir):
+                effective_path = "./" + pkg_dir[len(working_dir) :].lstrip("/") + "/"
+
+        command = command_template.replace(_FILE_PLACEHOLDER, effective_path)
         # Split command into list for subprocess
         # SECURITY: These are trusted lint tools defined in strategy constants
         command_parts = command.split()
@@ -160,6 +194,7 @@ class LintOnEditHandler(Handler):
                 capture_output=True,
                 text=True,
                 timeout=Timeout.LINT_CHECK,
+                cwd=working_dir,
             )
 
             if result.returncode != 0:

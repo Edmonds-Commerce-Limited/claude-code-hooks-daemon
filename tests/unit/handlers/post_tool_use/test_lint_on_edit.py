@@ -463,6 +463,109 @@ class TestEdgeCases:
         assert "Error in stderr only" in (result.reason or "")
 
 
+class TestModuleRoot:
+    """Test module root detection and Go package-level vetting (Plan 00076 bug fix)."""
+
+    def test_find_module_root_finds_go_mod(self, tmp_path: Path) -> None:
+        """_find_module_root walks up to find go.mod."""
+        go_mod = tmp_path / "go.mod"
+        go_mod.write_text("module example.com/project\n\ngo 1.24\n")
+        pkg_dir = tmp_path / "internal" / "github"
+        pkg_dir.mkdir(parents=True)
+        go_file = pkg_dir / "client.go"
+        go_file.write_text("package github\n")
+
+        result = LintOnEditHandler._find_module_root(str(go_file), "go.mod")
+        assert result == str(tmp_path)
+
+    def test_find_module_root_returns_none_when_not_found(self, tmp_path: Path) -> None:
+        """_find_module_root returns None when marker not found."""
+        go_file = tmp_path / "orphan.go"
+        go_file.write_text("package main\n")
+
+        result = LintOnEditHandler._find_module_root(str(go_file), "go.mod")
+        assert result is None
+
+    @patch("claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit.subprocess")
+    def test_go_lint_uses_module_root_as_cwd(
+        self, mock_subprocess: MagicMock, handler: LintOnEditHandler, tmp_path: Path
+    ) -> None:
+        """Go lint commands run with cwd set to module root."""
+        go_mod = tmp_path / "go.mod"
+        go_mod.write_text("module example.com/project\n\ngo 1.24\n")
+        pkg_dir = tmp_path / "internal" / "github"
+        pkg_dir.mkdir(parents=True)
+        go_file = pkg_dir / "client.go"
+        go_file.write_text("package github\n")
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = ""
+        mock_result.stderr = ""
+        mock_subprocess.run.return_value = mock_result
+
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(go_file)},
+        }
+        handler.handle(hook_input)
+
+        call_kwargs = mock_subprocess.run.call_args[1]
+        assert call_kwargs.get("cwd") == str(tmp_path)
+
+    @patch("claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit.subprocess")
+    def test_go_lint_uses_package_dir_not_single_file(
+        self, mock_subprocess: MagicMock, handler: LintOnEditHandler, tmp_path: Path
+    ) -> None:
+        """Go lint vets the package directory, not a single file."""
+        go_mod = tmp_path / "go.mod"
+        go_mod.write_text("module example.com/project\n\ngo 1.24\n")
+        pkg_dir = tmp_path / "internal" / "github"
+        pkg_dir.mkdir(parents=True)
+        go_file = pkg_dir / "client.go"
+        go_file.write_text("package github\n")
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = ""
+        mock_result.stderr = ""
+        mock_subprocess.run.return_value = mock_result
+
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(go_file)},
+        }
+        handler.handle(hook_input)
+
+        call_args = mock_subprocess.run.call_args[0][0]
+        command_str = " ".join(call_args)
+        assert "./internal/github/" in command_str
+        assert str(go_file) not in command_str
+
+    @patch("claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit.subprocess")
+    def test_non_go_lint_does_not_set_cwd(
+        self, mock_subprocess: MagicMock, handler: LintOnEditHandler, tmp_path: Path
+    ) -> None:
+        """Non-Go lint commands don't set cwd."""
+        test_file = tmp_path / "app.py"
+        test_file.write_text("x = 1")
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = ""
+        mock_result.stderr = ""
+        mock_subprocess.run.return_value = mock_result
+
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(test_file)},
+        }
+        handler.handle(hook_input)
+
+        call_kwargs = mock_subprocess.run.call_args[1]
+        assert call_kwargs.get("cwd") is None
+
+
 class TestAcceptanceTests:
     def test_returns_list(self, handler: LintOnEditHandler) -> None:
         tests = handler.get_acceptance_tests()
