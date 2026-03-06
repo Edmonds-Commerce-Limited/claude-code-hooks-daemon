@@ -208,9 +208,9 @@ class PipeBlockerHandler(Handler):
             f"  {source_segment or 'command'} > \"$TEMP_FILE\" 2>&1\n"
             f"  EXIT_CODE=$?\n"
             f'  if [ $EXIT_CODE -eq 0 ]; then echo "Completed OK"; '
-            f'else echo "Completed with errors (exit code: $EXIT_CODE) - check /tmp/output.txt"; fi\n\n'
+            f'else echo "Completed with errors (exit code: $EXIT_CODE) - check $TEMP_FILE"; fi\n\n'
             f"  # Agent sees 'Completed OK' → no need to read the file\n"
-            f"  # Agent sees 'Completed with errors' → read /tmp/output.txt to diagnose\n\n"
+            f"  # Agent sees 'Completed with errors' → read $TEMP_FILE to diagnose\n\n"
             f"To disable: {_CONFIG_HINT_HANDLER}  (set enabled: false)"
         )
 
@@ -234,9 +234,9 @@ class PipeBlockerHandler(Handler):
             f"  {source_segment or 'command'} > \"$TEMP_FILE\" 2>&1\n"
             f"  EXIT_CODE=$?\n"
             f'  if [ $EXIT_CODE -eq 0 ]; then echo "Completed OK"; '
-            f'else echo "Completed with errors (exit code: $EXIT_CODE) - check /tmp/output.txt"; fi\n\n'
+            f'else echo "Completed with errors (exit code: $EXIT_CODE) - check $TEMP_FILE"; fi\n\n'
             f"  # Agent sees 'Completed OK' → no need to read the file\n"
-            f"  # Agent sees 'Completed with errors' → read /tmp/output.txt to diagnose\n\n"
+            f"  # Agent sees 'Completed with errors' → read $TEMP_FILE to diagnose\n\n"
             f"INFO: WHITELISTED COMMANDS (piping is OK):\n"
             f"  Commands that already filter output: grep, rg, awk, sed, jq, ls, cat, etc.\n\n"
             f"  Example: grep error /var/log/syslog | tail -n 20  (allowed)\n\n"
