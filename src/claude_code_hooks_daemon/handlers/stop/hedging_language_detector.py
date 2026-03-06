@@ -11,14 +11,16 @@ Detected patterns:
 - Weak confidence: "I'm not sure but", "I'm pretty sure", "I believe"
 """
 
-import json
 import logging
 import re
-from pathlib import Path
 from typing import Any, ClassVar
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.utils.stop_hook_helpers import (
+    get_transcript_reader,
+    is_stop_hook_active,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -91,23 +93,11 @@ class HedgingLanguageDetectorHandler(Handler):
         ):
             self._all_patterns.append((pattern_str, re.compile(pattern_str, re.IGNORECASE)))
 
-    def _is_stop_hook_active(self, hook_input: dict[str, Any]) -> bool:
-        """Check if stop hook is in re-entry state (prevents infinite loops).
-
-        Claude Code may send this field as snake_case or camelCase.
-
-        Args:
-            hook_input: Hook input dictionary
-
-        Returns:
-            True if stop hook is active (re-entry detected)
-        """
-        return bool(
-            hook_input.get("stop_hook_active", False) or hook_input.get("stopHookActive", False)
-        )
-
     def _get_last_assistant_message(self, transcript_path: str) -> str:
         """Read transcript and extract the last assistant message text.
+
+        Uses shared get_transcript_reader() utility for loading,
+        then delegates to TranscriptReader.get_last_assistant_text().
 
         Args:
             transcript_path: Path to the JSONL transcript file
@@ -115,51 +105,10 @@ class HedgingLanguageDetectorHandler(Handler):
         Returns:
             Text content of the last assistant message, or empty string
         """
-        try:
-            path = Path(transcript_path)
-            if not path.exists():
-                return ""
-
-            with path.open() as f:
-                lines = f.readlines()
-
-            if not lines:
-                return ""
-
-            # Parse JSONL in reverse - find last assistant message
-            for line in reversed(lines):
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    msg = json.loads(line)
-                    if msg.get("type") != "message":
-                        continue
-                    message = msg.get("message", {})
-                    if message.get("role") != "assistant":
-                        continue
-
-                    # Extract text content from content array
-                    content = message.get("content", [])
-                    text_parts = []
-                    for part in content:
-                        if isinstance(part, dict) and part.get("type") == "text":
-                            text_parts.append(part.get("text", ""))
-                        elif isinstance(part, str):
-                            text_parts.append(part)
-
-                    return " ".join(text_parts)
-                except (json.JSONDecodeError, ValueError) as e:
-                    logger.debug("Skipping malformed JSONL line: %s", e)
-                    continue
-
+        reader = get_transcript_reader({HookInputField.TRANSCRIPT_PATH: transcript_path})
+        if not reader:
             return ""
-        except (OSError, json.JSONDecodeError, UnicodeDecodeError) as e:
-            logger.debug("Failed to read transcript from %s: %s", transcript_path, e)
-            return ""
-        except Exception as e:
-            logger.error("Unexpected error reading transcript: %s", e, exc_info=True)
-            return ""
+        return reader.get_last_assistant_text()
 
     def _find_hedging_phrases(self, text: str) -> list[str]:
         """Find all hedging phrases in the given text.
@@ -188,7 +137,7 @@ class HedgingLanguageDetectorHandler(Handler):
             True if hedging language detected in last assistant message
         """
         # Prevent infinite loops on re-entry
-        if self._is_stop_hook_active(hook_input):
+        if is_stop_hook_active(hook_input):
             logger.debug("Stop hook active (re-entry) - skipping hedging check")
             return False
 

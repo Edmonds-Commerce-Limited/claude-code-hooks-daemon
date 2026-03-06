@@ -4,14 +4,16 @@ Blocks Stop events when Claude asks confirmation questions, making Claude
 continue automatically in YOLO mode without requiring any user interaction.
 """
 
-import json
 import logging
 import re
-from pathlib import Path
 from typing import Any, ClassVar
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.utils.stop_hook_helpers import (
+    get_transcript_reader,
+    is_stop_hook_active,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -74,25 +76,6 @@ class AutoContinueStopHandler(Handler):
             ],
         )
 
-    def _is_stop_hook_active(self, hook_input: dict[str, Any]) -> bool:
-        """Check if stop hook is in re-entry state (prevents infinite loops).
-
-        Claude Code may send this field as snake_case (stop_hook_active) or
-        camelCase (stopHookActive). Pydantic extra="allow" preserves the
-        original casing, so we must check BOTH variants.
-
-        Args:
-            hook_input: Hook input dictionary
-
-        Returns:
-            True if stop hook is active (re-entry detected)
-        """
-        # Check both snake_case and camelCase variants
-        # Claude Code docs show snake_case, but camelCase is also possible
-        return bool(
-            hook_input.get("stop_hook_active", False) or hook_input.get("stopHookActive", False)
-        )
-
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if this is a confirmation question stop that should auto-continue.
 
@@ -103,19 +86,18 @@ class AutoContinueStopHandler(Handler):
             True if Claude asked a confirmation question and we should auto-continue
         """
         # CRITICAL: Prevent infinite loops - check both casing variants
-        if self._is_stop_hook_active(hook_input):
+        if is_stop_hook_active(hook_input):
             logger.debug("Stop hook is active (re-entry) - skipping to prevent infinite loop")
             return False
 
-        transcript_path = hook_input.get(HookInputField.TRANSCRIPT_PATH)
-        if not transcript_path:
-            logger.debug("No transcript_path in hook_input - cannot check for confirmation")
+        reader = get_transcript_reader(hook_input)
+        if not reader:
+            logger.debug("No transcript available - cannot check for confirmation")
             return False
 
-        # Get the last assistant message from transcript
-        last_message = self._get_last_assistant_message(str(transcript_path))
+        last_message = reader.get_last_assistant_text()
         if not last_message:
-            logger.debug("No assistant message found in transcript: %s", transcript_path)
+            logger.debug("No assistant message found in transcript")
             return False
 
         # Must contain a question mark
@@ -151,60 +133,6 @@ class AutoContinueStopHandler(Handler):
             "Continue automatically without asking for permission."
         )
         return HookResult(decision=Decision.DENY, reason=reason)
-
-    def _get_last_assistant_message(self, transcript_path: str) -> str:
-        """Read transcript and get the last assistant message.
-
-        Args:
-            transcript_path: Path to the JSONL transcript file
-
-        Returns:
-            Text content of the last assistant message, or empty string
-        """
-        try:
-            path = Path(transcript_path)
-            if not path.exists():
-                return ""
-
-            with path.open() as f:
-                lines = f.readlines()
-
-            if not lines:
-                return ""
-
-            # Parse JSONL - find last assistant message
-            for line in reversed(lines):
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    msg = json.loads(line)
-                    if msg.get("type") != "message":
-                        continue
-                    message = msg.get("message", {})
-                    if message.get("role") != "assistant":
-                        continue
-
-                    # Extract text content
-                    content = message.get("content", [])
-                    text_parts = []
-                    for part in content:
-                        if isinstance(part, dict) and part.get("type") == "text":
-                            text_parts.append(part.get("text", ""))
-                        elif isinstance(part, str):
-                            text_parts.append(part)
-
-                    return " ".join(text_parts)
-                except (json.JSONDecodeError, ValueError):
-                    continue
-
-            return ""
-        except (OSError, json.JSONDecodeError, UnicodeDecodeError) as e:
-            logger.debug("Failed to read transcript from %s: %s", transcript_path, e)
-            return ""
-        except Exception as e:
-            logger.error("Unexpected error reading transcript: %s", e, exc_info=True)
-            return ""
 
     def _contains_confirmation_pattern(self, text: str) -> bool:
         """Check if text contains a confirmation pattern.
