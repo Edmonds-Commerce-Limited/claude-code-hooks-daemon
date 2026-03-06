@@ -160,14 +160,15 @@ class TestSecurityStrategyRegistry:
 
     # ── create_default() ──────────────────────────────────────────────
 
-    def test_create_default_has_secrets(self):
+    def test_create_default_has_all_languages(self):
         registry = SecurityStrategyRegistry.create_default()
-        assert "Secrets" in registry.registered_languages
+        expected = [
+            "Secrets", "PHP", "JavaScript", "Python", "Go", "Ruby",
+            "Java", "Kotlin", "C#", "Rust", "Swift", "Dart",
+        ]
+        for lang in expected:
+            assert lang in registry.registered_languages, f"Missing language: {lang}"
 
-    def test_create_default_has_php(self):
+    def test_create_default_has_12_languages(self):
         registry = SecurityStrategyRegistry.create_default()
-        assert "PHP" in registry.registered_languages
-
-    def test_create_default_has_javascript(self):
-        registry = SecurityStrategyRegistry.create_default()
-        assert "JavaScript" in registry.registered_languages
+        assert len(registry.registered_languages) == 12
