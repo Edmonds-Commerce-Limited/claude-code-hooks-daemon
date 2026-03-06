@@ -51,6 +51,10 @@ handlers:
       enabled: true
       priority: 13
 
+    security_antipattern:  # Blocks security antipatterns (hardcoded secrets, eval, innerHTML, etc)
+      enabled: true
+      priority: 14
+
     worktree_file_copy:    # Prevents copying files between git worktrees
       enabled: true
       priority: 15
