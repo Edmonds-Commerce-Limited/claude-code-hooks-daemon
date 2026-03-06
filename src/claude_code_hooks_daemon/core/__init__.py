@@ -31,9 +31,9 @@ from claude_code_hooks_daemon.core.transcript_reader import (
 
 __all__ = [
     "AcceptanceTest",
-    "ContentBlock",
     "ChainExecutionResult",
     "CliAcceptanceTest",
+    "ContentBlock",
     "DaemonDataLayer",
     "Decision",
     "EventRouter",

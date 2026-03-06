@@ -457,9 +457,7 @@ class TestGetLastAssistantMessageEdgeCases:
         """Unexpected exception in transcript reading returns empty string."""
         from unittest.mock import patch as mock_patch
 
-        with mock_patch(
-            "claude_code_hooks_daemon.core.transcript_reader.Path"
-        ) as mock_path:
+        with mock_patch("claude_code_hooks_daemon.core.transcript_reader.Path") as mock_path:
             mock_path.return_value.exists.side_effect = TypeError("unexpected")
             result = handler._get_last_assistant_message("/some/path")
             assert result == ""

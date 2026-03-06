@@ -211,16 +211,12 @@ class TranscriptReader:
 
         # Handle string content (not a list of blocks)
         if isinstance(raw_content, str):
-            self._messages.append(
-                TranscriptMessage(role=role, content=raw_content, raw=data)
-            )
+            self._messages.append(TranscriptMessage(role=role, content=raw_content, raw=data))
             return
 
         # Parse content block list
         if not isinstance(raw_content, list):
-            self._messages.append(
-                TranscriptMessage(role=role, content="", raw=data)
-            )
+            self._messages.append(TranscriptMessage(role=role, content="", raw=data))
             return
 
         blocks: list[ContentBlock] = []
