@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.19.0] - 2026-03-06
+
+### Added
+
+- **TDD Collocated Test Support**: TDD enforcement handler now supports collocated test file layouts in addition to the traditional separate `tests/` directory. Three new test location modes are available via the `test_locations` configuration option: `separate` (traditional `tests/` tree), `collocated` (test file next to source file, e.g. Go `_test.go` and React/Jest `*.test.ts`/`*.test.js`), and `test_subdir` (`__tests__/` subdirectory alongside source). All three modes are enabled by default, making the handler work out-of-the-box for Go, JavaScript, TypeScript, and any other language using collocated test conventions.
+
+### Fixed
+
+- **Go Lint Module Root and Package Vetting**: Go lint commands (`go vet`, `golangci-lint`) now run from the correct module root directory (where `go.mod` lives) rather than the file's parent directory, and vet entire package directories instead of single files. This fixes cross-file reference resolution failures in multi-file packages and multi-module repositories where types defined in sibling files were unresolvable.
+
 ## [2.18.0] - 2026-03-05
 
 ### Added
