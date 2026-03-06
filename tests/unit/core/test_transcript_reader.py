@@ -524,9 +524,7 @@ class TestTranscriptReaderRealJSONLFormat:
     def test_legacy_format_still_works(self, tmp_path: Path) -> None:
         """Legacy format (type=human/assistant) should still be parsed."""
         transcript = tmp_path / "transcript.jsonl"
-        transcript.write_text(
-            json.dumps({"type": "human", "message": {"content": "Hello"}}) + "\n"
-        )
+        transcript.write_text(json.dumps({"type": "human", "message": {"content": "Hello"}}) + "\n")
         reader = TranscriptReader()
         reader.load(str(transcript))
         msgs = reader.get_messages()
@@ -669,9 +667,7 @@ class TestTranscriptReaderQueryMethods:
         reader.load(str(transcript))
         assert reader.last_assistant_used_tool(ToolName.ASK_USER_QUESTION) is False
 
-    def test_get_last_tool_use_in_message(
-        self, reader_with_conversation: TranscriptReader
-    ) -> None:
+    def test_get_last_tool_use_in_message(self, reader_with_conversation: TranscriptReader) -> None:
         """get_last_tool_use_in_message() returns last tool_use ContentBlock."""
         block = reader_with_conversation.get_last_tool_use_in_message()
         assert block is not None

@@ -7,8 +7,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from claude_code_hooks_daemon.utils.stop_hook_helpers import (
     get_transcript_reader,
     is_stop_hook_active,
