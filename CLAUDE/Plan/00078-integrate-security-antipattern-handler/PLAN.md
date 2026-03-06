@@ -1,4 +1,7 @@
-# Plan: Integrate SecurityAntipatternHandler
+# Plan 00078: Integrate SecurityAntipatternHandler
+
+**Status**: In Progress
+**Created**: 2026-03-06
 
 ## Context
 
@@ -52,23 +55,52 @@ SECURITY_ANTIPATTERN = 14  # Safety range, after error_hiding_blocker (13)
 
 ## Execution Phases
 
-### Phase 1: RED — Write Failing Tests
-- Create `tests/unit/handlers/pre_tool_use/test_security_antipattern.py`
-- Run tests — must FAIL (handler not in source tree yet)
+### Phase 1: RED — Write Failing Tests ✅ COMPLETE
+- [x] Create `tests/unit/handlers/pre_tool_use/test_security_antipattern.py` (60 tests)
+- [x] Run tests — confirmed FAIL before handler in source tree
 
-### Phase 2: GREEN — Add Constants + Move Handler
-- Add `HandlerID.SECURITY_ANTIPATTERN` constant
-- Add `Priority.SECURITY_ANTIPATTERN` constant
-- Add to `HandlerKey` Literal
-- Copy handler file to source tree
-- Register in `__init__.py`
-- Run tests — must PASS
+### Phase 2: GREEN — Add Constants + Move Handler ✅ COMPLETE
+- [x] Add `HandlerID.SECURITY_ANTIPATTERN` constant
+- [x] Add `Priority.SECURITY_ANTIPATTERN` constant
+- [x] Add to `HandlerKey` Literal
+- [x] Copy handler file to source tree
+- [x] Register in `__init__.py`
+- [x] Run tests — all 60 PASS
 
-### Phase 3: Config + Verification
-- Register in `.claude/hooks-daemon.yaml`
-- Run `./scripts/qa/run_all.sh` — all checks must pass
-- Restart daemon and verify RUNNING
-- Checkpoint commit
+### Phase 3: Config + Verification ✅ COMPLETE
+- [x] Register in `.claude/hooks-daemon.yaml` (priority 14)
+- [x] Type check passes (mypy --strict)
+- [x] Daemon restart verified — RUNNING
+- [x] Checkpoint commit: `adeb96b`
+
+### Phase 4: Source Guard CLAUDE.md Files ✅ COMPLETE
+- [x] Create `src/CLAUDE.md` — warns project agents not to edit daemon source
+- [x] Create `tests/CLAUDE.md` — warns project agents not to edit daemon tests
+- [x] Both files link to project-level handlers guide and bug reporting guide
+
+### Phase 5: Strategy Pattern Refactoring (FUTURE)
+
+**Status**: Not Started — separate plan recommended
+
+The current handler uses `if _is_php_file()` / `if _is_ts_or_js_file()` chains, which violates the project's Strategy Pattern principle (CLAUDE.md: "If you see an if/elif chain on type/language names, use Strategy Pattern instead").
+
+**Proposed approach**:
+- Define a `SecurityStrategy` Protocol with `file_extensions`, `patterns`, and `owasp_category`
+- Create per-language strategy implementations:
+  - `PhpSecurityStrategy` — eval, exec, shell_exec, system, passthru, proc_open, unserialize
+  - `TypeScriptSecurityStrategy` — eval, new Function, dangerouslySetInnerHTML, innerHTML, document.write
+  - `SecretDetectionStrategy` — AWS keys, Stripe keys, GitHub tokens, private keys (all file types)
+- Registry maps file extensions to active strategies
+- Config-driven: project's `hooks-daemon.yaml` can specify which languages are active
+- Allows projects to enable only relevant language strategies (e.g. PHP-only project skips TS checks)
+
+**Benefits**:
+- New language support by adding new strategy, not modifying handler
+- Project-specific language configuration
+- Independent TDD per strategy
+- Follows SOLID/Open-Closed principle
+
+**This should be a separate plan** (00079 or similar) since it's a non-trivial refactoring effort.
 
 ## Verification
 
@@ -77,7 +109,7 @@ SECURITY_ANTIPATTERN = 14  # Safety range, after error_hiding_blocker (13)
 pytest tests/unit/handlers/pre_tool_use/test_security_antipattern.py -v
 
 # Full QA
-./scripts/qa/run_all.sh
+./scripts/qa/llm_qa.py all
 
 # Daemon load
 $PYTHON -m claude_code_hooks_daemon.daemon.cli restart
