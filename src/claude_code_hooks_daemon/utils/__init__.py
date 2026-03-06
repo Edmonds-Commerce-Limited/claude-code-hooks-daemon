@@ -11,11 +11,17 @@ from claude_code_hooks_daemon.utils.naming import (
     display_name_to_config_key,
 )
 from claude_code_hooks_daemon.utils.npm import has_llm_commands_in_package_json
+from claude_code_hooks_daemon.utils.stop_hook_helpers import (
+    get_transcript_reader,
+    is_stop_hook_active,
+)
 
 __all__ = [
     "class_name_to_config_key",
     "config_key_to_display_name",
     "display_name_to_config_key",
     "get_llm_command_guide_path",
+    "get_transcript_reader",
     "has_llm_commands_in_package_json",
+    "is_stop_hook_active",
 ]
