@@ -75,6 +75,7 @@ The daemon ships with 48 production handlers across 10 event types, covering the
 
 - **Destructive git blocker** — Prevents `git push --force`, `git reset --hard`, `git clean -f`, `git branch -D`
 - **Sed blocker** — Encourages the Edit tool over sed; avoids dangerous in-place edits
+- **Security antipattern blocker** — Blocks hardcoded secrets (OWASP A02) and injection patterns (OWASP A03) across 12 language strategies (Secrets, Python, JS/TS, PHP, Go, Ruby, Java, Kotlin, C#, Rust, Swift, Dart)
 - **Absolute path enforcer** — Prevents absolute paths in tool calls
 - **QA suppression blocker** — Blocks `# type: ignore`, `# noqa`, `eslint-disable`, `//nolint` across 11 languages (Python, JS, TS, PHP, Go, Rust, Java, Ruby, Kotlin, Swift, C#)
 
