@@ -211,6 +211,11 @@ class HandlerID:
         config_key="error_hiding_blocker",
         display_name="error-hiding-blocker",
     )
+    SECURITY_ANTIPATTERN = HandlerIDMeta(
+        class_name="SecurityAntipatternHandler",
+        config_key="security_antipattern",
+        display_name="block-security-antipatterns",
+    )
     GIT_STASH = HandlerIDMeta(
         class_name="GitStashHandler",
         config_key="git_stash",
@@ -456,6 +461,7 @@ HandlerKey = Literal[
     "pipe_blocker",
     "git_stash",
     "error_hiding_blocker",
+    "security_antipattern",
     # QA enforcement handlers
     "qa_suppression",
     "validate_plan_number",
