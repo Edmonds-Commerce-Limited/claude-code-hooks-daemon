@@ -10,6 +10,7 @@ import pytest
 
 from claude_code_hooks_daemon.constants import ToolName
 from claude_code_hooks_daemon.core.transcript_reader import (
+    ContentBlock,
     ToolUse,
     TranscriptMessage,
     TranscriptReader,
@@ -345,6 +346,62 @@ class TestTranscriptMessage:
         assert msg.content == "Hello"
 
 
+class TestTranscriptMessageContentBlocks:
+    """Test TranscriptMessage.content_blocks field."""
+
+    def test_default_content_blocks_is_empty_tuple(self) -> None:
+        """Default content_blocks should be empty tuple for backward compat."""
+        msg = TranscriptMessage(role="human", content="Hello", raw={})
+        assert msg.content_blocks == ()
+
+    def test_content_blocks_preserved(self) -> None:
+        """content_blocks should store provided blocks."""
+        block = ContentBlock(block_type="text", text="Hello")
+        msg = TranscriptMessage(
+            role="assistant",
+            content="Hello",
+            raw={},
+            content_blocks=(block,),
+        )
+        assert len(msg.content_blocks) == 1
+        assert msg.content_blocks[0].text == "Hello"
+
+
+class TestContentBlock:
+    """Test ContentBlock dataclass."""
+
+    def test_text_block(self) -> None:
+        """ContentBlock should store text block fields."""
+        block = ContentBlock(block_type="text", text="Hello world")
+        assert block.block_type == "text"
+        assert block.text == "Hello world"
+        assert block.tool_name == ""
+        assert block.tool_input == {}
+
+    def test_tool_use_block(self) -> None:
+        """ContentBlock should store tool_use block fields."""
+        block = ContentBlock(
+            block_type="tool_use",
+            tool_name=ToolName.ASK_USER_QUESTION,
+            tool_input={"question": "Which option?"},
+        )
+        assert block.block_type == "tool_use"
+        assert block.tool_name == ToolName.ASK_USER_QUESTION
+        assert block.tool_input == {"question": "Which option?"}
+        assert block.text == ""
+
+    def test_raw_field(self) -> None:
+        """ContentBlock raw field stores original dict."""
+        raw = {"type": "text", "text": "hi"}
+        block = ContentBlock(block_type="text", text="hi", raw=raw)
+        assert block.raw == raw
+
+    def test_default_raw_is_empty_dict(self) -> None:
+        """ContentBlock raw defaults to empty dict."""
+        block = ContentBlock(block_type="text")
+        assert block.raw == {}
+
+
 class TestToolUse:
     """Test ToolUse dataclass."""
 
@@ -353,3 +410,289 @@ class TestToolUse:
         tool = ToolUse(tool_name=ToolName.BASH, tool_input={"command": "ls"}, raw={})
         assert tool.tool_name == ToolName.BASH
         assert tool.tool_input == {"command": "ls"}
+
+
+class TestTranscriptReaderRealJSONLFormat:
+    """Test parsing real Claude Code JSONL format (type=message with nested role)."""
+
+    def test_parses_real_assistant_message(self, tmp_path: Path) -> None:
+        """Should parse real format: type=message, message.role=assistant."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps(
+                {
+                    "type": "message",
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {"type": "text", "text": "I'll help you."},
+                            {
+                                "type": "tool_use",
+                                "name": "Bash",
+                                "input": {"command": "ls"},
+                            },
+                        ],
+                    },
+                }
+            )
+            + "\n"
+        )
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        msgs = reader.get_messages()
+        assert len(msgs) == 1
+        assert msgs[0].role == "assistant"
+        assert msgs[0].content == "I'll help you."
+
+    def test_parses_content_blocks_from_real_format(self, tmp_path: Path) -> None:
+        """Should parse content blocks from real JSONL format."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps(
+                {
+                    "type": "message",
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {"type": "text", "text": "Let me check."},
+                            {
+                                "type": "tool_use",
+                                "name": "AskUserQuestion",
+                                "input": {"question": "Which?"},
+                            },
+                        ],
+                    },
+                }
+            )
+            + "\n"
+        )
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        msgs = reader.get_messages()
+        assert len(msgs[0].content_blocks) == 2
+        assert msgs[0].content_blocks[0].block_type == "text"
+        assert msgs[0].content_blocks[0].text == "Let me check."
+        assert msgs[0].content_blocks[1].block_type == "tool_use"
+        assert msgs[0].content_blocks[1].tool_name == "AskUserQuestion"
+        assert msgs[0].content_blocks[1].tool_input == {"question": "Which?"}
+
+    def test_parses_real_human_message(self, tmp_path: Path) -> None:
+        """Should parse real format: type=message, message.role=human."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps(
+                {
+                    "type": "message",
+                    "message": {
+                        "role": "human",
+                        "content": [{"type": "text", "text": "Hello Claude"}],
+                    },
+                }
+            )
+            + "\n"
+        )
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        msgs = reader.get_messages()
+        assert len(msgs) == 1
+        assert msgs[0].role == "human"
+        assert msgs[0].content == "Hello Claude"
+
+    def test_concatenates_multiple_text_blocks(self, tmp_path: Path) -> None:
+        """Should concatenate multiple text blocks into content string."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps(
+                {
+                    "type": "message",
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {"type": "text", "text": "First part."},
+                            {"type": "text", "text": "Second part."},
+                        ],
+                    },
+                }
+            )
+            + "\n"
+        )
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        msgs = reader.get_messages()
+        assert msgs[0].content == "First part. Second part."
+
+    def test_legacy_format_still_works(self, tmp_path: Path) -> None:
+        """Legacy format (type=human/assistant) should still be parsed."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps({"type": "human", "message": {"content": "Hello"}}) + "\n"
+        )
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        msgs = reader.get_messages()
+        assert len(msgs) == 1
+        assert msgs[0].role == "human"
+        assert msgs[0].content == "Hello"
+
+    def test_string_content_in_real_format(self, tmp_path: Path) -> None:
+        """Should handle string content (not list) in real format."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps(
+                {
+                    "type": "message",
+                    "message": {
+                        "role": "assistant",
+                        "content": "Just a plain string",
+                    },
+                }
+            )
+            + "\n"
+        )
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        msgs = reader.get_messages()
+        assert msgs[0].content == "Just a plain string"
+
+
+class TestTranscriptReaderQueryMethods:
+    """Test new query methods on TranscriptReader."""
+
+    @pytest.fixture
+    def reader_with_conversation(self, tmp_path: Path) -> TranscriptReader:
+        """Create reader with a realistic conversation including tool_use blocks."""
+        transcript = tmp_path / "transcript.jsonl"
+        lines = [
+            json.dumps(
+                {
+                    "type": "message",
+                    "message": {
+                        "role": "human",
+                        "content": [{"type": "text", "text": "Fix the bug"}],
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "message",
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {"type": "text", "text": "I'll read the file."},
+                            {
+                                "type": "tool_use",
+                                "name": "Read",
+                                "input": {"file_path": "/tmp/test.py"},
+                            },
+                        ],
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "message",
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {"type": "text", "text": "Would you like me to proceed?"},
+                            {
+                                "type": "tool_use",
+                                "name": "AskUserQuestion",
+                                "input": {"question": "Which approach?"},
+                            },
+                        ],
+                    },
+                }
+            ),
+        ]
+        transcript.write_text("\n".join(lines) + "\n")
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        return reader
+
+    def test_get_last_assistant_message(self, reader_with_conversation: TranscriptReader) -> None:
+        """get_last_assistant_message() returns last assistant TranscriptMessage."""
+        msg = reader_with_conversation.get_last_assistant_message()
+        assert msg is not None
+        assert msg.role == "assistant"
+        assert "Would you like" in msg.content
+
+    def test_get_last_assistant_message_none_when_empty(self, tmp_path: Path) -> None:
+        """get_last_assistant_message() returns None when no assistant messages."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps(
+                {
+                    "type": "message",
+                    "message": {
+                        "role": "human",
+                        "content": [{"type": "text", "text": "Hello"}],
+                    },
+                }
+            )
+            + "\n"
+        )
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        assert reader.get_last_assistant_message() is None
+
+    def test_get_last_assistant_text(self, reader_with_conversation: TranscriptReader) -> None:
+        """get_last_assistant_text() returns text content of last assistant message."""
+        text = reader_with_conversation.get_last_assistant_text()
+        assert "Would you like" in text
+
+    def test_get_last_assistant_text_empty_when_no_messages(self, tmp_path: Path) -> None:
+        """get_last_assistant_text() returns empty string when no assistant messages."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text("")
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        assert reader.get_last_assistant_text() == ""
+
+    def test_last_assistant_used_tool_true(
+        self, reader_with_conversation: TranscriptReader
+    ) -> None:
+        """last_assistant_used_tool() returns True when tool was used."""
+        assert reader_with_conversation.last_assistant_used_tool(ToolName.ASK_USER_QUESTION) is True
+
+    def test_last_assistant_used_tool_false(
+        self, reader_with_conversation: TranscriptReader
+    ) -> None:
+        """last_assistant_used_tool() returns False when tool was NOT used."""
+        assert reader_with_conversation.last_assistant_used_tool(ToolName.BASH) is False
+
+    def test_last_assistant_used_tool_false_when_no_messages(self, tmp_path: Path) -> None:
+        """last_assistant_used_tool() returns False when no messages."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text("")
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        assert reader.last_assistant_used_tool(ToolName.ASK_USER_QUESTION) is False
+
+    def test_get_last_tool_use_in_message(
+        self, reader_with_conversation: TranscriptReader
+    ) -> None:
+        """get_last_tool_use_in_message() returns last tool_use ContentBlock."""
+        block = reader_with_conversation.get_last_tool_use_in_message()
+        assert block is not None
+        assert block.block_type == "tool_use"
+        assert block.tool_name == "AskUserQuestion"
+
+    def test_get_last_tool_use_in_message_none_when_no_tools(self, tmp_path: Path) -> None:
+        """get_last_tool_use_in_message() returns None when no tool_use blocks."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps(
+                {
+                    "type": "message",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "Just text."}],
+                    },
+                }
+            )
+            + "\n"
+        )
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        assert reader.get_last_tool_use_in_message() is None

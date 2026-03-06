@@ -23,6 +23,7 @@ from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.core.router import EventRouter
 from claude_code_hooks_daemon.core.session_state import SessionState
 from claude_code_hooks_daemon.core.transcript_reader import (
+    ContentBlock,
     ToolUse,
     TranscriptMessage,
     TranscriptReader,
@@ -30,6 +31,7 @@ from claude_code_hooks_daemon.core.transcript_reader import (
 
 __all__ = [
     "AcceptanceTest",
+    "ContentBlock",
     "ChainExecutionResult",
     "CliAcceptanceTest",
     "DaemonDataLayer",
