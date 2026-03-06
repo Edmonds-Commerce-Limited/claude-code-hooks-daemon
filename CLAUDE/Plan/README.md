@@ -26,6 +26,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00078: Integrate SecurityAntipatternHandler](Completed/00078-integrate-security-antipattern-handler/PLAN.md) - Complete
+  - Blocks Write/Edit of files containing hardcoded secrets (AWS, Stripe, GitHub tokens) and injection patterns (PHP eval/exec, JS innerHTML/eval)
+  - Strategy Pattern: SecurityStrategy Protocol with per-language strategies (Secrets, PHP, JavaScript) and registry
+  - 60 handler tests + ~40 strategy tests, OWASP A02/A03 coverage
+
 - [00076: TDD Collocated Test Support](Completed/00076-tdd-collocated-test-support/PLAN.md) - Complete
   - Added `test_locations` config option with 3 styles: separate, collocated, __tests__/ subdir
   - Fixes false blocking of Go, React/Vitest/Jest, Dart collocated test conventions
@@ -436,8 +441,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 74
-- **Completed**: 65 (1 with reduced scope)
+- **Total Plans Created**: 75
+- **Completed**: 66 (1 with reduced scope)
 - **Active**: 1 (in progress)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 3 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045)
