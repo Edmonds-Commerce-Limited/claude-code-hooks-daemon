@@ -1,14 +1,16 @@
 """SecurityAntipatternHandler - blocks security antipatterns in written code.
 
-Prevents Write/Edit of files containing hardcoded secrets, dangerous functions,
-or unsafe DOM manipulation patterns. This is a real-time defence layer that
-complements static analysis rules (PHPStan/ESLint).
+Inspects content written via Write or Edit tools and denies if the new content
+contains security antipatterns defined by registered strategies.
+
+Uses Strategy Pattern: all language-specific pattern logic is delegated to
+SecurityStrategy implementations.  The handler has ZERO language awareness.
 
 OWASP coverage: A02 (Cryptographic Failures), A03 (Injection).
 """
 
 import re
-from typing import Any
+from typing import Any, cast
 
 from claude_code_hooks_daemon.constants import (
     HandlerID,
@@ -18,76 +20,30 @@ from claude_code_hooks_daemon.constants import (
     ToolName,
 )
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
-from claude_code_hooks_daemon.core.utils import get_file_content, get_file_path
-
-# Directories to skip (vendor code, test fixtures, documentation)
-_SKIP_PATTERNS: tuple[str, ...] = (
-    "/vendor/",
-    "/node_modules/",
-    "/tests/fixtures/",
-    "/tests/assets/",
-    ".env.example",
-    "/docs/",
-    "/CLAUDE/",
-    "/eslint-rules/",  # ESLint rule files legitimately reference banned patterns
-    "/tests/PHPStan/",  # PHPStan rule files legitimately reference banned patterns
+from claude_code_hooks_daemon.core.utils import get_file_path
+from claude_code_hooks_daemon.strategies.security.common import should_skip
+from claude_code_hooks_daemon.strategies.security.protocol import SecurityPattern
+from claude_code_hooks_daemon.strategies.security.registry import (
+    SecurityStrategyRegistry,
 )
 
-# Hardcoded secret patterns (OWASP A02)
-_SECRET_PATTERNS: tuple[tuple[str, str], ...] = (
-    (r"AKIA[0-9A-Z]{16}", "AWS Access Key"),
-    (r"sk_live_[a-zA-Z0-9]{24,}", "Stripe Secret Key"),
-    (r"pk_live_[a-zA-Z0-9]{24,}", "Stripe Publishable Key (live)"),
-    (r"ghp_[a-zA-Z0-9]{36}", "GitHub Personal Access Token"),
-    (r"gho_[a-zA-Z0-9]{36}", "GitHub OAuth Token"),
-    (r"-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----", "Private Key"),
-)
-
-# PHP dangerous function patterns (OWASP A03)
-_PHP_DANGEROUS_PATTERNS: tuple[tuple[str, str], ...] = (
-    (r"\beval\s*\(", "eval() - code injection risk"),
-    (r"\bexec\s*\(", "exec() - command injection risk"),
-    (r"\bshell_exec\s*\(", "shell_exec() - command injection risk"),
-    (r"\bsystem\s*\(", "system() - command injection risk"),
-    (r"\bpassthru\s*\(", "passthru() - command injection risk"),
-    (r"\bproc_open\s*\(", "proc_open() - command injection risk"),
-    (r"\bunserialize\s*\(", "unserialize() - object injection risk"),
-)
-
-# TypeScript/JavaScript dangerous patterns (OWASP A03)
-_TS_DANGEROUS_PATTERNS: tuple[tuple[str, str], ...] = (
-    (r"\beval\s*\(", "eval() - code injection risk"),
-    (r"\bnew\s+Function\s*\(", "new Function() - code injection risk"),
-    (r"dangerouslySetInnerHTML", "dangerouslySetInnerHTML - XSS risk"),
-    (r"\.innerHTML\s*=", "innerHTML assignment - XSS risk"),
-    (r"\bdocument\.write\s*\(", "document.write() - XSS risk"),
-)
-
-
-def _is_php_file(path: str) -> bool:
-    """Check if file is a PHP file."""
-    return path.endswith(".php")
-
-
-def _is_ts_or_js_file(path: str) -> bool:
-    """Check if file is a TypeScript or JavaScript file."""
-    return any(path.endswith(ext) for ext in (".ts", ".tsx", ".js", ".jsx"))
-
-
-def _should_skip(path: str) -> bool:
-    """Check if file should be excluded from scanning."""
-    return any(skip in path for skip in _SKIP_PATTERNS)
+# Config key hint shown in the denial message
+_CONFIG_HINT_HANDLER = "handlers.pre_tool_use.security_antipattern"
 
 
 class SecurityAntipatternHandler(Handler):
     """Block Write/Edit of files containing security antipatterns.
 
-    Scans content being written for:
-    - Hardcoded secrets (AWS keys, Stripe keys, GitHub tokens, private keys)
-    - PHP dangerous functions (eval, exec, shell_exec, system, passthru, etc.)
-    - TypeScript/JS unsafe patterns (eval, new Function, dangerouslySetInnerHTML)
+    Scans content being written for security antipatterns defined by
+    registered SecurityStrategy implementations.  The handler orchestrates
+    without any knowledge of specific languages or pattern types.
 
-    Excludes vendor code, test fixtures, documentation, and rule definition files.
+    Excludes vendor code, test fixtures, documentation, and rule definition
+    files via the shared should_skip() utility.
+
+    Configuration options (set via YAML config):
+        languages: list[str] | None — Restrict enforcement to specific languages.
+            If unset or empty, ALL registered strategies are enforced (default).
     """
 
     def __init__(self) -> None:
@@ -101,18 +57,35 @@ class SecurityAntipatternHandler(Handler):
                 HandlerTag.FILE_OPS,
             ],
         )
+        self._registry = SecurityStrategyRegistry.create_default()
+        self._languages: list[str] | None = None
+        self._languages_applied: bool = False
 
-    def _get_content(self, hook_input: dict[str, Any]) -> str:
-        """Extract content from hook input, handling Write vs Edit."""
-        tool_name = hook_input.get(HookInputField.TOOL_NAME)
-        if tool_name == ToolName.EDIT:
-            tool_input: dict[str, str] = hook_input.get(HookInputField.TOOL_INPUT, {})
-            return tool_input.get("new_string", "")
-        content = get_file_content(hook_input)
-        return content or ""
+    # ------------------------------------------------------------------
+    # Language filter (applied lazily on first use)
+    # ------------------------------------------------------------------
+
+    def _apply_language_filter(self) -> None:
+        """Apply language filter to registry on first use (lazy)."""
+        if self._languages_applied:
+            return
+        self._languages_applied = True
+        effective_languages = self._languages or getattr(self, "_project_languages", None)
+        if effective_languages:
+            self._registry.filter_by_languages(effective_languages)
+
+    # ------------------------------------------------------------------
+    # Handler interface
+    # ------------------------------------------------------------------
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """Check if writing security antipatterns to a source file."""
+        """Return True if the content being written contains a security antipattern.
+
+        Only matches Write and Edit tool calls for files not in skip directories.
+        Returns False for all other tools or empty content.
+        """
+        self._apply_language_filter()
+
         tool_name = hook_input.get(HookInputField.TOOL_NAME)
         if tool_name not in (ToolName.WRITE, ToolName.EDIT):
             return False
@@ -121,135 +94,103 @@ class SecurityAntipatternHandler(Handler):
         if not file_path:
             return False
 
-        if _should_skip(file_path):
+        if should_skip(file_path):
             return False
 
-        content = self._get_content(hook_input)
+        content = self._get_new_content(hook_input, tool_name)
         if not content:
             return False
 
-        # Check for hardcoded secrets in any file type
-        for pattern, _ in _SECRET_PATTERNS:
-            if re.search(pattern, content):
-                return True
-
-        # Check PHP-specific patterns
-        if _is_php_file(file_path):
-            for pattern, _ in _PHP_DANGEROUS_PATTERNS:
-                if re.search(pattern, content):
-                    return True
-
-        # Check TS/JS-specific patterns
-        if _is_ts_or_js_file(file_path):
-            for pattern, _ in _TS_DANGEROUS_PATTERNS:
-                if re.search(pattern, content):
+        strategies = self._registry.get_strategies(file_path)
+        for strategy in strategies:
+            for pattern in strategy.patterns:
+                if re.search(pattern.regex, content):
                     return True
 
         return False
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
-        """Block the write with details of what was detected."""
+        """Deny write if content contains security antipatterns, allow otherwise."""
         file_path = get_file_path(hook_input)
+        tool_name = hook_input.get(HookInputField.TOOL_NAME, "")
+
         if not file_path:
             return HookResult(decision=Decision.ALLOW)
 
-        content = self._get_content(hook_input)
+        content = self._get_new_content(hook_input, tool_name)
         if not content:
             return HookResult(decision=Decision.ALLOW)
 
-        issues: list[str] = []
-
-        # Check secrets
-        for pattern, label in _SECRET_PATTERNS:
-            if re.search(pattern, content):
-                issues.append(f"[A02] {label}")
-
-        # Check PHP patterns
-        if _is_php_file(file_path):
-            for pattern, label in _PHP_DANGEROUS_PATTERNS:
-                if re.search(pattern, content):
-                    issues.append(f"[A03] {label}")
-
-        # Check TS/JS patterns
-        if _is_ts_or_js_file(file_path):
-            for pattern, label in _TS_DANGEROUS_PATTERNS:
-                if re.search(pattern, content):
-                    issues.append(f"[A03] {label}")
-
+        issues = self._find_all_violations(content, file_path)
         if not issues:
             return HookResult(decision=Decision.ALLOW)
 
-        issues_text = "\n".join(f"  - {issue}" for issue in issues)
-
         return HookResult(
             decision=Decision.DENY,
-            reason=(
-                f"SECURITY ANTIPATTERN BLOCKED\n\n"
-                f"File: {file_path}\n\n"
-                f"Issues detected ({len(issues)}):\n"
-                f"{issues_text}\n\n"
-                "These patterns indicate security vulnerabilities (OWASP A02/A03).\n\n"
-                "CORRECT APPROACH:\n"
-                "  - Secrets: Use environment variables, never hardcode credentials\n"
-                "  - eval/exec: Use safe alternatives (JSON.parse, Symfony Process)\n"
-                "  - innerHTML/dangerouslySetInnerHTML: Use React JSX or sanitise input\n"
-                "  - unserialize: Use json_decode() instead\n\n"
-                "If this is test fixture code, place it in tests/fixtures/ or tests/assets/.\n"
-                "If this is rule documentation, place it in docs/ or eslint-rules/."
-            ),
+            reason=self._format_reason(issues, file_path),
         )
 
     def get_acceptance_tests(self) -> list[Any]:
-        """Return acceptance tests for security antipattern handler."""
-        from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType
+        """Return acceptance tests aggregated from all registered strategies."""
+        tests: list[Any] = []
+        seen_languages: set[str] = set()
+        for strategy in self._registry.all_strategies:
+            if strategy.language_name in seen_languages:
+                continue
+            seen_languages.add(strategy.language_name)
+            if hasattr(strategy, "get_acceptance_tests"):
+                tests.extend(strategy.get_acceptance_tests())
+        return tests
 
-        return [
-            AcceptanceTest(
-                title="Block PHP eval in source file",
-                command=(
-                    "Use the Write tool to write file_path='/workspace/src/test_security.php' "
-                    "with content '<?php eval($userInput);'"
-                ),
-                description="Blocks writing PHP file with eval() call",
-                expected_decision=Decision.DENY,
-                expected_message_patterns=[
-                    r"SECURITY ANTIPATTERN BLOCKED",
-                    r"eval\(\)",
-                ],
-                safety_notes="Handler blocks before file is written.",
-                test_type=TestType.BLOCKING,
-                recommended_model=RecommendedModel.HAIKU,
-                requires_main_thread=False,
-            ),
-            AcceptanceTest(
-                title="Block hardcoded AWS key",
-                command=(
-                    "Use the Write tool to write file_path='/workspace/src/config.ts' "
-                    "with content 'const key = \"AKIAIOSFODNN7EXAMPLE1\";'"
-                ),
-                description="Blocks writing file with hardcoded AWS access key",
-                expected_decision=Decision.DENY,
-                expected_message_patterns=[
-                    r"SECURITY ANTIPATTERN BLOCKED",
-                    r"AWS Access Key",
-                ],
-                safety_notes="Handler blocks before file is written.",
-                test_type=TestType.BLOCKING,
-                recommended_model=RecommendedModel.HAIKU,
-                requires_main_thread=False,
-            ),
-            AcceptanceTest(
-                title="Allow test fixture files",
-                command=(
-                    "Use the Write tool to write file_path='/workspace/tests/fixtures/security_test.php' "
-                    "with content '<?php eval($testInput);'"
-                ),
-                description="Allows writing eval in test fixture files (excluded path)",
-                expected_decision=Decision.ALLOW,
-                expected_message_patterns=[],
-                safety_notes="Test fixtures are excluded from security scanning.",
-                test_type=TestType.ADVISORY,
-                recommended_model=RecommendedModel.HAIKU,
-                requires_main_thread=False,
-            ),
-        ]
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    def _get_new_content(self, hook_input: dict[str, Any], tool_name: str) -> str | None:
+        """Extract the new content being written from the hook input.
+
+        For Write: returns the 'content' field.
+        For Edit: returns the 'new_string' field.
+        """
+        tool_input: dict[str, Any] = hook_input.get(HookInputField.TOOL_INPUT, {})
+        if tool_name == ToolName.WRITE:
+            return cast("str", tool_input.get("content", ""))
+        if tool_name == ToolName.EDIT:
+            return cast("str", tool_input.get("new_string", ""))
+        return None
+
+    def _find_all_violations(self, content: str, file_path: str) -> list[SecurityPattern]:
+        """Return all matching security patterns across all applicable strategies."""
+        violations: list[SecurityPattern] = []
+        strategies = self._registry.get_strategies(file_path)
+        for strategy in strategies:
+            for pattern in strategy.patterns:
+                if re.search(pattern.regex, content):
+                    violations.append(pattern)
+        return violations
+
+    def _format_reason(self, issues: list[SecurityPattern], file_path: str) -> str:
+        """Build a human-readable denial message for matched patterns."""
+        issues_text = "\n".join(f"  - [{issue.owasp}] {issue.name}" for issue in issues)
+
+        # Collect unique suggestions
+        suggestions = []
+        seen_suggestions: set[str] = set()
+        for issue in issues:
+            if issue.suggestion not in seen_suggestions:
+                seen_suggestions.add(issue.suggestion)
+                suggestions.append(f"  - {issue.suggestion}")
+        suggestions_text = "\n".join(suggestions)
+
+        return (
+            f"SECURITY ANTIPATTERN BLOCKED\n\n"
+            f"File: {file_path}\n\n"
+            f"Issues detected ({len(issues)}):\n"
+            f"{issues_text}\n\n"
+            "These patterns indicate security vulnerabilities (OWASP A02/A03).\n\n"
+            f"CORRECT APPROACH:\n"
+            f"{suggestions_text}\n\n"
+            "If this is test fixture code, place it in tests/fixtures/ or tests/assets/.\n"
+            "If this is rule documentation, place it in docs/ or eslint-rules/.\n\n"
+            f"To disable: {_CONFIG_HINT_HANDLER}  (set enabled: false)"
+        )
