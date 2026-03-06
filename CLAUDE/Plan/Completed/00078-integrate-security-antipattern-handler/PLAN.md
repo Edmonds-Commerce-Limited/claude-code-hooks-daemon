@@ -1,6 +1,6 @@
 # Plan 00078: Integrate SecurityAntipatternHandler
 
-**Status**: In Progress
+**Status**: Complete (2026-03-06)
 **Created**: 2026-03-06
 
 ## Context
@@ -78,29 +78,16 @@ SECURITY_ANTIPATTERN = 14  # Safety range, after error_hiding_blocker (13)
 - [x] Create `tests/CLAUDE.md` — warns project agents not to edit daemon tests
 - [x] Both files link to project-level handlers guide and bug reporting guide
 
-### Phase 5: Strategy Pattern Refactoring (FUTURE)
-
-**Status**: Not Started — separate plan recommended
-
-The current handler uses `if _is_php_file()` / `if _is_ts_or_js_file()` chains, which violates the project's Strategy Pattern principle (CLAUDE.md: "If you see an if/elif chain on type/language names, use Strategy Pattern instead").
-
-**Proposed approach**:
-- Define a `SecurityStrategy` Protocol with `file_extensions`, `patterns`, and `owasp_category`
-- Create per-language strategy implementations:
-  - `PhpSecurityStrategy` — eval, exec, shell_exec, system, passthru, proc_open, unserialize
-  - `TypeScriptSecurityStrategy` — eval, new Function, dangerouslySetInnerHTML, innerHTML, document.write
-  - `SecretDetectionStrategy` — AWS keys, Stripe keys, GitHub tokens, private keys (all file types)
-- Registry maps file extensions to active strategies
-- Config-driven: project's `hooks-daemon.yaml` can specify which languages are active
-- Allows projects to enable only relevant language strategies (e.g. PHP-only project skips TS checks)
-
-**Benefits**:
-- New language support by adding new strategy, not modifying handler
-- Project-specific language configuration
-- Independent TDD per strategy
-- Follows SOLID/Open-Closed principle
-
-**This should be a separate plan** (00079 or similar) since it's a non-trivial refactoring effort.
+### Phase 5: Strategy Pattern Refactoring ✅ COMPLETE
+- [x] Define `SecurityStrategy` Protocol with `SecurityPattern` frozen dataclass
+- [x] Create `SecurityStrategyRegistry` with universal + extension-mapped strategies
+- [x] Implement `SecretDetectionStrategy` (universal, OWASP A02)
+- [x] Implement `PhpSecurityStrategy` (.php, OWASP A03)
+- [x] Implement `JavaScriptSecurityStrategy` (.ts/.js/.tsx/.jsx, OWASP A03)
+- [x] Refactor handler to ZERO language awareness — delegates to strategies
+- [x] All tests pass (60 handler + ~40 strategy tests)
+- [x] Type check clean, daemon verified RUNNING
+- [x] Checkpoint commit: `3465b6f`
 
 ## Verification
 
