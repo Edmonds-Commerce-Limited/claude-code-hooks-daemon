@@ -104,18 +104,54 @@ class SecurityStrategyRegistry:
     @classmethod
     def create_default(cls) -> "SecurityStrategyRegistry":
         """Create a registry with ALL built-in security strategies."""
+        from claude_code_hooks_daemon.strategies.security.csharp_strategy import (
+            CSharpSecurityStrategy,
+        )
+        from claude_code_hooks_daemon.strategies.security.dart_strategy import (
+            DartSecurityStrategy,
+        )
+        from claude_code_hooks_daemon.strategies.security.go_strategy import (
+            GoSecurityStrategy,
+        )
+        from claude_code_hooks_daemon.strategies.security.java_strategy import (
+            JavaSecurityStrategy,
+        )
         from claude_code_hooks_daemon.strategies.security.javascript_strategy import (
             JavaScriptSecurityStrategy,
+        )
+        from claude_code_hooks_daemon.strategies.security.kotlin_strategy import (
+            KotlinSecurityStrategy,
         )
         from claude_code_hooks_daemon.strategies.security.php_strategy import (
             PhpSecurityStrategy,
         )
+        from claude_code_hooks_daemon.strategies.security.python_strategy import (
+            PythonSecurityStrategy,
+        )
+        from claude_code_hooks_daemon.strategies.security.ruby_strategy import (
+            RubySecurityStrategy,
+        )
+        from claude_code_hooks_daemon.strategies.security.rust_strategy import (
+            RustSecurityStrategy,
+        )
         from claude_code_hooks_daemon.strategies.security.secret_strategy import (
             SecretDetectionStrategy,
+        )
+        from claude_code_hooks_daemon.strategies.security.swift_strategy import (
+            SwiftSecurityStrategy,
         )
 
         registry = cls()
         registry.register(SecretDetectionStrategy())
         registry.register(PhpSecurityStrategy())
         registry.register(JavaScriptSecurityStrategy())
+        registry.register(PythonSecurityStrategy())
+        registry.register(GoSecurityStrategy())
+        registry.register(RubySecurityStrategy())
+        registry.register(JavaSecurityStrategy())
+        registry.register(KotlinSecurityStrategy())
+        registry.register(CSharpSecurityStrategy())
+        registry.register(RustSecurityStrategy())
+        registry.register(SwiftSecurityStrategy())
+        registry.register(DartSecurityStrategy())
         return registry

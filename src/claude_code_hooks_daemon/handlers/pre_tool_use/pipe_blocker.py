@@ -14,7 +14,7 @@ import re
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import Decision, Handler, HookResult, get_data_layer
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.strategies.pipe_blocker.common import UNIVERSAL_WHITELIST_PATTERNS
 from claude_code_hooks_daemon.strategies.pipe_blocker.registry import PipeBlockerStrategyRegistry
@@ -191,8 +191,15 @@ class PipeBlockerHandler(Handler):
                 return True
         return False
 
+    def _get_block_count(self) -> int:
+        """Get number of previous blocks by this handler."""
+        try:
+            return get_data_layer().history.count_blocks_by_handler(self.name)
+        except Exception:
+            return 0
+
     def _blacklisted_reason(self, source_segment: str, command: str) -> str:
-        """Return block message for known-expensive commands (blacklisted)."""
+        """Return verbose block message for known-expensive commands (blacklisted)."""
         source_name = source_segment.split()[0] if source_segment else "command"
         return (
             f"🚫 BLOCKED: Pipe to tail/head detected\n\n"
@@ -214,8 +221,23 @@ class PipeBlockerHandler(Handler):
             f"To disable: {_CONFIG_HINT_HANDLER}  (set enabled: false)"
         )
 
+    def _blacklisted_terse_reason(self, source_segment: str, command: str) -> str:
+        """Return terse block message for known-expensive commands (subsequent blocks)."""
+        source_name = source_segment.split()[0] if source_segment else "command"
+        return (
+            f"BLOCKED: Pipe to tail/head — {source_name} is expensive\n\n"
+            f"COMMAND: {command}\n\n"
+            f"Use temp file:\n"
+            f'  TEMP_FILE="/tmp/output_$$.txt"\n'
+            f"  {source_segment or 'command'} > \"$TEMP_FILE\" 2>&1\n"
+            f"  EXIT_CODE=$?\n"
+            f'  if [ $EXIT_CODE -eq 0 ]; then echo "Completed OK"; '
+            f'else echo "Completed with errors (exit code: $EXIT_CODE) - check $TEMP_FILE"; fi\n\n'
+            f"To disable: {_CONFIG_HINT_HANDLER}  (set enabled: false)"
+        )
+
     def _unknown_reason(self, source_segment: str, command: str) -> str:
-        """Return block message for unrecognized commands (not in whitelist or blacklist)."""
+        """Return verbose block message for unrecognized commands (not in whitelist or blacklist)."""
         source_name = source_segment.split()[0] if source_segment else "command"
         return (
             f"🚫 BLOCKED: Pipe to tail/head detected\n\n"
@@ -243,16 +265,42 @@ class PipeBlockerHandler(Handler):
             f"To disable: {_CONFIG_HINT_HANDLER}  (set enabled: false)"
         )
 
+    def _unknown_terse_reason(self, source_segment: str, command: str) -> str:
+        """Return terse block message for unrecognized commands (subsequent blocks)."""
+        source_name = source_segment.split()[0] if source_segment else "command"
+        return (
+            f"BLOCKED: Pipe to tail/head — {source_name} unrecognized\n\n"
+            f"COMMAND: {command}\n\n"
+            f"Add to whitelist in .claude/hooks-daemon.yaml:\n"
+            f"  {_CONFIG_YAML_KEY}:\n"
+            f"    {_CONFIG_HINT_EXTRA_WHITELIST}:\n"
+            f'      - "^{source_name}\\\\b"\n\n'
+            f"Or use temp file:\n"
+            f'  TEMP_FILE="/tmp/output_$$.txt"\n'
+            f"  {source_segment or 'command'} > \"$TEMP_FILE\" 2>&1\n"
+            f"  EXIT_CODE=$?\n"
+            f'  if [ $EXIT_CODE -eq 0 ]; then echo "Completed OK"; '
+            f'else echo "Completed with errors (exit code: $EXIT_CODE) - check $TEMP_FILE"; fi\n\n'
+            f"To disable: {_CONFIG_HINT_HANDLER}  (set enabled: false)"
+        )
+
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
-        """Block with blacklisted or unknown message based on pattern match."""
+        """Block with blacklisted or unknown message based on pattern match and block count."""
         command = get_bash_command(hook_input) or "unknown command"
         source_segment = self._extract_source_segment(command)
+        block_count = self._get_block_count()
 
-        # Differentiate: known expensive vs unrecognized
+        # Differentiate: known expensive vs unrecognized, verbose vs terse
         if self._matches_blacklist(source_segment):
-            reason = self._blacklisted_reason(source_segment, command)
+            if block_count == 0:
+                reason = self._blacklisted_reason(source_segment, command)
+            else:
+                reason = self._blacklisted_terse_reason(source_segment, command)
         else:
-            reason = self._unknown_reason(source_segment, command)
+            if block_count == 0:
+                reason = self._unknown_reason(source_segment, command)
+            else:
+                reason = self._unknown_terse_reason(source_segment, command)
 
         return HookResult(decision=Decision.DENY, reason=reason)
 
