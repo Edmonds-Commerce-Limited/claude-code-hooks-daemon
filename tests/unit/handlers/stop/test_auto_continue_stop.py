@@ -505,6 +505,123 @@ class TestAutoContinueStopHandlerHandle:
         assert any(verb in reason_lower for verb in action_verbs)
 
 
+class TestAutoContinueStopHandlerAskUserQuestion:
+    """Test AskUserQuestion bug fix - handler must NOT auto-continue when Claude used AskUserQuestion.
+
+    Bug: When Claude calls AskUserQuestion, the text content often contains
+    confirmation-like phrasing ("Would you like...") which matches the handler's
+    patterns. The handler would block the Stop and tell Claude to continue,
+    meaning the user never sees the question.
+
+    Fix: If the last assistant message contains a tool_use block for AskUserQuestion,
+    matches() must return False regardless of text content.
+    """
+
+    @pytest.fixture
+    def handler(self) -> AutoContinueStopHandler:
+        """Create handler instance."""
+        return AutoContinueStopHandler()
+
+    @pytest.fixture
+    def mock_transcript_path(self, tmp_path: Path) -> Path:
+        """Create a temporary transcript file path."""
+        return tmp_path / "transcript.jsonl"
+
+    def test_matches_false_when_ask_user_question_used(
+        self, handler: AutoContinueStopHandler, mock_transcript_path: Path
+    ) -> None:
+        """CRITICAL BUG FIX: Must return False when AskUserQuestion was used."""
+        with mock_transcript_path.open("w") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "type": "message",
+                        "message": {
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": "Would you like me to continue with approach A or B?",
+                                },
+                                {
+                                    "type": "tool_use",
+                                    "name": "AskUserQuestion",
+                                    "input": {"question": "Which approach?"},
+                                },
+                            ],
+                        },
+                    }
+                )
+                + "\n"
+            )
+        hook_input = {
+            "transcript_path": str(mock_transcript_path),
+            "stop_hook_active": False,
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_matches_true_when_confirmation_without_ask_user(
+        self, handler: AutoContinueStopHandler, mock_transcript_path: Path
+    ) -> None:
+        """Should still match confirmation questions that DON'T use AskUserQuestion."""
+        with mock_transcript_path.open("w") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "type": "message",
+                        "message": {
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": "Would you like me to continue with the next phase?",
+                                },
+                            ],
+                        },
+                    }
+                )
+                + "\n"
+            )
+        hook_input = {
+            "transcript_path": str(mock_transcript_path),
+            "stop_hook_active": False,
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_false_when_ask_user_with_shall_i_proceed(
+        self, handler: AutoContinueStopHandler, mock_transcript_path: Path
+    ) -> None:
+        """AskUserQuestion with 'shall I proceed' text must not auto-continue."""
+        with mock_transcript_path.open("w") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "type": "message",
+                        "message": {
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": "Shall I proceed with the deployment?",
+                                },
+                                {
+                                    "type": "tool_use",
+                                    "name": "AskUserQuestion",
+                                    "input": {"question": "Deploy now?"},
+                                },
+                            ],
+                        },
+                    }
+                )
+                + "\n"
+            )
+        hook_input = {
+            "transcript_path": str(mock_transcript_path),
+            "stop_hook_active": False,
+        }
+        assert handler.matches(hook_input) is False
+
+
 class TestAutoContinueStopHandlerEdgeCases:
     """Test edge cases for transcript parsing."""
 

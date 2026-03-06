@@ -8,7 +8,7 @@ import logging
 import re
 from typing import Any, ClassVar
 
-from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
+from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority, ToolName
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.utils.stop_hook_helpers import (
     get_transcript_reader,
@@ -112,11 +112,19 @@ class AutoContinueStopHandler(Handler):
 
         # Check if it's a confirmation question
         is_confirmation = self._contains_confirmation_pattern(last_message)
-        if is_confirmation:
-            logger.info("Confirmation question detected - will auto-continue")
-        else:
+        if not is_confirmation:
             logger.debug("Question found but no confirmation pattern matched")
-        return is_confirmation
+            return False
+
+        # CRITICAL: Don't auto-continue when Claude used AskUserQuestion
+        # The text may contain confirmation-like phrasing ("Would you like...")
+        # but the user MUST see and answer the question
+        if reader.last_assistant_used_tool(ToolName.ASK_USER_QUESTION):
+            logger.info("AskUserQuestion detected - user must answer, not auto-continuing")
+            return False
+
+        logger.info("Confirmation question detected - will auto-continue")
+        return True
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Block the stop and tell Claude to auto-continue.
