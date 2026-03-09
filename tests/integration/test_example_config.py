@@ -172,7 +172,9 @@ def test_example_config_includes_all_library_handlers(example_config: dict) -> N
         if hasattr(attr, "config_key"):
             all_handlers.append(attr.config_key)
 
-    # Exclude test and internal handlers
+    # Exclude test, internal, and pseudo-event handlers
+    # Pseudo-event handlers (nitpick_*) are registered via pseudo_events config,
+    # not the regular handlers section
     excluded_handlers = {
         "hello_world_pre_tool_use",
         "hello_world_post_tool_use",
@@ -185,6 +187,8 @@ def test_example_config_includes_all_library_handlers(example_config: dict) -> N
         "hello_world_notification",
         "hello_world_permission_request",
         "test_server",
+        "dismissive_language_nitpick",
+        "hedging_language_nitpick",
     }
 
     library_handlers = [h for h in all_handlers if h not in excluded_handlers]

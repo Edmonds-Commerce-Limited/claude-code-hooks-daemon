@@ -20,6 +20,11 @@ from claude_code_hooks_daemon.core.hook_result import HookResult
 from claude_code_hooks_daemon.core.mode import ModeManager
 from claude_code_hooks_daemon.core.mode_interceptor import get_interceptor_for_mode
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.core.pseudo_event import (
+    PseudoEventConfig,
+    PseudoEventDispatcher,
+    merge_pseudo_results,
+)
 from claude_code_hooks_daemon.core.router import EventRouter
 from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
 
@@ -113,6 +118,7 @@ class DaemonController:
         "_degraded",
         "_initialised",
         "_mode_manager",
+        "_pseudo_dispatcher",
         "_registry",
         "_router",
         "_stats",
@@ -132,6 +138,7 @@ class DaemonController:
         self._degraded = False
         self._config_errors: list[str] = []
         self._mode_manager = self._init_mode_manager(config)
+        self._pseudo_dispatcher: PseudoEventDispatcher | None = None
 
     def initialise(
         self,
@@ -140,6 +147,7 @@ class DaemonController:
         plugins_config: "PluginsConfig | None" = None,
         project_handlers_config: "ProjectHandlersConfig | None" = None,
         project_languages: list[str] | None = None,
+        pseudo_events_config: dict[str, dict[str, Any]] | None = None,
     ) -> None:
         """Initialise the controller with handlers.
 
@@ -152,6 +160,7 @@ class DaemonController:
             plugins_config: Optional plugin configuration from hooks-daemon.yaml
             project_handlers_config: Optional project handlers configuration
             project_languages: Project-level language filter from daemon.languages config
+            pseudo_events_config: Optional pseudo-event configuration from hooks-daemon.yaml
 
         Raises:
             ValueError: If workspace_root is None (FAIL FAST requirement)
@@ -203,6 +212,10 @@ class DaemonController:
                 workspace_root=workspace_root,
             )
             logger.info("Loaded %d project handlers", project_count)
+
+        # Register pseudo-events (if configured)
+        if pseudo_events_config:
+            self._register_pseudo_events(pseudo_events_config)
 
         total_count = count + plugin_count + project_count
         logger.info("DaemonController initialised with %d total handlers", total_count)
@@ -382,6 +395,87 @@ class DaemonController:
         )
         return registered_count
 
+    def _register_pseudo_events(
+        self,
+        pseudo_events_config: dict[str, dict[str, Any]],
+    ) -> None:
+        """Parse pseudo-event config and register with dispatcher.
+
+        Creates a PseudoEventDispatcher, parses each pseudo-event config,
+        looks up the setup function and handler factories, and registers them.
+
+        Args:
+            pseudo_events_config: Pseudo-event config dict from hooks-daemon.yaml
+        """
+        from claude_code_hooks_daemon.core.chain import HandlerChain
+
+        # Registry of known pseudo-event setup functions and handler factories
+        setup_registry = self._get_pseudo_event_setup_registry()
+
+        dispatcher = PseudoEventDispatcher()
+        registered_count = 0
+
+        for name, pe_data in pseudo_events_config.items():
+            try:
+                pe_config = PseudoEventConfig.from_dict(name, pe_data)
+            except ValueError:
+                logger.exception("Invalid pseudo-event config for %r, skipping", name)
+                continue
+
+            if not pe_config.enabled:
+                logger.info("Pseudo-event %r is disabled, skipping", name)
+                continue
+
+            if name not in setup_registry:
+                logger.warning(
+                    "Unknown pseudo-event %r — no setup function registered, skipping",
+                    name,
+                )
+                continue
+
+            setup_fn, handler_factories = setup_registry[name]
+
+            # Build handler chain from factories
+            chain = HandlerChain()
+            for factory in handler_factories:
+                handler = factory()
+                chain.add(handler)
+
+            dispatcher.register(pe_config, setup_fn=setup_fn, chain=chain)
+            registered_count += 1
+            logger.info(
+                "Registered pseudo-event %r with %d handlers and %d triggers",
+                name,
+                len(handler_factories),
+                len(pe_config.triggers),
+            )
+
+        if registered_count > 0:
+            self._pseudo_dispatcher = dispatcher
+            logger.info("PseudoEventDispatcher active with %d pseudo-events", registered_count)
+
+    @staticmethod
+    def _get_pseudo_event_setup_registry() -> dict[str, tuple[Any, list[Any]]]:
+        """Get registry mapping pseudo-event names to (setup_fn, handler_factories).
+
+        Returns:
+            Dict mapping name to (setup_function, list_of_handler_factory_callables)
+        """
+        from claude_code_hooks_daemon.handlers.nitpick.dismissive_language import (
+            DismissiveLanguageNitpickHandler,
+        )
+        from claude_code_hooks_daemon.handlers.nitpick.hedging_language import (
+            HedgingLanguageNitpickHandler,
+        )
+        from claude_code_hooks_daemon.pseudo_events.nitpick import NitpickSetup
+
+        return {
+            "nitpick": (
+                NitpickSetup(),
+                [DismissiveLanguageNitpickHandler, HedgingLanguageNitpickHandler],
+            ),
+        }
+
     def _validate_config(self, config_path: Path) -> None:
         """Validate configuration at startup, entering degraded mode on errors.
 
@@ -539,6 +633,17 @@ class DaemonController:
                     tool_name=tool_name,
                     reason=result.result.reason,
                 )
+
+            # Dispatch pseudo-events (if configured)
+            if self._pseudo_dispatcher is not None:
+                session_id = event.hook_input.session_id or "default"
+                pseudo_results = self._pseudo_dispatcher.check_and_fire(
+                    event.event_type,
+                    hook_input_dict,
+                    session_id,
+                )
+                if pseudo_results:
+                    result = merge_pseudo_results(result, pseudo_results)
 
             # Check if a handler crashed (strict mode creates error result with context)
             if any("Handler exception:" in ctx for ctx in result.result.context):

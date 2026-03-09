@@ -498,6 +498,10 @@ class Config(BaseModel):
     handlers: HandlersConfig = Field(default_factory=HandlersConfig)
     plugins: PluginsConfig = Field(default_factory=PluginsConfig)
     project_handlers: ProjectHandlersConfig = Field(default_factory=ProjectHandlersConfig)
+    pseudo_events: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description="Pseudo-event configurations keyed by pseudo-event name",
+    )
 
     # Legacy field mapping
     settings: dict[str, Any] | None = Field(default=None, exclude=True)
