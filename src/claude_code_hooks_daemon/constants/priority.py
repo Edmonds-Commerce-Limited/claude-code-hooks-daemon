@@ -102,6 +102,7 @@ class Priority:
 
     # Advisory handlers (Priority: 55-60)
     CRITICAL_THINKING_ADVISORY = 55
+    NITPICK = 57
     DISMISSIVE_LANGUAGE_DETECTOR = 58
     BRITISH_ENGLISH = 60
 
