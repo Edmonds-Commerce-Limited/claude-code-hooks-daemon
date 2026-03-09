@@ -1,6 +1,6 @@
 # Plan 00081: Pseudo-Events & Nitpick Handler
 
-**Status**: In Progress (Research Phase)
+**Status**: In Progress (Research Complete, Implementation Next)
 **Created**: 2026-03-09
 **Owner**: Claude
 **Priority**: High
@@ -178,56 +178,142 @@ Advisory is safer as default — blocking every tool call for a language quality
 
 The existing Stop-based `DismissiveLanguageDetectorHandler` and `HedgingLanguageDetectorHandler` would remain as a **secondary safety net** but the primary enforcement shifts to the nitpick pseudo-event. Over time, if Stop events remain unreliable, the Stop handlers could be deprecated.
 
-## Open Questions
+## Resolved Design Decisions
 
-1. **Should nitpick checkers be Handlers (full ABC) or lighter-weight Strategies (Protocol)?** Strategies would be simpler and more focused, but Handlers give us the full infrastructure (tags, priority, acceptance tests).
+### Q1: Strategies (Protocol), not full Handlers
 
-2. **Should the NitpickHandler be a single PreToolUse handler that dispatches internally, or should pseudo-events be a first-class concept in the EventRouter?** First-class gives us cleaner architecture but more infrastructure to build.
+**Decision**: NitpickChecker as a Protocol, not Handler ABC.
 
-3. **How should the audit window interact with context compaction?** After compaction, earlier messages may be irrelevant — should we reset last_audited_uuid?
+**Rationale**: Checkers are lightweight pattern matchers, not event handlers. They don't need tags, priority, terminal flags, or acceptance tests — those belong to the NitpickHandler itself. A checker just needs:
 
-4. **Performance**: Reading and parsing the full transcript on every PreToolUse could be slow for long sessions. The incremental approach (seek to last position) mitigates this, but needs benchmarking.
+```python
+class NitpickChecker(Protocol):
+    checker_id: str
+    def check(self, text: str) -> list[NitpickFinding]: ...
+```
 
-5. **What's the right `trigger_frequency` default?** Every call (thorough but potentially slow) vs every 5th call (faster but might miss things)?
+Adding a new checker = one file with patterns. No wiring, no registration boilerplate.
+
+### Q2: Internal dispatch, not first-class pseudo-events
+
+**Decision**: NitpickHandler dispatches to checkers internally. No EventRouter changes.
+
+**Rationale**: YAGNI. The NitpickHandler is a normal PreToolUse handler that internally runs checker strategies. The "pseudo-event" concept is documented as an architectural pattern for future reference, but building first-class infrastructure now would be premature. If we later need TurnComplete, ContextPressure, or IdleCheck pseudo-events, we extract the pattern then.
+
+### Q3: Reset audit state on compaction
+
+**Decision**: Reset `last_audited_uuid` and `last_byte_offset` to zero on context compaction.
+
+**Rationale**: After compaction, the agent's context is reset. Re-auditing a few messages (~5 max from audit window) is harmless at <2ms. The alternative (preserving state across compaction via PreCompact) adds complexity for negligible benefit.
+
+### Q4: Performance — benchmarked, no concerns
+
+**Decision**: Use byte-offset incremental reading. Full parse is fast enough as fallback.
+
+**Benchmarks** (3.9MB transcript, 1732 entries, 426 assistant messages):
+- Full parse: **15.8ms** (well under 50ms budget)
+- Seek-based (last 500KB): **1.8ms**
+- Last 100 lines: **4.5ms**
+
+**Incremental approach**: Store `last_byte_offset` in NitpickState. On each trigger, seek to offset, read only new lines, parse only new entries. Expected overhead: **<2ms per PreToolUse call**.
+
+**Fallback**: If offset becomes stale (file truncated/rotated), fall back to full parse at 15.8ms — still safe.
+
+### Q5: Trigger on every PreToolUse call (frequency=1)
+
+**Decision**: Default `trigger_frequency: 1` (every call).
+
+**Rationale**: With <2ms incremental overhead, there's no performance reason to skip calls. Every PreToolUse = every tool call = every turn boundary. Missing a call means potentially missing dismissive language until the next call.
+
+The `trigger_frequency` config option is kept for users who want to reduce overhead in very long sessions, but defaults to every call.
 
 ## Tasks
 
-### Phase 1: Research & Design (Current)
+### Phase 1: Research & Design (Complete)
 
 - [x] **Task 1.1**: Investigate Stop event reliability (upstream limitation confirmed)
 - [x] **Task 1.2**: Fix TranscriptReader crash on real transcripts (commit `226b43c`)
 - [x] **Task 1.3**: Fix dismissive pattern gaps (commit `226b43c`)
 - [x] **Task 1.4**: Investigate transcript message identity (UUIDs confirmed)
-- [ ] **Task 1.5**: Benchmark transcript reading performance for long sessions
-- [ ] **Task 1.6**: Prototype incremental auditing with UUID tracking
-- [ ] **Task 1.7**: Resolve open questions (Handler vs Strategy, first-class vs internal)
-- [ ] **Task 1.8**: Write final implementation plan with resolved design decisions
+- [x] **Task 1.5**: Benchmark transcript reading performance (15.8ms full, 1.8ms seek — no concerns)
+- [x] **Task 1.6**: Design incremental auditing (byte-offset + UUID tracking)
+- [x] **Task 1.7**: Resolve open questions (Strategies, internal dispatch, reset on compaction, every-call trigger)
+- [x] **Task 1.8**: Write final implementation plan with resolved design decisions
 
-### Phase 2: Infrastructure (Pseudo-Event Foundation)
+### Phase 2: TranscriptReader Enhancements (TDD)
 
 - [ ] **Task 2.1**: Add `uuid` field to `TranscriptMessage` dataclass
-- [ ] **Task 2.2**: Add `get_messages_after_uuid()` to `TranscriptReader`
-- [ ] **Task 2.3**: Add `get_assistant_messages_since()` convenience method
-- [ ] **Task 2.4**: Design NitpickState storage in DaemonDataLayer
-- [ ] **Task 2.5**: Add nitpick configuration schema to config loader
+  - Parse from entry-level `uuid` field (not message.uuid)
+  - 97.6% of entries have UUIDs; None for those without
+- [ ] **Task 2.2**: Add `read_incremental(path, byte_offset) -> tuple[list[TranscriptMessage], int]`
+  - Seek to byte_offset, read only new lines
+  - Return (new_messages, new_byte_offset)
+  - If offset invalid (file truncated), fall back to full read from 0
+- [ ] **Task 2.3**: Add `get_assistant_messages(messages)` static filter method
+  - Filter list to role=assistant only
+  - Used by NitpickHandler after incremental read
 
-### Phase 3: NitpickHandler (TDD)
+### Phase 3: NitpickChecker Protocol & Strategies (TDD)
 
-- [ ] **Task 3.1**: Write failing tests for NitpickHandler matches/handle
-- [ ] **Task 3.2**: Implement NitpickHandler as PreToolUse handler
-- [ ] **Task 3.3**: Implement nitpick checker Protocol/interface
-- [ ] **Task 3.4**: Wire up dismissive language as first nitpick checker
-- [ ] **Task 3.5**: Wire up hedging language as second nitpick checker
-- [ ] **Task 3.6**: Implement incremental auditing with UUID tracking
-- [ ] **Task 3.7**: Implement configurable audit window and trigger frequency
+- [ ] **Task 3.1**: Define `NitpickChecker` Protocol and `NitpickFinding` dataclass
+  - `checker_id: str` — unique identifier
+  - `check(text: str) -> list[NitpickFinding]` — scan text for issues
+  - `NitpickFinding`: checker_id, category, message, matched_pattern
+- [ ] **Task 3.2**: Implement `DismissiveLanguageChecker` (extract patterns from Stop handler)
+  - Reuse patterns from `DismissiveLanguageDetectorHandler`
+  - Share via constants or import from handler
+- [ ] **Task 3.3**: Implement `HedgingLanguageChecker` (extract patterns from Stop handler)
+  - Reuse patterns from `HedgingLanguageDetectorHandler`
+- [ ] **Task 3.4**: Create checker registry mapping checker_id -> checker class
 
-### Phase 4: Integration & Dogfooding
+### Phase 4: NitpickHandler (TDD)
 
-- [ ] **Task 4.1**: Register in config, daemon restart verification
-- [ ] **Task 4.2**: Dogfooding tests
-- [ ] **Task 4.3**: Full QA suite
-- [ ] **Task 4.4**: Generate docs (generate-docs command)
-- [ ] **Task 4.5**: Live testing in real session
+- [ ] **Task 4.1**: Define `NitpickState` dataclass
+  - `last_byte_offset: int` — file seek position
+  - `last_audited_uuid: str | None` — UUID of last audited message
+  - `findings_count: int` — running count this session
+  - Stored in DaemonDataLayer (in-memory, keyed by session_id)
+- [ ] **Task 4.2**: Write failing tests for NitpickHandler matches/handle
+  - matches(): True when transcript_path present in hook_input
+  - handle(): reads transcript incrementally, runs checkers, returns findings
+- [ ] **Task 4.3**: Implement NitpickHandler as PreToolUse handler
+  - Priority: 57 (advisory range, after British English at 56)
+  - Terminal: False (advisory, does not block chain)
+  - Tags: VALIDATION, ADVISORY, NON_TERMINAL, WORKFLOW
+- [ ] **Task 4.4**: Implement incremental audit logic
+  - Read NitpickState from DaemonDataLayer
+  - Call `read_incremental()` with stored byte_offset
+  - Filter to assistant messages
+  - Run each enabled checker on message content
+  - Aggregate findings
+  - Update NitpickState with new offset/uuid
+- [ ] **Task 4.5**: Implement configurable mode (advisory vs blocking)
+  - Advisory (default): ALLOW with context warnings
+  - Blocking: DENY with findings as reason
+- [ ] **Task 4.6**: Add acceptance tests via `get_acceptance_tests()`
+
+### Phase 5: Configuration & Integration
+
+- [ ] **Task 5.1**: Add nitpick handler config to hooks-daemon.yaml
+  ```yaml
+  handlers:
+    pre_tool_use:
+      nitpick:
+        enabled: true
+        options:
+          mode: advisory
+          max_messages: 10
+          checkers:
+            dismissive_language: {enabled: true}
+            hedging_language: {enabled: true}
+  ```
+- [ ] **Task 5.2**: Add HandlerID, Priority constants
+- [ ] **Task 5.3**: Register handler in registry
+- [ ] **Task 5.4**: Daemon restart verification
+- [ ] **Task 5.5**: Dogfooding tests (config + hook scripts)
+- [ ] **Task 5.6**: Full QA suite
+- [ ] **Task 5.7**: Generate docs (generate-docs command)
+- [ ] **Task 5.8**: Live testing in real session
 
 ## Success Criteria
 
@@ -244,6 +330,13 @@ The existing Stop-based `DismissiveLanguageDetectorHandler` and `HedgingLanguage
 - Related: DismissiveLanguageDetectorHandler, HedgingLanguageDetectorHandler (Stop handlers)
 
 ## Notes & Updates
+
+### 2026-03-09 (continued)
+- Research phase complete (tasks 1.1-1.8)
+- Benchmarked transcript reading: 15.8ms full parse (3.9MB), 1.8ms seek-based
+- Real transcripts: type=assistant/user (not human/message), 97.6% have UUIDs
+- Resolved all 5 open questions: Strategies, internal dispatch, reset on compaction, <2ms incremental, every-call trigger
+- Revised task plan: 5 phases, 23 tasks
 
 ### 2026-03-09
 - Plan created from dogfooding failure investigation
