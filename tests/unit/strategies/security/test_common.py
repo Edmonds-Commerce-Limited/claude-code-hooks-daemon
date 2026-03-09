@@ -1,6 +1,5 @@
 """Tests for security strategy common utilities."""
 
-
 from claude_code_hooks_daemon.strategies.security.common import (
     SKIP_PATTERNS,
     UNIVERSAL_EXTENSION,

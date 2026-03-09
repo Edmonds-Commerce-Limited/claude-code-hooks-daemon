@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.20.0] - 2026-03-09
+
+### Added
+
+- **SecurityAntipatternHandler**: New PreToolUse handler that blocks hardcoded secrets (OWASP A02) and code injection patterns (OWASP A03) using the Strategy Pattern. Supports 12 language strategies via `SecurityStrategy` Protocol and `SecurityStrategyRegistry`:
+  - **Secrets** (universal): API keys, tokens, passwords, private keys, connection strings
+  - **Python**: `eval()`, `exec()`, `os.system()`, `subprocess` with `shell=True`, `pickle.load()`, unsafe `yaml.load()`, `__import__()`
+  - **JavaScript/TypeScript**: `eval()`, `innerHTML`, `document.write()`, `Function()` constructor, `child_process.exec()`
+  - **PHP**: `eval()`, `exec()`, `system()`, `shell_exec()`, `passthru()`, `include/require` with variables, `unserialize()`
+  - **Go**: `template.HTML()`, `template.JS()`, `template.URL()`
+  - **Ruby**: `eval()`, `system()`, `exec()`, `instance_eval()`, `class_eval()`, `Marshal.load()`, `IO.popen()`
+  - **Java**: `Runtime.getRuntime().exec()`, `ObjectInputStream`, `XMLDecoder`, `ScriptEngineManager`
+  - **Kotlin**: `Runtime.getRuntime().exec()`, `ObjectInputStream()`, `XMLDecoder()`, `ScriptEngineManager`
+  - **C#**: `Process.Start()`, `BinaryFormatter`, `LosFormatter`, `ObjectStateFormatter`
+  - **Rust**: `from_raw_parts()`, `transmute()`
+  - **Swift**: `Process()`, `evaluateJavaScript()`, `NSKeyedUnarchiver.unarchiveObject()`
+  - **Dart**: `Process.run()`, `Process.start()`, `innerHTML` assignment
+
+- **ContentBlock Dataclass**: New structured data type for transcript message content blocks (`text`, `tool_use`, `tool_result`) with typed fields for `tool_name`, `tool_input`, and `tool_result_content`. Enables precise querying of transcript data.
+
+- **TranscriptReader Query Methods**: New methods for querying parsed transcript data:
+  - `last_assistant_used_tool(tool_name)` - check if assistant's last message used a specific tool
+  - `get_last_tool_use_in_message()` - get the last tool_use ContentBlock
+  - Real JSONL parsing with structured `ContentBlock` objects
+
+- **Shared Stop Hook Utilities**: New `utils/stop_hook_helpers.py` module with `is_stop_hook_active()` and `get_transcript_reader()` functions, eliminating duplicated logic across stop handlers.
+
+- **Source Guard CLAUDE.md Files**: Added `CLAUDE.md` files to `src/` and `tests/` directories that prevent project-level agents from editing daemon source code, redirecting them to project-level handlers instead.
+
+- **Supported Languages Documentation**: Documented all supported languages across strategy domains (Security, TDD, QA Suppression) in README.md and root CLAUDE.md.
+
+### Changed
+
+- **SecurityAntipatternHandler Refactored to Strategy Pattern**: Migrated from monolithic handler to `SecurityStrategy` Protocol with `SecurityPattern` frozen dataclass and `SecurityStrategyRegistry`. Each language is now an independent strategy class, following the Open/Closed Principle.
+
+- **Pipe Blocker Progressive Verbosity**: First pipe block shows full verbose explanation with alternatives. Subsequent blocks show terse message with just the block reason and suggested command, reducing noise for experienced users.
+
+- **Stop Handlers Use Shared Utilities**: `HedgingLanguageDetector` and `AutoContinueStopHandler` refactored to use shared `stop_hook_helpers` module, removing duplicated transcript reading and stop-hook-active detection logic.
+
+### Fixed
+
+- **AutoContinueStopHandler No Longer Overrides AskUserQuestion**: Fixed bug where the auto-continue handler would override Claude's `AskUserQuestion` tool use, continuing automatically when the user was being asked a question. Handler now checks transcript for `AskUserQuestion` usage before triggering auto-continue.
+
+- **Pipe Blocker Error Message Variable**: Fixed pipe blocker using hardcoded `/tmp/output.txt` path in error messages instead of the `$TEMP_FILE` variable.
+
 ## [2.19.0] - 2026-03-06
 
 ### Added

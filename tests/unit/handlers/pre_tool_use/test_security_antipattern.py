@@ -521,7 +521,7 @@ class TestSecurityAntipatternHandler:
             "tool_name": "Write",
             "tool_input": {
                 "file_path": "/workspace/src/utils.py",
-                "content": "os.system('ls')",
+                "content": "shell_exec('ls')",
             },
         }
         assert handler.matches(hook_input) is False

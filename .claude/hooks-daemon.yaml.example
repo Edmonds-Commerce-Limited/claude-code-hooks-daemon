@@ -43,6 +43,10 @@ handlers:
       enabled: true
       priority: 14
 
+    security_antipattern:  # Blocks hardcoded secrets and injection patterns
+      enabled: true
+      priority: 15
+
     pipe_blocker:          # Blocks dangerous pipe patterns in bash commands
       enabled: true
       priority: 15

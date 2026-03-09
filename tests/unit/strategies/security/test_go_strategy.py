@@ -34,17 +34,17 @@ class TestGoSecurityStrategy:
     # ── Pattern Matching ──────────────────────────────────────────────
 
     def test_matches_template_html(self, strategy):
-        content = 'safe := template.HTML(userInput)'
+        content = "safe := template.HTML(userInput)"
         matched = any(re.search(p.regex, content) for p in strategy.patterns)
         assert matched is True
 
     def test_matches_template_js(self, strategy):
-        content = 'safe := template.JS(userScript)'
+        content = "safe := template.JS(userScript)"
         matched = any(re.search(p.regex, content) for p in strategy.patterns)
         assert matched is True
 
     def test_matches_template_url(self, strategy):
-        content = 'safe := template.URL(userURL)'
+        content = "safe := template.URL(userURL)"
         matched = any(re.search(p.regex, content) for p in strategy.patterns)
         assert matched is True
 
