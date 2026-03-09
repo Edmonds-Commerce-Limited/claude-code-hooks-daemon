@@ -277,6 +277,10 @@ handlers:
       enabled: true
       priority: 30
 
+    dismissive_language_detector:  # Detects dismissive language (pre-existing issue, out of scope, etc)
+      enabled: true
+      priority: 58
+
     task_completion_checker:  # Checks for task completion
       enabled: false           # Enable if using task management system
       priority: 20

@@ -425,6 +425,13 @@ class HandlerID:
         display_name="hedging-language-detector",
     )
 
+    # Dismissive language detector (Stop handler)
+    DISMISSIVE_LANGUAGE_DETECTOR = HandlerIDMeta(
+        class_name="DismissiveLanguageDetectorHandler",
+        config_key="dismissive_language_detector",
+        display_name="dismissive-language-detector",
+    )
+
 
 # Type-safe config key literal (for mypy/type checking)
 HandlerKey = Literal[
@@ -481,6 +488,7 @@ HandlerKey = Literal[
     "npm_command",
     "task_completion_checker",
     "hedging_language_detector",
+    "dismissive_language_detector",
     "optimal_config_checker",
     "bash_error_detector",
     "web_search_year",
