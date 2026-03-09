@@ -38,9 +38,7 @@ class NitpickSetup:
         self._reader = TranscriptReader()
         self._states: dict[str, NitpickState] = {}
 
-    def __call__(
-        self, hook_input: dict[str, Any], session_id: str
-    ) -> dict[str, Any] | None:
+    def __call__(self, hook_input: dict[str, Any], session_id: str) -> dict[str, Any] | None:
         """Read transcript and return enriched hook_input.
 
         Args:
@@ -81,8 +79,7 @@ class NitpickSetup:
             **hook_input,
             "pseudo_event": PSEUDO_EVENT_NAME,
             "assistant_messages": [
-                {"uuid": msg.uuid or "", "content": msg.content}
-                for msg in assistant_messages
+                {"uuid": msg.uuid or "", "content": msg.content} for msg in assistant_messages
             ],
         }
 
