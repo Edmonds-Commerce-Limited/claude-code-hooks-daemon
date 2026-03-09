@@ -205,6 +205,18 @@
       "lines": [51],
       "rule": "log-and-continue",
       "reason": "Subagent completion logger: logs OSError at debug level and continues. Monitoring handlers must not crash sessions because a log file is temporarily unavailable. The error is now visible in debug logs."
+    },
+    {
+      "file": "core/transcript_reader.py",
+      "lines": [115],
+      "rule": "return-none-on-error",
+      "reason": "TranscriptReader.load(): Returns early when path is invalid or does not exist. Transcript reading is advisory - handlers must not crash if the transcript file is missing or the path is malformed. Callers check _loaded state."
+    },
+    {
+      "file": "core/transcript_reader.py",
+      "lines": [146],
+      "rule": "log-and-continue",
+      "reason": "TranscriptReader._parse(): Logs file read errors and continues with empty state. Transcript parsing is advisory - one unreadable transcript must not crash handler execution. Already logged at debug/error level."
     }
   ]
 }

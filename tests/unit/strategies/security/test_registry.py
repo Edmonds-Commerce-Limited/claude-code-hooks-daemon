@@ -163,8 +163,18 @@ class TestSecurityStrategyRegistry:
     def test_create_default_has_all_languages(self):
         registry = SecurityStrategyRegistry.create_default()
         expected = [
-            "Secrets", "PHP", "JavaScript", "Python", "Go", "Ruby",
-            "Java", "Kotlin", "C#", "Rust", "Swift", "Dart",
+            "Secrets",
+            "PHP",
+            "JavaScript",
+            "Python",
+            "Go",
+            "Ruby",
+            "Java",
+            "Kotlin",
+            "C#",
+            "Rust",
+            "Swift",
+            "Dart",
         ]
         for lang in expected:
             assert lang in registry.registered_languages, f"Missing language: {lang}"

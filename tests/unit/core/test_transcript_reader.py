@@ -375,7 +375,7 @@ class TestContentBlock:
         block = ContentBlock(block_type="text", text="Hello world")
         assert block.block_type == "text"
         assert block.text == "Hello world"
-        assert block.tool_name == ""
+        assert not block.tool_name
         assert block.tool_input == {}
 
     def test_tool_use_block(self) -> None:
@@ -473,7 +473,7 @@ class TestTranscriptReaderRealJSONLFormat:
         assert msgs[0].content_blocks[0].block_type == "text"
         assert msgs[0].content_blocks[0].text == "Let me check."
         assert msgs[0].content_blocks[1].block_type == "tool_use"
-        assert msgs[0].content_blocks[1].tool_name == "AskUserQuestion"
+        assert msgs[0].content_blocks[1].tool_name == ToolName.ASK_USER_QUESTION
         assert msgs[0].content_blocks[1].tool_input == {"question": "Which?"}
 
     def test_parses_real_human_message(self, tmp_path: Path) -> None:
@@ -672,7 +672,7 @@ class TestTranscriptReaderQueryMethods:
         block = reader_with_conversation.get_last_tool_use_in_message()
         assert block is not None
         assert block.block_type == "tool_use"
-        assert block.tool_name == "AskUserQuestion"
+        assert block.tool_name == ToolName.ASK_USER_QUESTION
 
     def test_get_last_tool_use_in_message_none_when_no_tools(self, tmp_path: Path) -> None:
         """get_last_tool_use_in_message() returns None when no tool_use blocks."""
