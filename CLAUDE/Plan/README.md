@@ -32,6 +32,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00080: Generated HOOKS-DAEMON.md + Version Cache Flush](Completed/00080-generate-hooks-daemon-docs/PLAN.md) - Complete
+  - `generate-docs` CLI command producing `.claude/HOOKS-DAEMON.md` from live config + handler metadata
+  - Version cache flush fix in upgrade script + stale cache defense in daemon_stats
+  - Installer integration (Step 13) and CLAUDE.md update to reference generated docs
+
 - [00079: DismissiveLanguageDetectorHandler](Completed/00079-dismissive-language-detector-handler/PLAN.md) - Complete
   - Stop event advisory handler detecting dismissive language (pre-existing issue, out of scope, not our problem, defer/ignore)
   - Follows hedging_language_detector pattern, 57 unit tests, priority 58 (advisory range)
@@ -451,8 +456,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 77
-- **Completed**: 67 (1 with reduced scope)
+- **Total Plans Created**: 78
+- **Completed**: 68 (1 with reduced scope)
 - **Active**: 2 (in progress)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 3 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045)
