@@ -352,6 +352,17 @@ log_step "12" "Running post-install validation"
 run_post_install_checks "$PROJECT_ROOT" "$VENV_PYTHON" "$DAEMON_DIR" "false"
 
 # ============================================================
+# Step 13: Generate handler documentation
+# ============================================================
+
+log_step "13" "Generating handler documentation"
+if "$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli generate-docs --project-root "$PROJECT_ROOT"; then
+    print_success "Generated .claude/HOOKS-DAEMON.md"
+else
+    print_warning "Failed to generate handler docs (non-fatal)"
+fi
+
+# ============================================================
 # Complete
 # ============================================================
 
