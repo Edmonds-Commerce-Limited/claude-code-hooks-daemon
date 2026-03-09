@@ -432,11 +432,16 @@ class HandlerID:
         display_name="dismissive-language-detector",
     )
 
-    # Nitpick advisor (PreToolUse handler - transcript quality auditing)
-    NITPICK = HandlerIDMeta(
-        class_name="NitpickHandler",
-        config_key="nitpick",
-        display_name="nitpick-advisor",
+    # Nitpick pseudo-event handlers (transcript quality auditing)
+    NITPICK_DISMISSIVE = HandlerIDMeta(
+        class_name="DismissiveLanguageNitpickHandler",
+        config_key="dismissive_language_nitpick",
+        display_name="nitpick-dismissive-language",
+    )
+    NITPICK_HEDGING = HandlerIDMeta(
+        class_name="HedgingLanguageNitpickHandler",
+        config_key="hedging_language_nitpick",
+        display_name="nitpick-hedging-language",
     )
 
 
@@ -496,7 +501,8 @@ HandlerKey = Literal[
     "task_completion_checker",
     "hedging_language_detector",
     "dismissive_language_detector",
-    "nitpick",
+    "dismissive_language_nitpick",
+    "hedging_language_nitpick",
     "optimal_config_checker",
     "bash_error_detector",
     "web_search_year",
