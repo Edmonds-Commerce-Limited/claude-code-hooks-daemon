@@ -3,9 +3,6 @@
 from claude_code_hooks_daemon.nitpick.checkers.dismissive import (
     DismissiveLanguageChecker,
 )
-from claude_code_hooks_daemon.nitpick.checkers.hedging import (
-    HedgingLanguageChecker,
-)
 from claude_code_hooks_daemon.nitpick.checkers.registry import (
     CHECKER_REGISTRY,
     get_checker,
@@ -59,7 +56,7 @@ class TestCheckerRegistry:
         """All registered checker classes implement NitpickChecker protocol."""
         for checker_id, checker_class in CHECKER_REGISTRY.items():
             instance = checker_class()
-            assert isinstance(instance, NitpickChecker), (
-                f"{checker_id} does not implement NitpickChecker"
-            )
+            assert isinstance(
+                instance, NitpickChecker
+            ), f"{checker_id} does not implement NitpickChecker"
             assert instance.checker_id == checker_id

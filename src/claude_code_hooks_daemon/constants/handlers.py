@@ -432,6 +432,13 @@ class HandlerID:
         display_name="dismissive-language-detector",
     )
 
+    # Nitpick advisor (PreToolUse handler - transcript quality auditing)
+    NITPICK = HandlerIDMeta(
+        class_name="NitpickHandler",
+        config_key="nitpick",
+        display_name="nitpick-advisor",
+    )
+
 
 # Type-safe config key literal (for mypy/type checking)
 HandlerKey = Literal[
@@ -489,6 +496,7 @@ HandlerKey = Literal[
     "task_completion_checker",
     "hedging_language_detector",
     "dismissive_language_detector",
+    "nitpick",
     "optimal_config_checker",
     "bash_error_detector",
     "web_search_year",

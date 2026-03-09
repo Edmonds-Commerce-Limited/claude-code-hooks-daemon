@@ -34,7 +34,7 @@ class TestNitpickFinding:
             matched_pattern="test",
         )
         with pytest.raises((AttributeError, TypeError)):
-            setattr(finding, "checker_id", "modified")
+            finding.checker_id = "modified"
 
 
 class TestNitpickState:

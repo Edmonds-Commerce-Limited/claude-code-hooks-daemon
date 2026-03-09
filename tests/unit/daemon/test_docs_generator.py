@@ -5,15 +5,11 @@ TDD RED phase: These tests define the expected behavior of the DocsGenerator.
 
 from __future__ import annotations
 
-import re
 from datetime import datetime
 from typing import Any
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from claude_code_hooks_daemon.core import Handler, HookResult
-
 
 # --- Helpers ---
 
