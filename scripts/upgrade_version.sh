@@ -616,6 +616,9 @@ if ! restart_daemon_verified "$VENV_PYTHON"; then
     exit 1
 fi
 
+# Clear version check cache to prevent stale upgrade indicators
+rm -f "$DAEMON_DIR/untracked/version_check_cache.json"
+
 # ============================================================
 # Step 15: Post-upgrade validation
 # ============================================================

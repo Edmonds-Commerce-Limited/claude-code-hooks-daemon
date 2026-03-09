@@ -105,10 +105,19 @@ class DaemonStatsHandler(Handler):
                 if cache_file.exists():
                     cache_data = json.loads(cache_file.read_text())
                     if cache_data.get("is_outdated"):
+                        from claude_code_hooks_daemon.version import __version__
+
+                        cached_version = cache_data.get("current_version", "")
                         latest = cache_data.get("latest_version", "")
-                        current = cache_data.get("current_version", "")
-                        if latest and current:
-                            parts.append(f": 📦 v{current} → v{latest}")
+                        # Defense-in-depth: ignore stale cache from before upgrade
+                        if cached_version and cached_version != __version__:
+                            logger.debug(
+                                "Ignoring stale version cache: cached=%s actual=%s",
+                                cached_version,
+                                __version__,
+                            )
+                        elif latest and cached_version:
+                            parts.append(f": 📦 v{cached_version} → v{latest}")
                         elif latest:
                             parts.append(f": 📦 upgrade → v{latest}")
             except Exception as e:
