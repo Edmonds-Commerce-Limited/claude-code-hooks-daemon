@@ -817,3 +817,225 @@ class TestLegacyFormatWithContentBlocks:
         reader.load(str(transcript))
         text = reader.get_last_assistant_text()
         assert text == "Plain string response"
+
+
+class TestTranscriptMessageUuid:
+    """Tests for UUID field on TranscriptMessage (Plan 00081 Task 2.1)."""
+
+    def test_uuid_parsed_from_entry_level_field(self, tmp_path: Path) -> None:
+        """UUID should be parsed from the entry-level uuid field."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "uuid": "abc-123-def",
+                    "message": {"role": "assistant", "content": "Hello"},
+                }
+            )
+            + "\n"
+        )
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        msg = reader.get_last_assistant_message()
+        assert msg is not None
+        assert msg.uuid == "abc-123-def"
+
+    def test_uuid_none_when_missing(self, tmp_path: Path) -> None:
+        """UUID should be None when entry has no uuid field."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {"role": "assistant", "content": "No UUID"},
+                }
+            )
+            + "\n"
+        )
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        msg = reader.get_last_assistant_message()
+        assert msg is not None
+        assert msg.uuid is None
+
+    def test_uuid_on_real_format_message(self, tmp_path: Path) -> None:
+        """UUID should be parsed from type=message entries too."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps(
+                {
+                    "type": "message",
+                    "uuid": "real-uuid-456",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "Response"}],
+                    },
+                }
+            )
+            + "\n"
+        )
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        msg = reader.get_last_assistant_message()
+        assert msg is not None
+        assert msg.uuid == "real-uuid-456"
+
+    def test_uuid_preserved_across_multiple_messages(self, tmp_path: Path) -> None:
+        """Each message should have its own UUID."""
+        transcript = tmp_path / "transcript.jsonl"
+        lines = [
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "uuid": "uuid-1",
+                    "message": {"role": "assistant", "content": "First"},
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "uuid": "uuid-2",
+                    "message": {"role": "assistant", "content": "Second"},
+                }
+            ),
+        ]
+        transcript.write_text("\n".join(lines) + "\n")
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        msgs = reader.get_messages()
+        assert len(msgs) == 2
+        assert msgs[0].uuid == "uuid-1"
+        assert msgs[1].uuid == "uuid-2"
+
+
+class TestIncrementalRead:
+    """Tests for incremental transcript reading (Plan 00081 Task 2.2)."""
+
+    def test_read_incremental_returns_new_messages(self, tmp_path: Path) -> None:
+        """read_incremental should return only messages after byte offset."""
+        transcript = tmp_path / "transcript.jsonl"
+        line1 = json.dumps(
+            {
+                "type": "assistant",
+                "uuid": "uuid-1",
+                "message": {"role": "assistant", "content": "First"},
+            }
+        )
+        transcript.write_text(line1 + "\n")
+
+        reader = TranscriptReader()
+        # First read — get all
+        messages, offset = reader.read_incremental(str(transcript), 0)
+        assert len(messages) == 1
+        assert messages[0].content == "First"
+        assert offset > 0
+
+        # Append more content
+        with transcript.open("a") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "type": "assistant",
+                        "uuid": "uuid-2",
+                        "message": {"role": "assistant", "content": "Second"},
+                    }
+                )
+                + "\n"
+            )
+
+        # Incremental read — only new messages
+        new_messages, new_offset = reader.read_incremental(str(transcript), offset)
+        assert len(new_messages) == 1
+        assert new_messages[0].content == "Second"
+        assert new_offset > offset
+
+    def test_read_incremental_returns_empty_when_no_new(self, tmp_path: Path) -> None:
+        """read_incremental should return empty list when no new content."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "uuid": "uuid-1",
+                    "message": {"role": "assistant", "content": "Only one"},
+                }
+            )
+            + "\n"
+        )
+        reader = TranscriptReader()
+        _, offset = reader.read_incremental(str(transcript), 0)
+
+        # Read again from same offset — nothing new
+        messages, same_offset = reader.read_incremental(str(transcript), offset)
+        assert len(messages) == 0
+        assert same_offset == offset
+
+    def test_read_incremental_fallback_on_invalid_offset(self, tmp_path: Path) -> None:
+        """read_incremental should fall back to full read if offset is beyond file size."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "uuid": "uuid-1",
+                    "message": {"role": "assistant", "content": "Data"},
+                }
+            )
+            + "\n"
+        )
+        reader = TranscriptReader()
+        # Use offset way beyond file size
+        messages, offset = reader.read_incremental(str(transcript), 999999)
+        assert len(messages) == 1
+        assert messages[0].content == "Data"
+        assert offset > 0
+
+    def test_read_incremental_skips_non_message_types(self, tmp_path: Path) -> None:
+        """read_incremental should skip progress/system entries, only return messages."""
+        transcript = tmp_path / "transcript.jsonl"
+        lines = [
+            json.dumps({"type": "progress", "uuid": "p1", "data": "compiling"}),
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "uuid": "uuid-1",
+                    "message": {"role": "assistant", "content": "Done"},
+                }
+            ),
+            json.dumps({"type": "system", "uuid": "s1", "data": "info"}),
+        ]
+        transcript.write_text("\n".join(lines) + "\n")
+        reader = TranscriptReader()
+        messages, _ = reader.read_incremental(str(transcript), 0)
+        assert len(messages) == 1
+        assert messages[0].content == "Done"
+
+
+class TestFilterAssistantMessages:
+    """Tests for assistant message filtering (Plan 00081 Task 2.3)."""
+
+    def test_filter_assistant_messages_only(self) -> None:
+        """filter_assistant_messages should return only assistant role messages."""
+        messages = [
+            TranscriptMessage(role="user", content="Question", raw={}, uuid=None),
+            TranscriptMessage(role="assistant", content="Answer", raw={}, uuid="a1"),
+            TranscriptMessage(role="user", content="Follow up", raw={}, uuid=None),
+            TranscriptMessage(role="assistant", content="More info", raw={}, uuid="a2"),
+        ]
+        result = TranscriptReader.filter_assistant_messages(messages)
+        assert len(result) == 2
+        assert result[0].content == "Answer"
+        assert result[1].content == "More info"
+
+    def test_filter_assistant_messages_empty_list(self) -> None:
+        """filter_assistant_messages should return empty list for empty input."""
+        assert TranscriptReader.filter_assistant_messages([]) == []
+
+    def test_filter_assistant_messages_no_assistant(self) -> None:
+        """filter_assistant_messages should return empty when no assistant messages."""
+        messages = [
+            TranscriptMessage(role="user", content="Hello", raw={}, uuid=None),
+        ]
+        result = TranscriptReader.filter_assistant_messages(messages)
+        assert len(result) == 0
