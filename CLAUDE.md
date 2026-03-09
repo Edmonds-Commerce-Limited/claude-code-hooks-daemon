@@ -451,26 +451,15 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli test-project-handlers --verbose
 
 **See CLAUDE/PROJECT_HANDLERS.md for complete developer guide and examples.**
 
-## Configuration
+## Active Configuration
 
-Config file: `.claude/hooks-daemon.yaml`
+See @.claude/HOOKS-DAEMON.md for the current active handler summary, generated from live config.
 
-```yaml
-version: 1.0
-daemon:
-  idle_timeout_seconds: 600
-  log_level: INFO
-  self_install_mode: true  # For this project only
-  enforce_single_daemon_process: true  # Auto-enabled in containers
-handlers:
-  pre_tool_use:
-    destructive_git: {enabled: true, priority: 10}
-project_handlers:
-  enabled: true
-  path: .claude/project-handlers
-```
+**Regenerate**: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-docs`
 
-Handler options (e.g. `blocking_mode`, `mode`) are not shown above. See **[docs/guides/HANDLER_REFERENCE.md](docs/guides/HANDLER_REFERENCE.md)** for the full per-handler options reference.
+**Config file**: `.claude/hooks-daemon.yaml`
+
+Handler options (e.g. `blocking_mode`, `mode`): See **[docs/guides/HANDLER_REFERENCE.md](docs/guides/HANDLER_REFERENCE.md)** for the full per-handler options reference.
 
 ### Single Daemon Process Enforcement
 

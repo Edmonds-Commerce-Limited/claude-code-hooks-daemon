@@ -2248,6 +2248,12 @@ def main() -> int:
         type=str,
         help="Output file path (default: .claude/HOOKS-DAEMON.md)",
     )
+    parser_gen_docs.add_argument(
+        "--project-root",
+        type=Path,
+        default=None,
+        help="Project root directory (default: auto-detect)",
+    )
     parser_gen_docs.set_defaults(func=cmd_generate_docs)
 
     # config-diff command
