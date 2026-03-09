@@ -8,6 +8,7 @@ from claude_code_hooks_daemon.constants import (
     HandlerTag,
     HookInputField,
     Priority,
+    ProjectPath,
     ToolName,
 )
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult, ProjectContext
@@ -50,8 +51,10 @@ class ValidatePlanNumberHandler(Handler):
                 HandlerTag.ADVISORY,
                 HandlerTag.NON_TERMINAL,
             ],
+            shares_options_with="markdown_organization",
         )
         self.workspace_root = ProjectContext.project_root()
+        self._track_plans_in_project: str | None = None
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if creating a plan folder."""
@@ -140,21 +143,22 @@ class ValidatePlanNumberHandler(Handler):
         # Allow plan_number == highest (TOCTOU: mkdir already created the dir
         # before Write fires, so the new dir is already counted as "highest")
         # Allow plan_number == highest + 1 (normal case: dir not yet created)
+        plan_dir = self._track_plans_in_project or ProjectPath.PLAN_DIR
         if plan_number != expected_number and plan_number != highest:
             error_message = f"""
 PLAN NUMBER INCORRECT
 
-You are creating: CLAUDE/Plan/{plan_number}-{plan_name}/
+You are creating: {plan_dir}/{plan_number}-{plan_name}/
 Highest existing plan: {highest}
 Expected next number: {expected_number}
 
-BOTH active plans (CLAUDE/Plan/) AND completed plans (CLAUDE/Plan/Completed/) were checked.
+BOTH active plans ({plan_dir}/) AND completed plans ({plan_dir}/Completed/) were checked.
 
 HOW TO FIND CORRECT NUMBER:
 
 Run this command BEFORE creating a plan:
 ```bash
-find CLAUDE/Plan -maxdepth 2 -type d -name '[0-9]*' | grep -oP '/\\K\\d+(?=-)' | sort -n | tail -1
+find {plan_dir} -maxdepth 2 -type d -name '[0-9]*' | grep -oP '/\\K\\d+(?=-)' | sort -n | tail -1
 ```
 
 This searches BOTH directories and returns the highest number.
@@ -166,10 +170,10 @@ Use the correct plan number: {expected_number}
 
 Example:
 ```bash
-mkdir -p CLAUDE/Plan/{expected_number}-{plan_name}
+mkdir -p {plan_dir}/{expected_number}-{plan_name}
 ```
 
-See: CLAUDE/Plan/CLAUDE.md for full instructions
+See: {plan_dir}/CLAUDE.md for full instructions
 """
 
             return HookResult(decision=Decision.ALLOW, context=[error_message])
@@ -185,7 +189,8 @@ See: CLAUDE/Plan/CLAUDE.md for full instructions
         Any subfolder whose name does not start with a number
         is treated as organizational and its children are scanned.
         """
-        plan_root = self.workspace_root / "CLAUDE/Plan"
+        plan_dir = self._track_plans_in_project or ProjectPath.PLAN_DIR
+        plan_root = self.workspace_root / plan_dir
 
         if not plan_root.exists():
             return 0

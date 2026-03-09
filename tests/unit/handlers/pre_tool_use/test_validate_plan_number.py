@@ -749,6 +749,64 @@ class TestValidatePlanNumberHandler:
         assert result.context
         assert "PLAN NUMBER INCORRECT" in result.context[0]
 
+    # Tests for config-aware plan directory
+
+    def test_handler_shares_options_with_markdown_organization(
+        self, handler: ValidatePlanNumberHandler
+    ) -> None:
+        """Handler inherits config from markdown_organization."""
+        assert handler.shares_options_with == "markdown_organization"
+
+    def test_handler_has_track_plans_in_project_attribute(
+        self, handler: ValidatePlanNumberHandler
+    ) -> None:
+        """Handler has _track_plans_in_project attribute for config injection."""
+        assert hasattr(handler, "_track_plans_in_project")
+        assert handler._track_plans_in_project is None
+
+    def test_get_highest_plan_number_uses_configured_dir(
+        self, handler: ValidatePlanNumberHandler, temp_workspace: Path
+    ) -> None:
+        """_get_highest_plan_number uses _track_plans_in_project when set."""
+        custom_plan_dir = temp_workspace / "CLAUDE" / "Plans"
+        custom_plan_dir.mkdir(parents=True)
+        (custom_plan_dir / "010-custom-plan").mkdir()
+
+        handler._track_plans_in_project = "CLAUDE/Plans"
+        highest = handler._get_highest_plan_number()
+        assert highest == 10
+
+    def test_get_highest_plan_number_falls_back_to_default(
+        self, handler: ValidatePlanNumberHandler, plan_root: Path
+    ) -> None:
+        """_get_highest_plan_number uses ProjectPath.PLAN_DIR when config is None."""
+        (plan_root / "007-default-plan").mkdir()
+
+        handler._track_plans_in_project = None
+        highest = handler._get_highest_plan_number()
+        assert highest == 7
+
+    def test_error_message_uses_configured_plan_dir(
+        self, handler: ValidatePlanNumberHandler, temp_workspace: Path
+    ) -> None:
+        """Error messages use the configured plan directory, not hardcoded CLAUDE/Plan."""
+        custom_plan_dir = temp_workspace / "CLAUDE" / "Plans"
+        custom_plan_dir.mkdir(parents=True)
+        (custom_plan_dir / "005-existing").mkdir()
+
+        handler._track_plans_in_project = "CLAUDE/Plans"
+
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/workspace/CLAUDE/Plans/020-wrong/PLAN.md"},
+        }
+        result = handler.handle(hook_input)
+        assert result.context
+        assert "CLAUDE/Plans/" in result.context[0]
+        # Should NOT contain the hardcoded "CLAUDE/Plan/" (without 's')
+        # when a custom dir is configured
+        assert "CLAUDE/Plan/" not in result.context[0]
+
     # Tests for handler metadata
 
     def test_handler_has_correct_name(self, handler: ValidatePlanNumberHandler) -> None:
