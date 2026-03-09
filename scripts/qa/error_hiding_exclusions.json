@@ -58,15 +58,15 @@
     },
     {
       "file": "daemon/cli.py",
-      "lines": [95],
-      "rule": "silent-pass",
-      "reason": "Directory search loop: except SystemExit: pass when searching upward for .claude directory. SystemExit during path resolution means we hit filesystem root - continue searching is the correct behaviour."
+      "lines": [99],
+      "rule": "log-and-continue",
+      "reason": "Directory search loop: log-and-continue when searching upward for .claude directory. SystemExit during path validation means invalid installation at this path - continue searching upward is the correct behaviour. Already logged at debug level."
     },
     {
       "file": "daemon/cli.py",
-      "lines": [214],
+      "lines": [218],
       "rule": "return-none-on-error",
-      "reason": "send_request(): Returns None on socket connection failure. Callers check for None and display appropriate error messages to user. Socket unavailability is a normal operational state (daemon not running)."
+      "reason": "send_request(): Returns None on socket connection failure. Callers check for None and display appropriate error messages to user. Socket unavailability is a normal operational state (daemon not running). Already logged via logger.exception."
     },
     {
       "file": "daemon/playbook_generator.py",

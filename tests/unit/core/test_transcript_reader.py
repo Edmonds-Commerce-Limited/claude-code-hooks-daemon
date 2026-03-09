@@ -776,7 +776,7 @@ class TestLegacyFormatWithContentBlocks:
         assert len(msg.content_blocks) == 2
         assert msg.content_blocks[0].block_type == "text"
         assert msg.content_blocks[1].block_type == "tool_use"
-        assert msg.content_blocks[1].tool_name == "Bash"
+        assert msg.content_blocks[1].tool_name == ToolName.BASH
 
     def test_legacy_human_with_content_blocks(self, tmp_path: Path) -> None:
         """type=human with content blocks should also parse correctly."""

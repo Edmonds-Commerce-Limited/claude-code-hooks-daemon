@@ -26,6 +26,7 @@ import argparse
 import asyncio
 import datetime
 import json
+import logging
 import os
 import platform
 import signal
@@ -35,6 +36,8 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Literal, cast
+
+logger = logging.getLogger(__name__)
 
 from pydantic import ValidationError as PydanticValidationError
 
@@ -97,7 +100,7 @@ def get_project_path(override_path: Path | None = None) -> Path:
                 return _validate_installation(current)
             except SystemExit:
                 # Invalid installation - keep searching upward
-                pass
+                logger.debug("Invalid installation at %s, searching upward", current)
         current = current.parent
 
     print(
@@ -233,8 +236,8 @@ def send_daemon_request(
         sock.close()
         return cast("dict[str, Any]", json.loads(response.decode("utf-8")))
 
-    except Exception as e:
-        print(f"ERROR: Failed to communicate with daemon: {e}", file=sys.stderr)
+    except Exception:
+        logger.exception("Failed to communicate with daemon")
         return None
 
 
