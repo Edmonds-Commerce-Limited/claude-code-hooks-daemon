@@ -10,6 +10,9 @@ daemon:
 
   enable_hello_world_handlers: false  # Disabled - using real handlers instead
 
+  # Language filter for strategy-pattern handlers
+  languages: []
+
   # Input validation (v2.2.0+) - Catch malformed events at front controller layer
   input_validation:
     enabled: true              # Validate hook inputs (recommended)
@@ -368,3 +371,16 @@ plugins:
 project_handlers:
   enabled: true
   path: .claude/project-handlers
+
+# Pseudo-events: synthetic events triggered by real events with frequency control
+pseudo_events:
+  nitpick:
+    enabled: true
+    triggers:
+      - "pre_tool_use:1/5"    # Fire once every 5 PreToolUse events
+      - "stop:1/1"            # Fire on every Stop event
+    handlers:
+      dismissive_language:
+        enabled: true
+      hedging_language:
+        enabled: true
