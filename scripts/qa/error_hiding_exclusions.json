@@ -4,7 +4,7 @@
   "exclusions": [
     {
       "file": "config/models.py",
-      "lines": [553],
+      "lines": [557],
       "rule": "silent-pass",
       "reason": "load_or_default(): FileNotFoundError is expected when config file disappears between exists() check and read (TOCTOU). Falls through to return cls() which creates a safe default. This is not hiding an error - it IS the intended fallback."
     },
@@ -208,15 +208,33 @@
     },
     {
       "file": "core/transcript_reader.py",
-      "lines": [115],
+      "lines": [117],
       "rule": "return-none-on-error",
       "reason": "TranscriptReader.load(): Returns early when path is invalid or does not exist. Transcript reading is advisory - handlers must not crash if the transcript file is missing or the path is malformed. Callers check _loaded state."
     },
     {
       "file": "core/transcript_reader.py",
-      "lines": [146],
+      "lines": [148],
       "rule": "log-and-continue",
       "reason": "TranscriptReader._parse(): Logs file read errors and continues with empty state. Transcript parsing is advisory - one unreadable transcript must not crash handler execution. Already logged at debug/error level."
+    },
+    {
+      "file": "core/transcript_reader.py",
+      "lines": [302],
+      "rule": "log-and-continue",
+      "reason": "TranscriptReader.read_incremental(): Logs OSError/UnicodeDecodeError at debug level and returns partial results. Incremental transcript reading is advisory - same pattern as _parse() above. Already logged."
+    },
+    {
+      "file": "core/transcript_reader.py",
+      "lines": [311],
+      "rule": "silent-continue",
+      "reason": "JSONL transcript parsing loop: except json.JSONDecodeError: continue is the standard JSONL pattern. Malformed lines are skipped to process the rest of the transcript. Same pattern already excluded in hedging_language_detector:129 and auto_continue_stop:180."
+    },
+    {
+      "file": "core/pseudo_event.py",
+      "lines": [285],
+      "rule": "return-none-on-error",
+      "reason": "PseudoEventDispatcher._run_pseudo_event(): Catches Exception, logs full traceback via logger.exception(), returns None. Pseudo-event dispatch is non-critical - one failing pseudo-event must not crash the main hook processing pipeline. Already logged with full traceback."
     }
   ]
 }
