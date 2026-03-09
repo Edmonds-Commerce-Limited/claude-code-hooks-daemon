@@ -1,6 +1,6 @@
 # Plan 00083: Fix validate_plan_number Hardcoded Plan Directory
 
-**Status**: Not Started
+**Status**: Complete (2026-03-09)
 **Type**: Bug Fix
 **Severity**: High
 **Recommended Executor**: Sonnet
@@ -17,25 +17,25 @@ Bug report: `untracked/hooks-daemon-plans-plural-dir-problems.md`
 
 ### Phase 1: TDD - Write Failing Tests
 
-- [ ] Add test: handler has `shares_options_with` set to `"markdown_organization"`
-- [ ] Add test: `_get_highest_plan_number()` uses `_track_plans_in_project` when set (custom dir like `CLAUDE/Plans`)
-- [ ] Add test: `_get_highest_plan_number()` falls back to `ProjectPath.PLAN_DIR` when `_track_plans_in_project` is None
-- [ ] Add test: error messages use configured plan directory (not hardcoded `CLAUDE/Plan`)
-- [ ] Run tests — must FAIL
+- [x] Add test: handler has `shares_options_with` set to `"markdown_organization"`
+- [x] Add test: `_get_highest_plan_number()` uses `_track_plans_in_project` when set (custom dir like `CLAUDE/Plans`)
+- [x] Add test: `_get_highest_plan_number()` falls back to `ProjectPath.PLAN_DIR` when `_track_plans_in_project` is None
+- [x] Add test: error messages use configured plan directory (not hardcoded `CLAUDE/Plan`)
+- [x] Run tests — must FAIL
 
 ### Phase 2: Implement Fix
 
-- [ ] Add `shares_options_with="markdown_organization"` to `__init__`
-- [ ] Add `self._track_plans_in_project: str | None = None` attribute
-- [ ] Update `_get_highest_plan_number()` line 188: use `self._track_plans_in_project or ProjectPath.PLAN_DIR`
-- [ ] Update error messages (lines 144-173) to use dynamic `plan_dir` variable instead of hardcoded `CLAUDE/Plan`
-- [ ] Run tests — must PASS
+- [x] Add `shares_options_with="markdown_organization"` to `__init__`
+- [x] Add `self._track_plans_in_project: str | None = None` attribute
+- [x] Update `_get_highest_plan_number()` line 188: use `self._track_plans_in_project or ProjectPath.PLAN_DIR`
+- [x] Update error messages (lines 144-173) to use dynamic `plan_dir` variable instead of hardcoded `CLAUDE/Plan`
+- [x] Run tests — must PASS
 
 ### Phase 3: QA & Verification
 
-- [ ] Run `./scripts/qa/run_all.sh`
-- [ ] Restart daemon, verify RUNNING
-- [ ] Commit
+- [x] Run `./scripts/qa/run_all.sh`
+- [x] Restart daemon, verify RUNNING
+- [x] Commit
 
 ## Files to Modify
 

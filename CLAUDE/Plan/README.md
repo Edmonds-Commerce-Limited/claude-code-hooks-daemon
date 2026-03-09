@@ -26,6 +26,14 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00084: Fix Inplace-Edit Blocker xargs Bypass](Completed/00084-fix-inplace-edit-blocker-xargs-bypass/PLAN.md) - Complete
+  - Fixed `grep | xargs sed -i` bypassing the blocker via overly broad grep safety check
+  - Clarified handler intent: block destructive file modification, allow read-only pipelines
+
+- [00083: Fix validate_plan_number Hardcoded Plan Directory](Completed/00083-fix-validate-plan-number-hardcoded-dir/PLAN.md) - Complete
+  - Fixed handler hardcoding `CLAUDE/Plan` instead of using configurable `track_plans_in_project`
+  - Added `shares_options_with="markdown_organization"` for config inheritance
+
 - [00082: Pseudo-Events & Nitpick Handler](Completed/00082-pseudo-events-nitpick-handler/PLAN.md) - Complete
   - Pseudo-event infrastructure: synthetic events triggered by real events with frequency control
   - Nitpick pseudo-event with dismissive/hedging language handlers reusing Stop handler patterns
@@ -456,8 +464,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 79
-- **Completed**: 69 (1 with reduced scope)
+- **Total Plans Created**: 81
+- **Completed**: 71 (1 with reduced scope)
 - **Active**: 1 (in progress)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 3 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045)
