@@ -169,16 +169,21 @@ class TranscriptReader:
                         # Real Claude Code format
                         self._parse_message_entry(data)
                     elif entry_type in ("human", "assistant"):
-                        # Legacy/test format
+                        # Legacy format: type=human/assistant with message.content
+                        # Real transcripts use this format WITH content blocks (list),
+                        # so delegate to _parse_message_entry for proper block parsing.
                         message_data = data.get("message", {})
-                        content = (
-                            message_data.get("content", "")
-                            if isinstance(message_data, dict)
-                            else ""
-                        )
-                        self._messages.append(
-                            TranscriptMessage(role=entry_type, content=content, raw=data)
-                        )
+                        if not isinstance(message_data, dict):
+                            self._messages.append(
+                                TranscriptMessage(role=entry_type, content="", raw=data)
+                            )
+                        else:
+                            # Inject role into message dict for _parse_message_entry
+                            if "role" not in message_data:
+                                message_data = {**message_data, "role": entry_type}
+                            self._parse_message_entry(
+                                {**data, "message": message_data}
+                            )
                     elif entry_type == "tool_use":
                         tool_name = data.get("tool_name", "")
                         tool_input = data.get("tool_input", {})
