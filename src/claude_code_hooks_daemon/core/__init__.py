@@ -20,6 +20,12 @@ from claude_code_hooks_daemon.core.handler_history import HandlerDecisionRecord,
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 from claude_code_hooks_daemon.core.mode import ModeManager
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.core.pseudo_event import (
+    PseudoEventConfig,
+    PseudoEventDispatcher,
+    PseudoEventTrigger,
+    merge_pseudo_results,
+)
 from claude_code_hooks_daemon.core.router import EventRouter
 from claude_code_hooks_daemon.core.session_state import SessionState
 from claude_code_hooks_daemon.core.transcript_reader import (
@@ -48,6 +54,9 @@ __all__ = [
     "HookResult",
     "ModeManager",
     "ProjectContext",
+    "PseudoEventConfig",
+    "PseudoEventDispatcher",
+    "PseudoEventTrigger",
     "RecommendedModel",
     "SessionState",
     "TestType",
@@ -57,5 +66,6 @@ __all__ = [
     "TranscriptReader",
     "generate_daemon_error_response",
     "get_data_layer",
+    "merge_pseudo_results",
     "reset_data_layer",
 ]
