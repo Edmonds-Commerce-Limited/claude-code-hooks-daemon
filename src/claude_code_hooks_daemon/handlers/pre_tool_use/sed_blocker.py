@@ -34,20 +34,26 @@ class SedBlockingMode:
 
 
 class SedBlockerHandler(Handler):
-    """Block ALL sed command usage - Claude gets sed wrong and causes file destruction.
+    """Block sed used for file modification - Claude gets sed wrong and causes file destruction.
+
+    PURPOSE: Prevent the LLM from running dangerous sed updates that cause
+    widespread file damage. Read-only sed in pipelines (transforming stdout)
+    is acceptable — the danger is sed modifying files on disk.
 
     Blocks:
-    1. Bash tool with sed command (direct execution)
-    2. Write tool creating .sh/.bash files containing sed commands
+    1. Direct sed execution (sed -i, sed -e, bare sed with file args)
+    2. Indirect sed via xargs (grep -rl X | xargs sed -i)
+    3. Write tool creating .sh/.bash files containing sed commands
 
     Allows:
-    1. Markdown files (.md) - documentation can mention sed
-    2. Git commands - commit messages can mention sed
-    3. Read operations - already allowed (doesn't match Write/Bash)
+    1. Read-only sed in pipelines (cat file | sed 's/x/y/' | grep z)
+    2. Markdown files (.md) - documentation can mention sed
+    3. Git/gh commands - commit messages and PR bodies can mention sed
+    4. grep searching for the word "sed"
 
-    sed causes large-scale file corruption when:
+    Why sed is dangerous for LLMs:
     - Syntax errors destroy hundreds of files with find -exec
-    - In-place editing is irreversible
+    - In-place editing (-i) is irreversible
     - Regular expressions are error-prone
     """
 
@@ -200,8 +206,13 @@ class SedBlockerHandler(Handler):
         - find -exec sed (executing sed)
         - command chains with sed (&&, ||, ;)
         """
-        # Always allow grep (safe - just searching)
+        # Allow grep if it doesn't pipe into destructive sed execution.
+        # Read-only pipelines like `cat | sed 's/x/y/' | grep z` are safe.
+        # But `grep -rl X | xargs sed -i` is destructive file modification.
         if re.search(r"(^|\s|[;&|])\s*grep\s+", command):
+            # Block if grep pipes to xargs sed (file modification via xargs)
+            if re.search(r"\|\s*xargs\s+.*\bsed\b", command):
+                return False
             return True
 
         # For echo commands, only allow if NOT containing sed command patterns

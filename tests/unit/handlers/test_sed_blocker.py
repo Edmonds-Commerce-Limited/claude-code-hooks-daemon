@@ -63,13 +63,13 @@ class TestSedBlockerHandler:
         }
         assert handler.matches(hook_input) is True
 
-    def test_matches_bash_sed_pipeline_with_grep_returns_false(self, handler):
-        """Should NOT match sed in pipeline with grep (grep makes it safe)."""
+    def test_matches_bash_sed_readonly_pipeline_with_grep_allowed(self, handler):
+        """Should NOT match read-only sed in pipeline — no file modification."""
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "cat file.txt | sed 's/old/new/' | grep result"},
         }
-        # grep presence makes this a "safe readonly command"
+        # Read-only pipeline: sed transforms stdout, no -i flag, no file modification
         assert handler.matches(hook_input) is False
 
     def test_matches_bash_sed_in_command_chain_without_echo(self, handler):
@@ -465,6 +465,48 @@ EOF
         """_is_safe_readonly_command() should reject find -exec sed."""
         command = "find . -name '*.txt' -exec sed -i 's/foo/bar/g' {} \\;"
         assert handler._is_safe_readonly_command(command) is False
+
+    def test_is_safe_readonly_command_rejects_grep_pipe_xargs_sed(self, handler):
+        """_is_safe_readonly_command() should reject grep piped to xargs sed."""
+        command = "grep -rl 'pattern' | xargs sed -i 's/old/new/g'"
+        assert handler._is_safe_readonly_command(command) is False
+
+    def test_is_safe_readonly_command_allows_grep_pipe_sed_readonly(self, handler):
+        """_is_safe_readonly_command() should allow grep piped to sed (read-only pipeline)."""
+        command = "grep -rl 'pattern' | sed 's/old/new/g'"
+        assert handler._is_safe_readonly_command(command) is True
+
+    def test_is_safe_readonly_command_rejects_grep_pipe_xargs_sed_complex(self, handler):
+        """_is_safe_readonly_command() should reject complex grep | xargs sed."""
+        command = (
+            "grep -rl 'CLAUDE/Plans' --include='*.md' --include='*.yaml' "
+            "| xargs sed -i 's|CLAUDE/Plans|CLAUDE/Plan|g'"
+        )
+        assert handler._is_safe_readonly_command(command) is False
+
+    def test_matches_grep_pipe_xargs_sed(self, handler):
+        """matches() should block grep piped to xargs sed."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "grep -rl 'pattern' | xargs sed -i 's/old/new/g'"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_grep_pipe_sed_readonly_allowed(self, handler):
+        """matches() should allow grep piped to sed (read-only pipeline)."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "grep -rl 'X' | sed 's/X/Y/g'"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_matches_find_pipe_xargs_sed(self, handler):
+        """matches() should block find piped to xargs sed."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "find . -name '*.md' | xargs sed -i 's/old/new/g'"},
+        }
+        assert handler.matches(hook_input) is True
 
     # handle() Tests - Message content
     def test_handle_returns_deny_decision(self, handler):
