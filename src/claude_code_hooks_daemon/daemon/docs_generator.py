@@ -138,25 +138,45 @@ class DocsGenerator:
 
         lines: list[str] = ["## Active Handlers"]
 
+        # Render known event types in canonical order
+        rendered_keys: set[str] = set()
         for event_dir_name, event_type in EVENT_TYPE_MAPPING.items():
             event_handlers = handlers_by_event.get(event_dir_name, [])
             if not event_handlers:
                 continue
+            rendered_keys.add(event_dir_name)
+            self._render_handler_table(lines, event_type.value, event_handlers)
 
-            # Sort by priority
-            event_handlers.sort(key=lambda h: h[3])
-
-            count = len(event_handlers)
-            count_label = f"{count} handler{'s' if count != 1 else ''}"
-            lines.append(f"\n### {event_type.value} ({count_label})\n")
-            lines.append("| Priority | Handler | Behavior | Description |")
-            lines.append("|----------|---------|----------|-------------|")
-
-            for handler_info in event_handlers:
-                _name, config_key, _evt, priority, behavior, description, _enabled = handler_info
-                lines.append(f"| {priority} | {config_key} | {behavior} | {description} |")
+        # Render any extra keys (plugin/project handlers with unknown event types)
+        for extra_key in sorted(handlers_by_event.keys() - rendered_keys):
+            extra_handlers = handlers_by_event[extra_key]
+            if extra_handlers:
+                heading = extra_key.replace("_", " ").title()
+                self._render_handler_table(lines, heading, extra_handlers)
 
         return "\n".join(lines)
+
+    @staticmethod
+    def _render_handler_table(
+        lines: list[str], heading: str, handlers: list[CollectedHandler]
+    ) -> None:
+        """Render a handler table for one event type section.
+
+        Args:
+            lines: Output lines list to append to
+            heading: Section heading (e.g., "PreToolUse")
+            handlers: Handler info tuples for this section
+        """
+        handlers.sort(key=lambda h: h[3])
+        count = len(handlers)
+        count_label = f"{count} handler{'s' if count != 1 else ''}"
+        lines.append(f"\n### {heading} ({count_label})\n")
+        lines.append("| Priority | Handler | Behavior | Description |")
+        lines.append("|----------|---------|----------|-------------|")
+
+        for handler_info in handlers:
+            _name, config_key, _evt, priority, behavior, description, _enabled = handler_info
+            lines.append(f"| {priority} | {config_key} | {behavior} | {description} |")
 
     def _render_config_reference(self) -> str:
         """Render quick config reference section."""
@@ -220,6 +240,86 @@ class DocsGenerator:
 
                 except Exception as e:
                     logger.warning("Failed to inspect handler %s: %s", handler_class_name, e)
+
+        # Collect from plugin handlers
+        for plugin_handler in self._plugins:
+            try:
+                handler_name = plugin_handler.__class__.__name__
+                event_type_str = getattr(plugin_handler, "event_type", None)
+                if hasattr(event_type_str, "value"):
+                    event_type_str = event_type_str.value
+                # Find matching event dir name
+                event_dir = self._event_type_to_dir(event_type_str) or "plugin"
+                behavior = self._detect_behavior(plugin_handler)
+                description = self._get_description(type(plugin_handler))
+
+                handler_info = (
+                    handler_name,
+                    handler_name,
+                    event_dir,
+                    plugin_handler.priority,
+                    behavior,
+                    description,
+                    True,
+                )
+                if event_dir not in handlers_by_event:
+                    handlers_by_event[event_dir] = []
+                handlers_by_event[event_dir].append(handler_info)
+            except Exception as e:
+                logger.warning("Failed to inspect plugin handler: %s", e)
+
+        # Collect from project handlers
+        for project_handler in self._project_handlers:
+            try:
+                handler_name = project_handler.__class__.__name__
+                event_type_str = getattr(project_handler, "event_type", None)
+                if hasattr(event_type_str, "value"):
+                    event_type_str = event_type_str.value
+                # Try module path for event type detection
+                module = getattr(project_handler, "__module__", "") or ""
+                event_dir = self._event_type_to_dir(event_type_str)
+                if not event_dir:
+                    # Fall back to module path detection
+                    for dir_name in EVENT_TYPE_MAPPING:
+                        if dir_name in module:
+                            event_dir = dir_name
+                            break
+                event_dir = event_dir or "project"
+
+                behavior = self._detect_behavior(project_handler)
+                description = self._get_description(type(project_handler))
+
+                handler_info = (
+                    handler_name,
+                    handler_name,
+                    event_dir,
+                    project_handler.priority,
+                    behavior,
+                    description,
+                    True,
+                )
+                if event_dir not in handlers_by_event:
+                    handlers_by_event[event_dir] = []
+                handlers_by_event[event_dir].append(handler_info)
+            except Exception as e:
+                logger.warning("Failed to inspect project handler: %s", e)
+
+    @staticmethod
+    def _event_type_to_dir(event_type_value: str | None) -> str | None:
+        """Map an EventType value back to its directory name.
+
+        Args:
+            event_type_value: EventType string value (e.g., "PreToolUse")
+
+        Returns:
+            Directory name (e.g., "pre_tool_use"), or None if not found.
+        """
+        if not event_type_value:
+            return None
+        for dir_name, event_type in EVENT_TYPE_MAPPING.items():
+            if event_type.value == event_type_value:
+                return dir_name
+        return None
 
     @staticmethod
     def _detect_behavior(instance: Any) -> str:
