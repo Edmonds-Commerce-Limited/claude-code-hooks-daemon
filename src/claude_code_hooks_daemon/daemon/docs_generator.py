@@ -187,6 +187,16 @@ class DocsGenerator:
             "**Handler options**: Set under `options:` key per handler"
         )
 
+    @staticmethod
+    def _extract_event_type_str(handler: object) -> str | None:
+        """Extract event type string from a handler's event_type attribute."""
+        raw = getattr(handler, "event_type", None)
+        if raw is None:
+            return None
+        if hasattr(raw, "value"):
+            return str(raw.value)
+        return str(raw)
+
     def _collect_handlers(
         self,
         handlers_by_event: dict[str, list[CollectedHandler]],
@@ -238,16 +248,14 @@ class DocsGenerator:
                         handlers_by_event[event_dir_name] = []
                     handlers_by_event[event_dir_name].append(handler_info)
 
-                except Exception as e:
-                    logger.warning("Failed to inspect handler %s: %s", handler_class_name, e)
+                except Exception:
+                    logger.exception("Failed to inspect handler %s", handler_class_name)
 
         # Collect from plugin handlers
         for plugin_handler in self._plugins:
             try:
                 handler_name = plugin_handler.__class__.__name__
-                event_type_str = getattr(plugin_handler, "event_type", None)
-                if hasattr(event_type_str, "value"):
-                    event_type_str = event_type_str.value
+                event_type_str = self._extract_event_type_str(plugin_handler)
                 # Find matching event dir name
                 event_dir = self._event_type_to_dir(event_type_str) or "plugin"
                 behavior = self._detect_behavior(plugin_handler)
@@ -265,26 +273,24 @@ class DocsGenerator:
                 if event_dir not in handlers_by_event:
                     handlers_by_event[event_dir] = []
                 handlers_by_event[event_dir].append(handler_info)
-            except Exception as e:
-                logger.warning("Failed to inspect plugin handler: %s", e)
+            except Exception:
+                logger.exception("Failed to inspect plugin handler")
 
         # Collect from project handlers
         for project_handler in self._project_handlers:
             try:
                 handler_name = project_handler.__class__.__name__
-                event_type_str = getattr(project_handler, "event_type", None)
-                if hasattr(event_type_str, "value"):
-                    event_type_str = event_type_str.value
+                event_type_str = self._extract_event_type_str(project_handler)
                 # Try module path for event type detection
                 module = getattr(project_handler, "__module__", "") or ""
-                event_dir = self._event_type_to_dir(event_type_str)
-                if not event_dir:
+                proj_event_dir = self._event_type_to_dir(event_type_str)
+                if not proj_event_dir:
                     # Fall back to module path detection
                     for dir_name in EVENT_TYPE_MAPPING:
                         if dir_name in module:
-                            event_dir = dir_name
+                            proj_event_dir = dir_name
                             break
-                event_dir = event_dir or "project"
+                resolved_dir = proj_event_dir or "project"
 
                 behavior = self._detect_behavior(project_handler)
                 description = self._get_description(type(project_handler))
@@ -292,17 +298,17 @@ class DocsGenerator:
                 handler_info = (
                     handler_name,
                     handler_name,
-                    event_dir,
+                    resolved_dir,
                     project_handler.priority,
                     behavior,
                     description,
                     True,
                 )
-                if event_dir not in handlers_by_event:
-                    handlers_by_event[event_dir] = []
-                handlers_by_event[event_dir].append(handler_info)
-            except Exception as e:
-                logger.warning("Failed to inspect project handler: %s", e)
+                if resolved_dir not in handlers_by_event:
+                    handlers_by_event[resolved_dir] = []
+                handlers_by_event[resolved_dir].append(handler_info)
+            except Exception:
+                logger.exception("Failed to inspect project handler")
 
     @staticmethod
     def _event_type_to_dir(event_type_value: str | None) -> str | None:
