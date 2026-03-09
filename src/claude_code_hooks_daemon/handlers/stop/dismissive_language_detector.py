@@ -5,7 +5,8 @@ that signals the agent is avoiding work by labelling issues as "pre-existing",
 "out of scope", or "someone else's problem" instead of offering to fix them.
 
 Detected patterns:
-- Not our problem: "pre-existing issue", "not caused by our changes", "was already broken"
+- Not our problem: "pre-existing issue", "not caused by our changes", "was already broken",
+  "not introduced by my change", "no issues with my code", "my code is correct"
 - Out of scope: "outside the scope of", "out of scope", "separate issue"
 - Someone else's job: "not our responsibility", "different task entirely"
 - Defer/ignore: "can be addressed later", "not worth fixing", "best left alone"
@@ -43,12 +44,19 @@ class DismissiveLanguageDetectorHandler(Handler):
     NOT_OUR_PROBLEM_PATTERNS: ClassVar[list[str]] = [
         r"\bpre-existing issue\b",
         r"\bpre-existing problem\b",
-        r"\bnot caused by (?:our|my) changes\b",
+        r"\bnot caused by (?:our|my) changes?\b",
         r"\bunrelated to (?:our|my|what we're)\b",
-        r"\bexisted before our changes\b",
+        r"\bexisted before (?:our|my) changes\b",
         r"\bwas already (?:there|present|broken|failing)\b",
         r"\bnot (?:our|my) (?:problem|issue|concern|fault|bug)\b",
         r"\bnot something we (?:introduced|caused|broke)\b",
+        r"\bnot (?:introduced|caused|created) by (?:our|my) changes?\b",
+        r"\bnot (?:related|due) to (?:our|my) changes?\b",
+        r"\bnothing to do with (?:our|my) changes?\b",
+        r"\bnot a result of (?:our|my) changes?\b",
+        r"\bnot from (?:our|my) changes?\b",
+        r"\bno issues with (?:our|my)\b",
+        r"\b(?:our|my) (?:code|implementation|changes?) (?:is|are) correct\b",
     ]
 
     # "Out of scope" - arbitrarily scoping out encountered issues

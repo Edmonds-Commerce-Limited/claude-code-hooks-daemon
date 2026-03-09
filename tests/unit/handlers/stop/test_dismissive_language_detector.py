@@ -308,6 +308,64 @@ class TestDismissiveLanguageDetectorMatches:
         )
         assert handler.matches({HookInputField.TRANSCRIPT_PATH: path}) is True
 
+    # --- Subtle dismissal patterns (dogfooding-discovered gaps) ---
+
+    def test_matches_no_issues_with_my_code(self, handler: Any) -> None:
+        """Detect 'no issues with my new code' - subtle self-exoneration."""
+        path = _make_transcript(
+            [_assistant_message("There are no issues with my new code, these warnings were there before")]
+        )
+        assert handler.matches({HookInputField.TRANSCRIPT_PATH: path}) is True
+
+    def test_matches_not_introduced_by_my_change(self, handler: Any) -> None:
+        """Detect 'not introduced by my change' - deflecting blame."""
+        path = _make_transcript(
+            [_assistant_message("This error is not introduced by my change")]
+        )
+        assert handler.matches({HookInputField.TRANSCRIPT_PATH: path}) is True
+
+    def test_matches_not_related_to_my_changes(self, handler: Any) -> None:
+        """Detect 'not related to my/our changes'."""
+        path = _make_transcript(
+            [_assistant_message("These shellcheck warnings are not related to my changes")]
+        )
+        assert handler.matches({HookInputField.TRANSCRIPT_PATH: path}) is True
+
+    def test_matches_nothing_to_do_with_our_changes(self, handler: Any) -> None:
+        """Detect 'nothing to do with our/my changes'."""
+        path = _make_transcript(
+            [_assistant_message("That failure has nothing to do with our changes")]
+        )
+        assert handler.matches({HookInputField.TRANSCRIPT_PATH: path}) is True
+
+    def test_matches_not_a_result_of(self, handler: Any) -> None:
+        """Detect 'not a result of our/my changes'."""
+        path = _make_transcript(
+            [_assistant_message("The lint warning is not a result of my changes")]
+        )
+        assert handler.matches({HookInputField.TRANSCRIPT_PATH: path}) is True
+
+    def test_matches_no_issues_with_my_implementation(self, handler: Any) -> None:
+        """Detect 'no issues with my/our implementation'."""
+        path = _make_transcript(
+            [_assistant_message("There are no issues with my implementation")]
+        )
+        assert handler.matches({HookInputField.TRANSCRIPT_PATH: path}) is True
+
+    def test_matches_my_code_is_correct(self, handler: Any) -> None:
+        """Detect 'my/our code is correct' - self-exoneration."""
+        path = _make_transcript(
+            [_assistant_message("My code is correct, the test must be wrong")]
+        )
+        assert handler.matches({HookInputField.TRANSCRIPT_PATH: path}) is True
+
+    def test_matches_these_are_not_from_my(self, handler: Any) -> None:
+        """Detect 'these are not from my/our' changes."""
+        path = _make_transcript(
+            [_assistant_message("These warnings are not from my changes")]
+        )
+        assert handler.matches({HookInputField.TRANSCRIPT_PATH: path}) is True
+
     # --- Case insensitivity ---
 
     def test_matches_case_insensitive(self, handler: Any) -> None:

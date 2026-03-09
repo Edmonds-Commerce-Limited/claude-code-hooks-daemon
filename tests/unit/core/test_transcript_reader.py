@@ -692,3 +692,128 @@ class TestTranscriptReaderQueryMethods:
         reader = TranscriptReader()
         reader.load(str(transcript))
         assert reader.get_last_tool_use_in_message() is None
+
+
+class TestLegacyFormatWithContentBlocks:
+    """Test type=assistant/human entries with content as list of blocks.
+
+    Regression tests for bug: Real Claude Code transcripts use type=assistant
+    (not type=message) with content as a list of content blocks. The legacy
+    format path stored the list directly instead of parsing blocks, causing
+    TypeError in handlers that call get_last_assistant_text().
+    """
+
+    def test_legacy_assistant_with_content_blocks_returns_string(self, tmp_path: Path) -> None:
+        """type=assistant with content blocks should join text into string."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [
+                            {"type": "text", "text": "I'll help you with that."},
+                        ],
+                    },
+                }
+            )
+            + "\n"
+        )
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        text = reader.get_last_assistant_text()
+        assert isinstance(text, str)
+        assert text == "I'll help you with that."
+
+    def test_legacy_assistant_with_multiple_text_blocks(self, tmp_path: Path) -> None:
+        """type=assistant with multiple text blocks should concatenate them."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [
+                            {"type": "text", "text": "First part."},
+                            {"type": "text", "text": "Second part."},
+                        ],
+                    },
+                }
+            )
+            + "\n"
+        )
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        text = reader.get_last_assistant_text()
+        assert text == "First part. Second part."
+
+    def test_legacy_assistant_with_tool_use_blocks(self, tmp_path: Path) -> None:
+        """type=assistant with tool_use blocks should parse content blocks."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [
+                            {"type": "text", "text": "Let me check."},
+                            {
+                                "type": "tool_use",
+                                "name": "Bash",
+                                "input": {"command": "ls"},
+                            },
+                        ],
+                    },
+                }
+            )
+            + "\n"
+        )
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        msg = reader.get_last_assistant_message()
+        assert msg is not None
+        assert msg.content == "Let me check."
+        assert len(msg.content_blocks) == 2
+        assert msg.content_blocks[0].block_type == "text"
+        assert msg.content_blocks[1].block_type == "tool_use"
+        assert msg.content_blocks[1].tool_name == "Bash"
+
+    def test_legacy_human_with_content_blocks(self, tmp_path: Path) -> None:
+        """type=human with content blocks should also parse correctly."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps(
+                {
+                    "type": "human",
+                    "message": {
+                        "content": [
+                            {"type": "text", "text": "Fix the bug please"},
+                        ],
+                    },
+                }
+            )
+            + "\n"
+        )
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        msgs = reader.get_messages()
+        assert len(msgs) == 1
+        assert isinstance(msgs[0].content, str)
+        assert msgs[0].content == "Fix the bug please"
+
+    def test_legacy_assistant_string_content_still_works(self, tmp_path: Path) -> None:
+        """type=assistant with plain string content should still work."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {"content": "Plain string response"},
+                }
+            )
+            + "\n"
+        )
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        text = reader.get_last_assistant_text()
+        assert text == "Plain string response"
