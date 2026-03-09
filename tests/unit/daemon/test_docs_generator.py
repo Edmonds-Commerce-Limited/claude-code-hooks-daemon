@@ -462,3 +462,52 @@ class TestDocsGeneratorMultipleEventTypes:
         output = gen.generate_markdown()
         assert "### PreToolUse" in output
         assert "### PostToolUse" in output
+
+
+class TestDocsGeneratorProjectHandlers:
+    """Tests for project handler inclusion."""
+
+    def test_project_handlers_appear_in_output(self) -> None:
+        """Project handlers should appear in the generated docs."""
+        from claude_code_hooks_daemon.daemon.docs_generator import DocsGenerator
+
+        # Create a mock project handler instance (not a class)
+        handler_instance = _make_handler_class(
+            name="my-project-handler",
+            priority=45,
+            tags=["advisory"],
+            docstring="Custom project handler for validation.",
+            module_name="project_handlers.pre_tool_use.my_handler",
+        )()
+
+        registry = _make_registry()
+        gen = DocsGenerator(
+            config={"pre_tool_use": {}},
+            registry=registry,
+            project_handlers=[handler_instance],
+        )
+        output = gen.generate_markdown()
+        assert "Custom project handler for validation" in output
+        assert "45" in output
+
+    def test_plugin_handlers_appear_in_output(self) -> None:
+        """Plugin handlers should appear in the generated docs."""
+        from claude_code_hooks_daemon.daemon.docs_generator import DocsGenerator
+
+        handler_instance = _make_handler_class(
+            name="my-plugin",
+            priority=30,
+            tags=["blocking"],
+            docstring="Plugin handler for security.",
+            module_name="plugins.pre_tool_use.security",
+        )()
+
+        registry = _make_registry()
+        gen = DocsGenerator(
+            config={"pre_tool_use": {}},
+            registry=registry,
+            plugins=[handler_instance],
+        )
+        output = gen.generate_markdown()
+        assert "Plugin handler for security" in output
+        assert "30" in output

@@ -11,6 +11,7 @@ Provides:
 - config: Show loaded configuration
 - init-config: Generate configuration template
 - generate-playbook: Generate acceptance test playbook from handler definitions
+- generate-docs: Generate .claude/HOOKS-DAEMON.md from live config and handler metadata
 - repair: Repair broken venv (runs uv sync)
 - config-diff: Compare user config against default
 - config-merge: Merge user customizations onto new default
@@ -1170,6 +1171,88 @@ def cmd_generate_playbook(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_generate_docs(args: argparse.Namespace) -> int:
+    """Generate .claude/HOOKS-DAEMON.md from live config and handler metadata.
+
+    Args:
+        args: Command-line arguments with include_disabled and output options
+
+    Returns:
+        0 if docs generated successfully, 1 otherwise
+    """
+    try:
+        # Get project path
+        project_path = get_project_path(getattr(args, "project_root", None))
+    except SystemExit:
+        return 1
+
+    config_path = project_path / ".claude" / "hooks-daemon.yaml"
+
+    if not config_path.exists():
+        print(f"No configuration file found at: {config_path}", file=sys.stderr)
+        print("Run 'init-config' to create one", file=sys.stderr)
+        return 1
+
+    try:
+        # Load configuration
+        config = Config.load(config_path)
+
+        # Create handler registry and discover handlers
+        from claude_code_hooks_daemon.handlers.registry import HandlerRegistry
+
+        registry = HandlerRegistry()
+        registry.discover()
+
+        # Load plugin handlers
+        from claude_code_hooks_daemon.plugins.loader import PluginLoader
+
+        plugins = PluginLoader.load_from_plugins_config(config.plugins, project_path)
+
+        # Load project handlers
+        project_handlers_list: list[Any] = []
+        if config.project_handlers.enabled:
+            from claude_code_hooks_daemon.handlers.project_loader import ProjectHandlerLoader
+
+            ph_path = Path(config.project_handlers.path)
+            if not ph_path.is_absolute():
+                ph_path = project_path / ph_path
+            if ph_path.exists():
+                discovered = ProjectHandlerLoader.discover_handlers(ph_path)
+                project_handlers_list = [handler for _event_type, handler in discovered]
+
+        # Create docs generator
+        from claude_code_hooks_daemon.daemon.docs_generator import DocsGenerator
+
+        handlers_dict = config.handlers.model_dump()
+
+        generator = DocsGenerator(
+            config=handlers_dict,
+            registry=registry,
+            plugins=plugins,
+            project_handlers=project_handlers_list,
+        )
+
+        include_disabled = getattr(args, "include_disabled", False)
+        markdown = generator.generate_markdown(include_disabled=include_disabled)
+
+        # Determine output path
+        output_path = getattr(args, "output", None)
+        if output_path:
+            output_file = Path(output_path)
+        else:
+            output_file = project_path / ".claude" / "HOOKS-DAEMON.md"
+
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text(markdown)
+        print(f"Generated: {output_file}")
+
+        return 0
+
+    except Exception as e:
+        print(f"ERROR: Failed to generate docs: {e}", file=sys.stderr)
+        return 1
+
+
 def cmd_config_diff(args: argparse.Namespace) -> int:
     """Run config diff operation.
 
@@ -2149,6 +2232,23 @@ def main() -> int:
         help="Filter tests by handler name substring (json format only)",
     )
     parser_gen_playbook.set_defaults(func=cmd_generate_playbook)
+
+    # generate-docs command
+    parser_gen_docs = subparsers.add_parser(
+        "generate-docs",
+        help="Generate .claude/HOOKS-DAEMON.md from live config and handler metadata",
+    )
+    parser_gen_docs.add_argument(
+        "--include-disabled",
+        action="store_true",
+        help="Include disabled handlers in output",
+    )
+    parser_gen_docs.add_argument(
+        "--output",
+        type=str,
+        help="Output file path (default: .claude/HOOKS-DAEMON.md)",
+    )
+    parser_gen_docs.set_defaults(func=cmd_generate_docs)
 
     # config-diff command
     parser_config_diff = subparsers.add_parser(
