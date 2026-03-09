@@ -384,6 +384,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         plugins_config=config.plugins,
         project_handlers_config=config.project_handlers,
         project_languages=config.daemon.languages,
+        pseudo_events_config=config.pseudo_events or None,
     )
 
     # Get the daemon config with proper paths
