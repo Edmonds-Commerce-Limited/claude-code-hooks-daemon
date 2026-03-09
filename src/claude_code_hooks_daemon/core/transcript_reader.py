@@ -50,12 +50,14 @@ class TranscriptMessage:
         content: Message text content (concatenated from text blocks)
         raw: Original parsed JSON dict for accessing extra fields
         content_blocks: Parsed content blocks from the message
+        uuid: Unique identifier from the transcript entry (None if absent)
     """
 
     role: str
     content: str
     raw: dict[str, Any] = field(repr=False)
     content_blocks: tuple[ContentBlock, ...] = ()
+    uuid: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,15 +177,15 @@ class TranscriptReader:
                         message_data = data.get("message", {})
                         if not isinstance(message_data, dict):
                             self._messages.append(
-                                TranscriptMessage(role=entry_type, content="", raw=data)
+                                TranscriptMessage(
+                                    role=entry_type, content="", raw=data, uuid=data.get("uuid")
+                                )
                             )
                         else:
                             # Inject role into message dict for _parse_message_entry
                             if "role" not in message_data:
                                 message_data = {**message_data, "role": entry_type}
-                            self._parse_message_entry(
-                                {**data, "message": message_data}
-                            )
+                            self._parse_message_entry({**data, "message": message_data})
                     elif entry_type == "tool_use":
                         tool_name = data.get("tool_name", "")
                         tool_input = data.get("tool_input", {})
@@ -212,16 +214,21 @@ class TranscriptReader:
         if not role:
             return
 
+        entry_uuid = data.get("uuid")
         raw_content = message.get("content", [])
 
         # Handle string content (not a list of blocks)
         if isinstance(raw_content, str):
-            self._messages.append(TranscriptMessage(role=role, content=raw_content, raw=data))
+            self._messages.append(
+                TranscriptMessage(role=role, content=raw_content, raw=data, uuid=entry_uuid)
+            )
             return
 
         # Parse content block list
         if not isinstance(raw_content, list):
-            self._messages.append(TranscriptMessage(role=role, content="", raw=data))
+            self._messages.append(
+                TranscriptMessage(role=role, content="", raw=data, uuid=entry_uuid)
+            )
             return
 
         blocks: list[ContentBlock] = []
@@ -258,8 +265,158 @@ class TranscriptReader:
                 content=content,
                 raw=data,
                 content_blocks=tuple(blocks),
+                uuid=entry_uuid,
             )
         )
+
+    def read_incremental(
+        self, transcript_path: str, byte_offset: int
+    ) -> tuple[list[TranscriptMessage], int]:
+        """Read new messages from transcript starting at byte offset.
+
+        Seeks to byte_offset, reads only new lines, and parses them.
+        Falls back to reading from start if offset is beyond file size.
+
+        Args:
+            transcript_path: Path to JSONL transcript file
+            byte_offset: Byte position to start reading from
+
+        Returns:
+            Tuple of (new_messages, new_byte_offset)
+        """
+        path = Path(transcript_path)
+        if not path.exists():
+            return [], byte_offset
+
+        file_size = path.stat().st_size
+        if file_size == 0:
+            return [], 0
+
+        # Fall back to start if offset is invalid
+        if byte_offset > file_size:
+            byte_offset = 0
+
+        messages: list[TranscriptMessage] = []
+        new_offset = byte_offset
+
+        try:
+            with path.open("rb") as f:
+                f.seek(byte_offset)
+
+                for raw_line in f:
+                    line = raw_line.decode("utf-8", errors="replace").strip()
+                    if not line:
+                        continue
+
+                    try:
+                        data = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+
+                    if not isinstance(data, dict):
+                        continue
+
+                    entry_type = data.get("type")
+                    entry_uuid = data.get("uuid")
+
+                    if entry_type == "message":
+                        msg = self._parse_entry_to_message(data, entry_uuid)
+                        if msg:
+                            messages.append(msg)
+                    elif entry_type in ("human", "assistant", "user"):
+                        message_data = data.get("message", {})
+                        if isinstance(message_data, dict):
+                            if "role" not in message_data:
+                                message_data = {**message_data, "role": entry_type}
+                            msg = self._parse_entry_to_message(
+                                {**data, "message": message_data}, entry_uuid
+                            )
+                            if msg:
+                                messages.append(msg)
+
+                new_offset = f.tell()
+        except (OSError, UnicodeDecodeError) as e:
+            logger.debug("TranscriptReader: Failed incremental read %s: %s", path, e)
+
+        return messages, new_offset
+
+    def _parse_entry_to_message(
+        self, data: dict[str, Any], entry_uuid: str | None
+    ) -> TranscriptMessage | None:
+        """Parse a single entry dict into a TranscriptMessage without storing it.
+
+        Args:
+            data: Parsed JSON dict with message field
+            entry_uuid: UUID from the entry
+
+        Returns:
+            TranscriptMessage or None if entry is not a valid message
+        """
+        message = data.get("message", {})
+        if not isinstance(message, dict):
+            return None
+
+        role = message.get("role", "")
+        if not role:
+            return None
+
+        raw_content = message.get("content", [])
+
+        if isinstance(raw_content, str):
+            return TranscriptMessage(role=role, content=raw_content, raw=data, uuid=entry_uuid)
+
+        if not isinstance(raw_content, list):
+            return TranscriptMessage(role=role, content="", raw=data, uuid=entry_uuid)
+
+        blocks: list[ContentBlock] = []
+        text_parts: list[str] = []
+
+        for block_data in raw_content:
+            if isinstance(block_data, str):
+                text_parts.append(block_data)
+                blocks.append(ContentBlock(block_type="text", text=block_data, raw={}))
+            elif isinstance(block_data, dict):
+                block_type = block_data.get("type", "")
+                if block_type == "text":
+                    text = block_data.get("text", "")
+                    text_parts.append(text)
+                    blocks.append(ContentBlock(block_type="text", text=text, raw=block_data))
+                elif block_type == "tool_use":
+                    tool_name = block_data.get("name", "")
+                    tool_input = block_data.get("input", {})
+                    blocks.append(
+                        ContentBlock(
+                            block_type="tool_use",
+                            tool_name=tool_name,
+                            tool_input=tool_input,
+                            raw=block_data,
+                        )
+                    )
+                else:
+                    blocks.append(ContentBlock(block_type=block_type, raw=block_data))
+
+        content = " ".join(text_parts)
+        return TranscriptMessage(
+            role=role,
+            content=content,
+            raw=data,
+            content_blocks=tuple(blocks),
+            uuid=entry_uuid,
+        )
+
+    @staticmethod
+    def filter_assistant_messages(
+        messages: list[TranscriptMessage],
+    ) -> list[TranscriptMessage]:
+        """Filter a list of messages to only assistant role messages.
+
+        Args:
+            messages: List of TranscriptMessage to filter
+
+        Returns:
+            List containing only messages with role='assistant'
+        """
+        return [m for m in messages if m.role == "assistant"]
 
     def is_loaded(self) -> bool:
         """Check if a transcript has been successfully loaded.
