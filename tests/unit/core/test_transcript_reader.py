@@ -1039,3 +1039,435 @@ class TestFilterAssistantMessages:
         ]
         result = TranscriptReader.filter_assistant_messages(messages)
         assert len(result) == 0
+
+
+class TestLoadPathCheckExceptions:
+    """Cover exception branches in load() path validation (lines 122-124)."""
+
+    def test_load_with_invalid_path_characters_stays_unloaded(self) -> None:
+        """load() should handle path.exists() raising an exception gracefully."""
+        # A null byte in the path triggers an OSError in Path.exists() on Linux,
+        # exercising the except-Exception branch (lines 122-124).
+        reader = TranscriptReader()
+        reader.load("/some/path\x00with_null")
+        assert reader.is_loaded() is False
+
+
+class TestParseExceptionBranches:
+    """Cover exception handling branches inside _parse() (lines 153, 195-198)."""
+
+    def test_skips_malformed_json_inside_parse(self, tmp_path: Path) -> None:
+        """_parse() should skip lines with malformed JSON (line 153)."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            "this is {not valid json\n"
+            + json.dumps({"type": "human", "message": {"content": "Good"}})
+            + "\n"
+        )
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        msgs = reader.get_messages()
+        assert len(msgs) == 1
+        assert msgs[0].content == "Good"
+
+    def test_handles_oserror_during_parse(self, tmp_path: Path) -> None:
+        """_parse() should handle OSError when reading (line 148 try/except).
+
+        We create a directory where a file is expected so that open() raises
+        IsADirectoryError (subclass of OSError). _parse() catches this
+        internally and returns empty, but load() still marks _loaded = True
+        since _parse() didn't propagate the exception.
+        """
+        # Create a directory with the same name as the transcript so open() raises
+        transcript_dir = tmp_path / "transcript.jsonl"
+        transcript_dir.mkdir()
+        reader = TranscriptReader()
+        # load() will see path.exists() == True then _parse() catches OSError
+        reader.load(str(transcript_dir))
+        # _parse() caught the error and returned normally, so _loaded is True
+        # but no messages were parsed
+        assert reader.is_loaded() is True
+        assert reader.get_messages() == []
+
+
+class TestParseMessageEntryEdgeCases:
+    """Cover _parse_message_entry branches not exercised by existing tests."""
+
+    def test_message_field_not_dict_is_skipped(self, tmp_path: Path) -> None:
+        """_parse_message_entry returns early when message value is not a dict (line 211)."""
+        transcript = tmp_path / "transcript.jsonl"
+        # type=message but message field is a string, not a dict
+        transcript.write_text(json.dumps({"type": "message", "message": "not a dict"}) + "\n")
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        assert reader.get_messages() == []
+
+    def test_message_entry_with_empty_role_is_skipped(self, tmp_path: Path) -> None:
+        """_parse_message_entry returns early when role is absent/empty (line 215)."""
+        transcript = tmp_path / "transcript.jsonl"
+        # message dict present but no role key
+        transcript.write_text(
+            json.dumps({"type": "message", "message": {"content": "no role"}}) + "\n"
+        )
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        assert reader.get_messages() == []
+
+    def test_non_list_non_string_content_produces_empty_message(self, tmp_path: Path) -> None:
+        """_parse_message_entry handles content that is neither str nor list (lines 229-232)."""
+        transcript = tmp_path / "transcript.jsonl"
+        # content is a dict — neither str nor list
+        transcript.write_text(
+            json.dumps(
+                {
+                    "type": "message",
+                    "message": {"role": "assistant", "content": {"key": "value"}},
+                }
+            )
+            + "\n"
+        )
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        msgs = reader.get_messages()
+        assert len(msgs) == 1
+        assert msgs[0].role == "assistant"
+        assert msgs[0].content == ""
+
+    def test_string_items_in_content_list_become_text_blocks(self, tmp_path: Path) -> None:
+        """_parse_message_entry handles bare string items in content list (lines 239-240)."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps(
+                {
+                    "type": "message",
+                    "message": {
+                        "role": "assistant",
+                        "content": ["plain string item"],
+                    },
+                }
+            )
+            + "\n"
+        )
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        msgs = reader.get_messages()
+        assert len(msgs) == 1
+        assert msgs[0].content == "plain string item"
+        assert len(msgs[0].content_blocks) == 1
+        assert msgs[0].content_blocks[0].block_type == "text"
+        assert msgs[0].content_blocks[0].text == "plain string item"
+
+    def test_unknown_block_type_stored_as_generic_content_block(self, tmp_path: Path) -> None:
+        """_parse_message_entry stores unknown block types with their type name (line 259)."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps(
+                {
+                    "type": "message",
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {"type": "thinking", "thinking": "Let me reason..."},
+                        ],
+                    },
+                }
+            )
+            + "\n"
+        )
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        msgs = reader.get_messages()
+        assert len(msgs) == 1
+        assert len(msgs[0].content_blocks) == 1
+        assert msgs[0].content_blocks[0].block_type == "thinking"
+        assert msgs[0].content_blocks[0].text == ""
+
+    def test_uuid_on_legacy_format_with_non_dict_message(self, tmp_path: Path) -> None:
+        """Legacy path appends message with empty content when message is not a dict (line 179)."""
+        transcript = tmp_path / "transcript.jsonl"
+        # type=human but message value is not a dict — triggers line 179 branch
+        transcript.write_text(
+            json.dumps({"type": "human", "uuid": "x-uuid", "message": ["not", "a", "dict"]}) + "\n"
+        )
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        msgs = reader.get_messages()
+        assert len(msgs) == 1
+        assert msgs[0].role == "human"
+        assert msgs[0].content == ""
+        assert msgs[0].uuid == "x-uuid"
+
+
+class TestIncrementalReadEdgeCases:
+    """Cover branches in read_incremental() not hit by existing tests."""
+
+    def test_read_incremental_returns_empty_and_zero_for_empty_file(self, tmp_path: Path) -> None:
+        """read_incremental on a zero-byte file returns ([], 0) (lines 289, 293)."""
+        transcript = tmp_path / "empty.jsonl"
+        transcript.write_text("")
+        reader = TranscriptReader()
+        messages, offset = reader.read_incremental(str(transcript), 0)
+        assert messages == []
+        assert offset == 0
+
+    def test_read_incremental_skips_empty_lines(self, tmp_path: Path) -> None:
+        """read_incremental skips blank lines within the file (line 309)."""
+        transcript = tmp_path / "transcript.jsonl"
+        line = json.dumps({"type": "assistant", "message": {"role": "assistant", "content": "Hi"}})
+        # Surround a real line with blank lines
+        transcript.write_bytes(("\n" + line + "\n\n").encode("utf-8"))
+        reader = TranscriptReader()
+        messages, offset = reader.read_incremental(str(transcript), 0)
+        assert len(messages) == 1
+        assert messages[0].content == "Hi"
+
+    def test_read_incremental_skips_malformed_json_lines(self, tmp_path: Path) -> None:
+        """read_incremental silently skips lines with invalid JSON (lines 313-314)."""
+        transcript = tmp_path / "transcript.jsonl"
+        good_line = json.dumps(
+            {"type": "assistant", "message": {"role": "assistant", "content": "Good"}}
+        )
+        transcript.write_bytes(("bad json here\n" + good_line + "\n").encode("utf-8"))
+        reader = TranscriptReader()
+        messages, _ = reader.read_incremental(str(transcript), 0)
+        assert len(messages) == 1
+        assert messages[0].content == "Good"
+
+    def test_read_incremental_skips_non_dict_json_lines(self, tmp_path: Path) -> None:
+        """read_incremental skips JSON lines that are not dicts (line 317)."""
+        transcript = tmp_path / "transcript.jsonl"
+        good_line = json.dumps(
+            {"type": "assistant", "message": {"role": "assistant", "content": "Good"}}
+        )
+        transcript.write_bytes((json.dumps([1, 2, 3]) + "\n" + good_line + "\n").encode("utf-8"))
+        reader = TranscriptReader()
+        messages, _ = reader.read_incremental(str(transcript), 0)
+        assert len(messages) == 1
+        assert messages[0].content == "Good"
+
+    def test_read_incremental_parses_type_message_entries(self, tmp_path: Path) -> None:
+        """read_incremental handles type=message entries (lines 323-325)."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_bytes(
+            (
+                json.dumps(
+                    {
+                        "type": "message",
+                        "uuid": "m-uuid",
+                        "message": {
+                            "role": "assistant",
+                            "content": [{"type": "text", "text": "Via message type"}],
+                        },
+                    }
+                )
+                + "\n"
+            ).encode("utf-8")
+        )
+        reader = TranscriptReader()
+        messages, _ = reader.read_incremental(str(transcript), 0)
+        assert len(messages) == 1
+        assert messages[0].content == "Via message type"
+        assert messages[0].uuid == "m-uuid"
+
+    def test_read_incremental_injects_role_for_legacy_entries_without_role(
+        self, tmp_path: Path
+    ) -> None:
+        """read_incremental injects role into legacy entries that omit it (line 330)."""
+        transcript = tmp_path / "transcript.jsonl"
+        # type=assistant but message dict has no 'role' key
+        transcript.write_bytes(
+            (
+                json.dumps(
+                    {
+                        "type": "assistant",
+                        "message": {"content": "Injected role"},
+                    }
+                )
+                + "\n"
+            ).encode("utf-8")
+        )
+        reader = TranscriptReader()
+        messages, _ = reader.read_incremental(str(transcript), 0)
+        assert len(messages) == 1
+        assert messages[0].role == "assistant"
+        assert messages[0].content == "Injected role"
+
+    def test_read_incremental_handles_oserror(self, tmp_path: Path) -> None:
+        """read_incremental returns ([], offset) when an OSError occurs (lines 338-339)."""
+        import os
+
+        # Create a directory at the path so open() raises IsADirectoryError
+        transcript_dir = tmp_path / "transcript.jsonl"
+        transcript_dir.mkdir()
+
+        reader = TranscriptReader()
+        # path.exists() is True (dir exists) and stat().st_size would fail or
+        # open() would raise IsADirectoryError.  Either way the OSError branch fires.
+        messages, offset = reader.read_incremental(str(transcript_dir), 0)
+        assert messages == []
+        os.rmdir(str(transcript_dir))
+
+    def test_read_incremental_user_type_entry_is_parsed(self, tmp_path: Path) -> None:
+        """read_incremental handles type=user entries (branch alongside human/assistant)."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_bytes(
+            (
+                json.dumps(
+                    {
+                        "type": "user",
+                        "message": {"role": "user", "content": "User message"},
+                    }
+                )
+                + "\n"
+            ).encode("utf-8")
+        )
+        reader = TranscriptReader()
+        messages, _ = reader.read_incremental(str(transcript), 0)
+        assert len(messages) == 1
+        assert messages[0].role == "user"
+        assert messages[0].content == "User message"
+
+
+class TestParseEntryToMessage:
+    """Cover _parse_entry_to_message() branches (lines 357-399)."""
+
+    def test_returns_none_when_message_not_dict(self) -> None:
+        """_parse_entry_to_message returns None when message field is not a dict (line 357)."""
+        reader = TranscriptReader()
+        result = reader._parse_entry_to_message({"message": "not a dict"}, entry_uuid=None)
+        assert result is None
+
+    def test_returns_none_when_role_missing(self) -> None:
+        """_parse_entry_to_message returns None when role is absent (line 361)."""
+        reader = TranscriptReader()
+        result = reader._parse_entry_to_message(
+            {"message": {"content": "no role"}}, entry_uuid=None
+        )
+        assert result is None
+
+    def test_returns_message_with_string_content(self) -> None:
+        """_parse_entry_to_message handles string content (line 366)."""
+        reader = TranscriptReader()
+        result = reader._parse_entry_to_message(
+            {"message": {"role": "assistant", "content": "plain string"}},
+            entry_uuid="u1",
+        )
+        assert result is not None
+        assert result.role == "assistant"
+        assert result.content == "plain string"
+        assert result.uuid == "u1"
+
+    def test_returns_message_with_non_list_non_string_content(self) -> None:
+        """_parse_entry_to_message handles content that is neither str nor list (line 369)."""
+        reader = TranscriptReader()
+        result = reader._parse_entry_to_message(
+            {"message": {"role": "human", "content": {"nested": "dict"}}},
+            entry_uuid=None,
+        )
+        assert result is not None
+        assert result.role == "human"
+        assert result.content == ""
+
+    def test_returns_message_with_string_items_in_content_list(self) -> None:
+        """_parse_entry_to_message handles bare string items in content list (lines 376-377)."""
+        reader = TranscriptReader()
+        result = reader._parse_entry_to_message(
+            {"message": {"role": "human", "content": ["bare string"]}},
+            entry_uuid=None,
+        )
+        assert result is not None
+        assert result.content == "bare string"
+        assert len(result.content_blocks) == 1
+        assert result.content_blocks[0].block_type == "text"
+        assert result.content_blocks[0].text == "bare string"
+
+    def test_returns_message_with_tool_use_block(self) -> None:
+        """_parse_entry_to_message parses tool_use content blocks (lines 384-394)."""
+        reader = TranscriptReader()
+        result = reader._parse_entry_to_message(
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "text", "text": "Running it."},
+                        {
+                            "type": "tool_use",
+                            "name": ToolName.BASH,
+                            "input": {"command": "ls"},
+                        },
+                    ],
+                }
+            },
+            entry_uuid="u2",
+        )
+        assert result is not None
+        assert result.content == "Running it."
+        assert len(result.content_blocks) == 2
+        assert result.content_blocks[1].block_type == "tool_use"
+        assert result.content_blocks[1].tool_name == ToolName.BASH
+        assert result.content_blocks[1].tool_input == {"command": "ls"}
+
+    def test_returns_message_with_unknown_block_type(self) -> None:
+        """_parse_entry_to_message stores unknown block types generically (line 396)."""
+        reader = TranscriptReader()
+        result = reader._parse_entry_to_message(
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "image", "source": {"type": "base64", "data": "..."}},
+                    ],
+                }
+            },
+            entry_uuid=None,
+        )
+        assert result is not None
+        assert len(result.content_blocks) == 1
+        assert result.content_blocks[0].block_type == "image"
+        assert result.content_blocks[0].text == ""
+
+    def test_returns_message_with_uuid(self) -> None:
+        """_parse_entry_to_message stores the uuid on the returned message."""
+        reader = TranscriptReader()
+        result = reader._parse_entry_to_message(
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "Hello"}],
+                }
+            },
+            entry_uuid="entry-uuid-99",
+        )
+        assert result is not None
+        assert result.uuid == "entry-uuid-99"
+
+
+class TestGetLastToolUseInMessageEdgeCases:
+    """Cover get_last_tool_use_in_message() when there is no assistant message (line 521)."""
+
+    def test_get_last_tool_use_returns_none_when_no_messages_loaded(self) -> None:
+        """get_last_tool_use_in_message() returns None when reader has no messages (line 521)."""
+        reader = TranscriptReader()
+        # Never loaded — no messages at all
+        result = reader.get_last_tool_use_in_message()
+        assert result is None
+
+    def test_get_last_tool_use_returns_none_when_only_human_messages(self, tmp_path: Path) -> None:
+        """get_last_tool_use_in_message() returns None when no assistant messages exist."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps(
+                {
+                    "type": "message",
+                    "message": {
+                        "role": "human",
+                        "content": [{"type": "text", "text": "Hello"}],
+                    },
+                }
+            )
+            + "\n"
+        )
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        result = reader.get_last_tool_use_in_message()
+        assert result is None
