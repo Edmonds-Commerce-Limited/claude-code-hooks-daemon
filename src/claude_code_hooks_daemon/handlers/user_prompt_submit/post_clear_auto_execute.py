@@ -16,7 +16,9 @@ from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 
 # Handler identity
 _HANDLER_ID: Final[str] = "post_clear_auto_execute"
-_HANDLER_PRIORITY: Final[int] = Priority.CRITICAL_THINKING_ADVISORY - 1  # Fire before critical thinking
+_HANDLER_PRIORITY: Final[int] = (
+    Priority.CRITICAL_THINKING_ADVISORY - 1
+)  # Fire before critical thinking
 
 # Guidance message injected on first prompt of a new session
 _GUIDANCE_MESSAGE: Final[str] = (
