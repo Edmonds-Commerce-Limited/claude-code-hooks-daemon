@@ -1,5 +1,6 @@
 """MarkdownOrganizationHandler - enforces markdown file organization rules."""
 
+import json
 import logging
 import re
 from pathlib import Path
@@ -58,6 +59,7 @@ class MarkdownOrganizationHandler(Handler):
         self._workspace_root: Path = ProjectContext.project_root()
         self._track_plans_in_project: str | None = None  # Path to plan folder or None
         self._plan_workflow_docs: str | None = None  # Path to workflow doc or None
+        self._enforce_claude_code_sync: bool = False  # Enforce plansDirectory sync
         self._monorepo_subproject_patterns: list[str] | None = (
             None  # Regex patterns for sub-projects
         )
@@ -286,6 +288,72 @@ class MarkdownOrganizationHandler(Handler):
         # Return highest numbered match (most recent)
         return sorted(matches_found, key=lambda p: p.name, reverse=True)[0]
 
+    def _check_claude_code_sync(self) -> HookResult | None:
+        """Check if plansDirectory in .claude/settings.json matches plan_workflow.directory.
+
+        Returns:
+            HookResult with DENY if out of sync, None if in sync or enforcement disabled
+        """
+        if not self._enforce_claude_code_sync or not self._track_plans_in_project:
+            return None
+
+        settings_path = self._workspace_root / ".claude" / "settings.json"
+        expected_value = f"./{self._track_plans_in_project}"
+
+        if not settings_path.exists():
+            return HookResult.deny(
+                reason=(
+                    "BLOCKED: .claude/settings.json not found.\n\n"
+                    "Plan workflow requires plansDirectory to be configured.\n\n"
+                    "Fix: Create .claude/settings.json with:\n"
+                    f'  "plansDirectory": "{expected_value}"\n\n'
+                    "Then restart your session."
+                ),
+            )
+
+        try:
+            settings_data = json.loads(settings_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as e:
+            logger.error(f"Failed to read .claude/settings.json: {e}")
+            return HookResult.deny(
+                reason=(
+                    "BLOCKED: Cannot read .claude/settings.json.\n\n"
+                    f"Error: {e}\n\n"
+                    "Fix the file and restart your session."
+                ),
+            )
+
+        plans_directory = settings_data.get("plansDirectory")
+        if plans_directory is None:
+            return HookResult.deny(
+                reason=(
+                    "BLOCKED: plansDirectory not set in .claude/settings.json.\n\n"
+                    "Plan workflow requires plansDirectory to match daemon config.\n\n"
+                    "Fix: Add to .claude/settings.json:\n"
+                    f'  "plansDirectory": "{expected_value}"\n\n'
+                    "Then restart your session."
+                ),
+            )
+
+        # Normalise for comparison: strip leading "./" from both
+        normalised_actual = plans_directory.lstrip("./")
+        normalised_expected = self._track_plans_in_project.lstrip("./")
+
+        if normalised_actual != normalised_expected:
+            return HookResult.deny(
+                reason=(
+                    "BLOCKED: plansDirectory mismatch.\n\n"
+                    f'  .claude/settings.json: "{plans_directory}"\n'
+                    f'  hooks daemon config:   "{self._track_plans_in_project}"\n\n'
+                    "These must match for plan workflow to work correctly.\n\n"
+                    "Fix: Update .claude/settings.json:\n"
+                    f'  "plansDirectory": "{expected_value}"\n\n'
+                    "Then restart your session."
+                ),
+            )
+
+        return None
+
     def handle_planning_mode_write(self, hook_input: dict[str, Any]) -> HookResult:
         """Handle planning mode write by creating numbered plan folder.
 
@@ -307,6 +375,11 @@ class MarkdownOrganizationHandler(Handler):
 
         if not self._track_plans_in_project or not file_path:
             return HookResult(decision=Decision.ALLOW)
+
+        # Enforce plansDirectory sync before processing plan writes
+        sync_result = self._check_claude_code_sync()
+        if sync_result is not None:
+            return sync_result
 
         plan_base = self._workspace_root / self._track_plans_in_project
 
