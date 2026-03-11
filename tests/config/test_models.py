@@ -18,6 +18,7 @@ from claude_code_hooks_daemon.config.models import (
     HandlerConfig,
     HandlersConfig,
     LogLevel,
+    PlanWorkflowConfig,
     PluginConfig,
     PluginsConfig,
 )
@@ -850,3 +851,290 @@ handlers:
         assert loaded.daemon.log_level == LogLevel.DEBUG
         assert loaded.plugins.paths == ["/path1", "/path2"]
         assert len(loaded.plugins.plugins) == 1
+
+
+class TestPlanWorkflowConfig:
+    """Tests for PlanWorkflowConfig model."""
+
+    def test_defaults(self) -> None:
+        """PlanWorkflowConfig has correct defaults."""
+        config = PlanWorkflowConfig()
+        assert config.enabled is True
+        assert config.directory == "CLAUDE/Plan"
+        assert config.workflow_docs == "CLAUDE/PlanWorkflow.md"
+        assert config.enforce_claude_code_sync is False
+
+    def test_custom_values(self) -> None:
+        """PlanWorkflowConfig accepts custom values."""
+        config = PlanWorkflowConfig(
+            enabled=False,
+            directory="plans/",
+            workflow_docs="docs/PLANS.md",
+            enforce_claude_code_sync=True,
+        )
+        assert config.enabled is False
+        assert config.directory == "plans/"
+        assert config.workflow_docs == "docs/PLANS.md"
+        assert config.enforce_claude_code_sync is True
+
+    def test_extra_fields_forbidden(self) -> None:
+        """PlanWorkflowConfig rejects extra fields."""
+        with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+            PlanWorkflowConfig.model_validate({"unknown_field": "value"})
+
+
+class TestMigratePlanHandlerOptions:
+    """Tests for Config.migrate_plan_handler_options validator."""
+
+    def test_no_migration_when_plan_workflow_explicit(self) -> None:
+        """No migration when plan_workflow is explicitly set."""
+        config = Config(
+            plan_workflow=PlanWorkflowConfig(directory="my/plans"),
+            handlers=HandlersConfig.model_validate(
+                {
+                    "pre_tool_use": {
+                        "markdown_organization": {
+                            "options": {
+                                "track_plans_in_project": "old/path",
+                            },
+                        },
+                    },
+                }
+            ),
+        )
+        # Explicit plan_workflow takes precedence
+        assert config.plan_workflow.directory == "my/plans"
+
+    def test_no_migration_when_no_markdown_organization(self) -> None:
+        """No migration when markdown_organization handler not configured."""
+        config = Config()
+        assert config.plan_workflow.directory == "CLAUDE/Plan"
+
+    def test_migration_from_dict_handler_config(self) -> None:
+        """Migration from dict-format markdown_organization handler options."""
+        config = Config(
+            handlers=HandlersConfig.model_validate(
+                {
+                    "pre_tool_use": {
+                        "markdown_organization": {
+                            "options": {
+                                "track_plans_in_project": "CLAUDE/Plan",
+                                "plan_workflow_docs": "CLAUDE/MyWorkflow.md",
+                            },
+                        },
+                    },
+                }
+            ),
+        )
+        assert config.plan_workflow.enabled is True
+        assert config.plan_workflow.directory == "CLAUDE/Plan"
+        assert config.plan_workflow.workflow_docs == "CLAUDE/MyWorkflow.md"
+
+    def test_migration_from_dict_handler_default_workflow_docs(self) -> None:
+        """Migration uses default workflow_docs when not specified."""
+        config = Config(
+            handlers=HandlersConfig.model_validate(
+                {
+                    "pre_tool_use": {
+                        "markdown_organization": {
+                            "options": {
+                                "track_plans_in_project": "plans/",
+                            },
+                        },
+                    },
+                }
+            ),
+        )
+        assert config.plan_workflow.directory == "plans/"
+        assert config.plan_workflow.workflow_docs == "CLAUDE/PlanWorkflow.md"
+
+    def test_no_migration_when_track_plans_not_set(self) -> None:
+        """No migration when track_plans_in_project is not in handler options."""
+        config = Config(
+            handlers=HandlersConfig.model_validate(
+                {
+                    "pre_tool_use": {
+                        "markdown_organization": {
+                            "options": {},
+                        },
+                    },
+                }
+            ),
+        )
+        # Default plan_workflow remains
+        assert config.plan_workflow.directory == "CLAUDE/Plan"
+
+    def test_no_migration_when_handler_config_not_dict_or_handler_config(self) -> None:
+        """No migration when markdown_organization is an unexpected type (e.g., bool)."""
+        config = Config(
+            handlers=HandlersConfig.model_validate(
+                {
+                    "pre_tool_use": {
+                        "markdown_organization": True,
+                    },
+                }
+            ),
+        )
+        # Default plan_workflow remains - the True value is not a dict or HandlerConfig
+        assert config.plan_workflow.directory == "CLAUDE/Plan"
+
+    def test_migration_from_raw_dict_handler_config(self) -> None:
+        """Migration from raw dict bypassing Pydantic coercion (line 568-569)."""
+        config = Config()
+        # Bypass Pydantic coercion to set a raw dict for markdown_organization
+        raw_pre_tool_use = {
+            "markdown_organization": {
+                "options": {
+                    "track_plans_in_project": "my/plans",
+                    "plan_workflow_docs": "docs/MY_WORKFLOW.md",
+                },
+            },
+        }
+        object.__setattr__(config.handlers, "pre_tool_use", raw_pre_tool_use)
+        # Clear model_fields_set so plan_workflow is not considered explicitly set
+        object.__setattr__(config, "__pydantic_fields_set__", set())
+        result = config.migrate_plan_handler_options()
+        assert result.plan_workflow.enabled is True
+        assert result.plan_workflow.directory == "my/plans"
+        assert result.plan_workflow.workflow_docs == "docs/MY_WORKFLOW.md"
+
+    def test_migration_raw_dict_no_options(self) -> None:
+        """Migration from raw dict with no options key (line 569 empty dict)."""
+        config = Config()
+        raw_pre_tool_use = {
+            "markdown_organization": {},
+        }
+        object.__setattr__(config.handlers, "pre_tool_use", raw_pre_tool_use)
+        object.__setattr__(config, "__pydantic_fields_set__", set())
+        result = config.migrate_plan_handler_options()
+        # No track_plans_in_project, so no migration
+        assert result.plan_workflow.directory == "CLAUDE/Plan"
+
+    def test_migration_non_dict_non_handler_config_returns_early(self) -> None:
+        """Migration returns early when md_org is neither dict nor HandlerConfig (line 570-571)."""
+        config = Config()
+        raw_pre_tool_use = {
+            "markdown_organization": 42,
+        }
+        object.__setattr__(config.handlers, "pre_tool_use", raw_pre_tool_use)
+        object.__setattr__(config, "__pydantic_fields_set__", set())
+        result = config.migrate_plan_handler_options()
+        assert result.plan_workflow.directory == "CLAUDE/Plan"
+
+
+class TestValidateHandlerDependencies:
+    """Tests for HandlersConfig.validate_handler_dependencies validator."""
+
+    def test_non_dict_event_config_skipped(self) -> None:
+        """Non-dict event configs are silently skipped during validation."""
+        # After coercion, event configs are always dicts. But via extra="allow",
+        # a non-standard event type could be set to a non-dict value.
+        # Use object.__setattr__ to bypass Pydantic and set a non-dict value
+        # on a known field, then re-run validation.
+        handlers_config = HandlersConfig()
+        object.__setattr__(handlers_config, "pre_tool_use", "not_a_dict")
+        # Manually trigger validation - should not raise
+        result = handlers_config.validate_handler_dependencies()
+        assert result is handlers_config
+
+    def test_handler_config_object_enabled_check(self) -> None:
+        """HandlerConfig objects correctly report enabled status."""
+        # coerce_handler_configs converts dicts to HandlerConfig objects
+        handlers_config = HandlersConfig.model_validate(
+            {
+                "pre_tool_use": {
+                    "destructive_git": {"enabled": True},
+                },
+            }
+        )
+        # After coercion, handler config is a HandlerConfig object
+        handler_cfg = handlers_config.pre_tool_use["destructive_git"]
+        assert isinstance(handler_cfg, HandlerConfig)
+        assert handler_cfg.enabled is True
+
+    def test_handler_config_disabled(self) -> None:
+        """Disabled HandlerConfig is recognised as disabled."""
+        handlers_config = HandlersConfig.model_validate(
+            {
+                "pre_tool_use": {
+                    "destructive_git": {"enabled": False},
+                },
+            }
+        )
+        handler_cfg = handlers_config.pre_tool_use["destructive_git"]
+        assert isinstance(handler_cfg, HandlerConfig)
+        assert handler_cfg.enabled is False
+
+    def test_bare_value_coerced_to_default_handler_config(self) -> None:
+        """Non-dict, non-HandlerConfig handler values coerced to default HandlerConfig."""
+        handlers_config = HandlersConfig.model_validate(
+            {
+                "pre_tool_use": {
+                    "destructive_git": True,
+                },
+            }
+        )
+        handler_cfg = handlers_config.pre_tool_use["destructive_git"]
+        assert isinstance(handler_cfg, HandlerConfig)
+        assert handler_cfg.enabled is True
+
+    def test_dict_format_in_validate_handler_dependencies(self) -> None:
+        """Dict-format handler config in event_config exercises dict branch."""
+        # Bypass coercion to put a raw dict into event config
+        # This exercises lines 161-164 in validate_handler_dependencies
+        handlers_config = HandlersConfig()
+        object.__setattr__(
+            handlers_config,
+            "pre_tool_use",
+            {"destructive_git": {"enabled": True}},
+        )
+        result = handlers_config.validate_handler_dependencies()
+        assert result is handlers_config
+
+    def test_dict_format_disabled_handler_skipped(self) -> None:
+        """Dict-format disabled handler is not checked for parent dependencies."""
+        handlers_config = HandlersConfig()
+        object.__setattr__(
+            handlers_config,
+            "pre_tool_use",
+            {"destructive_git": {"enabled": False}},
+        )
+        result = handlers_config.validate_handler_dependencies()
+        assert result is handlers_config
+
+    def test_bare_value_handler_config_else_branch(self) -> None:
+        """Non-dict, non-HandlerConfig handler value defaults to enabled=True (line 164)."""
+        handlers_config = HandlersConfig()
+        object.__setattr__(
+            handlers_config,
+            "pre_tool_use",
+            {"destructive_git": True},
+        )
+        result = handlers_config.validate_handler_dependencies()
+        assert result is handlers_config
+
+    def test_handler_instantiation_failure_skipped(self) -> None:
+        """Handler that fails to instantiate is skipped during validation (lines 171-177)."""
+        from unittest.mock import MagicMock
+
+        handlers_config = HandlersConfig()
+
+        # Create a mock handler class that raises on instantiation
+        mock_handler_cls = MagicMock(side_effect=RuntimeError("requires runtime context"))
+        mock_handler_cls.__name__ = "DestructiveGitHandler"
+
+        # Mock the registry - it's imported inside validate_handler_dependencies
+        with patch(
+            "claude_code_hooks_daemon.handlers.registry.HandlerRegistry"
+        ) as mock_registry_cls:
+            mock_registry = MagicMock()
+            mock_registry_cls.return_value = mock_registry
+            mock_registry._handlers = {"DestructiveGitHandler": mock_handler_cls}
+
+            object.__setattr__(
+                handlers_config,
+                "pre_tool_use",
+                {"destructive_git": {"enabled": True}},
+            )
+            result = handlers_config.validate_handler_dependencies()
+            assert result is handlers_config

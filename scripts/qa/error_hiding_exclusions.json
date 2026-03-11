@@ -4,7 +4,7 @@
   "exclusions": [
     {
       "file": "config/models.py",
-      "lines": [557],
+      "lines": [625],
       "rule": "silent-pass",
       "reason": "load_or_default(): FileNotFoundError is expected when config file disappears between exists() check and read (TOCTOU). Falls through to return cls() which creates a safe default. This is not hiding an error - it IS the intended fallback."
     },
@@ -76,7 +76,7 @@
     },
     {
       "file": "handlers/registry.py",
-      "lines": [89, 218, 284],
+      "lines": [89, 220, 286],
       "rule": "log-and-continue",
       "reason": "Handler module discovery: log-and-continue when a module fails to import. One broken module should not prevent other handlers from loading. Already logged at warning level."
     },
