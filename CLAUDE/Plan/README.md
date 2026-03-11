@@ -457,7 +457,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Cancelled Plans
 
-- [00087: Post-Clear Auto-Execute](Completed/00087-post-clear-auto-execute/PLAN.md) - Cancelled
+- [00087: Post-Clear Auto-Execute](Cancelled/00087-post-clear-auto-execute/PLAN.md) - Cancelled
   - Hooks cannot solve `/clear <text>` auto-execution — client-side `local-command-caveat` and no auto-submit
   - Prototype handler remains enabled (marginal value), but core goal impossible via hooks
 
