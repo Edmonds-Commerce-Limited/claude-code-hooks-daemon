@@ -751,11 +751,12 @@ class TestValidatePlanNumberHandler:
 
     # Tests for config-aware plan directory
 
-    def test_handler_shares_options_with_markdown_organization(
+    def test_handler_receives_plan_workflow_via_planning_tag(
         self, handler: ValidatePlanNumberHandler
     ) -> None:
-        """Handler inherits config from markdown_organization."""
-        assert handler.shares_options_with == "markdown_organization"
+        """Handler receives plan config via PLANNING tag (no shares_options_with)."""
+        assert handler.shares_options_with is None
+        assert "planning" in handler.tags
 
     def test_handler_has_track_plans_in_project_attribute(
         self, handler: ValidatePlanNumberHandler

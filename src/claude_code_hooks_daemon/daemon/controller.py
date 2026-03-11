@@ -148,6 +148,7 @@ class DaemonController:
         project_handlers_config: "ProjectHandlersConfig | None" = None,
         project_languages: list[str] | None = None,
         pseudo_events_config: dict[str, dict[str, Any]] | None = None,
+        plan_workflow: Any = None,
     ) -> None:
         """Initialise the controller with handlers.
 
@@ -161,6 +162,7 @@ class DaemonController:
             project_handlers_config: Optional project handlers configuration
             project_languages: Project-level language filter from daemon.languages config
             pseudo_events_config: Optional pseudo-event configuration from hooks-daemon.yaml
+            plan_workflow: Optional PlanWorkflowConfig for plan-related handlers
 
         Raises:
             ValueError: If workspace_root is None (FAIL FAST requirement)
@@ -194,6 +196,7 @@ class DaemonController:
             config=handler_config,
             workspace_root=workspace_root,
             project_languages=project_languages,
+            plan_workflow=plan_workflow,
         )
 
         logger.info("Registered %d built-in handlers", count)

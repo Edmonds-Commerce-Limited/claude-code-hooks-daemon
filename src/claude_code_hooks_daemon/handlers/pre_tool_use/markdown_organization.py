@@ -51,6 +51,7 @@ class MarkdownOrganizationHandler(Handler):
                 HandlerTag.EC_SPECIFIC,
                 HandlerTag.BLOCKING,
                 HandlerTag.TERMINAL,
+                HandlerTag.PLANNING,
             ],
         )
         # Configuration attributes (set by registry after instantiation)

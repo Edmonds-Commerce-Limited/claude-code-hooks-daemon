@@ -147,8 +147,6 @@ handlers:
     plan_number_helper:    # Provides correct next plan number (prevents broken bash discovery)
       enabled: true        # Enable when using CLAUDE/Plan/ structure
       priority: 33
-      options:
-        track_plans_in_project: "CLAUDE/Plan"  # Must match markdown_organization setting
 
     task_tdd_advisor:      # Advises on TDD workflow for tasks
       enabled: true
@@ -186,9 +184,9 @@ handlers:
       enabled: true        # Enable for md organization + plan tracking
       priority: 50
       # Docs: docs/guides/handlers/markdown_organization.md
-      options:
-        track_plans_in_project: "CLAUDE/Plan"     # Path to plan folder (null to disable)
-        plan_workflow_docs: "CLAUDE/PlanWorkflow.md"  # Optional: workflow doc to reference
+      # Plan tracking options (track_plans_in_project, plan_workflow_docs)
+      # are now in top-level plan_workflow: section.
+      # options:
         # allowed_markdown_paths: OVERRIDES all built-in path rules with custom regex.
         # In monorepos, patterns match AFTER prefix stripping. See HANDLER_REFERENCE.md.
         #   allowed_markdown_paths:
@@ -371,6 +369,13 @@ plugins:
       event_type: session_start
       enabled: true
       priority: 35
+
+# Plan workflow configuration (single source of truth for plan tracking)
+plan_workflow:
+  enabled: true
+  directory: "CLAUDE/Plan"
+  workflow_docs: "CLAUDE/PlanWorkflow.md"
+  enforce_claude_code_sync: false
 
 project_handlers:
   enabled: true

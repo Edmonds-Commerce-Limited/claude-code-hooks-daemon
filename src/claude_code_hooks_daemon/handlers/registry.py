@@ -161,6 +161,7 @@ class HandlerRegistry:
         config: dict[str, dict[str, dict[str, Any]]] | None = None,
         workspace_root: Path | None = None,
         project_languages: list[str] | None = None,
+        plan_workflow: Any = None,
     ) -> int:
         """Register all discovered handlers with the router.
 
@@ -173,6 +174,7 @@ class HandlerRegistry:
             config: Optional handler configuration from hooks-daemon.yaml
             workspace_root: Optional workspace root path for handlers
             project_languages: Project-level language filter from daemon.languages config
+            plan_workflow: Optional PlanWorkflowConfig for plan-related handlers
 
         Returns:
             Number of handlers registered
@@ -328,6 +330,23 @@ class HandlerRegistry:
 
                             # Inject project-level language filter (via setattr like other options)
                             instance._project_languages = project_languages
+
+                            # Inject plan_workflow config for planning-tagged handlers
+                            # This overrides any handler-level options (top-level is source of truth)
+                            # Uses dynamic setattr pattern (same as handler options) for type safety
+                            if plan_workflow is not None and "planning" in instance.tags:
+                                plan_attrs: dict[str, str | None] = {
+                                    "track_plans_in_project": (
+                                        plan_workflow.directory if plan_workflow.enabled else None
+                                    ),
+                                    "plan_workflow_docs": (
+                                        plan_workflow.workflow_docs
+                                        if plan_workflow.enabled
+                                        else None
+                                    ),
+                                }
+                                for attr_key, attr_val in plan_attrs.items():
+                                    setattr(instance, f"_{attr_key}", attr_val)
 
                             router.register(event_type, instance)
                             count += 1
