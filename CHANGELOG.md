@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.21.0] - 2026-03-11
+
+### Added
+
+- **DismissiveLanguageDetectorHandler**: New Stop event advisory handler that scans the last assistant message in the conversation transcript for dismissive language patterns — "not our problem" deflection, "out of scope" avoidance, "someone else's job" pushing, and defer/ignore phrases. When detected, injects a warning instructing the agent to acknowledge the problem and offer to fix it rather than explaining it away. Four pattern categories with 30+ compiled regexes.
+
+- **PseudoEventDispatcher**: New core infrastructure for synthetic daemon-generated events. A pseudo-event hooks into real events via frequency-control notation (`event_type:N/D` — fire N times every D occurrences). The dispatcher maintains per-session counters, runs a shared setup function once per fire (for expensive operations like transcript reading), then dispatches through a dedicated handler chain. Results are merged back into the real event result (DENY wins, context accumulates).
+
+- **Nitpick Pseudo-Event**: First concrete pseudo-event, triggered every 5 PreToolUse events by default. Reads conversation transcript incrementally using byte-offset tracking, extracts new assistant messages, and dispatches through nitpick handler chains. Handlers receive pre-extracted messages — no redundant transcript reads per handler.
+
+- **NitpickDismissiveLanguageHandler**: Nitpick pseudo-event handler that audits assistant messages for dismissive language. Reuses pattern lists from `DismissiveLanguageDetectorHandler` as single source of truth. Runs periodically during sessions rather than only at Stop events.
+
+- **NitpickHedgingLanguageHandler**: Nitpick pseudo-event handler that audits assistant messages for hedging language (guessing instead of researching). Reuses pattern lists from `HedgingLanguageDetectorHandler` as single source of truth.
+
+- **DocsGenerator and generate-docs CLI command**: New `DocsGenerator` class and `generate-docs` CLI command that generates `.claude/HOOKS-DAEMON.md` from live config and handler metadata. Produces an accurate, auto-generated summary of active handlers (including project handlers and plugins), plan mode settings, and config reference. Integrated into the installer so new installations get an up-to-date HOOKS-DAEMON.md automatically.
+
+- **TranscriptReader Incremental Reading**: `TranscriptReader` now supports incremental JSONL reading via `read_incremental(path, byte_offset)`, returning only messages added since the last read position. Also adds `UUID` field to parsed messages and `filter_assistant_messages()` static method. Enables efficient periodic transcript auditing without re-reading the entire file.
+
+- **PlanWorkflowConfig Top-Level Config**: New `plan_workflow` top-level configuration block that centralises plan-related settings previously scattered across handler options. Fields: `enabled`, `directory` (default `CLAUDE/Plan`), `workflow_docs` (default `CLAUDE/PlanWorkflow.md`), `enforce_claude_code_sync`. Automatic migration reads `track_plans_in_project` from `markdown_organization` handler options and populates `plan_workflow` for backwards compatibility.
+
+- **Plan Redirect ALLOW Flow and Numbered Folder Support**: Plan redirect handler now supports an ALLOW flow that correctly accepts writes targeting the project plan directory. Also recognises 5-digit plan folder numbers (e.g. `00085`, `00086`) alongside the existing 3-digit format.
+
+- **plansDirectory Sync Enforcement**: When `plan_workflow.enforce_claude_code_sync` is `true`, the daemon validates that `.claude/settings.json` `plansDirectory` field matches the configured plan directory and injects a correction advisory if they diverge.
+
+- **PostClearAutoExecuteHandler** (prototype, disabled by default): UserPromptSubmit advisory handler that detects the first prompt of a new session and injects guidance for the agent to execute the instruction immediately. Intended to address the `/clear <instruction>` idle agent pattern. Marked as prototype; behaviour may change in future releases.
+
+- **DestructiveGitHandler: Block commit rewriting via amend flag**: Added pattern 9 to the destructive git handler, blocking all `git commit` with the `--amend` flag. Amending rewrites the previous commit and creates messy history — new commits are always preferred.
+
+### Changed
+
+- **DaemonController Pseudo-Event Integration**: `DaemonController.initialise()` now accepts `pseudo_events_config` and `plan_workflow` parameters. After handler registration, pseudo-events are parsed from YAML config, nitpick handlers are registered, and the `PseudoEventDispatcher` is wired into the event dispatch loop. Real event results are merged with pseudo-event results before returning.
+
+- **PlanWorkflowConfig Migration**: `Config` model validator automatically migrates `track_plans_in_project` and `plan_workflow_docs` from `markdown_organization.options` to the new top-level `plan_workflow` block. Existing configs continue to work without changes.
+
+- **HandlerRegistry receives plan_workflow**: Handler registration now passes the `PlanWorkflowConfig` object to the registry, allowing plan-related handlers to read their configuration from the centralised config rather than per-handler options.
+
+### Fixed
+
+- **Block xargs Bypass of Inplace-Edit Blocker**: The sed/inplace-edit blocker now also matches `xargs sed`, `xargs perl -pi`, and `xargs awk -i` patterns, closing a bypass where agents used `find ... | xargs sed -i` to perform in-place file edits.
+
+- **validate_plan_number Uses Hardcoded Plan Directory**: Fixed `validate_plan_number` handler using a hardcoded `CLAUDE/Plan` path instead of reading the configured plan directory from `plan_workflow.directory`. The handler now reads the correct path from config.
+
+- **TranscriptReader Crash on Real Transcripts**: Fixed a crash when parsing JSONL transcript files with unexpected message structures. Parser is now more defensive against missing or malformed content blocks.
+
+- **Dismissive Language Pattern Gaps**: Extended dismissive language pattern set to cover additional deflection phrases missed in initial implementation.
+
+- **Version Cache Flush After Upgrade**: Fixed stale version cache after daemon upgrade. The version cache is now flushed when a new version is detected, ensuring the status line shows the correct version immediately after upgrading.
+
+- **Error Hiding Exclusions for Drifted Lines**: Updated `error_hiding_blocker` handler exclusion line numbers to match current source after upstream code changes caused the exclusions to drift out of alignment.
+
+- **QA Violations in DocsGenerator and CLI**: Fixed ruff lint and mypy type errors introduced during initial DocsGenerator implementation.
+
 ## [2.20.0] - 2026-03-09
 
 ### Added
