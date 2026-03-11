@@ -121,3 +121,16 @@ class TestHedgingLanguageNitpickHandle:
         )
         result = handler.handle(hook_input)
         assert result.decision.value == "allow"
+
+    def test_empty_content_message_skipped(self) -> None:
+        """Messages with empty content are skipped (line 91)."""
+        handler = HedgingLanguageNitpickHandler()
+        hook_input = _make_hook_input(
+            [
+                {"uuid": "u1", "content": ""},
+                {"uuid": "u2", "content": "If I recall correctly, this uses YAML."},
+            ]
+        )
+        result = handler.handle(hook_input)
+        # Only the second message triggers detection
+        assert len(result.context) > 0

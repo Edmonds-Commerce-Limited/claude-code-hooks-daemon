@@ -148,3 +148,32 @@ class TestEnforceSingleDaemon:
 
         # No daemons to kill
         mock_kill.assert_not_called()
+
+
+class TestEnforceSingleDaemonKillFailure:
+    """Test kill failure branch (line 63)."""
+
+    def test_kill_failure_logs_error(self) -> None:
+        """When kill_daemon_process returns False, logs error."""
+        mock_config = MagicMock()
+        mock_config.daemon.enforce_single_daemon_process = True
+
+        with (
+            patch(
+                "claude_code_hooks_daemon.daemon.enforcement.is_container_environment",
+                return_value=True,
+            ),
+            patch(
+                "claude_code_hooks_daemon.daemon.enforcement.find_all_daemon_processes",
+                return_value=[12345],
+            ),
+            patch(
+                "claude_code_hooks_daemon.daemon.enforcement.kill_daemon_process",
+                return_value=False,
+            ),
+            patch("claude_code_hooks_daemon.daemon.enforcement.logger") as mock_logger,
+        ):
+            enforce_single_daemon(config=mock_config, pid_path=Path("/tmp/test.pid"))
+
+        mock_logger.error.assert_called_once()
+        assert "12345" in str(mock_logger.error.call_args)

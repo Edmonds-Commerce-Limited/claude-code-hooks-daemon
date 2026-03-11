@@ -646,3 +646,17 @@ class TestRegressionContextNotReason:
         assert any(
             "validated" in c.lower() for c in result.context
         ), "Context must contain 'validated'"
+
+
+class TestValidateInstructionContentUnhandledTool:
+    """Test handler with unhandled tool types."""
+
+    def test_non_write_non_edit_tool_returns_allow(self, handler) -> None:
+        """Tool type not Write or Edit returns allow (line 100)."""
+        hook_input = {
+            "tool_name": "Read",
+            "tool_input": {"file_path": "/workspace/CLAUDE.md"},
+        }
+        result = handler.handle(hook_input)
+        assert result.decision == "allow"
+        assert "not handled" in result.reason.lower()
