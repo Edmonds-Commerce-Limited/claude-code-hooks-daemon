@@ -6,6 +6,7 @@ Reports issues with explanations, benefits, and how-to-fix instructions.
 
 import os
 import tempfile
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
@@ -520,6 +521,222 @@ class TestHandleMixedResults:
                     context = "\n".join(result.context)
                     assert "OK:" in context
                     assert "Agent Teams" in context or "Bash Working Directory" in context
+
+
+class TestWriteGlobalSettings:
+    """Test _write_global_settings method."""
+
+    @pytest.fixture
+    def handler(self) -> Any:
+        from claude_code_hooks_daemon.handlers.session_start.optimal_config_checker import (
+            OptimalConfigCheckerHandler,
+        )
+
+        return OptimalConfigCheckerHandler()
+
+    def test_writes_settings_to_file(self, handler: Any, tmp_path: Any) -> None:
+        """Should write settings dict as JSON to settings.json."""
+        import json
+
+        settings_path = tmp_path / ".claude" / "settings.json"
+        with patch.object(handler, "_get_settings_path", return_value=settings_path):
+            result = handler._write_global_settings({"effortLevel": "high"})
+
+        assert result is True
+        written = json.loads(settings_path.read_text())
+        assert written == {"effortLevel": "high"}
+
+    def test_creates_parent_directory(self, handler: Any, tmp_path: Any) -> None:
+        """Should create parent .claude directory if missing."""
+        settings_path = tmp_path / ".claude" / "settings.json"
+        assert not settings_path.parent.exists()
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_path):
+            handler._write_global_settings({"key": "value"})
+
+        assert settings_path.parent.exists()
+        assert settings_path.exists()
+
+    def test_returns_false_on_oserror(self, handler: Any) -> None:
+        """Should return False when write fails."""
+        with patch.object(
+            handler, "_get_settings_path", return_value=Path("/nonexistent/deep/settings.json")
+        ):
+            with patch("pathlib.Path.mkdir", side_effect=OSError("Permission denied")):
+                result = handler._write_global_settings({"key": "value"})
+
+        assert result is False
+
+
+class TestEnforceSettingsSync:
+    """Test _enforce_settings_sync method."""
+
+    @pytest.fixture
+    def handler(self) -> Any:
+        from claude_code_hooks_daemon.handlers.session_start.optimal_config_checker import (
+            OptimalConfigCheckerHandler,
+        )
+
+        return OptimalConfigCheckerHandler()
+
+    def test_writes_effort_level_when_missing(self, handler: Any, tmp_path: Any) -> None:
+        """Should write effortLevel=high when missing from settings."""
+        import json
+
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(json.dumps({"alwaysThinkingEnabled": True}))
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_path):
+            written = handler._enforce_settings_sync()
+
+        assert "effortLevel=high" in written
+        updated = json.loads(settings_path.read_text())
+        assert updated["effortLevel"] == "high"
+        assert updated["alwaysThinkingEnabled"] is True
+
+    def test_writes_thinking_when_missing(self, handler: Any, tmp_path: Any) -> None:
+        """Should write alwaysThinkingEnabled=true when missing from settings."""
+        import json
+
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(json.dumps({"effortLevel": "high"}))
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_path):
+            written = handler._enforce_settings_sync()
+
+        assert "alwaysThinkingEnabled=true" in written
+        updated = json.loads(settings_path.read_text())
+        assert updated["alwaysThinkingEnabled"] is True
+        assert updated["effortLevel"] == "high"
+
+    def test_writes_both_when_both_missing(self, handler: Any, tmp_path: Any) -> None:
+        """Should write both settings when both are missing."""
+        import json
+
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(json.dumps({"model": "opus"}))
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_path):
+            written = handler._enforce_settings_sync()
+
+        assert len(written) == 2
+        updated = json.loads(settings_path.read_text())
+        assert updated["effortLevel"] == "high"
+        assert updated["alwaysThinkingEnabled"] is True
+        assert updated["model"] == "opus"
+
+    def test_no_write_when_both_present(self, handler: Any, tmp_path: Any) -> None:
+        """Should not write when both settings already exist."""
+        import json
+
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        original = {"effortLevel": "medium", "alwaysThinkingEnabled": False}
+        settings_path.write_text(json.dumps(original))
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_path):
+            written = handler._enforce_settings_sync()
+
+        assert written == []
+        # Settings should be unchanged
+        updated = json.loads(settings_path.read_text())
+        assert updated == original
+
+    def test_respects_existing_values(self, handler: Any, tmp_path: Any) -> None:
+        """Should not overwrite existing effortLevel or alwaysThinkingEnabled values."""
+        import json
+
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(json.dumps({"effortLevel": "low", "alwaysThinkingEnabled": False}))
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_path):
+            written = handler._enforce_settings_sync()
+
+        assert written == []
+        updated = json.loads(settings_path.read_text())
+        assert updated["effortLevel"] == "low"
+        assert updated["alwaysThinkingEnabled"] is False
+
+    def test_handles_empty_settings_file(self, handler: Any, tmp_path: Any) -> None:
+        """Should handle empty/no settings file gracefully."""
+        settings_path = tmp_path / ".claude" / "settings.json"
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_path):
+            written = handler._enforce_settings_sync()
+
+        assert len(written) == 2
+
+    def test_aborts_on_read_error_to_avoid_clobbering(self, handler: Any, tmp_path: Any) -> None:
+        """Should NOT write when settings file read fails (avoids clobbering)."""
+        import json
+
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        original = {"model": "opus", "env": {"KEY": "val"}}
+        settings_path.write_text(json.dumps(original))
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_path):
+            with patch("pathlib.Path.read_text", side_effect=OSError("Permission denied")):
+                written = handler._enforce_settings_sync()
+
+        assert written == []
+        # Original file should be untouched
+        updated = json.loads(settings_path.read_text())
+        assert updated == original
+
+    def test_aborts_on_invalid_json(self, handler: Any, tmp_path: Any) -> None:
+        """Should NOT write when settings file has invalid JSON."""
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text("{invalid json{{")
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_path):
+            written = handler._enforce_settings_sync()
+
+        assert written == []
+        # File should be untouched
+        assert settings_path.read_text() == "{invalid json{{"
+
+    def test_aborts_on_non_dict_settings(self, handler: Any, tmp_path: Any) -> None:
+        """Should NOT write when settings file contains a non-dict value."""
+        import json
+
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(json.dumps([1, 2, 3]))
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_path):
+            written = handler._enforce_settings_sync()
+
+        assert written == []
+
+    def test_handle_reports_enforced_settings(self, handler: Any, tmp_path: Any) -> None:
+        """Handle output should include CONFIG SYNC line when settings are written."""
+        import json
+
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(json.dumps({"model": "opus"}))
+
+        with (
+            patch.object(handler, "_get_settings_path", return_value=settings_path),
+            patch.dict(
+                os.environ,
+                {
+                    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+                    "CLAUDE_CODE_EFFORT_LEVEL": "high",
+                    "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "64000",
+                    "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1",
+                },
+            ),
+        ):
+            result = handler.handle(_session_start_input())
+            context = "\n".join(result.context)
+            assert "CONFIG SYNC" in context
 
 
 class TestAcceptanceTests:

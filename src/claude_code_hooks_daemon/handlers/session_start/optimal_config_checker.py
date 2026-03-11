@@ -70,6 +70,14 @@ class OptimalConfigCheckerHandler(Handler):
         except (OSError, ValueError):
             return False
 
+    def _get_settings_path(self) -> Path:
+        """Get path to Claude global settings file.
+
+        Returns:
+            Path to ~/.claude/settings.json
+        """
+        return Path.home() / ".claude" / "settings.json"
+
     def _read_global_settings(self) -> dict[str, Any]:
         """Read ~/.claude/settings.json.
 
@@ -77,7 +85,7 @@ class OptimalConfigCheckerHandler(Handler):
             Parsed settings dict, or empty dict on failure
         """
         try:
-            settings_path = Path.home() / ".claude" / "settings.json"
+            settings_path = self._get_settings_path()
             if not settings_path.exists():
                 return {}
             with settings_path.open() as f:
@@ -88,6 +96,26 @@ class OptimalConfigCheckerHandler(Handler):
         except (OSError, json.JSONDecodeError, ValueError) as e:
             logger.debug("Failed to read global settings: %s", e)
             return {}
+
+    def _write_global_settings(self, settings: dict[str, Any]) -> bool:
+        """Write settings back to ~/.claude/settings.json.
+
+        Args:
+            settings: Complete settings dict to write
+
+        Returns:
+            True if write succeeded, False on failure
+        """
+        try:
+            settings_path = self._get_settings_path()
+            settings_path.parent.mkdir(parents=True, exist_ok=True)
+            with settings_path.open("w") as f:
+                json.dump(settings, f, indent=2)
+                f.write("\n")
+            return True
+        except (OSError, ValueError) as e:
+            logger.debug("Failed to write global settings: %s", e)
+            return False
 
     def _check_agent_teams(self) -> dict[str, Any]:
         """Check if agent teams env var is enabled."""
@@ -245,8 +273,56 @@ class OptimalConfigCheckerHandler(Handler):
         """
         return not self._is_resume_session(hook_input)
 
+    def _enforce_settings_sync(self) -> list[str]:
+        """Ensure critical settings exist in ~/.claude/settings.json.
+
+        When effortLevel or alwaysThinkingEnabled are missing from settings,
+        writes optimal defaults so the statusline and config stay in sync.
+        Claude Code defaults to medium effort when unset, but we want high.
+
+        Reads the file directly (not via _read_global_settings) to distinguish
+        between "file missing/empty" (safe to create) and "read error" (abort
+        to avoid clobbering existing settings).
+
+        Returns:
+            List of setting names that were written
+        """
+        try:
+            settings_path = self._get_settings_path()
+            if settings_path.exists():
+                raw = settings_path.read_text()
+                settings = json.loads(raw)
+                if not isinstance(settings, dict):
+                    logger.debug("Settings file is not a dict, skipping sync")
+                    return []
+            else:
+                settings = {}
+        except (OSError, json.JSONDecodeError, ValueError) as e:
+            # Read failed — do NOT write to avoid clobbering existing settings
+            logger.debug("Cannot read settings for sync, aborting: %s", e)
+            return []
+
+        written: list[str] = []
+
+        if "effortLevel" not in settings:
+            settings["effortLevel"] = "high"
+            written.append("effortLevel=high")
+
+        if "alwaysThinkingEnabled" not in settings:
+            settings["alwaysThinkingEnabled"] = True
+            written.append("alwaysThinkingEnabled=true")
+
+        if written:
+            self._write_global_settings(settings)
+
+        return written
+
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Run config checks and return advisory context.
+
+        Also enforces that critical settings (effortLevel, alwaysThinkingEnabled)
+        are explicitly set in ~/.claude/settings.json so the statusline stays
+        in sync with actual configuration.
 
         Args:
             hook_input: SessionStart hook input
@@ -254,11 +330,18 @@ class OptimalConfigCheckerHandler(Handler):
         Returns:
             HookResult with ALLOW decision and config check results
         """
+        # Enforce settings sync BEFORE running checks
+        enforced = self._enforce_settings_sync()
+
         checks = self._run_checks()
         failures = [c for c in checks if not c["passed"]]
         passes = [c for c in checks if c["passed"]]
 
         lines: list[str] = []
+
+        if enforced:
+            lines.append(f"CONFIG SYNC: Auto-set {', '.join(enforced)} in ~/.claude/settings.json")
+            lines.append("")
 
         if not failures:
             lines.append(
