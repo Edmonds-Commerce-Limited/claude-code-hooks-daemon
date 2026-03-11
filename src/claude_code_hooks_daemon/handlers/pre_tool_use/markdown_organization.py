@@ -21,6 +21,9 @@ logger = logging.getLogger(__name__)
 # Known CLAUDE/Plan/ subdirectories that should allow nested plan folders
 _PLAN_SUBDIRECTORIES: Final[tuple[str, ...]] = ("completed", "cancelled", "archive")
 
+# Files in the plan directory root that are NOT plan files (excluded from interception)
+_PLAN_ROOT_EXCLUDED_FILES: Final[frozenset[str]] = frozenset({"readme"})
+
 
 class MarkdownOrganizationHandler(Handler):
     """Enforce markdown file organization rules.
@@ -162,9 +165,16 @@ class MarkdownOrganizationHandler(Handler):
         return None
 
     def is_planning_mode_write(self, file_path: str) -> bool:
-        """Check if this is a Claude Code planning mode write.
+        """Check if this is a planning mode write to intercept.
 
-        Planning mode writes go to ~/.claude/plans/*.md (user home directory).
+        Detects two patterns:
+        1. Flat file writes to {plan_directory}/*.md (plansDirectory mode)
+           e.g., CLAUDE/Plan/my-plan.md — written by Claude Code when plansDirectory is set
+        2. Legacy writes to ~/.claude/plans/*.md (backward compatibility)
+
+        Excludes:
+        - Files in numbered subfolders (CLAUDE/Plan/00087-name/PLAN.md)
+        - Known non-plan files (README.md)
 
         Args:
             file_path: File path to check
@@ -172,11 +182,19 @@ class MarkdownOrganizationHandler(Handler):
         Returns:
             True if this is a planning mode write
         """
-        # Pattern: ~/.claude/plans/*.md (anywhere in user home)
-        # Examples:
-        # - /home/user/.claude/plans/my-plan.md
-        # - /Users/bob/.claude/plans/plan.md
-        # - ~/.claude/plans/test.md
+        # Pattern 1: Flat file in plan directory root (plansDirectory mode)
+        if self._track_plans_in_project:
+            normalized = self.normalize_path(file_path)
+            plan_dir = self._track_plans_in_project
+            # Match {plan_dir}/{name}.md where {name} has no slashes (flat file)
+            pattern = rf"^{re.escape(plan_dir)}/([^/]+)\.md$"
+            match = re.match(pattern, normalized, re.IGNORECASE)
+            if match:
+                filename = match.group(1)
+                if filename.lower() not in _PLAN_ROOT_EXCLUDED_FILES:
+                    return True
+
+        # Pattern 2: Legacy ~/.claude/plans/*.md (backward compatibility)
         return bool(re.search(r"/.claude/plans/[^/]+\.md$", file_path))
 
     def sanitize_folder_name(self, filename: str) -> str:
@@ -235,135 +253,172 @@ class MarkdownOrganizationHandler(Handler):
                 return folder_name_with_suffix
             suffix += 1
 
-    def handle_planning_mode_write(self, hook_input: dict[str, Any]) -> HookResult:
-        """Handle planning mode write by redirecting to project structure.
+    def _find_matching_plan_folder(self, plan_base: Path, flat_file_path: str) -> Path | None:
+        """Find the numbered plan folder matching a flat plan filename.
 
-        Creates:
-        1. CLAUDE/Plan/{number}-{name}/PLAN.md (actual plan content)
-        2. ~/.claude/plans/{original-name}.md (stub redirect file)
+        Searches for folders ending with -{sanitized_name} in the plan directory,
+        returning the one with the highest number (most recent).
+
+        Args:
+            plan_base: Path to plan directory (e.g., workspace/CLAUDE/Plan/)
+            flat_file_path: Path to flat plan file
+
+        Returns:
+            Path to matching plan folder, or None if not found
+        """
+        if not plan_base.exists():
+            return None
+
+        sanitized = self.sanitize_folder_name(Path(flat_file_path).name)
+        if not sanitized:
+            return None
+
+        suffix = f"-{sanitized}"
+        matches_found: list[Path] = []
+        for entry in plan_base.iterdir():
+            if entry.is_dir() and entry.name.endswith(suffix):
+                matches_found.append(entry)
+
+        if not matches_found:
+            return None
+
+        # Return highest numbered match (most recent)
+        return sorted(matches_found, key=lambda p: p.name, reverse=True)[0]
+
+    def handle_planning_mode_write(self, hook_input: dict[str, Any]) -> HookResult:
+        """Handle planning mode write by creating numbered plan folder.
+
+        For Write tool: Creates CLAUDE/Plan/{number}-{name}/PLAN.md alongside
+        the flat file. Returns ALLOW so the flat file is also written (visible
+        to ExitPlanMode for user approval).
+
+        For Edit tool: Syncs the edit to the matching numbered folder's PLAN.md.
+        Returns ALLOW so the flat file edit proceeds normally.
 
         Args:
             hook_input: Hook input data
 
         Returns:
-            HookResult with ALLOW decision and context about redirect
+            HookResult with ALLOW decision and context about plan folder
         """
         file_path = get_file_path(hook_input)
-        content = hook_input.get(HookInputField.TOOL_INPUT, {}).get("content", "")
+        tool_name = hook_input.get(HookInputField.TOOL_NAME)
+
+        if not self._track_plans_in_project or not file_path:
+            return HookResult(decision=Decision.ALLOW)
+
+        plan_base = self._workspace_root / self._track_plans_in_project
 
         try:
-            # Get plan directory from config (track_plans_in_project is the path)
-            if not self._track_plans_in_project:
-                # Should not reach here - matches() should have filtered this
-                return HookResult(decision=Decision.ALLOW)
-
-            plan_base = self._workspace_root / self._track_plans_in_project
-
-            # Get next plan number
-            next_number = get_next_plan_number(plan_base)
-
-            # Sanitize filename to create folder name
-            if not file_path:
-                return HookResult(decision=Decision.ALLOW)  # Should not happen
-            original_filename = Path(file_path).name
-            sanitized_name = self.sanitize_folder_name(original_filename)
-
-            # Get unique folder name (handle collisions)
-            folder_name = self.get_unique_folder_name(plan_base, next_number, sanitized_name)
-
-            # Create plan folder (don't use exist_ok to catch unexpected collisions)
-            plan_folder = plan_base / folder_name
-            plan_folder.mkdir(parents=True, exist_ok=False)
-
-            # Write PLAN.md
-            plan_file = plan_folder / "PLAN.md"
-            plan_file.write_text(content, encoding="utf-8")
-
-            # Create stub redirect file at original location
-            original_path = Path(file_path).expanduser()
-            original_path.parent.mkdir(parents=True, exist_ok=True)
-
-            stub_content = (
-                f"# Plan Redirect\n\n"
-                f"This plan has been moved to the project:\n\n"
-                f"**Location**: `{self._track_plans_in_project}/{folder_name}/PLAN.md`\n\n"
-                f"The hooks daemon automatically redirects planning mode writes "
-                f"to keep plans in version control.\n\n"
-                f"**IMPORTANT**: The plan folder currently has a temporary name: `{folder_name}`\n\n"
-                f"**You MUST rename this folder** to a descriptive name based on the plan content:\n"
-                f"1. Read the plan to understand what it's about\n"
-                f"2. Choose a clear, descriptive kebab-case name\n"
-                f"3. Rename: `{self._track_plans_in_project}/{folder_name}/` → "
-                f"`{self._track_plans_in_project}/{next_number}-descriptive-name/`\n"
-                f"4. Keep the plan number prefix ({next_number}-) intact\n\n"
-                f"Example: `{next_number}-floofy-growing-moth` → `{next_number}-implement-tdd-validation`\n"
-            )
-            original_path.write_text(stub_content, encoding="utf-8")
-
-            logger.info(f"Planning mode write redirected: {file_path} -> {plan_folder}/PLAN.md")
-
-            # Build reason — DENY blocks the Write tool from executing on the original
-            # path (which would overwrite the redirect stub). Content is already saved.
-            reason_parts = [
-                f"PLAN SAVED SUCCESSFULLY\n\n"
-                f"Your plan content has been automatically redirected to project version control.\n\n"
-                f"Saved to: `{self._track_plans_in_project}/{folder_name}/PLAN.md`\n\n"
-                f"A redirect stub was written to: `{file_path}`\n\n"
-                f"Do NOT retry this write — the content is already saved.\n\n"
-                f"**IMPORTANT**: The plan folder currently has a temporary name: `{folder_name}`\n\n"
-                f"**You MUST rename this folder** to a descriptive name based on the plan content:\n"
-                f"1. Read the plan to understand what it's about\n"
-                f"2. Choose a clear, descriptive kebab-case name\n"
-                f"3. Rename: `{self._track_plans_in_project}/{folder_name}/` → "
-                f"`{self._track_plans_in_project}/{next_number}-descriptive-name/`\n"
-                f"4. Keep the plan number prefix ({next_number}-) intact\n"
-            ]
-
-            if self._plan_workflow_docs:
-                workflow_path = self._workspace_root / self._plan_workflow_docs
-                if workflow_path.exists():
-                    reason_parts.append(
-                        "\nIf this plan is relevant to the current work and not already "
-                        "complete, continue working on it.\n"
-                    )
-
-            return HookResult(
-                decision=Decision.DENY,
-                reason="".join(reason_parts),
-            )
+            if tool_name == ToolName.EDIT:
+                return self._handle_plan_edit(hook_input, plan_base, file_path)
+            return self._handle_plan_write(hook_input, plan_base, file_path)
 
         except FileNotFoundError as e:
             logger.error(f"Planning mode write failed - directory not found: {e}")
             return HookResult(
-                decision=Decision.DENY,
-                reason=(
-                    "Failed to redirect planning mode write.\n\n"
-                    f"Error: Plan directory does not exist: {plan_base}\n\n"
-                    f"Please ensure {self._track_plans_in_project}/ directory exists in your project."
-                ),
+                decision=Decision.ALLOW,
+                context=[
+                    f"Warning: Could not create plan folder. "
+                    f"Ensure {self._track_plans_in_project}/ directory exists."
+                ],
             )
 
         except PermissionError as e:
             logger.error(f"Planning mode write failed - permission error: {e}")
             return HookResult(
-                decision=Decision.DENY,
-                reason=(
-                    "Failed to redirect planning mode write.\n\n"
-                    "Error: Permission denied when creating plan folder.\n\n"
-                    f"Please check file permissions for {self._track_plans_in_project}/ directory."
-                ),
+                decision=Decision.ALLOW,
+                context=[
+                    f"Warning: Permission denied creating plan folder in "
+                    f"{self._track_plans_in_project}/."
+                ],
             )
 
         except Exception as e:
-            logger.error(f"Planning mode write failed - unexpected error: {e}", exc_info=True)
+            logger.error(f"Planning mode write failed: {e}", exc_info=True)
             return HookResult(
-                decision=Decision.DENY,
-                reason=(
-                    "Failed to redirect planning mode write.\n\n"
-                    f"Error: {type(e).__name__}: {e}\n\n"
-                    "Please check daemon logs for details."
-                ),
+                decision=Decision.ALLOW,
+                context=[f"Warning: Could not create plan folder: {type(e).__name__}: {e}"],
             )
+
+    def _handle_plan_write(
+        self, hook_input: dict[str, Any], plan_base: Path, file_path: str
+    ) -> HookResult:
+        """Handle Write tool for planning mode — create numbered folder.
+
+        Args:
+            hook_input: Hook input data
+            plan_base: Path to plan directory
+            file_path: Path to the flat plan file being written
+
+        Returns:
+            HookResult with ALLOW decision and context
+        """
+        content = hook_input.get(HookInputField.TOOL_INPUT, {}).get("content", "")
+
+        next_number = get_next_plan_number(plan_base)
+        original_filename = Path(file_path).name
+        sanitized_name = self.sanitize_folder_name(original_filename)
+        folder_name = self.get_unique_folder_name(plan_base, next_number, sanitized_name)
+
+        # Create plan folder and write PLAN.md
+        plan_folder = plan_base / folder_name
+        plan_folder.mkdir(parents=True, exist_ok=False)
+
+        plan_file = plan_folder / "PLAN.md"
+        plan_file.write_text(content, encoding="utf-8")
+
+        logger.info(f"Plan folder created: {self._track_plans_in_project}/{folder_name}/PLAN.md")
+
+        context_parts = [
+            f"Plan folder created: {self._track_plans_in_project}/{folder_name}/PLAN.md"
+        ]
+
+        if self._plan_workflow_docs:
+            workflow_path = self._workspace_root / self._plan_workflow_docs
+            if workflow_path.exists():
+                context_parts.append(
+                    f"See `{self._plan_workflow_docs}` for plan workflow conventions."
+                )
+
+        return HookResult(decision=Decision.ALLOW, context=context_parts)
+
+    def _handle_plan_edit(
+        self, hook_input: dict[str, Any], plan_base: Path, file_path: str
+    ) -> HookResult:
+        """Handle Edit tool for planning mode — sync edit to numbered folder.
+
+        Args:
+            hook_input: Hook input data
+            plan_base: Path to plan directory
+            file_path: Path to the flat plan file being edited
+
+        Returns:
+            HookResult with ALLOW decision and optional sync context
+        """
+        old_string = hook_input.get(HookInputField.TOOL_INPUT, {}).get("old_string", "")
+        new_string = hook_input.get(HookInputField.TOOL_INPUT, {}).get("new_string", "")
+
+        plan_folder = self._find_matching_plan_folder(plan_base, file_path)
+        if not plan_folder:
+            return HookResult(decision=Decision.ALLOW)
+
+        plan_file = plan_folder / "PLAN.md"
+        if not plan_file.exists():
+            return HookResult(decision=Decision.ALLOW)
+
+        current_content = plan_file.read_text(encoding="utf-8")
+        if old_string and old_string in current_content:
+            updated = current_content.replace(old_string, new_string, 1)
+            plan_file.write_text(updated, encoding="utf-8")
+
+            rel_folder = plan_folder.relative_to(self._workspace_root)
+            return HookResult(
+                decision=Decision.ALLOW,
+                context=[f"Edit synced to: {rel_folder}/PLAN.md"],
+            )
+
+        return HookResult(decision=Decision.ALLOW)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if writing markdown to wrong location.
