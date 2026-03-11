@@ -4,11 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00087: Post-Clear Auto-Execute](00087-post-clear-auto-execute/PLAN.md) - In Progress
-  - Detect when `/clear <instructions>` is used and auto-trigger agent execution
-  - Phase 1: Investigation & prototype to validate approach
-  - **Priority**: Medium
-
 - [00063: FAIL FAST - Plugin Handler Bug & Error Hiding Audit](00063-fail-fast-plugin-handler-audit/PLAN.md) - In Progress
   - **Phase 1 DONE**: Plugin handler suffix bug fixed, warning converted to crash (daemon fails on unregistered handler)
   - **Phase 2 PENDING**: Comprehensive audit for ALL error hiding patterns in codebase (audit script, fix violations)
@@ -462,6 +457,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Cancelled Plans
 
+- [00087: Post-Clear Auto-Execute](Completed/00087-post-clear-auto-execute/PLAN.md) - Cancelled
+  - Hooks cannot solve `/clear <text>` auto-execution — client-side `local-command-caveat` and no auto-submit
+  - Prototype handler remains enabled (marginal value), but core goal impossible via hooks
+
 - [00044: Acceptance Testing Skill](Completed/00044-acceptance-testing-skill/PLAN.md) - Cancelled
   - Sub-agent acceptance testing retired in v2.10.0; main-thread testing is the standard
 
@@ -469,11 +468,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 82
+- **Total Plans Created**: 83
 - **Completed**: 71 (1 with reduced scope)
-- **Active**: 2 (in progress)
+- **Active**: 1 (in progress)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
-- **Cancelled/Abandoned**: 3 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045)
+- **Cancelled/Abandoned**: 4 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation)
 
 ## Quick Links
 
