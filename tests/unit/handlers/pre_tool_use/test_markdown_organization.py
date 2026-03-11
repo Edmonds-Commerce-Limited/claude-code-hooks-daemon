@@ -1394,9 +1394,7 @@ class TestClaudeCodeSyncEnforcement:
         result = handler._check_claude_code_sync()
         assert result is None
 
-    def test_returns_none_when_no_plan_tracking(
-        self, handler: MarkdownOrganizationHandler
-    ) -> None:
+    def test_returns_none_when_no_plan_tracking(self, handler: MarkdownOrganizationHandler) -> None:
         """No check performed when _track_plans_in_project is None."""
         handler._track_plans_in_project = None
         result = handler._check_claude_code_sync()
@@ -1404,9 +1402,7 @@ class TestClaudeCodeSyncEnforcement:
 
     # ── Settings file missing ──
 
-    def test_denies_when_settings_file_missing(
-        self, handler: MarkdownOrganizationHandler
-    ) -> None:
+    def test_denies_when_settings_file_missing(self, handler: MarkdownOrganizationHandler) -> None:
         """DENY when .claude/settings.json does not exist."""
         result = handler._check_claude_code_sync()
         assert result is not None
