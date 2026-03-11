@@ -285,6 +285,10 @@ handlers:
       enabled: true
       priority: 10
 
+    post_clear_auto_execute:  # PROTOTYPE: Inject guidance on first prompt after /clear
+      enabled: true
+      priority: 54
+
     critical_thinking_advisory:  # Periodic advisory encouraging critical evaluation
       enabled: true
       priority: 55
