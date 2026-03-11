@@ -671,31 +671,30 @@ class TestMarkdownOrganizationHandlerIntegration:
         handler._track_plans_in_project = "CLAUDE/Plan"
         handler._plan_workflow_docs = "CLAUDE/PlanWorkflow.md"
 
-        # Simulate planning mode write (to writable temp path matching /.claude/plans/ pattern)
-        fake_home = project_context / "fake_home"
+        # Simulate planning mode write — flat file in plan directory (plansDirectory mode)
         hook_input = {
             "tool_name": "Write",
             "tool_input": {
-                "file_path": str(fake_home / ".claude" / "plans" / "my-test-plan.md"),
+                "file_path": str(plan_dir / "my-test-plan.md"),
                 "content": "# My Test Plan\n\nThis is a test.",
             },
         }
 
         result = router.route(EventType.PRE_TOOL_USE, hook_input)
 
-        # Verify interception and redirect (DENY — handler already saved content)
-        assert result.result.decision == Decision.DENY
-        assert result.terminated_by == "enforce-markdown-organization"
-        assert result.result.reason is not None
-        assert "PLAN SAVED" in result.result.reason
+        # Verify interception returns ALLOW (flat file written for ExitPlanMode)
+        assert result.result.decision == Decision.ALLOW
+        assert result.result.context is not None
+        context_text = " ".join(result.result.context)
+        assert "plan folder created" in context_text.lower()
 
-        # Verify plan folder was created
-        created_folders = list(plan_dir.iterdir())
-        assert len(created_folders) == 1
-        assert created_folders[0].name.startswith("00001-")
+        # Verify numbered plan folder was created alongside
+        plan_folders = [d for d in plan_dir.iterdir() if d.is_dir()]
+        assert len(plan_folders) == 1
+        assert plan_folders[0].name.startswith("00001-")
 
-        # Verify PLAN.md was created
-        plan_file = created_folders[0] / "PLAN.md"
+        # Verify PLAN.md was created in numbered folder
+        plan_file = plan_folders[0] / "PLAN.md"
         assert plan_file.exists()
         content = plan_file.read_text()
         assert "# My Test Plan" in content

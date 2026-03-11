@@ -413,20 +413,35 @@ class TestMarkdownOrganizationHandler:
 
 
 class TestPlanningModeIntegration:
-    """Tests for planning mode write interception."""
+    """Tests for planning mode write interception.
+
+    Planning mode uses plansDirectory to write flat files to CLAUDE/Plan/*.md.
+    The handler intercepts these writes, creates numbered plan folders alongside,
+    and returns ALLOW so ExitPlanMode can display the plan content.
+    """
 
     @pytest.fixture
     def handler(self, tmp_path: Path) -> MarkdownOrganizationHandler:
         """Create handler with mocked workspace."""
         handler = MarkdownOrganizationHandler()
-        # Mock workspace_root to use tmp_path
         handler._workspace_root = tmp_path
         return handler
 
     @pytest.fixture
-    def planning_write_input(self, tmp_path: Path) -> dict[str, Any]:
-        """Create sample planning mode Write hook input."""
-        # Use tmp_path-based path to avoid filesystem permission errors
+    def flat_plan_write_input(self, tmp_path: Path) -> dict[str, Any]:
+        """Create sample flat plan Write hook input (plansDirectory mode)."""
+        plan_path = tmp_path / "CLAUDE" / "Plan" / "my-awesome-plan.md"
+        return {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": str(plan_path),
+                "content": "# My Awesome Plan\n\nThis is a test plan.",
+            },
+        }
+
+    @pytest.fixture
+    def legacy_plan_write_input(self, tmp_path: Path) -> dict[str, Any]:
+        """Create sample legacy planning mode Write hook input (~/.claude/plans/)."""
         plans_path = tmp_path / "fake_home" / ".claude" / "plans" / "my-awesome-plan.md"
         return {
             "tool_name": "Write",
@@ -436,18 +451,65 @@ class TestPlanningModeIntegration:
             },
         }
 
-    def test_detects_planning_mode_write_to_claude_plans(
-        self, handler: MarkdownOrganizationHandler, planning_write_input: dict[str, Any]
-    ) -> None:
-        """Handler detects writes to ~/.claude/plans/ as planning mode."""
-        assert (
-            handler.is_planning_mode_write(planning_write_input["tool_input"]["file_path"]) is True
-        )
+    # ── Flat file detection (plansDirectory mode) ──
 
-    def test_detects_planning_mode_with_various_home_paths(
+    def test_detects_flat_file_in_plan_directory(
         self, handler: MarkdownOrganizationHandler
     ) -> None:
-        """Handler detects planning mode writes across different home path formats."""
+        """Handler detects flat .md files in plan directory root."""
+        handler._track_plans_in_project = "CLAUDE/Plan"
+        paths = [
+            "CLAUDE/Plan/my-plan.md",
+            "/workspace/CLAUDE/Plan/some-feature.md",
+            "CLAUDE/Plan/another-plan.md",
+        ]
+        for path in paths:
+            assert handler.is_planning_mode_write(path) is True, f"Should detect: {path}"
+
+    def test_does_not_detect_readme_in_plan_directory(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        """Handler excludes README.md from plan file detection."""
+        handler._track_plans_in_project = "CLAUDE/Plan"
+        assert handler.is_planning_mode_write("CLAUDE/Plan/README.md") is False
+        assert handler.is_planning_mode_write("/workspace/CLAUDE/Plan/readme.md") is False
+
+    def test_does_not_detect_numbered_subfolder_files(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        """Handler does not detect files in numbered subfolders as flat plan files."""
+        handler._track_plans_in_project = "CLAUDE/Plan"
+        paths = [
+            "CLAUDE/Plan/00001-test/PLAN.md",
+            "CLAUDE/Plan/00002-another/notes.md",
+            "/workspace/CLAUDE/Plan/00087-feature/PLAN.md",
+        ]
+        for path in paths:
+            assert handler.is_planning_mode_write(path) is False, f"Should NOT detect: {path}"
+
+    def test_flat_file_detection_disabled_when_no_config(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        """Flat file detection is disabled when _track_plans_in_project is None."""
+        handler._track_plans_in_project = None
+        # Flat file should not be detected (no legacy path match either)
+        assert handler.is_planning_mode_write("CLAUDE/Plan/my-plan.md") is False
+
+    # ── Legacy detection (backward compatibility) ──
+
+    def test_detects_legacy_planning_mode_write_to_claude_plans(
+        self, handler: MarkdownOrganizationHandler, legacy_plan_write_input: dict[str, Any]
+    ) -> None:
+        """Handler detects writes to ~/.claude/plans/ as planning mode (legacy)."""
+        assert (
+            handler.is_planning_mode_write(legacy_plan_write_input["tool_input"]["file_path"])
+            is True
+        )
+
+    def test_detects_legacy_planning_mode_with_various_home_paths(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        """Handler detects legacy planning mode writes across different home paths."""
         paths = [
             "/home/user/.claude/plans/plan.md",
             "/Users/bob/.claude/plans/another-plan.md",
@@ -470,66 +532,62 @@ class TestPlanningModeIntegration:
         for path in paths:
             assert handler.is_planning_mode_write(path) is False
 
-    def test_does_not_detect_planning_mode_for_project_plan_paths(
-        self, handler: MarkdownOrganizationHandler
-    ) -> None:
-        """Handler does not detect project CLAUDE/Plan paths as planning mode."""
-        paths = [
-            "/workspace/CLAUDE/Plan/00001-test/PLAN.md",
-            "CLAUDE/Plan/00002-another/notes.md",
-        ]
-        for path in paths:
-            assert handler.is_planning_mode_write(path) is False
+    # ── matches() integration ──
 
-    def test_matches_returns_true_for_planning_mode_write_when_feature_enabled(
-        self, handler: MarkdownOrganizationHandler, planning_write_input: dict[str, Any]
+    def test_matches_returns_true_for_flat_plan_write_when_feature_enabled(
+        self, handler: MarkdownOrganizationHandler, flat_plan_write_input: dict[str, Any]
     ) -> None:
-        """Handler matches planning mode writes when feature is enabled."""
+        """Handler matches flat plan writes when feature is enabled."""
         handler._track_plans_in_project = "CLAUDE/Plan"
-        assert handler.matches(planning_write_input) is True
+        assert handler.matches(flat_plan_write_input) is True
 
-    def test_matches_returns_false_for_planning_mode_write_when_feature_disabled(
-        self, handler: MarkdownOrganizationHandler, planning_write_input: dict[str, Any]
+    def test_matches_returns_true_for_legacy_plan_write_when_feature_enabled(
+        self, handler: MarkdownOrganizationHandler, legacy_plan_write_input: dict[str, Any]
     ) -> None:
-        """Handler does not match planning mode writes when feature is disabled."""
+        """Handler matches legacy plan writes when feature is enabled."""
+        handler._track_plans_in_project = "CLAUDE/Plan"
+        assert handler.matches(legacy_plan_write_input) is True
+
+    def test_matches_returns_false_for_flat_plan_write_when_feature_disabled(
+        self, handler: MarkdownOrganizationHandler, flat_plan_write_input: dict[str, Any]
+    ) -> None:
+        """Handler does not match flat plan writes when feature is disabled."""
         handler._track_plans_in_project = None
-        # When disabled, planning mode writes go through normal validation
-        # and would be denied as wrong location (outside project)
-        # But matches() should return False for planning mode detection
-        assert (
-            handler.is_planning_mode_write(planning_write_input["tool_input"]["file_path"]) is True
-        )
-        # Even though it's a planning mode write, if feature is disabled, handler should not intercept it
+        # Flat file detection requires _track_plans_in_project, so it should
+        # fall through to normal validation (CLAUDE/Plan/*.md is allowed by builtin)
+        # matches() will return False because the flat file is in an allowed location
+        assert handler.matches(flat_plan_write_input) is False
+
+    # ── handle() Write tool — ALLOW flow ──
 
     @patch(
         "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
     )
-    def test_handle_creates_plan_folder_and_writes_plan_md(
+    def test_handle_write_creates_plan_folder_and_returns_allow(
         self,
         mock_get_next: MagicMock,
         handler: MarkdownOrganizationHandler,
-        planning_write_input: dict[str, Any],
+        flat_plan_write_input: dict[str, Any],
         tmp_path: Path,
     ) -> None:
-        """Handler creates numbered plan folder and writes PLAN.md."""
+        """Handler creates numbered plan folder and returns ALLOW."""
         handler._track_plans_in_project = "CLAUDE/Plan"
         mock_get_next.return_value = "00001"
 
-        # Create CLAUDE/Plan directory
         plan_dir = tmp_path / "CLAUDE" / "Plan"
         plan_dir.mkdir(parents=True)
 
-        result = handler.handle(planning_write_input)
+        result = handler.handle(flat_plan_write_input)
 
-        # Should DENY the write (handler already saved content — no write needed)
-        assert result.decision == Decision.DENY
+        # ALLOW so flat file is written (visible to ExitPlanMode)
+        assert result.decision == Decision.ALLOW
 
-        # Should create plan folder
+        # Numbered folder created alongside
         created_folder = plan_dir / "00001-my-awesome-plan"
         assert created_folder.exists()
         assert created_folder.is_dir()
 
-        # Should write PLAN.md
+        # PLAN.md written with content
         plan_file = created_folder / "PLAN.md"
         assert plan_file.exists()
         content = plan_file.read_text()
@@ -538,45 +596,37 @@ class TestPlanningModeIntegration:
     @patch(
         "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
     )
-    def test_handle_creates_stub_redirect_file(
+    def test_handle_write_does_not_create_stub_redirect(
         self,
         mock_get_next: MagicMock,
         handler: MarkdownOrganizationHandler,
-        planning_write_input: dict[str, Any],
+        legacy_plan_write_input: dict[str, Any],
         tmp_path: Path,
     ) -> None:
-        """Handler creates stub redirect at original planning mode location."""
+        """Handler no longer creates stub redirect files (removed in Plan 86)."""
         handler._track_plans_in_project = "CLAUDE/Plan"
         mock_get_next.return_value = "00001"
 
-        # Create directories
         plan_dir = tmp_path / "CLAUDE" / "Plan"
         plan_dir.mkdir(parents=True)
 
-        # Create the original location
-        original_path = Path(planning_write_input["tool_input"]["file_path"])
-        original_path.parent.mkdir(parents=True, exist_ok=True)
+        original_path = Path(legacy_plan_write_input["tool_input"]["file_path"])
+        # Don't pre-create the directory — handler should not write there
+        handler.handle(legacy_plan_write_input)
 
-        handler.handle(planning_write_input)
-
-        # Should create stub file at original location
-        assert original_path.exists()
-        stub_content = original_path.read_text()
-        assert "This plan has been moved to the project" in stub_content
-        assert "00001-my-awesome-plan" in stub_content
-        # Should include rename instructions
-        assert "MUST rename this folder" in stub_content
-        assert "00001-descriptive-name" in stub_content
-        assert "Keep the plan number prefix (00001-) intact" in stub_content
+        # No stub redirect should be written
+        if original_path.exists():
+            stub_content = original_path.read_text()
+            assert "redirect" not in stub_content.lower()
 
     @patch(
         "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
     )
-    def test_handle_sanitizes_plan_folder_name(
+    def test_handle_write_sanitizes_plan_folder_name(
         self,
         mock_get_next: MagicMock,
         handler: MarkdownOrganizationHandler,
-        planning_write_input: dict[str, Any],
+        legacy_plan_write_input: dict[str, Any],
         tmp_path: Path,
     ) -> None:
         """Handler sanitizes folder name from plan filename."""
@@ -584,93 +634,321 @@ class TestPlanningModeIntegration:
         mock_get_next.return_value = "00001"
 
         # Use a filename with special characters
-        planning_write_input["tool_input"][
+        legacy_plan_write_input["tool_input"][
             "file_path"
         ] = "/home/user/.claude/plans/My Plan: (with special chars!).md"
 
         plan_dir = tmp_path / "CLAUDE" / "Plan"
         plan_dir.mkdir(parents=True)
 
-        handler.handle(planning_write_input)
+        handler.handle(legacy_plan_write_input)
 
-        # Should sanitize folder name
         created_folder = plan_dir / "00001-my-plan-with-special-chars"
         assert created_folder.exists()
 
     @patch(
         "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
     )
-    def test_handle_returns_context_with_folder_location(
+    def test_handle_write_returns_context_with_folder_location(
         self,
         mock_get_next: MagicMock,
         handler: MarkdownOrganizationHandler,
-        planning_write_input: dict[str, Any],
+        flat_plan_write_input: dict[str, Any],
         tmp_path: Path,
     ) -> None:
-        """Handler returns context informing Claude of new location."""
+        """Handler returns ALLOW with context about created folder."""
         handler._track_plans_in_project = "CLAUDE/Plan"
         mock_get_next.return_value = "00001"
 
         plan_dir = tmp_path / "CLAUDE" / "Plan"
         plan_dir.mkdir(parents=True)
 
-        result = handler.handle(planning_write_input)
+        result = handler.handle(flat_plan_write_input)
 
-        assert result.decision == Decision.DENY
-        assert result.reason is not None
-        assert "00001-my-awesome-plan" in result.reason
-        assert "CLAUDE/Plan/" in result.reason
-        assert "PLAN SAVED" in result.reason
+        assert result.decision == Decision.ALLOW
+        assert result.context is not None
+        context_text = " ".join(result.context)
+        assert "00001-my-awesome-plan" in context_text
+        assert "CLAUDE/Plan/" in context_text
 
     @patch(
         "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
     )
-    def test_handle_handles_folder_collision_with_suffix(
+    def test_handle_write_handles_folder_collision_with_suffix(
         self,
         mock_get_next: MagicMock,
         handler: MarkdownOrganizationHandler,
-        planning_write_input: dict[str, Any],
+        flat_plan_write_input: dict[str, Any],
         tmp_path: Path,
     ) -> None:
-        """Handler adds -2 suffix if folder name collides (same plan name, same number)."""
+        """Handler adds -2 suffix if folder name collides."""
         handler._track_plans_in_project = "CLAUDE/Plan"
-        # Mock returns 00002, but folder 00002-my-awesome-plan already exists
         mock_get_next.return_value = "00002"
 
         plan_dir = tmp_path / "CLAUDE" / "Plan"
         plan_dir.mkdir(parents=True)
 
-        # Create existing folder with the name we'll try to create
+        # Create existing folder that would collide
         existing_folder = plan_dir / "00002-my-awesome-plan"
         existing_folder.mkdir()
 
-        result = handler.handle(planning_write_input)
+        result = handler.handle(flat_plan_write_input)
 
-        # Should create folder with -2 suffix (same number, different suffix)
         created_folder = plan_dir / "00002-my-awesome-plan-2"
         assert created_folder.exists()
-        assert result.decision == Decision.DENY
+        assert result.decision == Decision.ALLOW
 
     @patch(
         "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
     )
-    def test_handle_fails_gracefully_on_file_not_found_error(
+    def test_handle_write_fails_gracefully_on_missing_directory(
         self,
         mock_get_next: MagicMock,
         handler: MarkdownOrganizationHandler,
-        planning_write_input: dict[str, Any],
-        tmp_path: Path,
+        flat_plan_write_input: dict[str, Any],
     ) -> None:
-        """Handler returns DENY with clear message when plan directory doesn't exist."""
+        """Handler returns ALLOW with warning when plan directory doesn't exist."""
         handler._track_plans_in_project = "CLAUDE/Plan"
-        # Mock raises FileNotFoundError
         mock_get_next.side_effect = FileNotFoundError("Plan directory does not exist")
 
-        result = handler.handle(planning_write_input)
+        result = handler.handle(flat_plan_write_input)
 
-        # Should return DENY with error message
-        assert result.decision == Decision.DENY
-        assert "does not exist" in result.reason.lower() or "not found" in result.reason.lower()
+        # ALLOW — don't block the write just because folder creation failed
+        assert result.decision == Decision.ALLOW
+        assert result.context is not None
+        context_text = " ".join(result.context)
+        assert "warning" in context_text.lower() or "could not" in context_text.lower()
+
+    # ── handle() Edit tool — sync to numbered folder ──
+
+    def test_handle_edit_syncs_to_numbered_folder(
+        self,
+        handler: MarkdownOrganizationHandler,
+        tmp_path: Path,
+    ) -> None:
+        """Edit tool syncs changes to the matching numbered folder's PLAN.md."""
+        handler._track_plans_in_project = "CLAUDE/Plan"
+
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        plan_dir.mkdir(parents=True)
+
+        # Create numbered folder with PLAN.md
+        numbered_folder = plan_dir / "00087-my-plan"
+        numbered_folder.mkdir()
+        plan_file = numbered_folder / "PLAN.md"
+        plan_file.write_text("# Old Title\n\nOriginal content.", encoding="utf-8")
+
+        # Edit the flat file
+        edit_input: dict[str, Any] = {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(tmp_path / "CLAUDE" / "Plan" / "my-plan.md"),
+                "old_string": "# Old Title",
+                "new_string": "# New Title",
+            },
+        }
+
+        result = handler.handle(edit_input)
+
+        assert result.decision == Decision.ALLOW
+        # Verify PLAN.md was updated
+        updated_content = plan_file.read_text()
+        assert "# New Title" in updated_content
+        assert "# Old Title" not in updated_content
+
+    def test_handle_edit_returns_allow_when_no_matching_folder(
+        self,
+        handler: MarkdownOrganizationHandler,
+        tmp_path: Path,
+    ) -> None:
+        """Edit returns ALLOW with no sync when no matching folder exists."""
+        handler._track_plans_in_project = "CLAUDE/Plan"
+
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        plan_dir.mkdir(parents=True)
+
+        edit_input: dict[str, Any] = {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(tmp_path / "CLAUDE" / "Plan" / "nonexistent-plan.md"),
+                "old_string": "old",
+                "new_string": "new",
+            },
+        }
+
+        result = handler.handle(edit_input)
+        assert result.decision == Decision.ALLOW
+
+    def test_handle_edit_returns_context_on_sync(
+        self,
+        handler: MarkdownOrganizationHandler,
+        tmp_path: Path,
+    ) -> None:
+        """Edit returns context message when sync succeeds."""
+        handler._track_plans_in_project = "CLAUDE/Plan"
+
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        plan_dir.mkdir(parents=True)
+
+        numbered_folder = plan_dir / "00042-test-plan"
+        numbered_folder.mkdir()
+        plan_file = numbered_folder / "PLAN.md"
+        plan_file.write_text("Some content", encoding="utf-8")
+
+        edit_input: dict[str, Any] = {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(tmp_path / "CLAUDE" / "Plan" / "test-plan.md"),
+                "old_string": "Some content",
+                "new_string": "Updated content",
+            },
+        }
+
+        result = handler.handle(edit_input)
+        assert result.decision == Decision.ALLOW
+        assert result.context is not None
+        context_text = " ".join(result.context)
+        assert "synced" in context_text.lower()
+
+    # ── _find_matching_plan_folder ──
+
+    def test_find_matching_plan_folder_finds_correct_folder(
+        self,
+        handler: MarkdownOrganizationHandler,
+        tmp_path: Path,
+    ) -> None:
+        """_find_matching_plan_folder finds folder by sanitized name suffix."""
+        handler._track_plans_in_project = "CLAUDE/Plan"
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        plan_dir.mkdir(parents=True)
+
+        # Create folders
+        (plan_dir / "00001-other-plan").mkdir()
+        (plan_dir / "00042-my-plan").mkdir()
+
+        result = handler._find_matching_plan_folder(
+            plan_dir, str(tmp_path / "CLAUDE" / "Plan" / "my-plan.md")
+        )
+        assert result is not None
+        assert result.name == "00042-my-plan"
+
+    def test_find_matching_plan_folder_returns_highest_numbered(
+        self,
+        handler: MarkdownOrganizationHandler,
+        tmp_path: Path,
+    ) -> None:
+        """_find_matching_plan_folder returns highest-numbered match."""
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        plan_dir.mkdir(parents=True)
+
+        (plan_dir / "00010-my-plan").mkdir()
+        (plan_dir / "00050-my-plan").mkdir()
+
+        result = handler._find_matching_plan_folder(
+            plan_dir, str(tmp_path / "CLAUDE" / "Plan" / "my-plan.md")
+        )
+        assert result is not None
+        assert result.name == "00050-my-plan"
+
+    def test_find_matching_plan_folder_returns_none_when_no_match(
+        self,
+        handler: MarkdownOrganizationHandler,
+        tmp_path: Path,
+    ) -> None:
+        """_find_matching_plan_folder returns None when no folder matches."""
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        plan_dir.mkdir(parents=True)
+
+        (plan_dir / "00001-other-plan").mkdir()
+
+        result = handler._find_matching_plan_folder(
+            plan_dir, str(tmp_path / "CLAUDE" / "Plan" / "nonexistent.md")
+        )
+        assert result is None
+
+    def test_find_matching_plan_folder_returns_none_when_dir_missing(
+        self,
+        handler: MarkdownOrganizationHandler,
+        tmp_path: Path,
+    ) -> None:
+        """_find_matching_plan_folder returns None when plan dir doesn't exist."""
+        missing_dir = tmp_path / "CLAUDE" / "Plan" / "nonexistent"
+        result = handler._find_matching_plan_folder(
+            missing_dir, str(tmp_path / "CLAUDE" / "Plan" / "my-plan.md")
+        )
+        assert result is None
+
+    # ── Error handling paths ──
+
+    @patch(
+        "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
+    )
+    def test_handle_write_permission_error_returns_allow(
+        self,
+        mock_get_next: MagicMock,
+        handler: MarkdownOrganizationHandler,
+        flat_plan_write_input: dict[str, Any],
+    ) -> None:
+        """Handler returns ALLOW with warning on PermissionError."""
+        handler._track_plans_in_project = "CLAUDE/Plan"
+        mock_get_next.side_effect = PermissionError("Permission denied")
+
+        result = handler.handle(flat_plan_write_input)
+
+        assert result.decision == Decision.ALLOW
+        assert result.context is not None
+        context_text = " ".join(result.context)
+        assert "permission" in context_text.lower()
+
+    @patch(
+        "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
+    )
+    def test_handle_write_generic_error_returns_allow(
+        self,
+        mock_get_next: MagicMock,
+        handler: MarkdownOrganizationHandler,
+        flat_plan_write_input: dict[str, Any],
+    ) -> None:
+        """Handler returns ALLOW with warning on unexpected errors."""
+        handler._track_plans_in_project = "CLAUDE/Plan"
+        mock_get_next.side_effect = RuntimeError("Unexpected")
+
+        result = handler.handle(flat_plan_write_input)
+
+        assert result.decision == Decision.ALLOW
+        assert result.context is not None
+        context_text = " ".join(result.context)
+        assert "runtimeerror" in context_text.lower()
+
+    # ── Workflow docs reference ──
+
+    @patch(
+        "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
+    )
+    def test_handle_write_includes_workflow_docs_when_exists(
+        self,
+        mock_get_next: MagicMock,
+        handler: MarkdownOrganizationHandler,
+        flat_plan_write_input: dict[str, Any],
+        tmp_path: Path,
+    ) -> None:
+        """Handler includes workflow docs reference when the file exists."""
+        handler._track_plans_in_project = "CLAUDE/Plan"
+        handler._plan_workflow_docs = "CLAUDE/PlanWorkflow.md"
+        mock_get_next.return_value = "00001"
+
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        plan_dir.mkdir(parents=True)
+
+        # Create workflow docs file
+        workflow_file = tmp_path / "CLAUDE" / "PlanWorkflow.md"
+        workflow_file.write_text("# Workflow", encoding="utf-8")
+
+        result = handler.handle(flat_plan_write_input)
+
+        assert result.decision == Decision.ALLOW
+        context_text = " ".join(result.context)
+        assert "PlanWorkflow.md" in context_text
 
 
 class TestMonorepoSupport:
