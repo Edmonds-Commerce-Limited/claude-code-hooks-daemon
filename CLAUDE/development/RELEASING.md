@@ -753,10 +753,21 @@ gh release create vX.Y.Z \
 
 ### 11. Post-Release Verification (Main Claude Executes)
 
-**Main Claude** verifies:
+**Main Claude** verifies using these exact commands:
+
+```bash
+# Verify tag exists locally
+git tag -l vX.Y.Z
+
+# Verify GitHub release is published (not draft, not prerelease)
+gh release view vX.Y.Z --json tagName,isDraft,isPrerelease,url --jq '{tag: .tagName, draft: .isDraft, prerelease: .isPrerelease, url: .url}'
+# Expected: draft=false, prerelease=false
+```
+
+**Checklist:**
 - ✅ Tag exists locally and on GitHub
-- ✅ GitHub release is published
-- ✅ Release marked as "Latest"
+- ✅ GitHub release is published (`isDraft: false`)
+- ✅ Not marked as prerelease (`isPrerelease: false`)
 - ✅ README badge renders correctly (GitHub caches clear)
 - ✅ Installation from tag works
 
