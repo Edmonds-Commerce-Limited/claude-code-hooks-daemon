@@ -39,7 +39,6 @@ class PlanNumberHelperHandler(Handler):
             priority=Priority.PLAN_NUMBER_HELPER,  # Run before markdown_organization (35)
             terminal=True,  # Block broken commands that return incorrect plan numbers
             tags=[HandlerTag.WORKFLOW, HandlerTag.ADVISORY, HandlerTag.PLANNING],
-            shares_options_with="markdown_organization",  # Inherit config from parent (config key)
         )
 
         # Configuration attributes (set by registry after instantiation)

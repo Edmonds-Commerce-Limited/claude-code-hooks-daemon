@@ -368,6 +368,36 @@ class ProjectHandlersConfig(BaseModel):
     )
 
 
+class PlanWorkflowConfig(BaseModel):
+    """Configuration for plan workflow system.
+
+    Centralises plan-related configuration that was previously scattered
+    across handler options (track_plans_in_project, plan_workflow_docs).
+
+    Attributes:
+        enabled: Whether plan workflow tracking is enabled
+        directory: Path to plan folder relative to workspace root
+        workflow_docs: Path to workflow documentation file
+        enforce_claude_code_sync: Whether to enforce plansDirectory sync
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(default=True, description="Enable plan workflow tracking")
+    directory: str = Field(
+        default="CLAUDE/Plan",
+        description="Path to plan folder relative to workspace root",
+    )
+    workflow_docs: str = Field(
+        default="CLAUDE/PlanWorkflow.md",
+        description="Path to workflow documentation file",
+    )
+    enforce_claude_code_sync: bool = Field(
+        default=False,
+        description="Enforce plansDirectory sync with .claude/settings.json",
+    )
+
+
 class DaemonConfig(BaseModel):
     """Configuration for the daemon server.
 
@@ -498,6 +528,7 @@ class Config(BaseModel):
     handlers: HandlersConfig = Field(default_factory=HandlersConfig)
     plugins: PluginsConfig = Field(default_factory=PluginsConfig)
     project_handlers: ProjectHandlersConfig = Field(default_factory=ProjectHandlersConfig)
+    plan_workflow: PlanWorkflowConfig = Field(default_factory=PlanWorkflowConfig)
     pseudo_events: dict[str, dict[str, Any]] = Field(
         default_factory=dict,
         description="Pseudo-event configurations keyed by pseudo-event name",
@@ -511,6 +542,43 @@ class Config(BaseModel):
         """Migrate legacy 'settings' to 'daemon' config."""
         if self.settings and "logging_level" in self.settings:
             self.daemon.log_level = LogLevel(self.settings["logging_level"])
+        return self
+
+    @model_validator(mode="after")
+    def migrate_plan_handler_options(self) -> Self:
+        """Migrate handler-level plan options to top-level plan_workflow.
+
+        If plan_workflow was not explicitly set in the config file but
+        handler options contain track_plans_in_project, create plan_workflow
+        from the handler options. Top-level plan_workflow always takes
+        precedence over handler options.
+        """
+        # If plan_workflow was explicitly set, no migration needed
+        if "plan_workflow" in self.model_fields_set:
+            return self
+
+        # Check for old-format options in markdown_organization handler
+        pre_tool_use = self.handlers.pre_tool_use
+        md_org = pre_tool_use.get("markdown_organization")
+        if md_org is None:
+            return self
+
+        if isinstance(md_org, HandlerConfig):
+            options = md_org.options
+        elif isinstance(md_org, dict):
+            options = md_org.get("options", {})
+        else:
+            return self
+
+        track_plans = options.get("track_plans_in_project")
+        if track_plans:
+            self.plan_workflow = PlanWorkflowConfig(
+                enabled=True,
+                directory=track_plans,
+                workflow_docs=options.get("plan_workflow_docs", "CLAUDE/PlanWorkflow.md"),
+            )
+            logger.info("Migrated plan config from handler options to top-level plan_workflow")
+
         return self
 
     @classmethod

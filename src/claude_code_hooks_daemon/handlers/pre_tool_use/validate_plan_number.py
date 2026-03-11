@@ -51,7 +51,6 @@ class ValidatePlanNumberHandler(Handler):
                 HandlerTag.ADVISORY,
                 HandlerTag.NON_TERMINAL,
             ],
-            shares_options_with="markdown_organization",
         )
         self.workspace_root = ProjectContext.project_root()
         self._track_plans_in_project: str | None = None
