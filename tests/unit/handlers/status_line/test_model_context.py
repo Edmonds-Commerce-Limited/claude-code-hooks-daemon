@@ -186,12 +186,12 @@ class TestModelContextHandler:
 
         assert "\033[38;5;208m▌▌▌" in result.context[0]
 
-    # --- Effort bars: default "high" for Claude 4+ when not in settings ---
+    # --- Effort bars: default "medium" for Claude 4+ when not in settings ---
 
-    def test_claude4_defaults_to_high_bars_when_effort_absent(
+    def test_claude4_defaults_to_medium_bars_when_effort_absent(
         self, handler: ModelContextHandler, tmp_path: Path
     ) -> None:
-        """Claude 4+ with no effortLevel in settings shows high bars (Claude Code default)."""
+        """Claude 4+ with no effortLevel in settings shows medium bars (Claude Code default)."""
         hook_input = {
             "model": {"id": "claude-sonnet-4-6", "display_name": "Sonnet 4.6"},
             "context_window": {"used_percentage": 30.0},
@@ -202,12 +202,13 @@ class TestModelContextHandler:
         with patch.object(handler, "_get_settings_path", return_value=settings_file):
             result = handler.handle(hook_input)
 
-        assert "\033[38;5;208m▌▌▌" in result.context[0]
+        # Medium = two orange bars + one dim
+        assert "\033[38;5;208m▌▌\033[2;37m▌" in result.context[0]
 
-    def test_claude4_defaults_to_high_bars_when_settings_missing(
+    def test_claude4_defaults_to_medium_bars_when_settings_missing(
         self, handler: ModelContextHandler, tmp_path: Path
     ) -> None:
-        """Claude 4+ with no settings file at all shows high bars (Claude Code default)."""
+        """Claude 4+ with no settings file at all shows medium bars (Claude Code default)."""
         hook_input = {
             "model": {"id": "claude-opus-4-6", "display_name": "Opus 4.6"},
             "context_window": {"used_percentage": 30.0},
@@ -217,12 +218,12 @@ class TestModelContextHandler:
         with patch.object(handler, "_get_settings_path", return_value=settings_file):
             result = handler.handle(hook_input)
 
-        assert "\033[38;5;208m▌▌▌" in result.context[0]
+        assert "\033[38;5;208m▌▌\033[2;37m▌" in result.context[0]
 
-    def test_haiku4_defaults_to_high_bars_when_effort_absent(
+    def test_haiku4_defaults_to_medium_bars_when_effort_absent(
         self, handler: ModelContextHandler, tmp_path: Path
     ) -> None:
-        """Haiku 4.x with no effortLevel also defaults to high bars."""
+        """Haiku 4.x with no effortLevel also defaults to medium bars."""
         hook_input = {
             "model": {"id": "claude-haiku-4-5-20251001", "display_name": "Haiku 4.5"},
             "context_window": {"used_percentage": 10.0},
@@ -232,7 +233,7 @@ class TestModelContextHandler:
         with patch.object(handler, "_get_settings_path", return_value=settings_file):
             result = handler.handle(hook_input)
 
-        assert "\033[38;5;208m▌▌▌" in result.context[0]
+        assert "\033[38;5;208m▌▌\033[2;37m▌" in result.context[0]
 
     # --- No bars for pre-4.x models ---
 

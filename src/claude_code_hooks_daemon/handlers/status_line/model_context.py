@@ -19,7 +19,7 @@ Matches Claude Code's own ▌▌▌ bar style - always orange active, grey inact
 
 Effort level source (in priority order):
 1. effortLevel key in ~/.claude/settings.json (set explicitly via /model)
-2. Default "high" for Claude 4+ models (Claude Code default, not written to settings)
+2. Default "medium" for Claude 4+ models (Claude Code default, not written to settings)
 3. No bars for pre-4.x models (effort feature not available)
 
 Context usage (quarter circle icons with color-coded percentages):
@@ -50,7 +50,7 @@ _EFFORT_BAR = "▌"
 _EFFORT_DIM = "\033[2;37m"
 
 # Claude Code default effort level when effortLevel absent from settings
-_EFFORT_DEFAULT = "high"
+_EFFORT_DEFAULT = "medium"
 
 # Minimum Claude major version that supports effort configuration
 _EFFORT_MIN_MAJOR_VERSION = 4
