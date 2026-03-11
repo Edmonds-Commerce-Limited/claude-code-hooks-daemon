@@ -119,3 +119,16 @@ class TestDismissiveLanguageNitpickHandle:
         hook_input = _make_hook_input([{"uuid": "u1", "content": "This is a pre-existing issue."}])
         result = handler.handle(hook_input)
         assert result.decision.value == "allow"
+
+    def test_empty_content_message_skipped(self) -> None:
+        """Messages with empty content are skipped (line 92)."""
+        handler = DismissiveLanguageNitpickHandler()
+        hook_input = _make_hook_input(
+            [
+                {"uuid": "u1", "content": ""},
+                {"uuid": "u2", "content": "This is a pre-existing issue."},
+            ]
+        )
+        result = handler.handle(hook_input)
+        # Only the second message triggers detection
+        assert len(result.context) > 0

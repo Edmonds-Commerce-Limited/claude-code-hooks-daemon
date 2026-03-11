@@ -372,3 +372,13 @@ class TestBashErrorDetectorHandler:
         }
         result = handler.handle(hook_input)
         assert isinstance(result, HookResult)
+
+    def test_non_dict_tool_response_returns_allow(self, handler):
+        """Non-dict tool_response returns allow (line 58)."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "echo test"},
+            "tool_response": "some string response",
+        }
+        result = handler.handle(hook_input)
+        assert result.decision.value == "allow"

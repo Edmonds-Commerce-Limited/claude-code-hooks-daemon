@@ -2,6 +2,7 @@
 
 import pytest
 
+from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use.git_stash import GitStashHandler
 
 
@@ -344,3 +345,15 @@ class TestGitStashHandler:
 
         # Both should match the same patterns
         assert deny_handler.matches(hook_input) == warn_handler.matches(hook_input)
+
+
+class TestGitStashAcceptanceTestsDenyMode:
+    """Test get_acceptance_tests in deny mode (line 109)."""
+
+    def test_deny_mode_returns_blocking_tests(self):
+        """Deny mode returns acceptance tests with DENY decisions."""
+        handler = GitStashHandler()
+        handler._mode = "deny"
+        tests = handler.get_acceptance_tests()
+        assert len(tests) >= 2
+        assert all(t.expected_decision == Decision.DENY for t in tests)

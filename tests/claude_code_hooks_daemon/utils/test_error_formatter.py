@@ -148,3 +148,22 @@ class TestEnhancedError:
         assert "Missing get_acceptance_tests()" in display
         assert "Implement the method" in display
         assert "/handler.py" in display
+
+
+class TestFormatHandlerErrorReturnNone:
+    """Test format_handler_error returns None for unrecognised errors."""
+
+    def test_error_text_without_recognisable_pattern(self) -> None:
+        """Returns None when exception text has Error but no matching pattern (line 174)."""
+        from claude_code_hooks_daemon.utils.error_formatter import format_plugin_load_error
+
+        # Text contains "Error" but the pattern doesn't match \w+Error: ... format
+        result = format_plugin_load_error("Something went wrong - Error in loading", "/handler.py")
+        assert result is None
+
+    def test_non_error_text_returns_none(self) -> None:
+        """Returns None when exception text has no Error/Exception keyword (line 107)."""
+        from claude_code_hooks_daemon.utils.error_formatter import format_plugin_load_error
+
+        result = format_plugin_load_error("some random warning text", "/handler.py")
+        assert result is None
