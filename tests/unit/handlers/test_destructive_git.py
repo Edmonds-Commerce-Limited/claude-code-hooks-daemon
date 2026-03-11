@@ -29,9 +29,9 @@ class TestDestructiveGitHandler:
         assert handler.terminal is True
 
     def test_init_creates_destructive_patterns_list(self, handler):
-        """Handler should initialize with 8 destructive patterns."""
+        """Handler should initialize with 9 destructive patterns."""
         assert hasattr(handler, "destructive_patterns")
-        assert len(handler.destructive_patterns) == 8
+        assert len(handler.destructive_patterns) == 9
 
     # matches() - Pattern 1: git reset --hard
     def test_matches_git_reset_hard(self, handler):
@@ -224,6 +224,41 @@ class TestDestructiveGitHandler:
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git branch -d feature"}}
         assert handler.matches(hook_input) is False
 
+    # matches() - Pattern 9: git commit --amend
+    def test_matches_git_commit_amend(self, handler):
+        """Should match 'git commit --amend' command."""
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git commit --amend"}}
+        assert handler.matches(hook_input) is True
+
+    def test_matches_git_commit_amend_no_edit(self, handler):
+        """Should match 'git commit --amend --no-edit' command."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git commit --amend --no-edit"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_git_commit_amend_with_message(self, handler):
+        """Should match 'git commit --amend -m' command."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git commit --amend -m 'fix typo'"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_git_commit_a_amend(self, handler):
+        """Should match 'git commit -a --amend' command."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git commit -a --amend"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_git_commit_amend_case_insensitive(self, handler):
+        """Should match 'git commit --amend' with different casing."""
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "GIT COMMIT --AMEND"}}
+        assert handler.matches(hook_input) is True
+
     # matches() - Negative Cases: Safe git commands
     def test_matches_git_reset_soft_returns_false(self, handler):
         """Should NOT match 'git reset --soft' (safe)."""
@@ -412,6 +447,20 @@ class TestDestructiveGitHandler:
         assert result.decision == "deny"
         assert "git branch -D force-deletes a branch" in result.reason
 
+    def test_handle_git_commit_amend_reason(self, handler):
+        """handle() should provide specific reason for git commit --amend."""
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 0
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git commit --amend"}}
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
+            return_value=mock_dl,
+        ):
+            result = handler.handle(hook_input)
+        assert result.decision == "deny"
+        assert "amend" in result.reason.lower()
+        assert "previous commit" in result.reason.lower()
+
     def test_handle_generic_destructive_reason(self, handler):
         """handle() should provide generic reason for other patterns."""
         mock_dl = MagicMock()
@@ -563,6 +612,8 @@ class TestDestructiveGitHandler:
             "git stash drop",
             "git stash clear",
             "git branch -D feature",
+            "git commit --amend",
+            "git commit --amend --no-edit",
         ]
         for cmd in destructive_commands:
             hook_input = {"tool_name": "Bash", "tool_input": {"command": cmd}}

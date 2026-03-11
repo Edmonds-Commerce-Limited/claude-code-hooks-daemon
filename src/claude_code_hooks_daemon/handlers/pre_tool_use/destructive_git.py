@@ -39,6 +39,8 @@ class DestructiveGitHandler(Handler):
             # Block force branch deletion (bypasses merge check, can lose unmerged work)
             # Uses (?-i:) to match only uppercase -D (lowercase -d is safe, checks merge status)
             r"\bgit\s+branch\s+.*(?-i:-D)\b",
+            # Block git commit --amend (rewrites previous commit, creates messy history)
+            r"\bgit\s+commit\s+.*--amend\b",
         ]
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
@@ -122,6 +124,11 @@ class DestructiveGitHandler(Handler):
         elif re.search(r"\bgit\s+branch\s+.*(?-i:-D)\b", command, re.IGNORECASE):
             specific_reason = (
                 "git branch -D force-deletes a branch without checking if it has been merged"
+            )
+        elif re.search(r"\bgit\s+commit\s+.*--amend\b", command, re.IGNORECASE):
+            specific_reason = (
+                "git commit --amend rewrites the previous commit, creating messy history "
+                "and potential data loss — create a new commit instead"
             )
         else:
             specific_reason = "This git command destroys uncommitted changes permanently"
@@ -252,6 +259,20 @@ class DestructiveGitHandler(Handler):
                     r"stash",
                 ],
                 safety_notes="Safe to test - only clears stash (recoverable via reflog)",
+                test_type=TestType.BLOCKING,
+                recommended_model=RecommendedModel.HAIKU,
+                requires_main_thread=False,
+            ),
+            AcceptanceTest(
+                title="git commit --amend",
+                command='echo "git commit --amend"',
+                description="Blocks git commit --amend (rewrites previous commit)",
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[
+                    r"rewrites the previous commit",
+                    r"messy history",
+                ],
+                safety_notes="Uses echo - command is not actually executed",
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
