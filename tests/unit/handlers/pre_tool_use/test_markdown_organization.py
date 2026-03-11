@@ -1359,3 +1359,166 @@ class TestAllowedMarkdownPaths:
         # packages/backend blocked (not in custom paths)
         write_input["tool_input"]["file_path"] = "packages/backend/src/notes.md"
         assert handler.matches(write_input) is True
+
+
+class TestClaudeCodeSyncEnforcement:
+    """Tests for _check_claude_code_sync() — Phase 3 of Plan 86.
+
+    Verifies that plan writes are blocked when plansDirectory in
+    .claude/settings.json doesn't match daemon plan_workflow.directory.
+    """
+
+    @pytest.fixture
+    def handler(self, tmp_path: Path) -> MarkdownOrganizationHandler:
+        """Create handler with enforcement enabled."""
+        handler = MarkdownOrganizationHandler()
+        handler._workspace_root = tmp_path
+        handler._track_plans_in_project = "CLAUDE/Plan"
+        handler._enforce_claude_code_sync = True
+        return handler
+
+    @pytest.fixture
+    def settings_dir(self, tmp_path: Path) -> Path:
+        """Create .claude directory for settings.json."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        return claude_dir
+
+    # ── Enforcement disabled ──
+
+    def test_returns_none_when_enforcement_disabled(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        """No check performed when enforce_claude_code_sync is False."""
+        handler._enforce_claude_code_sync = False
+        result = handler._check_claude_code_sync()
+        assert result is None
+
+    def test_returns_none_when_no_plan_tracking(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        """No check performed when _track_plans_in_project is None."""
+        handler._track_plans_in_project = None
+        result = handler._check_claude_code_sync()
+        assert result is None
+
+    # ── Settings file missing ──
+
+    def test_denies_when_settings_file_missing(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        """DENY when .claude/settings.json does not exist."""
+        result = handler._check_claude_code_sync()
+        assert result is not None
+        assert result.decision == Decision.DENY
+        assert "settings.json not found" in result.reason
+
+    # ── Settings file parse error ──
+
+    def test_denies_when_settings_file_invalid_json(
+        self, handler: MarkdownOrganizationHandler, settings_dir: Path
+    ) -> None:
+        """DENY when .claude/settings.json contains invalid JSON."""
+        settings_file = settings_dir / "settings.json"
+        settings_file.write_text("{invalid json", encoding="utf-8")
+        result = handler._check_claude_code_sync()
+        assert result is not None
+        assert result.decision == Decision.DENY
+        assert "Cannot read" in result.reason
+
+    # ── plansDirectory not set ──
+
+    def test_denies_when_plans_directory_not_set(
+        self, handler: MarkdownOrganizationHandler, settings_dir: Path
+    ) -> None:
+        """DENY when plansDirectory key is missing from settings."""
+        settings_file = settings_dir / "settings.json"
+        settings_file.write_text('{"other_key": "value"}', encoding="utf-8")
+        result = handler._check_claude_code_sync()
+        assert result is not None
+        assert result.decision == Decision.DENY
+        assert "plansDirectory not set" in result.reason
+
+    # ── plansDirectory mismatch ──
+
+    def test_denies_when_plans_directory_mismatches(
+        self, handler: MarkdownOrganizationHandler, settings_dir: Path
+    ) -> None:
+        """DENY when plansDirectory doesn't match daemon config."""
+        settings_file = settings_dir / "settings.json"
+        settings_file.write_text('{"plansDirectory": "./Other/Plans"}', encoding="utf-8")
+        result = handler._check_claude_code_sync()
+        assert result is not None
+        assert result.decision == Decision.DENY
+        assert "mismatch" in result.reason
+        assert "Other/Plans" in result.reason
+
+    # ── plansDirectory matches ──
+
+    def test_returns_none_when_plans_directory_matches_with_dot_slash(
+        self, handler: MarkdownOrganizationHandler, settings_dir: Path
+    ) -> None:
+        """Pass when plansDirectory matches with ./ prefix."""
+        settings_file = settings_dir / "settings.json"
+        settings_file.write_text('{"plansDirectory": "./CLAUDE/Plan"}', encoding="utf-8")
+        result = handler._check_claude_code_sync()
+        assert result is None
+
+    def test_returns_none_when_plans_directory_matches_without_prefix(
+        self, handler: MarkdownOrganizationHandler, settings_dir: Path
+    ) -> None:
+        """Pass when plansDirectory matches without ./ prefix."""
+        settings_file = settings_dir / "settings.json"
+        settings_file.write_text('{"plansDirectory": "CLAUDE/Plan"}', encoding="utf-8")
+        result = handler._check_claude_code_sync()
+        assert result is None
+
+    # ── Normalisation ──
+
+    def test_normalises_leading_dot_slash_for_comparison(
+        self, handler: MarkdownOrganizationHandler, settings_dir: Path
+    ) -> None:
+        """Both ./CLAUDE/Plan and CLAUDE/Plan normalise to the same value."""
+        handler._track_plans_in_project = "./CLAUDE/Plan"
+        settings_file = settings_dir / "settings.json"
+        settings_file.write_text('{"plansDirectory": "CLAUDE/Plan"}', encoding="utf-8")
+        result = handler._check_claude_code_sync()
+        assert result is None
+
+    # ── Integration: sync check in handle_planning_mode_write ──
+
+    def test_handle_planning_mode_write_denies_on_sync_failure(
+        self, handler: MarkdownOrganizationHandler, tmp_path: Path
+    ) -> None:
+        """handle_planning_mode_write returns DENY when sync check fails."""
+        # No .claude/settings.json exists -> sync check will fail
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        plan_dir.mkdir(parents=True)
+        plan_path = str(plan_dir / "test-plan.md")
+
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": plan_path, "content": "# Test Plan"},
+        }
+        result = handler.handle_planning_mode_write(hook_input)
+        assert result.decision == Decision.DENY
+        assert "settings.json not found" in result.reason
+
+    def test_handle_planning_mode_write_proceeds_when_sync_passes(
+        self, handler: MarkdownOrganizationHandler, settings_dir: Path, tmp_path: Path
+    ) -> None:
+        """handle_planning_mode_write creates plan folder when sync check passes."""
+        settings_file = settings_dir / "settings.json"
+        settings_file.write_text('{"plansDirectory": "./CLAUDE/Plan"}', encoding="utf-8")
+
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        plan_dir.mkdir(parents=True)
+        plan_path = str(plan_dir / "test-plan.md")
+
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": plan_path, "content": "# Test Plan"},
+        }
+        result = handler.handle_planning_mode_write(hook_input)
+        assert result.decision == Decision.ALLOW
+        assert any("Plan folder created" in ctx for ctx in result.context)
