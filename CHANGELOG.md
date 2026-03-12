@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.21.1] - 2026-03-12
+
+### Fixed
+
+- **Statusline Effort Default Corrected**: `ModelContextHandler` was defaulting to `"high"` effort bars when `effortLevel` was absent from `~/.claude/settings.json`, disagreeing with Claude Code's actual default of `"medium"`. The constant `_EFFORT_DEFAULT` is now `"medium"`, so the status line correctly reflects what Claude Code uses when no explicit effort level is configured.
+
+- **Auto-Set Effort Config on SessionStart**: `OptimalConfigCheckerHandler` now writes `effortLevel=high` and `alwaysThinkingEnabled=true` to `~/.claude/settings.json` at the start of each new session when those keys are absent. This keeps the status line in sync with the desired optimal configuration without requiring manual setup. The write is safe: the handler reads the file first and aborts if the read fails, preventing any risk of clobbering existing settings.
+
+### Changed
+
+- **Release Documentation**: Added exact `gh release view` JSON query command to the post-release verification step (Step 11) in `CLAUDE/development/RELEASING.md` for precise release status confirmation.
+
 ## [2.21.0] - 2026-03-11
 
 ### Added

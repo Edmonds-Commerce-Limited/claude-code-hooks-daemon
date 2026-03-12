@@ -121,7 +121,7 @@ class ModelContextHandler(Handler):
         """Get effort level signal bars for Claude 4+ models.
 
         Shows three signal bars (▌▌▌) where active bars are orange, inactive dim grey.
-        Reads effortLevel from settings; defaults to "high" for Claude 4+ when unset.
+        Reads effortLevel from settings; defaults to "medium" for Claude 4+ when unset.
 
         Args:
             model_id: Model ID string (e.g. "claude-sonnet-4-6")
@@ -149,7 +149,7 @@ class ModelContextHandler(Handler):
 
         Priority:
         1. effortLevel from ~/.claude/settings.json (explicitly set via /model)
-        2. _EFFORT_DEFAULT ("high") for Claude 4+ models (Claude Code default)
+        2. _EFFORT_DEFAULT ("medium") for Claude 4+ models (Claude Code default)
         3. None for pre-4.x models (effort not supported)
 
         Args:
@@ -169,7 +169,7 @@ class ModelContextHandler(Handler):
             if level is not None:
                 return str(level)
 
-            # Not in settings - use default "high" for Claude 4+ (not written when default)
+            # Not in settings - use default "medium" for Claude 4+ (not written when default)
             if self._model_supports_effort(model_id):
                 return _EFFORT_DEFAULT
 
