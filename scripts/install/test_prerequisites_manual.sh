@@ -21,6 +21,15 @@ else
     exit 1
 fi
 
+# Test check_git_remote_origin (should pass if origin exists)
+print_header "Test: check_git_remote_origin()"
+if check_git_remote_origin; then
+    print_success "check_git_remote_origin() passed"
+else
+    print_error "check_git_remote_origin() failed (no git remote origin)"
+    exit 1
+fi
+
 # Test check_python3 (should pass on this system)
 print_header "Test: check_python3()"
 if check_python3; then

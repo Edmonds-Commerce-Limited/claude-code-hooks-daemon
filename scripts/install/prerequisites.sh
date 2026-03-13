@@ -137,6 +137,34 @@ Please restart your shell or run:
 }
 
 #
+# check_git_remote_origin() - Verify git remote 'origin' is configured
+#
+# The daemon requires a git remote 'origin' to operate (ProjectContext
+# reads repo URL from it). Without it, the daemon fails to start with
+# a confusing silent error at Step 11.
+#
+# Returns:
+#   0 - git remote 'origin' exists
+#   1 - no remote 'origin' (also exits via fail_fast)
+#
+check_git_remote_origin() {
+    local remote_url
+    if ! remote_url=$(git remote get-url origin 2>/dev/null); then
+        fail_fast "No git remote 'origin' configured.
+
+The daemon requires a remote named 'origin' to operate.
+
+Fix:
+  git remote add origin <your-repo-url>
+
+Example:
+  git remote add origin https://github.com/your-org/your-project.git"
+    fi
+    print_success "git remote 'origin' found ($remote_url)"
+    return 0
+}
+
+#
 # check_all_prerequisites() - Run all prerequisite checks
 #
 # Args:
@@ -153,6 +181,7 @@ check_all_prerequisites() {
     print_info "Checking prerequisites..."
 
     check_git
+    check_git_remote_origin
     check_python3
     check_uv "$auto_install_uv"
 
