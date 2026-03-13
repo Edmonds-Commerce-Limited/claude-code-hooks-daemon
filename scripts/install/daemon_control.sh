@@ -55,14 +55,15 @@ stop_daemon_safe() {
 #
 # start_daemon_safe() - Safely start the daemon
 #
-# Starts daemon without failing on errors.
-# Useful when daemon might already be running.
+# Starts daemon and surfaces errors clearly. On failure, captures and
+# prints the daemon's error output so users see actionable messages
+# (e.g., "No git remote 'origin' configured").
 #
 # Args:
 #   $1 - venv_python: Path to venv Python binary
 #
 # Returns:
-#   Exit code 0 if started successfully or already running
+#   Exit code 0 if started successfully
 #   Exit code 1 if start failed
 #
 start_daemon_safe() {
@@ -80,13 +81,22 @@ start_daemon_safe() {
 
     print_verbose "Starting daemon..."
 
-    # Start daemon, suppress errors
-    if "$venv_python" -m claude_code_hooks_daemon.daemon.cli start 2>/dev/null; then
+    # Capture daemon output so errors are visible (Bug 00088-2)
+    local daemon_output
+    local exit_code
+    daemon_output=$("$venv_python" -m claude_code_hooks_daemon.daemon.cli start 2>&1) && exit_code=0 || exit_code=$?
+
+    if [ "$exit_code" -eq 0 ]; then
         print_verbose "Daemon started"
         return 0
     else
-        print_verbose "Daemon start returned error (may already be running)"
-        return 0
+        print_error "Daemon failed to start (exit code $exit_code)"
+        if [ -n "$daemon_output" ]; then
+            echo ""
+            echo "$daemon_output"
+            echo ""
+        fi
+        return 1
     fi
 }
 

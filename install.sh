@@ -59,6 +59,9 @@ _ok "git found"
 _info "Validating project root..."
 [ -d ".claude" ] || _fail "No .claude directory found. Run from a Claude Code project root."
 [ -d ".git" ]    || _fail "No .git directory found. Run from a git repository root."
+git remote get-url origin 2>/dev/null || _fail "No git remote 'origin' configured.
+  The daemon requires a remote named 'origin'.
+  Fix: git remote add origin <your-repo-url>"
 _ok "Project root: $PROJECT_ROOT"
 
 # Step 3: Clone daemon repository
