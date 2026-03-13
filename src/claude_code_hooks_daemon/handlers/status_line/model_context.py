@@ -161,25 +161,25 @@ class ModelContextHandler(Handler):
         Returns:
             Effort level string (low/medium/high) or None if not applicable
         """
+        settings: dict[str, Any] = {}
         try:
             settings_path = self._get_settings_path()
-            settings: dict[str, Any] = {}
             if settings_path.exists():
                 raw = settings_path.read_text()
                 settings = json.loads(raw)
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("Cannot read effort level from settings: %s", exc)
+            # settings stays empty — fall through to default logic below
 
-            level = settings.get("effortLevel")
-            if level is not None:
-                return str(level)
+        level = settings.get("effortLevel")
+        if level is not None:
+            return str(level)
 
-            # Not in settings - use default "high" for Claude 4+ (daemon optimal)
-            if self._model_supports_effort(model_id):
-                return _EFFORT_DEFAULT
+        # Not in settings - use default "high" for Claude 4+ (daemon optimal)
+        if self._model_supports_effort(model_id):
+            return _EFFORT_DEFAULT
 
-            return None
-        except (json.JSONDecodeError, OSError):
-            logger.info("Error reading effort level from settings")
-            return None
+        return None
 
     def _model_supports_effort(self, model_id: str) -> bool:
         """Check if model supports effort configuration (Claude 4+).
