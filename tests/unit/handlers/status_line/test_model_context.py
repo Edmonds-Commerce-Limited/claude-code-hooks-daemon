@@ -315,10 +315,10 @@ class TestModelContextHandler:
         # Must NOT show dim bar (that would be medium or low)
         assert "\033[2;37m▌" not in result.context[0]
 
-    def test_read_effort_level_returns_none_on_oserror(
+    def test_read_effort_level_falls_back_to_default_on_oserror(
         self, handler: ModelContextHandler, tmp_path: Path
     ) -> None:
-        """_read_effort_level returns None when settings file raises OSError."""
+        """_read_effort_level returns daemon default on OSError for Claude 4+."""
         settings_file = tmp_path / "settings.json"
         settings_file.write_text('{"effortLevel": "medium"}')
 
@@ -326,16 +326,30 @@ class TestModelContextHandler:
             with patch("pathlib.Path.read_text", side_effect=OSError("permission denied")):
                 result = handler._read_effort_level("claude-sonnet-4-6")
 
-        assert result is None
+        # Claude 4+ falls back to daemon default ("high"), not None
+        assert result == "high"
 
-    def test_read_effort_level_returns_none_on_invalid_json(
+    def test_read_effort_level_returns_none_on_oserror_for_old_models(
         self, handler: ModelContextHandler, tmp_path: Path
     ) -> None:
-        """_read_effort_level returns None when settings file has invalid JSON."""
+        """_read_effort_level returns None on OSError for pre-4.x models."""
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text('{"effortLevel": "medium"}')
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_file):
+            with patch("pathlib.Path.read_text", side_effect=OSError("permission denied")):
+                result = handler._read_effort_level("claude-3-5-sonnet-20241022")
+
+        assert result is None
+
+    def test_read_effort_level_falls_back_to_default_on_invalid_json(
+        self, handler: ModelContextHandler, tmp_path: Path
+    ) -> None:
+        """_read_effort_level returns daemon default on invalid JSON for Claude 4+."""
         settings_file = tmp_path / "settings.json"
         settings_file.write_text("{invalid json{{")
 
         with patch.object(handler, "_get_settings_path", return_value=settings_file):
             result = handler._read_effort_level("claude-sonnet-4-6")
 
-        assert result is None
+        assert result == "high"

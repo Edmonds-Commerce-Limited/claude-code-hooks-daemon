@@ -142,9 +142,9 @@
     },
     {
       "file": "handlers/status_line/model_context.py",
-      "lines": [161],
-      "rule": "return-none-on-error",
-      "reason": "Model context handler: returns None on parse failure. Status line callers handle None by omitting the element. Status line must never crash the terminal display."
+      "lines": [165],
+      "rule": "log-and-continue",
+      "reason": "Model context effort level reader: log-and-continue on settings file read failure (OSError, invalid JSON). Status line handlers are fail-open by design — settings stays empty and falls through to daemon default. Already logged at warning level."
     },
     {
       "file": "handlers/status_line/daemon_stats.py",

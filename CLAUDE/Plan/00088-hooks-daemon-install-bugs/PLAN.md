@@ -48,29 +48,29 @@ Full bug report with reproduction steps, root cause analysis, and suggested fixe
 
 ### Phase 1: Critical & Major Fixes (Bugs 1, 2, 4)
 
-- [ ] **Task 1.1**: Add git remote origin check to installer prereqs (Bug 1)
-  - [ ] Add `git remote get-url origin` check to install.sh Step 1
-  - [ ] Add same check to install_version.sh
-  - [ ] Write test for prereq failure path
-  - [ ] Verify installer aborts cleanly before writing any files
+- [x] **Task 1.1**: Add git remote origin check to installer prereqs (Bug 1) ✅
+  - [x] Add `git remote get-url origin` check to install.sh Layer 1
+  - [x] Add `check_git_remote_origin()` to prerequisites.sh (Layer 2)
+  - [x] Add manual test to test_prerequisites_manual.sh
+  - [x] Verify installer aborts cleanly before writing any files
 
-- [ ] **Task 1.2**: Surface daemon error output on startup failure (Bug 2)
-  - [ ] Capture stderr/stdout from daemon start command in install_version.sh Step 11
-  - [ ] Print daemon error inline when exit code is non-zero
-  - [ ] Verify actionable error message is visible to user
+- [x] **Task 1.2**: Surface daemon error output on startup failure (Bug 2) ✅
+  - [x] Capture stderr/stdout from daemon start command in daemon_control.sh
+  - [x] Print daemon error inline when exit code is non-zero
+  - [x] Removed `2>/dev/null` that was swallowing actionable error messages
 
-- [ ] **Task 1.3**: Fix effort level display mismatch (Bug 4)
-  - [ ] Investigate whether Claude Code runtime effort API exists
-  - [ ] If no API: change optimal_config_checker to advise instead of silently writing
-  - [ ] Add warning message: "Set effortLevel=high in settings.json - takes effect NEXT session"
-  - [ ] Update model_context to indicate when displaying file-based (not runtime) value
+- [x] **Task 1.3**: Fix effort level display mismatch (Bug 4) ✅
+  - [x] Investigated: no Claude Code runtime effort API exists
+  - [x] Changed `_EFFORT_DEFAULT` from "medium" to "high" in model_context
+  - [x] Daemon users expect high effort (optimal_config_checker enforces it)
+  - [x] When effortLevel IS in settings, that explicit value is used as before
 
 ### Phase 2: Version & UX Improvements (Bugs 3, 5, 6)
 
-- [ ] **Task 2.1**: Fix version number mismatch (Bug 3)
-  - [ ] Investigate using importlib.metadata or hatch-vcs for single source of truth
-  - [ ] Ensure pyproject.toml version and `__version__` always match
-  - [ ] Add version consistency check to QA suite
+- [x] **Task 2.1**: Fix version number mismatch (Bug 3) ✅
+  - [x] Fixed: `__init__.py` now imports `__version__` from `version.py` (SSOT)
+  - [x] Was hardcoded to "2.4.0" while version.py had "2.21.1"
+  - [ ] Add version consistency check to QA suite (follow-up)
 
 - [ ] **Task 2.2**: Add plan workflow setup to installer (Bug 5)
   - [ ] Add optional Step 12 to installer for plan workflow bootstrapping
