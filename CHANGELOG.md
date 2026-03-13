@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.22.0] - 2026-03-13
+
+### Added
+
+- **Plan Workflow Bootstrap**: New installer module (`install.plan_workflow`) that creates a complete `CLAUDE/Plan/` directory structure with README.md template (plan index), CLAUDE.md (lifecycle instructions), and Completed/ subdirectory. Idempotent — never overwrites existing files. Activated via `PLAN_WORKFLOW=yes` environment variable during installation (Step 14).
+
+- **Handler Profiles**: New installer module (`install.handler_profiles`) with three configuration tiers — `minimal` (default, no extra handlers), `recommended` (16 quality/safety handlers including qa_suppression, tdd_enforcement, plan handlers, lint_on_edit), and `strict` (recommended + 8 additional handlers). Applied via `HANDLER_PROFILE=recommended|strict` environment variable during installation (Step 15). Uses text-based YAML modification to preserve comments.
+
+- **Installer Prerequisite Checks**: `check_python_importable` validation in `scripts/install/prerequisites.sh` verifies Python can actually import the daemon package after venv creation, catching broken installs early. Also checks for `uv` availability with automatic fallback to `pip`.
+
+- **Daemon Error Surfacing**: `restart_daemon_verified` in `scripts/install/daemon_control.sh` now captures and displays stderr from failed daemon restarts, showing the actual Python traceback instead of a generic "failed to start" message.
+
+### Fixed
+
+- **Version Module Mismatch**: `__init__.py` was defining `__version__` independently instead of importing from `version.py`, causing potential version drift. Now imports directly: `from claude_code_hooks_daemon.version import __version__`.
+
+- **ModelContext Effort Error Handling**: `_read_effort_level()` in `ModelContextHandler` now uses structured try/except with logging instead of bare exception suppression. OSError and JSON decode errors are caught specifically and logged at warning level, returning `None` to fall through to daemon defaults. Updated QA exclusion to match new line numbers and rule name (`log-and-continue`).
+
+- **Status Line Effort Default**: Corrected `_EFFORT_DEFAULT` from `"high"` to `"medium"` in an earlier release (v2.21.1), but the error handling around reading the effort level was still using bare try/except which violated security standards. Now properly structured.
+
+### Changed
+
+- **Installer Steps 14-15**: `install_version.sh` now includes two new optional steps: Step 14 (plan workflow bootstrap) and Step 15 (handler profile application). Both are opt-in via environment variables and use proper `if/then/else` blocks (SC2015 compliant).
+
+- **Installer Completion Output**: Enhanced post-install summary showing active profile and plan workflow status, plus customisation instructions for re-running with different profiles.
+
 ## [2.21.1] - 2026-03-12
 
 ### Fixed
