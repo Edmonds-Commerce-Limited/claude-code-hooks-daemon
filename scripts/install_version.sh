@@ -363,6 +363,70 @@ else
 fi
 
 # ============================================================
+# Step 14: Plan workflow setup (optional, via PLAN_WORKFLOW=yes)
+# ============================================================
+
+if [ "${PLAN_WORKFLOW:-}" = "yes" ]; then
+    log_step "14" "Setting up plan workflow"
+
+    if "$VENV_PYTHON" -c "
+from pathlib import Path
+from claude_code_hooks_daemon.install.plan_workflow import bootstrap_plan_workflow
+
+result = bootstrap_plan_workflow(Path('$PROJECT_ROOT'))
+for msg in result.messages:
+    print(f'  -> {msg}')
+if result.success:
+    print('Plan workflow bootstrapped')
+"; then
+        print_success "Plan workflow ready"
+    else
+        print_warning "Plan workflow setup had issues (non-fatal)"
+    fi
+else
+    log_step "14" "Plan workflow setup (skipped)"
+    print_info "Set PLAN_WORKFLOW=yes to bootstrap CLAUDE/Plan/ structure"
+fi
+
+# ============================================================
+# Step 15: Handler profile (optional, via HANDLER_PROFILE=recommended|strict)
+# ============================================================
+
+HANDLER_PROFILE="${HANDLER_PROFILE:-minimal}"
+
+if [ "$HANDLER_PROFILE" != "minimal" ]; then
+    log_step "15" "Applying handler profile: $HANDLER_PROFILE"
+
+    if "$VENV_PYTHON" -c "
+from pathlib import Path
+from claude_code_hooks_daemon.install.handler_profiles import apply_profile
+
+config_path = Path('$TARGET_CONFIG')
+try:
+    count = apply_profile(config_path, '$HANDLER_PROFILE')
+    print(f'  Enabled {count} additional handler(s)')
+except ValueError as e:
+    print(f'Error: {e}')
+    exit(1)
+"; then
+        print_success "Profile '$HANDLER_PROFILE' applied"
+    else
+        print_warning "Profile application had issues (non-fatal)"
+    fi
+
+    # Restart daemon to pick up new config
+    restart_daemon_verified "$VENV_PYTHON"
+
+    # Regenerate docs with new handler state
+    if "$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli generate-docs --project-root "$PROJECT_ROOT"; then
+        print_success "Regenerated .claude/HOOKS-DAEMON.md"
+    fi
+else
+    log_step "15" "Handler profile: minimal (default)"
+    print_info "Set HANDLER_PROFILE=recommended or HANDLER_PROFILE=strict for more handlers"
+fi
+
+# ============================================================
 # Complete
 # ============================================================
 
@@ -375,10 +439,22 @@ echo "  Daemon:   $DAEMON_DIR"
 echo "  Config:   $TARGET_CONFIG"
 echo "  Venv:     $DAEMON_DIR/untracked/venv/"
 echo ""
+if [ "$HANDLER_PROFILE" != "minimal" ]; then
+echo "  Profile:  $HANDLER_PROFILE"
+fi
+if [ "${PLAN_WORKFLOW:-}" = "yes" ]; then
+echo "  Plans:    $PROJECT_ROOT/CLAUDE/Plan/"
+fi
+echo ""
 echo "Next steps:"
 echo "  1. Review config:   vim $TARGET_CONFIG"
 echo "  2. Commit hooks:    git add .claude/hooks/ .claude/settings.json .claude/hooks-daemon.yaml"
 echo "  3. Hooks activate automatically on next tool use"
+echo ""
+echo "Customisation (re-run installer or edit config):"
+echo "  Profiles:  HANDLER_PROFILE=recommended  (safety + quality + plans)"
+echo "             HANDLER_PROFILE=strict        (all handlers enabled)"
+echo "  Plans:     PLAN_WORKFLOW=yes             (bootstrap CLAUDE/Plan/)"
 echo ""
 echo "Daemon management:"
 echo "  Status:   $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli status"

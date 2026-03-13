@@ -72,17 +72,22 @@ Full bug report with reproduction steps, root cause analysis, and suggested fixe
   - [x] Was hardcoded to "2.4.0" while version.py had "2.21.1"
   - [ ] Add version consistency check to QA suite (follow-up)
 
-- [ ] **Task 2.2**: Add plan workflow setup to installer (Bug 5)
-  - [ ] Add optional Step 12 to installer for plan workflow bootstrapping
-  - [ ] Create CLAUDE/Plan/README.md template for new projects
-  - [ ] Enable plan workflow handlers when user opts in
-  - [ ] Handle existing CLAUDE/Plan/ directory detection
+- [x] **Task 2.2**: Add plan workflow setup to installer (Bug 5) ✅
+  - [x] Created `install/plan_workflow.py` with `bootstrap_plan_workflow()`
+  - [x] Creates CLAUDE/Plan/README.md + CLAUDE.md templates for new projects
+  - [x] Creates CLAUDE/Plan/Completed/ subdirectory
+  - [x] Preserves existing files (idempotent)
+  - [x] Added Step 14 to installer via `PLAN_WORKFLOW=yes` env var
+  - [x] 8 unit tests passing
 
-- [ ] **Task 2.3**: Add handler profile selection to installer (Bug 6)
-  - [ ] Define handler profiles (Minimal, Recommended, Strict)
-  - [ ] Add profile selection prompt to installer
-  - [ ] Apply profile to hooks-daemon.yaml during install
-  - [ ] Document profile differences
+- [x] **Task 2.3**: Add handler profile selection to installer (Bug 6) ✅
+  - [x] Created `install/handler_profiles.py` with 3 profiles
+  - [x] Minimal: safety only (default, config as-is)
+  - [x] Recommended: safety + quality + plan workflow + linting (16 handlers)
+  - [x] Strict: all handlers enabled (24 handlers)
+  - [x] Text-based yaml modification preserves all comments
+  - [x] Added Step 15 to installer via `HANDLER_PROFILE=recommended|strict` env var
+  - [x] 12 unit tests passing
 
 ### Phase 3: Verification
 
