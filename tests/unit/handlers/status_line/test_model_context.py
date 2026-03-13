@@ -186,12 +186,13 @@ class TestModelContextHandler:
 
         assert "\033[38;5;208m▌▌▌" in result.context[0]
 
-    # --- Effort bars: default "medium" for Claude 4+ when not in settings ---
+    # --- Effort bars: default "high" for Claude 4+ when not in settings ---
+    # (daemon default, not Claude Code default — see Bug 00088-4)
 
-    def test_claude4_defaults_to_medium_bars_when_effort_absent(
+    def test_claude4_defaults_to_high_bars_when_effort_absent(
         self, handler: ModelContextHandler, tmp_path: Path
     ) -> None:
-        """Claude 4+ with no effortLevel in settings shows medium bars (Claude Code default)."""
+        """Claude 4+ with no effortLevel in settings shows high bars (daemon default)."""
         hook_input = {
             "model": {"id": "claude-sonnet-4-6", "display_name": "Sonnet 4.6"},
             "context_window": {"used_percentage": 30.0},
@@ -202,13 +203,13 @@ class TestModelContextHandler:
         with patch.object(handler, "_get_settings_path", return_value=settings_file):
             result = handler.handle(hook_input)
 
-        # Medium = two orange bars + one dim
-        assert "\033[38;5;208m▌▌\033[2;37m▌" in result.context[0]
+        # High = all three orange bars, no dim
+        assert "\033[38;5;208m▌▌▌" in result.context[0]
 
-    def test_claude4_defaults_to_medium_bars_when_settings_missing(
+    def test_claude4_defaults_to_high_bars_when_settings_missing(
         self, handler: ModelContextHandler, tmp_path: Path
     ) -> None:
-        """Claude 4+ with no settings file at all shows medium bars (Claude Code default)."""
+        """Claude 4+ with no settings file at all shows high bars (daemon default)."""
         hook_input = {
             "model": {"id": "claude-opus-4-6", "display_name": "Opus 4.6"},
             "context_window": {"used_percentage": 30.0},
@@ -218,12 +219,12 @@ class TestModelContextHandler:
         with patch.object(handler, "_get_settings_path", return_value=settings_file):
             result = handler.handle(hook_input)
 
-        assert "\033[38;5;208m▌▌\033[2;37m▌" in result.context[0]
+        assert "\033[38;5;208m▌▌▌" in result.context[0]
 
-    def test_haiku4_defaults_to_medium_bars_when_effort_absent(
+    def test_haiku4_defaults_to_high_bars_when_effort_absent(
         self, handler: ModelContextHandler, tmp_path: Path
     ) -> None:
-        """Haiku 4.x with no effortLevel also defaults to medium bars."""
+        """Haiku 4.x with no effortLevel also defaults to high bars."""
         hook_input = {
             "model": {"id": "claude-haiku-4-5-20251001", "display_name": "Haiku 4.5"},
             "context_window": {"used_percentage": 10.0},
@@ -233,7 +234,7 @@ class TestModelContextHandler:
         with patch.object(handler, "_get_settings_path", return_value=settings_file):
             result = handler.handle(hook_input)
 
-        assert "\033[38;5;208m▌▌\033[2;37m▌" in result.context[0]
+        assert "\033[38;5;208m▌▌▌" in result.context[0]
 
     # --- No bars for pre-4.x models ---
 
@@ -286,6 +287,33 @@ class TestModelContextHandler:
     def test_model_supports_effort_empty_false(self, handler: ModelContextHandler) -> None:
         """Empty model ID does not support effort."""
         assert handler._model_supports_effort("") is False
+
+    # --- Bug 00088-4: Default effort should be "high" (daemon optimal) ---
+
+    def test_absent_effort_defaults_to_high_not_medium(
+        self, handler: ModelContextHandler, tmp_path: Path
+    ) -> None:
+        """Bug 00088-4: When effortLevel absent from settings, default to 'high'.
+
+        The daemon's optimal_config_checker enforces high effort. Claude Code
+        can overwrite ~/.claude/settings.json and remove effortLevel. When this
+        happens, the status line should show 'high' (daemon default), not
+        'medium' (Claude Code default), because daemon users expect high effort.
+        """
+        hook_input = {
+            "model": {"id": "claude-opus-4-6", "display_name": "Opus 4.6"},
+            "context_window": {"used_percentage": 30.0},
+        }
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text(json.dumps({"model": "opus"}))
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_file):
+            result = handler.handle(hook_input)
+
+        # High effort = all three bars orange, zero dim bars
+        assert "\033[38;5;208m▌▌▌" in result.context[0]
+        # Must NOT show dim bar (that would be medium or low)
+        assert "\033[2;37m▌" not in result.context[0]
 
     def test_read_effort_level_returns_none_on_oserror(
         self, handler: ModelContextHandler, tmp_path: Path
