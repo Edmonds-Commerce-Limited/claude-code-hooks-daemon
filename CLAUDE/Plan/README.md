@@ -4,6 +4,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00088: Hooks Daemon Install Bugs](00088-hooks-daemon-install-bugs/PLAN.md) - Not Started
+  - 6 bugs found during fresh install: silent prereq failures, swallowed errors, version mismatch, wrong effort display, missing plan workflow setup, no handler profiles
+  - **Priority**: High
+
 - [00063: FAIL FAST - Plugin Handler Bug & Error Hiding Audit](00063-fail-fast-plugin-handler-audit/PLAN.md) - In Progress
   - **Phase 1 DONE**: Plugin handler suffix bug fixed, warning converted to crash (daemon fails on unregistered handler)
   - **Phase 2 PENDING**: Comprehensive audit for ALL error hiding patterns in codebase (audit script, fix violations)
@@ -468,9 +472,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 83
+- **Total Plans Created**: 84
 - **Completed**: 71 (1 with reduced scope)
-- **Active**: 1 (in progress)
+- **Active**: 2 (1 in progress, 1 not started)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation)
 

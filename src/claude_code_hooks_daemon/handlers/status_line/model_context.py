@@ -19,7 +19,7 @@ Matches Claude Code's own ▌▌▌ bar style - always orange active, grey inact
 
 Effort level source (in priority order):
 1. effortLevel key in ~/.claude/settings.json (set explicitly via /model)
-2. Default "medium" for Claude 4+ models (Claude Code default, not written to settings)
+2. Default "high" for Claude 4+ models (daemon default — optimal_config_checker enforces high)
 3. No bars for pre-4.x models (effort feature not available)
 
 Context usage (quarter circle icons with color-coded percentages):
@@ -49,8 +49,11 @@ _EFFORT_BAR = "▌"
 # ANSI dim grey for unlit effort bars
 _EFFORT_DIM = "\033[2;37m"
 
-# Claude Code default effort level when effortLevel absent from settings
-_EFFORT_DEFAULT = "medium"
+# Daemon default effort level when effortLevel absent from settings.
+# Claude Code defaults to "medium", but daemon users expect "high" because
+# optimal_config_checker enforces high effort. When CC overwrites the settings
+# file and removes effortLevel, we show "high" rather than misleading "medium".
+_EFFORT_DEFAULT = "high"
 
 # Minimum Claude major version that supports effort configuration
 _EFFORT_MIN_MAJOR_VERSION = 4
@@ -149,7 +152,7 @@ class ModelContextHandler(Handler):
 
         Priority:
         1. effortLevel from ~/.claude/settings.json (explicitly set via /model)
-        2. _EFFORT_DEFAULT ("medium") for Claude 4+ models (Claude Code default)
+        2. _EFFORT_DEFAULT ("high") for Claude 4+ models (daemon optimal default)
         3. None for pre-4.x models (effort not supported)
 
         Args:
@@ -169,7 +172,7 @@ class ModelContextHandler(Handler):
             if level is not None:
                 return str(level)
 
-            # Not in settings - use default "medium" for Claude 4+ (not written when default)
+            # Not in settings - use default "high" for Claude 4+ (daemon optimal)
             if self._model_supports_effort(model_id):
                 return _EFFORT_DEFAULT
 
