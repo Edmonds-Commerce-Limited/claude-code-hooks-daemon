@@ -1,6 +1,6 @@
 # Plan 00090: Command Redirection for Blocking Handlers
 
-**Status**: Not Started
+**Status**: Complete (2026-03-15)
 **Created**: 2026-03-15
 **Priority**: High
 **Recommended Executor**: Sonnet
