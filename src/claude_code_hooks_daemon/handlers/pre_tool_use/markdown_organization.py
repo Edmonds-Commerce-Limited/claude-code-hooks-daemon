@@ -418,7 +418,12 @@ class MarkdownOrganizationHandler(Handler):
     def _handle_plan_write(
         self, hook_input: dict[str, Any], plan_base: Path, file_path: str
     ) -> HookResult:
-        """Handle Write tool for planning mode — create numbered folder.
+        """Handle Write tool for planning mode — create numbered folder, DENY flat file.
+
+        Creates the numbered plan folder with PLAN.md, then returns DENY so
+        the flat file is NOT also written. The deny reason tells Claude where
+        the file was created and instructs it to rename the folder to something
+        semantic (Claude Code generates random three-word names by default).
 
         Args:
             hook_input: Hook input data
@@ -426,7 +431,7 @@ class MarkdownOrganizationHandler(Handler):
             file_path: Path to the flat plan file being written
 
         Returns:
-            HookResult with ALLOW decision and context
+            HookResult with DENY decision and reason pointing to created file
         """
         content = hook_input.get(HookInputField.TOOL_INPUT, {}).get("content", "")
 
@@ -442,20 +447,31 @@ class MarkdownOrganizationHandler(Handler):
         plan_file = plan_folder / "PLAN.md"
         plan_file.write_text(content, encoding="utf-8")
 
-        logger.info(f"Plan folder created: {self._track_plans_in_project}/{folder_name}/PLAN.md")
+        plan_relative = f"{self._track_plans_in_project}/{folder_name}/PLAN.md"
+        logger.info(f"Plan folder created: {plan_relative}")
 
-        context_parts = [
-            f"Plan folder created: {self._track_plans_in_project}/{folder_name}/PLAN.md"
+        reason_parts = [
+            f"REDIRECTED: Plan written to {plan_relative}",
+            "",
+            "Your plan content has been saved to the numbered folder above.",
+            "The flat file write was blocked to prevent duplicate files.",
+            "",
+            f"IMPORTANT: Rename the plan folder to something semantic:",
+            f"  git mv {self._track_plans_in_project}/{folder_name} "
+            f"{self._track_plans_in_project}/{next_number}-<descriptive-name>",
+            "",
+            "Claude Code generates random three-word folder names by default.",
+            "Replace with a short, descriptive kebab-case name for the plan.",
         ]
 
         if self._plan_workflow_docs:
             workflow_path = self._workspace_root / self._plan_workflow_docs
             if workflow_path.exists():
-                context_parts.append(
-                    f"See `{self._plan_workflow_docs}` for plan workflow conventions."
+                reason_parts.append(
+                    f"\nSee `{self._plan_workflow_docs}` for plan workflow conventions."
                 )
 
-        return HookResult(decision=Decision.ALLOW, context=context_parts)
+        return HookResult.deny(reason="\n".join(reason_parts))
 
     def _handle_plan_edit(
         self, hook_input: dict[str, Any], plan_base: Path, file_path: str
