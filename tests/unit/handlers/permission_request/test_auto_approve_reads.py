@@ -1,4 +1,8 @@
-"""Comprehensive tests for AutoApproveReadsHandler."""
+"""Comprehensive tests for AutoApproveReadsHandler.
+
+Tests use REAL PermissionRequest event structure with tool_name and
+permission_suggestions fields (NOT the non-existent permission_type field).
+"""
 
 import pytest
 
@@ -29,118 +33,177 @@ class TestAutoApproveReadsHandler:
         """Handler should be terminal (default)."""
         assert handler.terminal is True
 
-    # matches() - Positive Cases
-    def test_matches_file_read_permission(self, handler):
-        """Should match file_read permission type."""
+    # =====================================================================
+    # matches() - Positive Cases (read-only tools)
+    # =====================================================================
+    def test_matches_read_tool(self, handler):
+        """Should match Read tool permission request."""
         hook_input = {
-            "permission_type": "file_read",
-            "resource": "/workspace/README.md",
+            "hook_event_name": "PermissionRequest",
+            "tool_name": "Read",
+            "tool_input": {"file_path": "/workspace/README.md"},
+            "permission_suggestions": [{"prompt": "Allow read?"}],
         }
         assert handler.matches(hook_input) is True
 
-    def test_matches_file_write_permission(self, handler):
-        """Should match file_write permission type."""
+    def test_matches_glob_tool(self, handler):
+        """Should match Glob tool permission request."""
         hook_input = {
-            "permission_type": "file_write",
-            "resource": "/workspace/notes.txt",
+            "hook_event_name": "PermissionRequest",
+            "tool_name": "Glob",
+            "tool_input": {"pattern": "**/*.py"},
+            "permission_suggestions": [{"prompt": "Allow glob?"}],
         }
         assert handler.matches(hook_input) is True
 
-    # matches() - Negative Cases
-    def test_matches_network_permission_returns_false(self, handler):
-        """Should not match network permission types."""
+    def test_matches_grep_tool(self, handler):
+        """Should match Grep tool permission request."""
         hook_input = {
-            "permission_type": "network",
-            "resource": "https://example.com",
+            "hook_event_name": "PermissionRequest",
+            "tool_name": "Grep",
+            "tool_input": {"pattern": "TODO"},
+            "permission_suggestions": [{"prompt": "Allow grep?"}],
+        }
+        assert handler.matches(hook_input) is True
+
+    # =====================================================================
+    # matches() - Negative Cases (write/execute tools should NOT match)
+    # =====================================================================
+    def test_matches_write_tool_returns_false(self, handler):
+        """Should NOT match Write tool — not a read operation."""
+        hook_input = {
+            "hook_event_name": "PermissionRequest",
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/workspace/test.py"},
+            "permission_suggestions": [{"prompt": "Allow write?"}],
         }
         assert handler.matches(hook_input) is False
 
-    def test_matches_missing_permission_type_returns_false(self, handler):
-        """Should not match when permission_type is missing."""
+    def test_matches_edit_tool_returns_false(self, handler):
+        """Should NOT match Edit tool — not a read operation."""
         hook_input = {
-            "resource": "/workspace/file.txt",
+            "hook_event_name": "PermissionRequest",
+            "tool_name": "Edit",
+            "tool_input": {"file_path": "/workspace/test.py"},
+            "permission_suggestions": [{"prompt": "Allow edit?"}],
         }
         assert handler.matches(hook_input) is False
 
-    def test_matches_none_permission_type_returns_false(self, handler):
-        """Should not match when permission_type is None."""
+    def test_matches_bash_tool_returns_false(self, handler):
+        """Should NOT match Bash tool — not a read operation."""
         hook_input = {
-            "permission_type": None,
-            "resource": "/workspace/file.txt",
+            "hook_event_name": "PermissionRequest",
+            "tool_name": "Bash",
+            "tool_input": {"command": "ls"},
+            "permission_suggestions": [{"prompt": "Allow bash?"}],
         }
         assert handler.matches(hook_input) is False
 
-    def test_matches_empty_permission_type_returns_false(self, handler):
-        """Should not match when permission_type is empty."""
+    def test_matches_missing_tool_name_returns_false(self, handler):
+        """Should not match when tool_name is missing."""
         hook_input = {
-            "permission_type": "",
-            "resource": "/workspace/file.txt",
+            "hook_event_name": "PermissionRequest",
+            "permission_suggestions": [{"prompt": "Allow?"}],
         }
         assert handler.matches(hook_input) is False
 
-    # handle() Tests - file_read
-    def test_handle_file_read_returns_allow_decision(self, handler):
-        """handle() should return allow for file_read."""
+    def test_matches_none_tool_name_returns_false(self, handler):
+        """Should not match when tool_name is None."""
         hook_input = {
-            "permission_type": "file_read",
-            "resource": "/workspace/README.md",
+            "hook_event_name": "PermissionRequest",
+            "tool_name": None,
+            "permission_suggestions": [{"prompt": "Allow?"}],
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_matches_empty_tool_name_returns_false(self, handler):
+        """Should not match when tool_name is empty."""
+        hook_input = {
+            "hook_event_name": "PermissionRequest",
+            "tool_name": "",
+            "permission_suggestions": [{"prompt": "Allow?"}],
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_matches_unknown_tool_returns_false(self, handler):
+        """Should not match unknown tool names."""
+        hook_input = {
+            "hook_event_name": "PermissionRequest",
+            "tool_name": "CustomTool",
+            "permission_suggestions": [{"prompt": "Allow?"}],
+        }
+        assert handler.matches(hook_input) is False
+
+    # =====================================================================
+    # handle() Tests - Read tool (auto-approve)
+    # =====================================================================
+    def test_handle_read_tool_returns_allow_decision(self, handler):
+        """handle() should return allow for Read tool."""
+        hook_input = {
+            "hook_event_name": "PermissionRequest",
+            "tool_name": "Read",
+            "tool_input": {"file_path": "/workspace/README.md"},
+            "permission_suggestions": [{"prompt": "Allow read?"}],
         }
         result = handler.handle(hook_input)
         assert result.decision == "allow"
 
-    def test_handle_file_read_has_no_reason(self, handler):
-        """handle() should not provide reason for file_read (auto-approval)."""
+    def test_handle_read_tool_has_no_reason(self, handler):
+        """handle() should not provide reason for Read tool (auto-approval)."""
         hook_input = {
-            "permission_type": "file_read",
-            "resource": "/workspace/notes.txt",
+            "hook_event_name": "PermissionRequest",
+            "tool_name": "Read",
+            "tool_input": {"file_path": "/workspace/notes.txt"},
+            "permission_suggestions": [{"prompt": "Allow read?"}],
         }
         result = handler.handle(hook_input)
         assert result.reason is None
 
-    def test_handle_file_read_has_no_context(self, handler):
-        """handle() should not provide context for file_read."""
+    def test_handle_glob_tool_returns_allow(self, handler):
+        """handle() should return allow for Glob tool."""
         hook_input = {
-            "permission_type": "file_read",
-            "resource": "/workspace/README.md",
+            "hook_event_name": "PermissionRequest",
+            "tool_name": "Glob",
+            "tool_input": {"pattern": "**/*.py"},
+            "permission_suggestions": [{"prompt": "Allow glob?"}],
         }
         result = handler.handle(hook_input)
-        assert result.context == []
+        assert result.decision == "allow"
 
-    def test_handle_file_read_has_no_guidance(self, handler):
-        """handle() should not provide guidance for file_read."""
+    def test_handle_grep_tool_returns_allow(self, handler):
+        """handle() should return allow for Grep tool."""
         hook_input = {
-            "permission_type": "file_read",
-            "resource": "/workspace/README.md",
+            "hook_event_name": "PermissionRequest",
+            "tool_name": "Grep",
+            "tool_input": {"pattern": "TODO"},
+            "permission_suggestions": [{"prompt": "Allow grep?"}],
         }
         result = handler.handle(hook_input)
-        assert result.guidance is None
+        assert result.decision == "allow"
 
-    # handle() Tests - file_write
-    def test_handle_file_write_returns_deny_decision(self, handler):
-        """handle() should return deny for file_write."""
+    # =====================================================================
+    # handle() Tests - Non-read tools (should not reach handle, but test defence)
+    # =====================================================================
+    def test_handle_non_read_tool_returns_deny(self, handler):
+        """handle() should deny non-read tools that somehow reach handle()."""
         hook_input = {
-            "permission_type": "file_write",
-            "resource": "/workspace/test.py",
+            "hook_event_name": "PermissionRequest",
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/workspace/test.py"},
+            "permission_suggestions": [{"prompt": "Allow write?"}],
         }
         result = handler.handle(hook_input)
         assert result.decision == "deny"
-
-    def test_handle_file_write_has_reason(self, handler):
-        """handle() should provide reason for file_write denial."""
-        hook_input = {
-            "permission_type": "file_write",
-            "resource": "/workspace/test.py",
-        }
-        result = handler.handle(hook_input)
         assert result.reason is not None
         assert "BLOCKED" in result.reason
-        assert "file_write" in result.reason
 
     def test_handle_returns_hook_result_instance(self, handler):
         """handle() should return HookResult instance."""
         hook_input = {
-            "permission_type": "file_read",
-            "resource": "/workspace/README.md",
+            "hook_event_name": "PermissionRequest",
+            "tool_name": "Read",
+            "tool_input": {"file_path": "/workspace/README.md"},
+            "permission_suggestions": [{"prompt": "Allow read?"}],
         }
         result = handler.handle(hook_input)
         assert isinstance(result, HookResult)

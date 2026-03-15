@@ -364,6 +364,8 @@ class TestConfigHandlerCoverage:
         "validate_eslint_on_write",
         # Status line handlers - project-specific
         "suggest_status_line",
+        # AskUserQuestion blocker - optional unattended mode
+        "ask_user_question_blocker",
     }
 
     @pytest.fixture

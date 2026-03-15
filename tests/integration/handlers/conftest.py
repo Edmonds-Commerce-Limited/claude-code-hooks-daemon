@@ -137,13 +137,22 @@ def make_subagent_stop_input(
     }
 
 
-def make_permission_request_input(permission_type: str, resource: str = "") -> dict[str, Any]:
-    """Create a PermissionRequest hook_input."""
-    return {
+def make_permission_request_input(
+    tool_name: str,
+    resource: str = "",
+) -> dict[str, Any]:
+    """Create a PermissionRequest hook_input using real event structure.
+
+    Real PermissionRequest events use tool_name (e.g. "Read", "Write")
+    and permission_suggestions array, NOT permission_type.
+    """
+    result: dict[str, Any] = {
         "hook_event_name": "PermissionRequest",
-        "permission_type": permission_type,
-        "resource": resource,
+        "tool_name": tool_name,
     }
+    if resource:
+        result["resource"] = resource
+    return result
 
 
 def make_notification_input(

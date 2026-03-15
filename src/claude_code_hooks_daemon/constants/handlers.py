@@ -151,6 +151,11 @@ class HandlerID:
         config_key="auto_approve_reads",
         display_name="auto-approve-reads",
     )
+    ASK_USER_QUESTION_BLOCKER = HandlerIDMeta(
+        class_name="AskUserQuestionBlockerHandler",
+        config_key="ask_user_question_blocker",
+        display_name="block-ask-user-question",
+    )
     VALIDATE_ESLINT_ON_WRITE = HandlerIDMeta(
         class_name="ValidateEslintOnWriteHandler",
         config_key="validate_eslint_on_write",
@@ -468,6 +473,7 @@ HandlerKey = Literal[
     "curl_pipe_shell",
     "dangerous_permissions",
     "auto_approve_reads",
+    "ask_user_question_blocker",
     "validate_eslint_on_write",
     "transcript_archiver",
     "absolute_path",

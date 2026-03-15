@@ -954,17 +954,17 @@ class TestAutoApproveReadsHandler:
     @pytest.mark.parametrize(
         "hook_input,expected_decision,description",
         [
-            # Auto-approve read operations
+            # Auto-approve read operations (uses tool_name, not permission_type)
             (
-                {"permission_type": "file_read", "resource": "/workspace/file.txt"},
+                {"tool_name": "Read", "resource": "/workspace/file.txt"},
                 Decision.ALLOW,
                 "Auto-approve file read",
             ),
-            # Deny write operations
+            # Write tool does not match (handler only matches read-only tools)
             (
-                {"permission_type": "file_write", "resource": "/workspace/file.txt"},
-                Decision.DENY,
-                "Block file write",
+                {"tool_name": "Write", "resource": "/workspace/file.txt"},
+                Decision.ALLOW,
+                "Write tool does not match handler",
             ),
         ],
     )

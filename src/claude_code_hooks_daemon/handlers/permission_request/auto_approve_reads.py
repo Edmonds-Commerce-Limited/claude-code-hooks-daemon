@@ -1,16 +1,34 @@
-"""AutoApproveReadsHandler - automatically approves file read permission requests."""
+"""AutoApproveReadsHandler - automatically approves read-only tool permission requests.
+
+Uses tool_name from the PermissionRequest event to determine whether the
+operation is read-only. Real PermissionRequest events contain tool_name and
+permission_suggestions (NOT permission_type).
+"""
 
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
+from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+
+# Read-only tools that are safe to auto-approve
+_READ_ONLY_TOOLS: tuple[str, ...] = (
+    ToolName.READ,
+    ToolName.GLOB,
+    ToolName.GREP,
+)
 
 
 class AutoApproveReadsHandler(Handler):
-    """Auto-approve file_read permission requests.
+    """Auto-approve read-only tool permission requests.
 
-    Automatically approves file read operations to reduce permission prompt
-    friction while blocking write operations.
+    Automatically approves permission requests for read-only operations
+    (Read, Glob, Grep) to reduce permission prompt friction. All other
+    tools are denied — write/execute operations should be controlled by
+    PreToolUse hooks instead.
+
+    Matches on tool_name from real PermissionRequest events, NOT the
+    non-existent permission_type field.
     """
 
     def __init__(self) -> None:
@@ -22,45 +40,44 @@ class AutoApproveReadsHandler(Handler):
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """Check if this is a file read or write permission request.
+        """Check if this is a permission request for a read-only tool.
+
+        Uses tool_name from the real PermissionRequest event structure.
+        Only matches read-only tools (Read, Glob, Grep).
 
         Args:
             hook_input: Hook input dictionary from Claude Code
 
         Returns:
-            True if file_read or file_write permission type
+            True if tool_name is a read-only tool
         """
-        permission_type = hook_input.get(HookInputField.PERMISSION_TYPE)
+        tool_name = hook_input.get(HookInputField.TOOL_NAME)
 
-        # Match both read and write to handle them differently
-        return permission_type in ("file_read", "file_write")
+        return tool_name in _READ_ONLY_TOOLS
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
-        """Auto-approve reads, deny writes.
+        """Auto-approve read-only tools, deny everything else.
 
         Args:
             hook_input: Hook input dictionary from Claude Code
 
         Returns:
-            HookResult with allow for reads, deny for writes
+            HookResult with allow for read-only tools, deny for others
         """
-        permission_type = hook_input.get(HookInputField.PERMISSION_TYPE)
+        tool_name = hook_input.get(HookInputField.TOOL_NAME)
 
-        if permission_type == "file_read":
-            # Auto-approve read operations
+        if tool_name in _READ_ONLY_TOOLS:
             return HookResult(decision=Decision.ALLOW)
-        else:
-            # Block write operations (should use PreToolUse hooks instead)
-            resource = hook_input.get("resource", "unknown")
-            return HookResult(
-                decision=Decision.DENY,
-                reason=(
-                    f"BLOCKED: file_write permission request\n\n"
-                    f"Resource: {resource}\n\n"
-                    "File write operations should be controlled by PreToolUse hooks,\n"
-                    "not PermissionRequest hooks. This handler only auto-approves reads."
-                ),
-            )
+
+        # Defensive: deny non-read tools that somehow reach handle()
+        return HookResult(
+            decision=Decision.DENY,
+            reason=(
+                f"BLOCKED: Permission request for non-read tool '{tool_name}'\n\n"
+                "Only read-only tools (Read, Glob, Grep) are auto-approved.\n"
+                "Write/execute operations should be controlled by PreToolUse hooks."
+            ),
+        )
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Auto Approve Reads."""
@@ -75,7 +92,7 @@ class AutoApproveReadsHandler(Handler):
             AcceptanceTest(
                 title="Auto-approve read permissions",
                 command="Read file permission request",
-                description="Auto-approves read-only operations",
+                description="Auto-approves read-only operations (Read, Glob, Grep)",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"read", r"approved"],
                 safety_notes="Read-only operations are safe",
