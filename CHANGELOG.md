@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.23.0] - 2026-03-15
+
+### Added
+
+- **Command Redirection Core Utility**: New `utils.command_redirection` module providing a reusable mechanism for blocking handlers to automatically execute corrected commands and save output to files. Eliminates wasted turns when a handler blocks a command and suggests a corrected version — Claude receives the educational deny message and the command result in a single turn. Includes `CommandRedirectionResult` dataclass, `execute_and_save()`, `format_redirection_context()`, and `cleanup_old_files()`. 24 unit tests.
+
+- **Command Redirection for `gh_issue_comments` Handler**: When blocking a `gh issue view` command that lacks `--comments`, the handler now automatically executes the corrected command (with `--comments`) and saves the output to a file. Configurable via `command_redirection: true/false` option (default: enabled). Graceful fallback to block-only if execution fails.
+
+- **Command Redirection for `npm_command` Handler**: When blocking raw `npm`/`npx` commands, the handler now automatically executes the corrected `llm:`-prefixed command and saves the output. Configurable via `command_redirection` option (default: enabled). Graceful fallback to block-only if execution fails.
+
+- **Command Redirection for `pipe_blocker` Handler**: When blocking commands piped to `tail`/`head`, the handler now automatically executes the base command (without the pipe) and saves the output to a file. Configurable via `command_redirection` option (default: enabled). Graceful fallback to block-only if execution fails.
+
+- **`ask_user_question_blocker` Handler**: New PreToolUse handler (disabled by default) that blocks `AskUserQuestion` tool calls for fully unattended autonomous workflows. Useful in CI or scheduled agent runs where interactive prompts are not acceptable.
+
+- **Transcript-Based Debugging Guide**: Added `CLAUDE/DEBUGGING_TRANSCRIPTS.md` documenting the technique of using conversation transcripts for post-mortem debugging of hook event issues — analysing actual event payloads from real sessions to investigate handler failures.
+
+### Fixed
+
+- **`auto_approve_reads` Handler Dead Code Bug**: Handler was matching on `permission_type` field which does not exist in real `PermissionRequest` events, making it entirely non-functional. Rewrote to match on `tool_name` (`Read`, `Glob`, `Grep`) which is the actual field present in real events. Handler is now functional.
+
+- **`markdown_organization` Plan Folder Write Returns DENY**: `_handle_plan_write()` previously returned `Decision.ALLOW` after creating the numbered plan folder, causing both a flat file and a folder to exist simultaneously. Now returns `Decision.DENY` with a descriptive reason explaining the redirect path and instructing the agent to rename the folder to something semantic.
+
 ## [2.22.0] - 2026-03-13
 
 ### Added
