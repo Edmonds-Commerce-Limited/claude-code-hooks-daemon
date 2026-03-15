@@ -3,6 +3,7 @@
 Comprehensive test coverage for npm/npx command enforcement.
 """
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
@@ -673,3 +674,119 @@ class TestNpmCommandHandler:
         result = advisory_handler.handle(hook_input)
         assert "Full guide:" in result.reason
         assert "llm-command-wrappers.md" in result.reason
+
+    # ==========================================================================
+    # COMMAND REDIRECTION TESTS
+    # ==========================================================================
+
+    def test_redirection_enabled_by_default(self) -> None:
+        """Command redirection should be enabled by default."""
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.npm_command.has_llm_commands_in_package_json",
+            return_value=True,
+        ):
+            handler = NpmCommandHandler()
+        assert handler._command_redirection is True
+
+    def test_redirection_disabled_via_options(self) -> None:
+        """Command redirection can be disabled via options."""
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.npm_command.has_llm_commands_in_package_json",
+            return_value=True,
+        ):
+            handler = NpmCommandHandler(options={"command_redirection": False})
+        assert handler._command_redirection is False
+
+    def test_get_redirected_command_npm_run(self, handler: NpmCommandHandler) -> None:
+        """Should return corrected npm run llm: command."""
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "npm run build"},
+        }
+        redirected = handler.get_redirected_command(hook_input)
+        assert redirected is not None
+        cmd_str = " ".join(redirected)
+        assert "npm" in cmd_str
+        assert "llm:build" in cmd_str
+
+    def test_get_redirected_command_npx(self, handler: NpmCommandHandler) -> None:
+        """Should return corrected npm run llm: command for npx tools."""
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "npx tsc"},
+        }
+        redirected = handler.get_redirected_command(hook_input)
+        assert redirected is not None
+        cmd_str = " ".join(redirected)
+        assert "npm" in cmd_str
+        assert "llm:type-check" in cmd_str
+
+    def test_get_redirected_command_returns_none_for_pipe(
+        self, handler: NpmCommandHandler
+    ) -> None:
+        """Should return None for piped commands (no sensible redirect)."""
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "npm run test | grep error"},
+        }
+        redirected = handler.get_redirected_command(hook_input)
+        assert redirected is None
+
+    def test_get_redirected_command_returns_none_for_non_bash(
+        self, handler: NpmCommandHandler
+    ) -> None:
+        """Should return None for non-Bash tools."""
+        hook_input: dict[str, Any] = {
+            "tool_name": "Read",
+            "tool_input": {"file_path": "/tmp/test"},
+        }
+        redirected = handler.get_redirected_command(hook_input)
+        assert redirected is None
+
+    def test_handle_with_redirection_includes_context(
+        self, handler: NpmCommandHandler, tmp_path: Path
+    ) -> None:
+        """When redirection is enabled, handle() should include redirection context."""
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "npm run build"},
+        }
+        from claude_code_hooks_daemon.core.command_redirection import (
+            CommandRedirectionResult,
+        )
+
+        with (
+            patch(
+                "claude_code_hooks_daemon.handlers.pre_tool_use.npm_command.execute_and_save"
+            ) as mock_exec,
+            patch(
+                "claude_code_hooks_daemon.handlers.pre_tool_use.npm_command.ProjectContext"
+            ) as mock_ctx,
+        ):
+            mock_ctx.daemon_untracked_dir.return_value = tmp_path
+            mock_exec.return_value = CommandRedirectionResult(
+                exit_code=0,
+                output_path=tmp_path / "test.txt",
+                command="npm run llm:build",
+            )
+            result = handler.handle(hook_input)
+
+        assert result.decision == Decision.DENY
+        joined_context = "\n".join(result.context)
+        assert "COMMAND REDIRECTED" in joined_context
+
+    def test_handle_without_redirection_no_context(self) -> None:
+        """When redirection is disabled, handle() should NOT include redirection context."""
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.npm_command.has_llm_commands_in_package_json",
+            return_value=True,
+        ):
+            handler = NpmCommandHandler(options={"command_redirection": False})
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "npm run build"},
+        }
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        joined_context = "\n".join(result.context)
+        assert "COMMAND REDIRECTED" not in joined_context
