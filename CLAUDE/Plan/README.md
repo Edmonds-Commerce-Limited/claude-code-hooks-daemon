@@ -26,6 +26,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00090: Command Redirection for Blocking Handlers](Completed/00090-snappy-greeting-cloud/PLAN.md) - Complete
+  - Core command_redirection utility module with execute_and_save(), format_redirection_context(), cleanup_old_files()
+  - Retrofitted gh_issue_comments, npm_command, pipe_blocker handlers with per-handler toggle
+  - Fixed markdown_organization plan folder bug (ALLOW→DENY to prevent duplicate flat files)
+  - Config, docs, and acceptance test infrastructure updated
+
 - [00088: Hooks Daemon Install Bugs](Completed/00088-hooks-daemon-install-bugs/PLAN.md) - Complete
   - Fixed 6 install bugs: git remote prereq check, daemon error surfacing, version SSOT, effort level default, plan workflow bootstrap, handler profiles
   - New installer Steps 14-15: PLAN_WORKFLOW=yes and HANDLER_PROFILE=recommended|strict env vars
@@ -472,8 +478,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 85
-- **Completed**: 72 (1 with reduced scope)
+- **Total Plans Created**: 86
+- **Completed**: 73 (1 with reduced scope)
 - **Active**: 1 (in progress)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation)
