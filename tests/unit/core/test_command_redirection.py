@@ -5,9 +5,6 @@ from __future__ import annotations
 import os
 import time
 from pathlib import Path
-from unittest.mock import patch
-
-import pytest
 
 from claude_code_hooks_daemon.core.command_redirection import (
     COMMAND_REDIRECTION_SUBDIR,

@@ -721,9 +721,7 @@ class TestNpmCommandHandler:
         assert "npm" in cmd_str
         assert "llm:type-check" in cmd_str
 
-    def test_get_redirected_command_returns_none_for_pipe(
-        self, handler: NpmCommandHandler
-    ) -> None:
+    def test_get_redirected_command_returns_none_for_pipe(self, handler: NpmCommandHandler) -> None:
         """Should return None for piped commands (no sensible redirect)."""
         hook_input: dict[str, Any] = {
             "tool_name": "Bash",

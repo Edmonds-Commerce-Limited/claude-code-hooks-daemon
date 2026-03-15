@@ -456,7 +456,7 @@ class MarkdownOrganizationHandler(Handler):
             "Your plan content has been saved to the numbered folder above.",
             "The flat file write was blocked to prevent duplicate files.",
             "",
-            f"IMPORTANT: Rename the plan folder to something semantic:",
+            "IMPORTANT: Rename the plan folder to something semantic:",
             f"  git mv {self._track_plans_in_project}/{folder_name} "
             f"{self._track_plans_in_project}/{next_number}-<descriptive-name>",
             "",
