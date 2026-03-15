@@ -682,11 +682,10 @@ class TestMarkdownOrganizationHandlerIntegration:
 
         result = router.route(EventType.PRE_TOOL_USE, hook_input)
 
-        # Verify interception returns ALLOW (flat file written for ExitPlanMode)
-        assert result.result.decision == Decision.ALLOW
-        assert result.result.context is not None
-        context_text = " ".join(result.result.context)
-        assert "plan folder created" in context_text.lower()
+        # Verify interception returns DENY (flat file blocked to prevent duplicate)
+        assert result.result.decision == Decision.DENY
+        assert result.result.reason is not None
+        assert "REDIRECTED" in result.result.reason
 
         # Verify numbered plan folder was created alongside
         plan_folders = [d for d in plan_dir.iterdir() if d.is_dir()]

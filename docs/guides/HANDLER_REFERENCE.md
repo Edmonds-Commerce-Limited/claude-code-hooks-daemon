@@ -218,6 +218,12 @@ handlers:
 npm test | tail -n 20
 ```
 
+**Options:**
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `command_redirection` | bool | `true` | When enabled, executes the corrected command (without pipe) automatically and saves output to a file, so Claude gets both the educational message and the result in one turn. |
+
 **Config example:**
 ```yaml
 handlers:
@@ -225,6 +231,8 @@ handlers:
     pipe_blocker:
       enabled: true
       priority: 17
+      options:
+        command_redirection: true
 ```
 
 ---
@@ -612,6 +620,12 @@ handlers:
 gh issue view 123
 ```
 
+**Options:**
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `command_redirection` | bool | `true` | When enabled, executes the corrected command (with `--comments`) automatically and saves output to a file, so Claude gets both the educational message and the result in one turn. |
+
 **Config example:**
 ```yaml
 handlers:
@@ -619,6 +633,8 @@ handlers:
     gh_issue_comments:
       enabled: true
       priority: 40
+      options:
+        command_redirection: true
 ```
 
 ---
@@ -749,6 +765,12 @@ handlers:
 
 **Description:** Enforces the use of `llm:` prefixed npm script commands and blocks direct `npx` tool usage. Maps common npm commands to their `llm:` equivalents (e.g., `npm run build` should be `npm run llm:build`).
 
+**Options:**
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `command_redirection` | bool | `true` | When enabled, executes the corrected `llm:` command automatically and saves output to a file, so Claude gets both the educational message and the result in one turn. Does not apply to piped commands. |
+
 **Config example:**
 ```yaml
 handlers:
@@ -756,6 +778,8 @@ handlers:
     npm_command:
       enabled: true
       priority: 49
+      options:
+        command_redirection: true
 ```
 
 ---
