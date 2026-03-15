@@ -383,9 +383,7 @@ class TestGhIssueCommentsHandler:
         joined_context = "\n".join(result.context)
         assert "COMMAND REDIRECTED" not in joined_context
 
-    def test_handle_redirection_failure_falls_back(
-        self, handler: GhIssueCommentsHandler
-    ) -> None:
+    def test_handle_redirection_failure_falls_back(self, handler: GhIssueCommentsHandler) -> None:
         """When redirection execution fails, should fall back to block-only."""
         hook_input = {
             "tool_name": "Bash",

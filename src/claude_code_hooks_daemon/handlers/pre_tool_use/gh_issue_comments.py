@@ -146,9 +146,7 @@ class GhIssueCommentsHandler(Handler):
             redirected_args = self.get_redirected_command(hook_input)
             if redirected_args:
                 try:
-                    output_dir = (
-                        ProjectContext.daemon_untracked_dir() / COMMAND_REDIRECTION_SUBDIR
-                    )
+                    output_dir = ProjectContext.daemon_untracked_dir() / COMMAND_REDIRECTION_SUBDIR
                     result = execute_and_save(
                         command=redirected_args,
                         output_dir=output_dir,
@@ -156,9 +154,7 @@ class GhIssueCommentsHandler(Handler):
                     )
                     context = format_redirection_context(result)
                 except (OSError, RuntimeError) as e:
-                    logger.warning(
-                        "Command redirection failed for gh_issue_comments: %s", e
-                    )
+                    logger.warning("Command redirection failed for gh_issue_comments: %s", e)
 
         return HookResult(decision=Decision.DENY, reason=reason, context=context)
 

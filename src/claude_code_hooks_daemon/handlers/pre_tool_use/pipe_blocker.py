@@ -16,7 +16,13 @@ import shlex
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult, ProjectContext, get_data_layer
+from claude_code_hooks_daemon.core import (
+    Decision,
+    Handler,
+    HookResult,
+    ProjectContext,
+    get_data_layer,
+)
 from claude_code_hooks_daemon.core.command_redirection import (
     COMMAND_REDIRECTION_SUBDIR,
     execute_and_save,
@@ -352,9 +358,7 @@ class PipeBlockerHandler(Handler):
             redirected_args = self.get_redirected_command(hook_input)
             if redirected_args:
                 try:
-                    output_dir = (
-                        ProjectContext.daemon_untracked_dir() / COMMAND_REDIRECTION_SUBDIR
-                    )
+                    output_dir = ProjectContext.daemon_untracked_dir() / COMMAND_REDIRECTION_SUBDIR
                     result = execute_and_save(
                         command=redirected_args,
                         output_dir=output_dir,
@@ -362,9 +366,7 @@ class PipeBlockerHandler(Handler):
                     )
                     context = format_redirection_context(result)
                 except (OSError, RuntimeError) as e:
-                    logger.warning(
-                        "Command redirection failed for pipe_blocker: %s", e
-                    )
+                    logger.warning("Command redirection failed for pipe_blocker: %s", e)
 
         return HookResult(decision=Decision.DENY, reason=reason, context=context)
 
