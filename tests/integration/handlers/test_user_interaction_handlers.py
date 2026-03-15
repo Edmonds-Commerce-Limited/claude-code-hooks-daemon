@@ -34,22 +34,32 @@ class TestAutoApproveReadsHandler:
         return AutoApproveReadsHandler()
 
     def test_approves_file_read(self, handler: Any) -> None:
-        hook_input = make_permission_request_input("file_read", resource="/workspace/src/main.py")
+        hook_input = make_permission_request_input("Read", resource="/workspace/src/main.py")
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW
+
+    def test_approves_glob(self, handler: Any) -> None:
+        hook_input = make_permission_request_input("Glob")
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW
+
+    def test_approves_grep(self, handler: Any) -> None:
+        hook_input = make_permission_request_input("Grep")
         assert handler.matches(hook_input) is True
         result = handler.handle(hook_input)
         assert result.decision == Decision.ALLOW
 
     def test_denies_file_write(self, handler: Any) -> None:
-        hook_input = make_permission_request_input("file_write", resource="/workspace/src/main.py")
-        assert handler.matches(hook_input) is True
-        result = handler.handle(hook_input)
-        assert result.decision == Decision.DENY
-
-    def test_ignores_other_permission_types(self, handler: Any) -> None:
-        hook_input = make_permission_request_input("network_access", resource="https://example.com")
+        hook_input = make_permission_request_input("Write", resource="/workspace/src/main.py")
         assert handler.matches(hook_input) is False
 
-    def test_ignores_empty_permission_type(self, handler: Any) -> None:
+    def test_ignores_bash(self, handler: Any) -> None:
+        hook_input = make_permission_request_input("Bash")
+        assert handler.matches(hook_input) is False
+
+    def test_ignores_empty_tool_name(self, handler: Any) -> None:
         hook_input = make_permission_request_input("")
         assert handler.matches(hook_input) is False
 

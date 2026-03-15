@@ -135,6 +135,7 @@ class TestDogfoodingConfiguration:
         opt_in_handlers = frozenset(
             {
                 "validate_instruction_content",  # False positives on this project's own CLAUDE.md/README.md
+                "ask_user_question_blocker",  # Optional unattended mode — disabled by default
             }
         )
 

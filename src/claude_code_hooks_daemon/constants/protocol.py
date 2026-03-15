@@ -72,6 +72,10 @@ class HookInputField:
 
     # Permission fields
     PERMISSION_REQUEST = "permission_request"
+    PERMISSION_SUGGESTIONS = "permission_suggestions"
+    # DEPRECATED: permission_type does not exist in real PermissionRequest events.
+    # Real events use permission_suggestions array + tool_name.
+    # Kept for backward compatibility only — do NOT use in new code.
     PERMISSION_TYPE = "permission_type"
 
 

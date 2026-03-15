@@ -75,6 +75,10 @@ handlers:
       enabled: false       # Enable for daemon development projects
       priority: 22
 
+    ask_user_question_blocker: # Blocks AskUserQuestion so Claude works autonomously (for unattended workflows)
+      enabled: false           # Enable for fully unattended operation
+      priority: 23
+
     worktree_file_copy:    # Prevents copying files between git worktrees
       enabled: true
       priority: 16
