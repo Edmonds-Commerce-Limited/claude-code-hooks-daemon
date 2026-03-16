@@ -1126,6 +1126,12 @@ These handlers run when Claude stops generating a response.
 
 **Description:** Enables true auto-continue without user input. Reads the conversation transcript to detect if Claude's last message was a confirmation question ("Would you like me to continue?", "Should I proceed?", etc.) and blocks the stop with an auto-continue instruction. Includes loop prevention via `stop_hook_active` check.
 
+**Options:**
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `continue_on_errors` | `bool` | `true` | When true, auto-continues even when Claude's message contains error patterns ("error:", "failed:"). Prevents sessions blocking until user returns. Set to `false` to restore original behaviour of stopping on errors. |
+
 **Config example:**
 ```yaml
 handlers:
@@ -1133,6 +1139,8 @@ handlers:
     auto_continue_stop:
       enabled: true
       priority: 10
+      options:
+        continue_on_errors: true  # default: auto-continue on errors too
 ```
 
 ---
