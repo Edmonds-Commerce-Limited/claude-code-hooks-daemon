@@ -416,6 +416,13 @@ class HandlerID:
         display_name="optimal-config-checker",
     )
 
+    # Git filemode checker (SessionStart handler)
+    GIT_FILEMODE_CHECKER = HandlerIDMeta(
+        class_name="GitFilemodeCheckerHandler",
+        config_key="git_filemode_checker",
+        display_name="git-filemode-checker",
+    )
+
     # Lint on edit (PostToolUse handler)
     LINT_ON_EDIT = HandlerIDMeta(
         class_name="LintOnEditHandler",
@@ -510,6 +517,7 @@ HandlerKey = Literal[
     "dismissive_language_nitpick",
     "hedging_language_nitpick",
     "optimal_config_checker",
+    "git_filemode_checker",
     "bash_error_detector",
     "web_search_year",
     "suggest_status_line",

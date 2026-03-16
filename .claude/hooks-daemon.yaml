@@ -249,6 +249,10 @@ handlers:
       enabled: true
       priority: 52
 
+    git_filemode_checker:  # Warns when git core.fileMode=false (hooks lose exec perms)
+      enabled: true
+      priority: 53
+
     suggest_status_line:  # Suggests daemon-based status line setup
       enabled: true      # Enable to suggest status line configuration
       priority: 55

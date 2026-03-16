@@ -210,6 +210,7 @@ class ConfigTemplate:
             "    workflow_state_restoration: {enabled: true, priority: 50}  # Restore workflow state after compaction\n"
             "    yolo_container_detection: {enabled: true, priority: 40}  # Detect YOLO container environments\n"
             "    optimal_config_checker: {enabled: true, priority: 52}  # Check Claude Code env for optimal settings\n"
+            "    git_filemode_checker: {enabled: true, priority: 53}  # Warn when git core.fileMode=false\n"
             "    suggest_status_line: {enabled: true, priority: 55}  # Suggest status line setup\n"
             "    version_check: {enabled: true, priority: 55}  # Check for daemon updates on new sessions\n"
             "\n"
