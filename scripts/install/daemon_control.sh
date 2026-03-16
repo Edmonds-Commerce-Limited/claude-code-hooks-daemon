@@ -80,6 +80,7 @@ start_daemon_safe() {
     fi
 
     print_verbose "Starting daemon..."
+    print_info "Starting daemon (loading handlers, this may take a moment)..."
 
     # Capture daemon output so errors are visible (Bug 00088-2)
     local daemon_output

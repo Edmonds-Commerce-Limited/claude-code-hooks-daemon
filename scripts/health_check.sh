@@ -151,16 +151,10 @@ fi
 #
 echo -n "5. Daemon installation... "
 HOOKS_DAEMON_DIR="$PROJECT_ROOT/.claude/hooks-daemon"
-if [[ -f "$PROJECT_ROOT/.claude/hooks-daemon.env" ]]; then
-    # Self-install mode - daemon code should be at project root
-    if [[ -d "$PROJECT_ROOT/src/claude_code_hooks_daemon" ]]; then
-        echo -e "${GREEN}✓ Self-install mode${NC}"
-    else
-        echo -e "${RED}✗ Self-install mode but daemon source not found${NC}"
-        FAILED=1
-    fi
-elif [[ -f "$CONFIG_FILE" ]]; then
-    # Check if self_install_mode is set
+
+# Detect self-install mode from YAML config (not .env file presence)
+SELF_INSTALL="false"
+if [[ -f "$CONFIG_FILE" ]]; then
     SELF_INSTALL=$(python3 -c "
 import yaml
 with open('$CONFIG_FILE') as f:
@@ -168,27 +162,21 @@ with open('$CONFIG_FILE') as f:
 daemon = config.get('daemon', {})
 print('true' if daemon.get('self_install_mode', False) else 'false')
 " 2>/dev/null || echo "false")
+fi
 
-    if [[ "$SELF_INSTALL" == "true" ]]; then
-        if [[ -d "$PROJECT_ROOT/src/claude_code_hooks_daemon" ]]; then
-            echo -e "${GREEN}✓ Self-install mode (config)${NC}"
-        else
-            echo -e "${RED}✗ Self-install mode but daemon source not found${NC}"
-            FAILED=1
-        fi
-    elif [[ -d "$HOOKS_DAEMON_DIR" ]]; then
-        echo -e "${GREEN}✓ Normal installation${NC}"
+if [[ "$SELF_INSTALL" == "true" ]]; then
+    # Self-install mode - daemon code should be at project root
+    if [[ -d "$PROJECT_ROOT/src/claude_code_hooks_daemon" ]]; then
+        echo -e "${GREEN}✓ Self-install mode${NC}"
     else
-        echo -e "${RED}✗ Not found: $HOOKS_DAEMON_DIR${NC}"
+        echo -e "${RED}✗ Self-install mode but daemon source not found${NC}"
         FAILED=1
     fi
+elif [[ -d "$HOOKS_DAEMON_DIR" ]]; then
+    echo -e "${GREEN}✓ Normal installation${NC}"
 else
-    if [[ -d "$HOOKS_DAEMON_DIR" ]]; then
-        echo -e "${GREEN}✓ Normal installation${NC}"
-    else
-        echo -e "${RED}✗ Not found: $HOOKS_DAEMON_DIR${NC}"
-        FAILED=1
-    fi
+    echo -e "${RED}✗ Not found: $HOOKS_DAEMON_DIR${NC}"
+    FAILED=1
 fi
 
 #
