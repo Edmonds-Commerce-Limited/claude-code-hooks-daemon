@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.23.2] - 2026-03-16
+
+### Fixed
+
+- **Git handlers use `ProjectContext.project_root()` as cwd**: `GitFilemodeCheckerHandler` and `GitContextInjectorHandler` previously ran git subprocess calls without specifying a working directory. Because the daemon process runs from `/`, all git commands failed with "not a git repository" errors. Both handlers now use `ProjectContext.project_root()` as `cwd`, with fallback to the process working directory when `ProjectContext` is not yet initialised. Tests updated to mock `ProjectContext.project_root()` alongside `subprocess.run`.
+
+- **Shell script executable permissions**: Fixed missing executable bit on 7 shell scripts (`install/mode_guard.sh`, `install/test_helpers.sh`, `.claude/skills/mode/invoke.sh`, and four `skills/hooks-daemon/scripts/` scripts). Permissions updated in the git index via `git update-index --chmod=+x`.
+
 ## [2.23.1] - 2026-03-16
 
 ### Added
