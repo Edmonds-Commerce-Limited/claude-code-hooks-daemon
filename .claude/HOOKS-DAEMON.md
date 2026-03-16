@@ -1,6 +1,6 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-03-11 (v2.21.0) by `generate-docs`. Regenerate: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-docs`
+> Generated on 2026-03-16 (v2.23.0) by `generate-docs`. Regenerate: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-docs`
 
 ## Active Handlers
 
@@ -89,7 +89,7 @@
 | Priority | Handler | Behavior | Description |
 |----------|---------|----------|-------------|
 | 5 | hello_world_permission_request | NON-TERMINAL | Simple test handler that confirms PermissionRequest hook is working |
-| 10 | auto_approve_reads | TERMINAL | Auto-approve file_read permission requests |
+| 10 | auto_approve_reads | TERMINAL | Auto-approve read-only tool permission requests |
 
 ### Notification (2 handlers)
 
