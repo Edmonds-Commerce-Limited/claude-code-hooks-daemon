@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.23.1] - 2026-03-16
+
+### Added
+
+- **`GitFilemodeCheckerHandler`**: New SessionStart handler (priority 53, advisory) that warns loudly when `git config core.fileMode=false` is detected. Losing executable permissions on hook scripts after git operations (checkout, merge, rebase) is a common and silent failure mode — this handler surfaces the problem on session start for new sessions only (not resumes). 21 unit tests with full coverage.
+
+- **`git_force_executable` install step**: New step in `scripts/install/hooks_deploy.sh` that runs `git update-index --chmod=+x` on all tracked hook scripts during install and upgrade, ensuring hooks are committed as `100755` regardless of `core.fileMode` setting. Prevents the root cause of silent permission loss.
+
+- **`continue_on_errors` option for `auto_continue_stop` handler**: New boolean option (default: `true`) that controls whether the handler auto-continues even when Claude's stop message contains error patterns like `"error:"` or `"failed:"`. When enabled (default), sessions no longer block waiting for user intervention after a Bash command failure — the daemon auto-continues so Claude can attempt recovery. Configurable via `.claude/hooks-daemon.yaml` under `auto_continue_stop.options.continue_on_errors`.
+
+### Changed
+
+- **`auto_continue_stop` advisory reason improved**: The reason message now explicitly guides Claude toward truly stuck scenarios (blocked on user input, ambiguous requirements, missing credentials) rather than vague continuation prompts. Reduces unnecessary interruptions.
+
+- **Handler reference documentation**: `docs/guides/HANDLER_REFERENCE.md` updated with `continue_on_errors` option entry for `auto_continue_stop`.
+
 ## [2.23.0] - 2026-03-15
 
 ### Added
