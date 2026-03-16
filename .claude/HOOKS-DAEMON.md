@@ -1,6 +1,6 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-03-16 (v2.23.0) by `generate-docs`. Regenerate: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-docs`
+> Generated on 2026-03-16 (v2.23.1) by `generate-docs`. Regenerate: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-docs`
 
 ## Active Handlers
 
@@ -49,13 +49,14 @@
 | 20 | validate_eslint_on_write | ADVISORY | Run ESLint validation on TypeScript/TSX files after write |
 | 25 | lint_on_edit | NON-TERMINAL | Run language-aware lint validation on files after Write/Edit |
 
-### SessionStart (6 handlers)
+### SessionStart (7 handlers)
 
 | Priority | Handler | Behavior | Description |
 |----------|---------|----------|-------------|
 | 5 | hello_world_session_start | NON-TERMINAL | Simple test handler that confirms SessionStart hook is working |
 | 10 | yolo_container_detection | ADVISORY | Detects YOLO container environments using multi-tier confidence scoring |
 | 52 | optimal_config_checker | ADVISORY | Check Claude Code environment for optimal configuration on session start |
+| 53 | git_filemode_checker | ADVISORY | Warn when git core.fileMode=false is detected |
 | 55 | suggest_status_line | ADVISORY | Suggest setting up daemon-based statusline on session start |
 | 56 | version_check | ADVISORY | Check daemon version against latest GitHub release on new sessions |
 | 60 | workflow_state_restoration | ADVISORY | Restore workflow state after compaction |

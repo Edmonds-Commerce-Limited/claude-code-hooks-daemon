@@ -198,6 +198,89 @@ set_hook_permissions() {
 }
 
 #
+# git_force_executable() - Force executable bit in git index
+#
+# Uses `git update-index --chmod=+x` to ensure hook scripts are stored
+# as 100755 in git's index, regardless of core.fileMode setting.
+# This ensures hooks survive checkout/merge/rebase operations.
+#
+# Args:
+#   $1 - project_root: Path to project root
+#
+# Returns:
+#   Exit code 0 on success (always succeeds - git index errors are non-fatal)
+#
+git_force_executable() {
+    local project_root="$1"
+
+    if [ -z "$project_root" ]; then
+        print_error "git_force_executable: project_root required"
+        return 1
+    fi
+
+    # Check we're in a git repository (stderr suppressed: expected to fail outside git repos)
+    if ! git -C "$project_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        print_verbose "Not a git repository, skipping git update-index"
+        return 0
+    fi
+
+    local hooks_dir="$project_root/.claude/hooks"
+    local init_script="$project_root/.claude/init.sh"
+    local forced_count=0
+
+    # Force executable on hook scripts
+    if [ -d "$hooks_dir" ]; then
+        local hook_files
+        hook_files=$(find "$hooks_dir" -maxdepth 1 -type f ! -name ".*")
+
+        for hook_file in $hook_files; do
+            local rel_path
+            # stderr suppressed: file may not be tracked by git (expected case)
+            rel_path=$(git -C "$project_root" ls-files --full-name "$hook_file" 2>/dev/null) || rel_path=""
+            if [ -n "$rel_path" ]; then
+                # stderr suppressed: update-index may fail if file not staged (expected case)
+                if git -C "$project_root" update-index --chmod=+x "$rel_path" 2>/dev/null; then
+                    forced_count=$((forced_count + 1))
+                else
+                    print_verbose "Could not force executable on $rel_path (file may not be staged)"
+                fi
+            fi
+        done
+    fi
+
+    # Force executable on init.sh (if tracked by git)
+    if [ -f "$init_script" ]; then
+        local init_rel
+        # stderr suppressed: file may not be tracked by git (expected case)
+        init_rel=$(git -C "$project_root" ls-files --full-name "$init_script" 2>/dev/null) || init_rel=""
+        if [ -n "$init_rel" ]; then
+            # stderr suppressed: update-index may fail if file not staged (expected case)
+            if git -C "$project_root" update-index --chmod=+x "$init_rel" 2>/dev/null; then
+                forced_count=$((forced_count + 1))
+            else
+                print_verbose "Could not force executable on init.sh (file may not be staged)"
+            fi
+        fi
+    fi
+
+    if [ "$forced_count" -gt 0 ]; then
+        print_info "Forced executable bit in git index for $forced_count files"
+    fi
+
+    # Detect core.fileMode=false and warn
+    local filemode
+    # stderr suppressed: git config may fail outside git repos (expected case)
+    filemode=$(git -C "$project_root" config --local core.fileMode 2>/dev/null) || filemode=""
+    if [ "$filemode" = "false" ]; then
+        print_warning "git core.fileMode=false detected - hook permissions may not persist across git operations"
+        print_info "Hook scripts have been force-marked as executable in git's index (git update-index --chmod=+x)"
+        print_info "Strongly recommended: git config core.fileMode true"
+    fi
+
+    return 0
+}
+
+#
 # deploy_all_hooks() - Complete hook deployment workflow
 #
 # Deploys all hooks, init script, and sets permissions.
@@ -240,6 +323,9 @@ deploy_all_hooks() {
             print_warning "Failed to set hook permissions (may still work)"
         fi
     fi
+
+    # Force executable bit in git index (both install modes benefit from this)
+    git_force_executable "$project_root"
 
     print_success "Hooks deployed successfully"
     return 0
