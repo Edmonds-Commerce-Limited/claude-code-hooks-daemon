@@ -157,7 +157,8 @@ class AutoContinueStopHandler(Handler):
             "AUTO-CONTINUE: Yes, proceed with all remaining work. "
             "Do not ask for confirmation again. "
             "If a command failed, analyse the error, fix the root cause, and retry. "
-            "Continue automatically without asking for permission."
+            "If you are truly stuck and cannot make progress, you may stop and wait "
+            "for human guidance. Otherwise, continue automatically without asking."
         )
         return HookResult(decision=Decision.DENY, reason=reason)
 
