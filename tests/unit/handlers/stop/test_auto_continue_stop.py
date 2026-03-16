@@ -339,10 +339,10 @@ class TestAutoContinueStopHandlerMatchesFalse:
         }
         assert handler.matches(hook_input) is False
 
-    def test_matches_false_when_last_message_is_error_report(
+    def test_matches_true_when_last_message_is_error_report_default(
         self, handler: AutoContinueStopHandler, mock_transcript_path: Path
     ) -> None:
-        """Should return False when last message is an error report, not a confirmation."""
+        """With default continue_on_errors=True, error reports with questions DO match."""
         self._write_transcript(
             mock_transcript_path,
             "Error: The test failed. What would you like me to do",
@@ -351,9 +351,8 @@ class TestAutoContinueStopHandlerMatchesFalse:
             "transcript_path": str(mock_transcript_path),
             "stop_hook_active": False,
         }
-        # This should NOT match because it's asking about error handling,
-        # not asking for continuation permission
-        assert handler.matches(hook_input) is False
+        # With continue_on_errors=True (default), this SHOULD match
+        assert handler.matches(hook_input) is True
 
     def test_matches_false_when_question_not_about_continuation(
         self, handler: AutoContinueStopHandler, mock_transcript_path: Path
@@ -608,6 +607,209 @@ class TestAutoContinueStopHandlerAskUserQuestion:
                                     "type": "tool_use",
                                     "name": "AskUserQuestion",
                                     "input": {"question": "Deploy now?"},
+                                },
+                            ],
+                        },
+                    }
+                )
+                + "\n"
+            )
+        hook_input = {
+            "transcript_path": str(mock_transcript_path),
+            "stop_hook_active": False,
+        }
+        assert handler.matches(hook_input) is False
+
+
+class TestAutoContinueStopContinueOnErrors:
+    """Test continue_on_errors option - auto-continue even when error patterns detected.
+
+    When continue_on_errors is True (default), the handler should auto-continue
+    even when Claude's message contains error patterns like "error:", "failed:".
+    This prevents sessions from blocking until the user comes back and says "go".
+
+    When continue_on_errors is False, the handler preserves the original behavior
+    of NOT auto-continuing on error messages.
+    """
+
+    @pytest.fixture
+    def handler(self) -> AutoContinueStopHandler:
+        """Create handler instance (default: continue_on_errors=True)."""
+        return AutoContinueStopHandler()
+
+    @pytest.fixture
+    def handler_no_continue_on_errors(self) -> AutoContinueStopHandler:
+        """Create handler with continue_on_errors disabled."""
+        handler = AutoContinueStopHandler()
+        handler._continue_on_errors = False
+        return handler
+
+    @pytest.fixture
+    def mock_transcript_path(self, tmp_path: Path) -> Path:
+        """Create a temporary transcript file path."""
+        return tmp_path / "transcript.jsonl"
+
+    def _write_transcript(self, path: Path, assistant_text: str) -> None:
+        """Write a mock transcript with an assistant message."""
+        messages = [
+            {
+                "type": "message",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": assistant_text}],
+                },
+            }
+        ]
+        with path.open("w") as f:
+            for msg in messages:
+                f.write(json.dumps(msg) + "\n")
+
+    def test_default_continue_on_errors_is_true(self, handler: AutoContinueStopHandler) -> None:
+        """Default value of continue_on_errors should be True."""
+        assert getattr(handler, "_continue_on_errors", True) is True
+
+    def test_continue_on_errors_matches_error_with_confirmation(
+        self, handler: AutoContinueStopHandler, mock_transcript_path: Path
+    ) -> None:
+        """With continue_on_errors=True, should match even when error pattern present."""
+        self._write_transcript(
+            mock_transcript_path,
+            "Error: The test failed. Would you like me to continue with a different approach?",
+        )
+        hook_input = {
+            "transcript_path": str(mock_transcript_path),
+            "stop_hook_active": False,
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_continue_on_errors_matches_failed_with_should_i(
+        self, handler: AutoContinueStopHandler, mock_transcript_path: Path
+    ) -> None:
+        """With continue_on_errors=True, should match 'failed:' + 'should I proceed'."""
+        self._write_transcript(
+            mock_transcript_path,
+            "Failed: the build did not compile. Should I proceed with fixing the issue?",
+        )
+        hook_input = {
+            "transcript_path": str(mock_transcript_path),
+            "stop_hook_active": False,
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_continue_on_errors_matches_how_should_i_proceed(
+        self, handler: AutoContinueStopHandler, mock_transcript_path: Path
+    ) -> None:
+        """With continue_on_errors=True, should match 'how should I proceed' error pattern."""
+        self._write_transcript(
+            mock_transcript_path,
+            "The command exited with code 1. How should I proceed?",
+        )
+        hook_input = {
+            "transcript_path": str(mock_transcript_path),
+            "stop_hook_active": False,
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_continue_on_errors_matches_what_would_you_like(
+        self, handler: AutoContinueStopHandler, mock_transcript_path: Path
+    ) -> None:
+        """With continue_on_errors=True, should match 'what would you like me to do'."""
+        self._write_transcript(
+            mock_transcript_path,
+            "The test suite has 3 failures. What would you like me to do?",
+        )
+        hook_input = {
+            "transcript_path": str(mock_transcript_path),
+            "stop_hook_active": False,
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_disabled_continue_on_errors_blocks_on_error(
+        self, handler_no_continue_on_errors: AutoContinueStopHandler, mock_transcript_path: Path
+    ) -> None:
+        """With continue_on_errors=False, should NOT match when error pattern present."""
+        self._write_transcript(
+            mock_transcript_path,
+            "Error: The test failed. Would you like me to continue with a different approach?",
+        )
+        hook_input = {
+            "transcript_path": str(mock_transcript_path),
+            "stop_hook_active": False,
+        }
+        assert handler_no_continue_on_errors.matches(hook_input) is False
+
+    def test_disabled_continue_on_errors_blocks_on_failed(
+        self, handler_no_continue_on_errors: AutoContinueStopHandler, mock_transcript_path: Path
+    ) -> None:
+        """With continue_on_errors=False, should NOT match when failed pattern present."""
+        self._write_transcript(
+            mock_transcript_path,
+            "Failed: build broke. Should I proceed with fixing it?",
+        )
+        hook_input = {
+            "transcript_path": str(mock_transcript_path),
+            "stop_hook_active": False,
+        }
+        assert handler_no_continue_on_errors.matches(hook_input) is False
+
+    def test_continue_on_errors_still_requires_question_mark(
+        self, handler: AutoContinueStopHandler, mock_transcript_path: Path
+    ) -> None:
+        """Even with continue_on_errors=True, message must contain a question mark."""
+        self._write_transcript(
+            mock_transcript_path,
+            "Error: The test failed. I will try a different approach.",
+        )
+        hook_input = {
+            "transcript_path": str(mock_transcript_path),
+            "stop_hook_active": False,
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_continue_on_errors_still_checks_stop_hook_active(
+        self, handler: AutoContinueStopHandler, mock_transcript_path: Path
+    ) -> None:
+        """Even with continue_on_errors=True, stop_hook_active must prevent infinite loops."""
+        self._write_transcript(
+            mock_transcript_path,
+            "Error: something broke. Should I proceed?",
+        )
+        hook_input = {
+            "transcript_path": str(mock_transcript_path),
+            "stop_hook_active": True,
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_continue_on_errors_handle_gives_diagnostic_instruction(
+        self, handler: AutoContinueStopHandler, mock_transcript_path: Path
+    ) -> None:
+        """When auto-continuing on errors, handle() should instruct to diagnose and fix."""
+        # Simulate that the handler matched on an error message
+        hook_input: dict[str, Any] = {}
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+
+    def test_continue_on_errors_still_respects_ask_user_question(
+        self, handler: AutoContinueStopHandler, mock_transcript_path: Path
+    ) -> None:
+        """Even with continue_on_errors=True, AskUserQuestion must still block."""
+        with mock_transcript_path.open("w") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "type": "message",
+                        "message": {
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": "Error: test failed. Would you like me to continue?",
+                                },
+                                {
+                                    "type": "tool_use",
+                                    "name": "AskUserQuestion",
+                                    "input": {"question": "What to do?"},
                                 },
                             ],
                         },

@@ -53,7 +53,16 @@ class AutoContinueStopHandler(Handler):
         r"i can (?:continue|proceed) with",
     ]
 
-    # Patterns that indicate an error or problem - should NOT auto-continue
+    # Error-question patterns — Claude asking what to do about an error.
+    # Only matched when continue_on_errors is True.
+    ERROR_QUESTION_PATTERNS: ClassVar[list[str]] = [
+        r"what would you like me to do",
+        r"how should I (?:handle|proceed|fix)",
+        r"what do you (?:think|suggest|prefer)",
+    ]
+
+    # Patterns that indicate an error or problem — used to gate auto-continue
+    # when continue_on_errors is False.
     ERROR_PATTERNS: ClassVar[list[str]] = [
         r"error:",
         r"failed:",
@@ -105,13 +114,22 @@ class AutoContinueStopHandler(Handler):
             logger.debug("Last assistant message has no question mark - not a confirmation")
             return False
 
-        # Check for error patterns - don't auto-continue on errors
-        if self._contains_error_pattern(last_message):
+        # Check for error patterns — behavior depends on continue_on_errors option
+        continue_on_errors = getattr(self, "_continue_on_errors", True)
+        has_error = self._contains_error_pattern(last_message)
+
+        if has_error and not continue_on_errors:
             logger.debug("Last message contains error pattern - not auto-continuing")
             return False
 
         # Check if it's a confirmation question
         is_confirmation = self._contains_confirmation_pattern(last_message)
+
+        # When continue_on_errors is True and message has errors,
+        # also check error-question patterns (e.g. "what would you like me to do?")
+        if not is_confirmation and has_error and continue_on_errors:
+            is_confirmation = self._contains_error_question_pattern(last_message)
+
         if not is_confirmation:
             logger.debug("Question found but no confirmation pattern matched")
             return False
@@ -138,6 +156,7 @@ class AutoContinueStopHandler(Handler):
         reason = (
             "AUTO-CONTINUE: Yes, proceed with all remaining work. "
             "Do not ask for confirmation again. "
+            "If a command failed, analyse the error, fix the root cause, and retry. "
             "Continue automatically without asking for permission."
         )
         return HookResult(decision=Decision.DENY, reason=reason)
@@ -168,6 +187,25 @@ class AutoContinueStopHandler(Handler):
         """
         text_lower = text.lower()
         return any(re.search(pattern, text_lower, re.IGNORECASE) for pattern in self.ERROR_PATTERNS)
+
+    def _contains_error_question_pattern(self, text: str) -> bool:
+        """Check if text contains an error-question pattern.
+
+        These are patterns where Claude is asking how to handle an error,
+        e.g. "what would you like me to do?". Only used when continue_on_errors
+        is True to auto-continue through error recovery.
+
+        Args:
+            text: Text to check
+
+        Returns:
+            True if text contains an error-question pattern
+        """
+        text_lower = text.lower()
+        return any(
+            re.search(pattern, text_lower, re.IGNORECASE)
+            for pattern in self.ERROR_QUESTION_PATTERNS
+        )
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for this handler."""

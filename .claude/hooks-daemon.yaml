@@ -320,6 +320,8 @@ handlers:
     auto_continue_stop:  # Auto-continues after stop events based on criteria
       enabled: true
       priority: 10
+      options:
+        continue_on_errors: true
 
     hedging_language_detector:  # Detects guessing language (should probably, IIRC, I believe, etc)
       enabled: true
