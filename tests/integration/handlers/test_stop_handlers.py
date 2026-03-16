@@ -103,7 +103,33 @@ class TestAutoContinueStopHandler:
         )
         assert handler.matches(hook_input) is False
 
-    def test_ignores_error_questions(self, handler: Any, tmp_path: Any) -> None:
+    def test_matches_error_questions_with_default_continue_on_errors(
+        self, handler: Any, tmp_path: Any
+    ) -> None:
+        """With default continue_on_errors=True, error questions SHOULD match."""
+        transcript = tmp_path / "transcript.jsonl"
+        message = {
+            "type": "message",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": "Error: build failed. What would you like me to do?"}
+                ],
+            },
+        }
+        transcript.write_text(json.dumps(message) + "\n")
+
+        hook_input = make_stop_input(
+            stop_hook_active=False,
+            transcript_path=str(transcript),
+        )
+        assert handler.matches(hook_input) is True
+
+    def test_ignores_error_questions_when_continue_on_errors_false(
+        self, handler: Any, tmp_path: Any
+    ) -> None:
+        """With continue_on_errors=False, error questions should NOT match."""
+        handler._continue_on_errors = False
         transcript = tmp_path / "transcript.jsonl"
         message = {
             "type": "message",

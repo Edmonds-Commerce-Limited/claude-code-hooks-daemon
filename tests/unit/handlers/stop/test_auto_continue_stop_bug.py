@@ -109,11 +109,11 @@ class TestAutoContinueStopBug:
                 handler.matches(hook_input) is True
             ), f"Handler should match '{message_text}' but didn't"
 
-    def test_should_not_match_error_patterns(self, tmp_path: Path) -> None:
-        """Verify handler correctly rejects error patterns (not a bug)."""
+    def test_error_patterns_match_with_default_continue_on_errors(self, tmp_path: Path) -> None:
+        """With default continue_on_errors=True, error+question patterns SHOULD match."""
         handler = AutoContinueStopHandler()
 
-        # These should NOT match (contain error patterns)
+        # These SHOULD match with continue_on_errors=True (default)
         error_messages = [
             "Error: something failed. Should I proceed?",
             "Failed: test didn't pass. Should I continue?",
@@ -140,7 +140,42 @@ class TestAutoContinueStopBug:
                 "stop_hook_active": False,
             }
 
-            # Error patterns should NOT match
+            # Error patterns SHOULD match with continue_on_errors=True
+            assert (
+                handler.matches(hook_input) is True
+            ), f"Handler should match error pattern '{message_text}' with continue_on_errors=True"
+
+    def test_error_patterns_blocked_with_continue_on_errors_false(self, tmp_path: Path) -> None:
+        """With continue_on_errors=False, error patterns should NOT match."""
+        handler = AutoContinueStopHandler()
+        handler._continue_on_errors = False
+
+        error_messages = [
+            "Error: something failed. Should I proceed?",
+            "Failed: test didn't pass. Should I continue?",
+            "What would you like me to do next?",
+            "How should I handle this error?",
+        ]
+
+        for message_text in error_messages:
+            transcript_file = tmp_path / f"transcript_{hash(message_text)}.jsonl"
+            assistant_message = {
+                "type": "message",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": message_text}],
+                },
+            }
+
+            with transcript_file.open("w") as f:
+                json.dump(assistant_message, f)
+                f.write("\n")
+
+            hook_input = {
+                "transcript_path": str(transcript_file),
+                "stop_hook_active": False,
+            }
+
             assert (
                 handler.matches(hook_input) is False
-            ), f"Handler should NOT match error pattern '{message_text}' but did"
+            ), f"Handler should NOT match '{message_text}' with continue_on_errors=False"
