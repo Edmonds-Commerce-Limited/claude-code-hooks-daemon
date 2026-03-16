@@ -148,7 +148,13 @@ class TestGitFilemodeCheckerHandle:
 
     def test_filemode_false_warns(self, handler: Any) -> None:
         """When core.fileMode=false, handler returns warning context."""
-        with patch("subprocess.run", return_value=self._mock_git_result("false\n")):
+        with (
+            patch(
+                "claude_code_hooks_daemon.handlers.session_start.git_filemode_checker.ProjectContext.project_root",
+                return_value=Path("/fake/project"),
+            ),
+            patch("subprocess.run", return_value=self._mock_git_result("false\n")),
+        ):
             result = handler.handle(_session_start_input())
         assert result.decision == Decision.ALLOW
         context_str = "\n".join(result.context)
@@ -157,14 +163,26 @@ class TestGitFilemodeCheckerHandle:
 
     def test_filemode_false_recommends_enabling(self, handler: Any) -> None:
         """Warning includes recommendation to enable core.fileMode."""
-        with patch("subprocess.run", return_value=self._mock_git_result("false\n")):
+        with (
+            patch(
+                "claude_code_hooks_daemon.handlers.session_start.git_filemode_checker.ProjectContext.project_root",
+                return_value=Path("/fake/project"),
+            ),
+            patch("subprocess.run", return_value=self._mock_git_result("false\n")),
+        ):
             result = handler.handle(_session_start_input())
         context_str = "\n".join(result.context)
         assert "git config core.fileMode true" in context_str
 
     def test_filemode_false_warns_about_hooks(self, handler: Any) -> None:
         """Warning explains hooks may lose executable permissions."""
-        with patch("subprocess.run", return_value=self._mock_git_result("false\n")):
+        with (
+            patch(
+                "claude_code_hooks_daemon.handlers.session_start.git_filemode_checker.ProjectContext.project_root",
+                return_value=Path("/fake/project"),
+            ),
+            patch("subprocess.run", return_value=self._mock_git_result("false\n")),
+        ):
             result = handler.handle(_session_start_input())
         context_str = "\n".join(result.context).lower()
         assert "hook" in context_str
@@ -172,7 +190,13 @@ class TestGitFilemodeCheckerHandle:
 
     def test_filemode_true_no_warning(self, handler: Any) -> None:
         """When core.fileMode=true, handler returns OK context without warning."""
-        with patch("subprocess.run", return_value=self._mock_git_result("true\n")):
+        with (
+            patch(
+                "claude_code_hooks_daemon.handlers.session_start.git_filemode_checker.ProjectContext.project_root",
+                return_value=Path("/fake/project"),
+            ),
+            patch("subprocess.run", return_value=self._mock_git_result("true\n")),
+        ):
             result = handler.handle(_session_start_input())
         assert result.decision == Decision.ALLOW
         context_str = "\n".join(result.context)
@@ -181,25 +205,49 @@ class TestGitFilemodeCheckerHandle:
 
     def test_not_git_repo_no_error(self, handler: Any) -> None:
         """When not in a git repo, handler handles gracefully."""
-        with patch("subprocess.run", return_value=self._mock_git_result("", returncode=1)):
+        with (
+            patch(
+                "claude_code_hooks_daemon.handlers.session_start.git_filemode_checker.ProjectContext.project_root",
+                return_value=Path("/fake/project"),
+            ),
+            patch("subprocess.run", return_value=self._mock_git_result("", returncode=1)),
+        ):
             result = handler.handle(_session_start_input())
         assert result.decision == Decision.ALLOW
 
     def test_subprocess_timeout_handled(self, handler: Any) -> None:
         """When git command times out, handler handles gracefully."""
-        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("git", 5)):
+        with (
+            patch(
+                "claude_code_hooks_daemon.handlers.session_start.git_filemode_checker.ProjectContext.project_root",
+                return_value=Path("/fake/project"),
+            ),
+            patch("subprocess.run", side_effect=subprocess.TimeoutExpired("git", 5)),
+        ):
             result = handler.handle(_session_start_input())
         assert result.decision == Decision.ALLOW
 
     def test_subprocess_oserror_handled(self, handler: Any) -> None:
         """When git binary not found, handler handles gracefully."""
-        with patch("subprocess.run", side_effect=OSError("No such file")):
+        with (
+            patch(
+                "claude_code_hooks_daemon.handlers.session_start.git_filemode_checker.ProjectContext.project_root",
+                return_value=Path("/fake/project"),
+            ),
+            patch("subprocess.run", side_effect=OSError("No such file")),
+        ):
             result = handler.handle(_session_start_input())
         assert result.decision == Decision.ALLOW
 
     def test_filemode_not_set_returns_ok(self, handler: Any) -> None:
         """When core.fileMode is not explicitly set, returns OK."""
-        with patch("subprocess.run", return_value=self._mock_git_result("", returncode=1)):
+        with (
+            patch(
+                "claude_code_hooks_daemon.handlers.session_start.git_filemode_checker.ProjectContext.project_root",
+                return_value=Path("/fake/project"),
+            ),
+            patch("subprocess.run", return_value=self._mock_git_result("", returncode=1)),
+        ):
             result = handler.handle(_session_start_input())
         assert result.decision == Decision.ALLOW
         # Should not contain a WARNING about fileMode=false
