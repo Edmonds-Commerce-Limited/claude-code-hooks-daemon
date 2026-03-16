@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.23.3] - 2026-03-16
+
+### Fixed
+
+- **Health check self-install false positive**: `scripts/health_check.sh` previously used the presence of a `.env` file as a proxy for self-install mode detection. This was incorrect — normal installations can also have a `hooks-daemon.env` file, causing false-positive failures. The script now reads `self_install_mode` directly from the YAML config, matching the logic already used in `upgrade.sh`.
+
+- **Daemon start progress output**: `scripts/install/daemon_control.sh` now emits a progress message before the blocking daemon start call. Previously, callers (such as the upgrade script) would see no output during handler loading, making the script appear to hang. The new message makes it clear the daemon is starting and may take a moment.
+
 ## [2.23.2] - 2026-03-16
 
 ### Fixed
