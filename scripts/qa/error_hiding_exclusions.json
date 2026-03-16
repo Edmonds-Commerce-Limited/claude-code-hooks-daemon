@@ -106,9 +106,9 @@
     },
     {
       "file": "handlers/session_start/git_filemode_checker.py",
-      "lines": [80, 94, 98],
+      "lines": [81, 88, 103],
       "rule": "return-none-on-error",
-      "reason": "Git filemode checker: returns None when not in a git repo or git config query fails. Caller handles None explicitly by showing 'Not in a git repository or unable to check'. Advisory handler - failure should not break session start."
+      "reason": "Git filemode checker: returns None when ProjectContext not initialized or not in a git repo or git config query fails. Caller handles None explicitly by showing 'Not in a git repository or unable to check'. Advisory handler - failure should not break session start."
     },
     {
       "file": "handlers/session_start/version_check.py",

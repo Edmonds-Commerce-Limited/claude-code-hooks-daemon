@@ -5,6 +5,7 @@ from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority, Timeout
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 
 
 class GitContextInjectorHandler(Handler):
@@ -49,12 +50,20 @@ class GitContextInjectorHandler(Handler):
             HookResult with git status context or silent allow if git unavailable
         """
         try:
+            project_root: str | None = str(ProjectContext.project_root())
+        except RuntimeError:
+            # ProjectContext not initialized (e.g. running without daemon) - use cwd as fallback
+            project_root = None
+
+        try:
             # Run git status with short timeout
+            # cwd from ProjectContext (authoritative project root), or cwd fallback
             result = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
                 ["git", "status"],
                 capture_output=True,
                 text=True,
                 timeout=Timeout.GIT_CONTEXT,
+                cwd=project_root,
                 check=False,
             )
 

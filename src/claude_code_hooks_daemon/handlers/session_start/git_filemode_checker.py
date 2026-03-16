@@ -18,6 +18,7 @@ from claude_code_hooks_daemon.constants import (
     Timeout,
 )
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 
 logger = logging.getLogger(__name__)
 
@@ -78,16 +79,25 @@ class GitFilemodeCheckerHandler(Handler):
             "true", "false", or None if not in a git repo or error
         """
         try:
+            project_root: Path | None = ProjectContext.project_root()
+        except RuntimeError:
+            # ProjectContext not initialized (e.g. running without daemon) - use cwd fallback
+            logger.debug("ProjectContext not initialized, using cwd for git fileMode check")
+            project_root = None
+
+        try:
             # SECURITY: This subprocess call is safe because:
             # - Command is hardcoded: "git"
             # - All arguments are hardcoded (no user input)
             # - No shell=True (prevents command injection)
             # - Timeout prevents hanging
+            # - cwd from ProjectContext (authoritative project root)
             result = subprocess.run(  # nosec B603 B607
                 [_GIT_COMMAND, "config", "--local", _GIT_CONFIG_KEY],
                 capture_output=True,
                 text=True,
                 timeout=Timeout.VERSION_CHECK,
+                cwd=str(project_root) if project_root else None,
                 check=False,
             )
             if result.returncode != 0:
