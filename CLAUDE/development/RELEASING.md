@@ -204,6 +204,7 @@ After the Release Agent completes, **main Claude** (not the agent) invokes an ad
 
 **Review Scope (Documentation Only):**
 - ✅ All version numbers consistent across files
+- ✅ README.md stats updated (test count badge + body, handler count, event type count)
 - ✅ Changelog entries accurate and categorized correctly (Added/Changed/Fixed/Removed)
 - ✅ Release notes comprehensive and grammatically correct
 - ✅ Technical descriptions accurate
