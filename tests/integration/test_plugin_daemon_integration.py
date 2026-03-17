@@ -738,11 +738,16 @@ plugins:
         # Daemon MUST crash if configured plugin can't be loaded
         assert result.returncode != 0, "Daemon must crash with missing plugin (FAIL FAST)"
 
-        # Verify error message mentions plugin loading failure
+        # Verify error message indicates daemon failed to start
+        # The parent process reports startup failure on stderr. The grandchild's
+        # detailed error (plugin loading) goes to /dev/null as part of proper
+        # daemonization — in-memory logs capture the detail instead.
         error_output = result.stderr.decode()
         assert (
-            "Failed to load plugin handler" in error_output or "RuntimeError" in error_output
-        ), "Error message should mention plugin loading failure"
+            "Failed to load plugin handler" in error_output
+            or "RuntimeError" in error_output
+            or "failed to start" in error_output.lower()
+        ), "Error message should indicate daemon startup failure"
 
         # Verify daemon is NOT running
         status_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "status"]
