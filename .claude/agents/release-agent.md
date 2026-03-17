@@ -510,6 +510,7 @@ After detection and generation, output:
 
 **Automated Checks:**
 - [ ] All version numbers updated consistently
+- [ ] README.md stats updated (test count badge + body, handler count, event type count)
 - [ ] CHANGELOG.md follows Keep a Changelog format
 - [ ] Release notes are comprehensive
 - [ ] Code examples use correct version tags
