@@ -116,6 +116,16 @@ Updates version string in:
 4. `CLAUDE.md` ("Current Version" section)
 5. Any version-specific upgrade docs
 
+**Also updates README.md stats** (these go stale between releases):
+- **Test count badge** (line 4): Update from QA output (`pytest` result count)
+- **Test count in body**: Update "ships with N+ tests" text
+- **Handler count**: Count non-test handlers from `.claude/HOOKS-DAEMON.md`:
+  ```bash
+  grep '| [0-9]' .claude/HOOKS-DAEMON.md | grep -v hello_world | wc -l  # handler count
+  grep -c '^###' .claude/HOOKS-DAEMON.md                                  # event type count
+  ```
+  Update "N production handlers across M event types" in README body
+
 All updates use exact string replacement - no manual editing required.
 
 ### 4. Changelog Generation (Automated)
