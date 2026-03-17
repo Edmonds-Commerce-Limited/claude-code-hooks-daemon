@@ -78,7 +78,7 @@ UPGRADE_STARTED=false
 
 cleanup_on_failure() {
     local exit_code=$?
-    if [ $exit_code -ne 0 ] && [ "$UPGRADE_STARTED" = true ]; then
+    if [ "$exit_code" -ne 0 ] && [ "$UPGRADE_STARTED" = true ]; then
         echo ""
         print_warning "Upgrade failed - attempting rollback..."
 
@@ -423,8 +423,19 @@ except Exception as e:
 " 2>&1)
 
     if echo "$GUIDE_CHECK" | grep -q "GUIDES_FOUND"; then
-        # Interactive prompt (unless --skip-reading-confirmation flag)
-        if [[ "$*" != *"--skip-reading-confirmation"* ]]; then
+        # Skip interactive prompt when:
+        # - --skip-reading-confirmation flag is set, OR
+        # - stdin is not a terminal (non-interactive mode, e.g. run by CI or Claude Code agent)
+        #   Without this check, `read` hangs forever waiting for input that never arrives
+        if [[ "$*" == *"--skip-reading-confirmation"* ]] || [ ! -t 0 ]; then
+            if [ ! -t 0 ]; then
+                print_info "Non-interactive mode detected, skipping upgrade guide confirmation"
+            else
+                print_info "--skip-reading-confirmation flag detected, skipping guide confirmation"
+            fi
+            print_info "Review upgrade guides after upgrade: $DAEMON_DIR/CLAUDE/UPGRADES/"
+            rm -f /tmp/upgrade_guides_list.txt
+        else
             echo ""
             echo "Have you read all upgrade guides? (yes/no/show)"
             read -r -p "> " response
@@ -467,8 +478,6 @@ except Exception as e:
 
             # Cleanup temp file
             rm -f /tmp/upgrade_guides_list.txt
-        else
-            print_info "--skip-reading-confirmation flag detected, skipping guide confirmation"
         fi
     fi
 fi
