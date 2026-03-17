@@ -348,10 +348,16 @@ def cmd_start(args: argparse.Namespace) -> int:
     # Redirect stdin to /dev/null
     sys.stdin.close()
 
-    # Redirect stdout/stderr to /dev/null (server uses in-memory logging + stderr for errors)
-    devnull = Path("/dev/null").open("w")  # noqa: SIM115 - need to keep fd open for dup2
-    os.dup2(devnull.fileno(), sys.stdout.fileno())
-    # Keep stderr for error output (MemoryLogHandler sends ERROR+ to stderr)
+    # Redirect stdout AND stderr to /dev/null
+    # CRITICAL: Both must be redirected. If stderr is kept open, any caller using
+    # $() command substitution with 2>&1 (e.g. start_daemon_safe in daemon_control.sh)
+    # will block forever because the pipe stays open as long as the daemon runs.
+    # The in-memory log system (MemoryLogHandler) captures all errors — stderr is
+    # not needed for a properly daemonized background process.
+    devnull_fd = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(devnull_fd, sys.stdout.fileno())
+    os.dup2(devnull_fd, sys.stderr.fileno())
+    os.close(devnull_fd)
 
     # Now run the daemon server
     from claude_code_hooks_daemon.daemon.controller import DaemonController
