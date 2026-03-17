@@ -3,7 +3,7 @@
 ![Version](https://img.shields.io/badge/version-2.23.3-blue)
 ![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-7344%20passing-success)
+![Tests](https://img.shields.io/badge/tests-7344%2B%20passing-success)
 ![Coverage](https://img.shields.io/badge/coverage-95%25%20required-success)
 
 A better way to build and maintain Claude Code hooks.
@@ -12,24 +12,29 @@ A better way to build and maintain Claude Code hooks.
 
 ## Installation & Updates
 
-**IMPORTANT: If you are installing or updating this daemon, read these docs first:**
+> **For humans:** See [Installation](#installation) and [Updating](#updating) sections below for manual and AI-assisted instructions.
 
-- **INSTALL**: https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-INSTALL.md
-- **UPDATE**: https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-UPDATE.md
+**LLM Quick Reference** — paste these into Claude Code to install or update:
 
-**Quick Install (AI-Assisted - Recommended):**
+<details>
+<summary>Install (copy into Claude Code)</summary>
+
 ```
 Use curl to fetch and save this file:
 curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-INSTALL.md -o /tmp/LLM-INSTALL.md
 Then read /tmp/LLM-INSTALL.md and follow the instructions exactly.
 ```
+</details>
 
-**Quick Update (AI-Assisted - Recommended):**
+<details>
+<summary>Update (copy into Claude Code)</summary>
+
 ```
 Use curl to fetch and save this file:
 curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-UPDATE.md -o /tmp/LLM-UPDATE.md
 Then read /tmp/LLM-UPDATE.md and follow the instructions exactly.
 ```
+</details>
 
 ---
 
@@ -55,7 +60,7 @@ Restarting the daemon takes under a second. Your Claude Code session continues u
 
 **Test-Driven Development for hooks**
 
-Because handlers are Python classes with proper type annotations, you can write real unit tests. This project ships with 6,255 tests and a 95% coverage requirement — the same standard applies to handlers you write for your own project. Catch regressions before restarting, not after.
+Because handlers are Python classes with proper type annotations, you can write real unit tests. This project ships with 7,300+ tests and a 95% coverage requirement — the same standard applies to handlers you write for your own project. Catch regressions before restarting, not after.
 
 **Run many handlers without overhead**
 
@@ -69,7 +74,7 @@ Handlers are Python classes. Strategy patterns, type safety, dependency injectio
 
 ## What's Built In
 
-The daemon ships with 48 production handlers across 10 event types, covering the most common AI-assisted development guardrails:
+The daemon ships with 68 production handlers across 11 event types, covering the most common AI-assisted development guardrails:
 
 ### Safety (Priority 10–20)
 
@@ -151,7 +156,7 @@ See [CLAUDE/PROJECT_HANDLERS.md](CLAUDE/PROJECT_HANDLERS.md) for the complete gu
 
 ### AI-Assisted (Recommended)
 
-**Copy this into Claude Code:**
+**Paste this into Claude Code** — the LLM will fetch the install guide and follow it:
 
 ```
 Use curl to fetch and save this file:
@@ -159,7 +164,7 @@ curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-cod
 Then read /tmp/LLM-INSTALL.md and follow the instructions exactly.
 ```
 
-Installation takes around 30 seconds. The AI will clone the daemon, create a virtual environment, run the installer, and verify everything works.
+Installation takes around 30 seconds. Claude will clone the daemon, create a virtual environment, run the installer, and verify everything works.
 
 ### Manual
 
@@ -192,7 +197,7 @@ The installer creates:
 
 ### AI-Assisted (Recommended)
 
-**Copy this into Claude Code:**
+**Paste this into Claude Code** — the LLM will fetch the update guide and follow it:
 
 ```
 Use curl to fetch and save this file:
