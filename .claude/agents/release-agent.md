@@ -99,6 +99,12 @@ Update version string in these files:
 4. `CLAUDE.md` - "Current Version" section (search for "Version:")
 5. Any upgrade docs that reference version numbers
 
+**Also update README.md stats** (these go stale between releases):
+- **Test count badge** (line 4): Update test count from QA output (`pytest` result)
+- **Test count in body**: Search for "ships with N+ tests" or similar and update
+- **Handler count**: Count non-test handlers from `.claude/HOOKS-DAEMON.md` and update "N production handlers across M event types"
+- **Handler counts**: Run `grep '| [0-9]' .claude/HOOKS-DAEMON.md | grep -v hello_world | wc -l` for handler count and `grep -c '^###' .claude/HOOKS-DAEMON.md` for event type count
+
 ### 4. Changelog Generation
 
 **Format: Keep a Changelog (https://keepachangelog.com/)**
