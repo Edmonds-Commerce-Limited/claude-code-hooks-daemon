@@ -354,101 +354,68 @@ class TestModelContextHandler:
 
         assert result == "high"
 
-    # --- Opus large-context thresholds ---
+    # --- Context-window-size-based thresholds ---
+    # Thresholds keyed by context window size (in thousands of tokens).
+    # Larger windows get tighter % thresholds because even moderate percentages
+    # represent enormous absolute token counts.
 
-    def test_opus_context_red_at_40_percent(self, handler: ModelContextHandler) -> None:
-        """Opus 1M context: 40% used (400k tokens) should show red."""
+    def test_1000k_red_at_40_percent(self, handler: ModelContextHandler) -> None:
+        """1M context: 40%+ (400k tokens) should show red."""
         hook_input = {
             "model": {"id": "claude-opus-4-6", "display_name": "Opus 4.6"},
-            "context_window": {"used_percentage": 45.0},
+            "context_window": {"used_percentage": 45.0, "context_window_size": 1000000},
         }
 
         with patch.object(handler, "_get_settings_path", return_value=Path("/nonexistent")):
             result = handler.handle(hook_input)
 
-        # Red = full circle + red bg
         assert "●" in result.context[0]
         assert "\033[41m" in result.context[0]
 
-    def test_opus_context_orange_at_30_percent(self, handler: ModelContextHandler) -> None:
-        """Opus 1M context: 30% used (300k tokens) should show orange."""
+    def test_1000k_orange_at_30_percent(self, handler: ModelContextHandler) -> None:
+        """1M context: 30-39% (300-400k tokens) should show orange."""
         hook_input = {
             "model": {"id": "claude-opus-4-6", "display_name": "Opus 4.6"},
-            "context_window": {"used_percentage": 35.0},
+            "context_window": {"used_percentage": 35.0, "context_window_size": 1000000},
         }
 
         with patch.object(handler, "_get_settings_path", return_value=Path("/nonexistent")):
             result = handler.handle(hook_input)
 
-        # Orange = 3/4 filled + orange bg
         assert "◕" in result.context[0]
         assert "\033[48;5;208m" in result.context[0]
 
-    def test_opus_context_yellow_at_15_percent(self, handler: ModelContextHandler) -> None:
-        """Opus 1M context: 15% used (150k tokens) should show yellow."""
+    def test_1000k_yellow_at_15_percent(self, handler: ModelContextHandler) -> None:
+        """1M context: 15-29% (150-300k tokens) should show yellow."""
         hook_input = {
             "model": {"id": "claude-opus-4-6", "display_name": "Opus 4.6"},
-            "context_window": {"used_percentage": 18.0},
+            "context_window": {"used_percentage": 18.0, "context_window_size": 1000000},
         }
 
         with patch.object(handler, "_get_settings_path", return_value=Path("/nonexistent")):
             result = handler.handle(hook_input)
 
-        # Yellow = half filled + yellow bg
         assert "◑" in result.context[0]
         assert "\033[43m" in result.context[0]
 
-    def test_opus_context_green_below_15_percent(self, handler: ModelContextHandler) -> None:
-        """Opus 1M context: below 15% should show green."""
+    def test_1000k_green_below_15_percent(self, handler: ModelContextHandler) -> None:
+        """1M context: below 15% should show green."""
         hook_input = {
             "model": {"id": "claude-opus-4-6", "display_name": "Opus 4.6"},
-            "context_window": {"used_percentage": 10.0},
+            "context_window": {"used_percentage": 10.0, "context_window_size": 1000000},
         }
 
         with patch.object(handler, "_get_settings_path", return_value=Path("/nonexistent")):
             result = handler.handle(hook_input)
 
-        # Green = 1/4 filled + green bg
         assert "◔" in result.context[0]
         assert "\033[42m" in result.context[0]
 
-    def test_opus_thresholds_dont_affect_sonnet(self, handler: ModelContextHandler) -> None:
-        """Sonnet at 35% should still be yellow (standard thresholds), not orange."""
-        hook_input = {
-            "model": {"id": "claude-sonnet-4-6", "display_name": "Sonnet 4.6"},
-            "context_window": {"used_percentage": 35.0},
-        }
-
-        with patch.object(handler, "_get_settings_path", return_value=Path("/nonexistent")):
-            result = handler.handle(hook_input)
-
-        # Yellow for Sonnet (standard 26-50% band)
-        assert "◑" in result.context[0]
-        assert "\033[43m" in result.context[0]
-
-    def test_opus_thresholds_configurable(self, handler: ModelContextHandler) -> None:
-        """Opus thresholds can be overridden via config options."""
-        # Override thresholds via config option injection (same as registry.py setattr)
-        handler._opus_context_orange_pct = 20
-        handler._opus_context_red_pct = 35
-
+    def test_1000k_boundary_30_is_orange(self, handler: ModelContextHandler) -> None:
+        """1M context: exactly 30% (boundary) should be orange."""
         hook_input = {
             "model": {"id": "claude-opus-4-6", "display_name": "Opus 4.6"},
-            "context_window": {"used_percentage": 22.0},
-        }
-
-        with patch.object(handler, "_get_settings_path", return_value=Path("/nonexistent")):
-            result = handler.handle(hook_input)
-
-        # 22% with orange threshold at 20% should show orange
-        assert "◕" in result.context[0]
-        assert "\033[48;5;208m" in result.context[0]
-
-    def test_opus_at_boundary_30_is_orange(self, handler: ModelContextHandler) -> None:
-        """Opus at exactly 30% (boundary) should be orange, not yellow."""
-        hook_input = {
-            "model": {"id": "claude-opus-4-6", "display_name": "Opus 4.6"},
-            "context_window": {"used_percentage": 30.0},
+            "context_window": {"used_percentage": 30.0, "context_window_size": 1000000},
         }
 
         with patch.object(handler, "_get_settings_path", return_value=Path("/nonexistent")):
@@ -456,11 +423,11 @@ class TestModelContextHandler:
 
         assert "◕" in result.context[0]
 
-    def test_opus_at_boundary_40_is_red(self, handler: ModelContextHandler) -> None:
-        """Opus at exactly 40% (boundary) should be red, not orange."""
+    def test_1000k_boundary_40_is_red(self, handler: ModelContextHandler) -> None:
+        """1M context: exactly 40% (boundary) should be red."""
         hook_input = {
             "model": {"id": "claude-opus-4-6", "display_name": "Opus 4.6"},
-            "context_window": {"used_percentage": 40.0},
+            "context_window": {"used_percentage": 40.0, "context_window_size": 1000000},
         }
 
         with patch.object(handler, "_get_settings_path", return_value=Path("/nonexistent")):
@@ -468,3 +435,88 @@ class TestModelContextHandler:
 
         assert "●" in result.context[0]
         assert "\033[41m" in result.context[0]
+
+    def test_200k_uses_standard_thresholds(self, handler: ModelContextHandler) -> None:
+        """200k context: 35% should be yellow (standard 26-50% band)."""
+        hook_input = {
+            "model": {"id": "claude-sonnet-4-6", "display_name": "Sonnet 4.6"},
+            "context_window": {"used_percentage": 35.0, "context_window_size": 200000},
+        }
+
+        with patch.object(handler, "_get_settings_path", return_value=Path("/nonexistent")):
+            result = handler.handle(hook_input)
+
+        assert "◑" in result.context[0]
+        assert "\033[43m" in result.context[0]
+
+    def test_200k_thresholds_configurable(self, handler: ModelContextHandler) -> None:
+        """200k thresholds can be overridden via config options."""
+        handler._200k_orange_pct = 40
+        handler._200k_red_pct = 60
+
+        hook_input = {
+            "model": {"id": "claude-sonnet-4-6", "display_name": "Sonnet 4.6"},
+            "context_window": {"used_percentage": 45.0, "context_window_size": 200000},
+        }
+
+        with patch.object(handler, "_get_settings_path", return_value=Path("/nonexistent")):
+            result = handler.handle(hook_input)
+
+        assert "◕" in result.context[0]
+        assert "\033[48;5;208m" in result.context[0]
+
+    def test_1000k_thresholds_configurable(self, handler: ModelContextHandler) -> None:
+        """1000k thresholds can be overridden via config options."""
+        handler._1000k_orange_pct = 20
+        handler._1000k_red_pct = 35
+
+        hook_input = {
+            "model": {"id": "claude-opus-4-6", "display_name": "Opus 4.6"},
+            "context_window": {"used_percentage": 22.0, "context_window_size": 1000000},
+        }
+
+        with patch.object(handler, "_get_settings_path", return_value=Path("/nonexistent")):
+            result = handler.handle(hook_input)
+
+        assert "◕" in result.context[0]
+        assert "\033[48;5;208m" in result.context[0]
+
+    def test_opus_200k_uses_200k_thresholds(self, handler: ModelContextHandler) -> None:
+        """Opus with 200k context should use 200k thresholds, not 1000k."""
+        hook_input = {
+            "model": {"id": "claude-opus-4-6", "display_name": "Opus 4.6"},
+            "context_window": {"used_percentage": 35.0, "context_window_size": 200000},
+        }
+
+        with patch.object(handler, "_get_settings_path", return_value=Path("/nonexistent")):
+            result = handler.handle(hook_input)
+
+        # 35% with 200k = yellow (standard 26-50% band), NOT orange (1000k band)
+        assert "◑" in result.context[0]
+        assert "\033[43m" in result.context[0]
+
+    def test_missing_context_window_size_uses_200k(self, handler: ModelContextHandler) -> None:
+        """Missing context_window_size falls back to 200k (standard) thresholds."""
+        hook_input = {
+            "model": {"id": "claude-opus-4-6", "display_name": "Opus 4.6"},
+            "context_window": {"used_percentage": 35.0},
+        }
+
+        with patch.object(handler, "_get_settings_path", return_value=Path("/nonexistent")):
+            result = handler.handle(hook_input)
+
+        # No size info -> standard thresholds -> 35% = yellow
+        assert "◑" in result.context[0]
+
+    def test_future_2000k_falls_back_to_1000k(self, handler: ModelContextHandler) -> None:
+        """A hypothetical 2M context uses the largest configured tier (1000k)."""
+        hook_input = {
+            "model": {"id": "claude-opus-5-0", "display_name": "Opus 5.0"},
+            "context_window": {"used_percentage": 35.0, "context_window_size": 2000000},
+        }
+
+        with patch.object(handler, "_get_settings_path", return_value=Path("/nonexistent")):
+            result = handler.handle(hook_input)
+
+        # 2M > 1M so uses 1000k tier -> 35% = orange (30-39% band)
+        assert "◕" in result.context[0]

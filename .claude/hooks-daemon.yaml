@@ -345,11 +345,13 @@ handlers:
       enabled: true
       priority: 10
       # options:
-      #   # Opus large-context thresholds (Opus has 1M tokens).
-      #   # At 30% that's 300k tokens and at 40% it's 400k — enormous payloads
-      #   # that degrade quality, spike latency, and balloon costs.
-      #   opus_context_orange_pct: 30  # default: 30 (warn at 300k tokens)
-      #   opus_context_red_pct: 40     # default: 40 (critical at 400k tokens)
+      #   # Context thresholds by window size (in thousands of tokens).
+      #   # Larger windows get tighter % thresholds — 400k tokens is enormous
+      #   # to push back and forth, quality degrades, latency spikes, costs balloon.
+      #   200k_orange_pct: 51    # default: 51 (standard models)
+      #   200k_red_pct: 76       # default: 76
+      #   1000k_orange_pct: 30   # default: 30 (1M context models)
+      #   1000k_red_pct: 40      # default: 40
 
     git_branch:     # Shows current git branch if in repo
       enabled: true
