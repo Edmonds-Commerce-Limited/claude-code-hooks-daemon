@@ -24,23 +24,32 @@ Effort level source (in priority order):
 
 Context usage (quarter circle icons with color-coded percentages):
 
-Standard thresholds (Sonnet, Haiku, etc. — 200k context):
-- ◔ Green (0-25%): 1/4 filled - Low usage, plenty of space
-- ◑ Yellow (26-50%): Right half filled - Moderate usage
-- ◕ Orange (51-75%): 3/4 filled - High usage, approaching limit
-- ● Red (76-100%): Full circle - Critical usage, near or at limit
+Thresholds are keyed by context window size (in thousands of tokens). Larger
+windows get tighter percentage thresholds because even moderate percentages
+represent enormous absolute token counts.
 
-Opus thresholds (1M context — tighter because 400k+ tokens is already huge):
-- ◔ Green (0-14%): Low usage
-- ◑ Yellow (15-29%): Moderate — already 150-300k tokens in flight
-- ◕ Orange (30-39%): High — 300-400k tokens, diminishing returns territory
-- ● Red (40-100%): Critical — 400k+ tokens is an enormous context to push back
-  and forth per API call. Quality degrades, latency spikes, and costs balloon.
-  Even if the window technically fits more, you should compact or start fresh.
+200k thresholds (standard — Sonnet, Haiku, Opus-200k):
+- ◔ Green (0-25%):  up to 50k tokens
+- ◑ Yellow (26-50%): 50-100k tokens
+- ◕ Orange (51-75%): 100-150k tokens
+- ● Red (76-100%):   150k+ tokens
 
-Opus thresholds are configurable via handler options:
-  opus_context_orange_pct: 30  (default)
-  opus_context_red_pct: 40     (default)
+1000k thresholds (Opus-1M — tighter because 400k+ tokens is already huge):
+- ◔ Green (0-14%):  up to 150k tokens
+- ◑ Yellow (15-29%): 150-300k tokens
+- ◕ Orange (30-39%): 300-400k tokens, diminishing returns territory
+- ● Red (40-100%):   400k+ tokens is an enormous context to push back and forth
+  per API call. Quality degrades, latency spikes, and costs balloon. Even if
+  the window technically fits more, you should compact or start fresh.
+
+Thresholds are configurable per tier via handler options:
+  200k_orange_pct: 51   (default)
+  200k_red_pct: 76      (default)
+  1000k_orange_pct: 30  (default)
+  1000k_red_pct: 40     (default)
+
+Adding a new tier (e.g. 2000k) is just adding two new options. Models whose
+context_window_size exceeds all configured tiers use the largest tier.
 """
 
 import json
@@ -72,13 +81,22 @@ _EFFORT_DEFAULT = "high"
 # Minimum Claude major version that supports effort configuration
 _EFFORT_MIN_MAJOR_VERSION = 4
 
-# Opus large-context thresholds (configurable via handler options).
-# Opus has a 1M token context window. At 30% that's already 300k tokens and at
-# 40% it's 400k — an enormous payload to shuttle per API round-trip. Quality
+# Context threshold tiers keyed by window size in tokens.
+# Each tier defines the orange and red percentage thresholds. Yellow is derived
+# as half of orange. The handler picks the tier whose size threshold is <= the
+# actual context_window_size, falling back to the smallest (200k) tier.
+#
+# Why tighter thresholds for larger windows: at 1M tokens, 30% is already 300k
+# and 40% is 400k — an enormous payload to shuttle per API round-trip. Quality
 # degrades from noise, latency spikes, and costs balloon well before the window
-# is technically full. These tighter defaults nudge the user to compact early.
-_OPUS_CONTEXT_ORANGE_PCT = 30
-_OPUS_CONTEXT_RED_PCT = 40
+# is technically full. Tighter defaults nudge the user to compact early.
+_CONTEXT_TIER_200K_SIZE = 200_000
+_CONTEXT_TIER_200K_ORANGE_PCT = 51
+_CONTEXT_TIER_200K_RED_PCT = 76
+
+_CONTEXT_TIER_1000K_SIZE = 1_000_000
+_CONTEXT_TIER_1000K_ORANGE_PCT = 30
+_CONTEXT_TIER_1000K_RED_PCT = 40
 
 # Regex to extract major version from Claude 4+ model IDs
 # Matches: claude-sonnet-4-6, claude-opus-4-6, claude-haiku-4-5-20251001
@@ -96,9 +114,13 @@ class ModelContextHandler(Handler):
             terminal=False,
             tags=[HandlerTag.STATUS, HandlerTag.DISPLAY, HandlerTag.NON_TERMINAL],
         )
-        # Opus large-context thresholds — overridable via config options
-        self._opus_context_orange_pct: int = _OPUS_CONTEXT_ORANGE_PCT
-        self._opus_context_red_pct: int = _OPUS_CONTEXT_RED_PCT
+        # Per-tier context thresholds — overridable via config options.
+        # Config keys match the pattern: {size}k_orange_pct, {size}k_red_pct
+        # e.g. "1000k_orange_pct: 25" in hooks-daemon.yaml options.
+        self._200k_orange_pct: int = _CONTEXT_TIER_200K_ORANGE_PCT
+        self._200k_red_pct: int = _CONTEXT_TIER_200K_RED_PCT
+        self._1000k_orange_pct: int = _CONTEXT_TIER_1000K_ORANGE_PCT
+        self._1000k_red_pct: int = _CONTEXT_TIER_1000K_RED_PCT
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Always run for status events."""
@@ -138,9 +160,9 @@ class ModelContextHandler(Handler):
         model_part = f"🤖 {model_color}{model_display}{reset}{effort_suffix}"
 
         # Get quarter circle icon and colors based on usage threshold
-        is_opus = "opus" in model_lower
+        window_size = ctx_data.get("context_window_size") or 0
         ctx_icon, icon_color, pct_color = self._get_context_icon_and_color(
-            used_pct, is_opus=is_opus
+            used_pct, window_size=window_size
         )
 
         # Format: "🤖 Model ▌▌▌ | ◔ XX%" with colored icon and percentage
@@ -236,50 +258,23 @@ class ModelContextHandler(Handler):
         return Path.home() / ".claude" / "settings.json"
 
     def _get_context_icon_and_color(
-        self, used_pct: float, *, is_opus: bool = False
+        self, used_pct: float, *, window_size: int = 0
     ) -> tuple[str, str, str]:
         """Get quarter circle icon, icon color, and percentage background color.
 
-        Opus models use tighter thresholds because their 1M context window means
-        even moderate percentages represent enormous token counts (300k-400k+).
-        At that scale, quality degrades, latency spikes, and costs balloon —
-        the user should compact well before hitting 50%.
+        Selects threshold tier based on context_window_size. Larger windows get
+        tighter percentage thresholds because even moderate percentages represent
+        enormous absolute token counts at scale (e.g. 30% of 1M = 300k tokens).
 
         Args:
             used_pct: Context usage percentage (0-100)
-            is_opus: Whether the active model is Opus (uses tighter thresholds)
+            window_size: Context window size in tokens (e.g. 200000, 1000000)
 
         Returns:
             Tuple of (icon, icon_fg_color, percentage_bg_color)
         """
-        if is_opus:
-            return self._opus_context_icon_and_color(used_pct)
-
-        if used_pct <= 25:
-            return "◔", "\033[32m", "\033[42m\033[30m"  # 1/4 filled, green fg + bg
-        elif used_pct <= 50:
-            return "◑", "\033[33m", "\033[43m\033[30m"  # Right half, yellow fg + bg
-        elif used_pct <= 75:
-            return "◕", "\033[38;5;208m", "\033[48;5;208m\033[30m"  # 3/4, orange fg + bg
-        else:
-            return "●", "\033[31m", "\033[41m\033[97m"  # Full, red fg + bg
-
-    def _opus_context_icon_and_color(self, used_pct: float) -> tuple[str, str, str]:
-        """Opus-specific context thresholds for 1M token window.
-
-        Uses tighter bands than standard models. The orange and red thresholds
-        are configurable via handler options (opus_context_orange_pct,
-        opus_context_red_pct). The yellow threshold is derived as half of orange.
-
-        Args:
-            used_pct: Context usage percentage (0-100)
-
-        Returns:
-            Tuple of (icon, icon_fg_color, percentage_bg_color)
-        """
-        orange_pct = self._opus_context_orange_pct
-        red_pct = self._opus_context_red_pct
-        # Yellow band starts at half of orange (e.g. 30 -> 15)
+        orange_pct, red_pct = self._resolve_tier_thresholds(window_size)
+        # Yellow band starts at half of orange (e.g. 51 -> 25, 30 -> 15)
         yellow_pct = orange_pct // 2
 
         if used_pct < yellow_pct:
@@ -290,6 +285,29 @@ class ModelContextHandler(Handler):
             return "◕", "\033[38;5;208m", "\033[48;5;208m\033[30m"  # Orange
         else:
             return "●", "\033[31m", "\033[41m\033[97m"  # Red
+
+    def _resolve_tier_thresholds(self, window_size: int) -> tuple[int, int]:
+        """Pick the context threshold tier for the given window size.
+
+        Tiers are checked largest-first. If the window size meets or exceeds a
+        tier's size threshold, that tier's (orange, red) percentages are used.
+        Falls back to the smallest tier (200k) when window_size is unknown or
+        smaller than all configured tiers.
+
+        Adding a new tier (e.g. 2000k) only requires adding two new config
+        options and a new entry here — zero changes to the colour logic above.
+
+        Args:
+            window_size: Context window size in tokens
+
+        Returns:
+            Tuple of (orange_pct, red_pct) for the matched tier
+        """
+        # Ordered largest-first so the first match wins
+        if window_size >= _CONTEXT_TIER_1000K_SIZE:
+            return self._1000k_orange_pct, self._1000k_red_pct
+
+        return self._200k_orange_pct, self._200k_red_pct
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for this handler."""
