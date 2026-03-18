@@ -148,7 +148,7 @@
     },
     {
       "file": "handlers/status_line/model_context.py",
-      "lines": [165],
+      "lines": [215],
       "rule": "log-and-continue",
       "reason": "Model context effort level reader: log-and-continue on settings file read failure (OSError, invalid JSON). Status line handlers are fail-open by design — settings stays empty and falls through to daemon default. Already logged at warning level."
     },
