@@ -363,6 +363,7 @@ class PipeBlockerHandler(Handler):
                         command=redirected_args,
                         output_dir=output_dir,
                         label="pipe_blocker",
+                        cwd=ProjectContext.project_root(),
                     )
                     context = format_redirection_context(result)
                 except (OSError, RuntimeError) as e:

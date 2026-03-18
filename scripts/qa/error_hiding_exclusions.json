@@ -238,7 +238,7 @@
     },
     {
       "file": "core/command_redirection.py",
-      "lines": [207],
+      "lines": [213],
       "rule": "log-and-continue",
       "reason": "File cleanup loop: log-and-continue when individual old output files cannot be removed (FileNotFoundError, PermissionError). One unremovable file must not prevent cleanup of others. Already logged at debug/warning level."
     },
