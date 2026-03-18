@@ -96,6 +96,25 @@ git commit -m "Plan NNNNN: Phase N - Description"
 
 ---
 
+## ⚠️ CRITICAL: Dogfooding Bug Fixes (NON-NEGOTIABLE)
+
+**This project dogfoods itself.** When you encounter ANY bug while using the daemon's own handlers, tools, or features during normal development work — **you MUST fix it immediately.**
+
+### Rules
+
+1. **Never ignore a dogfooding bug** — if a handler misfires, blocks the wrong thing, runs in the wrong directory, or produces incorrect output, that is a real bug affecting all users
+2. **Fix before continuing** — stop your current task, fix the bug with TDD, run QA, commit, then resume your original work
+3. **All handler behaviour is in scope** — blocking handlers, advisory handlers, command redirection, context injection, status line — everything
+4. **The daemon is not "someone else's problem"** — you ARE the upstream. There is no one else to report to
+
+### Why This Matters
+
+- Every bug you encounter, users encounter too
+- Handlers that misfire erode trust in the entire system
+- Unfixed dogfooding bugs compound — one wrong cwd breaks three handlers
+
+---
+
 ## ⚠️ CRITICAL: Code Lifecycle (READ BEFORE MAKING CHANGES)
 
 **MANDATORY**: Read these documents BEFORE implementing changes:

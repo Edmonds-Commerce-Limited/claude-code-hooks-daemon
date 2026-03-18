@@ -70,6 +70,7 @@ def execute_and_save(
     output_dir: Path,
     label: str,
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+    cwd: Path | None = None,
 ) -> CommandRedirectionResult:
     """Execute a command and save its output to a file.
 
@@ -81,6 +82,10 @@ def execute_and_save(
         output_dir: Directory to write output file into
         label: Handler label for filename (e.g. "gh_issue_view")
         timeout_seconds: Max execution time before killing the process
+        cwd: Working directory for command execution. CRITICAL: the daemon
+            process runs from "/" (daemonization calls os.chdir("/")), so
+            commands with relative paths will fail without this parameter.
+            Use ProjectContext.project_root() for project-relative commands.
 
     Returns:
         CommandRedirectionResult with exit code, output path, and command string
@@ -108,6 +113,7 @@ def execute_and_save(
             capture_output=True,
             timeout=timeout_seconds,
             check=False,
+            cwd=str(cwd) if cwd else None,
         )
 
         exit_code = proc.returncode
@@ -211,4 +217,5 @@ def cleanup_old_files(output_dir: Path, max_age_seconds: int = _CLEANUP_MAX_AGE_
         except FileNotFoundError:
             logger.debug("File already removed during cleanup: %s", file_path.name)
         except PermissionError:
-            logger.warning("Permission denied removing old output: %s", file_path.name)
+            # Non-critical cleanup — one stuck file must not abort cleanup of others
+            logger.debug("Permission denied removing old output: %s", file_path.name)
