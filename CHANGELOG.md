@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.24.0] - 2026-03-18
+
+### Added
+
+- **README stats check in Opus review gate**: The Opus documentation review step now explicitly validates that README.md stats are up to date — including the test count badge, test count in body text, handler count, and event type count. Prevents stale stats from shipping in releases.
+
+- **README stat updates in release process**: The release agent checklist and RELEASING.md documentation now include an explicit step to update README.md stats (test count badge, body test count, handler count, event type count) as part of version updates. Previously these went stale between releases.
+
+- **Dogfooding bug fix mandate**: Added non-negotiable dogfooding rule to project CLAUDE.md — any bugs found while using the daemon's own handlers during development must be fixed immediately, not deferred.
+
+### Fixed
+
+- **Command redirection runs in project root**: `execute_and_save()` now accepts a `cwd` parameter, and all three callers (`gh_issue_comments`, `npm_command`, `pipe_blocker`) pass `ProjectContext.project_root()`. Previously, redirected commands ran from `/` (the daemon's cwd after daemonization) causing them to fail. Discovered via dogfooding when the pipe_blocker redirected a pytest command to a file but ran it from the wrong directory.
+
+- **Daemon start hangs callers using `$()` command substitution**: The double-fork daemonization in `cli.py cmd_start()` redirected stdout to `/dev/null` but intentionally kept stderr open for error output. When callers like `daemon_control.sh` captured output with `$("$python" ... start 2>&1)`, the grandchild daemon process held the pipe's write-end open via inherited stderr, causing the `$()` substitution to block forever. Fixed by redirecting both stdout and stderr to `/dev/null` in the grandchild — the in-memory log system already captures all errors, so stderr is not needed for a properly daemonized process.
+
+- **README stats corrected**: Updated README.md with accurate stats — handler count 48→68, event types 10→13, test count 6,255→7,344+. Clarified LLM-targeted sections (raw URLs at top) with collapsible `<details>` blocks labelled "LLM Quick Reference" to reduce confusion for human readers.
+
+- **Upgrade script hangs in non-interactive mode**: `scripts/upgrade_version.sh` used `read -r -p` for an upgrade guide confirmation prompt without checking whether stdin is a terminal. In non-interactive environments (Claude Code agents, CI pipelines), `read` blocks forever waiting for input that never arrives. Fixed by adding `[ ! -t 0 ]` detection to auto-skip the interactive prompt, with an informational message directing users to review upgrade guides after the upgrade completes.
+
 ## [2.23.3] - 2026-03-16
 
 ### Fixed

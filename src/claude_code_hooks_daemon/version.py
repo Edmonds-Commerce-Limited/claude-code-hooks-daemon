@@ -1,3 +1,3 @@
 """Version information for Claude Code Hooks Daemon."""
 
-__version__ = "2.23.3"
+__version__ = "2.24.0"
