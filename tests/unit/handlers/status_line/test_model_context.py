@@ -353,3 +353,118 @@ class TestModelContextHandler:
             result = handler._read_effort_level("claude-sonnet-4-6")
 
         assert result == "high"
+
+    # --- Opus large-context thresholds ---
+
+    def test_opus_context_red_at_40_percent(self, handler: ModelContextHandler) -> None:
+        """Opus 1M context: 40% used (400k tokens) should show red."""
+        hook_input = {
+            "model": {"id": "claude-opus-4-6", "display_name": "Opus 4.6"},
+            "context_window": {"used_percentage": 45.0},
+        }
+
+        with patch.object(handler, "_get_settings_path", return_value=Path("/nonexistent")):
+            result = handler.handle(hook_input)
+
+        # Red = full circle + red bg
+        assert "●" in result.context[0]
+        assert "\033[41m" in result.context[0]
+
+    def test_opus_context_orange_at_30_percent(self, handler: ModelContextHandler) -> None:
+        """Opus 1M context: 30% used (300k tokens) should show orange."""
+        hook_input = {
+            "model": {"id": "claude-opus-4-6", "display_name": "Opus 4.6"},
+            "context_window": {"used_percentage": 35.0},
+        }
+
+        with patch.object(handler, "_get_settings_path", return_value=Path("/nonexistent")):
+            result = handler.handle(hook_input)
+
+        # Orange = 3/4 filled + orange bg
+        assert "◕" in result.context[0]
+        assert "\033[48;5;208m" in result.context[0]
+
+    def test_opus_context_yellow_at_15_percent(self, handler: ModelContextHandler) -> None:
+        """Opus 1M context: 15% used (150k tokens) should show yellow."""
+        hook_input = {
+            "model": {"id": "claude-opus-4-6", "display_name": "Opus 4.6"},
+            "context_window": {"used_percentage": 18.0},
+        }
+
+        with patch.object(handler, "_get_settings_path", return_value=Path("/nonexistent")):
+            result = handler.handle(hook_input)
+
+        # Yellow = half filled + yellow bg
+        assert "◑" in result.context[0]
+        assert "\033[43m" in result.context[0]
+
+    def test_opus_context_green_below_15_percent(self, handler: ModelContextHandler) -> None:
+        """Opus 1M context: below 15% should show green."""
+        hook_input = {
+            "model": {"id": "claude-opus-4-6", "display_name": "Opus 4.6"},
+            "context_window": {"used_percentage": 10.0},
+        }
+
+        with patch.object(handler, "_get_settings_path", return_value=Path("/nonexistent")):
+            result = handler.handle(hook_input)
+
+        # Green = 1/4 filled + green bg
+        assert "◔" in result.context[0]
+        assert "\033[42m" in result.context[0]
+
+    def test_opus_thresholds_dont_affect_sonnet(self, handler: ModelContextHandler) -> None:
+        """Sonnet at 35% should still be yellow (standard thresholds), not orange."""
+        hook_input = {
+            "model": {"id": "claude-sonnet-4-6", "display_name": "Sonnet 4.6"},
+            "context_window": {"used_percentage": 35.0},
+        }
+
+        with patch.object(handler, "_get_settings_path", return_value=Path("/nonexistent")):
+            result = handler.handle(hook_input)
+
+        # Yellow for Sonnet (standard 26-50% band)
+        assert "◑" in result.context[0]
+        assert "\033[43m" in result.context[0]
+
+    def test_opus_thresholds_configurable(self, handler: ModelContextHandler) -> None:
+        """Opus thresholds can be overridden via config options."""
+        # Override thresholds via config option injection (same as registry.py setattr)
+        handler._opus_context_orange_pct = 20
+        handler._opus_context_red_pct = 35
+
+        hook_input = {
+            "model": {"id": "claude-opus-4-6", "display_name": "Opus 4.6"},
+            "context_window": {"used_percentage": 22.0},
+        }
+
+        with patch.object(handler, "_get_settings_path", return_value=Path("/nonexistent")):
+            result = handler.handle(hook_input)
+
+        # 22% with orange threshold at 20% should show orange
+        assert "◕" in result.context[0]
+        assert "\033[48;5;208m" in result.context[0]
+
+    def test_opus_at_boundary_30_is_orange(self, handler: ModelContextHandler) -> None:
+        """Opus at exactly 30% (boundary) should be orange, not yellow."""
+        hook_input = {
+            "model": {"id": "claude-opus-4-6", "display_name": "Opus 4.6"},
+            "context_window": {"used_percentage": 30.0},
+        }
+
+        with patch.object(handler, "_get_settings_path", return_value=Path("/nonexistent")):
+            result = handler.handle(hook_input)
+
+        assert "◕" in result.context[0]
+
+    def test_opus_at_boundary_40_is_red(self, handler: ModelContextHandler) -> None:
+        """Opus at exactly 40% (boundary) should be red, not orange."""
+        hook_input = {
+            "model": {"id": "claude-opus-4-6", "display_name": "Opus 4.6"},
+            "context_window": {"used_percentage": 40.0},
+        }
+
+        with patch.object(handler, "_get_settings_path", return_value=Path("/nonexistent")):
+            result = handler.handle(hook_input)
+
+        assert "●" in result.context[0]
+        assert "\033[41m" in result.context[0]

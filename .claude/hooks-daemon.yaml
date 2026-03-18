@@ -344,6 +344,12 @@ handlers:
     model_context:  # Shows model name and color-coded context percentage
       enabled: true
       priority: 10
+      # options:
+      #   # Opus large-context thresholds (Opus has 1M tokens).
+      #   # At 30% that's 300k tokens and at 40% it's 400k — enormous payloads
+      #   # that degrade quality, spike latency, and balloon costs.
+      #   opus_context_orange_pct: 30  # default: 30 (warn at 300k tokens)
+      #   opus_context_red_pct: 40     # default: 40 (critical at 400k tokens)
 
     git_branch:     # Shows current git branch if in repo
       enabled: true
