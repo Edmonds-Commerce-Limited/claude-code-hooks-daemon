@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.25.0] - 2026-03-19
+
+### Added
+
+- **Context-window-size-based threshold tiers for `model_context` status handler**: The status line context percentage indicator now uses tiers keyed by context window size rather than model name. Models with a 200k context window use standard thresholds (orange at 51%, red at 76%); models with a 1M context window use tighter thresholds (orange at 30%, red at 40%) because at those sizes even moderate percentages represent enormous token payloads. All thresholds are fully configurable via handler options in `.claude/hooks-daemon.yaml`. Unknown context window sizes fall back to the 200k tier. Adding a new tier (e.g. 2000k) requires only two new config options.
+
+### Changed
+
+- **Context thresholds keyed by window size, not model name**: Replaces the previous Opus-specific threshold implementation with a model-agnostic window-size approach. Any model (current or future) with a 1M context window automatically receives tighter thresholds; any model at 200k uses standard thresholds. This makes the feature robust to new model releases without code changes.
+
+### Fixed
+
+- **Error hiding exclusion line number updated for `model_context.py`**: The `try/except` block in `_read_effort_level` shifted from line 165 to line 215 after adding context-window-size tier constants and configurable threshold fields. The error-hiding exclusion comment was updated to match the current line number, keeping the security scan clean.
+
 ## [2.24.0] - 2026-03-18
 
 ### Added
