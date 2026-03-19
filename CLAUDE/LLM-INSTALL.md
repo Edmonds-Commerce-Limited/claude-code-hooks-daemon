@@ -268,50 +268,118 @@ If any of these fail, see Troubleshooting section below.
 
 ---
 
-### 6. Configure Handlers (Optional)
+### 6. Enable and Configure Handlers (CRITICAL)
 
-Edit `.claude/hooks-daemon.yaml`:
+**The daemon ships with 60+ handlers but most start DISABLED.** An unconfigured daemon provides minimal value. You MUST review available handlers and enable everything relevant to the project.
+
+**Step 6.1: Generate the full default config with ALL handlers visible:**
+
+```bash
+cd .claude/hooks-daemon
+VENV_PYTHON=untracked/venv/bin/python
+$VENV_PYTHON -c "
+from claude_code_hooks_daemon.daemon.init_config import generate_config
+print(generate_config(mode='full'))
+" > /tmp/full-config.yaml
+cat /tmp/full-config.yaml
+```
+
+**Step 6.2: Review every handler and enable all that are relevant.**
+
+Use these guidelines — when in doubt, **enable it**. Handlers can always be disabled later, but missing protection cannot be retroactively applied to code already written.
+
+| Category | Handlers | Recommendation |
+|----------|----------|----------------|
+| **Safety** (priority 10-22) | `destructive_git`, `sed_blocker`, `absolute_path`, `error_hiding_blocker`, `security_antipattern`, `curl_pipe_shell`, `pipe_blocker`, `dangerous_permissions`, `lock_file_edit_blocker`, `pip_break_system`, `sudo_pip` | **Enable ALL** — these prevent data loss and security issues |
+| **Code Quality** (priority 25-35) | `qa_suppression`, `tdd_enforcement`, `lint_on_edit` | **Enable ALL** — prevents suppressed linting, enforces TDD, validates edits |
+| **Workflow** (priority 36-55) | `npm_command`, `global_npm_advisor`, `gh_issue_comments`, `daemon_restart_verifier` | **Enable ALL** — enforces best practices |
+| **Advisory** (priority 55-60) | `british_english`, `web_search_year` | Enable based on project preferences |
+| **Session/Lifecycle** | `git_context_injector`, `bash_error_detector`, `version_check`, `optimal_config_checker` | **Enable ALL** — provides valuable context at zero cost |
+| **Planning** | `plan_workflow`, `validate_plan_number`, `plan_time_estimates`, `plan_completion_advisor`, `markdown_organization` | Enable if using the planning workflow (see Planning section below) |
+
+**Step 6.3: Edit `.claude/hooks-daemon.yaml` and enable handlers:**
 
 ```yaml
 daemon:
-  idle_timeout_seconds: 600  # 10min auto-shutdown
+  idle_timeout_seconds: 600
   log_level: INFO
 
 handlers:
   pre_tool_use:
-    destructive_git: {enabled: true, priority: 10}   # Blocks git reset --hard, clean -f
-    sed_blocker: {enabled: true, priority: 10}       # Blocks sed (use Edit tool)
-    absolute_path: {enabled: true, priority: 12}     # Enforces absolute paths
-    tdd_enforcement: {enabled: false, priority: 35}  # Enable for TDD workflow
-    british_english: {enabled: false, priority: 60}  # Enable for UK spelling
+    # Safety — enable ALL of these
+    destructive_git: {enabled: true, priority: 10}
+    sed_blocker: {enabled: true, priority: 11}
+    absolute_path: {enabled: true, priority: 12}
+    error_hiding_blocker: {enabled: true, priority: 13}
+    security_antipattern: {enabled: true, priority: 14}
+    curl_pipe_shell: {enabled: true, priority: 16}
+    pipe_blocker: {enabled: true, priority: 17}
+    dangerous_permissions: {enabled: true, priority: 18}
+    lock_file_edit_blocker: {enabled: true, priority: 20}
+    pip_break_system: {enabled: true, priority: 21}
+    sudo_pip: {enabled: true, priority: 22}
+    daemon_restart_verifier: {enabled: true, priority: 23}
+
+    # Code quality — enable for better code
+    qa_suppression: {enabled: true, priority: 30}
+    tdd_enforcement: {enabled: true, priority: 35}
+
+    # Workflow — enable for best practices
+    gh_issue_comments: {enabled: true, priority: 40}
+    global_npm_advisor: {enabled: true, priority: 42}
+    npm_command: {enabled: true, priority: 49}
+
+    # Advisory
+    web_search_year: {enabled: true, priority: 55}
+    british_english: {enabled: false, priority: 60}  # Enable for UK English projects
+
+  post_tool_use:
+    bash_error_detector: {enabled: true, priority: 10}
+    lint_on_edit: {enabled: true, priority: 25}
+
+  session_start:
+    git_context_injector: {enabled: true, priority: 10}
+    optimal_config_checker: {enabled: true, priority: 52}
+    version_check: {enabled: true, priority: 56}
+
+  user_prompt_submit:
+    git_context_injector: {enabled: true, priority: 10}
 ```
 
-Restart daemon after config changes:
+**Step 6.4: Restart daemon to load new config:**
+
 ```bash
 .claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
 ```
 
+**Step 6.5: Verify handlers loaded:**
+
+```bash
+.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli status
+```
+
 **Note**: Settings.json changes require Claude session restart, config.yaml changes only need daemon restart.
+
+**For full handler options reference** (blocking modes, language filters, etc.): see `docs/guides/HANDLER_REFERENCE.md` in the daemon directory.
 
 ---
 
-## Post-Installation: Handler Status Report
+## Post-Installation: Handler Status Report (MANDATORY)
 
-After installation and configuration, generate a comprehensive report showing all handlers and their status:
+**You MUST run this after installation to verify your handler configuration.** Review the output and check that the handlers you need are actually enabled.
 
 ```bash
 cd .claude/hooks-daemon
 untracked/venv/bin/python scripts/handler_status.py
 ```
 
-This displays a detailed table with:
-- **All available handlers** organized by event type (PreToolUse, PostToolUse, etc.)
-- **Enabled/Disabled status** for each handler
+This displays:
+- **All available handlers** organized by event type
+- **Enabled/Disabled status** — review this carefully
 - **Priority and terminal settings**
-- **Handler tags** (language, function, specificity)
-- **Handler-specific configuration options** (if enabled)
-- **Summary statistics** (total handlers, enabled count, disabled count)
-- **Tag filtering info** (if using enable_tags/disable_tags)
+- **Summary statistics** — if the enabled count is low, go back to Step 6 and enable more handlers
+
+**Check your enabled count.** A well-configured installation typically has **30+ handlers enabled**. If you see fewer than 15 enabled, you are likely missing valuable protection and workflow enforcement. Return to Step 6 and review the handler categories.
 
 **Save for reference:**
 ```bash
@@ -390,49 +458,20 @@ If missing, prepend this comment block to the top of `.claude/hooks-daemon.yaml`
 
 ---
 
-## Post-Installation: Planning Workflow Adoption (Optional)
+## Post-Installation: Planning Workflow Setup
 
-The daemon includes a comprehensive planning workflow system with numbered plan directories and enforcement handlers. Check if you want to adopt this approach.
+The daemon includes a structured planning workflow with numbered plan directories and enforcement handlers. **If your project uses any form of planning or task tracking, you should adopt this system** — it integrates directly with the daemon's enforcement handlers to keep plans consistent and actionable.
 
-### Check for Existing Planning Documentation
+### Quick Assessment
 
-```bash
-# Look for existing planning docs in common locations
-find . -maxdepth 3 \( \
-  -name "PLANNING.md" -o \
-  -name "PlanWorkflow.md" -o \
-  -name "Planning.md" -o \
-  -path "*/docs/planning/*" -o \
-  -path "*/CLAUDE/planning*" -o \
-  -path "*/Plan/*" \
-) 2>/dev/null
-```
+Ask yourself (or the user): Does this project benefit from structured planning for non-trivial work?
 
-### Compare with Hooks Daemon Approach
+- **Yes** → Follow the setup steps below. The enforcement handlers prevent common planning mistakes (bad numbering, time estimates, incomplete closures).
+- **No / Not sure** → Skip for now. The handlers remain disabled and can be enabled later.
 
-The daemon uses a structured planning system:
+### Setup Steps
 
-**View the daemon's planning workflow:**
-```bash
-cat .claude/hooks-daemon/CLAUDE/PlanWorkflow.md | head -100
-```
-
-**Key features:**
-- Numbered plan directories (CLAUDE/Plan/001-description/, 002-description/)
-- Standardized PLAN.md template with tasks, goals, success criteria
-- Task status system
-- TDD integration and QA enforcement
-- Planning-specific handlers for enforcement
-
-**Enforcement handlers available:**
-- `plan-workflow-guidance` - Guides through planning steps
-- `validate-plan-number` - Validates plan numbering consistency
-- `block-plan-time-estimates` - Prevents time estimates in plans
-- `enforce-markdown-organization` - Enforces markdown organization rules
-
-### If User Chooses to Adopt
-
-**1. Copy planning workflow documentation:**
+**1. Create planning directories and copy workflow documentation:**
 ```bash
 mkdir -p CLAUDE/Plan
 cp .claude/hooks-daemon/CLAUDE/PlanWorkflow.md CLAUDE/PlanWorkflow.md
@@ -449,24 +488,37 @@ if [ ! -f "CLAUDE/Plan/README.md" ]; then
 fi
 ```
 
-**2. Enable planning enforcement handlers** in `.claude/hooks-daemon.yaml`:
+**2. Enable ALL planning enforcement handlers** in `.claude/hooks-daemon.yaml`:
 ```yaml
 handlers:
   pre_tool_use:
-    plan-workflow-guidance: {enabled: true, priority: 45}
-    validate-plan-number: {enabled: true, priority: 30}
-    block-plan-time-estimates: {enabled: true, priority: 40}
-    enforce-markdown-organization: {enabled: false, priority: 35}  # EC-specific
+    plan_workflow: {enabled: true, priority: 46}
+    validate_plan_number: {enabled: true, priority: 41}
+    plan_time_estimates: {enabled: true, priority: 45}
+    plan_completion_advisor: {enabled: true, priority: 48}
+    plan_number_helper: {enabled: true, priority: 33}
+    markdown_organization: {enabled: true, priority: 50}
 ```
+
+**What each handler does:**
+| Handler | What It Enforces |
+|---------|-----------------|
+| `plan_workflow` | Guides agents through proper planning steps when creating plans |
+| `validate_plan_number` | Ensures plan folders use sequential numbering (001, 002, ...) |
+| `plan_time_estimates` | Blocks time estimates in plan documents (they are always wrong) |
+| `plan_completion_advisor` | Reminds to follow the completion checklist when closing plans |
+| `plan_number_helper` | Provides the correct next plan number when agents search for it |
+| `markdown_organization` | Enforces markdown file placement rules in CLAUDE/ directory |
 
 **3. Restart daemon:**
 ```bash
 .claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
 ```
 
-### If User Chooses to Skip
-
-No action needed. The planning handlers will remain disabled.
+**4. Verify planning handlers loaded:**
+```bash
+.claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli status
+```
 
 ---
 

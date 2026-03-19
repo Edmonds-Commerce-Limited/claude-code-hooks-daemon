@@ -240,9 +240,9 @@ echo '{"tool_name": "Bash", "tool_input": {"command": "git reset --hard HEAD"}}'
 
 ---
 
-## Step 5: Discover New Handlers (After Update)
+## Step 5: Discover and Enable New Handlers (CRITICAL)
 
-After updating, you should check for new handlers that weren't in the previous version.
+**After every update, you MUST check for new handlers and enable them.** New versions frequently add safety, quality, and workflow handlers. Leaving them disabled means you lose the main benefit of upgrading.
 
 ### Method 1: Discover All Available Handlers (Programmatic)
 
@@ -415,33 +415,53 @@ Run with --help for all options.
 - Includes descriptions and examples from the version manifests
 - Machine-readable: exit code 0/1 for scripting
 
-### What to Do with New Handlers
+### What to Do with New Handlers (CRITICAL)
 
-1. **Read the handler documentation**:
-   ```bash
-   cd .claude/hooks-daemon
-   cat src/claude_code_hooks_daemon/handlers/pre_tool_use/destructive_git.py
-   ```
+**New handlers ship DISABLED by default.** After every upgrade, you MUST review new handlers and enable them. Skipping this step means you miss new safety protections, code quality enforcement, and workflow improvements that were added in the new version.
 
-2. **Check release notes** for handler descriptions:
-   ```bash
-   cat RELEASES/v2.3.0.md | grep -A 5 "New Handlers"
-   ```
+**Step 1: Review each new handler and decide:**
 
-3. **Add handlers to your config** if desired:
-   ```yaml
-   handlers:
-     pre_tool_use:
-       new_handler_name:
-         enabled: true
-         priority: 50
-   ```
+| Category | Default Action |
+|----------|---------------|
+| **Safety handlers** (destructive operations, security) | **Always enable** — these prevent data loss |
+| **Code quality handlers** (linting, TDD, QA) | **Enable unless project has reason not to** |
+| **Workflow handlers** (npm, git, planning) | **Enable if relevant to project** |
+| **Advisory handlers** (spelling, suggestions) | Enable based on project preferences |
 
-4. **Restart daemon** to load new config:
-   ```bash
-   cd .claude/hooks-daemon
-   untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
-   ```
+**Step 2: Add new handlers to config** — enable them, don't just list them:
+
+```yaml
+handlers:
+  pre_tool_use:
+    new_handler_name:
+      enabled: true  # <-- ENABLE, not just add
+      priority: 50
+```
+
+**Step 3: Check release notes** for handler descriptions and options:
+
+```bash
+cd .claude/hooks-daemon
+# Find release notes for the version you upgraded to
+ls RELEASES/
+cat RELEASES/vX.Y.Z.md
+```
+
+**Step 4: Restart daemon** to load new config:
+
+```bash
+cd .claude/hooks-daemon
+untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
+```
+
+**Step 5: Verify handler count increased:**
+
+```bash
+cd .claude/hooks-daemon
+untracked/venv/bin/python scripts/handler_status.py | grep -i "enabled"
+```
+
+A well-configured installation has **30+ handlers enabled**. If your count is significantly lower, review the full handler list and enable more.
 
 ### Understanding Handler Tags
 
@@ -453,14 +473,19 @@ Handlers are tagged by language, function, and specificity. Use tags to filter:
 
 ---
 
-## Post-Update: Handler Status Report
+## Post-Update: Handler Status Report (MANDATORY)
 
-After updating and discovering new handlers, generate a comprehensive status report:
+**You MUST run this after every upgrade to verify your handler configuration is complete.**
 
 ```bash
 cd .claude/hooks-daemon
 untracked/venv/bin/python scripts/handler_status.py
 ```
+
+Review the output and check:
+- **Enabled count** — should be **30+ handlers** for a well-configured installation
+- **New handlers** — any new handlers from the upgrade should be enabled (see Step 5)
+- **Disabled handlers** — if any safety or code quality handlers are disabled, enable them now
 
 ---
 
