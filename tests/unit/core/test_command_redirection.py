@@ -13,6 +13,7 @@ from claude_code_hooks_daemon.core.command_redirection import (
     cleanup_old_files,
     execute_and_save,
     format_redirection_context,
+    launch_and_save,
 )
 
 
@@ -43,6 +44,20 @@ class TestCommandRedirectionResult:
             exit_code=1, output_path=Path("/tmp/test.txt"), command="echo hello"
         )
         assert result.success is False
+
+    def test_pid_default_none(self) -> None:
+        """Should default pid to None for sync results."""
+        result = CommandRedirectionResult(
+            exit_code=0, output_path=Path("/tmp/test.txt"), command="echo hello"
+        )
+        assert result.pid is None
+
+    def test_pid_set_for_async(self) -> None:
+        """Should accept pid for async results."""
+        result = CommandRedirectionResult(
+            exit_code=-1, output_path=Path("/tmp/test.txt"), command="echo hello", pid=12345
+        )
+        assert result.pid == 12345
 
 
 class TestExecuteAndSave:
@@ -207,6 +222,205 @@ class TestFormatRedirectionContext:
         context = format_redirection_context(result)
         joined = "\n".join(context)
         assert "Read" in joined or "read" in joined
+
+    def test_async_includes_pid(self) -> None:
+        """Should include PID in context for async results."""
+        result = CommandRedirectionResult(
+            exit_code=-1,
+            output_path=Path("/workspace/untracked/test.txt"),
+            command="pytest tests/",
+            pid=12345,
+        )
+        context = format_redirection_context(result)
+        joined = "\n".join(context)
+        assert "PID 12345" in joined
+
+    def test_async_includes_status_check_command(self) -> None:
+        """Should include kill -0 status check for async results."""
+        result = CommandRedirectionResult(
+            exit_code=-1,
+            output_path=Path("/workspace/untracked/test.txt"),
+            command="pytest tests/",
+            pid=99999,
+        )
+        context = format_redirection_context(result)
+        joined = "\n".join(context)
+        assert "kill -0 99999" in joined
+
+    def test_async_warns_not_to_rerun(self) -> None:
+        """Should tell Claude not to re-run the command for async results."""
+        result = CommandRedirectionResult(
+            exit_code=-1,
+            output_path=Path("/workspace/untracked/test.txt"),
+            command="npm test",
+            pid=54321,
+        )
+        context = format_redirection_context(result)
+        joined = "\n".join(context)
+        assert "DO NOT re-run" in joined
+
+    def test_async_includes_output_path(self) -> None:
+        """Should include output file path for async results."""
+        result = CommandRedirectionResult(
+            exit_code=-1,
+            output_path=Path("/workspace/untracked/test.txt"),
+            command="pytest tests/",
+            pid=12345,
+        )
+        context = format_redirection_context(result)
+        joined = "\n".join(context)
+        assert "/workspace/untracked/test.txt" in joined
+
+    def test_sync_does_not_include_pid(self) -> None:
+        """Should NOT include PID info for sync results (pid=None)."""
+        result = CommandRedirectionResult(
+            exit_code=0,
+            output_path=Path("/workspace/untracked/test.txt"),
+            command="echo hello",
+        )
+        context = format_redirection_context(result)
+        joined = "\n".join(context)
+        assert "PID" not in joined
+        assert "kill -0" not in joined
+
+
+class TestLaunchAndSave:
+    """Tests for launch_and_save function (non-blocking async execution)."""
+
+    @staticmethod
+    def _kill_if_running(pid: int) -> None:
+        """Send SIGTERM to a process if it is still running."""
+        import signal
+
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return  # Process already exited — nothing to clean up
+
+    def test_returns_immediately_for_slow_command(self, tmp_path: Path) -> None:
+        """Should return without waiting for slow commands (the whole point of this fix)."""
+        import time as time_mod
+
+        start = time_mod.monotonic()
+        result = launch_and_save(
+            command=["sleep", "10"],
+            output_dir=tmp_path,
+            label="test_async",
+        )
+        elapsed = time_mod.monotonic() - start
+
+        # Must return in under 2 seconds (command sleeps for 10)
+        assert elapsed < 2.0
+        assert result.pid is not None
+
+        # Clean up the background process
+        self._kill_if_running(result.pid)
+
+    def test_returns_result_with_pid(self, tmp_path: Path) -> None:
+        """Should return a result with PID set and exit_code -1 (unknown)."""
+        result = launch_and_save(
+            command=["echo", "hello"],
+            output_dir=tmp_path,
+            label="test_pid",
+        )
+        assert result.pid is not None
+        assert result.pid > 0
+        # exit_code is -1 since we don't wait for completion
+        assert result.exit_code == -1
+
+    def test_output_file_created_with_header(self, tmp_path: Path) -> None:
+        """Should create output file with command header immediately."""
+        result = launch_and_save(
+            command=["echo", "test"],
+            output_dir=tmp_path,
+            label="test_header",
+        )
+        assert result.output_path.exists()
+        content = result.output_path.read_text()
+        assert "Command: echo test" in content
+
+    def test_output_file_has_content_after_completion(self, tmp_path: Path) -> None:
+        """After process completes, file should have output and exit code."""
+        result = launch_and_save(
+            command=["echo", "hello world"],
+            output_dir=tmp_path,
+            label="test_content",
+        )
+        # Wait for fast command to complete
+        time.sleep(1.0)
+
+        content = result.output_path.read_text()
+        assert "hello world" in content
+        assert "Exit code: 0" in content
+
+    def test_captures_nonzero_exit_code(self, tmp_path: Path) -> None:
+        """Should capture non-zero exit code after process completes."""
+        result = launch_and_save(
+            command=["false"],
+            output_dir=tmp_path,
+            label="test_fail",
+        )
+        time.sleep(1.0)
+
+        content = result.output_path.read_text()
+        assert "Exit code: 1" in content
+
+    def test_captures_stderr_in_output(self, tmp_path: Path) -> None:
+        """Should capture stderr in the output file (2>&1 in wrapper)."""
+        result = launch_and_save(
+            command=["bash", "-c", "echo error_msg >&2"],
+            output_dir=tmp_path,
+            label="test_stderr",
+        )
+        time.sleep(1.0)
+
+        content = result.output_path.read_text()
+        assert "error_msg" in content
+
+    def test_creates_output_directory(self, tmp_path: Path) -> None:
+        """Should create output directory if it doesn't exist."""
+        output_dir = tmp_path / "nested" / "dir"
+        assert not output_dir.exists()
+
+        result = launch_and_save(
+            command=["echo", "test"],
+            output_dir=output_dir,
+            label="test_mkdir",
+        )
+        assert output_dir.exists()
+        assert result.output_path.exists()
+
+    def test_output_file_naming(self, tmp_path: Path) -> None:
+        """Should include label in the output filename."""
+        result = launch_and_save(
+            command=["echo", "test"],
+            output_dir=tmp_path,
+            label="my_handler",
+        )
+        assert "my_handler" in result.output_path.name
+        assert result.output_path.suffix == ".txt"
+
+    def test_stores_command_in_result(self, tmp_path: Path) -> None:
+        """Should store the command string in the result."""
+        result = launch_and_save(
+            command=["echo", "hello"],
+            output_dir=tmp_path,
+            label="test",
+        )
+        assert result.command == "echo hello"
+
+    def test_cwd_parameter(self, tmp_path: Path) -> None:
+        """Should execute command in specified working directory."""
+        result = launch_and_save(
+            command=["pwd"],
+            output_dir=tmp_path,
+            label="test_cwd",
+            cwd=tmp_path,
+        )
+        time.sleep(1.0)
+
+        content = result.output_path.read_text()
+        assert str(tmp_path) in content
 
 
 class TestCleanupOldFiles:

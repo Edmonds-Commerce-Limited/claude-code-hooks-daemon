@@ -488,17 +488,18 @@ class TestPipeBlockerRedirection:
 
         with (
             patch(
-                "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.execute_and_save"
-            ) as mock_exec,
+                "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.launch_and_save"
+            ) as mock_launch,
             patch(
                 "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.ProjectContext"
             ) as mock_ctx,
         ):
             mock_ctx.daemon_untracked_dir.return_value = tmp_path
-            mock_exec.return_value = CommandRedirectionResult(
-                exit_code=0,
+            mock_launch.return_value = CommandRedirectionResult(
+                exit_code=-1,
                 output_path=tmp_path / "test.txt",
                 command="pytest tests/",
+                pid=12345,
             )
             result = handler.handle(hook_input)
 
