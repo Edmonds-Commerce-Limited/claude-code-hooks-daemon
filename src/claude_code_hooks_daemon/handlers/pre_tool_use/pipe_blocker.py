@@ -25,8 +25,8 @@ from claude_code_hooks_daemon.core import (
 )
 from claude_code_hooks_daemon.core.command_redirection import (
     COMMAND_REDIRECTION_SUBDIR,
-    execute_and_save,
     format_redirection_context,
+    launch_and_save,
 )
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.strategies.pipe_blocker.common import UNIVERSAL_WHITELIST_PATTERNS
@@ -352,14 +352,16 @@ class PipeBlockerHandler(Handler):
             else:
                 reason = self._unknown_terse_reason(source_segment, command)
 
-        # Command redirection: execute base command and save output
+        # Command redirection: launch base command in background and save output.
+        # Uses launch_and_save (async/non-blocking) instead of execute_and_save
+        # to prevent hook timeout when redirecting slow commands (pytest, npm test).
         context: list[str] = []
         if self._command_redirection:
             redirected_args = self.get_redirected_command(hook_input)
             if redirected_args:
                 try:
                     output_dir = ProjectContext.daemon_untracked_dir() / COMMAND_REDIRECTION_SUBDIR
-                    result = execute_and_save(
+                    result = launch_and_save(
                         command=redirected_args,
                         output_dir=output_dir,
                         label="pipe_blocker",
