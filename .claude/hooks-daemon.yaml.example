@@ -6,6 +6,11 @@ daemon:
   log_level: INFO
   project_root: ../../  # Project root relative to this config file (always ../../)
 
+  # CI enforcement (v2.27.0+) - Controls behaviour when daemon cannot start
+  # Default (false/omitted): fail open — warn once then silently passthrough
+  # When true: fail closed — block all tool use and tell agent to stop
+  # ci_enabled: false
+
   # Input validation (v2.2.0+) - Catch malformed events at front controller layer
   input_validation:
     enabled: true              # Validate hook inputs (recommended)
