@@ -193,7 +193,7 @@ def _reap_background_process(proc: subprocess.Popen[bytes]) -> None:
     try:
         proc.wait()
     except Exception:  # nosec B110 — reaper thread must not crash the daemon
-        pass
+        logger.debug("Reaper thread: process wait failed for PID %s", proc.pid)
 
 
 def launch_and_save(
