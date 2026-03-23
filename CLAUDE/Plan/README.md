@@ -4,6 +4,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00092: CI Environment Graceful Degradation](00092-ci-environment-graceful-degradation/PLAN.md) - Not Started
+  - Detect CI/GitHub Actions environments at bash hook level; degrade gracefully (warn + passthrough) instead of blocking
+  - Fixes broken Claude Code triage in GitHub Actions for projects with hooks daemon installed
+  - **Priority**: High
+
 - [00063: FAIL FAST - Plugin Handler Bug & Error Hiding Audit](00063-fail-fast-plugin-handler-audit/PLAN.md) - In Progress
   - **Phase 1 DONE**: Plugin handler suffix bug fixed, warning converted to crash (daemon fails on unregistered handler)
   - **Phase 2 PENDING**: Comprehensive audit for ALL error hiding patterns in codebase (audit script, fix violations)
@@ -478,9 +483,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 86
+- **Total Plans Created**: 87
 - **Completed**: 73 (1 with reduced scope)
-- **Active**: 1 (in progress)
+- **Active**: 2 (1 in progress, 1 not started)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation)
 
