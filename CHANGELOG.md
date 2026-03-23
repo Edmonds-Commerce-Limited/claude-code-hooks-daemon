@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.26.0] - 2026-03-23
+
+### Added
+
+- **Async command redirection (`launch_and_save`) for `pipe_blocker` handler**: The pipe blocker's command redirection now uses a new non-blocking `launch_and_save()` function instead of the synchronous `execute_and_save()`. When blocking a command piped to `tail`/`head`, the handler immediately spawns the base command as a detached background process and returns the deny message without waiting for it to complete. This prevents hook timeouts when the redirected command is slow (e.g. `pytest`, `npm test`). A daemon reaper thread prevents zombie process accumulation. The async wrapper script passes command arguments positionally via `$@` — no shell interpolation of user-supplied values.
+
+### Fixed
+
+- **Plan numbering regex matches date directories, inflating counter**: The regex `^(\d+)-` in `plan_numbering.py` and `validate_plan_number.py` matched date-formatted directories such as `2026-01-12` in legacy archives, extracting `2026` as a plan number and causing the sequential counter to jump from ~32 to ~2027. Fixed by tightening the regex to `^(\d{1,5})-[a-zA-Z]`, which requires a letter immediately after the hyphen — excluding date patterns (digit after hyphen) while correctly matching valid plan directories like `00032-svc-feature`. Regression tests added for both `plan_numbering` utility and `validate_plan_number` handler.
+
+- **Install and upgrade docs now strongly emphasise handler enablement**: `CLAUDE/LLM-INSTALL.md` and `CLAUDE/LLM-UPDATE.md` previously treated handler configuration as optional, causing agents to leave most handlers disabled after install. Renamed "Configure Handlers (Optional)" to "Enable and Configure Handlers (CRITICAL)", added a full handler category table with enablement recommendations, added a comprehensive example config enabling 20+ handlers, and made the Handler Status Report section mandatory with a 30+ enabled handler target. Applied equivalent changes to the update guide.
+
+- **QA violations in async command redirection and stale exclusion lines**: Resolved Ruff and MyPy violations introduced by the `launch_and_save` implementation and updated stale line-number references in `error_hiding_exclusions.json` that shifted after adding the new async function to `command_redirection.py`.
+
 ## [2.25.0] - 2026-03-19
 
 ### Added
