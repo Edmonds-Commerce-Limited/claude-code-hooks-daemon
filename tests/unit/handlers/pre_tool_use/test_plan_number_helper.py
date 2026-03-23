@@ -145,6 +145,34 @@ class TestPlanNumberHelperHandler:
             }
             assert handler_enabled.matches(hook_input), f"Should match: {command}"
 
+    def test_ignores_multi_command_pipeline_with_unrelated_echo(
+        self, handler_enabled: PlanNumberHelperHandler
+    ) -> None:
+        r"""Regression: should NOT match when echo and CLAUDE/Plan are in different subcommands.
+
+        Bug: echo\s+.*CLAUDE/Plan/ regex was too greedy, matching `echo "$DATABASE_URL"`
+        from one subcommand with a CLAUDE/Plan path in a `cat` command elsewhere in the
+        same pipeline, causing a false positive block.
+        """
+        # Command that parses DATABASE_URL via echo|sed, then runs mysql with a SQL file
+        # stored in the plan folder — echo and CLAUDE/Plan/ are completely unrelated here.
+        command = (
+            "source /var/www/vhosts/green/quoting-dsm-api/.env && "
+            "DB_HOST=$(echo \"$DATABASE_URL\" | sed 's|mysql://[^@]*@||;s|/.*||;s|:.*||') && "
+            "DB_USER=$(echo \"$DATABASE_URL\" | sed 's|mysql://||;s|:.*||') && "
+            "DB_PASS=$(echo \"$DATABASE_URL\" | sed 's|mysql://[^:]*:||;s|@.*||') && "
+            'mysql -h "$DB_HOST" -u "$DB_USER" -p"$DB_PASS" mydb '
+            '-e "$(cat /var/www/vhosts/green/quoting/CLAUDE/Plan/00003-stats/report.sql)" '
+            '> /tmp/output.tsv 2>&1; echo "EXIT: $?"'
+        )
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+        }
+        assert not handler_enabled.matches(
+            hook_input
+        ), "Should NOT match: echo and CLAUDE/Plan/ path are in different subcommands"
+
     def test_ignores_safe_commands(self, handler_enabled: PlanNumberHelperHandler) -> None:
         """Should not match safe commands."""
         safe_commands = [
