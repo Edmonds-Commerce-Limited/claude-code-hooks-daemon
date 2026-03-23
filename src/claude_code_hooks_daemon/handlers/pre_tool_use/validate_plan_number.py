@@ -195,7 +195,9 @@ See: {plan_dir}/CLAUDE.md for full instructions
             return 0
 
         plan_dirs: list[str] = []
-        _numbered_dir_re = re.compile(r"^(\d+)-")
+        # Require a letter after hyphen to exclude date-formatted dirs
+        # like "2026-01-12" while matching plan dirs like "00032-svc-feature".
+        _numbered_dir_re = re.compile(r"^(\d{1,5})-[a-zA-Z]")
 
         for item in plan_root.iterdir():
             if not item.is_dir():

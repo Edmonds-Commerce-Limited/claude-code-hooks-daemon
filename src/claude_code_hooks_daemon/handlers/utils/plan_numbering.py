@@ -43,7 +43,10 @@ def get_next_plan_number(plan_folder: Path) -> str:
         raise FileNotFoundError(f"Plan directory does not exist: {plan_folder}")
 
     highest_number = 0
-    pattern = re.compile(r"^(\d+)-")
+    # Require a letter after hyphen to exclude date-formatted dirs
+    # like "2026-01-12" (digit after hyphen) while matching plan dirs like
+    # "00032-svc-feature" or "00032-Feature" (letter after hyphen).
+    pattern = re.compile(r"^(\d{1,5})-[a-zA-Z]")
 
     def scan_directory(directory: Path, scan_subdirs: bool = True) -> None:
         """Scan directory for plan numbers.
