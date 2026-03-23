@@ -5,11 +5,13 @@ from __future__ import annotations
 import os
 import time
 from pathlib import Path
+from unittest.mock import patch
 
 from claude_code_hooks_daemon.core.command_redirection import (
     COMMAND_REDIRECTION_SUBDIR,
     DEFAULT_TIMEOUT_SECONDS,
     CommandRedirectionResult,
+    _reap_background_process,
     cleanup_old_files,
     execute_and_save,
     format_redirection_context,
@@ -421,6 +423,96 @@ class TestLaunchAndSave:
 
         content = result.output_path.read_text()
         assert str(tmp_path) in content
+
+
+class TestReapBackgroundProcess:
+    """Tests for _reap_background_process helper."""
+
+    def test_reaps_completed_process(self) -> None:
+        """Should call wait() on the process to reap it."""
+        import subprocess
+
+        # Launch a quick process and reap it
+        proc = subprocess.Popen(["true"])  # nosec B603 B607
+        _reap_background_process(proc)
+        assert proc.returncode is not None
+
+    def test_handles_exception_without_crashing(self) -> None:
+        """Should log and continue when wait() raises an exception."""
+        from unittest.mock import MagicMock
+
+        mock_proc = MagicMock()
+        mock_proc.wait.side_effect = OSError("process gone")
+        mock_proc.pid = 99999
+
+        # Should not raise
+        _reap_background_process(mock_proc)
+
+
+class TestExecuteAndSaveErrorPaths:
+    """Tests for execute_and_save error handling paths."""
+
+    def test_file_not_found_error(self, tmp_path: Path) -> None:
+        """Should handle FileNotFoundError when command binary doesn't exist."""
+        result = execute_and_save(
+            command=["nonexistent_binary_xyz_12345"],
+            output_dir=tmp_path,
+            label="test_fnf",
+        )
+        assert result.exit_code == 127
+        content = result.output_path.read_text()
+        assert "not found" in content.lower() or "No such file" in content
+
+    def test_os_error_handling(self, tmp_path: Path) -> None:
+        """Should handle OSError during command execution."""
+        with patch(
+            "claude_code_hooks_daemon.core.command_redirection.subprocess.run",
+            side_effect=OSError("Permission denied"),
+        ):
+            result = execute_and_save(
+                command=["echo", "test"],
+                output_dir=tmp_path,
+                label="test_oserror",
+            )
+            assert result.exit_code == 1
+            content = result.output_path.read_text()
+            assert "Permission denied" in content
+
+
+class TestLaunchAndSaveErrorPaths:
+    """Tests for launch_and_save error handling paths."""
+
+    def test_file_not_found_when_bash_missing(self, tmp_path: Path) -> None:
+        """Should handle FileNotFoundError when bash is not found."""
+        with patch(
+            "claude_code_hooks_daemon.core.command_redirection.subprocess.Popen",
+            side_effect=FileNotFoundError("bash not found"),
+        ):
+            result = launch_and_save(
+                command=["echo", "test"],
+                output_dir=tmp_path,
+                label="test_no_bash",
+            )
+            assert result.exit_code == 127
+            assert result.pid is None
+            content = result.output_path.read_text()
+            assert "bash not found" in content.lower()
+
+    def test_os_error_handling(self, tmp_path: Path) -> None:
+        """Should handle OSError during Popen."""
+        with patch(
+            "claude_code_hooks_daemon.core.command_redirection.subprocess.Popen",
+            side_effect=OSError("Permission denied"),
+        ):
+            result = launch_and_save(
+                command=["echo", "test"],
+                output_dir=tmp_path,
+                label="test_oserror",
+            )
+            assert result.exit_code == 1
+            assert result.pid is None
+            content = result.output_path.read_text()
+            assert "Permission denied" in content
 
 
 class TestCleanupOldFiles:
