@@ -95,9 +95,11 @@ class PlanNumberHelperHandler(Handler):
 
         # 3. Glob expansion (echo, printf with plan directory globs)
         # Match patterns like: echo CLAUDE/Plan/0*, echo CLAUDE/Plan/*, echo CLAUDE/Plan/[0-9]*
+        # Use [^;&|]* instead of .* to avoid matching across command separators (&&, ||, ;, |)
+        # which would cause false positives when echo and CLAUDE/Plan appear in different subcommands.
         glob_patterns = [
-            rf"echo\s+.*{re.escape(plan_dir)}/[0-9\*\[]",  # echo with glob chars
-            rf"printf\s+.*{re.escape(plan_dir)}/[0-9\*\[]",  # printf with glob chars
+            rf"echo\s+[^;&|]*{re.escape(plan_dir)}/[0-9\*\[]",  # echo with glob chars
+            rf"printf\s+[^;&|]*{re.escape(plan_dir)}/[0-9\*\[]",  # printf with glob chars
         ]
 
         for pattern in glob_patterns:
