@@ -156,3 +156,56 @@ class TestGetNextPlanNumber:
         (archive / "README.md").write_text("notes")
         result = get_next_plan_number(temp_plan_dir)
         assert result == "00004"
+
+    # Regression tests for date-directory false positive bug
+
+    def test_date_directories_not_counted_as_plan_numbers(self, temp_plan_dir: Path) -> None:
+        """Date-formatted dirs like 2026-01-12 must not be treated as plan numbers.
+
+        Regression test: date dirs in legacy archives matched ^(\\d+)- regex,
+        causing plan numbers to jump from ~32 to ~2027.
+        """
+        (temp_plan_dir / "00005-svc-some-feature").mkdir()
+        legacy = temp_plan_dir / "legacy" / "old-stuff" / "2026-01-12"
+        legacy.mkdir(parents=True)
+
+        result = get_next_plan_number(temp_plan_dir)
+        assert result == "00006"  # NOT "02027"
+
+    def test_date_directories_at_top_level_not_counted(self, temp_plan_dir: Path) -> None:
+        """Date-formatted dirs directly in plan folder must not match."""
+        (temp_plan_dir / "00010-real-plan").mkdir()
+        (temp_plan_dir / "2026-01-12").mkdir()
+        (temp_plan_dir / "2026-01-13").mkdir()
+
+        result = get_next_plan_number(temp_plan_dir)
+        assert result == "00011"  # NOT "02027"
+
+    def test_date_directories_in_nested_archive_not_counted(self, temp_plan_dir: Path) -> None:
+        """Date dirs nested several levels deep in archives must not match."""
+        (temp_plan_dir / "00032-latest-plan").mkdir()
+        deep_archive = temp_plan_dir / "legacy" / "top-level" / "container-management"
+        deep_archive.mkdir(parents=True)
+        (deep_archive / "2026-01-12").mkdir()
+        (deep_archive / "2026-01-13").mkdir()
+
+        result = get_next_plan_number(temp_plan_dir)
+        assert result == "00033"  # NOT "02027"
+
+    def test_uppercase_plan_names_counted(self, temp_plan_dir: Path) -> None:
+        """Plan dirs starting with uppercase letter after hyphen should match."""
+        (temp_plan_dir / "00005-Feature-work").mkdir()
+        (temp_plan_dir / "00010-Refactor-handlers").mkdir()
+
+        result = get_next_plan_number(temp_plan_dir)
+        assert result == "00011"
+
+    def test_numeric_only_directories_not_counted(self, temp_plan_dir: Path) -> None:
+        """Directories like '2025' (year only, no hyphen) should not match."""
+        (temp_plan_dir / "00005-real-plan").mkdir()
+        archive = temp_plan_dir / "archive"
+        archive.mkdir()
+        (archive / "2025").mkdir()
+
+        result = get_next_plan_number(temp_plan_dir)
+        assert result == "00006"

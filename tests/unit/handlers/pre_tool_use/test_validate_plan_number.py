@@ -808,6 +808,46 @@ class TestValidatePlanNumberHandler:
         # when a custom dir is configured
         assert "CLAUDE/Plan/" not in result.context[0]
 
+    # Regression tests for date-directory false positive bug
+
+    def test_get_highest_ignores_date_directories_in_subfolders(
+        self, handler: ValidatePlanNumberHandler, plan_root: Path
+    ) -> None:
+        """Date-formatted dirs like 2026-01-12 must not inflate plan numbers.
+
+        Regression test: date dirs in organizational subfolders matched
+        ^(\\d+)- regex, causing plan numbers to jump to ~2027.
+        """
+        (plan_root / "005-active").mkdir()
+        completed = plan_root / "Completed"
+        completed.mkdir()
+        (completed / "032-completed").mkdir()
+        # Date-formatted directory inside an organizational subfolder
+        legacy = plan_root / "legacy"
+        legacy.mkdir()
+        (legacy / "2026-01-12").mkdir()
+        (legacy / "2026-01-13").mkdir()
+
+        highest = handler._get_highest_plan_number()
+        assert highest == 32  # NOT 2026
+
+    def test_handle_not_poisoned_by_date_directories(
+        self, handler: ValidatePlanNumberHandler, plan_root: Path
+    ) -> None:
+        """Plan validation should not be affected by date-formatted dirs."""
+        (plan_root / "032-existing").mkdir()
+        legacy = plan_root / "legacy"
+        legacy.mkdir()
+        (legacy / "2026-01-12").mkdir()
+
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/workspace/CLAUDE/Plan/033-new-plan/PLAN.md"},
+        }
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW
+        assert not result.context  # No warning — 033 is correct
+
     # Tests for handler metadata
 
     def test_handler_has_correct_name(self, handler: ValidatePlanNumberHandler) -> None:
