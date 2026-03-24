@@ -8,6 +8,8 @@ daemon:
   strict_mode: true  # FAIL FAST on ALL errors (dogfooding requirement)
   project_root: ../../  # Project root relative to this config file (always ../../)
 
+  stale_file_days: 7  # Remove daemon runtime files and command-redirection output older than this many days
+
   enable_hello_world_handlers: false  # Disabled - using real handlers instead
 
   # Language filter for strategy-pattern handlers
@@ -79,6 +81,8 @@ handlers:
     git_stash:             # Warns about git stash (stashes can be lost)
       enabled: true
       priority: 19
+      options:
+        mode: deny             # Block git stash entirely (use git commit or worktree instead)
 
     lock_file_edit_blocker: # Prevents editing package lock files
       enabled: true
@@ -364,6 +368,10 @@ handlers:
     working_directory:  # Shows current working directory when different from project root
       enabled: true
       priority: 25
+
+    startup_cleanup:  # Shows 🧹 briefly after startup when stale files were removed
+      enabled: true
+      priority: 28
 
     daemon_stats:   # Shows daemon uptime, memory, log level
       enabled: true

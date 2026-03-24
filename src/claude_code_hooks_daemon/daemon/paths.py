@@ -10,8 +10,10 @@ not /tmp, to prevent security vulnerabilities.
 
 import contextlib
 import hashlib
+import json
 import logging
 import os
+import time
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -425,3 +427,170 @@ def cleanup_pid_file(pid_path: Path | str) -> None:
         logger.warning("Failed to cleanup PID file %s: %s", pid_path, e)
     except Exception as e:
         logger.error("Unexpected error cleaning PID file %s: %s", pid_path, e, exc_info=True)
+
+
+# Prefix for all daemon runtime files
+_DAEMON_FILE_PREFIX = "daemon-"
+
+# Filename for the cleanup status file read by the startup_cleanup statusline handler
+_CLEANUP_STATUS_FILENAME = "cleanup_status.json"
+
+# Directory name for command-redirection output files
+_COMMAND_REDIRECTION_DIR = "command-redirection"
+
+
+def cleanup_stale_daemon_files(project_dir: Path | str, max_age_days: int = 7) -> int:
+    """Remove daemon runtime files that haven't been touched within max_age_days.
+
+    Active daemons call touch_daemon_files() periodically to keep their files
+    fresh. Files whose mtime has aged past the cutoff belong to dead containers
+    and are safe to remove.
+
+    This is deliberately NOT hostname-based: multiple containers can legitimately
+    share a single codebase, so removing by hostname would break live daemons.
+
+    Args:
+        project_dir: Path to project directory
+        max_age_days: Files older than this many days are removed (default 7)
+
+    Returns:
+        Number of stale files removed
+    """
+    project_path = Path(project_dir).resolve()
+    untracked_dir = _get_untracked_dir(project_path)
+
+    if not untracked_dir.is_dir():
+        return 0
+
+    cutoff = time.time() - (max_age_days * 86400)
+    removed = 0
+
+    for filepath in untracked_dir.iterdir():
+        if not filepath.name.startswith(_DAEMON_FILE_PREFIX):
+            continue
+        try:
+            if filepath.stat().st_mtime < cutoff:
+                filepath.unlink()
+                removed += 1
+                logger.info("Removed stale daemon file: %s", filepath)
+        except OSError as e:
+            logger.warning("Failed to remove stale daemon file %s: %s", filepath, e)
+        except Exception as e:
+            logger.error("Unexpected error removing %s: %s", filepath, e, exc_info=True)
+
+    if removed:
+        logger.info(
+            "Cleaned up %d stale daemon file(s) (older than %d days)", removed, max_age_days
+        )
+
+    return removed
+
+
+def cleanup_stale_command_redirection_files(project_dir: Path | str, max_age_days: int = 7) -> int:
+    """Remove command-redirection output files older than max_age_days.
+
+    The pipe_blocker handler redirects blocked commands to files in
+    untracked/command-redirection/. These accumulate over time and should
+    be periodically cleaned up.
+
+    Args:
+        project_dir: Path to project directory
+        max_age_days: Files older than this many days are removed (default 7)
+
+    Returns:
+        Number of stale files removed
+    """
+    project_path = Path(project_dir).resolve()
+    untracked_dir = _get_untracked_dir(project_path)
+    cmd_redir_dir = untracked_dir / _COMMAND_REDIRECTION_DIR
+
+    if not cmd_redir_dir.is_dir():
+        return 0
+
+    cutoff = time.time() - (max_age_days * 86400)
+    removed = 0
+
+    for filepath in cmd_redir_dir.iterdir():
+        if not filepath.is_file():
+            continue
+        try:
+            if filepath.stat().st_mtime < cutoff:
+                filepath.unlink()
+                removed += 1
+                logger.info("Removed stale command-redirection file: %s", filepath)
+        except OSError as e:
+            logger.warning("Failed to remove stale command-redirection file %s: %s", filepath, e)
+        except Exception as e:
+            logger.error("Unexpected error removing %s: %s", filepath, e, exc_info=True)
+
+    if removed:
+        logger.info(
+            "Cleaned up %d stale command-redirection file(s) (older than %d days)",
+            removed,
+            max_age_days,
+        )
+
+    return removed
+
+
+def touch_daemon_files_in_dir(untracked_dir: Path) -> None:
+    """Touch the current daemon's runtime files in a known untracked directory.
+
+    Inner implementation used by both touch_daemon_files() (project-path API)
+    and the server's periodic task (socket-path API).
+
+    Args:
+        untracked_dir: The untracked directory containing daemon runtime files
+    """
+    if not untracked_dir.is_dir():
+        return
+
+    suffix = _get_hostname_suffix()
+    current_prefix = f"daemon{suffix}."
+
+    for filepath in untracked_dir.iterdir():
+        if not filepath.name.startswith(current_prefix):
+            continue
+        try:
+            filepath.touch()
+            logger.debug("Touched daemon file: %s", filepath)
+        except OSError as e:
+            logger.debug("Failed to touch daemon file %s: %s", filepath, e)
+
+
+def touch_daemon_files(project_dir: Path | str) -> None:
+    """Touch the current daemon's runtime files to mark them as active.
+
+    Called periodically by the running daemon so that cleanup_stale_daemon_files()
+    can distinguish live containers (recently touched) from dead ones (aged out).
+
+    Only touches files belonging to the current hostname instance.
+
+    Args:
+        project_dir: Path to project directory
+    """
+    project_path = Path(project_dir).resolve()
+    untracked_dir = _get_untracked_dir(project_path)
+    touch_daemon_files_in_dir(untracked_dir)
+
+
+def write_cleanup_status(project_dir: Path | str, total_removed: int) -> None:
+    """Write cleanup result to a JSON file for the statusline handler.
+
+    The startup_cleanup statusline handler reads this file to briefly display
+    a cleanup summary after daemon startup.
+
+    Args:
+        project_dir: Path to project directory
+        total_removed: Total number of stale files removed during startup cleanup
+    """
+    project_path = Path(project_dir).resolve()
+    untracked_dir = _get_untracked_dir(project_path)
+
+    try:
+        untracked_dir.mkdir(parents=True, exist_ok=True)
+        status_file = untracked_dir / _CLEANUP_STATUS_FILENAME
+        status_file.write_text(json.dumps({"count": total_removed, "timestamp": time.time()}))
+        logger.debug("Wrote cleanup status: %d files removed", total_removed)
+    except OSError as e:
+        logger.warning("Failed to write cleanup status: %s", e)

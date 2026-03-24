@@ -242,6 +242,7 @@ class ConfigTemplate:
             "    usage_tracking: {enabled: true, priority: 15}   # Usage statistics\n"
             "    git_branch: {enabled: true, priority: 20}       # Current git branch\n"
             "    thinking_mode: {enabled: true, priority: 25}    # Current thinking mode\n"
+            "    startup_cleanup: {enabled: true, priority: 28}  # Stale file cleanup indicator\n"
             "    daemon_stats: {enabled: true, priority: 30}     # Daemon health metrics\n"
             "\n"
             "# Custom project-specific handlers\n"

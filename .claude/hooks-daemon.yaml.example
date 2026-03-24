@@ -6,6 +6,8 @@ daemon:
   log_level: INFO
   project_root: ../../  # Project root relative to this config file (always ../../)
 
+  stale_file_days: 7  # Remove daemon runtime files and command-redirection output older than this (days)
+
   # CI enforcement (v2.27.0+) - Controls behaviour when daemon cannot start
   # Default (false/omitted): fail open — warn once then silently passthrough
   # When true: fail closed — block all tool use and tell agent to stop
@@ -321,6 +323,10 @@ handlers:
     working_directory:  # Shows current working directory when different from project root
       enabled: true
       priority: 25
+
+    startup_cleanup:  # Shows 🧹 briefly after startup when stale files were removed
+      enabled: true
+      priority: 28
 
     daemon_stats:   # Shows daemon uptime, memory, log level
       enabled: true

@@ -373,13 +373,20 @@ class HooksDaemon:
         # Start idle timeout monitor
         idle_monitor_task = asyncio.create_task(self._monitor_idle_timeout())
 
+        # Start periodic file touch (keeps runtime files fresh so stale cleanup
+        # can distinguish live containers from dead ones by mtime)
+        touch_task = asyncio.create_task(self._touch_daemon_files_periodically())
+
         # Wait for shutdown event
         await self.shutdown_event.wait()
 
-        # Cancel idle monitor
+        # Cancel background tasks
         idle_monitor_task.cancel()
+        touch_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await idle_monitor_task
+        with contextlib.suppress(asyncio.CancelledError):
+            await touch_task
 
         logger.info("Daemon shutdown complete")
 
@@ -392,6 +399,28 @@ class HooksDaemon:
         logger.info("Received signal %s, initiating graceful shutdown", sig.name)
         # Store task reference to prevent GC, task runs independently
         self._shutdown_task = asyncio.create_task(self.shutdown())
+
+    # Touch daemon files every 1 hour so stale-file cleanup can tell live from dead
+    _TOUCH_INTERVAL_SECONDS = 3600
+
+    async def _touch_daemon_files_periodically(self) -> None:
+        """Periodically touch this daemon's runtime files to mark them as active.
+
+        Active containers must call this regularly so that startup cleanup can
+        identify dead containers by file age and remove their orphaned files.
+        """
+        try:
+            while not self._shutdown_requested:
+                await asyncio.sleep(self._TOUCH_INTERVAL_SECONDS)
+                socket_path = self.config.socket_path_obj
+                if socket_path and socket_path.parent.is_dir():
+                    from claude_code_hooks_daemon.daemon.paths import touch_daemon_files_in_dir
+
+                    touch_daemon_files_in_dir(socket_path.parent)
+                    logger.debug("Touched daemon runtime files")
+        except asyncio.CancelledError:
+            logger.debug("Daemon file touch task cancelled")
+            raise
 
     async def _monitor_idle_timeout(self) -> None:
         """Monitor idle timeout and shutdown if exceeded.
