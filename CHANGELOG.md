@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.27.0] - 2026-03-23
+
+### Added
+
+- **CI environment graceful degradation for hooks daemon**: Added config-based behaviour when the hooks daemon is unavailable (e.g. GitHub Actions, other CI environments). Implemented entirely in `init.sh`, the bash hook entry point layer, with zero impact on normal daemon operation.
+  - **Default (fail open)**: When the daemon cannot be reached, the hook script emits a one-time warning to stderr and writes a `.hooks-passthrough` state file alongside the socket. All subsequent calls silently pass through without re-emitting the warning. This keeps CI pipelines operational without noise.
+  - **`ci_enabled: true` (fail closed)**: When this option is set under `daemon:` in `hooks-daemon.yaml`, the hook script returns a hard deny with a STOP message instructing the agent that the hooks daemon must be installed before continuing. Provides strict enforcement for projects that require the daemon to be present.
+  - 12 new end-to-end bash tests covering both modes in `tests/unit/test_ci_passthrough.py`.
+  - Example config updated with inline documentation for the new `ci_enabled` option.
+
+### Fixed
+
+- **`plan_number_helper` false positive on multi-command pipelines**: The glob expansion regex used `.*` between `echo\s+` and the plan directory path, allowing it to match greedily across command separators (`&&`, `||`, `;`, `|`). This caused false positives when an unrelated `echo` (e.g. parsing `DATABASE_URL`) appeared earlier in the same pipeline as a `cat` command referencing a file stored in the plan folder. Fixed by replacing `.*` with `[^;&|]*` to prevent matching across command separator boundaries. Regression test added.
+
 ## [2.26.0] - 2026-03-23
 
 ### Added
