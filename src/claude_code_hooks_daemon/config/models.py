@@ -458,6 +458,10 @@ class DaemonConfig(BaseModel):
         default="default",
         description="Default daemon mode on startup. Values: 'default' (normal operation), 'unattended' (blocks Stop events to keep Claude working).",
     )
+    stale_file_days: Annotated[int, Field(ge=1, le=365)] = Field(
+        default=7,
+        description="Number of days before daemon runtime files (sock, pid, socket-path) and command-redirection output files are considered stale and removed on startup. Active daemons touch their files periodically to stay fresh.",
+    )
 
     @field_validator("socket_path", "pid_file_path", mode="before")
     @classmethod

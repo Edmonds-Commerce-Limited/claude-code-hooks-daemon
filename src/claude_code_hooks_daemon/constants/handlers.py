@@ -409,6 +409,13 @@ class HandlerID:
         display_name="status-working-directory",
     )
 
+    # Startup cleanup status (status line)
+    STARTUP_CLEANUP = HandlerIDMeta(
+        class_name="StartupCleanupHandler",
+        config_key="startup_cleanup",
+        display_name="status-startup-cleanup",
+    )
+
     # Optimal config checker (SessionStart handler)
     OPTIMAL_CONFIG_CHECKER = HandlerIDMeta(
         class_name="OptimalConfigCheckerHandler",
@@ -537,6 +544,7 @@ HandlerKey = Literal[
     "model_context",
     "usage_tracking",
     "working_directory",
+    "startup_cleanup",
     # Workflow state handlers
     "workflow_state_restoration",
     "workflow_state_pre_compact",

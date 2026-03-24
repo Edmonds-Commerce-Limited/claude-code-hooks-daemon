@@ -4,7 +4,7 @@
   "exclusions": [
     {
       "file": "config/models.py",
-      "lines": [625],
+      "lines": [629],
       "rule": "silent-pass",
       "reason": "load_or_default(): FileNotFoundError is expected when config file disappears between exists() check and read (TOCTOU). Falls through to return cls() which creates a safe default. This is not hiding an error - it IS the intended fallback."
     },
@@ -28,13 +28,13 @@
     },
     {
       "file": "daemon/paths.py",
-      "lines": [298, 316, 403, 420],
+      "lines": [300, 318, 405, 422],
       "rule": "log-and-continue",
       "reason": "Stale socket/PID file cleanup routines: log-and-continue is correct. Cleanup failing for one stale file should not prevent cleanup of others or block daemon startup. Already logged at warning level."
     },
     {
       "file": "daemon/paths.py",
-      "lines": [362],
+      "lines": [364],
       "rule": "return-none-on-error",
       "reason": "read_pid_file(): Returns None when PID file missing or invalid. Callers check for None before using PID. This is the documented contract - a missing PID file means no daemon is running."
     },
@@ -52,19 +52,19 @@
     },
     {
       "file": "daemon/server.py",
-      "lines": [716, 719],
+      "lines": [745, 748],
       "rule": "log-and-continue",
       "reason": "Stale PID file check: log-and-continue when reading/parsing stale PID file. Already logged. Daemon startup should continue even if stale PID file is unreadable."
     },
     {
       "file": "daemon/cli.py",
-      "lines": [99],
+      "lines": [102],
       "rule": "log-and-continue",
       "reason": "Directory search loop: log-and-continue when searching upward for .claude directory. SystemExit during path validation means invalid installation at this path - continue searching upward is the correct behaviour. Already logged at debug level."
     },
     {
       "file": "daemon/cli.py",
-      "lines": [218],
+      "lines": [221],
       "rule": "return-none-on-error",
       "reason": "send_request(): Returns None on socket connection failure. Callers check for None and display appropriate error messages to user. Socket unavailability is a normal operational state (daemon not running). Already logged via logger.exception."
     },
@@ -241,6 +241,18 @@
       "lines": [193],
       "rule": "log-and-continue",
       "reason": "Zombie reaper thread: log-and-continue when process wait() fails. Reaper thread must never crash the daemon — it exists solely to prevent zombie accumulation. Already logged at debug level."
+    },
+    {
+      "file": "daemon/paths.py",
+      "lines": [471, 516, 554, 590],
+      "rule": "log-and-continue",
+      "reason": "Stale file batch cleanup routines (cleanup_stale_daemon_files, cleanup_stale_command_redirection_files, touch_daemon_files_in_dir, write_cleanup_status): log-and-continue is correct. One unremovable/unreadable file must not abort cleanup of others or block daemon startup. Already logged at warning/debug level."
+    },
+    {
+      "file": "handlers/status_line/startup_cleanup.py",
+      "lines": [49],
+      "rule": "log-and-continue",
+      "reason": "Startup cleanup status handler: log-and-continue on OSError reading cleanup_status.json. Status line handlers are fail-open by design — one failing element must not crash the entire status line. Returns empty context on error. Already logged at debug level."
     },
     {
       "file": "core/command_redirection.py",

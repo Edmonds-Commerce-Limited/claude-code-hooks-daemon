@@ -123,6 +123,7 @@ class Priority:
     CURRENT_TIME = 14
     USAGE_TRACKING = 15
     WORKING_DIRECTORY = 25
+    STARTUP_CLEANUP = 28  # Between working_directory (25) and daemon_stats (30)
 
     # Special handlers (no fixed priority in catalog)
     # These handlers set priority dynamically or don't use the standard system
