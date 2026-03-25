@@ -166,6 +166,11 @@ if [ -z "$TARGET_VERSION" ]; then
     fi
 fi
 
+# Normalise version: prepend 'v' if missing
+if [[ -n "$TARGET_VERSION" && ! "$TARGET_VERSION" =~ ^v ]]; then
+    TARGET_VERSION="v${TARGET_VERSION}"
+fi
+
 git -C "$DAEMON_DIR" rev-parse "$TARGET_VERSION" &>/dev/null || \
     _fail "Version $TARGET_VERSION not found"
 _ok "Target version: $TARGET_VERSION"
