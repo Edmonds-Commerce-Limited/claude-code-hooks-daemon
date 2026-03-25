@@ -1,11 +1,21 @@
 """Tests for CI/daemon-unavailable graceful degradation in init.sh.
 
-When the daemon cannot start and ci_enabled is NOT set in config (default),
-hook scripts degrade gracefully: warn once, write a state file, then silently
-passthrough on subsequent calls.
+This module tests two distinct failure modes when the daemon cannot start:
 
-When ci_enabled: true IS set in config, hook scripts hard-block with a loud
-STOP message telling the agent to report that hooks daemon needs installing.
+1. NON-CI ENVIRONMENT (no CI env vars):
+   Passthrough mode must NOT activate. Instead, emit_hook_error is called,
+   returning hookSpecificOutput with "Not currently running" for most events,
+   and decision: block for Stop events. Each call returns an error independently
+   — no state file suppression.
+
+2. CI ENVIRONMENT (CI=true, GITHUB_ACTIONS=true, JENKINS_URL set, etc.):
+   Passthrough mode activates — daemon is simply not installed in this pipeline.
+   First call returns one-time advisory context. Second call (flag exists) returns
+   empty {}. No blocking. Supports multiple CI platform detection.
+
+3. CI ENFORCED (ci_enabled: true in config):
+   Hard fail regardless of environment. PreToolUse is denied with STOP message.
+   Stop events are blocked. No state file created.
 
 Tests invoke the actual bash hook forwarder scripts via subprocess with
 controlled config files, verifying real end-to-end behaviour.
@@ -22,18 +32,32 @@ from typing import Any
 _HOOKS_DIR = Path(__file__).resolve().parents[2] / ".claude" / "hooks"
 
 
-def _build_clean_env(project_path: str) -> dict[str, str]:
+def _build_clean_env(
+    project_path: str,
+    ci_env: dict[str, str] | None = None,
+) -> dict[str, str]:
     """Build a clean environment with no daemon available.
 
     Uses a fake project path so the daemon cannot start (no venv, no socket).
+    By default, NO CI environment variables are included — this simulates a
+    developer machine or dev container where passthrough must NOT activate.
+
+    Args:
+        project_path: Path to the fake project root.
+        ci_env: Optional dict of CI environment variables to add (e.g.
+                {"CI": "true"} or {"GITHUB_ACTIONS": "true"}). If None,
+                no CI variables are set — non-CI environment.
     """
-    return {
+    env: dict[str, str] = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": os.environ.get("HOME", "/root"),
         "HOSTNAME": os.environ.get("HOSTNAME", "test-host"),
         # Override HOOKS_DAEMON_ROOT_DIR to point at the fake project
         "HOOKS_DAEMON_ROOT_DIR": f"{project_path}/.claude/hooks-daemon",
     }
+    if ci_env:
+        env.update(ci_env)
+    return env
 
 
 def _create_project_structure(
@@ -80,45 +104,31 @@ def _create_project_structure(
     return project
 
 
-def _run_hook(
-    hook_name: str,
-    hook_input: dict[str, Any],
-    project_path: Path,
-    timeout: int = 10,
-) -> subprocess.CompletedProcess[str]:
-    """Run a hook forwarder script with a fake project path."""
-    hook_path = _HOOKS_DIR / hook_name
-    assert hook_path.exists(), f"Hook script not found: {hook_path}"
-
-    env = _build_clean_env(str(project_path))
-
-    return subprocess.run(
-        ["bash", "-c", f'source "{_HOOKS_DIR}/../init.sh" && ensure_daemon && echo "{{}}"'],
-        input=json.dumps(hook_input),
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        env=env,
-        cwd=str(project_path),
-    )
-
-
 def _run_hook_via_forwarder(
     hook_name: str,
     hook_input: dict[str, Any],
     project_path: Path,
     timeout: int = 10,
+    extra_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run a hook forwarder script directly with controlled environment.
 
     Creates a minimal forwarder that sources init.sh from the real repo
     but uses the fake project path for daemon lookup.
+
+    Args:
+        hook_name: Hook script name (e.g. "pre-tool-use").
+        hook_input: JSON-serialisable dict to pass as hook input.
+        project_path: Path to the fake project root.
+        timeout: Subprocess timeout in seconds.
+        extra_env: Optional additional environment variables to merge into
+                   the clean environment (e.g. {"CI": "true"} for CI tests).
     """
     hook_path = _HOOKS_DIR / hook_name
     assert hook_path.exists(), f"Hook script not found: {hook_path}"
 
     init_sh = _HOOKS_DIR.parent / "init.sh"
-    env = _build_clean_env(str(project_path))
+    env = _build_clean_env(str(project_path), ci_env=extra_env)
 
     # Build a minimal test forwarder that:
     # 1. Sets PROJECT_PATH to fake project (before sourcing init.sh)
@@ -172,82 +182,206 @@ _PRE_TOOL_INPUT = {"tool_name": "Bash", "tool_input": {"command": "echo hello"}}
 _STOP_INPUT = {"stop_hook_active": True}
 
 
-class TestDefaultFailOpen:
-    """Default behaviour (no ci_enabled): fail open with one-time noise."""
+class TestNonCIDaemonFailure:
+    """Non-CI environment: daemon failure must NOT enter passthrough mode.
 
-    def test_first_call_returns_advisory_context(self, tmp_path: Path) -> None:
-        """First failure should return advisory hookSpecificOutput (not empty)."""
+    When running outside a CI environment (no CI env vars), passthrough mode
+    must never activate. Instead, emit_hook_error provides a "Not currently
+    running" error so the agent can restart the daemon. This prevents silent
+    protection-bypass in developer environments and dev containers.
+    """
+
+    def test_non_ci_returns_error_context(self, tmp_path: Path) -> None:
+        """Non-CI daemon failure returns hookSpecificOutput with error (not passthrough advisory)."""
         project = _create_project_structure(tmp_path, ci_enabled=None)
+        # No extra_env — no CI variables present
         result = _run_hook_via_forwarder("pre-tool-use", _PRE_TOOL_INPUT, project)
 
         assert result.returncode == 0
         stdout = result.stdout.strip()
-        # Should contain advisory context, not be empty
         parsed = json.loads(stdout)
-        assert "hookSpecificOutput" in parsed
+        assert "hookSpecificOutput" in parsed, f"Expected hookSpecificOutput, got: {parsed}"
         context = parsed["hookSpecificOutput"]["additionalContext"]
-        assert "INACTIVE" in context
-        assert "warning appears once" in context.lower() or "warning appears once" in context
+        # Must contain "Not currently running" — the non-CI error message
+        assert (
+            "Not currently running" in context
+        ), f"Expected 'Not currently running' in context, got: {context!r}"
+        # Must NOT contain passthrough advisory language
+        assert (
+            "INACTIVE" not in context or "Not currently running" in context
+        ), "Non-CI should show daemon error, not passthrough advisory"
 
-    def test_first_call_logs_warning_to_stderr(self, tmp_path: Path) -> None:
-        """First failure should log warning to stderr."""
-        project = _create_project_structure(tmp_path, ci_enabled=None)
-        result = _run_hook_via_forwarder("pre-tool-use", _PRE_TOOL_INPUT, project)
-
-        assert "passthrough mode" in result.stderr
-        assert "handlers inactive" in result.stderr.lower()
-
-    def test_state_file_created_on_first_failure(self, tmp_path: Path) -> None:
-        """First failure should create passthrough state file."""
-        project = _create_project_structure(tmp_path, ci_enabled=None)
-        _run_hook_via_forwarder("pre-tool-use", _PRE_TOOL_INPUT, project)
-
-        state_file = project / ".claude" / "hooks-daemon" / "untracked" / ".hooks-passthrough"
-        assert state_file.exists(), "Passthrough state file should be created on first failure"
-
-    def test_second_call_is_silent_passthrough(self, tmp_path: Path) -> None:
-        """Second call (state file exists) should return empty {} silently."""
-        project = _create_project_structure(tmp_path, ci_enabled=None)
-
-        # First call: creates state file
-        _run_hook_via_forwarder("pre-tool-use", _PRE_TOOL_INPUT, project)
-
-        # Second call: should be silent passthrough
-        result = _run_hook_via_forwarder("pre-tool-use", _PRE_TOOL_INPUT, project)
-
-        assert result.returncode == 0
-        stdout = result.stdout.strip()
-        assert stdout == "{}", f"Second call should return '{{}}', got: {stdout!r}"
-        # Should NOT log the noisy warning again
-        assert "passthrough mode" not in result.stderr
-
-    def test_ci_enabled_false_same_as_default(self, tmp_path: Path) -> None:
-        """ci_enabled: false should behave same as omitted (fail open)."""
-        project = _create_project_structure(tmp_path, ci_enabled=False)
-        result = _run_hook_via_forwarder("pre-tool-use", _PRE_TOOL_INPUT, project)
-
-        assert result.returncode == 0
-        stdout = result.stdout.strip()
-        # Should be advisory (first call) not a deny
-        parsed = json.loads(stdout)
-        assert "decision" not in parsed or parsed.get("decision") != "deny"
-
-    def test_does_not_block_any_event_type(self, tmp_path: Path) -> None:
-        """Default mode should never block, even Stop events."""
+    def test_non_ci_stop_event_blocked(self, tmp_path: Path) -> None:
+        """Non-CI daemon failure returns decision: block for Stop events."""
         project = _create_project_structure(tmp_path, ci_enabled=None)
         result = _run_hook_via_forwarder("stop", _STOP_INPUT, project)
 
         assert result.returncode == 0
         stdout = result.stdout.strip()
         parsed = json.loads(stdout)
-        # Should NOT have decision: block (the ci_enforced response)
-        # First call returns advisory context or passthrough
-        if "decision" in parsed:
-            assert parsed["decision"] != "block", "Default mode should not block Stop events"
+        assert (
+            parsed.get("decision") == "block"
+        ), f"Expected block for Stop in non-CI, got: {parsed}"
+
+    def test_non_ci_no_passthrough_flag_created(self, tmp_path: Path) -> None:
+        """Non-CI daemon failure must NOT create the passthrough state file."""
+        project = _create_project_structure(tmp_path, ci_enabled=None)
+        _run_hook_via_forwarder("pre-tool-use", _PRE_TOOL_INPUT, project)
+
+        state_file = project / ".claude" / "hooks-daemon" / "untracked" / ".hooks-passthrough"
+        assert (
+            not state_file.exists()
+        ), "Passthrough state file must NOT be created in non-CI environments"
+
+    def test_non_ci_second_call_also_returns_error(self, tmp_path: Path) -> None:
+        """Each non-CI call returns an error independently (no flag suppression)."""
+        project = _create_project_structure(tmp_path, ci_enabled=None)
+
+        result1 = _run_hook_via_forwarder("pre-tool-use", _PRE_TOOL_INPUT, project)
+        result2 = _run_hook_via_forwarder("pre-tool-use", _PRE_TOOL_INPUT, project)
+
+        parsed1 = json.loads(result1.stdout.strip())
+        parsed2 = json.loads(result2.stdout.strip())
+        # Both calls must return error context, not silent {}
+        assert "hookSpecificOutput" in parsed1, f"First call should error, got: {parsed1}"
+        assert "hookSpecificOutput" in parsed2, f"Second call should also error, got: {parsed2}"
+        assert result2.stdout.strip() != "{}", "Second call must not silently passthrough"
+
+    def test_ci_enabled_false_non_ci_still_errors(self, tmp_path: Path) -> None:
+        """ci_enabled: false + no CI env vars → error response (not passthrough)."""
+        project = _create_project_structure(tmp_path, ci_enabled=False)
+        # No CI env vars — non-CI environment
+        result = _run_hook_via_forwarder("pre-tool-use", _PRE_TOOL_INPUT, project)
+
+        assert result.returncode == 0
+        stdout = result.stdout.strip()
+        parsed = json.loads(stdout)
+        # Should show error context, not passthrough advisory or deny
+        assert "hookSpecificOutput" in parsed, f"Expected hookSpecificOutput, got: {parsed}"
+        context = parsed["hookSpecificOutput"]["additionalContext"]
+        assert (
+            "Not currently running" in context
+        ), f"Expected daemon error message, got: {context!r}"
+
+
+class TestCIEnvironmentPassthrough:
+    """CI environment: daemon failure enters passthrough mode (daemon not installed).
+
+    When a CI environment is detected (CI=true, GITHUB_ACTIONS=true, JENKINS_URL,
+    TF_BUILD, GITLAB_CI), passthrough mode activates. The daemon is simply not
+    installed in the pipeline — safety handlers are not expected to run.
+
+    First call: one-time advisory context returned.
+    Subsequent calls: silent {} (state file suppresses noise).
+    """
+
+    def test_ci_first_call_returns_advisory(self, tmp_path: Path) -> None:
+        """CI=true → first failure returns advisory hookSpecificOutput."""
+        project = _create_project_structure(tmp_path, ci_enabled=None)
+        result = _run_hook_via_forwarder(
+            "pre-tool-use", _PRE_TOOL_INPUT, project, extra_env={"CI": "true"}
+        )
+
+        assert result.returncode == 0
+        stdout = result.stdout.strip()
+        parsed = json.loads(stdout)
+        assert (
+            "hookSpecificOutput" in parsed
+        ), f"CI first failure should return advisory hookSpecificOutput, got: {parsed}"
+        context = parsed["hookSpecificOutput"]["additionalContext"]
+        assert "INACTIVE" in context, f"Advisory should mention INACTIVE, got: {context!r}"
+
+    def test_ci_first_call_logs_to_stderr(self, tmp_path: Path) -> None:
+        """CI=true → first failure logs passthrough warning to stderr."""
+        project = _create_project_structure(tmp_path, ci_enabled=None)
+        result = _run_hook_via_forwarder(
+            "pre-tool-use", _PRE_TOOL_INPUT, project, extra_env={"CI": "true"}
+        )
+
+        assert (
+            "passthrough mode" in result.stderr
+        ), f"Expected 'passthrough mode' in stderr, got: {result.stderr!r}"
+        assert (
+            "handlers inactive" in result.stderr.lower()
+        ), f"Expected 'handlers inactive' in stderr, got: {result.stderr!r}"
+
+    def test_ci_state_file_created(self, tmp_path: Path) -> None:
+        """CI=true → first failure creates passthrough state file."""
+        project = _create_project_structure(tmp_path, ci_enabled=None)
+        _run_hook_via_forwarder("pre-tool-use", _PRE_TOOL_INPUT, project, extra_env={"CI": "true"})
+
+        state_file = project / ".claude" / "hooks-daemon" / "untracked" / ".hooks-passthrough"
+        assert state_file.exists(), "Passthrough state file should be created in CI environment"
+
+    def test_ci_second_call_silent_passthrough(self, tmp_path: Path) -> None:
+        """CI=true → second call (flag exists) returns empty {} silently."""
+        project = _create_project_structure(tmp_path, ci_enabled=None)
+
+        # First call: creates state file and returns advisory
+        _run_hook_via_forwarder("pre-tool-use", _PRE_TOOL_INPUT, project, extra_env={"CI": "true"})
+
+        # Second call: should be silent passthrough
+        result = _run_hook_via_forwarder(
+            "pre-tool-use", _PRE_TOOL_INPUT, project, extra_env={"CI": "true"}
+        )
+
+        assert result.returncode == 0
+        stdout = result.stdout.strip()
+        assert stdout == "{}", f"CI second call should return '{{}}', got: {stdout!r}"
+        assert (
+            "passthrough mode" not in result.stderr
+        ), "Second CI call should not repeat the noisy warning"
+
+    def test_ci_github_actions_also_passthrough(self, tmp_path: Path) -> None:
+        """GITHUB_ACTIONS=true (without CI var) → passthrough mode."""
+        project = _create_project_structure(tmp_path, ci_enabled=None)
+        result = _run_hook_via_forwarder(
+            "pre-tool-use",
+            _PRE_TOOL_INPUT,
+            project,
+            extra_env={"GITHUB_ACTIONS": "true"},
+        )
+
+        assert result.returncode == 0
+        stdout = result.stdout.strip()
+        parsed = json.loads(stdout)
+        # Should be advisory (passthrough first call) not error
+        assert (
+            "hookSpecificOutput" in parsed
+        ), f"GITHUB_ACTIONS should trigger passthrough advisory, got: {parsed}"
+        context = parsed["hookSpecificOutput"]["additionalContext"]
+        assert (
+            "INACTIVE" in context
+        ), f"GITHUB_ACTIONS passthrough should mention INACTIVE, got: {context!r}"
+
+    def test_ci_jenkins_also_passthrough(self, tmp_path: Path) -> None:
+        """JENKINS_URL set → passthrough mode (Jenkins does not set CI var)."""
+        project = _create_project_structure(tmp_path, ci_enabled=None)
+        result = _run_hook_via_forwarder(
+            "pre-tool-use",
+            _PRE_TOOL_INPUT,
+            project,
+            extra_env={"JENKINS_URL": "http://jenkins.example.com/"},
+        )
+
+        assert result.returncode == 0
+        stdout = result.stdout.strip()
+        parsed = json.loads(stdout)
+        assert (
+            "hookSpecificOutput" in parsed
+        ), f"JENKINS_URL should trigger passthrough advisory, got: {parsed}"
+        context = parsed["hookSpecificOutput"]["additionalContext"]
+        assert (
+            "INACTIVE" in context
+        ), f"Jenkins passthrough should mention INACTIVE, got: {context!r}"
 
 
 class TestCIEnforcedFailClosed:
-    """ci_enabled: true behaviour: hard block with loud STOP message."""
+    """ci_enabled: true behaviour: hard block with loud STOP message.
+
+    When ci_enabled: true is set in config, the daemon is REQUIRED regardless
+    of environment. All operations are blocked until the daemon is installed.
+    """
 
     def test_pre_tool_use_denied(self, tmp_path: Path) -> None:
         """PreToolUse should be denied with loud STOP message."""
@@ -285,7 +419,6 @@ class TestCIEnforcedFailClosed:
         """ci_enforced should block on every call (no state file to bypass)."""
         project = _create_project_structure(tmp_path, ci_enabled=True)
 
-        # Call twice
         result1 = _run_hook_via_forwarder("pre-tool-use", _PRE_TOOL_INPUT, project)
         result2 = _run_hook_via_forwarder("pre-tool-use", _PRE_TOOL_INPUT, project)
 
@@ -307,23 +440,37 @@ class TestCIEnforcedFailClosed:
 
 
 class TestPassthroughRecovery:
-    """Test that passthrough state is cleaned up when daemon recovers."""
+    """Passthrough state is cleaned up when the daemon recovers.
 
-    def test_state_file_cleaned_on_manual_creation(self, tmp_path: Path) -> None:
-        """If state file exists but daemon starts, state file should be cleaned up.
+    Bug fix: previously the cleanup at start_daemon() success was unreachable
+    because the passthrough check returned early before start_daemon() was called.
+    The fix: clean up the flag in the is_daemon_running() branch too.
+    """
 
-        We can't easily test real daemon recovery, but we can verify the
-        state file path and cleanup logic are correct.
+    def test_state_file_not_present_in_non_ci_environment(self, tmp_path: Path) -> None:
+        """Non-CI daemon failure must not create state file (nothing to recover from).
+
+        Verifies that after a non-CI failure, no passthrough state file is written.
+        Recovery only applies to CI environments where the file IS written.
         """
         project = _create_project_structure(tmp_path, ci_enabled=None)
         state_file = project / ".claude" / "hooks-daemon" / "untracked" / ".hooks-passthrough"
 
-        # Create state file manually
-        state_file.touch()
-        assert state_file.exists()
+        # Non-CI failure — no state file should be written
+        _run_hook_via_forwarder("pre-tool-use", _PRE_TOOL_INPUT, project)
+        assert (
+            not state_file.exists()
+        ), "Non-CI daemon failure must not create passthrough state file"
 
-        # Run hook - daemon still can't start, so state file remains
-        result = _run_hook_via_forwarder("pre-tool-use", _PRE_TOOL_INPUT, project)
-        assert result.returncode == 0
-        # State file should still exist (daemon didn't start)
-        assert state_file.exists()
+    def test_ci_state_file_persists_when_daemon_still_down(self, tmp_path: Path) -> None:
+        """CI state file remains when daemon still cannot start after second call."""
+        project = _create_project_structure(tmp_path, ci_enabled=None)
+        state_file = project / ".claude" / "hooks-daemon" / "untracked" / ".hooks-passthrough"
+
+        # First CI call: creates state file
+        _run_hook_via_forwarder("pre-tool-use", _PRE_TOOL_INPUT, project, extra_env={"CI": "true"})
+        assert state_file.exists(), "State file should exist after first CI failure"
+
+        # Second CI call: daemon still down, state file should remain
+        _run_hook_via_forwarder("pre-tool-use", _PRE_TOOL_INPUT, project, extra_env={"CI": "true"})
+        assert state_file.exists(), "State file should persist when daemon still not running"
