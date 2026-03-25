@@ -216,6 +216,10 @@ handlers:
       enabled: true
       priority: 55
 
+    daemon_docs_guard:     # Warns when reading from hooks-daemon internal CLAUDE/ docs (wrong directory)
+      enabled: true
+      priority: 57
+
     british_english:       # Warns about American English spelling
       enabled: true
       priority: 60

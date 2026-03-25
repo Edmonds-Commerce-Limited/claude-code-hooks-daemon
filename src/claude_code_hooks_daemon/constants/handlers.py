@@ -116,6 +116,11 @@ class HandlerID:
         config_key="daemon_location_guard",
         display_name="daemon-location-guard",
     )
+    DAEMON_DOCS_GUARD = HandlerIDMeta(
+        class_name="DaemonDocsGuardHandler",
+        config_key="daemon_docs_guard",
+        display_name="daemon-docs-guard",
+    )
     SED_BLOCKER = HandlerIDMeta(
         class_name="SedBlockerHandler",
         config_key="sed_blocker",

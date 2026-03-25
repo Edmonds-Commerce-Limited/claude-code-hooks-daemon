@@ -28,15 +28,25 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_LIB_DIR="$SCRIPT_DIR/install"
 
 # Source all library modules
+# shellcheck source=install/output.sh
 source "$INSTALL_LIB_DIR/output.sh"
+# shellcheck source=install/mode_guard.sh
 source "$INSTALL_LIB_DIR/mode_guard.sh"
+# shellcheck source=install/prerequisites.sh
 source "$INSTALL_LIB_DIR/prerequisites.sh"
+# shellcheck source=install/project_detection.sh
 source "$INSTALL_LIB_DIR/project_detection.sh"
+# shellcheck source=install/venv.sh
 source "$INSTALL_LIB_DIR/venv.sh"
+# shellcheck source=install/hooks_deploy.sh
 source "$INSTALL_LIB_DIR/hooks_deploy.sh"
+# shellcheck source=install/gitignore.sh
 source "$INSTALL_LIB_DIR/gitignore.sh"
+# shellcheck source=install/slash_commands.sh
 source "$INSTALL_LIB_DIR/slash_commands.sh"
+# shellcheck source=install/validation.sh
 source "$INSTALL_LIB_DIR/validation.sh"
+# shellcheck source=install/daemon_control.sh
 source "$INSTALL_LIB_DIR/daemon_control.sh"
 
 # ============================================================
@@ -211,6 +221,17 @@ ensure_normal_mode_only "$DAEMON_DIR"
 
 # Validate project structure
 validate_project_structure "$PROJECT_ROOT" "true"
+
+# Option A: Rename CLAUDE/ to daemon-docs/ in the installed daemon directory.
+# The daemon repo contains a CLAUDE/ docs directory which, after installation at
+# .claude/hooks-daemon/, collides with the project's own CLAUDE/ convention.
+# Renaming eliminates the ambiguity so @CLAUDE/... references always resolve to
+# the project's authoritative docs, never the daemon's internal copies.
+# Idempotent: only renames if CLAUDE/ exists and daemon-docs/ doesn't yet.
+if [ -d "$DAEMON_DIR/CLAUDE" ] && [ ! -d "$DAEMON_DIR/daemon-docs" ]; then
+    mv "$DAEMON_DIR/CLAUDE" "$DAEMON_DIR/daemon-docs"
+    print_success "Renamed daemon CLAUDE/ to daemon-docs/ (avoids project docs collision)"
+fi
 
 # ============================================================
 # Step 2: Prerequisites
