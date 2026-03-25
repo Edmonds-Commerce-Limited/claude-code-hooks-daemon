@@ -185,6 +185,7 @@ class ConfigTemplate:
             "    web_search_year: {enabled: true, priority: 55}   # Fix outdated years in searches\n"
             "\n"
             "    # ADVISORY HANDLERS (Priority 56-60)\n"
+            "    daemon_docs_guard: {enabled: true, priority: 57}  # Warn when reading from daemon internal CLAUDE/ docs\n"
             "    british_english: {enabled: true, priority: 60}   # Warn about American English\n"
             "\n"
             "  # PostToolUse - After tool execution\n"

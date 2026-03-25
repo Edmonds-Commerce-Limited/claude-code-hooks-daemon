@@ -23,6 +23,11 @@ class DaemonPath:
     # Directory names
     CLAUDE_DIR = ".claude"
     HOOKS_DAEMON_DIR = "hooks-daemon"
+    # Internal docs directory name used in normal (non-self-install) daemon installations.
+    # In normal installs, the daemon repo is cloned to .claude/hooks-daemon/ and the
+    # CLAUDE/ docs directory is renamed to this to avoid collision with the project's
+    # own CLAUDE/ convention. Self-install mode keeps CLAUDE/ unchanged.
+    DAEMON_DOC_DIR = "daemon-docs"
     LOG_DIR = "logs"
     UNTRACKED_DIR = "untracked"
     VENV_DIR = "venv"
