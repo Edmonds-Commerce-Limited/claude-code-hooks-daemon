@@ -23,7 +23,6 @@ from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.config.validator import ConfigValidator
-from claude_code_hooks_daemon.constants.paths import DaemonPath
 from claude_code_hooks_daemon.install.breaking_changes_detector import (
     BreakingChangesDetector,
     ChangeType,
@@ -352,12 +351,7 @@ class CompatibilityChecker:
         Returns:
             List of upgrade guide paths to read
         """
-        # Normal installs rename CLAUDE/ → daemon-docs/ to avoid collision with the
-        # project's CLAUDE/ convention. Self-install mode and pre-rename installs
-        # still use CLAUDE/. Try the renamed path first, fall back to the old path.
-        upgrades_dir = daemon_dir / DaemonPath.DAEMON_DOC_DIR / "UPGRADES" / "v2"
-        if not upgrades_dir.exists():
-            upgrades_dir = daemon_dir / "CLAUDE" / "UPGRADES" / "v2"
+        upgrades_dir = daemon_dir / "CLAUDE" / "UPGRADES" / "v2"
 
         if not upgrades_dir.exists():
             return []
