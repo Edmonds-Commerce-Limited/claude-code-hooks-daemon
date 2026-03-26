@@ -212,6 +212,7 @@ class ConfigTemplate:
             "    yolo_container_detection: {enabled: true, priority: 40}  # Detect YOLO container environments\n"
             "    optimal_config_checker: {enabled: true, priority: 52}  # Check Claude Code env for optimal settings\n"
             "    git_filemode_checker: {enabled: true, priority: 53}  # Warn when git core.fileMode=false\n"
+            "    gitignore_safety_checker: {enabled: true, priority: 54}  # Warn when required .claude/ paths are not gitignored\n"
             "    suggest_status_line: {enabled: true, priority: 55}  # Suggest status line setup\n"
             "    version_check: {enabled: true, priority: 55}  # Check for daemon updates on new sessions\n"
             "\n"

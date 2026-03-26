@@ -283,6 +283,18 @@
       "lines": [285],
       "rule": "return-none-on-error",
       "reason": "PseudoEventDispatcher._run_pseudo_event(): Catches Exception, logs full traceback via logger.exception(), returns None. Pseudo-event dispatch is non-critical - one failing pseudo-event must not crash the main hook processing pipeline. Already logged with full traceback."
+    },
+    {
+      "file": "handlers/session_start/gitignore_safety_checker.py",
+      "lines": [89, 106, 152],
+      "rule": "log-and-continue",
+      "reason": "Gitignore safety checker: log-and-continue on OSError reading optional gitignore files. Advisory handler — if a gitignore file is temporarily unreadable, the check skips that file and continues. Session start must not be blocked by advisory filesystem checks. Already logged at debug level."
+    },
+    {
+      "file": "handlers/session_start/gitignore_safety_checker.py",
+      "lines": [143],
+      "rule": "return-none-on-error",
+      "reason": "Cache reader _get_cached_missing_entries(): returns None when cache file is missing or unparseable. Caller checks for None and falls through to a fresh filesystem scan. Cache reading is advisory — failure means re-scan, not crash."
     }
   ]
 }

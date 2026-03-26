@@ -435,6 +435,13 @@ class HandlerID:
         display_name="git-filemode-checker",
     )
 
+    # Gitignore safety checker (SessionStart handler)
+    GITIGNORE_SAFETY_CHECKER = HandlerIDMeta(
+        class_name="GitignoreSafetyCheckerHandler",
+        config_key="gitignore_safety_checker",
+        display_name="gitignore-safety-checker",
+    )
+
     # Lint on edit (PostToolUse handler)
     LINT_ON_EDIT = HandlerIDMeta(
         class_name="LintOnEditHandler",
