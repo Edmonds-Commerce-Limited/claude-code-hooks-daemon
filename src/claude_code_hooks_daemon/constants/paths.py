@@ -83,6 +83,10 @@ class ProjectPath:
     CORE_DIR = "src/claude_code_hooks_daemon/core"
     DAEMON_DIR = "src/claude_code_hooks_daemon/daemon"
 
+    # Worktree directories
+    WORKTREES_DIR = "untracked/worktrees"  # manually managed worktrees
+    CLAUDE_WORKTREES_DIR = ".claude/worktrees"  # Claude Code managed worktrees (not configurable)
+
     # Config files
     PYPROJECT_TOML = "pyproject.toml"
     SETUP_PY = "setup.py"

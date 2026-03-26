@@ -17,6 +17,7 @@ from claude_code_hooks_daemon.constants import (
     Timeout,
     ToolName,
 )
+from claude_code_hooks_daemon.constants.paths import ProjectPath
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult, ProjectContext
 from claude_code_hooks_daemon.core.utils import get_file_path
 from claude_code_hooks_daemon.utils.guides import get_llm_command_guide_path
@@ -112,8 +113,11 @@ class ValidateEslintOnWriteHandler(Handler):
 
         print(f"\n🔍 Running ESLint validation on {file_path_obj.name}...")
 
-        # Check if this is a worktree file
-        is_worktree = "untracked/worktrees/" in file_path
+        # Check if this is a worktree file (either manually managed or Claude Code managed)
+        is_worktree = any(
+            f"{prefix}/" in file_path
+            for prefix in (ProjectPath.WORKTREES_DIR, ProjectPath.CLAUDE_WORKTREES_DIR)
+        )
 
         # Run ESLint using wrapper script
         try:
