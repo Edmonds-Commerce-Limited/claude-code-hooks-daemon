@@ -4,8 +4,15 @@ import re
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
+from claude_code_hooks_daemon.constants.paths import ProjectPath
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_bash_command
+
+# Both worktree root prefixes — untracked/ is manually managed, .claude/ is Claude Code managed
+_WORKTREE_PREFIXES = (ProjectPath.WORKTREES_DIR, ProjectPath.CLAUDE_WORKTREES_DIR)
+
+# Regex alternation matching either worktree root (used in pattern strings below)
+_WORKTREE_RE = r"(?:untracked/worktrees|\.claude/worktrees)"
 
 
 class WorktreeFileCopyHandler(Handler):
@@ -18,10 +25,23 @@ class WorktreeFileCopyHandler(Handler):
             tags=[HandlerTag.SAFETY, HandlerTag.GIT, HandlerTag.BLOCKING, HandlerTag.TERMINAL],
         )
 
+    def _is_same_worktree_operation(self, command: str) -> bool:
+        """Return True if both paths in command refer to the same worktree branch."""
+        for prefix in _WORKTREE_PREFIXES:
+            if command.count(prefix) >= 2:
+                escaped = re.escape(prefix)
+                branches = re.findall(rf"{escaped}/([^/\s]+)", command)
+                if len(branches) >= 2 and branches[0] == branches[1]:
+                    return True
+        return False
+
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if copying between worktree and main repo."""
         command = get_bash_command(hook_input)
-        if not command or "untracked/worktrees" not in command:
+        if not command:
+            return False
+
+        if not any(prefix in command for prefix in _WORKTREE_PREFIXES):
             return False
 
         # Check for forbidden operations
@@ -30,18 +50,14 @@ class WorktreeFileCopyHandler(Handler):
 
         # Check patterns
         patterns = [
-            r"untracked/worktrees/[^/\s]+/\S+\s+.*\b(src/|tests/|config/)",
-            r"rsync.*untracked/worktrees.*\b(src|tests|config)\b",
+            rf"{_WORKTREE_RE}/[^/\s]+/\S+\s+.*\b(src/|tests/|config/)",
+            rf"rsync.*{_WORKTREE_RE}.*\b(src|tests|config)\b",
         ]
 
         for pattern in patterns:
             if re.search(pattern, command, re.IGNORECASE):
-                # Check if within same worktree
-                worktree_count = command.count("untracked/worktrees")
-                if worktree_count >= 2:
-                    worktree_paths = re.findall(r"untracked/worktrees/([^/\s]+)", command)
-                    if len(worktree_paths) >= 2 and worktree_paths[0] == worktree_paths[1]:
-                        continue
+                if self._is_same_worktree_operation(command):
+                    continue
                 return True
 
         return False

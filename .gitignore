@@ -145,6 +145,9 @@ verify-*.sh
 # Development artifacts and QA outputs
 untracked/
 
+# Claude Code managed worktrees (path not configurable, must be gitignored)
+.claude/worktrees/
+
 # Acceptance test results
 CLAUDE/AcceptanceTests/results/*
 !CLAUDE/AcceptanceTests/results/.gitkeep

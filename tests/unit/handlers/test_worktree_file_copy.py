@@ -301,3 +301,54 @@ class TestWorktreeFileCopyHandler:
         for cmd in safe_commands:
             hook_input = {"tool_name": "Bash", "tool_input": {"command": cmd}}
             assert handler.matches(hook_input) is False, f"Should allow: {cmd}"
+
+    # matches() - .claude/worktrees/ paths (Claude Code managed worktrees)
+    def test_matches_cp_from_claude_worktree_to_src(self, handler):
+        """Should match cp from .claude/worktrees/ to src/."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "cp .claude/worktrees/feature-branch/src/test.py src/"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_cp_from_claude_worktree_to_tests(self, handler):
+        """Should match cp from .claude/worktrees/ to tests/."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "cp .claude/worktrees/fix-bug/tests/test.py tests/"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_mv_from_claude_worktree_to_src(self, handler):
+        """Should match mv from .claude/worktrees/ to src/."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "mv .claude/worktrees/branch/src/file.py src/"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_rsync_from_claude_worktree(self, handler):
+        """Should match rsync from .claude/worktrees/ to src."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "rsync -av .claude/worktrees/branch/src/ src/"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_cp_within_same_claude_worktree_returns_false(self, handler):
+        """Should allow cp within the same .claude/worktrees/ branch."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "cp .claude/worktrees/branch/src/a.py .claude/worktrees/branch/tests/"
+            },
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_matches_ls_claude_worktree_returns_false(self, handler):
+        """Should not match ls of .claude/worktrees/ path."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "ls .claude/worktrees/branch/"},
+        }
+        assert handler.matches(hook_input) is False
