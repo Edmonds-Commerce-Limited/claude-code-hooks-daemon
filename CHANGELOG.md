@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.28.0] - 2026-03-25
+
+### Added
+
+- **`daemon_docs_guard` handler (PreToolUse, priority 57, advisory, 22 tests)**: New handler that detects when Claude Code reads from the hooks-daemon's internal `CLAUDE/` docs directory instead of the project's own authoritative `CLAUDE/` directory. When the daemon is installed at `.claude/hooks-daemon/`, it brings its own `CLAUDE/` subdirectory which can collide with the project's `CLAUDE/` naming convention. The handler injects a corrective advisory message when a Read, Write, or Edit tool targets a path containing `hooks-daemon/CLAUDE/`, explaining which file was accessed and providing the correct project-level path. The operation is always allowed (non-blocking, advisory only).
+
+- **Stale daemon file cleanup with `startup_cleanup` statusline indicator**: Age-based cleanup on daemon startup removes runtime files (`daemon-*.*`) and `command-redirection/` output files older than a configurable threshold (default 7 days). Active daemons touch their runtime files hourly so only files from dead containers age past the cutoff — enabling safe multi-container setups where multiple containers share one codebase. New `stale_file_days` config item added to `DaemonConfig` (range 1–365, default 7). New `startup_cleanup` Status handler (priority 28) shows a cleanup icon briefly after startup and displays "N stale" count for 30 seconds when files were removed.
+
+### Fixed
+
+- **CI passthrough activating in non-CI environments (safety-critical)**: Passthrough mode was incorrectly triggering in non-CI developer environments (containers, local machines) whenever the daemon had a transient failure, causing all safety handlers to go permanently inactive. Fixed by restricting passthrough activation to environments where a CI environment variable is detected (`CI`, `GITHUB_ACTIONS`, `GITLAB_CI`, `JENKINS_URL`, `TF_BUILD`). Non-CI environments now receive a noisy `emit_hook_error` with restart instructions instead of silent passthrough. Also fixed a permanent passthrough lock bug: the cleanup `rm -f` after `start_daemon()` success was unreachable because the passthrough check returned early before `start_daemon()` was called; fixed by cleaning the flag in the `is_daemon_running()` branch so recovery after manual restart works. Also resolves SC2155 and SC1091 shellcheck violations in `init.sh`.
+
+- **Upgrade script version prefix normalisation**: `scripts/upgrade.sh` documented both `2.14.0` and `v2.14.0` as valid inputs but the internal `git rev-parse` validation only worked with the `v` prefix (matching how tags are stored). Fixed by normalising `TARGET_VERSION` to prepend `v` if missing before the validation step.
+
+- **ShellCheck SC1091 source directive violations in `install_version.sh` and Option A installer rename reverted**: Added proper `shellcheck source=` directives for all sourced modules in the install script, resolving pre-existing SC1091 violations. Also reverted an incorrect Option A approach (renaming `CLAUDE/` to `daemon-docs/` at install time via `mv`) that made the cloned repository dirty; the handler-based Option B (`daemon_docs_guard`) is the correct solution. Constants and upgrade compatibility code introduced for the aborted Option A were also removed.
+
 ## [2.27.0] - 2026-03-23
 
 ### Added
