@@ -261,6 +261,10 @@ handlers:
       enabled: true
       priority: 53
 
+    gitignore_safety_checker:  # Warns when required .claude/ paths are missing from .gitignore
+      enabled: true            # Uses content-hash cache - only re-checks when .gitignore changes
+      priority: 54
+
     suggest_status_line:  # Suggests daemon-based status line setup
       enabled: true      # Enable to suggest status line configuration
       priority: 55
