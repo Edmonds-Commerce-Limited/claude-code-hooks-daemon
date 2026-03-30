@@ -1,19 +1,23 @@
 """Tests for CI/daemon-unavailable graceful degradation in init.sh.
 
-This module tests two distinct failure modes when the daemon cannot start:
+This module tests three distinct failure modes when the daemon cannot start:
 
-1. NON-CI ENVIRONMENT (no CI env vars):
-   Passthrough mode must NOT activate. Instead, emit_hook_error is called,
-   returning hookSpecificOutput with "Not currently running" for most events,
-   and decision: block for Stop events. Each call returns an error independently
-   — no state file suppression.
+1. NON-CI ENVIRONMENT, NOT INSTALLED (no CI env vars, venv absent):
+   Passthrough mode must NOT activate. emit_hook_error is called with "Not
+   installed" guidance pointing to CLAUDE/LLM-INSTALL.md. Fail-open for
+   most events; block for Stop events.
 
-2. CI ENVIRONMENT (CI=true, GITHUB_ACTIONS=true, JENKINS_URL set, etc.):
+2. NON-CI ENVIRONMENT, INSTALLED BUT NOT RUNNING (venv present, daemon crashed):
+   emit_hook_error is called with "Not currently running" restart guidance.
+   Fail-open for most events; block for Stop events. Each call returns an
+   error independently — no state file suppression.
+
+3. CI ENVIRONMENT (CI=true, GITHUB_ACTIONS=true, JENKINS_URL set, etc.):
    Passthrough mode activates — daemon is simply not installed in this pipeline.
    First call returns one-time advisory context. Second call (flag exists) returns
    empty {}. No blocking. Supports multiple CI platform detection.
 
-3. CI ENFORCED (ci_enabled: true in config):
+4. CI ENFORCED (ci_enabled: true in config):
    Hard fail regardless of environment. PreToolUse is denied with STOP message.
    Stop events are blocked. No state file created.
 
@@ -104,6 +108,19 @@ def _create_project_structure(
     return project
 
 
+def _create_installed_stub(project_path: Path) -> None:
+    """Create a fake venv python binary so _is_daemon_installed() returns true.
+
+    The test script template hardcodes PYTHON_CMD to {project}/nonexistent/python.
+    Creating that file makes the daemon appear 'installed' (dir + venv both present),
+    so ensure_daemon() falls through to the 'installed but not running' error path.
+    """
+    stub = project_path / "nonexistent" / "python"
+    stub.parent.mkdir(parents=True, exist_ok=True)
+    stub.write_text("#!/bin/bash\nexit 1\n")
+    stub.chmod(0o755)
+
+
 def _run_hook_via_forwarder(
     hook_name: str,
     hook_input: dict[str, Any],
@@ -186,15 +203,15 @@ class TestNonCIDaemonFailure:
     """Non-CI environment: daemon failure must NOT enter passthrough mode.
 
     When running outside a CI environment (no CI env vars), passthrough mode
-    must never activate. Instead, emit_hook_error provides a "Not currently
-    running" error so the agent can restart the daemon. This prevents silent
+    must never activate. Instead, emit_hook_error provides install or restart
+    guidance depending on whether the daemon is installed. This prevents silent
     protection-bypass in developer environments and dev containers.
     """
 
-    def test_non_ci_returns_error_context(self, tmp_path: Path) -> None:
-        """Non-CI daemon failure returns hookSpecificOutput with error (not passthrough advisory)."""
+    def test_non_ci_not_installed_returns_install_guidance(self, tmp_path: Path) -> None:
+        """Non-CI, daemon not installed: hookSpecificOutput points to LLM-INSTALL.md."""
         project = _create_project_structure(tmp_path, ci_enabled=None)
-        # No extra_env — no CI variables present
+        # No extra_env — no CI variables present; no venv stub — daemon not installed
         result = _run_hook_via_forwarder("pre-tool-use", _PRE_TOOL_INPUT, project)
 
         assert result.returncode == 0
@@ -202,14 +219,34 @@ class TestNonCIDaemonFailure:
         parsed = json.loads(stdout)
         assert "hookSpecificOutput" in parsed, f"Expected hookSpecificOutput, got: {parsed}"
         context = parsed["hookSpecificOutput"]["additionalContext"]
-        # Must contain "Not currently running" — the non-CI error message
+        # Must say "Not installed" and point to the install guide
+        assert "Not installed" in context, f"Expected 'Not installed' in context, got: {context!r}"
+        assert (
+            "LLM-INSTALL.md" in context
+        ), f"Expected install guide reference in context, got: {context!r}"
+        # Must NOT look like passthrough advisory
+        assert (
+            "not installed in CI" not in context
+        ), "Non-CI not-installed should not show CI advisory language"
+
+    def test_non_ci_installed_but_not_running_shows_restart_guidance(self, tmp_path: Path) -> None:
+        """Non-CI, daemon installed but not starting: hookSpecificOutput says 'Not currently running'."""
+        project = _create_project_structure(tmp_path, ci_enabled=None)
+        _create_installed_stub(project)  # venv python exists → daemon appears installed
+        result = _run_hook_via_forwarder("pre-tool-use", _PRE_TOOL_INPUT, project)
+
+        assert result.returncode == 0
+        stdout = result.stdout.strip()
+        parsed = json.loads(stdout)
+        assert "hookSpecificOutput" in parsed, f"Expected hookSpecificOutput, got: {parsed}"
+        context = parsed["hookSpecificOutput"]["additionalContext"]
         assert (
             "Not currently running" in context
         ), f"Expected 'Not currently running' in context, got: {context!r}"
-        # Must NOT contain passthrough advisory language
+        assert "restart" in context, f"Expected restart instruction in context, got: {context!r}"
         assert (
-            "INACTIVE" not in context or "Not currently running" in context
-        ), "Non-CI should show daemon error, not passthrough advisory"
+            "LLM-INSTALL.md" not in context
+        ), "Installed-but-not-running should not show install guide"
 
     def test_non_ci_stop_event_blocked(self, tmp_path: Path) -> None:
         """Non-CI daemon failure returns decision: block for Stop events."""
@@ -250,7 +287,7 @@ class TestNonCIDaemonFailure:
     def test_ci_enabled_false_non_ci_still_errors(self, tmp_path: Path) -> None:
         """ci_enabled: false + no CI env vars → error response (not passthrough)."""
         project = _create_project_structure(tmp_path, ci_enabled=False)
-        # No CI env vars — non-CI environment
+        # No CI env vars — non-CI environment; no venv stub — daemon not installed
         result = _run_hook_via_forwarder("pre-tool-use", _PRE_TOOL_INPUT, project)
 
         assert result.returncode == 0
@@ -259,9 +296,8 @@ class TestNonCIDaemonFailure:
         # Should show error context, not passthrough advisory or deny
         assert "hookSpecificOutput" in parsed, f"Expected hookSpecificOutput, got: {parsed}"
         context = parsed["hookSpecificOutput"]["additionalContext"]
-        assert (
-            "Not currently running" in context
-        ), f"Expected daemon error message, got: {context!r}"
+        # ci_enabled: false still can't start daemon → shows "Not installed" guidance
+        assert "Not installed" in context, f"Expected daemon error message, got: {context!r}"
 
 
 class TestCIEnvironmentPassthrough:

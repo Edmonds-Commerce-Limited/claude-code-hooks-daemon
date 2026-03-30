@@ -4,6 +4,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00093: Fresh-Clone Install Guidance](00093-fresh-clone-install-guidance/PLAN.md) - Not Started
+  - Distinguish "daemon not installed" from "daemon not running" in init.sh
+  - Show install guidance (CLAUDE/LLM-INSTALL.md) on fresh clones instead of wrong "restart" advice
+  - Pure init.sh change — no Python, no new handlers
+
 - [00063: FAIL FAST - Plugin Handler Bug & Error Hiding Audit](00063-fail-fast-plugin-handler-audit/PLAN.md) - In Progress
   - **Phase 1 DONE**: Plugin handler suffix bug fixed, warning converted to crash (daemon fails on unregistered handler)
   - **Phase 2 PENDING**: Comprehensive audit for ALL error hiding patterns in codebase (audit script, fix violations)
@@ -483,9 +488,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 88
+- **Total Plans Created**: 89
 - **Completed**: 74 (1 with reduced scope)
-- **Active**: 1 (in progress)
+- **Active**: 2 (1 in progress, 1 not started)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation)
 
