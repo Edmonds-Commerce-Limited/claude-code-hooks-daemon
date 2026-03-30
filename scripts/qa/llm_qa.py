@@ -93,6 +93,11 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="error_hiding.json",
         jq_hint="jq '.violations[] | {file, line, rule, message}'",
     ),
+    "smoke_test": ToolConfig(
+        command=_bash("run_smoke_test.sh"),
+        json_file="smoke_test.json",
+        jq_hint="jq '.probes[] | {name, passed, expected, actual_decision}'",
+    ),
 }
 
 ALL_TOOL_NAMES = list(TOOL_REGISTRY)
@@ -149,6 +154,16 @@ def _summarize_error_hiding(data: dict) -> str:
     return f"{total} violations"
 
 
+def _summarize_smoke_test(data: dict) -> str:
+    s = data.get("summary", {})
+    passed = s.get("passed_probes", 0)
+    total = s.get("total_probes", 0)
+    failed = s.get("failed_probes", 0)
+    if failed == 0:
+        return f"{passed}/{total} probes passed"
+    return f"{passed}/{total} probes passed ({failed} failed)"
+
+
 SUMMARIZERS: dict[str, Summarizer] = {
     "magic_values": _summarize_magic_values,
     "format": _summarize_format,
@@ -158,6 +173,7 @@ SUMMARIZERS: dict[str, Summarizer] = {
     "security": _summarize_security,
     "dependencies": _summarize_dependencies,
     "error_hiding": _summarize_error_hiding,
+    "smoke_test": _summarize_smoke_test,
 }
 
 
