@@ -523,3 +523,54 @@ class TranscriptReader:
             if block.block_type == "tool_use":
                 return block
         return None
+
+    def get_last_tool_result_text(self) -> str:
+        """Get text content of the last tool_result block from the transcript.
+
+        Looks for the most recent user/human message containing a tool_result
+        content block and returns its text content. Handles both string and
+        structured (list of text blocks) content formats.
+
+        Returns:
+            Text content of last tool result, or empty string if none found
+        """
+        for msg in reversed(self._messages):
+            if msg.role in ("user", "human"):
+                raw_message = msg.raw.get("message", {})
+                if not isinstance(raw_message, dict):
+                    continue
+                raw_content = raw_message.get("content", [])
+                if not isinstance(raw_content, list):
+                    continue
+                for block in reversed(raw_content):
+                    if not isinstance(block, dict):
+                        continue
+                    if block.get("type") == "tool_result":
+                        content = block.get("content", "")
+                        if isinstance(content, str):
+                            return content
+                        if isinstance(content, list):
+                            texts = [
+                                item.get("text", "")
+                                for item in content
+                                if isinstance(item, dict) and item.get("type") == "text"
+                            ]
+                            return " ".join(text for text in texts if text)
+        return ""
+
+    def get_last_bash_tool_use(self) -> ContentBlock | None:
+        """Get the most recent Bash tool_use block across all assistant messages.
+
+        Unlike get_last_tool_use_in_message() which only checks the last assistant
+        message, this scans backwards across all messages to find the most recent
+        Bash tool use regardless of subsequent assistant text messages.
+
+        Returns:
+            Most recent Bash tool_use ContentBlock, or None if not found
+        """
+        for msg in reversed(self._messages):
+            if msg.role == "assistant":
+                for block in reversed(msg.content_blocks):
+                    if block.block_type == "tool_use" and block.tool_name == "Bash":
+                        return block
+        return None
