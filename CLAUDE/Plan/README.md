@@ -4,11 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00093: Fresh-Clone Install Guidance](00093-fresh-clone-install-guidance/PLAN.md) - Not Started
-  - Distinguish "daemon not installed" from "daemon not running" in init.sh
-  - Show install guidance (CLAUDE/LLM-INSTALL.md) on fresh clones instead of wrong "restart" advice
-  - Pure init.sh change — no Python, no new handlers
-
 - [00063: FAIL FAST - Plugin Handler Bug & Error Hiding Audit](00063-fail-fast-plugin-handler-audit/PLAN.md) - In Progress
   - **Phase 1 DONE**: Plugin handler suffix bug fixed, warning converted to crash (daemon fails on unregistered handler)
   - **Phase 2 PENDING**: Comprehensive audit for ALL error hiding patterns in codebase (audit script, fix violations)
@@ -30,6 +25,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 
 ## Completed Plans
+
+- [00093: Fresh-Clone Install Guidance](Completed/00093-fresh-clone-install-guidance/PLAN.md) - Complete
+  - Distinguish "daemon not installed" from "daemon not running" in init.sh
+  - Fresh clones now see "read CLAUDE/LLM-INSTALL.md" instead of wrong "run restart" advice
+  - New `_is_daemon_installed()` helper + `_HOOKS_DAEMON_NOT_INSTALLED` flag, 2 new tests
 
 - [00092: CI Environment Graceful Degradation](Completed/00092-ci-environment-graceful-degradation/PLAN.md) - Complete
   - Config-based `ci_enabled` setting for daemon-unavailable behaviour
@@ -489,8 +489,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 89
-- **Completed**: 74 (1 with reduced scope)
-- **Active**: 2 (1 in progress, 1 not started)
+- **Completed**: 75 (1 with reduced scope)
+- **Active**: 1 (in progress)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation)
 

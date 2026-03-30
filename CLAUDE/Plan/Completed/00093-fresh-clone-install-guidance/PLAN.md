@@ -1,8 +1,8 @@
 # Plan 00093: Fresh-Clone Install Guidance
 
-**Status**: Not Started
+**Status**: Complete (2026-03-30)
 **Created**: 2026-03-30
-**Owner**: TBD
+**Owner**: Claude
 **Priority**: Medium
 **Recommended Executor**: Sonnet
 **Execution Strategy**: Single-Threaded
@@ -77,16 +77,16 @@ This correctly handles:
 
 ### Phase 1: init.sh Changes
 
-- [ ] ⬜ **Task 1.1**: Add global flag `_HOOKS_DAEMON_NOT_INSTALLED=false` near `_HOOKS_DAEMON_CI_ENFORCED=false` (line ~21)
+- [x] ✅ **Task 1.1**: Add global flag `_HOOKS_DAEMON_NOT_INSTALLED=false` near `_HOOKS_DAEMON_CI_ENFORCED=false` (line ~21)
 
-- [ ] ⬜ **Task 1.2**: Add `_is_daemon_installed()` helper function (after `_is_ci_environment()`, around line 445):
+- [x] ✅ **Task 1.2**: Add `_is_daemon_installed()` helper function (after `_is_ci_environment()`, around line 445):
   ```bash
   _is_daemon_installed() {
       [[ -d "$HOOKS_DAEMON_ROOT_DIR" ]] && [[ -f "$PYTHON_CMD" ]]
   }
   ```
 
-- [ ] ⬜ **Task 1.3**: Update `ensure_daemon()` non-CI failure branch (around line 555) to detect not-installed state before returning 1:
+- [x] ✅ **Task 1.3**: Update `ensure_daemon()` non-CI failure branch (around line 555) to detect not-installed state before returning 1:
   ```bash
   # Non-CI environment: fail with error so agent sees it and can act
   # Distinguish not-installed (fresh clone) from installed-but-broken
@@ -96,7 +96,7 @@ This correctly handles:
   return 1
   ```
 
-- [ ] ⬜ **Task 1.4**: Add "not installed" message branch in `emit_hook_error()` between the CI-enforced branch and the standard branch (around line 51):
+- [x] ✅ **Task 1.4**: Add "not installed" message branch in `emit_hook_error()` between the CI-enforced branch and the standard branch (around line 51):
   ```bash
   elif [[ "$_HOOKS_DAEMON_NOT_INSTALLED" == "true" ]]; then
       context_msg=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s' \
@@ -117,21 +117,21 @@ This correctly handles:
   - PreToolUse: fail-open advisory context (same as standard not-running, but "not installed" message)
   - Stop/SubagentStop: block (same as standard not-running)
 
-- [ ] ⬜ **Task 1.5**: Verify shellcheck passes on the modified `init.sh`
+- [x] ✅ **Task 1.5**: Verify shellcheck passes on the modified `init.sh`
   ```bash
   shellcheck .claude/init.sh
   ```
 
 ### Phase 2: Verification
 
-- [ ] ⬜ **Task 2.1**: Daemon restart verification — confirm daemon still starts cleanly
+- [x] ✅ **Task 2.1**: Daemon restart verification — confirm daemon still starts cleanly
   ```bash
   $PYTHON -m claude_code_hooks_daemon.daemon.cli restart
   $PYTHON -m claude_code_hooks_daemon.daemon.cli status
   # Expected: RUNNING
   ```
 
-- [ ] ⬜ **Task 2.2**: Manual test — simulate not-installed by checking what `emit_hook_error` outputs with flag set:
+- [x] ✅ **Task 2.2**: Manual test — simulate not-installed by checking what `emit_hook_error` outputs with flag set:
   ```bash
   # Source init.sh, set flag, call emit_hook_error, verify output JSON
   bash -c '
@@ -142,7 +142,7 @@ This correctly handles:
   # Expected: hookSpecificOutput with "Not installed" message and LLM-INSTALL.md reference
   ```
 
-- [ ] ⬜ **Task 2.3**: Manual test — verify not-running case still shows restart guidance (flag not set):
+- [x] ✅ **Task 2.3**: Manual test — verify not-running case still shows restart guidance (flag not set):
   ```bash
   bash -c '
     source .claude/init.sh 2>/dev/null || true
@@ -152,7 +152,7 @@ This correctly handles:
   # Expected: "Not currently running" with restart instructions (unchanged)
   ```
 
-- [ ] ⬜ **Task 2.4**: Manual test — verify CI enforced case unchanged:
+- [x] ✅ **Task 2.4**: Manual test — verify CI enforced case unchanged:
   ```bash
   bash -c '
     source .claude/init.sh 2>/dev/null || true
@@ -164,7 +164,7 @@ This correctly handles:
 
 ### Phase 3: Full QA
 
-- [ ] ⬜ **Task 3.1**: Run full QA suite
+- [x] ✅ **Task 3.1**: Run full QA suite
   ```bash
   ./scripts/qa/run_all.sh
   ```
@@ -172,9 +172,9 @@ This correctly handles:
 
 ### Phase 4: Acceptance Test Coverage
 
-- [ ] ⬜ **Task 4.1**: Check if the `init.sh` path is tested via `generate-playbook` — it's a shell script so won't appear in Python handler playbook. Document the manual verification steps from Phase 2 as the acceptance test record.
+- [x] ✅ **Task 4.1**: Check if the `init.sh` path is tested via `generate-playbook` — it's a shell script so won't appear in Python handler playbook. Document the manual verification steps from Phase 2 as the acceptance test record.
 
-- [ ] ⬜ **Task 4.2**: Commit with clear message:
+- [x] ✅ **Task 4.2**: Commit with clear message:
   ```
   Fix: fresh-clone shows install guidance instead of restart advice
   ```
