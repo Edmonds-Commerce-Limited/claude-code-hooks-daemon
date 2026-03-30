@@ -176,6 +176,14 @@ class TestAutoContinueStopBug:
                 "stop_hook_active": False,
             }
 
+            # matches() always returns True now — routing is in handle()
             assert (
-                handler.matches(hook_input) is False
-            ), f"Handler should NOT match '{message_text}' with continue_on_errors=False"
+                handler.matches(hook_input) is True
+            ), f"Handler should always match (routing moved to handle()): '{message_text}'"
+            result = handler.handle(hook_input)
+            assert result.decision == Decision.DENY
+            # Must NOT emit auto-continue confirmation — requires stop explanation instead
+            reason: str = result.reason or ""
+            assert not reason.startswith(
+                "AUTO-CONTINUE: Yes"
+            ), f"Handler should not auto-continue for error message: '{message_text}'"

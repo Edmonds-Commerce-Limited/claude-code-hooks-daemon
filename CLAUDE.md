@@ -106,12 +106,31 @@ git commit -m "Plan NNNNN: Phase N - Description"
 2. **Fix before continuing** — stop your current task, fix the bug with TDD, run QA, commit, then resume your original work
 3. **All handler behaviour is in scope** — blocking handlers, advisory handlers, command redirection, context injection, status line — everything
 4. **The daemon is not "someone else's problem"** — you ARE the upstream. There is no one else to report to
+5. **Restart the daemon after every handler code change** — the daemon loads Python modules at startup; file edits are invisible until restarted. A handler that "passes unit tests" but never gets restarted is NOT dogfooded.
+
+### Daemon Restart is Mandatory Dogfooding
+
+**After every change to handler code, restart immediately:**
+
+```bash
+$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
+$PYTHON -m claude_code_hooks_daemon.daemon.cli status
+# Expected: RUNNING
+```
+
+**When a handler doesn't fire as expected:**
+1. Check the daemon is running the new code (restart if in doubt)
+2. Use `nc` to probe the live daemon directly: `echo '{"hook_event_name":"Stop","stop_hook_active":false}' | /workspace/.claude/hooks/stop`
+3. Check daemon logs: `$PYTHON -m claude_code_hooks_daemon.daemon.cli logs | tail -20`
+
+**The "daemon running old code" failure mode is silent and common.** Unit tests pass, QA passes, but production behaviour is wrong because the daemon was never restarted. This is the #1 dogfooding failure mode.
 
 ### Why This Matters
 
 - Every bug you encounter, users encounter too
 - Handlers that misfire erode trust in the entire system
 - Unfixed dogfooding bugs compound — one wrong cwd breaks three handlers
+- The daemon running stale code creates phantom bugs that are invisible in tests
 
 ---
 

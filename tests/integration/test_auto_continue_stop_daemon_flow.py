@@ -300,7 +300,7 @@ class TestAutoContinueStopDaemonFlow:
         self,
         tmp_path: Path,
     ) -> None:
-        """Stop event without transcript_path - handler gracefully doesn't match."""
+        """Stop event without transcript_path - handler fires and requires stop explanation."""
         workspace = _make_workspace(tmp_path)
 
         raw_request = {
@@ -326,7 +326,9 @@ class TestAutoContinueStopDaemonFlow:
             )
 
         response = controller.process_request(raw_request)
-        assert response.get("decision") != "block"
+        # Handler now fires even without transcript_path — requires stop explanation
+        assert response.get("decision") == "block"
+        assert "STOPPING BECAUSE" in (response.get("reason") or "")
 
     def test_hook_event_model_validate_stop(self, tmp_path: Path) -> None:
         """HookEvent.model_validate correctly parses Stop events."""
