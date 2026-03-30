@@ -980,5 +980,222 @@ class TestAutoContinueStopHandlerEdgeCases:
             "transcript_path": str(mock_transcript_path),
             "stop_hook_active": False,
         }
-        # Should return False on unexpected error
-        assert handler.matches(hook_input) is False
+        # After Plan 00094: matches() always returns True unless stop_hook_active=True or
+        # AskUserQuestion was used. On read error, reader is empty → True.
+        assert handler.matches(hook_input) is True
+
+
+class TestAutoContinueStopHandlerExplainerBehaviours:
+    """Tests for stop-explainer and QA-failure auto-continue (Plan 00094).
+
+    New behaviours added by Plan 00094:
+    - matches() always returns True when stop_hook_active=False (except AskUserQuestion)
+    - QA tool failures → DENY: "fix failures and continue"
+    - "STOPPING BECAUSE:" prefix in last message → ALLOW
+    - No transcript / unclear stop → DENY: "explain or continue"
+    """
+
+    @pytest.fixture
+    def handler(self) -> AutoContinueStopHandler:
+        """Create handler instance."""
+        return AutoContinueStopHandler()
+
+    def _write_bash_and_result(self, path: Path, command: str, output: str) -> None:
+        """Write transcript with a Bash tool_use followed by a tool_result."""
+        messages = [
+            {
+                "type": "message",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "tu_1",
+                            "name": "Bash",
+                            "input": {"command": command},
+                        }
+                    ],
+                },
+            },
+            {
+                "type": "message",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {"type": "tool_result", "tool_use_id": "tu_1", "content": output}
+                    ],
+                },
+            },
+        ]
+        with path.open("w") as f:
+            for msg in messages:
+                f.write(json.dumps(msg) + "\n")
+
+    def _write_assistant_text(self, path: Path, text: str) -> None:
+        """Write transcript with a single assistant text message."""
+        msg = {
+            "type": "message",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": text}],
+            },
+        }
+        with path.open("w") as f:
+            f.write(json.dumps(msg) + "\n")
+
+    # ── matches() always-True tests ──────────────────────────────────────────
+
+    def test_matches_true_when_no_transcript(self, handler: AutoContinueStopHandler) -> None:
+        """No transcript_path → matches=True; handle() will force explanation."""
+        hook_input: dict[str, Any] = {"stop_hook_active": False}
+        assert handler.matches(hook_input) is True
+
+    def test_matches_true_when_transcript_not_found(
+        self, handler: AutoContinueStopHandler
+    ) -> None:
+        """Non-existent transcript file → matches=True."""
+        hook_input = {
+            "transcript_path": "/nonexistent/no-such-file.jsonl",
+            "stop_hook_active": False,
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_true_when_no_question_mark(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """Statement without '?' → matches=True (old: False). handle() forces explanation."""
+        path = tmp_path / "t.jsonl"
+        self._write_assistant_text(path, "I have completed the implementation.")
+        hook_input = {"transcript_path": str(path), "stop_hook_active": False}
+        assert handler.matches(hook_input) is True
+
+    def test_matches_true_when_unrelated_question(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """Non-continuation question → matches=True. handle() forces explanation."""
+        path = tmp_path / "t.jsonl"
+        self._write_assistant_text(path, "What colour scheme would you prefer for the UI?")
+        hook_input = {"transcript_path": str(path), "stop_hook_active": False}
+        assert handler.matches(hook_input) is True
+
+    # ── handle() branch: QA failure ─────────────────────────────────────────
+
+    def test_handle_pytest_failure_returns_deny(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """pytest FAILED output → DENY with fix instruction."""
+        path = tmp_path / "t.jsonl"
+        self._write_bash_and_result(
+            path,
+            "pytest tests/ -v",
+            "FAILED tests/test_foo.py::test_bar - AssertionError\n2 failed, 3 passed",
+        )
+        hook_input = {"transcript_path": str(path), "stop_hook_active": False}
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+
+    def test_handle_pytest_failure_reason_mentions_fix(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """pytest failure reason should mention fixing failures."""
+        path = tmp_path / "t.jsonl"
+        self._write_bash_and_result(
+            path,
+            "pytest tests/ -v",
+            "FAILED tests/test_foo.py::test_bar\n1 failed, 0 passed",
+        )
+        hook_input = {"transcript_path": str(path), "stop_hook_active": False}
+        result = handler.handle(hook_input)
+        assert result.reason is not None
+        reason_lower = result.reason.lower()
+        assert "fix" in reason_lower or "fail" in reason_lower
+
+    def test_handle_run_all_sh_failure_returns_deny(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """./scripts/qa/run_all.sh FAILED → DENY with fix instruction."""
+        path = tmp_path / "t.jsonl"
+        self._write_bash_and_result(
+            path,
+            "./scripts/qa/run_all.sh",
+            "Format Check   : FAILED\nOverall Status : FAILED",
+        )
+        hook_input = {"transcript_path": str(path), "stop_hook_active": False}
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        reason_lower = result.reason.lower()
+        assert "fix" in reason_lower or "fail" in reason_lower
+
+    def test_handle_qa_pass_does_not_trigger_qa_branch(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """pytest all passing → NOT the QA-fail branch (falls to explain-or-continue)."""
+        path = tmp_path / "t.jsonl"
+        self._write_bash_and_result(path, "pytest tests/ -v", "5 passed in 0.5s")
+        hook_input = {"transcript_path": str(path), "stop_hook_active": False}
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "qa fail" not in result.reason.lower()
+
+    def test_handle_non_qa_bash_does_not_trigger_qa_branch(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """A non-QA Bash command (echo) → NOT the QA-fail branch."""
+        path = tmp_path / "t.jsonl"
+        self._write_bash_and_result(path, "echo hello", "hello")
+        hook_input = {"transcript_path": str(path), "stop_hook_active": False}
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "qa fail" not in result.reason.lower()
+
+    # ── handle() branch: STOPPING BECAUSE ───────────────────────────────────
+
+    def test_handle_stopping_because_prefix_returns_allow(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """'STOPPING BECAUSE:' prefix in last message → ALLOW."""
+        path = tmp_path / "t.jsonl"
+        self._write_assistant_text(path, "STOPPING BECAUSE: all tasks complete and QA passes.")
+        hook_input = {"transcript_path": str(path), "stop_hook_active": False}
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW
+
+    def test_handle_stopping_because_lowercase_does_not_match(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """Lowercase 'stopping because' does NOT match prefix → DENY (force explanation)."""
+        path = tmp_path / "t.jsonl"
+        self._write_assistant_text(path, "I am stopping because the task is done.")
+        hook_input = {"transcript_path": str(path), "stop_hook_active": False}
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+
+    def test_handle_stopping_because_with_whitespace_returns_allow(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """'STOPPING BECAUSE:' with leading whitespace still returns ALLOW."""
+        path = tmp_path / "t.jsonl"
+        self._write_assistant_text(path, "  STOPPING BECAUSE: work is complete.")
+        hook_input = {"transcript_path": str(path), "stop_hook_active": False}
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW
+
+    # ── handle() branch: no transcript (force explanation) ───────────────────
+
+    def test_handle_no_transcript_returns_deny(self, handler: AutoContinueStopHandler) -> None:
+        """No transcript → DENY with explain-or-continue message."""
+        hook_input: dict[str, Any] = {"stop_hook_active": False}
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+
+    def test_handle_no_transcript_reason_contains_stopping_because_hint(
+        self, handler: AutoContinueStopHandler
+    ) -> None:
+        """Explain-or-continue reason should hint at STOPPING BECAUSE: protocol."""
+        hook_input: dict[str, Any] = {"stop_hook_active": False}
+        result = handler.handle(hook_input)
+        assert result.reason is not None
+        assert "STOPPING BECAUSE" in result.reason
