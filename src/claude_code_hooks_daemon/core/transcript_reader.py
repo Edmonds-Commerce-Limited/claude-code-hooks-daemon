@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from claude_code_hooks_daemon.constants.tools import ToolName
+
 logger = logging.getLogger(__name__)
 
 
@@ -571,6 +573,6 @@ class TranscriptReader:
         for msg in reversed(self._messages):
             if msg.role == "assistant":
                 for block in reversed(msg.content_blocks):
-                    if block.block_type == "tool_use" and block.tool_name == "Bash":
+                    if block.block_type == "tool_use" and block.tool_name == ToolName.BASH:
                         return block
         return None

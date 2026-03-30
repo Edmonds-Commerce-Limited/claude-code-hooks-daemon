@@ -302,32 +302,30 @@ class TestAutoContinueStopHandlerMatchesFalse:
         }
         assert handler.matches(hook_input) is False
 
-    def test_matches_false_when_no_transcript_path(self, handler: AutoContinueStopHandler) -> None:
-        """Should return False when transcript_path is missing."""
+    def test_matches_true_when_no_transcript_path(self, handler: AutoContinueStopHandler) -> None:
+        """Should return True when transcript_path is missing (handle() forces explanation)."""
         hook_input: dict[str, Any] = {"stop_hook_active": False}
-        assert handler.matches(hook_input) is False
+        assert handler.matches(hook_input) is True
 
-    def test_matches_false_when_transcript_path_empty(
+    def test_matches_true_when_transcript_path_empty(
         self, handler: AutoContinueStopHandler
     ) -> None:
-        """Should return False when transcript_path is empty string."""
+        """Should return True when transcript_path is empty string (no AskUserQuestion detectable)."""
         hook_input = {"transcript_path": "", "stop_hook_active": False}
-        assert handler.matches(hook_input) is False
+        assert handler.matches(hook_input) is True
 
-    def test_matches_false_when_transcript_not_found(
-        self, handler: AutoContinueStopHandler
-    ) -> None:
-        """Should return False when transcript file does not exist."""
+    def test_matches_true_when_transcript_not_found(self, handler: AutoContinueStopHandler) -> None:
+        """Should return True when transcript file does not exist (handle() forces explanation)."""
         hook_input = {
             "transcript_path": "/nonexistent/path/transcript.jsonl",
             "stop_hook_active": False,
         }
-        assert handler.matches(hook_input) is False
+        assert handler.matches(hook_input) is True
 
-    def test_matches_false_when_last_message_not_question(
+    def test_matches_true_when_last_message_not_question(
         self, handler: AutoContinueStopHandler, mock_transcript_path: Path
     ) -> None:
-        """Should return False when last message doesn't contain a question mark."""
+        """Should return True when last message has no question mark (handle() routes to branch 4)."""
         self._write_transcript(
             mock_transcript_path,
             "I have completed the implementation",
@@ -337,7 +335,7 @@ class TestAutoContinueStopHandlerMatchesFalse:
             "transcript_path": str(mock_transcript_path),
             "stop_hook_active": False,
         }
-        assert handler.matches(hook_input) is False
+        assert handler.matches(hook_input) is True
 
     def test_matches_true_when_last_message_is_error_report_default(
         self, handler: AutoContinueStopHandler, mock_transcript_path: Path
@@ -354,10 +352,10 @@ class TestAutoContinueStopHandlerMatchesFalse:
         # With continue_on_errors=True (default), this SHOULD match
         assert handler.matches(hook_input) is True
 
-    def test_matches_false_when_question_not_about_continuation(
+    def test_matches_true_when_question_not_about_continuation(
         self, handler: AutoContinueStopHandler, mock_transcript_path: Path
     ) -> None:
-        """Should return False when question is not about continuation."""
+        """Should return True when question is not about continuation (handle() routes to branch 4)."""
         self._write_transcript(
             mock_transcript_path, "What color scheme would you prefer for the UI"
         )
@@ -365,12 +363,12 @@ class TestAutoContinueStopHandlerMatchesFalse:
             "transcript_path": str(mock_transcript_path),
             "stop_hook_active": False,
         }
-        assert handler.matches(hook_input) is False
+        assert handler.matches(hook_input) is True
 
-    def test_matches_false_when_no_assistant_messages(
+    def test_matches_true_when_no_assistant_messages(
         self, handler: AutoContinueStopHandler, mock_transcript_path: Path
     ) -> None:
-        """Should return False when transcript has no assistant messages."""
+        """Should return True when transcript has no assistant messages (no AskUserQuestion)."""
         messages = [
             {
                 "type": "message",
@@ -388,12 +386,12 @@ class TestAutoContinueStopHandlerMatchesFalse:
             "transcript_path": str(mock_transcript_path),
             "stop_hook_active": False,
         }
-        assert handler.matches(hook_input) is False
+        assert handler.matches(hook_input) is True
 
-    def test_matches_false_when_transcript_is_malformed_json(
+    def test_matches_true_when_transcript_is_malformed_json(
         self, handler: AutoContinueStopHandler, mock_transcript_path: Path
     ) -> None:
-        """Should return False when transcript contains malformed JSON."""
+        """Should return True when transcript contains malformed JSON (no AskUserQuestion found)."""
         with mock_transcript_path.open("w") as f:
             f.write("not valid json\n")
             f.write("{incomplete json\n")
@@ -402,19 +400,19 @@ class TestAutoContinueStopHandlerMatchesFalse:
             "transcript_path": str(mock_transcript_path),
             "stop_hook_active": False,
         }
-        assert handler.matches(hook_input) is False
+        assert handler.matches(hook_input) is True
 
-    def test_matches_false_when_transcript_is_empty(
+    def test_matches_true_when_transcript_is_empty(
         self, handler: AutoContinueStopHandler, mock_transcript_path: Path
     ) -> None:
-        """Should return False when transcript file is empty."""
+        """Should return True when transcript file is empty (no AskUserQuestion found)."""
         mock_transcript_path.touch()  # Create empty file
 
         hook_input = {
             "transcript_path": str(mock_transcript_path),
             "stop_hook_active": False,
         }
-        assert handler.matches(hook_input) is False
+        assert handler.matches(hook_input) is True
 
 
 class TestAutoContinueStopHandlerHandle:
@@ -727,7 +725,7 @@ class TestAutoContinueStopContinueOnErrors:
     def test_disabled_continue_on_errors_blocks_on_error(
         self, handler_no_continue_on_errors: AutoContinueStopHandler, mock_transcript_path: Path
     ) -> None:
-        """With continue_on_errors=False, should NOT match when error pattern present."""
+        """With continue_on_errors=False, matches() still fires; handle() skips auto-continue."""
         self._write_transcript(
             mock_transcript_path,
             "Error: The test failed. Would you like me to continue with a different approach?",
@@ -736,12 +734,18 @@ class TestAutoContinueStopContinueOnErrors:
             "transcript_path": str(mock_transcript_path),
             "stop_hook_active": False,
         }
-        assert handler_no_continue_on_errors.matches(hook_input) is False
+        # matches() always returns True now — routing moved to handle()
+        assert handler_no_continue_on_errors.matches(hook_input) is True
+        # handle() must NOT treat this as auto-continue (error + continue_on_errors=False)
+        result = handler_no_continue_on_errors.handle(hook_input)
+        assert result.decision == Decision.DENY
+        reason = result.reason or ""
+        assert "STOPPING BECAUSE" in reason or "AUTO-CONTINUE" in reason
 
     def test_disabled_continue_on_errors_blocks_on_failed(
         self, handler_no_continue_on_errors: AutoContinueStopHandler, mock_transcript_path: Path
     ) -> None:
-        """With continue_on_errors=False, should NOT match when failed pattern present."""
+        """With continue_on_errors=False, matches() still fires; handle() skips auto-continue."""
         self._write_transcript(
             mock_transcript_path,
             "Failed: build broke. Should I proceed with fixing it?",
@@ -750,12 +754,18 @@ class TestAutoContinueStopContinueOnErrors:
             "transcript_path": str(mock_transcript_path),
             "stop_hook_active": False,
         }
-        assert handler_no_continue_on_errors.matches(hook_input) is False
+        # matches() always returns True now — routing moved to handle()
+        assert handler_no_continue_on_errors.matches(hook_input) is True
+        # handle() must NOT treat this as auto-continue (error + continue_on_errors=False)
+        result = handler_no_continue_on_errors.handle(hook_input)
+        assert result.decision == Decision.DENY
+        reason = result.reason or ""
+        assert "STOPPING BECAUSE" in reason or "AUTO-CONTINUE" in reason
 
     def test_continue_on_errors_still_requires_question_mark(
         self, handler: AutoContinueStopHandler, mock_transcript_path: Path
     ) -> None:
-        """Even with continue_on_errors=True, message must contain a question mark."""
+        """Without a question mark the confirmation branch in handle() is not triggered."""
         self._write_transcript(
             mock_transcript_path,
             "Error: The test failed. I will try a different approach.",
@@ -764,7 +774,12 @@ class TestAutoContinueStopContinueOnErrors:
             "transcript_path": str(mock_transcript_path),
             "stop_hook_active": False,
         }
-        assert handler.matches(hook_input) is False
+        # matches() always returns True — routing is in handle()
+        assert handler.matches(hook_input) is True
+        # handle() falls through to explain-or-continue branch (no question mark → no auto-continue)
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert "STOPPING BECAUSE" in (result.reason or "")
 
     def test_continue_on_errors_still_checks_stop_hook_active(
         self, handler: AutoContinueStopHandler, mock_transcript_path: Path
@@ -929,8 +944,8 @@ class TestAutoContinueStopHandlerEdgeCases:
 
         try:
             result = handler.matches(hook_input)
-            # Should return False on read error
-            assert result is False
+            # Now returns True on read error — routing (fail open) happens in handle()
+            assert result is True
         finally:
             # Clean up - restore permissions so pytest can delete the file
             transcript_path.chmod(0o644)
@@ -947,8 +962,8 @@ class TestAutoContinueStopHandlerEdgeCases:
             "transcript_path": str(mock_transcript_path),
             "stop_hook_active": False,
         }
-        # Should return False on decode error
-        assert handler.matches(hook_input) is False
+        # Now returns True on decode error — routing (fail open) happens in handle()
+        assert handler.matches(hook_input) is True
 
     def test_matches_handles_unexpected_exception(
         self, handler: AutoContinueStopHandler, mock_transcript_path: Path, monkeypatch: Any
@@ -1021,9 +1036,7 @@ class TestAutoContinueStopHandlerExplainerBehaviours:
                 "type": "message",
                 "message": {
                     "role": "user",
-                    "content": [
-                        {"type": "tool_result", "tool_use_id": "tu_1", "content": output}
-                    ],
+                    "content": [{"type": "tool_result", "tool_use_id": "tu_1", "content": output}],
                 },
             },
         ]
@@ -1050,9 +1063,7 @@ class TestAutoContinueStopHandlerExplainerBehaviours:
         hook_input: dict[str, Any] = {"stop_hook_active": False}
         assert handler.matches(hook_input) is True
 
-    def test_matches_true_when_transcript_not_found(
-        self, handler: AutoContinueStopHandler
-    ) -> None:
+    def test_matches_true_when_transcript_not_found(self, handler: AutoContinueStopHandler) -> None:
         """Non-existent transcript file → matches=True."""
         hook_input = {
             "transcript_path": "/nonexistent/no-such-file.jsonl",

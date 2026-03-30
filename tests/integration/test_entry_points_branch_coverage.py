@@ -136,7 +136,9 @@ class TestEntryPointBranchCoverage:
 
         assert result.returncode == 0
         output = json.loads(result.stdout)
-        assert output == {}
+        # auto_continue_stop fires even without config — requires stop explanation
+        assert output.get("decision") == "block"
+        assert "STOPPING BECAUSE" in (output.get("reason") or "")
 
     def test_user_prompt_submit_without_config_file(self, tmp_path: Path) -> None:
         """UserPromptSubmit hook works without config file."""

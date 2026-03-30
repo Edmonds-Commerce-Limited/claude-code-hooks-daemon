@@ -4,12 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00094: Claude Code Introspection & Debugging Sub-Agent](00094-claude-code-introspection-debug-agent/PLAN.md) - Not Started
-  - Fix "stop on QA failure" — auto-continue after pytest/ruff/mypy failures without user typing "go"
-  - Deploy `hooks-debugger` sub-agent via install/upgrade pipeline (`.claude/agents/`)
-  - Transcript-aware Stop handler using `TranscriptReader` + `transcript_path` from hook input
-  - Report generation + handler proposal scripts for the sub-agent to invoke
-
 - [00063: FAIL FAST - Plugin Handler Bug & Error Hiding Audit](00063-fail-fast-plugin-handler-audit/PLAN.md) - In Progress
   - **Phase 1 DONE**: Plugin handler suffix bug fixed, warning converted to crash (daemon fails on unregistered handler)
   - **Phase 2 PENDING**: Comprehensive audit for ALL error hiding patterns in codebase (audit script, fix violations)
@@ -31,6 +25,17 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 
 ## Completed Plans
+
+- [00095: /optimise Skill for Config Analysis](Completed/00095-config-optimise-skill/PLAN.md) - Complete
+  - New `/optimise` skill analyzing hooks-daemon config across 5 domains: Safety, Stop Quality, Plan Workflow, Code Quality, Daemon Settings
+  - Generates prioritised recommendations with enable/disable commands for each finding
+  - Bash-driven invoke.sh iterating handler domains and scoring against active config
+
+- [00094: Stop Explainer & Auto-Continue](Completed/00094-claude-code-introspection-debug-agent/PLAN.md) - Complete
+  - `auto_continue_stop` redesigned: `matches()` always fires (except `stop_hook_active=True`), routing in `handle()`
+  - 4 branches: STOPPING BECAUSE → ALLOW; confirmation question → DENY+auto-continue; QA failure → DENY+fix; default → DENY+explain-or-continue
+  - Stop event JSONL logger (`_log_stop_event()`); camelCase `stopHookActive` field support
+  - Full TDD with regression tests; 8/8 QA; daemon verified live
 
 - [00093: Fresh-Clone Install Guidance](Completed/00093-fresh-clone-install-guidance/PLAN.md) - Complete
   - Distinguish "daemon not installed" from "daemon not running" in init.sh
@@ -494,9 +499,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 90
-- **Completed**: 75 (1 with reduced scope)
-- **Active**: 2 (1 in progress, 1 not started)
+- **Total Plans Created**: 91
+- **Completed**: 77 (1 with reduced scope)
+- **Active**: 1 (in progress)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation)
 

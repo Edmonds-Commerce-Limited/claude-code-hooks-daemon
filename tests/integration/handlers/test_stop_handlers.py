@@ -128,7 +128,7 @@ class TestAutoContinueStopHandler:
     def test_ignores_error_questions_when_continue_on_errors_false(
         self, handler: Any, tmp_path: Any
     ) -> None:
-        """With continue_on_errors=False, error questions should NOT match."""
+        """With continue_on_errors=False, error questions match but don't auto-continue."""
         handler._continue_on_errors = False
         transcript = tmp_path / "transcript.jsonl"
         message = {
@@ -146,9 +146,15 @@ class TestAutoContinueStopHandler:
             stop_hook_active=False,
             transcript_path=str(transcript),
         )
-        assert handler.matches(hook_input) is False
+        # matches() always returns True now — routing is in handle()
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        # Must not emit auto-continue confirmation — requires stop explanation instead
+        assert not (result.reason or "").startswith("AUTO-CONTINUE: Yes")
 
     def test_ignores_non_question(self, handler: Any, tmp_path: Any) -> None:
+        """Non-question text matches but requires stop explanation."""
         transcript = tmp_path / "transcript.jsonl"
         message = {
             "type": "message",
@@ -163,14 +169,23 @@ class TestAutoContinueStopHandler:
             stop_hook_active=False,
             transcript_path=str(transcript),
         )
-        assert handler.matches(hook_input) is False
+        # matches() always returns True now — routing is in handle()
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert "STOPPING BECAUSE" in (result.reason or "")
 
     def test_handles_missing_transcript(self, handler: Any) -> None:
+        """Missing transcript is fail-open: matches True, handle() requires explanation."""
         hook_input = make_stop_input(
             stop_hook_active=False,
             transcript_path="/nonexistent/transcript.jsonl",
         )
-        assert handler.matches(hook_input) is False
+        # matches() is fail-open — returns True even when transcript is missing
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert "STOPPING BECAUSE" in (result.reason or "")
 
     def test_handler_is_terminal(self, handler: Any) -> None:
         assert handler.terminal is True
