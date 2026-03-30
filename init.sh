@@ -20,6 +20,9 @@ set -euo pipefail
 # Flag set by ensure_daemon when ci_enabled: true and daemon can't start
 _HOOKS_DAEMON_CI_ENFORCED=false
 
+# Flag set by ensure_daemon when daemon directory/venv is absent (fresh clone)
+_HOOKS_DAEMON_NOT_INSTALLED=false
+
 #
 # emit_hook_error() - Output a valid hook error response to stdout
 #
@@ -63,6 +66,20 @@ emit_hook_error() {
             "3. Installation guide: CLAUDE/LLM-INSTALL.md" \
             "" \
             "DO NOT attempt to install the daemon yourself. DO NOT continue working without the daemon.")
+    elif [[ "$_HOOKS_DAEMON_NOT_INSTALLED" == "true" ]]; then
+        # NOT INSTALLED: Guide to install guide — project was cloned but daemon never set up
+        context_msg=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s' \
+            "HOOKS DAEMON: Not installed" \
+            "" \
+            "This project uses the Claude Code Hooks Daemon for safety enforcement," \
+            "but the daemon is not installed in this environment." \
+            "" \
+            "ALL safety handlers, code quality checks, and workflow enforcement are INACTIVE." \
+            "" \
+            "TO INSTALL — read and follow the guide (do not improvise):" \
+            "  CLAUDE/LLM-INSTALL.md" \
+            "" \
+            "After installing, the daemon starts automatically on the next hook event.")
     else
         # Standard error message
         # NOTE: Language is intentionally measured to avoid triggering investigation loops
@@ -97,6 +114,15 @@ emit_hook_error() {
                     '{"decision": "deny", "reason": $reason}'
             elif [[ "$event_name" == "Stop" || "$event_name" == "SubagentStop" ]]; then
                 jq -n --arg reason "$ci_reason" \
+                    '{"decision": "block", "reason": $reason}'
+            else
+                jq -n --arg event "$event_name" --arg context "$context_msg" \
+                    '{"hookSpecificOutput": {"hookEventName": $event, "additionalContext": $context}}'
+            fi
+        elif [[ "$_HOOKS_DAEMON_NOT_INSTALLED" == "true" ]]; then
+            # Not installed: Stop/SubagentStop block, others fail-open with install guidance
+            if [[ "$event_name" == "Stop" || "$event_name" == "SubagentStop" ]]; then
+                jq -n --arg reason "Hooks daemon not installed - protection not active" \
                     '{"decision": "block", "reason": $reason}'
             else
                 jq -n --arg event "$event_name" --arg context "$context_msg" \
@@ -421,6 +447,20 @@ _is_ci_enforced() {
 }
 
 #
+# _is_daemon_installed() - Check if daemon is installed (dir + venv Python present)
+#
+# Distinguishes "not installed" (fresh clone) from "installed but not running".
+# Used by ensure_daemon() to set _HOOKS_DAEMON_NOT_INSTALLED for better error messages.
+#
+# Returns:
+#   0 if daemon appears installed
+#   1 if daemon directory or venv Python is absent
+#
+_is_daemon_installed() {
+    [[ -d "$HOOKS_DAEMON_ROOT_DIR" ]] && [[ -f "$PYTHON_CMD" ]]
+}
+
+#
 # _is_ci_environment() - Detect if running in any CI/CD environment
 #
 # Checks common CI environment variables across major platforms.
@@ -552,7 +592,11 @@ ensure_daemon() {
         return 0
     fi
 
-    # Non-CI environment: fail with error so agent sees it and can restart the daemon
+    # Non-CI environment: fail with error so agent sees it and can act
+    # Distinguish not-installed (fresh clone) from installed-but-not-starting
+    if ! _is_daemon_installed; then
+        _HOOKS_DAEMON_NOT_INSTALLED=true
+    fi
     return 1
 }
 
