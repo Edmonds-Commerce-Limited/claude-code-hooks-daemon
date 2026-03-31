@@ -276,18 +276,19 @@ class AutoContinueStopHandler(Handler):
         return any(ind in result_text for ind in self._QA_FAILURE_INDICATORS)
 
     def _has_stop_explanation(self, reader: TranscriptReader) -> bool:
-        """Return True if last assistant message starts with 'STOPPING BECAUSE:'.
+        """Return True if any line in last assistant message starts with 'STOPPING BECAUSE:'.
 
-        Strips leading whitespace before checking the prefix.
+        Checks each line individually, stripping leading whitespace, so the prefix
+        may appear anywhere in the message (not just at the very start).
 
         Args:
             reader: Loaded transcript reader
 
         Returns:
-            True if last text starts with the STOPPING BECAUSE: prefix
+            True if any line starts with the STOPPING BECAUSE: prefix
         """
         last_text = reader.get_last_assistant_text()
-        return last_text.lstrip().startswith("STOPPING BECAUSE:")
+        return any(line.lstrip().startswith("STOPPING BECAUSE:") for line in last_text.splitlines())
 
     def _log_stop_event(self, hook_input: dict[str, Any], decision: Decision, reason: str) -> None:
         """Log stop event to JSONL file for debugging.

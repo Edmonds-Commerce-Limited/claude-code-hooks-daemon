@@ -1194,6 +1194,49 @@ class TestAutoContinueStopHandlerExplainerBehaviours:
         result = handler.handle(hook_input)
         assert result.decision == Decision.ALLOW
 
+    def test_handle_stopping_because_after_summary_returns_allow(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """'STOPPING BECAUSE:' on a later line (after summary content) → ALLOW.
+
+        Regression test: Bug 1 from untracked/hooks-daemon-stopping-because.md.
+        Assistants naturally summarise work before stating the stop reason, so
+        the prefix appears on a non-first line of the message.
+        """
+        path = tmp_path / "t.jsonl"
+        message = (
+            "Both fixed:\n\n"
+            "1. **`core.fileMode`** set to `true`\n"
+            "2. **`.claude/worktrees/`** added to `.gitignore`\n\n"
+            "STOPPING BECAUSE: both issues resolved."
+        )
+        self._write_assistant_text(path, message)
+        hook_input = {"transcript_path": str(path), "stop_hook_active": False}
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW
+
+    def test_handle_stopping_because_on_last_line_returns_allow(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """'STOPPING BECAUSE:' as the final line of a multi-line message → ALLOW."""
+        path = tmp_path / "t.jsonl"
+        message = "Done.\n\nAll QA passes.\n\nSTOPPING BECAUSE: task complete."
+        self._write_assistant_text(path, message)
+        hook_input = {"transcript_path": str(path), "stop_hook_active": False}
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW
+
+    def test_handle_stopping_because_with_leading_whitespace_on_later_line_returns_allow(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """'STOPPING BECAUSE:' with leading whitespace on a non-first line → ALLOW."""
+        path = tmp_path / "t.jsonl"
+        message = "Summary of work done.\n\n  STOPPING BECAUSE: no more tasks."
+        self._write_assistant_text(path, message)
+        hook_input = {"transcript_path": str(path), "stop_hook_active": False}
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW
+
     # ── handle() branch: no transcript (force explanation) ───────────────────
 
     def test_handle_no_transcript_returns_deny(self, handler: AutoContinueStopHandler) -> None:
