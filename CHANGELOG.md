@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.29.0] - 2026-03-30
+
+### Added
+
+- **Live daemon smoke test as QA check 9 (`run_smoke_test.sh` + `llm_qa.py` integration)**: New QA check that probes the running daemon via 3 live hook script calls — Stop without explanation (must block), Stop with `stop_hook_active=true` (must allow, loop-guard check), and PreToolUse with a destructive git command (must deny). Catches the "#1 dogfooding failure mode": daemon running stale code. Results written to `untracked/qa/smoke_test.json`. Integrated as check 9 in `llm_qa.py` alongside the existing 8 automated checks. Includes 14 unit tests in `tests/unit/qa/test_smoke_test.py`.
+
+- **`auto_continue_stop` redesign: 4-branch routing + JSONL stop-event logger**: The `AutoContinueStopHandler` was redesigned with a clean 4-branch routing model in `handle()`: (1) QA failure — last Bash was a QA tool and output indicates failure, respond with fix-and-continue message; (2) Explicit stop — last assistant message starts with `STOPPING BECAUSE:`, allow the stop; (3) Confirmation question (backwards compat) — text contains a continuation question, deny with auto-continue instruction; (4) Default — require `STOPPING BECAUSE:` prefix or continue, deny with explanation prompt. All stop decisions are now logged to `untracked/stop-events.jsonl` via `_log_stop_event()` for post-session debugging.
+
+- **`/optimise` skill**: New Claude Code skill at `.claude/skills/optimise/` that analyses the hooks daemon configuration and produces a scored report across five areas: Safety, Stop Quality, Plan Workflow, Code Quality, and Daemon Settings. Each area is scored PASS / WARN / FAIL. Recommends specific handler changes and can apply them automatically (`apply all`, `apply 2,3`, or `skip`).
+
+- **`GitignoreSafetyCheckerHandler` (SessionStart, priority 54, advisory, 39 tests)**: New SessionStart handler that warns when required `.claude/` paths are absent from `.gitignore`. Currently checks that `.claude/worktrees/` is gitignored (Claude Code managed worktrees — path is not configurable). Uses content-hash caching (MD5 of `.gitignore` + `.claude/.gitignore`) to avoid redundant filesystem reads on every session start. Only fires on new sessions (not resume). Non-blocking advisory — injects a warning context block listing missing entries with fix instructions.
+
+- **Transcript-inspector sub-agent** (`.claude/agents/transcript-inspector.md`): New sub-agent that reads and analyses the current session transcript using `TranscriptReader` helpers. Useful for debugging stop hook behaviour, understanding conversation flow, and inspecting tool call history.
+
+- **Stop hook debugging guide** (`CLAUDE/DEBUGGING_STOP_HOOK.md`): New documentation covering how to debug the `auto_continue_stop` handler — how to read `untracked/stop-events.jsonl`, how to probe the stop hook directly via `nc`, how to interpret the 4-branch routing decisions, and common failure patterns.
+
+- **Daemon restart dogfooding rule added to `CLAUDE.md`**: Non-negotiable rule added to project instructions mandating daemon restart after every handler code change, with explicit commands and a description of the "daemon running stale code" failure mode as the #1 dogfooding pitfall.
+
+### Fixed
+
+- **Fresh-clone install guidance instead of restart advice**: When running from a fresh clone without an existing daemon socket, the hook init script now shows install guidance (directing the user to `CLAUDE/LLM-INSTALL.md`) rather than misleadingly instructing them to restart the daemon.
+
+- **Worktree handler path fix for `.claude/worktrees/`**: The `worktree_file_copy` handler was missing `.claude/worktrees/` as a recognised worktree path. Claude Code stores managed worktrees at this path by default but the handler only matched user-configured paths, causing it to miss the most common worktree location. Fixed by adding `.claude/worktrees/` to the set of recognised worktree root patterns.
+
 ## [2.28.0] - 2026-03-25
 
 ### Added
