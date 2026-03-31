@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.29.1] - 2026-03-31
+
+### Fixed
+
+- **`auto_continue_stop` stop explanation recognised on any line**: `_has_stop_explanation()` previously used `startswith()` on the entire assistant message, so `STOPPING BECAUSE:` was only recognised when it appeared at the very first character. Assistants naturally summarise completed work before stating the stop reason, placing the prefix on a later line — causing the handler to deny valid stops and force unnecessary retry loops. Fixed by scanning each line individually so the prefix is recognised wherever it appears in the message.
+
 ## [2.29.0] - 2026-03-30
 
 ### Added
