@@ -238,7 +238,7 @@
     },
     {
       "file": "handlers/stop/auto_continue_stop.py",
-      "lines": [303],
+      "lines": [304],
       "rule": "silent-pass",
       "reason": "_log_stop_event(): Non-critical JSONL append — fails silently when ProjectContext is not initialised (unit tests) or the log file is unwritable. Stop event logging is purely diagnostic and must not affect the handler decision or raise to callers."
     },
