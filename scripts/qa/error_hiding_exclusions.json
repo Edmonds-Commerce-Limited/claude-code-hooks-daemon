@@ -1,306 +1,390 @@
 {
-  "version": "1.0",
-  "description": "Intentional error-handling patterns exempt from the error-hiding audit. Each entry documents WHY the pattern is appropriate rather than a bug.",
+  "version": "2.0",
+  "description": "Intentional error-handling patterns exempt from the error-hiding audit. Each entry uses 'function' (not 'lines') for drift-proof matching — line numbers shift on every edit, function names are stable. Each entry documents WHY the pattern is appropriate.",
   "exclusions": [
     {
       "file": "config/models.py",
-      "lines": [629],
+      "function": "load_or_default",
       "rule": "silent-pass",
-      "reason": "load_or_default(): FileNotFoundError is expected when config file disappears between exists() check and read (TOCTOU). Falls through to return cls() which creates a safe default. This is not hiding an error - it IS the intended fallback."
+      "reason": "FileNotFoundError is expected when config file disappears between exists() check and read (TOCTOU). Falls through to return cls() which creates a safe default. This is not hiding an error — it IS the intended fallback."
     },
     {
-      "file": "core/project_context.py",
-      "lines": [180, 250],
-      "rule": "return-none-on-error",
-      "reason": "Git helper methods (git_root, git_branch, etc.) are explicitly non-fatal. Callers check for None and handle missing git context gracefully. These are utility methods, not critical paths."
+      "file": "core/command_redirection.py",
+      "function": "_reap_background_process",
+      "rule": "log-and-continue",
+      "reason": "Zombie reaper thread: log-and-continue when process wait() fails. Reaper thread must never crash the daemon — it exists solely to prevent zombie accumulation. Already logged at debug level."
+    },
+    {
+      "file": "core/command_redirection.py",
+      "function": "cleanup_old_files",
+      "rule": "log-and-continue",
+      "reason": "File cleanup loop: log-and-continue when individual old output files cannot be removed (FileNotFoundError, PermissionError). One unremovable file must not prevent cleanup of others. Already logged at debug/warning level."
     },
     {
       "file": "core/front_controller.py",
-      "lines": [148],
+      "function": "_inject_config_key_footer",
       "rule": "return-none-on-error",
-      "reason": "_inject_disable_footer(): Returns early on ValueError for unknown event types. The caller continues normally - the footer injection is optional context enrichment, not a critical operation."
+      "reason": "Returns early on ValueError for unknown event types. The caller continues normally — the footer injection is optional context enrichment, not a critical operation."
     },
     {
-      "file": "daemon/validation.py",
-      "lines": [71],
+      "file": "core/project_context.py",
+      "function": "_get_git_repo_name",
       "rule": "return-none-on-error",
-      "reason": "load_config_raw(): Returns None on config load failure. Callers receive None and handle it by using defaults or raising with better context. This is the documented contract of the function."
+      "reason": "Git helper methods are explicitly non-fatal. Callers check for None and handle missing git context gracefully. These are utility methods, not critical paths."
     },
     {
-      "file": "daemon/paths.py",
-      "lines": [300, 318, 405, 422],
+      "file": "core/project_context.py",
+      "function": "_get_git_toplevel",
+      "rule": "return-none-on-error",
+      "reason": "Git helper methods are explicitly non-fatal. Callers check for None and handle missing git context gracefully. These are utility methods, not critical paths."
+    },
+    {
+      "file": "core/pseudo_event.py",
+      "function": "_fire",
+      "rule": "return-none-on-error",
+      "reason": "Catches Exception, logs full traceback via logger.exception(), returns None. Pseudo-event dispatch is non-critical — one failing pseudo-event must not crash the main hook processing pipeline. Already logged with full traceback."
+    },
+    {
+      "file": "core/transcript_reader.py",
+      "function": "load",
+      "rule": "return-none-on-error",
+      "reason": "Returns early when path is invalid or does not exist. Transcript reading is advisory — handlers must not crash if the transcript file is missing or the path is malformed. Callers check _loaded state."
+    },
+    {
+      "file": "core/transcript_reader.py",
+      "function": "_parse",
       "rule": "log-and-continue",
-      "reason": "Stale socket/PID file cleanup routines: log-and-continue is correct. Cleanup failing for one stale file should not prevent cleanup of others or block daemon startup. Already logged at warning level."
+      "reason": "Logs file read errors and continues with empty state. Transcript parsing is advisory — one unreadable transcript must not crash handler execution. Already logged at debug/error level."
+    },
+    {
+      "file": "core/transcript_reader.py",
+      "function": "read_incremental",
+      "rule": "log-and-continue",
+      "reason": "Logs OSError/UnicodeDecodeError at debug level and returns partial results. Incremental transcript reading is advisory — same pattern as _parse(). Already logged."
+    },
+    {
+      "file": "core/transcript_reader.py",
+      "function": "read_incremental",
+      "rule": "silent-continue",
+      "reason": "JSONL transcript parsing loop: except json.JSONDecodeError: continue is the standard JSONL pattern. Malformed lines are skipped to process the rest of the transcript. Same pattern already excluded in hedging_language_detector and auto_continue_stop."
+    },
+    {
+      "file": "daemon/cli.py",
+      "function": "get_project_path",
+      "rule": "log-and-continue",
+      "reason": "Directory search loop: log-and-continue when searching upward for .claude directory. SystemExit during path validation means invalid installation at this path — continue searching upward is the correct behaviour. Already logged at debug level."
+    },
+    {
+      "file": "daemon/cli.py",
+      "function": "send_daemon_request",
+      "rule": "return-none-on-error",
+      "reason": "Returns None on socket connection failure. Callers check for None and display appropriate error messages to user. Socket unavailability is a normal operational state (daemon not running). Already logged via logger.exception."
     },
     {
       "file": "daemon/paths.py",
-      "lines": [364],
+      "function": "write_socket_discovery_file",
+      "rule": "log-and-continue",
+      "reason": "Stale socket/PID file cleanup routine: log-and-continue is correct. Cleanup failing for one stale file should not prevent cleanup of others or block daemon startup. Already logged at warning level."
+    },
+    {
+      "file": "daemon/paths.py",
+      "function": "cleanup_socket_discovery_file",
+      "rule": "log-and-continue",
+      "reason": "Stale socket/PID file cleanup routine: log-and-continue is correct. Cleanup failing for one stale file should not prevent cleanup of others or block daemon startup. Already logged at warning level."
+    },
+    {
+      "file": "daemon/paths.py",
+      "function": "read_pid_file",
       "rule": "return-none-on-error",
-      "reason": "read_pid_file(): Returns None when PID file missing or invalid. Callers check for None before using PID. This is the documented contract - a missing PID file means no daemon is running."
+      "reason": "Returns None when PID file missing or invalid. Callers check for None before using PID. This is the documented contract — a missing PID file means no daemon is running."
+    },
+    {
+      "file": "daemon/paths.py",
+      "function": "cleanup_socket",
+      "rule": "log-and-continue",
+      "reason": "Stale socket/PID file cleanup routine: log-and-continue is correct. Cleanup failing for one stale file should not prevent cleanup of others or block daemon startup. Already logged at warning level."
+    },
+    {
+      "file": "daemon/paths.py",
+      "function": "cleanup_pid_file",
+      "rule": "log-and-continue",
+      "reason": "Stale socket/PID file cleanup routine: log-and-continue is correct. Cleanup failing for one stale file should not prevent cleanup of others or block daemon startup. Already logged at warning level."
+    },
+    {
+      "file": "daemon/paths.py",
+      "function": "cleanup_stale_daemon_files",
+      "rule": "log-and-continue",
+      "reason": "Stale file batch cleanup routine: log-and-continue is correct. One unremovable/unreadable file must not abort cleanup of others or block daemon startup. Already logged at warning/debug level."
+    },
+    {
+      "file": "daemon/paths.py",
+      "function": "cleanup_stale_command_redirection_files",
+      "rule": "log-and-continue",
+      "reason": "Stale file batch cleanup routine: log-and-continue is correct. One unremovable/unreadable file must not abort cleanup of others or block daemon startup. Already logged at warning/debug level."
+    },
+    {
+      "file": "daemon/paths.py",
+      "function": "touch_daemon_files_in_dir",
+      "rule": "log-and-continue",
+      "reason": "Stale file batch cleanup routine: log-and-continue is correct. One unremovable/unreadable file must not abort cleanup of others or block daemon startup. Already logged at warning/debug level."
+    },
+    {
+      "file": "daemon/paths.py",
+      "function": "write_cleanup_status",
+      "rule": "log-and-continue",
+      "reason": "Stale file batch cleanup routine: log-and-continue is correct. One unremovable/unreadable file must not abort cleanup of others or block daemon startup. Already logged at warning/debug level."
+    },
+    {
+      "file": "daemon/playbook_generator.py",
+      "function": "_collect_tests",
+      "rule": "log-and-continue",
+      "reason": "Acceptance test collection from handlers: log-and-continue when a handler fails to provide tests. One handler failing should not prevent playbook generation from other handlers. Already logged."
     },
     {
       "file": "daemon/process_verification.py",
-      "lines": [38],
+      "function": "find_all_daemon_processes",
       "rule": "silent-continue",
-      "reason": "psutil process iteration: except (NoSuchProcess, AccessDenied): continue is the canonical psutil pattern. Processes can disappear mid-iteration on any OS. Skipping them silently is correct - they are already gone."
+      "reason": "psutil process iteration: except (NoSuchProcess, AccessDenied): continue is the canonical psutil pattern. Processes can disappear mid-iteration on any OS. Skipping them silently is correct — they are already gone."
     },
     {
       "file": "daemon/server.py",
-      "lines": [266],
+      "function": "_get_input_validator",
       "rule": "return-none-on-error",
       "reason": "Schema validator loading: returns None when schema not available. Callers check for None and skip validation or use strict mode. Schema validation is optional safety layer, not blocking."
     },
     {
       "file": "daemon/server.py",
-      "lines": [745, 748],
+      "function": "_write_pid_file",
       "rule": "log-and-continue",
       "reason": "Stale PID file check: log-and-continue when reading/parsing stale PID file. Already logged. Daemon startup should continue even if stale PID file is unreadable."
     },
     {
-      "file": "daemon/cli.py",
-      "lines": [102],
-      "rule": "log-and-continue",
-      "reason": "Directory search loop: log-and-continue when searching upward for .claude directory. SystemExit during path validation means invalid installation at this path - continue searching upward is the correct behaviour. Already logged at debug level."
-    },
-    {
-      "file": "daemon/cli.py",
-      "lines": [221],
+      "file": "daemon/validation.py",
+      "function": "load_config_safe",
       "rule": "return-none-on-error",
-      "reason": "send_request(): Returns None on socket connection failure. Callers check for None and display appropriate error messages to user. Socket unavailability is a normal operational state (daemon not running). Already logged via logger.exception."
-    },
-    {
-      "file": "daemon/playbook_generator.py",
-      "lines": [100, 118, 139],
-      "rule": "log-and-continue",
-      "reason": "Acceptance test collection from handlers: log-and-continue when a handler fails to provide tests. One handler failing should not prevent playbook generation from other handlers. Already logged."
-    },
-    {
-      "file": "handlers/registry.py",
-      "lines": [89, 220, 286],
-      "rule": "log-and-continue",
-      "reason": "Handler module discovery: log-and-continue when a module fails to import. One broken module should not prevent other handlers from loading. Already logged at warning level."
-    },
-    {
-      "file": "handlers/project_loader.py",
-      "lines": [131],
-      "rule": "log-and-continue",
-      "reason": "Project handler acceptance test validation: log-and-continue. Acceptance test retrieval failure is non-fatal for handler loading. Already logged at warning level."
-    },
-    {
-      "file": "handlers/pre_compact/workflow_state_pre_compact.py",
-      "lines": [115, 177, 193, 243, 256],
-      "rule": "log-and-continue",
-      "reason": "Workflow state file reading: log-and-continue. One unreadable state file should not prevent processing of other state files. PreCompact handler must not crash the compaction process. Already logged."
-    },
-    {
-      "file": "handlers/pre_tool_use/tdd_enforcement.py",
-      "lines": [236, 262],
-      "rule": "silent-pass",
-      "reason": "Path mapping fallback strategies (_map_src_to_tests_mirror, _map_src_to_test_path): except (ValueError, IndexError): pass is intentional try-next-strategy. The calling code tries multiple mapping strategies and uses whichever succeeds. Silent pass advances to the next strategy."
-    },
-    {
-      "file": "handlers/session_start/yolo_container_detection.py",
-      "lines": [87, 107, 115, 148, 169, 176],
-      "rule": "silent-pass",
-      "reason": "Optional container confidence indicator checks: nested try/except/pass for filesystem and OS queries (uid, socket existence). These are optional scoring signals - if unavailable, skip without logging (noisy). The outer function catches and logs broader failures."
-    },
-    {
-      "file": "handlers/session_start/git_filemode_checker.py",
-      "lines": [81, 88, 103],
-      "rule": "return-none-on-error",
-      "reason": "Git filemode checker: returns None when ProjectContext not initialized or not in a git repo or git config query fails. Caller handles None explicitly by showing 'Not in a git repository or unable to check'. Advisory handler - failure should not break session start."
-    },
-    {
-      "file": "handlers/session_start/version_check.py",
-      "lines": [88, 97, 110],
-      "rule": "return-none-on-error",
-      "reason": "Version check helpers: return None when version info unavailable (file missing, parse error). Callers handle None gracefully. Version checking is advisory - failure should not break session start."
-    },
-    {
-      "file": "handlers/session_start/version_check.py",
-      "lines": [97],
-      "rule": "log-and-continue",
-      "reason": "Version check: log-and-continue on subprocess failure. Already logged. Version checking is advisory."
-    },
-    {
-      "file": "handlers/stop/hedging_language_detector.py",
-      "lines": [129],
-      "rule": "silent-continue",
-      "reason": "JSONL transcript parsing loop: except (json.JSONDecodeError, ValueError): continue is the standard JSONL pattern. Malformed lines are skipped to process the rest of the transcript. Logging each malformed line would be excessively noisy."
-    },
-    {
-      "file": "handlers/stop/auto_continue_stop.py",
-      "lines": [180],
-      "rule": "silent-continue",
-      "reason": "JSONL transcript parsing loop: except (json.JSONDecodeError, ValueError): continue is the standard JSONL pattern. Malformed lines are skipped to process the rest of the transcript. Logging each malformed line would be excessively noisy."
-    },
-    {
-      "file": "handlers/status_line/stats_cache_reader.py",
-      "lines": [28],
-      "rule": "return-none-on-error",
-      "reason": "Stats cache reader: returns None when cache file missing or unparseable. Status line callers handle None by omitting the stats section. Status line must never crash the terminal display."
-    },
-    {
-      "file": "handlers/status_line/git_branch.py",
-      "lines": [50, 104],
-      "rule": "log-and-continue",
-      "reason": "Git branch handler: log-and-continue on subprocess failure. Status line handlers are fail-open by design - one failing element must not crash the entire status line. Already logged at debug level."
-    },
-    {
-      "file": "handlers/status_line/model_context.py",
-      "lines": [215],
-      "rule": "log-and-continue",
-      "reason": "Model context effort level reader: log-and-continue on settings file read failure (OSError, invalid JSON). Status line handlers are fail-open by design — settings stays empty and falls through to daemon default. Already logged at warning level."
-    },
-    {
-      "file": "handlers/status_line/daemon_stats.py",
-      "lines": [57, 74, 95, 103],
-      "rule": "log-and-continue",
-      "reason": "Daemon stats handler: log-and-continue on individual stat collection failures. Status line handlers are fail-open - one stat failing must not crash the entire status line. Already logged."
-    },
-    {
-      "file": "plugins/loader.py",
-      "lines": [76, 121],
-      "rule": "return-none-on-error",
-      "reason": "Plugin loader: returns None when plugin import or instantiation fails. Logged at error level before returning. The plugin system is resilient - one broken plugin does not prevent others from loading."
-    },
-    {
-      "file": "plugins/loader.py",
-      "lines": [140],
-      "rule": "log-and-continue",
-      "reason": "Plugin acceptance test validation: log-and-continue. Acceptance test retrieval failure is non-fatal for plugin loading. Already logged at warning level."
-    },
-    {
-      "file": "qa/runner.py",
-      "lines": [532],
-      "rule": "return-none-on-error",
-      "reason": "save_results(): Returns None when JSON result file cannot be written. Prints error to stdout. QA result saving is an auxiliary function - failure does not affect QA pass/fail determination."
-    },
-    {
-      "file": "utils/container_detection.py",
-      "lines": [43, 63, 71, 122, 143, 150],
-      "rule": "silent-pass",
-      "reason": "Optional container confidence indicator checks: nested try/except/pass for filesystem and OS queries (uid, socket existence, project root). These are optional scoring signals - if unavailable, skip without logging (noisy). The outer function catches and logs broader failures."
-    },
-    {
-      "file": "install/client_validator.py",
-      "lines": [232, 244],
-      "rule": "silent-pass",
-      "reason": "Process management during installation: nested try/except/pass for OS signal operations (kill, SIGTERM, SIGKILL). Inner exceptions (ProcessLookupError) indicate the process already died - a success condition. Outer try handles unexpected signal failures gracefully."
+      "reason": "Returns None on config load failure. Callers receive None and handle it by using defaults or raising with better context. This is the documented contract of the function."
     },
     {
       "file": "handlers/notification/notification_logger.py",
-      "lines": [51],
+      "function": "handle",
       "rule": "log-and-continue",
       "reason": "Notification logger: logs OSError at debug level and continues. Monitoring handlers must not crash sessions because a log file is temporarily unavailable. The error is now visible in debug logs rather than silently discarded."
     },
     {
       "file": "handlers/pre_compact/transcript_archiver.py",
-      "lines": [51],
+      "function": "handle",
       "rule": "log-and-continue",
       "reason": "Transcript archiver: logs OSError at debug level and continues. Archiving is best-effort; compaction must proceed even if the archive write fails. The error is now visible in debug logs."
     },
     {
-      "file": "handlers/session_end/cleanup_handler.py",
-      "lines": [50],
+      "file": "handlers/pre_compact/workflow_state_pre_compact.py",
+      "function": "handle",
       "rule": "log-and-continue",
-      "reason": "Session cleanup handler: logs OSError at debug level and continues. Cleanup is best-effort; session end must not be blocked by a failed temp file removal. The error is now visible in debug logs."
+      "reason": "Workflow state file reading: log-and-continue. One unreadable state file should not prevent processing of other state files. PreCompact handler must not crash the compaction process. Already logged."
     },
     {
-      "file": "handlers/subagent_stop/subagent_completion_logger.py",
-      "lines": [51],
+      "file": "handlers/pre_compact/workflow_state_pre_compact.py",
+      "function": "_detect_workflow",
       "rule": "log-and-continue",
-      "reason": "Subagent completion logger: logs OSError at debug level and continues. Monitoring handlers must not crash sessions because a log file is temporarily unavailable. The error is now visible in debug logs."
+      "reason": "Workflow state file reading: log-and-continue. One unreadable state file should not prevent processing of other state files. PreCompact handler must not crash the compaction process. Already logged."
     },
     {
-      "file": "core/transcript_reader.py",
-      "lines": [119],
-      "rule": "return-none-on-error",
-      "reason": "TranscriptReader.load(): Returns early when path is invalid or does not exist. Transcript reading is advisory - handlers must not crash if the transcript file is missing or the path is malformed. Callers check _loaded state."
-    },
-    {
-      "file": "core/transcript_reader.py",
-      "lines": [150],
+      "file": "handlers/pre_compact/workflow_state_pre_compact.py",
+      "function": "_extract_workflow_state",
       "rule": "log-and-continue",
-      "reason": "TranscriptReader._parse(): Logs file read errors and continues with empty state. Transcript parsing is advisory - one unreadable transcript must not crash handler execution. Already logged at debug/error level."
-    },
-    {
-      "file": "core/transcript_reader.py",
-      "lines": [304],
-      "rule": "log-and-continue",
-      "reason": "TranscriptReader.read_incremental(): Logs OSError/UnicodeDecodeError at debug level and returns partial results. Incremental transcript reading is advisory - same pattern as _parse() above. Already logged."
-    },
-    {
-      "file": "core/transcript_reader.py",
-      "lines": [313],
-      "rule": "silent-continue",
-      "reason": "JSONL transcript parsing loop: except json.JSONDecodeError: continue is the standard JSONL pattern. Malformed lines are skipped to process the rest of the transcript. Same pattern already excluded in hedging_language_detector:129 and auto_continue_stop:180."
-    },
-    {
-      "file": "handlers/stop/auto_continue_stop.py",
-      "lines": [322],
-      "rule": "log-and-continue",
-      "reason": "_log_stop_event(): Non-critical JSONL append — logs at debug level and continues when ProjectContext is not initialised (unit tests) or the log file is unwritable. Stop event logging is purely diagnostic and must not affect the handler decision or raise to callers. Same pattern as notification_logger:51, transcript_archiver:51, cleanup_handler:50."
-    },
-    {
-      "file": "core/command_redirection.py",
-      "lines": [193],
-      "rule": "log-and-continue",
-      "reason": "Zombie reaper thread: log-and-continue when process wait() fails. Reaper thread must never crash the daemon — it exists solely to prevent zombie accumulation. Already logged at debug level."
-    },
-    {
-      "file": "daemon/paths.py",
-      "lines": [471, 516, 554, 590],
-      "rule": "log-and-continue",
-      "reason": "Stale file batch cleanup routines (cleanup_stale_daemon_files, cleanup_stale_command_redirection_files, touch_daemon_files_in_dir, write_cleanup_status): log-and-continue is correct. One unremovable/unreadable file must not abort cleanup of others or block daemon startup. Already logged at warning/debug level."
-    },
-    {
-      "file": "handlers/status_line/startup_cleanup.py",
-      "lines": [49],
-      "rule": "log-and-continue",
-      "reason": "Startup cleanup status handler: log-and-continue on OSError reading cleanup_status.json. Status line handlers are fail-open by design — one failing element must not crash the entire status line. Returns empty context on error. Already logged at debug level."
-    },
-    {
-      "file": "core/command_redirection.py",
-      "lines": [359],
-      "rule": "log-and-continue",
-      "reason": "File cleanup loop: log-and-continue when individual old output files cannot be removed (FileNotFoundError, PermissionError). One unremovable file must not prevent cleanup of others. Already logged at debug/warning level."
+      "reason": "Workflow state file reading: log-and-continue. One unreadable state file should not prevent processing of other state files. PreCompact handler must not crash the compaction process. Already logged."
     },
     {
       "file": "handlers/pre_tool_use/gh_issue_comments.py",
-      "lines": [148],
+      "function": "handle",
       "rule": "log-and-continue",
       "reason": "Command redirection fallback: log-and-continue when redirected command execution fails. Handler falls back to block-only behaviour (educational deny message without result). Redirection is best-effort enhancement. Already logged at warning level."
     },
     {
       "file": "handlers/pre_tool_use/npm_command.py",
-      "lines": [250],
+      "function": "handle",
       "rule": "log-and-continue",
       "reason": "Command redirection fallback: log-and-continue when redirected command execution fails. Handler falls back to block-only behaviour (educational deny message without result). Redirection is best-effort enhancement. Already logged at warning level."
     },
     {
       "file": "handlers/pre_tool_use/pipe_blocker.py",
-      "lines": [362],
+      "function": "handle",
       "rule": "log-and-continue",
       "reason": "Command redirection fallback: log-and-continue when redirected command execution fails. Handler falls back to block-only behaviour (educational deny message without result). Redirection is best-effort enhancement. Already logged at warning level."
     },
     {
-      "file": "core/pseudo_event.py",
-      "lines": [285],
-      "rule": "return-none-on-error",
-      "reason": "PseudoEventDispatcher._run_pseudo_event(): Catches Exception, logs full traceback via logger.exception(), returns None. Pseudo-event dispatch is non-critical - one failing pseudo-event must not crash the main hook processing pipeline. Already logged with full traceback."
-    },
-    {
-      "file": "handlers/session_start/gitignore_safety_checker.py",
-      "lines": [89, 106, 152],
+      "file": "handlers/project_loader.py",
+      "function": "load_handler_from_file",
       "rule": "log-and-continue",
-      "reason": "Gitignore safety checker: log-and-continue on OSError reading optional gitignore files. Advisory handler — if a gitignore file is temporarily unreadable, the check skips that file and continues. Session start must not be blocked by advisory filesystem checks. Already logged at debug level."
+      "reason": "Project handler acceptance test validation: log-and-continue. Acceptance test retrieval failure is non-fatal for handler loading. Already logged at warning level."
+    },
+    {
+      "file": "handlers/registry.py",
+      "function": "discover",
+      "rule": "log-and-continue",
+      "reason": "Handler module discovery: log-and-continue when a module fails to import. One broken module should not prevent other handlers from loading. Already logged at warning level."
+    },
+    {
+      "file": "handlers/registry.py",
+      "function": "register_all",
+      "rule": "log-and-continue",
+      "reason": "Handler module discovery: log-and-continue when a module fails to import. One broken module should not prevent other handlers from loading. Already logged at warning level."
+    },
+    {
+      "file": "handlers/session_end/cleanup_handler.py",
+      "function": "handle",
+      "rule": "log-and-continue",
+      "reason": "Session cleanup handler: logs OSError at debug level and continues. Cleanup is best-effort; session end must not be blocked by a failed temp file removal. The error is now visible in debug logs."
+    },
+    {
+      "file": "handlers/session_start/git_filemode_checker.py",
+      "function": "_get_filemode_setting",
+      "rule": "return-none-on-error",
+      "reason": "Git filemode checker: returns None when ProjectContext not initialized or not in a git repo or git config query fails. Caller handles None explicitly. Advisory handler — failure should not break session start."
     },
     {
       "file": "handlers/session_start/gitignore_safety_checker.py",
-      "lines": [143],
+      "function": "_compute_gitignore_hash",
+      "rule": "log-and-continue",
+      "reason": "Gitignore safety checker: log-and-continue on OSError reading optional gitignore files. Advisory handler — if a gitignore file is temporarily unreadable, the check skips that file and continues. Already logged at debug level."
+    },
+    {
+      "file": "handlers/session_start/gitignore_safety_checker.py",
+      "function": "_read_gitignore_lines",
+      "rule": "log-and-continue",
+      "reason": "Gitignore safety checker: log-and-continue on OSError reading optional gitignore files. Advisory handler — if a gitignore file is temporarily unreadable, the check skips that file and continues. Already logged at debug level."
+    },
+    {
+      "file": "handlers/session_start/gitignore_safety_checker.py",
+      "function": "_get_cached_missing_entries",
       "rule": "return-none-on-error",
-      "reason": "Cache reader _get_cached_missing_entries(): returns None when cache file is missing or unparseable. Caller checks for None and falls through to a fresh filesystem scan. Cache reading is advisory — failure means re-scan, not crash."
+      "reason": "Cache reader: returns None when cache file is missing or unparseable. Caller checks for None and falls through to a fresh filesystem scan. Cache reading is advisory — failure means re-scan, not crash."
+    },
+    {
+      "file": "handlers/session_start/gitignore_safety_checker.py",
+      "function": "_write_cache",
+      "rule": "log-and-continue",
+      "reason": "Cache writer: log-and-continue on OSError writing cache file. Cache writing is best-effort — failure means the next session re-scans instead of using cache. Advisory handler must not crash session start. Already logged at debug level."
+    },
+    {
+      "file": "handlers/session_start/version_check.py",
+      "function": "_get_cached_result",
+      "rule": "return-none-on-error",
+      "reason": "Version check helper: returns None when cache file missing or unparseable. Caller handles None gracefully by falling through to a fresh version check. Version checking is advisory — failure should not break session start."
+    },
+    {
+      "file": "handlers/session_start/version_check.py",
+      "function": "_write_cache",
+      "rule": "log-and-continue",
+      "reason": "Version check: log-and-continue on cache write failure. Already logged. Version checking is advisory."
+    },
+    {
+      "file": "handlers/session_start/version_check.py",
+      "function": "_get_latest_version",
+      "rule": "return-none-on-error",
+      "reason": "Version check helper: returns None when version info unavailable (subprocess failure, parse error). Callers handle None gracefully. Version checking is advisory — failure should not break session start."
+    },
+    {
+      "file": "handlers/session_start/yolo_container_detection.py",
+      "function": "_calculate_confidence_score",
+      "rule": "silent-pass",
+      "reason": "Optional container confidence indicator checks: nested try/except/pass for filesystem and OS queries (uid, socket existence). These are optional scoring signals — if unavailable, skip without logging (noisy). The outer function catches and logs broader failures."
+    },
+    {
+      "file": "handlers/session_start/yolo_container_detection.py",
+      "function": "_get_detected_indicators",
+      "rule": "silent-pass",
+      "reason": "Optional container confidence indicator checks: nested try/except/pass for filesystem and OS queries (uid, socket existence). These are optional scoring signals — if unavailable, skip without logging (noisy). The outer function catches and logs broader failures."
+    },
+    {
+      "file": "handlers/status_line/daemon_stats.py",
+      "function": "handle",
+      "rule": "log-and-continue",
+      "reason": "Daemon stats handler: log-and-continue on individual stat collection failures. Status line handlers are fail-open — one stat failing must not crash the entire status line. Already logged."
+    },
+    {
+      "file": "handlers/status_line/git_branch.py",
+      "function": "handle",
+      "rule": "log-and-continue",
+      "reason": "Git branch handler: log-and-continue on subprocess failure. Status line handlers are fail-open by design — one failing element must not crash the entire status line. Already logged at debug level."
+    },
+    {
+      "file": "handlers/status_line/git_branch.py",
+      "function": "_get_default_branch",
+      "rule": "log-and-continue",
+      "reason": "Git branch handler: log-and-continue on subprocess failure. Status line handlers are fail-open by design — one failing element must not crash the entire status line. Already logged at debug level."
+    },
+    {
+      "file": "handlers/status_line/model_context.py",
+      "function": "_read_effort_level",
+      "rule": "log-and-continue",
+      "reason": "Model context effort level reader: log-and-continue on settings file read failure (OSError, invalid JSON). Status line handlers are fail-open by design — settings stays empty and falls through to daemon default. Already logged at warning level."
+    },
+    {
+      "file": "handlers/status_line/startup_cleanup.py",
+      "function": "handle",
+      "rule": "log-and-continue",
+      "reason": "Startup cleanup status handler: log-and-continue on OSError reading cleanup_status.json. Status line handlers are fail-open by design — one failing element must not crash the entire status line. Returns empty context on error. Already logged at debug level."
+    },
+    {
+      "file": "handlers/status_line/stats_cache_reader.py",
+      "function": "read_stats_cache",
+      "rule": "return-none-on-error",
+      "reason": "Stats cache reader: returns None when cache file missing or unparseable. Status line callers handle None by omitting the stats section. Status line must never crash the terminal display."
+    },
+    {
+      "file": "handlers/stop/auto_continue_stop.py",
+      "function": "_log_stop_event",
+      "rule": "log-and-continue",
+      "reason": "_log_stop_event(): Non-critical JSONL append — logs at debug level and continues when ProjectContext is not initialised (unit tests) or the log file is unwritable. Stop event logging is purely diagnostic and must not affect the handler decision or raise to callers."
+    },
+    {
+      "file": "handlers/stop/hedging_language_detector.py",
+      "function": "_parse_transcript",
+      "rule": "silent-continue",
+      "reason": "JSONL transcript parsing loop: except (json.JSONDecodeError, ValueError): continue is the standard JSONL pattern. Malformed lines are skipped to process the rest of the transcript. Logging each malformed line would be excessively noisy."
+    },
+    {
+      "file": "handlers/subagent_stop/subagent_completion_logger.py",
+      "function": "handle",
+      "rule": "log-and-continue",
+      "reason": "Subagent completion logger: logs OSError at debug level and continues. Monitoring handlers must not crash sessions because a log file is temporarily unavailable. The error is now visible in debug logs rather than silently discarded."
+    },
+    {
+      "file": "install/client_validator.py",
+      "function": "_check_running_daemon",
+      "rule": "silent-pass",
+      "reason": "Process management during installation: nested try/except/pass for OS signal operations (kill, SIGTERM, SIGKILL). Inner exceptions (ProcessLookupError) indicate the process already died — a success condition. Outer try handles unexpected signal failures gracefully."
+    },
+    {
+      "file": "plugins/loader.py",
+      "function": "load_handler",
+      "rule": "return-none-on-error",
+      "reason": "Plugin loader: returns None when plugin import or instantiation fails. Logged at error level before returning. The plugin system is resilient — one broken plugin does not prevent others from loading."
+    },
+    {
+      "file": "plugins/loader.py",
+      "function": "load_handler",
+      "rule": "log-and-continue",
+      "reason": "Plugin acceptance test validation: log-and-continue. Acceptance test retrieval failure is non-fatal for plugin loading. Already logged at warning level."
+    },
+    {
+      "file": "qa/runner.py",
+      "function": "save_results",
+      "rule": "return-none-on-error",
+      "reason": "save_results(): Returns None when JSON result file cannot be written. Prints error to stdout. QA result saving is an auxiliary function — failure does not affect QA pass/fail determination."
+    },
+    {
+      "file": "utils/container_detection.py",
+      "function": "get_container_confidence_score",
+      "rule": "silent-pass",
+      "reason": "Optional container confidence indicator checks: nested try/except/pass for filesystem and OS queries (uid, socket existence, project root). These are optional scoring signals — if unavailable, skip without logging (noisy). The outer function catches and logs broader failures."
+    },
+    {
+      "file": "utils/container_detection.py",
+      "function": "get_detected_indicators",
+      "rule": "silent-pass",
+      "reason": "Optional container confidence indicator checks: nested try/except/pass for filesystem and OS queries (uid, socket existence, project root). These are optional scoring signals — if unavailable, skip without logging (noisy). The outer function catches and logs broader failures."
     }
   ]
 }
