@@ -278,17 +278,35 @@ class AutoContinueStopHandler(Handler):
     def _has_stop_explanation(self, reader: TranscriptReader) -> bool:
         """Return True if any line in last assistant message starts with 'STOPPING BECAUSE:'.
 
-        Checks each line individually, stripping leading whitespace, so the prefix
-        may appear anywhere in the message (not just at the very start).
+        Checks each content block independently to avoid false negatives from block
+        joining. When TranscriptReader joins multiple text blocks with ' ' (space),
+        'STOPPING BECAUSE:' at the start of a later block ends up mid-line in the
+        joined string and the startswith check fails. Checking per-block preserves
+        the original line boundaries.
+
+        Falls back to the joined content string for legacy/string-format messages.
 
         Args:
             reader: Loaded transcript reader
 
         Returns:
-            True if any line starts with the STOPPING BECAUSE: prefix
+            True if any line in any text block starts with the STOPPING BECAUSE: prefix
         """
-        last_text = reader.get_last_assistant_text()
-        return any(line.lstrip().startswith("STOPPING BECAUSE:") for line in last_text.splitlines())
+        msg = reader.get_last_assistant_message()
+        if not msg:
+            return False
+
+        def _line_starts_with_prefix(text: str) -> bool:
+            return any(line.lstrip().startswith("STOPPING BECAUSE:") for line in text.splitlines())
+
+        # Check each text block individually to handle multi-block messages
+        for block in msg.content_blocks:
+            if block.block_type == "text" and block.text:
+                if _line_starts_with_prefix(block.text):
+                    return True
+
+        # Fallback: joined content (handles string-content / legacy-format messages)
+        return _line_starts_with_prefix(msg.content)
 
     def _log_stop_event(self, hook_input: dict[str, Any], decision: Decision, reason: str) -> None:
         """Log stop event to JSONL file for debugging.
@@ -313,8 +331,8 @@ class AutoContinueStopHandler(Handler):
             }
             with log_path.open("a") as f:
                 f.write(json.dumps(entry) + "\n")
-        except (RuntimeError, OSError):
-            pass  # Non-critical — ProjectContext not initialised (tests) or file write errors
+        except (RuntimeError, OSError) as e:
+            logger.debug("_log_stop_event: non-critical write failure: %s", e)
 
     def _contains_confirmation_pattern(self, text: str) -> bool:
         """Check if text contains a confirmation pattern.
