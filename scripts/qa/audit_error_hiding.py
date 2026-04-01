@@ -41,6 +41,7 @@ class ErrorHidingVisitor(ast.NodeVisitor):
         self.violations: list[dict[str, Any]] = []
         self._seen: set[tuple[str, int, str]] = set()
         self.in_test_file = "test_" in filepath.name or filepath.parts[-2] == "tests"
+        self._function_stack: list[str] = []
 
     def visit_Try(self, node: ast.Try) -> None:
         """Check try/except blocks for error hiding."""
@@ -85,6 +86,7 @@ class ErrorHidingVisitor(ast.NodeVisitor):
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         """Check function definitions for return-none-on-error pattern."""
+        self._function_stack.append(node.name)
         # Look for try/except that returns None
         for child in ast.walk(node):
             if isinstance(child, ast.Try):
@@ -103,6 +105,13 @@ class ErrorHidingVisitor(ast.NodeVisitor):
                                 )
 
         self.generic_visit(node)
+        self._function_stack.pop()
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        """Delegate to visit_FunctionDef for async functions."""
+        self._function_stack.append(node.name)
+        self.generic_visit(node)
+        self._function_stack.pop()
 
     def _is_log_and_continue(self, handler: ast.ExceptHandler) -> bool:
         """Check if handler just logs and continues."""
@@ -128,6 +137,7 @@ class ErrorHidingVisitor(ast.NodeVisitor):
             {
                 "file": str(self.filepath),
                 "line": line,
+                "function": self._function_stack[-1] if self._function_stack else None,
                 "rule": rule,
                 "message": message,
                 "description": VIOLATION_TYPES.get(rule, "Unknown violation"),
@@ -223,7 +233,15 @@ def load_exclusions(script_dir: Path) -> list[dict[str, Any]]:
 def apply_exclusions(
     violations: list[dict[str, Any]], exclusions: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    """Remove violations that match an intentional-pattern exclusion entry."""
+    """Remove violations that match an intentional-pattern exclusion entry.
+
+    Exclusions support two matching strategies:
+    - ``function``: matches by enclosing function name + rule (drift-proof)
+    - ``lines``: matches by line number (legacy, drifts on code edits)
+
+    Function-based matching is preferred. Line-based is kept for backward
+    compatibility and for violations at module level.
+    """
     if not exclusions:
         return violations
 
@@ -232,8 +250,18 @@ def apply_exclusions(
         excluded = False
         for excl in exclusions:
             file_suffix = excl.get("file", "")
-            excl_lines: list[int] = excl.get("lines", [])
-            if v["file"].endswith(file_suffix) and v["line"] in excl_lines:
+            if not v["file"].endswith(file_suffix):
+                continue
+            excl_rule = excl.get("rule", "")
+            if excl_rule and v["rule"] != excl_rule:
+                continue
+            # Function-based match (preferred — immune to line drift)
+            if "function" in excl:
+                if v.get("function") == excl["function"]:
+                    excluded = True
+                    break
+            # Line-based match (legacy fallback)
+            elif v["line"] in excl.get("lines", []):
                 excluded = True
                 break
         if not excluded:
