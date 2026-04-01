@@ -1237,6 +1237,55 @@ class TestAutoContinueStopHandlerExplainerBehaviours:
         result = handler.handle(hook_input)
         assert result.decision == Decision.ALLOW
 
+    def test_handle_stopping_because_in_second_content_block_returns_allow(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """'STOPPING BECAUSE:' at start of second content block → ALLOW.
+
+        Regression test: When agent interleaves text + tool_use + text in one message,
+        TranscriptReader joins text blocks with ' ' (space). If 'STOPPING BECAUSE:'
+        starts the second block, it ends up mid-line after joining and the startswith
+        check fails. Handler must check each content block individually.
+        """
+        path = tmp_path / "t.jsonl"
+        msg = {
+            "type": "message",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": "Pushed. The flow is now:\n\n  No more stale data."},
+                    {"type": "tool_use", "name": "Bash", "input": {"command": "git status"}},
+                    {"type": "text", "text": "STOPPING BECAUSE: SSH test flow cleaned up."},
+                ],
+            },
+        }
+        with path.open("w") as f:
+            f.write(json.dumps(msg) + "\n")
+        hook_input = {"transcript_path": str(path), "stop_hook_active": False}
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW
+
+    def test_handle_stopping_because_in_second_block_with_leading_whitespace_returns_allow(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """'STOPPING BECAUSE:' with leading whitespace in second block → ALLOW."""
+        path = tmp_path / "t.jsonl"
+        msg = {
+            "type": "message",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": "Work complete."},
+                    {"type": "text", "text": "  STOPPING BECAUSE: all tasks done."},
+                ],
+            },
+        }
+        with path.open("w") as f:
+            f.write(json.dumps(msg) + "\n")
+        hook_input = {"transcript_path": str(path), "stop_hook_active": False}
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW
+
     # ── handle() branch: no transcript (force explanation) ───────────────────
 
     def test_handle_no_transcript_returns_deny(self, handler: AutoContinueStopHandler) -> None:

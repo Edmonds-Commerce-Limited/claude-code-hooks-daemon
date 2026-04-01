@@ -238,9 +238,9 @@
     },
     {
       "file": "handlers/stop/auto_continue_stop.py",
-      "lines": [304],
-      "rule": "silent-pass",
-      "reason": "_log_stop_event(): Non-critical JSONL append — fails silently when ProjectContext is not initialised (unit tests) or the log file is unwritable. Stop event logging is purely diagnostic and must not affect the handler decision or raise to callers."
+      "lines": [322],
+      "rule": "log-and-continue",
+      "reason": "_log_stop_event(): Non-critical JSONL append — logs at debug level and continues when ProjectContext is not initialised (unit tests) or the log file is unwritable. Stop event logging is purely diagnostic and must not affect the handler decision or raise to callers. Same pattern as notification_logger:51, transcript_archiver:51, cleanup_handler:50."
     },
     {
       "file": "core/command_redirection.py",
