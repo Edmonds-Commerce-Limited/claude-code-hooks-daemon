@@ -18,6 +18,7 @@ to one of four branches:
 import json
 import logging
 import re
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, ClassVar
@@ -25,7 +26,11 @@ from typing import Any, ClassVar
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority, ToolName
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
-from claude_code_hooks_daemon.core.transcript_reader import ContentBlock, TranscriptReader
+from claude_code_hooks_daemon.core.transcript_reader import (
+    ContentBlock,
+    TranscriptMessage,
+    TranscriptReader,
+)
 from claude_code_hooks_daemon.utils.stop_hook_helpers import (
     get_transcript_reader,
     is_stop_hook_active,
@@ -286,6 +291,12 @@ class AutoContinueStopHandler(Handler):
 
         Falls back to the joined content string for legacy/string-format messages.
 
+        Race condition handling: Claude Code writes thinking and text as separate
+        JSONL entries. If the stop event fires before the text entry is flushed,
+        the last assistant message will be thinking-only. When this is detected,
+        the transcript is reloaded up to 3 times with a short delay to give Claude
+        Code time to flush the text entry.
+
         Args:
             reader: Loaded transcript reader
 
@@ -299,14 +310,34 @@ class AutoContinueStopHandler(Handler):
         def _line_starts_with_prefix(text: str) -> bool:
             return any(line.lstrip().startswith("STOPPING BECAUSE:") for line in text.splitlines())
 
-        # Check each text block individually to handle multi-block messages
-        for block in msg.content_blocks:
-            if block.block_type == "text" and block.text:
-                if _line_starts_with_prefix(block.text):
-                    return True
+        def _has_text_blocks(m: TranscriptMessage) -> bool:
+            return bool(m.content) or any(
+                b.block_type == "text" and b.text for b in m.content_blocks
+            )
 
-        # Fallback: joined content (handles string-content / legacy-format messages)
-        return _line_starts_with_prefix(msg.content)
+        def _check_msg(m: TranscriptMessage) -> bool:
+            for block in m.content_blocks:
+                if block.block_type == "text" and block.text:
+                    if _line_starts_with_prefix(block.text):
+                        return True
+            return _line_starts_with_prefix(m.content)
+
+        # If the last assistant message has no text blocks (thinking/tool_use only),
+        # the text entry may not have been flushed yet (stop fires before text is
+        # written). Reload the transcript up to 3 times with a short delay.
+        if not _has_text_blocks(msg):
+            transcript_path = getattr(reader, "_path", None)
+            if transcript_path:
+                for _ in range(3):
+                    time.sleep(0.05)
+                    retry_reader = TranscriptReader()
+                    retry_reader.load(transcript_path)
+                    retry_msg = retry_reader.get_last_assistant_message()
+                    if retry_msg and _has_text_blocks(retry_msg):
+                        msg = retry_msg
+                        break
+
+        return _check_msg(msg)
 
     def _log_stop_event(self, hook_input: dict[str, Any], decision: Decision, reason: str) -> None:
         """Log stop event to JSONL file for debugging.

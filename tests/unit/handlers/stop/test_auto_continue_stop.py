@@ -1286,6 +1286,79 @@ class TestAutoContinueStopHandlerExplainerBehaviours:
         result = handler.handle(hook_input)
         assert result.decision == Decision.ALLOW
 
+    # ── handle() branch: race condition (thinking entry before text flushed) ────
+
+    def test_has_stop_explanation_retries_when_last_message_is_thinking_only(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """Race condition: last entry thinking-only, text flushed before retry → ALLOW.
+
+        Simulates Claude Code writing the thinking entry first. The stop hook fires
+        before the text entry is flushed to disk. The retry mechanism should reload
+        the transcript and find the text entry with STOPPING BECAUSE:.
+        """
+        from claude_code_hooks_daemon.core.transcript_reader import TranscriptReader
+
+        path = tmp_path / "t.jsonl"
+        thinking_entry = {
+            "type": "message",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "thinking", "thinking": "I'm done, will write stop reason."}],
+            },
+        }
+        with path.open("w") as f:
+            f.write(json.dumps(thinking_entry) + "\n")
+
+        # Load reader while only the thinking entry is in the file
+        reader = TranscriptReader()
+        reader.load(str(path))
+
+        # Now append the text entry (simulating flush after initial read)
+        text_entry = {
+            "type": "message",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "STOPPING BECAUSE: all work complete."}],
+            },
+        }
+        with path.open("a") as f:
+            f.write(json.dumps(text_entry) + "\n")
+
+        # Retry must reload the file and find the text entry
+        result = handler._has_stop_explanation(reader)
+        assert result is True
+
+    def test_has_stop_explanation_returns_false_when_thinking_only_after_retries(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """Race condition: last entry is thinking-only and no text ever appears → False.
+
+        When retries also yield thinking-only, _has_stop_explanation must return False
+        so the stop is denied. Mocks sleep to avoid 150ms test latency.
+        """
+        from unittest.mock import patch
+
+        from claude_code_hooks_daemon.core.transcript_reader import TranscriptReader
+
+        path = tmp_path / "t.jsonl"
+        thinking_entry = {
+            "type": "message",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "thinking", "thinking": "Hmm."}],
+            },
+        }
+        with path.open("w") as f:
+            f.write(json.dumps(thinking_entry) + "\n")
+
+        reader = TranscriptReader()
+        reader.load(str(path))
+
+        with patch("claude_code_hooks_daemon.handlers.stop.auto_continue_stop.time.sleep"):
+            result = handler._has_stop_explanation(reader)
+        assert result is False
+
     # ── handle() branch: no transcript (force explanation) ───────────────────
 
     def test_handle_no_transcript_returns_deny(self, handler: AutoContinueStopHandler) -> None:
