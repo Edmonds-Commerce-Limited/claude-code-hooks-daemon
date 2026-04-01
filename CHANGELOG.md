@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.29.2] - 2026-04-01
+
+### Fixed
+
+- **`auto_continue_stop` stop explanation missed in multi-block assistant messages**: `_has_stop_explanation()` was reading the first content block only; when the assistant produced multiple text blocks (e.g. a thinking block followed by the response), the `STOPPING BECAUSE:` prefix in a later block was silently ignored, causing valid stops to be denied and triggering unnecessary retry loops. Fixed by scanning all content blocks, not just the first.
+
+- **Race condition in `_has_stop_explanation` — retry when text not yet flushed**: Under load, the stop event sometimes arrives before the assistant's final message has been fully written to the transcript. Added a short retry loop with backoff so the handler waits for the text to appear rather than immediately treating an empty or missing message as a missing stop explanation.
+
+### Changed
+
+- **Error-hiding exclusion list uses function names instead of line numbers (drift-proof)**: The `error_hiding_blocker` handler's QA audit exclusion list (`error_hiding_exclusions.json`) previously matched by line number, which silently drifted out of sync whenever code was added or removed above an exclusion site. Refactored to match by enclosing function name instead, so exclusions are immune to line shifts and fail loudly if a function is renamed rather than silently matching the wrong code.
+
 ## [2.29.1] - 2026-03-31
 
 ### Fixed
