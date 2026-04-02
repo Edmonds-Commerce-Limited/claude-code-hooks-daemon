@@ -125,6 +125,9 @@ class ReleaseBlockerHandler(Handler):
         )
         return HookResult(decision=Decision.DENY, reason=reason)
 
+    def get_claude_md(self) -> str | None:
+        return None
+
     def get_acceptance_tests(self) -> list:
         """Return acceptance tests for this handler.
 

@@ -89,6 +89,9 @@ class DaemonLocationGuardHandler(Handler):
             guidance=guidance,
         )
 
+    def get_claude_md(self) -> str | None:
+        return None
+
     def get_acceptance_tests(self) -> list[AcceptanceTest]:
         """Return acceptance tests for this handler."""
         from claude_code_hooks_daemon.core import RecommendedModel, TestType

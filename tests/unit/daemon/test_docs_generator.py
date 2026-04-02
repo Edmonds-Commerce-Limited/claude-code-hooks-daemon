@@ -41,6 +41,9 @@ def _make_handler_class(
         def handle(self, hook_input: dict[str, Any]) -> HookResult:
             return HookResult()
 
+        def get_claude_md(self) -> str | None:
+            return None
+
         def get_acceptance_tests(self) -> list[Any]:
             return []
 
@@ -540,6 +543,9 @@ def _make_handler_instance_without_event_type(
 
         def handle(self, hook_input: dict[str, Any]) -> HookResult:
             return HookResult()
+
+        def get_claude_md(self) -> str | None:
+            return None
 
         def get_acceptance_tests(self) -> list[Any]:
             return []

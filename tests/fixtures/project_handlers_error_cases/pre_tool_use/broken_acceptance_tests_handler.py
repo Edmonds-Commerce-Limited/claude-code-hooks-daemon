@@ -22,5 +22,8 @@ class BrokenAcceptanceTestsHandler(Handler):
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         return HookResult(decision=Decision.ALLOW)
 
+    def get_claude_md(self) -> str | None:
+        return None
+
     def get_acceptance_tests(self) -> list[AcceptanceTest]:
         raise RuntimeError("Deliberate acceptance test failure for testing")

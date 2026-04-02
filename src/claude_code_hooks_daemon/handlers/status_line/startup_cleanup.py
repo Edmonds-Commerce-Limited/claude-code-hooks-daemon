@@ -66,6 +66,9 @@ class StartupCleanupHandler(Handler):
 
         return HookResult(context=[])
 
+    def get_claude_md(self) -> str | None:
+        return None
+
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for this handler."""
         from claude_code_hooks_daemon.core import (

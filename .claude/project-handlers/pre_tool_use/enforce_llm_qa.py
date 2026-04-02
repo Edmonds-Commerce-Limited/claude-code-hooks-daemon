@@ -47,6 +47,9 @@ class EnforceLlmQaHandler(Handler):
             ),
         )
 
+    def get_claude_md(self) -> str | None:
+        return None
+
     def get_acceptance_tests(self) -> list[AcceptanceTest]:
         """Define acceptance tests."""
         return [

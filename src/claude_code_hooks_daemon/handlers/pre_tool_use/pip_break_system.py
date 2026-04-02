@@ -120,6 +120,9 @@ NEVER use --break-system-packages as default behavior."""
             guidance=None,
         )
 
+    def get_claude_md(self) -> str | None:
+        return None
+
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for pip break system handler."""
         from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType

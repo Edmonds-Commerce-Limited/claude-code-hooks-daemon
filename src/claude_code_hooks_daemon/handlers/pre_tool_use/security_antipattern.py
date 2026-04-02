@@ -130,6 +130,9 @@ class SecurityAntipatternHandler(Handler):
             reason=self._format_reason(issues, file_path),
         )
 
+    def get_claude_md(self) -> str | None:
+        return None
+
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests aggregated from all registered strategies."""
         tests: list[Any] = []

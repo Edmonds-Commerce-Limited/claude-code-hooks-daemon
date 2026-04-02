@@ -28,6 +28,9 @@ class VendorReminderHandler(Handler):
             context=["VENDOR REMINDER: Commit in vendor dir first"],
         )
 
+    def get_claude_md(self) -> str | None:
+        return None
+
     def get_acceptance_tests(self) -> list[AcceptanceTest]:
         return [
             AcceptanceTest(

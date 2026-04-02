@@ -261,6 +261,9 @@ class NpmCommandHandler(Handler):
 
         return HookResult(decision=Decision.DENY, reason=reason, context=context)
 
+    def get_claude_md(self) -> str | None:
+        return None
+
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Npm Command."""
         from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType

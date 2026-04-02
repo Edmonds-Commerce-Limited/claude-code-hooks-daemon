@@ -52,6 +52,9 @@ class MockHandler(Handler):
             raise self._raise_exception
         return self._result
 
+    def get_claude_md(self) -> str | None:
+        return None
+
     def get_acceptance_tests(self) -> list[Any]:
         """Test handler - stub implementation."""
         from claude_code_hooks_daemon.core import AcceptanceTest, TestType

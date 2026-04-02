@@ -464,6 +464,9 @@ class TestDaemonController:
             def handle(self, hook_input: dict[str, Any]) -> HookResult:
                 raise RuntimeError("Handler exploded")
 
+            def get_claude_md(self) -> str | None:
+                return None
+
             def get_acceptance_tests(self) -> list:
                 return []
 
@@ -564,6 +567,9 @@ class TestControllerPluginLoadingEdgeCases:
             def handle(self, hook_input: dict[str, Any]) -> HookResult:
                 return HookResult.allow()
 
+            def get_claude_md(self) -> str | None:
+                return None
+
             def get_acceptance_tests(self) -> list:
                 return []
 
@@ -610,6 +616,9 @@ class TestControllerPluginLoadingEdgeCases:
 
             def handle(self, hook_input: dict[str, Any]) -> HookResult:
                 return HookResult.allow()
+
+            def get_claude_md(self) -> str | None:
+                return None
 
             def get_acceptance_tests(self) -> list:
                 return []

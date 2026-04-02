@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from claude_code_hooks_daemon.config.validator import ConfigValidator
 from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
 from claude_code_hooks_daemon.core.chain import ChainExecutionResult
+from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
 from claude_code_hooks_daemon.core.data_layer import get_data_layer
 from claude_code_hooks_daemon.core.event import EventType, HookEvent
 from claude_code_hooks_daemon.core.hook_result import HookResult
@@ -223,6 +224,10 @@ class DaemonController:
         total_count = count + plugin_count + project_count
         logger.info("DaemonController initialised with %d total handlers", total_count)
         self._initialised = True
+
+        # Inject handler guidance into project CLAUDE.md (advisory, never raises)
+        all_handlers = [h for chain in self._router._chains.values() for h in chain._handlers]
+        ClaudeMdInjector(workspace_root=workspace_root, handlers=all_handlers).inject()
 
         # Validate configuration at startup (fail-open: degraded mode on errors)
         self._validate_config(config_path)

@@ -43,6 +43,9 @@ class GitRepoNameHandler(Handler):
         repo_name = ProjectContext.git_repo_name()
         return HookResult(context=[f"📁 {repo_name}"])
 
+    def get_claude_md(self) -> str | None:
+        return None
+
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for this handler."""
         from claude_code_hooks_daemon.core import (

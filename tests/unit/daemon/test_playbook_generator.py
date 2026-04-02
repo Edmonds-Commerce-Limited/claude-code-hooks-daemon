@@ -32,6 +32,9 @@ class MockHandlerWithTests(Handler):
         """Mock handle implementation."""
         return HookResult(decision=Decision.ALLOW)
 
+    def get_claude_md(self) -> str | None:
+        return None
+
     def get_acceptance_tests(self) -> list[AcceptanceTest]:
         """Return mock acceptance tests."""
         return self._tests
@@ -53,6 +56,9 @@ class MockHandlerNoTests(Handler):
         """Mock handle implementation."""
         return HookResult(decision=Decision.ALLOW)
 
+    def get_claude_md(self) -> str | None:
+        return None
+
 
 class MockHandlerNoMethod(Handler):
     """Mock handler without get_acceptance_tests method."""
@@ -70,6 +76,9 @@ class MockHandlerNoMethod(Handler):
         """Mock handle implementation."""
         return HookResult(decision=Decision.ALLOW)
 
+    def get_claude_md(self) -> str | None:
+        return None
+
 
 class BrokenHandler(Handler):
     """Mock handler that raises exception during instantiation."""
@@ -84,6 +93,9 @@ class BrokenHandler(Handler):
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Mock handle implementation."""
         return HookResult(decision=Decision.ALLOW)
+
+    def get_claude_md(self) -> str | None:
+        return None
 
     def get_acceptance_tests(self) -> list[AcceptanceTest]:
         """Return mock acceptance tests."""
@@ -760,6 +772,9 @@ def test_generate_markdown_includes_plugin_handlers() -> None:
         def handle(self, hook_input: dict[str, Any]) -> HookResult:
             return HookResult(decision=Decision.ALLOW)
 
+        def get_claude_md(self) -> str | None:
+            return None
+
         def get_acceptance_tests(self) -> list[AcceptanceTest]:
             return [plugin_test]
 
@@ -823,6 +838,9 @@ def test_generate_markdown_combines_library_and_plugin_handlers() -> None:
 
         def handle(self, hook_input: dict[str, Any]) -> HookResult:
             return HookResult(decision=Decision.ALLOW)
+
+        def get_claude_md(self) -> str | None:
+            return None
 
         def get_acceptance_tests(self) -> list[AcceptanceTest]:
             return [plugin_test]
@@ -1307,6 +1325,9 @@ def test_generate_json_includes_plugin_handlers() -> None:
         def handle(self, hook_input: dict[str, Any]) -> HookResult:
             return HookResult(decision=Decision.ALLOW)
 
+        def get_claude_md(self) -> str | None:
+            return None
+
         def get_acceptance_tests(self) -> list[AcceptanceTest]:
             return [plugin_test]
 
@@ -1355,6 +1376,9 @@ def test_generate_json_includes_project_handlers() -> None:
 
         def handle(self, hook_input: dict[str, Any]) -> HookResult:
             return HookResult(decision=Decision.ALLOW)
+
+        def get_claude_md(self) -> str | None:
+            return None
 
         def get_acceptance_tests(self) -> list[AcceptanceTest]:
             return [project_test]
@@ -1427,6 +1451,9 @@ def test_generate_json_all_sources_combined() -> None:
         def handle(self, hook_input: dict[str, Any]) -> HookResult:
             return HookResult(decision=Decision.ALLOW)
 
+        def get_claude_md(self) -> str | None:
+            return None
+
         def get_acceptance_tests(self) -> list[AcceptanceTest]:
             return [plugin_test]
 
@@ -1450,6 +1477,9 @@ def test_generate_json_all_sources_combined() -> None:
 
         def handle(self, hook_input: dict[str, Any]) -> HookResult:
             return HookResult(decision=Decision.ALLOW)
+
+        def get_claude_md(self) -> str | None:
+            return None
 
         def get_acceptance_tests(self) -> list[AcceptanceTest]:
             return [project_test]
@@ -1638,6 +1668,9 @@ def test_generate_markdown_project_handler_with_recommended_model() -> None:
 
         def handle(self, hook_input: dict[str, Any]) -> HookResult:
             return HookResult(decision=Decision.ALLOW)
+
+        def get_claude_md(self) -> str | None:
+            return None
 
         def get_acceptance_tests(self) -> list[AcceptanceTest]:
             return [test]

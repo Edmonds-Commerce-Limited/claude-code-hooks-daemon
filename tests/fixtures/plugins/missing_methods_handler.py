@@ -16,4 +16,7 @@ class MissingMethodsHandler(Handler):
         super().__init__(name="missing-methods", priority=Priority.HELLO_WORLD)
         self.config = config
 
+    def get_claude_md(self) -> str | None:
+        return None
+
     # Missing matches() and handle() methods

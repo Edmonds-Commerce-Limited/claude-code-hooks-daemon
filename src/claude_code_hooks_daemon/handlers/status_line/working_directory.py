@@ -59,6 +59,9 @@ class WorkingDirectoryHandler(Handler):
             # current_dir is not relative to project_dir (e.g., different drive on Windows)
             return HookResult(context=[])
 
+    def get_claude_md(self) -> str | None:
+        return None
+
     def get_acceptance_tests(self) -> list[AcceptanceTest]:
         """Return acceptance tests for this handler.
 

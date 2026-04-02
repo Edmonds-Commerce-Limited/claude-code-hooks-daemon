@@ -35,6 +35,9 @@ class TestServerHandler(Handler):
     def handle(self, hook_input: dict) -> HookResult:
         return HookResult.allow(context=["Test context"])
 
+    def get_claude_md(self) -> str | None:
+        return None
+
     def get_acceptance_tests(self) -> list:
         """Stub implementation for test handler."""
         return []

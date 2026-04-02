@@ -462,6 +462,9 @@ class BrokenTestsHandler(Handler):
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         return HookResult(decision=Decision.ALLOW)
 
+    def get_claude_md(self) -> str | None:
+        return None
+
     def get_acceptance_tests(self) -> list:
         raise RuntimeError("Tests are broken")
 ''')

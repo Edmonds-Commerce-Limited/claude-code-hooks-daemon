@@ -154,6 +154,23 @@ class Handler(ABC):
         ...
 
     @abstractmethod
+    def get_claude_md(self) -> str | None:
+        """Return markdown content to inject into project CLAUDE.md.
+
+        Override this method to provide handler-specific guidance that helps
+        agents understand what this handler does and how to avoid fighting it.
+
+        On daemon startup, the daemon collects get_claude_md() from all active
+        handlers that return non-None, and injects the combined content into the
+        project CLAUDE.md inside a <hooksdaemon>...</hooksdaemon> section.
+        This keeps agents informed about active handler behaviour without
+        requiring manual CLAUDE.md maintenance.
+
+        Returns:
+            Markdown string with handler guidance, or None to exclude from injection.
+        """
+
+    @abstractmethod
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for this handler.
 

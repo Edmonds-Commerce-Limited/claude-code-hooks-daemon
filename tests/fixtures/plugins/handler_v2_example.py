@@ -39,6 +39,9 @@ class HandlerV2Example(Handler):
         """
         return HookResult(decision=Decision.ALLOW, context="Handler V2")
 
+    def get_claude_md(self) -> str | None:
+        return None
+
     def get_acceptance_tests(self) -> list:
         """Test handler - stub implementation."""
         from claude_code_hooks_daemon.core import AcceptanceTest, TestType

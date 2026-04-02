@@ -128,6 +128,8 @@ class SimpleHandler(Handler):
         return True
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         return HookResult(decision=Decision.ALLOW)
+    def get_claude_md(self) -> str | None:
+        return None
     def get_acceptance_tests(self) -> list[AcceptanceTest]:
         return [AcceptanceTest(
             title="test", command="echo test", description="test",
@@ -272,6 +274,8 @@ class FirstHandler(Handler):
         return True
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         return HookResult(decision=Decision.ALLOW)
+    def get_claude_md(self) -> str | None:
+        return None
     def get_acceptance_tests(self) -> list[AcceptanceTest]:
         return [AcceptanceTest(
             title="test", command="echo test", description="test",
@@ -286,6 +290,8 @@ class SecondHandler(Handler):
         return False
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         return HookResult(decision=Decision.ALLOW)
+    def get_claude_md(self) -> str | None:
+        return None
     def get_acceptance_tests(self) -> list[AcceptanceTest]:
         return [AcceptanceTest(
             title="test", command="echo test", description="test",
@@ -323,6 +329,8 @@ class NullPriorityHandler(Handler):
         return True
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         return HookResult(decision=Decision.ALLOW)
+    def get_claude_md(self) -> str | None:
+        return None
     def get_acceptance_tests(self) -> list[AcceptanceTest]:
         return [AcceptanceTest(
             title="test", command="echo test", description="test",

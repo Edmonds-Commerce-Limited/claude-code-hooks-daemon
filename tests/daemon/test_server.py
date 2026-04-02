@@ -36,6 +36,9 @@ class SimpleTestHandler(Handler):
         """Return simple allow result."""
         return HookResult(decision=Decision.ALLOW, context="Test handler executed")
 
+    def get_claude_md(self) -> str | None:
+        return None
+
     def get_acceptance_tests(self) -> list:
         """Test handler - stub implementation."""
         from claude_code_hooks_daemon.core import AcceptanceTest, TestType
@@ -68,6 +71,9 @@ class SlowTestHandler(Handler):
         """Sleep then return result."""
         time.sleep(self.delay_ms / 1000.0)
         return HookResult(decision=Decision.ALLOW, context=f"Delayed {self.delay_ms}ms")
+
+    def get_claude_md(self) -> str | None:
+        return None
 
     def get_acceptance_tests(self) -> list:
         """Test handler - stub implementation."""
@@ -727,6 +733,9 @@ class TestHooksDaemon:
 
             def handle(self, hook_input: dict) -> HookResult:
                 raise RuntimeError("Simulated handler failure")
+
+            def get_claude_md(self) -> str | None:
+                return None
 
             def get_acceptance_tests(self) -> list:
                 """Test handler - stub implementation."""

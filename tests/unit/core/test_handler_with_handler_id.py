@@ -24,6 +24,9 @@ class ConcreteTestHandler(Handler):
         """Simple handle implementation."""
         return HookResult(decision=Decision.ALLOW)
 
+    def get_claude_md(self) -> str | None:
+        return None
+
     def get_acceptance_tests(self) -> list[Any]:
         """Test handler - stub implementation."""
         from claude_code_hooks_daemon.core import AcceptanceTest, TestType
