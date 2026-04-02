@@ -1673,6 +1673,7 @@ def cmd_validate_project_handlers(args: argparse.Namespace) -> int:
 
     total_handlers = 0
     total_warnings = 0
+    total_failures = 0
     handlers_by_event: dict[str, list[str]] = {}
 
     for dir_name, event_type in EVENT_TYPE_MAPPING.items():
@@ -1689,7 +1690,7 @@ def cmd_validate_project_handlers(args: argparse.Namespace) -> int:
             except RuntimeError as e:
                 print(f"  ERROR: Failed to load {dir_name}/{py_file.name}")
                 print(f"    - {e}")
-                total_warnings += 1
+                total_failures += 1
                 continue
 
             total_handlers += 1
@@ -1721,17 +1722,19 @@ def cmd_validate_project_handlers(args: argparse.Namespace) -> int:
     if total_handlers == 0:
         print("No project handlers found")
         print(f"Add handler .py files to event-type subdirectories in {handlers_path}")
-        return 0
+        return 1 if total_failures > 0 else 0
 
     # Summary
     print(f"Validation: {total_handlers} handler(s) loaded successfully")
     if total_warnings > 0:
         print(f"Warnings: {total_warnings}")
+    if total_failures > 0:
+        print(f"Failures: {total_failures} handler(s) failed to load")
 
     for event_name, handler_names in handlers_by_event.items():
         print(f"  {event_name}: {len(handler_names)} handler(s)")
 
-    return 0
+    return 1 if total_failures > 0 else 0
 
 
 def cmd_test_project_handlers(args: argparse.Namespace) -> int:

@@ -214,6 +214,75 @@ class NoTestsHandler(Handler):
             result = cmd_validate_project_handlers(args)
             assert result == 1
 
+    def test_returns_1_on_handler_load_failure(self, tmp_path: Path, capsys: Any) -> None:
+        """validate-project-handlers returns exit code 1 when any handler fails to load.
+
+        A non-zero exit code is required so CI pipelines and upgrade scripts
+        can detect broken project handlers automatically.
+        """
+        from claude_code_hooks_daemon.daemon.cli import cmd_validate_project_handlers
+
+        project_path = _setup_project(tmp_path)
+        handlers_dir = project_path / ".claude" / "project-handlers"
+        pre_tool_use = handlers_dir / "pre_tool_use"
+        pre_tool_use.mkdir(parents=True)
+        (handlers_dir / "__init__.py").write_text("")
+        (pre_tool_use / "__init__.py").write_text("")
+        (pre_tool_use / "broken_handler.py").write_text("this is not valid python !!!")
+
+        args = argparse.Namespace(project_root=project_path)
+        result = cmd_validate_project_handlers(args)
+
+        assert result == 1
+
+    def test_shows_upgrade_guide_hint_for_missing_abstract_method(
+        self, tmp_path: Path, capsys: Any
+    ) -> None:
+        """validate-project-handlers prints upgrade guide path for version-specific errors.
+
+        When a handler is missing an abstract method introduced in a specific version,
+        the output must include a pointer to CLAUDE/UPGRADES/v2/ so users know
+        where to find migration instructions.
+        """
+        from claude_code_hooks_daemon.daemon.cli import cmd_validate_project_handlers
+
+        project_path = _setup_project(tmp_path)
+        handlers_dir = project_path / ".claude" / "project-handlers"
+        pre_tool_use = handlers_dir / "pre_tool_use"
+        pre_tool_use.mkdir(parents=True)
+        (handlers_dir / "__init__.py").write_text("")
+        (pre_tool_use / "__init__.py").write_text("")
+
+        # Handler missing get_claude_md() — simulates pre-v2.30.0 handler
+        handler_code = '''"""Handler missing get_claude_md."""
+from typing import Any
+from claude_code_hooks_daemon.core import AcceptanceTest, Handler, HookResult, TestType
+from claude_code_hooks_daemon.core.hook_result import Decision
+
+class OldStyleHandler(Handler):
+    def __init__(self) -> None:
+        super().__init__(handler_id="old-style", priority=50)
+    def matches(self, hook_input: dict[str, Any]) -> bool:
+        return False
+    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+        return HookResult(decision=Decision.ALLOW)
+    def get_acceptance_tests(self) -> list[AcceptanceTest]:
+        return [AcceptanceTest(
+            title="test", command="echo test", description="test",
+            expected_decision=Decision.ALLOW, expected_message_patterns=[],
+            test_type=TestType.BLOCKING,
+        )]
+'''
+        (pre_tool_use / "old_style_handler.py").write_text(handler_code)
+
+        args = argparse.Namespace(project_root=project_path)
+        result = cmd_validate_project_handlers(args)
+
+        assert result == 1
+        captured = capsys.readouterr()
+        output = captured.out + captured.err
+        assert "UPGRADES" in output, f"Output should reference upgrade guides, got:\n{output}"
+
     def test_counts_handlers_per_event_type(self, tmp_path: Path, capsys: Any) -> None:
         """validate-project-handlers shows handler count per event type."""
         from claude_code_hooks_daemon.daemon.cli import cmd_validate_project_handlers
