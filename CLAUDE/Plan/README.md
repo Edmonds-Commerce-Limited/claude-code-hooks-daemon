@@ -4,6 +4,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00097: Project Handler Upgrade Resilience](00097-project-handler-upgrade-resilience/PLAN.md) - Not Started (Hotfix)
+  - Daemon crashes if project handlers have missing abstract methods after upgrade
+  - Fix: graceful skip + actionable version-specific error messages + upgrade guide v2.29→v2.30
+  - **Priority**: High (hotfix for v2.30.0 breaking change)
+
 - [00096: Live Daemon Smoke Tests in QA Stack](00096-live-daemon-smoke-tests/PLAN.md) - Not Started
   - Add check 9 to QA stack: 3 nc-based probes against the live daemon via hook scripts
   - Catches "daemon running stale code" failure mode that unit tests miss entirely
