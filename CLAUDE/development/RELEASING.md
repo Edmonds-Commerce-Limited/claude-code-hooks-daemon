@@ -553,7 +553,80 @@ git diff "${LAST_TAG}..HEAD" -- src/
 - ✅ Code looks correct → Proceed to Step 8 (Acceptance Testing)
 - ❌ Issues found → **ABORT release**, fix issues, re-run `/release` from beginning
 
-**Main Claude proceeds to Acceptance Testing Gate (Step 8) ONLY if code review passes.**
+**Main Claude proceeds to CLAUDE.md Guidance Audit (Step 7.6) ONLY if code review passes.**
+
+### 7.6. CLAUDE.md Guidance Audit (Sub-Agent Analysis) - 🚨 BLOCKING
+
+**CRITICAL BLOCKING GATE: Verify all impactful handlers have accurate `get_claude_md()` guidance.**
+
+**Purpose**: Handlers publish guidance into project CLAUDE.md via `get_claude_md()`. Agents read this section to avoid fighting handlers. If guidance is missing or inaccurate, agents repeat the same blocked-action cycles. This step ensures the injected guidance is complete and correct before release.
+
+**STEP 7.6.1: Launch analysis sub-agent**
+
+Invoke a general-purpose sub-agent with this prompt:
+
+```
+Analyse /workspace/src/claude_code_hooks_daemon/handlers/ for get_claude_md() completeness.
+
+For each handler file, read:
+1. The handler's matches() and handle() logic — what does it block/advise?
+2. The handler's get_claude_md() return value — what guidance does it publish?
+
+Produce a report with three sections:
+
+MISSING GUIDANCE — Handlers with significant user-visible behaviour (blocking, advisory, or
+context-injecting) that return None from get_claude_md() and should have content.
+For each: handler name, what it does, why an agent would benefit from knowing.
+
+INACCURATE GUIDANCE — Handlers whose get_claude_md() content does not match their current
+matches()/handle() logic (e.g. outdated patterns, wrong examples, missing cases).
+For each: handler name, specific inaccuracy, suggested correction.
+
+ACCEPTABLE NONES — Handlers that correctly return None (e.g. hello_world stubs, status line
+formatters, session lifecycle handlers with no agent-facing constraints).
+List these briefly to confirm they were reviewed.
+
+Focus on PreToolUse blocking handlers first — these are the ones agents fight most.
+High-priority candidates for non-None guidance:
+  destructive_git, tdd_enforcement, qa_suppression, error_hiding_blocker, sed_blocker,
+  curl_pipe_shell, dangerous_permissions, lock_file_edit_blocker, absolute_path,
+  worktree_file_copy, lsp_enforcement, markdown_organization, daemon_restart_verifier.
+
+Do NOT modify any files. Analysis only.
+```
+
+**STEP 7.6.2: Evaluate report**
+
+Review the sub-agent's findings:
+
+- **MISSING GUIDANCE items**: For each, decide: does this handler block/advise frequently enough that agents would benefit from guidance?
+  - Yes → add `get_claude_md()` returning clear markdown (see pipe_blocker.py and auto_continue_stop.py as reference implementations)
+  - No → it's an acceptable None
+
+- **INACCURATE GUIDANCE items**: Fix each inaccuracy. Update the `get_claude_md()` return value to match actual handler behaviour.
+
+**STEP 7.6.3: If any changes made**
+
+```bash
+# Run full QA after updating get_claude_md() implementations
+./scripts/qa/run_all.sh
+
+# Restart daemon to verify it loads and injects updated guidance
+$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
+$PYTHON -m claude_code_hooks_daemon.daemon.cli status
+
+# Verify CLAUDE.md was updated
+grep -A 5 "<hooksdaemon>" CLAUDE.md
+```
+
+Then update the changelog entry (Step 4) to include the guidance additions.
+
+**STEP 7.6.4: Decision**
+
+- ✅ No missing/inaccurate guidance (or all fixed) → Proceed to Step 8 (Acceptance Testing)
+- ❌ Unable to fix identified issues → **ABORT release**, fix and re-run `/release`
+
+**Main Claude proceeds to Acceptance Testing Gate (Step 8) ONLY if guidance audit passes.**
 
 ### 8. Acceptance Testing Gate (Main Claude Executes) - 🚨 BLOCKING
 
