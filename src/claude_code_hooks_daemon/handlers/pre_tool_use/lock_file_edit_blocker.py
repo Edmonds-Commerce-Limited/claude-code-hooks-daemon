@@ -193,7 +193,21 @@ NEVER manually edit lock files with Write or Edit tools."""
         )
 
     def get_claude_md(self) -> str | None:
-        return None
+        return (
+            "## lock_file_edit_blocker — never directly edit lock files\n\n"
+            "Direct `Write` or `Edit` to package manager lock files is blocked. "
+            "Lock files are generated artifacts; manual edits create checksum mismatches "
+            "and broken dependency graphs.\n\n"
+            "**Blocked files**: `composer.lock`, `package-lock.json`, `yarn.lock`, "
+            "`pnpm-lock.yaml`, `Gemfile.lock`, `Cargo.lock`, `go.sum`, "
+            "`Package.resolved`, `Pipfile.lock`, and others.\n\n"
+            "**Use package manager commands instead**:\n"
+            "- PHP: `composer install` / `composer require package`\n"
+            "- Node: `npm install` / `yarn add package`\n"
+            "- Ruby: `bundle install` / `bundle add gem`\n"
+            "- Rust: `cargo add crate`\n"
+            "- Go: `go get module`"
+        )
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for lock file edit blocker handler."""

@@ -196,7 +196,22 @@ class QaSuppressionHandler(Handler):
         )
 
     def get_claude_md(self) -> str | None:
-        return None
+        return (
+            "## qa_suppression — QA suppression annotations are blocked\n\n"
+            "Writing QA suppression directives into source files is blocked across all "
+            "supported languages. Fix the underlying code issue instead.\n\n"
+            "**Blocked annotation types (by language)**:\n"
+            "- Python: `noqa` directives, `type: ignore` annotations\n"
+            "- JavaScript/TypeScript: `eslint-disable` inline directives\n"
+            "- Go: `nolint` directives (golangci-lint)\n"
+            "- PHP: `phpstan-ignore`, `psalm-suppress` annotations\n"
+            "- Java/Kotlin: `@SuppressWarnings`, `@Suppress` annotations\n"
+            "- C#: `pragma warning disable` directives\n"
+            "- Rust: `allow(clippy::...)` attributes on type-level items\n\n"
+            "**Required action**: Fix the code so QA passes without suppression. "
+            "If a suppression is genuinely necessary, ask the user to add it manually — "
+            "this signals a conscious decision rather than a shortcut."
+        )
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests aggregated from all registered strategies."""

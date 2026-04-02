@@ -95,7 +95,17 @@ class GitStashHandler(Handler):
             )
 
     def get_claude_md(self) -> str | None:
-        return None
+        return (
+            "## git_stash — git stash is advisory by default\n\n"
+            "`git stash`, `git stash push`, and `git stash save` trigger this handler. "
+            "`git stash pop`, `git stash apply`, `git stash list`, and `git stash show` "
+            "are always allowed.\n\n"
+            "**Default mode** (`warn`): stash is allowed but an advisory message explains risks.\n"
+            "**Deny mode** (`deny`): stash is blocked — use `git commit` to checkpoint "
+            "work instead.\n\n"
+            "Configure via `handlers.pre_tool_use.git_stash.options.mode: deny` "
+            "to enforce the stricter policy."
+        )
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for git stash handler.

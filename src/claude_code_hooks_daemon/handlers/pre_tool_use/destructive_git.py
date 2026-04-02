@@ -149,7 +149,25 @@ class DestructiveGitHandler(Handler):
         )
 
     def get_claude_md(self) -> str | None:
-        return None
+        return (
+            "## destructive_git — blocked git commands\n\n"
+            "The following git commands are permanently blocked and will always be denied:\n\n"
+            "| Command | Reason |\n"
+            "|---------|--------|\n"
+            "| `git reset --hard` | Permanently destroys all uncommitted changes |\n"
+            "| `git clean -f` | Permanently deletes untracked files |\n"
+            "| `git checkout -- <file>` | Discards all local changes to that file |\n"
+            "| `git restore <file>` | Discards local changes (`--staged` is allowed) |\n"
+            "| `git stash drop` | Permanently destroys stashed changes |\n"
+            "| `git stash clear` | Permanently destroys all stashes |\n"
+            "| `git push --force` | Can overwrite remote history and destroy teammates' work |\n"
+            "| `git branch -D` | Force-deletes branch without checking if merged (lowercase `-d` is safe) |\n"
+            "| `git commit --amend` | Rewrites the previous commit — create a new commit instead |\n\n"
+            "If the user needs to run one of these, ask them to do it manually. "
+            "Do not attempt to work around the block.\n\n"
+            "**Safe alternatives**: `git stash` (recoverable), `git diff` / `git status` "
+            "(inspect first), `git commit` (save changes permanently first)."
+        )
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for destructive git handler."""

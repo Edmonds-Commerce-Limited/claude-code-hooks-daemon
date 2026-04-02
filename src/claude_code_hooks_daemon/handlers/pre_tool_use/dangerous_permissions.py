@@ -125,7 +125,16 @@ The correct solution is almost never 777."""
         )
 
     def get_claude_md(self) -> str | None:
-        return None
+        return (
+            "## dangerous_permissions — chmod 777 is blocked\n\n"
+            "`chmod 777` and other world-writable permission commands are blocked. "
+            "Overly permissive file permissions are a security vulnerability.\n\n"
+            "**Blocked**: `chmod 777`, `chmod 666`, `chmod a+w`, `chmod o+w`\n\n"
+            "**Use least-privilege permissions instead**:\n"
+            "- Executable scripts: `chmod 755` (owner rwx, group/other rx)\n"
+            "- Regular files: `chmod 644` (owner rw, group/other r)\n"
+            "- Private files: `chmod 600` (owner rw only)"
+        )
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for dangerous permissions handler."""

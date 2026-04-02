@@ -131,7 +131,19 @@ class SecurityAntipatternHandler(Handler):
         )
 
     def get_claude_md(self) -> str | None:
-        return None
+        return (
+            "## security_antipattern — OWASP security antipatterns are blocked\n\n"
+            "Writing code that contains security antipatterns is blocked across all "
+            "supported languages. Fix the code to use safe patterns instead.\n\n"
+            "**Blocked categories**:\n"
+            "- SQL injection: building queries via string concatenation (use parameterised queries)\n"
+            "- Command injection: passing unvalidated input to subprocess (use argument lists)\n"
+            "- Hardcoded credentials: API keys, passwords, tokens embedded in source code\n"
+            "- Weak cryptography: MD5 or SHA1 for password hashing (use bcrypt/argon2)\n"
+            "- Path traversal: unvalidated user input used in file paths\n\n"
+            "**Supported languages**: Python, JavaScript/TypeScript, Go, PHP, Ruby, "
+            "Java, Kotlin, C#, Rust, Swift, Dart."
+        )
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests aggregated from all registered strategies."""
