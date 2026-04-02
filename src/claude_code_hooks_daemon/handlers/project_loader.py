@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 # Used to emit version-specific error messages when project handlers are found
 # to be missing required methods after an upgrade.
 _ABSTRACT_METHOD_VERSIONS: dict[str, str] = {
-    "get_acceptance_tests": "2.13.0",
+    "get_acceptance_tests": "2.5.0",
     "get_claude_md": "2.30.0",
 }
 
