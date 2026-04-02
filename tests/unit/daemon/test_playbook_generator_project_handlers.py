@@ -30,6 +30,9 @@ class FakeProjectHandler(Handler):
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         return HookResult(decision=Decision.ALLOW, context=["Fake context"])
 
+    def get_claude_md(self) -> str | None:
+        return None
+
     def get_acceptance_tests(self) -> list[AcceptanceTest]:
         return [
             AcceptanceTest(
@@ -59,6 +62,9 @@ class FakeProjectHandlerWithAllFields(Handler):
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         return HookResult(decision=Decision.DENY, context=["Blocked"])
+
+    def get_claude_md(self) -> str | None:
+        return None
 
     def get_acceptance_tests(self) -> list[AcceptanceTest]:
         return [
@@ -92,6 +98,9 @@ class FakeProjectHandlerNoTests(Handler):
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         return HookResult(decision=Decision.ALLOW, context=[])
+
+    def get_claude_md(self) -> str | None:
+        return None
 
     def get_acceptance_tests(self) -> list[AcceptanceTest]:
         return []

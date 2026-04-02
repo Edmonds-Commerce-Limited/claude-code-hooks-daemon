@@ -39,6 +39,9 @@ class StubHandler(Handler):
         """Return configured result."""
         return self._result
 
+    def get_claude_md(self) -> str | None:
+        return None
+
     def get_acceptance_tests(self) -> list[Any]:
         """Stub - no acceptance tests needed for test helpers."""
         from claude_code_hooks_daemon.core import AcceptanceTest, TestType

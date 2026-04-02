@@ -20,6 +20,10 @@ class ConcreteHandler(Handler):
         """Simple handle implementation."""
         return HookResult(decision=Decision.ALLOW, context="Concrete handler executed")
 
+    def get_claude_md(self) -> str | None:
+        """Return None for testing."""
+        return None
+
     def get_acceptance_tests(self):
         """Return test acceptance tests."""
         from claude_code_hooks_daemon.core import AcceptanceTest
@@ -45,6 +49,10 @@ class TerminalHandler(Handler):
     def handle(self, hook_input: dict) -> HookResult:
         """Handle implementation."""
         return HookResult(decision=Decision.DENY, reason="Terminal handler blocked")
+
+    def get_claude_md(self) -> str | None:
+        """Return None for testing."""
+        return None
 
     def get_acceptance_tests(self):
         """Return test acceptance tests."""
@@ -77,6 +85,10 @@ class NonTerminalHandler(Handler):
     def handle(self, hook_input: dict) -> HookResult:
         """Handle implementation."""
         return HookResult(decision=Decision.ALLOW, context="Non-terminal context")
+
+    def get_claude_md(self) -> str | None:
+        """Return None for testing."""
+        return None
 
     def get_acceptance_tests(self):
         """Return test acceptance tests."""
@@ -250,6 +262,9 @@ class TestHandlerAbstractMethods:
                 """Handle implementation."""
                 return HookResult(decision=Decision.ALLOW)
 
+            def get_claude_md(self) -> str | None:
+                return None
+
         # ABC prevents instantiation of incomplete subclasses
         with pytest.raises(TypeError, match="abstract"):
             IncompleteHandler(name="incomplete")
@@ -264,6 +279,9 @@ class TestHandlerAbstractMethods:
                 """Matches implementation."""
                 return True
 
+            def get_claude_md(self) -> str | None:
+                return None
+
         # ABC prevents instantiation of incomplete subclasses
         with pytest.raises(TypeError, match="abstract"):
             IncompleteHandler(name="incomplete")
@@ -275,6 +293,9 @@ class TestHandlerAbstractMethods:
             """Handler with no implementations."""
 
             pass
+
+    def get_claude_md(self) -> str | None:
+        return None
 
         # ABC prevents instantiation of incomplete subclasses
         with pytest.raises(TypeError, match="abstract"):
@@ -377,6 +398,9 @@ class TestMatchesMethod:
                 """Handle implementation."""
                 return HookResult(decision=Decision.DENY, reason="Dangerous command")
 
+            def get_claude_md(self) -> str | None:
+                return None
+
             def get_acceptance_tests(self):
                 """Test handler - stub implementation."""
                 from claude_code_hooks_daemon.core import AcceptanceTest, TestType
@@ -451,6 +475,9 @@ class TestHandleMethod:
                 else:
                     return HookResult(decision=Decision.ALLOW)
 
+            def get_claude_md(self) -> str | None:
+                return None
+
             def get_acceptance_tests(self):
                 """Test handler - stub implementation."""
                 from claude_code_hooks_daemon.core import AcceptanceTest, TestType
@@ -494,6 +521,9 @@ class TestHandlerIntegration:
             def handle(self, hook_input: dict) -> HookResult:
                 """Deny dangerous operations."""
                 return HookResult(decision=Decision.DENY, reason="Dangerous command blocked")
+
+            def get_claude_md(self) -> str | None:
+                return None
 
             def get_acceptance_tests(self):
                 """Test handler - stub implementation."""
@@ -541,6 +571,9 @@ class TestHandlerIntegration:
                 return HookResult(
                     decision=Decision.ALLOW, guidance="Consider using Edit instead of Write"
                 )
+
+            def get_claude_md(self) -> str | None:
+                return None
 
             def get_acceptance_tests(self):
                 """Test handler - stub implementation."""
@@ -802,6 +835,9 @@ class TestHandlerAcceptanceTests:
             def handle(self, hook_input: dict) -> HookResult:
                 return HookResult(decision=Decision.ALLOW)
 
+            def get_claude_md(self) -> str | None:
+                return None
+
         # Should raise TypeError because get_acceptance_tests() is not implemented
         with pytest.raises(TypeError, match="abstract"):
             NoAcceptanceTestHandler(name="no-tests")
@@ -818,6 +854,9 @@ class TestHandlerAcceptanceTests:
 
             def handle(self, hook_input: dict) -> HookResult:
                 return HookResult(decision=Decision.DENY, reason="Blocked")
+
+            def get_claude_md(self) -> str | None:
+                return None
 
             def get_acceptance_tests(self) -> list[AcceptanceTest]:
                 return [
@@ -852,6 +891,9 @@ class TestHandlerAcceptanceTests:
             def handle(self, hook_input: dict) -> HookResult:
                 return HookResult(decision=Decision.ALLOW)
 
+            def get_claude_md(self) -> str | None:
+                return None
+
             def get_acceptance_tests(self) -> list[AcceptanceTest]:
                 return []
 
@@ -860,3 +902,49 @@ class TestHandlerAcceptanceTests:
         # Empty list should be rejected during validation (not at instantiation)
         tests = handler.get_acceptance_tests()
         assert tests == []  # Method can return empty, validation happens elsewhere
+
+
+class TestHandlerGetClaudeMd:
+    """Tests for Handler.get_claude_md() abstract method."""
+
+    def test_get_claude_md_is_abstract_method(self) -> None:
+        """get_claude_md() should be an abstract method."""
+
+        class NoClaudeMdHandler(Handler):
+            """Handler without get_claude_md implementation."""
+
+            def matches(self, hook_input: dict) -> bool:
+                return True
+
+            def handle(self, hook_input: dict) -> HookResult:
+                return HookResult(decision=Decision.ALLOW)
+
+            def get_acceptance_tests(self) -> list:
+                return []
+
+        # Should raise TypeError because get_claude_md() is not implemented
+        with pytest.raises(TypeError, match="abstract"):
+            NoClaudeMdHandler(name="no-claude-md")
+
+    def test_concrete_handler_returning_none(self) -> None:
+        """Concrete handler can implement get_claude_md() returning None."""
+        handler = ConcreteHandler(name="test-handler")
+        assert handler.get_claude_md() is None
+
+    def test_subclass_can_override_to_return_string(self) -> None:
+        """Handler subclass can override get_claude_md() to return guidance string."""
+
+        class GuidedHandler(ConcreteHandler):
+            def get_claude_md(self) -> str | None:
+                return "## My Handler\n\nDo not do X, do Y instead."
+
+        handler = GuidedHandler(name="guided-handler")
+        result = handler.get_claude_md()
+        assert result is not None
+        assert "## My Handler" in result
+
+    def test_return_type_is_str_or_none(self) -> None:
+        """get_claude_md() returns str or None — no other types."""
+        handler = ConcreteHandler(name="test-handler")
+        result = handler.get_claude_md()
+        assert result is None or isinstance(result, str)

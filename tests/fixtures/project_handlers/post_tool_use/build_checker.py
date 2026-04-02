@@ -28,6 +28,9 @@ class BuildCheckerHandler(Handler):
             context=["BUILD REMINDER: Run yarn build after TS/SCSS changes"],
         )
 
+    def get_claude_md(self) -> str | None:
+        return None
+
     def get_acceptance_tests(self) -> list[AcceptanceTest]:
         return [
             AcceptanceTest(

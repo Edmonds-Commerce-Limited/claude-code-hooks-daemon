@@ -44,6 +44,9 @@ class MyTestPlugin(Handler):
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         return HookResult(decision=Decision.DENY, reason="Test plugin blocked this")
 
+    def get_claude_md(self) -> str | None:
+        return None
+
     def get_acceptance_tests(self) -> list:
         return []
 ''')
@@ -124,6 +127,9 @@ class SystemPathsHandler(Handler):
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         return HookResult(decision=Decision.DENY, reason="System file blocked")
 
+    def get_claude_md(self) -> str | None:
+        return None
+
     def get_acceptance_tests(self) -> list:
         return []
 ''')
@@ -201,6 +207,9 @@ class CompletelyDifferentClassName(Handler):
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         return HookResult(decision=Decision.ALLOW, reason="")
+
+    def get_claude_md(self) -> str | None:
+        return None
 
     def get_acceptance_tests(self) -> list:
         return []

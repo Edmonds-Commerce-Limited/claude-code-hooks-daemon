@@ -185,6 +185,9 @@ class ValidateInstructionContentHandler(Handler):
 
         return "\n".join(result_lines)
 
+    def get_claude_md(self) -> str | None:
+        return None
+
     def get_acceptance_tests(self) -> list[AcceptanceTest]:
         """Return acceptance tests for this handler."""
         return [

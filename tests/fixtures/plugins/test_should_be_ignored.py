@@ -19,3 +19,6 @@ class TestShouldBeIgnored(Handler):
     def handle(self, hook_input: dict) -> HookResult:
         """Handle."""
         return HookResult(decision=Decision.DENY, reason="This should never be loaded")
+
+    def get_claude_md(self) -> str | None:
+        return None

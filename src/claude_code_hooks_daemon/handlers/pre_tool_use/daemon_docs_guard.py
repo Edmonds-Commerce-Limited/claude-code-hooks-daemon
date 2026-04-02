@@ -80,6 +80,9 @@ class DaemonDocsGuardHandler(Handler):
 
         return HookResult(decision=Decision.ALLOW, context=[warning])
 
+    def get_claude_md(self) -> str | None:
+        return None
+
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for daemon docs guard."""
         from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType

@@ -19,3 +19,6 @@ class WrongName(Handler):
     def handle(self, hook_input: dict) -> HookResult:
         """Handle."""
         return HookResult(decision=Decision.ALLOW)
+
+    def get_claude_md(self) -> str | None:
+        return None

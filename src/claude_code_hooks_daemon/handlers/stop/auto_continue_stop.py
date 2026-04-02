@@ -441,6 +441,26 @@ class AutoContinueStopHandler(Handler):
             for pattern in self.ERROR_QUESTION_PATTERNS
         )
 
+    def get_claude_md(self) -> str | None:
+        """Return CLAUDE.md guidance about the stop explanation requirement."""
+        return (
+            "### Stop Explanation Required\n\n"
+            "Before stopping, **prefix your final message** with `STOPPING BECAUSE:` "
+            "followed by a clear reason:\n\n"
+            "```\n"
+            "STOPPING BECAUSE: all tasks complete, QA passes, daemon restart verified.\n"
+            "```\n\n"
+            "**Why**: The stop hook enforces intentional stops. Stopping without an "
+            "explanation triggers an auto-block that asks you to explain or continue.\n\n"
+            "**Alternatives**:\n"
+            "- `STOPPING BECAUSE: <reason>` — stops cleanly with explanation\n"
+            "- Continue working — no need to stop unless all work is genuinely complete\n\n"
+            "**Do NOT**:\n"
+            "- Stop mid-task without explanation\n"
+            "- Ask confirmation questions and then stop (the hook auto-continues those)\n"
+            "- Use `AUTO-CONTINUE` unless you intend to keep working indefinitely"
+        )
+
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for this handler."""
         from claude_code_hooks_daemon.core import (

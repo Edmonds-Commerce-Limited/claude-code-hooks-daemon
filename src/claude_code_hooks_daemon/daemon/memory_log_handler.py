@@ -71,3 +71,6 @@ class MemoryLogHandler(logging.Handler):
             Number of log records stored
         """
         return len(self.records)
+
+    def get_claude_md(self) -> str | None:
+        return None

@@ -346,6 +346,9 @@ class TddEnforcementHandler(Handler):
         """
         return Path(source_path).parent / _TEST_SUBDIR_NAME / test_filename
 
+    def get_claude_md(self) -> str | None:
+        return None
+
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests aggregated from all registered strategies."""
         tests: list[Any] = []

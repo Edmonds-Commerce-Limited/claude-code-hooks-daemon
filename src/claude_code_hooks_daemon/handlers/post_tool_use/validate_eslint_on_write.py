@@ -185,6 +185,9 @@ class ValidateEslintOnWriteHandler(Handler):
         except Exception as e:
             return HookResult(decision=Decision.DENY, reason=f"Failed to run ESLint: {e!s}")
 
+    def get_claude_md(self) -> str | None:
+        return None
+
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for this handler."""
         from claude_code_hooks_daemon.core import AcceptanceTest, RecommendedModel, TestType

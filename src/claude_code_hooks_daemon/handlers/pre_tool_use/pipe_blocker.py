@@ -373,6 +373,26 @@ class PipeBlockerHandler(Handler):
 
         return HookResult(decision=Decision.DENY, reason=reason, context=context)
 
+    def get_claude_md(self) -> str | None:
+        """Return CLAUDE.md guidance about the pipe blocker."""
+        return (
+            "### Pipe Blocker\n\n"
+            "Commands piped to `tail` or `head` are **blocked** — piping truncates output "
+            "and causes information loss.\n\n"
+            "**Use a temp file instead:**\n\n"
+            "```bash\n"
+            "# WRONG — blocked:\n"
+            "pytest tests/ 2>&1 | tail -20\n\n"
+            "# RIGHT — redirect to temp file:\n"
+            "pytest tests/ > /tmp/pytest_out.txt 2>&1\n"
+            "# Then read selectively if needed\n"
+            "```\n\n"
+            "**Allowed** (whitelisted): `grep`, `rg`, `awk`, `sed`, `jq`, `ls`, `cat`, "
+            "`git log`, `git tag`, `git branch`, and other cheap filtering commands.\n\n"
+            "**Add to whitelist** (if safe to pipe): set `extra_whitelist` in "
+            "`.claude/hooks-daemon.yaml` under `pipe_blocker`."
+        )
+
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for pipe blocker handler."""
         from claude_code_hooks_daemon.core import (

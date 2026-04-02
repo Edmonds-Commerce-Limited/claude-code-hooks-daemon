@@ -423,6 +423,9 @@ class TestConfigPriorityOverride:
             def handle(self, hook_input: dict[str, Any]) -> HookResult:
                 return HookResult(decision=Decision.ALLOW, context=["low executed"])
 
+            def get_claude_md(self) -> str | None:
+                return None
+
             def get_acceptance_tests(self) -> list[Any]:
                 """Test handler - stub implementation."""
                 from claude_code_hooks_daemon.core import AcceptanceTest, TestType
@@ -447,6 +450,9 @@ class TestConfigPriorityOverride:
 
             def handle(self, hook_input: dict[str, Any]) -> HookResult:
                 return HookResult(decision=Decision.ALLOW, context=["high executed"])
+
+            def get_claude_md(self) -> str | None:
+                return None
 
             def get_acceptance_tests(self) -> list[Any]:
                 """Test handler - stub implementation."""

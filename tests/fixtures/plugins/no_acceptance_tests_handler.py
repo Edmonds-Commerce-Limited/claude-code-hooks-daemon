@@ -38,6 +38,9 @@ class NoAcceptanceTestsHandler(Handler):
         """
         return HookResult(decision=Decision.ALLOW, context="Test handler")
 
+    def get_claude_md(self) -> str | None:
+        return None
+
     def get_acceptance_tests(self) -> list:
         """Return empty list - VIOLATES REQUIREMENT."""
         return []
