@@ -149,6 +149,37 @@ class PipeBlockerHandler(Handler):
         # Steps 2 & 3: Blacklisted or unknown → block
         return True
 
+    @staticmethod
+    def _split_on_unquoted_pipes(s: str) -> list[str]:
+        """Split string on | characters that are not inside single or double quotes.
+
+        Prevents false splits on grep patterns like grep -E "15:56|15:57" where
+        the | is a regex alternation inside a quoted argument, not a shell pipe.
+
+        Examples:
+            'a | b | c'              -> ['a ', ' b ', ' c']
+            'grep -E "15:56|15:57"'  -> ['grep -E "15:56|15:57"']  (no split inside quotes)
+            "grep -E '15:56|15:57'"  -> ["grep -E '15:56|15:57'"]  (no split inside quotes)
+        """
+        parts: list[str] = []
+        current: list[str] = []
+        in_single = False
+        in_double = False
+        for ch in s:
+            if ch == "'" and not in_double:
+                in_single = not in_single
+                current.append(ch)
+            elif ch == '"' and not in_single:
+                in_double = not in_double
+                current.append(ch)
+            elif ch == "|" and not in_single and not in_double:
+                parts.append("".join(current))
+                current = []
+            else:
+                current.append(ch)
+        parts.append("".join(current))
+        return parts
+
     def _extract_source_segment(self, command: str) -> str:
         """Extract full segment before pipe to tail/head.
 
@@ -161,6 +192,7 @@ class PipeBlockerHandler(Handler):
             "go test ./... | tail -20"      -> "go test ./..."
             "grep err log | awk '{p}' | tail" -> "awk '{p}'"
             "npm test && grep FAIL | tail"  -> "grep FAIL"
+            'cmd | grep -E "a|b" | head'    -> 'grep -E "a|b"'
 
         Returns empty string if extraction fails (treated as unknown command).
         """
@@ -177,9 +209,10 @@ class PipeBlockerHandler(Handler):
                 if separator in before_pipe:
                     before_pipe = before_pipe.rsplit(separator, 1)[-1]
 
-            # Handle multiple actual (unescaped) pipes — take the last segment.
-            # Use negative lookbehind to avoid splitting on \| inside grep patterns.
-            parts = re.split(r"(?<!\\)\|", before_pipe)
+            # Handle multiple actual pipes — take the last segment.
+            # Quote-aware split prevents false splits on | inside grep patterns
+            # like grep -E "15:56|15:57" where | is a regex alternation, not a pipe.
+            parts = self._split_on_unquoted_pipes(before_pipe)
             if len(parts) > 1:
                 before_pipe = parts[-1]
 
