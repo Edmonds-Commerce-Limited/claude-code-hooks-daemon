@@ -320,6 +320,14 @@ Breaking changes are detected by scanning the changelog entry for this release:
    - "incompatible"
    - "renamed" (for handlers/config)
 
+4. **Handler ABC changes** (abstract methods added/removed on `Handler` base class)
+   - Any new `@abstractmethod` on `Handler` in `core/handler.py` breaks all project handlers that don't implement it
+   - Check: `git diff ${LAST_TAG}..HEAD -- src/claude_code_hooks_daemon/core/handler.py | grep abstractmethod`
+   - If new abstract method found:
+     - `_ABSTRACT_METHOD_VERSIONS` in `project_loader.py` MUST include the method name and this release version
+     - Upgrade guide MUST document: method name, version added, exact stub to add, how to detect affected handlers via `validate-project-handlers`
+     - Example: v2.30.0 added `get_claude_md()` — see `CLAUDE/UPGRADES/v2/v2.29-to-v2.30/`
+
 **Examples from v2.11 and v2.12:**
 
 v2.11 (CHANGELOG.md lines 200-204):
