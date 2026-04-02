@@ -125,7 +125,19 @@ NEVER pipe network content directly to a shell."""
         )
 
     def get_claude_md(self) -> str | None:
-        return None
+        return (
+            "## curl_pipe_shell — never pipe curl/wget to bash/sh\n\n"
+            "Piping network content directly to a shell is blocked. "
+            "It executes untrusted remote code without any inspection.\n\n"
+            "**Blocked**: `curl URL | bash`, `curl URL | sh`, `wget URL | bash`, "
+            "`curl URL | sudo bash`\n\n"
+            "**Safe alternative**: download first, inspect, then execute:\n"
+            "```\n"
+            "curl -o /tmp/script.sh URL\n"
+            "cat /tmp/script.sh          # inspect\n"
+            "bash /tmp/script.sh         # execute if safe\n"
+            "```"
+        )
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for curl pipe shell handler."""

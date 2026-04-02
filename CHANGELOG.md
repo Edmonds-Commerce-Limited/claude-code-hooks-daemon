@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.30.0] - 2026-04-02
+
+### Added
+
+- **`get_claude_md()` abstract method on `Handler` base class**: Every handler must now explicitly implement `get_claude_md()`, returning either `None` or a guidance string describing its behaviour. This makes handler self-documentation mandatory and opt-out rather than opt-in, preventing silent omissions. All 77+ existing handlers have been updated with explicit `return None` stubs or real guidance strings.
+
+- **`ClaudeMdInjector`**: New core component (`src/claude_code_hooks_daemon/core/claude_md_injector.py`) that collects `get_claude_md()` output from all active handlers on daemon restart and writes a `<hooksdaemon>...</hooksdaemon>` section into the project `CLAUDE.md`. The section is auto-replaced on each restart and never duplicates. Invoked from `DaemonController.initialise()` after all handlers are loaded. Includes 13 unit tests.
+
+- **`pipe_blocker` publishes guidance via `get_claude_md()`**: Returns a guidance block explaining what commands are blocked and showing the correct redirect-to-temp-file pattern as an alternative.
+
+- **`auto_continue_stop` publishes guidance via `get_claude_md()`**: Returns a guidance block explaining the `STOPPING BECAUSE:` prefix requirement so agents know how to signal intentional stops without triggering retry loops.
+
+- **Step 7.6 CLAUDE.md guidance audit added to release process**: The release documentation now includes a mandatory sub-agent analysis step that verifies all impactful handlers have accurate `get_claude_md()` content before each release.
+
+### Fixed
+
+- **Stale transcript race condition in `_has_stop_explanation`**: A second Stop event could fire before the new assistant turn was written to the transcript. `get_last_assistant_message()` then returned the previous turn's message (which contained `STOPPING BECAUSE:`), incorrectly allowing the new stop without a fresh explanation. Fixed by also retrying when the last message in the transcript is not from the assistant, only accepting an explanation when the last message is confirmed to be an assistant message with text blocks belonging to the current turn. If retries are exhausted without a fresh message, the method returns `False`.
+
 ## [2.29.2] - 2026-04-01
 
 ### Fixed

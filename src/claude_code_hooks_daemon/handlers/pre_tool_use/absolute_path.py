@@ -67,7 +67,15 @@ class AbsolutePathHandler(Handler):
         )
 
     def get_claude_md(self) -> str | None:
-        return None
+        return (
+            "## absolute_path — always use absolute paths\n\n"
+            "The `Read`, `Write`, and `Edit` tools require absolute paths. "
+            "Relative paths are blocked.\n\n"
+            "- **Correct**: `/workspace/src/main.py`, `/workspace/tests/test_utils.py`\n"
+            "- **Blocked**: `src/main.py`, `./config.yaml`, `../other/file.txt`\n\n"
+            "The working directory is `/workspace`. "
+            "Prepend `/workspace/` to any relative path before calling these tools."
+        )
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for absolute path handler."""

@@ -313,7 +313,22 @@ class LspEnforcementHandler(Handler):
         return "\n".join(lines)
 
     def get_claude_md(self) -> str | None:
-        return None
+        return (
+            "## lsp_enforcement — use LSP tools for code symbol lookups\n\n"
+            "Using `Grep` or `Bash` (grep/rg) to find class definitions, function "
+            "signatures, or symbol references is blocked or redirected to LSP tools, "
+            "which are faster and semantically accurate.\n\n"
+            "**Prefer LSP tools for**:\n"
+            "- Finding where a class or function is defined → `goToDefinition`\n"
+            "- Finding all usages of a symbol → `findReferences`\n"
+            "- Getting type information or documentation → `hover`\n"
+            "- Listing all symbols in a file → `documentSymbol`\n"
+            "- Searching symbols across the project → `workspaceSymbol`\n\n"
+            "**Grep/Bash grep is still appropriate for**: text patterns in content, "
+            "log searching, finding strings in config files.\n\n"
+            "Default mode (`block_once`): the first symbol-lookup grep in a session "
+            "is denied with guidance; subsequent retries are allowed."
+        )
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for LSP enforcement handler."""

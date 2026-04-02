@@ -87,7 +87,16 @@ class WorktreeFileCopyHandler(Handler):
         )
 
     def get_claude_md(self) -> str | None:
-        return None
+        return (
+            "## worktree_file_copy — do not copy files between worktrees and the main repo\n\n"
+            "`cp`, `mv`, and `rsync` operations that move files from a worktree directory "
+            "(`untracked/worktrees/` or `.claude/worktrees/`) into the main repo "
+            "(`src/`, `tests/`, `config/`) — or vice versa — are blocked.\n\n"
+            "Worktrees are isolated branches. Cross-copying corrupts that isolation "
+            "and can silently overwrite in-progress work.\n\n"
+            "**Allowed**: operations within the same worktree branch. "
+            "**To merge changes**: use `git merge` or `git cherry-pick` instead."
+        )
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for worktree file copy handler."""

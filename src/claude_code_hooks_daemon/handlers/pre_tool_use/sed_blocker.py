@@ -310,7 +310,24 @@ class SedBlockerHandler(Handler):
         )
 
     def get_claude_md(self) -> str | None:
-        return None
+        return (
+            "## sed_blocker — sed is forbidden for file modification\n\n"
+            "`sed` is blocked because Claude gets sed syntax wrong and a single error "
+            "can silently destroy hundreds of files with no recovery possible.\n\n"
+            "**Blocked**:\n"
+            "- `sed -i` / `sed -e` (in-place file editing via Bash tool)\n"
+            "- `grep -rl X | xargs sed -i` (mass file modification)\n"
+            "- Shell scripts (`.sh`/`.bash`) written via Write tool that contain `sed`\n\n"
+            "**Allowed** (read-only, no file modification):\n"
+            "- `cat file | sed 's/x/y/' | grep z` (pipeline transforming stdout only)\n"
+            "- `sed` mentioned in commit messages, PR bodies, or `.md` documentation files\n\n"
+            "**Use instead**:\n"
+            "- `Edit` tool — safe, atomic, verifiable\n"
+            "- Parallel Haiku agents with `Edit` tool for bulk changes across many files:\n"
+            "  1. Identify all files to update\n"
+            "  2. Dispatch one Haiku agent per file\n"
+            "  3. Each agent uses the `Edit` tool (never `sed`)"
+        )
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for sed blocker handler."""

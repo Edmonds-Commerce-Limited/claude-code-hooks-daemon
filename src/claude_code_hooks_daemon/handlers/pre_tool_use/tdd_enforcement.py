@@ -347,7 +347,23 @@ class TddEnforcementHandler(Handler):
         return Path(source_path).parent / _TEST_SUBDIR_NAME / test_filename
 
     def get_claude_md(self) -> str | None:
-        return None
+        return (
+            "## tdd_enforcement — test file must exist before source file\n\n"
+            "Creating a production source file is blocked until a corresponding test file exists.\n\n"
+            "**TDD workflow (required)**:\n"
+            "1. Create the **test file first** (e.g. `tests/unit/handlers/test_my_handler.py`)\n"
+            "2. Write failing tests — RED phase\n"
+            "3. Create the source file and implement until tests pass — GREEN phase\n"
+            "4. Refactor — REFACTOR phase\n\n"
+            "**Supported languages**: Python, Go, JavaScript/TypeScript, PHP, Rust, Java, "
+            "C#, Kotlin, Ruby, Swift, Dart\n\n"
+            "**Test file locations checked** (any satisfies the block):\n"
+            "- Separate mirror: `tests/unit/{subdir}/test_{module}.py`\n"
+            "- Collocated: `{source_dir}/{module}.test.ts` (JS/TS projects)\n"
+            "- Test subdirectory: `{source_dir}/__tests__/{module}.test.ts`\n\n"
+            "**Allowed through without blocking**: vendor dirs, node_modules, build outputs, "
+            "generated files, and file extensions not in the supported language list."
+        )
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests aggregated from all registered strategies."""

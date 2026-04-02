@@ -103,7 +103,17 @@ class DaemonRestartVerifierHandler(Handler):
         )
 
     def get_claude_md(self) -> str | None:
-        return None
+        return (
+            "## daemon_restart_verifier — restart the daemon before committing\n\n"
+            "Before making a `git commit` in the hooks daemon repository, this handler "
+            "advises verifying that the daemon can restart successfully with the current "
+            "code changes. This is advisory — it adds context but does not block the commit.\n\n"
+            "**Why**: Unit tests alone don't catch import errors. A handler that fails to "
+            "import silently disables protection without any test-time error. Daemon restart "
+            "is the definitive check.\n\n"
+            "**Run before committing** (in this repo only):\n"
+            "`$PYTHON -m claude_code_hooks_daemon.daemon.cli restart` then verify status shows RUNNING."
+        )
 
     def get_acceptance_tests(self) -> list[AcceptanceTest]:
         """Return acceptance tests for daemon restart verifier."""

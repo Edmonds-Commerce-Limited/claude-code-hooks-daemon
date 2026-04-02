@@ -186,7 +186,19 @@ class ValidateInstructionContentHandler(Handler):
         return "\n".join(result_lines)
 
     def get_claude_md(self) -> str | None:
-        return None
+        return (
+            "## validate_instruction_content — CLAUDE.md and README.md must have stable content\n\n"
+            "Writing ephemeral or session-specific content to `CLAUDE.md` or `README.md` is "
+            "blocked. These files should contain only stable instructions, not implementation "
+            "logs or session state.\n\n"
+            "**Blocked content types**:\n"
+            "- Timestamps and ISO dates\n"
+            "- Status emoji followed by completion words (e.g. checkmark + 'Done')\n"
+            "- Implementation log sentences ('created the file X', 'added the class Y')\n"
+            "- Test output counts ('3 tests passed')\n"
+            "- LLM summary section headings ('## Summary', '## Key Points')\n\n"
+            "Content inside markdown code blocks is exempt from validation."
+        )
 
     def get_acceptance_tests(self) -> list[AcceptanceTest]:
         """Return acceptance tests for this handler."""

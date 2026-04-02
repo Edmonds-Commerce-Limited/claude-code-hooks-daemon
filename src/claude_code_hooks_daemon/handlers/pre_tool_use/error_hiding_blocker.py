@@ -130,7 +130,21 @@ class ErrorHidingBlockerHandler(Handler):
         )
 
     def get_claude_md(self) -> str | None:
-        return None
+        return (
+            "## error_hiding_blocker — error-suppression patterns are blocked\n\n"
+            "Writing code that silently swallows errors is blocked. "
+            "All errors must be handled explicitly.\n\n"
+            "**Blocked patterns (examples)**:\n"
+            "- Python: bare `except` clauses with an empty body, "
+            "catching and discarding all exceptions\n"
+            "- Shell: redirecting stderr to `/dev/null` to silence failures, "
+            "`|| true` to suppress non-zero exit codes\n"
+            "- JavaScript/TypeScript: empty `catch` blocks that swallow exceptions\n"
+            "- Go: `_ = err` (discarding error return values without handling)\n\n"
+            "**Required action**: Handle errors explicitly — log them, return them "
+            "to the caller, or propagate them. Silent error suppression masks bugs "
+            "and makes debugging impossible."
+        )
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests aggregated from all registered strategies."""
