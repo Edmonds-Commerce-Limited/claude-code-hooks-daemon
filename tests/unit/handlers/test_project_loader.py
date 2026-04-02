@@ -88,17 +88,25 @@ class TestDiscoverHandlers:
         results = ProjectHandlerLoader.discover_handlers(tmp_path)
         assert results == []
 
-    def test_discover_handlers_crashes_on_syntax_errors(self, error_cases_dir: Path) -> None:
-        """Test that any error in handler files crashes (TIER 1: project handlers).
+    def test_discover_handlers_skips_broken_handlers_and_logs_warnings(
+        self,
+        error_cases_dir: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that broken handlers are skipped and a warning is logged.
 
-        Project handlers are explicitly written by the user - any error must
-        be immediately visible, not silently skipped. Discovery stops at the
-        first error encountered.
+        Project handlers are user code — an upstream upgrade should not kill
+        the daemon. Broken handlers are skipped gracefully so the daemon starts
+        with all remaining working handlers still active.
         """
-        # The error_cases directory contains multiple error types
-        # Discovery should crash when it tries to load the first one
-        with pytest.raises(RuntimeError, match="Failed to .* project handler"):
-            ProjectHandlerLoader.discover_handlers(error_cases_dir)
+        with caplog.at_level(logging.WARNING):
+            results = ProjectHandlerLoader.discover_handlers(error_cases_dir)
+
+        # Broken handlers skipped → returns only successfully loaded handlers
+        # (may be empty if all broken, but must not raise)
+        assert isinstance(results, list)
+        # At least one warning logged for each skipped handler
+        assert any("Skipping project handler" in record.message for record in caplog.records)
 
     def test_discover_handlers_ignores_non_event_directories(self, tmp_path: Path) -> None:
         """Test that directories not matching event types are ignored."""
@@ -143,6 +151,55 @@ class SimpleHandler(Handler):
         assert len(results) == 1
         assert results[0][0] == EventType.PRE_TOOL_USE
         assert results[0][1].name == "simple-test"
+
+    def test_discover_handlers_skips_broken_handler_and_loads_working_one(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that a broken handler is skipped while a working one still loads.
+
+        This is the core resilience guarantee: one broken project handler must
+        not prevent other working project handlers from loading.
+        """
+        pre_tool_dir = tmp_path / "pre_tool_use"
+        pre_tool_dir.mkdir()
+
+        # Broken handler — syntax error
+        (pre_tool_dir / "aaa_broken_handler.py").write_text("this is not valid python !!!")
+
+        # Working handler
+        working_code = '''"""Working handler."""
+from typing import Any
+from claude_code_hooks_daemon.core import Handler, HookResult, AcceptanceTest, TestType
+from claude_code_hooks_daemon.core.hook_result import Decision
+
+class WorkingHandler(Handler):
+    def __init__(self) -> None:
+        super().__init__(handler_id="working-handler", priority=50)
+    def matches(self, hook_input: dict[str, Any]) -> bool:
+        return False
+    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+        return HookResult(decision=Decision.ALLOW)
+    def get_claude_md(self) -> str | None:
+        return None
+    def get_acceptance_tests(self) -> list[AcceptanceTest]:
+        return [AcceptanceTest(
+            title="test", command="echo test", description="test",
+            expected_decision=Decision.ALLOW, expected_message_patterns=[],
+            test_type=TestType.BLOCKING,
+        )]
+'''
+        (pre_tool_dir / "zzz_working_handler.py").write_text(working_code)
+
+        with caplog.at_level(logging.WARNING):
+            results = ProjectHandlerLoader.discover_handlers(tmp_path)
+
+        # Working handler loaded despite broken one
+        assert len(results) == 1
+        assert results[0][1].name == "working-handler"
+        # Warning logged for the skipped handler
+        assert any("Skipping project handler" in record.message for record in caplog.records)
 
 
 class TestLoadHandlerFromFile:
@@ -304,6 +361,28 @@ class SecondHandler(Handler):
 
         with pytest.raises(RuntimeError, match="Multiple Handler subclasses found"):
             ProjectHandlerLoader.load_handler_from_file(handler_file)
+
+    def test_load_handler_gives_version_specific_error_for_missing_get_claude_md(
+        self,
+        error_cases_dir: Path,
+    ) -> None:
+        """Test that a handler missing get_claude_md() gets a version-specific error.
+
+        Regression test for v2.30.0 breaking change: get_claude_md() became abstract.
+        The error must name the method and the version it was introduced, so users
+        know exactly what to add and why, rather than seeing "No Handler subclass found".
+        """
+        handler_file = error_cases_dir / "pre_tool_use" / "missing_get_claude_md_handler.py"
+        with pytest.raises(RuntimeError) as exc_info:
+            ProjectHandlerLoader.load_handler_from_file(handler_file)
+
+        error_message = str(exc_info.value)
+        assert (
+            "get_claude_md" in error_message
+        ), f"Error should name the missing method, got: {error_message}"
+        assert (
+            "2.30.0" in error_message
+        ), f"Error should include the version that introduced the method, got: {error_message}"
 
     def test_load_handler_applies_default_priority_when_none(
         self,
