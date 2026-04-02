@@ -291,17 +291,28 @@ class AutoContinueStopHandler(Handler):
 
         Falls back to the joined content string for legacy/string-format messages.
 
-        Race condition handling: Claude Code writes thinking and text as separate
-        JSONL entries. If the stop event fires before the text entry is flushed,
-        the last assistant message will be thinking-only. When this is detected,
-        the transcript is reloaded up to 3 times with a short delay to give Claude
-        Code time to flush the text entry.
+        Race condition handling — two cases:
+        1. Thinking-only message: Claude Code writes thinking and text as separate
+           JSONL entries. If the stop event fires before the text entry is flushed,
+           the last assistant message will be thinking-only (no text blocks).
+        2. Stale previous-turn message: Stop fires before any new assistant content
+           is written for the current turn. The transcript's last message is from the
+           USER (e.g. after a continuation prompt), so get_last_assistant_message()
+           returns the PREVIOUS turn's message — which may contain "STOPPING BECAUSE:"
+           from an earlier allowed stop, causing a false positive.
+
+        In both cases the transcript is reloaded up to 3 times with a short delay.
+        A "fresh" message is one where the last message in the transcript IS from
+        the assistant AND has text blocks. If retries are exhausted without a fresh
+        message, we return False — cannot verify the explanation belongs to the
+        current stop event.
 
         Args:
             reader: Loaded transcript reader
 
         Returns:
-            True if any line in any text block starts with the STOPPING BECAUSE: prefix
+            True if any line in any text block of the CURRENT turn starts with
+            the STOPPING BECAUSE: prefix
         """
         msg = reader.get_last_assistant_message()
         if not msg:
@@ -322,10 +333,19 @@ class AutoContinueStopHandler(Handler):
                         return True
             return _line_starts_with_prefix(m.content)
 
-        # If the last assistant message has no text blocks (thinking/tool_use only),
-        # the text entry may not have been flushed yet (stop fires before text is
-        # written). Reload the transcript up to 3 times with a short delay.
-        if not _has_text_blocks(msg):
+        def _last_message_is_assistant(r: TranscriptReader) -> bool:
+            """Return True if the most recent message in the transcript is from assistant."""
+            all_msgs = r.get_messages()
+            return bool(all_msgs) and all_msgs[-1].role == "assistant"
+
+        # Retry condition — either:
+        # 1. No text blocks yet (thinking-only: text not flushed yet), OR
+        # 2. Last message is not assistant (stale previous-turn message: new turn
+        #    not written yet — assistant hasn't started responding to current prompt)
+        needs_retry = not _has_text_blocks(msg) or not _last_message_is_assistant(reader)
+
+        if needs_retry:
+            found_fresh = False
             transcript_path = getattr(reader, "_path", None)
             if transcript_path:
                 for _ in range(3):
@@ -333,9 +353,19 @@ class AutoContinueStopHandler(Handler):
                     retry_reader = TranscriptReader()
                     retry_reader.load(transcript_path)
                     retry_msg = retry_reader.get_last_assistant_message()
-                    if retry_msg and _has_text_blocks(retry_msg):
+                    # "Fresh" = last message IS assistant AND has text blocks
+                    if (
+                        _last_message_is_assistant(retry_reader)
+                        and retry_msg
+                        and _has_text_blocks(retry_msg)
+                    ):
                         msg = retry_msg
+                        found_fresh = True
                         break
+
+            if not found_fresh:
+                # Retries exhausted — cannot verify explanation belongs to current stop
+                return False
 
         return _check_msg(msg)
 

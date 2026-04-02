@@ -1375,3 +1375,154 @@ class TestAutoContinueStopHandlerExplainerBehaviours:
         result = handler.handle(hook_input)
         assert result.reason is not None
         assert "STOPPING BECAUSE" in result.reason
+
+
+class TestHasStopExplanationStaleTranscriptRace:
+    """Tests for the stale-transcript race condition in _has_stop_explanation().
+
+    Race condition scenario:
+    1. Turn N: Claude says "STOPPING BECAUSE: task done" → stop allowed.
+    2. User sends new prompt; Claude starts a new turn.
+    3. Second stop fires BEFORE Claude writes any new assistant content.
+    4. get_last_assistant_message() returns the OLD turn-N message.
+    5. Without the fix, _has_stop_explanation() incorrectly returns True.
+    """
+
+    @pytest.fixture
+    def handler(self) -> AutoContinueStopHandler:
+        """Create handler instance."""
+        return AutoContinueStopHandler()
+
+    def test_stale_explanation_from_previous_turn_not_accepted(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """STOPPING BECAUSE: in old turn must not satisfy current stop event.
+
+        Race condition: stop fires before new assistant message is written.
+        Transcript has user message after old 'STOPPING BECAUSE:' assistant
+        message, but no new assistant message yet. Must return False.
+        """
+        from unittest.mock import patch
+
+        from claude_code_hooks_daemon.core.transcript_reader import TranscriptReader
+
+        transcript_path = tmp_path / "transcript.jsonl"
+        messages = [
+            {
+                "type": "message",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "STOPPING BECAUSE: task complete"}],
+                },
+            },
+            {
+                "type": "message",
+                "message": {
+                    "role": "user",
+                    "content": [{"type": "text", "text": "please continue"}],
+                },
+            },
+            # No new assistant message — new turn not written yet
+        ]
+        with transcript_path.open("w") as f:
+            for msg in messages:
+                f.write(json.dumps(msg) + "\n")
+
+        reader = TranscriptReader()
+        reader.load(str(transcript_path))
+
+        # Patch sleep so retries are instant (all retries will still see user as last)
+        with patch("claude_code_hooks_daemon.handlers.stop.auto_continue_stop.time.sleep"):
+            result = handler._has_stop_explanation(reader)
+
+        assert (
+            result is False
+        ), "STOPPING BECAUSE: from previous turn should not satisfy current stop"
+
+    def test_explanation_in_current_turn_accepted(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """STOPPING BECAUSE: in current turn (no user msg after it) is valid."""
+        from claude_code_hooks_daemon.core.transcript_reader import TranscriptReader
+
+        transcript_path = tmp_path / "transcript.jsonl"
+        messages = [
+            {
+                "type": "message",
+                "message": {
+                    "role": "user",
+                    "content": [{"type": "text", "text": "do the work"}],
+                },
+            },
+            {
+                "type": "message",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "STOPPING BECAUSE: all done"}],
+                },
+            },
+            # Last message IS assistant — fresh, not stale
+        ]
+        with transcript_path.open("w") as f:
+            for msg in messages:
+                f.write(json.dumps(msg) + "\n")
+
+        reader = TranscriptReader()
+        reader.load(str(transcript_path))
+
+        result = handler._has_stop_explanation(reader)
+
+        assert result is True
+
+    def test_stale_then_fresh_assistant_message_accepted_on_retry(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """Stale transcript at first read, fresh assistant message appears on retry.
+
+        Simulates the transcript being updated between the initial load and the
+        retry: initial state has user as last message, but by the time retry
+        reloads the file a new assistant message with STOPPING BECAUSE: exists.
+        """
+        from claude_code_hooks_daemon.core.transcript_reader import TranscriptReader
+
+        transcript_path = tmp_path / "transcript.jsonl"
+
+        # Initial state: last message is user (no new assistant yet)
+        initial_messages = [
+            {
+                "type": "message",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "STOPPING BECAUSE: old turn"}],
+                },
+            },
+            {
+                "type": "message",
+                "message": {
+                    "role": "user",
+                    "content": [{"type": "text", "text": "continue"}],
+                },
+            },
+        ]
+        with transcript_path.open("w") as f:
+            for msg in initial_messages:
+                f.write(json.dumps(msg) + "\n")
+
+        reader = TranscriptReader()
+        reader.load(str(transcript_path))
+
+        # Append fresh assistant message BEFORE retries run (file already updated)
+        fresh_msg = {
+            "type": "message",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "STOPPING BECAUSE: new turn done"}],
+            },
+        }
+        with transcript_path.open("a") as f:
+            f.write(json.dumps(fresh_msg) + "\n")
+
+        # Retry must reload and find the fresh assistant message
+        result = handler._has_stop_explanation(reader)
+
+        assert result is True
