@@ -70,8 +70,9 @@ If you need to upgrade manually:
 # 1. Stop daemon
 $PYTHON -m claude_code_hooks_daemon.daemon.cli stop
 
-# 2. Download upgrade script
-curl -fsSL https://raw.githubusercontent.com/your-org/hooks-daemon/main/scripts/upgrade.sh | bash
+# 2. Download upgrade script (never pipe curl to shell)
+curl -sSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/scripts/upgrade.sh -o /tmp/hooks-daemon-upgrade.sh
+bash /tmp/hooks-daemon-upgrade.sh
 
 # 3. Verify new version
 $PYTHON -m claude_code_hooks_daemon.daemon.cli status

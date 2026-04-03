@@ -1,7 +1,7 @@
 ---
 name: hooks-daemon
-description: Manage Claude Code Hooks Daemon - upgrade versions, check health, restart, and develop project-level handlers
-argument-hint: "[upgrade|health|restart|dev-handlers|logs] [args...]"
+description: Manage Claude Code Hooks Daemon - install, upgrade, check health, restart, and develop project-level handlers
+argument-hint: "[install|upgrade|health|restart|dev-handlers|logs] [args...]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Bash, Read, Write, Edit
@@ -12,6 +12,15 @@ allowed-tools: Bash, Read, Write, Edit
 Manage your Claude Code Hooks Daemon installation with these commands.
 
 ## Available Commands
+
+### Install Daemon
+Install the hooks daemon on a fresh clone (daemon not yet present):
+```bash
+/hooks-daemon install          # Install daemon from GitHub
+/hooks-daemon install --force  # Force reinstall over existing
+```
+
+See [install.md](install.md) for detailed install documentation.
 
 ### Upgrade Daemon
 Update to a new version of the hooks daemon:
@@ -92,6 +101,10 @@ shift || true  # Remove subcommand from arguments
 
 # Route to appropriate script
 case "$SUBCOMMAND" in
+    install)
+        bash "$SKILL_DIR/scripts/install.sh" "$@"
+        ;;
+
     upgrade)
         bash "$SKILL_DIR/scripts/upgrade.sh" "$@"
         ;;
@@ -114,6 +127,7 @@ case "$SUBCOMMAND" in
         echo "Usage: /hooks-daemon <command> [args...]"
         echo ""
         echo "Available commands:"
+        echo "  install [--force]     Install daemon (fresh clone)"
         echo "  restart               Restart daemon (required after config changes)"
         echo "  health                Check daemon health and status"
         echo "  upgrade [VERSION]     Upgrade daemon to new version"

@@ -27,10 +27,10 @@ class GhIssueCommentsHandler(Handler):
     and updates that aren't in the issue body. Claude should always read them.
 
     Options:
-        command_redirection: bool (default True) — When enabled, the handler
+        command_redirection: bool (default False) — When enabled, the handler
             executes the corrected command automatically and saves output to a
-            file, so Claude gets both the educational message AND the result
-            in one turn.
+            file. Disabled by default because the output file lands inside
+            .claude/hooks-daemon/ which triggers CLAUDE.md cascade loading.
     """
 
     def __init__(self, options: dict[str, Any] | None = None) -> None:
@@ -40,7 +40,7 @@ class GhIssueCommentsHandler(Handler):
             tags=[HandlerTag.WORKFLOW, HandlerTag.GITHUB, HandlerTag.BLOCKING, HandlerTag.TERMINAL],
         )
         options = options or {}
-        self._command_redirection: bool = options.get("command_redirection", True)
+        self._command_redirection: bool = options.get("command_redirection", False)
 
         # Match: gh issue view [number] [--repo owner/repo] [other flags]
         # But NOT already containing --comments

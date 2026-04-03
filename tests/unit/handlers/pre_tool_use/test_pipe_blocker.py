@@ -427,15 +427,15 @@ class TestDataLayerErrorFallback:
 class TestPipeBlockerRedirection:
     """Tests for command redirection in PipeBlockerHandler."""
 
-    def test_redirection_enabled_by_default(self) -> None:
-        """Command redirection should be enabled by default."""
+    def test_redirection_disabled_by_default(self) -> None:
+        """Command redirection should be disabled by default (CLAUDE.md cascade issue)."""
         handler = PipeBlockerHandler()
-        assert handler._command_redirection is True
-
-    def test_redirection_disabled_via_options(self) -> None:
-        """Command redirection can be disabled via options."""
-        handler = PipeBlockerHandler(options={"command_redirection": False})
         assert handler._command_redirection is False
+
+    def test_redirection_enabled_via_options(self) -> None:
+        """Command redirection can be enabled via options."""
+        handler = PipeBlockerHandler(options={"command_redirection": True})
+        assert handler._command_redirection is True
 
     def test_get_redirected_command_strips_pipe(self) -> None:
         """Should return base command with pipe stripped."""
@@ -477,7 +477,7 @@ class TestPipeBlockerRedirection:
 
     def test_handle_with_redirection_includes_context(self, tmp_path: Path) -> None:
         """When redirection is enabled, handle() should include redirection context."""
-        handler = PipeBlockerHandler()
+        handler = PipeBlockerHandler(options={"command_redirection": True})
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "pytest tests/ | tail -20"},

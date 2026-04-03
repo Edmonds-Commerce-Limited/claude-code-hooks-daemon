@@ -121,9 +121,14 @@ curl: (404) Not Found
 ```
 
 **Solution:**
-Use the correct upgrade URL:
+Use the skill command or download-then-run:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/your-org/hooks-daemon/main/scripts/upgrade.sh | bash
+# Preferred:
+/hooks-daemon upgrade
+
+# Manual:
+curl -sSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/scripts/upgrade.sh -o /tmp/hooks-daemon-upgrade.sh
+bash /tmp/hooks-daemon-upgrade.sh
 ```
 
 ### Upgrade Hangs
@@ -331,7 +336,7 @@ When reporting issues, include:
 4. Diagnostic report (above)
 5. Steps to reproduce
 
-**Report at:** https://github.com/your-org/claude-code-hooks-daemon/issues
+**Report at:** https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/issues
 
 ## Quick Reference
 

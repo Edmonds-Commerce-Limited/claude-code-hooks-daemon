@@ -284,15 +284,15 @@ class TestGhIssueCommentsHandler:
     # COMMAND REDIRECTION TESTS
     # ==========================================================================
 
-    def test_redirection_enabled_by_default(self) -> None:
-        """Command redirection should be enabled by default."""
+    def test_redirection_disabled_by_default(self) -> None:
+        """Command redirection should be disabled by default (CLAUDE.md cascade issue)."""
         handler = GhIssueCommentsHandler()
-        assert handler._command_redirection is True
-
-    def test_redirection_disabled_via_options(self) -> None:
-        """Command redirection can be disabled via options."""
-        handler = GhIssueCommentsHandler(options={"command_redirection": False})
         assert handler._command_redirection is False
+
+    def test_redirection_enabled_via_options(self) -> None:
+        """Command redirection can be enabled via options."""
+        handler = GhIssueCommentsHandler(options={"command_redirection": True})
+        assert handler._command_redirection is True
 
     def test_get_redirected_command_basic(self, handler: GhIssueCommentsHandler) -> None:
         """Should return corrected command with --comments appended."""
@@ -332,10 +332,9 @@ class TestGhIssueCommentsHandler:
         redirected = handler.get_redirected_command(hook_input)
         assert redirected is None
 
-    def test_handle_with_redirection_includes_context(
-        self, handler: GhIssueCommentsHandler, tmp_path: Path
-    ) -> None:
-        """When redirection is enabled, handle() should include redirection context."""
+    def test_handle_with_redirection_includes_context(self, tmp_path: Path) -> None:
+        """When redirection is explicitly enabled, handle() should include redirection context."""
+        handler = GhIssueCommentsHandler(options={"command_redirection": True})
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "gh issue view 123"},

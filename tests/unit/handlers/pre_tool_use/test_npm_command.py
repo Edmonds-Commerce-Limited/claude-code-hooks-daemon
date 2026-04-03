@@ -679,23 +679,23 @@ class TestNpmCommandHandler:
     # COMMAND REDIRECTION TESTS
     # ==========================================================================
 
-    def test_redirection_enabled_by_default(self) -> None:
-        """Command redirection should be enabled by default."""
+    def test_redirection_disabled_by_default(self) -> None:
+        """Command redirection should be disabled by default (CLAUDE.md cascade issue)."""
         with patch(
             "claude_code_hooks_daemon.handlers.pre_tool_use.npm_command.has_llm_commands_in_package_json",
             return_value=True,
         ):
             handler = NpmCommandHandler()
-        assert handler._command_redirection is True
+        assert handler._command_redirection is False
 
-    def test_redirection_disabled_via_options(self) -> None:
-        """Command redirection can be disabled via options."""
+    def test_redirection_enabled_via_options(self) -> None:
+        """Command redirection can be enabled via options."""
         with patch(
             "claude_code_hooks_daemon.handlers.pre_tool_use.npm_command.has_llm_commands_in_package_json",
             return_value=True,
         ):
-            handler = NpmCommandHandler(options={"command_redirection": False})
-        assert handler._command_redirection is False
+            handler = NpmCommandHandler(options={"command_redirection": True})
+        assert handler._command_redirection is True
 
     def test_get_redirected_command_npm_run(self, handler: NpmCommandHandler) -> None:
         """Should return corrected npm run llm: command."""
@@ -741,10 +741,13 @@ class TestNpmCommandHandler:
         redirected = handler.get_redirected_command(hook_input)
         assert redirected is None
 
-    def test_handle_with_redirection_includes_context(
-        self, handler: NpmCommandHandler, tmp_path: Path
-    ) -> None:
-        """When redirection is enabled, handle() should include redirection context."""
+    def test_handle_with_redirection_includes_context(self, tmp_path: Path) -> None:
+        """When redirection is explicitly enabled, handle() should include redirection context."""
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.npm_command.has_llm_commands_in_package_json",
+            return_value=True,
+        ):
+            redir_handler = NpmCommandHandler(options={"command_redirection": True})
         hook_input: dict[str, Any] = {
             "tool_name": "Bash",
             "tool_input": {"command": "npm run build"},
@@ -767,7 +770,7 @@ class TestNpmCommandHandler:
                 output_path=tmp_path / "test.txt",
                 command="npm run llm:build",
             )
-            result = handler.handle(hook_input)
+            result = redir_handler.handle(hook_input)
 
         assert result.decision == Decision.DENY
         joined_context = "\n".join(result.context)
