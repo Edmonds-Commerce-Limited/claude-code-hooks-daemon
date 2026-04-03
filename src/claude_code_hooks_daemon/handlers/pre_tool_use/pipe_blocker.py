@@ -65,10 +65,11 @@ class PipeBlockerHandler(Handler):
         """Initialize with optional per-project extra whitelist/blacklist.
 
         Options:
-            command_redirection: bool (default True) — When enabled, the handler
+            command_redirection: bool (default False) — When enabled, the handler
                 executes the base command (without pipe) automatically and saves
-                output to a file, so Claude gets the educational message AND the
-                result in one turn.
+                output to a file. Disabled by default because the output file
+                lands inside .claude/hooks-daemon/ which triggers CLAUDE.md
+                cascade loading when Claude reads it.
         """
         super().__init__(
             handler_id=HandlerID.PIPE_BLOCKER,
@@ -76,7 +77,7 @@ class PipeBlockerHandler(Handler):
             tags=[HandlerTag.SAFETY, HandlerTag.BASH, HandlerTag.BLOCKING, HandlerTag.TERMINAL],
         )
         options = options or {}
-        self._command_redirection: bool = options.get("command_redirection", True)
+        self._command_redirection: bool = options.get("command_redirection", False)
 
         # Strategy registry for language-specific blacklists
         self._registry = PipeBlockerStrategyRegistry.create_default()

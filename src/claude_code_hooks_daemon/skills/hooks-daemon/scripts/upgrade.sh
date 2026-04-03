@@ -41,7 +41,7 @@ if [ ! -d "$DAEMON_DIR" ]; then
     echo "Error: Daemon directory not found: $DAEMON_DIR"
     echo ""
     echo "Run installation first:"
-    echo "  curl -fsSL https://raw.githubusercontent.com/your-org/hooks-daemon/main/scripts/install.sh | bash"
+    echo "  /hooks-daemon install"
     exit 1
 fi
 

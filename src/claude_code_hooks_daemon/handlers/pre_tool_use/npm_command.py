@@ -27,10 +27,10 @@ class NpmCommandHandler(Handler):
     """Enforce llm: prefixed npm commands and block direct npx tool usage.
 
     Options:
-        command_redirection: bool (default True) — When enabled, the handler
+        command_redirection: bool (default False) — When enabled, the handler
             executes the corrected llm: command automatically and saves output
-            to a file, so Claude gets both the educational message AND the result
-            in one turn.
+            to a file. Disabled by default because the output file lands inside
+            .claude/hooks-daemon/ which triggers CLAUDE.md cascade loading.
     """
 
     ALLOWED_COMMANDS: ClassVar[list[str]] = ["clean", "dev:permissive"]
@@ -71,7 +71,7 @@ class NpmCommandHandler(Handler):
             ],
         )
         options = options or {}
-        self._command_redirection: bool = options.get("command_redirection", True)
+        self._command_redirection: bool = options.get("command_redirection", False)
         self.has_llm_commands: bool = has_llm_commands_in_package_json()
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
