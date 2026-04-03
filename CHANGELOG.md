@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.31.0] - 2026-04-03
+
+### Added
+
+- **Handler ABC version registry accuracy**: Updated `_ABSTRACT_METHOD_VERSIONS` registry in `project_loader.py` to ensure the `get_claude_md()` method version entry is accurate, preventing false positive version mismatch errors when validating project handlers.
+
+- **Release process checklist for Handler ABC methods**: Added a detection step to the release process for new `@abstractmethod` entries on the `Handler` base class — ensuring upgrade guides document the method name, version added, and the required stub for project handlers.
+
+- **Upgrade guide v2.29 to v2.30**: Created comprehensive upgrade guide in `CLAUDE/UPGRADES/v2/v2.29-to-v2.30/` documenting the `get_claude_md()` breaking change introduced in v2.30.0, including before/after config examples and migration steps.
+
+### Fixed
+
+- **`validate-project-handlers` now returns exit 1 on load failures**: Previously, the CLI command reported handler load failures but exited with code 0, making it usable in CI scripts without detecting problems. Now correctly exits with code 1 when any project handler fails to load.
+
+- **Quote-aware pipe splitting in pipe blocker handler**: The pipe blocker previously split commands on `|` characters inside quoted strings, causing false positives on legitimate commands that contained quoted pipe characters. Now correctly ignores `|` inside single and double quotes.
+
+- **Project handler load failures no longer crash the daemon**: A single malformed or incompatible project handler previously caused the entire daemon startup to fail. Now failed project handlers are skipped with an error log entry, allowing the daemon to start with the remaining valid handlers.
+
+- **Command redirection output to `/tmp/` instead of daemon dir**: The async command redirection feature (pipe blocker, gh issue comments, npm command) previously wrote output files into the daemon's runtime directory. Changed to write to `/tmp/hooks-daemon-cmd/` for consistency and to avoid cluttering the daemon directory.
+
+- **Fresh clone install experience**: Hook scripts on freshly cloned projects now direct the LLM to use `/hooks-daemon install` instead of referencing the non-existent `CLAUDE/LLM-INSTALL.md` file. New install skill and shell script added to the deployed skills package.
+
+- **Placeholder URLs replaced**: Fixed `your-org/hooks-daemon` references across skill files to use the correct `Edmonds-Commerce-Limited/claude-code-hooks-daemon` GitHub URL. Also fixed `curl | bash` patterns to use the safer download-then-inspect approach.
+
+- **Command redirection disabled by default**: All three handlers with command redirection (`pipe_blocker`, `gh_issue_comments`, `npm_command`) now default to `command_redirection: false` to avoid CLAUDE.md cascade reads when output files were in the daemon directory.
+
+- **`gh_issue_comments` publishes guidance via `get_claude_md()`**: Returns a guidance block explaining why `--comments` is required and how to use `--json` with the `comments` field as an alternative.
+
+- **`npm_command` publishes guidance via `get_claude_md()`**: Returns a guidance block explaining the `llm:` prefix convention for npm commands and the difference between advisory and enforcement modes.
+
+### Changed
+
+- **RELEASING.md condensed from 1,178 to 210 lines**: Refactored the release documentation to be significantly more concise while preserving all essential steps, making it faster to read and easier to follow during releases.
+
 ## [2.30.0] - 2026-04-02
 
 ### Added

@@ -405,3 +405,24 @@ class TestGhIssueCommentsHandler:
         # But no redirection context (failed gracefully)
         joined_context = "\n".join(result.context)
         assert "COMMAND REDIRECTED" not in joined_context
+
+    # ==========================================================================
+    # CLAUDE.MD GUIDANCE TESTS
+    # ==========================================================================
+
+    def test_get_claude_md_returns_guidance(self, handler: GhIssueCommentsHandler) -> None:
+        """Should return non-None guidance for CLAUDE.md injection."""
+        guidance = handler.get_claude_md()
+        assert guidance is not None
+
+    def test_get_claude_md_mentions_comments_flag(self, handler: GhIssueCommentsHandler) -> None:
+        """Guidance should explain the --comments requirement."""
+        guidance = handler.get_claude_md()
+        assert guidance is not None
+        assert "--comments" in guidance
+
+    def test_get_claude_md_mentions_json_alternative(self, handler: GhIssueCommentsHandler) -> None:
+        """Guidance should mention --json with comments field as alternative."""
+        guidance = handler.get_claude_md()
+        assert guidance is not None
+        assert "--json" in guidance

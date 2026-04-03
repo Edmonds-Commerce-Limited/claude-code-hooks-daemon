@@ -262,7 +262,16 @@ class NpmCommandHandler(Handler):
         return HookResult(decision=Decision.DENY, reason=reason, context=context)
 
     def get_claude_md(self) -> str | None:
-        return None
+        return (
+            "## npm_command — use llm: prefixed npm commands\n\n"
+            "Direct `npm run` and `npx` commands are blocked or advised against. "
+            "Projects with `llm:` prefixed scripts in `package.json` should use those instead.\n\n"
+            "**Why**: `llm:` commands are configured for LLM-friendly output "
+            "(no spinners, no colour codes, structured results).\n\n"
+            "**Example**: Use `npm run llm:build` instead of `npm run build`.\n\n"
+            "If no `llm:` commands exist in `package.json`, the handler operates "
+            "in advisory mode (warns but does not block)."
+        )
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Npm Command."""
