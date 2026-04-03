@@ -21,8 +21,9 @@ Usage in handlers:
 SECURITY:
 - Commands are computed by handlers (not user input) — safe by construction
 - Uses subprocess.run with list args (no shell=True)
-- Output written to daemon untracked directory (not /tmp)
-- Files auto-cleaned after 1 hour
+- Output written to /tmp/hooks-daemon-cmd/ (outside project tree to avoid
+  triggering CLAUDE.md cascade reads when LLM reads output files)
+- Files auto-cleaned after 1 hour on each execution
 """
 
 from __future__ import annotations
@@ -36,7 +37,14 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Subdirectory name within daemon untracked dir for redirection output
+# Output directory for command redirection files.
+# Uses /tmp/ (outside project tree) to avoid triggering CLAUDE.md cascade
+# reads when the LLM reads output files from within .claude/hooks-daemon/.
+COMMAND_REDIRECTION_OUTPUT_DIR: Path = Path(
+    "/tmp/hooks-daemon-cmd"
+)  # nosec B108 — not runtime state, just ephemeral command output
+
+# Legacy constant kept for backwards compatibility with existing handler imports.
 COMMAND_REDIRECTION_SUBDIR: str = "command-redirection"
 
 # Default timeout for redirected commands (seconds)
@@ -52,6 +60,19 @@ _CLEANUP_MAX_AGE_SECONDS: int = 3600
 _ASYNC_WRAPPER_SCRIPT: str = (
     '{ "$@"; } >> "$0" 2>&1; ' 'printf "\\n---\\nExit code: %d\\n" $? >> "$0"'
 )
+
+
+def get_output_dir() -> Path:
+    """Return the output directory for command redirection files.
+
+    Returns /tmp/hooks-daemon-cmd/ — outside the project tree so that
+    LLM file reads don't trigger CLAUDE.md cascade loading from the
+    hooks-daemon directory.
+
+    Cleanup of old files (>1 hour) happens automatically on each
+    execute_and_save() / launch_and_save() call.
+    """
+    return COMMAND_REDIRECTION_OUTPUT_DIR
 
 
 @dataclass(frozen=True)

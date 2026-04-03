@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from claude_code_hooks_daemon.core.command_redirection import (
+    COMMAND_REDIRECTION_OUTPUT_DIR,
     COMMAND_REDIRECTION_SUBDIR,
     DEFAULT_TIMEOUT_SECONDS,
     CommandRedirectionResult,
@@ -15,6 +16,7 @@ from claude_code_hooks_daemon.core.command_redirection import (
     cleanup_old_files,
     execute_and_save,
     format_redirection_context,
+    get_output_dir,
     launch_and_save,
 )
 
@@ -562,8 +564,18 @@ class TestConstants:
     """Tests for module constants."""
 
     def test_subdir_name(self) -> None:
-        """Should have a defined subdirectory name constant."""
+        """Should have a defined subdirectory name constant (legacy)."""
         assert COMMAND_REDIRECTION_SUBDIR == "command-redirection"
+
+    def test_output_dir_is_tmp(self) -> None:
+        """Output dir should be in /tmp/ to avoid CLAUDE.md cascade reads."""
+        assert COMMAND_REDIRECTION_OUTPUT_DIR == Path("/tmp/hooks-daemon-cmd")
+
+    def test_get_output_dir_returns_tmp_path(self) -> None:
+        """get_output_dir() should return /tmp/hooks-daemon-cmd/."""
+        result = get_output_dir()
+        assert result == Path("/tmp/hooks-daemon-cmd")
+        assert str(result).startswith("/tmp/")
 
     def test_default_timeout(self) -> None:
         """Should have a 30-second default timeout."""

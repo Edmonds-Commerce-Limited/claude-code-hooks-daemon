@@ -491,10 +491,14 @@ class TestPipeBlockerRedirection:
                 "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.launch_and_save"
             ) as mock_launch,
             patch(
+                "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_output_dir",
+                return_value=tmp_path,
+            ),
+            patch(
                 "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.ProjectContext"
             ) as mock_ctx,
         ):
-            mock_ctx.daemon_untracked_dir.return_value = tmp_path
+            mock_ctx.project_root.return_value = tmp_path
             mock_launch.return_value = CommandRedirectionResult(
                 exit_code=-1,
                 output_path=tmp_path / "test.txt",

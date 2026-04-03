@@ -24,8 +24,8 @@ from claude_code_hooks_daemon.core import (
     get_data_layer,
 )
 from claude_code_hooks_daemon.core.command_redirection import (
-    COMMAND_REDIRECTION_SUBDIR,
     format_redirection_context,
+    get_output_dir,
     launch_and_save,
 )
 from claude_code_hooks_daemon.core.utils import get_bash_command
@@ -394,7 +394,7 @@ class PipeBlockerHandler(Handler):
             redirected_args = self.get_redirected_command(hook_input)
             if redirected_args:
                 try:
-                    output_dir = ProjectContext.daemon_untracked_dir() / COMMAND_REDIRECTION_SUBDIR
+                    output_dir = get_output_dir()
                     result = launch_and_save(
                         command=redirected_args,
                         output_dir=output_dir,
