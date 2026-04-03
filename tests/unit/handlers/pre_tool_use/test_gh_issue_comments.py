@@ -348,10 +348,14 @@ class TestGhIssueCommentsHandler:
                 "claude_code_hooks_daemon.handlers.pre_tool_use.gh_issue_comments.execute_and_save"
             ) as mock_exec,
             patch(
+                "claude_code_hooks_daemon.handlers.pre_tool_use.gh_issue_comments.get_output_dir",
+                return_value=tmp_path,
+            ),
+            patch(
                 "claude_code_hooks_daemon.handlers.pre_tool_use.gh_issue_comments.ProjectContext"
             ) as mock_ctx,
         ):
-            mock_ctx.daemon_untracked_dir.return_value = tmp_path
+            mock_ctx.project_root.return_value = tmp_path
             mock_exec.return_value = CommandRedirectionResult(
                 exit_code=0,
                 output_path=tmp_path / "test.txt",

@@ -12,9 +12,9 @@ from typing import Any, ClassVar
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult, ProjectContext
 from claude_code_hooks_daemon.core.command_redirection import (
-    COMMAND_REDIRECTION_SUBDIR,
     execute_and_save,
     format_redirection_context,
+    get_output_dir,
 )
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.guides import get_llm_command_guide_path
@@ -248,7 +248,7 @@ class NpmCommandHandler(Handler):
             redirected_args = self.get_redirected_command(hook_input)
             if redirected_args:
                 try:
-                    output_dir = ProjectContext.daemon_untracked_dir() / COMMAND_REDIRECTION_SUBDIR
+                    output_dir = get_output_dir()
                     result = execute_and_save(
                         command=redirected_args,
                         output_dir=output_dir,
