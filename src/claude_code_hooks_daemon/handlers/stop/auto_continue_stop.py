@@ -227,6 +227,10 @@ class AutoContinueStopHandler(Handler):
             return result
 
         # Branch 3: Confirmation question (backwards compat)
+        # Reload reader — the original from handle() entry may be stale.
+        # Branch 2's retry logic reloads internally but doesn't propagate back.
+        # By this point the transcript is more likely to have been flushed.
+        reader = get_transcript_reader(hook_input)
         if reader:
             last_message = reader.get_last_assistant_text()
             if last_message:
@@ -458,7 +462,18 @@ class AutoContinueStopHandler(Handler):
             "**Do NOT**:\n"
             "- Stop mid-task without explanation\n"
             "- Ask confirmation questions and then stop (the hook auto-continues those)\n"
-            "- Use `AUTO-CONTINUE` unless you intend to keep working indefinitely"
+            "- Use `AUTO-CONTINUE` unless you intend to keep working indefinitely\n\n"
+            "**Before asking a question, evaluate it critically**:\n"
+            "- Tautological/rhetorical questions with obvious answers "
+            '("Should I continue?", "Would you like me to proceed?") '
+            "— do NOT ask, just do it\n"
+            "- Errors with a clear next step "
+            '("The test failed, should I fix it?") '
+            "— do NOT ask, just fix it\n"
+            "- Genuine choice questions where all options are valid "
+            '("Which of A, B, or C should we use?") '
+            "— these deserve a response. Use "
+            "`STOPPING BECAUSE: need user input` and ask your question"
         )
 
     def get_acceptance_tests(self) -> list[Any]:

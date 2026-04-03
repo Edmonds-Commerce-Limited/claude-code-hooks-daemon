@@ -1377,6 +1377,192 @@ class TestAutoContinueStopHandlerExplainerBehaviours:
         assert "STOPPING BECAUSE" in result.reason
 
 
+class TestBranch3StaleReaderRace:
+    """Tests for the stale-reader race condition in Branch 3 (confirmation question).
+
+    Bug: handle() creates a reader once at the top. Branch 2 (_has_stop_explanation)
+    has retry logic that reloads the transcript, but the fresh data doesn't propagate
+    to Branch 3. Branch 3 reads stale data from the original reader and never detects
+    confirmation questions that were flushed after the initial reader was created.
+
+    Result: Branch 3 NEVER fires — 88 stop events logged, zero auto-continues.
+    """
+
+    @pytest.fixture
+    def handler(self) -> AutoContinueStopHandler:
+        """Create handler instance."""
+        return AutoContinueStopHandler()
+
+    def test_confirmation_question_detected_after_late_transcript_flush(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """Branch 3 should detect confirmation question even when initial read was stale.
+
+        Scenario:
+        1. Stop fires before text block is written (only thinking block in transcript)
+        2. During Branch 2 retries, the text block flushes with a confirmation question
+        3. Branch 2 returns False (no STOPPING BECAUSE:)
+        4. Branch 3 MUST detect the confirmation question from fresh transcript data
+
+        Without the fix, Branch 3 uses the original stale reader and misses the question.
+        """
+        from unittest.mock import patch
+
+        transcript_path = tmp_path / "transcript.jsonl"
+
+        # Initial transcript: user prompt, then assistant with NO text blocks yet
+        initial_messages = [
+            {
+                "type": "message",
+                "message": {
+                    "role": "user",
+                    "content": [{"type": "text", "text": "implement the feature"}],
+                },
+            },
+            {
+                "type": "message",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "tool_use", "id": "tu_1", "name": "Write", "input": {}}],
+                },
+            },
+        ]
+        with transcript_path.open("w") as f:
+            for msg in initial_messages:
+                f.write(json.dumps(msg) + "\n")
+
+        # Simulate text flushing during Branch 2 retries
+        flush_done = [False]
+
+        def mock_sleep(_duration: float) -> None:
+            if not flush_done[0]:
+                flush_done[0] = True
+                # Rewrite transcript with the text block now present
+                updated_messages = [
+                    {
+                        "type": "message",
+                        "message": {
+                            "role": "user",
+                            "content": [{"type": "text", "text": "implement the feature"}],
+                        },
+                    },
+                    {
+                        "type": "message",
+                        "message": {
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "type": "tool_use",
+                                    "id": "tu_1",
+                                    "name": "Write",
+                                    "input": {},
+                                },
+                                {
+                                    "type": "text",
+                                    "text": "I've implemented the feature. Would you like me to continue with the tests?",
+                                },
+                            ],
+                        },
+                    },
+                ]
+                with transcript_path.open("w") as f:
+                    for msg in updated_messages:
+                        f.write(json.dumps(msg) + "\n")
+
+        hook_input: dict[str, Any] = {
+            "transcript_path": str(transcript_path),
+            "stop_hook_active": False,
+        }
+
+        with patch(
+            "claude_code_hooks_daemon.handlers.stop.auto_continue_stop.time.sleep",
+            side_effect=mock_sleep,
+        ):
+            result = handler.handle(hook_input)
+
+        # Should be Branch 3 (AUTO-CONTINUE: Yes, proceed), NOT Branch 4
+        # Branch 4 starts with "You stopped without explaining" — distinct from Branch 3
+        assert result.decision == Decision.DENY
+        reason = result.reason or ""
+        assert reason.startswith(
+            "AUTO-CONTINUE: Yes, proceed"
+        ), f"Expected Branch 3 auto-continue but got: {reason[:80]}"
+
+    def test_confirmation_in_fresh_transcript_after_user_as_last_message(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """Branch 3 detects confirmation when initial transcript had user as last message.
+
+        Scenario:
+        1. Stop fires before new assistant message is written
+        2. Transcript shows: [old assistant], [user] — user is last
+        3. During retries, new assistant message with confirmation question flushes
+        4. Branch 3 must detect it
+        """
+        from unittest.mock import patch
+
+        transcript_path = tmp_path / "transcript.jsonl"
+
+        # Initial: user is last message (stale — new assistant turn not written yet)
+        initial_messages = [
+            {
+                "type": "message",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "I completed the work."}],
+                },
+            },
+            {
+                "type": "message",
+                "message": {
+                    "role": "user",
+                    "content": [{"type": "text", "text": "now do the tests"}],
+                },
+            },
+        ]
+        with transcript_path.open("w") as f:
+            for msg in initial_messages:
+                f.write(json.dumps(msg) + "\n")
+
+        flush_done = [False]
+
+        def mock_sleep(_duration: float) -> None:
+            if not flush_done[0]:
+                flush_done[0] = True
+                # New assistant message appears
+                fresh_msg = {
+                    "type": "message",
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Should I proceed with writing the integration tests?",
+                            }
+                        ],
+                    },
+                }
+                with transcript_path.open("a") as f:
+                    f.write(json.dumps(fresh_msg) + "\n")
+
+        hook_input: dict[str, Any] = {
+            "transcript_path": str(transcript_path),
+            "stop_hook_active": False,
+        }
+
+        with patch(
+            "claude_code_hooks_daemon.handlers.stop.auto_continue_stop.time.sleep",
+            side_effect=mock_sleep,
+        ):
+            result = handler.handle(hook_input)
+
+        assert result.decision == Decision.DENY
+        reason = result.reason or ""
+        assert reason.startswith(
+            "AUTO-CONTINUE: Yes, proceed"
+        ), f"Expected Branch 3 auto-continue but got: {reason[:80]}"
+
+
 class TestHasStopExplanationStaleTranscriptRace:
     """Tests for the stale-transcript race condition in _has_stop_explanation().
 
