@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.31.1] - 2026-04-03
+
+### Fixed
+
+- **`auto_continue_stop` Branch 3 stale reader race condition**: The confirmation-question auto-continue branch (Branch 3) never fired because it used the original transcript reader captured at `handle()` entry, which could be stale after Branch 2's retry loop had reloaded the transcript. Branch 2 did not propagate the refreshed reader back, so Branch 3 always evaluated stale data. Fixed by reloading the transcript reader immediately before the Branch 3 check.
+
+- **`auto_continue_stop` question evaluation guidance**: Added `get_claude_md()` guidance teaching Claude to distinguish tautological confirmation questions (rhetorical — just proceed) from genuine choice questions (require user input — use `STOPPING BECAUSE: need user input`). Prevents unnecessary stops on questions that don't need human decision-making.
+
 ## [2.31.0] - 2026-04-03
 
 ### Added
