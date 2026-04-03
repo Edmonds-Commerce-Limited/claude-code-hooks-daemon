@@ -821,4 +821,9 @@ STOPPING BECAUSE: all tasks complete, QA passes, daemon restart verified.
 - Ask confirmation questions and then stop (the hook auto-continues those)
 - Use `AUTO-CONTINUE` unless you intend to keep working indefinitely
 
+**Before asking a question, evaluate it critically**:
+- Tautological/rhetorical questions with obvious answers ("Should I continue?", "Would you like me to proceed?") — do NOT ask, just do it
+- Errors with a clear next step ("The test failed, should I fix it?") — do NOT ask, just fix it
+- Genuine choice questions where all options are valid ("Which of A, B, or C should we use?") — these deserve a response. Use `STOPPING BECAUSE: need user input` and ask your question
+
 </hooksdaemon>
