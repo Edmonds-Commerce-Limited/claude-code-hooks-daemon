@@ -160,7 +160,15 @@ class GhIssueCommentsHandler(Handler):
         return HookResult(decision=Decision.DENY, reason=reason, context=context)
 
     def get_claude_md(self) -> str | None:
-        return None
+        return (
+            "## gh_issue_comments — always include --comments on gh issue view\n\n"
+            "`gh issue view` without `--comments` is blocked. Issue comments often "
+            "contain critical context, clarifications, and updates not in the issue body.\n\n"
+            "**Blocked**: `gh issue view 123`, `gh issue view 123 --repo owner/repo`\n\n"
+            "**Allowed**: `gh issue view 123 --comments`, "
+            "`gh issue view 123 --json title,body,comments`\n\n"
+            "If using `--json`, include `comments` in the field list instead of adding `--comments`."
+        )
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Gh Issue Comments."""

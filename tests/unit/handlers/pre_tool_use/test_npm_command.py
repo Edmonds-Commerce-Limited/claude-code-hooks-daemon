@@ -795,3 +795,28 @@ class TestNpmCommandHandler:
         assert result.decision == Decision.DENY
         joined_context = "\n".join(result.context)
         assert "COMMAND REDIRECTED" not in joined_context
+
+    # ==========================================================================
+    # CLAUDE.MD GUIDANCE TESTS
+    # ==========================================================================
+
+    def test_get_claude_md_returns_guidance(self) -> None:
+        """Should return non-None guidance for CLAUDE.md injection."""
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.npm_command.has_llm_commands_in_package_json",
+            return_value=True,
+        ):
+            handler = NpmCommandHandler()
+        guidance = handler.get_claude_md()
+        assert guidance is not None
+
+    def test_get_claude_md_mentions_llm_prefix(self) -> None:
+        """Guidance should explain the llm: prefix convention."""
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.npm_command.has_llm_commands_in_package_json",
+            return_value=True,
+        ):
+            handler = NpmCommandHandler()
+        guidance = handler.get_claude_md()
+        assert guidance is not None
+        assert "llm:" in guidance

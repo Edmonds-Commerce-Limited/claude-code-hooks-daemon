@@ -759,6 +759,26 @@ Using `Grep` or `Bash` (grep/rg) to find class definitions, function signatures,
 
 Default mode (`block_once`): the first symbol-lookup grep in a session is denied with guidance; subsequent retries are allowed.
 
+## gh_issue_comments — always include --comments on gh issue view
+
+`gh issue view` without `--comments` is blocked. Issue comments often contain critical context, clarifications, and updates not in the issue body.
+
+**Blocked**: `gh issue view 123`, `gh issue view 123 --repo owner/repo`
+
+**Allowed**: `gh issue view 123 --comments`, `gh issue view 123 --json title,body,comments`
+
+If using `--json`, include `comments` in the field list instead of adding `--comments`.
+
+## npm_command — use llm: prefixed npm commands
+
+Direct `npm run` and `npx` commands are blocked or advised against. Projects with `llm:` prefixed scripts in `package.json` should use those instead.
+
+**Why**: `llm:` commands are configured for LLM-friendly output (no spinners, no colour codes, structured results).
+
+**Example**: Use `npm run llm:build` instead of `npm run build`.
+
+If no `llm:` commands exist in `package.json`, the handler operates in advisory mode (warns but does not block).
+
 ## markdown_organization — markdown files must go in allowed locations
 
 Writing a new `.md` file to an unrecognised location is blocked. Markdown files must be placed in project-configured allowed paths.
