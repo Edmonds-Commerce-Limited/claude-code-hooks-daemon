@@ -21,7 +21,7 @@ def test_lazy_import_raises_attribute_error_for_invalid_name() -> None:
     from claude_code_hooks_daemon.strategies import lint
 
     with pytest.raises(AttributeError, match="has no attribute 'InvalidAttribute'"):
-        lint.InvalidAttribute
+        _ = lint.InvalidAttribute
 
 
 def test_lint_strategy_protocol_is_directly_importable() -> None:

@@ -202,7 +202,7 @@ class TestSuggestStatusLineHandler:
         hook_input = {"transcript_path": str(transcript)}
         assert handler.matches(hook_input) is False
 
-    def test_matches_returns_false_when_statusline_configured(
+    def test_matches_returns_false_when_statusline_configured_with_settings_file(
         self, handler: SuggestStatusLineHandler, tmp_path: "Path", monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """matches returns False when statusline is already configured."""

@@ -13,6 +13,8 @@ The key insight: Protocol ellipsis methods (...) are only covered when:
 This test file uses real strategy implementations to trigger Protocol coverage.
 """
 
+import pytest
+
 from claude_code_hooks_daemon.strategies.lint.protocol import LintStrategy
 from claude_code_hooks_daemon.strategies.qa_suppression.protocol import (
     QaSuppressionStrategy,
@@ -169,8 +171,5 @@ class TestLintInitLazyImport:
         """Accessing invalid attribute should raise AttributeError."""
         import claude_code_hooks_daemon.strategies.lint as lint_module
 
-        try:
+        with pytest.raises(AttributeError, match="NonExistentClass"):
             _ = lint_module.NonExistentClass
-            assert False, "Should have raised AttributeError"
-        except AttributeError as e:
-            assert "NonExistentClass" in str(e)

@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import importlib.util
 import stat
-import types
-from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import types
+    from collections.abc import Callable
 
 import pytest
 
