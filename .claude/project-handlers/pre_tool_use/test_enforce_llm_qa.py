@@ -81,6 +81,26 @@ class TestEnforceLlmQaHandler:
         assert handler.matches(bash_hook_input("git status")) is False
         assert handler.matches(bash_hook_input("pytest tests/")) is False
 
+    def test_does_not_match_git_add_of_script(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """Does NOT match git add that stages the script file."""
+        assert handler.matches(bash_hook_input("git add scripts/qa/run_all.sh")) is False
+
+    def test_does_not_match_git_commit_mentioning_script(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """Does NOT match git commit whose message mentions the script."""
+        assert handler.matches(
+            bash_hook_input('git commit -m "Integrated into run_all.sh"')
+        ) is False
+
+    def test_does_not_match_glob_of_script(
+        self, handler: EnforceLlmQaHandler, bash_hook_input: Any
+    ) -> None:
+        """Does NOT match git add with glob that matches the script."""
+        assert handler.matches(bash_hook_input("git add scripts/qa/run_all*")) is False
+
     # ── handle() ──
 
     def test_handle_blocks_with_guidance(

@@ -26,11 +26,15 @@ class EnforceLlmQaHandler(Handler):
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """Match Bash commands that invoke run_all.sh."""
+        """Match Bash commands that actually run run_all.sh (not just mention it)."""
         if hook_input.get("tool_name") != "Bash":
             return False
         tool_input = hook_input.get("tool_input", {})
         command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
+        # Only match when the script is being executed, not when mentioned
+        # in git commit messages, git add paths, or other non-execution contexts
+        if command.startswith(("git ", "gh ")):
+            return False
         return _BLOCKED_SCRIPT in command
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
