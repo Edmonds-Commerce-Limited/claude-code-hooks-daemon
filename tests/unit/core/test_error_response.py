@@ -146,9 +146,10 @@ class TestGenerateDaemonErrorResponse:
         assert "Safety guardrails are NOT active" in context
 
         # Should contain remediation steps (skill-based, not raw python commands)
-        assert "/hooks-daemon health" in context
-        assert "/hooks-daemon logs" in context
-        assert "/hooks-daemon restart" in context
+        assert "hooks-daemon skill" in context
+        assert "args=health" in context
+        assert "args=logs" in context
+        assert "args=restart" in context
 
 
 class TestErrorResponseCLI:
