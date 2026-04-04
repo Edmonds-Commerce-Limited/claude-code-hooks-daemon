@@ -209,7 +209,6 @@ class ClientInstallValidator:
         Returns:
             ValidationResult
         """
-        errors: list[str] = []
         warnings: list[str] = []
 
         # Look for PID file in expected location
@@ -487,7 +486,6 @@ class ClientInstallValidator:
         Returns:
             ValidationResult with warnings about cleaned files
         """
-        errors: list[str] = []
         warnings: list[str] = []
 
         daemon_dir = project_root / ".claude" / "hooks-daemon"

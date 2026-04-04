@@ -26,7 +26,7 @@ _ERROR_HEADER = "Config Error"
 
 def format_validation_error(
     error: ValidationError,
-    config: dict[str, Any] | None = None,
+    _config: dict[str, Any] | None = None,
 ) -> str:
     """Format a Pydantic ValidationError into a user-friendly message.
 
@@ -35,7 +35,7 @@ def format_validation_error(
 
     Args:
         error: The Pydantic ValidationError to format
-        config: Optional original config dict for context
+        _config: Optional original config dict for context
 
     Returns:
         User-friendly error message string

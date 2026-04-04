@@ -273,7 +273,7 @@ def launch_and_save(
         # Output path passed as $0, also never interpolated into the script.
         # Only trusted system tools are invoked (pytest, npm, etc.).
         proc = subprocess.Popen(  # nosec B603 B607
-            ["bash", "-c", _ASYNC_WRAPPER_SCRIPT, str(output_path)] + command,
+            ["bash", "-c", _ASYNC_WRAPPER_SCRIPT, str(output_path), *command],
             cwd=str(cwd) if cwd else None,
             start_new_session=True,  # Detach from parent process group
             stdin=subprocess.DEVNULL,

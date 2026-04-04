@@ -170,7 +170,6 @@ class TestCleanupStaleCommandRedirectionFiles:
 
     def test_returns_zero_when_directory_does_not_exist(self, tmp_path: Path) -> None:
         """Returns 0 when command-redirection directory doesn't exist."""
-        nonexistent = tmp_path / "command-redirection"
         with patch(
             "claude_code_hooks_daemon.daemon.paths._get_untracked_dir",
             return_value=tmp_path,
@@ -281,10 +280,12 @@ class TestCleanupStaleDaemonFilesExceptionBranch:
 
         import os as _os
 
+        _original_stat = Path.stat
+
         def exploding_stat(self: Path) -> _os.stat_result:
             if self.name.endswith(".pid"):
                 raise RuntimeError("unexpected stat failure")
-            return _os.stat(self)
+            return _original_stat(self)
 
         with (
             patch(
@@ -372,10 +373,12 @@ class TestCleanupStaleCommandRedirectionFilesExtra:
                 return True
             return original_is_file(self)
 
+        _original_stat2 = Path.stat
+
         def patched_stat(self: Path) -> _os.stat_result:
             if self.name.endswith(".txt"):
                 raise RuntimeError("unexpected")
-            return _os.stat(self)
+            return _original_stat2(self)
 
         with (
             patch(

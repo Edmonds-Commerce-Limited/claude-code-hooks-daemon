@@ -177,7 +177,7 @@ class NoTestsHandler(Handler):
         (pre_tool_use / "no_tests_handler.py").write_text(handler_code)
 
         args = argparse.Namespace(project_root=project_path)
-        result = cmd_validate_project_handlers(args)
+        cmd_validate_project_handlers(args)
 
         captured = capsys.readouterr()
         assert "no acceptance tests" in captured.out.lower() or "WARNING" in captured.out
@@ -195,7 +195,7 @@ class NoTestsHandler(Handler):
         (pre_tool_use / "broken_handler.py").write_text("import nonexistent_module_xyz\n")
 
         args = argparse.Namespace(project_root=project_path)
-        result = cmd_validate_project_handlers(args)
+        cmd_validate_project_handlers(args)
 
         captured = capsys.readouterr()
         output = captured.out + captured.err

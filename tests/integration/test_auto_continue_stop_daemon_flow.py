@@ -19,9 +19,11 @@ Additionally, the handler lacks logging, making production failures invisible.
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import Mock, patch
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from claude_code_hooks_daemon.core.event import EventType, HookEvent, HookInput
 from claude_code_hooks_daemon.core.project_context import ProjectContext
