@@ -93,6 +93,11 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="error_hiding.json",
         jq_hint="jq '.violations[] | {file, line, rule, message}'",
     ),
+    "skill_refs": ToolConfig(
+        command=_python("check_skill_references.py") + ["--json"],
+        json_file="skill_references.json",
+        jq_hint="jq '.violations[] | {file, line, rule, message}'",
+    ),
     "smoke_test": ToolConfig(
         command=_bash("run_smoke_test.sh"),
         json_file="smoke_test.json",
@@ -154,6 +159,11 @@ def _summarize_error_hiding(data: dict) -> str:
     return f"{total} violations"
 
 
+def _summarize_skill_refs(data: dict) -> str:
+    total = data.get("summary", {}).get("total_violations", 0)
+    return f"{total} violations"
+
+
 def _summarize_smoke_test(data: dict) -> str:
     s = data.get("summary", {})
     passed = s.get("passed_probes", 0)
@@ -173,6 +183,7 @@ SUMMARIZERS: dict[str, Summarizer] = {
     "security": _summarize_security,
     "dependencies": _summarize_dependencies,
     "error_hiding": _summarize_error_hiding,
+    "skill_refs": _summarize_skill_refs,
     "smoke_test": _summarize_smoke_test,
 }
 
