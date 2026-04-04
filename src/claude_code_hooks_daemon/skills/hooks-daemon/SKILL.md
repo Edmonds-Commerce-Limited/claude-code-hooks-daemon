@@ -60,6 +60,16 @@ Scaffold new project-level handlers:
 
 See [dev-handlers.md](dev-handlers.md) for handler development guide.
 
+### Investigate an Issue
+Generate a detailed investigation report with timeline, evidence, and analysis:
+```bash
+/hooks-daemon report "daemon stopped responding during edits"
+```
+
+The report is saved to `./untracked/hooks-daemon-{description}.md` for sharing with maintainers.
+
+See [report.md](report.md) for details.
+
 ## Quick Start
 
 After editing `.claude/hooks-daemon.yaml`:
@@ -76,10 +86,13 @@ If you're experiencing issues:
 # 2. View recent logs
 /hooks-daemon logs
 
-# 3. Generate a bug report with full diagnostics
+# 3. Generate a quick bug report with diagnostics
 /hooks-daemon bug-report "description of the issue"
 
-# 4. Restart to recover
+# 4. Generate a full investigation report with timeline
+/hooks-daemon report "description of the issue"
+
+# 5. Restart to recover
 /hooks-daemon restart
 ```
 
@@ -117,6 +130,11 @@ case "$SUBCOMMAND" in
         bash "$SKILL_DIR/scripts/init-handlers.sh" "$@"
         ;;
 
+    report)
+        # LLM-driven investigation report — outputs prompt for Claude to follow
+        cat "$SKILL_DIR/report.md" | sed "s/\$ARGUMENTS/$*/"
+        ;;
+
     logs|status|restart|handlers|validate-config|bug-report)
         # Forward to daemon CLI wrapper
         bash "$SKILL_DIR/scripts/daemon-cli.sh" "$SUBCOMMAND" "$@"
@@ -136,6 +154,7 @@ case "$SUBCOMMAND" in
         echo "  status                Show daemon status"
         echo "  handlers              List loaded handlers"
         echo "  bug-report DESC       Generate bug report with diagnostics"
+        echo "  report DESC           Investigate an issue and generate a detailed report"
         echo ""
         echo "After editing .claude/hooks-daemon.yaml, always run: /hooks-daemon restart"
         echo ""
