@@ -96,11 +96,11 @@ emit_hook_error() {
             "If you are in the middle of an upgrade, this is expected and temporary." \
             "" \
             "TO FIX (usually takes a few seconds):" \
-            "1. Run: python -m claude_code_hooks_daemon.daemon.cli restart" \
-            "2. Verify: python -m claude_code_hooks_daemon.daemon.cli status" \
+            "1. Run: /hooks-daemon restart  (invoke via Skill tool)" \
+            "2. Verify: /hooks-daemon health" \
             "" \
             "If restart fails, check logs:" \
-            "  python -m claude_code_hooks_daemon.daemon.cli logs" \
+            "  /hooks-daemon logs" \
             "Then inform the user if the issue persists.")
     fi
 
@@ -644,11 +644,11 @@ def emit_error_json(event_name, error_type, error_details):
         'If you are in the middle of an upgrade, this is expected and temporary.',
         '',
         'TO FIX (usually takes a few seconds):',
-        '1. Run: python -m claude_code_hooks_daemon.daemon.cli restart',
-        '2. Verify: python -m claude_code_hooks_daemon.daemon.cli status',
+        '1. Run: /hooks-daemon restart  (invoke via Skill tool)',
+        '2. Verify: /hooks-daemon health',
         '',
         'If restart fails, check logs:',
-        '  python -m claude_code_hooks_daemon.daemon.cli logs',
+        '  /hooks-daemon logs',
         'Then inform the user if the issue persists.',
     ]
     context = chr(10).join(context_lines)

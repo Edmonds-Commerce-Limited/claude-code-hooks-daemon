@@ -145,10 +145,10 @@ class TestGenerateDaemonErrorResponse:
         assert "Code quality checks are NOT running" in context
         assert "Safety guardrails are NOT active" in context
 
-        # Should contain remediation steps
-        assert "python -m claude_code_hooks_daemon.daemon.cli status" in context
-        assert "python -m claude_code_hooks_daemon.daemon.cli logs" in context
-        assert "python -m claude_code_hooks_daemon.daemon.cli restart" in context
+        # Should contain remediation steps (skill-based, not raw python commands)
+        assert "/hooks-daemon health" in context
+        assert "/hooks-daemon logs" in context
+        assert "/hooks-daemon restart" in context
 
 
 class TestErrorResponseCLI:
