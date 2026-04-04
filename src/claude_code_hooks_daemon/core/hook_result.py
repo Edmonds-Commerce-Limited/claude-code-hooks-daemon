@@ -426,7 +426,7 @@ class HookResult(BaseModel):
             context_lines.extend(
                 [
                     "",
-                    "TO DEBUG: Run 'python -m claude_code_hooks_daemon.daemon.cli logs' to view daemon logs",
+                    "TO DEBUG: Use the hooks-daemon skill to check logs (Skill tool: skill=hooks-daemon, args=logs)",
                     "",
                     "RECOMMENDED ACTION:",
                     "1. Pause current task immediately",
@@ -474,7 +474,7 @@ class HookResult(BaseModel):
             [
                 "REMEDIATION:",
                 "1. Fix the configuration in .claude/hooks-daemon.yaml",
-                "2. Restart the daemon: python -m claude_code_hooks_daemon.daemon.cli restart",
+                "2. Use the hooks-daemon skill to restart (Skill tool: skill=hooks-daemon, args=restart)",
                 "",
                 "Working in degraded mode - some handlers may not be active.",
             ]

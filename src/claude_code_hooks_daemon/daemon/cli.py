@@ -1621,9 +1621,15 @@ class TestExampleHandler:
     print()
     print("Next steps:")
     print("  1. Edit pre_tool_use/example_handler.py with your handler logic")
-    print("  2. Run tests: python -m claude_code_hooks_daemon.daemon.cli test-project-handlers")
-    print("  3. Validate: python -m claude_code_hooks_daemon.daemon.cli validate-project-handlers")
-    print("  4. Restart daemon: python -m claude_code_hooks_daemon.daemon.cli restart")
+    print(
+        "  2. Use the hooks-daemon skill to test (Skill tool: skill=hooks-daemon, args=dev-handlers)"
+    )
+    print(
+        "  3. Use the hooks-daemon skill to validate (Skill tool: skill=hooks-daemon, args=dev-handlers)"
+    )
+    print(
+        "  4. Use the hooks-daemon skill to restart (Skill tool: skill=hooks-daemon, args=restart)"
+    )
 
     return 0
 
