@@ -113,6 +113,16 @@ else
 fi
 echo ""
 
+echo "10. Running Skill Reference Check..."
+echo "----------------------------------------"
+if ! "${PROJECT_ROOT}/untracked/venv/bin/python" "${SCRIPT_DIR}/check_skill_references.py" --json; then
+    OVERALL_EXIT_CODE=1
+    echo "❌ Skill reference check FAILED"
+else
+    echo "✅ Skill reference check PASSED"
+fi
+echo ""
+
 # Print overall summary
 echo "========================================"
 echo "QA Summary"
@@ -131,6 +141,7 @@ results = {
     "Dependencies": "untracked/qa/dependencies.json",
     "Shell Check": "untracked/qa/shell_check.json",
     "Error Hiding": "untracked/qa/error_hiding.json",
+    "Skill Refs": "untracked/qa/skill_references.json",
 }
 
 all_passed = True
