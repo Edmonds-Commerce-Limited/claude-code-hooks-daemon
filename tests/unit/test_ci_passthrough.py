@@ -222,7 +222,7 @@ class TestNonCIDaemonFailure:
         # Must say "Not installed" and point to the install guide
         assert "Not installed" in context, f"Expected 'Not installed' in context, got: {context!r}"
         assert (
-            "/hooks-daemon install" in context
+            "hooks-daemon skill to install" in context
         ), f"Expected install skill reference in context, got: {context!r}"
         # Must NOT look like passthrough advisory
         assert (

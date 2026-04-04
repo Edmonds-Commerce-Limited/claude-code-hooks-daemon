@@ -48,9 +48,9 @@ def generate_daemon_error_response(
         "RECOMMENDED ACTIONS:",
         "1. STOP all current tasks immediately",
         "2. Inform the user that hooks protection is down",
-        "3. Run: /hooks-daemon health  (invoke via Skill tool)",
-        "4. Run: /hooks-daemon logs",
-        "5. Restart daemon: /hooks-daemon restart",
+        "3. Use the hooks-daemon skill to check health (Skill tool: skill=hooks-daemon, args=health)",
+        "4. Use the hooks-daemon skill to check logs (Skill tool: skill=hooks-daemon, args=logs)",
+        "5. Use the hooks-daemon skill to restart (Skill tool: skill=hooks-daemon, args=restart)",
         "",
         "DO NOT continue work until hooks are verified working.",
     ]
