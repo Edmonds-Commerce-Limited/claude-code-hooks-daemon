@@ -15,13 +15,17 @@ to one of four branches:
    (only when force_explanation=True, the default)
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import re
 import time
 from datetime import UTC, datetime
-from pathlib import Path
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority, ToolName
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult

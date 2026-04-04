@@ -261,16 +261,7 @@ class PluginLoader:
                     search_paths = raw_paths
                 handler_module = plugin_config.path
 
-            # Determine which handlers to load
-            if plugin_config.handlers:
-                # handlers are class names, but we need module names for load_handler
-                # The module name is plugin_config.path (snake_case)
-                # We'll load the module and check if the class exists
-                # For now, just use the handler_module as the base
-                handlers_to_load = [handler_module]
-            else:
-                # Load all handlers from the module (use snake_case module name)
-                handlers_to_load = [handler_module]
+            handlers_to_load = [handler_module]
 
             # Load each handler
             for module_name in handlers_to_load:

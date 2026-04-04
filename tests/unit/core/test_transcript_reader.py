@@ -1217,7 +1217,7 @@ class TestIncrementalReadEdgeCases:
         # Surround a real line with blank lines
         transcript.write_bytes(("\n" + line + "\n\n").encode("utf-8"))
         reader = TranscriptReader()
-        messages, offset = reader.read_incremental(str(transcript), 0)
+        messages, _offset = reader.read_incremental(str(transcript), 0)
         assert len(messages) == 1
         assert messages[0].content == "Hi"
 
@@ -1294,7 +1294,6 @@ class TestIncrementalReadEdgeCases:
 
     def test_read_incremental_handles_oserror(self, tmp_path: Path) -> None:
         """read_incremental returns ([], offset) when an OSError occurs (lines 338-339)."""
-        import os
 
         # Create a directory at the path so open() raises IsADirectoryError
         transcript_dir = tmp_path / "transcript.jsonl"
@@ -1303,9 +1302,9 @@ class TestIncrementalReadEdgeCases:
         reader = TranscriptReader()
         # path.exists() is True (dir exists) and stat().st_size would fail or
         # open() would raise IsADirectoryError.  Either way the OSError branch fires.
-        messages, offset = reader.read_incremental(str(transcript_dir), 0)
+        messages, _offset = reader.read_incremental(str(transcript_dir), 0)
         assert messages == []
-        os.rmdir(str(transcript_dir))
+        Path(str(transcript_dir)).rmdir()
 
     def test_read_incremental_user_type_entry_is_parsed(self, tmp_path: Path) -> None:
         """read_incremental handles type=user entries (branch alongside human/assistant)."""

@@ -40,7 +40,7 @@ class StartupCleanupHandler(Handler):
         """Show cleanup indicator briefly after daemon startup.
 
         - First 5 seconds:  | 🧹  (startup phase — brush icon only)
-        - 5–30 seconds, files cleaned: | 🧹 N stale  (result phase)
+        - 5-30 seconds, files cleaned: | 🧹 N stale  (result phase)
         - After 30 seconds: nothing
 
         Returns:

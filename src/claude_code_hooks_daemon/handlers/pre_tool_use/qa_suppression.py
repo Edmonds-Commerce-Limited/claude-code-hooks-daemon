@@ -165,7 +165,8 @@ class QaSuppressionHandler(Handler):
         """Build a DENY result with language-appropriate error message."""
         # Build resources section from strategy
         resources_text = "\n".join(
-            f"  - {tool}: {url}" for tool, url in zip(strategy.tool_names, strategy.tool_docs_urls)
+            f"  - {tool}: {url}"
+            for tool, url in zip(strategy.tool_names, strategy.tool_docs_urls, strict=False)
         )
 
         issues_text = "\n".join(f"  - {issue}" for issue in issues[:_MAX_ISSUES_SHOWN])

@@ -757,7 +757,7 @@ class TestControllerProcessEventErrors:
 
         # Patch route at the class level since EventRouter uses __slots__
         with patch.object(EventRouter, "route", return_value=mock_result):
-            result = controller.process_event(event)
+            controller.process_event(event)
 
         # Stats should record error since context contains "Handler exception:"
         assert controller.get_stats().errors == 1

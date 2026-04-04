@@ -6,7 +6,7 @@ implementations. The handler itself has ZERO language awareness.
 
 import subprocess  # nosec B404 - subprocess used for lint validation only (trusted tools)
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from claude_code_hooks_daemon.constants import (
     HandlerID,
@@ -155,7 +155,7 @@ class LintOnEditHandler(Handler):
         return None
 
     # Map of language names to their module root marker files
-    _MODULE_ROOT_MARKERS: dict[str, str] = {
+    _MODULE_ROOT_MARKERS: ClassVar[dict[str, str]] = {
         "Go": "go.mod",
     }
 

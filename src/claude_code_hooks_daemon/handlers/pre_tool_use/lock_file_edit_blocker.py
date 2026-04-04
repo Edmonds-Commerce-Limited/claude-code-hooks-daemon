@@ -9,7 +9,7 @@ This handler blocks Write and Edit tools when targeting lock files across all ma
 language ecosystems (PHP, JavaScript, Python, Ruby, Rust, Go, .NET, Swift).
 """
 
-from typing import Any
+from typing import Any, ClassVar
 
 from claude_code_hooks_daemon.constants.handlers import HandlerID
 from claude_code_hooks_daemon.constants.priority import Priority
@@ -35,7 +35,7 @@ class LockFileEditBlockerHandler(Handler):
     """
 
     # Protected lock files (14 types across 8 ecosystems)
-    LOCK_FILES = [
+    LOCK_FILES: ClassVar[list[str]] = [
         # PHP/Composer
         "composer.lock",
         # JavaScript/Node
@@ -61,7 +61,7 @@ class LockFileEditBlockerHandler(Handler):
     ]
 
     # Package manager commands for each lock file type
-    PACKAGE_MANAGER_COMMANDS = {
+    PACKAGE_MANAGER_COMMANDS: ClassVar[dict[str, str]] = {
         "composer.lock": "composer install / composer update",
         "package-lock.json": "npm install / npm update",
         "yarn.lock": "yarn install / yarn upgrade",
@@ -118,11 +118,7 @@ class LockFileEditBlockerHandler(Handler):
 
         # Check if file path ends with any protected lock file (case-insensitive)
         file_path_lower = file_path.lower()
-        for lock_file in self.LOCK_FILES:
-            if file_path_lower.endswith(lock_file.lower()):
-                return True
-
-        return False
+        return any(file_path_lower.endswith(lock_file.lower()) for lock_file in self.LOCK_FILES)
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Block operation and explain why lock files must not be edited.

@@ -229,10 +229,7 @@ class PipeBlockerHandler(Handler):
         for pattern in self._whitelist:
             if pattern.search(source_segment):
                 return True
-        for pattern in self._extra_whitelist:
-            if pattern.search(source_segment):
-                return True
-        return False
+        return any(pattern.search(source_segment) for pattern in self._extra_whitelist)
 
     def _matches_blacklist(self, source_segment: str) -> bool:
         """Check if source segment matches any blacklisted pattern (known expensive)."""
