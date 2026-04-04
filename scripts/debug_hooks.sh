@@ -21,7 +21,7 @@ fi
 
 if [[ -z "$SOCKET_PATH" ]]; then
     echo "ERROR: No daemon socket found in $PROJECT_ROOT/.claude/hooks-daemon/untracked/"
-    echo "Is the daemon running? Check: python -m claude_code_hooks_daemon.daemon.cli status"
+    echo "Is the daemon running? Use the hooks-daemon skill to check health (Skill tool: skill=hooks-daemon, args=health)"
     exit 1
 fi
 
