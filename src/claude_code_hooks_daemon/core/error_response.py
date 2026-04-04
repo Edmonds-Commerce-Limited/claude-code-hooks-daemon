@@ -48,10 +48,9 @@ def generate_daemon_error_response(
         "RECOMMENDED ACTIONS:",
         "1. STOP all current tasks immediately",
         "2. Inform the user that hooks protection is down",
-        "3. Run: python -m claude_code_hooks_daemon.daemon.cli status",
-        "4. Run: python -m claude_code_hooks_daemon.daemon.cli logs",
-        "5. Check daemon installation in .claude/hooks-daemon/",
-        "6. Restart daemon: python -m claude_code_hooks_daemon.daemon.cli restart",
+        "3. Run: /hooks-daemon health  (invoke via Skill tool)",
+        "4. Run: /hooks-daemon logs",
+        "5. Restart daemon: /hooks-daemon restart",
         "",
         "DO NOT continue work until hooks are verified working.",
     ]
