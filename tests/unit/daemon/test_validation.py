@@ -419,7 +419,7 @@ class TestLoadConfigSafeUnexpectedException:
         assert result is None
 
 
-class TestValidateNotNested:
+class TestValidateNotNestedRaises:
     """Test validate_not_nested() raises InstallationError on nested install (line 99)."""
 
     def test_validate_not_nested_raises_on_nested_install(self, tmp_path: Path) -> None:

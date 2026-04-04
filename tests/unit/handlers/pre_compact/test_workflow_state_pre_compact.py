@@ -684,8 +684,6 @@ class TestWorkflowStatePreCompactHandler:
 
         # We need to let CLAUDE.local.md not exist (no match from that path)
         # Then patch plan file reading to raise Exception
-        original_open = plan_file.open
-
         def mock_plan_open(*args: Any, **kwargs: Any) -> Any:
             raise Exception("Unexpected plan read error")
 

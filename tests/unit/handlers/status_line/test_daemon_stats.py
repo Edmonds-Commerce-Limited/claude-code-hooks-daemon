@@ -1,7 +1,12 @@
 """Tests for DaemonStatsHandler."""
 
-from pathlib import Path
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 import pytest
 
@@ -358,7 +363,7 @@ class TestDaemonStatsHandler:
         assert len(block_parts) == 0
 
     def test_handle_shows_upgrade_indicator_when_outdated(
-        self, handler: DaemonStatsHandler, tmp_path: "Path"
+        self, handler: DaemonStatsHandler, tmp_path: Path
     ) -> None:
         """Shows upgrade indicator with colon prefix when version cache reports outdated."""
         import json
@@ -406,7 +411,7 @@ class TestDaemonStatsHandler:
         assert upgrade_parts[0].startswith(":")
 
     def test_handle_ignores_stale_version_cache_after_upgrade(
-        self, handler: DaemonStatsHandler, tmp_path: "Path"
+        self, handler: DaemonStatsHandler, tmp_path: Path
     ) -> None:
         """Regression: stale cache from old version should be ignored after upgrade."""
         import json
@@ -449,7 +454,7 @@ class TestDaemonStatsHandler:
         assert len(upgrade_parts) == 0
 
     def test_handle_hides_upgrade_indicator_when_up_to_date(
-        self, handler: DaemonStatsHandler, tmp_path: "Path"
+        self, handler: DaemonStatsHandler, tmp_path: Path
     ) -> None:
         """Hides upgrade indicator when version cache reports up to date."""
         import json
@@ -525,7 +530,7 @@ class TestDaemonStatsHandler:
         assert "MB" not in result.context[0]
 
     def test_handle_hides_upgrade_indicator_when_no_cache(
-        self, handler: DaemonStatsHandler, tmp_path: "Path"
+        self, handler: DaemonStatsHandler, tmp_path: Path
     ) -> None:
         """Hides upgrade indicator when no version cache file exists."""
         mock_stats = MagicMock()

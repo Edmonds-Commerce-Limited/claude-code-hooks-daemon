@@ -74,7 +74,7 @@ class TestStartupCleanupHandler:
         assert result.context == []
 
     def test_shows_nothing_in_result_phase_when_zero_cleaned(self, tmp_path: Path) -> None:
-        """5–30 seconds but count=0: no result message needed."""
+        """5-30 seconds but count=0: no result message needed."""
         h = self._make_handler()
         status_file = tmp_path / "cleanup_status.json"
         status_file.write_text(json.dumps({"count": 0, "timestamp": time.time() - 10}))

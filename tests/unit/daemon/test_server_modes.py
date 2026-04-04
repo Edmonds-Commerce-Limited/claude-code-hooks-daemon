@@ -145,7 +145,7 @@ class TestServerSetModeAction:
         """set_mode passes custom_message."""
         server = self._make_server()
 
-        response = server._handle_system_request(
+        server._handle_system_request(
             {
                 "action": ModeConstant.ACTION_SET_MODE,
                 ModeConstant.KEY_MODE: DaemonMode.UNATTENDED.value,

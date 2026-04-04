@@ -68,5 +68,5 @@ class TestBootstrapPlanWorkflow:
         claude_md = plan_dir / "CLAUDE.md"
         claude_md.write_text("# Custom lifecycle\n")
 
-        result = bootstrap_plan_workflow(tmp_path)
+        bootstrap_plan_workflow(tmp_path)
         assert claude_md.read_text() == "# Custom lifecycle\n"

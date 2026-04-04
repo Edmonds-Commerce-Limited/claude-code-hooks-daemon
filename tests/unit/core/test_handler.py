@@ -292,10 +292,8 @@ class TestHandlerAbstractMethods:
         class EmptyHandler(Handler):
             """Handler with no implementations."""
 
-            pass
-
-    def get_claude_md(self) -> str | None:
-        return None
+            def get_claude_md(self) -> str | None:
+                return None
 
         # ABC prevents instantiation of incomplete subclasses
         with pytest.raises(TypeError, match="abstract"):

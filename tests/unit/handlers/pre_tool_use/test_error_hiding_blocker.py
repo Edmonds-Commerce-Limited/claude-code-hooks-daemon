@@ -324,4 +324,4 @@ class TestErrorHidingBlockerAcceptanceTests:
     def test_all_languages_represented(self, handler: ErrorHidingBlockerHandler) -> None:
         tests = handler.get_acceptance_tests()
         # At minimum we expect tests for all 5 languages (Shell, Python, JS, Go, Java)
-        assert len(tests) >= 10  # 2 tests each × 5 languages
+        assert len(tests) >= 10  # 2 tests each x 5 languages
