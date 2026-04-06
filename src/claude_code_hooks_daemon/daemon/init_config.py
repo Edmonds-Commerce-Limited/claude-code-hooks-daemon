@@ -210,6 +210,7 @@ class ConfigTemplate:
             "  session_start:\n"
             "    workflow_state_restoration: {enabled: true, priority: 50}  # Restore workflow state after compaction\n"
             "    yolo_container_detection: {enabled: true, priority: 40}  # Detect YOLO container environments\n"
+            "    hook_registration_checker: {enabled: true, priority: 51}  # Validate hook registrations in settings.json\n"
             "    optimal_config_checker: {enabled: true, priority: 52}  # Check Claude Code env for optimal settings\n"
             "    git_filemode_checker: {enabled: true, priority: 53}  # Warn when git core.fileMode=false\n"
             "    gitignore_safety_checker: {enabled: true, priority: 54}  # Warn when required .claude/ paths are not gitignored\n"
