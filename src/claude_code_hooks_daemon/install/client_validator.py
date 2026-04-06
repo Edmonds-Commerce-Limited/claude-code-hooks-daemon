@@ -7,6 +7,7 @@ This module provides comprehensive safety checks to prevent configuration
 confusion that could cause handler_status.py and other tools to malfunction.
 """
 
+import json
 import logging
 import os
 import signal
@@ -15,6 +16,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from claude_code_hooks_daemon.constants import Timeout
+from claude_code_hooks_daemon.utils.hook_registration import (
+    detect_duplicate_hooks,
+    validate_hook_commands,
+    validate_settings_hooks,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +122,11 @@ class ClientInstallValidator:
 
         # Check 3: Config does NOT have self_install_mode: true
         result = ClientInstallValidator._verify_no_self_install_mode(project_root)
+        errors.extend(result.errors)
+        warnings.extend(result.warnings)
+
+        # Check 4: Verify hook registrations in settings.json
+        result = ClientInstallValidator._verify_hook_registrations(project_root)
         errors.extend(result.errors)
         warnings.extend(result.warnings)
 
@@ -424,6 +435,57 @@ class ClientInstallValidator:
             warnings.append(f"Failed to verify config at {config_path}: {e}")
 
         return ValidationResult(passed=len(errors) == 0, errors=errors, warnings=warnings)
+
+    @staticmethod
+    def _verify_hook_registrations(project_root: Path) -> ValidationResult:
+        """Verify hook registrations in settings.json are correct.
+
+        Checks that all expected hook events are registered and that there
+        are no duplicate registrations across settings.json and settings.local.json.
+
+        Args:
+            project_root: Project root to check
+
+        Returns:
+            ValidationResult with any issues as warnings (non-fatal)
+        """
+        warnings: list[str] = []
+
+        claude_dir = project_root / ".claude"
+        settings_path = claude_dir / "settings.json"
+
+        if not settings_path.exists():
+            # No settings.json yet — will be created during install
+            return ValidationResult(passed=True, errors=[], warnings=[])
+
+        try:
+            with settings_path.open() as f:
+                settings = json.load(f)
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            warnings.append(f"Failed to read {settings_path}: {exc}")
+            return ValidationResult(passed=True, errors=[], warnings=warnings)
+
+        if not isinstance(settings, dict):
+            return ValidationResult(passed=True, errors=[], warnings=[])
+
+        # Read local settings (optional)
+        local_settings: dict[str, object] = {}
+        local_path = claude_dir / "settings.local.json"
+        if local_path.exists():
+            try:
+                with local_path.open() as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    local_settings = data
+            except (OSError, json.JSONDecodeError, ValueError) as exc:
+                warnings.append(f"Failed to read {local_path}: {exc}")
+
+        # Run validations using shared utilities
+        warnings.extend(validate_settings_hooks(settings))
+        warnings.extend(detect_duplicate_hooks(settings, local_settings))
+        warnings.extend(validate_hook_commands(settings))
+
+        return ValidationResult(passed=True, errors=[], warnings=warnings)
 
     @staticmethod
     def validate_daemon_can_start(project_root: Path) -> ValidationResult:

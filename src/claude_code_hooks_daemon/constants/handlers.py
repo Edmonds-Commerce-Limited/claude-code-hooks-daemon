@@ -442,6 +442,13 @@ class HandlerID:
         display_name="gitignore-safety-checker",
     )
 
+    # Hook registration checker (SessionStart handler)
+    HOOK_REGISTRATION_CHECKER = HandlerIDMeta(
+        class_name="HookRegistrationCheckerHandler",
+        config_key="hook_registration_checker",
+        display_name="hook-registration-checker",
+    )
+
     # Lint on edit (PostToolUse handler)
     LINT_ON_EDIT = HandlerIDMeta(
         class_name="LintOnEditHandler",
@@ -560,4 +567,6 @@ HandlerKey = Literal[
     # Workflow state handlers
     "workflow_state_restoration",
     "workflow_state_pre_compact",
+    # Hook registration checker
+    "hook_registration_checker",
 ]

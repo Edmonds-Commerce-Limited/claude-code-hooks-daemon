@@ -253,6 +253,10 @@ handlers:
       enabled: true
       priority: 10
 
+    hook_registration_checker:  # Validates hook registrations in settings.json
+      enabled: true
+      priority: 51
+
     optimal_config_checker:  # Checks Claude Code env for optimal settings
       enabled: true
       priority: 52

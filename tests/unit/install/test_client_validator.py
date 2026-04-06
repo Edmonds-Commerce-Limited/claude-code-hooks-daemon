@@ -1,5 +1,7 @@
 """Tests for ClientInstallValidator."""
 
+import json
+
 import yaml
 
 from claude_code_hooks_daemon.install.client_validator import (
@@ -395,6 +397,156 @@ class TestCleanupStaleRuntimeFiles:
         result = ClientInstallValidator.cleanup_stale_runtime_files(project_root)
         assert result.passed is True
         assert not pid_file.exists()
+
+
+def _build_valid_settings() -> dict:
+    """Build a settings.json dict with all hooks properly registered."""
+    from claude_code_hooks_daemon.utils.hook_registration import HOOK_EVENTS_IN_SETTINGS
+
+    hooks: dict = {}
+    for json_key, bash_key in HOOK_EVENTS_IN_SETTINGS.items():
+        hooks[json_key] = [
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": f'"$CLAUDE_PROJECT_DIR"/.claude/hooks/{bash_key}',
+                        "timeout": 60,
+                    }
+                ]
+            }
+        ]
+    return {"hooks": hooks}
+
+
+class TestVerifyHookRegistrations:
+    """Test _verify_hook_registrations validation."""
+
+    def test_no_settings_file_passes(self, tmp_path):
+        """No settings.json yet — nothing to validate."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        result = ClientInstallValidator._verify_hook_registrations(project_root)
+        assert result.passed is True
+        assert result.warnings == []
+
+    def test_all_hooks_present_no_duplicates(self, tmp_path):
+        """All hooks registered, no duplicates — clean result."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        claude_dir = project_root / ".claude"
+        claude_dir.mkdir()
+
+        settings_path = claude_dir / "settings.json"
+        settings_path.write_text(json.dumps(_build_valid_settings()))
+
+        result = ClientInstallValidator._verify_hook_registrations(project_root)
+        assert result.passed is True
+        assert result.warnings == []
+
+    def test_missing_hooks_reported_as_warnings(self, tmp_path):
+        """Missing hooks should appear as warnings."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        claude_dir = project_root / ".claude"
+        claude_dir.mkdir()
+
+        settings = _build_valid_settings()
+        del settings["hooks"]["Stop"]
+        del settings["hooks"]["PreToolUse"]
+
+        settings_path = claude_dir / "settings.json"
+        settings_path.write_text(json.dumps(settings))
+
+        result = ClientInstallValidator._verify_hook_registrations(project_root)
+        assert result.passed is True  # warnings, not errors
+        warnings_text = "\n".join(result.warnings)
+        assert "Stop" in warnings_text
+        assert "PreToolUse" in warnings_text
+
+    def test_duplicate_hooks_reported_as_warnings(self, tmp_path):
+        """Hooks in both settings files should be warned about."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        claude_dir = project_root / ".claude"
+        claude_dir.mkdir()
+
+        settings_path = claude_dir / "settings.json"
+        settings_path.write_text(json.dumps(_build_valid_settings()))
+
+        local_settings = {
+            "hooks": {
+                "Stop": [{"hooks": [{"type": "command", "command": ".claude/hooks/stop"}]}],
+            }
+        }
+        local_path = claude_dir / "settings.local.json"
+        local_path.write_text(json.dumps(local_settings))
+
+        result = ClientInstallValidator._verify_hook_registrations(project_root)
+        assert result.passed is True  # warnings, not errors
+        warnings_text = "\n".join(result.warnings)
+        assert "Duplicate" in warnings_text or "duplicate" in warnings_text
+        assert "Stop" in warnings_text
+
+    def test_wrong_command_reported_as_warning(self, tmp_path):
+        """Wrong hook command paths should appear as warnings."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        claude_dir = project_root / ".claude"
+        claude_dir.mkdir()
+
+        settings = _build_valid_settings()
+        settings["hooks"]["Stop"] = [
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": '"$CLAUDE_PROJECT_DIR"/.claude/hooks/wrong-script',
+                    }
+                ]
+            }
+        ]
+
+        settings_path = claude_dir / "settings.json"
+        settings_path.write_text(json.dumps(settings))
+
+        result = ClientInstallValidator._verify_hook_registrations(project_root)
+        assert result.passed is True  # warnings, not errors
+        warnings_text = "\n".join(result.warnings)
+        assert "Stop" in warnings_text
+        assert "wrong-script" in warnings_text
+
+    def test_invalid_json_adds_warning(self, tmp_path):
+        """Malformed settings.json should produce a warning, not crash."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        claude_dir = project_root / ".claude"
+        claude_dir.mkdir()
+
+        settings_path = claude_dir / "settings.json"
+        settings_path.write_text("{invalid json")
+
+        result = ClientInstallValidator._verify_hook_registrations(project_root)
+        assert result.passed is True
+        assert len(result.warnings) == 1
+        assert "Failed to read" in result.warnings[0]
+
+    def test_no_local_settings_no_duplicate_warnings(self, tmp_path):
+        """Missing settings.local.json should not produce duplicate warnings."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        claude_dir = project_root / ".claude"
+        claude_dir.mkdir()
+
+        settings_path = claude_dir / "settings.json"
+        settings_path.write_text(json.dumps(_build_valid_settings()))
+        # No settings.local.json
+
+        result = ClientInstallValidator._verify_hook_registrations(project_root)
+        assert result.passed is True
+        warnings_text = "\n".join(result.warnings)
+        assert "duplicate" not in warnings_text.lower()
 
 
 class TestValidatePreInstall:
