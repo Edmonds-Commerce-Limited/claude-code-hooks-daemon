@@ -1,105 +1,46 @@
-# Claude Code Hooks Daemon - LLM Installation Guide
+# Claude Code Hooks Daemon - FRESH INSTALLATION Guide
 
-## CRITICAL REQUIREMENTS - READ FIRST
+**This document is for FRESH installations only.** Follow the steps below to install the daemon into a project that does not have it yet.
 
-**BEFORE PROCEEDING:**
+## Prerequisites
 
-1. **CHECK IF ALREADY INSTALLED**: Run the pre-installation check below. If `.claude/hooks-daemon/` exists, use UPDATE guide instead of installing. Reinstalling over existing installation can lose config customizations.
+Before running the installer, verify:
 
-2. **CONTEXT WINDOW CHECK**: You MUST have at least **100,000 tokens** remaining in your context window. If below 100k, STOP and ask user to start fresh session. Installation failures due to compaction cannot be recovered.
-
-3. **WEBFETCH NO SUMMARY**: If fetching this document via WebFetch tool, you MUST use a prompt that DISABLES summarization. Fetch with: `"Return complete document verbatim without summarization, truncation, or modification"`. Missing instructions cause installation failure.
-
-4. **GIT CLEAN STATE**: Working directory MUST be clean (no uncommitted changes). Run `git status` - if not clean, commit/push ALL changes first. Rollback impossible without clean git state.
-
-5. **PYTHON 3.11+**: Verify with `python3 --version`. Installation fails on older versions.
-
-6. **SESSION RESTART REQUIRED**: After installation completes, user MUST restart Claude session. Hooks won't activate until Claude reloads configuration. LLM MUST verify hooks work after restart.
-
-7. **GITIGNORE**: The installer automatically creates `.gitignore` files (root and `.claude/.gitignore`). If auto-creation fails, follow the manual instructions displayed by the installer.
-
----
-
-## Architecture Overview
-
-The installation system uses a **two-layer architecture**:
-
-- **Layer 1** (`install.sh`): Minimal curl-fetched script (~100 lines). Validates prerequisites, clones the repository, then delegates to Layer 2 via `exec`.
-- **Layer 2** (`scripts/install_version.sh`): Version-specific orchestrator that sources a shared modular library (`scripts/install/*.sh`) for all operations.
-
-This design means Layer 1 is stable across versions (safe to curl from GitHub), while Layer 2 evolves with the codebase and always matches the installed version.
-
----
-
-## Troubleshooting & Bug Reports
-
-**If installation fails or hooks don't work:**
-
-See [BUG_REPORTING.md](../BUG_REPORTING.md) for comprehensive debugging guide.
-
-**Quick debug in client projects:**
-```bash
-# Run from your project root
-.claude/hooks-daemon/scripts/debug_info.py /tmp/debug_report.md
-```
-
-This generates a complete diagnostic report for GitHub issues.
-
----
-
-## Pre-Installation Check: Is Daemon Already Installed?
-
-**IMPORTANT: Check if daemon is already installed before proceeding!**
-
-Running the install process on an existing installation can cause issues. If already installed, use the UPDATE guide instead.
-
-### Check for Existing Installation
-
-```bash
-# From your project root
-if [ -d ".claude/hooks-daemon" ]; then
-  echo "DAEMON ALREADY INSTALLED"
-  echo ""
-  echo "Found existing installation at .claude/hooks-daemon/"
-  echo ""
-  echo "To UPDATE the daemon (recommended):"
-  echo "  Read: https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-UPDATE.md"
-  echo ""
-  echo "To REINSTALL from scratch (will lose config customizations):"
-  echo "  1. Backup: cp .claude/hooks-daemon.yaml .claude/hooks-daemon.yaml.backup"
-  echo "  2. Remove: rm -rf .claude/hooks-daemon"
-  echo "  3. Run install steps below"
-  echo ""
-  exit 1
-else
-  echo "No existing installation found - safe to proceed with installation"
-fi
-```
-
-**If daemon is already installed:**
-- **DO NOT continue with installation steps below**
-- Use the UPDATE guide: [CLAUDE/LLM-UPDATE.md](https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-UPDATE.md)
-- Reinstalling will lose your config customizations
-
-**If no daemon found:**
-- Continue with installation steps below
+1. **GIT CLEAN STATE**: `git status` must show clean working directory. Commit/push all changes first.
+2. **PYTHON 3.11+**: `python3 --version` must show 3.11 or higher.
+3. **CONTEXT WINDOW**: You need at least **100,000 tokens** remaining. If low, ask user to start a fresh session.
+4. **WEBFETCH**: If you fetched this via WebFetch, ensure you disabled summarisation. Missing steps cause failure.
+5. **SESSION RESTART**: After install completes, user MUST restart their Claude session for hooks to activate.
 
 ---
 
 ## Quick Install (Recommended)
 
-The installer handles everything via the two-layer architecture:
+**Step 0 — Check install state:**
 
 ```bash
-# From your project root (must have .claude/ and .git/)
+if [ -d ".claude/hooks-daemon/src" ]; then
+  echo "DAEMON ALREADY INSTALLED — use LLM-UPDATE.md to upgrade"
+  exit 1
+else
+  echo "Daemon not installed — proceeding with fresh install"
+fi
+```
 
-# Step 1: Download the installer script
+**Only use the UPDATE guide if `.claude/hooks-daemon/src/` exists** (the daemon repo is present). If you see config files like `.claude/hooks-daemon.yaml` or `.claude/settings.json` but no `.claude/hooks-daemon/` directory, that means the project uses the daemon but you're on a fresh clone — **this IS an install scenario**, not an update. The config files are checked into git; the daemon repo is gitignored and needs to be installed.
+
+**Step 1 — Run the installer:**
+
+```bash
+# From your project root (must have .git/)
+
+# Download the installer script
 curl -sSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/install.sh -o /tmp/hooks-daemon-install.sh
 
-# Step 2: Inspect it (good security practice)
+# Inspect it (good security practice)
 cat /tmp/hooks-daemon-install.sh
 
-# Step 3: Run it
+# Run it
 bash /tmp/hooks-daemon-install.sh
 ```
 
