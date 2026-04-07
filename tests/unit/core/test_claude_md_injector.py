@@ -224,3 +224,146 @@ class TestClaudeMdInjectorCreateSection:
         second = claude_md.read_text()
 
         assert first == second
+
+
+class TestClaudeMdInjectorContentLossProtection:
+    """Tests for defensive content loss protection.
+
+    The injector must NEVER produce a file that loses user content
+    (content outside the <hooksdaemon> block). These tests verify the
+    safety checks that prevent data loss even if the replacement logic
+    has an edge-case bug.
+    """
+
+    def test_aborts_when_user_content_would_be_lost(self, tmp_path: Path) -> None:
+        """Injection is skipped if replacement would lose user content.
+
+        Simulates the reported bug: after replacement, user content before
+        the <hooksdaemon> block disappears. The injector must detect this
+        and refuse to write.
+        """
+        from unittest.mock import patch
+
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        # CLAUDE.md with substantial user content + hooksdaemon block
+        user_content = (
+            "# My Project\n\n"
+            "## Critical Rules\n\n"
+            "Important project rules here.\n\n"
+            "## Design Principles\n\n"
+            "- DRY\n- YAGNI\n- KISS\n\n"
+        )
+        hooksdaemon_block = f"{_OPEN_TAG}\n## Old\n\nOld content.\n{_CLOSE_TAG}\n"
+        original = user_content + hooksdaemon_block
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text(original)
+
+        handler = _StubHandler("h", "## H\n\nNew content.")
+        injector = ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler])
+
+        # Simulate a buggy _replace_or_append_section that loses user content
+        def buggy_replace(orig: str, new_section: str) -> str:
+            # Returns only the new section — user content lost
+            return new_section
+
+        with patch.object(
+            ClaudeMdInjector, "_replace_or_append_section", staticmethod(buggy_replace)
+        ):
+            injector.inject()
+
+        # File must retain original content — the write should have been aborted
+        result = claude_md.read_text()
+        assert "Critical Rules" in result, "User content was lost — safety check failed!"
+
+    def test_allows_write_when_user_content_preserved(self, tmp_path: Path) -> None:
+        """Normal injection proceeds when user content is preserved."""
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        user_content = "# My Project\n\nImportant rules.\n\n"
+        hooksdaemon_block = f"{_OPEN_TAG}\n## Old\n\nOld.\n{_CLOSE_TAG}\n"
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text(user_content + hooksdaemon_block)
+
+        handler = _StubHandler("h", "## H\n\nNew content.")
+        injector = ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler])
+        injector.inject()
+
+        result = claude_md.read_text()
+        assert "Important rules" in result
+        assert "New content" in result
+        assert "Old." not in result  # old section replaced
+
+    def test_writes_backup_before_modifying_existing_file(self, tmp_path: Path) -> None:
+        """A .CLAUDE.md.pre-inject backup is created before any modification."""
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        original = "# My Project\n\nOriginal content.\n"
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text(original)
+
+        handler = _StubHandler("h", "## H\n\nContent.")
+        injector = ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler])
+        injector.inject()
+
+        backup = tmp_path / ".CLAUDE.md.pre-inject"
+        assert backup.exists(), "Backup file was not created"
+        assert backup.read_text() == original
+
+    def test_no_backup_when_creating_new_file(self, tmp_path: Path) -> None:
+        """No backup is created when CLAUDE.md does not exist yet."""
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        handler = _StubHandler("h", "## H\n\nContent.")
+        injector = ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler])
+        injector.inject()
+
+        backup = tmp_path / ".CLAUDE.md.pre-inject"
+        assert not backup.exists(), "Backup should not exist for new files"
+
+    def test_extracts_user_content_correctly(self, tmp_path: Path) -> None:
+        """_extract_user_content returns content outside <hooksdaemon> tags."""
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        before = "# Project\n\nRules.\n\n"
+        after = "\n\n## Footer\n\nMore stuff.\n"
+        content = f"{before}{_OPEN_TAG}\nhandler stuff\n{_CLOSE_TAG}{after}"
+
+        result = ClaudeMdInjector._extract_user_content(content)
+        assert result == before + after
+
+    def test_extracts_all_content_when_no_tags(self, tmp_path: Path) -> None:
+        """_extract_user_content returns full content when no tags present."""
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        content = "# Project\n\nAll user content.\n"
+        result = ClaudeMdInjector._extract_user_content(content)
+        assert result == content
+
+    def test_content_loss_logged_as_error(self, tmp_path: Path, caplog: Any) -> None:
+        """Content loss detection is logged at ERROR level for diagnostics."""
+        import logging
+        from unittest.mock import patch
+
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        user_content = "# Project\n\n## Rules\n\nImportant.\n\n"
+        hooksdaemon_block = f"{_OPEN_TAG}\n## Old\n{_CLOSE_TAG}\n"
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text(user_content + hooksdaemon_block)
+
+        handler = _StubHandler("h", "## H\n\nNew.")
+        injector = ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler])
+
+        def buggy_replace(orig: str, new_section: str) -> str:
+            return new_section
+
+        with (
+            caplog.at_level(logging.ERROR),
+            patch.object(
+                ClaudeMdInjector, "_replace_or_append_section", staticmethod(buggy_replace)
+            ),
+        ):
+            injector.inject()
+
+        assert any("content loss" in record.message.lower() for record in caplog.records)
