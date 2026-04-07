@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.1] - 2026-04-07
+
+### Fixed
+
+- **ClaudeMdInjector content loss protection**: Added safety checks that detect and abort writes that would lose user content outside the `<hooksdaemon>` block, plus a `.CLAUDE.md.pre-inject` backup file is written before every modification.
+- **Install/upgrade gitignore management**: The `.CLAUDE.md.pre-inject` backup file is now included in generated `.gitignore` entries so it is never accidentally committed.
+
 ## [3.0.0] - 2026-04-07
 
 ### Removed
