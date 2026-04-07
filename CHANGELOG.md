@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.32.0] - 2026-04-06
+
+### Added
+
+- **`hook_registration_checker` handler**: New SessionStart handler (priority 51) that validates hook registrations in Claude Code settings on session start, alerting when expected hooks are missing or misconfigured.
+
+- **`/hooks-daemon report` subcommand**: New CLI subcommand for generating investigation reports, providing structured diagnostic output to assist in debugging daemon and handler issues.
+
+- **Skill-reference QA checker**: New `skill_refs` QA check that enforces the pattern of using skill-based references (e.g. `/hooks-daemon`) rather than bare Python module invocations or slash syntax in agent-facing messages, ensuring consistent and user-friendly guidance across all handlers.
+
+### Fixed
+
+- **`enforce_llm_qa` false positive on run_all.sh mentions**: The handler previously blocked git add/commit operations when the commit message contained the string `run_all.sh`, incorrectly treating it as a direct QA invocation. Fixed to correctly distinguish between mentioning `run_all.sh` in a commit message and actually running it.
+
+- **Daemon error messages use skill-based wording**: All agent-facing error and guidance messages in the daemon core now direct agents to use `/hooks-daemon` skill syntax instead of bare Python module invocations (`python -m ...`) or raw slash syntax, ensuring consistent skill-first messaging.
+
+- **Ruff warnings resolved across codebase**: Resolved all pre-existing ruff linting warnings in both source files and test files, achieving zero lint violations across the entire codebase.
+
+- **`hook_registration_checker` included in default config**: Added `hook_registration_checker` to `init_config.py` default configuration so new installations automatically include the handler without requiring manual config edits.
+
+- **LLM-INSTALL.md restructured to prevent install/update confusion**: The install guide front-loaded "already installed?" messaging so heavily that LLM agents would conclude they should update instead of install. Restructured to lead with prerequisites and install steps. The "already installed?" check is now a brief Step 0 guard that correctly distinguishes fresh clones (config files exist but daemon repo is gitignored) from actual existing installations.
+
 ## [2.31.1] - 2026-04-03
 
 ### Fixed
