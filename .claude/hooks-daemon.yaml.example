@@ -6,7 +6,7 @@ daemon:
   log_level: INFO
   project_root: ../../  # Project root relative to this config file (always ../../)
 
-  stale_file_days: 7  # Remove daemon runtime files and command-redirection output older than this (days)
+  stale_file_days: 7  # Remove daemon runtime files older than this (days)
 
   # CI enforcement (v2.27.0+) - Controls behaviour when daemon cannot start
   # Default (false/omitted): fail open — warn once then silently passthrough
@@ -57,8 +57,6 @@ handlers:
     pipe_blocker:          # Blocks dangerous pipe patterns in bash commands
       enabled: true
       priority: 15
-      options:
-        command_redirection: true  # Execute corrected command and save output to file
 
     dangerous_permissions: # Warns about dangerous file permission changes
       enabled: true
@@ -128,8 +126,6 @@ handlers:
     gh_issue_comments:     # Requires --comments flag for gh issue view
       enabled: true
       priority: 40
-      options:
-        command_redirection: true  # Execute corrected command and save output to file
 
     validate_plan_number:  # Validates plan number format (001-, 002-, etc)
       enabled: false       # Enable for projects using CLAUDE/Plan/
@@ -158,8 +154,6 @@ handlers:
     npm_command:           # Restricts npm commands to approved list
       enabled: false       # Enable for strict npm usage control
       priority: 50
-      options:
-        command_redirection: true  # Execute corrected command and save output to file
 
     markdown_organization: # Enforces markdown file organization rules & plan tracking
       enabled: false       # Enable for md organization + plan tracking

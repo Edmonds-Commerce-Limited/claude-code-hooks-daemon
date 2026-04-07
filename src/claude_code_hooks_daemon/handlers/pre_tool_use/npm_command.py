@@ -4,34 +4,18 @@ When llm: commands exist in package.json, enforces their usage (DENY raw command
 When llm: commands do NOT exist, allows with advisory about creating them.
 """
 
-import logging
 import re
-import shlex
 from typing import Any, ClassVar
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult, ProjectContext
-from claude_code_hooks_daemon.core.command_redirection import (
-    execute_and_save,
-    format_redirection_context,
-    get_output_dir,
-)
+from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.guides import get_llm_command_guide_path
 from claude_code_hooks_daemon.utils.npm import has_llm_commands_in_package_json
 
-logger = logging.getLogger(__name__)
-
 
 class NpmCommandHandler(Handler):
-    """Enforce llm: prefixed npm commands and block direct npx tool usage.
-
-    Options:
-        command_redirection: bool (default False) — When enabled, the handler
-            executes the corrected llm: command automatically and saves output
-            to a file. Disabled by default because the output file lands inside
-            .claude/hooks-daemon/ which triggers CLAUDE.md cascade loading.
-    """
+    """Enforce llm: prefixed npm commands and block direct npx tool usage."""
 
     ALLOWED_COMMANDS: ClassVar[list[str]] = ["clean", "dev:permissive"]
     SUGGESTIONS: ClassVar[dict[str, str]] = {
@@ -70,8 +54,6 @@ class NpmCommandHandler(Handler):
                 HandlerTag.NON_TERMINAL,
             ],
         )
-        options = options or {}
-        self._command_redirection: bool = options.get("command_redirection", False)
         self.has_llm_commands: bool = has_llm_commands_in_package_json()
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
@@ -102,62 +84,6 @@ class NpmCommandHandler(Handler):
             return tool_name in self.NPX_TOOL_SUGGESTIONS
 
         return False
-
-    def _get_suggested_command(self, hook_input: dict[str, Any]) -> str | None:
-        """Compute the suggested llm: command string.
-
-        Returns None for piped commands (no sensible redirect) or non-Bash tools.
-
-        Args:
-            hook_input: Hook input data
-
-        Returns:
-            Suggested command string (e.g. "npm run llm:build") or None
-        """
-        command = get_bash_command(hook_input)
-        if not command:
-            return None
-
-        # Piped commands don't have a sensible redirect
-        pipe_match = re.search(r"\b(npm\s+run|npx)\s+([a-z:]+).*?\s*(?<!\|)\|(?!\|)", command)
-        if pipe_match:
-            return None
-
-        # npm run command
-        npm_match = re.search(r"npm\s+run\s+([a-z:]+(?:-[a-z]+)*)", command)
-        if npm_match:
-            npm_cmd = npm_match.group(1)
-            suggested = self.SUGGESTIONS.get(npm_cmd, "llm:qa")
-            return f"npm run {suggested}"
-
-        # npx command
-        npx_match = re.search(r"npx\s+([a-z]+)", command)
-        if npx_match:
-            tool_name = npx_match.group(1)
-            suggested = self.NPX_TOOL_SUGGESTIONS.get(tool_name, "llm:qa")
-            return f"npm run {suggested}"
-
-        return None
-
-    def get_redirected_command(self, hook_input: dict[str, Any]) -> list[str] | None:
-        """Compute the corrected command as a list of args for subprocess.
-
-        Returns None for piped commands or non-Bash tools.
-
-        Args:
-            hook_input: Hook input data
-
-        Returns:
-            Corrected command as list of strings, or None
-        """
-        suggested = self._get_suggested_command(hook_input)
-        if not suggested:
-            return None
-
-        try:
-            return shlex.split(suggested)
-        except ValueError:
-            return suggested.split()
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Block non-llm npm commands, npx tools, and piped commands with suggestion."""
@@ -242,24 +168,7 @@ class NpmCommandHandler(Handler):
             f"No need for grep/awk/sed post-processing!"
         )
 
-        # Command redirection: execute corrected command and save output
-        context: list[str] = []
-        if self._command_redirection:
-            redirected_args = self.get_redirected_command(hook_input)
-            if redirected_args:
-                try:
-                    output_dir = get_output_dir()
-                    result = execute_and_save(
-                        command=redirected_args,
-                        output_dir=output_dir,
-                        label="npm_command",
-                        cwd=ProjectContext.project_root(),
-                    )
-                    context = format_redirection_context(result)
-                except (OSError, RuntimeError) as e:
-                    logger.warning("Command redirection failed for npm_command: %s", e)
-
-        return HookResult(decision=Decision.DENY, reason=reason, context=context)
+        return HookResult(decision=Decision.DENY, reason=reason)
 
     def get_claude_md(self) -> str | None:
         return (

@@ -2,22 +2,13 @@
 
 from __future__ import annotations
 
-import logging
 import re
-import shlex
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Handler, HookResult, ProjectContext
-from claude_code_hooks_daemon.core.command_redirection import (
-    execute_and_save,
-    format_redirection_context,
-    get_output_dir,
-)
+from claude_code_hooks_daemon.core import Handler, HookResult
 from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.core.utils import get_bash_command
-
-logger = logging.getLogger(__name__)
 
 
 class GhIssueCommentsHandler(Handler):
@@ -25,12 +16,6 @@ class GhIssueCommentsHandler(Handler):
 
     Comments on GitHub issues often contain critical context, clarifications,
     and updates that aren't in the issue body. Claude should always read them.
-
-    Options:
-        command_redirection: bool (default False) — When enabled, the handler
-            executes the corrected command automatically and saves output to a
-            file. Disabled by default because the output file lands inside
-            .claude/hooks-daemon/ which triggers CLAUDE.md cascade loading.
     """
 
     def __init__(self, options: dict[str, Any] | None = None) -> None:
@@ -39,9 +24,6 @@ class GhIssueCommentsHandler(Handler):
             priority=Priority.GH_ISSUE_COMMENTS,
             tags=[HandlerTag.WORKFLOW, HandlerTag.GITHUB, HandlerTag.BLOCKING, HandlerTag.TERMINAL],
         )
-        options = options or {}
-        self._command_redirection: bool = options.get("command_redirection", False)
-
         # Match: gh issue view [number] [--repo owner/repo] [other flags]
         # But NOT already containing --comments
         self._gh_issue_view_pattern = re.compile(
@@ -77,28 +59,6 @@ class GhIssueCommentsHandler(Handler):
         # No --comments flag and no --json with comments field
         return True
 
-    def get_redirected_command(self, hook_input: dict[str, Any]) -> list[str] | None:
-        """Compute the corrected command as a list of args for subprocess.
-
-        Returns None if no bash command is present.
-
-        Args:
-            hook_input: Hook input data
-
-        Returns:
-            Corrected command as list of strings, or None
-        """
-        command = get_bash_command(hook_input)
-        if not command:
-            return None
-
-        suggested = self._compute_suggested_command(command)
-        try:
-            return shlex.split(suggested)
-        except ValueError:
-            # Fallback: simple split if shlex fails on complex quoting
-            return suggested.split()
-
     def _compute_suggested_command(self, command: str) -> str:
         """Compute the suggested corrected command string.
 
@@ -118,11 +78,7 @@ class GhIssueCommentsHandler(Handler):
         return f"{command} --comments"
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
-        """Block and suggest adding --comments flag.
-
-        When command_redirection is enabled, also executes the corrected
-        command and saves output to a file for immediate access.
-        """
+        """Block and suggest adding --comments flag."""
         command = get_bash_command(hook_input)
         if not command:
             return HookResult(decision=Decision.ALLOW)
@@ -140,24 +96,7 @@ class GhIssueCommentsHandler(Handler):
             f"  {suggested_command}\n"
         )
 
-        # Command redirection: execute corrected command and save output
-        context: list[str] = []
-        if self._command_redirection:
-            redirected_args = self.get_redirected_command(hook_input)
-            if redirected_args:
-                try:
-                    output_dir = get_output_dir()
-                    result = execute_and_save(
-                        command=redirected_args,
-                        output_dir=output_dir,
-                        label="gh_issue_view",
-                        cwd=ProjectContext.project_root(),
-                    )
-                    context = format_redirection_context(result)
-                except (OSError, RuntimeError) as e:
-                    logger.warning("Command redirection failed for gh_issue_comments: %s", e)
-
-        return HookResult(decision=Decision.DENY, reason=reason, context=context)
+        return HookResult(decision=Decision.DENY, reason=reason)
 
     def get_claude_md(self) -> str | None:
         return (

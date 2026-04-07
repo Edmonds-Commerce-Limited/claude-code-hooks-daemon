@@ -104,7 +104,7 @@ git commit -m "Plan NNNNN: Phase N - Description"
 
 1. **Never ignore a dogfooding bug** — if a handler misfires, blocks the wrong thing, runs in the wrong directory, or produces incorrect output, that is a real bug affecting all users
 2. **Fix before continuing** — stop your current task, fix the bug with TDD, run QA, commit, then resume your original work
-3. **All handler behaviour is in scope** — blocking handlers, advisory handlers, command redirection, context injection, status line — everything
+3. **All handler behaviour is in scope** — blocking handlers, advisory handlers, context injection, status line — everything
 4. **The daemon is not "someone else's problem"** — you ARE the upstream. There is no one else to report to
 5. **Restart the daemon after every handler code change** — the daemon loads Python modules at startup; file edits are invisible until restarted. A handler that "passes unit tests" but never gets restarted is NOT dogfooded.
 

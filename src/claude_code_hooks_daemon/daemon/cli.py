@@ -49,7 +49,6 @@ from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.paths import (
     cleanup_pid_file,
     cleanup_socket,
-    cleanup_stale_command_redirection_files,
     cleanup_stale_daemon_files,
     get_pid_path,
     get_socket_path,
@@ -315,11 +314,9 @@ def cmd_start(args: argparse.Namespace) -> int:
     # Remove stale runtime files from dead containers (age-based, not hostname-based)
     stale_days = config.daemon.stale_file_days
     stale_daemon = cleanup_stale_daemon_files(project_path, max_age_days=stale_days)
-    stale_cmdredir = cleanup_stale_command_redirection_files(project_path, max_age_days=stale_days)
-    total_stale = stale_daemon + stale_cmdredir
-    write_cleanup_status(project_path, total_stale)
-    if total_stale > 0:
-        print(f"Cleaned up {total_stale} stale file(s) older than {stale_days} days")
+    write_cleanup_status(project_path, stale_daemon)
+    if stale_daemon > 0:
+        print(f"Cleaned up {stale_daemon} stale file(s) older than {stale_days} days")
 
     # Daemonise process (fork and detach from terminal)
     try:

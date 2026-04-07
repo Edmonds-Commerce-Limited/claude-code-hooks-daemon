@@ -10,9 +10,7 @@ PipeBlockerStrategy implementations registered in PipeBlockerStrategyRegistry.
 The handler itself has ZERO language awareness.
 """
 
-import logging
 import re
-import shlex
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
@@ -20,19 +18,11 @@ from claude_code_hooks_daemon.core import (
     Decision,
     Handler,
     HookResult,
-    ProjectContext,
     get_data_layer,
-)
-from claude_code_hooks_daemon.core.command_redirection import (
-    format_redirection_context,
-    get_output_dir,
-    launch_and_save,
 )
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.strategies.pipe_blocker.common import UNIVERSAL_WHITELIST_PATTERNS
 from claude_code_hooks_daemon.strategies.pipe_blocker.registry import PipeBlockerStrategyRegistry
-
-logger = logging.getLogger(__name__)
 
 # Config key hints shown in unknown-command message
 _CONFIG_HINT_EXTRA_WHITELIST = "extra_whitelist"
@@ -62,22 +52,13 @@ class PipeBlockerHandler(Handler):
     """
 
     def __init__(self, options: dict[str, Any] | None = None) -> None:
-        """Initialize with optional per-project extra whitelist/blacklist.
-
-        Options:
-            command_redirection: bool (default False) — When enabled, the handler
-                executes the base command (without pipe) automatically and saves
-                output to a file. Disabled by default because the output file
-                lands inside .claude/hooks-daemon/ which triggers CLAUDE.md
-                cascade loading when Claude reads it.
-        """
+        """Initialize with optional per-project extra whitelist/blacklist."""
         super().__init__(
             handler_id=HandlerID.PIPE_BLOCKER,
             priority=Priority.PIPE_BLOCKER,
             tags=[HandlerTag.SAFETY, HandlerTag.BASH, HandlerTag.BLOCKING, HandlerTag.TERMINAL],
         )
         options = options or {}
-        self._command_redirection: bool = options.get("command_redirection", False)
 
         # Strategy registry for language-specific blacklists
         self._registry = PipeBlockerStrategyRegistry.create_default()
@@ -338,33 +319,6 @@ class PipeBlockerHandler(Handler):
             f"To disable: {_CONFIG_HINT_HANDLER}  (set enabled: false)"
         )
 
-    def get_redirected_command(self, hook_input: dict[str, Any]) -> list[str] | None:
-        """Compute the base command (without pipe) as a list of args.
-
-        Strips the pipe to tail/head, returning just the source command
-        so it can be executed and its full output saved to a file.
-
-        Returns None if no bash command is present.
-
-        Args:
-            hook_input: Hook input data
-
-        Returns:
-            Base command as list of strings, or None
-        """
-        command = get_bash_command(hook_input)
-        if not command:
-            return None
-
-        source_segment = self._extract_source_segment(command)
-        if not source_segment:
-            return None
-
-        try:
-            return shlex.split(source_segment)
-        except ValueError:
-            return source_segment.split()
-
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Block with blacklisted or unknown message based on pattern match and block count."""
         command = get_bash_command(hook_input) or "unknown command"
@@ -383,26 +337,7 @@ class PipeBlockerHandler(Handler):
             else:
                 reason = self._unknown_terse_reason(source_segment, command)
 
-        # Command redirection: launch base command in background and save output.
-        # Uses launch_and_save (async/non-blocking) instead of execute_and_save
-        # to prevent hook timeout when redirecting slow commands (pytest, npm test).
-        context: list[str] = []
-        if self._command_redirection:
-            redirected_args = self.get_redirected_command(hook_input)
-            if redirected_args:
-                try:
-                    output_dir = get_output_dir()
-                    result = launch_and_save(
-                        command=redirected_args,
-                        output_dir=output_dir,
-                        label="pipe_blocker",
-                        cwd=ProjectContext.project_root(),
-                    )
-                    context = format_redirection_context(result)
-                except (OSError, RuntimeError) as e:
-                    logger.warning("Command redirection failed for pipe_blocker: %s", e)
-
-        return HookResult(decision=Decision.DENY, reason=reason, context=context)
+        return HookResult(decision=Decision.DENY, reason=reason)
 
     def get_claude_md(self) -> str | None:
         """Return CLAUDE.md guidance about the pipe blocker."""
