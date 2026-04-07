@@ -61,7 +61,16 @@ class ClaudeMdInjector:
     If no handlers have guidance, CLAUDE.md is left untouched.
     All errors (missing file, permission errors) are logged and swallowed
     — injection is advisory and must never crash the daemon.
+
+    Safety: before writing, the injector verifies that user content
+    (everything outside the <hooksdaemon> block) is preserved. If user
+    content would be lost, the write is aborted and the original file
+    is left untouched. A .CLAUDE.md.pre-inject backup is always written
+    before modifying an existing file.
     """
+
+    # Backup filename — written before every modification to an existing CLAUDE.md
+    _BACKUP_FILENAME = ".CLAUDE.md.pre-inject"
 
     def __init__(self, workspace_root: Path, handlers: list[Any]) -> None:
         """Initialise injector.
@@ -115,15 +124,74 @@ class ClaudeMdInjector:
         if claude_md_path.exists():
             original = claude_md_path.read_text(encoding="utf-8")
             updated = self._replace_or_append_section(original, generated)
-        else:
-            updated = generated + "\n"
 
-        claude_md_path.write_text(updated, encoding="utf-8")
+            # SAFETY: verify user content is preserved before writing
+            if not self._is_user_content_preserved(original, updated):
+                logger.error(
+                    "ClaudeMdInjector: CONTENT LOSS DETECTED — aborting write to %s. "
+                    "User content outside <hooksdaemon> block would be lost. "
+                    "Original: %d chars, updated: %d chars. "
+                    "Backup at: %s",
+                    claude_md_path,
+                    len(original),
+                    len(updated),
+                    claude_md_path.parent / self._BACKUP_FILENAME,
+                )
+                return
+
+            # Write backup before modifying existing file
+            backup_path = self._workspace_root / self._BACKUP_FILENAME
+            backup_path.write_text(original, encoding="utf-8")
+
+            claude_md_path.write_text(updated, encoding="utf-8")
+        else:
+            # No existing file — create from scratch (no backup needed)
+            updated = generated + "\n"
+            claude_md_path.write_text(updated, encoding="utf-8")
+
         logger.info(
             "ClaudeMdInjector: updated %s with guidance from %d handler(s)",
             claude_md_path,
             len(sections),
         )
+
+    @staticmethod
+    def _extract_user_content(content: str) -> str:
+        """Return content outside the <hooksdaemon>...</hooksdaemon> block.
+
+        If tags are not found, returns the full content (it is all user content).
+        """
+        open_pos = content.find(_OPEN_TAG)
+        close_pos = content.find(_CLOSE_TAG)
+
+        if open_pos != -1 and close_pos != -1 and open_pos < close_pos:
+            before = content[:open_pos]
+            after = content[close_pos + len(_CLOSE_TAG) :]
+            return before + after
+
+        # No valid tag pair — entire content is user content
+        return content
+
+    @staticmethod
+    def _is_user_content_preserved(original: str, updated: str) -> bool:
+        """Check that user content (outside hooksdaemon block) is preserved.
+
+        Returns True if it is safe to write the updated content.
+        Returns False if user content would be lost — the write must be aborted.
+        """
+        original_user = ClaudeMdInjector._extract_user_content(original)
+        updated_user = ClaudeMdInjector._extract_user_content(updated)
+
+        # Strip whitespace for comparison — whitespace changes are not content loss
+        original_stripped = original_user.strip()
+        updated_stripped = updated_user.strip()
+
+        # If original had no user content, any result is safe
+        if not original_stripped:
+            return True
+
+        # Updated must contain the same user content (stripped)
+        return updated_stripped == original_stripped
 
     def _collect_sections(self) -> list[tuple[str, str]]:
         """Return list of (handler_name, guidance) for handlers with content."""

@@ -151,3 +151,6 @@ untracked/
 # Acceptance test results
 CLAUDE/AcceptanceTests/results/*
 !CLAUDE/AcceptanceTests/results/.gitkeep
+
+# ClaudeMdInjector backup (written before each injection to enable recovery)
+.CLAUDE.md.pre-inject

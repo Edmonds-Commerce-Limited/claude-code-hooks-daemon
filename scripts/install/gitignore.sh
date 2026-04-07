@@ -20,6 +20,8 @@ fi
 # Expected .gitignore entries
 readonly DAEMON_GITIGNORE_ENTRY=".claude/hooks-daemon/"
 readonly UNTRACKED_GITIGNORE_ENTRY="/untracked/"
+# Backup file created by ClaudeMdInjector before modifying CLAUDE.md
+readonly INJECT_BACKUP_GITIGNORE_ENTRY=".CLAUDE.md.pre-inject"
 
 #
 # ensure_root_gitignore() - Ensure root .gitignore has daemon entry
@@ -59,8 +61,9 @@ ensure_root_gitignore() {
         cat > "$gitignore_file" <<EOF
 # Claude Code Hooks Daemon
 $ignore_entry
+$INJECT_BACKUP_GITIGNORE_ENTRY
 EOF
-        print_success "Created .gitignore with daemon entry"
+        print_success "Created .gitignore with daemon entries"
         return 0
     fi
 
@@ -75,9 +78,10 @@ EOF
 
 # Claude Code Hooks Daemon
 $ignore_entry
+$INJECT_BACKUP_GITIGNORE_ENTRY
 EOF
 
-    print_success "Added daemon entry to .gitignore"
+    print_success "Added daemon entries to .gitignore"
     return 0
 }
 
