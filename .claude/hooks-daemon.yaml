@@ -8,7 +8,7 @@ daemon:
   strict_mode: true  # FAIL FAST on ALL errors (dogfooding requirement)
   project_root: ../../  # Project root relative to this config file (always ../../)
 
-  stale_file_days: 7  # Remove daemon runtime files and command-redirection output older than this many days
+  stale_file_days: 7  # Remove daemon runtime files older than this many days
 
   enable_hello_world_handlers: false  # Disabled - using real handlers instead
 
@@ -71,8 +71,6 @@ handlers:
     pipe_blocker:          # Blocks dangerous pipe patterns in bash commands
       enabled: true
       priority: 17
-      options:
-        command_redirection: true
 
     dangerous_permissions: # Warns about dangerous file permission changes
       enabled: true
@@ -165,8 +163,6 @@ handlers:
     gh_issue_comments:     # Requires --comments flag for gh issue view
       enabled: true
       priority: 40
-      options:
-        command_redirection: true
 
     validate_plan_number:  # Validates plan number format (001-, 002-, etc)
       enabled: true        # Enable for projects using CLAUDE/Plan/
@@ -191,8 +187,6 @@ handlers:
     npm_command:           # Restricts npm commands to approved list
       enabled: true        # Enable for strict npm usage control
       priority: 49
-      options:
-        command_redirection: true
 
     markdown_organization: # Enforces markdown file organization rules & plan tracking
       enabled: true        # Enable for md organization + plan tracking

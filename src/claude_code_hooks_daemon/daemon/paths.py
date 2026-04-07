@@ -435,9 +435,6 @@ _DAEMON_FILE_PREFIX = "daemon-"
 # Filename for the cleanup status file read by the startup_cleanup statusline handler
 _CLEANUP_STATUS_FILENAME = "cleanup_status.json"
 
-# Directory name for command-redirection output files
-_COMMAND_REDIRECTION_DIR = "command-redirection"
-
 
 def cleanup_stale_daemon_files(project_dir: Path | str, max_age_days: int = 7) -> int:
     """Remove daemon runtime files that haven't been touched within max_age_days.
@@ -481,53 +478,6 @@ def cleanup_stale_daemon_files(project_dir: Path | str, max_age_days: int = 7) -
     if removed:
         logger.info(
             "Cleaned up %d stale daemon file(s) (older than %d days)", removed, max_age_days
-        )
-
-    return removed
-
-
-def cleanup_stale_command_redirection_files(project_dir: Path | str, max_age_days: int = 7) -> int:
-    """Remove command-redirection output files older than max_age_days.
-
-    The pipe_blocker handler redirects blocked commands to files in
-    untracked/command-redirection/. These accumulate over time and should
-    be periodically cleaned up.
-
-    Args:
-        project_dir: Path to project directory
-        max_age_days: Files older than this many days are removed (default 7)
-
-    Returns:
-        Number of stale files removed
-    """
-    project_path = Path(project_dir).resolve()
-    untracked_dir = _get_untracked_dir(project_path)
-    cmd_redir_dir = untracked_dir / _COMMAND_REDIRECTION_DIR
-
-    if not cmd_redir_dir.is_dir():
-        return 0
-
-    cutoff = time.time() - (max_age_days * 86400)
-    removed = 0
-
-    for filepath in cmd_redir_dir.iterdir():
-        if not filepath.is_file():
-            continue
-        try:
-            if filepath.stat().st_mtime < cutoff:
-                filepath.unlink()
-                removed += 1
-                logger.info("Removed stale command-redirection file: %s", filepath)
-        except OSError as e:
-            logger.warning("Failed to remove stale command-redirection file %s: %s", filepath, e)
-        except Exception as e:
-            logger.error("Unexpected error removing %s: %s", filepath, e, exc_info=True)
-
-    if removed:
-        logger.info(
-            "Cleaned up %d stale command-redirection file(s) (older than %d days)",
-            removed,
-            max_age_days,
         )
 
     return removed

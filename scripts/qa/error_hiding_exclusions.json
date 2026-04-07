@@ -9,18 +9,6 @@
       "reason": "FileNotFoundError is expected when config file disappears between exists() check and read (TOCTOU). Falls through to return cls() which creates a safe default. This is not hiding an error — it IS the intended fallback."
     },
     {
-      "file": "core/command_redirection.py",
-      "function": "_reap_background_process",
-      "rule": "log-and-continue",
-      "reason": "Zombie reaper thread: log-and-continue when process wait() fails. Reaper thread must never crash the daemon — it exists solely to prevent zombie accumulation. Already logged at debug level."
-    },
-    {
-      "file": "core/command_redirection.py",
-      "function": "cleanup_old_files",
-      "rule": "log-and-continue",
-      "reason": "File cleanup loop: log-and-continue when individual old output files cannot be removed (FileNotFoundError, PermissionError). One unremovable file must not prevent cleanup of others. Already logged at debug/warning level."
-    },
-    {
       "file": "core/claude_md_injector.py",
       "function": "inject",
       "rule": "return-none-on-error",
@@ -124,12 +112,6 @@
     },
     {
       "file": "daemon/paths.py",
-      "function": "cleanup_stale_command_redirection_files",
-      "rule": "log-and-continue",
-      "reason": "Stale file batch cleanup routine: log-and-continue is correct. One unremovable/unreadable file must not abort cleanup of others or block daemon startup. Already logged at warning/debug level."
-    },
-    {
-      "file": "daemon/paths.py",
       "function": "touch_daemon_files_in_dir",
       "rule": "log-and-continue",
       "reason": "Stale file batch cleanup routine: log-and-continue is correct. One unremovable/unreadable file must not abort cleanup of others or block daemon startup. Already logged at warning/debug level."
@@ -199,24 +181,6 @@
       "function": "_extract_workflow_state",
       "rule": "log-and-continue",
       "reason": "Workflow state file reading: log-and-continue. One unreadable state file should not prevent processing of other state files. PreCompact handler must not crash the compaction process. Already logged."
-    },
-    {
-      "file": "handlers/pre_tool_use/gh_issue_comments.py",
-      "function": "handle",
-      "rule": "log-and-continue",
-      "reason": "Command redirection fallback: log-and-continue when redirected command execution fails. Handler falls back to block-only behaviour (educational deny message without result). Redirection is best-effort enhancement. Already logged at warning level."
-    },
-    {
-      "file": "handlers/pre_tool_use/npm_command.py",
-      "function": "handle",
-      "rule": "log-and-continue",
-      "reason": "Command redirection fallback: log-and-continue when redirected command execution fails. Handler falls back to block-only behaviour (educational deny message without result). Redirection is best-effort enhancement. Already logged at warning level."
-    },
-    {
-      "file": "handlers/pre_tool_use/pipe_blocker.py",
-      "function": "handle",
-      "rule": "log-and-continue",
-      "reason": "Command redirection fallback: log-and-continue when redirected command execution fails. Handler falls back to block-only behaviour (educational deny message without result). Redirection is best-effort enhancement. Already logged at warning level."
     },
     {
       "file": "handlers/project_loader.py",

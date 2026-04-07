@@ -10,7 +10,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 from claude_code_hooks_daemon.daemon.paths import (
-    cleanup_stale_command_redirection_files,
     cleanup_stale_daemon_files,
     touch_daemon_files,
     touch_daemon_files_in_dir,
@@ -165,58 +164,6 @@ class TestCleanupStaleDaemonFiles:
         assert result == 1  # Only .pid removed; .sock failed but didn't crash
 
 
-class TestCleanupStaleCommandRedirectionFiles:
-    """Tests for cleanup_stale_command_redirection_files()."""
-
-    def test_returns_zero_when_directory_does_not_exist(self, tmp_path: Path) -> None:
-        """Returns 0 when command-redirection directory doesn't exist."""
-        with patch(
-            "claude_code_hooks_daemon.daemon.paths._get_untracked_dir",
-            return_value=tmp_path,
-        ):
-            result = cleanup_stale_command_redirection_files(tmp_path)
-        assert result == 0
-
-    def test_removes_old_redirection_files(self, tmp_path: Path) -> None:
-        """Removes command-redirection output files older than max_age_days."""
-        cmd_dir = tmp_path / "command-redirection"
-        cmd_dir.mkdir()
-
-        old1 = cmd_dir / "pipe_blocker_12345.txt"
-        old2 = cmd_dir / "pipe_blocker_67890.txt"
-        for f in (old1, old2):
-            f.write_text("old output")
-            _make_old(f)
-
-        with patch(
-            "claude_code_hooks_daemon.daemon.paths._get_untracked_dir",
-            return_value=tmp_path,
-        ):
-            result = cleanup_stale_command_redirection_files(tmp_path, max_age_days=7)
-
-        assert result == 2
-        assert not old1.exists()
-        assert not old2.exists()
-
-    def test_preserves_recent_redirection_files(self, tmp_path: Path) -> None:
-        """Recent command-redirection files are preserved."""
-        cmd_dir = tmp_path / "command-redirection"
-        cmd_dir.mkdir()
-
-        recent = cmd_dir / "pipe_blocker_new.txt"
-        recent.write_text("new output")
-        # mtime is now — recent
-
-        with patch(
-            "claude_code_hooks_daemon.daemon.paths._get_untracked_dir",
-            return_value=tmp_path,
-        ):
-            result = cleanup_stale_command_redirection_files(tmp_path, max_age_days=7)
-
-        assert result == 0
-        assert recent.exists()
-
-
 class TestTouchDaemonFiles:
     """Tests for touch_daemon_files()."""
 
@@ -297,100 +244,6 @@ class TestCleanupStaleDaemonFilesExceptionBranch:
             result = cleanup_stale_daemon_files(tmp_path)
 
         assert result == 0  # Nothing removed, but no crash
-
-
-class TestCleanupStaleCommandRedirectionFilesExtra:
-    """Additional coverage for cleanup_stale_command_redirection_files."""
-
-    def test_skips_subdirectories(self, tmp_path: Path) -> None:
-        """Subdirectories inside command-redirection are skipped (is_file() guard)."""
-        cmd_dir = tmp_path / "command-redirection"
-        cmd_dir.mkdir()
-
-        subdir = cmd_dir / "subdir"
-        subdir.mkdir()
-
-        old_file = cmd_dir / "pipe_blocker_old.txt"
-        old_file.write_text("data")
-        _make_old(old_file)
-
-        with patch(
-            "claude_code_hooks_daemon.daemon.paths._get_untracked_dir",
-            return_value=tmp_path,
-        ):
-            result = cleanup_stale_command_redirection_files(tmp_path)
-
-        assert result == 1
-        assert not old_file.exists()
-        assert subdir.exists()
-
-    def test_handles_oserror_gracefully(self, tmp_path: Path) -> None:
-        """OSError on unlink is caught; cleanup continues for other files."""
-        cmd_dir = tmp_path / "command-redirection"
-        cmd_dir.mkdir()
-
-        f1 = cmd_dir / "pipe_blocker_fail.txt"
-        f2 = cmd_dir / "pipe_blocker_ok.txt"
-        for f in (f1, f2):
-            f.write_text("data")
-            _make_old(f)
-
-        original_unlink = Path.unlink
-
-        def flaky_unlink(self: Path, missing_ok: bool = False) -> None:
-            if "fail" in self.name:
-                raise OSError("locked")
-            original_unlink(self, missing_ok=missing_ok)
-
-        with (
-            patch(
-                "claude_code_hooks_daemon.daemon.paths._get_untracked_dir",
-                return_value=tmp_path,
-            ),
-            patch.object(Path, "unlink", flaky_unlink),
-        ):
-            result = cleanup_stale_command_redirection_files(tmp_path)
-
-        assert result == 1
-
-    def test_continues_on_unexpected_exception(self, tmp_path: Path) -> None:
-        """Generic Exception in the command-redirection loop is logged, not raised."""
-        import os as _os
-
-        cmd_dir = tmp_path / "command-redirection"
-        cmd_dir.mkdir()
-
-        stale = cmd_dir / "pipe_blocker_stale.txt"
-        stale.write_text("data")
-        _make_old(stale)
-
-        # is_file() calls stat() internally and only catches OSError, so we must
-        # patch is_file() separately to avoid RuntimeError propagating from there.
-        original_is_file = Path.is_file
-
-        def patched_is_file(self: Path) -> bool:
-            if self.name.endswith(".txt"):
-                return True
-            return original_is_file(self)
-
-        _original_stat2 = Path.stat
-
-        def patched_stat(self: Path) -> _os.stat_result:
-            if self.name.endswith(".txt"):
-                raise RuntimeError("unexpected")
-            return _original_stat2(self)
-
-        with (
-            patch(
-                "claude_code_hooks_daemon.daemon.paths._get_untracked_dir",
-                return_value=tmp_path,
-            ),
-            patch.object(Path, "is_file", patched_is_file),
-            patch.object(Path, "stat", patched_stat),
-        ):
-            result = cleanup_stale_command_redirection_files(tmp_path)
-
-        assert result == 0
 
 
 class TestTouchDaemonFilesInDir:
