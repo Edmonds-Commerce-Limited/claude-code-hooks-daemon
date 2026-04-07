@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-04-07
+
+### Removed
+
+- **BREAKING: `command_redirection` feature removed entirely.** The `command_redirection` option on `pipe_blocker`, `npm_command`, and `gh_issue_comments` handlers has been removed. The shared `core/command_redirection.py` module has been deleted along with all associated tests, config options, documentation, and QA exclusions. The feature stripped blocked command parts, executed the remainder, and saved output to files — but it caused unpredictable behaviour, could not handle output redirection, and added significant complexity for marginal benefit.
+
+### Changed
+
+- **BREAKING: Affected handlers now simply deny with educational guidance.** `pipe_blocker`, `npm_command`, and `gh_issue_comments` no longer attempt to execute a corrected version of the blocked command. They return a `deny` decision with a clear explanation, leaving Claude to construct the corrected command itself. This is the same behaviour these handlers had with `command_redirection: false` (the default since v2.31.0).
+
+- **Daemon stale-file cleanup no longer cleans command redirection files.** The `cleanup_stale_command_redirection_files()` function has been removed from `daemon/paths.py`. Daemon startup cleanup now only removes stale daemon runtime files (sockets, PID files, logs).
+
 ## [2.32.0] - 2026-04-06
 
 ### Added
