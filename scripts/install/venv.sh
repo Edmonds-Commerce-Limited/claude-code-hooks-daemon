@@ -220,6 +220,98 @@ get_venv_python_version() {
     "$venv_python" -c 'import sys; print(".".join(map(str, sys.version_info[:3])))' 2>/dev/null
 }
 
+# Version stamp file name — lives inside the venv directory
+VENV_VERSION_STAMP=".daemon-version"
+
+#
+# stamp_venv_version() - Write daemon version into venv directory
+#
+# Called after successful venv creation to record which daemon version
+# the venv was built for. Enables stale-venv detection on upgrade.
+#
+# Args:
+#   $1 - venv_path: Path to venv directory (e.g., .../untracked/venv)
+#   $2 - version: Version string to stamp (e.g., v3.1.0)
+#
+# Returns:
+#   Exit code 0 on success, 1 on failure
+#
+stamp_venv_version() {
+    local venv_path="$1"
+    local version="$2"
+
+    if [ -z "$venv_path" ] || [ -z "$version" ]; then
+        print_error "stamp_venv_version: venv_path and version required"
+        return 1
+    fi
+
+    if [ ! -d "$venv_path" ]; then
+        print_error "stamp_venv_version: venv directory does not exist: $venv_path"
+        return 1
+    fi
+
+    echo "$version" > "$venv_path/$VENV_VERSION_STAMP"
+    print_verbose "Stamped venv with version: $version"
+    return 0
+}
+
+#
+# get_venv_version() - Read daemon version from venv stamp
+#
+# Args:
+#   $1 - venv_path: Path to venv directory
+#
+# Returns:
+#   Prints version string to stdout (empty string if no stamp)
+#   Exit code 0 always
+#
+get_venv_version() {
+    local venv_path="$1"
+    local stamp_file="$venv_path/$VENV_VERSION_STAMP"
+
+    if [ -f "$stamp_file" ]; then
+        cat "$stamp_file"
+    else
+        echo ""
+    fi
+}
+
+#
+# venv_version_matches() - Check if venv was built for the target version
+#
+# Args:
+#   $1 - venv_path: Path to venv directory
+#   $2 - target_version: Expected version string
+#
+# Returns:
+#   Exit code 0 if versions match
+#   Exit code 1 if mismatch or no stamp
+#
+venv_version_matches() {
+    local venv_path="$1"
+    local target_version="$2"
+
+    if [ -z "$venv_path" ] || [ -z "$target_version" ]; then
+        return 1
+    fi
+
+    local current_version
+    current_version=$(get_venv_version "$venv_path")
+
+    if [ -z "$current_version" ]; then
+        print_verbose "No venv version stamp found (pre-stamp install)"
+        return 1
+    fi
+
+    if [ "$current_version" = "$target_version" ]; then
+        print_verbose "Venv version matches: $current_version"
+        return 0
+    else
+        print_info "Venv version mismatch: have $current_version, need $target_version"
+        return 1
+    fi
+}
+
 #
 # install_package_editable() - Install package in editable mode
 #

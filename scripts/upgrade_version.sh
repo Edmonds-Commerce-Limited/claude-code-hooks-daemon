@@ -174,6 +174,19 @@ if [ "$ROLLBACK_REF" = "$TARGET_VERSION" ]; then
     print_success "Already at version $TARGET_VERSION"
     print_info "Running idempotent deployment steps to ensure files are current..."
 
+    # Check if venv was built for this version — recreate if stale
+    VENV_PATH="$DAEMON_DIR/untracked/venv"
+    if ! venv_version_matches "$VENV_PATH" "$TARGET_VERSION"; then
+        print_info "Venv is stale or unstamped — recreating for $TARGET_VERSION"
+        recreate_venv "$DAEMON_DIR"
+
+        if ! verify_venv "$VENV_PYTHON" "$DAEMON_DIR"; then
+            fail_fast "Virtual environment verification failed after recreate"
+        fi
+
+        stamp_venv_version "$VENV_PATH" "$TARGET_VERSION"
+    fi
+
     deploy_all_hooks "$PROJECT_ROOT" "$DAEMON_DIR" "normal"
 
     if [ -f "$SETTINGS_JSON_SOURCE" ]; then
@@ -200,11 +213,11 @@ except Exception as e:
 "
 
     if ! restart_daemon_verified "$VENV_PYTHON"; then
-        print_warning "Daemon restart had issues; check status manually"
+        fail_fast "Daemon failed to start after idempotent upgrade"
     fi
 
     if ! run_post_install_checks "$PROJECT_ROOT" "$VENV_PYTHON" "$DAEMON_DIR" "false"; then
-        print_warning "Post-install checks had warnings (non-fatal)"
+        fail_fast "Post-install verification failed after idempotent upgrade"
     fi
 
     print_success "Upgrade verification complete"
@@ -524,6 +537,8 @@ recreate_venv "$DAEMON_DIR"
 if ! verify_venv "$VENV_PYTHON" "$DAEMON_DIR"; then
     fail_fast "Virtual environment verification failed after recreate"
 fi
+
+stamp_venv_version "$DAEMON_DIR/untracked/venv" "$TARGET_VERSION"
 
 # ============================================================
 # Step 8: Redeploy hook scripts
