@@ -194,16 +194,17 @@ handlers:
       # Docs: docs/guides/handlers/markdown_organization.md
       # Plan tracking options (track_plans_in_project, plan_workflow_docs)
       # are now in top-level plan_workflow: section.
-      # options:
+      options:
         # allowed_markdown_paths: OVERRIDES all built-in path rules with custom regex.
         # In monorepos, patterns match AFTER prefix stripping. See HANDLER_REFERENCE.md.
-        #   allowed_markdown_paths:
-        #     - "^CLAUDE/.*\\.md$"
-        #     - "^docs/.*\\.md$"
-        #     - "^untracked/.*\\.md$"
-        #     - "^RELEASES/.*\\.md$"
-        #     - "^eslint-rules/.*\\.md$"
-        #     - "^src/claude_code_hooks_daemon/guides/.*\\.md$"
+        allowed_markdown_paths:
+          - "^CLAUDE/.*\\.md$"
+          - "^docs/.*\\.md$"
+          - "^untracked/.*\\.md$"
+          - "^RELEASES/.*\\.md$"
+          - "^eslint-rules/.*\\.md$"
+          - "^src/claude_code_hooks_daemon/guides/.*\\.md$"
+          - "^\\.github/.*\\.md$"
 
     # TOOL USAGE HANDLERS (Priority 50-60)
     web_search_year:       # Fixes year in web search queries (uses current year)
