@@ -42,7 +42,7 @@ The `/release` skill includes TWO mandatory blocking gates that MUST pass before
 1. **QA Verification Gate** (after Opus review):
 
    - Main Claude manually runs: `./scripts/qa/run_all.sh`
-   - ALL 8 checks must pass (Magic Values, Format, Lint, Type Check, Tests, Security, Dependencies, Shell Check)
+   - ALL 10 checks must pass (Magic Values, Format, Lint, Type Check, Tests, Security, Dependencies, Error Hiding, Skill References, Smoke Test)
    - If ANY check fails → ABORT release immediately
 
 2. **Acceptance Testing Gate** (after QA passes):
