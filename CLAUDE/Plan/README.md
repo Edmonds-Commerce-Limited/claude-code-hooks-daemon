@@ -4,14 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00098: Human-Friendly Markdown Tables](00098-human-friendly-markdown/PLAN.md) - Not Started
-
-  - Auto-format markdown tables so pipes align and columns have consistent widths
-  - Install `mdformat + mdformat-gfm` (Python, pip) into daemon venv
-  - New PostToolUse handler `markdown_table_formatter` runs after Write/Edit of `.md` files
-  - New CLI subcommand `format-markdown` for ad-hoc batch fixes to existing files
-  - Research in `00098-human-friendly-markdown/RESEARCH.md` — six tools evaluated
-
 - [00096: Live Daemon Smoke Tests in QA Stack](00096-live-daemon-smoke-tests/PLAN.md) - Not Started
 
   - Add check 9 to QA stack: 3 nc-based probes against the live daemon via hook scripts
@@ -42,6 +34,13 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - SessionState cache still viable when upstream unblocks
 
 ## Completed Plans
+
+- [00098: Human-Friendly Markdown Tables](Completed/00098-human-friendly-markdown/PLAN.md) - Complete
+
+  - PostToolUse handler `markdown_table_formatter` auto-formats .md files after Write/Edit via mdformat + mdformat-gfm
+  - CLI subcommand `format-markdown` for ad-hoc batch formatting (file/directory/--check modes)
+  - Batch-formatted 257 existing project markdown files
+  - Gitignore safety for `.CLAUDE.md.pre-inject` added to installer and session-start checker
 
 - [00097: Project Handler Upgrade Resilience](Completed/00097-project-handler-upgrade-resilience/PLAN.md) - Complete
 
@@ -602,8 +601,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 93
-- **Completed**: 78 (1 with reduced scope)
-- **Active**: 2 (2 not started)
+- **Completed**: 79 (1 with reduced scope)
+- **Active**: 2 (1 not started, 1 in progress)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation)
 
