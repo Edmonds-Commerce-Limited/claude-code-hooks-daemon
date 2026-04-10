@@ -456,6 +456,13 @@ class HandlerID:
         display_name="lint-on-edit",
     )
 
+    # Markdown table formatter (PostToolUse handler)
+    MARKDOWN_TABLE_FORMATTER = HandlerIDMeta(
+        class_name="MarkdownTableFormatterHandler",
+        config_key="markdown_table_formatter",
+        display_name="markdown-table-formatter",
+    )
+
     # Hedging language detector (Stop handler)
     HEDGING_LANGUAGE_DETECTOR = HandlerIDMeta(
         class_name="HedgingLanguageDetectorHandler",

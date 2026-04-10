@@ -69,6 +69,9 @@ class Priority:
     # Lint on edit (Priority: 25 - code quality range)
     LINT_ON_EDIT = 25
 
+    # Markdown table formatter (Priority: 26 - adjacent to lint_on_edit)
+    MARKDOWN_TABLE_FORMATTER = 26
+
     # QA enforcement handlers (Priority: 30-35)
     QA_SUPPRESSION = 30
     VALIDATE_PLAN_NUMBER = 30

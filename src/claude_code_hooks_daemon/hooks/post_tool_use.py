@@ -29,6 +29,9 @@ from claude_code_hooks_daemon.handlers.post_tool_use.hello_world import (
 from claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit import (
     LintOnEditHandler,
 )
+from claude_code_hooks_daemon.handlers.post_tool_use.markdown_table_formatter import (
+    MarkdownTableFormatterHandler,
+)
 from claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write import (
     ValidateEslintOnWriteHandler,
 )
@@ -43,6 +46,7 @@ def get_builtin_handlers() -> dict[str, type]:
     return {
         "bash_error_detector": BashErrorDetectorHandler,
         "lint_on_edit": LintOnEditHandler,
+        "markdown_table_formatter": MarkdownTableFormatterHandler,
         "validate_eslint_on_write": ValidateEslintOnWriteHandler,
     }
 

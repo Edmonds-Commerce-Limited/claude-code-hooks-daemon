@@ -20,6 +20,7 @@ Provides:
 - validate-project-handlers: Validate project handler files
 - test-project-handlers: Run project handler tests
 - bug-report: Generate comprehensive bug report with diagnostics
+- format-markdown: Format markdown files via mdformat + mdformat-gfm
 """
 
 import argparse
@@ -36,6 +37,8 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Literal, cast
+
+import mdformat
 
 logger = logging.getLogger(__name__)
 
@@ -1816,6 +1819,118 @@ def cmd_test_project_handlers(args: argparse.Namespace) -> int:
         return 1
 
 
+_MARKDOWN_EXTENSIONS: tuple[str, ...] = (".md", ".markdown")
+_MDFORMAT_EXTENSIONS: set[str] = {"gfm"}
+_MDFORMAT_OPTIONS: dict[str, Any] = {"number": True}
+_THEMATIC_BREAK_UNDERSCORES = "_" * 70
+_THEMATIC_BREAK_DASHES = "---"
+
+
+def _restore_thematic_breaks(content: str) -> str:
+    """Replace mdformat's 70-underscore thematic break with ``---``."""
+    return "\n".join(
+        _THEMATIC_BREAK_DASHES if line == _THEMATIC_BREAK_UNDERSCORES else line
+        for line in content.split("\n")
+    )
+
+
+def _format_single_markdown_file(path: Path, check: bool) -> tuple[bool, bool]:
+    """Format a single markdown file via mdformat + mdformat-gfm.
+
+    Args:
+        path: Markdown file to format.
+        check: If True, do not write changes. Only detect whether the file
+            would change.
+
+    Returns:
+        Tuple of (changed, error) booleans. ``changed`` is True when the
+        file would be (or was) rewritten. ``error`` is True when mdformat
+        raised an exception.
+    """
+    try:
+        before = path.read_text(encoding="utf-8")
+        formatted = mdformat.text(
+            before,
+            extensions=_MDFORMAT_EXTENSIONS,
+            options=_MDFORMAT_OPTIONS,
+        )
+        formatted = _restore_thematic_breaks(formatted)
+    except Exception as exc:
+        # FAIL SAFE: Surface the failure but do not crash the whole run
+        # when processing a directory of many files.
+        print(f"ERROR: {path}: {exc}", file=sys.stderr)
+        return False, True
+
+    if formatted == before:
+        return False, False
+
+    if not check:
+        path.write_text(formatted, encoding="utf-8")
+    return True, False
+
+
+def cmd_format_markdown(args: argparse.Namespace) -> int:
+    """Format markdown files via mdformat + mdformat-gfm.
+
+    Accepts either a single ``.md``/``.markdown`` file or a directory to
+    recurse into. ``--check`` runs in check mode and returns non-zero if
+    any file would be rewritten (without actually touching the file).
+
+    Args:
+        args: Parsed CLI arguments with ``path`` (Path) and ``check`` (bool).
+
+    Returns:
+        0 when no changes needed (or all changes applied successfully),
+        1 when the path is invalid or any file would change in check mode
+        or any file failed to format.
+    """
+    path: Path = args.path
+    check: bool = args.check
+
+    if not path.exists():
+        print(f"ERROR: Path does not exist: {path}", file=sys.stderr)
+        return 1
+
+    if path.is_file():
+        if not path.name.lower().endswith(_MARKDOWN_EXTENSIONS):
+            print(f"ERROR: {path} is not a markdown file", file=sys.stderr)
+            return 1
+        changed, errored = _format_single_markdown_file(path, check)
+        if errored:
+            return 1
+        if check and changed:
+            print(f"Would reformat: {path}")
+            return 1
+        if changed:
+            print(f"Reformatted: {path}")
+        return 0
+
+    # Directory mode: recurse and process every markdown file.
+    any_changed = False
+    any_errored = False
+    for candidate in sorted(path.rglob("*")):
+        if not candidate.is_file():
+            continue
+        if not candidate.name.lower().endswith(_MARKDOWN_EXTENSIONS):
+            continue
+        changed, errored = _format_single_markdown_file(candidate, check)
+        if errored:
+            any_errored = True
+            continue
+        if changed:
+            any_changed = True
+            if check:
+                print(f"Would reformat: {candidate}")
+            else:
+                print(f"Reformatted: {candidate}")
+
+    if any_errored:
+        return 1
+    if check and any_changed:
+        return 1
+    return 0
+
+
 _BUG_REPORT_LOG_LINES = 100
 _BUG_REPORT_DIR_NAME = "bug-reports"
 _BUG_REPORT_ENV_VARS = (
@@ -2394,6 +2509,22 @@ def main() -> int:
     parser_test_ph.set_defaults(func=cmd_test_project_handlers)
 
     # bug-report command
+    parser_format_md = subparsers.add_parser(
+        "format-markdown",
+        help="Format markdown files via mdformat + mdformat-gfm (auto-align tables)",
+    )
+    parser_format_md.add_argument(
+        "path",
+        type=Path,
+        help="Markdown file or directory to format (directories are processed recursively)",
+    )
+    parser_format_md.add_argument(
+        "--check",
+        action="store_true",
+        help="Dry-run mode: exit 1 if any file would be rewritten, do not modify files",
+    )
+    parser_format_md.set_defaults(func=cmd_format_markdown)
+
     parser_bug_report = subparsers.add_parser(
         "bug-report",
         help="Generate comprehensive bug report with system diagnostics",
