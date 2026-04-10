@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.1] - 2026-04-10
+
+### Changed
+
+- **Markdown organization allowed paths**: Uncommented and activated the `allowed_markdown_paths` configuration in `hooks-daemon.yaml`, adding `.github/` as a new allowed path for markdown files. This enables markdown files in the `.github/` directory (e.g. issue templates, PR templates, workflows documentation) to pass the `markdown_organization` handler without being blocked.
+
 ## [3.2.0] - 2026-04-10
 
 ### Added
