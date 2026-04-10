@@ -70,7 +70,7 @@ fi
 
 # Test check_all_prerequisites
 print_header "Test: check_all_prerequisites()"
-if check_all_prerequisites; then
+if check_all_prerequisites "true"; then
     print_success "check_all_prerequisites() passed"
 else
     print_error "check_all_prerequisites() failed"

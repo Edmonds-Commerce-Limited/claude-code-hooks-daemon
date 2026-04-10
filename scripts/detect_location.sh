@@ -65,36 +65,6 @@ detect_project_root() {
 }
 
 #
-# is_hooks_daemon_repo() - Check if a directory is the hooks-daemon source repo
-#
-# Uses git remote URL as source of truth.
-#
-# Args:
-#   $1 - Directory to check
-#
-# Returns:
-#   0 if it is the hooks-daemon repo
-#   1 otherwise
-#
-is_hooks_daemon_repo() {
-    local dir="$1"
-    if [ ! -d "$dir/.git" ]; then
-        return 1
-    fi
-
-    local remote_url
-    remote_url=$(git -C "$dir" remote get-url origin 2>/dev/null || echo "")
-    remote_url=$(echo "$remote_url" | tr '[:upper:]' '[:lower:]')
-
-    if echo "$remote_url" | grep -q "claude-code-hooks-daemon" || \
-       echo "$remote_url" | grep -q "claude_code_hooks_daemon"; then
-        return 0
-    fi
-
-    return 1
-}
-
-#
 # Main detection logic
 #
 

@@ -577,6 +577,8 @@ class TestValidatePostInstall:
 
     def test_successful_install_passes(self, tmp_path):
         """Test validation passes for successful installation."""
+        from unittest.mock import patch
+
         project_root = tmp_path / "project"
         project_root.mkdir()
         claude_dir = project_root / ".claude"
@@ -596,8 +598,61 @@ class TestValidatePostInstall:
         with config_path.open("w") as f:
             yaml.dump(config, f)
 
-        result = ClientInstallValidator.validate_post_install(project_root)
-        assert result.passed is True
+        # Mock daemon start check since we don't have a real venv in test
+        with patch.object(
+            ClientInstallValidator,
+            "validate_daemon_can_start",
+            return_value=ValidationResult(passed=True, errors=[], warnings=[]),
+        ):
+            result = ClientInstallValidator.validate_post_install(project_root)
+            assert result.passed is True
+
+    def test_post_install_calls_daemon_start_check(self, tmp_path):
+        """Test that validate_post_install checks daemon can start.
+
+        Bug regression: validate_post_install did not call
+        validate_daemon_can_start(), so a broken venv (e.g. missing
+        mdformat dependency) was never caught during post-install
+        verification.
+        """
+        from unittest.mock import patch
+
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        claude_dir = project_root / ".claude"
+        claude_dir.mkdir()
+        daemon_dir = claude_dir / "hooks-daemon"
+        daemon_dir.mkdir()
+        src_dir = daemon_dir / "src"
+        src_dir.mkdir()
+
+        config = {
+            "version": "1.0",
+            "daemon": {"idle_timeout_seconds": 600, "log_level": "INFO"},
+            "handlers": {},
+        }
+
+        config_path = claude_dir / "hooks-daemon.yaml"
+        with config_path.open("w") as f:
+            yaml.dump(config, f)
+
+        # Mock daemon start check to return failure
+        daemon_error = ValidationResult(
+            passed=False,
+            errors=["Failed to import claude_code_hooks_daemon: No module named 'mdformat'"],
+            warnings=[],
+        )
+        with patch.object(
+            ClientInstallValidator,
+            "validate_daemon_can_start",
+            return_value=daemon_error,
+        ) as mock_check:
+            result = ClientInstallValidator.validate_post_install(project_root)
+            # validate_daemon_can_start must be called
+            mock_check.assert_called_once_with(project_root)
+            # Post-install must FAIL when daemon can't start
+            assert result.passed is False
+            assert any("mdformat" in err for err in result.errors)
 
     def test_missing_config_fails(self, tmp_path):
         """Test validation fails when config missing after install."""

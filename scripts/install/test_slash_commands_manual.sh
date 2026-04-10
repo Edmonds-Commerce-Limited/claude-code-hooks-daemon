@@ -15,7 +15,7 @@ echo ""
 
 # Detect project
 print_header "Setup: Detect project"
-if ! detect_and_validate_project; then
+if ! detect_and_validate_project "walk-up"; then
     print_error "Failed to detect project"
     exit 1
 fi

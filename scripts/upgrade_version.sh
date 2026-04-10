@@ -28,17 +28,29 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_LIB_DIR="$SCRIPT_DIR/install"
 
 # Source all library modules
+# shellcheck source=install/output.sh
 source "$INSTALL_LIB_DIR/output.sh"
+# shellcheck source=install/mode_guard.sh
 source "$INSTALL_LIB_DIR/mode_guard.sh"
+# shellcheck source=install/prerequisites.sh
 source "$INSTALL_LIB_DIR/prerequisites.sh"
+# shellcheck source=install/project_detection.sh
 source "$INSTALL_LIB_DIR/project_detection.sh"
+# shellcheck source=install/venv.sh
 source "$INSTALL_LIB_DIR/venv.sh"
+# shellcheck source=install/hooks_deploy.sh
 source "$INSTALL_LIB_DIR/hooks_deploy.sh"
+# shellcheck source=install/gitignore.sh
 source "$INSTALL_LIB_DIR/gitignore.sh"
+# shellcheck source=install/slash_commands.sh
 source "$INSTALL_LIB_DIR/slash_commands.sh"
+# shellcheck source=install/validation.sh
 source "$INSTALL_LIB_DIR/validation.sh"
+# shellcheck source=install/daemon_control.sh
 source "$INSTALL_LIB_DIR/daemon_control.sh"
+# shellcheck source=install/rollback.sh
 source "$INSTALL_LIB_DIR/rollback.sh"
+# shellcheck source=install/config_preserve.sh
 source "$INSTALL_LIB_DIR/config_preserve.sh"
 
 # ============================================================
@@ -76,6 +88,7 @@ UPGRADE_STARTED=false
 # Rollback trap
 # ============================================================
 
+# shellcheck disable=SC2317  # Invoked indirectly by EXIT trap
 cleanup_on_failure() {
     local exit_code=$?
     if [ "$exit_code" -ne 0 ] && [ "$UPGRADE_STARTED" = true ]; then
@@ -633,7 +646,21 @@ rm -f "$DAEMON_DIR/untracked/version_check_cache.json"
 # ============================================================
 
 log_step "15" "Running post-upgrade validation"
-run_post_install_checks "$PROJECT_ROOT" "$VENV_PYTHON" "$DAEMON_DIR" "false" || true
+if ! run_post_install_checks "$PROJECT_ROOT" "$VENV_PYTHON" "$DAEMON_DIR" "false"; then
+    print_error "Post-upgrade validation failed"
+    print_info "The daemon may not be fully functional. Review the errors above."
+
+    if [ -n "$CONFIG_BACKUP" ]; then
+        echo ""
+        print_info "To restore previous config:"
+        echo "  cp $CONFIG_BACKUP $TARGET_CONFIG"
+        echo "  $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli restart"
+    fi
+
+    # Don't trigger rollback - code is updated, but user needs to investigate
+    UPGRADE_STARTED=false
+    exit 1
+fi
 
 # ============================================================
 # Step 16: Cleanup old snapshots

@@ -130,6 +130,11 @@ class ClientInstallValidator:
         errors.extend(result.errors)
         warnings.extend(result.warnings)
 
+        # Check 5: Verify daemon can actually start (catches missing dependencies)
+        result = ClientInstallValidator.validate_daemon_can_start(project_root)
+        errors.extend(result.errors)
+        warnings.extend(result.warnings)
+
         return ValidationResult(
             passed=len(errors) == 0,
             errors=errors,
