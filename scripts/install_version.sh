@@ -240,6 +240,10 @@ if ! verify_venv "$VENV_PYTHON" "$DAEMON_DIR"; then
     fail_fast "Virtual environment verification failed"
 fi
 
+# Stamp venv with installed version for stale-venv detection on future upgrades
+INSTALLED_VERSION=$(git -C "$DAEMON_DIR" describe --tags --exact-match 2>/dev/null || git -C "$DAEMON_DIR" rev-parse --short HEAD)
+stamp_venv_version "$DAEMON_DIR/untracked/venv" "$INSTALLED_VERSION"
+
 # ============================================================
 # Step 4: Deploy hook scripts
 # ============================================================
