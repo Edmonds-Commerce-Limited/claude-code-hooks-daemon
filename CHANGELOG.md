@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.1] - 2026-04-10
+
+### Fixed
+
+- **Venv not recreated on idempotent upgrade path**: When upgrading between versions, the upgrade script now detects stale venvs via a `.daemon-version` stamp file and recreates the venv when the version changes, ensuring new dependencies (e.g. `mdformat`, `mdformat-gfm`) are correctly installed rather than silently missing.
+- **Upgrade post-install verification fails fast on broken venv**: Post-install verification now detects broken venv states (missing packages, import errors) and fails immediately with a clear diagnostic instead of silently passing, preventing a broken install from appearing successful.
+- **Venv version stamping**: The venv creation and upgrade scripts now write a `.daemon-version` file into the venv to track which daemon version the venv was built for, enabling reliable stale-venv detection on future upgrades.
+- **Shellcheck issues in install/upgrade scripts**: All shellcheck warnings across install/upgrade scripts resolved (zero tolerance policy), including bash array handling for the Python interpreter flag in `venv.sh` (SC2086).
+
 ## [3.1.0] - 2026-04-10
 
 ### Added
