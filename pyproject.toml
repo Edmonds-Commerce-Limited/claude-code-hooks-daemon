@@ -30,6 +30,8 @@ dependencies = [
     "pydantic>=2.5",
     "jsonschema>=4.0",
     "psutil>=5.9",
+    "mdformat>=0.7",
+    "mdformat-gfm>=0.4",
 ]
 
 [project.optional-dependencies]

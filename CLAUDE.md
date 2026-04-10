@@ -802,6 +802,23 @@ Writing ephemeral or session-specific content to `CLAUDE.md` or `README.md` is b
 
 Content inside markdown code blocks is exempt from validation.
 
+## markdown_table_formatter — markdown tables are auto-aligned
+
+After every `Write` or `Edit` of a `.md` or `.markdown` file, the content is re-formatted via `mdformat + mdformat-gfm` so that table pipes are aligned and column widths are consistent. The handler is non-terminal and advisory — it never blocks, it just rewrites the file on disk.
+
+**What changes:**
+
+- Table pipes are aligned vertically and delimiter rows widened to match cell widths.
+- Ordered lists keep consecutive numbering (`1.` `2.` `3.`).
+- `---` thematic breaks are preserved (mdformat's 70-underscore default is post-processed back).
+- Asterisks in table cells are escaped (`*` → `\*`) as required by GFM.
+
+**Ad-hoc formatting of existing files:**
+
+```
+$PYTHON -m claude_code_hooks_daemon.daemon.cli format-markdown <path>
+```
+
 ### Stop Explanation Required
 
 Before stopping, **prefix your final message** with `STOPPING BECAUSE:` followed by a clear reason:

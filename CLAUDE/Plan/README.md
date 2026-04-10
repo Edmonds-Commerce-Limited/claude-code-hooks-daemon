@@ -4,6 +4,13 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00098: Human-Friendly Markdown Tables](00098-human-friendly-markdown/PLAN.md) - Not Started
+  - Auto-format markdown tables so pipes align and columns have consistent widths
+  - Install `mdformat + mdformat-gfm` (Python, pip) into daemon venv
+  - New PostToolUse handler `markdown_table_formatter` runs after Write/Edit of `.md` files
+  - New CLI subcommand `format-markdown` for ad-hoc batch fixes to existing files
+  - Research in `00098-human-friendly-markdown/RESEARCH.md` — six tools evaluated
+
 - [00096: Live Daemon Smoke Tests in QA Stack](00096-live-daemon-smoke-tests/PLAN.md) - Not Started
   - Add check 9 to QA stack: 3 nc-based probes against the live daemon via hook scripts
   - Catches "daemon running stale code" failure mode that unit tests miss entirely
@@ -509,9 +516,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 92
+- **Total Plans Created**: 93
 - **Completed**: 78 (1 with reduced scope)
-- **Active**: 1 (1 not started)
+- **Active**: 2 (2 not started)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation)
 

@@ -241,6 +241,10 @@ handlers:
       #     extended: null  # Disable shellcheck
       # Default: Uses sys.executable for Python, standard binaries for others
 
+    markdown_table_formatter:  # Auto-format markdown tables via mdformat + mdformat-gfm
+      enabled: true
+      priority: 26
+
   # SessionStart handlers (run when session starts)
   session_start:
     yolo_container_detection:  # Detects YOLO development environments (Docker, etc)
