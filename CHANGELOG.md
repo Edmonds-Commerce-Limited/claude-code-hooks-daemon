@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-04-10
+
+### Added
+
+- **Universal continuation instruction for PreToolUse deny responses**: All PreToolUse blocking handlers now automatically append a "Do not stop working. Modify your approach" suffix to deny reasons, preventing agents from interpreting a blocked tool call as a signal to stop. This is a single-point-of-change in `HookResult` that covers all blocking handlers without requiring individual handler modifications.
+- **CLAUDE.md hooksdaemon section continuation guidance**: The auto-generated `<hooksdaemon>` section in `CLAUDE.md` now includes a universal note instructing agents to read block reasons and continue working, reinforcing the continuation instruction from deny responses.
+
+### Fixed
+
+- **QA check count in documentation**: Updated CLAUDE.md and RELEASING.md to reference 10 QA checks (was incorrectly stating 8, missing Error Hiding, Skill References, and Smoke Test)
+
 ## [3.1.1] - 2026-04-10
 
 ### Fixed

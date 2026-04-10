@@ -94,7 +94,7 @@ Approved -> proceed. Issues found -> agent fixes docs, re-submit until approved.
 
 Main Claude runs: `./scripts/qa/run_all.sh`
 
-All 8 checks must pass. ANY failure = ABORT.
+All 10 checks must pass. ANY failure = ABORT.
 
 ---
 
