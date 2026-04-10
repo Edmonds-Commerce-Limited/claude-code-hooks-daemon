@@ -192,6 +192,7 @@ class ConfigTemplate:
             "  post_tool_use:\n"
             "    bash_error_detector: {enabled: true, priority: 50}  # Detect bash errors\n"
             "    lint_on_edit: {enabled: true, priority: 25}  # Language-aware lint validation after Write/Edit\n"
+            "    markdown_table_formatter: {enabled: true, priority: 26}  # Auto-format markdown tables via mdformat\n"
             "    validate_eslint_on_write: {enabled: true, priority: 10}  # Run ESLint after file writes\n"
             "\n"
             "  # PermissionRequest - Auto-approve decisions\n"

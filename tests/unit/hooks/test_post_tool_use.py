@@ -18,7 +18,9 @@ class TestGetBuiltinHandlers:
         handlers = get_builtin_handlers()
 
         assert isinstance(handlers, dict)
-        assert len(handlers) == 3  # bash_error_detector, lint_on_edit, validate_eslint_on_write
+        assert (
+            len(handlers) == 4
+        )  # bash_error_detector, lint_on_edit, markdown_table_formatter, validate_eslint_on_write
 
     def test_contains_bash_error_detector_handler(self) -> None:
         """Bash error detector handler is present."""
@@ -278,6 +280,7 @@ class TestMainFunction:
                 "post_tool_use": {
                     "bash_error_detector": {"enabled": False},
                     "lint_on_edit": {"enabled": False},
+                    "markdown_table_formatter": {"enabled": False},
                     "validate_eslint_on_write": {"enabled": False},
                 }
             },
