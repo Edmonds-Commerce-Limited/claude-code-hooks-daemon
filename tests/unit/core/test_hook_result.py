@@ -90,12 +90,14 @@ class TestToJsonDenyDecision:
         assert "permissionDecisionReason" not in output["hookSpecificOutput"]
 
     def test_to_json_deny_with_reason(self):
-        """Deny with reason should include both decision and reason."""
+        """Deny with reason should include both decision and reason plus continuation suffix."""
         result = HookResult(decision=Decision.DENY, reason="Operation blocked")
         output = result.to_json("PreToolUse")
 
         assert output["hookSpecificOutput"]["permissionDecision"] == Decision.DENY
-        assert output["hookSpecificOutput"]["permissionDecisionReason"] == "Operation blocked"
+        reason = output["hookSpecificOutput"]["permissionDecisionReason"]
+        assert reason.startswith("Operation blocked")
+        assert "Do not stop working" in reason
 
     def test_to_json_deny_with_reason_and_context(self):
         """Deny with reason and context should include all fields."""
@@ -103,7 +105,9 @@ class TestToJsonDenyDecision:
         output = result.to_json("PreToolUse")
 
         assert output["hookSpecificOutput"]["permissionDecision"] == Decision.DENY
-        assert output["hookSpecificOutput"]["permissionDecisionReason"] == "Blocked"
+        reason = output["hookSpecificOutput"]["permissionDecisionReason"]
+        assert reason.startswith("Blocked")
+        assert "Do not stop working" in reason
         assert output["hookSpecificOutput"]["additionalContext"] == "Extra info"
 
     def test_to_json_deny_with_guidance(self):
@@ -115,12 +119,22 @@ class TestToJsonDenyDecision:
         assert output["hookSpecificOutput"]["guidance"] == "Try this instead"
 
     def test_to_json_deny_multiline_reason(self):
-        """Deny with multiline reason should preserve formatting."""
+        """Deny with multiline reason should preserve original and append suffix."""
         reason = "Line 1\nLine 2\nLine 3"
         result = HookResult(decision=Decision.DENY, reason=reason)
         output = result.to_json("PreToolUse")
 
-        assert output["hookSpecificOutput"]["permissionDecisionReason"] == reason
+        output_reason = output["hookSpecificOutput"]["permissionDecisionReason"]
+        assert output_reason.startswith(reason)
+        assert "Do not stop working" in output_reason
+
+    def test_to_json_deny_continuation_suffix_not_on_ask(self):
+        """ASK decisions should NOT get the continuation suffix."""
+        result = HookResult(decision=Decision.ASK, reason="Confirm this")
+        output = result.to_json("PreToolUse")
+
+        assert output["hookSpecificOutput"]["permissionDecisionReason"] == "Confirm this"
+        assert "Do not stop working" not in output["hookSpecificOutput"]["permissionDecisionReason"]
 
 
 class TestToJsonAskDecision:

@@ -31,7 +31,9 @@ _SECTION_HEADER = "## Hooks Daemon — Active Handler Guidance\n"
 
 _SECTION_INTRO = (
     "The handlers listed below are active in this project. "
-    "Read this section to avoid triggering unnecessary blocks."
+    "Read this section to avoid triggering unnecessary blocks.\n\n"
+    "**When a tool is blocked by a handler, do not stop working.** "
+    "Read the block reason, modify your approach, and continue with your task."
 )
 
 
