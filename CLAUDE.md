@@ -573,6 +573,8 @@ daemon:
 
 The handlers listed below are active in this project. Read this section to avoid triggering unnecessary blocks.
 
+**When a tool is blocked by a handler, do not stop working.** Read the block reason, modify your approach, and continue with your task.
+
 ## destructive_git — blocked git commands
 
 The following git commands are permanently blocked and will always be denied:

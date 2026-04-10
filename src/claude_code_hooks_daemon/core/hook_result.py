@@ -19,6 +19,14 @@ class Decision(StrEnum):
     CONTINUE = "continue"
 
 
+# Universal suffix appended to all PreToolUse DENY reasons.
+# Agents sometimes interpret a blocked tool as a signal to stop working.
+# This suffix makes the expected behaviour explicit: adapt and continue.
+_DENY_CONTINUATION_SUFFIX = (
+    "\n\nDo not stop working. Modify your approach using the guidance above and continue."
+)
+
+
 class HookResult(BaseModel):
     """Standardised hook result with decision, reason, and context.
 
@@ -182,7 +190,10 @@ class HookResult(BaseModel):
         if self.decision in (Decision.DENY, Decision.ASK):
             output["permissionDecision"] = self.decision.value
             if self.reason:
-                output["permissionDecisionReason"] = self.reason
+                reason = self.reason
+                if self.decision == Decision.DENY:
+                    reason = reason + _DENY_CONTINUATION_SUFFIX
+                output["permissionDecisionReason"] = reason
 
         if self.context:
             output["additionalContext"] = "\n\n".join(self.context)
