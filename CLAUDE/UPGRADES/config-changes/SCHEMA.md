@@ -61,12 +61,12 @@ config_changes:
 
 Config paths use dot notation mirroring the YAML structure:
 
-| Config location | Key format |
-|----------------|------------|
+| Config location                         | Key format                              |
+| --------------------------------------- | --------------------------------------- |
 | `handlers.pre_tool_use.destructive_git` | `handlers.pre_tool_use.destructive_git` |
-| `handlers.post_tool_use.lint_on_edit` | `handlers.post_tool_use.lint_on_edit` |
-| `daemon.enforce_single_daemon_process` | `daemon.enforce_single_daemon_process` |
-| `daemon.project_languages` | `daemon.project_languages` |
+| `handlers.post_tool_use.lint_on_edit`   | `handlers.post_tool_use.lint_on_edit`   |
+| `daemon.enforce_single_daemon_process`  | `daemon.enforce_single_daemon_process`  |
+| `daemon.project_languages`              | `daemon.project_languages`              |
 
 ## Advisory Logic
 

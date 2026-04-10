@@ -13,6 +13,7 @@ Fix ModuleNotFoundError when switching between container environments and host e
 ## Problem
 
 When users switch between container (e.g., `/workspace/`) and host (e.g., `~/Projects/`) environments, the daemon fails with cryptic errors due to:
+
 1. Editable install `.pth` files with absolute container paths
 2. Python version mismatches between venv creation and runtime
 3. Broken pip binaries after Python upgrades
@@ -20,6 +21,7 @@ When users switch between container (e.g., `/workspace/`) and host (e.g., `~/Pro
 ## Solution
 
 Comprehensive architectural redesign of init.sh:
+
 - Pure bash path computation using md5sum
 - socat for socket communication (replaces Python socket client)
 - Pure bash JSON error generation

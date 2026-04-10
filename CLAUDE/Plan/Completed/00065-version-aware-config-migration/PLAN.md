@@ -22,14 +22,14 @@ The user specifically raised this when asking why grep was still being blocked a
 
 ### Critical Files
 
-| File | Role |
-|------|------|
-| `CLAUDE/UPGRADES/config-changes/v{X.Y.Z}.yaml` | Per-version change manifests (new) |
-| `src/claude_code_hooks_daemon/install/config_migrations.py` | Manifest loader + advisory generator (new) |
-| `src/claude_code_hooks_daemon/daemon/cli.py` | Register new `check-config-migrations` command |
-| `CLAUDE/LLM-UPDATE.md` | Add advisory step to upgrade workflow |
-| `tests/unit/install/test_config_migrations.py` | Unit tests (TDD) |
-| `tests/integration/test_config_migrations_integration.py` | Integration tests |
+| File                                                        | Role                                           |
+| ----------------------------------------------------------- | ---------------------------------------------- |
+| `CLAUDE/UPGRADES/config-changes/v{X.Y.Z}.yaml`              | Per-version change manifests (new)             |
+| `src/claude_code_hooks_daemon/install/config_migrations.py` | Manifest loader + advisory generator (new)     |
+| `src/claude_code_hooks_daemon/daemon/cli.py`                | Register new `check-config-migrations` command |
+| `CLAUDE/LLM-UPDATE.md`                                      | Add advisory step to upgrade workflow          |
+| `tests/unit/install/test_config_migrations.py`              | Unit tests (TDD)                               |
+| `tests/integration/test_config_migrations_integration.py`   | Integration tests                              |
 
 ---
 
@@ -53,6 +53,7 @@ The user specifically raised this when asking why grep was still being blocked a
 - [x] Run QA: `./scripts/qa/run_all.sh`
 
 **Manifest format**:
+
 ```yaml
 version: "2.12.0"
 date: "2026-02-12"
@@ -129,24 +130,24 @@ Using CHANGELOG.md as the source of truth, create one manifest per version. Vers
 
 Versions to backfill (from CHANGELOG analysis):
 
-| Version | Breaking | Config Changes |
-|---------|----------|----------------|
-| v2.2.0  | No | Base version — empty |
-| v2.3.0  | No | TBD from CHANGELOG |
-| v2.4.0  | No | TBD from CHANGELOG |
-| v2.5.0  | No | New handlers (check CHANGELOG) |
-| v2.6.0  | No | TBD from CHANGELOG |
-| v2.7.0  | No | Config preservation engine |
-| v2.8.0  | No | Project-level handlers (`project_handlers:` section) |
-| v2.9.0  | No | Strategy Pattern (no config changes) |
-| v2.10.0 | No | Python version check |
-| v2.11.0 | Yes | Removed `validate_sitemap`, `remind_validator` |
-| v2.12.0 | Yes | Renamed `validate_eslint_on_write` → `lint_on_edit`, new handlers |
-| v2.13.0 | No | New `release_blocker` handler, `enforce_single_daemon_process` |
-| v2.14.0 | No | New handlers (check CHANGELOG) |
-| v2.15.0 | No | `error_hiding_blocker`, pipe_blocker options |
-| v2.15.1 | No | Minor changes |
-| v2.15.2 | No | Config header change |
+| Version | Breaking | Config Changes                                                    |
+| ------- | -------- | ----------------------------------------------------------------- |
+| v2.2.0  | No       | Base version — empty                                              |
+| v2.3.0  | No       | TBD from CHANGELOG                                                |
+| v2.4.0  | No       | TBD from CHANGELOG                                                |
+| v2.5.0  | No       | New handlers (check CHANGELOG)                                    |
+| v2.6.0  | No       | TBD from CHANGELOG                                                |
+| v2.7.0  | No       | Config preservation engine                                        |
+| v2.8.0  | No       | Project-level handlers (`project_handlers:` section)              |
+| v2.9.0  | No       | Strategy Pattern (no config changes)                              |
+| v2.10.0 | No       | Python version check                                              |
+| v2.11.0 | Yes      | Removed `validate_sitemap`, `remind_validator`                    |
+| v2.12.0 | Yes      | Renamed `validate_eslint_on_write` → `lint_on_edit`, new handlers |
+| v2.13.0 | No       | New `release_blocker` handler, `enforce_single_daemon_process`    |
+| v2.14.0 | No       | New handlers (check CHANGELOG)                                    |
+| v2.15.0 | No       | `error_hiding_blocker`, pipe_blocker options                      |
+| v2.15.1 | No       | Minor changes                                                     |
+| v2.15.2 | No       | Config header change                                              |
 
 - [x] Read CHANGELOG.md in detail and create manifest for each version
 - [x] Validate all manifests parse correctly via unit test: `test_all_manifests_parse_correctly()`
@@ -159,7 +160,8 @@ Versions to backfill (from CHANGELOG analysis):
 **Goal**: Add advisory step to the upgrade workflow so users automatically see what's new.
 
 - [x] Add new step to LLM-UPDATE.md after upgrade completes:
-  ```
+
+  ````
   ## Step N: Check Config Migration Advisory
 
   After upgrading, check for new configuration options:
@@ -167,11 +169,15 @@ Versions to backfill (from CHANGELOG analysis):
   ```bash
   $PYTHON -m claude_code_hooks_daemon.daemon.cli check-config-migrations \
     --from {PREVIOUS_VERSION} --to {NEW_VERSION}
-  ```
+  ````
 
   If any suggestions appear, review the new options and decide whether to enable them.
+
   ```
+  ```
+
 - [x] Add advisory output example (what the LLM will see)
+
 - [x] Add note that advisory is informational — new options are opt-in
 
 ---
@@ -189,18 +195,22 @@ Versions to backfill (from CHANGELOG analysis):
 ## Key Design Decisions
 
 ### Decision 1: Per-version manifest files (not a single aggregated file)
+
 **Chosen**: `CLAUDE/UPGRADES/config-changes/v{X.Y.Z}.yaml` (one file per version)
 **Rationale**: Aligns with upgrade guide convention (one directory per version transition). Easy to add new manifests at release time without editing a central file. Git diff shows exactly what changed per release.
 
 ### Decision 2: Manifests stored in CLAUDE/UPGRADES/ (not in src/)
+
 **Chosen**: `CLAUDE/UPGRADES/config-changes/`
 **Rationale**: These are LLM-facing documentation artifacts, not runtime code. Follows the pattern of upgrade guides. The CLI command reads them as data files, not as importable Python.
 
 ### Decision 3: Advisory is informational, not blocking
+
 **Chosen**: Exit code 0 for suggestions, 1 for warnings (breaking changes). Not integrated as a blocking gate.
 **Rationale**: New options are opt-in by design. Advisory should inform, not block upgrading. Warnings (you have a removed config key) are more urgent but still not blocking.
 
 ### Decision 4: Backfill ALL versions from v2.2.0
+
 **Chosen**: Backfill all 19 versions.
 **Rationale**: Project is young (< 1 year), CHANGELOG.md is complete and accurate, and having explicit "no changes" manifests is valuable documentation. Future tooling can rely on complete coverage.
 
@@ -226,6 +236,7 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli status
 ```
 
 Expected output of check-config-migrations (v2.10→v2.15.2) for a user on v2.10 config:
+
 ```
 💡 New Options Available (since v2.10.0 → v2.15.2)
 

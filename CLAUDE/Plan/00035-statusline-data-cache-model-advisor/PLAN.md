@@ -17,6 +17,7 @@ Plan 00032 (Sub-Agent Orchestration) needs model-awareness: advise users to swit
 ### Architecture
 
 The daemon already has persistent state patterns:
+
 - `DaemonController` (singleton, holds router + stats)
 - `ProjectContext` (singleton, caches project paths)
 - `DaemonStats` (accumulates metrics across requests)
@@ -100,6 +101,7 @@ This is a ONE-LINE integration in the existing event flow.
 ### What This Unlocks
 
 Any handler, in ANY event type, can now do:
+
 ```python
 from claude_code_hooks_daemon.core.session_state import get_session_state
 
@@ -125,6 +127,7 @@ if state.context_used_percentage > 80:
 - **Tags**: ADVISORY, WORKFLOW, NON_TERMINAL
 
 **Matching logic**:
+
 ```python
 def matches(self, hook_input):
     tool_name = hook_input.get("tool_name", "")
@@ -133,6 +136,7 @@ def matches(self, hook_input):
 ```
 
 **Handle logic**:
+
 ```python
 def handle(self, hook_input):
     state = get_session_state()
@@ -163,18 +167,18 @@ def handle(self, hook_input):
 
 ## Files to Modify/Create
 
-| Action | File | Purpose |
-|--------|------|---------|
-| **Create** | `src/claude_code_hooks_daemon/core/session_state.py` | StatusLine data cache |
-| **Create** | `src/claude_code_hooks_daemon/handlers/pre_tool_use/opus_agent_team_advisor.py` | Model-aware advisor |
-| **Create** | `tests/unit/core/test_session_state.py` | SessionState tests |
-| **Create** | `tests/unit/handlers/pre_tool_use/test_opus_agent_team_advisor.py` | Handler tests |
-| **Edit** | `src/claude_code_hooks_daemon/core/__init__.py` | Export SessionState |
-| **Edit** | `src/claude_code_hooks_daemon/daemon/controller.py` | Wire up StatusLine → SessionState |
-| **Edit** | `src/claude_code_hooks_daemon/constants/handlers.py` | Add HandlerID |
-| **Edit** | `src/claude_code_hooks_daemon/constants/priority.py` | Add Priority |
-| **Edit** | `.claude/hooks-daemon.yaml` | Add config entry |
-| **Edit** | `CLAUDE/Plan/00032-.../PLAN.md` | Update plan with model-awareness |
+| Action     | File                                                                            | Purpose                           |
+| ---------- | ------------------------------------------------------------------------------- | --------------------------------- |
+| **Create** | `src/claude_code_hooks_daemon/core/session_state.py`                            | StatusLine data cache             |
+| **Create** | `src/claude_code_hooks_daemon/handlers/pre_tool_use/opus_agent_team_advisor.py` | Model-aware advisor               |
+| **Create** | `tests/unit/core/test_session_state.py`                                         | SessionState tests                |
+| **Create** | `tests/unit/handlers/pre_tool_use/test_opus_agent_team_advisor.py`              | Handler tests                     |
+| **Edit**   | `src/claude_code_hooks_daemon/core/__init__.py`                                 | Export SessionState               |
+| **Edit**   | `src/claude_code_hooks_daemon/daemon/controller.py`                             | Wire up StatusLine → SessionState |
+| **Edit**   | `src/claude_code_hooks_daemon/constants/handlers.py`                            | Add HandlerID                     |
+| **Edit**   | `src/claude_code_hooks_daemon/constants/priority.py`                            | Add Priority                      |
+| **Edit**   | `.claude/hooks-daemon.yaml`                                                     | Add config entry                  |
+| **Edit**   | `CLAUDE/Plan/00032-.../PLAN.md`                                                 | Update plan with model-awareness  |
 
 ## Existing Code to Reuse
 
@@ -188,6 +192,7 @@ def handle(self, hook_input):
 ## Test Scenarios
 
 ### SessionState Tests
+
 - `test_initial_state`: All fields None/zero
 - `test_update_from_status_line`: Correctly parses StatusLine data
 - `test_is_opus_true`: Returns True for opus model IDs
@@ -197,6 +202,7 @@ def handle(self, hook_input):
 - `test_singleton`: get_session_state() returns same instance
 
 ### Handler Tests
+
 - `test_matches_team_create`: Returns True for TeamCreate
 - `test_matches_task`: Returns True for Task tool
 - `test_matches_rejects_bash`: Returns False for Bash, Write, etc.

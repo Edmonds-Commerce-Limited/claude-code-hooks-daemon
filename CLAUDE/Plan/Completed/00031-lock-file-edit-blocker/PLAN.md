@@ -43,6 +43,7 @@ Lock files are generated artifacts that capture exact dependency versions and ch
 4. **Build failures**: Corrupted lock files cause CI/CD failures
 
 This handler follows the same safety pattern as:
+
 - `DestructiveGitHandler` (priority 10, terminal=true)
 - `SedBlockerHandler` (priority 10, terminal=true)
 
@@ -63,6 +64,7 @@ This handler follows the same safety pattern as:
 ```
 
 **Expected Event Analysis**:
+
 - **Event Type**: PreToolUse
 - **Tool Names**: Write, Edit
 - **Key hook_input fields**:
@@ -72,6 +74,7 @@ This handler follows the same safety pattern as:
   - `tool_input.edits`: Edit operations (for Edit)
 
 **Trigger Pattern**:
+
 - Match when `file_path` ends with any protected lock file name
 - Both absolute and relative paths must be handled
 - Case-insensitive matching (some systems use different cases)
@@ -81,33 +84,41 @@ This handler follows the same safety pattern as:
 ### Protected Lock Files (14 types across 8 ecosystems)
 
 **PHP/Composer:**
+
 - `composer.lock` - Composer dependency lock file
 
 **JavaScript/Node:**
+
 - `package-lock.json` - npm lock file
 - `yarn.lock` - Yarn lock file
 - `pnpm-lock.yaml` - pnpm lock file
 - `bun.lockb` - Bun binary lock file
 
 **Python:**
+
 - `poetry.lock` - Poetry lock file
 - `Pipfile.lock` - Pipenv lock file
 - `pdm.lock` - PDM lock file
 
 **Ruby:**
+
 - `Gemfile.lock` - Bundler lock file
 
 **Rust:**
+
 - `Cargo.lock` - Cargo lock file
 
 **Go:**
+
 - `go.sum` - Go modules checksum file
 
 **.NET:**
+
 - `packages.lock.json` - NuGet lock file
 - `project.assets.json` - MSBuild assets file
 
 **Swift:**
+
 - `Package.resolved` - Swift Package Manager resolved file
 
 ### Proper Usage Commands
@@ -129,12 +140,14 @@ This handler follows the same safety pattern as:
 ## Tasks
 
 ### Phase 1: Debug & Design
+
 - [ ] ⬜ Run debug script for lock file scenarios
 - [ ] ⬜ Analyze captured events and document findings
 - [ ] ⬜ Design handler matching logic with pattern list
 - [ ] ⬜ Determine handler configuration (priority, tags, terminal)
 
 ### Phase 2: TDD Implementation
+
 - [ ] ⬜ RED: Write failing initialization tests
 - [ ] ⬜ RED: Write failing matches() tests (positive and negative)
 - [ ] ⬜ RED: Write failing handle() tests
@@ -144,6 +157,7 @@ This handler follows the same safety pattern as:
 - [ ] ⬜ Verify 95%+ test coverage maintained
 
 ### Phase 3: Integration & Testing
+
 - [ ] ⬜ Add integration test to response validation suite
 - [ ] ⬜ Register handler in `.claude/hooks-daemon.yaml`
 - [ ] ⬜ **CRITICAL**: Restart daemon and verify successful load
@@ -177,6 +191,7 @@ This handler follows the same safety pattern as:
 ## Technical Decisions
 
 ### Decision 1: Priority Level = 10 (Safety)
+
 **Context**: Need to determine execution priority for lock file blocker.
 
 **Decision**: Priority 10 (safety category)
@@ -186,6 +201,7 @@ This handler follows the same safety pattern as:
 **Date**: 2026-02-06
 
 ### Decision 2: Terminal = true
+
 **Context**: Should handler stop dispatch chain or allow other handlers to run?
 
 **Decision**: terminal=true
@@ -195,6 +211,7 @@ This handler follows the same safety pattern as:
 **Date**: 2026-02-06
 
 ### Decision 3: Case-Insensitive Matching
+
 **Context**: Should lock file matching be case-sensitive?
 
 **Decision**: Case-insensitive matching
@@ -204,6 +221,7 @@ This handler follows the same safety pattern as:
 **Date**: 2026-02-06
 
 ### Decision 4: Intercept Write + Edit Only
+
 **Context**: Which Claude Code tools should trigger the handler?
 
 **Decision**: Write and Edit tools only
@@ -214,17 +232,18 @@ This handler follows the same safety pattern as:
 
 ## Risks & Mitigations
 
-| Risk | Impact | Probability | Mitigation |
-|------|--------|-------------|------------|
-| False positives block legitimate files | Medium | Low | Strict pattern matching on known lock file names only |
-| Missing new lock file formats | Low | Medium | Document how to add new formats; extensible design |
-| Package manager commands blocked | High | Low | Only intercept Write/Edit, not Bash tool |
-| Handler initialization fails | High | Low | Daemon load verification catches this; fail fast |
-| Import errors break daemon | High | Low | TDD + daemon restart verification mandatory |
+| Risk                                   | Impact | Probability | Mitigation                                            |
+| -------------------------------------- | ------ | ----------- | ----------------------------------------------------- |
+| False positives block legitimate files | Medium | Low         | Strict pattern matching on known lock file names only |
+| Missing new lock file formats          | Low    | Medium      | Document how to add new formats; extensible design    |
+| Package manager commands blocked       | High   | Low         | Only intercept Write/Edit, not Bash tool              |
+| Handler initialization fails           | High   | Low         | Daemon load verification catches this; fail fast      |
+| Import errors break daemon             | High   | Low         | TDD + daemon restart verification mandatory           |
 
 ## Notes & Updates
 
 ### 2026-02-06
+
 - Plan created based on GitHub Issue #19
 - Following Handler Implementation Plan template from PlanWorkflow.md
 - Priority aligned with similar safety handlers (10)

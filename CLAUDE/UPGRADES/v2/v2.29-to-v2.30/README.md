@@ -71,13 +71,16 @@ Before starting the upgrade:
 **Migration Steps**:
 
 1. **Detect affected handlers**:
+
    ```bash
    cd .claude/hooks-daemon
    untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli validate-project-handlers
    ```
+
    Any handler that fails with a message mentioning `get_claude_md` needs updating.
 
 2. **Add the method to each affected handler**:
+
    ```python
    class MyHandler(Handler):
        # ... existing code ...
@@ -87,6 +90,7 @@ Before starting the upgrade:
    ```
 
    If your handler blocks or advises on specific patterns, consider returning a guidance string instead of `None`:
+
    ```python
    def get_claude_md(self) -> str | None:
        return (
@@ -97,6 +101,7 @@ Before starting the upgrade:
    ```
 
 3. **Verify the fix**:
+
    ```bash
    cd .claude/hooks-daemon
    untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli validate-project-handlers
@@ -107,6 +112,7 @@ Before starting the upgrade:
    ```
 
 **Rollback**: If you cannot update handlers immediately, downgrade to v2.29.x:
+
 ```bash
 cd .claude/hooks-daemon
 git checkout v2.29.2
@@ -159,6 +165,7 @@ cat src/claude_code_hooks_daemon/version.py
 ```
 
 **Expected**:
+
 ```python
 __version__ = "2.30.0"
 ```
@@ -233,11 +240,13 @@ untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
 If you encounter issues during upgrade:
 
 1. **Validate handlers**:
+
    ```bash
    untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli validate-project-handlers --verbose
    ```
 
 2. **Check daemon logs**:
+
    ```bash
    untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli logs
    ```
@@ -245,6 +254,7 @@ If you encounter issues during upgrade:
 3. **Try rollback** (see "Rollback Instructions" above)
 
 4. **Report issue**:
+
    - GitHub: https://github.com/anthropics/claude-code-hooks-daemon/issues
    - Include: version info, error output, daemon logs
 

@@ -34,6 +34,7 @@ All pipes aligned. Columns padded to consistent width. Delimiter row widened to 
 **What**: Pure-Python CommonMark formatter by Taneli Hukkinen, hosted under executablebooks.
 
 **Install**:
+
 ```bash
 pip install mdformat mdformat-gfm
 ```
@@ -41,6 +42,7 @@ pip install mdformat mdformat-gfm
 **Default behaviour**: Aligns pipes in GFM tables by default. Columns are padded to consistent width. Delimiter row widened to match. Outer pipes added on both sides.
 
 **Before**:
+
 ```
 a | b | c
 :- | -: | :-:
@@ -49,6 +51,7 @@ xxxxxx | yyyyyy | zzzzzz
 ```
 
 **After**:
+
 ```
 | a      |      b |   c    |
 | :----- | -----: | :----: |
@@ -59,6 +62,7 @@ xxxxxx | yyyyyy | zzzzzz
 Note that colons for column alignment (`:-`, `-:`, `:-:`) are preserved and cell content is visually aligned accordingly (left / right / centre).
 
 **CLI**:
+
 ```bash
 mdformat path/to/file.md              # In-place format
 mdformat --check path/to/file.md      # Check only
@@ -66,6 +70,7 @@ cat file.md | mdformat -               # Read stdin, write stdout
 ```
 
 **Python API**:
+
 ```python
 import mdformat
 formatted = mdformat.text(raw_markdown)          # Format a string
@@ -73,6 +78,7 @@ mdformat.file("path/to/file.md")                  # Format a file in place
 ```
 
 **Pros**:
+
 - Pure Python — integrates cleanly with the daemon venv (already Python)
 - Idempotent — safe to re-run, produces stable output
 - Maintained actively under executablebooks
@@ -82,6 +88,7 @@ mdformat.file("path/to/file.md")                  # Format a file in place
 - Can work on stdin/stdout (useful for daemon socket exposure without touching disk)
 
 **Cons**:
+
 - Reformats entire file, not just tables (may reflow code blocks, normalise headings, etc.) — this is desirable for consistency but surprising if unexpected. Can be controlled via config: `[plugin.gfm]` and other sections in `.mdformat.toml`
 - Requires Python 3.10+ (project already meets this)
 
@@ -92,16 +99,19 @@ mdformat.file("path/to/file.md")                  # Format a file in place
 **What**: Node.js library and VS Code extension specifically for prettifying markdown tables.
 
 **Install**:
+
 ```bash
 npm install -g markdown-table-prettify
 ```
 
 **Pros**:
+
 - Table-specific (doesn't touch anything else)
 - Clean before/after behaviour
 - Available as CLI and as a library
 
 **Cons**:
+
 - Requires Node runtime — extra dependency for a Python project
 - Not as widely maintained
 
@@ -110,10 +120,12 @@ npm install -g markdown-table-prettify
 **What**: The markdownlint rule MD060 (`table-column-style`) defines three styles: `aligned`, `compact`, `tight`.
 
 **Pros**:
+
 - Well-known lint tool
 - `aligned` style matches the human-friendly target
 
 **Cons**:
+
 - **MD060 is NOT auto-fixable by `markdownlint-cli2 --fix`** (known limitation, confirmed in upstream issues)
 - Only detects violations, doesn't rewrite tables
 - Requires Node runtime
@@ -125,9 +137,11 @@ npm install -g markdown-table-prettify
 **What**: Prettier added markdown support in v1.8 (2017), including table formatting.
 
 **Pros**:
+
 - Ubiquitous, well-known
 
 **Cons**:
+
 - Expands tables significantly — wider than necessary
 - Known to handle large tables poorly (upstream issues)
 - Requires Node runtime
@@ -144,29 +158,32 @@ npm install -g markdown-table-prettify
 **What**: A dedicated Node.js table formatter that MD060-aligns tables.
 
 **Pros**:
+
 - Table-specific
 - Compliant with markdownlint MD060 aligned style
 
 **Cons**:
+
 - Node runtime dependency
 - Less mature than mdformat
 
 ## Comparison Matrix
 
-| Tool                      | Language | Scope         | Auto-Align | Library API | CLI | Idempotent | Project Fit |
-| ------------------------- | -------- | ------------- | ---------- | ----------- | --- | ---------- | ----------- |
-| mdformat + mdformat-gfm   | Python   | Whole file    | Yes        | Yes         | Yes | Yes        | Excellent   |
-| markdown-table-prettify   | Node     | Tables only   | Yes        | Yes         | Yes | Yes        | Poor (node) |
-| markdownlint-cli2         | Node     | Lint (detect) | No (fix)   | Yes         | Yes | N/A        | Poor (no fix) |
-| Prettier (markdown)       | Node     | Whole file    | Partial    | Yes         | Yes | Yes        | Poor (node, expands) |
-| tabulate / py-markdown-table | Python | Generate only | N/A        | Yes         | No  | N/A        | Wrong tool  |
-| markdown-table-formatter  | Node     | Tables only   | Yes        | Yes         | Yes | Yes        | Poor (node) |
+| Tool                         | Language | Scope         | Auto-Align | Library API | CLI | Idempotent | Project Fit          |
+| ---------------------------- | -------- | ------------- | ---------- | ----------- | --- | ---------- | -------------------- |
+| mdformat + mdformat-gfm      | Python   | Whole file    | Yes        | Yes         | Yes | Yes        | Excellent            |
+| markdown-table-prettify      | Node     | Tables only   | Yes        | Yes         | Yes | Yes        | Poor (node)          |
+| markdownlint-cli2            | Node     | Lint (detect) | No (fix)   | Yes         | Yes | N/A        | Poor (no fix)        |
+| Prettier (markdown)          | Node     | Whole file    | Partial    | Yes         | Yes | Yes        | Poor (node, expands) |
+| tabulate / py-markdown-table | Python   | Generate only | N/A        | Yes         | No  | N/A        | Wrong tool           |
+| markdown-table-formatter     | Node     | Tables only   | Yes        | Yes         | Yes | Yes        | Poor (node)          |
 
 ## Recommendation
 
 **Use `mdformat` + `mdformat-gfm`**.
 
 Rationale:
+
 1. Python-native — installs into the existing daemon venv with no new runtime dependency
 2. Produces the exact aligned output we want by default
 3. Has both a CLI (for quick file formatting) and a Python API (for socket exposure inside the daemon)

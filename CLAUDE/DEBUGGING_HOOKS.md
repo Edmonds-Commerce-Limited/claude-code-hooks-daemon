@@ -5,6 +5,7 @@
 ## Why This Matters
 
 Before writing handlers, you need to understand:
+
 - **Which events fire** for a given Claude Code workflow (planning mode, git operations, file edits, etc.)
 - **What order** events fire in
 - **What data** is available in each event's `hook_input`
@@ -36,6 +37,7 @@ Without introspection, you're guessing. With it, you're surgically precise.
 Logs are saved to `/tmp/hook_debug_TIMESTAMP.log` and displayed in terminal.
 
 Example output:
+
 ```
 2026-01-27 04:37:27,189 [INFO] === START BOUNDARY: Testing planning mode ===
 2026-01-27 04:37:27,475 [DEBUG] Routing PreToolUse event to chain with 17 handlers
@@ -49,6 +51,7 @@ Example output:
 ### Step 1: Identify Scenario
 
 Examples:
+
 - "Entering planning mode"
 - "Creating git commits"
 - "Running tests after code changes"
@@ -72,6 +75,7 @@ Examples:
 Look for:
 
 1. **Event Types**: Which events fired?
+
    ```
    PreToolUse event to chain    # Tool about to execute
    PostToolUse event to chain   # Tool finished
@@ -80,6 +84,7 @@ Look for:
    ```
 
 2. **Tool Names**: What tools were called?
+
    ```
    [DEBUG] Handler checking tool: EnterPlanMode
    [DEBUG] Handler checking tool: ExitPlanMode
@@ -87,6 +92,7 @@ Look for:
    ```
 
 3. **Event Data**: What's in `hook_input`?
+
    ```
    [DEBUG] hook_input: {
      "tool_name": "EnterPlanMode",
@@ -96,6 +102,7 @@ Look for:
    ```
 
 4. **Handler Execution**: Which handlers ran?
+
    ```
    [DEBUG] Handler destructive_git matched event
    [DEBUG] Handler tdd_enforcement matched event
@@ -106,12 +113,14 @@ Look for:
 Based on logs, decide:
 
 **Which event type?**
+
 - `PreToolUse` - Before tool executes (can block/modify)
 - `PostToolUse` - After tool succeeds (can validate/enhance)
 - `SubagentStop` - When subagent completes (can remind/report)
 - `UserPromptSubmit` - User input (can auto-continue/inject context)
 
 **What to match on?**
+
 ```python
 def matches(self, hook_input: dict) -> bool:
     # From logs, you know exactly what's in hook_input
@@ -130,6 +139,7 @@ def matches(self, hook_input: dict) -> bool:
 ```
 
 **What action to take?**
+
 ```python
 def handle(self, hook_input: dict) -> HookResult:
     # From logs, you know what data is available
@@ -157,9 +167,11 @@ def handle(self, hook_input: dict) -> HookResult:
 ## Example: Debugging Planning Mode
 
 ### Scenario
+
 We want to inject custom context when Claude enters planning mode.
 
 ### Capture
+
 ```bash
 ./scripts/debug_hooks.sh start "Planning mode entry and exit"
 
@@ -170,6 +182,7 @@ We want to inject custom context when Claude enters planning mode.
 ```
 
 ### Analyze Output
+
 ```
 [DEBUG] Routing PreToolUse event to chain with 17 handlers
 [DEBUG] Handler checking tool: EnterPlanMode
@@ -197,11 +210,13 @@ We want to inject custom context when Claude enters planning mode.
 ```
 
 ### Insights
+
 1. **EnterPlanMode fires PreToolUse** - we can intercept before planning starts
 2. **SubagentStart fires with agent_type="Plan"** - we can detect plan agent spawning
 3. **SubagentStop fires when plan completes** - we can remind/validate after planning
 
 ### Handler Decision
+
 ```python
 # Option 1: Intercept before planning starts (PreToolUse)
 class PlanningModePrep(Handler):
@@ -257,6 +272,7 @@ class PlanValidator(Handler):
 ## Common Scenarios to Debug
 
 ### Git Operations
+
 ```bash
 ./scripts/debug_hooks.sh start "Git commit workflow"
 # Perform: git add, git commit, git push
@@ -266,6 +282,7 @@ class PlanValidator(Handler):
 Look for: `Bash` tool with `git` commands in PreToolUse events
 
 ### File Editing
+
 ```bash
 ./scripts/debug_hooks.sh start "File edit and validation"
 # Perform: Edit file, run linter
@@ -275,6 +292,7 @@ Look for: `Bash` tool with `git` commands in PreToolUse events
 Look for: `Edit`/`Write` tools in PreToolUse, validation in PostToolUse
 
 ### Test Running
+
 ```bash
 ./scripts/debug_hooks.sh start "Test execution after code change"
 # Perform: Edit code, run tests
@@ -284,6 +302,7 @@ Look for: `Edit`/`Write` tools in PreToolUse, validation in PostToolUse
 Look for: `Bash` tool with test commands, timing between Edit and Bash
 
 ### User Prompts
+
 ```bash
 ./scripts/debug_hooks.sh start "User types 'continue'"
 # Type: continue
@@ -295,6 +314,7 @@ Look for: UserPromptSubmit event with prompt text
 ## Tips
 
 ### 1. Be Specific with Boundary Messages
+
 ```bash
 # Good
 ./scripts/debug_hooks.sh start "Testing EnterPlanMode → ExitPlanMode sequence"
@@ -304,15 +324,19 @@ Look for: UserPromptSubmit event with prompt text
 ```
 
 ### 2. Keep Test Scenarios Simple
+
 Capture one workflow at a time. Complex scenarios create noisy logs.
 
 ### 3. Look for Patterns, Not One-Offs
+
 If you see an event fire once, test again to confirm it's consistent.
 
 ### 4. Check Multiple Event Types
+
 Don't just look at PreToolUse - SubagentStart/Stop might be more appropriate.
 
 ### 5. Save Logs for Reference
+
 ```bash
 ./scripts/debug_hooks.sh stop > scenarios/planning_mode_flow.log
 ```
@@ -343,16 +367,19 @@ Differences reveal when/how to detect failures and respond.
 ### How It Works
 
 1. **START**:
+
    - Enables DEBUG logging in config
    - Restarts daemon with DEBUG level
    - Injects `=== START BOUNDARY: message ===` via `log_marker` system action
 
 2. **During Session**:
+
    - All hook events logged at DEBUG level
    - Full handler dispatch chains logged
    - Tool names, inputs, and results captured
 
 3. **STOP**:
+
    - Injects `=== END BOUNDARY ===` marker
    - Retrieves all DEBUG logs from memory buffer
    - Filters to only logs between boundaries using awk
@@ -377,17 +404,20 @@ TIMESTAMP [LEVEL] module: message
 ### Troubleshooting
 
 **"Daemon socket not found"**
+
 ```bash
 # Check daemon is running
 untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli status
 ```
 
 **"No logs in buffer"**
+
 - Session was too short (daemon hadn't processed events yet)
 - Daemon was restarted since events fired
 - Try longer/more active test scenario
 
 **"Coverage failure" when running tests**
+
 ```bash
 # Debug script doesn't affect coverage
 # This is expected if you only ran log_marker tests
@@ -399,6 +429,7 @@ untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli status
 See [HANDLER_DEVELOPMENT.md](./HANDLER_DEVELOPMENT.md) for full handler creation guide.
 
 **Recommended workflow:**
+
 1. Identify scenario (e.g., "enforce TDD")
 2. **Debug the scenario** (this doc)
 3. Analyze event flow
@@ -423,6 +454,7 @@ If you capture useful event flow logs for common scenarios, please contribute th
 4. Submit PR
 
 Example scenarios to capture:
+
 - Planning mode (enter/exit)
 - Git workflows (commit, push, rebase)
 - Test execution patterns

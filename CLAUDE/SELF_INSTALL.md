@@ -34,11 +34,13 @@ When `self_install_mode: true` in `.claude/hooks-daemon.yaml`, the daemon runs f
 ### Python Command
 
 **ALWAYS use venv Python:**
+
 ```bash
 PYTHON=/workspace/untracked/venv/bin/python
 ```
 
 **NEVER use:**
+
 - `python` (might be system Python)
 - `python3` (might be system Python)
 - `.claude/hooks-daemon/untracked/venv/bin/python` (doesn't exist in self-install mode)
@@ -50,6 +52,7 @@ CONFIG=/workspace/.claude/hooks-daemon.yaml
 ```
 
 Key setting:
+
 ```yaml
 daemon:
   self_install_mode: true  # Runs from workspace root
@@ -58,6 +61,7 @@ daemon:
 ### Environment File
 
 `.claude/hooks-daemon.env`:
+
 ```bash
 # Override daemon root directory to workspace
 export HOOKS_DAEMON_ROOT_DIR="$PROJECT_PATH"
@@ -68,6 +72,7 @@ This file is sourced by `.claude/init.sh` before any daemon operations.
 ### Source Code
 
 Daemon imports from workspace source:
+
 ```
 /workspace/src/claude_code_hooks_daemon/
 ```
@@ -138,6 +143,7 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli status
 ### 4. Check Logs
 
 If something goes wrong:
+
 ```bash
 # View daemon logs
 $PYTHON -m claude_code_hooks_daemon.daemon.cli logs
@@ -153,6 +159,7 @@ tail -f untracked/logs/daemon.log
 **Cause**: Using system Python instead of venv Python
 
 **Fix**: Use `$PYTHON` (venv Python) for all commands
+
 ```bash
 PYTHON=/workspace/untracked/venv/bin/python
 $PYTHON -m claude_code_hooks_daemon.daemon.cli status
@@ -163,6 +170,7 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli status
 **Cause**: Daemon looking in wrong location (`.claude/hooks-daemon/` instead of `/workspace/`)
 
 **Fix**: Ensure `.claude/hooks-daemon.env` exists and sets `HOOKS_DAEMON_ROOT_DIR`
+
 ```bash
 # Should be set
 echo $HOOKS_DAEMON_ROOT_DIR
@@ -174,6 +182,7 @@ echo $HOOKS_DAEMON_ROOT_DIR
 **Cause**: Daemon running old code from before restart
 
 **Fix**: Restart daemon after code changes
+
 ```bash
 $PYTHON -m claude_code_hooks_daemon.daemon.cli restart
 ```
@@ -183,6 +192,7 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli restart
 **Cause**: Old daemon process still running
 
 **Fix**: Stop daemon forcefully
+
 ```bash
 # Graceful stop
 $PYTHON -m claude_code_hooks_daemon.daemon.cli stop
@@ -200,6 +210,7 @@ rm untracked/daemon.pid
 ### 1. Environment Setup
 
 `.claude/init.sh` sources `.claude/hooks-daemon.env`:
+
 ```bash
 if [ -f "$PROJECT_PATH/.claude/hooks-daemon.env" ]; then
     source "$PROJECT_PATH/.claude/hooks-daemon.env"
@@ -209,6 +220,7 @@ fi
 ### 2. Root Directory Override
 
 `.claude/hooks-daemon.env` sets:
+
 ```bash
 export HOOKS_DAEMON_ROOT_DIR="$PROJECT_PATH"
 ```
@@ -218,6 +230,7 @@ This tells daemon code to use workspace root instead of `.claude/hooks-daemon/`.
 ### 3. Path Resolution
 
 Daemon code (in `daemon/paths.py`) checks for `HOOKS_DAEMON_ROOT_DIR`:
+
 ```python
 def get_daemon_root() -> Path:
     # Check environment override (for self-install mode)
@@ -232,6 +245,7 @@ def get_daemon_root() -> Path:
 ### 4. Config Detection
 
 Daemon loads config and checks `self_install_mode`:
+
 ```python
 config = load_config()
 if config.get("daemon", {}).get("self_install_mode", False):
@@ -242,6 +256,7 @@ if config.get("daemon", {}).get("self_install_mode", False):
 ### 5. Source Import
 
 Python imports modules from workspace source:
+
 ```python
 # These resolve to /workspace/src/claude_code_hooks_daemon/
 from claude_code_hooks_daemon.core import Handler
@@ -317,12 +332,14 @@ print(claude_code_hooks_daemon.__file__)
 ## When to Use Self-Install Mode
 
 **Use self-install mode when:**
+
 - Developing the hooks-daemon project itself (dogfooding)
 - Testing unreleased features
 - Debugging daemon internals
 - Contributing to the project
 
 **Use normal mode when:**
+
 - Using hooks-daemon in other projects
 - Running stable released version
 - Don't need to modify daemon code

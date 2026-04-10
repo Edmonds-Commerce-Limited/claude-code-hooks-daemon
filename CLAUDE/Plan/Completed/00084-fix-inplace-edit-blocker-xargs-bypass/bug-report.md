@@ -12,12 +12,14 @@ The `sed_blocker` handler blocks direct `sed -i` commands but does not detect `s
 ## Reproduction
 
 ### Blocked (correctly):
+
 ```bash
 sed -i 's|CLAUDE/Plans|CLAUDE/Plan|g' CLAUDE.md
 # → Blocked by sed_blocker handler
 ```
 
 ### Not blocked (bypass):
+
 ```bash
 grep -rl 'CLAUDE/Plans' | xargs sed -i 's|CLAUDE/Plans|CLAUDE/Plan|g'
 # → Executes successfully, handler does not fire

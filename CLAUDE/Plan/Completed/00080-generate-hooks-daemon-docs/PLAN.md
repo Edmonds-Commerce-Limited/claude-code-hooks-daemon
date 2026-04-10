@@ -21,6 +21,7 @@ Additionally, a bug report exists at `untracked/hooks-daemon-upgrade-cache-flush
 **1. `src/claude_code_hooks_daemon/daemon/docs_generator.py`**
 
 `DocsGenerator` class following `PlaybookGenerator` pattern:
+
 - Constructor: `(config: dict, config_raw: Config, registry: HandlerRegistry, plugins, project_handlers)`
 - `generate_markdown(include_disabled=False) -> str` — main output method
 - `_collect_handlers()` — iterates `EVENT_TYPE_MAPPING`, instantiates handlers, reads config enabled/disabled, collects metadata
@@ -33,6 +34,7 @@ Handler description: first line of class docstring via `inspect.getdoc()`. Behav
 **2. `tests/unit/daemon/test_docs_generator.py`**
 
 TDD tests (written first):
+
 - Header contains version and timestamp
 - Handlers grouped by event type
 - Priority + behavior columns present
@@ -56,6 +58,7 @@ TDD tests (written first):
 **4. `CLAUDE.md` (project root)**
 
 Replace the "Configuration" section's inline YAML handler example and "Priority Ranges" subsection with:
+
 ```markdown
 ## Active Configuration
 
@@ -67,6 +70,7 @@ Keep all non-config sections (architecture, engineering principles, security, pl
 **5. `scripts/install_version.sh`** (non-fatal step after install)
 
 Add step to generate docs:
+
 ```bash
 "$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli generate-docs --project-root "$PROJECT_ROOT" || true
 ```
@@ -116,6 +120,7 @@ The redirect handler intercepts `~/.claude/plans/` writes as a safety net only.
 ## Part B: Version Cache Flush Fix
 
 ### Bug
+
 After upgrade, `version_check_cache.json` still has `is_outdated: true` for the old version. `daemon_stats.py:104` reads this and shows stale upgrade indicator.
 
 ### Fix
@@ -123,6 +128,7 @@ After upgrade, `version_check_cache.json` still has `is_outdated: true` for the 
 **6. `scripts/upgrade_version.sh`** (~line 617, after successful daemon restart)
 
 Add cache flush between Step 14 (daemon restart) and Step 15 (validation):
+
 ```bash
 # Clear version check cache to prevent stale upgrade indicators
 rm -f "$DAEMON_DIR/untracked/version_check_cache.json"
@@ -136,17 +142,17 @@ rm -f "$DAEMON_DIR/untracked/version_check_cache.json"
 
 ## Implementation Sequence
 
-| Phase | Task |
-|-------|------|
-| 1 | Write failing tests for `DocsGenerator` (TDD RED) |
-| 2 | Implement `DocsGenerator` class (TDD GREEN) |
-| 3 | Wire up CLI command in `cli.py` |
-| 4 | Run tests, verify green + QA |
-| 5 | Fix version cache flush in `upgrade_version.sh` + harden `daemon_stats.py` |
-| 6 | Update `CLAUDE.md` with `@` link |
-| 7 | Add install script step |
-| 8 | Full QA + daemon restart verification |
-| 9 | Generate `.claude/HOOKS-DAEMON.md` for this project |
+| Phase | Task                                                                       |
+| ----- | -------------------------------------------------------------------------- |
+| 1     | Write failing tests for `DocsGenerator` (TDD RED)                          |
+| 2     | Implement `DocsGenerator` class (TDD GREEN)                                |
+| 3     | Wire up CLI command in `cli.py`                                            |
+| 4     | Run tests, verify green + QA                                               |
+| 5     | Fix version cache flush in `upgrade_version.sh` + harden `daemon_stats.py` |
+| 6     | Update `CLAUDE.md` with `@` link                                           |
+| 7     | Add install script step                                                    |
+| 8     | Full QA + daemon restart verification                                      |
+| 9     | Generate `.claude/HOOKS-DAEMON.md` for this project                        |
 
 ## Verification
 

@@ -228,6 +228,7 @@ Per CLAUDE/DEBUGGING_HOOKS.md, capture real event flow before writing the handle
 **Context**: Need a tool to reformat markdown tables with aligned pipes.
 
 **Options Considered**:
+
 1. `mdformat + mdformat-gfm` — Python, pip-installable, aligned-by-default
 2. `markdown-table-prettify` — Node runtime
 3. `markdownlint-cli2 --fix` — Node runtime, MD060 not auto-fixable
@@ -243,6 +244,7 @@ Per CLAUDE/DEBUGGING_HOOKS.md, capture real event flow before writing the handle
 **Context**: When should the formatter run?
 
 **Options Considered**:
+
 1. PostToolUse handler that runs `mdformat` after Write/Edit completes — automatic, invisible on success
 2. PreToolUse handler that denies Write/Edit with unaligned tables — intrusive, burns tokens
 3. Manual slash command only — unreliable, Claude might forget
@@ -256,6 +258,7 @@ Per CLAUDE/DEBUGGING_HOOKS.md, capture real event flow before writing the handle
 **Context**: Where to slot this in the PostToolUse priority range?
 
 **Options Considered**:
+
 1. Priority 25 (alongside `lint_on_edit`)
 2. Priority 26 (just after `lint_on_edit`)
 3. Priority 30+ (after other quality handlers)
@@ -269,6 +272,7 @@ Per CLAUDE/DEBUGGING_HOOKS.md, capture real event flow before writing the handle
 **Context**: `mdformat` reformats the entire file (headings, lists, code blocks), not just tables. This could surprise users.
 
 **Options Considered**:
+
 1. Let `mdformat` reformat the whole file — gives consistent output across the project
 2. Parse the file, extract tables, reformat only tables, splice back in — table-only scope, custom logic
 3. Constrain `mdformat` via `.mdformat.toml` config to minimise non-table changes
@@ -293,14 +297,14 @@ Per CLAUDE/DEBUGGING_HOOKS.md, capture real event flow before writing the handle
 
 ## Risks & Mitigations
 
-| Risk | Impact | Probability | Mitigation |
-|------|--------|-------------|------------|
-| mdformat reformats non-table content unexpectedly | Medium | Medium | Phase 1.4 smoke test; fall back to `.mdformat.toml` config if needed |
-| Handler runs on every `.md` write and slows things down | Low | Low | Lazy import of mdformat; handler only runs for matching files; skip if file unchanged |
-| Batch-fix in Phase 7 introduces noise in unrelated files | Medium | Medium | Dry-run with `--check` first; scope narrowly; commit as separate checkpoint |
-| mdformat exception crashes the PostToolUse handler chain | High | Low | Wrap `mdformat.file()` in try/except with explicit error context; never propagate |
-| Users with hand-crafted tables lose their formatting | Low | Medium | Only runs after Write/Edit; doesn't touch files on disk otherwise |
-| Adding runtime deps increases install surface | Low | Low | Both are pure Python, no C extensions; minimal transitive deps |
+| Risk                                                     | Impact | Probability | Mitigation                                                                            |
+| -------------------------------------------------------- | ------ | ----------- | ------------------------------------------------------------------------------------- |
+| mdformat reformats non-table content unexpectedly        | Medium | Medium      | Phase 1.4 smoke test; fall back to `.mdformat.toml` config if needed                  |
+| Handler runs on every `.md` write and slows things down  | Low    | Low         | Lazy import of mdformat; handler only runs for matching files; skip if file unchanged |
+| Batch-fix in Phase 7 introduces noise in unrelated files | Medium | Medium      | Dry-run with `--check` first; scope narrowly; commit as separate checkpoint           |
+| mdformat exception crashes the PostToolUse handler chain | High   | Low         | Wrap `mdformat.file()` in try/except with explicit error context; never propagate     |
+| Users with hand-crafted tables lose their formatting     | Low    | Medium      | Only runs after Write/Edit; doesn't touch files on disk otherwise                     |
+| Adding runtime deps increases install surface            | Low    | Low         | Both are pure Python, no C extensions; minimal transitive deps                        |
 
 ## Execution Strategy
 
@@ -309,6 +313,7 @@ Per CLAUDE/DEBUGGING_HOOKS.md, capture real event flow before writing the handle
 ## Notes & Updates
 
 ### 2026-04-09
+
 - Plan created from user request ("human friendly markdown tables")
 - Research completed in `RESEARCH.md` — six tools evaluated, `mdformat + mdformat-gfm` selected
 - Current version: v3.0.1 (from `git log`)

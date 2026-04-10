@@ -42,12 +42,14 @@ Handler results ────────┘       ├─────────
 Lightweight in-memory cache updated on every StatusLine event.
 
 **Data cached**:
+
 - `model_id` / `model_display_name` - Current model
 - `context_used_percentage` - Context window usage
 - `workspace_dir` / `project_dir` - Workspace info
 - `last_updated` - Timestamp of last StatusLine event
 
 **Convenience methods**:
+
 - `is_opus() -> bool` - Quick model family check
 - `is_sonnet() -> bool` / `is_haiku() -> bool`
 - `model_name_short() -> str` - Human-readable name
@@ -63,12 +65,14 @@ Lightweight in-memory cache updated on every StatusLine event.
 Lazy, cached parser for Claude Code's JSONL conversation transcripts.
 
 **Key design decisions**:
+
 - **Lazy loading**: Don't parse until first query
 - **Cached**: Parse once, cache results until transcript path changes
 - **Read-only**: Never modify transcript files
 - **Performant**: Stream JSONL lines, don't load entire file into memory
 
 **API** (initial - expand as use cases emerge):
+
 - `load(transcript_path: str) -> None`
 - `get_messages() -> list[TranscriptMessage]`
 - `get_tool_uses() -> list[ToolUse]`
@@ -89,6 +93,7 @@ Tracks previous handler decisions within the session.
 **Data per decision**: handler_id, event_type, decision, tool_name, timestamp, reason
 
 **API**:
+
 - `record(...)` - Log a decision
 - `get_recent(n) -> list` - Last N decisions
 - `count_blocks() -> int` - Total blocks this session
@@ -118,6 +123,7 @@ def get_data_layer() -> DaemonDataLayer:
 ```
 
 **Handler usage**:
+
 ```python
 from claude_code_hooks_daemon.core.data_layer import get_data_layer
 
@@ -131,19 +137,19 @@ def handle(self, hook_input):
 
 ## Files to Create/Modify
 
-| Action | File | Purpose |
-|--------|------|---------|
-| **Create** | `src/claude_code_hooks_daemon/core/session_state.py` | StatusLine data cache |
-| **Create** | `src/claude_code_hooks_daemon/core/transcript_reader.py` | JSONL transcript parser |
-| **Create** | `src/claude_code_hooks_daemon/core/handler_history.py` | Decision history log |
-| **Create** | `src/claude_code_hooks_daemon/core/data_layer.py` | Unified API facade |
-| **Create** | `tests/unit/core/test_session_state.py` | Tests |
-| **Create** | `tests/unit/core/test_transcript_reader.py` | Tests |
-| **Create** | `tests/unit/core/test_handler_history.py` | Tests |
-| **Create** | `tests/unit/core/test_data_layer.py` | Tests |
-| **Edit** | `src/claude_code_hooks_daemon/core/__init__.py` | Export new classes |
-| **Edit** | `src/claude_code_hooks_daemon/daemon/controller.py` | Wire StatusLine -> SessionState |
-| **Edit** | `src/claude_code_hooks_daemon/core/front_controller.py` | Wire dispatch -> HandlerHistory |
+| Action     | File                                                     | Purpose                         |
+| ---------- | -------------------------------------------------------- | ------------------------------- |
+| **Create** | `src/claude_code_hooks_daemon/core/session_state.py`     | StatusLine data cache           |
+| **Create** | `src/claude_code_hooks_daemon/core/transcript_reader.py` | JSONL transcript parser         |
+| **Create** | `src/claude_code_hooks_daemon/core/handler_history.py`   | Decision history log            |
+| **Create** | `src/claude_code_hooks_daemon/core/data_layer.py`        | Unified API facade              |
+| **Create** | `tests/unit/core/test_session_state.py`                  | Tests                           |
+| **Create** | `tests/unit/core/test_transcript_reader.py`              | Tests                           |
+| **Create** | `tests/unit/core/test_handler_history.py`                | Tests                           |
+| **Create** | `tests/unit/core/test_data_layer.py`                     | Tests                           |
+| **Edit**   | `src/claude_code_hooks_daemon/core/__init__.py`          | Export new classes              |
+| **Edit**   | `src/claude_code_hooks_daemon/daemon/controller.py`      | Wire StatusLine -> SessionState |
+| **Edit**   | `src/claude_code_hooks_daemon/core/front_controller.py`  | Wire dispatch -> HandlerHistory |
 
 ## Existing Code to Reuse
 

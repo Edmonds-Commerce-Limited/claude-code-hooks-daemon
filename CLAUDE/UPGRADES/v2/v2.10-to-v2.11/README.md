@@ -5,6 +5,7 @@ This directory contains all materials needed to upgrade from v2.10.x to v2.11.0.
 ## Breaking Changes
 
 v2.11.0 removes two project-specific handlers:
+
 - `validate_sitemap` (PostToolUse)
 - `remind_validator` (SubagentStop)
 
@@ -13,17 +14,21 @@ These were "hangover code" from early development and should not have been in th
 ## Files in This Directory
 
 ### Main Documentation
+
 - **v2.10-to-v2.11.md** - Complete upgrade guide with step-by-step instructions
 
 ### Configuration Examples
+
 - **config-before.yaml** - Example v2.10 config with removed handlers
 - **config-after.yaml** - Example v2.11 config without removed handlers
 
 ### Automation Scripts
+
 - **migration-script.sh** - Automated config migration (comments out or removes obsolete handlers)
 - **verification.sh** - Verifies upgrade was successful
 
 ### This File
+
 - **README.md** - This overview
 
 ## Quick Start
@@ -42,6 +47,7 @@ bash .claude/hooks-daemon/CLAUDE/UPGRADES/v2/v2.10-to-v2.11/migration-script.sh
 ```
 
 This will:
+
 - Check if your config references removed handlers
 - Create backup of current config
 - Comment out or remove obsolete handlers
@@ -55,6 +61,7 @@ bash .claude/hooks-daemon/CLAUDE/UPGRADES/v2/v2.10-to-v2.11/verification.sh
 ```
 
 This will:
+
 - Check version is v2.11.0
 - Validate config has no active obsolete handlers
 - Test daemon restart
@@ -64,11 +71,13 @@ This will:
 ## Who Should Use This?
 
 ### You NEED to migrate if:
+
 - Your `.claude/hooks-daemon.yaml` references `validate_sitemap`
 - Your `.claude/hooks-daemon.yaml` references `remind_validator`
 - You explicitly enabled these handlers
 
 ### You DON'T need to migrate if:
+
 - You never configured these handlers
 - You use only default handler configuration
 - You're upgrading from a clean v2.10 install
@@ -78,6 +87,7 @@ This will:
 **Low Impact** - These handlers were project-specific and unlikely to be used by other projects.
 
 **What happens if you don't migrate?**
+
 - Daemon continues to work normally
 - Obsolete handler references are silently ignored
 - No errors or warnings
@@ -88,6 +98,7 @@ This will:
 If you relied on these handlers, you can recreate them as project-level handlers.
 
 See the upgrade guide for:
+
 - Complete code examples for recreating handlers
 - Instructions on project handler setup
 - Testing procedures

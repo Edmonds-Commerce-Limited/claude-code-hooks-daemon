@@ -13,18 +13,21 @@ This directory contains documentation optimized for LLM consumption (Claude, GPT
 ### Architecture & Design
 
 **ARCHITECTURE.md** - System architecture and design decisions
+
 - Daemon architecture and component overview
 - Handler system design
 - Configuration system
 - Plugin architecture
 
 **HANDLER_DEVELOPMENT.md** - Guide for creating custom handlers
+
 - Handler lifecycle and API
 - Priority system
 - Testing patterns
 - Best practices
 
 **DEBUGGING_HOOKS.md** - Critical tool for introspecting hook event flows
+
 - Debug utility usage (`scripts/debug_hooks.sh`)
 - Capturing event sequences for scenarios
 - Analyzing logs to surgically decide which events to hook
@@ -34,11 +37,13 @@ This directory contains documentation optimized for LLM consumption (Claude, GPT
 ### Installation & Setup
 
 **LLM-INSTALL.md** - LLM-optimized installation guide
+
 - Installation workflow for AI assistants
 - Troubleshooting common issues
 - Verification steps
 
 **LLM-UPDATE.md** - LLM-optimized update guide
+
 - Version detection and upgrade path determination
 - References RELEASES/ for version changelogs
 - References UPGRADES/ for migration guides
@@ -47,6 +52,7 @@ This directory contains documentation optimized for LLM consumption (Claude, GPT
 ### Troubleshooting & Support
 
 **BUG_REPORTING.md** (root directory) - Bug reporting and diagnostics
+
 - Debug info script usage (`scripts/debug_info.py`)
 - Automated diagnostic report generation
 - Common issues and solutions
@@ -55,6 +61,7 @@ This directory contains documentation optimized for LLM consumption (Claude, GPT
 ### Development & Contributing
 
 **development/** - Documentation for daemon repository development
+
 - **RELEASING.md** - Release process using `/release` skill
 - **QA.md** - QA pipeline and automation
 - For developers working on the daemon codebase itself
@@ -76,6 +83,7 @@ This directory contains documentation optimized for LLM consumption (Claude, GPT
 ## Usage by LLMs
 
 When working on this project, LLMs should:
+
 1. Read README.md for overview and installation
 2. Check ARCHITECTURE.md for system design
 3. **Use DEBUGGING_HOOKS.md to introspect event flows before writing handlers**
@@ -89,6 +97,7 @@ When working on this project, LLMs should:
 ### Handler Development Workflow
 
 **CRITICAL**: Always debug first, develop second:
+
 1. Identify scenario ("enforce TDD", "block destructive git", etc.)
 2. **Use `scripts/debug_hooks.sh` to capture event flow** (DEBUGGING_HOOKS.md)
 3. Analyze logs to determine which event type and what data is available

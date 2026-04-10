@@ -150,10 +150,12 @@ _ADVISORY_MESSAGES: Final[tuple[str, ...]]    # Pool of rotating messages
 ### Phase 2: TDD Implementation
 
 - [x] **Add constants**
+
   - [x] Add HandlerID.CRITICAL_THINKING_ADVISORY to constants
   - [x] Add priority constant
 
 - [x] **Write failing tests**
+
   - [x] Test: Handler initialises with correct ID, priority, terminal=False
   - [x] Test: matches() returns False for short prompts (< 80 chars)
   - [x] Test: matches() returns True for long prompts (>= 80 chars)
@@ -166,6 +168,7 @@ _ADVISORY_MESSAGES: Final[tuple[str, ...]]    # Pool of rotating messages
   - [x] Test: acceptance tests defined
 
 - [x] **Implement handler**
+
   - [x] Create handler file
   - [x] Implement matches() with length gate
   - [x] Implement handle() with random + cooldown gates
@@ -175,10 +178,12 @@ _ADVISORY_MESSAGES: Final[tuple[str, ...]]    # Pool of rotating messages
 ### Phase 3: Integration
 
 - [x] **Register in config**
+
   - [x] Add to hooks-daemon.yaml under user_prompt_submit
   - [x] Set enabled: true, appropriate priority
 
 - [x] **Update constants modules**
+
   - [x] Add HandlerID entry
   - [x] Add Priority entry if needed
 
@@ -200,6 +205,7 @@ _ADVISORY_MESSAGES: Final[tuple[str, ...]]    # Pool of rotating messages
 **Context**: How to prevent context flooding while still firing usefully?
 
 **Options Considered**:
+
 1. **Length only** - Fire on all long prompts (too frequent)
 2. **Random only** - Fire randomly regardless of prompt (wastes tokens on "yes")
 3. **Cooldown only** - Fire periodically (no prompt awareness)
@@ -208,6 +214,7 @@ _ADVISORY_MESSAGES: Final[tuple[str, ...]]    # Pool of rotating messages
 **Decision**: Option 4 - Multi-gate filter
 
 **Rationale**:
+
 - Each gate independently eliminates a class of waste
 - Combined effect is highly targeted (~1 in 15-20 prompts)
 - Cheap to evaluate (string length, random float, integer comparison)
@@ -218,6 +225,7 @@ _ADVISORY_MESSAGES: Final[tuple[str, ...]]    # Pool of rotating messages
 **Context**: Where to store the cooldown counter?
 
 **Options Considered**:
+
 1. **HandlerHistory query** - Check when this handler last fired
 2. **Instance variable** - Store `_last_fired_count` on handler instance
 3. **Data layer custom state** - Add custom state to DaemonDataLayer
@@ -225,6 +233,7 @@ _ADVISORY_MESSAGES: Final[tuple[str, ...]]    # Pool of rotating messages
 **Decision**: Option 2 - Instance variable
 
 **Rationale**:
+
 - Simplest implementation (just an int)
 - Handler instance persists for daemon lifetime
 - No need to query data layer on every call
@@ -238,6 +247,7 @@ _ADVISORY_MESSAGES: Final[tuple[str, ...]]    # Pool of rotating messages
 **Decision**: 3-5 messages, randomly selected
 
 **Rationale**:
+
 - Too few (1-2) feels repetitive when it does fire
 - Too many (10+) is over-engineering for an advisory
 - 3-5 provides variety without maintenance burden
@@ -256,17 +266,18 @@ _ADVISORY_MESSAGES: Final[tuple[str, ...]]    # Pool of rotating messages
 
 ## Risks & Mitigations
 
-| Risk | Impact | Probability | Mitigation |
-|------|--------|-------------|------------|
-| Fires too often, annoying users | Medium | Low | Multi-gate filter with conservative defaults |
-| Fires too rarely, never seen | Low | Medium | Tune thresholds; 80 chars + 20% + 3-event cooldown |
-| Advisory messages feel patronising | Medium | Medium | Keep messages collaborative ("consider", "evaluate") not directive |
-| Adds latency to prompt processing | Low | Low | All gates are O(1) operations, negligible overhead |
-| Random behaviour makes testing hard | Medium | Medium | Seed RNG in tests for deterministic behaviour |
+| Risk                                | Impact | Probability | Mitigation                                                         |
+| ----------------------------------- | ------ | ----------- | ------------------------------------------------------------------ |
+| Fires too often, annoying users     | Medium | Low         | Multi-gate filter with conservative defaults                       |
+| Fires too rarely, never seen        | Low    | Medium      | Tune thresholds; 80 chars + 20% + 3-event cooldown                 |
+| Advisory messages feel patronising  | Medium | Medium      | Keep messages collaborative ("consider", "evaluate") not directive |
+| Adds latency to prompt processing   | Low    | Low         | All gates are O(1) operations, negligible overhead                 |
+| Random behaviour makes testing hard | Medium | Medium      | Seed RNG in tests for deterministic behaviour                      |
 
 ## Notes & Updates
 
 ### 2026-02-12
+
 - Plan created based on user request for "critical thinking advisory"
 - Key insight from user: must avoid flooding context, only fire on substantial prompts
 - User suggested: prompt length threshold, random sampling (1-in-5 or 1-in-10), or combination

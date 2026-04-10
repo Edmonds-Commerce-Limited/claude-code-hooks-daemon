@@ -11,6 +11,7 @@
 ### Long Lines in String Literals
 
 **Symptom:**
+
 ```
 error: Line exceeds 100 characters
 ```
@@ -19,6 +20,7 @@ error: Line exceeds 100 characters
 Long strings (URLs, messages, paths) exceed line limit.
 
 **Fix:**
+
 ```python
 # ❌ WRONG - Line too long
 message = "This is a very long error message that explains what went wrong and how to fix it"
@@ -37,6 +39,7 @@ message = textwrap.dedent("""
 ```
 
 **Notes:**
+
 - Parentheses allow string continuation without backslashes
 - String literals next to each other are concatenated automatically
 
@@ -47,6 +50,7 @@ message = textwrap.dedent("""
 ### F401: Unused Import
 
 **Symptom:**
+
 ```
 F401 `module.thing` imported but unused
 ```
@@ -55,6 +59,7 @@ F401 `module.thing` imported but unused
 Import was added but never used, or usage was removed.
 
 **Fix:**
+
 ```python
 # ❌ WRONG - Unused import
 from typing import Dict, List, Optional  # Only using Dict
@@ -64,12 +69,14 @@ from typing import Dict
 ```
 
 **Notes:**
+
 - If import is for re-export, use `__all__` to make it explicit
 - If import is for type checking only, use `TYPE_CHECKING` block
 
 ### F841: Unused Variable
 
 **Symptom:**
+
 ```
 F841 Local variable `x` is assigned but never used
 ```
@@ -78,6 +85,7 @@ F841 Local variable `x` is assigned but never used
 Variable assigned but not used. Often from copy-paste or incomplete refactoring.
 
 **Fix:**
+
 ```python
 # ❌ WRONG - Unused variable
 result = expensive_operation()
@@ -92,12 +100,14 @@ _, important_value = get_pair()
 ```
 
 **Notes:**
+
 - Single underscore `_` is convention for intentionally ignored values
 - If you need the side effect but not the value, consider if function should be void
 
 ### E711/E712: Comparison to None/True/False
 
 **Symptom:**
+
 ```
 E711 Comparison to `None` should be `is None`
 E712 Comparison to `True` should be `if x:`
@@ -107,6 +117,7 @@ E712 Comparison to `True` should be `if x:`
 Using `==` instead of `is` for singleton comparisons.
 
 **Fix:**
+
 ```python
 # ❌ WRONG
 if result == None:
@@ -120,6 +131,7 @@ if not enabled:  # or `if enabled is False:` for explicit
 ```
 
 **Notes:**
+
 - Use `is` for None, True, False (they're singletons)
 - Use `==` for value comparison
 
@@ -130,6 +142,7 @@ if not enabled:  # or `if enabled is False:` for explicit
 ### Missing Return Type
 
 **Symptom:**
+
 ```
 error: Function is missing a return type annotation
 ```
@@ -138,6 +151,7 @@ error: Function is missing a return type annotation
 Function defined without return type.
 
 **Fix:**
+
 ```python
 # ❌ WRONG
 def process(data):
@@ -151,6 +165,7 @@ def process(data: str) -> str:
 ### Incompatible Types in Assignment
 
 **Symptom:**
+
 ```
 error: Incompatible types in assignment (expression has type "X", variable has type "Y")
 ```
@@ -159,6 +174,7 @@ error: Incompatible types in assignment (expression has type "X", variable has t
 Type mismatch between declared type and assigned value.
 
 **Fix:**
+
 ```python
 # ❌ WRONG - Type mismatch
 def get_count() -> int:
@@ -176,6 +192,7 @@ def get_count() -> str:
 ### Optional Type Not Handled
 
 **Symptom:**
+
 ```
 error: Item "None" of "Optional[X]" has no attribute "y"
 ```
@@ -184,6 +201,7 @@ error: Item "None" of "Optional[X]" has no attribute "y"
 Accessing attribute on value that might be None.
 
 **Fix:**
+
 ```python
 # ❌ WRONG - Doesn't handle None
 def get_name(user: User | None) -> str:
@@ -205,6 +223,7 @@ def get_name(user: User | None) -> str:
 ### Dict Key Access Type Error
 
 **Symptom:**
+
 ```
 error: TypedDict "X" has no key "y"
 ```
@@ -213,6 +232,7 @@ error: TypedDict "X" has no key "y"
 Accessing key that's not in TypedDict definition.
 
 **Fix:**
+
 ```python
 # ❌ WRONG - Key not in TypedDict
 class Config(TypedDict):
@@ -238,6 +258,7 @@ def process(config: dict[str, Any]) -> None:
 ### Fixture Not Found
 
 **Symptom:**
+
 ```
 fixture 'my_fixture' not found
 ```
@@ -246,6 +267,7 @@ fixture 'my_fixture' not found
 Fixture not defined in scope or conftest.py.
 
 **Fix:**
+
 ```python
 # ❌ WRONG - Fixture in wrong scope
 # tests/unit/test_foo.py
@@ -273,6 +295,7 @@ Test passes but doesn't actually test anything, or mock isn't called.
 Patching wrong path or mock not configured correctly.
 
 **Fix:**
+
 ```python
 # ❌ WRONG - Patching where defined, not where used
 # Module: myapp.service (imports from myapp.utils)
@@ -287,6 +310,7 @@ def test_service():
 ```
 
 **Notes:**
+
 - Patch the name as it's used in the module under test
 - Not where it's defined
 
@@ -299,6 +323,7 @@ Test passes but assertion is never executed.
 Return/exception before assertion, or wrong test structure.
 
 **Fix:**
+
 ```python
 # ❌ WRONG - Assertion after return
 def test_something():
@@ -320,6 +345,7 @@ def test_something():
 ### Uncovered Branch
 
 **Symptom:**
+
 ```
 Missing branch coverage for line X
 ```
@@ -328,6 +354,7 @@ Missing branch coverage for line X
 If/else or try/except not fully tested.
 
 **Fix:**
+
 ```python
 # Code under test
 def process(value: int) -> str:
@@ -351,6 +378,7 @@ Except block shows as uncovered.
 Tests don't trigger the exception path.
 
 **Fix:**
+
 ```python
 # Code under test
 def load_file(path: Path) -> str:
@@ -372,6 +400,7 @@ def test_load_file_not_found(tmp_path):
 ### B101: Assert Used
 
 **Symptom:**
+
 ```
 B101: Use of assert detected
 ```
@@ -380,6 +409,7 @@ B101: Use of assert detected
 Assert statements are removed in optimized mode (-O flag).
 
 **Fix:**
+
 ```python
 # ❌ WRONG - Assert in production code
 def process(data: dict) -> None:
@@ -394,12 +424,14 @@ def process(data: dict) -> None:
 ```
 
 **Notes:**
+
 - Asserts are for debugging and tests only
 - Use explicit validation in production code
 
 ### B602: subprocess with shell=True
 
 **Symptom:**
+
 ```
 B602: subprocess call with shell=True is identified
 ```
@@ -408,6 +440,7 @@ B602: subprocess call with shell=True is identified
 Shell injection vulnerability when using shell=True with user input.
 
 **Fix:**
+
 ```python
 # ❌ WRONG - Shell injection risk
 subprocess.run(f"ls {user_input}", shell=True)
@@ -433,6 +466,7 @@ Two handlers with same priority cause non-deterministic ordering.
 Handlers should have unique priorities within their category.
 
 **Fix:**
+
 ```python
 # ❌ WRONG - Duplicate priorities
 class HandlerA(Handler):
@@ -454,6 +488,7 @@ class HandlerB(Handler):
 ```
 
 **Priority Ranges:**
+
 - 5: Test handlers
 - 10-20: Safety handlers
 - 25-35: Code quality
@@ -463,6 +498,7 @@ class HandlerB(Handler):
 ### HookResult Schema Validation
 
 **Symptom:**
+
 ```
 ValidationError: Invalid HookResult
 ```
@@ -471,6 +507,7 @@ ValidationError: Invalid HookResult
 HookResult fields don't match expected schema.
 
 **Fix:**
+
 ```python
 # ❌ WRONG - Invalid decision value
 return HookResult(decision="block")  # "block" not valid
@@ -480,6 +517,7 @@ return HookResult(decision="deny")   # or "allow"
 ```
 
 **Valid HookResult fields:**
+
 - `decision`: "allow" | "deny"
 - `reason`: str (optional but recommended for deny)
 
@@ -490,6 +528,7 @@ return HookResult(decision="deny")   # or "allow"
 **Last Updated:** 2026-01-27
 
 **Adding New Patterns:**
+
 1. Encounter a QA issue during development
 2. Research the proper fix (not suppression)
 3. Document symptom, root cause, and fix
@@ -497,6 +536,7 @@ return HookResult(decision="deny")   # or "allow"
 5. Add to appropriate category
 
 **Review Schedule:**
+
 - Update when encountering new patterns
 - Review and prune quarterly
 - Remove patterns no longer relevant

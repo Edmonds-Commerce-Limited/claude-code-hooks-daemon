@@ -24,6 +24,7 @@ Edit RELEASES/*.md      # ❌ NEVER DO THIS
 ```
 
 **Why this matters**: Manual release operations bypass:
+
 - Pre-release validation (QA, git state, GitHub CLI)
 - Version consistency checks across all files
 - Changelog generation from commits
@@ -39,11 +40,13 @@ Edit RELEASES/*.md      # ❌ NEVER DO THIS
 The `/release` skill includes TWO mandatory blocking gates that MUST pass before any git operations:
 
 1. **QA Verification Gate** (after Opus review):
+
    - Main Claude manually runs: `./scripts/qa/run_all.sh`
    - ALL 8 checks must pass (Magic Values, Format, Lint, Type Check, Tests, Security, Dependencies, Shell Check)
    - If ANY check fails → ABORT release immediately
 
 2. **Acceptance Testing Gate** (after QA passes):
+
    - Main Claude generates and executes full acceptance test playbook
    - ALL 15+ tests must pass in real Claude Code session
    - If ANY test fails → ABORT release, enter FAIL-FAST cycle
@@ -53,14 +56,14 @@ The `/release` skill includes TWO mandatory blocking gates that MUST pass before
 
 ### Release Commands
 
-| Operation | Status |
-|-----------|--------|
-| `/release` | ✅ ONLY CORRECT WAY |
-| `git tag v*` | ❌ FORBIDDEN |
-| `git push origin v*` | ❌ FORBIDDEN |
-| `git push origin tags` | ❌ FORBIDDEN |
-| Edit CHANGELOG.md | ❌ FORBIDDEN (outside release) |
-| Edit RELEASES/*.md | ❌ FORBIDDEN (outside release) |
+| Operation              | Status                         |
+| ---------------------- | ------------------------------ |
+| `/release`             | ✅ ONLY CORRECT WAY            |
+| `git tag v*`           | ❌ FORBIDDEN                   |
+| `git push origin v*`   | ❌ FORBIDDEN                   |
+| `git push origin tags` | ❌ FORBIDDEN                   |
+| Edit CHANGELOG.md      | ❌ FORBIDDEN (outside release) |
+| Edit RELEASES/\*.md    | ❌ FORBIDDEN (outside release) |
 
 **See @CLAUDE/development/RELEASING.md for complete release workflow documentation.**
 
@@ -119,6 +122,7 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli status
 ```
 
 **When a handler doesn't fire as expected:**
+
 1. Check the daemon is running the new code (restart if in doubt)
 2. Use `nc` to probe the live daemon directly: `echo '{"hook_event_name":"Stop","stop_hook_active":false}' | /workspace/.claude/hooks/stop`
 3. Check daemon logs: `$PYTHON -m claude_code_hooks_daemon.daemon.cli logs | tail -20`
@@ -161,6 +165,7 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli status
 **Claude Code is the source of truth for hook formats.** This daemon intercepts hook events from Claude Code CLI and processes them through handler chains.
 
 Hook events fire at key moments (PreToolUse, PostToolUse, SessionStart, etc.) and allow custom logic to:
+
 - Block destructive operations (git reset --hard, sed -i, etc.)
 - Inject context (git status, plan numbers)
 - Enforce workflows (TDD, planning)
@@ -193,6 +198,7 @@ Blocking handlers match patterns in the full Bash command string, including git 
 **Lifecycle**: Not Started → In Progress → Complete (moved to `Completed/`)
 
 **Optional Handlers**:
+
 - `markdown_organization` - Enforces CLAUDE/Plan/ structure
 - `plan_completion_advisor` - Reminds to move completed plans to Completed/
 
@@ -209,6 +215,7 @@ Blocking handlers match patterns in the full Bash command string, including git 
 **Lifecycle**: Start → Phase transitions → Complete (delete state file)
 
 **Required Handlers**:
+
 - `workflow_state_pre_compact` - Preserves workflow state before compaction
 - `workflow_state_restoration` - Restores workflow state after compaction with required reading
 
@@ -264,6 +271,7 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli restart
 **How It Works**: Uses `HOSTNAME` environment variable directly as suffix - simple, transparent, debuggable.
 
 **Path Pattern**:
+
 - With hostname: `.claude/hooks-daemon/untracked/daemon-{hostname}.{sock,pid,log}`
 - No hostname: `.claude/hooks-daemon/untracked/daemon-{time-hash}.{sock,pid,log}`
 
@@ -272,6 +280,7 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli restart
 **Environment Overrides**: `CLAUDE_HOOKS_SOCKET_PATH`, `CLAUDE_HOOKS_PID_PATH`, `CLAUDE_HOOKS_LOG_PATH` take precedence.
 
 **Examples**:
+
 ```bash
 # Hostname used directly as suffix
 HOSTNAME=laptop → daemon-laptop.sock
@@ -297,10 +306,10 @@ unset HOSTNAME → daemon-a1b2c3d4.sock
 
 ### Core Standards
 
-6. **FAIL FAST** - Detect errors early, validate at boundaries, explicit error handling. If something is wrong, crash immediately with a clear message — never silently continue.
-7. **DRY** - Single source of truth for all logic. If you see the same pattern repeated, extract it. Common test directories, directory matching — shared utilities, not copy-paste.
-8. **YAGNI** - Don't build for hypothetical futures. Implement what's needed now, design for extensibility through patterns (Strategy, Protocol), not through premature abstraction.
-9. **NO MAGIC** - Zero magic strings or numbers. Every string literal and numeric value must be a named constant. `"/src/"` in an if-statement is magic — `_SOURCE_DIRECTORIES` tuple is not. Use constants modules, class constants, or module-level named tuples.
+06. **FAIL FAST** - Detect errors early, validate at boundaries, explicit error handling. If something is wrong, crash immediately with a clear message — never silently continue.
+07. **DRY** - Single source of truth for all logic. If you see the same pattern repeated, extract it. Common test directories, directory matching — shared utilities, not copy-paste.
+08. **YAGNI** - Don't build for hypothetical futures. Implement what's needed now, design for extensibility through patterns (Strategy, Protocol), not through premature abstraction.
+09. **NO MAGIC** - Zero magic strings or numbers. Every string literal and numeric value must be a named constant. `"/src/"` in an if-statement is magic — `_SOURCE_DIRECTORIES` tuple is not. Use constants modules, class constants, or module-level named tuples.
 10. **SINGLE SOURCE OF TRUTH** - Config is truth, code reads config, never hardcode. Language configurations define language properties. Strategies define language behavior. Handlers orchestrate.
 11. **PROPER NOT QUICK** - No workarounds, fix root causes. Three similar lines of code is better than a wrong abstraction, but six identical blocks means you need a proper pattern.
 12. **TYPE SAFETY** - Full type annotations, strict mypy, no `Any` without justification. Use `Protocol` for interfaces, not `ABC` (structural typing over nominal).
@@ -317,19 +326,19 @@ unset HOSTNAME → daemon-a1b2c3d4.sock
 
 The following languages have strategy implementations across handler domains (QA suppression, security antipatterns, TDD, pipe blocker, lint-on-edit):
 
-| Language | Extensions | Strategy Domains |
-|----------|-----------|-----------------|
-| Python | `.py` | QA suppression, Security, TDD, Pipe blocker, Lint |
+| Language              | Extensions                   | Strategy Domains                                  |
+| --------------------- | ---------------------------- | ------------------------------------------------- |
+| Python                | `.py`                        | QA suppression, Security, TDD, Pipe blocker, Lint |
 | JavaScript/TypeScript | `.js`, `.jsx`, `.ts`, `.tsx` | QA suppression, Security, TDD, Pipe blocker, Lint |
-| PHP | `.php` | QA suppression, Security, TDD, Lint |
-| Go | `.go` | QA suppression, Security, TDD, Pipe blocker, Lint |
-| Ruby | `.rb` | QA suppression, Security, TDD, Pipe blocker, Lint |
-| Java | `.java` | QA suppression, Security, TDD, Pipe blocker, Lint |
-| Kotlin | `.kt`, `.kts` | QA suppression, Security, TDD, Lint |
-| C# | `.cs` | QA suppression, Security, TDD, Lint |
-| Rust | `.rs` | QA suppression, Security, TDD, Pipe blocker, Lint |
-| Swift | `.swift` | QA suppression, Security, TDD, Lint |
-| Dart | `.dart` | QA suppression, Security, TDD, Lint |
+| PHP                   | `.php`                       | QA suppression, Security, TDD, Lint               |
+| Go                    | `.go`                        | QA suppression, Security, TDD, Pipe blocker, Lint |
+| Ruby                  | `.rb`                        | QA suppression, Security, TDD, Pipe blocker, Lint |
+| Java                  | `.java`                      | QA suppression, Security, TDD, Pipe blocker, Lint |
+| Kotlin                | `.kt`, `.kts`                | QA suppression, Security, TDD, Lint               |
+| C#                    | `.cs`                        | QA suppression, Security, TDD, Lint               |
+| Rust                  | `.rs`                        | QA suppression, Security, TDD, Pipe blocker, Lint |
+| Swift                 | `.swift`                     | QA suppression, Security, TDD, Lint               |
+| Dart                  | `.dart`                      | QA suppression, Security, TDD, Lint               |
 
 Adding a new language: create a strategy class per domain, register in the domain's registry, add tests. Zero handler modifications needed.
 
@@ -356,6 +365,7 @@ Adding a new language: create a strategy class per domain, register in the domai
 ### Required Security Practices
 
 **Subprocess Security (B602, B603, B607, B404):**
+
 - **NEVER use `shell=True`** in subprocess calls - it enables command injection attacks
 - Always pass commands as lists: `["git", "status"]` not `"git status"`
 - Replace shell operators (`||`, `&&`) with explicit Python logic (try/except)
@@ -363,16 +373,19 @@ Adding a new language: create a strategy class per domain, register in the domai
 - Document all subprocess usage with SECURITY comments
 
 **File Security (B108):**
+
 - **NEVER use `/tmp`** for runtime files (sockets, PID files, logs)
 - Always use daemon's untracked directory via `ProjectContext.daemon_untracked_dir()`
 - Normal mode: `{project}/.claude/hooks-daemon/untracked/`
 - Self-install mode: `{project}/untracked/`
 
 **Cryptographic Security (B324):**
+
 - When using MD5 for non-security purposes, **MUST** specify `usedforsecurity=False`
 - Document why MD5 is acceptable (e.g., "hash for path identifier, not cryptographic")
 
 **Error Handling (B110):**
+
 - **NEVER silently suppress exceptions** with bare try/except/pass
 - FAIL FAST - if something can't import or initialize, crash immediately
 - No silent error hiding - all failures must be visible
@@ -429,6 +442,7 @@ src/claude_code_hooks_daemon/
 ## Handler Development
 
 **Before writing handlers**: Debug event flow first
+
 ```bash
 ./scripts/debug_hooks.sh start "Testing scenario"
 # ... perform actions in Claude Code ...
@@ -504,22 +518,26 @@ Handler options (e.g. `blocking_mode`, `mode`): See **[docs/guides/HANDLER_REFER
 **Purpose**: Prevents multiple daemon instances from running simultaneously.
 
 **How it works**:
+
 - **In containers** (YOLO mode, Docker, Podman): Kills ALL other daemon processes system-wide on startup
 - **Outside containers**: Only cleans up stale PID files (safe for multi-project environments)
 - **Auto-detection**: Configuration generation auto-enables this setting in container environments
 
 **Configuration**:
+
 ```yaml
 daemon:
   enforce_single_daemon_process: true  # Auto-enabled if container detected during init
 ```
 
 **When to enable**:
+
 - ✅ Container environments (auto-enabled)
 - ✅ Single-user development machines
 - ❌ Shared servers with multiple users/projects
 
 **Behavior**:
+
 - Container: Terminates all other `hooks-daemon` processes (SIGTERM → SIGKILL)
 - Non-container: Only removes stale PID files for current project
 - 2-second timeout for graceful shutdown before force kill
@@ -527,6 +545,7 @@ daemon:
 ## QA Requirements
 
 **MUST pass before commits:**
+
 - Black (format), Ruff (lint), MyPy (types), Pytest (95% coverage), Bandit (security), shellcheck (shell scripts)
 - Run: `./scripts/qa/run_all.sh`
 
@@ -558,17 +577,17 @@ The handlers listed below are active in this project. Read this section to avoid
 
 The following git commands are permanently blocked and will always be denied:
 
-| Command | Reason |
-|---------|--------|
-| `git reset --hard` | Permanently destroys all uncommitted changes |
-| `git clean -f` | Permanently deletes untracked files |
-| `git checkout -- <file>` | Discards all local changes to that file |
-| `git restore <file>` | Discards local changes (`--staged` is allowed) |
-| `git stash drop` | Permanently destroys stashed changes |
-| `git stash clear` | Permanently destroys all stashes |
-| `git push --force` | Can overwrite remote history and destroy teammates' work |
-| `git branch -D` | Force-deletes branch without checking if merged (lowercase `-d` is safe) |
-| `git commit --amend` | Rewrites the previous commit — create a new commit instead |
+| Command                  | Reason                                                                   |
+| ------------------------ | ------------------------------------------------------------------------ |
+| `git reset --hard`       | Permanently destroys all uncommitted changes                             |
+| `git clean -f`           | Permanently deletes untracked files                                      |
+| `git checkout -- <file>` | Discards all local changes to that file                                  |
+| `git restore <file>`     | Discards local changes (`--staged` is allowed)                           |
+| `git stash drop`         | Permanently destroys stashed changes                                     |
+| `git stash clear`        | Permanently destroys all stashes                                         |
+| `git push --force`       | Can overwrite remote history and destroy teammates' work                 |
+| `git branch -D`          | Force-deletes branch without checking if merged (lowercase `-d` is safe) |
+| `git commit --amend`     | Rewrites the previous commit — create a new commit instead               |
 
 If the user needs to run one of these, ask them to do it manually. Do not attempt to work around the block.
 
@@ -579,15 +598,18 @@ If the user needs to run one of these, ask them to do it manually. Do not attemp
 `sed` is blocked because Claude gets sed syntax wrong and a single error can silently destroy hundreds of files with no recovery possible.
 
 **Blocked**:
+
 - `sed -i` / `sed -e` (in-place file editing via Bash tool)
 - `grep -rl X | xargs sed -i` (mass file modification)
 - Shell scripts (`.sh`/`.bash`) written via Write tool that contain `sed`
 
 **Allowed** (read-only, no file modification):
+
 - `cat file | sed 's/x/y/' | grep z` (pipeline transforming stdout only)
 - `sed` mentioned in commit messages, PR bodies, or `.md` documentation files
 
 **Use instead**:
+
 - `Edit` tool — safe, atomic, verifiable
 - Parallel Haiku agents with `Edit` tool for bulk changes across many files:
   1. Identify all files to update
@@ -608,6 +630,7 @@ The working directory is `/workspace`. Prepend `/workspace/` to any relative pat
 Writing code that silently swallows errors is blocked. All errors must be handled explicitly.
 
 **Blocked patterns (examples)**:
+
 - Python: bare `except` clauses with an empty body, catching and discarding all exceptions
 - Shell: redirecting stderr to `/dev/null` to silence failures, `|| true` to suppress non-zero exit codes
 - JavaScript/TypeScript: empty `catch` blocks that swallow exceptions
@@ -620,6 +643,7 @@ Writing code that silently swallows errors is blocked. All errors must be handle
 Writing code that contains security antipatterns is blocked across all supported languages. Fix the code to use safe patterns instead.
 
 **Blocked categories**:
+
 - SQL injection: building queries via string concatenation (use parameterised queries)
 - Command injection: passing unvalidated input to subprocess (use argument lists)
 - Hardcoded credentials: API keys, passwords, tokens embedded in source code
@@ -643,6 +667,7 @@ Piping network content directly to a shell is blocked. It executes untrusted rem
 **Blocked**: `curl URL | bash`, `curl URL | sh`, `wget URL | bash`, `curl URL | sudo bash`
 
 **Safe alternative**: download first, inspect, then execute:
+
 ```
 curl -o /tmp/script.sh URL
 cat /tmp/script.sh          # inspect
@@ -675,6 +700,7 @@ pytest tests/ > /tmp/pytest_out.txt 2>&1
 **Blocked**: `chmod 777`, `chmod 666`, `chmod a+w`, `chmod o+w`
 
 **Use least-privilege permissions instead**:
+
 - Executable scripts: `chmod 755` (owner rwx, group/other rx)
 - Regular files: `chmod 644` (owner rw, group/other r)
 - Private files: `chmod 600` (owner rw only)
@@ -695,6 +721,7 @@ Direct `Write` or `Edit` to package manager lock files is blocked. Lock files ar
 **Blocked files**: `composer.lock`, `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `Gemfile.lock`, `Cargo.lock`, `go.sum`, `Package.resolved`, `Pipfile.lock`, and others.
 
 **Use package manager commands instead**:
+
 - PHP: `composer install` / `composer require package`
 - Node: `npm install` / `yarn add package`
 - Ruby: `bundle install` / `bundle add gem`
@@ -715,6 +742,7 @@ Before making a `git commit` in the hooks daemon repository, this handler advise
 Writing QA suppression directives into source files is blocked across all supported languages. Fix the underlying code issue instead.
 
 **Blocked annotation types (by language)**:
+
 - Python: `noqa` directives, `type: ignore` annotations
 - JavaScript/TypeScript: `eslint-disable` inline directives
 - Go: `nolint` directives (golangci-lint)
@@ -730,6 +758,7 @@ Writing QA suppression directives into source files is blocked across all suppor
 Creating a production source file is blocked until a corresponding test file exists.
 
 **TDD workflow (required)**:
+
 1. Create the **test file first** (e.g. `tests/unit/handlers/test_my_handler.py`)
 2. Write failing tests — RED phase
 3. Create the source file and implement until tests pass — GREEN phase
@@ -738,6 +767,7 @@ Creating a production source file is blocked until a corresponding test file exi
 **Supported languages**: Python, Go, JavaScript/TypeScript, PHP, Rust, Java, C#, Kotlin, Ruby, Swift, Dart
 
 **Test file locations checked** (any satisfies the block):
+
 - Separate mirror: `tests/unit/{subdir}/test_{module}.py`
 - Collocated: `{source_dir}/{module}.test.ts` (JS/TS projects)
 - Test subdirectory: `{source_dir}/__tests__/{module}.test.ts`
@@ -749,6 +779,7 @@ Creating a production source file is blocked until a corresponding test file exi
 Using `Grep` or `Bash` (grep/rg) to find class definitions, function signatures, or symbol references is blocked or redirected to LSP tools, which are faster and semantically accurate.
 
 **Prefer LSP tools for**:
+
 - Finding where a class or function is defined → `goToDefinition`
 - Finding all usages of a symbol → `findReferences`
 - Getting type information or documentation → `hover`
@@ -794,6 +825,7 @@ If you need a markdown file in a new location, add a pattern to `allowed_markdow
 Writing ephemeral or session-specific content to `CLAUDE.md` or `README.md` is blocked. These files should contain only stable instructions, not implementation logs or session state.
 
 **Blocked content types**:
+
 - Timestamps and ISO dates
 - Status emoji followed by completion words (e.g. checkmark + 'Done')
 - Implementation log sentences ('created the file X', 'added the class Y')
@@ -830,15 +862,18 @@ STOPPING BECAUSE: all tasks complete, QA passes, daemon restart verified.
 **Why**: The stop hook enforces intentional stops. Stopping without an explanation triggers an auto-block that asks you to explain or continue.
 
 **Alternatives**:
+
 - `STOPPING BECAUSE: <reason>` — stops cleanly with explanation
 - Continue working — no need to stop unless all work is genuinely complete
 
 **Do NOT**:
+
 - Stop mid-task without explanation
 - Ask confirmation questions and then stop (the hook auto-continues those)
 - Use `AUTO-CONTINUE` unless you intend to keep working indefinitely
 
 **Before asking a question, evaluate it critically**:
+
 - Tautological/rhetorical questions with obvious answers ("Should I continue?", "Would you like me to proceed?") — do NOT ask, just do it
 - Errors with a clear next step ("The test failed, should I fix it?") — do NOT ask, just fix it
 - Genuine choice questions where all options are valid ("Which of A, B, or C should we use?") — these deserve a response. Use `STOPPING BECAUSE: need user input` and ask your question

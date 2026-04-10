@@ -41,6 +41,7 @@ The plan redirect system writes a stub to `~/.claude/plans/random-words.md`, so 
 - [ ] **Task 0.5**: Test Edit tool on plan file (incremental edits)
 
 **Questions to answer**:
+
 - Does the path include `./` prefix or is it bare `CLAUDE/Plan/`?
 - Does it create the directory if it doesn't exist?
 - What happens if the handler DENYs the write - does ExitPlanMode still show content?
@@ -70,20 +71,24 @@ The plan redirect system writes a stub to `~/.claude/plans/random-words.md`, so 
 ### Tasks
 
 - [ ] **Task 1.1**: Update `is_planning_mode_write()` to detect writes to configured plansDirectory
+
   - Currently checks `/.claude/plans/` - need to also check project-relative plan dir
   - Read `plansDirectory` from `.claude/settings.json` or use daemon config path
 
 - [ ] **Task 1.2**: Change `handle_planning_mode_write()` to return ALLOW instead of DENY
+
   - Still create numbered folder with PLAN.md
   - Return ALLOW so Claude Code writes the flat file (ExitPlanMode can read it)
   - Add context message about the numbered folder location
 
 - [ ] **Task 1.3**: Handle Edit tool for plan files
+
   - When agent edits flat file, also apply edit to numbered folder PLAN.md
   - Return ALLOW (Claude Code applies edit to flat file)
   - Both copies stay in sync
 
 - [ ] **Task 1.4**: Remove rename instructions from handler response
+
   - Rename happens after approval, not during write
 
 - [ ] **Task 1.5**: Tests for all new behaviour
@@ -101,6 +106,7 @@ The plan redirect system writes a stub to `~/.claude/plans/random-words.md`, so 
 **Option C**: Handler reads plansDirectory at runtime from settings.json
 
 - [ ] **Task 2.1**: Add check in handler init or SessionStart
+
   - Read `.claude/settings.json` for `plansDirectory`
   - Compare with `track_plans_in_project` from daemon config
   - Warn if mismatch
@@ -112,6 +118,7 @@ The plan redirect system writes a stub to `~/.claude/plans/random-words.md`, so 
 ## Phase 3: Cleanup and Documentation
 
 - [ ] **Task 3.1**: Update PlanWorkflow.md
+
   - Document: rename folder after approval, delete flat file
   - Document: plansDirectory config requirement
 
@@ -129,12 +136,12 @@ The plan redirect system writes a stub to `~/.claude/plans/random-words.md`, so 
 
 ## Key Files
 
-| File | Changes |
-|------|---------|
-| `.claude/settings.json` | Add `plansDirectory: "./CLAUDE/Plan"` |
+| File                                            | Changes                                          |
+| ----------------------------------------------- | ------------------------------------------------ |
+| `.claude/settings.json`                         | Add `plansDirectory: "./CLAUDE/Plan"`            |
 | `src/.../pre_tool_use/markdown_organization.py` | Update detection + change DENY→ALLOW + Edit sync |
-| `tests/.../test_markdown_organization.py` | Update tests for new flow |
-| `CLAUDE/PlanWorkflow.md` | Document new flow |
+| `tests/.../test_markdown_organization.py`       | Update tests for new flow                        |
+| `CLAUDE/PlanWorkflow.md`                        | Document new flow                                |
 
 ## Success Criteria
 

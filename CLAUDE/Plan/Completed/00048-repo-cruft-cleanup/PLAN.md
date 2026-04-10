@@ -46,11 +46,13 @@ Full audit of the repository identified accumulated cruft: spurious files, stale
 ### Phase 3: Plan Directory Cleanup
 
 - [x] **Task 3.1**: Delete empty plan `00036-sleepy-puzzling-backus/`
+
   - PLAN.md is 0 bytes, completely empty draft
   - README.md lists it as "(Unnamed Draft)"
   - Action: `rm -rf` the directory
 
 - [x] **Task 3.2**: Rename duplicate-named plans for clarity
+
   - `00034-sleepy-puzzling-backus/` - Actually "Model-Aware Agent Team Advisor" (147 lines)
     - Rename to `00034-model-aware-agent-team-advisor/`
   - `00035-sleepy-puzzling-backus/` - Actually "StatusLine Data Cache + Model-Aware Advisor" (216 lines)
@@ -59,6 +61,7 @@ Full audit of the repository identified accumulated cruft: spurious files, stale
   - Note: There's also a `Completed/00034-library-plugin-separation-qa/` which is a different plan (completed). The active 00034 is a different topic that reused the number. This is confusing but renaming will help distinguish them.
 
 - [x] **Task 3.3**: Update `CLAUDE/Plan/README.md`
+
   - Update links for renamed plans
   - Remove entry for deleted 00036
   - Fix plan statistics (Active count: 7 not 8 after removing empty draft)
@@ -66,12 +69,14 @@ Full audit of the repository identified accumulated cruft: spurious files, stale
 ### Phase 4: Root-Level Stale Documentation
 
 - [x] **Task 4.1**: Evaluate `BUG_FIX_STOP_EVENT_SCHEMA.md`
+
   - This is a historical bug-fix write-up (141 lines) for a specific bug from 2026-01-27
   - All the info is captured in code/tests already
   - Action: Move to `CLAUDE/Plan/Completed/` as historical reference, or delete
   - Decision needed: Keep as historical doc or remove?
 
 - [x] **Task 4.2**: Evaluate `BUG_REPORTING.md`
+
   - Active user-facing document (195 lines) with bug reporting guide
   - References `scripts/debug_info.py` and GitHub issues URL
   - This is legitimate - referenced in CLAUDE/CLAUDE.md
@@ -105,11 +110,11 @@ Full audit of the repository identified accumulated cruft: spurious files, stale
 
 ## Risks & Mitigations
 
-| Risk | Impact | Probability | Mitigation |
-|------|--------|-------------|------------|
-| Worktree removal fails (dirty state) | Low | Low | Force remove if needed, data is in completed plans |
-| Plan rename breaks references | Low | Low | grep for old names, update any refs |
-| Removing .bak breaks installer | Low | Low | Installer recreates backups as needed |
+| Risk                                 | Impact | Probability | Mitigation                                         |
+| ------------------------------------ | ------ | ----------- | -------------------------------------------------- |
+| Worktree removal fails (dirty state) | Low    | Low         | Force remove if needed, data is in completed plans |
+| Plan rename breaks references        | Low    | Low         | grep for old names, update any refs                |
+| Removing .bak breaks installer       | Low    | Low         | Installer recreates backups as needed              |
 
 ## Notes
 
@@ -124,6 +129,7 @@ Full audit of the repository identified accumulated cruft: spurious files, stale
 ### Duplicate Plan Number Issue
 
 Plan 00034 exists in TWO places:
+
 - `CLAUDE/Plan/00034-sleepy-puzzling-backus/` (active, model-aware advisor topic)
 - `CLAUDE/Plan/Completed/00034-library-plugin-separation-qa/` (completed, different topic)
 

@@ -54,16 +54,16 @@ Claude Code displays in terminal status bar
 
 ### Key Components
 
-| Component | Path | Role |
-|-----------|------|------|
-| Hook script | `.claude/hooks/status-line` | Entry point; forwards JSON to daemon, extracts text output |
-| Init script | `.claude/init.sh` | Daemon lifecycle (ensure running, send via socket) |
-| Handler chain | `src/claude_code_hooks_daemon/core/chain.py` | Executes handlers in priority order, accumulates context |
-| HookResult | `src/claude_code_hooks_daemon/core/hook_result.py` | `to_json("Status")` joins context array into plain text |
-| Handler registry | `src/claude_code_hooks_daemon/handlers/registry.py` | Maps `status_line` directory to `EventType.STATUS_LINE` |
-| Handlers | `src/claude_code_hooks_daemon/handlers/status_line/` | Individual status line handlers |
-| Configuration | `.claude/hooks-daemon.yaml` | Enable/disable handlers, set priorities |
-| Settings | `.claude/settings.json` | Registers `statusLine.command` with Claude Code |
+| Component        | Path                                                 | Role                                                       |
+| ---------------- | ---------------------------------------------------- | ---------------------------------------------------------- |
+| Hook script      | `.claude/hooks/status-line`                          | Entry point; forwards JSON to daemon, extracts text output |
+| Init script      | `.claude/init.sh`                                    | Daemon lifecycle (ensure running, send via socket)         |
+| Handler chain    | `src/claude_code_hooks_daemon/core/chain.py`         | Executes handlers in priority order, accumulates context   |
+| HookResult       | `src/claude_code_hooks_daemon/core/hook_result.py`   | `to_json("Status")` joins context array into plain text    |
+| Handler registry | `src/claude_code_hooks_daemon/handlers/registry.py`  | Maps `status_line` directory to `EventType.STATUS_LINE`    |
+| Handlers         | `src/claude_code_hooks_daemon/handlers/status_line/` | Individual status line handlers                            |
+| Configuration    | `.claude/hooks-daemon.yaml`                          | Enable/disable handlers, set priorities                    |
+| Settings         | `.claude/settings.json`                              | Registers `statusLine.command` with Claude Code            |
 
 ---
 
@@ -73,13 +73,13 @@ All status line handlers are **non-terminal** (`terminal=False`). They all retur
 
 ### Handler Execution Order
 
-| Priority | Handler | Config Key | Output Example | Data Source |
-|----------|---------|------------|----------------|-------------|
-| 5 | `AccountDisplayHandler` | `account_display` | `username \|` | `~/.claude/.last-launch.conf` |
-| 10 | `ModelContextHandler` | `model_context` | `Claude Opus 4.5 \| Ctx: [colored]12.3%[/colored]` | `hook_input.model`, `hook_input.context_window` |
-| 15 | `UsageTrackingHandler` | `usage_tracking` | `\| daily: 45.2% \| weekly: 23.1%` | `~/.claude/stats-cache.json` (DISABLED) |
-| 20 | `GitBranchHandler` | `git_branch` | `\| main` | `git branch --show-current` subprocess |
-| 30 | `DaemonStatsHandler` | `daemon_stats` | `\| hook-icon 5.2m 34MB \| INFO` | `DaemonController.get_stats()`, `psutil` |
+| Priority | Handler                 | Config Key        | Output Example                                     | Data Source                                     |
+| -------- | ----------------------- | ----------------- | -------------------------------------------------- | ----------------------------------------------- |
+| 5        | `AccountDisplayHandler` | `account_display` | `username \|`                                      | `~/.claude/.last-launch.conf`                   |
+| 10       | `ModelContextHandler`   | `model_context`   | `Claude Opus 4.5 \| Ctx: [colored]12.3%[/colored]` | `hook_input.model`, `hook_input.context_window` |
+| 15       | `UsageTrackingHandler`  | `usage_tracking`  | `\| daily: 45.2% \| weekly: 23.1%`                 | `~/.claude/stats-cache.json` (DISABLED)         |
+| 20       | `GitBranchHandler`      | `git_branch`      | `\| main`                                          | `git branch --show-current` subprocess          |
+| 30       | `DaemonStatsHandler`    | `daemon_stats`    | `\| hook-icon 5.2m 34MB \| INFO`                   | `DaemonController.get_stats()`, `psutil`        |
 
 ### Handler Details
 
@@ -234,13 +234,13 @@ handlers:
 
 ### Performance Characteristics by Handler
 
-| Handler | I/O Type | Expected Latency |
-|---------|----------|-----------------|
-| `AccountDisplayHandler` | File read (`~/.claude/.last-launch.conf`) | <1ms |
-| `ModelContextHandler` | In-memory (from hook_input) | <0.1ms |
-| `UsageTrackingHandler` | File read (`stats-cache.json`) | <1ms (disabled) |
-| `GitBranchHandler` | Subprocess (`git`) | 5-50ms |
-| `DaemonStatsHandler` | In-process (`get_stats()` + `psutil`) | <2ms |
+| Handler                 | I/O Type                                  | Expected Latency |
+| ----------------------- | ----------------------------------------- | ---------------- |
+| `AccountDisplayHandler` | File read (`~/.claude/.last-launch.conf`) | \<1ms            |
+| `ModelContextHandler`   | In-memory (from hook_input)               | \<0.1ms          |
+| `UsageTrackingHandler`  | File read (`stats-cache.json`)            | \<1ms (disabled) |
+| `GitBranchHandler`      | Subprocess (`git`)                        | 5-50ms           |
+| `DaemonStatsHandler`    | In-process (`get_stats()` + `psutil`)     | \<2ms            |
 
 ### Total Expected Latency
 
@@ -317,6 +317,7 @@ Create `tests/handlers/status_line/test_my_element.py` with tests for `matches()
 ### Status line shows "DAEMON FAILED"
 
 The daemon is not running. Check:
+
 ```bash
 $PYTHON -m claude_code_hooks_daemon.daemon.cli status
 $PYTHON -m claude_code_hooks_daemon.daemon.cli restart
@@ -325,6 +326,7 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli restart
 ### Status line shows "NO STATUS DATA"
 
 All handlers returned empty context. Check:
+
 - Are handlers enabled in `hooks-daemon.yaml`?
 - Check daemon logs: `$PYTHON -m claude_code_hooks_daemon.daemon.cli logs`
 

@@ -84,12 +84,15 @@ Before starting the upgrade:
 **Migration Steps**:
 
 1. **Detect affected config**:
+
    ```bash
    grep -n "command_redirection" .claude/hooks-daemon.yaml
    ```
+
    If this returns no output, you have nothing to migrate.
 
 2. **Remove the lines from your config**. Open `.claude/hooks-daemon.yaml` and remove any block matching:
+
    ```yaml
        pipe_blocker:
          enabled: true
@@ -97,18 +100,23 @@ Before starting the upgrade:
          options:
            command_redirection: true   # <- remove this line
    ```
+
    If `options:` is now empty, remove the empty `options:` line as well:
+
    ```yaml
        pipe_blocker:
          enabled: true
          priority: 17
    ```
+
    Repeat for `npm_command` and `gh_issue_comments`.
 
 3. **Verify the fix**:
+
    ```bash
    grep -n "command_redirection" .claude/hooks-daemon.yaml || echo "Clean"
    ```
+
    Should print `Clean`.
 
 ### 2. `core/command_redirection.py` module deleted
@@ -122,20 +130,24 @@ Before starting the upgrade:
 **Migration Steps**:
 
 1. **Detect affected project handlers**:
+
    ```bash
    grep -rn "command_redirection" .claude/project-handlers/ 2>/dev/null
    ```
 
 2. **There is no drop-in replacement.** If your project handler depended on `execute_and_save` or `launch_and_save`, you have two options:
+
    - **Drop the execution behaviour** and just deny with an educational message (recommended — this is what the built-in handlers now do).
    - **Inline the subprocess logic** in your handler if you genuinely need it. The original implementation was a thin wrapper around `subprocess.run` / `subprocess.Popen` writing output to a file under `/tmp/hooks-daemon-cmd/`.
 
 3. **Verify the fix**:
+
    ```bash
    cd .claude/hooks-daemon
    untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli validate-project-handlers
    echo $?
    ```
+
    Expected: exit code 0.
 
 ### 3. `cleanup_stale_command_redirection_files()` removed
@@ -149,6 +161,7 @@ Before starting the upgrade:
 **Migration Steps**: Remove the import. There is no replacement — `cleanup_stale_daemon_files()` continues to handle cleanup of daemon runtime files (sockets, PID files, logs) and is unchanged.
 
 **Rollback**: If you cannot complete migration immediately, downgrade to v2.32.0:
+
 ```bash
 cd .claude/hooks-daemon
 git checkout v2.32.0
@@ -206,6 +219,7 @@ cat src/claude_code_hooks_daemon/version.py
 ```
 
 **Expected**:
+
 ```python
 __version__ = "3.0.0"
 ```
@@ -287,12 +301,14 @@ None.
 If you encounter issues during upgrade:
 
 1. **Check daemon logs**:
+
    ```bash
    cd .claude/hooks-daemon
    untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli logs
    ```
 
 2. **Validate project handlers**:
+
    ```bash
    untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli validate-project-handlers --verbose
    ```
@@ -300,6 +316,7 @@ If you encounter issues during upgrade:
 3. **Try rollback** (see "Rollback Instructions" above)
 
 4. **Report issue**:
+
    - GitHub: https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/issues
    - Include: version info, error output, daemon logs, the offending config snippet
 

@@ -45,6 +45,7 @@ After Plan 00037 created the data layer infrastructure, handlers needed to actua
 - [x] Export from core/__init__.py
 
 **Files**:
+
 - `src/claude_code_hooks_daemon/core/handler_history.py`
 - `tests/unit/core/test_handler_history.py`
 
@@ -52,11 +53,12 @@ After Plan 00037 created the data layer infrastructure, handlers needed to actua
 
 - [x] Refactor handle() to check block count
 - [x] Implement 3 tiers: terse (0), standard (1-2), verbose (3+)
-- [x] Add private methods: _terse_reason(), _standard_reason(), _verbose_reason()
+- [x] Add private methods: \_terse_reason(), \_standard_reason(), \_verbose_reason()
 - [x] Update tests to mock get_data_layer()
 - [x] Test each verbosity tier
 
 **Files**:
+
 - `src/claude_code_hooks_daemon/handlers/pre_tool_use/pipe_blocker.py`
 - `tests/unit/handlers/test_pipe_blocker.py`
 
@@ -68,6 +70,7 @@ After Plan 00037 created the data layer infrastructure, handlers needed to actua
 - [x] Verbose: Full message with examples
 
 **Files**:
+
 - `src/claude_code_hooks_daemon/handlers/pre_tool_use/sed_blocker.py`
 - `tests/unit/handlers/test_sed_blocker.py`
 
@@ -79,6 +82,7 @@ After Plan 00037 created the data layer infrastructure, handlers needed to actua
 - [x] Verbose: Full warnings
 
 **Files**:
+
 - `src/claude_code_hooks_daemon/handlers/pre_tool_use/destructive_git.py`
 - `tests/unit/handlers/test_destructive_git.py`
 
@@ -90,18 +94,21 @@ After Plan 00037 created the data layer infrastructure, handlers needed to actua
 - [x] Mock get_data_layer() in tests
 
 **Files**:
+
 - `src/claude_code_hooks_daemon/handlers/status_line/daemon_stats.py`
 - `tests/unit/handlers/status_line/test_daemon_stats.py`
 
 ## Technical Decisions
 
 ### Decision 1: Block count thresholds
+
 **Context**: How many blocks before escalating verbosity?
 **Decision**: 0 = terse, 1-2 = standard, 3+ = verbose
 **Rationale**: One chance to be terse, two attempts with guidance, then assume agent needs full context
 **Date**: 2026-02-09
 
 ### Decision 2: History records timing
+
 **Context**: When are history records created?
 **Decision**: After handler returns (in DaemonController)
 **Rationale**: Current block doesn't count toward its own verbosity tier
@@ -122,18 +129,18 @@ After Plan 00037 created the data layer infrastructure, handlers needed to actua
 
 ## Files Modified
 
-| File | Status |
-|------|--------|
-| `src/claude_code_hooks_daemon/core/handler_history.py` | ✅ Complete |
-| `src/claude_code_hooks_daemon/handlers/pre_tool_use/pipe_blocker.py` | ✅ Complete |
-| `src/claude_code_hooks_daemon/handlers/pre_tool_use/sed_blocker.py` | ✅ Complete |
+| File                                                                    | Status      |
+| ----------------------------------------------------------------------- | ----------- |
+| `src/claude_code_hooks_daemon/core/handler_history.py`                  | ✅ Complete |
+| `src/claude_code_hooks_daemon/handlers/pre_tool_use/pipe_blocker.py`    | ✅ Complete |
+| `src/claude_code_hooks_daemon/handlers/pre_tool_use/sed_blocker.py`     | ✅ Complete |
 | `src/claude_code_hooks_daemon/handlers/pre_tool_use/destructive_git.py` | ✅ Complete |
-| `src/claude_code_hooks_daemon/handlers/status_line/daemon_stats.py` | ✅ Complete |
-| `tests/unit/core/test_handler_history.py` | ✅ Complete |
-| `tests/unit/handlers/test_pipe_blocker.py` | ✅ Complete |
-| `tests/unit/handlers/test_sed_blocker.py` | ✅ Complete |
-| `tests/unit/handlers/test_destructive_git.py` | ✅ Complete |
-| `tests/unit/handlers/status_line/test_daemon_stats.py` | ✅ Complete |
+| `src/claude_code_hooks_daemon/handlers/status_line/daemon_stats.py`     | ✅ Complete |
+| `tests/unit/core/test_handler_history.py`                               | ✅ Complete |
+| `tests/unit/handlers/test_pipe_blocker.py`                              | ✅ Complete |
+| `tests/unit/handlers/test_sed_blocker.py`                               | ✅ Complete |
+| `tests/unit/handlers/test_destructive_git.py`                           | ✅ Complete |
+| `tests/unit/handlers/status_line/test_daemon_stats.py`                  | ✅ Complete |
 
 ## Dependencies
 
@@ -143,6 +150,7 @@ After Plan 00037 created the data layer infrastructure, handlers needed to actua
 ## Notes & Updates
 
 ### 2026-02-09
+
 - All 5 phases implemented with TDD
 - Full 3-layer QA completed
 - Layer 1: All 7 automated checks pass

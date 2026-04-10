@@ -26,6 +26,7 @@ This scans `CLAUDE/Plan/` which doesn't exist in this project. The directory is 
 ### Problem 2: No config integration
 
 Unlike its sibling handlers, `validate_plan_number` does NOT:
+
 - Declare `_track_plans_in_project` attribute
 - Use `shares_options_with` to inherit config from `markdown_organization`
 - Read any config options at all
@@ -66,6 +67,7 @@ See: CLAUDE/Plan/CLAUDE.md for full instructions                # ← hardcoded
 ## Observed Behavior
 
 ### Project config (`.claude/hooks-daemon.yaml`):
+
 ```yaml
 handlers:
   pre_tool_use:
@@ -85,6 +87,7 @@ handlers:
 ```
 
 ### Actual project structure:
+
 ```
 CLAUDE/Plans/
 ├── 00036-operational-readiness/
@@ -130,16 +133,17 @@ Beyond the immediate bug, there is a deeper design problem: **plan workflow conf
 
 Currently, plan-related config is scattered:
 
-| Handler | How it gets plan path | Config location |
-|---------|----------------------|-----------------|
-| `markdown_organization` | Direct `options.track_plans_in_project` | Own config section |
-| `plan_number_helper` | `shares_options_with: "markdown_organization"` | Inherited from markdown_organization |
-| `validate_plan_number` | **Hardcoded** `"CLAUDE/Plan"` | None — ignores config entirely |
-| `plan_workflow` | Unknown | Needs audit |
-| `plan_completion_advisor` | Unknown | Needs audit |
-| `task_tdd_advisor` | Unknown | Needs audit |
+| Handler                   | How it gets plan path                          | Config location                      |
+| ------------------------- | ---------------------------------------------- | ------------------------------------ |
+| `markdown_organization`   | Direct `options.track_plans_in_project`        | Own config section                   |
+| `plan_number_helper`      | `shares_options_with: "markdown_organization"` | Inherited from markdown_organization |
+| `validate_plan_number`    | **Hardcoded** `"CLAUDE/Plan"`                  | None — ignores config entirely       |
+| `plan_workflow`           | Unknown                                        | Needs audit                          |
+| `plan_completion_advisor` | Unknown                                        | Needs audit                          |
+| `task_tdd_advisor`        | Unknown                                        | Needs audit                          |
 
 This means:
+
 1. **Every handler that touches plans must independently know where to find config** — some inherit, some hardcode, some have their own options
 2. **Adding a new plan-aware handler requires knowing which handler to `shares_options_with`** — non-obvious, easy to get wrong (as this bug proves)
 3. **Changing the plan directory requires updating multiple config sections** — currently `plan_number_helper.options` AND `markdown_organization.options` must both be set
@@ -209,24 +213,24 @@ Add `track_plans_in_project` as a direct option on `validate_plan_number` in the
 
 ## Affected Handlers Summary
 
-| Handler | Uses config `track_plans_in_project`? | Scan path | Status |
-|---------|--------------------------------------|-----------|--------|
-| `markdown_organization` | Yes (direct option) | Configurable | OK |
-| `plan_number_helper` | Yes (via `shares_options_with`) | Configurable | OK |
-| `validate_plan_number` | **No — hardcoded** | `CLAUDE/Plan` only | **BUG** |
-| `plan_completion_advisor` | Unknown (not checked) | Unknown | Needs check |
-| `plan_workflow` | Unknown (not checked) | Unknown | Needs check |
+| Handler                   | Uses config `track_plans_in_project`? | Scan path          | Status      |
+| ------------------------- | ------------------------------------- | ------------------ | ----------- |
+| `markdown_organization`   | Yes (direct option)                   | Configurable       | OK          |
+| `plan_number_helper`      | Yes (via `shares_options_with`)       | Configurable       | OK          |
+| `validate_plan_number`    | **No — hardcoded**                    | `CLAUDE/Plan` only | **BUG**     |
+| `plan_completion_advisor` | Unknown (not checked)                 | Unknown            | Needs check |
+| `plan_workflow`           | Unknown (not checked)                 | Unknown            | Needs check |
 
 ## Additional Hardcoded References
 
 The following files also contain hardcoded `CLAUDE/Plan` (singular) references that may need updating if projects use custom paths:
 
-| File | Line(s) | Context |
-|------|---------|---------|
-| `constants/paths.py` | 51-52 | `PLAN_DIR = "CLAUDE/Plan"`, `PLAN_COMPLETED_DIR = "CLAUDE/Plan/Completed"` |
-| `constants/paths.py` | 68 | `PLAN_README = "CLAUDE/Plan/README.md"` |
-| `daemon/init_config.py` | 147-148 | Default config template |
-| `handlers/utils/plan_numbering.py` | 24, 33, 36, 39 | Docstring examples only |
+| File                               | Line(s)        | Context                                                                    |
+| ---------------------------------- | -------------- | -------------------------------------------------------------------------- |
+| `constants/paths.py`               | 51-52          | `PLAN_DIR = "CLAUDE/Plan"`, `PLAN_COMPLETED_DIR = "CLAUDE/Plan/Completed"` |
+| `constants/paths.py`               | 68             | `PLAN_README = "CLAUDE/Plan/README.md"`                                    |
+| `daemon/init_config.py`            | 147-148        | Default config template                                                    |
+| `handlers/utils/plan_numbering.py` | 24, 33, 36, 39 | Docstring examples only                                                    |
 
 The `constants/paths.py` defaults are fine as fallbacks — the bug is that `validate_plan_number` doesn't check config before falling back to the constant.
 

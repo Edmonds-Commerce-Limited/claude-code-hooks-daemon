@@ -37,6 +37,7 @@ Implement first-class developer experience for project-level handler development
 #### Tasks
 
 - [✓] **Create config models** (TDD)
+
   - [✓] Add `ProjectHandlersConfig` to `config/models.py`
   - [✓] Add `project_handlers` field to root `Config` model
   - [✓] Schema: `enabled`, `path`, `handlers_config`
@@ -44,6 +45,7 @@ Implement first-class developer experience for project-level handler development
   - [✓] Verify config loads from YAML correctly
 
 - [✓] **Create ProjectHandlerLoader** (TDD)
+
   - [✓] New file: `src/handlers/project_loader.py`
   - [✓] Implement `discover_handlers(path: Path) -> list[Handler]`
   - [✓] Use `importlib.util.spec_from_file_location` (same as PluginLoader)
@@ -52,6 +54,7 @@ Implement first-class developer experience for project-level handler development
   - [✓] Write comprehensive unit tests (95%+ coverage)
 
 - [✓] **Integrate with DaemonController** (TDD)
+
   - [✓] Add `_load_project_handlers()` method
   - [✓] Call after built-in handlers and legacy plugins in `initialise()`
   - [✓] Pass project_handlers config and workspace_root
@@ -59,12 +62,14 @@ Implement first-class developer experience for project-level handler development
   - [✓] Write integration tests for loading pipeline
 
 - [✓] **Conflict Detection** (TDD)
+
   - [✓] Check for handler_id conflicts with built-in handlers
   - [✓] Check for priority collisions (log warnings)
   - [✓] Prefer built-in handlers on conflict (log warning)
   - [✓] Write tests for conflict scenarios
 
 - [✓] **Run full QA**: `./scripts/qa/run_all.sh` — All 7 checks passed, coverage 95.0%
+
 - [✓] **Verify daemon restarts**: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
 
 ### Phase 2: Developer Experience CLI
@@ -74,6 +79,7 @@ Implement first-class developer experience for project-level handler development
 #### Tasks
 
 - [✓] **Create `init-project-handlers` command** (TDD)
+
   - [✓] Implemented in `src/daemon/cli.py` (cmd_init_project_handlers)
   - [✓] Create `.claude/project-handlers/` structure
   - [✓] Generate event-type subdirectories
@@ -83,6 +89,7 @@ Implement first-class developer experience for project-level handler development
   - [✓] 9 tests in `tests/unit/daemon/test_cli_init_project_handlers.py`
 
 - [✓] **Create `validate-project-handlers` command** (TDD)
+
   - [✓] Implemented in `src/daemon/cli.py` (cmd_validate_project_handlers)
   - [✓] Discover project handlers via ProjectHandlerLoader
   - [✓] Attempt to import and instantiate each handler
@@ -92,6 +99,7 @@ Implement first-class developer experience for project-level handler development
   - [✓] 7 tests in `tests/unit/daemon/test_cli_validate_project_handlers.py`
 
 - [✓] **Create `test-project-handlers` command** (TDD)
+
   - [✓] Implemented in `src/daemon/cli.py` (cmd_test_project_handlers)
   - [✓] Run pytest on `.claude/project-handlers/` directory
   - [✓] Pass correct `--import-mode=importlib`
@@ -99,17 +107,20 @@ Implement first-class developer experience for project-level handler development
   - [✓] 8 tests in `tests/unit/daemon/test_cli_test_project_handlers.py`
 
 - [✓] **Update playbook generator** (TDD)
+
   - [✓] Modified `src/daemon/playbook_generator.py`
   - [✓] Include project handler acceptance tests in output
   - [✓] Section header: "## Project Handlers"
   - [✓] 7 tests in `tests/unit/daemon/test_playbook_generator_project_handlers.py`
 
 - [✓] **Wire CLI subcommands**
+
   - [✓] Added 3 subcommands to `src/daemon/cli.py` main()
   - [✓] Added help text and examples
   - [✓] Tests verify CLI invocation
 
 - [✓] **Run full QA**: `./scripts/qa/run_all.sh` — ALL CHECKS PASSED
+
 - [✓] **Verify daemon restarts**: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart` — Status: RUNNING (PID 121279)
 
 ### Phase 3: Documentation & Examples
@@ -119,6 +130,7 @@ Implement first-class developer experience for project-level handler development
 #### Tasks
 
 - [✓] **Create PROJECT_HANDLERS.md**
+
   - [✓] Location: `CLAUDE/PROJECT_HANDLERS.md`
   - [✓] Overview and motivation
   - [✓] Quick start guide
@@ -130,18 +142,21 @@ Implement first-class developer experience for project-level handler development
   - [✓] CLI reference
 
 - [✓] **Update ARCHITECTURE.md**
+
   - [✓] Add "Project Handler Loading" section
   - [✓] Document discovery mechanism
   - [✓] Document config schema
   - [✓] Update loading pipeline diagram
 
 - [✓] **Update HANDLER_DEVELOPMENT.md**
+
   - [✓] Add "Project-Level Handlers" section
   - [✓] Differences from built-in handlers
   - [✓] Testing with daemon infrastructure
   - [✓] Acceptance testing integration
 
 - [✓] **Create example handlers**
+
   - [✓] Location: `examples/project-handlers/`
   - [✓] Example 1: Vendor changes reminder (PreToolUse, advisory)
   - [✓] Example 2: Branch naming enforcer (SessionStart, blocking)
@@ -150,6 +165,7 @@ Implement first-class developer experience for project-level handler development
   - [✓] README.md explaining examples
 
 - [✓] **Update CLAUDE.md**
+
   - [✓] Add "Project-Level Handlers" section
   - [✓] Quick reference for LLM agents
   - [✓] Links to detailed docs
@@ -161,6 +177,7 @@ Implement first-class developer experience for project-level handler development
 #### Tasks
 
 - [✓] **Create handlers in checkout project** (see Plan 006 in checkout repo)
+
   - [✓] Vendor changes reminder
   - [✓] Build asset watcher
   - [✓] Composer lock sync reminder
@@ -168,6 +185,7 @@ Implement first-class developer experience for project-level handler development
   - [✓] Document all issues found
 
 - [✓] **Iterate on DX**
+
   - [✓] Fix any issues discovered during dogfooding
   - [✓] Improve error messages
   - [✓] Enhance validation output
@@ -175,11 +193,13 @@ Implement first-class developer experience for project-level handler development
   - [✓] Each fix follows TDD cycle
 
 - [✓] **Acceptance testing**
+
   - [✓] Add project handler tests to PLAYBOOK.md
   - [✓] Execute playbook manually
   - [✓] Document results
 
 - [✓] **Run full QA**: `./scripts/qa/run_all.sh`
+
 - [✓] **Verify daemon restarts**: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
 
 ### Phase 5: Release
@@ -189,22 +209,26 @@ Implement first-class developer experience for project-level handler development
 #### Tasks
 
 - [✓] **Create migration guide**
+
   - [✓] Document upgrade path for existing plugin users (in README.md migration note)
   - [✓] Comparison: old plugins vs new project-handlers
   - [✓] When to use each approach
 
 - [✓] **Update CHANGELOG.md**
+
   - [✓] Entry added in v2.8.0 release (already shipped)
   - [✓] No breaking changes (legacy plugins still work)
   - [✓] New CLI commands documented
 
 - [✓] **Update README.md**
+
   - [✓] Updated features list: "Project-level handlers" replaces "Plugin system"
   - [✓] Updated "Creating Your Own" section with project-handlers workflow
   - [✓] Added migration note from plugins to project-handlers
   - [✓] Link to PROJECT_HANDLERS.md
 
 - [✓] **Final QA sweep**
+
   - [✓] Run full QA suite - ALL 7 CHECKS PASSED
   - [✓] Daemon restarts successfully
   - [✓] All examples documented in examples/project-handlers/
@@ -219,12 +243,14 @@ Implement first-class developer experience for project-level handler development
 **Chosen**: Scan `.claude/project-handlers/` using same pattern as built-in handlers
 
 **Rationale**:
+
 - Mirrors built-in handler system exactly (one pattern to learn)
 - Zero config for new handlers (just add .py file in right directory)
 - Event-type subdirectories make event mapping unambiguous
 - Auto-discovery with optional per-handler config override
 
 **Alternatives Considered**:
+
 - Explicit listing in config (too much friction)
 - Entry-points based (overkill for project-level, better for distributable packages)
 
@@ -233,6 +259,7 @@ Implement first-class developer experience for project-level handler development
 **Chosen**: `test_handler.py` alongside `handler.py` in same directory
 
 **Rationale**:
+
 - Reduces friction for TDD
 - Easy to find tests for a handler
 - Mirrors pytest conventions
@@ -243,6 +270,7 @@ Implement first-class developer experience for project-level handler development
 **Chosen**: Project handlers run in daemon's venv, tests use daemon's pytest
 
 **Rationale**:
+
 - Handlers already need to import from daemon package
 - No additional environment management
 - Consistent Python version and dependencies
@@ -263,18 +291,21 @@ Implement first-class developer experience for project-level handler development
 ## Testing Strategy
 
 ### Unit Testing (Phase 1-2)
+
 - All new classes have comprehensive unit tests
 - Mock filesystem operations where needed
 - Test error conditions (invalid handlers, conflicts, etc.)
 - 95%+ coverage maintained
 
 ### Integration Testing (Phase 1-2)
+
 - Test full loading pipeline (config → discovery → registration → dispatch)
 - Test with real project-handlers directory
 - Test handler execution through EventRouter
 - Test acceptance test collection
 
 ### Manual Testing (Phase 4)
+
 - Actually use project handlers in checkout project
 - Verify CLI commands work as documented
 - Run acceptance playbook
@@ -282,21 +313,23 @@ Implement first-class developer experience for project-level handler development
 
 ## Risks & Mitigations
 
-| Risk | Impact | Probability | Mitigation |
-|------|--------|-------------|------------|
-| Breaking changes to existing plugin system | High | Low | Keep plugins working, add project-handlers alongside |
-| Handler conflicts hard to debug | Medium | Medium | Clear validation output, good error messages |
-| Test infrastructure complex | Medium | Low | Provide conftest.py template with fixtures |
-| Documentation insufficient | High | Medium | Write docs while coding, dogfood immediately |
+| Risk                                       | Impact | Probability | Mitigation                                           |
+| ------------------------------------------ | ------ | ----------- | ---------------------------------------------------- |
+| Breaking changes to existing plugin system | High   | Low         | Keep plugins working, add project-handlers alongside |
+| Handler conflicts hard to debug            | Medium | Medium      | Clear validation output, good error messages         |
+| Test infrastructure complex                | Medium | Low         | Provide conftest.py template with fixtures           |
+| Documentation insufficient                 | High   | Medium      | Write docs while coding, dogfood immediately         |
 
 ## Dependencies
 
 **Internal**:
+
 - Existing PluginLoader patterns
 - Handler ABC and dispatch pipeline
 - Config system
 
 **External**:
+
 - None (all Python stdlib or existing deps)
 
 ## Branch Strategy
@@ -321,6 +354,7 @@ Implement first-class developer experience for project-level handler development
 ---
 
 **Related Plans**:
+
 - Plan 006 in checkout repo: Dogfooding project handlers
 
 **Last Updated**: 2026-02-10

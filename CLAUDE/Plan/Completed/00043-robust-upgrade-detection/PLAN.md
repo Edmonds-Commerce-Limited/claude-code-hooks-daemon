@@ -21,6 +21,7 @@ Add fallback detection signals and auto-repair of missing config during upgrade.
 ### 1. `scripts/install/project_detection.sh` - Multi-signal detection
 
 Update `detect_project_root()` to check multiple signals in priority order:
+
 1. `.claude/hooks-daemon.yaml` (current - ideal state)
 2. `.claude/hooks-daemon/.git` (daemon repo exists but config missing)
 
@@ -31,6 +32,7 @@ Also update `detect_and_validate_project()` to set a new `NEEDS_CONFIG_REPAIR` f
 ### 2. `scripts/upgrade.sh` (Layer 1) - Use multi-signal detection
 
 Replace the inline detection loop (lines 47-55) with the same multi-signal logic:
+
 1. First check for `.claude/hooks-daemon.yaml` (fast path)
 2. Fallback: check for `.claude/hooks-daemon/.git` (broken install)
 

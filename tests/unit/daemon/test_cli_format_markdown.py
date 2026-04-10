@@ -53,9 +53,7 @@ class TestCmdFormatMarkdownSingleFile:
         captured = capsys.readouterr()
         assert "not a markdown file" in captured.err.lower()
 
-    def test_rejects_missing_path(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_rejects_missing_path(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
         missing = tmp_path / "nope.md"
         args = argparse.Namespace(path=missing, check=False)
 

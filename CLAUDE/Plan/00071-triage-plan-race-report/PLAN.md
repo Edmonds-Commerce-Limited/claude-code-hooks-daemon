@@ -72,6 +72,7 @@ The `.*?` matched from `mkdir` across `&&` into the `git mv` target path, treati
 ### Root Cause
 
 When creating a plan, two tool calls happen in sequence:
+
 1. `mkdir -p CLAUDE/Plan/024-name/` — creates directory (PreToolUse validates, passes)
 2. `Write CLAUDE/Plan/024-name/PLAN.md` — creates file (PreToolUse validates again)
 
@@ -92,6 +93,7 @@ if plan_number != expected_number and plan_number != highest:
 ```
 
 This allows both:
+
 - `plan_number == highest + 1` — normal case (dir not yet created)
 - `plan_number == highest` — TOCTOU case (mkdir already created the dir)
 

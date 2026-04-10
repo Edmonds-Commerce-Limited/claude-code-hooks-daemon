@@ -71,6 +71,7 @@ pre-commit install
 ### 1. Choose the Right Event
 
 Handlers are organised by hook event type:
+
 - `pre_tool_use/` - Before tool execution (most common)
 - `post_tool_use/` - After tool execution
 - `session_start/` - When Claude Code session begins
@@ -145,9 +146,11 @@ class MyHandler(Handler):
 ### 4. Register Handler
 
 Add to the appropriate entry point module:
+
 - `src/claude_code_hooks_daemon/hooks/pre_tool_use.py`
 
 And to the daemon controller:
+
 - `src/claude_code_hooks_daemon/daemon/controller.py`
 
 ### 5. Add Configuration
@@ -186,21 +189,25 @@ def handle(self, hook_input: dict) -> HookResult:
 ## Pull Request Process
 
 1. **Create Feature Branch**
+
    ```bash
    git checkout -b feature/my-feature
    ```
 
 2. **Make Changes**
+
    - Write tests first
    - Implement feature
    - Update documentation
 
 3. **Run QA Checks**
+
    ```bash
    ./scripts/qa/run_all.sh
    ```
 
 4. **Commit with Descriptive Message**
+
    ```bash
    git commit -m "Add MyHandler for blocking dangerous operations
 
@@ -210,11 +217,13 @@ def handle(self, hook_input: dict) -> HookResult:
    ```
 
 5. **Push and Create PR**
+
    ```bash
    git push origin feature/my-feature
    ```
 
 6. **PR Review**
+
    - All QA checks must pass
    - Test coverage must be maintained (95%+)
    - Documentation must be updated

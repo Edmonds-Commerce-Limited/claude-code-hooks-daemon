@@ -25,23 +25,25 @@ Plans should specify the recommended execution approach based on complexity and 
 
 ### Strategy Selection Matrix
 
-| Plan Complexity | Recommended Model | Execution Strategy | Rationale |
-|----------------|-------------------|-------------------|-----------|
-| **Simple** (single handler, straightforward logic) | Sonnet 4.5 | Sub-Agent Orchestration | Sonnet delegates independent tasks to specialized agents |
-| **Medium** (multiple handlers, some dependencies) | Sonnet 4.5 | Sub-Agent Orchestration | Sonnet coordinates sequential phases with parallel tasks |
-| **Complex** (architectural changes, many dependencies) | Opus 4.6 | Sub-Agent Teams | Opus manages team of agents with task coordination |
-| **Critical** (releases, major refactors) | Opus 4.6 | Sub-Agent Teams | Opus provides strategic oversight and decision-making |
+| Plan Complexity                                        | Recommended Model | Execution Strategy      | Rationale                                                |
+| ------------------------------------------------------ | ----------------- | ----------------------- | -------------------------------------------------------- |
+| **Simple** (single handler, straightforward logic)     | Sonnet 4.5        | Sub-Agent Orchestration | Sonnet delegates independent tasks to specialized agents |
+| **Medium** (multiple handlers, some dependencies)      | Sonnet 4.5        | Sub-Agent Orchestration | Sonnet coordinates sequential phases with parallel tasks |
+| **Complex** (architectural changes, many dependencies) | Opus 4.6          | Sub-Agent Teams         | Opus manages team of agents with task coordination       |
+| **Critical** (releases, major refactors)               | Opus 4.6          | Sub-Agent Teams         | Opus provides strategic oversight and decision-making    |
 
 **Haiku 4.5 CANNOT orchestrate plans.** Only Opus and Sonnet are valid executors.
 
 ### Execution Strategy Definitions
 
 **1. Single-Threaded**
+
 - Main agent (Sonnet or Opus) executes all work directly
 - No delegation to sub-agents
 - Use for: Quick fixes, documentation updates, simple changes
 
 **2. Sub-Agent Orchestration** (Sonnet preferred)
+
 - Main agent (Sonnet) spawns specialized sub-agents for independent tasks
 - Main agent coordinates but doesn't micromanage
 - Sub-agents work in parallel when possible
@@ -49,6 +51,7 @@ Plans should specify the recommended execution approach based on complexity and 
 - Example: Main Sonnet spawns Explore agent for codebase research, then spawns python-developer for implementation
 
 **3. Sub-Agent Teams** (Opus preferred)
+
 - Main agent (Opus) creates team with task list
 - Team members claim tasks autonomously
 - Main agent provides strategic guidance and reviews
@@ -58,12 +61,14 @@ Plans should specify the recommended execution approach based on complexity and 
 ### Model-Specific Guidance
 
 **When executing as Sonnet 4.5:**
+
 - Default to Sub-Agent Orchestration for multi-phase plans
 - Spawn agents for independent tasks (Explore for research, python-developer for TDD implementation)
 - Use multiple parallel agents when tasks are independent
 - Keep main thread for coordination and decision-making
 
 **When executing as Opus 4.6:**
+
 - Default to Sub-Agent Teams for complex plans
 - Create team structure with clear roles
 - Use shared task list for coordination
@@ -71,6 +76,7 @@ Plans should specify the recommended execution approach based on complexity and 
 - Review sub-agent output for quality and consistency
 
 **Haiku 4.5:**
+
 - CANNOT orchestrate plans
 - Use only for: utility scripts, basic file operations, team support roles
 
@@ -83,6 +89,7 @@ Plans specify **Recommended Executor** in the header:
 ```
 
 **Guidelines**:
+
 - **Opus**: Architectural changes, releases, critical refactors, complex coordination
 - **Sonnet**: Feature work, handler implementations, bug fixes, standard complexity
 
@@ -218,15 +225,15 @@ Refer to detailed info in supporting docs as required
 
 Use these Unicode icons for task status:
 
-| Status | Icon | Markdown | Meaning |
-|--------|------|----------|---------|
-| **Not Started** | ⬜ | `⬜` | Task not yet begun |
-| **In Progress** | 🔄 | `🔄` | Currently being worked on |
-| **Completed** | ✅ | `✅` | Task finished and verified |
-| **Blocked** | 🚫 | `🚫` | Cannot proceed (dependency/issue) |
-| **Cancelled** | ❌ | `❌` | Task no longer needed |
-| **On Hold** | ⏸️ | `⏸️` | Paused temporarily |
-| **Needs Review** | 👁️ | `👁️` | Work done, awaiting review |
+| Status           | Icon | Markdown | Meaning                           |
+| ---------------- | ---- | -------- | --------------------------------- |
+| **Not Started**  | ⬜   | `⬜`     | Task not yet begun                |
+| **In Progress**  | 🔄   | `🔄`     | Currently being worked on         |
+| **Completed**    | ✅   | `✅`     | Task finished and verified        |
+| **Blocked**      | 🚫   | `🚫`     | Cannot proceed (dependency/issue) |
+| **Cancelled**    | ❌   | `❌`     | Task no longer needed             |
+| **On Hold**      | ⏸️   | `⏸️`     | Paused temporarily                |
+| **Needs Review** | 👁️   | `👁️`     | Work done, awaiting review        |
 
 ### Task Formatting
 
@@ -261,13 +268,13 @@ Run the complete QA suite before marking any task complete:
 
 ### What Gets Checked
 
-| Check | Tool | Requirement |
-|-------|------|-------------|
-| Code Formatting | Black | Auto-formats (line length 100) |
-| Linting | Ruff | Auto-fixes violations |
-| Type Checking | MyPy | Strict mode, all functions typed |
-| Tests | Pytest | 95% minimum coverage |
-| Security | Bandit | No HIGH severity issues |
+| Check           | Tool   | Requirement                      |
+| --------------- | ------ | -------------------------------- |
+| Code Formatting | Black  | Auto-formats (line length 100)   |
+| Linting         | Ruff   | Auto-fixes violations            |
+| Type Checking   | MyPy   | Strict mode, all functions typed |
+| Tests           | Pytest | 95% minimum coverage             |
+| Security        | Bandit | No HIGH severity issues          |
 
 ### QA Task Format
 
@@ -426,12 +433,14 @@ When a plan is complete, follow these steps to properly close it out. Skipping s
 ## Using TodoWrite vs Plans
 
 ### Use TodoWrite For:
+
 - Very small tasks and LOW RISK tasks
 - Single-session work
 - No major architectural decisions
 - Temporary tracking during active work
 
 ### Use Plans For:
+
 - Medium sized+ work
 - Any risk
 - Work with multiple phases
@@ -442,6 +451,7 @@ When a plan is complete, follow these steps to properly close it out. Skipping s
 ### Converting TodoWrite to Plan
 
 If TodoWrite list grows beyond 5 items or becomes multi-session:
+
 1. Create proper plan
 2. Migrate tasks to plan
 3. Clear TodoWrite
@@ -455,7 +465,7 @@ If TodoWrite list grows beyond 5 items or becomes multi-session:
 
 Use this template when creating new handlers for hook events.
 
-```markdown
+````markdown
 # Plan XXX: [Handler Name] Handler
 
 **Status**: Not Started
@@ -485,9 +495,10 @@ Use this template when creating new handlers for hook events.
 ./scripts/debug_hooks.sh start "Testing [scenario]"
 # ... perform actions in Claude Code ...
 ./scripts/debug_hooks.sh stop
-```
+````
 
 **Event Analysis**:
+
 - Event Type: [PreToolUse, etc.]
 - Tool Name: [Write, Bash, etc.]
 - Key hook_input fields: [list relevant fields]
@@ -496,6 +507,7 @@ Use this template when creating new handlers for hook events.
 ## Tasks
 
 ### Phase 1: Debug & Design
+
 - [ ] ⬜ Run debug script for target scenario
 - [ ] ⬜ Analyze captured events and data
 - [ ] ⬜ Document event type and patterns
@@ -503,6 +515,7 @@ Use this template when creating new handlers for hook events.
 - [ ] ⬜ Determine priority and terminal behavior
 
 ### Phase 2: TDD Implementation
+
 - [ ] ⬜ Create test file: `tests/handlers/{event_type}/test_{handler_name}.py`
 - [ ] ⬜ Write failing test for matches() - positive case
 - [ ] ⬜ Write failing test for matches() - negative cases
@@ -513,6 +526,7 @@ Use this template when creating new handlers for hook events.
 - [ ] ⬜ Refactor and clean up
 
 ### Phase 3: Integration
+
 - [ ] ⬜ Register handler in config
 - [ ] ⬜ Update handler count in CLAUDE.md
 - [ ] ⬜ Run full QA suite: `./scripts/qa/run_all.sh`
@@ -547,7 +561,8 @@ class [HandlerName]Handler(Handler):
 - [ ] Live testing successful in Claude Code
 - [ ] Documentation updated
 - [ ] All QA checks pass
-```
+
+````
 
 ### Feature Implementation Plan Template
 
@@ -588,7 +603,7 @@ class [HandlerName]Handler(Handler):
 - [ ] All tests passing with 95%+ coverage
 - [ ] All QA checks pass
 - [ ] Documentation updated
-```
+````
 
 ### Bug Fix Plan Template
 
@@ -680,12 +695,14 @@ Use this template when improving existing code without changing behavior.
 ### Task Writing
 
 ✅ **Good Tasks**:
+
 - "Create PreToolUse handler to block force push to main/master"
 - "Add terminal flag to npm audit handler with priority 45"
 - "Fix MyPy type error in FrontController.dispatch method"
 - "Increase test coverage for daemon/server.py to 95%"
 
 ❌ **Bad Tasks**:
+
 - "Fix the daemon"
 - "Make it work better"
 - "Work on handlers"
@@ -824,21 +841,21 @@ Maintain `CLAUDE/Plan/README.md`:
 
 When Claude Code (or other AI agents) work on this project:
 
-1. **Always check for existing plans** before starting work
-2. **Create plan if none exists** for work > 2 hours
-3. **Choose execution strategy** based on current model and plan complexity:
-   - **Sonnet**: Default to Sub-Agent Orchestration
-   - **Opus**: Default to Sub-Agent Teams
-   - **Haiku**: Default to Single-Threaded
-4. **Debug hook events first** - Before writing handlers:
-   - Use `scripts/debug_hooks.sh` to capture event flow
-   - Analyze logs to understand what events fire
-   - See CLAUDE/DEBUGGING_HOOKS.md for complete guide
-5. **Follow TDD workflow** - Write failing tests before implementation
-6. **Update task status in real-time** as you work
-7. **Run QA before commits** - `./scripts/qa/run_all.sh` must pass
-8. **Document blockers immediately** if you get stuck
-9. **Ask user for approval** before marking plan complete
+01. **Always check for existing plans** before starting work
+02. **Create plan if none exists** for work > 2 hours
+03. **Choose execution strategy** based on current model and plan complexity:
+    - **Sonnet**: Default to Sub-Agent Orchestration
+    - **Opus**: Default to Sub-Agent Teams
+    - **Haiku**: Default to Single-Threaded
+04. **Debug hook events first** - Before writing handlers:
+    - Use `scripts/debug_hooks.sh` to capture event flow
+    - Analyze logs to understand what events fire
+    - See CLAUDE/DEBUGGING_HOOKS.md for complete guide
+05. **Follow TDD workflow** - Write failing tests before implementation
+06. **Update task status in real-time** as you work
+07. **Run QA before commits** - `./scripts/qa/run_all.sh` must pass
+08. **Document blockers immediately** if you get stuck
+09. **Ask user for approval** before marking plan complete
 10. **Reference plans in all commits** for traceability
 
 ### Agent Workflow Example
@@ -880,6 +897,7 @@ Agent:
 ## Summary
 
 **Remember**:
+
 - Plan before you code
 - Debug hook events before writing handlers
 - Write tests first (TDD)

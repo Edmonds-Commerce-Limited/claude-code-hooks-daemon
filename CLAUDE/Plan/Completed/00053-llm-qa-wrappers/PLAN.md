@@ -7,6 +7,7 @@ This project created a guide (Plan 052) explaining the LLM command wrapper patte
 ## Approach: Single Python Script (`scripts/qa/llm_qa.py`)
 
 Rather than creating 7 separate wrapper scripts, create **one unified Python script** that:
+
 - Takes tool name(s) as arguments (or `all`)
 - Runs the underlying bash script with stdout/stderr suppressed
 - Reads the JSON output from `untracked/qa/`
@@ -29,12 +30,14 @@ Rather than creating 7 separate wrapper scripts, create **one unified Python scr
 ```
 
 Or on failure:
+
 ```
 ❌ lint: 3 violations (2 errors, 1 warning)
    untracked/qa/lint.json | jq '.violations[] | {file, rule, message}'
 ```
 
 Each tool gets exactly 2 lines:
+
 - **Line 1**: Pass/fail emoji + tool name + key metrics
 - **Line 2**: JSON path + useful jq command
 
@@ -108,6 +111,7 @@ TOOLS = {
 ## Files to Create/Modify
 
 ### New Files
+
 1. **`scripts/qa/llm_qa.py`** - The unified LLM QA wrapper (~200 lines)
    - Executable (`chmod +x`, shebang `#!/usr/bin/env python3`)
    - Tool registry with per-tool config
@@ -117,10 +121,12 @@ TOOLS = {
    - `--read-only` flag to just summarize existing JSON without re-running
 
 ### Modified Files
+
 2. **`CLAUDE.md`** - Add `llm_qa.py` to Quick Commands section
 3. **`scripts/qa/run_all.sh`** - No changes (keep as-is for human use)
 
 ### No Test Files Needed
+
 This is a CLI utility script, not daemon code. It reads JSON and prints text. Testing is done by running it and verifying output. No pytest coverage requirement since it's not in `src/`.
 
 ## Implementation Steps

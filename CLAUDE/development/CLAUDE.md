@@ -7,11 +7,13 @@ This directory contains documentation for **developers working on the hooks daem
 ## Distinction
 
 - **User Documentation**: `/CLAUDE/` root level (ARCHITECTURE.md, HANDLER_DEVELOPMENT.md, LLM-INSTALL.md)
+
   - How to use the daemon
   - How to create handlers
   - How to install and configure
 
 - **Development Documentation**: `/CLAUDE/development/` (this directory)
+
   - How to contribute to the daemon codebase
   - Release management process
   - Testing and QA workflows
@@ -25,6 +27,7 @@ This directory contains documentation for **developers working on the hooks daem
 ## When to Use This Directory
 
 Add documentation here when:
+
 - Documenting internal development workflows
 - Explaining how to modify the daemon core
 - Describing release/deployment processes
@@ -33,6 +36,7 @@ Add documentation here when:
 ## When NOT to Use This Directory
 
 Don't put documentation here for:
+
 - User-facing features or APIs → `/CLAUDE/` root
 - Handler development → `/CLAUDE/HANDLER_DEVELOPMENT.md`
 - Installation guides → `/CLAUDE/LLM-INSTALL.md`

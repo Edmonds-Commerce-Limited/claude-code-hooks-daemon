@@ -36,12 +36,14 @@ Issue #16 documents an Opus 4.5 agent attempting upgrade to v2.4.0. Problems enc
 ## Tasks
 
 ### Phase 1: Location Detection Script
+
 - [x] ✅ Create `scripts/detect_location.sh` that identifies current directory context
 - [x] ✅ Script outputs one of: "project_root", "hooks_daemon_dir", "wrong_location"
 - [x] ✅ Add usage examples to LLM-UPDATE.md
 - [x] ✅ Test script from various directories
 
 ### Phase 2: Self-Locating Upgrade Script
+
 - [x] ✅ Create `scripts/upgrade.sh`
 - [x] ✅ Script auto-detects project root by walking up to find `.claude/hooks-daemon.yaml`
 - [x] ✅ Implements complete upgrade workflow:
@@ -54,6 +56,7 @@ Issue #16 documents an Opus 4.5 agent attempting upgrade to v2.4.0. Problems enc
 - [x] ✅ Make script executable and test from various directories
 
 ### Phase 3: LLM-UPDATE.md Improvements
+
 - [x] ✅ Add "CRITICAL: Determine Your Location First" section with detection command
 - [x] ✅ Provide single copy-paste command blocks for each location scenario
 - [x] ✅ Update primary recommendation to use upgrade script
@@ -61,6 +64,7 @@ Issue #16 documents an Opus 4.5 agent attempting upgrade to v2.4.0. Problems enc
 - [x] ✅ Eliminated `cd .claude/hooks-daemon` pattern - all commands use project root
 
 ### Phase 4: Error Message Improvements
+
 - [x] ✅ Review all daemon error messages for upgrade context
 - [x] ✅ Update "PROTECTION NOT ACTIVE" errors - removed alarming language
 - [x] ✅ Remove "CRITICAL: STOP work" language - replaced with measured guidance
@@ -68,6 +72,7 @@ Issue #16 documents an Opus 4.5 agent attempting upgrade to v2.4.0. Problems enc
 - [x] ✅ Updated both bash (emit_hook_error) and Python (send_request_stdin) error generators
 
 ### Phase 5: Nested .claude Conflicts Prevention
+
 - [x] ✅ Research options: Reviewed all three options
 - [x] ✅ Decide on approach: Option 3 - detection logic already correct
   - `check_for_nested_installation()` properly checks for `.claude/hooks-daemon/.claude/hooks-daemon`
@@ -77,10 +82,12 @@ Issue #16 documents an Opus 4.5 agent attempting upgrade to v2.4.0. Problems enc
 - [x] ✅ No SELF_INSTALL.md update needed - the existing docs already explain the distinction
 
 ### Phase 6: Testing & Documentation
+
 - [x] ✅ Run full QA suite
 - [x] ✅ Verify daemon restarts successfully
 
 ### Phase 7: Integration & QA
+
 - [x] ✅ Run full QA suite: `./scripts/qa/run_all.sh`
 - [x] ✅ Fix any issues found (pre-existing test failure only, not from this plan)
 - [x] ✅ Verify all checks pass
@@ -88,40 +95,48 @@ Issue #16 documents an Opus 4.5 agent attempting upgrade to v2.4.0. Problems enc
 ## Technical Decisions
 
 ### Decision 1: Upgrade Script Location
+
 **Context**: Where should the upgrade script live?
 **Options Considered**:
+
 1. `.claude/hooks-daemon/scripts/upgrade.sh` - Colocated with daemon
 2. `.claude/hooks-daemon/upgrade.sh` - Root of daemon install
 3. Root project scripts/ - Separate from daemon
 
 **Decision**: `scripts/upgrade.sh` in the daemon repository root
 **Rationale**:
+
 - Colocated with other daemon scripts (detect_location.sh, health_check.sh)
 - Part of daemon repository (versioned with code)
 - Accessible both as `scripts/upgrade.sh` (self-install) and `.claude/hooks-daemon/scripts/upgrade.sh` (normal)
-**Date**: 2026-02-06
+  **Date**: 2026-02-06
 
 ### Decision 2: Nested .claude Handling
+
 **Context**: Hooks-daemon repo contains own `.claude/` for development, conflicts when installed
 **Options Considered**:
+
 1. Gitignore nested installations (`.claude/hooks-daemon/`)
 2. Rename development dir to `.claude-dev/`
 3. Improve daemon detection logic
 
 **Decision**: Option 3 - No change needed
 **Rationale**: The detection logic already correctly distinguishes between:
+
 - `.claude/hooks-daemon/.claude/` (fine - repo's own dev config)
 - `.claude/hooks-daemon/.claude/hooks-daemon` (bad - true nested install)
-**Date**: 2026-02-06
+  **Date**: 2026-02-06
 
 ### Decision 3: Error Message Tone
+
 **Context**: "STOP work immediately" language caused LLM investigation loops
 **Decision**: Replaced with measured guidance that:
+
 - Acknowledges the error without panic language
 - Explains this is expected during upgrades
 - Provides clear fix steps (restart daemon)
 - Only asks to inform user if the issue persists after fix attempt
-**Date**: 2026-02-06
+  **Date**: 2026-02-06
 
 ## Success Criteria
 
@@ -139,15 +154,16 @@ Issue #16 documents an Opus 4.5 agent attempting upgrade to v2.4.0. Problems enc
 
 ## Risks & Mitigations
 
-| Risk | Impact | Probability | Mitigation |
-|------|--------|-------------|------------|
-| Upgrade script breaks existing workflows | High | Low | Thorough testing, maintain manual process docs |
-| Detection logic false positives | Medium | Medium | Conservative detection, clear error messages |
-| Error message changes confuse users | Medium | Low | A/B test with examples, gather feedback |
+| Risk                                     | Impact | Probability | Mitigation                                     |
+| ---------------------------------------- | ------ | ----------- | ---------------------------------------------- |
+| Upgrade script breaks existing workflows | High   | Low         | Thorough testing, maintain manual process docs |
+| Detection logic false positives          | Medium | Medium      | Conservative detection, clear error messages   |
+| Error message changes confuse users      | Medium | Low         | A/B test with examples, gather feedback        |
 
 ## Notes & Updates
 
 ### 2026-02-06
+
 - All phases complete
 - Key insight: nested .claude detection was already correct, no code change needed
 - Error messages significantly softened to prevent LLM investigation loops

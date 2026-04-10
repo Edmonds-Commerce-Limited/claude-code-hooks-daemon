@@ -43,6 +43,7 @@ tests/unit/handlers/{event_type}/test_{handler}.py
 ```
 
 Write comprehensive tests:
+
 - Initialization tests (name, priority, terminal flag)
 - `matches()` positive cases (should trigger)
 - `matches()` negative cases (should not trigger)
@@ -50,6 +51,7 @@ Write comprehensive tests:
 - Edge cases and error conditions
 
 **Run tests - they MUST FAIL**:
+
 ```bash
 pytest tests/unit/handlers/{event_type}/test_{handler}.py -v
 # Expected: FAILURES (no handler implementation yet)
@@ -63,11 +65,13 @@ src/claude_code_hooks_daemon/handlers/{event_type}/{handler}.py
 ```
 
 Implement minimum code to pass tests:
+
 - Use constants (HandlerID, Priority, Decision enums)
 - Follow existing handler patterns
 - Import from correct modules (core.Decision, not constants.decision!)
 
 **Run tests - they MUST PASS**:
+
 ```bash
 pytest tests/unit/handlers/{event_type}/test_{handler}.py -v
 # Expected: ALL PASS
@@ -80,6 +84,7 @@ pytest tests/unit/handlers/{event_type}/test_{handler}.py -v
 - Maintain test passing
 
 **Verify coverage**:
+
 ```bash
 pytest tests/unit/handlers/{event_type}/test_{handler}.py --cov=src/claude_code_hooks_daemon/handlers/{event_type}/{handler}.py --cov-report=term-missing
 # Expected: 95%+ coverage
@@ -93,6 +98,7 @@ Integration tests verify handler works with daemon components.
 
 1. **Response Validation** (MANDATORY):
    Add test case to `tests/integration/test_all_handlers_response_validation.py`
+
    ```python
    def test_{handler}_returns_valid_response():
        """Verify {handler} returns valid HookResult."""
@@ -101,11 +107,13 @@ Integration tests verify handler works with daemon components.
 
 2. **FrontController Integration** (if complex):
    Create `tests/integration/test_{handler}_integration.py` if handler has:
+
    - Complex dispatch logic
    - Dependencies on other handlers
    - State management
 
 **Run integration tests**:
+
 ```bash
 pytest tests/integration/ -v -k {handler}
 # Expected: ALL PASS
@@ -119,6 +127,7 @@ pytest tests/integration/ -v -k {handler}
 
 Unit tests use mocks and don't import handlers through the daemon registry.
 **Daemon load test catches**:
+
 - Import errors (wrong module paths)
 - Missing dependencies
 - Circular imports
@@ -148,6 +157,7 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli logs | grep -i error
 ```
 
 **If daemon fails to start**:
+
 1. Check daemon logs for error details
 2. Fix import/registration issues
 3. Re-run daemon restart
@@ -168,6 +178,7 @@ pytest tests/integration/test_dogfooding_hook_scripts.py -v
 ```
 
 **If dogfooding tests fail**:
+
 - Ensure handler is enabled in `.claude/hooks-daemon.yaml`
 - Ensure priority is set correctly
 - Ensure event type section exists
@@ -181,6 +192,7 @@ Run ALL quality checks before committing:
 ```
 
 **Expected output**:
+
 ```
 ========================================
 QA Summary
@@ -235,6 +247,7 @@ Execute tests in a real Claude Code session. See `CLAUDE/AcceptanceTests/GENERAT
 **If ANY test fails**: Return to Phase 2 (fix bug with TDD)
 
 **FAIL-FAST Cycle**:
+
 ```
 Test fails → Fix with TDD → Full QA → Daemon restart → RESTART ALL TESTS FROM BEGINNING
 ```
@@ -254,6 +267,7 @@ Test in real Claude Code session:
 A feature is DONE when ALL of the following are verified:
 
 ### 1. Unit Tests (TDD)
+
 - [ ] Failing tests written BEFORE implementation
 - [ ] Implementation makes tests pass
 - [ ] 95%+ coverage maintained
@@ -261,6 +275,7 @@ A feature is DONE when ALL of the following are verified:
 - [ ] Run: `pytest tests/unit/ -v`
 
 ### 2. Integration Tests
+
 - [ ] Handler integrates with FrontController
 - [ ] Handler integrates with EventRouter
 - [ ] Response validation passes (valid JSON for event type)
@@ -268,6 +283,7 @@ A feature is DONE when ALL of the following are verified:
 - [ ] Run: `pytest tests/integration/ -v`
 
 ### 3. Daemon Load Test (CRITICAL)
+
 - [ ] Daemon restarts successfully with new code
 - [ ] No import errors in daemon logs
 - [ ] Handler appears in loaded handlers list
@@ -275,16 +291,19 @@ A feature is DONE when ALL of the following are verified:
 - [ ] Verify: `$PYTHON -m claude_code_hooks_daemon.daemon.cli status`
 
 ### 4. Dogfooding Tests
+
 - [ ] `test_dogfooding_config.py` passes (handler in config)
 - [ ] `test_dogfooding_hook_scripts.py` passes (scripts match)
 - [ ] Run: `pytest tests/integration/test_dogfooding*.py -v`
 
 ### 5. Full QA Suite
+
 - [ ] All 6 checks pass with ZERO failures
 - [ ] Run: `./scripts/qa/run_all.sh`
 - [ ] Expected output: "ALL CHECKS PASSED"
 
 ### 6. Acceptance Tests (Before Release)
+
 - [ ] Handler implements `get_acceptance_tests()` with test definitions
 - [ ] Generated playbook includes handler tests (`generate-playbook`)
 - [ ] All relevant handler tests pass in real Claude Code session
@@ -292,6 +311,7 @@ A feature is DONE when ALL of the following are verified:
 - [ ] See: `CLAUDE/AcceptanceTests/GENERATING.md`
 
 ### 7. Live Testing
+
 - [ ] Handler tested in real Claude Code session
 - [ ] Expected behavior verified (blocks/allows correctly)
 - [ ] No false positives or negatives observed
@@ -303,12 +323,14 @@ A feature is DONE when ALL of the following are verified:
 **Mistake**: Ran unit tests, saw 100% coverage, assumed done.
 
 **What was missed**:
+
 - ❌ No daemon restart after each commit
 - ❌ Wrong import path (`constants.decision` instead of `core.Decision`)
 - ❌ Daemon couldn't load any of the 5 handlers
 - ❌ All protection was down
 
 **How to avoid**:
+
 - ✅ **ALWAYS restart daemon after code changes**
 - ✅ Verify daemon status shows RUNNING
 - ✅ Check daemon logs for import errors
@@ -326,6 +348,7 @@ A feature is DONE when ALL of the following are verified:
 **Remember**: Unit tests alone are NOT enough!
 
 Complete testing pyramid:
+
 1. Unit tests (isolated, TDD)
 2. Integration tests (component interactions)
 3. **Daemon load** (catches import errors) ← **CRITICAL**
@@ -339,6 +362,7 @@ Complete testing pyramid:
 ---
 
 **See Also**:
+
 - @CLAUDE/CodeLifecycle/Bugs.md - Bug fix lifecycle
 - @CLAUDE/CodeLifecycle/General.md - General code changes
 - @CLAUDE/AcceptanceTests/GENERATING.md - Acceptance test generation

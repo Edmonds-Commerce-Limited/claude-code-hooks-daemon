@@ -28,18 +28,21 @@ Implement comprehensive sub-agent orchestration to preserve main thread context.
 ## Context & Background
 
 **Research findings**:
+
 1. Manual compaction via `/compact` is the only trigger mechanism
 2. PreCompact hook can observe but NOT trigger compaction
 3. Agents cannot spawn nested agents (architectural constraint)
 4. Main thread must orchestrate all agent spawning
 
 **Current state**:
+
 - 5 custom agents exist (.claude/agents/)
 - Agent teams work but no sub-agent usage by teammates
 - Main thread often executes QA, setup, and other tasks directly
 - Context accumulates rapidly during complex work
 
 **Why this matters**:
+
 - Complex plans consume 30-50% of context window
 - QA output pollutes context with logs
 - Worktree/venv setup is verbose
@@ -50,12 +53,14 @@ Implement comprehensive sub-agent orchestration to preserve main thread context.
 ### Phase 1: Research & Design (Agent Team Capabilities)
 
 - [ ] ⬜ **Verify agent team sub-agent spawning capability**
+
   - [ ] ⬜ Review TeamCreate/SendMessage/Task tool documentation
   - [ ] ⬜ Check if teammates can use Task tool to spawn their own sub-agents
   - [ ] ⬜ Test: Spawn teammate, have it spawn sub-agent, observe behavior
   - [ ] ⬜ Document findings in plan notes
 
 - [ ] ⬜ **Design orchestration patterns**
+
   - [ ] ⬜ Main thread orchestration pattern (definite)
   - [ ] ⬜ Agent team member sub-agent pattern (if possible)
   - [ ] ⬜ Context preservation strategies
@@ -160,16 +165,19 @@ Implement comprehensive sub-agent orchestration to preserve main thread context.
 #### 5.2: Update Existing Documentation
 
 - [ ] ⬜ **Update CLAUDE.md**
+
   - [ ] ⬜ Add section on sub-agent orchestration
   - [ ] ⬜ Reference SubAgentOrchestration.md
   - [ ] ⬜ Update "Using your tools" section
 
 - [ ] ⬜ **Update CLAUDE/AgentTeam.md**
+
   - [ ] ⬜ Add sub-agent delegation guidance
   - [ ] ⬜ Document how team members should use sub-agents
   - [ ] ⬜ Add examples to each role (developer uses qa-runner, etc.)
 
 - [ ] ⬜ **Update CLAUDE/PlanWorkflow.md**
+
   - [ ] ⬜ Add guidance on sub-agent orchestration during plans
   - [ ] ⬜ Update task templates with sub-agent patterns
 
@@ -220,16 +228,19 @@ Implement comprehensive sub-agent orchestration to preserve main thread context.
 ### Phase 7: QA & Deployment
 
 - [ ] ⬜ **Run full QA suite**
+
   - [ ] ⬜ Use qa-runner sub-agent: `Task(subagent_type='qa-runner', ...)`
   - [ ] ⬜ Fix any issues via qa-fixer
   - [ ] ⬜ Verify all checks pass
 
 - [ ] ⬜ **Daemon restart verification**
+
   - [ ] ⬜ Run: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
   - [ ] ⬜ Verify: Status RUNNING
   - [ ] ⬜ Check logs for import errors
 
 - [ ] ⬜ **Update plan status to Complete**
+
   - [ ] ⬜ Move plan to Completed/
   - [ ] ⬜ Update CLAUDE/Plan/README.md
 
@@ -240,12 +251,14 @@ Implement comprehensive sub-agent orchestration to preserve main thread context.
 **Context**: Should handlers BLOCK direct tool execution or ADVISE?
 
 **Options Considered**:
+
 1. **Blocking (terminal=true)** - Force sub-agent usage, deny direct execution
 2. **Advisory (terminal=false)** - Suggest sub-agent, allow override
 
 **Decision**: Advisory (Option 2)
 
 **Rationale**:
+
 - Main Claude may need direct execution for debugging
 - Allows gradual adoption
 - Less disruptive to existing workflows
@@ -258,6 +271,7 @@ Implement comprehensive sub-agent orchestration to preserve main thread context.
 **Context**: Which model for each agent type?
 
 **Decision**:
+
 - **Worktree/Setup/Git agents**: haiku (fast, cheap, simple tasks)
 - **QA agents**: haiku (execution) + sonnet (fixing)
 - **Code reviewer**: opus (nuanced analysis)
@@ -272,6 +286,7 @@ Implement comprehensive sub-agent orchestration to preserve main thread context.
 **Context**: Can agent team members spawn their own sub-agents?
 
 **Investigation Required**:
+
 - Test in Phase 1
 - Document findings
 - Update plan based on results
@@ -281,11 +296,13 @@ Implement comprehensive sub-agent orchestration to preserve main thread context.
 ## Agent Inventory (After This Plan)
 
 ### Orchestration Agents (Main Thread Uses These)
+
 - **worktree-manager** (haiku) - Worktree/venv setup
 - **setup-agent** (haiku) - Installation tasks
 - **git-agent** (haiku) - Verbose git operations
 
 ### Workflow Agents (Existing)
+
 - **qa-runner** (haiku) - QA execution
 - **qa-fixer** (sonnet) - QA issue resolution
 - **python-developer** (sonnet) - Development work
@@ -293,6 +310,7 @@ Implement comprehensive sub-agent orchestration to preserve main thread context.
 - **release-agent** (sonnet) - Release preparation
 
 ### Built-in Agents (Claude Code)
+
 - **Explore** - Codebase exploration
 - **Plan** - Implementation planning
 - **general-purpose** - General tasks
@@ -300,6 +318,7 @@ Implement comprehensive sub-agent orchestration to preserve main thread context.
 ## Enforcement Handlers Inventory
 
 ### Advisory Handlers (New)
+
 - **qa_script_blocker** (priority 58) - Advise using qa-runner sub-agent
 - **worktree_setup_advisor** (priority 58) - Advise using worktree-manager
 - **git_operations_advisor** (priority 58) - Advise using git-agent for verbose ops
@@ -324,18 +343,19 @@ Implement comprehensive sub-agent orchestration to preserve main thread context.
 
 ## Risks & Mitigations
 
-| Risk | Impact | Probability | Mitigation |
-|------|--------|-------------|------------|
-| Agent teams can't spawn sub-agents | High | Medium | Document limitation, main thread orchestrates for teams |
-| Advisory handlers ignored | Medium | High | Monitor usage, adjust messaging, consider metrics |
-| Sub-agent overhead > savings | Medium | Low | Benchmark in Phase 6, adjust strategy if needed |
-| Complex orchestration confusing | Medium | Medium | Comprehensive docs, clear examples |
+| Risk                               | Impact | Probability | Mitigation                                              |
+| ---------------------------------- | ------ | ----------- | ------------------------------------------------------- |
+| Agent teams can't spawn sub-agents | High   | Medium      | Document limitation, main thread orchestrates for teams |
+| Advisory handlers ignored          | Medium | High        | Monitor usage, adjust messaging, consider metrics       |
+| Sub-agent overhead > savings       | Medium | Low         | Benchmark in Phase 6, adjust strategy if needed         |
+| Complex orchestration confusing    | Medium | Medium      | Comprehensive docs, clear examples                      |
 
 ## Notes & Updates
 
 ### 2026-02-06 - Plan Created
 
 **Research Summary**:
+
 - Compaction cannot be triggered from hooks (PreCompact is observe-only)
 - Manual `/compact` is only trigger mechanism
 - Agents cannot spawn nested agents (architectural constraint)
@@ -344,11 +364,13 @@ Implement comprehensive sub-agent orchestration to preserve main thread context.
 - Agent teams work well but no evidence of sub-agent usage by teammates
 
 **Open Questions**:
+
 1. Can agent team members spawn sub-agents? (Test in Phase 1)
 2. What token savings can we achieve? (Measure in Phase 6)
 3. Should enforcement be advisory or blocking? (Decided: advisory)
 
 **Next Steps**:
+
 - ⏸️ PLAN ON HOLD - Waiting for upstream delegate mode fix
 - Monitor GitHub issues: #23447, #25037, #14859, #7881
 - When delegate mode is fixed, reassess scope (may need minimal daemon work)
@@ -371,6 +393,7 @@ Implement comprehensive sub-agent orchestration to preserve main thread context.
 **Decision**: Hold this plan. Delegate mode is exactly what we need and is a first-class platform feature. Building workarounds in the hooks daemon would be fragile, incomplete, and superseded once upstream fixes land.
 
 **What to monitor**:
+
 - [#23447](https://github.com/anthropics/claude-code/issues/23447) - Primary delegate mode cascade bug
 - [#25037](https://github.com/anthropics/claude-code/issues/25037) - Latest duplicate with active discussion
 - [#14859](https://github.com/anthropics/claude-code/issues/14859) - Agent hierarchy in hook events

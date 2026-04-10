@@ -77,15 +77,15 @@ daemon:
 
 ### Setting Details
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `idle_timeout_seconds` | `600` | Daemon shuts down after this many seconds without a hook call. It restarts automatically on the next call (lazy startup). |
-| `log_level` | `INFO` | Controls how much detail appears in daemon logs. Use `DEBUG` when troubleshooting handler behavior. |
-| `enable_hello_world_handlers` | `false` | Activates simple test handlers that add context to every event. Useful for confirming hooks are connected. |
-| `strict_mode` | `false` | When `true`, the daemon crashes on any unexpected error instead of continuing. Recommended for development/testing. |
-| `self_install_mode` | `false` | Used when the daemon runs from the project root instead of `.claude/hooks-daemon/`. Only needed for daemon development. |
-| `input_validation.enabled` | `true` | Validates hook event data before processing. Catches malformed events early. |
-| `input_validation.strict_mode` | `false` | When `true`, invalid events are denied. When `false`, invalid events are allowed through with a warning logged. |
+| Setting                        | Default | Description                                                                                                               |
+| ------------------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `idle_timeout_seconds`         | `600`   | Daemon shuts down after this many seconds without a hook call. It restarts automatically on the next call (lazy startup). |
+| `log_level`                    | `INFO`  | Controls how much detail appears in daemon logs. Use `DEBUG` when troubleshooting handler behavior.                       |
+| `enable_hello_world_handlers`  | `false` | Activates simple test handlers that add context to every event. Useful for confirming hooks are connected.                |
+| `strict_mode`                  | `false` | When `true`, the daemon crashes on any unexpected error instead of continuing. Recommended for development/testing.       |
+| `self_install_mode`            | `false` | Used when the daemon runs from the project root instead of `.claude/hooks-daemon/`. Only needed for daemon development.   |
+| `input_validation.enabled`     | `true`  | Validates hook event data before processing. Catches malformed events early.                                              |
+| `input_validation.strict_mode` | `false` | When `true`, invalid events are denied. When `false`, invalid events are allowed through with a warning logged.           |
 
 ---
 
@@ -113,11 +113,11 @@ handlers:
 
 ### Handler Properties
 
-| Property | Required | Description |
-|----------|----------|-------------|
-| `enabled` | Yes | `true` to activate the handler, `false` to skip it |
-| `priority` | Yes | Execution order -- lower numbers run first |
-| `options` | No | Handler-specific configuration (varies per handler) |
+| Property   | Required | Description                                         |
+| ---------- | -------- | --------------------------------------------------- |
+| `enabled`  | Yes      | `true` to activate the handler, `false` to skip it  |
+| `priority` | Yes      | Execution order -- lower numbers run first          |
+| `options`  | No       | Handler-specific configuration (varies per handler) |
 
 ### Enabling and Disabling Handlers
 
@@ -133,19 +133,19 @@ $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli restart
 
 The daemon supports these hook event types:
 
-| Event Type | Config Key | When It Fires |
-|------------|-----------|---------------|
-| PreToolUse | `pre_tool_use` | Before Claude executes a tool (Bash, Write, Read, etc.) |
-| PostToolUse | `post_tool_use` | After a tool finishes executing |
-| SessionStart | `session_start` | When a new Claude Code session begins |
-| SessionEnd | `session_end` | When a session ends |
-| PreCompact | `pre_compact` | Before conversation history is compacted |
-| SubagentStop | `subagent_stop` | When a subagent completes its task |
-| UserPromptSubmit | `user_prompt_submit` | When the user submits a prompt |
-| PermissionRequest | `permission_request` | When a tool requests permission |
-| Notification | `notification` | When a notification event occurs |
-| Stop | `stop` | When Claude is about to stop responding |
-| StatusLine | `status_line` | When generating the status bar display |
+| Event Type        | Config Key           | When It Fires                                           |
+| ----------------- | -------------------- | ------------------------------------------------------- |
+| PreToolUse        | `pre_tool_use`       | Before Claude executes a tool (Bash, Write, Read, etc.) |
+| PostToolUse       | `post_tool_use`      | After a tool finishes executing                         |
+| SessionStart      | `session_start`      | When a new Claude Code session begins                   |
+| SessionEnd        | `session_end`        | When a session ends                                     |
+| PreCompact        | `pre_compact`        | Before conversation history is compacted                |
+| SubagentStop      | `subagent_stop`      | When a subagent completes its task                      |
+| UserPromptSubmit  | `user_prompt_submit` | When the user submits a prompt                          |
+| PermissionRequest | `permission_request` | When a tool requests permission                         |
+| Notification      | `notification`       | When a notification event occurs                        |
+| Stop              | `stop`               | When Claude is about to stop responding                 |
+| StatusLine        | `status_line`        | When generating the status bar display                  |
 
 ---
 
@@ -155,14 +155,14 @@ Priorities determine the order handlers execute within an event type. **Lower nu
 
 ### Priority Ranges
 
-| Range | Category | Purpose | Examples |
-|-------|----------|---------|----------|
-| 0-9 | Test | Test and debug handlers | `hello_world` (5) |
-| 10-20 | Safety | Prevent destructive operations | `destructive_git` (10), `sed_blocker` (10), `curl_pipe_shell` (15) |
-| 25-35 | Code Quality | Enforce development standards | `eslint_disable` (30), `tdd_enforcement` (35) |
-| 36-55 | Workflow | Process and tool guidance | `plan_workflow` (45), `npm_command` (50), `web_search_year` (55) |
-| 56-60 | Advisory | Non-blocking suggestions | `british_english` (60) |
-| 100+ | Logging | Metrics and audit trails | `notification_logger` (100) |
+| Range | Category     | Purpose                        | Examples                                                           |
+| ----- | ------------ | ------------------------------ | ------------------------------------------------------------------ |
+| 0-9   | Test         | Test and debug handlers        | `hello_world` (5)                                                  |
+| 10-20 | Safety       | Prevent destructive operations | `destructive_git` (10), `sed_blocker` (10), `curl_pipe_shell` (15) |
+| 25-35 | Code Quality | Enforce development standards  | `eslint_disable` (30), `tdd_enforcement` (35)                      |
+| 36-55 | Workflow     | Process and tool guidance      | `plan_workflow` (45), `npm_command` (50), `web_search_year` (55)   |
+| 56-60 | Advisory     | Non-blocking suggestions       | `british_english` (60)                                             |
+| 100+  | Logging      | Metrics and audit trails       | `notification_logger` (100)                                        |
 
 ### Why Priority Matters
 
@@ -374,15 +374,15 @@ plugins:
 
 These environment variables affect daemon behavior. They are typically set in `.claude/hooks-daemon.env`, which is sourced before the daemon starts.
 
-| Variable | Description |
-|----------|-------------|
-| `HOOKS_DAEMON_ROOT_DIR` | Root directory of the daemon installation. Default: `$PROJECT_PATH/.claude/hooks-daemon`. Set to `$PROJECT_PATH` for self-install mode. |
-| `CLAUDE_HOOKS_SOCKET_PATH` | Override the Unix socket path. Takes precedence over hostname-based paths. |
-| `CLAUDE_HOOKS_PID_PATH` | Override the PID file path. |
-| `CLAUDE_HOOKS_LOG_PATH` | Override the log file path. |
-| `HOSTNAME` | Used for multi-environment isolation. Each unique hostname gets its own socket, PID, and log files (e.g., `daemon-laptop.sock`). |
-| `DAEMON_BRANCH` | Git branch or tag to install (used by the installer only). Default: `main`. |
-| `FORCE` | Set to `true` to force reinstall over an existing installation. |
+| Variable                   | Description                                                                                                                             |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `HOOKS_DAEMON_ROOT_DIR`    | Root directory of the daemon installation. Default: `$PROJECT_PATH/.claude/hooks-daemon`. Set to `$PROJECT_PATH` for self-install mode. |
+| `CLAUDE_HOOKS_SOCKET_PATH` | Override the Unix socket path. Takes precedence over hostname-based paths.                                                              |
+| `CLAUDE_HOOKS_PID_PATH`    | Override the PID file path.                                                                                                             |
+| `CLAUDE_HOOKS_LOG_PATH`    | Override the log file path.                                                                                                             |
+| `HOSTNAME`                 | Used for multi-environment isolation. Each unique hostname gets its own socket, PID, and log files (e.g., `daemon-laptop.sock`).        |
+| `DAEMON_BRANCH`            | Git branch or tag to install (used by the installer only). Default: `main`.                                                             |
+| `FORCE`                    | Set to `true` to force reinstall over an existing installation.                                                                         |
 
 ### Hostname-Based Isolation
 

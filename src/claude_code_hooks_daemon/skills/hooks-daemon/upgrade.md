@@ -48,6 +48,7 @@ The upgrade process includes multiple safety checks:
 ## After Upgrade
 
 The upgrade process will:
+
 - Restart the daemon with the new version
 - Refresh skill files in `.claude/skills/hooks-daemon/`
 - Display changelog highlights for the new version
@@ -55,6 +56,7 @@ The upgrade process will:
 ## If Upgrade Fails
 
 If the upgrade fails, the system automatically:
+
 1. Stops the new daemon
 2. Restores backed-up configuration
 3. Restarts the previous daemon version
@@ -81,6 +83,7 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli status
 ## Version History
 
 To see what's new in each version, check:
+
 - `CHANGELOG.md` in the daemon repository
 - `RELEASES/` directory for detailed release notes
 - GitHub releases page

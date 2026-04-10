@@ -62,24 +62,25 @@ pseudo_events:
 
 From commit `37c5c3f` and uncommitted work:
 
-| Component | Status | Reuse? |
-|-----------|--------|--------|
-| `NitpickFinding` dataclass | Committed | **Keep** — findings data structure is correct |
-| `NitpickState` dataclass | Committed | **Keep** — state tracking still needed |
-| `NitpickChecker` Protocol | Committed | **Replace** — checkers become full Handler subclasses |
-| `DismissiveLanguageChecker` | Committed | **Refactor** → `DismissiveLanguageHandler` |
-| `HedgingLanguageChecker` | Committed | **Refactor** → `HedgingLanguageHandler` |
-| Checker registry | Committed | **Replace** — directory-based discovery instead |
-| `NitpickHandler` (PreToolUse) | Uncommitted | **Delete** — wrong architecture |
-| TranscriptReader enhancements | Committed (earlier) | **Keep** — uuid, incremental, filter |
-| HandlerID.NITPICK constant | Uncommitted | **Keep** — still needed |
-| Priority.NITPICK = 57 | Uncommitted | **Reassess** — pseudo-event handlers have own priorities |
+| Component                     | Status              | Reuse?                                                   |
+| ----------------------------- | ------------------- | -------------------------------------------------------- |
+| `NitpickFinding` dataclass    | Committed           | **Keep** — findings data structure is correct            |
+| `NitpickState` dataclass      | Committed           | **Keep** — state tracking still needed                   |
+| `NitpickChecker` Protocol     | Committed           | **Replace** — checkers become full Handler subclasses    |
+| `DismissiveLanguageChecker`   | Committed           | **Refactor** → `DismissiveLanguageHandler`               |
+| `HedgingLanguageChecker`      | Committed           | **Refactor** → `HedgingLanguageHandler`                  |
+| Checker registry              | Committed           | **Replace** — directory-based discovery instead          |
+| `NitpickHandler` (PreToolUse) | Uncommitted         | **Delete** — wrong architecture                          |
+| TranscriptReader enhancements | Committed (earlier) | **Keep** — uuid, incremental, filter                     |
+| HandlerID.NITPICK constant    | Uncommitted         | **Keep** — still needed                                  |
+| Priority.NITPICK = 57         | Uncommitted         | **Reassess** — pseudo-event handlers have own priorities |
 
 ## Tasks
 
 ### Phase 1: Clean Up Wrong Architecture
 
 - [ ] **Task 1.1**: Delete uncommitted NitpickHandler
+
   - Remove `src/claude_code_hooks_daemon/handlers/pre_tool_use/nitpick.py`
   - Remove `tests/unit/handlers/pre_tool_use/test_nitpick.py`
   - Revert nitpick entry from `handlers.pre_tool_use` in hooks-daemon.yaml
@@ -92,17 +93,20 @@ From commit `37c5c3f` and uncommitted work:
 Core infrastructure that makes pseudo-events work. All components are new.
 
 - [ ] **Task 2.1**: Define `PseudoEventTrigger` dataclass
+
   - Fields: `event_type: EventType`, `numerator: int`, `denominator: int`
   - Parse from string notation: `"pre_tool_use:1/5"` → `PseudoEventTrigger(PRE_TOOL_USE, 1, 5)`
-  - Validation: numerator > 0, denominator > 0, numerator <= denominator
+  - Validation: numerator > 0, denominator > 0, numerator \<= denominator
   - File: `src/claude_code_hooks_daemon/core/pseudo_event.py`
 
 - [ ] **Task 2.2**: Define `PseudoEventConfig` dataclass
+
   - Fields: `name: str`, `enabled: bool`, `triggers: list[PseudoEventTrigger]`, `handler_config: dict`
   - Parsed from YAML `pseudo_events:` section
   - File: `src/claude_code_hooks_daemon/core/pseudo_event.py`
 
 - [ ] **Task 2.3**: Implement `PseudoEventDispatcher`
+
   - Maintains counter per pseudo-event per trigger-event-type per session
   - `check_and_fire(event_type, hook_input, session_id) -> list[HookResult]`
     - Increment counter for matching triggers
@@ -113,12 +117,14 @@ Core infrastructure that makes pseudo-events work. All components are new.
   - File: `src/claude_code_hooks_daemon/core/pseudo_event.py`
 
 - [ ] **Task 2.4**: Implement trigger frequency counter logic
+
   - Counter state: `dict[str, dict[str, int]]` — `{pseudo_event_name: {event_type: count}}`
   - Per-session counters (keyed by session_id)
   - `should_fire(trigger, session_id) -> bool`: increment, check modulo
   - Reset on new session
 
 - [ ] **Task 2.5**: Implement result merging
+
   - `merge_results(real_result: ChainExecutionResult, pseudo_results: list[HookResult]) -> ChainExecutionResult`
   - DENY wins (if any pseudo-event handler denies, final is DENY)
   - Context accumulates (pseudo-event context appended to real context)
@@ -129,6 +135,7 @@ Core infrastructure that makes pseudo-events work. All components are new.
 The "setup" phase specific to the nitpick pseudo-event. This is the shared infrastructure that reads the transcript ONCE for all nitpick handlers.
 
 - [ ] **Task 3.1**: Implement nitpick setup function
+
   - Signature: `nitpick_setup(hook_input: dict, session_id: str) -> dict`
   - Reads transcript incrementally (using TranscriptReader + NitpickState)
   - Extracts new assistant messages since last audit
@@ -139,6 +146,7 @@ The "setup" phase specific to the nitpick pseudo-event. This is the shared infra
   - File: `src/claude_code_hooks_daemon/pseudo_events/nitpick.py`
 
 - [ ] **Task 3.2**: Implement NitpickState management
+
   - State per session: last_byte_offset, last_audited_uuid, findings_count
   - Stored in PseudoEventDispatcher (in-memory, keyed by session_id)
   - Reset if transcript file truncated/rotated
@@ -148,6 +156,7 @@ The "setup" phase specific to the nitpick pseudo-event. This is the shared infra
 Each nitpick handler is a full Handler subclass that checks for specific quality patterns.
 
 - [ ] **Task 4.1**: Refactor `DismissiveLanguageChecker` → `DismissiveLanguageNitpickHandler`
+
   - Full Handler subclass (not NitpickChecker Protocol)
   - `matches()`: True when `assistant_messages` present in hook_input
   - `handle()`: Check patterns against each message, return findings as advisory/deny
@@ -157,11 +166,13 @@ Each nitpick handler is a full Handler subclass that checks for specific quality
   - File: `src/claude_code_hooks_daemon/handlers/nitpick/dismissive_language.py`
 
 - [ ] **Task 4.2**: Refactor `HedgingLanguageChecker` → `HedgingLanguageNitpickHandler`
+
   - Same pattern as Task 4.1 but for hedging patterns
   - Reuse patterns from `HedgingLanguageDetectorHandler`
   - File: `src/claude_code_hooks_daemon/handlers/nitpick/hedging_language.py`
 
 - [ ] **Task 4.3**: Update handler constants
+
   - Add HandlerID entries for nitpick handlers (NITPICK_DISMISSIVE, NITPICK_HEDGING)
   - Add to EVENT_TYPE_MAPPING if pseudo-events use directory-based discovery
   - Or: register pseudo-event handlers via PseudoEventDispatcher config
@@ -171,22 +182,26 @@ Each nitpick handler is a full Handler subclass that checks for specific quality
 Wire pseudo-event dispatch into DaemonController.
 
 - [ ] **Task 5.1**: Parse `pseudo_events:` config section
+
   - Add `pseudo_events` field to config models
   - Parse trigger notation, handler enable/disable, options
   - File: `src/claude_code_hooks_daemon/config/models.py`
 
 - [ ] **Task 5.2**: Integrate PseudoEventDispatcher into DaemonController
+
   - Create dispatcher during `initialise()`
   - In `process_event()`: after real handler chain, call `dispatcher.check_and_fire()`
   - Merge pseudo-event results with real results
   - File: `src/claude_code_hooks_daemon/daemon/controller.py`
 
 - [ ] **Task 5.3**: Register nitpick handlers with PseudoEventDispatcher
+
   - Discover handlers from `handlers/nitpick/` directory
   - Apply config from `pseudo_events.nitpick.handlers`
   - Register setup function for nitpick pseudo-event
 
 - [ ] **Task 5.4**: Add pseudo_events config to hooks-daemon.yaml
+
   ```yaml
   pseudo_events:
     nitpick:
@@ -202,7 +217,9 @@ Wire pseudo-event dispatch into DaemonController.
   ```
 
 - [ ] **Task 5.5**: Daemon restart verification
+
 - [ ] **Task 5.6**: Dogfooding tests
+
 - [ ] **Task 5.7**: Full QA suite
 
 ### Phase 6: Clean Up Legacy Code
@@ -227,17 +244,20 @@ Wire pseudo-event dispatch into DaemonController.
 ## Key Files
 
 ### New
+
 - `src/claude_code_hooks_daemon/core/pseudo_event.py` — PseudoEventTrigger, PseudoEventConfig, PseudoEventDispatcher
 - `src/claude_code_hooks_daemon/pseudo_events/nitpick.py` — Nitpick setup function + state management
 - `src/claude_code_hooks_daemon/handlers/nitpick/dismissive_language.py` — Handler
 - `src/claude_code_hooks_daemon/handlers/nitpick/hedging_language.py` — Handler
 
 ### Modified
+
 - `src/claude_code_hooks_daemon/daemon/controller.py` — Integrate PseudoEventDispatcher
 - `src/claude_code_hooks_daemon/config/models.py` — Add pseudo_events config
 - `.claude/hooks-daemon.yaml` — Add pseudo_events section
 
 ### Deleted
+
 - `src/claude_code_hooks_daemon/handlers/pre_tool_use/nitpick.py` — Wrong architecture
 - `src/claude_code_hooks_daemon/nitpick/checkers/registry.py` — Replaced by discovery
 - `src/claude_code_hooks_daemon/nitpick/protocol.py` — NitpickChecker Protocol removed (keep NitpickFinding/State)
@@ -245,6 +265,7 @@ Wire pseudo-event dispatch into DaemonController.
 ## Notes & Updates
 
 ### 2026-03-09 (revision)
+
 - User corrected architecture: nitpick is a pseudo-event with handler registration, NOT a monolithic handler with internal strategies
 - Requirements clarified: multi-event triggers (array), frequency notation (pre_tool_use:1/5), own config section (pseudo_events:), handlers can block independently
 - Plan rewritten to reflect pseudo-event dispatch architecture

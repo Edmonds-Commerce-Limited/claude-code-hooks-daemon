@@ -24,6 +24,7 @@ Use curl to fetch and save this file:
 curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-INSTALL.md -o /tmp/LLM-INSTALL.md
 Then read /tmp/LLM-INSTALL.md and follow the instructions exactly.
 ```
+
 </details>
 
 <details>
@@ -34,6 +35,7 @@ Use curl to fetch and save this file:
 curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/CLAUDE/LLM-UPDATE.md -o /tmp/LLM-UPDATE.md
 Then read /tmp/LLM-UPDATE.md and follow the instructions exactly.
 ```
+
 </details>
 
 ---
@@ -186,6 +188,7 @@ cp .claude/hooks-daemon/.claude/.gitignore .claude/.gitignore
 ```
 
 The installer creates:
+
 - `.claude/settings.json` — Hook registration for Claude Code
 - `.claude/hooks/*` — Forwarder scripts (route events to the daemon)
 - `.claude/init.sh` — Daemon lifecycle functions
@@ -251,6 +254,7 @@ Place handlers in `.claude/project-handlers/{event_type}/` — they're auto-disc
 ```
 
 **Priority ranges:**
+
 - `10–20` — Safety (destructive operations)
 - `25–35` — Code quality (linting, TDD)
 - `36–55` — Workflow (planning, conventions)
@@ -326,12 +330,12 @@ handlers:
 
 The daemon is designed for **fast, deterministic validation**. For reasoning-heavy evaluation, use Claude Code's native agent-based hooks.
 
-| Use Daemon For | Use Agent Hooks For |
-|----------------|---------------------|
-| Pattern matching (regex, string checks) | Workflow compliance validation |
-| Fast synchronous validation | Context analysis (transcripts, git state) |
-| Reusable safety rules across sessions | Multi-turn investigation |
-| Deterministic, stateless logic | Reasoning and judgment calls |
+| Use Daemon For                          | Use Agent Hooks For                       |
+| --------------------------------------- | ----------------------------------------- |
+| Pattern matching (regex, string checks) | Workflow compliance validation            |
+| Fast synchronous validation             | Context analysis (transcripts, git state) |
+| Reusable safety rules across sessions   | Multi-turn investigation                  |
+| Deterministic, stateless logic          | Reasoning and judgment calls              |
 
 ---
 

@@ -21,12 +21,15 @@ During plan 85 (Reminder Pseudo-Event System), the plan redirect system's UX fla
 ### Claude Code Plan Mode
 
 When Claude Code enters plan mode (`EnterPlanMode` tool), it assigns a random plan file path:
+
 ```
 /root/.claude/plans/{random-words}.md
 ```
+
 Example from this session: `/root/.claude/plans/idempotent-chasing-wadler.md`
 
 The system instructions tell Claude:
+
 - "You should create your plan at /root/.claude/plans/idempotent-chasing-wadler.md using the Write tool"
 - "You should build your plan incrementally by writing to or editing this file"
 - "NOTE that this is the only file you are allowed to edit"
@@ -59,6 +62,7 @@ The `markdown_organization` handler (PreToolUse, priority 50, BLOCKING) intercep
 The ExitPlanMode tool reads from `/root/.claude/plans/random-words.md` to show the user the plan. But this file now contains just the **redirect stub**, not the actual plan content!
 
 The redirect stub looks something like:
+
 ```markdown
 # Plan Redirect
 This plan has been saved to: CLAUDE/Plan/00085-descriptive-name/PLAN.md
@@ -71,23 +75,27 @@ So the user has to open a separate file to review the actual plan. **This breaks
 ## Issues Identified
 
 ### Issue 1: Plan Approval Shows Redirect Stub, Not Content
+
 - **Severity**: HIGH - breaks core UX
 - ExitPlanMode reads from `.claude/plans/random-words.md` which is just a redirect
 - User cannot review plan content in the approval UI
 - Must open separate file/window to read actual plan
 
 ### Issue 2: Rename Before Approval Creates Confusion
+
 - Agent renames folder before ExitPlanMode (because handler instructs it to)
 - The redirect stub still references the old random name
 - After rename, the redirect path is stale
 - Timing is non-deterministic (sometimes rename happens, sometimes not)
 
 ### Issue 3: Redirect Stub Has Stale Path After Rename
+
 - Redirect stub says `CLAUDE/Plan/00085-random-words/PLAN.md`
 - But folder was renamed to `CLAUDE/Plan/00085-descriptive-name/PLAN.md`
 - If user follows the redirect, it points to wrong location
 
 ### Issue 4: Plan Mode File Restriction
+
 - Plan mode says "this is the only file you are allowed to edit"
 - But the handler redirects to a different file
 - Creates tension between plan mode restrictions and redirect behaviour
@@ -97,6 +105,7 @@ So the user has to open a separate file to review the actual plan. **This breaks
 ## Current Handler Implementation
 
 The handler is `markdown_organization` in the PreToolUse handlers:
+
 - **File**: `src/claude_code_hooks_daemon/handlers/pre_tool_use/markdown_organization.py`
 - **Priority**: 50
 - **Behaviour**: BLOCKING
@@ -125,6 +134,7 @@ It matches Write/Edit tool calls to markdown files and enforces organization rul
 ## Brainstormed Solutions
 
 ### Option A: Keep Redirect + Append Full Plan Below
+
 - Write the redirect notice at top
 - Append the FULL plan content below for reference
 - Pro: ExitPlanMode shows actual content to user
@@ -132,6 +142,7 @@ It matches Write/Edit tool calls to markdown files and enforces organization rul
 - Con: If agent edits plan via the redirect path, edits go to wrong copy
 
 ### Option B: Write Plan Directly to Project Folder (Skip Redirect)
+
 - Don't intercept the write at all
 - Instead, have the agent write directly to `CLAUDE/Plan/NNNNN/PLAN.md`
 - This requires teaching the agent (via CLAUDE.md instructions) to write plans there
@@ -140,6 +151,7 @@ It matches Write/Edit tool calls to markdown files and enforces organization rul
 - Con: Plan mode UI won't show the plan (it reads from assigned path)
 
 ### Option C: Symlink Instead of Redirect
+
 - Create a symlink from `/root/.claude/plans/random-words.md` → `CLAUDE/Plan/NNNNN/PLAN.md`
 - ExitPlanMode would follow the symlink and show actual content
 - Pro: Transparent, single source of truth
@@ -147,6 +159,7 @@ It matches Write/Edit tool calls to markdown files and enforces organization rul
 - Con: Symlink target changes after rename
 
 ### Option D: Copy Content Back After Redirect
+
 - Handler redirects as before
 - But also copies full content to the redirect path (not just a stub)
 - Essentially: content exists at both paths, redirect path is the "mirror"
@@ -154,12 +167,14 @@ It matches Write/Edit tool calls to markdown files and enforces organization rul
 - Con: Two copies can diverge if agent edits one but not the other
 
 ### Option E: Investigate Claude Code Plan Mode Configuration
+
 - Research if Claude Code supports configuring the plan file path
 - If we can set it to `CLAUDE/Plan/NNNNN/PLAN.md` directly, no redirect needed
 - This would be the ideal solution if the feature exists
 - Need to research: Claude Code settings, plan mode configuration
 
 ### Option F: Post-Redirect Hook Update
+
 - After redirect, update the redirect stub to include full content
 - The hook itself writes: redirect header + full plan content to original path
 - ExitPlanMode shows everything
@@ -193,12 +208,14 @@ Location: `CLAUDE/Plan/00085-reminder-pseudo-event-system/PLAN.md`
 The `plansDirectory` setting was **hallucinated** by a research agent. It does not exist in Claude Code. There is no way to configure where Claude Code stores plan files.
 
 **What actually exists:**
+
 - Claude Code always assigns: `~/.claude/plans/{random-words}.md`
 - No setting to change this path
 - Plan mode is toggled via Shift+Tab or `--permission-mode plan`
 - ExitPlanMode reads from the assigned file path to show user the plan
 
 **Verified by searching:**
+
 - Claude Code official docs (docs.anthropic.com)
 - GitHub issues/discussions
 - Local settings.json files (project and user level)
@@ -218,6 +235,7 @@ ExitPlanMode reads from the plan file path assigned at EnterPlanMode time. The c
 The simplest fix is to change `handle_planning_mode_write()` (line 238-366 of `markdown_organization.py`) to write the **full plan content** to the redirect path instead of just a stub.
 
 **Current behavior** (line 286-300):
+
 ```python
 stub_content = (
     f"# Plan Redirect\n\n"
@@ -228,6 +246,7 @@ original_path.write_text(stub_content, encoding="utf-8")
 ```
 
 **Proposed behavior**:
+
 ```python
 # Write redirect header + FULL plan content
 mirror_content = (
@@ -238,6 +257,7 @@ original_path.write_text(mirror_content, encoding="utf-8")
 ```
 
 **Why this works:**
+
 1. ExitPlanMode reads from `~/.claude/plans/random-words.md`
 2. That file now contains the full plan content
 3. User sees the actual plan during approval
@@ -249,6 +269,7 @@ If the agent edits the plan via the redirect path, the markdown_organization han
 ### Recommended Fix: Move Rename After Approval
 
 Currently the DENY response instructs the agent to rename immediately. This causes:
+
 - Rename happens before ExitPlanMode
 - Redirect stub has stale path
 

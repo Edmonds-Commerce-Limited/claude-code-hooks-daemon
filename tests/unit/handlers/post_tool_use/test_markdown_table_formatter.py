@@ -98,9 +98,7 @@ class TestMatches:
         }
         assert handler.matches(hook_input) is True
 
-    def test_does_not_match_bash_tool(
-        self, handler: MarkdownTableFormatterHandler
-    ) -> None:
+    def test_does_not_match_bash_tool(self, handler: MarkdownTableFormatterHandler) -> None:
         hook_input: dict[str, Any] = {
             "tool_name": "Bash",
             "tool_input": {"command": "echo hello"},
@@ -129,9 +127,7 @@ class TestMatches:
         }
         assert handler.matches(hook_input) is False
 
-    def test_does_not_match_missing_file_path(
-        self, handler: MarkdownTableFormatterHandler
-    ) -> None:
+    def test_does_not_match_missing_file_path(self, handler: MarkdownTableFormatterHandler) -> None:
         hook_input: dict[str, Any] = {
             "tool_name": "Write",
             "tool_input": {},
@@ -204,9 +200,7 @@ class TestHandle:
         self, handler: MarkdownTableFormatterHandler, tmp_path: Path
     ) -> None:
         test_file = tmp_path / "doc.md"
-        test_file.write_text(
-            "# Top\n\n---\n\n## Section\n\n| a | b |\n|-|-|\n| 1 | 2 |\n"
-        )
+        test_file.write_text("# Top\n\n---\n\n## Section\n\n| a | b |\n|-|-|\n| 1 | 2 |\n")
         hook_input: dict[str, Any] = {
             "tool_name": "Write",
             "tool_input": {"file_path": str(test_file)},
@@ -259,9 +253,7 @@ class TestHandle:
         # Should not crash dispatch; should return ALLOW
         assert result.decision == Decision.ALLOW
 
-    def test_no_file_path_returns_allow(
-        self, handler: MarkdownTableFormatterHandler
-    ) -> None:
+    def test_no_file_path_returns_allow(self, handler: MarkdownTableFormatterHandler) -> None:
         hook_input: dict[str, Any] = {
             "tool_name": "Write",
             "tool_input": {},

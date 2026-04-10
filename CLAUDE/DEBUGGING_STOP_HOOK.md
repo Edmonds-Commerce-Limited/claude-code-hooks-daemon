@@ -3,6 +3,7 @@
 **Purpose**: Diagnose and fix dogfooding issues where the stop hook fails to block Claude from stopping when it should.
 
 **When to use this guide**:
+
 - Claude stops mid-task without a `STOPPING BECAUSE:` prefix and was not blocked
 - You had to type "go" or "continue" manually to resume Claude
 - `preventedContinuation: false` appears in a transcript when blocking was expected
@@ -23,6 +24,7 @@ user: "go"   ← manual resume, should never appear in a working session
 ```
 
 A working stop hook produces:
+
 ```
 stop_hook_summary: { preventedContinuation: true, level: "error" }
 ← Claude auto-continues, no user input needed
@@ -76,11 +78,13 @@ Claude Code wants to stop
 ## Transcript Data Model for Stop Events
 
 Claude Code session transcripts are JSONL files at:
+
 ```
 /root/.claude/projects/-workspace/<session-id>.jsonl
 ```
 
 Find the current session transcript:
+
 ```bash
 ls -t /root/.claude/projects/-workspace/*.jsonl | head -1
 ```
@@ -118,14 +122,15 @@ This confirms the hook was invoked. If this entry is absent, Claude Code never c
 
 This is the ground truth. Fields:
 
-| Field | Meaning when broken | Meaning when working |
-|-------|--------------------|--------------------|
-| `preventedContinuation` | `false` — hook did not block | `true` — hook blocked stop |
-| `level` | `"suggestion"` — daemon returned `{}` | `"error"` or `"block"` — decision field present |
-| `hasOutput` | `false` — hook produced no output | `true` — hook produced JSON |
-| `hookErrors` | Non-empty — hook script crashed | `[]` — no errors |
+| Field                   | Meaning when broken                   | Meaning when working                            |
+| ----------------------- | ------------------------------------- | ----------------------------------------------- |
+| `preventedContinuation` | `false` — hook did not block          | `true` — hook blocked stop                      |
+| `level`                 | `"suggestion"` — daemon returned `{}` | `"error"` or `"block"` — decision field present |
+| `hasOutput`             | `false` — hook produced no output     | `true` — hook produced JSON                     |
+| `hookErrors`            | Non-empty — hook script crashed       | `[]` — no errors                                |
 
 **The key diagnostic combination**:
+
 - `preventedContinuation: false` + `level: "suggestion"` + `hasOutput: true` = hook ran and returned `{}` (ALLOW). The daemon's `to_json()` produced an empty object. This means `HookResult` had `decision=ALLOW` and no context.
 - `preventedContinuation: false` + `hasOutput: false` = hook script produced nothing. Either daemon was down or the script itself crashed.
 
@@ -183,11 +188,13 @@ echo '{"hook_event_name":"Stop","stop_hook_active":false}' | /workspace/.claude/
 ```
 
 Working output:
+
 ```json
 {"decision":"block","reason":"You stopped without explaining why..."}
 ```
 
 Broken outputs and their meanings:
+
 - `{}` — hook script ran, daemon responded ALLOW
 - *(no output)* — hook script crashed or daemon unreachable
 - `{"error":"...","type":"hook_error"}` — daemon startup failed
@@ -201,6 +208,7 @@ echo '{"event":"Stop","hook_input":{"hook_event_name":"Stop","stop_hook_active":
 ```
 
 Working output includes `"decision":"deny"` at the top level:
+
 ```json
 {
   "result": {"decision":"deny","reason":"You stopped without explaining why...","context":[]},
@@ -220,11 +228,13 @@ tail -10 /workspace/untracked/stop-events.jsonl
 ```
 
 Each entry:
+
 ```json
 {"timestamp":"2026-03-30T10:00:00+00:00","decision":"deny","reason_prefix":"You stopped without...","stop_hook_active":false}
 ```
 
 Cross-reference with the transcript:
+
 - Log entry with `decision: deny` but transcript shows `preventedContinuation: false` → daemon is blocking but the response is not reaching Claude Code. The hook script → socket pipe is broken.
 - No log entry for a stop event that appears in transcript → handler never ran. Check daemon status.
 
@@ -239,6 +249,7 @@ Cross-reference with the transcript:
 ```
 
 If not `RUNNING`, restart it:
+
 ```bash
 /workspace/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
 ```
@@ -254,6 +265,7 @@ This is **correct behaviour**. If you see it during normal operation (not during
 ### 3. `force_explanation: false` in Config
 
 Check `.claude/hooks-daemon.yaml`:
+
 ```yaml
 handlers:
   stop:
@@ -327,22 +339,26 @@ tail -3 /workspace/untracked/stop-events.jsonl
 After any code change to the stop hook chain:
 
 1. Restart the daemon:
+
    ```bash
    /workspace/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
    /workspace/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli status
    ```
 
 2. Run the hook script test:
+
    ```bash
    echo '{"hook_event_name":"Stop","stop_hook_active":false}' | /workspace/.claude/hooks/stop
    ```
 
 3. Run the unit tests:
+
    ```bash
    /workspace/untracked/venv/bin/pytest tests/unit/handlers/stop/ -v
    ```
 
 4. Run full QA:
+
    ```bash
    ./scripts/qa/run_all.sh
    ```

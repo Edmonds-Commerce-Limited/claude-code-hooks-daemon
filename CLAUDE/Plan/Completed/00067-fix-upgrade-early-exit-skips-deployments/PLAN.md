@@ -5,11 +5,12 @@
 ## Context
 
 `upgrade_version.sh` lines 159-171 have an early-exit for when the daemon is already at the target version. It only restarts the daemon and exits, bypassing:
+
 - Step 8: Redeploy hook scripts
 - Step 9: Redeploy settings.json
 - Step 11: .gitignore
 - Step 12: Redeploy slash commands
-- Step 13: Redeploy skills  ← root cause of missing skills
+- Step 13: Redeploy skills ← root cause of missing skills
 
 Skills were added in Plan 00061 (Feb 17 2026). Projects already on v2.16.0 when skills landed can't get them deployed because re-running upgrade exits early.
 

@@ -14,6 +14,7 @@ The TDD enforcement handler currently uses a single hardcoded path mapping that 
 This causes false positives where the handler blocks file creation even though a valid test exists in a different (but valid) location.
 
 **Root cause:** The handler assumes Python's convention (strip package name, use `tests/unit/`) but different languages and projects use different conventions:
+
 - **Python**: `tests/unit/` with package stripped
 - **PHP PSR-4**: `tests/` mirrors `src/` exactly
 - **Java**: `src/test/` mirrors `src/main/`
@@ -31,10 +32,12 @@ This causes false positives where the handler blocks file creation even though a
 For a source file `src/Package/SubDir/File.ext`:
 
 1. **Mirror mapping** (NEW): `tests/Package/SubDir/TestFile.ext`
+
    - Mirrors full `src/` structure under `tests/`
    - Handles PHP PSR-4, Java standard layout, etc.
 
 2. **Current mapping**: `tests/unit/SubDir/TestFile.ext`
+
    - Strips package directory (first dir after `src/`)
    - Python convention (this project's own structure)
 
@@ -155,12 +158,14 @@ def _map_src_to_tests_mirror(path_parts: tuple[str, ...], test_filename: str) ->
 ## Critical Files to Modify
 
 1. **`src/claude_code_hooks_daemon/handlers/pre_tool_use/tdd_enforcement.py`**
+
    - Rename `_get_test_file_path()` → `_get_test_file_paths()` (returns `list[Path]`)
    - Update `handle()` to check all candidates with `any(path.exists() for path in candidates)`
    - Add new `_map_src_to_tests_mirror()` static method
    - Update error message to show all searched locations
 
 2. **`tests/unit/handlers/test_tdd_enforcement.py`**
+
    - Add regression test for bug: source with test in mirror location should ALLOW
    - Add test: source with test in current location (strip package) should ALLOW
    - Add test: source with no test in ANY location should DENY
@@ -276,11 +281,11 @@ Test with real PHP project structure:
 
 ## Risks & Mitigations
 
-| Risk | Mitigation |
-|------|------------|
+| Risk                                       | Mitigation                                                       |
+| ------------------------------------------ | ---------------------------------------------------------------- |
 | Performance (multiple path.exists() calls) | Typically 2-3 checks max, filesystem cache makes this negligible |
-| False negatives (allows without test) | List is finite and ordered by convention strength |
-| Confusing error message (many paths) | Show all candidates with clear labels |
+| False negatives (allows without test)      | List is finite and ordered by convention strength                |
+| Confusing error message (many paths)       | Show all candidates with clear labels                            |
 
 ## Definition of Done
 
@@ -298,6 +303,7 @@ Test with real PHP project structure:
 ## Completion Summary
 
 Successfully implemented multi-path detection for TDD handler. The handler now checks multiple candidate paths in priority order:
+
 1. Mirror mapping (tests/{package}/ - PHP PSR-4, Java)
 2. Current mapping (tests/unit/ - Python convention)
 3. Fallback mapping (controller-relative)

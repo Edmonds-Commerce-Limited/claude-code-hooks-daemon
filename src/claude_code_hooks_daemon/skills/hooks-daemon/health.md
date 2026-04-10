@@ -9,6 +9,7 @@ Check the status and health of your Claude Code Hooks Daemon.
 ```
 
 Displays:
+
 - Daemon status (running/stopped)
 - Handler load counts (library + project handlers)
 - Configuration validity
@@ -23,6 +24,7 @@ Displays:
 ```
 
 Logs show:
+
 - Daemon startup messages
 - Handler loading results
 - Hook event processing
@@ -32,6 +34,7 @@ Logs show:
 ## Health Check Output
 
 Example healthy output:
+
 ```
 ✅ Daemon Status: RUNNING (PID: 12345)
 ✅ Socket: /workspace/.claude/hooks-daemon/untracked/daemon-hostname.sock
@@ -42,6 +45,7 @@ Example healthy output:
 ```
 
 Example degraded output:
+
 ```
 ⚠️  Daemon Status: RUNNING (PID: 12345) - DEGRADED MODE
 ⚠️  Socket: /workspace/.claude/hooks-daemon/untracked/daemon-hostname.sock
@@ -66,6 +70,7 @@ See logs for details: /hooks-daemon logs
 ```
 
 **Fix:**
+
 ```bash
 $PYTHON -m claude_code_hooks_daemon.daemon.cli restart
 ```
@@ -77,11 +82,13 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli restart
 ```
 
 **Causes:**
+
 - Plugin handler missing required abstract methods (e.g., `get_acceptance_tests()` in v2.13.0+)
 - Handler import errors
 - Invalid handler configuration
 
 **Fix:**
+
 1. Check logs: `/hooks-daemon logs`
 2. Fix handler issues
 3. Restart daemon
@@ -93,6 +100,7 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli restart
 ```
 
 **Fix:**
+
 1. Check config file: `.claude/hooks-daemon.yaml`
 2. Compare with example: `.claude/hooks-daemon.yaml.example`
 3. Fix syntax errors or invalid values
@@ -116,6 +124,7 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli validate-config
 ## Troubleshooting
 
 See [references/troubleshooting.md](references/troubleshooting.md) for:
+
 - Common error messages
 - Handler load failures
 - DEGRADED MODE recovery

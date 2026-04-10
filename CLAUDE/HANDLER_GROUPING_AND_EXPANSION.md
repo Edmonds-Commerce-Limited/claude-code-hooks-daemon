@@ -28,6 +28,7 @@ class MyHandler(Handler):
 **Standard Tag Categories:**
 
 **Languages:**
+
 - `python`
 - `php`
 - `javascript`
@@ -40,6 +41,7 @@ class MyHandler(Handler):
 - `css`
 
 **Frameworks/Ecosystems:**
+
 - `react`
 - `vue`
 - `angular`
@@ -51,6 +53,7 @@ class MyHandler(Handler):
 - `nextjs`
 
 **Handler Types:**
+
 - `tdd` - Test-driven development enforcement
 - `qa-enforcement` - Code quality/linting enforcement
 - `qa-suppression-prevention` - Blocks lazy QA suppression comments
@@ -59,11 +62,13 @@ class MyHandler(Handler):
 - `advisory` - Non-blocking suggestions
 
 **Project-Specific:**
+
 - `project-specific` - Handlers that should NOT be in core library
 
 ### 2. Configuration Schema for Tag-Based Groups
 
 **Option A: Enable by tags**
+
 ```yaml
 handlers:
   pre_tool_use:
@@ -84,6 +89,7 @@ handlers:
 ```
 
 **Option B: Tag groups + individual overrides**
+
 ```yaml
 handler_groups:
   python_full:
@@ -110,6 +116,7 @@ handlers:
 ```
 
 **Option C: Hybrid (recommended)**
+
 ```yaml
 handlers:
   pre_tool_use:
@@ -134,9 +141,11 @@ handlers:
 Create handlers to block lazy QA suppression across languages:
 
 #### Python: `python_qa_suppression_blocker.py`
+
 **Tags:** `[python, qa-suppression-prevention]`
 
 Blocks:
+
 - `# type: ignore` (MyPy)
 - `# noqa` (Ruff, Flake8)
 - `# pylint: disable`
@@ -144,50 +153,61 @@ Blocks:
 - `@pytest.mark.skip` without reason
 
 **Exceptions:**
+
 - Allow with detailed justification: `# type: ignore[import]  # Justification: third-party types unavailable`
 - Allow in test fixtures: `tests/fixtures/`
 - Allow in migrations: `migrations/`
 
 #### PHP: `php_qa_suppression_blocker.py`
+
 **Tags:** `[php, qa-suppression-prevention]`
 
 Blocks:
+
 - `@phpstan-ignore-next-line`
 - `@psalm-suppress`
 - `@codingStandardsIgnoreLine`
 - `// phpcs:ignore`
 
 **Exceptions:**
+
 - Allow with detailed justification
 - Allow in legacy directories (configurable)
 - Allow in vendor/
 
 #### TypeScript/JavaScript: `typescript_qa_suppression_blocker.py`
+
 **Tags:** `[typescript, javascript, qa-suppression-prevention]`
 
 Blocks:
+
 - `// eslint-disable` (already exists as `eslint_disable.py`)
 - `// @ts-ignore`
 - `// @ts-expect-error` without reason
 - `// tslint:disable`
 
 **Exceptions:**
+
 - Allow with detailed justification
 - Allow in .d.ts files
 - Allow in node_modules/
 
 #### Go: `go_qa_suppression_blocker.py`
+
 **Tags:** `[go, qa-suppression-prevention]`
 
 Blocks:
+
 - `//nolint`
 - `//go:generate` with dangerous commands
 
 **Exceptions:**
+
 - Allow with detailed justification
 - Allow in generated code files
 
 #### Other Languages
+
 - **Rust:** Block `#[allow(clippy::...)]` without justification
 - **Java:** Block `@SuppressWarnings` without reason
 - **Ruby:** Block `# rubocop:disable` without reason
@@ -197,52 +217,68 @@ Blocks:
 For each language, implement three handler types:
 
 #### TDD Enforcement
+
 **Existing:**
+
 - Python: `tdd_enforcement.py` (tags: `[python, tdd]`)
 
 **To Create:**
+
 - `php_tdd_enforcement.py` (tags: `[php, tdd]`)
+
   - Ensure test files exist for new classes
   - Prevent changing code without running PHPUnit
 
 - `typescript_tdd_enforcement.py` (tags: `[typescript, javascript, tdd]`)
+
   - Ensure test files exist for new components
   - Prevent changing code without running Jest/Vitest
 
 - `go_tdd_enforcement.py` (tags: `[go, tdd]`)
+
   - Ensure test files exist for new packages
   - Prevent changing code without running `go test`
 
 #### QA Enforcement
+
 **To Create:**
+
 - `python_qa_enforcement.py` (tags: `[python, qa-enforcement]`)
+
   - Ensure MyPy passes before commits
   - Ensure Ruff passes before commits
   - Ensure test coverage threshold met
 
 - `php_qa_enforcement.py` (tags: `[php, qa-enforcement]`)
+
   - Ensure PHPStan passes before commits
   - Ensure PHP-CS-Fixer passes before commits
   - Ensure Psalm passes before commits
 
 - `typescript_qa_enforcement.py` (tags: `[typescript, javascript, qa-enforcement]`)
+
   - Ensure TypeScript compiler passes before commits
   - Ensure ESLint passes before commits
   - Ensure Prettier passes before commits
 
 #### Coding Standards
+
 **To Create:**
+
 - `python_standards.py` (tags: `[python, advisory]`)
+
   - Suggest type hints for function parameters
   - Suggest docstrings for public functions
   - Warn about bare `except:` clauses
 
 - `php_standards.py` (tags: `[php, advisory]`)
+
   - Suggest type hints for function parameters
   - Suggest PHPDoc blocks for public methods
   - Warn about deprecated PHP features
 
 - `typescript_standards.py` (tags: `[typescript, javascript, advisory]`)
+
   - Suggest explicit return types
   - Warn about `any` types
   - Suggest JSDoc for public APIs
@@ -252,6 +288,7 @@ For each language, implement three handler types:
 **Handlers to Mark as Project-Specific:**
 
 1. **`validate_sitemap.py`** (tags: `[project-specific]`)
+
    - Specific to EC's sitemap validation system
    - References `CLAUDE/Sitemap/` directory structure
    - References `sitemap-validator` agent (EC-specific)
@@ -259,6 +296,7 @@ For each language, implement three handler types:
    **Action:** Add deprecation warning, suggest moving to plugin system
 
 **Audit Needed:**
+
 - Review all handlers for EC-specific assumptions
 - Check for hardcoded paths to EC project structures
 - Check for references to EC-specific tooling
@@ -266,6 +304,7 @@ For each language, implement three handler types:
 ### 6. Implementation Plan
 
 #### Phase 1: Core Tagging System (v2.2.0)
+
 1. Add `tags: list[str]` to Handler base class
 2. Update all existing handlers with appropriate tags
 3. Add tag-based filtering to FrontController
@@ -274,6 +313,7 @@ For each language, implement three handler types:
 6. Document tagging system in HANDLER_DEVELOPMENT.md
 
 #### Phase 2: QA Suppression Prevention (v2.3.0)
+
 1. Create `python_qa_suppression_blocker.py`
 2. Create `php_qa_suppression_blocker.py`
 3. Extend existing `eslint_disable.py` → `typescript_qa_suppression_blocker.py`
@@ -282,6 +322,7 @@ For each language, implement three handler types:
 6. Update default config with QA suppression handlers
 
 #### Phase 3: Language-Specific TDD (v2.4.0)
+
 1. Create `php_tdd_enforcement.py`
 2. Create `typescript_tdd_enforcement.py`
 3. Create `go_tdd_enforcement.py`
@@ -289,17 +330,20 @@ For each language, implement three handler types:
 5. Update default config
 
 #### Phase 4: QA Enforcement Handlers (v2.5.0)
+
 1. Create `python_qa_enforcement.py`
 2. Create `php_qa_enforcement.py`
 3. Create `typescript_qa_enforcement.py`
 4. Add tests for each handler
 
 #### Phase 5: Coding Standards Handlers (v2.6.0)
+
 1. Create advisory handlers for Python, PHP, TypeScript
 2. Make them non-terminal (suggestions only)
 3. Add configuration for severity levels
 
 #### Phase 6: Project-Specific Cleanup (v3.0.0 - Breaking)
+
 1. Mark project-specific handlers with deprecation warnings
 2. Move project-specific handlers to separate package
 3. Document migration path for users with project-specific handlers
@@ -308,6 +352,7 @@ For each language, implement three handler types:
 ### 7. Configuration Examples
 
 #### Python Developer Config
+
 ```yaml
 handlers:
   pre_tool_use:
@@ -326,6 +371,7 @@ handlers:
 ```
 
 #### Full-Stack Developer Config
+
 ```yaml
 handlers:
   pre_tool_use:
@@ -342,6 +388,7 @@ handlers:
 ```
 
 #### Minimal Safety-Only Config
+
 ```yaml
 handlers:
   pre_tool_use:
@@ -363,12 +410,14 @@ handlers:
 ## Migration Path
 
 **v2.1.0 → v2.2.0 (Tagging System):**
+
 - No breaking changes
 - Old config still works (enable handlers individually)
 - New `enable_tags` feature is optional
 - All handlers get default tags
 
 **v2.2.0 → v3.0.0 (Project-Specific Cleanup):**
+
 - Breaking: Remove project-specific handlers from core
 - Migration guide: Move to plugin system
 - Deprecated handlers show warnings in v2.x

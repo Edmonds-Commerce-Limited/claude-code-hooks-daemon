@@ -43,19 +43,20 @@ This suggests a new architectural concept: **pseudo-events**.
 
 Claude Code fires these real events:
 
-| Event | When | Frequency | Can Block? |
-|-------|------|-----------|------------|
-| SessionStart | Session begins | Once | No |
-| UserPromptSubmit | User sends message | Per message | Yes |
-| PreToolUse | Before tool execution | Per tool call (HIGH) | Yes |
-| PostToolUse | After tool execution | Per tool call (HIGH) | No (advisory) |
-| Stop | Agent finishes responding | Unreliable/rare | No (advisory) |
-| SubagentStop | Subagent finishes | Per subagent | No (advisory) |
-| Notification | Agent sends notification | Per notification | No |
-| PreCompact | Before context compaction | Per compaction | No |
-| SessionEnd | Session ends | Once | No |
+| Event            | When                      | Frequency            | Can Block?    |
+| ---------------- | ------------------------- | -------------------- | ------------- |
+| SessionStart     | Session begins            | Once                 | No            |
+| UserPromptSubmit | User sends message        | Per message          | Yes           |
+| PreToolUse       | Before tool execution     | Per tool call (HIGH) | Yes           |
+| PostToolUse      | After tool execution      | Per tool call (HIGH) | No (advisory) |
+| Stop             | Agent finishes responding | Unreliable/rare      | No (advisory) |
+| SubagentStop     | Subagent finishes         | Per subagent         | No (advisory) |
+| Notification     | Agent sends notification  | Per notification     | No            |
+| PreCompact       | Before context compaction | Per compaction       | No            |
+| SessionEnd       | Session ends              | Once                 | No            |
 
 **Key insight**: PreToolUse is the only high-frequency event that can block. All quality enforcement currently either:
+
 - Uses PreToolUse (blocking handlers for dangerous commands) — **reliable**
 - Uses Stop/PostToolUse (advisory handlers for language quality) — **unreliable**
 
@@ -169,6 +170,7 @@ handlers:
 ### Blocking vs Advisory
 
 Two modes:
+
 - **Advisory** (default): Inject context warning but allow tool to proceed
 - **Blocking**: Block the tool call, forcing the agent to acknowledge and correct
 
@@ -204,18 +206,19 @@ Adding a new checker = one file with patterns. No wiring, no registration boiler
 
 **Decision**: Reset `last_audited_uuid` and `last_byte_offset` to zero on context compaction.
 
-**Rationale**: After compaction, the agent's context is reset. Re-auditing a few messages (~5 max from audit window) is harmless at <2ms. The alternative (preserving state across compaction via PreCompact) adds complexity for negligible benefit.
+**Rationale**: After compaction, the agent's context is reset. Re-auditing a few messages (~5 max from audit window) is harmless at \<2ms. The alternative (preserving state across compaction via PreCompact) adds complexity for negligible benefit.
 
 ### Q4: Performance — benchmarked, no concerns
 
 **Decision**: Use byte-offset incremental reading. Full parse is fast enough as fallback.
 
 **Benchmarks** (3.9MB transcript, 1732 entries, 426 assistant messages):
+
 - Full parse: **15.8ms** (well under 50ms budget)
 - Seek-based (last 500KB): **1.8ms**
 - Last 100 lines: **4.5ms**
 
-**Incremental approach**: Store `last_byte_offset` in NitpickState. On each trigger, seek to offset, read only new lines, parse only new entries. Expected overhead: **<2ms per PreToolUse call**.
+**Incremental approach**: Store `last_byte_offset` in NitpickState. On each trigger, seek to offset, read only new lines, parse only new entries. Expected overhead: **\<2ms per PreToolUse call**.
 
 **Fallback**: If offset becomes stale (file truncated/rotated), fall back to full parse at 15.8ms — still safe.
 
@@ -223,7 +226,7 @@ Adding a new checker = one file with patterns. No wiring, no registration boiler
 
 **Decision**: Default `trigger_frequency: 1` (every call).
 
-**Rationale**: With <2ms incremental overhead, there's no performance reason to skip calls. Every PreToolUse = every tool call = every turn boundary. Missing a call means potentially missing dismissive language until the next call.
+**Rationale**: With \<2ms incremental overhead, there's no performance reason to skip calls. Every PreToolUse = every tool call = every turn boundary. Missing a call means potentially missing dismissive language until the next call.
 
 The `trigger_frequency` config option is kept for users who want to reduce overhead in very long sessions, but defaults to every call.
 
@@ -332,13 +335,15 @@ The `trigger_frequency` config option is kept for users who want to reduce overh
 ## Notes & Updates
 
 ### 2026-03-09 (continued)
+
 - Research phase complete (tasks 1.1-1.8)
 - Benchmarked transcript reading: 15.8ms full parse (3.9MB), 1.8ms seek-based
 - Real transcripts: type=assistant/user (not human/message), 97.6% have UUIDs
-- Resolved all 5 open questions: Strategies, internal dispatch, reset on compaction, <2ms incremental, every-call trigger
+- Resolved all 5 open questions: Strategies, internal dispatch, reset on compaction, \<2ms incremental, every-call trigger
 - Revised task plan: 5 phases, 23 tasks
 
 ### 2026-03-09
+
 - Plan created from dogfooding failure investigation
 - TranscriptReader crash and pattern gaps fixed (commit `226b43c`)
 - Research phase tasks 1.1-1.4 complete

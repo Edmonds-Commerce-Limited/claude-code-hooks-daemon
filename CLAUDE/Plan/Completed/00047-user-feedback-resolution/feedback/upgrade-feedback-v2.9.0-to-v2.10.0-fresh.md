@@ -27,6 +27,7 @@ The v2.9.0 → v2.10.0 upgrade was **dramatically better** than the previous v2.
 ### Phase 1: Prerequisites Check ✅
 
 **Starting State**:
+
 ```bash
 $ pwd
 /workspace
@@ -39,12 +40,14 @@ __version__ = "2.9.0"
 ```
 
 **Git Status**:
+
 ```bash
 $ git status --short
  M .claude/hooks-daemon.yaml  ← From previous manual config fix
 ```
 
 **Action Taken**: Reset to clean state
+
 ```bash
 $ cd /workspace/.claude/hooks-daemon
 $ git reset --hard HEAD
@@ -83,6 +86,7 @@ $ wc -l /tmp/upgrade-fresh.sh
 ```
 
 **Script Analysis**:
+
 - **Line count**: 202 lines (was 148 in v2.9.0 Layer 1)
 - **Key change**: Now requires `--project-root PATH` argument
 - **New features**:
@@ -92,6 +96,7 @@ $ wc -l /tmp/upgrade-fresh.sh
   - Better error messages
 
 **Header excerpt**:
+
 ```bash
 #!/bin/bash
 # Claude Code Hooks Daemon - Upgrade Script (Layer 1)
@@ -106,11 +111,13 @@ $ wc -l /tmp/upgrade-fresh.sh
 ### Phase 4: Execute Upgrade Script ✅
 
 **Command**:
+
 ```bash
 $ bash /tmp/upgrade-fresh.sh --project-root /workspace
 ```
 
 **Complete Output**:
+
 ```
 Claude Code Hooks Daemon - Upgrade
 ========================================
@@ -156,6 +163,7 @@ Logs: in-memory (query with 'logs' command)
 **Analysis of Output**:
 
 1. **Layer 1 Execution** (Lines 1-9):
+
    - ✅ Accepted explicit `--project-root /workspace`
    - ✅ Validated Python version (3.11.2)
    - ✅ Confirmed daemon directory location
@@ -166,6 +174,7 @@ Logs: in-memory (query with 'logs' command)
    - ✅ Delegated to Layer 2
 
 2. **Layer 2 Execution** (Lines 11-27):
+
    - ✅ Safety checks passed
    - ✅ Detected code already at v2.10.0
    - ✅ Skipped unnecessary checkout (smart!)
@@ -180,6 +189,7 @@ Logs: in-memory (query with 'logs' command)
 ### Phase 5: Verification ✅
 
 **Version Check**:
+
 ```bash
 $ PYTHON=/workspace/.claude/hooks-daemon/untracked/venv/bin/python
 $ $PYTHON -c "from claude_code_hooks_daemon.version import __version__; print(f'Daemon version: {__version__}')"
@@ -187,6 +197,7 @@ Daemon version: 2.10.0  ✅
 ```
 
 **Status Check**:
+
 ```bash
 $ $PYTHON -m claude_code_hooks_daemon.daemon.cli status
 Daemon: RUNNING
@@ -196,11 +207,13 @@ PID file: /workspace/.claude/hooks-daemon/untracked/daemon-6071d6e26807.pid
 ```
 
 **Path Verification**:
+
 - ✅ Socket: `/workspace/.claude/hooks-daemon/untracked/daemon-*.sock` (CORRECT)
 - ✅ PID file: `/workspace/.claude/hooks-daemon/untracked/daemon-*.pid` (CORRECT)
 - ✅ No nested `/workspace/.claude/hooks-daemon/.claude/hooks-daemon/untracked/` (FIXED!)
 
 **Nested Directory Check**:
+
 ```bash
 $ ls -la /workspace/.claude/hooks-daemon/.claude/
 total 52
@@ -219,16 +232,16 @@ drwxr-xr-x. skills/
 
 ## Comparison: v2.4.0→v2.9.0 vs v2.9.0→v2.10.0
 
-| Aspect | v2.4.0 → v2.9.0 (Previous) | v2.9.0 → v2.10.0 (This Attempt) |
-|--------|---------------------------|----------------------------------|
-| **Layer 1 Detection** | ❌ Failed (unknown reason) | ✅ Explicit `--project-root` required |
-| **Layer 2 Execution** | ❌ Legacy fallback used | ✅ Full Layer 2 orchestration |
-| **Config Migration** | ❌ Not performed | ✅ Checked (not needed) |
-| **Nested Cleanup** | ❌ Manual fix required | ✅ Automatic detection & removal |
-| **Manual Steps** | ❌ Config format fix needed | ✅ Zero manual steps |
-| **Daemon Paths** | ⚠️ Nested (wrong) | ✅ Correct paths |
-| **Time Required** | ~10 minutes | ~2 minutes |
-| **User Experience** | 😞 Frustrating | 😊 Smooth |
+| Aspect                | v2.4.0 → v2.9.0 (Previous)  | v2.9.0 → v2.10.0 (This Attempt)       |
+| --------------------- | --------------------------- | ------------------------------------- |
+| **Layer 1 Detection** | ❌ Failed (unknown reason)  | ✅ Explicit `--project-root` required |
+| **Layer 2 Execution** | ❌ Legacy fallback used     | ✅ Full Layer 2 orchestration         |
+| **Config Migration**  | ❌ Not performed            | ✅ Checked (not needed)               |
+| **Nested Cleanup**    | ❌ Manual fix required      | ✅ Automatic detection & removal      |
+| **Manual Steps**      | ❌ Config format fix needed | ✅ Zero manual steps                  |
+| **Daemon Paths**      | ⚠️ Nested (wrong)           | ✅ Correct paths                      |
+| **Time Required**     | ~10 minutes                 | ~2 minutes                            |
+| **User Experience**   | 😞 Frustrating              | 😊 Smooth                             |
 
 ---
 
@@ -237,6 +250,7 @@ drwxr-xr-x. skills/
 ### 1. Explicit Project Root Argument ⭐⭐⭐⭐⭐
 
 **Old Approach** (v2.9.0 Layer 1):
+
 ```bash
 # Auto-detect project root by walking up directory tree
 current = Path.cwd()
@@ -247,11 +261,13 @@ while current != current.parent:
 ```
 
 **Problems**:
+
 - Found `/workspace/.claude/hooks-daemon/.claude/` first (nested)
 - No way to override incorrect detection
 - User couldn't specify correct path
 
 **New Approach** (v2.10.0 Layer 1):
+
 ```bash
 # Usage: bash upgrade.sh --project-root /workspace [VERSION]
 
@@ -269,6 +285,7 @@ fi
 ```
 
 **Benefits**:
+
 - ✅ No ambiguity - user specifies exact path
 - ✅ Clear error if path is wrong
 - ✅ Works reliably in all scenarios (normal, self-install, nested)
@@ -279,6 +296,7 @@ fi
 ### 2. Automatic Nested Artifact Cleanup ⭐⭐⭐⭐⭐
 
 **What It Does**:
+
 ```bash
 # From upgrade script output:
 WARN Cleaning up nested install artifacts: /workspace/.claude/hooks-daemon/.claude/hooks-daemon
@@ -286,6 +304,7 @@ OK Nested install artifacts removed
 ```
 
 **Code** (from new Layer 1 script):
+
 ```bash
 # Check for and remove nested install artifacts
 NESTED_ARTIFACT="$DAEMON_DIR/.claude/hooks-daemon"
@@ -297,11 +316,13 @@ fi
 ```
 
 **What It Removes**:
+
 - `/workspace/.claude/hooks-daemon/.claude/hooks-daemon/untracked/` (wrong runtime files)
 - PID files, socket files, log files at wrong locations
 - Any leftover state from previous buggy upgrades
 
 **What It Preserves**:
+
 - `/workspace/.claude/hooks-daemon/.claude/` (template directory for project handlers)
 - User configs, hooks, settings
 
@@ -310,16 +331,19 @@ fi
 ### 3. Python Version Validation ⭐⭐⭐
 
 **New Check**:
+
 ```bash
 OK Compatible Python found: /usr/bin/python3 (Python 3.11.2)
 ```
 
 **What It Checks**:
+
 - Python 3.11, 3.12, or 3.13 available
 - Python executable exists at expected path
 - Clear error if Python version incompatible
 
 **Why It Matters**:
+
 - Prevents upgrade on systems with old Python
 - Catches environment issues early
 - Provides clear fix instructions
@@ -327,6 +351,7 @@ OK Compatible Python found: /usr/bin/python3 (Python 3.11.2)
 ### 4. Smart Skip When Already At Version ⭐⭐⭐⭐
 
 **Layer 2 Behavior**:
+
 ```
 → Current version: 2.10.0
 → Current git ref: v2.10.0
@@ -335,12 +360,14 @@ OK Compatible Python found: /usr/bin/python3 (Python 3.11.2)
 ```
 
 **What This Means**:
+
 - Detects code is already at target version
 - Skips unnecessary git operations
 - Still performs validation and daemon restart
 - Idempotent - safe to run multiple times
 
 **Use Cases**:
+
 - Re-running upgrade after failure
 - Validating installation after manual changes
 - Smoke testing without making changes
@@ -348,6 +375,7 @@ OK Compatible Python found: /usr/bin/python3 (Python 3.11.2)
 ### 5. Better Progress Output ⭐⭐⭐
 
 **Clear Sections**:
+
 ```
 ============================================================
 Claude Code Hooks Daemon - Upgrade
@@ -365,6 +393,7 @@ Step 2: Pre-upgrade checks
 ```
 
 **Benefits**:
+
 - Easy to see what's happening
 - Clear separation of phases
 - Can identify where failure occurred
@@ -377,6 +406,7 @@ Step 2: Pre-upgrade checks
 ### 1. Hook Forwarder Nested Installation Detection ⚠️
 
 **Issue**:
+
 ```bash
 $ echo '{"tool_name":"Bash","tool_input":{"command":"echo test"}}' | /workspace/.claude/hooks/pre-tool-use
 HOOKS DAEMON ERROR [nested_installation]: NESTED INSTALLATION DETECTED!
@@ -385,6 +415,7 @@ Remove /workspace/.claude/hooks-daemon and reinstall.
 ```
 
 **Root Cause**:
+
 - Hook forwarder script (init.sh) checks for nested installation
 - Sees `/workspace/.claude/hooks-daemon/.claude/` directory
 - Doesn't distinguish between:
@@ -392,11 +423,13 @@ Remove /workspace/.claude/hooks-daemon and reinstall.
   - Intentional template directory (should allow)
 
 **Why `.claude/` Is There**:
+
 - v2.10.0 includes `.claude/` in git as template for Project-Level Handlers feature
 - This is intentional, documented, and tracked in version control
 - Contains example handlers, README files, configuration templates
 
 **Current Detection Logic**:
+
 ```bash
 # In init.sh
 if [[ -d "$DAEMON_DIR/.claude" ]]; then
@@ -406,6 +439,7 @@ fi
 ```
 
 **Recommended Fix**:
+
 ```bash
 # Check for nested RUNTIME artifacts, not template directories
 NESTED_RUNTIME="$DAEMON_DIR/.claude/hooks-daemon"
@@ -417,6 +451,7 @@ fi
 ```
 
 **Why This Fix**:
+
 - Checks for actual problem (runtime files in wrong location)
 - Allows intentional `.claude/` template directory
 - More specific error message
@@ -425,6 +460,7 @@ fi
 ### 2. Missing Upgrade Guide: v2.9.0 → v2.10.0 ⚠️
 
 **Current State**:
+
 ```bash
 $ ls -la /workspace/.claude/hooks-daemon/CLAUDE/UPGRADES/v2/
 total 0
@@ -432,6 +468,7 @@ drwxr-xr-x. v2.0-to-v2.1/
 ```
 
 **Missing**:
+
 - v2.1-to-v2.2
 - v2.2-to-v2.3
 - ...
@@ -439,6 +476,7 @@ drwxr-xr-x. v2.0-to-v2.1/
 - v2.9-to-v2.10 ← **Should exist for this upgrade**
 
 **Why It Matters**:
+
 - LLM-UPDATE.md references UPGRADES directory
 - Users expect to find migration guides
 - Especially important for breaking changes
@@ -446,6 +484,7 @@ drwxr-xr-x. v2.0-to-v2.1/
 
 **Recommendation**:
 Create `/workspace/.claude/hooks-daemon/CLAUDE/UPGRADES/v2/v2.9-to-v2.10/` with:
+
 - Main guide: `v2.9-to-v2.10.md`
 - Config examples (if changes)
 - Verification script
@@ -454,11 +493,13 @@ Create `/workspace/.claude/hooks-daemon/CLAUDE/UPGRADES/v2/v2.9-to-v2.10/` with:
 ### 3. Documentation: Project-Level Handlers Feature 📚
 
 **What Changed**:
+
 - v2.10.0 introduces `.claude/` directory in daemon repo
 - Contains templates for project-level handlers
 - New feature not clearly explained in upgrade context
 
 **User Confusion**:
+
 - "Why is there a `.claude/` directory inside `.claude/hooks-daemon/`?"
 - "Is this a nested installation?"
 - "Should I delete it?"
@@ -491,6 +532,7 @@ Do NOT delete this directory unless you're removing the daemon entirely.
 **Comparison**:
 
 **v2.4.0 → v2.9.0**:
+
 1. Run upgrade script
 2. ❌ Script fails with config validation error
 3. Manually investigate Pydantic error
@@ -501,6 +543,7 @@ Do NOT delete this directory unless you're removing the daemon entirely.
 8. Manually verify success
 
 **v2.9.0 → v2.10.0**:
+
 1. Run upgrade script with `--project-root`
 2. ✅ Success!
 
@@ -509,6 +552,7 @@ Do NOT delete this directory unless you're removing the daemon entirely.
 ### 2. Automatic Problem Detection and Fixing
 
 **What Script Does Automatically**:
+
 - ✅ Detects nested runtime artifacts
 - ✅ Removes them before they cause issues
 - ✅ Validates paths are correct
@@ -516,6 +560,7 @@ Do NOT delete this directory unless you're removing the daemon entirely.
 - ✅ Verifies daemon starts successfully
 
 **User Doesn't Need To**:
+
 - Understand nested installation issue
 - Manually diagnose path problems
 - Know where artifacts should be
@@ -524,11 +569,13 @@ Do NOT delete this directory unless you're removing the daemon entirely.
 ### 3. Layer 2 Actually Worked This Time
 
 **v2.4.0 → v2.9.0**:
+
 ```
 WARN Layer 2 upgrader not found. Using legacy upgrade flow...
 ```
 
 **v2.9.0 → v2.10.0**:
+
 ```
 >>> Delegating to version-specific upgrader...
 ============================================================
@@ -537,6 +584,7 @@ Claude Code Hooks Daemon - Upgrade
 ```
 
 **Why It Worked**:
+
 - Explicit project root meant correct path from start
 - No nested `.claude` confusion
 - Layer 2 script found at expected location
@@ -545,6 +593,7 @@ Claude Code Hooks Daemon - Upgrade
 ### 4. Idempotent Upgrade
 
 **Test**:
+
 ```bash
 $ bash /tmp/upgrade-fresh.sh --project-root /workspace
 ✓ Already at version v2.10.0
@@ -581,6 +630,7 @@ $ bash /tmp/upgrade-fresh.sh --project-root /workspace
 **Lesson**: Upgrade scripts should be safe to run multiple times.
 
 **Why It Matters**:
+
 - User might run again after failure
 - Validates installation without making changes
 - Debugging is easier (can re-run with modifications)
@@ -607,11 +657,13 @@ $ bash /tmp/upgrade-fresh.sh --project-root /workspace
 ### ⚠️ High Priority (For v2.11.0)
 
 2. **Create v2.9-to-v2.10 Upgrade Guide**
+
    - Document Project-Level Handlers feature
    - Explain `.claude/` template directory
    - Clarify what's nested vs what's intentional
 
 3. **Update LLM-UPDATE.md**
+
    - Document new `--project-root` requirement
    - Remove references to auto-detection
    - Update examples with explicit paths
@@ -619,11 +671,13 @@ $ bash /tmp/upgrade-fresh.sh --project-root /workspace
 ### 🔵 Medium Priority (Nice to Have)
 
 4. **Create All Missing Upgrade Guides**
+
    - Fill in v2.1 through v2.9
    - Even if just "no breaking changes"
    - Maintains documentation completeness
 
 5. **Add Usage Help to Upgrade Script**
+
    - `bash upgrade.sh --help` shows usage
    - Examples for common scenarios
    - Troubleshooting tips
@@ -675,6 +729,7 @@ ls /workspace/.claude/hooks-daemon/untracked/daemon-*.sock   # Exists ✅
 **Overall Grade**: A- (Excellent with minor issues)
 
 **What Made This Successful**:
+
 - ✅ Explicit project root parameter
 - ✅ Automatic nested artifact cleanup
 - ✅ Layer 2 upgrade orchestration
@@ -683,11 +738,13 @@ ls /workspace/.claude/hooks-daemon/untracked/daemon-*.sock   # Exists ✅
 - ✅ Zero manual steps required
 
 **Minor Issues**:
+
 - ⚠️ Hook forwarder false positive on nested installation
 - ⚠️ Missing upgrade guide documentation
 - ⚠️ New feature (project handlers) not clearly explained
 
 **Comparison to Previous Attempt**:
+
 - **User experience**: 😞 → 😊 (massive improvement)
 - **Manual steps**: 7 → 0 (fully automated)
 - **Time required**: 10 min → 2 min (5x faster)

@@ -7,6 +7,7 @@
 ## Overview
 
 Replace the current bash-based statusline with a daemon-powered system that accepts Claude data via socket and returns formatted status line text. This provides:
+
 - **20x faster** response (socket vs process spawn)
 - **Rich context**: Full Claude data + daemon health stats
 - **Modular design**: Easy to extend with new components
@@ -22,6 +23,7 @@ Replace the current bash-based statusline with a daemon-powered system that acce
 ## Architecture
 
 ### Event Flow
+
 ```
 Claude Code (calls statusline)
   ↓
@@ -44,17 +46,21 @@ Claude Code displays in status bar
 ### Key Design Decisions
 
 1. **Event Type**: Add `STATUS_LINE = "Status"` to `EventType` enum
+
    - Matches Claude Code's `hook_event_name: "Status"` in docs
 
 2. **Non-Terminal Handlers**: All handlers are `terminal=False`
+
    - Accumulate text fragments in `result.context`
    - Final concatenation happens in response formatting
 
 3. **Output Format**: Plain text with ANSI codes (NOT JSON hookSpecificOutput)
+
    - Special case: Status event returns raw text, not JSON
    - Join context list with spaces (no double newlines)
 
 4. **Color Coding**: Context percentage uses traffic light colors
+
    - Green (0-40%): `\033[42m\033[30m`
    - Yellow (41-60%): `\033[43m\033[30m`
    - Orange (61-80%): `\033[48;5;208m\033[30m`
@@ -65,6 +71,7 @@ Claude Code displays in status bar
 ### Phase 1: Core Infrastructure
 
 #### 1.1 Add STATUS_LINE Event Type
+
 **File**: `src/claude_code_hooks_daemon/core/event.py`
 
 ```python
@@ -74,6 +81,7 @@ class EventType(StrEnum):
 ```
 
 #### 1.2 Define Input Schema
+
 **File**: `src/claude_code_hooks_daemon/core/input_schemas.py`
 
 ```python
@@ -115,6 +123,7 @@ INPUT_SCHEMAS["Status"] = STATUS_LINE_INPUT_SCHEMA
 ```
 
 #### 1.3 Create Bash Hook Entry Point
+
 **File**: `.claude/hooks/status-line` (new file)
 
 ```bash
@@ -141,6 +150,7 @@ jq -c '{event: "Status", hook_input: .}' | send_request_stdin | jq -r '.result.t
 Create modular handlers in `src/claude_code_hooks_daemon/handlers/status_line/`
 
 #### 2.1 Model + Context Handler
+
 **File**: `src/claude_code_hooks_daemon/handlers/status_line/model_context.py`
 
 ```python
@@ -185,6 +195,7 @@ class ModelContextHandler(Handler):
 ```
 
 #### 2.2 Git Branch Handler
+
 **File**: `src/claude_code_hooks_daemon/handlers/status_line/git_branch.py`
 
 ```python
@@ -248,6 +259,7 @@ class GitBranchHandler(Handler):
 ```
 
 #### 2.3 Daemon Stats Handler
+
 **File**: `src/claude_code_hooks_daemon/handlers/status_line/daemon_stats.py`
 
 ```python
@@ -315,6 +327,7 @@ class DaemonStatsHandler(Handler):
 ```
 
 #### 2.4 Handler Package Init
+
 **File**: `src/claude_code_hooks_daemon/handlers/status_line/__init__.py`
 
 ```python
@@ -334,6 +347,7 @@ __all__ = [
 ### Phase 3: Response Formatting
 
 #### 3.1 Update HookResult for Status Event
+
 **File**: `src/claude_code_hooks_daemon/core/hook_result.py`
 
 Modify `to_json()` method to handle Status event:
@@ -354,9 +368,10 @@ def to_json(self, event_name: str) -> dict[str, Any]:
 ### Phase 4: SessionStart Suggestion Handler
 
 #### 4.1 Create Suggestion Handler
+
 **File**: `src/claude_code_hooks_daemon/handlers/session_start/suggest_statusline.py`
 
-```python
+````python
 from claude_code_hooks_daemon.core import Handler, HookResult
 from typing import Any
 
@@ -393,12 +408,14 @@ class SuggestStatusLineHandler(Handler):
                 "The status line shows: model name, context usage %, git branch, and daemon health.",
             ]
         )
-```
+````
 
 #### 4.2 Register Handler
+
 **File**: `src/claude_code_hooks_daemon/handlers/session_start/__init__.py`
 
 Add to imports and `__all__`:
+
 ```python
 from claude_code_hooks_daemon.handlers.session_start.suggest_statusline import (
     SuggestStatusLineHandler,
@@ -413,9 +430,11 @@ __all__ = [
 ### Phase 5: Configuration
 
 #### 5.1 Update Daemon Config
+
 **File**: `.claude/hooks-daemon.yaml`
 
 Add handler configuration:
+
 ```yaml
 handlers:
   status_line:
@@ -427,9 +446,11 @@ handlers:
 ```
 
 #### 5.2 Update Claude Settings
+
 **File**: `.claude/settings.json`
 
 Replace existing statusLine with:
+
 ```json
 {
   "statusLine": {
@@ -442,6 +463,7 @@ Replace existing statusLine with:
 ## Critical Files
 
 ### New Files
+
 - `.claude/hooks/status-line` - Bash entry point
 - `src/claude_code_hooks_daemon/handlers/status_line/__init__.py`
 - `src/claude_code_hooks_daemon/handlers/status_line/model_context.py`
@@ -450,6 +472,7 @@ Replace existing statusLine with:
 - `src/claude_code_hooks_daemon/handlers/session_start/suggest_statusline.py`
 
 ### Modified Files
+
 - `src/claude_code_hooks_daemon/core/event.py` - Add STATUS_LINE event
 - `src/claude_code_hooks_daemon/core/input_schemas.py` - Add STATUS_LINE schema
 - `src/claude_code_hooks_daemon/core/hook_result.py` - Handle Status response format
@@ -460,6 +483,7 @@ Replace existing statusLine with:
 ## Verification Plan
 
 ### 1. Unit Tests
+
 ```bash
 # Test handler logic
 pytest tests/unit/handlers/test_status_line.py -v
@@ -472,12 +496,14 @@ pytest tests/unit/core/test_hook_result.py::test_status_response_format -v
 ```
 
 ### 2. Integration Test
+
 ```bash
 # Test full flow: bash → socket → handlers → response
 pytest tests/integration/test_status_line_flow.py -v
 ```
 
 ### 3. Manual Testing
+
 ```bash
 # 1. Restart daemon
 .claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
@@ -501,6 +527,7 @@ echo '{"hook_event_name":"Status","model":{"display_name":"Sonnet"},"context_win
 ```
 
 ### 4. Performance Test
+
 ```bash
 # Compare old bash vs new daemon approach
 time (for i in {1..100}; do echo '{}' | .claude/hooks/status-line > /dev/null; done)
@@ -527,6 +554,7 @@ If issues occur:
 ## Documentation Updates
 
 After implementation:
+
 - Update `README.md` with statusline feature
 - Add `CLAUDE/STATUS_LINE.md` explaining architecture
 - Update `CLAUDE.md` with handler count

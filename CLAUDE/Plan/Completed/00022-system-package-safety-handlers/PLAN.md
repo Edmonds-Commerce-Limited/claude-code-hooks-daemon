@@ -14,22 +14,27 @@ Implement 5 safety handlers to block dangerous system package management pattern
 ## Handlers
 
 1. **PipBreakSystemHandler** (Priority 10, Terminal)
+
    - Blocks: `pip install --break-system-packages`
    - Reason: Corrupts system Python installation
 
 2. **SudoPipHandler** (Priority 10, Terminal)
+
    - Blocks: `sudo pip install`
    - Reason: Modifies system Python, breaks OS tools
 
 3. **CurlPipeShellHandler** (Priority 10, Terminal)
+
    - Blocks: `curl ... | bash`, `wget ... | sh`
    - Reason: Executes untrusted remote code without review
 
 4. **DangerousPermissionsHandler** (Priority 15, Terminal)
+
    - Blocks: `chmod 777`, `chmod a+rwx`
    - Reason: Creates security vulnerabilities
 
 5. **GlobalNpmAdvisorHandler** (Priority 40, Non-Terminal)
+
    - Advises on: `npm install -g`
    - Suggests: `npx` alternative
 
@@ -52,6 +57,7 @@ All 5 handlers successfully implemented and deployed:
 **Note**: Import error hotfix required after initial implementation (Commit: 3377bb3)
 
 All handlers have:
+
 - Full TDD test coverage
 - Constants defined (HandlerID, Priority)
 - Registered in default configuration

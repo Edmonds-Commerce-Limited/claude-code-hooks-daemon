@@ -11,12 +11,14 @@ Plan 00032 (Sub-Agent Orchestration) needs updating to be model-aware. The key i
 ### 1. New SessionStart Handler: `OpusAgentTeamAdvisorHandler`
 
 A generic, advisory handler that:
+
 - Detects the current model from `hook_input.get("model")` (e.g., `"claude-opus-4-6"`)
 - **If Opus 4.6+**: Injects context confirming agent team orchestration is fully supported
 - **If NOT Opus**: Suggests switching to Opus for best agent team support
 - Non-terminal, advisory - never blocks anything
 
 **Handler spec**:
+
 - **Location**: `src/claude_code_hooks_daemon/handlers/session_start/opus_agent_team_advisor.py`
 - **Priority**: 45 (workflow range, after YOLO detection at 40, before suggest_statusline at 55)
 - **Terminal**: False
@@ -24,6 +26,7 @@ A generic, advisory handler that:
 - **Event**: SessionStart only
 
 **Matching logic**:
+
 ```python
 def matches(self, hook_input):
     # Always match SessionStart - we always want to advise about model choice
@@ -31,6 +34,7 @@ def matches(self, hook_input):
 ```
 
 **Handle logic**:
+
 ```python
 def handle(self, hook_input):
     model_id = hook_input.get("model", "")
@@ -54,6 +58,7 @@ def handle(self, hook_input):
 ```
 
 **Model detection helper** (private function in handler module):
+
 ```python
 def _is_opus(model_id: str) -> bool:
     """Check if model ID indicates Opus."""
@@ -74,14 +79,17 @@ def _format_model_name(model_id: str) -> str:
 ### 2. Constants Updates
 
 **File**: `src/claude_code_hooks_daemon/constants/handlers.py`
+
 - Add `OPUS_AGENT_TEAM_ADVISOR = HandlerIDMeta(...)` to HandlerID enum
 
 **File**: `src/claude_code_hooks_daemon/constants/priority.py`
+
 - Add `OPUS_AGENT_TEAM_ADVISOR = 45` to Priority enum
 
 ### 3. Config Entry
 
 **File**: `.claude/hooks-daemon.yaml` under `session_start:`:
+
 ```yaml
 opus_agent_team_advisor:
   enabled: true
@@ -93,6 +101,7 @@ opus_agent_team_advisor:
 **File**: `tests/unit/handlers/session_start/test_opus_agent_team_advisor.py`
 
 Test scenarios:
+
 - `test_init`: Verify handler_id, priority 45, terminal=False, correct tags
 - `test_matches_session_start`: Returns True for SessionStart events
 - `test_matches_rejects_other_events`: Returns False for PreToolUse, PostToolUse, etc.
@@ -108,6 +117,7 @@ Test scenarios:
 ### 5. Update Plan 00032 PLAN.md
 
 Add to Plan 00032:
+
 - New task in Phase 4: Create `opus_agent_team_advisor` handler
 - Update Phase 1 to note model detection capability exists at SessionStart
 - Add model-awareness as a design principle
@@ -116,19 +126,20 @@ Add to Plan 00032:
 ### 6. Registration in session_start.py
 
 **File**: `src/claude_code_hooks_daemon/hooks/session_start.py`
+
 - Import and register `OpusAgentTeamAdvisorHandler` in the handler list
 
 ## Files to Modify/Create
 
-| Action | File |
-|--------|------|
-| **Create** | `src/claude_code_hooks_daemon/handlers/session_start/opus_agent_team_advisor.py` |
-| **Create** | `tests/unit/handlers/session_start/test_opus_agent_team_advisor.py` |
-| **Edit** | `src/claude_code_hooks_daemon/constants/handlers.py` (add HandlerID) |
-| **Edit** | `src/claude_code_hooks_daemon/constants/priority.py` (add Priority) |
-| **Edit** | `src/claude_code_hooks_daemon/hooks/session_start.py` (register handler) |
-| **Edit** | `.claude/hooks-daemon.yaml` (add config entry) |
-| **Edit** | `CLAUDE/Plan/00032-subagent-orchestration-context-preservation/PLAN.md` (update plan) |
+| Action     | File                                                                                  |
+| ---------- | ------------------------------------------------------------------------------------- |
+| **Create** | `src/claude_code_hooks_daemon/handlers/session_start/opus_agent_team_advisor.py`      |
+| **Create** | `tests/unit/handlers/session_start/test_opus_agent_team_advisor.py`                   |
+| **Edit**   | `src/claude_code_hooks_daemon/constants/handlers.py` (add HandlerID)                  |
+| **Edit**   | `src/claude_code_hooks_daemon/constants/priority.py` (add Priority)                   |
+| **Edit**   | `src/claude_code_hooks_daemon/hooks/session_start.py` (register handler)              |
+| **Edit**   | `.claude/hooks-daemon.yaml` (add config entry)                                        |
+| **Edit**   | `CLAUDE/Plan/00032-subagent-orchestration-context-preservation/PLAN.md` (update plan) |
 
 ## Existing Code to Reuse
 

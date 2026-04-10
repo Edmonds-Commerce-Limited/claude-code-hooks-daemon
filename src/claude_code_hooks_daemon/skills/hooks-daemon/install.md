@@ -14,6 +14,7 @@ Install the Claude Code Hooks Daemon into this project.
 This command is for **first-time installation** on a fresh clone. If the daemon is already installed, use `/hooks-daemon upgrade` instead.
 
 You typically need this when:
+
 - You cloned a project that uses the hooks daemon but the daemon isn't installed locally
 - Hook scripts are firing "not installed" errors
 - `.claude/hooks-daemon/` directory doesn't exist
@@ -33,6 +34,7 @@ You typically need this when:
 **CRITICAL: Restart your Claude session** after installation completes. Hooks won't activate until Claude reloads `.claude/settings.json`.
 
 Then verify:
+
 ```bash
 /hooks-daemon health
 ```
@@ -40,6 +42,7 @@ Then verify:
 ## If Already Installed
 
 If the daemon is already installed, the command will tell you and suggest upgrade instead:
+
 ```bash
 /hooks-daemon upgrade
 ```

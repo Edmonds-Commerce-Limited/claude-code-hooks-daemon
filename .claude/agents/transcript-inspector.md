@@ -1,9 +1,6 @@
 ---
-name: transcript-inspector
-description: Specialist agent for diagnosing stop hook failures by reading Claude Code session transcripts. Use when the stop hook is not blocking as expected, Claude keeps stopping without required explanation, or preventedContinuation is false when it should be true.
-tools: Read, Bash, Glob, Grep
-model: sonnet
----
+
+## name: transcript-inspector description: Specialist agent for diagnosing stop hook failures by reading Claude Code session transcripts. Use when the stop hook is not blocking as expected, Claude keeps stopping without required explanation, or preventedContinuation is false when it should be true. tools: Read, Bash, Glob, Grep model: sonnet
 
 # Transcript Inspector - Stop Hook Dogfooding Diagnostics
 
@@ -14,6 +11,7 @@ Diagnose stop hook failures by reading Claude Code session transcripts and cross
 ## How to Use This Agent
 
 Invoke when:
+
 - Claude stops without a `STOPPING BECAUSE:` prefix and the daemon did not block it
 - A user had to type "go" or "continue" manually (symptom of broken stop hook)
 - `preventedContinuation: false` appears in transcript when it should be `true`
@@ -76,18 +74,19 @@ for i, line in enumerate(lines):
 ```
 
 Run it:
+
 ```bash
 python3 /tmp/find_stop_hooks.py "$TRANSCRIPT"
 ```
 
 ### Interpreting stop_hook_summary Fields
 
-| Field | Broken value | Working value | Meaning |
-|-------|-------------|---------------|---------|
-| `preventedContinuation` | `false` | `true` | Hook did NOT block (broken) vs DID block |
-| `level` | `"suggestion"` | `"error"` or `"block"` | Suggestion = daemon returned `{}` or ALLOW |
-| `hasOutput` | `false` | `true` | Hook script produced no output at all |
-| `hookErrors` | non-empty | `[]` | Hook script errored |
+| Field                   | Broken value   | Working value          | Meaning                                    |
+| ----------------------- | -------------- | ---------------------- | ------------------------------------------ |
+| `preventedContinuation` | `false`        | `true`                 | Hook did NOT block (broken) vs DID block   |
+| `level`                 | `"suggestion"` | `"error"` or `"block"` | Suggestion = daemon returned `{}` or ALLOW |
+| `hasOutput`             | `false`        | `true`                 | Hook script produced no output at all      |
+| `hookErrors`            | non-empty      | `[]`                   | Hook script errored                        |
 
 **The symptom**: `preventedContinuation: false` + `level: "suggestion"` = daemon returned `{}` (ALLOW) when it should have returned `{"decision":"block","reason":"..."}`.
 
@@ -153,24 +152,29 @@ echo '{"hook_event_name":"Stop","stop_hook_active":false}' | /workspace/.claude/
 ```
 
 **Expected output when working (handler blocks):**
+
 ```json
 {"decision":"block","reason":"You stopped without explaining why..."}
 ```
 
 **Broken outputs:**
+
 ```json
 {}
 ```
+
 Empty object = daemon returned ALLOW. The hook script is fine but the daemon returned the wrong decision.
 
 ```
 (no output)
 ```
+
 Completely silent = hook script crashed or daemon is down.
 
 ```
 {"error":"..."}
 ```
+
 Explicit error = daemon startup failed or socket error.
 
 ## Step 5: Test the Daemon Socket Directly
@@ -188,20 +192,25 @@ echo '{"event":"Stop","hook_input":{"hook_event_name":"Stop","stop_hook_active":
 ```
 
 **Expected when working:**
+
 ```json
 {"result":{"decision":"deny","reason":"You stopped without explaining why..."},"timing_ms":1.23,"handlers_matched":["auto_continue_stop"]}
 ```
 
 **Broken - ALLOW with no reason:**
+
 ```json
 {"result":{"decision":"allow","reason":null,"context":[]},"timing_ms":0.41,"handlers_matched":[]}
 ```
+
 This means no handler matched. Check `handlers_matched: []` — if empty, the handler's `matches()` returned False.
 
 **Broken - empty:**
+
 ```json
 {}
 ```
+
 The socket returned `{}`. This is the to_json() ALLOW path — decision is ALLOW with no context.
 
 ## Step 6: Cross-Reference with the Daemon's Internal Log
@@ -213,6 +222,7 @@ cat /workspace/untracked/stop-events.jsonl 2>/dev/null | tail -10
 ```
 
 Each line is:
+
 ```json
 {"timestamp":"2026-03-30T...","decision":"deny","reason_prefix":"You stopped without...","stop_hook_active":false}
 ```
@@ -271,12 +281,15 @@ Claude stopped without STOPPING BECAUSE: prefix
 ## Common Root Causes
 
 ### 1. `stop_hook_active: true` in hook_input (not a bug)
+
 The handler intentionally allows when it detects it is being called from within a stop hook response cycle. Claude Code sets `stop_hook_active: true` when executing the auto-continue instruction. This is correct.
 
 ### 2. `force_explanation: false` in config
+
 If `.claude/hooks-daemon.yaml` has `auto_continue_stop.options.force_explanation: false`, Branch 4 will ALLOW instead of DENY. Check config.
 
 ### 3. Daemon not running
+
 ```bash
 /workspace/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli status
 # If not RUNNING:
@@ -284,19 +297,21 @@ If `.claude/hooks-daemon.yaml` has `auto_continue_stop.options.force_explanation
 ```
 
 ### 4. `to_json()` routing bug
+
 `HookResult.to_json(event_name)` routes on the exact string `"Stop"`. If the FrontController is called with a different event_name string (e.g. `"stop"` lowercase), `_format_stop_response()` is never called and the response falls through to systemMessage format, which does not include a `decision` field. Test: send to socket and verify `decision: deny` appears at top level.
 
 ### 5. transcript_path missing → handler still blocks
+
 Even without a transcript, Branch 4 (`force_explanation=True`) will DENY. If the handler is not blocking, transcript_path is not the cause.
 
 ## Key Entry Types in Transcript
 
-| type | subtype/data.type | Meaning |
-|------|-------------------|---------|
-| `progress` | `hook_progress`, `hookEvent: Stop` | Stop hook is firing |
-| `system` | `stop_hook_summary` | Stop hook outcome (check `preventedContinuation`) |
-| `assistant` | — | Last Claude message before stop |
-| `user` | — with `content: "go"` | User had to resume manually (broken stop hook symptom) |
+| type        | subtype/data.type                  | Meaning                                                |
+| ----------- | ---------------------------------- | ------------------------------------------------------ |
+| `progress`  | `hook_progress`, `hookEvent: Stop` | Stop hook is firing                                    |
+| `system`    | `stop_hook_summary`                | Stop hook outcome (check `preventedContinuation`)      |
+| `assistant` | —                                  | Last Claude message before stop                        |
+| `user`      | — with `content: "go"`             | User had to resume manually (broken stop hook symptom) |
 
 ## Quick Reference Commands
 

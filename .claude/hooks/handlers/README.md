@@ -5,6 +5,7 @@ This directory contains **project-specific** handlers for Claude Code hooks.
 ## When to Use Project-Level Handlers
 
 Use project-level handlers when you need custom hook behaviour that is:
+
 - Specific to this project's workflow
 - Not generally useful for other projects
 - Related to project-specific conventions or policies
@@ -20,12 +21,14 @@ Use project-level handlers when you need custom hook behaviour that is:
 ## Directory Structure
 
 Each hook event has its own subdirectory:
+
 - `pre_tool_use/` - Before tool execution
 - `post_tool_use/` - After tool execution
 - `session_start/` - When session begins
 - (etc for all 10 hook events)
 
 Each subdirectory contains:
+
 - `README.md` - Event-specific guide
 - Handler Python files
 - `tests/` - Test files (required)

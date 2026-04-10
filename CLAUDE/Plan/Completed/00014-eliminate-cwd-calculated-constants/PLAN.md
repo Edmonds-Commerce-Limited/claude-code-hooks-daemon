@@ -33,46 +33,46 @@ This plan eliminates all dynamic CWD lookups in favor of calculated constants de
 
 #### Category 1: Handler code using CWD directly (MUST FIX)
 
-| File | Line | Usage | Purpose |
-|------|------|-------|---------|
-| `src/.../handlers/status_line/git_repo_name.py` | 51 | `Path.cwd()` | Get project root for git commands |
-| `src/.../handlers/pre_tool_use/markdown_organization.py` | 51 | `Path.cwd()` | Default workspace root (overridden by options) |
-| `src/.../handlers/pre_tool_use/plan_number_helper.py` | 43 | `Path.cwd()` | Default workspace root (overridden by options) |
-| `src/.../handlers/session_start/yolo_container_detection.py` | 88, 150 | `Path.cwd()` | Check if running in /workspace container |
+| File                                                         | Line    | Usage        | Purpose                                        |
+| ------------------------------------------------------------ | ------- | ------------ | ---------------------------------------------- |
+| `src/.../handlers/status_line/git_repo_name.py`              | 51      | `Path.cwd()` | Get project root for git commands              |
+| `src/.../handlers/pre_tool_use/markdown_organization.py`     | 51      | `Path.cwd()` | Default workspace root (overridden by options) |
+| `src/.../handlers/pre_tool_use/plan_number_helper.py`        | 43      | `Path.cwd()` | Default workspace root (overridden by options) |
+| `src/.../handlers/session_start/yolo_container_detection.py` | 88, 150 | `Path.cwd()` | Check if running in /workspace container       |
 
 #### Category 2: Core code using CWD as fallback (MUST FIX)
 
-| File | Line | Usage | Purpose |
-|------|------|-------|---------|
-| `src/.../core/utils.py` | 74 | `Path.cwd()` | Fallback in `get_workspace_root()` |
-| `src/.../core/front_controller.py` | 183 | `get_workspace_root()` | Error logging path |
+| File                               | Line | Usage                  | Purpose                            |
+| ---------------------------------- | ---- | ---------------------- | ---------------------------------- |
+| `src/.../core/utils.py`            | 74   | `Path.cwd()`           | Fallback in `get_workspace_root()` |
+| `src/.../core/front_controller.py` | 183  | `get_workspace_root()` | Error logging path                 |
 
 #### Category 3: Handlers using `get_workspace_root()` which falls back to CWD (MUST FIX)
 
-| File | Line | Usage | Purpose |
-|------|------|-------|---------|
-| `src/.../handlers/pre_tool_use/validate_plan_number.py` | 54 | `get_workspace_root()` | Workspace root for plan validation |
-| `src/.../handlers/post_tool_use/validate_eslint_on_write.py` | 46 | `get_workspace_root()` | Workspace root for eslint |
-| `src/.../handlers/session_start/workflow_state_restoration.py` | 43 | `get_workspace_root()` | Workspace root for state files |
-| `src/.../handlers/pre_compact/workflow_state_pre_compact.py` | 48 | `get_workspace_root()` | Workspace root for state files |
+| File                                                           | Line | Usage                  | Purpose                            |
+| -------------------------------------------------------------- | ---- | ---------------------- | ---------------------------------- |
+| `src/.../handlers/pre_tool_use/validate_plan_number.py`        | 54   | `get_workspace_root()` | Workspace root for plan validation |
+| `src/.../handlers/post_tool_use/validate_eslint_on_write.py`   | 46   | `get_workspace_root()` | Workspace root for eslint          |
+| `src/.../handlers/session_start/workflow_state_restoration.py` | 43   | `get_workspace_root()` | Workspace root for state files     |
+| `src/.../handlers/pre_compact/workflow_state_pre_compact.py`   | 48   | `get_workspace_root()` | Workspace root for state files     |
 
 #### Category 4: CLI code using CWD for project discovery (ACCEPTABLE)
 
-| File | Line | Usage | Purpose |
-|------|------|-------|---------|
-| `src/.../daemon/cli.py` | 65 | `Path.cwd()` | Walk up to find `.claude` directory |
-| `src/.../daemon/cli.py` | 81 | `Path.cwd()` | Error message showing current directory |
-| `src/.../daemon/cli.py` | 718 | `Path.cwd()` | Config generation: walk up for project root |
+| File                    | Line | Usage        | Purpose                                     |
+| ----------------------- | ---- | ------------ | ------------------------------------------- |
+| `src/.../daemon/cli.py` | 65   | `Path.cwd()` | Walk up to find `.claude` directory         |
+| `src/.../daemon/cli.py` | 81   | `Path.cwd()` | Error message showing current directory     |
+| `src/.../daemon/cli.py` | 718  | `Path.cwd()` | Config generation: walk up for project root |
 
 These are **acceptable** because CLI commands are run interactively and CWD is the correct starting point for project discovery.
 
 #### Category 5: Install/diagnostic scripts (OUT OF SCOPE)
 
-| File | Line | Usage | Purpose |
-|------|------|-------|---------|
-| `install.py` | 183 | `Path.cwd()` | Installer project discovery |
-| `daemon.sh` | 72 | `os.getcwd()` | Log path generation |
-| `scripts/debug_info.py` | 126 | `Path.cwd()` | Diagnostic output |
+| File                    | Line | Usage         | Purpose                     |
+| ----------------------- | ---- | ------------- | --------------------------- |
+| `install.py`            | 183  | `Path.cwd()`  | Installer project discovery |
+| `daemon.sh`             | 72   | `os.getcwd()` | Log path generation         |
+| `scripts/debug_info.py` | 126  | `Path.cwd()`  | Diagnostic output           |
 
 ### How Project Root Already Flows
 
@@ -89,6 +89,7 @@ The daemon startup path already determines project root correctly:
 ### How workspace_root reaches handlers today
 
 The `HandlerRegistry` (line 217-218) injects `workspace_root` into the options dict. Handlers that declare `_workspace_root` as an attribute get it set via the options system. But this only works for handlers that:
+
 1. Declare `_workspace_root` or `workspace_root` as an attribute
 2. Are configured with options in the YAML
 
@@ -99,6 +100,7 @@ Handlers like `GitRepoNameHandler` and `YoloContainerDetectionHandler` don't use
 ### Phase 1: Create Calculated Constants Module
 
 - [x] **Task 1.1**: Create `src/claude_code_hooks_daemon/core/project_context.py`
+
   - [x] Define `ProjectContext` class with singleton pattern and class methods
   - [x] Fields: project_root, config_path, config_dir, self_install_mode, git_repo_name, git_toplevel, daemon_untracked_dir
   - [x] `ProjectContext.initialize(config_path)` factory calculates all values once
@@ -107,6 +109,7 @@ Handlers like `GitRepoNameHandler` and `YoloContainerDetectionHandler` don't use
   - [x] Comprehensive tests in `tests/unit/core/test_project_context.py`
 
 - [x] **Task 1.2**: Singleton access with FAIL FAST
+
   - [x] Class-level `_initialized` flag
   - [x] All accessors raise `RuntimeError` if not initialized
   - [x] `reset()` method for test isolation
@@ -115,10 +118,12 @@ Handlers like `GitRepoNameHandler` and `YoloContainerDetectionHandler` don't use
 ### Phase 2: Wire Into Daemon Startup
 
 - [x] **Task 2.1**: Initialize context in `DaemonController.initialise()`
+
   - [x] Calls `ProjectContext.initialize(config_path)` before handler registration
   - [x] FAIL FAST if `workspace_root` is None (raises ValueError)
 
 - [x] **Task 2.2**: HandlerRegistry injects workspace_root
+
   - [x] Registry injects `workspace_root` into handler options
   - [x] Handlers receive via `_workspace_root` attribute
 
@@ -133,15 +138,18 @@ Handlers like `GitRepoNameHandler` and `YoloContainerDetectionHandler` don't use
 ### Phase 4: Clean Up Core Utils
 
 - [x] **Task 4.1**: `get_workspace_root()` in `core/utils.py` updated
+
   - [x] Searches upward from file location for .git AND CLAUDE
   - [x] Falls back to `ProjectContext.project_root()` (no CWD fallback)
 
 - [x] **Task 4.2**: Audit complete - zero CWD in handler/core code
+
   - [x] Only remaining `Path.cwd()` is in `daemon/cli.py` (acceptable - CLI discovery)
 
 ### Phase 5: Testing & QA
 
 - [x] **Task 5.1**: Integration tests in `tests/unit/core/test_project_context.py`
+
   - [x] Normal mode and self-install mode initialization
   - [x] Non-git directory handling
   - [x] Singleton lifecycle (init, get, reset, re-init)
@@ -149,6 +157,7 @@ Handlers like `GitRepoNameHandler` and `YoloContainerDetectionHandler` don't use
   - [x] Git URL parsing edge cases
 
 - [x] **Task 5.2**: Full QA suite passes
+
 - [x] **Task 5.3**: Daemon restarts successfully with all handlers loading
 
 ## Technical Decisions
@@ -158,6 +167,7 @@ Handlers like `GitRepoNameHandler` and `YoloContainerDetectionHandler` don't use
 **Context**: How should handlers access calculated constants?
 
 **Options Considered**:
+
 1. **Singleton module** (`get_project_context()`) - Simple import, works everywhere
 2. **Dependency injection** (pass context through handler init) - More testable but requires API changes
 3. **Both** - Singleton for convenience, DI for testing
@@ -175,6 +185,7 @@ Handlers like `GitRepoNameHandler` and `YoloContainerDetectionHandler` don't use
 **Context**: What happens if project root doesn't exist or git fails?
 
 **Decision**:
+
 - `project_root` not existing: FAIL FAST (raise ValueError at daemon startup)
 - Not a git repo: Non-fatal (set `is_git_repo=False`, handlers degrade gracefully)
 - Git commands timeout: Non-fatal (log warning, set git fields to None)
@@ -193,12 +204,12 @@ Handlers like `GitRepoNameHandler` and `YoloContainerDetectionHandler` don't use
 
 ## Risks & Mitigations
 
-| Risk | Impact | Probability | Mitigation |
-|------|--------|-------------|------------|
-| Handlers instantiated before context initialized (e.g., in tests) | High | Medium | Allow DI override in constructors; singleton raises clear error |
-| Breaking handler tests that mock CWD | Medium | High | Update tests to use DI or mock `get_project_context()` |
-| `YoloContainerDetectionHandler` needs actual CWD for container detection | Medium | Low | Container detection uses project_root which IS where daemon was started from; functionally equivalent |
-| Self-install mode behaves differently | Medium | Low | `project_root` is already correctly set for self-install mode via `get_project_path()` |
+| Risk                                                                     | Impact | Probability | Mitigation                                                                                            |
+| ------------------------------------------------------------------------ | ------ | ----------- | ----------------------------------------------------------------------------------------------------- |
+| Handlers instantiated before context initialized (e.g., in tests)        | High   | Medium      | Allow DI override in constructors; singleton raises clear error                                       |
+| Breaking handler tests that mock CWD                                     | Medium | High        | Update tests to use DI or mock `get_project_context()`                                                |
+| `YoloContainerDetectionHandler` needs actual CWD for container detection | Medium | Low         | Container detection uses project_root which IS where daemon was started from; functionally equivalent |
+| Self-install mode behaves differently                                    | Medium | Low         | `project_root` is already correctly set for self-install mode via `get_project_path()`                |
 
 ## Notes & Updates
 

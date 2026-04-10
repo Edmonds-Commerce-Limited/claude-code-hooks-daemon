@@ -1,11 +1,11 @@
 # markdown_organization
 
-| Property | Value |
-|----------|-------|
+| Property       | Value                   |
+| -------------- | ----------------------- |
 | **Config key** | `markdown_organization` |
-| **Priority** | 50 |
-| **Type** | Blocking |
-| **Event** | PreToolUse |
+| **Priority**   | 50                      |
+| **Type**       | Blocking                |
+| **Event**      | PreToolUse              |
 
 Enforces markdown file organization rules and plan tracking. Intercepts Claude Code planning mode writes to `~/.claude/plans/` and redirects them to the project's `CLAUDE/Plan/` structure when configured.
 
@@ -26,27 +26,28 @@ handlers:
 
 ## Options
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `track_plans_in_project` | `string \| null` | `null` | Path to plan folder (e.g. `"CLAUDE/Plan"`). Enables planning mode redirect. |
-| `plan_workflow_docs` | `string \| null` | `null` | Path to workflow doc referenced in redirect context. |
-| `allowed_markdown_paths` | `list[string] \| null` | `null` | Regex patterns for allowed locations. **Overrides ALL built-in paths when set.** |
-| `monorepo_subproject_patterns` | `list[string] \| null` | `null` | Regex patterns matching sub-project root directories. |
+| Option                         | Type                   | Default | Description                                                                      |
+| ------------------------------ | ---------------------- | ------- | -------------------------------------------------------------------------------- |
+| `track_plans_in_project`       | `string \| null`       | `null`  | Path to plan folder (e.g. `"CLAUDE/Plan"`). Enables planning mode redirect.      |
+| `plan_workflow_docs`           | `string \| null`       | `null`  | Path to workflow doc referenced in redirect context.                             |
+| `allowed_markdown_paths`       | `list[string] \| null` | `null`  | Regex patterns for allowed locations. **Overrides ALL built-in paths when set.** |
+| `monorepo_subproject_patterns` | `list[string] \| null` | `null`  | Regex patterns matching sub-project root directories.                            |
 
 ## Built-in Allowed Paths
 
 When `allowed_markdown_paths` is **not set** (default), the handler uses these built-in rules:
 
-| Path pattern | Purpose |
-|---|---|
-| `CLAUDE/**/*.md` | LLM documentation (with plan number validation) |
-| `docs/**/*.md` | Human-facing documentation |
-| `untracked/**/*.md` | Temporary/scratch docs |
-| `RELEASES/**/*.md` | Release notes |
-| `eslint-rules/**/*.md` | ESLint rule documentation |
-| `src/claude_code_hooks_daemon/guides/**/*.md` | Shipped daemon guides |
+| Path pattern                                  | Purpose                                         |
+| --------------------------------------------- | ----------------------------------------------- |
+| `CLAUDE/**/*.md`                              | LLM documentation (with plan number validation) |
+| `docs/**/*.md`                                | Human-facing documentation                      |
+| `untracked/**/*.md`                           | Temporary/scratch docs                          |
+| `RELEASES/**/*.md`                            | Release notes                                   |
+| `eslint-rules/**/*.md`                        | ESLint rule documentation                       |
+| `src/claude_code_hooks_daemon/guides/**/*.md` | Shipped daemon guides                           |
 
 These files are **always allowed** regardless of any config:
+
 - `CLAUDE.md`, `README.md`, `CHANGELOG.md` (anywhere in project)
 - `.claude/agents/*.md`, `.claude/commands/*.md`, `.claude/skills/*/SKILL.md`
 
@@ -81,11 +82,11 @@ options:
 
 Custom `allowed_markdown_paths` patterns match against the **sub-project-relative path** (after prefix stripping). This means the same rules apply uniformly to root and all sub-projects.
 
-| Input path | Stripped to | Pattern matches against |
-|---|---|---|
-| `docs/guide.md` | *(root, used as-is)* | `docs/guide.md` |
-| `packages/frontend/docs/guide.md` | `docs/guide.md` | `docs/guide.md` |
-| `packages/backend/CLAUDE/test.md` | `CLAUDE/test.md` | `CLAUDE/test.md` |
+| Input path                        | Stripped to          | Pattern matches against |
+| --------------------------------- | -------------------- | ----------------------- |
+| `docs/guide.md`                   | *(root, used as-is)* | `docs/guide.md`         |
+| `packages/frontend/docs/guide.md` | `docs/guide.md`      | `docs/guide.md`         |
+| `packages/backend/CLAUDE/test.md` | `CLAUDE/test.md`     | `CLAUDE/test.md`        |
 
 ### Gotcha
 
@@ -110,15 +111,18 @@ Plans in `CLAUDE/Plan/` must follow the format `{NNN}-description/` where `NNN` 
 ## Examples
 
 **Allow only specific locations:**
+
 ```yaml
 options:
   allowed_markdown_paths:
     - "^CLAUDE/.*\\.md$"
     - "^docs/.*\\.md$"
 ```
+
 Result: `CLAUDE/test.md` allowed, `src/notes.md` blocked, `CLAUDE.md` always allowed.
 
 **Monorepo with shared rules:**
+
 ```yaml
 options:
   monorepo_subproject_patterns:
@@ -127,4 +131,5 @@ options:
     - "^docs/.*\\.md$"
     - "^CLAUDE/.*\\.md$"
 ```
+
 Result: Both `docs/api.md` and `packages/frontend/docs/api.md` allowed (same pattern).

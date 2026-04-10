@@ -12,11 +12,13 @@ When a handler blocks a command, the user currently has no easy way to identify 
 Inspired by PHPStan's approach (which provides a two-level namespaced rule identifier with every error so you can easily add it to your ignore list), every handler's DENY/ASK output should include its full configuration path so users can immediately know how to disable it.
 
 **Example - Current output:**
+
 ```
 BLOCKED: git reset --hard destroys all uncommitted changes permanently
 ```
 
 **Example - Proposed output:**
+
 ```
 BLOCKED: git reset --hard destroys all uncommitted changes permanently
 
@@ -24,6 +26,7 @@ To disable: handlers.pre_tool_use.destructive_git  (set enabled: false)
 ```
 
 This is the same UX pattern as:
+
 - PHPStan: `phpstan-ignore phpstan.rules.missingReturnType`
 - ESLint: `// eslint-disable-next-line no-unused-vars`
 - Ruff: `# noqa: E501`
@@ -48,10 +51,12 @@ This is the same UX pattern as:
 ### What Already Exists
 
 Every handler already has:
+
 - `self.config_key` - The snake_case config key (e.g., `destructive_git`)
 - `self.handler_id` - HandlerIDMeta with `config_key` attribute
 
 The config YAML is structured as:
+
 ```yaml
 handlers:
   pre_tool_use:
@@ -71,6 +76,7 @@ So the fully-qualified path is: `handlers.{event_type}.{config_key}`
 ### The PHPStan Model
 
 PHPStan displays rule identifiers alongside every error:
+
 ```
 Line   file.php
  12    Parameter $foo has no type declaration.
@@ -78,6 +84,7 @@ Line   file.php
 ```
 
 Users can then add to their config:
+
 ```neon
 parameters:
     ignoreErrors:
@@ -116,6 +123,7 @@ handlers.{event_type}.{config_key}
 ```
 
 Examples:
+
 - `handlers.pre_tool_use.destructive_git`
 - `handlers.pre_tool_use.sed_blocker`
 - `handlers.pre_tool_use.npm_command`
@@ -133,6 +141,7 @@ To disable: handlers.pre_tool_use.destructive_git  (set enabled: false)
 ```
 
 This is:
+
 - Visually separated from the main message (blank line)
 - Copy-pasteable (the dotted path maps directly to YAML nesting)
 - Self-explanatory (tells user what to do)
@@ -143,18 +152,21 @@ This is:
 ### Phase 1: Research & Design
 
 - [x] **Identify injection point**
+
   - [x] Read FrontController dispatch logic
   - [x] Identify where handler results are processed
   - [x] Confirm event_type is available at that point
   - [x] Verify config_key is accessible from handler instance
 
 - [x] **Verify event type mapping**
+
   - [x] Confirm event type names match YAML section names (pre_tool_use, post_tool_use, etc.)
   - [x] Handle any naming mismatches (e.g., camelCase vs snake_case)
 
 ### Phase 2: TDD Implementation
 
 - [x] **Write failing tests for config key injection**
+
   - [x] Test: DENY result includes config path in reason
   - [x] Test: ASK result includes config path in reason
   - [x] Test: ALLOW result does NOT include config path
@@ -165,39 +177,46 @@ This is:
   - [x] Test: Reason is None edge case (DENY without reason)
 
 - [x] **Implement injection in FrontController**
+
   - [x] Add config path append after handler returns DENY/ASK
   - [x] Use consistent format string
   - [x] Handle edge case where reason is None
   - [x] Ensure formatting doesn't break JSON serialisation
 
 - [x] **Verify all existing tests still pass**
+
   - [x] Update any tests that assert exact reason strings
   - [x] Ensure acceptance test patterns still match (they use regex)
 
 ### Phase 3: Integration & Testing
 
 - [x] **Integration tests**
+
   - [x] Test full dispatch flow with real handler returning DENY
   - [x] Verify config path appears in final JSON output
   - [x] Test with progressive verbosity handlers (terse/standard/verbose all get footer)
 
 - [x] **Verify no regressions**
+
   - [x] Run full test suite
   - [x] Ensure 95%+ coverage maintained
 
 ### Phase 4: QA & Verification
 
 - [x] **Run full QA suite**
+
   - [x] Run: `./scripts/qa/run_all.sh`
   - [x] Fix any QA issues
   - [x] Verify all checks pass
 
 - [x] **Daemon verification**
+
   - [x] Restart daemon: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
   - [x] Verify status: `$PYTHON -m claude_code_hooks_daemon.daemon.cli status`
   - [x] Check logs for errors
 
 - [x] **Live testing**
+
   - [x] Trigger a blocking handler (e.g., destructive git)
   - [x] Verify config path appears in error output
   - [x] Verify path is correct and maps to actual YAML config
@@ -214,6 +233,7 @@ This is:
 **Context**: Where should the config key be appended to the reason?
 
 **Options Considered**:
+
 1. **Each handler appends it** - Modify all 26+ handlers to include config key
 2. **Base Handler class appends it** - Override `handle()` in base class
 3. **FrontController appends it** - Post-process result after handler returns
@@ -221,6 +241,7 @@ This is:
 **Decision**: Option 3 - FrontController injection
 
 **Rationale**:
+
 - Zero changes to individual handlers (DRY)
 - FrontController already knows the event type
 - Single maintenance point
@@ -234,6 +255,7 @@ This is:
 **Context**: How to represent the config key to users?
 
 **Options Considered**:
+
 1. **Just config_key**: `destructive_git`
 2. **Dotted path**: `handlers.pre_tool_use.destructive_git`
 3. **YAML snippet**: `handlers:\n  pre_tool_use:\n    destructive_git:\n      enabled: false`
@@ -241,6 +263,7 @@ This is:
 **Decision**: Option 2 - Dotted path notation
 
 **Rationale**:
+
 - Familiar from PHPStan, ESLint, Ruff
 - Unambiguous (includes full path to the config item)
 - Concise (single line)
@@ -256,6 +279,7 @@ This is:
 **Decision**: Only append to DENY and ASK results
 
 **Rationale**:
+
 - ALLOW responses are often silent (empty result)
 - Users only need to disable handlers that are blocking them
 - Adding config keys to ALLOW would be noise
@@ -277,16 +301,17 @@ This is:
 
 ## Risks & Mitigations
 
-| Risk | Impact | Probability | Mitigation |
-|------|--------|-------------|------------|
-| Existing tests break (assert exact reason strings) | Medium | High | Update affected test assertions to account for footer |
-| Acceptance test patterns break | Medium | Medium | Regex patterns should still match (footer is appended after) |
-| Progressive verbosity messages look cluttered | Low | Low | Footer is visually separated with blank line |
-| Event type naming mismatch (camelCase vs snake_case) | Medium | Low | Verify mapping in Phase 1 research |
+| Risk                                                 | Impact | Probability | Mitigation                                                   |
+| ---------------------------------------------------- | ------ | ----------- | ------------------------------------------------------------ |
+| Existing tests break (assert exact reason strings)   | Medium | High        | Update affected test assertions to account for footer        |
+| Acceptance test patterns break                       | Medium | Medium      | Regex patterns should still match (footer is appended after) |
+| Progressive verbosity messages look cluttered        | Low    | Low         | Footer is visually separated with blank line                 |
+| Event type naming mismatch (camelCase vs snake_case) | Medium | Low         | Verify mapping in Phase 1 research                           |
 
 ## Notes & Updates
 
 ### 2026-02-12
+
 - Plan created based on user feedback
 - Inspired by PHPStan's rule identifier pattern
 - Key insight: FrontController already knows event type + handler, making it the ideal injection point

@@ -23,6 +23,7 @@ When Claude Code enters plan mode and writes to the plan file at `/root/.claude/
 ## Observed Behavior
 
 In this session, three consecutive write attempts produced three different plan numbers:
+
 - First attempt: `00026-glittery-wandering-thimble`
 - Second attempt: `00024-glittery-wandering-thimble`
 - Third attempt: `00025-glittery-wandering-thimble-2`
@@ -32,6 +33,7 @@ None of these directories were actually created (confirmed via Glob).
 ## Expected Behavior
 
 One of:
+
 1. The daemon should not modify the file between read and write operations
 2. The redirect target should be stable (same number on consecutive reads)
 3. The Write tool should succeed when writing to the plan file, with the daemon intercepting AFTER the write to copy/redirect the content

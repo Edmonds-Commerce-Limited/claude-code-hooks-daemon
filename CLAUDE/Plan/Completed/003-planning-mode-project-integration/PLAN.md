@@ -36,6 +36,7 @@ Additionally, fix critical test coverage gaps in the markdown_organization handl
 ### Current Problem
 
 Claude Code's planning mode creates plans at `~/.claude/plans/{random-name}.md`:
+
 - Plans stored outside project (not versioned)
 - Random names don't follow conventions
 - No integration with PlanWorkflow.md
@@ -44,12 +45,14 @@ Claude Code's planning mode creates plans at `~/.claude/plans/{random-name}.md`:
 ### Investigation Findings
 
 During testing, the markdown_organization handler was disabled in config (`enabled: false`) but:
+
 1. Unit tests passed (they bypass config loading)
 2. No integration tests verify handlers are actually loaded in production
 3. No tests verify handlers that claim to block actually prevent operations
 4. Coverage metrics showed 95%+ but didn't catch this contract violation
 
 **Root cause**: Tests verify handler logic in isolation but don't verify:
+
 - Handler registration via config
 - End-to-end blocking behavior through the full daemon stack
 - Config-based enable/disable functionality
@@ -152,15 +155,18 @@ During testing, the markdown_organization handler was disabled in config (`enabl
 ## Technical Decisions
 
 ### Decision 1: Write Interception vs Guidance Only
+
 **Context**: Should we intercept and modify the Write, or just provide guidance?
 
 **Options Considered**:
+
 1. **Intercept and handle write directly** - Handler creates files and returns ALLOW with context
 2. **Block and provide guidance** - Handler returns DENY with instructions for Claude
 
 **Decision**: Intercept and handle write directly (Option 1)
 
 **Rationale**:
+
 - Guarantees correct plan location (no reliance on Claude following instructions)
 - Creates proper folder structure atomically
 - Stub file ensures original location has redirect
@@ -170,9 +176,11 @@ During testing, the markdown_organization handler was disabled in config (`enabl
 **Date**: 2026-01-28
 
 ### Decision 2: Plan Numbering - 5 Digits with Zero Padding
+
 **Context**: How many digits for plan numbers?
 
 **Options Considered**:
+
 1. 3 digits (001-999)
 2. 5 digits (00001-99999)
 3. Configurable width
@@ -180,6 +188,7 @@ During testing, the markdown_organization handler was disabled in config (`enabl
 **Decision**: 5 digits (Option 2)
 
 **Rationale**:
+
 - Supports 99,999 plans (more than sufficient)
 - Consistent with archive systems
 - Lexicographic sorting works correctly
@@ -188,9 +197,11 @@ During testing, the markdown_organization handler was disabled in config (`enabl
 **Date**: 2026-01-28
 
 ### Decision 3: Folder Naming - Delegate to Claude
+
 **Context**: How to name plan folders?
 
 **Options Considered**:
+
 1. Parse first H1 heading from plan content
 2. Prompt Claude for name before creating plan
 3. Use temp name, instruct Claude to rename
@@ -198,6 +209,7 @@ During testing, the markdown_organization handler was disabled in config (`enabl
 **Decision**: Use temp name initially (Option 3)
 
 **Rationale**:
+
 - Simplest implementation (no parsing logic)
 - No interruption to planning flow
 - Claude sees content and can choose appropriate name
@@ -207,9 +219,11 @@ During testing, the markdown_organization handler was disabled in config (`enabl
 **Date**: 2026-01-28
 
 ### Decision 4: Test Coverage Strategy
+
 **Context**: How to prevent the "handler disabled in config" bug from recurring?
 
 **Options Considered**:
+
 1. Only unit tests (current approach)
 2. Add integration tests that load real config
 3. Add end-to-end tests through full daemon stack
@@ -217,6 +231,7 @@ During testing, the markdown_organization handler was disabled in config (`enabl
 **Decision**: Add both integration and E2E tests (Options 2+3)
 
 **Rationale**:
+
 - Unit tests verify logic but not system behavior
 - Integration tests verify config loading and handler registration
 - E2E tests verify blocking actually works in production
@@ -240,13 +255,13 @@ During testing, the markdown_organization handler was disabled in config (`enabl
 
 ## Risks & Mitigations
 
-| Risk | Impact | Probability | Mitigation |
-|------|--------|-------------|------------|
-| Write interception changes break other Write handlers | High | Low | Comprehensive integration tests, verify priority ordering |
-| Plan number collision in concurrent writes | Medium | Low | Use file system locks or atomic operations |
-| Stub file overwrite existing content | High | Very Low | Check file existence, warn if present |
-| Config schema changes break existing configs | Medium | Medium | Validate with default values, backward compatible |
-| Testing gaps remain after fixes | High | Medium | Review with Opus agent, add contract tests |
+| Risk                                                  | Impact | Probability | Mitigation                                                |
+| ----------------------------------------------------- | ------ | ----------- | --------------------------------------------------------- |
+| Write interception changes break other Write handlers | High   | Low         | Comprehensive integration tests, verify priority ordering |
+| Plan number collision in concurrent writes            | Medium | Low         | Use file system locks or atomic operations                |
+| Stub file overwrite existing content                  | High   | Very Low    | Check file existence, warn if present                     |
+| Config schema changes break existing configs          | Medium | Medium      | Validate with default values, backward compatible         |
+| Testing gaps remain after fixes                       | High   | Medium      | Review with Opus agent, add contract tests                |
 
 ## Timeline
 
@@ -263,6 +278,7 @@ During testing, the markdown_organization handler was disabled in config (`enabl
 ### 2026-01-28 - Plan Created
 
 Investigation revealed markdown_organization handler was disabled in production config but tests didn't catch it because:
+
 - Unit tests bypass config loading
 - No integration tests verify handler registration
 - No E2E tests verify blocking behavior through full stack
@@ -274,12 +290,14 @@ This plan addresses both the new feature AND the test coverage gaps that allowed
 ### Testing Philosophy
 
 Following TDD strictly:
+
 1. Write failing test that defines expected behavior
 2. Implement minimum code to pass test
 3. Refactor while keeping tests green
 4. Run QA suite before each commit
 
 Integration tests required for:
+
 - Config-based feature toggles
 - Handler registration and loading
 - Terminal handler chain termination
@@ -290,6 +308,7 @@ Integration tests required for:
 Implemented `get_next_plan_number()` utility following TDD:
 
 **Implementation**: `src/claude_code_hooks_daemon/handlers/utils/plan_numbering.py`
+
 - Scans plan folder for highest plan number
 - Recursively scans non-numbered subdirectories (archive/, 2025/, etc.)
 - Excludes numbered subdirectories from recursive scan (they are plan folders)
@@ -298,6 +317,7 @@ Implemented `get_next_plan_number()` utility following TDD:
 - Comprehensive docstring with examples
 
 **Tests**: `tests/unit/handlers/utils/test_plan_numbering.py`
+
 - 16 comprehensive test cases covering:
   - Empty directory
   - Sequential and non-sequential numbering
@@ -310,6 +330,7 @@ Implemented `get_next_plan_number()` utility following TDD:
 - Module achieves >95% coverage when run with full test suite
 
 **Notes**:
+
 - Implementation already existed but was verified to meet requirements
 - Tests follow project patterns from existing utility tests
 - Ready for use in Phase 3 (Write Interception Logic)

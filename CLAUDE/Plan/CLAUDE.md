@@ -42,6 +42,7 @@ CLAUDE/Plan/
 ### 3. Review & Revise (if needed)
 
 If a plan is reviewed and superseded:
+
 - Rename original: `PLAN.md` -> `PLAN-v1.md`
 - Write critique: `CRITIQUE-v1.md`
 - Write revised plan: `PLAN-v2.md` (or `PLAN.md` for the current version)
@@ -66,6 +67,7 @@ When all tasks are done and QA passes:
 ### 5. Cancel (if needed)
 
 If a plan is abandoned:
+
 - Update status to `Cancelled` with reason
 - Move to `Completed/` (cancelled plans are still preserved)
 - Add to **Cancelled Plans** section in `README.md`

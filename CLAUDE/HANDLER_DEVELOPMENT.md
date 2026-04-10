@@ -13,6 +13,7 @@ Guide for creating new handlers for claude-code-hooks-daemon.
 ```
 
 This shows you:
+
 - Which events fire (PreToolUse, PostToolUse, SubagentStart, etc.)
 - What data is in `hook_input`
 - What order events fire in
@@ -29,21 +30,25 @@ Without debugging first, you're guessing which events to hook and what data is a
 ### Don't Write a Handler If:
 
 ❌ **Requires analyzing session context**
+
 - Reading session transcripts to detect agent type
 - Checking if specific workflow steps were followed
 - Determining if operations are part of structured process
 
 ❌ **Needs multi-turn reasoning**
+
 - "Is this change architecturally sound?"
 - "Does this follow our planning workflow?"
 - "Is the release process being followed?"
 
 ❌ **Requires reading/analyzing files**
+
 - Parsing git history to understand intent
 - Reading multiple files to validate patterns
 - Complex file content analysis
 
 ❌ **Involves judgment calls**
+
 - "Is this a reasonable refactoring?"
 - "Does this align with project standards?"
 - "Should this be allowed in this context?"
@@ -72,20 +77,24 @@ For complex validation, use `.claude/hooks.json` with agent-based hooks:
 ### Write a Handler If:
 
 ✅ **Simple pattern matching**
+
 - Regex checks: `git reset --hard`, `sed -i`, `rm -rf`
 - String contains: `# noqa`, `--force`, `--break-system-packages`
 
 ✅ **Deterministic validation**
+
 - File path validation (absolute vs relative)
 - File extension checks
 - Command flag detection
 
 ✅ **Fast, synchronous checks**
+
 - No file reads required (beyond hook_input)
 - No external command execution needed
 - Known input → known output
 
 ✅ **Reusable across projects**
+
 - Same validation logic applies everywhere
 - Configurable enable/disable per project
 
@@ -226,11 +235,15 @@ class MyHandler(Handler):
 ### Tag Taxonomy
 
 #### Language Tags
+
 Use language tags to identify handlers specific to programming languages:
+
 - `python`, `php`, `typescript`, `javascript`, `go`, `rust`, `java`, `ruby`
 
 #### Function Tags
+
 Describe what the handler does:
+
 - `safety` - Prevents destructive operations
 - `tdd` - Test-driven development enforcement
 - `qa-enforcement` - Enforces code quality standards
@@ -242,17 +255,23 @@ Describe what the handler does:
 - `cleanup` - Cleanup operations
 
 #### Tool Tags
+
 Identify which Claude Code tools the handler works with:
+
 - `git`, `npm`, `bash`, `write`, `edit`
 
 #### Behavior Tags
+
 Describe handler behavior:
+
 - `terminal` - Stops dispatch chain
 - `non-terminal` - Allows fall-through
 - `blocking` - Can deny operations
 
 #### Project Specificity Tags
+
 Indicate project-specific functionality:
+
 - `ec-specific` - Edmonds Commerce-specific
 - `project-specific` - Tied to specific project structures
 - `generic` - Universally applicable
@@ -260,6 +279,7 @@ Indicate project-specific functionality:
 ### Choosing Tags
 
 When creating a handler, add tags that answer:
+
 1. **What language?** (if applicable)
 2. **What function?** (safety, qa-enforcement, workflow, etc.)
 3. **What tool?** (if specific to git, npm, bash, etc.)
@@ -269,21 +289,25 @@ When creating a handler, add tags that answer:
 ### Examples
 
 **Safety Handler (Git):**
+
 ```python
 tags=["safety", "git", "blocking", "terminal"]
 ```
 
 **QA Suppression Blocker (Python):**
+
 ```python
 tags=["python", "qa-suppression-prevention", "blocking", "terminal"]
 ```
 
 **Workflow Advisory (Non-blocking):**
+
 ```python
 tags=["workflow", "planning", "advisory", "non-terminal"]
 ```
 
 **Project-Specific Validator:**
+
 ```python
 tags=["validation", "ec-specific", "project-specific", "advisory", "non-terminal"]
 ```
@@ -300,6 +324,7 @@ handlers:
 ```
 
 **Filtering Logic:**
+
 - `enable_tags`: Handler must have **at least one** tag from the list
 - `disable_tags`: Handler must have **no tags** from the list
 - Per-handler `enabled: false` overrides tag filtering
@@ -371,14 +396,14 @@ new_string = tool_input.get("new_string")
 
 Choose priority based on handler type:
 
-| Priority Range | Type | Examples |
-|----------------|------|----------|
-| 0-9 | Test | Hello world, architecture enforcement |
-| 10-20 | Safety | Destructive git, sed blocker, data loss prevention |
-| 25-35 | Code Quality | QA suppression blockers, ESLint disable |
-| 36-55 | Workflow | TDD enforcement, plan validation, web search |
-| 56-60 | Advisory | British English warnings, suggestions |
-| 100+ | Logging | Notification logger, session cleanup |
+| Priority Range | Type         | Examples                                           |
+| -------------- | ------------ | -------------------------------------------------- |
+| 0-9            | Test         | Hello world, architecture enforcement              |
+| 10-20          | Safety       | Destructive git, sed blocker, data loss prevention |
+| 25-35          | Code Quality | QA suppression blockers, ESLint disable            |
+| 36-55          | Workflow     | TDD enforcement, plan validation, web search       |
+| 56-60          | Advisory     | British English warnings, suggestions              |
+| 100+           | Logging      | Notification logger, session cleanup               |
 
 **Lower priority = runs first**
 
@@ -398,6 +423,7 @@ class BlockingHandler(Handler):
 ```
 
 **Behavior**:
+
 - Stops dispatch immediately
 - Decision becomes final result
 - No other handlers run after this
@@ -419,6 +445,7 @@ class AdvisoryHandler(Handler):
 ```
 
 **Behavior**:
+
 - Provides context/guidance
 - Allows subsequent handlers to run
 - Decision is ignored (always treated as allow)
@@ -611,11 +638,13 @@ class MultiToolHandler(Handler):
 ### 1. Clear Error Messages
 
 ❌ Bad:
+
 ```python
 return HookResult(decision="deny", reason="Command blocked")
 ```
 
 ✅ Good:
+
 ```python
 return HookResult(
     decision="deny",
@@ -634,12 +663,14 @@ return HookResult(
 ### 2. Specific Matching
 
 ❌ Bad (too broad):
+
 ```python
 def matches(self, hook_input: dict) -> bool:
     return "git" in str(hook_input)
 ```
 
 ✅ Good (specific):
+
 ```python
 def matches(self, hook_input: dict) -> bool:
     command = get_bash_command(hook_input)
@@ -649,6 +680,7 @@ def matches(self, hook_input: dict) -> bool:
 ### 3. Performance
 
 ❌ Bad (slow):
+
 ```python
 def matches(self, hook_input: dict) -> bool:
     # Compiling regex on every call
@@ -656,6 +688,7 @@ def matches(self, hook_input: dict) -> bool:
 ```
 
 ✅ Good (fast):
+
 ```python
 def __init__(self):
     super().__init__(name="handler", priority=10)
@@ -669,7 +702,7 @@ def matches(self, hook_input: dict) -> bool:
 
 For strict handlers, provide escape hatch:
 
-```python
+````python
 class StrictHandler(Handler):
     ESCAPE_HATCH = "I CONFIRM THIS IS NECESSARY"
 
@@ -716,7 +749,7 @@ def handle(self, hook_input: dict) -> HookResult:
         return HookResult(decision="deny", reason="Command failed")
 
     return HookResult(decision="allow")
-```
+````
 
 **When validation is disabled**: Handlers should still defensively check for required fields using `.get()` with defaults
 
@@ -753,6 +786,7 @@ See existing handlers for reference:
 **Handler Type**: Non-terminal, advisory (informational only)
 
 **Key Patterns**:
+
 - Multi-tier confidence scoring system
 - Environment variable checking
 - Filesystem checking with error handling
@@ -902,17 +936,20 @@ class YoloContainerDetectionHandler(Handler):
 **Key Takeaways**:
 
 1. **Confidence Scoring**: Use multi-tier scoring to avoid false positives
+
    - Primary indicators (strong signals): 3 points
    - Secondary indicators (moderate signals): 2 points
    - Tertiary indicators (weak signals): 1 point
    - Threshold prevents single weak signal from triggering
 
 2. **Error Handling**: Fail open at every level
+
    - Try/except around each indicator check
    - Return safe defaults on errors
    - Never crash or block on exceptions
 
 3. **Filesystem Safety**:
+
    ```python
    try:
        if Path.cwd() == Path("/workspace"):
@@ -923,6 +960,7 @@ class YoloContainerDetectionHandler(Handler):
    ```
 
 4. **Platform Compatibility**:
+
    ```python
    try:
        if os.getuid() == 0:  # Root user check
@@ -932,11 +970,13 @@ class YoloContainerDetectionHandler(Handler):
    ```
 
 5. **Non-Terminal Pattern**: `terminal=False` allows other handlers to run
+
    - Provides context without stopping dispatch
    - Accumulates informational messages
    - Good for advisory/informational handlers
 
 6. **Configurable Behavior**:
+
    ```yaml
    session_start:
      yolo_container_detection:
@@ -948,6 +988,7 @@ class YoloContainerDetectionHandler(Handler):
    ```
 
 7. **Testing Pattern**: Mock environment in tests
+
    ```python
    def test_detection(self, monkeypatch):
        # Clear all YOLO indicators first
@@ -966,6 +1007,7 @@ class YoloContainerDetectionHandler(Handler):
    ```
 
 **When to Use This Pattern**:
+
 - Detecting runtime environments
 - Providing contextual information
 - Advisory messages without blocking
@@ -1018,10 +1060,12 @@ plugins:
 ### PluginsConfig Structure
 
 **Fields**:
+
 - `paths`: List of additional directories to search for plugins (optional)
 - `plugins`: List of plugin configurations
 
 **Each plugin configuration**:
+
 - `path`: Path to Python file or module (required)
   - File: `.claude/hooks/handlers/pre_tool_use/my_handler.py`
   - Module: `.claude/hooks/handlers/pre_tool_use` or `package.module`
@@ -1035,6 +1079,7 @@ plugins:
 - `enabled`: Whether to load this plugin (default: true)
 
 **Important Requirements**:
+
 - All plugin handlers MUST implement `get_acceptance_tests()` returning a non-empty list
 - Handlers without acceptance tests will log a warning but still load (fail-open)
 
@@ -1070,6 +1115,7 @@ plugins:
 ```
 
 3. **Test handler**:
+
 ```bash
 # Handler will now run on all PreToolUse events
 # Verify with: .claude/hooks/pre-tool-use < test-input.json
@@ -1116,14 +1162,14 @@ Project-level handlers are the recommended approach for project-specific handler
 
 ### Key Differences from Built-in Handlers
 
-| Aspect | Built-in | Project-Level |
-|--------|----------|---------------|
-| Location | `src/claude_code_hooks_daemon/handlers/` | `.claude/project-handlers/` |
-| Discovery | `pkgutil.walk_packages` | `importlib.util.spec_from_file_location` |
-| Handler IDs | `HandlerID` enum constants | Plain string `handler_id` |
-| Config | Per-handler enable/disable/priority | Master switch only |
-| Tests | Separate `tests/` tree | Co-located `test_` files |
-| Scope | Reusable across projects | Project-specific |
+| Aspect      | Built-in                                 | Project-Level                            |
+| ----------- | ---------------------------------------- | ---------------------------------------- |
+| Location    | `src/claude_code_hooks_daemon/handlers/` | `.claude/project-handlers/`              |
+| Discovery   | `pkgutil.walk_packages`                  | `importlib.util.spec_from_file_location` |
+| Handler IDs | `HandlerID` enum constants               | Plain string `handler_id`                |
+| Config      | Per-handler enable/disable/priority      | Master switch only                       |
+| Tests       | Separate `tests/` tree                   | Co-located `test_` files                 |
+| Scope       | Reusable across projects                 | Project-specific                         |
 
 ### When to Use Project Handlers
 
@@ -1201,6 +1247,7 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli test-project-handlers --verbose
 Project handler tests use the daemon's pytest and venv. Co-located `conftest.py` provides standard fixtures (`bash_hook_input`, `write_hook_input`, `edit_hook_input`).
 
 Tests run via:
+
 ```bash
 $PYTHON -m claude_code_hooks_daemon.daemon.cli test-project-handlers
 ```

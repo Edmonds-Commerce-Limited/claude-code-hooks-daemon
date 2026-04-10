@@ -18,6 +18,7 @@
 Based on the Pydantic model in `/workspace/src/claude_code_hooks_daemon/core/event.py`:
 
 **Claude Code sends (camelCase JSON)**:
+
 ```json
 {
   "prompt": "user prompt text",
@@ -27,6 +28,7 @@ Based on the Pydantic model in `/workspace/src/claude_code_hooks_daemon/core/eve
 ```
 
 **Handler receives (snake_case after Pydantic parsing)**:
+
 ```python
 hook_input = {
     "prompt": "user prompt text",
@@ -49,6 +51,7 @@ class HookInput(BaseModel):
 ```
 
 **Key observations:**
+
 - `prompt` field has NO alias (stays as-is)
 - `transcriptPath` (camelCase) → `transcript_path` (snake_case) via Pydantic alias
 - `sessionId` (camelCase) → `session_id` (snake_case) via Pydantic alias
@@ -62,6 +65,7 @@ class HookInput(BaseModel):
 **File**: `/workspace/tests/unit/handlers/user_prompt_submit/test_git_context_injector.py`
 
 **Test Fixtures Used**:
+
 ```python
 # Line 37
 hook_input = {"prompt": "Implement feature X"}
@@ -74,6 +78,7 @@ hook_input = {"prompt": "Test"}
 ```
 
 **Analysis**: ✅ CORRECT
+
 - Uses `prompt` field (matches spec)
 - Does NOT use `transcript_path` (handler doesn't need it)
 - Handler always returns True in `matches()` - doesn't inspect event data
@@ -83,6 +88,7 @@ hook_input = {"prompt": "Test"}
 **File**: `/workspace/tests/unit/handlers/user_prompt_submit/test_auto_continue.py`
 
 **Test Fixtures Used**:
+
 ```python
 # Line 82-84 (minimal response test)
 hook_input: dict[str, Any] = {
@@ -110,6 +116,7 @@ hook_input: dict[str, Any] = {
 ```
 
 **Handler Implementation** (`/workspace/src/claude_code_hooks_daemon/handlers/user_prompt_submit/auto_continue.py`):
+
 ```python
 # Lines 70-71
 prompt = hook_input.get("prompt", "").strip()
@@ -117,6 +124,7 @@ transcript_path = hook_input.get("transcript_path", "")  # ✅ Uses snake_case
 ```
 
 **Analysis**: ✅ CORRECT
+
 - Tests use `transcript_path` (snake_case) - matches what handler expects AFTER Pydantic conversion
 - Handler code accesses `transcript_path` (snake_case) via `.get()`
 - This is correct because handlers receive the CONVERTED data (post-Pydantic processing)
@@ -126,6 +134,7 @@ transcript_path = hook_input.get("transcript_path", "")  # ✅ Uses snake_case
 **File**: `/workspace/tests/integration/test_entry_points_branch_coverage.py`
 
 **Test Fixture** (lines 94-96):
+
 ```python
 hook_input = {
     "prompt": "Test prompt",
@@ -133,6 +142,7 @@ hook_input = {
 ```
 
 **Analysis**: ✅ CORRECT
+
 - Minimal valid UserPromptSubmit event
 - Uses `prompt` field only (transcript_path is optional)
 
@@ -155,6 +165,7 @@ Claude Code (JSON)        →    Pydantic Model    →    Handler Code
 ### 2. Test Fixture Correctness
 
 All test fixtures correctly use **snake_case** (`transcript_path`) because:
+
 - Tests call handler methods DIRECTLY (bypassing Pydantic)
 - Handlers expect already-converted snake_case field names
 - In production, Pydantic converts camelCase → snake_case before handlers see the data
@@ -162,6 +173,7 @@ All test fixtures correctly use **snake_case** (`transcript_path`) because:
 ### 3. No Discrepancies Found
 
 **Checked locations:**
+
 - ✅ Handler implementation code (`auto_continue.py`, `git_context_injector.py`)
 - ✅ Unit tests (`test_auto_continue.py`, `test_git_context_injector.py`)
 - ✅ Integration tests (`test_entry_points_branch_coverage.py`)
@@ -196,12 +208,14 @@ hook_input = {
 ### 2. Optional: Add Type Hints
 
 Current handler code uses plain dict:
+
 ```python
 def matches(self, hook_input: dict[str, Any]) -> bool:
     prompt = hook_input.get("prompt", "")
 ```
 
 Could leverage Pydantic model for IDE autocomplete:
+
 ```python
 from claude_code_hooks_daemon.core.event import HookInput
 

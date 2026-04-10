@@ -20,17 +20,20 @@ Rigorous process to fix bugs with confidence that they won't return.
 ### Steps
 
 1. **Gather information**:
+
    - Bug report/GitHub issue details
    - Steps to reproduce
    - Expected vs actual behavior
    - Environment details
 
 2. **Reproduce locally**:
+
    - Follow exact steps from bug report
    - Verify bug occurs
    - Document exact conditions
 
 3. **Identify affected component**:
+
    - Which handler/module is involved?
    - Which event type?
    - What inputs trigger it?
@@ -81,6 +84,7 @@ def test_bug_XXX_handler_integration_failure():
 Add acceptance test via `get_acceptance_tests()` method if bug affects real-world usage.
 
 **Run tests - they MUST FAIL**:
+
 ```bash
 pytest tests/unit/.../test_bug_XXX.py -v
 # Expected: FAILURE (proves bug exists)
@@ -91,12 +95,15 @@ pytest tests/unit/.../test_bug_XXX.py -v
 ### Fix Implementation
 
 1. **Identify root cause** from failing test
+
 2. **Implement minimal fix**:
+
    - Change only what's necessary
    - Don't refactor while fixing
    - Focus on making test pass
 
 3. **Verify fix**:
+
    ```bash
    pytest tests/unit/.../test_bug_XXX.py -v
    # Expected: PASS (bug is fixed)
@@ -105,6 +112,7 @@ pytest tests/unit/.../test_bug_XXX.py -v
 ### Common Bug Patterns
 
 **Import errors** (like the 5-handler issue):
+
 ```python
 # WRONG
 from claude_code_hooks_daemon.constants.decision import Decision
@@ -114,11 +122,13 @@ from claude_code_hooks_daemon.core import Decision
 ```
 
 **Pattern matching bugs**:
+
 - Check regex escaping
 - Verify case sensitivity flags
 - Test edge cases
 
 **Handler logic bugs**:
+
 - Verify matches() and handle() alignment
 - Check Decision.ALLOW vs Decision.DENY
 - Verify terminal flag behavior
@@ -172,14 +182,17 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli logs | grep -i error
 Test in real environment:
 
 1. **Reproduce original bug scenario**:
+
    - Use exact steps from bug report
    - Verify bug is no longer present
 
 2. **Check for side effects**:
+
    - Test related functionality
    - Verify no new issues introduced
 
 3. **Document fix**:
+
    - Update GitHub issue with fix details
    - Document root cause
    - Link to regression test
@@ -205,37 +218,44 @@ Fixes: #XXX
 A bug fix is DONE when ALL of the following are verified:
 
 ### 1. Reproduction
+
 - [ ] Bug reproduced locally
 - [ ] Exact steps documented
 - [ ] Root cause identified
 
 ### 2. Failing Test
+
 - [ ] Unit test written that FAILS (proves bug exists)
 - [ ] Integration test if applicable
 - [ ] Acceptance test added if handler-related
 - [ ] Run: `pytest -v -k bug_XXX` (tests FAIL before fix)
 
 ### 3. Fix Implementation
+
 - [ ] Root cause fixed with minimal change
 - [ ] Failing tests now PASS
 - [ ] Run: `pytest -v -k bug_XXX` (tests PASS after fix)
 
 ### 4. Regression Testing
+
 - [ ] All existing tests still pass
 - [ ] No new test failures introduced
 - [ ] Run: `pytest tests/ -v` (ALL PASS)
 
 ### 5. Full QA
+
 - [ ] Run: `./scripts/qa/run_all.sh`
 - [ ] Expected: "ALL CHECKS PASSED"
 
 ### 6. Daemon Verification
+
 - [ ] Daemon restarts successfully
 - [ ] No import errors in logs
 - [ ] Run: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
 - [ ] Verify: `$PYTHON -m claude_code_hooks_daemon.daemon.cli status` (RUNNING)
 
 ### 7. Live Verification
+
 - [ ] Original bug scenario no longer reproduces
 - [ ] No side effects observed
 - [ ] Fix documented in commit message and GitHub issue
@@ -264,12 +284,14 @@ Your fix might have affected earlier tests. Full re-run ensures no regressions.
 ### How it SHOULD have been caught
 
 **Step 1: Reproduce**
+
 ```bash
 $PYTHON -m claude_code_hooks_daemon.daemon.cli restart
 # Error: No module named 'claude_code_hooks_daemon.constants.decision'
 ```
 
 **Step 2: Write failing test**
+
 ```python
 def test_bug_daemon_loads_with_new_handlers():
     """Regression test: Daemon should load new handlers.
@@ -282,6 +304,7 @@ def test_bug_daemon_loads_with_new_handlers():
 ```
 
 **Step 3: Fix**
+
 ```python
 # Change in all 5 handlers:
 # from claude_code_hooks_daemon.constants.decision import Decision
@@ -289,12 +312,14 @@ from claude_code_hooks_daemon.core import Decision
 ```
 
 **Step 4: Verify test passes**
+
 ```bash
 pytest tests/integration/test_bug_daemon_loads.py -v
 # PASS
 ```
 
 **Step 5: Restart daemon**
+
 ```bash
 $PYTHON -m claude_code_hooks_daemon.daemon.cli restart
 # Daemon started successfully
@@ -303,6 +328,7 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli restart
 ## Common Bug Types
 
 ### Import Errors
+
 - Wrong module path
 - Circular imports
 - Missing dependencies
@@ -310,6 +336,7 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli restart
 **Prevention**: Always restart daemon after code changes.
 
 ### Pattern Matching Bugs
+
 - Regex escaping issues
 - Case sensitivity
 - Edge cases not covered
@@ -317,6 +344,7 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli restart
 **Prevention**: Comprehensive unit tests with edge cases.
 
 ### Handler Logic Bugs
+
 - matches() and handle() mismatch
 - Wrong Decision enum
 - Terminal flag incorrect
@@ -339,6 +367,7 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli restart
 ---
 
 **See Also**:
+
 - @CLAUDE/CodeLifecycle/Features.md - Feature development lifecycle
 - @CLAUDE/CodeLifecycle/General.md - General code changes
 - @CLAUDE/AcceptanceTests/GENERATING.md - Acceptance test generation

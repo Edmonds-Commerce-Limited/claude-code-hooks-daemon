@@ -37,10 +37,10 @@ Workflows are NOT ad-hoc task sequences. They are formal, documented processes w
 
 ## Workflow Types
 
-| Type | Description | Phases | Example |
-|------|-------------|--------|---------|
-| `release` | Release process workflow | 10+ | Version detection → Changelog → Opus review → QA → Acceptance testing → Commit/Push/Tag |
-| `custom` | Custom workflows | Variable | Any structured process |
+| Type      | Description              | Phases   | Example                                                                                 |
+| --------- | ------------------------ | -------- | --------------------------------------------------------------------------------------- |
+| `release` | Release process workflow | 10+      | Version detection → Changelog → Opus review → QA → Acceptance testing → Commit/Push/Tag |
+| `custom`  | Custom workflows         | Variable | Any structured process                                                                  |
 
 **Note**: The workflow system was originally developed for the Edmonds Commerce site project with workflows like `page-orchestration`, `qa-skill`, `sitemap-skill`, `eslint-skill`. This hooks daemon project is adopting the workflow system for its release process.
 
@@ -57,11 +57,13 @@ Workflows are NOT ad-hoc task sequences. They are formal, documented processes w
 **Location**: `./untracked/workflow-state/{workflow-name}/state-{workflow-name}-{start-time}.json`
 
 **Example**:
+
 ```bash
 ./untracked/workflow-state/release/state-release-20260217_143052.json
 ```
 
 **Agent Responsibility**: Create state file at workflow start with:
+
 - Workflow name and type
 - Initial phase (1/total)
 - Required reading list (with @ syntax)
@@ -75,6 +77,7 @@ Workflows are NOT ad-hoc task sequences. They are formal, documented processes w
 **Action**: UPDATE existing state file (same file, preserve `created_at`)
 
 **Agent Responsibility**: Update state file with:
+
 - New phase number and name
 - Updated status
 - Any new context or reminders
@@ -86,6 +89,7 @@ Workflows are NOT ad-hoc task sequences. They are formal, documented processes w
 **Action**: PreCompact hook UPDATES existing state file
 
 **How it works**:
+
 1. Hook detects active workflow (checks CLAUDE.local.md or active plans)
 2. Extracts current workflow state
 3. Looks for existing state file matching workflow name
@@ -107,6 +111,7 @@ Workflows are NOT ad-hoc task sequences. They are formal, documented processes w
 **Action**: SessionStart hook READS state file (DOES NOT DELETE)
 
 **How it works**:
+
 1. Hook finds all state files in `./untracked/workflow-state/*/`
 2. Reads most recently modified state file
 3. Provides guidance to agent with:
@@ -135,6 +140,7 @@ Workflows are NOT ad-hoc task sequences. They are formal, documented processes w
 **Agent Responsibility**: Remove state file when workflow is done.
 
 **Example**:
+
 ```bash
 rm -rf ./untracked/workflow-state/release/
 ```
@@ -173,18 +179,18 @@ rm -rf ./untracked/workflow-state/release/
 
 ### Field Descriptions
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `workflow` | string | ✅ | Human-readable workflow name |
-| `workflow_type` | enum | ✅ | Machine-readable type (see Workflow Types above) |
-| `phase.current` | integer | ✅ | Current phase number (1-indexed) |
-| `phase.total` | integer | ✅ | Total number of phases |
-| `phase.name` | string | ✅ | Human-readable phase name |
-| `phase.status` | enum | ✅ | `not_started` \| `in_progress` \| `completed` \| `blocked` |
-| `required_reading` | array | ✅ | File paths with **@ prefix** to force reading |
-| `context` | object | ⬜ | Flexible key-value pairs (workflow-specific) |
-| `key_reminders` | array | ⬜ | Critical rules that must survive compaction |
-| `created_at` | string | ✅ | ISO 8601 timestamp (preserved across updates) |
+| Field              | Type    | Required | Description                                                |
+| ------------------ | ------- | -------- | ---------------------------------------------------------- |
+| `workflow`         | string  | ✅       | Human-readable workflow name                               |
+| `workflow_type`    | enum    | ✅       | Machine-readable type (see Workflow Types above)           |
+| `phase.current`    | integer | ✅       | Current phase number (1-indexed)                           |
+| `phase.total`      | integer | ✅       | Total number of phases                                     |
+| `phase.name`       | string  | ✅       | Human-readable phase name                                  |
+| `phase.status`     | enum    | ✅       | `not_started` \| `in_progress` \| `completed` \| `blocked` |
+| `required_reading` | array   | ✅       | File paths with **@ prefix** to force reading              |
+| `context`          | object  | ⬜       | Flexible key-value pairs (workflow-specific)               |
+| `key_reminders`    | array   | ⬜       | Critical rules that must survive compaction                |
+| `created_at`       | string  | ✅       | ISO 8601 timestamp (preserved across updates)              |
 
 ### @ Syntax for REQUIRED READING
 
@@ -193,6 +199,7 @@ rm -rf ./untracked/workflow-state/release/
 **Why**: The @ syntax forces agents to actually READ files, not just be contextually aware of them.
 
 **Examples**:
+
 - `@CLAUDE/development/RELEASING.md` - Forces reading
 - `@.claude/skills/release/SKILL.md` - Forces reading
 - `@CLAUDE/AcceptanceTests/GENERATING.md` - Forces reading
@@ -212,6 +219,7 @@ rm -rf ./untracked/workflow-state/release/
 ```
 
 **Benefits**:
+
 - One directory per workflow (clean organization)
 - Multiple concurrent workflows supported
 - Easy to find and manage workflow state
@@ -226,11 +234,13 @@ The PreCompact hook detects active workflows using:
 ### Method 1: CLAUDE.local.md Markers
 
 If `CLAUDE.local.md` exists and contains:
+
 - `"WORKFLOW STATE"` marker
 - `"workflow:"` field
 - `"Phase:"` field
 
 **Example**:
+
 ```markdown
 # Current Workflow State
 
@@ -244,6 +254,7 @@ Phase: 4/10 - QA Verification Gate
 ### Method 2: Active Plans
 
 If `CLAUDE/Plan/*/PLAN.md` exists with:
+
 - `🔄 In Progress` status
 - `"phase"` or `"workflow"` keywords in content
 
@@ -256,6 +267,7 @@ If `CLAUDE/Plan/*/PLAN.md` exists with:
 ### The Problem
 
 Conversation compaction loses:
+
 - Procedural workflow details (phase tracking)
 - Document references (which files to read)
 - Conditional logic (e.g., "skip Phase 3" becomes vague)
@@ -277,6 +289,7 @@ Conversation compaction loses:
 ### Multiple Compaction Cycles
 
 State files persist across MULTIPLE compactions:
+
 - PreCompact updates existing file (cycle 1)
 - Compaction happens (cycle 1)
 - SessionStart reads file (cycle 1)
@@ -380,6 +393,7 @@ State files persist across MULTIPLE compactions:
 **Purpose**: Preserves workflow state before context compaction.
 
 **What it does**:
+
 - Detects if workflow active (via CLAUDE.local.md or active plans)
 - Extracts workflow state from conversation
 - Sanitizes workflow name for directory/filename
@@ -399,6 +413,7 @@ State files persist across MULTIPLE compactions:
 **Purpose**: Restores workflow state after compaction.
 
 **What it does**:
+
 - Finds all state files in `./untracked/workflow-state/*/`
 - If none: Returns allow, no guidance
 - If found: Sorts by modification time (most recent first)
@@ -415,6 +430,7 @@ State files persist across MULTIPLE compactions:
 **Location**: `.claude/hooks/controller/handlers/session_start/workflow_state_restoration_handler.py`
 
 **Example guidance**:
+
 ```
 ⚠️ WORKFLOW RESTORED AFTER COMPACTION ⚠️
 
@@ -513,6 +529,7 @@ rm -rf ./untracked/workflow-state/my-workflow/
 ### State file not created?
 
 **Check**:
+
 1. Is workflow formally documented?
 2. Does CLAUDE.local.md contain workflow markers?
 3. Check `.claude/hooks/controller/tests/` for test examples
@@ -524,6 +541,7 @@ rm -rf ./untracked/workflow-state/my-workflow/
 ### Workflow lost after compaction?
 
 **Check**:
+
 1. Was state file created before compaction?
 2. Check `./untracked/workflow-state/{workflow-name}/`
 3. Did SessionStart hook provide guidance?

@@ -13,6 +13,7 @@ Exhaustive configuration validation for `hooks-daemon.yaml` files with automated
 **Module**: `src/claude_code_hooks_daemon/config/validator.py`
 
 **Validates**:
+
 - ✅ Version format (`X.Y` pattern, e.g., `1.0`)
 - ✅ Daemon settings (idle_timeout_seconds, log_level)
 - ✅ Handler configuration (enabled, priority, event types)
@@ -24,6 +25,7 @@ Exhaustive configuration validation for `hooks-daemon.yaml` files with automated
 - ✅ Plugins section (optional)
 
 **Valid Event Types** (10 total):
+
 ```python
 pre_tool_use
 post_tool_use
@@ -38,17 +40,20 @@ pre_compact
 ```
 
 **Valid Log Levels**:
+
 ```python
 DEBUG, INFO, WARNING, ERROR
 ```
 
 **Priority Range**:
+
 ```python
 MIN_PRIORITY = 5
 MAX_PRIORITY = 60
 ```
 
 **Handler Name Pattern**:
+
 ```python
 ^[a-z][a-z0-9_]*$  # snake_case with optional numbers
 ```
@@ -58,15 +63,18 @@ MAX_PRIORITY = 60
 **Module**: `src/claude_code_hooks_daemon/daemon/init_config.py`
 
 **Modes**:
+
 - `minimal`: Essential configuration with no examples
 - `full`: Complete configuration with all hook events and example handlers (default)
 
 **CLI Command**:
+
 ```bash
 python3 -m claude_code_hooks_daemon.daemon.cli init-config [--minimal] [--force]
 ```
 
 **Example Usage**:
+
 ```bash
 # Generate full config (default)
 python3 -m claude_code_hooks_daemon.daemon.cli init-config
@@ -250,6 +258,7 @@ Invalid event type 'handlers.invalid_event'. Valid types: notification, permissi
 **Tests**: 40+ comprehensive tests
 
 **Test Files**:
+
 - `tests/config/test_validator.py` - Validator tests (30+ tests)
 - `tests/daemon/test_init_config.py` - Init config tests (15+ tests)
 - `tests/daemon/test_server_validation.py` - Server integration tests (5+ tests)
@@ -257,6 +266,7 @@ Invalid event type 'handlers.invalid_event'. Valid types: notification, permissi
 **Coverage**: 100% of validation logic
 
 **Test Categories**:
+
 - Valid configurations (minimal, full, with handlers)
 - Invalid field values (wrong type, out of range, invalid format)
 - Missing required fields
@@ -384,6 +394,7 @@ This ensures configs remain valid even when new handler options are added.
 ## Summary
 
 **Implemented**:
+
 - ✅ Exhaustive config validation (40+ validation rules)
 - ✅ Helpful error messages with context
 - ✅ Config template generation (minimal and full modes)
@@ -392,6 +403,7 @@ This ensures configs remain valid even when new handler options are added.
 - ✅ Forward compatibility for handler options
 
 **Next Steps**:
+
 - Integrate validation into server startup
 - Add config file validation to CI/CD
 - Document all handler options in full template

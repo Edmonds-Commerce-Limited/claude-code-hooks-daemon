@@ -20,7 +20,7 @@ Quick reference of all 10 features from the PowerShell implementation.
 
 ### LOW Priority (2 features)
 
-9. **Percentage Remaining** - Show both used and remaining context
+09. **Percentage Remaining** - Show both used and remaining context
 10. **Extra Usage** - Display overage credits if enabled
 
 ## PowerShell Display Example
@@ -34,21 +34,25 @@ Line 3: resets 3:45pm | resets Feb 15, 4:30pm | resets Mar 1
 ## Implementation Components
 
 ### New Utilities (Phase 1)
+
 - `format_token_count(count: int) -> str`
 - `build_progress_bar(pct: float, width: int) -> str`
 - `format_reset_time(iso_str: str, style: str) -> str`
 
 ### New Classes (Phase 2)
+
 - `ApiUsageClient` - OAuth authentication and API calls
 - `UsageCache` - TTL-based caching system
 
 ### New Handlers (Phase 3)
+
 - `api_usage_five_hour.py` - 5-hour window with progress bar
 - `api_usage_seven_day.py` - 7-day window with progress bar
 - `api_usage_extra.py` - Extra usage credits (optional)
 - `thinking_mode.py` - Thinking mode status
 
 ### Enhanced Handlers (Phase 3)
+
 - `model_context.py` - Add token counts and remaining percentage
 
 ## Key Technical Details
@@ -62,15 +66,18 @@ Line 3: resets 3:45pm | resets Feb 15, 4:30pm | resets Mar 1
 **Cache TTL**: 60s (configurable)
 
 **Progress Bar**: 10 characters wide (configurable)
+
 - Filled: ● (U+25CF)
 - Empty: ○ (U+25CB)
 - Colors: green → orange → yellow → red
 
 **Unicode Characters**:
+
 - Filled circle: ● (U+25CF)
 - Empty circle: ○ (U+25CB)
 
 **API Response Format**:
+
 ```json
 {
   "five_hour": {

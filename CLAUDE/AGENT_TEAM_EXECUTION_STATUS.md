@@ -4,9 +4,11 @@
 **Session:** Wave 3 - Multi-Role Verification Workflow
 
 ## ✅ COMPLETED: Plan 00031 - Lock File Edit Blocker Handler
+
 **Status:** Merged to main, pushed to origin (commits 572565a, c5a09b9, c4a5275)
 
 **4-Gate Verification Results:**
+
 - Gate 1 (Tester): ✅ 45/45 tests pass
 - Gate 2 (QA): ✅ All 7 QA checks pass
 - Gate 3 (Senior Reviewer): ✅ 11/11 criteria met
@@ -17,12 +19,14 @@
 ---
 
 ## 🔄 READY: Plan 003 - Planning Mode Integration (25-30% done)
+
 **Worktrees:** parent + child created, venvs installed
 **Team:** plan-003 created
 **Missing:** 6 of 8 phases incomplete
 **Next:** Spawn developer for phases 1, 3-8
 
 ## 🔄 READY: Plan 00021 - Language-Specific Handlers (15-20% done)
+
 **Worktrees:** parent + child created, venvs installed
 **Team:** Need to create (single-team limit)
 **Problem:** LanguageConfig is dead code, DRY violations remain
@@ -31,6 +35,7 @@
 ---
 
 ## Multi-Role Verification Workflow (Proven with Plan 00031)
+
 1. Developer implements (can't claim "complete")
 2. Gate 1: Tester verifies tests pass
 3. Gate 2: QA verifies all checks pass

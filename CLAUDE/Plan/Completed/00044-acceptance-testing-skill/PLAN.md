@@ -16,12 +16,14 @@ This plan creates an automated acceptance testing skill that generates the playb
 ### 1. JSON Output for PlaybookGenerator (code change)
 
 **Files:**
+
 - `src/claude_code_hooks_daemon/daemon/playbook_generator.py` - Refactor + add `generate_json()`
 - `src/claude_code_hooks_daemon/daemon/cli.py` - Add `--format json`, `--filter-type`, `--filter-handler` flags
 - `tests/unit/daemon/test_playbook_generator.py` - Tests for JSON generation
 - `tests/unit/daemon/test_cli.py` - Tests for new CLI flags (or extend existing)
 
 **Changes:**
+
 1. Extract shared logic from `generate_markdown()` into `_collect_tests()` private method
 2. Add `generate_json()` that returns `list[dict[str, Any]]` with all test fields plus handler_name, event_type, priority, test_number, source
 3. Add CLI flags: `--format json|markdown`, `--filter-type blocking|advisory|context`, `--filter-handler <name>`
@@ -42,12 +44,14 @@ This plan creates an automated acceptance testing skill that generates the playb
 ### 3. `/acceptance-test` Skill
 
 **Files:**
+
 - `.claude/skills/acceptance-test/SKILL.md` - Frontmatter + documentation
 - `.claude/skills/acceptance-test/invoke.sh` - Orchestration prompt generator
 
 **Accepts args:** `all` (default), `blocking-only`, `advisory-only`, `context-only`, or handler name substring
 
 **Orchestration flow:**
+
 1. Restart daemon
 2. Generate playbook as JSON (with filters)
 3. Group tests into batches of 3-5
@@ -109,14 +113,14 @@ Phase 3 (depends on Phase 2):
 
 ## Key Design Decisions
 
-| Decision | Rationale |
-|----------|-----------|
-| Batch size 3-5 tests per agent | Balances parallelism overhead vs throughput. ~90 tests = 18-30 batches |
-| SKIP lifecycle events | SessionStart/End/PreCompact can't be triggered by subagent. Honest > false confidence |
-| JSON via CLI flag not separate command | Reuses existing infrastructure, follows Unix conventions |
-| Filtering at CLI level | Reduces prompt size for orchestrating agent |
-| Extract `_collect_tests()` | DRY - both markdown and JSON need same collection logic |
-| Agent outputs JSON not free-text | Enables programmatic aggregation across batches |
+| Decision                               | Rationale                                                                             |
+| -------------------------------------- | ------------------------------------------------------------------------------------- |
+| Batch size 3-5 tests per agent         | Balances parallelism overhead vs throughput. ~90 tests = 18-30 batches                |
+| SKIP lifecycle events                  | SessionStart/End/PreCompact can't be triggered by subagent. Honest > false confidence |
+| JSON via CLI flag not separate command | Reuses existing infrastructure, follows Unix conventions                              |
+| Filtering at CLI level                 | Reduces prompt size for orchestrating agent                                           |
+| Extract `_collect_tests()`             | DRY - both markdown and JSON need same collection logic                               |
+| Agent outputs JSON not free-text       | Enables programmatic aggregation across batches                                       |
 
 ## Verification
 

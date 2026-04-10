@@ -13,6 +13,7 @@
 ## Approach
 
 Extend `TranscriptReader` to:
+
 1. Parse the **real** JSONL format (`"type": "message"` with nested role)
 2. Parse **embedded content blocks** (text + tool_use) within messages
 3. Provide high-level query methods for handlers
@@ -22,23 +23,24 @@ Then fix the bug: `AutoContinueStopHandler.matches()` checks if the last assista
 
 ## Files to Modify
 
-| File | Action |
-|------|--------|
-| `src/claude_code_hooks_daemon/core/transcript_reader.py` | Extend with content blocks + query methods |
-| `tests/unit/core/test_transcript_reader.py` | Add tests for new features (TDD) |
-| `src/claude_code_hooks_daemon/core/__init__.py` | Export new `ContentBlock` type |
-| `src/claude_code_hooks_daemon/utils/stop_hook_helpers.py` | **Create** — shared `is_stop_hook_active()` + `get_last_assistant_text()` |
-| `tests/unit/utils/test_stop_hook_helpers.py` | **Create** — tests for shared utilities |
-| `src/claude_code_hooks_daemon/utils/__init__.py` | Export new utilities |
-| `src/claude_code_hooks_daemon/handlers/stop/auto_continue_stop.py` | Remove duplicated methods, use shared utilities, add AskUserQuestion check |
-| `src/claude_code_hooks_daemon/handlers/stop/hedging_language_detector.py` | Remove duplicated methods, use shared utilities |
-| `tests/unit/handlers/stop/test_auto_continue_stop.py` | Add AskUserQuestion bug-fix tests |
+| File                                                                      | Action                                                                     |
+| ------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `src/claude_code_hooks_daemon/core/transcript_reader.py`                  | Extend with content blocks + query methods                                 |
+| `tests/unit/core/test_transcript_reader.py`                               | Add tests for new features (TDD)                                           |
+| `src/claude_code_hooks_daemon/core/__init__.py`                           | Export new `ContentBlock` type                                             |
+| `src/claude_code_hooks_daemon/utils/stop_hook_helpers.py`                 | **Create** — shared `is_stop_hook_active()` + `get_last_assistant_text()`  |
+| `tests/unit/utils/test_stop_hook_helpers.py`                              | **Create** — tests for shared utilities                                    |
+| `src/claude_code_hooks_daemon/utils/__init__.py`                          | Export new utilities                                                       |
+| `src/claude_code_hooks_daemon/handlers/stop/auto_continue_stop.py`        | Remove duplicated methods, use shared utilities, add AskUserQuestion check |
+| `src/claude_code_hooks_daemon/handlers/stop/hedging_language_detector.py` | Remove duplicated methods, use shared utilities                            |
+| `tests/unit/handlers/stop/test_auto_continue_stop.py`                     | Add AskUserQuestion bug-fix tests                                          |
 
 ## Phases
 
 ### Phase 1: Enhance TranscriptReader (TDD)
 
 **1a. Add `ContentBlock` dataclass:**
+
 ```python
 @dataclass(frozen=True, slots=True)
 class ContentBlock:
@@ -50,17 +52,20 @@ class ContentBlock:
 ```
 
 **1b. Add `content_blocks` field to `TranscriptMessage`:**
+
 ```python
 content_blocks: tuple[ContentBlock, ...] = ()  # backward-compat default
 ```
 
 **1c. Fix `_parse()` to handle real JSONL format:**
+
 - Support `"type": "message"` with `message.role` (real format)
 - Keep support for `"type": "human"/"assistant"` (legacy/test format)
 - When `message.content` is a list, parse each block into `ContentBlock`
 - Concatenate text blocks into `content` string (existing field)
 
 **1d. Add query methods:**
+
 - `get_last_assistant_message() -> TranscriptMessage | None`
 - `get_last_assistant_text() -> str`
 - `last_assistant_used_tool(tool_name: str) -> bool`
@@ -69,6 +74,7 @@ content_blocks: tuple[ContentBlock, ...] = ()  # backward-compat default
 ### Phase 2: Shared Stop Hook Utilities (TDD)
 
 Create `src/claude_code_hooks_daemon/utils/stop_hook_helpers.py` with:
+
 - `is_stop_hook_active(hook_input) -> bool` — checks both `stop_hook_active` and `stopHookActive`
 - `get_transcript_reader(hook_input) -> TranscriptReader | None` — loads transcript from hook_input, returns reader or None
 
@@ -79,12 +85,14 @@ Replace duplicated private methods in both handlers with calls to shared utiliti
 ### Phase 4: Fix AskUserQuestion Bug (TDD)
 
 Add to `AutoContinueStopHandler.matches()` after confirmation pattern match:
+
 ```python
 if transcript.last_assistant_used_tool(ToolName.ASK_USER_QUESTION):
     return False  # Don't override AskUserQuestion — user must answer
 ```
 
 New tests:
+
 - Transcript with AskUserQuestion tool_use block + confirmation text → `matches()` returns `False`
 - Transcript with confirmation text but NO AskUserQuestion → `matches()` returns `True` (unchanged)
 

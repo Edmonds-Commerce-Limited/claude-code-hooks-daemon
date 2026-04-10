@@ -12,6 +12,7 @@
 Fix critical silent failures where handlers match events but fail to process them due to wrong field names, then add robust input validation at the front controller layer to prevent this class of bug from recurring. This addresses the findings from Plan 001 (Test Fixture Validation).
 
 **Problem**: Multiple handlers are silently broken in production:
+
 - BashErrorDetectorHandler uses `tool_output` (real events have `tool_response`)
 - AutoApproveReadsHandler uses `permission_type` (real events have `permission_suggestions`)
 - NotificationLoggerHandler tests use `severity` (real events have `notification_type`)
@@ -46,6 +47,7 @@ From Plan 001, we discovered:
 3. **Notification tests**: Use `severity` (wrong), should use `notification_type` (correct)
 
 **Root Causes**:
+
 - Handlers written based on assumptions, not real event captures
 - No input schema validation (only response schemas exist)
 - `.get()` with defaults masks missing required fields
@@ -58,6 +60,7 @@ See `/workspace/CLAUDE/Plan/002-fix-silent-handler-failures/CRITICAL_ANALYSIS_SI
 ## Tasks
 
 ### Phase 1: Design Input Validation System
+
 - [ ] ⬜ **Task 1.1**: Research validation approaches
   - [ ] ⬜ Evaluate jsonschema performance (benchmark with 10k events)
   - [ ] ⬜ Compare: full schemas vs sanity checks vs hybrid
@@ -76,6 +79,7 @@ See `/workspace/CLAUDE/Plan/002-fix-silent-handler-failures/CRITICAL_ANALYSIS_SI
   - [ ] ⬜ Add validation toggle to CLI commands
 
 ### Phase 2: Implement Input Validation (TDD)
+
 - [ ] ⬜ **Task 2.1**: Create input schemas
   - [ ] ⬜ Write tests for schema structure
   - [ ] ⬜ Implement PreToolUse input schema
@@ -90,7 +94,7 @@ See `/workspace/CLAUDE/Plan/002-fix-silent-handler-failures/CRITICAL_ANALYSIS_SI
   - [ ] ⬜ Add performance logging
 - [ ] ⬜ **Task 2.3**: Integrate into server.py front controller layer
   - [ ] ⬜ Write tests for server validation integration
-  - [ ] ⬜ Add validation call in _handle_client() after parsing JSON, BEFORE dispatch
+  - [ ] ⬜ Add validation call in \_handle_client() after parsing JSON, BEFORE dispatch
   - [ ] ⬜ Validate ONCE per event at outermost layer (not in handlers/chain)
   - [ ] ⬜ Return error response to Claude Code if validation fails
   - [ ] ⬜ Log validation failures at WARNING level with full details
@@ -98,6 +102,7 @@ See `/workspace/CLAUDE/Plan/002-fix-silent-handler-failures/CRITICAL_ANALYSIS_SI
   - [ ] ⬜ Short-circuit: Don't dispatch to handlers if validation fails
 
 ### Phase 3: Fix BashErrorDetectorHandler (PostToolUse)
+
 - [ ] ⬜ **Task 3.1**: Update handler implementation
   - [ ] ⬜ Write failing tests using tool_response field
   - [ ] ⬜ Change tool_output → tool_response in handler
@@ -117,6 +122,7 @@ See `/workspace/CLAUDE/Plan/002-fix-silent-handler-failures/CRITICAL_ANALYSIS_SI
   - [ ] ⬜ Verify error detection actually works
 
 ### Phase 4: Fix AutoApproveReadsHandler (PermissionRequest)
+
 - [ ] ⬜ **Task 4.1**: Redesign handler for correct structure
   - [ ] ⬜ Analyze real permission_suggestions structure from logs
   - [ ] ⬜ Decide: Keep auto-approve concept or repurpose handler?
@@ -135,6 +141,7 @@ See `/workspace/CLAUDE/Plan/002-fix-silent-handler-failures/CRITICAL_ANALYSIS_SI
   - [ ] ⬜ Verify handler processes permission_suggestions
 
 ### Phase 5: Fix NotificationLoggerHandler Tests
+
 - [ ] ⬜ **Task 5.1**: Update test fixtures
   - [ ] ⬜ Update test_notification_logger.py (severity → notification_type)
   - [ ] ⬜ Use documented types: permission_prompt, idle_prompt, auth_success
@@ -147,6 +154,7 @@ See `/workspace/CLAUDE/Plan/002-fix-silent-handler-failures/CRITICAL_ANALYSIS_SI
   - [ ] ⬜ All tests passing
 
 ### Phase 6: Add Defensive Checks to Handlers (Optional)
+
 - [ ] ⬜ **Task 6.1**: Define defensive coding pattern for handlers
   - [ ] ⬜ Document: Handlers can trust validated input from front controller
   - [ ] ⬜ Document: When to add defensive checks vs trusting validation
@@ -160,6 +168,7 @@ See `/workspace/CLAUDE/Plan/002-fix-silent-handler-failures/CRITICAL_ANALYSIS_SI
 **Note**: With front controller validation, handlers can mostly trust input structure. Defensive checks are for edge cases not caught by schema (e.g., empty strings where non-empty expected).
 
 ### Phase 7: Performance & Integration Testing
+
 - [ ] ⬜ **Task 7.1**: Benchmark validation performance
   - [ ] ⬜ Create benchmark script with 10k events
   - [ ] ⬜ Measure baseline (no validation)
@@ -180,6 +189,7 @@ See `/workspace/CLAUDE/Plan/002-fix-silent-handler-failures/CRITICAL_ANALYSIS_SI
   - [ ] ⬜ No security issues
 
 ### Phase 8: Documentation & Completion
+
 - [ ] ⬜ **Task 8.1**: Update documentation
   - [ ] ⬜ Update CLAUDE/HANDLER_DEVELOPMENT.md with sanity check patterns
   - [ ] ⬜ Document input validation in DAEMON.md
@@ -205,36 +215,42 @@ See `/workspace/CLAUDE/Plan/002-fix-silent-handler-failures/CRITICAL_ANALYSIS_SI
 ## Technical Decisions
 
 ### Decision 1: Validation Approach
+
 **Context**: Need to prevent silent failures without impacting performance
 **Options Considered**:
+
 1. Full jsonschema validation (comprehensive but potentially slow)
 2. Sanity checks only (fast but less comprehensive)
 3. Hybrid: Essential field validation always + optional full validation
 
 **Decision**: **Hybrid approach with layered validation**
 **Implementation**:
+
 - **Layer 1 (Always ON)**: Validate essential fields required for routing (tool_name, tool_response vs tool_output, etc.)
 - **Layer 2 (Optional)**: Full jsonschema validation for all documented fields
-**Performance Data**:
+  **Performance Data**:
 - Schema compilation: 0.1-0.5ms (one-time, cached)
 - Simple validation: 0.01-0.05ms per event
 - Complex validation: 0.1-0.5ms per event
 - **Worst case: ~1ms** (well under 5ms target)
-**Rationale**:
+  **Rationale**:
 - Essential validation catches the specific bugs identified (wrong field names)
 - Full schemas provide comprehensive checking without brittleness
 - Performance is acceptable with cached validators
 - Hybrid provides protection without over-constraining
-**Date**: 2026-01-27
+  **Date**: 2026-01-27
 
 ### Decision 2: Configuration Default
+
 **Context**: Should validation be enabled by default?
 **Options Considered**:
+
 1. Opt-in (validate_input: false by default) - safer rollout
 2. Opt-out (validate_input: true by default) - better protection
 
 **Decision**: **Validation ON by default, Strict mode OFF by default**
 **Configuration Structure**:
+
 ```yaml
 daemon:
   input_validation:
@@ -242,61 +258,71 @@ daemon:
     strict_mode: false         # Fail-closed on errors (default: false)
     log_validation_errors: true
 ```
+
 **Environment Variables**:
+
 - `HOOKS_DAEMON_INPUT_VALIDATION=true|false` - Master switch
 - `HOOKS_DAEMON_VALIDATION_STRICT=true|false` - Strict mode
-**Rollout Strategy**:
+  **Rollout Strategy**:
+
 1. Phase 1: `enabled: true`, `strict_mode: false` - Validate but don't block
 2. Phase 2: Monitor logs, fix any false positives
 3. Phase 3: Keep `strict_mode: false` for production resilience
-**Rationale**:
+   **Rationale**:
+
 - ON by default catches bugs during development
 - Strict OFF ensures production resilience (fail-open)
 - Easy to enable strict mode for debugging
 - Aligns with existing fail-open architecture
-**Date**: 2026-01-27
+  **Date**: 2026-01-27
 
 ### Decision 3: Validation Layer Location
+
 **Context**: Where should input validation happen?
 **Options Considered**:
+
 1. In individual handlers (validate per-handler) - Flexible but inefficient, validated N times
 2. In handler chain (validate per-chain) - Better but still after routing
 3. In front controller server.py (validate once per event) - Outermost layer, most efficient
 
 **Decision**: Front controller layer (server.py `_handle_client()`) - ARCHITECTURAL DECISION
 **Rationale**:
+
 - Validate ONCE per event, not N times per handler
 - Catch invalid data before any handler processing
 - Single source of truth for valid event structure
 - Fail fast at system boundary
 - All handlers can trust input is valid
-**Date**: 2026-01-27
+  **Date**: 2026-01-27
 
 ### Decision 4: Error Handling
+
 **Context**: What happens when validation fails?
 **Options Considered**:
+
 1. Return error to Claude Code (fail-closed for validation)
 2. Log error and allow (fail-open for validation)
 3. Configurable behavior
 
 **Decision**: **Log and continue (fail-open) by default, with optional strict mode**
 **Default Behavior (fail-open)**:
+
 - Log validation errors at WARNING level with full details
 - Continue processing (dispatch to handlers)
 - Include validation warning in response context
 - Track `validation_failures` metric
-**Strict Mode (fail-closed, opt-in)**:
+  **Strict Mode (fail-closed, opt-in)**:
 - Log validation errors at ERROR level
 - Return error response to Claude Code
 - Do NOT dispatch to handlers
 - Error format: `{"error": "input_validation_failed", "details": [...]}`
-**Rationale**:
+  **Rationale**:
 - Fail-open aligns with existing architecture philosophy
 - Validation failures are likely edge cases or version mismatches
 - Better to have partial functionality than total failure
 - Strict mode available for testing/debugging
 - Logs provide visibility without blocking work
-**Date**: 2026-01-27
+  **Date**: 2026-01-27
 
 ## Success Criteria
 
@@ -313,13 +339,13 @@ daemon:
 
 ## Risks & Mitigations
 
-| Risk | Impact | Probability | Mitigation |
-|------|--------|-------------|------------|
-| Validation too slow | High | Medium | Benchmark early, make validation optional, optimize schemas |
-| Breaking existing handlers | High | Low | Comprehensive testing, gradual rollout, opt-in initially |
-| Validation too strict | Medium | Medium | Test with real events, allow optional fields, document schema |
-| Complex handler redesign | Medium | High | Focus on fixing field names first, redesign only if needed |
-| Coverage drops below 95% | Medium | Low | Write tests first (TDD), monitor coverage continuously |
+| Risk                       | Impact | Probability | Mitigation                                                    |
+| -------------------------- | ------ | ----------- | ------------------------------------------------------------- |
+| Validation too slow        | High   | Medium      | Benchmark early, make validation optional, optimize schemas   |
+| Breaking existing handlers | High   | Low         | Comprehensive testing, gradual rollout, opt-in initially      |
+| Validation too strict      | Medium | Medium      | Test with real events, allow optional fields, document schema |
+| Complex handler redesign   | Medium | High        | Focus on fixing field names first, redesign only if needed    |
+| Coverage drops below 95%   | Medium | Low         | Write tests first (TDD), monitor coverage continuously        |
 
 ## Timeline
 
@@ -338,6 +364,7 @@ daemon:
 ### 2026-01-28 - Plan Complete ✅
 
 **All Phases Completed**:
+
 - ✅ Phase 1: Design (validation approach, config structure, schemas)
 - ✅ Phase 2: Implementation (input_schemas.py, server.py integration)
 - ✅ Phase 3: Fix BashErrorDetectorHandler (tool_output→tool_response, removed exit_code)
@@ -348,6 +375,7 @@ daemon:
 - ✅ Phase 8: Documentation (DAEMON.md, README.md, HANDLER_DEVELOPMENT.md)
 
 **Key Achievements**:
+
 - Input validation system fully implemented and enabled by default
 - Fail-open architecture (logs warnings, doesn't block) with optional strict mode
 - Performance: ~0.03ms overhead per event (well under 5ms target)
@@ -358,11 +386,13 @@ daemon:
 - Security check passes (Bandit clean)
 
 **Coverage**: 94.74% (0.26% below 95% target)
+
 - Gap is in defensive code paths (ImportError handling, edge cases)
 - All production code paths are well-tested
 - Validation implementation has strong coverage
 
 **Configuration Defaults**:
+
 ```yaml
 daemon:
   input_validation:
@@ -372,10 +402,12 @@ daemon:
 ```
 
 **Environment Overrides**:
+
 - `HOOKS_DAEMON_INPUT_VALIDATION=true|false`
 - `HOOKS_DAEMON_VALIDATION_STRICT=true|false`
 
 **Files Modified**:
+
 - `src/claude_code_hooks_daemon/core/input_schemas.py` (NEW)
 - `src/claude_code_hooks_daemon/config/models.py` (added InputValidationConfig)
 - `src/claude_code_hooks_daemon/daemon/server.py` (added validation integration)
@@ -390,6 +422,7 @@ daemon:
 - `CLAUDE/HANDLER_DEVELOPMENT.md` (added validation best practices)
 
 **QA Results**:
+
 ```
 ✅ Format Check: PASSED
 ✅ Linter: PASSED
@@ -400,10 +433,12 @@ daemon:
 ```
 
 **Known Issues**:
+
 - Coverage 0.26% below target (acceptable - gap is in defensive code)
 - AutoApproveReadsHandler still needs redesign (deferred to future work)
 
 ### 2026-01-27
+
 - Plan created based on Plan 001 findings
 - Moved CRITICAL_ANALYSIS_SILENT_FAILURES.md into plan folder
 - Awaiting Opus agent research on validation approach
@@ -428,7 +463,9 @@ Located in `/workspace/CLAUDE/Plan/002-fix-silent-handler-failures/`:
 ### Input Schema Structure
 
 #### Common Base Fields
+
 All events contain these base fields:
+
 ```python
 {
     "session_id": "uuid-string",           # Always present
@@ -442,6 +479,7 @@ All events contain these base fields:
 #### Event-Specific Schemas
 
 **PreToolUse Schema:**
+
 ```python
 PRE_TOOL_USE_INPUT_SCHEMA = {
     "type": "object",
@@ -460,6 +498,7 @@ PRE_TOOL_USE_INPUT_SCHEMA = {
 ```
 
 **PostToolUse Schema (CRITICAL - validates tool_response, not tool_output):**
+
 ```python
 POST_TOOL_USE_INPUT_SCHEMA = {
     "type": "object",
@@ -479,6 +518,7 @@ POST_TOOL_USE_INPUT_SCHEMA = {
 ```
 
 **PermissionRequest Schema (CRITICAL - validates permission_suggestions):**
+
 ```python
 PERMISSION_REQUEST_INPUT_SCHEMA = {
     "type": "object",
@@ -599,27 +639,30 @@ def _get_input_validator(self, event_type: str) -> Draft7Validator | None:
 
 ### Performance Expectations
 
-| Metric | Target | Expected |
-|--------|--------|----------|
-| Schema compilation (cached) | N/A | 0.1-0.5ms one-time |
-| Validation per event | < 5ms | 0.1-0.5ms |
-| Memory overhead | < 1MB | ~500KB for all schemas |
-| Throughput impact | < 5% | < 1% expected |
+| Metric                      | Target | Expected               |
+| --------------------------- | ------ | ---------------------- |
+| Schema compilation (cached) | N/A    | 0.1-0.5ms one-time     |
+| Validation per event        | < 5ms  | 0.1-0.5ms              |
+| Memory overhead             | < 1MB  | ~500KB for all schemas |
+| Throughput impact           | < 5%   | < 1% expected          |
 
 **Mitigation Strategies:**
+
 - Pre-compile and cache all validators at daemon startup
 - Use Draft7Validator (optimized implementation)
-- Skip validation for system events (_system)
+- Skip validation for system events (\_system)
 - Optional: Disable validation in production if performance issues arise
 
 ### Testing Strategy
 
 **Test Fixtures from Real Events:**
+
 - Store canonical real event fixtures in `tests/fixtures/real_events/`
 - Source: Captures from debug_hooks.sh sessions
 - Document field structures in POSTTOOLUSE_FIXTURE_VERIFICATION.md
 
 **Unit Test Coverage:**
+
 ```python
 class TestInputValidation:
     def test_valid_pre_tool_use_bash(self):
@@ -637,6 +680,7 @@ class TestInputValidation:
 ```
 
 **Integration Tests:**
+
 - Test full request flow with validation enabled
 - Verify validation doesn't break existing handlers
 - Verify validation errors are logged correctly
@@ -646,10 +690,12 @@ class TestInputValidation:
 ### Files to Create/Modify
 
 **New Files:**
+
 1. `src/claude_code_hooks_daemon/core/input_schemas.py` - Input schema definitions
 2. `tests/fixtures/real_events/` - Canonical real event fixtures
 
 **Modified Files:**
+
 1. `src/claude_code_hooks_daemon/daemon/server.py` - Add validation integration
 2. `src/claude_code_hooks_daemon/config/models.py` - Add InputValidationConfig
 3. `src/claude_code_hooks_daemon/daemon/config.py` - Add validation settings

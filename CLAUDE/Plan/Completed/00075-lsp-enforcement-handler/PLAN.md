@@ -17,6 +17,7 @@ Claude Code has LSP tools (goToDefinition, findReferences, hover, documentSymbol
 Implement a PreToolUse handler (`LspEnforcementHandler`) that detects Grep and Bash(grep/rg) patterns that look like symbol lookups and steers the LLM toward LSP tools instead.
 
 **Design decisions (user-confirmed):**
+
 - **Default mode: `block_once`** — Block first grep-that-looks-like-LSP with DENY, allow retries
 - **No-LSP behaviour: block anyway** — Even without `ENABLE_LSP_TOOL`, block and tell them to set up LSP. Configurable via `no_lsp_mode` option (`block` | `advisory` | `disable`)
 - **Scope: Both Grep tool + Bash grep/rg** — Intercept dedicated Grep tool AND Bash commands containing grep/rg
@@ -40,24 +41,24 @@ Implement a PreToolUse handler (`LspEnforcementHandler`) that detects Grep and B
 
 **Triggers handler (looks like a symbol lookup):**
 
-| Pattern | Suggested LSP Operation |
-|---------|------------------------|
-| `class ClassName` | `workspaceSymbol` or `goToDefinition` |
-| `def function_name` | `workspaceSymbol` or `goToDefinition` |
-| `function functionName` | `workspaceSymbol` or `goToDefinition` |
-| `interface InterfaceName` | `workspaceSymbol` or `goToDefinition` |
+| Pattern                                | Suggested LSP Operation               |
+| -------------------------------------- | ------------------------------------- |
+| `class ClassName`                      | `workspaceSymbol` or `goToDefinition` |
+| `def function_name`                    | `workspaceSymbol` or `goToDefinition` |
+| `function functionName`                | `workspaceSymbol` or `goToDefinition` |
+| `interface InterfaceName`              | `workspaceSymbol` or `goToDefinition` |
 | PascalCase identifier (no regex chars) | `workspaceSymbol` or `findReferences` |
-| snake_case exact identifier | `workspaceSymbol` or `findReferences` |
-| `import.*ModuleName` | `findReferences` |
+| snake_case exact identifier            | `workspaceSymbol` or `findReferences` |
+| `import.*ModuleName`                   | `findReferences`                      |
 
 **Does NOT trigger (legitimate text search):**
 
-| Pattern | Why |
-|---------|-----|
+| Pattern                                     | Why                                 |
+| ------------------------------------------- | ----------------------------------- |
 | Complex regex (`log.*Error`, `\d{3}-\d{4}`) | LSP doesn't do regex content search |
-| String literals (`"error message"`) | Not a symbol |
-| TODO/FIXME/HACK comments | Comment markers, not symbols |
-| Patterns with many regex metacharacters | Text pattern, not identifier |
+| String literals (`"error message"`)         | Not a symbol                        |
+| TODO/FIXME/HACK comments                    | Comment markers, not symbols        |
+| Patterns with many regex metacharacters     | Text pattern, not identifier        |
 
 **Key heuristic:** Is the search pattern a **symbol name** (identifier) or a **text pattern** (regex)?
 
@@ -129,14 +130,14 @@ Implement a PreToolUse handler (`LspEnforcementHandler`) that detects Grep and B
 
 ## Key Files
 
-| File | Change |
-|------|--------|
-| `src/claude_code_hooks_daemon/constants/handlers.py` | Add `LSP_ENFORCEMENT` HandlerIDMeta + HandlerKey |
-| `src/claude_code_hooks_daemon/constants/priority.py` | Add `LSP_ENFORCEMENT = 38` |
-| `src/claude_code_hooks_daemon/constants/tools.py` | Add `LSP = "LSP"` + ToolNameLiteral |
-| `src/claude_code_hooks_daemon/handlers/pre_tool_use/lsp_enforcement.py` | **New** — main handler |
-| `tests/unit/handlers/pre_tool_use/test_lsp_enforcement.py` | **New** — test file |
-| `.claude/hooks-daemon.yaml` | Register handler with options |
+| File                                                                    | Change                                           |
+| ----------------------------------------------------------------------- | ------------------------------------------------ |
+| `src/claude_code_hooks_daemon/constants/handlers.py`                    | Add `LSP_ENFORCEMENT` HandlerIDMeta + HandlerKey |
+| `src/claude_code_hooks_daemon/constants/priority.py`                    | Add `LSP_ENFORCEMENT = 38`                       |
+| `src/claude_code_hooks_daemon/constants/tools.py`                       | Add `LSP = "LSP"` + ToolNameLiteral              |
+| `src/claude_code_hooks_daemon/handlers/pre_tool_use/lsp_enforcement.py` | **New** — main handler                           |
+| `tests/unit/handlers/pre_tool_use/test_lsp_enforcement.py`              | **New** — test file                              |
+| `.claude/hooks-daemon.yaml`                                             | Register handler with options                    |
 
 ## Reusable Utilities
 
@@ -156,7 +157,7 @@ Implement a PreToolUse handler (`LspEnforcementHandler`) that detects Grep and B
 ## Success Criteria
 
 - [x] Correctly identifies symbol-like grep patterns (>90% precision)
-- [x] Does NOT trigger on legitimate regex/content searches (<5% false positive rate)
+- [x] Does NOT trigger on legitimate regex/content searches (\<5% false positive rate)
 - [x] `block_once`: first grep blocked, retry allowed
 - [x] `advisory`: grep allowed with LSP guidance
 - [x] `strict`: grep always blocked

@@ -34,6 +34,7 @@
 From bug report `untracked/upstream-bug-report-plugin-handler-suffix.md`:
 
 **The Bug**:
+
 ```python
 # PluginLoader.load_handler() - CORRECT
 class_name_with_suffix = f"{class_name}Handler"
@@ -50,6 +51,7 @@ if handler.__class__.__name__ == expected_class:              # "SystemPathsHand
 **Expected Behavior**: DAEMON CRASHES IMMEDIATELY with clear error
 
 **Historical Context**:
+
 - Plan 00008 fixed error hiding audit (2026-02-05) - but this pattern was missed
 - Security standards require FAIL FAST (CLAUDE.md)
 - Engineering Principles require NO MAGIC and explicit error handling
@@ -87,6 +89,7 @@ if handler.__class__.__name__ == expected_class:              # "SystemPathsHand
 **Patterns to Detect**:
 
 1. **Silent try/except/pass**
+
    ```python
    try:
        operation()
@@ -95,6 +98,7 @@ if handler.__class__.__name__ == expected_class:              # "SystemPathsHand
    ```
 
 2. **Silent try/except/continue**
+
    ```python
    for item in items:
        try:
@@ -104,6 +108,7 @@ if handler.__class__.__name__ == expected_class:              # "SystemPathsHand
    ```
 
 3. **Warning instead of error** (in critical paths)
+
    ```python
    if critical_condition_failed:
        logger.warning("Problem")  # ❌ Should crash
@@ -111,6 +116,7 @@ if handler.__class__.__name__ == expected_class:              # "SystemPathsHand
    ```
 
 4. **Returning None on error** (instead of raising)
+
    ```python
    def load_critical_resource():
        try:
@@ -120,6 +126,7 @@ if handler.__class__.__name__ == expected_class:              # "SystemPathsHand
    ```
 
 5. **Empty except blocks**
+
    ```python
    try:
        operation()
@@ -128,11 +135,13 @@ if handler.__class__.__name__ == expected_class:              # "SystemPathsHand
    ```
 
 6. **Optional chaining hiding failures**
+
    ```python
    result = obj.method() or default_value  # ❌ Masks method failure
    ```
 
 7. **Graceful degradation in critical paths**
+
    ```python
    if not load_handler():
        logger.warning("Handler failed to load")
@@ -172,6 +181,7 @@ For each violation found:
 **Fix Strategies**:
 
 1. **Silent pass → Crash**
+
    ```python
    # BEFORE
    try:
@@ -187,6 +197,7 @@ For each violation found:
    ```
 
 2. **Warning → Crash**
+
    ```python
    # BEFORE
    if critical_check_failed:
@@ -199,6 +210,7 @@ For each violation found:
    ```
 
 3. **Return None → Raise**
+
    ```python
    # BEFORE
    def load_resource():
@@ -254,6 +266,7 @@ For each violation found:
 **Context**: Currently daemon logs warning and continues when plugin handler can't be matched to config
 
 **Options Considered**:
+
 1. Keep warning, improve matching logic
 2. Make it an error but allow daemon to start in degraded mode
 3. CRASH IMMEDIATELY if any configured handler can't be registered
@@ -261,6 +274,7 @@ For each violation found:
 **Decision**: Option 3 - CRASH IMMEDIATELY
 
 **Rationale**:
+
 - Users have NO IDEA their protection is down with warning approach
 - "Degraded mode" is meaningless if critical handlers are missing
 - FAIL FAST is a core engineering principle (CLAUDE.md)
@@ -274,6 +288,7 @@ For each violation found:
 **Context**: Need to match loaded handler class name back to config entry
 
 **Options Considered**:
+
 1. Check both `ClassName` and `ClassNameHandler` in comparison
 2. Strip `Handler` suffix from class name before comparison
 3. Use path-based matching instead of class name (rebuild loader interface)
@@ -281,6 +296,7 @@ For each violation found:
 **Decision**: Option 1 - Check both variants
 
 **Rationale**:
+
 - Minimal change, mirrors existing logic in `PluginLoader.load_handler()`
 - No interface changes required
 - Clear and explicit (`in (expected, f"{expected}Handler")`)
@@ -293,6 +309,7 @@ For each violation found:
 **Context**: Need to audit entire codebase for error hiding violations
 
 **Options Considered**:
+
 1. Fix only the reported bug (plugin handler suffix)
 2. Audit critical paths only (handler loading, config, daemon startup)
 3. Comprehensive audit of entire codebase
@@ -300,6 +317,7 @@ For each violation found:
 **Decision**: Option 3 - Comprehensive audit
 
 **Rationale**:
+
 - User explicitly requested "general audit for other shitness error hiding patterns"
 - Plan 00008 (2026-02-05) missed this pattern - indicates incomplete coverage
 - One violation suggests others exist
@@ -322,12 +340,12 @@ For each violation found:
 
 ## Risks & Mitigations
 
-| Risk | Impact | Probability | Mitigation |
-|------|--------|-------------|------------|
-| Audit finds 100+ violations | High | Medium | Prioritize by risk (Critical first), batch fixes with comprehensive testing |
-| Breaking change in error handling | High | Low | Add tests first, verify no behavior changes except crash-on-error |
-| Daemon becomes too strict | Medium | Low | Only crash on *configured* resource failures, not optional features |
-| Performance impact from audit script | Low | Low | Run audit only in CI, not in daemon hot path |
+| Risk                                 | Impact | Probability | Mitigation                                                                  |
+| ------------------------------------ | ------ | ----------- | --------------------------------------------------------------------------- |
+| Audit finds 100+ violations          | High   | Medium      | Prioritize by risk (Critical first), batch fixes with comprehensive testing |
+| Breaking change in error handling    | High   | Low         | Add tests first, verify no behavior changes except crash-on-error           |
+| Daemon becomes too strict            | Medium | Low         | Only crash on *configured* resource failures, not optional features         |
+| Performance impact from audit script | Low    | Low         | Run audit only in CI, not in daemon hot path                                |
 
 ## Notes & Updates
 
@@ -336,12 +354,14 @@ For each violation found:
 **User Feedback**: "silently disarded is bullshit - why are we doing this? we shuld be failing fast!"
 
 **Key Requirements**:
+
 1. Fix the immediate plugin handler bug
 2. Convert warning to CRASH
 3. Comprehensive audit for ALL error hiding patterns
 4. Zero tolerance for silent failures
 
 **Approach**:
+
 - Surgical fix for immediate bug
 - Automated pattern detection + manual review
 - Fix ALL violations following TDD

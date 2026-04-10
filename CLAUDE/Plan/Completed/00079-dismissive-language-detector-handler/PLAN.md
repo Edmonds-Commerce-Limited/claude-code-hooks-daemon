@@ -31,18 +31,23 @@ Create a new **Stop** event handler following the exact pattern of `HedgingLangu
 Follow `hedging_language_detector.py` structure exactly. Four pattern categories:
 
 **"Not our problem"** (~11 patterns):
+
 - `pre-existing issue/problem`, `not caused by our/my changes`, `unrelated to our/my/what we're`, `existed before our changes`, `was already there/present/broken/failing`, `not our problem/issue/concern/fault/bug`, `not something we introduced/caused/broke`
 
 **"Out of scope"** (~7 patterns):
+
 - `outside (the) scope of`, `beyond (the) scope of`, `out of scope`, `separate concern`, `separate issue`, `not within/in scope`, `falls outside`
 
 **"Someone else's job"** (~6 patterns):
+
 - `not our responsibility/work/task/job`, `not my/our area/domain`, `different task entirely`, `someone else's/should`, `a different effort/initiative/project`, `not what we're here/working on/doing/tasked`
 
 **"Defer/ignore"** (~8 patterns):
+
 - `can be addressed/fixed/handled/resolved later/separately`, `leave that/this/it for now/later`, `tackle that/this separately`, `defer that/this to/for`, `not worth fixing/addressing/worrying`, `ignore that/this for now`, `best left alone/as-is`, `let's not worry/concern ourselves about/with`
 
 Advisory message template:
+
 ```
 DISMISSIVE LANGUAGE DETECTED: {matched phrases}
 
@@ -64,6 +69,7 @@ Only defer if the user explicitly asks you to stay focused on something else.
 ### 5. Config: `.claude/hooks-daemon.yaml`
 
 - Add under `stop:` section (after `hedging_language_detector` at line 311):
+
 ```yaml
     dismissive_language_detector:
       enabled: true
@@ -75,6 +81,7 @@ Only defer if the user explicitly asks you to stay focused on something else.
 Follow `test_hedging_language_detector.py` pattern exactly. Reuse `_make_transcript`, `_assistant_message`, `_human_message` helpers.
 
 **Test classes:**
+
 - `TestDismissiveLanguageDetectorInit` - handler_id, non_terminal, tags, priority
 - `TestDismissiveLanguageDetectorMatches` - positive cases per category (~25 tests), case insensitivity, negative cases (~10 tests: clean responses, no transcript, empty transcript, stop_hook_active, human-only messages)
 - `TestDismissiveLanguageDetectorHandle` - ALLOW decision, context contains DISMISSIVE, context tells to fix, matched phrases in output, fallback when no transcript

@@ -124,6 +124,7 @@ daemon:
 ```
 
 **Log Output**:
+
 ```
 [WARNING] Input validation failed for PostToolUse: tool_response: Missing required field
 [WARNING] Input validation failed for PostToolUse: tool_output: Additional property not allowed
@@ -144,6 +145,7 @@ daemon:
 ```
 
 **Error Response to Claude Code**:
+
 ```json
 {
   "error": "input_validation_failed",
@@ -169,6 +171,7 @@ daemon:
 ```
 
 **Rationale**:
+
 - Validates all events, logs issues
 - Doesn't break functionality
 - Provides visibility into validation failures
@@ -352,6 +355,7 @@ See `VALIDATION_RESEARCH_RESULTS.md` for benchmarks.
 **Decision**: Default to fail-open (log warnings, continue processing)
 
 **Rationale**:
+
 - Prevents daemon from breaking on Claude Code version mismatches
 - New fields from Claude Code won't cause failures
 - Validation is for catching bugs, not security (hooks are trusted)
@@ -360,6 +364,7 @@ See `VALIDATION_RESEARCH_RESULTS.md` for benchmarks.
 ### Strict Mode Use Cases
 
 Use strict mode (`strict_mode: true`) when:
+
 - Debugging handler failures
 - Testing new handlers
 - Enforcing strict compliance
@@ -391,6 +396,7 @@ daemon:
 ### Validation Metrics
 
 Track validation failures:
+
 - Count by event type
 - Most common errors
 - Failure rate over time

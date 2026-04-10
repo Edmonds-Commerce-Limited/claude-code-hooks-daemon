@@ -73,12 +73,12 @@ project-root/
 
 **Why `.claude/project-handlers/` and not `.claude/hooks/handlers/` or another location:**
 
-| Option | Pros | Cons |
-|--------|------|------|
-| `.claude/project-handlers/` | Clear naming, parallel to `hooks-daemon/`, discoverable | New directory |
-| `.claude/hooks-daemon/project/` | Co-located with daemon | Mixes installed code with project code |
-| `.claude/hooks/handlers/` | Existing convention in some docs | Ambiguous, `hooks/` used for other things |
-| `project-root/hooks/` | Top-level visibility | Pollutes project root, not Claude-specific |
+| Option                          | Pros                                                    | Cons                                       |
+| ------------------------------- | ------------------------------------------------------- | ------------------------------------------ |
+| `.claude/project-handlers/`     | Clear naming, parallel to `hooks-daemon/`, discoverable | New directory                              |
+| `.claude/hooks-daemon/project/` | Co-located with daemon                                  | Mixes installed code with project code     |
+| `.claude/hooks/handlers/`       | Existing convention in some docs                        | Ambiguous, `hooks/` used for other things  |
+| `project-root/hooks/`           | Top-level visibility                                    | Pollutes project root, not Claude-specific |
 
 **Recommendation:** `.claude/project-handlers/` -- clear separation, discoverable naming, parallel to `hooks-daemon/`.
 
@@ -140,11 +140,11 @@ def discover_project_handlers(project_handlers_path: Path, workspace_root: Path)
 
 **Why auto-discovery over explicit listing:**
 
-| Approach | Pros | Cons |
-|----------|------|------|
-| Auto-discovery | Zero config for new handlers, convention-over-configuration, mirrors built-in system | Could load unintended files |
-| Explicit listing | Full control, clear what's loaded | Requires config update for every new handler, error-prone |
-| Hybrid (auto-discover + explicit disable) | Best of both: works by default, opt-out for specific handlers | Slightly more complex |
+| Approach                                  | Pros                                                                                 | Cons                                                      |
+| ----------------------------------------- | ------------------------------------------------------------------------------------ | --------------------------------------------------------- |
+| Auto-discovery                            | Zero config for new handlers, convention-over-configuration, mirrors built-in system | Could load unintended files                               |
+| Explicit listing                          | Full control, clear what's loaded                                                    | Requires config update for every new handler, error-prone |
+| Hybrid (auto-discover + explicit disable) | Best of both: works by default, opt-out for specific handlers                        | Slightly more complex                                     |
 
 **Recommendation:** Hybrid -- auto-discover from convention directories, allow per-handler `enabled: false` in config. This matches how built-in handlers already work.
 
@@ -390,6 +390,7 @@ python -m claude_code_hooks_daemon.daemon.cli validate-project-handlers
 ```
 
 This command would:
+
 1. Scan the project-handlers directory
 2. Attempt to import and instantiate each handler
 3. Verify it subclasses `Handler`
@@ -633,6 +634,7 @@ Next steps:
 ### Approach: Convention-Based Auto-Discovery from `.claude/project-handlers/`
 
 **Pros:**
+
 - Mirrors the built-in handler system exactly -- developers learn one pattern
 - Auto-discovery means zero config for new handlers (just add a .py file)
 - Event-type subdirectories make event mapping unambiguous (no `event_type` field in config needed)
@@ -642,6 +644,7 @@ Next steps:
 - CLI validation catches issues before daemon restart
 
 **Cons:**
+
 - Project handlers coupled to daemon's Python API (version changes could break them)
 - Running in daemon process means bugs can affect performance
 - Tests require daemon's venv Python (not the project's own Python)
@@ -658,6 +661,7 @@ vendor_reminder = "project_hooks.vendor_changes_reminder:VendorChangesReminderHa
 ```
 
 **Why rejected:**
+
 - Requires a full Python package structure in the project
 - Requires `pip install -e .` into the daemon's venv
 - Overkill for project-level handlers (this pattern is for distributable packages)
@@ -666,6 +670,7 @@ vendor_reminder = "project_hooks.vendor_changes_reminder:VendorChangesReminderHa
 ### Alternative Considered: Standalone Plugin Packages
 
 **Why deferred (not rejected):**
+
 - This is the right pattern for handlers that span multiple projects (e.g., "PHP project safety handlers")
 - Should be Phase 3 -- build on top of project-level handlers
 - Use entry points for this case: `pip install claude-hooks-php-safety`

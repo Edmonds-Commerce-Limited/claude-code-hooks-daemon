@@ -1,8 +1,6 @@
 ---
-name: configure
-description: View and modify hooks daemon handler configuration - enable/disable handlers, change priorities, set handler options
-argument-hint: "[list|<handler>|<handler> <option>=<value>]"
----
+
+## name: configure description: View and modify hooks daemon handler configuration - enable/disable handlers, change priorities, set handler options argument-hint: "\[list|<handler>|<handler> <option>=<value>\]"
 
 # /configure - Handler Configuration Skill
 
@@ -105,6 +103,7 @@ fi
 Every handler's configurable options, values, defaults, and examples are documented there. Do not duplicate that content here.
 
 Quick examples of what options look like:
+
 - `sed_blocker` → `blocking_mode` (`strict` | `direct_invocation_only`)
 - `git_stash` → `mode` (`warn` | `deny`)
 - `markdown_organization` → `track_plans_in_project`, `plan_workflow_docs`
@@ -152,18 +151,21 @@ Handler: sed_blocker
 ## Error Handling
 
 **Handler not found:**
+
 ```
 Handler "destrutive_git" not found.
 Did you mean: destructive_git?
 ```
 
 **Invalid option:**
+
 ```
 Unknown option "blcoking_mode" for sed_blocker.
 Available options: blocking_mode
 ```
 
 **Daemon fails to restart:**
+
 ```
 WARNING: Daemon failed to start after config change.
 Check logs: $PYTHON -m claude_code_hooks_daemon.daemon.cli logs

@@ -10,11 +10,13 @@
 Project-level handlers let you create custom hook handlers scoped to a specific project. They use the same `Handler` ABC as built-in handlers but live in your project repository, are auto-discovered by convention, and are version-controlled alongside your project code.
 
 **Use project handlers for**:
+
 - Project-specific workflow reminders (vendor commit workflow, asset rebuilds)
 - Coding convention enforcement (branch naming, file pairing)
 - Tool-specific reminders (run migrations after entity changes, regenerate API schemas)
 
 **Use built-in handlers for**:
+
 - Cross-project safety (destructive git, sed blocking)
 - Language-agnostic quality enforcement
 
@@ -199,18 +201,18 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli status
 
 ### Valid Event-Type Directories
 
-| Directory | Event | When It Fires |
-|-----------|-------|---------------|
-| `pre_tool_use/` | PreToolUse | Before a tool executes (Bash, Write, Edit, etc.) |
-| `post_tool_use/` | PostToolUse | After a tool completes |
-| `session_start/` | SessionStart | When a Claude Code session begins |
-| `session_end/` | SessionEnd | When a session ends |
-| `pre_compact/` | PreCompact | Before context compaction |
-| `user_prompt_submit/` | UserPromptSubmit | When user submits a prompt |
-| `permission_request/` | PermissionRequest | When a permission is requested |
-| `notification/` | Notification | On notifications |
-| `stop/` | Stop | When session stops |
-| `subagent_stop/` | SubagentStop | When a subagent stops |
+| Directory             | Event             | When It Fires                                    |
+| --------------------- | ----------------- | ------------------------------------------------ |
+| `pre_tool_use/`       | PreToolUse        | Before a tool executes (Bash, Write, Edit, etc.) |
+| `post_tool_use/`      | PostToolUse       | After a tool completes                           |
+| `session_start/`      | SessionStart      | When a Claude Code session begins                |
+| `session_end/`        | SessionEnd        | When a session ends                              |
+| `pre_compact/`        | PreCompact        | Before context compaction                        |
+| `user_prompt_submit/` | UserPromptSubmit  | When user submits a prompt                       |
+| `permission_request/` | PermissionRequest | When a permission is requested                   |
+| `notification/`       | Notification      | On notifications                                 |
+| `stop/`               | Stop              | When session stops                               |
+| `subagent_stop/`      | SubagentStop      | When a subagent stops                            |
 
 ---
 
@@ -226,12 +228,12 @@ from claude_code_hooks_daemon.core import Handler
 
 #### `__init__` Parameters
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `handler_id` | `str` | Yes | Unique identifier (kebab-case) |
-| `priority` | `int` | No (default: 50) | Execution order (lower = earlier) |
-| `terminal` | `bool` | No (default: True) | Stop dispatch after execution? |
-| `tags` | `list[str]` | No (default: []) | Tags for categorisation/filtering |
+| Parameter    | Type        | Required           | Description                       |
+| ------------ | ----------- | ------------------ | --------------------------------- |
+| `handler_id` | `str`       | Yes                | Unique identifier (kebab-case)    |
+| `priority`   | `int`       | No (default: 50)   | Execution order (lower = earlier) |
+| `terminal`   | `bool`      | No (default: True) | Stop dispatch after execution?    |
+| `tags`       | `list[str]` | No (default: [])   | Tags for categorisation/filtering |
 
 #### Abstract Methods (must implement)
 
@@ -246,13 +248,13 @@ Return at least one acceptance test definition. Used for playbook generation and
 
 #### Priority Ranges (Convention)
 
-| Range | Category | Examples |
-|-------|----------|---------|
-| 0-19 | Safety | Destructive git blocker, sed blocker |
+| Range | Category     | Examples                                |
+| ----- | ------------ | --------------------------------------- |
+| 0-19  | Safety       | Destructive git blocker, sed blocker    |
 | 20-39 | Code quality | ESLint disable blocker, TDD enforcement |
-| 40-59 | Workflow | Vendor reminders, migration reminders |
-| 60-79 | Advisory | British English warnings, hints |
-| 80-99 | Logging | Analytics, audit trails |
+| 40-59 | Workflow     | Vendor reminders, migration reminders   |
+| 60-79 | Advisory     | British English warnings, hints         |
+| 80-99 | Logging      | Analytics, audit trails                 |
 
 ### HookResult
 
@@ -261,11 +263,11 @@ from claude_code_hooks_daemon.core import HookResult
 from claude_code_hooks_daemon.core.hook_result import Decision
 ```
 
-| Decision | Behaviour | Use Case |
-|----------|-----------|----------|
-| `Decision.ALLOW` | Operation proceeds | Advisory reminders, context injection |
-| `Decision.DENY` | Operation blocked | Safety enforcement, convention violation |
-| `Decision.ASK` | User approval required | Risky but sometimes needed operations |
+| Decision         | Behaviour              | Use Case                                 |
+| ---------------- | ---------------------- | ---------------------------------------- |
+| `Decision.ALLOW` | Operation proceeds     | Advisory reminders, context injection    |
+| `Decision.DENY`  | Operation blocked      | Safety enforcement, convention violation |
+| `Decision.ASK`   | User approval required | Risky but sometimes needed operations    |
 
 **Common patterns**:
 
@@ -429,9 +431,9 @@ Scaffold the project-handlers directory structure with example handler and conft
 $PYTHON -m claude_code_hooks_daemon.daemon.cli init-project-handlers [--force] [--project-root PATH]
 ```
 
-| Flag | Description |
-|------|-------------|
-| `--force` | Overwrite existing directory |
+| Flag             | Description                         |
+| ---------------- | ----------------------------------- |
+| `--force`        | Overwrite existing directory        |
 | `--project-root` | Override auto-detected project root |
 
 ### validate-project-handlers
@@ -445,6 +447,7 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli validate-project-handlers [--proj
 **Output includes**: handler name, priority, terminal flag, tags, acceptance test count, load status.
 
 **Checks performed**:
+
 - File can be imported
 - Contains a concrete `Handler` subclass
 - Handler can be instantiated
@@ -459,9 +462,9 @@ Run pytest on project handler test files.
 $PYTHON -m claude_code_hooks_daemon.daemon.cli test-project-handlers [--verbose] [--project-root PATH]
 ```
 
-| Flag | Description |
-|------|-------------|
-| `--verbose` | Pass `-v` to pytest |
+| Flag             | Description                         |
+| ---------------- | ----------------------------------- |
+| `--verbose`      | Pass `-v` to pytest                 |
 | `--project-root` | Override auto-detected project root |
 
 ### generate-playbook
@@ -592,6 +595,7 @@ class SessionCheckHandler(Handler):
 ### Field name issues
 
 The daemon's internal protocol uses **snake_case**:
+
 - `tool_name` (not `toolName`)
 - `tool_input` (not `toolInput`)
 
@@ -608,16 +612,16 @@ Use the utility functions (`get_bash_command`, `get_file_path`) which handle thi
 
 ## Differences from Built-in Handlers
 
-| Aspect | Built-in Handlers | Project Handlers |
-|--------|-------------------|------------------|
-| Location | `src/claude_code_hooks_daemon/handlers/` | `.claude/project-handlers/` |
-| Discovery | `pkgutil.walk_packages` | `importlib.util.spec_from_file_location` |
-| IDs | `HandlerID` constants | String `handler_id` |
-| Config | Per-handler enable/disable in YAML | Master switch + file naming |
-| Scope | Cross-project, reusable | Project-specific |
-| Tests | Separate `tests/` directory | Co-located `test_` files |
-| Priority conflicts | Built-in handlers win | Warning logged |
-| Python env | Daemon package | Daemon venv (same Python) |
+| Aspect             | Built-in Handlers                        | Project Handlers                         |
+| ------------------ | ---------------------------------------- | ---------------------------------------- |
+| Location           | `src/claude_code_hooks_daemon/handlers/` | `.claude/project-handlers/`              |
+| Discovery          | `pkgutil.walk_packages`                  | `importlib.util.spec_from_file_location` |
+| IDs                | `HandlerID` constants                    | String `handler_id`                      |
+| Config             | Per-handler enable/disable in YAML       | Master switch + file naming              |
+| Scope              | Cross-project, reusable                  | Project-specific                         |
+| Tests              | Separate `tests/` directory              | Co-located `test_` files                 |
+| Priority conflicts | Built-in handlers win                    | Warning logged                           |
+| Python env         | Daemon package                           | Daemon venv (same Python)                |
 
 ---
 

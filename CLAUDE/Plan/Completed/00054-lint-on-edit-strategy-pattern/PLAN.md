@@ -57,19 +57,20 @@ class LintStrategy(Protocol):
 
 Only languages with a meaningful built-in lint command. Each in `strategies/lint/{language}_strategy.py`:
 
-| Language | Extensions | Default Lint Command | Extended Lint Command |
-|----------|-----------|---------------------|----------------------|
-| Shell | `.sh`, `.bash` | `bash -n {file}` | `shellcheck {file}` |
-| Python | `.py` | `python -m py_compile {file}` | `ruff check {file}` |
-| Go | `.go` | `go vet {file}` | `golangci-lint run {file}` |
-| Rust | `.rs` | `rustc --edition 2021 --crate-type lib -Z parse-only {file}` | `clippy-driver {file}` |
-| Ruby | `.rb` | `ruby -c {file}` | `rubocop {file}` |
-| PHP | `.php` | `php -l {file}` | `phpstan analyse {file}` |
-| Dart | `.dart` | `dart analyze {file}` | `null` |
-| Kotlin | `.kt` | `kotlinc -script {file} 2>&1` | `ktlint {file}` |
-| Swift | `.swift` | `swiftc -typecheck {file}` | `swiftlint lint {file}` |
+| Language | Extensions     | Default Lint Command                                         | Extended Lint Command      |
+| -------- | -------------- | ------------------------------------------------------------ | -------------------------- |
+| Shell    | `.sh`, `.bash` | `bash -n {file}`                                             | `shellcheck {file}`        |
+| Python   | `.py`          | `python -m py_compile {file}`                                | `ruff check {file}`        |
+| Go       | `.go`          | `go vet {file}`                                              | `golangci-lint run {file}` |
+| Rust     | `.rs`          | `rustc --edition 2021 --crate-type lib -Z parse-only {file}` | `clippy-driver {file}`     |
+| Ruby     | `.rb`          | `ruby -c {file}`                                             | `rubocop {file}`           |
+| PHP      | `.php`         | `php -l {file}`                                              | `phpstan analyse {file}`   |
+| Dart     | `.dart`        | `dart analyze {file}`                                        | `null`                     |
+| Kotlin   | `.kt`          | `kotlinc -script {file} 2>&1`                                | `ktlint {file}`            |
+| Swift    | `.swift`       | `swiftc -typecheck {file}`                                   | `swiftlint lint {file}`    |
 
 **Not included** (no built-in single-file lint):
+
 - JavaScript/TypeScript: Already covered by `ValidateEslintOnWriteHandler` (project-specific tooling, not built-in)
 - Java: `javac` requires classpath setup, not practical as a quick lint
 - C#: `dotnet build` requires project context, not single-file

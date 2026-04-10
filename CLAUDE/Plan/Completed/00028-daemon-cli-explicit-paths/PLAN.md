@@ -42,6 +42,7 @@ The `paths.py` module already supports environment variable overrides as the fir
 ### Phase 1: TDD - Unit Tests (Red)
 
 - [x] **Task 1.1**: Create test file `tests/unit/daemon/test_cli_explicit_paths.py`
+
   - [x] Test: `--pid-file` flag is parsed by argparse and available in `args.pid_file`
   - [x] Test: `--socket` flag is parsed by argparse and available in `args.socket`
   - [x] Test: `cmd_status` uses explicit `--pid-file` when provided
@@ -62,20 +63,24 @@ The `paths.py` module already supports environment variable overrides as the fir
 ### Phase 2: Implementation (Green)
 
 - [x] **Task 2.1**: Add `--pid-file` and `--socket` global flags to argparse in `main()`
+
   - Add to `cli.py` where `--project-root` is defined
   - `--pid-file` type: `Path`, help: "Explicit PID file path (overrides auto-discovery)"
   - `--socket` type: `Path`, help: "Explicit socket path (overrides auto-discovery)"
 
 - [x] **Task 2.2**: Create helper functions to resolve paths with override support
+
   - Add `_resolve_pid_path(args, project_path) -> Path`
   - Add `_resolve_socket_path(args, project_path) -> Path`
 
 - [x] **Task 2.3**: Update all `cmd_*` functions to use the helper functions
+
   - `cmd_start()`, `cmd_stop()`, `cmd_status()`, `cmd_logs()`
   - `cmd_health()`, `cmd_handlers()`, `cmd_repair()`
   - `cmd_restart()` delegates to stop+start (inherits flags)
 
 - [x] **Task 2.4**: Ensure `cmd_start()` passes explicit paths to the daemon process
+
   - When setting `daemon_config.socket_path` and `daemon_config.pid_file_path`, use resolved paths from args
 
 - [x] **Task 2.5**: Run tests -- they MUST PASS
@@ -110,12 +115,15 @@ The `paths.py` module already supports environment variable overrides as the fir
 ## Technical Decisions
 
 ### Decision 1: Global flags vs subcommand-specific flags
+
 **Decision**: Global parser (matches existing `--project-root` pattern)
 
 ### Decision 2: Helper functions vs inline resolution
+
 **Decision**: Extract `_resolve_pid_path()` and `_resolve_socket_path()` helpers (DRY)
 
 ### Decision 3: Interaction with environment variable overrides
+
 **Decision**: CLI flags > env vars > auto-discovery (most explicit wins)
 
 ## Success Criteria
@@ -130,12 +138,12 @@ The `paths.py` module already supports environment variable overrides as the fir
 
 ## Files to Modify
 
-| File | Change |
-|------|--------|
-| `src/claude_code_hooks_daemon/daemon/cli.py` | Add flags, helpers, update cmd_* functions |
-| `tests/unit/daemon/test_cli_explicit_paths.py` | NEW: TDD tests |
-| `tests/integration/test_cli_explicit_paths_integration.py` | NEW: integration tests |
-| `CLAUDE/Worktree.md` | Update daemon isolation docs |
+| File                                                       | Change                                       |
+| ---------------------------------------------------------- | -------------------------------------------- |
+| `src/claude_code_hooks_daemon/daemon/cli.py`               | Add flags, helpers, update cmd\_\* functions |
+| `tests/unit/daemon/test_cli_explicit_paths.py`             | NEW: TDD tests                               |
+| `tests/integration/test_cli_explicit_paths_integration.py` | NEW: integration tests                       |
+| `CLAUDE/Worktree.md`                                       | Update daemon isolation docs                 |
 
 ## Completion Summary
 
@@ -148,19 +156,21 @@ Successfully implemented `--pid-file` and `--socket` CLI flags for all daemon co
 1. **Phase 1 (RED)**: Wrote 10 comprehensive test classes covering all functionality - tests failed as expected
 2. **Phase 2 (GREEN)**: Implemented CLI flags and path resolution helpers - all tests passed
 3. **Phase 3 (Refactor)**: Code reviewed - no refactoring needed, implementation is clean and follows DRY principles
-4. **Phase 4 (Integration)**: Unit tests provide comprehensive integration coverage for all cmd_* functions
+4. **Phase 4 (Integration)**: Unit tests provide comprehensive integration coverage for all cmd\_\* functions
 5. **Phase 5 (Documentation)**: Updated CLAUDE/Worktree.md with CLI flag usage examples and precedence explanation
 6. **Phase 6 (QA)**: Full QA suite passed with zero failures, daemon restart verified successful
 
 ### Commits
 
 - **bebc68e**: "Plan 00028: Add --pid-file and --socket CLI flags for worktree isolation"
+
   - Added CLI flags to argparse
-  - Created _resolve_pid_path() and _resolve_socket_path() helpers
-  - Updated all cmd_* functions (start, stop, status, logs, health, handlers, repair)
+  - Created \_resolve_pid_path() and \_resolve_socket_path() helpers
+  - Updated all cmd\_\* functions (start, stop, status, logs, health, handlers, repair)
   - Added comprehensive test coverage (10 test classes)
 
 - **a7d1325**: "Plan 00028: Document CLI flags in Worktree.md"
+
   - Added CLI flag documentation to "Daemon Process Isolation" section
   - Documented path resolution precedence: CLI flags > env vars > auto-discovery
   - Included usage examples for all daemon commands

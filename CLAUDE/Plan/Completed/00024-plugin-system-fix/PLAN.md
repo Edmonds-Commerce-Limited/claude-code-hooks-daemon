@@ -31,6 +31,7 @@ The plugin system has multiple interconnected issues that prevent plugins from l
 ### Issue 1: Configuration Format Mismatch
 
 **models.py (PluginsConfig)** defines:
+
 ```yaml
 plugins:
   paths: ["/path/to/plugins"]
@@ -41,6 +42,7 @@ plugins:
 ```
 
 **loader.py (load_handlers_from_config)** expects:
+
 ```python
 {
     "enabled": bool,
@@ -54,11 +56,13 @@ These formats are **incompatible**.
 ### Issue 2: Daemon Never Loads Plugins
 
 **Critical Finding:**
+
 - `DaemonController.initialise()` only calls `HandlerRegistry.register_all()`
 - `PluginLoader` is only called in standalone entry points (`hooks/pre_tool_use.py`)
 - Users run the daemon, so **plugins never load**
 
 **Evidence:**
+
 ```python
 # daemon/controller.py:154-157
 self._registry.discover()
@@ -88,6 +92,7 @@ count = self._registry.register_all(
 ### Phase 2: TDD - Configuration Unification
 
 - [x] ✅ **Task 2.1**: Update PluginLoader to match models.py format
+
   - [x] ✅ Write failing test for new `load_from_plugins_config(PluginsConfig)` method
   - [x] ✅ Implement method to iterate `plugins_config.plugins` list
   - [x] ✅ Verify each `PluginConfig` has `path`, optional `handlers`, `enabled`
@@ -96,6 +101,7 @@ count = self._registry.register_all(
   - [x] ✅ Commit: 1f6c2b2
 
 - [x] ✅ **Task 2.2**: Add event_type to PluginConfig model
+
   - [x] ✅ Write failing test for `event_type` field in PluginConfig
   - [x] ✅ Add `event_type: Literal[...]` field to `PluginConfig` in models.py
   - [x] ✅ Update all tests to include event_type parameter
@@ -104,6 +110,7 @@ count = self._registry.register_all(
   - [x] ✅ Commit: 0b925ec, 5051ae5
 
 - [x] ✅ **Task 2.3**: Update existing tests
+
   - [x] ✅ Added TestPluginIntegrationWithPluginsConfig test class
   - [x] ✅ 5 new integration tests for PluginsConfig model usage
   - [x] ✅ All plugin integration tests pass
@@ -112,6 +119,7 @@ count = self._registry.register_all(
 ### Phase 3: TDD - Daemon Integration
 
 - [x] ✅ **Task 3.1**: Create daemon plugin integration test
+
   - [x] ✅ Create `tests/integration/test_plugin_daemon_integration.py`
   - [x] ✅ Write failing test: daemon starts with plugins configured
   - [x] ✅ Write failing test: plugin handler receives events through daemon
@@ -120,6 +128,7 @@ count = self._registry.register_all(
   - [x] ✅ Commit: 727986f
 
 - [x] ✅ **Task 3.2**: Add plugin loading to DaemonController
+
   - [x] ✅ Add `plugins_config` parameter to `DaemonController.initialise()`
   - [x] ✅ Implement `_load_plugins()` method
   - [x] ✅ Register plugin handlers with correct event types
@@ -128,6 +137,7 @@ count = self._registry.register_all(
   - [x] ✅ Commit: 1f0c876
 
 - [x] ✅ **Task 3.3**: Update daemon CLI to pass plugin config
+
   - [x] ✅ Modify `cmd_start()` in `daemon/cli.py`
   - [x] ✅ Extract `config.plugins` and pass to controller
   - [x] ✅ Verify daemon logs plugin loading
@@ -135,6 +145,7 @@ count = self._registry.register_all(
   - [x] ✅ Note: Completed together with Task 3.2 (Commit: 1f0c876)
 
 - [x] ✅ **Task 3.4**: Validate plugin handlers have acceptance tests
+
   - [x] ✅ Write failing test: plugin without acceptance tests rejected
   - [x] ✅ Write failing test: plugin with empty acceptance tests rejected
   - [x] ✅ Add validation to PluginLoader.load_handler()
@@ -144,6 +155,7 @@ count = self._registry.register_all(
   - [x] ✅ Commit: 49a9c25
 
 - [x] ✅ **Task 3.5**: End-to-end daemon smoke test
+
   - [x] ✅ Created blocking_handler.py test fixture with BlockingHandler class
   - [x] ✅ Added test_plugin_blocks_through_daemon_socket() E2E test
   - [x] ✅ Test verifies plugin blocks through actual Unix socket communication
@@ -155,6 +167,7 @@ count = self._registry.register_all(
 ### Phase 4: TDD - Validation Fixes
 
 - [x] ✅ **Task 4.1**: Make duplicate priorities deterministic (CORRECTED)
+
   - [x] ✅ Updated HandlerChain sorting to (priority, name) for determinism
   - [x] ✅ Duplicate priorities now sort alphabetically by handler name
   - [x] ✅ Kept shared options validation as ValueError (FAIL FAST - correct behavior)
@@ -165,6 +178,7 @@ count = self._registry.register_all(
   - Note: User feedback was about PRIORITY conflicts, not validation strictness
 
 - [x] ✅ **Task 4.2**: Add helpful error messages
+
   - [x] ✅ Enhanced shared options validation error with multi-line helpful message
   - [x] ✅ Provides clear fix options (enable parent or disable child)
   - [x] ✅ Includes example YAML configuration in error
@@ -177,17 +191,20 @@ count = self._registry.register_all(
 ### Phase 5: Documentation
 
 - [x] ✅ **Task 5.1**: Update HANDLER_DEVELOPMENT.md
+
   - [x] ✅ Updated Plugin Configuration section with event_type requirement
   - [x] ✅ Documented correct PluginsConfig structure
   - [x] ✅ Added acceptance test requirements for plugins
   - [x] ✅ Updated all YAML examples with event_type field
 
 - [x] ✅ **Task 5.2**: Update README/config examples
+
   - [x] ✅ Added event_type to all 5 plugin configuration examples
   - [x] ✅ Documented 11 valid event_type values
   - [x] ✅ Clarified REQUIRED vs optional fields
 
 - [x] ✅ **Task 5.3**: Migration guide
+
   - [x] ✅ Documented event_type requirement (new mandatory field)
   - [x] ✅ Explained PluginsConfig format (models.py is source of truth)
   - [x] ✅ Commit: e571b66
@@ -201,8 +218,10 @@ count = self._registry.register_all(
 ## Technical Decisions
 
 ### Decision 1: Configuration Format
+
 **Context**: Two incompatible formats exist
 **Options Considered**:
+
 1. Use models.py format (PluginsConfig with paths + plugins list)
 2. Use loader.py format (flat dict with handlers dict)
 3. Support both formats
@@ -212,8 +231,10 @@ count = self._registry.register_all(
 **Date**: 2026-02-02
 
 ### Decision 2: Event Type Specification
+
 **Context**: Plugin handlers need to be registered for specific event types
 **Options Considered**:
+
 1. Convention-based directory structure (place handlers in `pre_tool_use/` etc.)
 2. Explicit `event_type` field in plugin config
 3. Handler class attribute
@@ -223,8 +244,10 @@ count = self._registry.register_all(
 **Date**: 2026-02-02
 
 ### Decision 3: Validation Strictness
+
 **Context**: Shared options validation blocks legitimate configs
 **Options Considered**:
+
 1. Warn instead of fail (soft validation)
 2. Auto-disable children (implicit behavior)
 3. Lazy validation at registration time
@@ -246,16 +269,17 @@ count = self._registry.register_all(
 
 ## Risks & Mitigations
 
-| Risk | Impact | Probability | Mitigation |
-|------|--------|-------------|------------|
-| Breaking existing configs | High | Low | Maintain backward compat where possible, provide migration guide |
-| Plugin loading slows daemon startup | Medium | Low | Lazy loading if needed, performance tests |
-| Event type mismatch causes runtime errors | Medium | Medium | Clear validation and helpful error messages |
-| Test coverage drops below 95% | Medium | Low | TDD approach, monitor coverage after each phase |
+| Risk                                      | Impact | Probability | Mitigation                                                       |
+| ----------------------------------------- | ------ | ----------- | ---------------------------------------------------------------- |
+| Breaking existing configs                 | High   | Low         | Maintain backward compat where possible, provide migration guide |
+| Plugin loading slows daemon startup       | Medium | Low         | Lazy loading if needed, performance tests                        |
+| Event type mismatch causes runtime errors | Medium | Medium      | Clear validation and helpful error messages                      |
+| Test coverage drops below 95%             | Medium | Low         | TDD approach, monitor coverage after each phase                  |
 
 ## Notes & Updates
 
 ### 2026-02-03 - Plan 00024 COMPLETE (All Core Tasks)
+
 - ✅ All 5 phases complete (1: Investigation, 2: Config Unification, 3: Daemon Integration, 4: Validation Fixes, 5: Documentation)
 - ✅ Plugins now load through daemon lifecycle (THE CORE FIX)
 - ✅ Configuration format unified: PluginsConfig model is source of truth
@@ -266,6 +290,7 @@ count = self._registry.register_all(
 - ✅ Integration tests verify plugins work end-to-end through daemon socket
 
 **Task 3.5 NOW COMPLETE** (2026-02-04):
+
 - ✅ Created blocking_handler.py test fixture
 - ✅ Added test_plugin_blocks_through_daemon_socket() E2E test
 - ✅ Verifies plugin blocks through actual Unix socket (production flow)
@@ -275,6 +300,7 @@ count = self._registry.register_all(
 **ALL TASKS COMPLETE** - Plan 00024 is now 100% finished!
 
 **Commits**:
+
 - 1f6c2b2, 0b925ec, 5051ae5: Phase 2 (Config unification)
 - 727986f, 1f0c876: Phase 3.1-3.3 (Daemon integration - THE CORE FIX)
 - 49a9c25, f4d2778: Phase 3.4 (Acceptance test validation)
@@ -285,6 +311,7 @@ count = self._registry.register_all(
 **Success Criteria Met**: All 8 criteria achieved ✅
 
 ### 2026-02-03 - Phase 3 Task 3.4 Complete
+
 - ✅ Added acceptance test validation for plugin handlers
 - Implementation:
   - Created test fixture: no_acceptance_tests_handler.py (returns empty list)
@@ -298,6 +325,7 @@ count = self._registry.register_all(
 - Ready for Phase 3 Task 3.5 or Phase 4
 
 ### 2026-02-02 - Phase 3 Complete - THE CORE FIX
+
 - ✅ Phase 3 Tasks 3.1-3.3 complete
 - **THE CORE BUG IS FIXED**: Plugins now load through daemon lifecycle
 - Implementation:
@@ -314,6 +342,7 @@ count = self._registry.register_all(
 - Ready for Phase 4: Validation fixes
 
 ### 2026-02-02 - Initial Analysis Complete
+
 - Completed investigation of all three interconnected issues
 - Identified root causes in:
   - `config/models.py:272-283` - PluginsConfig model
@@ -328,15 +357,18 @@ count = self._registry.register_all(
 ## Critical Files for Implementation
 
 **Configuration:**
+
 - `src/claude_code_hooks_daemon/config/models.py:272-283` - PluginsConfig/PluginConfig models
 - `src/claude_code_hooks_daemon/config/models.py:96-187` - Validation logic to soften
 
 **Plugin Loading:**
+
 - `src/claude_code_hooks_daemon/plugins/loader.py:139-153` - load_handlers_from_config() to update
 - `src/claude_code_hooks_daemon/daemon/controller.py:115-160` - DaemonController.initialise()
 - `src/claude_code_hooks_daemon/daemon/cli.py:207-320` - cmd_start() to pass plugin config
 
 **Tests:**
+
 - `tests/unit/test_plugin_loader.py` - Update for new format
 - `tests/integration/test_plugin_integration.py` - Update for new format
 - `tests/integration/test_plugin_daemon_integration.py` - NEW: daemon integration tests
