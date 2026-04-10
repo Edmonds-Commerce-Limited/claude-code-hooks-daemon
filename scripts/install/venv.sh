@@ -59,24 +59,29 @@ create_venv() {
     local venv_path="$daemon_dir/untracked/venv"
 
     # If a specific Python interpreter was found, tell uv to use it
-    local python_flag=""
+    local python_args=()
     if [ -n "${HOOKS_DAEMON_PYTHON:-}" ]; then
-        python_flag="--python $HOOKS_DAEMON_PYTHON"
+        python_args=(--python "$HOOKS_DAEMON_PYTHON")
     fi
 
     # Suppress "Failed to hardlink files" warning in containers/overlay filesystems
     export UV_LINK_MODE=copy
 
     if [ "$quiet" = "true" ]; then
-        if UV_PROJECT_ENVIRONMENT="$venv_path" uv sync --project "$daemon_dir" $python_flag > /dev/null 2>&1; then
+        if UV_PROJECT_ENVIRONMENT="$venv_path" uv sync --project "$daemon_dir" "${python_args[@]}" > /tmp/uv_sync_output.txt 2>&1; then
             print_success "Virtual environment created at: $venv_path"
+            rm -f /tmp/uv_sync_output.txt
             return 0
         else
             print_error "Failed to create virtual environment"
+            if [ -f /tmp/uv_sync_output.txt ]; then
+                cat /tmp/uv_sync_output.txt >&2
+                rm -f /tmp/uv_sync_output.txt
+            fi
             return 1
         fi
     else
-        if UV_PROJECT_ENVIRONMENT="$venv_path" uv sync --project "$daemon_dir" $python_flag; then
+        if UV_PROJECT_ENVIRONMENT="$venv_path" uv sync --project "$daemon_dir" "${python_args[@]}"; then
             print_success "Virtual environment created at: $venv_path"
             return 0
         else
@@ -185,8 +190,9 @@ except ImportError as e:
         if [[ "$import_test" == "OK" ]]; then
             print_verbose "Daemon package imports successfully"
         else
-            print_warning "Daemon package import test failed: $import_test"
-            print_warning "This is expected if daemon package not yet installed"
+            print_error "Daemon package import test failed: $import_test"
+            print_error "Virtual environment may be missing dependencies"
+            return 1
         fi
     fi
 
