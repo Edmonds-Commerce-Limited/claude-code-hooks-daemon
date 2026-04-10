@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-04-10
+
+### Added
+
+- **`markdown_table_formatter` PostToolUse handler**: New handler (priority 26, non-terminal) that auto-formats markdown tables after every `Write` or `Edit` of a `.md` or `.markdown` file using `mdformat` + `mdformat-gfm`. Aligns table pipes vertically, widens delimiter rows to match cell widths, preserves thematic breaks, and escapes asterisks in table cells as required by GFM. Non-blocking — never denies, only reformats on disk.
+
+- **`format-markdown` CLI subcommand**: New `$PYTHON -m claude_code_hooks_daemon.daemon.cli format-markdown <path>` command for ad-hoc markdown formatting. Supports single file, directory (recursive), and `--check` mode for CI validation without modifying files.
+
+### Fixed
+
+- **`.CLAUDE.md.pre-inject` gitignore safety**: The installer and `gitignore_safety_checker` SessionStart handler now ensure `.CLAUDE.md.pre-inject` is present in client project `.gitignore` entries, preventing the pre-inject backup file from being accidentally committed.
+
+- **Integration test coverage for `markdown_table_formatter`**: Added missing integration test cases for the handler's response validation and FrontController dispatch path.
+
+### Changed
+
+- **257 project markdown files batch-formatted**: All existing `.md` files in the project were reformatted via `mdformat + mdformat-gfm` to align table pipes and normalise formatting, establishing a consistent baseline for the new auto-formatter.
+
+- **Daemon-generated `CLAUDE.md` `<hooksdaemon>` section restored**: The auto-generated hooks daemon guidance section in `CLAUDE.md` was restored after batch markdown formatting altered its structure.
+
 ## [3.0.1] - 2026-04-07
 
 ### Fixed
