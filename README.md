@@ -1,9 +1,9 @@
 # Claude Code Hooks Daemon
 
-![Version](https://img.shields.io/badge/version-3.0.1-blue)
+![Version](https://img.shields.io/badge/version-3.1.0-blue)
 ![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-7582%2B%20passing-success)
+![Tests](https://img.shields.io/badge/tests-7616%2B%20passing-success)
 ![Coverage](https://img.shields.io/badge/coverage-95%25%20required-success)
 
 A better way to build and maintain Claude Code hooks.
@@ -62,7 +62,7 @@ Restarting the daemon takes under a second. Your Claude Code session continues u
 
 **Test-Driven Development for hooks**
 
-Because handlers are Python classes with proper type annotations, you can write real unit tests. This project ships with 7,582+ tests and a 95% coverage requirement — the same standard applies to handlers you write for your own project. Catch regressions before restarting, not after.
+Because handlers are Python classes with proper type annotations, you can write real unit tests. This project ships with 7,616+ tests and a 95% coverage requirement — the same standard applies to handlers you write for your own project. Catch regressions before restarting, not after.
 
 **Run many handlers without overhead**
 
@@ -76,7 +76,7 @@ Handlers are Python classes. Strategy patterns, type safety, dependency injectio
 
 ## What's Built In
 
-The daemon ships with 72 production handlers across 13 event types, covering the most common AI-assisted development guardrails:
+The daemon ships with 73 production handlers across 13 event types, covering the most common AI-assisted development guardrails:
 
 ### Safety (Priority 10–20)
 
