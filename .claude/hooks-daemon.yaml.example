@@ -210,6 +210,10 @@ handlers:
       enabled: false           # Enable for automatic lint validation (Shell, Python, Go, Rust, etc.)
       priority: 25
 
+    markdown_table_formatter:  # Auto-format markdown tables via mdformat + mdformat-gfm
+      enabled: false           # Enable for automatic markdown table alignment
+      priority: 26
+
     validate_eslint_on_write:  # Runs ESLint after file writes
       enabled: false           # Enable for automatic ESLint validation
       priority: 20
