@@ -22,6 +22,7 @@ The hook's validation logic has a **TOCTOU (time-of-check-time-of-use) race cond
 The `mkdir` that creates the plan directory happens *before* the `Write` tool creates the PLAN.md file inside it. By the time the hook's `find` command runs (triggered by the `Write` call), the directory already exists on disk from the preceding `mkdir`.
 
 The hook's `find` command:
+
 ```bash
 find CLAUDE/Plan -maxdepth 2 -type d -name '[0-9]*' | grep -oP '/\K\d{3}(?=-)' | sort -n | tail -1
 ```

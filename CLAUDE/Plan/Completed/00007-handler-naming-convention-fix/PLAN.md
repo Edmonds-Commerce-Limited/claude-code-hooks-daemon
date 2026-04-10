@@ -10,6 +10,7 @@
 ## Problem Statement
 
 There is a **critical naming convention conflict** causing:
+
 - Test failures (1 failing test)
 - Linter/formatter fights (reverting manual fixes)
 - Runtime config lookup failures
@@ -19,12 +20,12 @@ There is a **critical naming convention conflict** causing:
 
 Multiple implementations of `_to_snake_case()` produce **different results**:
 
-| Implementation | Location | Strips Suffix? | Example Output |
-|----------------|----------|----------------|----------------|
-| Runtime (CORRECT) | `registry.py:281-299` | ✅ YES | `suggest_status_line` |
-| Runtime (CORRECT) | `validator.py:124-141` | ✅ YES | `suggest_status_line` |
-| Template (WRONG) | `init_config.py` | ❌ NO | `suggest_status_line_handler` |
-| Test Helper (WRONG) | `test_init_config.py:21-24` | ❌ NO | `suggest_status_line_handler` |
+| Implementation      | Location                    | Strips Suffix? | Example Output                |
+| ------------------- | --------------------------- | -------------- | ----------------------------- |
+| Runtime (CORRECT)   | `registry.py:281-299`       | ✅ YES         | `suggest_status_line`         |
+| Runtime (CORRECT)   | `validator.py:124-141`      | ✅ YES         | `suggest_status_line`         |
+| Template (WRONG)    | `init_config.py`            | ❌ NO          | `suggest_status_line_handler` |
+| Test Helper (WRONG) | `test_init_config.py:21-24` | ❌ NO          | `suggest_status_line_handler` |
 
 **Impact**: When the daemon reads config, it looks for `suggest_status_line` but the template generates `suggest_status_line_handler`, causing handler registration failures.
 
@@ -35,6 +36,7 @@ Multiple implementations of `_to_snake_case()` produce **different results**:
 ### Evidence Supporting "NO SUFFIX" Convention
 
 1. **Runtime Code Explicitly Strips Suffix**
+
    ```python
    # registry.py:281-299 and validator.py:124-141
    def _to_snake_case(name: str) -> str:
@@ -49,10 +51,12 @@ Multiple implementations of `_to_snake_case()` produce **different results**:
    ```
 
 2. **Unit Tests Verify Stripping**
+
    - `test_registry.py:362-400` - Tests verify suffix stripping
-   - `test_handler_name_validation.py:9-11` - Comment states: "Handler config keys do NOT include _handler suffix. Class DestructiveGitHandler -> config key 'destructive_git'"
+   - `test_handler_name_validation.py:9-11` - Comment states: "Handler config keys do NOT include \_handler suffix. Class DestructiveGitHandler -> config key 'destructive_git'"
 
 3. **Production Config Uses No Suffix**
+
    - `.claude/hooks-daemon.yaml` mostly correct: `destructive_git`, `sed_blocker`, `absolute_path`
    - Only recent additions have wrong suffix (status_line handlers)
 
@@ -71,15 +75,16 @@ The `init_config.py` template was created with ALL handler keys using `_handler`
 
 **Config keys should NOT have `_handler` suffix**
 
-| Class Name | Config Key |
-|------------|------------|
-| `DestructiveGitHandler` | `destructive_git` |
-| `SedBlockerHandler` | `sed_blocker` |
+| Class Name                 | Config Key            |
+| -------------------------- | --------------------- |
+| `DestructiveGitHandler`    | `destructive_git`     |
+| `SedBlockerHandler`        | `sed_blocker`         |
 | `SuggestStatusLineHandler` | `suggest_status_line` |
 | `BashErrorDetectorHandler` | `bash_error_detector` |
-| `PlanNumberHelperHandler` | `plan_number_helper` |
+| `PlanNumberHelperHandler`  | `plan_number_helper`  |
 
 **Rationale**:
+
 - Brevity: More readable config files
 - Consistency: Matches runtime behavior
 - Validation: Enables typo detection
@@ -144,6 +149,7 @@ daemon_stats_handler: -> daemon_stats:
 ```
 
 **Implementation Notes**:
+
 - These are in YAML template strings
 - Use search/replace to ensure consistency
 - Verify no other handler keys exist in the template
@@ -157,6 +163,7 @@ daemon_stats_handler: -> daemon_stats:
 #### Change 1: Update `_to_snake_case` (lines 21-24)
 
 **Current (WRONG)**:
+
 ```python
 def _to_snake_case(name: str) -> str:
     """Convert CamelCase to snake_case."""
@@ -165,6 +172,7 @@ def _to_snake_case(name: str) -> str:
 ```
 
 **Fixed (CORRECT)**:
+
 ```python
 def _to_snake_case(name: str) -> str:
     """Convert CamelCase to snake_case with _handler suffix stripped."""
@@ -181,6 +189,7 @@ def _to_snake_case(name: str) -> str:
 #### Change 2: Update `EXCLUDED_HANDLERS` Set (lines 333-362)
 
 **Current (WRONG)** - All entries have `_handler` suffix:
+
 ```python
 EXCLUDED_HANDLERS: ClassVar[set[str]] = {
     "validate_plan_number_handler",
@@ -191,6 +200,7 @@ EXCLUDED_HANDLERS: ClassVar[set[str]] = {
 ```
 
 **Fixed (CORRECT)** - Remove `_handler` from all entries:
+
 ```python
 EXCLUDED_HANDLERS: ClassVar[set[str]] = {
     # Plan workflow handlers - require CLAUDE/Plan/ directory structure
@@ -300,7 +310,7 @@ def test_template_handler_keys_match_runtime_convention(self):
 
 **Add New Section** after "Handler Priority Ranges":
 
-```markdown
+````markdown
 ## Handler Naming Convention
 
 ### Class Names vs Config Keys
@@ -345,9 +355,10 @@ def _to_snake_case(name: str) -> str:
         snake = snake[:-8]
 
     return snake
-```
+````
 
 **2. Validator (config validation)**
+
 ```python
 # src/claude_code_hooks_daemon/config/validator.py:124-141
 # Same implementation as registry
@@ -356,6 +367,7 @@ def _to_snake_case(name: str) -> str:
 ### Example Config
 
 **CORRECT**:
+
 ```yaml
 handlers:
   pre_tool_use:
@@ -368,6 +380,7 @@ handlers:
 ```
 
 **WRONG**:
+
 ```yaml
 handlers:
   pre_tool_use:
@@ -379,12 +392,14 @@ handlers:
 ### Testing
 
 Run the naming convention validation test:
+
 ```bash
 pytest tests/daemon/test_init_config.py::TestConfigHandlerCoverage::test_template_handler_keys_match_runtime_convention -v
 ```
 
 This test ensures the template matches runtime behavior and will catch any future deviations.
-```
+
+````
 
 ---
 
@@ -416,15 +431,17 @@ This test ensures the template matches runtime behavior and will catch any futur
    print(_to_snake_case('SuggestStatusLineHandler'))
    "
    # Should output: suggest_status_line
-   ```
+````
 
 2. **Identify All Mismatches**
+
    ```bash
    # Find all _handler suffixes in template
    grep -n "_handler:" src/claude_code_hooks_daemon/daemon/init_config.py
    ```
 
 3. **Check Production Config**
+
    ```bash
    # Find all _handler suffixes in production config
    grep -n "_handler:" .claude/hooks-daemon.yaml
@@ -433,18 +450,23 @@ This test ensures the template matches runtime behavior and will catch any futur
 ### Post-Implementation Validation
 
 1. **Run Full Test Suite**
+
    ```bash
    ./scripts/qa/run_tests.sh
    ```
+
    Expected: All tests pass (currently 1 failing)
 
 2. **Run Naming Validation**
+
    ```bash
    pytest tests/daemon/test_init_config.py::TestConfigHandlerCoverage::test_template_handler_keys_match_runtime_convention -v
    ```
+
    Expected: PASS
 
 3. **Verify Handler Discovery**
+
    ```bash
    # Test that handlers can be discovered with new config
    python3 -c "
@@ -461,6 +483,7 @@ This test ensures the template matches runtime behavior and will catch any futur
    ```
 
 4. **Test Config Generation**
+
    ```bash
    # Generate config and verify no _handler suffixes
    python3 -c "
@@ -483,18 +506,21 @@ This test ensures the template matches runtime behavior and will catch any futur
 ## Risk Assessment
 
 ### Low Risk Changes
+
 - Template modifications (generates new configs, doesn't affect existing)
 - Test helper updates (test-only code)
 - Documentation additions (no code impact)
 - New validation test (prevents future issues)
 
 ### Medium Risk Changes
+
 - Production config `.claude/hooks-daemon.yaml` updates
   - **Risk**: Handler registration failures if keys are wrong
   - **Mitigation**: Test with daemon restart after changes
   - **Rollback**: Keep backup of original config
 
 ### High Risk Areas (No Changes Needed)
+
 - Runtime code in `registry.py` and `validator.py`
   - Already correct, no changes needed
   - These are the authoritative implementations
@@ -506,22 +532,27 @@ This test ensures the template matches runtime behavior and will catch any futur
 ### Recommended Sequence
 
 1. **Phase 1**: Fix template (`init_config.py`)
+
    - Prevents future conflicts
    - Template generates correct configs going forward
 
 2. **Phase 2**: Fix test helper (`test_init_config.py`)
+
    - Aligns tests with runtime behavior
    - Removes test failures
 
 3. **Phase 4**: Add validation test
+
    - Prevents regression
    - Documents the correct convention in tests
 
 4. **Phase 5**: Update documentation
+
    - Educates future developers
    - Provides reference for correct usage
 
 5. **Phase 3**: Fix production config (`.claude/hooks-daemon.yaml`)
+
    - Last step to avoid linter conflicts
    - Linter will now see correct template and leave config alone
 
@@ -538,6 +569,7 @@ This test ensures the template matches runtime behavior and will catch any futur
 ## Success Criteria
 
 ### Must Achieve
+
 - ✅ All tests pass (0 failures)
 - ✅ Config template generates keys without `_handler` suffix
 - ✅ Production config uses correct convention
@@ -545,11 +577,13 @@ This test ensures the template matches runtime behavior and will catch any futur
 - ✅ Linter stops reverting manual fixes
 
 ### Should Achieve
+
 - ✅ Documentation clearly explains convention
 - ✅ Developers understand why suffix is stripped
 - ✅ Future handler additions follow convention
 
 ### Could Achieve
+
 - Add linter rule to enforce convention
 - Automate config key validation in CI/CD
 - Create migration script for old configs
@@ -561,16 +595,19 @@ This test ensures the template matches runtime behavior and will catch any futur
 If issues arise during implementation:
 
 1. **Template Issues**
+
    ```bash
    git checkout HEAD -- src/claude_code_hooks_daemon/daemon/init_config.py
    ```
 
 2. **Test Failures**
+
    ```bash
    git checkout HEAD -- tests/daemon/test_init_config.py
    ```
 
 3. **Production Config Issues**
+
    ```bash
    # Restore backup
    cp .claude/hooks-daemon.yaml.backup .claude/hooks-daemon.yaml
@@ -580,6 +617,7 @@ If issues arise during implementation:
    ```
 
 4. **Complete Rollback**
+
    ```bash
    git reset --hard HEAD
    ```
@@ -588,15 +626,15 @@ If issues arise during implementation:
 
 ## Timeline Estimate
 
-| Phase | Effort | Duration |
-|-------|--------|----------|
-| Phase 1: Template fixes | 21 replacements | 10 minutes |
-| Phase 2: Test helper | 2 functions | 5 minutes |
-| Phase 3: Production config | 4 keys | 5 minutes |
-| Phase 4: Validation test | 1 test | 10 minutes |
-| Phase 5: Documentation | 1 section | 15 minutes |
-| **Testing & Validation** | Full QA | 5 minutes |
-| **Total** | | **50 minutes** |
+| Phase                      | Effort          | Duration       |
+| -------------------------- | --------------- | -------------- |
+| Phase 1: Template fixes    | 21 replacements | 10 minutes     |
+| Phase 2: Test helper       | 2 functions     | 5 minutes      |
+| Phase 3: Production config | 4 keys          | 5 minutes      |
+| Phase 4: Validation test   | 1 test          | 10 minutes     |
+| Phase 5: Documentation     | 1 section       | 15 minutes     |
+| **Testing & Validation**   | Full QA         | 5 minutes      |
+| **Total**                  |                 | **50 minutes** |
 
 ---
 
@@ -615,37 +653,45 @@ If issues arise during implementation:
 ### Important Reminders
 
 1. **Search/Replace Pattern**
+
    - Find: `(\w+)_handler:`
    - Replace: `$1:`
    - Verify each replacement manually
 
 2. **Test Before Committing**
+
    ```bash
    ./scripts/qa/run_all.sh
    ```
 
 3. **Verify Daemon Still Works**
+
    ```bash
    python3 -m claude_code_hooks_daemon.daemon.cli restart
    python3 -m claude_code_hooks_daemon.daemon.cli status
    ```
 
 4. **Check Handler Counts**
+
    - Should still show 34 production handlers
    - No handlers should be missing
 
 ### Common Pitfalls
 
 1. ❌ Missing a handler key in template
+
    - **Solution**: Use grep to verify all found
 
 2. ❌ Updating config but not restarting daemon
+
    - **Solution**: Always restart daemon after config changes
 
 3. ❌ Forgetting to update EXCLUDED_HANDLERS
+
    - **Solution**: Validation test will catch this
 
 4. ❌ Linter reverting changes
+
    - **Solution**: Fix template FIRST, then config
 
 ---

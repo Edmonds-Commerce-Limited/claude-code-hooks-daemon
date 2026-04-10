@@ -12,6 +12,7 @@
 The current `PipeBlockerHandler` is over-eager — it blocks any command piped to tail/head that isn't in a hard-coded whitelist (grep, awk, jq, etc.). This produces noisy blocks for cheap commands like `git tag | tail` and provides no useful guidance for project-specific customization.
 
 The fix introduces a three-tier decision system backed by a new `pipe_blocker` strategy domain:
+
 1. **Whitelist** (never block) — cheap/filtering commands, regex-based, project-extensible
 2. **Blacklist** (always block, language-aware) — expensive test runners, build tools, QA tools
 3. **Unknown** (block with config instructions) — anything not in either list
@@ -63,11 +64,11 @@ Pipe blocker maps **language names → blacklist regex patterns**, merged into a
 
 ### Language Filtering Behaviour
 
-| `daemon.languages` config | Active blacklists |
-|--------------------------|-------------------|
-| `null` (not set) | ALL language strategies + Universal |
-| `["Python"]` | Python + Universal only |
-| `["Python", "Go"]` | Python + Go + Universal only |
+| `daemon.languages` config | Active blacklists                   |
+| ------------------------- | ----------------------------------- |
+| `null` (not set)          | ALL language strategies + Universal |
+| `["Python"]`              | Python + Universal only             |
+| `["Python", "Go"]`        | Python + Go + Universal only        |
 
 Universal strategy is **always active** (never filtered out by language filter).
 
@@ -148,22 +149,27 @@ Each strategy task follows TDD: write failing test → implement → register in
 ## Technical Decisions
 
 ### Decision 1: Command-Name-Keyed Registry (not extension-keyed)
+
 **Context**: Existing registries map file extensions to strategies. Pipe blocker operates on Bash commands, not files.
 **Decision**: Registry keyed by `language_name` string. `get_blacklist_patterns()` merges all active strategies' patterns into a flat tuple for efficient matching.
 
 ### Decision 2: Full Segment Matching (not first-word matching)
+
 **Context**: Current handler extracts only the first word (`git` from `git tag -l`). This prevents multi-word patterns.
 **Decision**: `_extract_source_segment()` returns the full trimmed command segment before the pipe, enabling patterns like `^git\s+tag\b`, `^npm\s+test\b`, `^go\s+build\b`.
 
 ### Decision 3: Whitelist is Universal (not language-stratified)
+
 **Context**: Whitelist commands (grep, ls, git tag) are safe regardless of project language.
 **Decision**: `UNIVERSAL_WHITELIST_PATTERNS` in `common.py` — not in strategies. Language-specific whitelist additions go via `extra_whitelist` in project config.
 
 ### Decision 4: Universal Strategy Always Active
+
 **Context**: Docker, make, cmake, terraform are expensive regardless of project language.
 **Decision**: `filter_by_languages()` always keeps `"Universal"` in `_strategies` dict. All other strategies are removed if not in active language list.
 
 ### Decision 5: Remove Progressive Verbosity
+
 **Context**: Progressive verbosity (terse/standard/verbose based on block count) was complex and less useful than knowing WHY a command is blocked.
 **Decision**: Replace with two message types: "blacklisted" (known expensive) with specific tool explanation, and "unknown" (not in either list) with config instructions.
 
@@ -201,14 +207,14 @@ tests/unit/strategies/pipe_blocker/
 
 ## Modified Files
 
-| File | Change |
-|------|--------|
-| `src/.../handlers/pre_tool_use/pipe_blocker.py` | Full redesign |
-| `src/.../strategies/__init__.py` | Add pipe_blocker exports |
-| `tests/unit/handlers/test_pipe_blocker.py` | Three-tier test updates |
-| `tests/unit/handlers/pre_tool_use/test_pipe_blocker_bug.py` | ls→allowed, find→unknown |
-| `tests/integration/test_pipe_blocker_integration.py` | Add blacklist + unknown paths |
-| `.claude/hooks-daemon.yaml` | Add extra_whitelist/extra_blacklist comments |
+| File                                                        | Change                                       |
+| ----------------------------------------------------------- | -------------------------------------------- |
+| `src/.../handlers/pre_tool_use/pipe_blocker.py`             | Full redesign                                |
+| `src/.../strategies/__init__.py`                            | Add pipe_blocker exports                     |
+| `tests/unit/handlers/test_pipe_blocker.py`                  | Three-tier test updates                      |
+| `tests/unit/handlers/pre_tool_use/test_pipe_blocker_bug.py` | ls→allowed, find→unknown                     |
+| `tests/integration/test_pipe_blocker_integration.py`        | Add blacklist + unknown paths                |
+| `.claude/hooks-daemon.yaml`                                 | Add extra_whitelist/extra_blacklist comments |
 
 ## Success Criteria
 
@@ -225,5 +231,6 @@ tests/unit/strategies/pipe_blocker/
 ## Notes & Updates
 
 ### 2026-02-19
+
 - Plan created based on user requirement to fix over-eager pipe blocking
 - Established as fourth strategy archetype: command-name-keyed (vs file-extension-keyed)

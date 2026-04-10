@@ -10,6 +10,7 @@
 When users install the hooks daemon, hook scripts (`.claude/hooks/pre-tool-use`, etc.) are deployed with `chmod +x`. However, if the user's git repo has `core.fileMode=false`, git doesn't track the executable bit. After any merge/checkout/rebase, scripts revert to `100644` (non-executable) and hooks silently break.
 
 The fix has three parts:
+
 1. Force-commit hook scripts as `100755` via `git update-index --chmod=+x` during install/upgrade
 2. Warn loudly on SessionStart if `core.fileMode=false` is detected
 3. Existing deployments get fixed automatically via the upgrade path (which calls the same deploy function)
@@ -19,6 +20,7 @@ The fix has three parts:
 **File**: `scripts/install/hooks_deploy.sh`
 
 - [ ] **Task 1.1**: Add `git_force_executable()` function after `set_hook_permissions()` (after line 198)
+
   - Check we're in a git repo (`git rev-parse --is-inside-work-tree`)
   - Find all hook scripts in `.claude/hooks/` (maxdepth 1, regular files)
   - For each: use `git ls-files --full-name` to get tracked path, then `git update-index --chmod=+x`
@@ -27,6 +29,7 @@ The fix has three parts:
   - All errors non-fatal (`|| true`)
 
 - [ ] **Task 1.2**: Call `git_force_executable()` from `deploy_all_hooks()` (line ~243)
+
   - Place OUTSIDE the `if [ "$install_mode" != "self-install" ]` guard (both modes benefit)
   - Call after `set_hook_permissions()`
 
@@ -37,6 +40,7 @@ The fix has three parts:
 ### Constants
 
 - [ ] **Task 2.1**: Add `HandlerID.GIT_FILEMODE_CHECKER` to `src/claude_code_hooks_daemon/constants/handlers.py` (after line 417)
+
   - `HandlerIDMeta(class_name="GitFilemodeCheckerHandler", config_key="git_filemode_checker", display_name="git-filemode-checker")`
   - Add `"git_filemode_checker"` to `HandlerKey` Literal (after `"optimal_config_checker"` ~line 512)
 
@@ -53,6 +57,7 @@ The fix has three parts:
 ### GREEN: Implement Handler
 
 - [ ] **Task 2.4**: Create `src/claude_code_hooks_daemon/handlers/session_start/git_filemode_checker.py`
+
   - Follow `optimal_config_checker.py` pattern exactly
   - `_is_resume_session()` - same logic (transcript size > 100 bytes)
   - `_get_filemode_setting()` - runs `git config --local core.fileMode`, returns "true"/"false"/None
@@ -63,6 +68,7 @@ The fix has three parts:
   - Use constants: `HandlerID.GIT_FILEMODE_CHECKER`, `Priority.GIT_FILEMODE_CHECKER`, `HandlerTag.{ADVISORY,GIT,NON_TERMINAL,ENVIRONMENT}`
 
 - [ ] **Task 2.5**: Register in `src/claude_code_hooks_daemon/handlers/session_start/__init__.py`
+
   - Add import and `__all__` entry
 
 ### Config
@@ -86,17 +92,17 @@ The fix has three parts:
 
 ## Key Files
 
-| File | Action |
-|------|--------|
-| `scripts/install/hooks_deploy.sh` | Modify - add `git_force_executable()` |
-| `src/.../constants/handlers.py` | Modify - add HandlerID + HandlerKey |
-| `src/.../constants/priority.py` | Modify - add priority 53 |
-| `src/.../handlers/session_start/git_filemode_checker.py` | **New** |
-| `tests/unit/handlers/session_start/test_git_filemode_checker.py` | **New** |
-| `src/.../handlers/session_start/__init__.py` | Modify - register import |
-| `.claude/hooks-daemon.yaml` | Modify - register handler |
-| `docs/guides/HANDLER_REFERENCE.md` | Modify - document handler |
-| `.claude/HOOKS-DAEMON.md` | Regenerate |
+| File                                                             | Action                                |
+| ---------------------------------------------------------------- | ------------------------------------- |
+| `scripts/install/hooks_deploy.sh`                                | Modify - add `git_force_executable()` |
+| `src/.../constants/handlers.py`                                  | Modify - add HandlerID + HandlerKey   |
+| `src/.../constants/priority.py`                                  | Modify - add priority 53              |
+| `src/.../handlers/session_start/git_filemode_checker.py`         | **New**                               |
+| `tests/unit/handlers/session_start/test_git_filemode_checker.py` | **New**                               |
+| `src/.../handlers/session_start/__init__.py`                     | Modify - register import              |
+| `.claude/hooks-daemon.yaml`                                      | Modify - register handler             |
+| `docs/guides/HANDLER_REFERENCE.md`                               | Modify - document handler             |
+| `.claude/HOOKS-DAEMON.md`                                        | Regenerate                            |
 
 ## Verification
 

@@ -13,6 +13,7 @@ Implement comprehensive config validation at daemon startup with graceful fail-o
 ## Problem
 
 Currently:
+
 - No ConfigValidator.validate() call at daemon startup
 - Forwarders silently fall back to defaults on config errors
 - No "degraded mode" - daemon either starts or crashes

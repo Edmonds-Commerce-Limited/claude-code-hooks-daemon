@@ -16,21 +16,25 @@ Provides automated QA runner that executes all Python quality checks (ruff, mypy
 ### Core Classes
 
 **QAExecutionError**
+
 - Exception raised when QA tool execution fails
 - Wraps subprocess errors (timeout, crash, etc.)
 
 **ToolResult**
+
 - Data class representing single tool execution
 - Fields: tool_name, passed, error_count, warning_count, output, duration_ms, files_affected
 - Serializable to dict/JSON
 
 **QAResult**
+
 - Data class representing overall QA execution
 - Fields: status (passed/failed), tools_run, total_errors, total_warnings, tool_results, summary
 - Contains results from all tools
 - Serializable to dict/JSON
 
 **QARunner**
+
 - Main orchestrator class
 - Methods:
   - `run_ruff()` - Execute ruff linting (JSON output)
@@ -45,6 +49,7 @@ Provides automated QA runner that executes all Python quality checks (ruff, mypy
 ### Parsing
 
 Static helper methods to extract counts from tool output:
+
 - `_parse_ruff_output()` - Parse JSON array from ruff
 - `_parse_mypy_output()` - Count errors from "Found X errors" pattern
 - `_parse_black_output()` - Count "would reformat" lines
@@ -78,6 +83,7 @@ python3 -m claude_code_hooks_daemon.qa.runner \
 ```
 
 Exit codes:
+
 - 0: All checks passed
 - 1: Some checks failed
 - 2: Execution error
@@ -85,6 +91,7 @@ Exit codes:
 ## Configuration
 
 **Tools to run** (via `tools_to_run` attribute):
+
 ```python
 runner.tools_to_run = ["ruff", "mypy", "black", "pytest"]
 # Optional: add bandit for security checks
@@ -92,6 +99,7 @@ runner.tools_to_run = ["ruff", "mypy", "black", "pytest", "bandit"]
 ```
 
 **Output directory** (for JSON results):
+
 ```python
 runner = QARunner(
     project_root="/path/to/project",
@@ -150,6 +158,7 @@ Status: PASSED
 ## Tool-Specific Output Parsing
 
 ### Ruff (JSON)
+
 ```json
 [
   {
@@ -162,12 +171,14 @@ Status: PASSED
 ```
 
 ### Mypy (Text)
+
 ```
 src/module.py:10: error: Incompatible return value type
 Found 5 errors in 2 files
 ```
 
 ### Black (Text)
+
 ```
 would reformat src/module.py
 would reformat tests/test_module.py
@@ -175,6 +186,7 @@ Oh no! 2 files would be reformatted, 10 files would be left unchanged.
 ```
 
 ### Pytest (Text)
+
 ```
 collected 28 items
 tests/test_module.py ............................                              [100%]
@@ -182,6 +194,7 @@ tests/test_module.py ............................                              [
 ```
 
 ### Bandit (JSON)
+
 ```json
 {
   "results": [
@@ -199,6 +212,7 @@ tests/test_module.py ............................                              [
 ## Error Handling
 
 Errors during tool execution:
+
 - Timeout: QAExecutionError("Command timeout: ...")
 - Crash: QAExecutionError("Execution error: ...")
 - Exception: Caught and logged in tool result with error_count=-1
@@ -217,6 +231,7 @@ Tool execution is resilient - one tool failure doesn't stop others.
 ## Testing
 
 All functionality covered by unit tests:
+
 - Data class serialisation
 - Tool execution (mocked subprocess)
 - Output parsing (regex patterns)
@@ -225,6 +240,7 @@ All functionality covered by unit tests:
 - Integration flow
 
 Run tests:
+
 ```bash
 python3 -m pytest tests/unit/test_qa_runner.py -v
 ```
@@ -232,6 +248,7 @@ python3 -m pytest tests/unit/test_qa_runner.py -v
 ## Dependencies
 
 **Required** (in pyproject.toml):
+
 - ruff>=0.1.0
 - mypy>=1.0
 - black>=23.0
@@ -239,6 +256,7 @@ python3 -m pytest tests/unit/test_qa_runner.py -v
 - pytest-cov>=4.0
 
 **Optional**:
+
 - bandit>=1.7 (security linting)
 
 ## Integration Points

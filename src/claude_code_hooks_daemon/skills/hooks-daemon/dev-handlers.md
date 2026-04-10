@@ -9,6 +9,7 @@ Scaffold new project-level handlers with automatic file generation and TDD struc
 ```
 
 This interactive command will:
+
 1. Prompt for handler details (name, event type, priority)
 2. Create handler file in `.claude/project-handlers/{event_type}/`
 3. Create co-located test file
@@ -97,6 +98,7 @@ Write tests that define expected behavior before implementing.
 ### 2. GREEN Phase - Implement Handler
 
 Update handler implementation to make tests pass:
+
 - Implement `matches()` logic
 - Implement `handle()` logic
 - Add acceptance tests to `get_acceptance_tests()`
@@ -109,6 +111,7 @@ pytest .claude/project-handlers/{event_type}/test_{handler_name}.py -v
 ### 3. REFACTOR Phase - Clean Up
 
 Improve code quality while keeping tests green:
+
 - Remove duplication
 - Improve clarity
 - Add comments only where needed
@@ -179,6 +182,7 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli generate-playbook > /tmp/playbook
 ## Examples
 
 See example project handlers:
+
 - `examples/project-handlers/pre_tool_use/example_blocker.py` - Blocking handler
 - `examples/project-handlers/post_tool_use/example_advisory.py` - Advisory handler
 - `examples/project-handlers/session_start/example_startup.py` - Startup handler
@@ -186,6 +190,7 @@ See example project handlers:
 ## Documentation
 
 For comprehensive handler development guide:
+
 - See: `CLAUDE/HANDLER_DEVELOPMENT.md`
 - See: `CLAUDE/PROJECT_HANDLERS.md`
 - See: `CLAUDE/DEBUGGING_HOOKS.md` (event flow debugging)
@@ -193,6 +198,7 @@ For comprehensive handler development guide:
 ## Next Steps After Scaffolding
 
 1. **Debug event flow** (recommended):
+
    ```bash
    ./scripts/debug_hooks.sh start "Testing my handler scenario"
    # ... perform actions that should trigger handler ...

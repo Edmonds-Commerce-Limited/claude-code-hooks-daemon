@@ -3,6 +3,7 @@
 ## Context
 
 **Problem**: The DaemonLocationGuardHandler was implemented with a completely made-up "official upgrade command" pattern that doesn't exist:
+
 ```python
 OFFICIAL_UPGRADE_PATTERN = re.compile(
     r"cd\s+\.claude/hooks-daemon\s+&&\s+git\s+pull\s+&&\s+cd\s+\.\./\.\.\s+&&.*upgrade"
@@ -10,6 +11,7 @@ OFFICIAL_UPGRADE_PATTERN = re.compile(
 ```
 
 This is wrong because:
+
 1. The `.claude/hooks-daemon` directory is NOT upgraded by `cd`-ing into it and running `git pull`
 2. The **actual recommended upgrade method** (from LLM-UPDATE.md) is:
    ```bash
@@ -20,6 +22,7 @@ This is wrong because:
 3. The upgrade script handles ALL git operations internally - users never `cd` into hooks-daemon for upgrades
 
 **Manual upgrade exists** (LLM-UPDATE.md Step 2), which involves:
+
 ```bash
 cd .claude/hooks-daemon
 git fetch --tags
@@ -28,6 +31,7 @@ cd ../..
 ```
 
 But this is:
+
 - A multi-step manual process, not a single command to whitelist
 - Not recommended (script method is preferred)
 - Used only when the script method fails
@@ -37,6 +41,7 @@ But this is:
 **Remove the whitelisting pattern entirely** and just block ALL `cd .claude/hooks-daemon` attempts.
 
 **Rationale**:
+
 1. **Recommended upgrade method** uses `/tmp/upgrade.sh` - never touches hooks-daemon directly
 2. **Manual upgrade** is a last-resort fallback for when the script fails
 3. If agents need manual upgrade access, they can:
@@ -49,16 +54,19 @@ But this is:
 ### File: `src/claude_code_hooks_daemon/handlers/pre_tool_use/daemon_location_guard.py`
 
 **Remove**:
+
 - `OFFICIAL_UPGRADE_PATTERN` class attribute (lines 18-20)
 - Whitelisting logic in `matches()` (lines 51-53)
 
 **Update**:
+
 - Handler docstring to remove mention of whitelisting
 - `handle()` guidance to explain upgrade process correctly
 
 ### File: `tests/unit/handlers/pre_tool_use/test_daemon_location_guard.py`
 
 **Remove**:
+
 - `test_not_matches_official_upgrade_command` test (lines 81-88)
 
 **Update test count**: 15 tests → 14 tests
@@ -66,6 +74,7 @@ But this is:
 ### File: `src/claude_code_hooks_daemon/handlers/pre_tool_use/daemon_location_guard.py` (acceptance tests)
 
 **Update**:
+
 - Remove second AcceptanceTest that tested whitelisting
 
 ## Implementation Steps
@@ -110,6 +119,7 @@ The `handle()` method should provide this guidance:
 ## Verification
 
 After changes:
+
 1. ✅ All unit tests pass (14 tests, down from 15)
 2. ✅ Full QA suite passes
 3. ✅ Daemon restarts successfully
@@ -132,6 +142,7 @@ After changes:
 **Status**: Complete (2026-02-12)
 
 All success criteria met:
+
 - Removed fake OFFICIAL_UPGRADE_PATTERN constant
 - Removed whitelisting logic from matches() method
 - Updated docstrings and guidance with correct upgrade process

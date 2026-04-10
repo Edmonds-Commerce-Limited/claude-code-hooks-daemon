@@ -7,13 +7,16 @@ This upgrade is **fully backwards-compatible**. Your v2.12.0 configuration will 
 ## Files in This Directory
 
 ### Main Upgrade Guide
+
 - **v2.12-to-v2.13.md** - Complete upgrade instructions and feature overview
 
 ### Configuration Examples
+
 - **config-before.yaml** - Example v2.12.0 configuration
 - **config-after.yaml** - Same configuration (showing no changes needed) + optional new features
 
 ### Verification
+
 - **verification.sh** - Automated verification script to confirm upgrade success
 
 ## Quick Upgrade
@@ -39,6 +42,7 @@ bash CLAUDE/UPGRADES/v2/v2.12-to-v2.13/verification.sh
 ## What's New in v2.13.0
 
 ### New Features
+
 1. **ReleaseBlockerHandler** - Project-level Stop handler prevents AI from skipping acceptance tests
 2. **Single Daemon Enforcement** - Auto-enabled in containers to prevent daemon conflicts
 3. **PHP QA Fix** - 8 missing suppression patterns now blocked (security fix)
@@ -46,7 +50,9 @@ bash CLAUDE/UPGRADES/v2/v2.12-to-v2.13/verification.sh
 5. **Plan Execution** - Clear model capability guidance for AI orchestration
 
 ### Configuration Changes
+
 **None required!** Optional features:
+
 - `daemon.enforce_single_daemon_process` (auto-enabled in containers)
 - Project handlers auto-discovery (enabled by default)
 
@@ -63,6 +69,7 @@ bash verification.sh --full
 ```
 
 Expected output:
+
 ```
 ==========================================
 v2.12 → v2.13 Upgrade Verification

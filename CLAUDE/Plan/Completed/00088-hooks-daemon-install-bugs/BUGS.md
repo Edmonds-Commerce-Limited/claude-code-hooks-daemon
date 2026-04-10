@@ -13,6 +13,7 @@
 ## Bug 1 (Critical): Prereq checks are incomplete — daemon requirements not validated before install begins
 
 The installer's Step 1 ("Checking prerequisites") only validates:
+
 - `git` binary is present
 - `.claude/` directory exists
 - `.git/` directory exists
@@ -20,13 +21,13 @@ The installer's Step 1 ("Checking prerequisites") only validates:
 It does **not** check the conditions the daemon itself requires to operate. These are only
 discovered later — silently — when the daemon fails to start at Step 11. The daemon requires:
 
-| Requirement | Checked by installer? | What happens if missing |
-|---|---|---|
-| `git` binary | Yes | Clear fail message |
-| `.claude/` dir exists | Yes | Clear fail message |
-| `.git/` dir exists | Yes | Clear fail message |
-| `git remote origin` configured | **No** | Silent exit code 1 at Step 11 |
-| Python 3.11+ | Yes (Step 2) | Clear fail message |
+| Requirement                    | Checked by installer? | What happens if missing       |
+| ------------------------------ | --------------------- | ----------------------------- |
+| `git` binary                   | Yes                   | Clear fail message            |
+| `.claude/` dir exists          | Yes                   | Clear fail message            |
+| `.git/` dir exists             | Yes                   | Clear fail message            |
+| `git remote origin` configured | **No**                | Silent exit code 1 at Step 11 |
+| Python 3.11+                   | Yes (Step 2)          | Clear fail message            |
 
 The installer should do **nothing** if prereqs are not met. Instead it deployed 11 hook
 scripts, settings.json, hooks-daemon.yaml, .gitignore entries, commands, and skills before
@@ -35,6 +36,7 @@ file is written. A partial install is worse than no install — the user now has
 pointing at a daemon that won't start.
 
 **Suggested prereq additions to `install.sh` / `install_version.sh` Step 1:**
+
 ```bash
 # Check git remote origin
 git remote get-url origin &>/dev/null || _fail "No git remote 'origin' configured.
@@ -49,6 +51,7 @@ git remote get-url origin &>/dev/null || _fail "No git remote 'origin' configure
 **Step**: Step 11 — "Starting daemon"
 
 **What the installer printed:**
+
 ```
 Step 11: Starting daemon
 ----------------------------------------
@@ -57,6 +60,7 @@ Step 11: Starting daemon
 ```
 
 **What the daemon actually outputs** (only visible when running `cli status` manually afterwards):
+
 ```
 ProjectContext: No git remote 'origin' configured
 ERROR: Invalid configuration in /workspace/.claude/hooks-daemon.yaml:
@@ -78,11 +82,13 @@ when the start command fails, so the actionable error is surfaced inline.
 ## Bug 3 (Minor): Version number mismatch — uv reports 2.21.1, `__version__` reports 2.4.0
 
 During install, uv output showed:
+
 ```
 + claude-code-hooks-daemon==2.21.1 (from file:///workspace/.claude/hooks-daemon)
 ```
 
 After install:
+
 ```
 $ .claude/hooks-daemon/untracked/venv/bin/python -c \
     "import claude_code_hooks_daemon; print(claude_code_hooks_daemon.__version__)"
@@ -109,6 +115,7 @@ bash /tmp/hooks-daemon-install.sh
 ```
 
 **Workaround**: add a remote before installing:
+
 ```bash
 git remote add origin https://github.com/placeholder/placeholder.git
 ```
@@ -141,6 +148,7 @@ suspect the display is wrong.
 runtime setting AND the file.
 
 **Suggested fixes**:
+
 1. `model_context` should read effort from the Claude Code environment/runtime, not from the
    settings file (if such an API exists)
 2. If no runtime API exists, `optimal_config_checker` should NOT write to settings.json
@@ -157,6 +165,7 @@ runtime setting AND the file.
 `PlanWorkflow.md`, no templates. All 6 plan workflow handlers are disabled by default.
 
 **Expected behaviour**: The installer should detect whether `CLAUDE/Plan/` exists and:
+
 - If it exists with content: offer to enable plan workflow handlers (the project already
   uses plans)
 - If it does not exist: offer to bootstrap a generic plan workflow with README.md,
@@ -171,6 +180,7 @@ idea that plan workflow exists or how to set it up.
 never discover it unless they read the hooks-daemon's own CLAUDE/PlanWorkflow.md.
 
 **Suggested fix**: Add a post-install step:
+
 ```
 Step 12: Plan Workflow Setup (Optional)
 ----------------------------------------
@@ -192,6 +202,7 @@ brief inline comment. The user has no guidance on which handlers are recommended
 project type.
 
 **Disabled handlers that most projects would benefit from**:
+
 - `qa_suppression` — blocks lint/test suppression comments
 - `tdd_enforcement` — enforces test-first development
 - `plan_number_helper`, `validate_plan_number`, `plan_time_estimates`, `plan_workflow`,
@@ -206,6 +217,7 @@ project type.
 
 **Suggested fix**: The installer (or a post-install wizard) should present handler
 categories and let the user choose a profile:
+
 - **Minimal**: Safety handlers only (current default)
 - **Recommended**: Safety + code quality + plan workflow
 - **Strict**: All handlers enabled

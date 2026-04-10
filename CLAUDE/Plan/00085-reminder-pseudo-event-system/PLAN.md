@@ -7,6 +7,7 @@ The pseudo-event system currently supports **fixed-frequency triggers** (N/D not
 **Problem**: The workflow state system only injects reminders at session start (after compaction). During normal work, the workflow state is forgotten and never kept up to date.
 
 **Solution**: Extend pseudo-events with **adaptive-frequency triggers** where the check interval changes based on whether a reminder was actually fired:
+
 - No reminder needed → check again in `check_interval` events (e.g., 4)
 - Reminder fired → wait `cooldown_interval` events before next check (e.g., 8)
 
@@ -45,17 +46,20 @@ Add type alias: `Trigger = PseudoEventTrigger | AdaptiveTrigger`
 **File**: `src/claude_code_hooks_daemon/core/pseudo_event.py` (lines 114-142)
 
 Current line 134 assumes all triggers are strings:
+
 ```python
 triggers = tuple(PseudoEventTrigger.from_string(s) for s in trigger_strs)
 ```
 
 Change to dispatch on type:
+
 - `str` → `PseudoEventTrigger.from_string(s)` (existing)
 - `dict` → `AdaptiveTrigger(event_type=..., check_interval=..., cooldown_interval=...)` (new)
 
 Update type annotation: `triggers: tuple[PseudoEventTrigger | AdaptiveTrigger, ...]`
 
 **Config format for adaptive triggers**:
+
 ```yaml
 triggers:
   - event_type: pre_tool_use
@@ -74,12 +78,14 @@ triggers:
 **File**: `src/claude_code_hooks_daemon/core/pseudo_event.py`
 
 **New state** (add to `__slots__`):
+
 ```python
 _adaptive_thresholds: dict[str, dict[str, dict[str, int]]]
 # {session_id: {pseudo_event_name: {event_type_value: next_fire_at_count}}}
 ```
 
 **Algorithm**:
+
 1. On each matching event, increment counter (shared `_counters`)
 2. For `AdaptiveTrigger`: check `counter >= threshold` (initial threshold = `check_interval`)
 3. If threshold reached → call `_fire()` (setup + chain)
@@ -88,6 +94,7 @@ _adaptive_thresholds: dict[str, dict[str, dict[str, int]]]
    - Setup returned None (no reminder) → `threshold = counter + check_interval`
 
 **Key change in `check_and_fire()`** (line 209-217): dispatch based on trigger type:
+
 ```python
 if isinstance(trigger, AdaptiveTrigger):
     result = self._check_and_fire_adaptive(registered, trigger, hook_input, session_id)
@@ -157,6 +164,7 @@ Reuse `ProjectContext.project_root()` for workspace path.
 **Modify**: `src/claude_code_hooks_daemon/constants/priority.py` - Add priority constant
 **Modify**: `src/claude_code_hooks_daemon/core/__init__.py` - Export `AdaptiveTrigger`
 **Modify**: `src/claude_code_hooks_daemon/daemon/controller.py` - Register in `_get_pseudo_event_setup_registry()`:
+
 ```python
 "workflow_reminder": (
     WorkflowReminderSetup(),
@@ -169,6 +177,7 @@ Reuse `ProjectContext.project_root()` for workspace path.
 ## Phase 7: Configuration
 
 **Modify**: `.claude/hooks-daemon.yaml` - Add under `pseudo_events:`:
+
 ```yaml
   workflow_reminder:
     enabled: true
@@ -194,21 +203,21 @@ Reuse `ProjectContext.project_root()` for workspace path.
 
 ## Files Summary
 
-| Action | File | Purpose |
-|--------|------|---------|
-| MODIFY | `src/claude_code_hooks_daemon/core/pseudo_event.py` | AdaptiveTrigger, config parsing, adaptive dispatcher |
-| MODIFY | `src/claude_code_hooks_daemon/core/__init__.py` | Export AdaptiveTrigger |
-| MODIFY | `src/claude_code_hooks_daemon/constants/handlers.py` | WORKFLOW_REMINDER HandlerIDMeta |
-| MODIFY | `src/claude_code_hooks_daemon/constants/priority.py` | Priority constant |
-| MODIFY | `src/claude_code_hooks_daemon/daemon/controller.py` | Register in setup registry |
-| MODIFY | `.claude/hooks-daemon.yaml` | Add workflow_reminder config |
-| MODIFY | `tests/unit/core/test_pseudo_event.py` | Adaptive trigger + dispatcher tests |
-| CREATE | `src/claude_code_hooks_daemon/pseudo_events/reminder.py` | WorkflowReminderSetup |
-| CREATE | `src/claude_code_hooks_daemon/handlers/reminder/__init__.py` | Package init |
-| CREATE | `src/claude_code_hooks_daemon/handlers/reminder/workflow_reminder.py` | Handler |
-| CREATE | `tests/unit/pseudo_events/test_reminder.py` | Setup tests |
-| CREATE | `tests/unit/handlers/reminder/__init__.py` | Test package init |
-| CREATE | `tests/unit/handlers/reminder/test_workflow_reminder.py` | Handler tests |
+| Action | File                                                                  | Purpose                                              |
+| ------ | --------------------------------------------------------------------- | ---------------------------------------------------- |
+| MODIFY | `src/claude_code_hooks_daemon/core/pseudo_event.py`                   | AdaptiveTrigger, config parsing, adaptive dispatcher |
+| MODIFY | `src/claude_code_hooks_daemon/core/__init__.py`                       | Export AdaptiveTrigger                               |
+| MODIFY | `src/claude_code_hooks_daemon/constants/handlers.py`                  | WORKFLOW_REMINDER HandlerIDMeta                      |
+| MODIFY | `src/claude_code_hooks_daemon/constants/priority.py`                  | Priority constant                                    |
+| MODIFY | `src/claude_code_hooks_daemon/daemon/controller.py`                   | Register in setup registry                           |
+| MODIFY | `.claude/hooks-daemon.yaml`                                           | Add workflow_reminder config                         |
+| MODIFY | `tests/unit/core/test_pseudo_event.py`                                | Adaptive trigger + dispatcher tests                  |
+| CREATE | `src/claude_code_hooks_daemon/pseudo_events/reminder.py`              | WorkflowReminderSetup                                |
+| CREATE | `src/claude_code_hooks_daemon/handlers/reminder/__init__.py`          | Package init                                         |
+| CREATE | `src/claude_code_hooks_daemon/handlers/reminder/workflow_reminder.py` | Handler                                              |
+| CREATE | `tests/unit/pseudo_events/test_reminder.py`                           | Setup tests                                          |
+| CREATE | `tests/unit/handlers/reminder/__init__.py`                            | Test package init                                    |
+| CREATE | `tests/unit/handlers/reminder/test_workflow_reminder.py`              | Handler tests                                        |
 
 ## Success Criteria
 

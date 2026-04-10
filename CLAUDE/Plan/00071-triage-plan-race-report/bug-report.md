@@ -9,12 +9,15 @@ When Claude Code is in **plan mode**, the hooks daemon intercepts writes to the 
 ### What happens step by step:
 
 1. **Claude reads the plan file** at `/root/.claude/plans/iterative-sauteeing-cerf.md`
+
    - File contains redirect notice pointing to `CLAUDE/Plans/00048-iterative-sauteeing-cerf/PLAN.md`
 
 2. **Claude attempts to Edit the plan file** with the actual plan content
+
    - The Edit tool requires matching the current `old_string` content exactly
 
 3. **The hooks daemon intercepts** (either the read or the edit attempt) and:
+
    - Creates a NEW plan folder (incrementing the number: 00049, 00050, 00051...)
    - Rewrites the plan file content with a NEW redirect notice pointing to the new folder
    - The `old_string` Claude was trying to match no longer exists in the file
@@ -26,6 +29,7 @@ When Claude Code is in **plan mode**, the hooks daemon intercepts writes to the 
 6. **Claude attempts Edit again** - but the daemon has already modified it again (now 00052)
 
 7. **This loops indefinitely**, with the plan number incrementing each time:
+
    - 00045 → 00047 → 00048 → 00049 → 00050 → 00051 → 00052 → 00053
 
 ### Result: 9 empty plan folders created
@@ -47,6 +51,7 @@ Claude was never able to write plan content to the plan file. The plan content o
 ## Root Cause
 
 The hooks daemon's `PostToolUse` hook for Write/Edit operations on the plan file:
+
 1. Detects a write to `/root/.claude/plans/*.md`
 2. Creates a project-level plan folder under `CLAUDE/Plans/`
 3. **Replaces the plan file content** with a redirect notice
@@ -65,28 +70,36 @@ The fundamental issue is that the hook **mutates the file that Claude is activel
 ## Suggested Fix Options
 
 ### Option A: Don't mutate the source file
+
 Instead of replacing the plan file content with a redirect notice, the hook should:
+
 1. **Copy** the content to `CLAUDE/Plans/{NNNNN}/PLAN.md`
 2. Leave the original file **unchanged** at `/root/.claude/plans/{plan-name}.md`
 3. Only write the redirect notice **after** Claude calls ExitPlanMode (i.e., after the plan is finalized)
 
 ### Option B: Use a file lock or atomic operation
+
 Ensure the hook only triggers once per write operation, not on every read-modify cycle. Use a lock file or debounce mechanism to prevent the hook from firing while Claude is mid-edit.
 
 ### Option C: Hook on ExitPlanMode only
+
 Move the redirect/copy logic to the ExitPlanMode hook instead of the Write/Edit hook. This way:
+
 1. Claude writes plan content freely during plan mode
 2. When ExitPlanMode is called, the hook copies the finalized plan to the project directory
 3. No race condition because the file is only touched once at the end
 
 ### Option D: Make the redirect file stable
+
 If the hook must create the redirect, use a **stable redirect** that doesn't change between reads:
+
 - Always point to the same folder (don't create new ones on each trigger)
 - Use an idempotent check: if redirect already exists and points to a valid folder, don't modify anything
 
 ## Workaround Used
 
 After multiple failed attempts to edit the plan file, Claude:
+
 1. Called `ExitPlanMode` with the plan described in conversation text
 2. After exiting plan mode, wrote the plan content directly to `CLAUDE/Plans/00045-visual-acceptance-testing/PLAN.md` (the project-level file)
 3. Manually cleaned up the 8 duplicate empty plan folders via `rm -rf`

@@ -1,8 +1,6 @@
 ---
-name: release
-description: Automated release management - version updates, changelog generation, git tagging, and GitHub release creation
-argument-hint: "[major|minor|patch|X.Y.Z]"
----
+
+## name: release description: Automated release management - version updates, changelog generation, git tagging, and GitHub release creation argument-hint: "[major|minor|patch|X.Y.Z]"
 
 # /release - Automated Release Management Skill
 
@@ -32,30 +30,31 @@ Automate the complete release process: version updates, changelog generation, Op
 
 ## What It Does
 
-1. **Validates** environment (ABORT if any failure):
-   - Clean git state (no uncommitted changes)
-   - All QA checks passing (format, lint, types, tests, security)
-   - GitHub CLI authenticated
-   - No existing tag for target version
-2. **Determines** version bump (auto or manual)
-3. **Updates** version across all files
-4. **Generates** CHANGELOG.md entry from commits
-5. **Creates** release notes (RELEASES/vX.Y.Z.md)
-6. **Detects** breaking changes automatically and generates upgrade guide templates
-7. **Submits** to Opus agent for documentation review
-8. **🚨 UPGRADE GUIDE GATE** - Verify upgrade guide complete if breaking changes (BLOCKING)
-9. **🚨 QA VERIFICATION GATE** - Main Claude runs `./scripts/qa/run_all.sh` (BLOCKING)
+01. **Validates** environment (ABORT if any failure):
+    - Clean git state (no uncommitted changes)
+    - All QA checks passing (format, lint, types, tests, security)
+    - GitHub CLI authenticated
+    - No existing tag for target version
+02. **Determines** version bump (auto or manual)
+03. **Updates** version across all files
+04. **Generates** CHANGELOG.md entry from commits
+05. **Creates** release notes (RELEASES/vX.Y.Z.md)
+06. **Detects** breaking changes automatically and generates upgrade guide templates
+07. **Submits** to Opus agent for documentation review
+08. **🚨 UPGRADE GUIDE GATE** - Verify upgrade guide complete if breaking changes (BLOCKING)
+09. **🚨 QA VERIFICATION GATE** - Main Claude runs `./scripts/qa/run_all.sh` (BLOCKING)
 10. **🚨 CODE REVIEW GATE** - Main Claude reviews code diff since last tag (BLOCKING)
 11. **🚨 ACCEPTANCE TESTING GATE** - Main Claude executes acceptance tests: full suite for MAJOR/MINOR, targeted or skipped for PATCH (BLOCKING)
 12. **Commits** and pushes changes (only after gates pass)
-12. **Tags** release and creates GitHub release
-13. **Verifies** release published successfully
+13. **Tags** release and creates GitHub release
+14. **Verifies** release published successfully
 
 **CRITICAL**: Release process ABORTS immediately on ANY validation failure or if blocking gates fail. NO auto-fixing of QA issues or git state.
 
 ## Agent
 
 Uses the specialized Release Agent (`.claude/agents/release-agent.md`):
+
 - Model: Sonnet 4.5 (main workflow)
 - Review: Opus 4.5 (final validation)
 - Tools: Bash, Read, Edit, Write, Grep, Glob, Task
@@ -109,6 +108,7 @@ Verify & Report
 ## Output
 
 On success:
+
 ```
 ✅ Release v2.2.0 Complete!
 
@@ -127,18 +127,21 @@ git clone -b v2.2.0 https://github.com/.../hooks-daemon.git
 Common errors with fixes:
 
 **Dirty Git State:**
+
 ```
 ❌ Uncommitted changes detected
 Fix: Commit or stash changes, then retry
 ```
 
 **QA Failures:**
+
 ```
 ❌ Tests failing: 3 failed, 1165 passed
 Fix: Run ./scripts/qa/run_all.sh, fix issues, retry
 ```
 
 **Opus Rejects (Documentation Issues Only):**
+
 ```
 ⚠️  Opus found documentation issues:
    - Typo in release notes
@@ -146,9 +149,11 @@ Fix: Run ./scripts/qa/run_all.sh, fix issues, retry
 
    Fixing documentation and re-submitting...
 ```
+
 **Note**: Opus ONLY reviews release documentation (changelog/release notes), NOT code or QA issues.
 
 **Upgrade Guide Incomplete (Step 6.5 Gate Failure):**
+
 ```
 ❌ Breaking changes detected but upgrade guide incomplete
 
@@ -167,6 +172,7 @@ Fix: Complete upgrade guide (remove auto-generated warning), then retry
 ```
 
 **Tag Exists:**
+
 ```
 ❌ Tag v2.2.0 already exists
 Fix: Use different version
@@ -225,6 +231,7 @@ EOF
 ### Phase Transitions
 
 **Update workflow state** at each phase transition by editing the existing state file (preserve `created_at`):
+
 - Update `phase.current` and `phase.name`
 - Update `context` with new information (version, breaking changes detected, etc.)
 - Add to `key_reminders` for critical phase-specific requirements
@@ -240,6 +247,7 @@ rm -rf ./untracked/workflow-state/release/
 ### Compaction Resilience
 
 If conversation compacts mid-release:
+
 1. **WorkflowStatePreCompactHandler** saves current phase to state file
 2. **WorkflowStateRestorationHandler** restores on session resume with guidance
 3. Agent reads all required files with @ syntax
@@ -254,6 +262,7 @@ This skill orchestrates a multi-stage release process through main Claude. The r
 ### Stage 1: Release Agent Preparation
 
 Main Claude invokes the Release Agent (`.claude/agents/release-agent.md`) to:
+
 - Validate environment (git state, QA, GitHub CLI)
 - Detect/confirm version bump
 - Update version files
@@ -266,6 +275,7 @@ Main Claude invokes the Release Agent (`.claude/agents/release-agent.md`) to:
 ### Stage 2: Opus Documentation Review
 
 Main Claude invokes ad-hoc Opus 4.5 agent to review:
+
 - Version consistency across files
 - CHANGELOG.md accuracy and format
 - Release notes quality
@@ -281,11 +291,13 @@ Opus does NOT review code or QA issues - only documentation.
 Main Claude executes:
 
 1. **Check Breaking Changes Flag**:
+
    - Review Release Agent output for breaking changes
    - If breaking changes detected, proceed to verification
    - If no breaking changes, skip to Step 7 (QA Gate)
 
 2. **Verify Upgrade Guide Exists**:
+
    ```bash
    # Determine version jump from Release Agent output
    OLD_VERSION="2.11"  # From last tag
@@ -302,6 +314,7 @@ Main Claude executes:
    ```
 
 3. **Verify Guide Completeness**:
+
    ```bash
    GUIDE_FILE="${UPGRADE_DIR}/v${OLD_VERSION}-to-v${NEW_VERSION}.md"
 
@@ -320,6 +333,7 @@ Main Claude executes:
    ```
 
 4. **Verify Required Sections Populated**:
+
    ```bash
    # Check for placeholder text that needs filling
    if grep -q "NEEDS HUMAN REVIEW" "$GUIDE_FILE"; then
@@ -333,6 +347,7 @@ Main Claude executes:
    ```
 
 5. **Verify Supporting Files Exist**:
+
    ```bash
    if [ ! -f "${UPGRADE_DIR}/config-before.yaml" ]; then
        echo "⚠️  Warning: config-before.yaml missing"
@@ -344,6 +359,7 @@ Main Claude executes:
    ```
 
 **If Step 6.5 FAILS**:
+
 - ABORT release immediately
 - Display clear error message with guide location
 - List incomplete sections
@@ -351,6 +367,7 @@ Main Claude executes:
 - User re-runs `/release` after completion
 
 **If Step 6.5 PASSES**:
+
 - Proceed to Step 7 (QA Verification Gate)
 
 ### Stage 4: QA Verification Gate (Step 7 - BLOCKING GATE)
@@ -364,6 +381,7 @@ Main Claude reviews `git diff <last-tag>..HEAD -- src/` for bugs, security issue
 ### Stage 5: Acceptance Testing Gate (Step 8 - BLOCKING GATE)
 
 Main Claude executes acceptance tests - scope depends on bump type:
+
 - MAJOR/MINOR: full test suite - see RELEASING.md Step 8
 - PATCH + handler changes: targeted tests for changed handlers only
 - PATCH + no handler changes: skip, document reason in release notes
@@ -377,6 +395,7 @@ Main Claude commits, tags, and publishes - see RELEASING.md Steps 9-11.
 **📖 SINGLE SOURCE OF TRUTH:** @CLAUDE/development/RELEASING.md
 
 This skill implements the process defined in the release documentation. For complete details on:
+
 - Pre-release validation steps
 - Breaking changes detection and upgrade guide generation (Step 6)
 - Upgrade guide verification gate (Step 6.5)

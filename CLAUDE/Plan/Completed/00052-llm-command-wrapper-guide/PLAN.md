@@ -11,6 +11,7 @@
 The `llm:` prefixed command pattern (minimal stdout, structured JSON to file, JQ-optimizable) currently exists only as inline text in the NPM handler's deny/advisory messages. This pattern is **language-agnostic** and applies to any ecosystem with QA tools that generate verbose stdout (ESLint, pytest, PHPStan, Go vet, RuboCop, etc.).
 
 This plan creates:
+
 1. A comprehensive, language-agnostic guide file shipped with the daemon
 2. Updated handler advisory messages that reference the guide instead of inlining advice
 3. The guide serves as a detailed prompt that LLMs can read to implement wrappers in any language
@@ -36,12 +37,14 @@ This plan creates:
 ### The LLM Command Philosophy
 
 Traditional QA tools (ESLint, pytest, PHPStan, etc.) produce verbose human-readable stdout:
+
 - Coloured output, progress bars, decorative formatting
 - Hundreds of lines for large codebases
 - Hard to parse programmatically
 - Wastes LLM context tokens
 
 LLM-flavoured commands solve this:
+
 - **Minimal stdout**: Pass/fail status, summary counts, file path to detailed output
 - **Structured JSON file**: Full machine-readable results in `./var/qa/*.json`
 - **JQ-optimizable**: JSON structure designed for common jq queries
@@ -50,12 +53,14 @@ LLM-flavoured commands solve this:
 ### Example Pattern
 
 **Traditional command:**
+
 ```bash
 npm run lint
 # 500 lines of coloured ESLint output eating context tokens
 ```
 
 **LLM command:**
+
 ```bash
 npm run llm:lint
 # stdout (3 lines):
@@ -81,6 +86,7 @@ src/claude_code_hooks_daemon/guides/llm-command-wrappers.md
 ```
 
 This location:
+
 - Ships with the daemon package (inside src/)
 - Accessible via `importlib.resources` or known path
 - Can be referenced by handlers via a constant
@@ -119,9 +125,11 @@ Line 4 (optional): JSON schema location or inline hint
 
 ### Example Stdout
 ```
+
 ✅ 45 files checked, 0 errors, 3 warnings
 Details: ./var/qa/eslint-cache.json
 Query: jq '.[] | select(.errorCount > 0) | {file: .filePath, errors: .messages}' ./var/qa/eslint-cache.json
+
 ```
 
 ## Language-Specific Examples
@@ -155,12 +163,14 @@ Query: jq '.[] | select(.errorCount > 0) | {file: .filePath, errors: .messages}'
 
 ## Directory Convention
 ```
+
 ./var/qa/
-  eslint-cache.json
-  jest-results.json
-  mypy-cache.json
-  phpstan-cache.json
-  ruff-cache.json
+eslint-cache.json
+jest-results.json
+mypy-cache.json
+phpstan-cache.json
+ruff-cache.json
+
 ```
 - `var/` is gitignored (ephemeral build artifacts)
 - `qa/` subdirectory keeps QA tools separate from other var data
@@ -236,6 +246,7 @@ def get_llm_command_guide_path() -> str:
 **Context**: Where should the guide file live?
 
 **Options Considered**:
+
 1. **`CLAUDE/guides/`** - Project documentation directory
 2. **`src/claude_code_hooks_daemon/guides/`** - Inside the Python package
 3. **`docs/guides/`** - Human documentation directory
@@ -244,6 +255,7 @@ def get_llm_command_guide_path() -> str:
 **Decision**: Option 2 - Inside the Python package
 
 **Rationale**:
+
 - Ships with the daemon in any installation (not just this repo)
 - Accessible via `__file__`-relative path or `importlib.resources`
 - Part of the codebase, version-controlled
@@ -257,6 +269,7 @@ def get_llm_command_guide_path() -> str:
 **Decision**: Markdown (`.md`)
 
 **Rationale**:
+
 - LLMs parse markdown natively
 - Readable by humans too
 - Code blocks render nicely
@@ -270,6 +283,7 @@ def get_llm_command_guide_path() -> str:
 **Decision**: Reference by filesystem path
 
 **Rationale**:
+
 - Guide may be 200+ lines - too long to inline in advisory context
 - Path reference is 1 line, LLM can Read the file if interested
 - Guide updates don't require handler changes
@@ -351,13 +365,14 @@ llm-command-wrappers/
 
 JSON generation in bash is fragile. Wrapper scripts need a real language. Options:
 
-| Language | Availability Assumption | Pros | Cons |
-|----------|------------------------|------|------|
-| **Node.js** | Claude Code users always have it | Native JSON, cross-platform | Not available in non-Node projects without Claude Code |
-| **Python 3.11+** | Hooks daemon requires it | Native JSON, always available if daemon installed | Version fragmentation on some systems |
-| **The tool's own language** | By definition available | Natural fit, no extra dependency | Different language per wrapper, inconsistent |
+| Language                    | Availability Assumption          | Pros                                              | Cons                                                   |
+| --------------------------- | -------------------------------- | ------------------------------------------------- | ------------------------------------------------------ |
+| **Node.js**                 | Claude Code users always have it | Native JSON, cross-platform                       | Not available in non-Node projects without Claude Code |
+| **Python 3.11+**            | Hooks daemon requires it         | Native JSON, always available if daemon installed | Version fragmentation on some systems                  |
+| **The tool's own language** | By definition available          | Natural fit, no extra dependency                  | Different language per wrapper, inconsistent           |
 
 **Recommended approach**: Each wrapper checks what's available:
+
 1. If it's a language-specific tool (e.g., pytest), use that language (Python)
 2. If Node is available (Claude Code context), use Node for the JSON bits
 3. Fallback: Python 3.11+ (daemon dependency guarantees it)
@@ -365,6 +380,7 @@ JSON generation in bash is fragile. Wrapper scripts need a real language. Option
 ### Per-Tool Considerations
 
 For each tool, check:
+
 1. **Does it have native JSON output?** (e.g., `eslint --format json`, `pytest --json-report`, `ruff --output-format json`)
    - If yes: wrapper is thin (just redirects JSON to file + summarises)
    - If no: wrapper must parse text output and generate JSON (needs real language)
@@ -375,6 +391,7 @@ For each tool, check:
 ### Repo Structure
 
 Each tool directory is self-contained within its language folder:
+
 - `{language}/{tool}/llm-{action}.sh` - Entry point (thin shell that delegates)
 - `{language}/{tool}/schema.json` - JSON Schema for the output format
 - `{language}/{tool}/README.md` - Usage, jq examples, version requirements
@@ -392,6 +409,7 @@ Each tool directory is self-contained within its language folder:
 ## Notes & Updates
 
 ### 2026-02-12
+
 - Plan created based on user insight: the llm: command pattern is language-agnostic
 - Key idea: ship a detailed guide as a prompt file that LLMs can read to implement wrappers
 - Guide lives in the daemon package so it's available everywhere the daemon is installed

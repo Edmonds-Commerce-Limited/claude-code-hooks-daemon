@@ -22,6 +22,7 @@ When Claude Code fires a hook event (for example, before running a Bash command)
 Before installing, make sure you have:
 
 - **Python 3.11 or higher**
+
   ```bash
   python3 --version
   # Must show 3.11, 3.12, or 3.13
@@ -32,6 +33,7 @@ Before installing, make sure you have:
 - **Git** installed (the installer clones the daemon repository)
 
 - **Clean git state** in your project (no uncommitted changes)
+
   ```bash
   git status --short
   # Should show nothing
@@ -181,6 +183,7 @@ plugins:
 ```
 
 Each handler has:
+
 - **enabled** -- `true` or `false` to toggle it
 - **priority** -- lower numbers run first; determines execution order
 

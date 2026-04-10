@@ -5,6 +5,7 @@ This document provides concrete examples of how the refactored handlers will wor
 ## Example 1: Python Project (Default - This Project)
 
 **Project Structure:**
+
 ```
 my-python-project/
 ├── src/
@@ -19,6 +20,7 @@ my-python-project/
 ```
 
 **Configuration:**
+
 ```yaml
 version: 1.0
 
@@ -38,12 +40,14 @@ handlers:
 ```
 
 **Behavior:**
+
 - Creating `src/myproject/auth.py` requires `tests/unit/test_auth.py` or `tests/unit/auth_test.py`
 - Supports both pytest conventions (prefix and suffix)
 
 ## Example 2: Go Project
 
 **Project Structure:**
+
 ```
 my-go-project/
 ├── cmd/
@@ -59,6 +63,7 @@ my-go-project/
 ```
 
 **Configuration:**
+
 ```yaml
 version: 1.0
 
@@ -76,12 +81,14 @@ handlers:
 ```
 
 **Behavior:**
+
 - Creating `pkg/auth/auth.go` requires `pkg/auth/auth_test.go` (colocated)
 - Follows Go convention of `*_test.go` suffix
 
 ## Example 3: TypeScript/React Project
 
 **Project Structure:**
+
 ```
 my-react-app/
 ├── src/
@@ -99,6 +106,7 @@ my-react-app/
 ```
 
 **Configuration:**
+
 ```yaml
 version: 1.0
 
@@ -121,6 +129,7 @@ handlers:
 ```
 
 **Behavior:**
+
 - Creating `src/components/Button.tsx` requires either:
   - `src/components/Button.test.tsx` (colocated), OR
   - `src/components/Button.spec.tsx` (colocated), OR
@@ -130,6 +139,7 @@ handlers:
 ## Example 4: PHP Project
 
 **Project Structure:**
+
 ```
 my-php-project/
 ├── src/
@@ -145,6 +155,7 @@ my-php-project/
 ```
 
 **Configuration:**
+
 ```yaml
 version: 1.0
 
@@ -166,12 +177,14 @@ handlers:
 ```
 
 **Behavior:**
+
 - Creating `src/Auth/AuthService.php` requires `tests/Unit/Auth/AuthServiceTest.php`
 - Follows PHPUnit convention of `*Test.php` suffix
 
 ## Example 5: Ruby Project
 
 **Project Structure:**
+
 ```
 my-ruby-project/
 ├── lib/
@@ -184,6 +197,7 @@ my-ruby-project/
 ```
 
 **Configuration:**
+
 ```yaml
 version: 1.0
 
@@ -202,12 +216,14 @@ handlers:
 ```
 
 **Behavior:**
+
 - Creating `lib/auth.rb` requires `spec/auth_spec.rb`
 - Follows RSpec convention of `*_spec.rb` suffix
 
 ## Example 6: Non-Standard Project Structure
 
 **Project Structure:**
+
 ```
 my-custom-project/
 ├── app/              # Custom source directory
@@ -221,6 +237,7 @@ my-custom-project/
 ```
 
 **Configuration:**
+
 ```yaml
 version: 1.0
 
@@ -250,12 +267,14 @@ handlers:
 ```
 
 **Behavior:**
+
 - All handlers adapt to custom directory structure
 - No hardcoded paths - everything from config
 
 ## Example 7: Monorepo with Multiple Languages
 
 **Project Structure:**
+
 ```
 my-monorepo/
 ├── services/
@@ -273,6 +292,7 @@ my-monorepo/
 ```
 
 **Configuration:**
+
 ```yaml
 version: 1.0
 
@@ -303,6 +323,7 @@ handlers:
 ```
 
 **Behavior:**
+
 - TDD handler detects language by extension and applies correct test pattern
 - Creating `services/api-go/pkg/auth/auth.go` → requires `auth_test.go` (Go convention)
 - Creating `libs/shared-python/src/utils.py` → requires `test_utils.py` (Python convention)
@@ -311,6 +332,7 @@ handlers:
 ## Example 8: Legacy Project (Graceful Degradation)
 
 **Project Structure:**
+
 ```
 legacy-project/
 ├── src/
@@ -320,6 +342,7 @@ legacy-project/
 ```
 
 **Configuration:**
+
 ```yaml
 version: 1.0
 
@@ -333,6 +356,7 @@ handlers:
 ```
 
 **Behavior:**
+
 - Handler checks if `tests/` directory exists
 - If not present, handler logs info and doesn't enforce
 - No errors, no blocking - graceful degradation
@@ -341,6 +365,7 @@ handlers:
 ## Migration Path for Existing Projects
 
 ### Before (Hardcoded):
+
 ```python
 # tdd_enforcement.py - OLD
 def _get_test_file_path(self, handler_path: str) -> Path:
@@ -351,6 +376,7 @@ def _get_test_file_path(self, handler_path: str) -> Path:
 ```
 
 ### After (Configurable):
+
 ```python
 # tdd_enforcement.py - NEW
 def _get_test_file_path(self, handler_path: str) -> Path:

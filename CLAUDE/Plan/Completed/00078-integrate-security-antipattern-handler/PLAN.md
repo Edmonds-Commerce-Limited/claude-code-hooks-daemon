@@ -12,10 +12,12 @@ The prototype is well-written and follows project patterns. It needs to be prope
 ## Files to Create
 
 1. **`src/claude_code_hooks_daemon/handlers/pre_tool_use/security_antipattern.py`**
+
    - Move from `untracked/security-antipattern-handler/security_antipattern.py`
    - No code changes needed — prototype already uses correct imports (`HandlerID`, `Priority`, `HookInputField`, `ToolName`, `get_file_path`, `get_file_content`)
 
 2. **`tests/unit/handlers/pre_tool_use/test_security_antipattern.py`**
+
    - TDD-style comprehensive tests following `test_curl_pipe_shell.py` patterns
    - Init tests (name, priority, terminal, tags)
    - `matches()` positive: AWS key, Stripe key, GitHub token, private key, PHP eval/exec/shell_exec/system/passthru/proc_open/unserialize, TS eval/new Function/dangerouslySetInnerHTML/innerHTML/document.write
@@ -26,17 +28,21 @@ The prototype is well-written and follows project patterns. It needs to be prope
 ## Files to Modify
 
 3. **`src/claude_code_hooks_daemon/constants/handlers.py`**
+
    - Add `SECURITY_ANTIPATTERN` to `HandlerID` class (in Safety handlers section, after `ERROR_HIDING_BLOCKER` ~line 213)
    - Add `"security_antipattern"` to `HandlerKey` Literal (in Safety handlers section, after `"error_hiding_blocker"`)
 
 4. **`src/claude_code_hooks_daemon/constants/priority.py`**
+
    - Add `SECURITY_ANTIPATTERN = 14` to Safety handlers section (between ERROR_HIDING_BLOCKER=13 and TDD_ENFORCEMENT=15)
 
 5. **`src/claude_code_hooks_daemon/handlers/pre_tool_use/__init__.py`**
+
    - Add import: `from .security_antipattern import SecurityAntipatternHandler`
    - Add to `__all__`: `"SecurityAntipatternHandler"`
 
 6. **`.claude/hooks-daemon.yaml`**
+
    - Add `security_antipattern` entry under `pre_tool_use` handlers, priority 14, enabled true
 
 ## Constants Values
@@ -56,10 +62,12 @@ SECURITY_ANTIPATTERN = 14  # Safety range, after error_hiding_blocker (13)
 ## Execution Phases
 
 ### Phase 1: RED — Write Failing Tests ✅ COMPLETE
+
 - [x] Create `tests/unit/handlers/pre_tool_use/test_security_antipattern.py` (60 tests)
 - [x] Run tests — confirmed FAIL before handler in source tree
 
 ### Phase 2: GREEN — Add Constants + Move Handler ✅ COMPLETE
+
 - [x] Add `HandlerID.SECURITY_ANTIPATTERN` constant
 - [x] Add `Priority.SECURITY_ANTIPATTERN` constant
 - [x] Add to `HandlerKey` Literal
@@ -68,17 +76,20 @@ SECURITY_ANTIPATTERN = 14  # Safety range, after error_hiding_blocker (13)
 - [x] Run tests — all 60 PASS
 
 ### Phase 3: Config + Verification ✅ COMPLETE
+
 - [x] Register in `.claude/hooks-daemon.yaml` (priority 14)
 - [x] Type check passes (mypy --strict)
 - [x] Daemon restart verified — RUNNING
 - [x] Checkpoint commit: `adeb96b`
 
 ### Phase 4: Source Guard CLAUDE.md Files ✅ COMPLETE
+
 - [x] Create `src/CLAUDE.md` — warns project agents not to edit daemon source
 - [x] Create `tests/CLAUDE.md` — warns project agents not to edit daemon tests
 - [x] Both files link to project-level handlers guide and bug reporting guide
 
 ### Phase 5: Strategy Pattern Refactoring ✅ COMPLETE
+
 - [x] Define `SecurityStrategy` Protocol with `SecurityPattern` frozen dataclass
 - [x] Create `SecurityStrategyRegistry` with universal + extension-mapped strategies
 - [x] Implement `SecretDetectionStrategy` (universal, OWASP A02)

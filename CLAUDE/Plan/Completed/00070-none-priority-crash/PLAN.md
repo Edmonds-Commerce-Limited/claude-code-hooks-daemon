@@ -13,6 +13,7 @@
 The daemon crashes with `TypeError: '<' not supported between instances of 'NoneType' and 'int'` when a handler ends up with `priority=None`. This happens when a YAML config has `priority:` with no value (parsed as `None` by PyYAML), which bypasses the type validator and gets assigned to `instance.priority` in the registry. The chain sort then crashes comparing `None < int`.
 
 The fix is multi-layered defence:
+
 1. **Validator** — reject `priority: null` at config validation time (fail fast)
 2. **Registry** — skip priority override when config value is `None` (defensive)
 3. **Chain** — use a sane default if priority is somehow `None` at sort time (last resort)
@@ -28,27 +29,32 @@ See [BUG_REPORT.md](BUG_REPORT.md) in this directory for the original external r
 Three code paths can lead to `None` priority:
 
 ### Path 1: YAML `priority:` with no value (PRIMARY)
+
 ```yaml
 my_handler:
   enabled: true
   priority:        # PyYAML parses this as None
 ```
+
 - `handler_config` = `{"enabled": True, "priority": None}`
 - Registry line 307: `ConfigKey.PRIORITY in handler_config` → `True`
 - Registry line 308: `instance.priority = None`
 - Chain sort crashes: `(None, "name") < (10, "other")` → TypeError
 
 ### Path 2: Validator gap
+
 - Validator line 417: `not isinstance(priority, int)` catches `None`... but only if validation runs
 - Config validation is fail-open (degraded mode) — daemon can start with invalid config
 - Even when validation runs, errors are collected but daemon may still load handlers
 
 ### Path 3: Project handlers with explicit None
+
 ```python
 class MyHandler(Handler):
     def __init__(self):
         super().__init__(handler_id="my-handler", priority=None)  # type: ignore
 ```
+
 - Project handler loader calls `handler_class()` and trusts the result
 - No post-instantiation priority validation
 
@@ -103,16 +109,20 @@ class MyHandler(Handler):
 ## Technical Decisions
 
 ### Decision 1: Default priority value
+
 **Context**: What default should be used when priority is None?
 **Options**:
+
 1. 50 (middle of range, matches Handler.__init__ default)
 2. 100 (end of range, least disruptive)
 
 **Decision**: 50 — matches the existing Handler base class default. A handler that doesn't specify priority should behave as if it used the base class default.
 
 ### Decision 2: Strict vs lenient on None priority
+
 **Context**: Should `priority: null` in config be a hard error or a warning?
 **Options**:
+
 1. Hard validation error (fail fast, daemon enters degraded mode)
 2. Warning with default applied (daemon starts normally)
 
@@ -131,7 +141,7 @@ class MyHandler(Handler):
 
 ## Risks & Mitigations
 
-| Risk | Impact | Probability | Mitigation |
-|------|--------|-------------|------------|
-| Existing configs rely on None priority | Low | Very Low | None priority was always a crash, so no one depends on it |
-| Default 50 conflicts with existing handler | Low | Low | Chain sorts ties alphabetically, deterministic |
+| Risk                                       | Impact | Probability | Mitigation                                                |
+| ------------------------------------------ | ------ | ----------- | --------------------------------------------------------- |
+| Existing configs rely on None priority     | Low    | Very Low    | None priority was always a crash, so no one depends on it |
+| Default 50 conflicts with existing handler | Low    | Low         | Chain sorts ties alphabetically, deterministic            |

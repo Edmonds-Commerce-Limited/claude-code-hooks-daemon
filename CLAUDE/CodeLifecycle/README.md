@@ -5,6 +5,7 @@
 ## Purpose
 
 These documents prevent shipping broken code by enforcing a complete testing pyramid:
+
 - Unit tests (TDD, 95%+ coverage)
 - Integration tests (component interactions)
 - **Daemon load verification** (catches import errors)
@@ -27,6 +28,7 @@ These documents prevent shipping broken code by enforcing a complete testing pyr
 ## The Critical Gap This Solves
 
 **Real Example**: 5 handlers shipped with:
+
 - ✅ Unit tests passing (100% coverage)
 - ✅ QA checks passing (format, lint, types, security)
 - ❌ **Daemon couldn't load them** (wrong import: `constants.decision` vs `core.Decision`)
@@ -50,14 +52,14 @@ If daemon fails to start, **your change is not done** - fix it before committing
 
 Start with the document for your change type:
 
-| Change Type | Read This |
-|-------------|-----------|
-| New handler | @CLAUDE/CodeLifecycle/Features.md |
-| New feature | @CLAUDE/CodeLifecycle/Features.md |
-| Bug fix | @CLAUDE/CodeLifecycle/Bugs.md |
-| Refactoring | @CLAUDE/CodeLifecycle/General.md |
-| Documentation | @CLAUDE/CodeLifecycle/General.md |
-| Config changes | @CLAUDE/CodeLifecycle/General.md |
+| Change Type    | Read This                         |
+| -------------- | --------------------------------- |
+| New handler    | @CLAUDE/CodeLifecycle/Features.md |
+| New feature    | @CLAUDE/CodeLifecycle/Features.md |
+| Bug fix        | @CLAUDE/CodeLifecycle/Bugs.md     |
+| Refactoring    | @CLAUDE/CodeLifecycle/General.md  |
+| Documentation  | @CLAUDE/CodeLifecycle/General.md  |
+| Config changes | @CLAUDE/CodeLifecycle/General.md  |
 
 ## Existing Testing Infrastructure
 

@@ -47,14 +47,16 @@ These assumptions make handlers less useful (or broken) when used in other proje
 #### **CRITICAL SEVERITY** (Blocks multi-language or multi-project use)
 
 1. **TddEnforcementHandler** (`pre_tool_use/tdd_enforcement.py`)
+
    - **Issue**: Hardcoded Python test convention (`test_*.py`)
    - **Issue**: Hardcoded path patterns (`tests/unit/handlers/{event_type}/test_{handler}.py`)
    - **Issue**: Workspace root detection assumes `/workspace` fallback
    - **Issue**: Only checks Python files (`.py` extension)
    - **Impact**: Cannot enforce TDD for Go, PHP, TypeScript, Rust, Java, etc.
-   - **Lines**: 44-59 (matches), 108-159 (_get_test_file_path)
+   - **Lines**: 44-59 (matches), 108-159 (\_get_test_file_path)
 
 2. **MarkdownOrganizationHandler** (`pre_tool_use/markdown_organization.py`)
+
    - **Issue**: Hardcoded directory structure (`CLAUDE/`, `docs/`, `eslint-rules/`)
    - **Issue**: Hardcoded plan path (`CLAUDE/Plan/`)
    - **Issue**: Project-specific page patterns (`src/pages/articles/`)
@@ -62,24 +64,28 @@ These assumptions make handlers less useful (or broken) when used in other proje
    - **Lines**: 42-44 (plan path check), 76-83 (project markers), 378-397 (CLAUDE/ check)
 
 3. **ValidatePlanNumberHandler** (`pre_tool_use/validate_plan_number.py`)
+
    - **Issue**: Hardcoded plan path (`CLAUDE/Plan/`)
    - **Issue**: Assumes specific numbering format (`NNN-description`)
    - **Impact**: Only works for projects using this exact plan structure
    - **Lines**: 69 (plan path pattern), 176 (plan root)
 
 4. **PlanNumberHelperHandler** (`pre_tool_use/plan_number_helper.py`)
+
    - **Issue**: Config-based but still assumes plan directory structure
    - **Issue**: Hardcoded plan path format
    - **Impact**: Moderate - at least uses config, but structure assumptions remain
    - **Lines**: 72 (plan_dir usage), 138 (plan_base path)
 
 5. **PlanWorkflowHandler** (`pre_tool_use/plan_workflow.py`)
+
    - **Issue**: Hardcoded plan path pattern (`CLAUDE/Plan/*/PLAN.md`)
    - **Issue**: Hardcoded workflow doc reference (`CLAUDE/PlanWorkflow.md`)
    - **Impact**: Only useful for projects with exact same structure
    - **Lines**: 44 (path pattern)
 
 6. **PlanCompletionAdvisorHandler** (`pre_tool_use/plan_completion_advisor.py`)
+
    - **Issue**: Hardcoded plan path pattern (`CLAUDE/Plan/`)
    - **Issue**: Assumes `Completed/` subdirectory structure
    - **Impact**: Only works with exact directory layout
@@ -87,23 +93,27 @@ These assumptions make handlers less useful (or broken) when used in other proje
 
 #### **MODERATE SEVERITY** (Works but has language-specific assumptions)
 
-7. **PythonQaSuppressionBlocker** (`pre_tool_use/python_qa_suppression_blocker.py`)
-   - **Issue**: Language-specific but GOOD - uses LanguageConfig
-   - **Issue**: Hardcoded skip directories (`tests/fixtures/`, `migrations/`)
-   - **Impact**: Skip directories might not match other projects
-   - **Lines**: 49 (skip_directories check)
+07. **PythonQaSuppressionBlocker** (`pre_tool_use/python_qa_suppression_blocker.py`)
 
-8. **GoQaSuppressionBlocker** (`pre_tool_use/go_qa_suppression_blocker.py`)
-   - **Issue**: Same as Python - hardcoded skip directories
-   - **Impact**: Minor - good use of LanguageConfig otherwise
-   - **Lines**: 49 (skip_directories check)
+    - **Issue**: Language-specific but GOOD - uses LanguageConfig
+    - **Issue**: Hardcoded skip directories (`tests/fixtures/`, `migrations/`)
+    - **Impact**: Skip directories might not match other projects
+    - **Lines**: 49 (skip_directories check)
 
-9. **PhpQaSuppressionBlocker** (`pre_tool_use/php_qa_suppression_blocker.py`)
-   - **Issue**: Same pattern as Python/Go
-   - **Impact**: Minor
-   - **Lines**: 49 (skip_directories check)
+08. **GoQaSuppressionBlocker** (`pre_tool_use/go_qa_suppression_blocker.py`)
+
+    - **Issue**: Same as Python - hardcoded skip directories
+    - **Impact**: Minor - good use of LanguageConfig otherwise
+    - **Lines**: 49 (skip_directories check)
+
+09. **PhpQaSuppressionBlocker** (`pre_tool_use/php_qa_suppression_blocker.py`)
+
+    - **Issue**: Same pattern as Python/Go
+    - **Impact**: Minor
+    - **Lines**: 49 (skip_directories check)
 
 10. **EslintDisableHandler** (`pre_tool_use/eslint_disable.py`)
+
     - **Issue**: Hardcoded skip directories (`node_modules`, `dist`, `.build`)
     - **Issue**: Hardcoded file extensions (`.ts`, `.tsx`, `.js`, `.jsx`)
     - **Impact**: Minor - common conventions but not configurable
@@ -121,16 +131,16 @@ These assumptions make handlers less useful (or broken) when used in other proje
 
 Based on research and industry standards:
 
-| Language | Test File Pattern | Example | Framework |
-|----------|------------------|---------|-----------|
-| **Python** | `test_*.py` or `*_test.py` | `test_auth.py` | pytest, unittest |
-| **Go** | `*_test.go` | `auth_test.go` | testing |
-| **PHP** | `*Test.php` | `AuthTest.php` | PHPUnit |
-| **JavaScript/TypeScript** | `*.test.{js,ts}` or `*.spec.{js,ts}` | `auth.test.ts` | Jest, Vitest |
-| **Rust** | `tests/*.rs` or inline `#[cfg(test)]` | `tests/integration.rs` | cargo test |
-| **Java** | `*Test.java` | `AuthTest.java` | JUnit |
-| **Ruby** | `*_spec.rb` or `test_*.rb` | `auth_spec.rb` | RSpec, Minitest |
-| **C#** | `*Tests.cs` or `*.Tests.cs` | `AuthTests.cs` | xUnit, NUnit |
+| Language                  | Test File Pattern                     | Example                | Framework        |
+| ------------------------- | ------------------------------------- | ---------------------- | ---------------- |
+| **Python**                | `test_*.py` or `*_test.py`            | `test_auth.py`         | pytest, unittest |
+| **Go**                    | `*_test.go`                           | `auth_test.go`         | testing          |
+| **PHP**                   | `*Test.php`                           | `AuthTest.php`         | PHPUnit          |
+| **JavaScript/TypeScript** | `*.test.{js,ts}` or `*.spec.{js,ts}`  | `auth.test.ts`         | Jest, Vitest     |
+| **Rust**                  | `tests/*.rs` or inline `#[cfg(test)]` | `tests/integration.rs` | cargo test       |
+| **Java**                  | `*Test.java`                          | `AuthTest.java`        | JUnit            |
+| **Ruby**                  | `*_spec.rb` or `test_*.rb`            | `auth_spec.rb`         | RSpec, Minitest  |
+| **C#**                    | `*Tests.cs` or `*.Tests.cs`           | `AuthTests.cs`         | xUnit, NUnit     |
 
 ### Common Patterns
 
@@ -146,6 +156,7 @@ Based on research and industry standards:
 **Context**: Handlers hardcode paths like `CLAUDE/Plan/`, `tests/`, `src/` which don't work for other projects.
 
 **Options Considered**:
+
 1. **Keep hardcoded** - Simple but defeats library purpose
 2. **Environment variables** - Flexible but complex, hard to document
 3. **Handler config in YAML** - Clean, documented, per-handler control
@@ -154,6 +165,7 @@ Based on research and industry standards:
 **Decision**: Use project-level config section in `.claude/hooks-daemon.yaml` with handler-specific overrides
 
 **Example**:
+
 ```yaml
 project_paths:
   # Generic path mapping for all handlers
@@ -172,6 +184,7 @@ handlers:
 ```
 
 **Rationale**:
+
 - Single source of truth for paths
 - Easy to understand and document
 - Handlers can access via `ProjectContext` or registry
@@ -184,6 +197,7 @@ handlers:
 **Context**: TDD handler only supports Python. Need to support Go, PHP, JS/TS, etc.
 
 **Options Considered**:
+
 1. **Separate handlers per language** - Duplicates logic, maintenance nightmare
 2. **Language detection + config map** - Clean, extensible, DRY
 3. **Plugin system** - Overkill for this use case
@@ -191,6 +205,7 @@ handlers:
 **Decision**: Extend existing `LanguageConfig` dataclass with test file patterns
 
 **Implementation**:
+
 ```python
 @dataclass(frozen=True)
 class LanguageConfig:
@@ -203,6 +218,7 @@ class LanguageConfig:
 ```
 
 **Example configs**:
+
 ```python
 PYTHON_CONFIG = LanguageConfig(
     name="Python",
@@ -230,6 +246,7 @@ TYPESCRIPT_CONFIG = LanguageConfig(
 ```
 
 **Rationale**:
+
 - Reuses existing LanguageConfig pattern
 - One handler supports all languages
 - Easy to add new languages
@@ -242,6 +259,7 @@ TYPESCRIPT_CONFIG = LanguageConfig(
 **Context**: When handlers are enabled but project paths don't exist, what happens?
 
 **Options Considered**:
+
 1. **Fail hard** - Error if paths missing
 2. **Disable silently** - No validation at all
 3. **Warn and disable** - Log warning, skip handler
@@ -250,12 +268,14 @@ TYPESCRIPT_CONFIG = LanguageConfig(
 **Decision**: Smart defaults with opt-out
 
 **Implementation**:
+
 - Handlers check if paths exist before enforcing
 - Use common conventions as defaults (e.g., `tests/`, `docs/`)
 - Log info message when using defaults
 - Allow explicit `enabled: false` to disable
 
 **Example**:
+
 ```python
 def matches(self, hook_input: dict) -> bool:
     # Get configured path or use default
@@ -270,6 +290,7 @@ def matches(self, hook_input: dict) -> bool:
 ```
 
 **Rationale**:
+
 - Doesn't break when used in new projects
 - Doesn't require extensive configuration for standard projects
 - Provides flexibility without complexity
@@ -279,6 +300,7 @@ def matches(self, hook_input: dict) -> bool:
 ## Tasks
 
 ### Phase 1: Design & Documentation
+
 - [x] ⬜ **Investigate all handlers for project-specific logic**
   - [x] ⬜ Read TDD enforcement handler
   - [x] ⬜ Survey all handlers in src/claude_code_hooks_daemon/handlers/
@@ -296,6 +318,7 @@ def matches(self, hook_input: dict) -> bool:
   - [ ] ⬜ Write tests for language detection
 
 ### Phase 2: Core Infrastructure (TDD)
+
 - [ ] ⬜ **Implement ProjectPaths utility class**
   - [ ] ⬜ Write failing tests for path resolution
   - [ ] ⬜ Implement ProjectPaths.get_test_directory()
@@ -311,6 +334,7 @@ def matches(self, hook_input: dict) -> bool:
   - [ ] ⬜ Run full QA suite
 
 ### Phase 3: Refactor Critical Handlers (TDD)
+
 - [ ] ⬜ **Refactor TddEnforcementHandler (CRITICAL)**
   - [ ] ⬜ Write failing tests for multi-language support
   - [ ] ⬜ Replace hardcoded paths with ProjectPaths
@@ -338,6 +362,7 @@ def matches(self, hook_input: dict) -> bool:
   - [ ] ⬜ Restart daemon successfully
 
 ### Phase 4: Refactor Moderate Severity Handlers (TDD)
+
 - [ ] ⬜ **Make QA suppression blockers configurable**
   - [ ] ⬜ Move skip_directories to config
   - [ ] ⬜ Update PythonQaSuppressionBlocker
@@ -350,6 +375,7 @@ def matches(self, hook_input: dict) -> bool:
   - [ ] ⬜ Run full QA suite
 
 ### Phase 5: Update Project Configuration
+
 - [ ] ⬜ **Update .claude/hooks-daemon.yaml for this project**
   - [ ] ⬜ Add project_paths section
   - [ ] ⬜ Set plan_directory: "CLAUDE/Plan"
@@ -364,6 +390,7 @@ def matches(self, hook_input: dict) -> bool:
   - [ ] ⬜ Update handler development guide
 
 ### Phase 6: Testing & Validation
+
 - [ ] ⬜ **Integration testing**
   - [ ] ⬜ Test with Python project structure
   - [ ] ⬜ Test with Go project structure
@@ -396,13 +423,13 @@ def matches(self, hook_input: dict) -> bool:
 
 ## Risks & Mitigations
 
-| Risk | Impact | Probability | Mitigation |
-|------|--------|-------------|------------|
-| Breaking existing functionality | High | Medium | TDD + dogfooding tests catch regressions |
-| Config complexity overwhelming users | Medium | Medium | Smart defaults, minimal required config |
-| Performance impact from path lookups | Low | Low | Cache resolved paths in ProjectContext |
-| Incomplete language coverage | Medium | High | Start with top 5 languages, document extension pattern |
-| Migration effort too large | High | Medium | Phased approach, prioritize by severity |
+| Risk                                 | Impact | Probability | Mitigation                                             |
+| ------------------------------------ | ------ | ----------- | ------------------------------------------------------ |
+| Breaking existing functionality      | High   | Medium      | TDD + dogfooding tests catch regressions               |
+| Config complexity overwhelming users | Medium | Medium      | Smart defaults, minimal required config                |
+| Performance impact from path lookups | Low    | Low         | Cache resolved paths in ProjectContext                 |
+| Incomplete language coverage         | Medium | High        | Start with top 5 languages, document extension pattern |
+| Migration effort too large           | High   | Medium      | Phased approach, prioritize by severity                |
 
 ## Timeline
 
@@ -428,6 +455,7 @@ Initial investigation complete. Key findings:
 **Most important fix**: TDD enforcement handler - blocks multi-language TDD enforcement entirely.
 
 **Research findings**:
+
 - ESLint uses glob patterns in `files` property for test matching
 - Pytest uses configurable naming conventions (python_files, python_classes, python_functions)
 - Language-agnostic testing is growing trend (TESTed framework example)
@@ -436,6 +464,7 @@ Initial investigation complete. Key findings:
 - JavaScript/TypeScript support both `.test` and `.spec` suffixes
 
 **Design approach**:
+
 - Configuration-driven (YAML project_paths section)
 - Multi-language via extended LanguageConfig
 - Smart defaults with opt-out

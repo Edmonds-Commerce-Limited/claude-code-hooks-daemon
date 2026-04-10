@@ -31,11 +31,11 @@ cd ../..
 
 **All upgrade commands should be run from the PROJECT ROOT** (the directory containing `.claude/`).
 
-| If you see this... | You are at... | Action |
-|---|---|---|
-| `.claude/hooks-daemon.yaml` exists | Project root | Correct - proceed |
-| `src/claude_code_hooks_daemon/` exists | Inside hooks-daemon | Run `cd ../..` first |
-| Neither exists | Wrong directory | Navigate to project root |
+| If you see this...                     | You are at...       | Action                   |
+| -------------------------------------- | ------------------- | ------------------------ |
+| `.claude/hooks-daemon.yaml` exists     | Project root        | Correct - proceed        |
+| `src/claude_code_hooks_daemon/` exists | Inside hooks-daemon | Run `cd ../..` first     |
+| Neither exists                         | Wrong directory     | Navigate to project root |
 
 ---
 
@@ -129,6 +129,7 @@ rm /tmp/upgrade.sh
 ### What the Script Does (Two-Layer Flow)
 
 **Layer 1** (the curl-fetched script):
+
 - Uses `--project-root PATH` (required) to locate the project
 - Fetches latest tags from remote
 - Determines target version (latest tag or specified argument)
@@ -136,6 +137,7 @@ rm /tmp/upgrade.sh
 - Delegates to Layer 2 via `exec`
 
 **Layer 2** (version-specific orchestrator):
+
 - Creates state snapshot for rollback (hooks, config, Claude Code `settings.json`)
 - Backs up user config and `settings.json` (Claude Code settings are preserved across upgrades)
 - Extracts user customizations (diff against old defaults)
@@ -381,10 +383,12 @@ $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli check-config-migrations \
 ```
 
 **Output interpretation:**
+
 - **Exit code 0**: Config is up to date — no new options to review
 - **Exit code 1**: New options available — review and add what's relevant
 
 Example output:
+
 ```
 Config Migration Advisory: v2.8.0 → v2.15.2
 
@@ -410,6 +414,7 @@ Run with --help for all options.
 ```
 
 **Why this is better than Methods 1-3:**
+
 - Version-aware: only shows options NEW since your previous version (not ones you already have)
 - Filters out already-configured options automatically
 - Includes descriptions and examples from the version manifests
@@ -421,12 +426,12 @@ Run with --help for all options.
 
 **Step 1: Review each new handler and decide:**
 
-| Category | Default Action |
-|----------|---------------|
+| Category                                               | Default Action                              |
+| ------------------------------------------------------ | ------------------------------------------- |
 | **Safety handlers** (destructive operations, security) | **Always enable** — these prevent data loss |
-| **Code quality handlers** (linting, TDD, QA) | **Enable unless project has reason not to** |
-| **Workflow handlers** (npm, git, planning) | **Enable if relevant to project** |
-| **Advisory handlers** (spelling, suggestions) | Enable based on project preferences |
+| **Code quality handlers** (linting, TDD, QA)           | **Enable unless project has reason not to** |
+| **Workflow handlers** (npm, git, planning)             | **Enable if relevant to project**           |
+| **Advisory handlers** (spelling, suggestions)          | Enable based on project preferences         |
 
 **Step 2: Add new handlers to config** — enable them, don't just list them:
 
@@ -483,6 +488,7 @@ untracked/venv/bin/python scripts/handler_status.py
 ```
 
 Review the output and check:
+
 - **Enabled count** — should be **30+ handlers** for a well-configured installation
 - **New handlers** — any new handlers from the upgrade should be enabled (see Step 5)
 - **Disabled handlers** — if any safety or code quality handlers are disabled, enable them now
@@ -569,6 +575,7 @@ ls -la CLAUDE/Plan/ 2>/dev/null
 **Scenario 1: No Planning Docs Yet** - See "Post-Installation: Planning Workflow Adoption" in LLM-INSTALL.md.
 
 **Scenario 2: Already Using Planning System** - Check for updates:
+
 ```bash
 diff CLAUDE/PlanWorkflow.md .claude/hooks-daemon/CLAUDE/PlanWorkflow.md || echo "Docs differ"
 ```
@@ -684,6 +691,7 @@ untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
 The Layer 2 upgrade orchestrator (`scripts/upgrade_version.sh`) creates state snapshots before any changes. If the upgrade fails at any step, it automatically restores the snapshot.
 
 Snapshots are stored at:
+
 ```
 .claude/hooks-daemon/untracked/upgrade-snapshots/{timestamp}/
 ├── manifest.json       # Metadata: version, timestamp, files list
@@ -937,11 +945,13 @@ If your project path is very deep (>60 characters), the Unix socket path may exc
 **Symptoms**: Daemon fails to start with "AF_UNIX path too long" or similar socket error.
 
 **Automatic fix**: The daemon automatically falls back to shorter paths:
+
 1. `$XDG_RUNTIME_DIR/hooks-daemon-{hash}.sock` (preferred)
 2. `/run/user/{uid}/hooks-daemon-{hash}.sock` (Linux)
 3. `/tmp/hooks-daemon-{hash}.sock` (last resort)
 
 **Manual override**: Set environment variable:
+
 ```bash
 export CLAUDE_HOOKS_SOCKET_PATH=/tmp/my-project-daemon.sock
 ```
@@ -972,6 +982,7 @@ If you see `.claude/` inside `.claude/hooks-daemon/`, this is normal and expecte
 Plugins now require an explicit `event_type` field. If you have custom plugins, update their config:
 
 **Before:**
+
 ```yaml
 plugins:
   my_plugin:
@@ -979,6 +990,7 @@ plugins:
 ```
 
 **After:**
+
 ```yaml
 plugins:
   my_plugin:
@@ -1112,6 +1124,7 @@ FEEDBACK
 ### What to Document
 
 During the upgrade, actively note:
+
 - **Every command** you run and its output (especially errors/warnings)
 - **Every decision point** where you had to choose between options
 - **Documentation inconsistencies** where docs said one thing but reality was different
@@ -1138,16 +1151,19 @@ The feedback file can be shared with project maintainers to improve the upgrade 
 If you encounter update issues:
 
 1. **Check daemon logs**:
+
    ```bash
    .claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli logs
    ```
 
 2. **Run debug script**:
+
    ```bash
    .claude/hooks-daemon/scripts/debug_info.py /tmp/debug_report.md
    ```
 
 3. **Report issue**:
+
    - GitHub: https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/issues
    - Include: current version, target version, error output, daemon logs
 

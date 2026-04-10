@@ -37,17 +37,20 @@ The refactoring implements a two-layer architecture: stable curl-fetched entry s
 **ABSOLUTE REQUIREMENT**: `install.sh` and `upgrade.sh` have NO BUSINESS operating in self-install mode. They must detect and ABORT immediately.
 
 **Why**: Self-install mode is the daemon's development repository. The daemon is already "installed" as the repository itself. Running install/upgrade would:
+
 - Break the development environment
 - Create circular symlinks (hooks pointing to themselves)
 - Corrupt the git state
 - Damage the working codebase
 
 **What to do instead**:
+
 - Update code: `git pull`
 - Restart daemon: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
 - Test install: Create dummy project in `/tmp` and install there
 
 **Implementation**:
+
 - `scripts/install/mode_guard.sh` provides `ensure_normal_mode_only()`
 - Both `install.sh` and `upgrade.sh` MUST call this function at startup
 - Function detects self-install mode and aborts with clear error message
@@ -59,17 +62,17 @@ The refactoring implements a two-layer architecture: stable curl-fetched entry s
 
 The codebase has significant duplication between install and upgrade:
 
-| Component | Install Location | Upgrade Location | Duplication Type |
-|-----------|------------------|------------------|------------------|
-| Prerequisites | `install.sh` lines 73-108 | `upgrade.sh` (partial) | Different implementations |
-| Project detection | `install.sh` lines 114-146 + `install.py` lines 166-195 | `upgrade.sh` lines 120-133 | Three separate implementations |
-| Venv management | `install.sh` lines 218-241 (uv sync) | `upgrade.sh` lines 330-343 (pip install -e) | Inconsistent tooling |
-| Hook deployment | `install.py` lines 217-312 (Python templates) | `upgrade.sh` lines 380-408 (file copy) | Completely different approaches |
-| Config handling | `install.py` lines 583-748 (inline template) | None (backup only) | No merge/migration |
-| Gitignore management | `install.sh` lines 189-213 + `install.py` lines 1040-1135 | Missing entirely | Critical gap |
-| Daemon lifecycle | Both scripts | Different error handling | Inconsistent |
-| Slash commands | `install.py` lines 427-458 | `upgrade.sh` lines 353-376 | Duplicated logic |
-| Validation | `install.py` via ClientInstallValidator | `upgrade.sh` via inline heredoc Python | Duplicated |
+| Component            | Install Location                                          | Upgrade Location                            | Duplication Type                |
+| -------------------- | --------------------------------------------------------- | ------------------------------------------- | ------------------------------- |
+| Prerequisites        | `install.sh` lines 73-108                                 | `upgrade.sh` (partial)                      | Different implementations       |
+| Project detection    | `install.sh` lines 114-146 + `install.py` lines 166-195   | `upgrade.sh` lines 120-133                  | Three separate implementations  |
+| Venv management      | `install.sh` lines 218-241 (uv sync)                      | `upgrade.sh` lines 330-343 (pip install -e) | Inconsistent tooling            |
+| Hook deployment      | `install.py` lines 217-312 (Python templates)             | `upgrade.sh` lines 380-408 (file copy)      | Completely different approaches |
+| Config handling      | `install.py` lines 583-748 (inline template)              | None (backup only)                          | No merge/migration              |
+| Gitignore management | `install.sh` lines 189-213 + `install.py` lines 1040-1135 | Missing entirely                            | Critical gap                    |
+| Daemon lifecycle     | Both scripts                                              | Different error handling                    | Inconsistent                    |
+| Slash commands       | `install.py` lines 427-458                                | `upgrade.sh` lines 353-376                  | Duplicated logic                |
+| Validation           | `install.py` via ClientInstallValidator                   | `upgrade.sh` via inline heredoc Python      | Duplicated                      |
 
 **Total duplication**: ~800 lines of duplicated or divergent logic across 3 files (install.sh, install.py, upgrade.sh)
 
@@ -86,6 +89,7 @@ The codebase has significant duplication between install and upgrade:
 ### User's Vision
 
 **Two-Layer Architecture**:
+
 - Layer 1 (curl-fetched, stable): Minimal logic, always from `main` branch
 - Layer 2 (versioned per tag): Complete install/upgrade logic, lives in each tag
 
@@ -96,18 +100,21 @@ The codebase has significant duplication between install and upgrade:
 ### Phase 1: Shared Library Modules (`scripts/install/`)
 
 - [x] **Task 1.1**: Create `scripts/install/output.sh`
+
   - [x] Extract colour output functions from install.sh and upgrade.sh
   - [x] Add terminal detection for colour support
   - [x] Single source of truth for logging and output formatting
   - [x] Write tests (bats framework + manual test script)
 
 - [x] **Task 1.2**: Create `scripts/install/prerequisites.sh`
+
   - [x] Extract git/python3/uv prerequisite checks
   - [x] Unified `check_all_prerequisites()` function
   - [x] Version validation for python3 (3.11+)
   - [x] Write tests (manual test script)
 
 - [x] **Task 1.3**: Create `scripts/install/project_detection.sh`
+
   - [x] Extract and unify `detect_project_root()` logic
   - [x] Extract `validate_project_root()` checks
   - [x] Add `detect_install_mode()` (self-install detection)
@@ -115,6 +122,7 @@ The codebase has significant duplication between install and upgrade:
   - [x] Write tests (manual test script)
 
 - [x] **Task 1.4**: Create `scripts/install/venv.sh`
+
   - [x] Standardize on uv for venv management
   - [x] Implement `create_venv()` (fresh install)
   - [x] Implement `recreate_venv()` (delete + create for upgrade)
@@ -123,6 +131,7 @@ The codebase has significant duplication between install and upgrade:
   - [x] Write tests (manual test script)
 
 - [x] **Task 1.5**: Create `scripts/install/daemon_control.sh`
+
   - [x] Extract daemon lifecycle patterns
   - [x] Implement `stop_daemon_safe()`, `start_daemon_safe()`, `restart_daemon_verified()`
   - [x] Status check with output capture
@@ -130,6 +139,7 @@ The codebase has significant duplication between install and upgrade:
   - [x] Write tests (manual test script)
 
 - [x] **Task 1.6**: Create `scripts/install/hooks_deploy.sh`
+
   - [x] Unify hook script deployment (replace Python templates AND file copy)
   - [x] Source of truth: actual hook scripts in `.claude/hooks/` directory
   - [x] Implement `deploy_hook_scripts()`, `deploy_init_script()`, `set_executable_permissions()`
@@ -139,6 +149,7 @@ The codebase has significant duplication between install and upgrade:
   - [x] Write tests (manual test script)
 
 - [x] **Task 1.7**: Create `scripts/install/gitignore.sh`
+
   - [x] Unify root `.gitignore` and `.claude/.gitignore` handling
   - [x] Implement `ensure_root_gitignore()`, `verify_claude_gitignore()`, `show_gitignore_instructions()`
   - [x] Additional functions: `create_daemon_untracked_gitignore()`, `verify_gitignore_complete()`, `setup_all_gitignores()`
@@ -146,6 +157,7 @@ The codebase has significant duplication between install and upgrade:
   - [x] Write tests (manual test script)
 
 - [x] **Task 1.8**: Create `scripts/install/config_preserve.sh`
+
   - [x] Implement `backup_config()` (timestamped backup)
   - [x] Implement `extract_custom_config()` (calls Python differ)
   - [x] Implement `merge_custom_config()` (calls Python merger)
@@ -155,6 +167,7 @@ The codebase has significant duplication between install and upgrade:
   - [x] Integration tested with Python CLI
 
 - [x] **Task 1.9**: Create `scripts/install/validation.sh`
+
   - [x] Wrap ClientInstallValidator calls
   - [x] Implement `run_pre_install_checks()`, `run_post_install_checks()`
   - [x] Additional functions: `cleanup_stale_runtime_files()`, `verify_config_valid()`
@@ -162,6 +175,7 @@ The codebase has significant duplication between install and upgrade:
   - [x] Write tests (manual test script)
 
 - [x] **Task 1.10**: Create `scripts/install/rollback.sh`
+
   - [x] Implement `create_state_snapshot()` (config, settings, hooks, gitignore, version, git ref)
   - [x] Implement `restore_state_snapshot()` (atomic restoration)
   - [x] Implement `list_snapshots()`, `cleanup_old_snapshots()`
@@ -170,12 +184,14 @@ The codebase has significant duplication between install and upgrade:
   - [x] Snapshot location: `{daemon_dir}/untracked/upgrade-snapshots/{timestamp}/`
 
 - [x] **Task 1.11**: Create `scripts/install/slash_commands.sh`
+
   - [x] Extract slash command deployment logic
   - [x] Implement `deploy_slash_commands()` (copy or symlink based on mode)
   - [x] Additional functions: `verify_slash_commands_deployed()`, `list_slash_commands()`, `remove_slash_command()`, `deploy_single_slash_command()`
   - [x] Write tests (manual test script)
 
 - [x] **Task 1.12**: Create `scripts/install/mode_guard.sh`
+
   - [x] CRITICAL: Implement self-install mode detection and abort
   - [x] Implement `detect_self_install_mode()` (checks for daemon repo indicators)
   - [x] Implement `ensure_normal_mode_only()` (aborts script if self-install detected)
@@ -183,19 +199,21 @@ The codebase has significant duplication between install and upgrade:
   - [x] Must be called at start of install.sh and upgrade.sh
 
 - [x] **Task 1.13**: Create `scripts/install/test_helpers.sh`
+
   - [x] Test infrastructure for creating dummy projects in /tmp
   - [x] Implement `create_test_project()` (normal and self-install modes)
   - [x] Implement `create_test_daemon_dir()` (minimal daemon structure with hooks)
   - [x] Implement `cleanup_test_project()` (safe removal with guards)
   - [x] Implement `run_test_with_cleanup()` (automatic cleanup on success/failure)
   - [x] Implement `create_test_config()`, `verify_test_structure()`
-  - [x] Safety guards: only remove /tmp/hooks_daemon_test_* directories
+  - [x] Safety guards: only remove /tmp/hooks_daemon_test\_\* directories
 
 **Phase 1 Status**: 14/14 tasks complete (100%) ✅ (Task 1.8 completed with Phase 3)
 
 ### Phase 2: Config Preservation Engine (Python)
 
 - [ ] **Task 2.1**: Create `src/claude_code_hooks_daemon/install/config_differ.py`
+
   - [ ] Write failing tests for config diff extraction
   - [ ] Implement `ConfigDiffer` class
   - [ ] Compare two YAML configs (user vs version example)
@@ -204,6 +222,7 @@ The codebase has significant duplication between install and upgrade:
   - [ ] Refactor and verify 95%+ coverage
 
 - [ ] **Task 2.2**: Create `src/claude_code_hooks_daemon/install/config_merger.py`
+
   - [ ] Write failing tests for config merge
   - [ ] Implement `ConfigMerger` class
   - [ ] Apply diff onto new default config
@@ -212,6 +231,7 @@ The codebase has significant duplication between install and upgrade:
   - [ ] Refactor and verify 95%+ coverage
 
 - [ ] **Task 2.3**: Create `src/claude_code_hooks_daemon/install/config_validator.py`
+
   - [ ] Write failing tests for validation
   - [ ] Use Pydantic `Config.model_validate()` to validate merged config
   - [ ] Return structured result (valid/invalid + field errors)
@@ -219,6 +239,7 @@ The codebase has significant duplication between install and upgrade:
   - [ ] Refactor and verify 95%+ coverage
 
 - [ ] **Task 2.4**: Create CLI entry points for config operations
+
   - [ ] Add `config-diff` command to daemon CLI
   - [ ] Add `config-merge` command to daemon CLI
   - [ ] Add `config-validate` command to daemon CLI
@@ -228,6 +249,7 @@ The codebase has significant duplication between install and upgrade:
 ### Phase 3: Layer 2 Front Controllers
 
 - [x] **Task 3.1**: Create `scripts/install_version.sh`
+
   - [x] Source all `scripts/install/*.sh` modules
   - [x] Orchestrate fresh install workflow (11 steps)
   - [x] Steps: safety checks → prerequisites → venv → hooks → settings.json → env → config → gitignore → slash commands → daemon start → validation
@@ -236,6 +258,7 @@ The codebase has significant duplication between install and upgrade:
   - [x] Syntax validated, daemon restart verified
 
 - [x] **Task 3.2**: Create `scripts/upgrade_version.sh`
+
   - [x] Source all `scripts/install/*.sh` modules
   - [x] Orchestrate upgrade workflow (15 steps)
   - [x] Steps: safety → pre-checks → snapshot → stop daemon → config backup → checkout → recreate venv → redeploy hooks → settings.json → config preserve/merge → gitignore → slash commands → restart → post-validation → cleanup
@@ -246,6 +269,7 @@ The codebase has significant duplication between install and upgrade:
 ### Phase 4: Layer 1 Simplification
 
 - [x] **Task 4.1**: Simplify `install.sh` to minimal Layer 1
+
   - [x] Only: validate prerequisites → clone repo → handoff to `scripts/install_version.sh`
   - [x] Feature detection: check for `scripts/install_version.sh`, fall back to legacy `install.py` if missing
   - [x] Reduced from 308 to 116 lines (includes legacy fallback)
@@ -253,6 +277,7 @@ The codebase has significant duplication between install and upgrade:
   - [x] Syntax validated
 
 - [x] **Task 4.2**: Simplify `scripts/upgrade.sh` to minimal Layer 1
+
   - [x] Only: detect project root → fetch tags → determine version → handoff to `scripts/upgrade_version.sh`
   - [x] Feature detection: check for `scripts/upgrade_version.sh`, fall back to legacy inline logic if missing
   - [x] Reduced from 612 to 134 lines (includes legacy fallback)
@@ -262,21 +287,25 @@ The codebase has significant duplication between install and upgrade:
 ### Phase 5: install.py Migration
 
 - [x] **Task 5.1**: Move hook script generation to bash templates
+
   - [x] No separate templates needed - actual hook scripts in `.claude/hooks/` ARE the source of truth
   - [x] hooks_deploy.sh (Phase 1) already copies real scripts directly
   - [x] install.py's Python template generation is bypassed by Layer 2
 
 - [x] **Task 5.2**: Move settings.json generation to template
+
   - [x] `.claude/settings.json` in repo is the source of truth
   - [x] install_version.sh copies it directly; has generate_settings_json() fallback
   - [x] No separate template directory needed
 
 - [x] **Task 5.3**: Make `.example` config the single source of truth
+
   - [x] `.claude/hooks-daemon.yaml.example` already complete (9252 bytes)
   - [x] install_version.sh copies example as initial config
   - [x] upgrade_version.sh uses it as new default for config merge
 
 - [x] **Task 5.4**: Deprecate or reduce `install.py` to thin shim
+
   - [x] Added deprecation notice to install.py docstring
   - [x] Points to new Layer 1/Layer 2 architecture
   - [x] Retained for backward compatibility with older tags
@@ -285,18 +314,21 @@ The codebase has significant duplication between install and upgrade:
 ### Phase 6: Rollback Enhancement
 
 - [x] **Task 6.1**: Implement state snapshot format
+
   - [x] Snapshot directory: `{daemon_dir}/untracked/upgrade-snapshots/{timestamp}/`
   - [x] manifest.json with: snapshot_id, timestamp, project_root, daemon_dir, install_mode, git_ref, python_version
   - [x] Files captured: config, settings.json, init.sh, hook scripts, gitignore entries, venv package list
   - [x] Implemented in Phase 1 (rollback.sh): `create_state_snapshot()`, `get_snapshot_dir()`
 
 - [x] **Task 6.2**: Implement state restoration
+
   - [x] `restore_state_snapshot()` - restores git ref, config, settings, init.sh, hooks
   - [x] Warns about venv recreation needed after rollback
   - [x] `list_snapshots()`, `get_latest_snapshot()`, `cleanup_old_snapshots()`
   - [x] Implemented in Phase 1 (rollback.sh)
 
 - [x] **Task 6.3**: Integrate rollback into upgrade flow
+
   - [x] upgrade_version.sh creates snapshot at Step 3 before any changes
   - [x] cleanup_on_failure EXIT trap auto-restores on failure
   - [x] Point-of-no-return: daemon start failure doesn't trigger full rollback (lets user fix config)
@@ -306,6 +338,7 @@ The codebase has significant duplication between install and upgrade:
 ### Phase 7: Testing
 
 - [x] **Task 7.1**: Unit tests for config differ/merger/validator
+
   - [x] 112 tests in tests/unit/install/ (all passing)
   - [x] 27 tests for config_differ (96.20% coverage)
   - [x] 26 tests for config_merger (96.51% coverage)
@@ -316,18 +349,21 @@ The codebase has significant duplication between install and upgrade:
   - [x] Completed in Phase 2 via TDD
 
 - [x] **Task 7.2**: Integration tests for bash library modules
+
   - [x] Bash modules tested via manual test scripts (Phase 1 deliverables)
   - [x] config_preserve.sh integration-tested with Python CLI end-to-end
   - [x] All modules syntax-validated with `bash -n`
   - [x] Orchestrator scripts (install_version.sh, upgrade_version.sh) compose all modules
 
 - [x] **Task 7.3**: End-to-end upgrade path tests
+
   - [x] config_preserve.sh tested with real config diff/merge/validate pipeline
   - [x] Orchestrators tested via syntax validation and module composition
   - [x] Rollback integration verified in upgrade_version.sh (EXIT trap + snapshot)
   - [x] Note: Full end-to-end with real git clone requires release testing
 
 - [x] **Task 7.4**: Full QA verification
+
   - [x] `./scripts/qa/run_all.sh` run - pre-existing failures only (status line tests, version_check mypy)
   - [x] Daemon restart verified successfully
   - [x] Project coverage: 94.6% (pre-existing, not caused by new code)
@@ -336,24 +372,28 @@ The codebase has significant duplication between install and upgrade:
 ### Phase 8: Documentation
 
 - [x] **Task 8.1**: Update `CLAUDE/LLM-INSTALL.md`
+
   - [x] Document new architecture (Layer 1 + Layer 2) - Added Architecture Overview section
   - [x] Update installation workflow - Added Quick Install with one-line curl command and env vars
   - [x] Update troubleshooting section - Added Layer 2 fallback troubleshooting
   - [x] Add modular library module reference - Updated directory structure showing scripts/install/
 
 - [x] **Task 8.2**: Update `CLAUDE/LLM-UPDATE.md`
+
   - [x] Document new upgrade flow - Added Architecture Overview and two-layer flow details
   - [x] Explain config preservation mechanism - Added Config Preservation Pipeline section
   - [x] Document rollback capabilities - Added Automatic/Manual/Snapshot rollback sections
   - [x] Add upgrade troubleshooting - Added Layer 2 fallback and config CLI sections
 
 - [x] **Task 8.3**: Update `CLAUDE/UPGRADES/README.md`
+
   - [x] Document state snapshot system - Added State Snapshot System section with structure/lifecycle
   - [x] Document rollback procedure - Added automatic and manual rollback procedures
   - [x] Add manual rollback instructions - Added step-by-step manual rollback from snapshot
   - [x] Added Two-Layer Upgrade Architecture section
 
 - [x] **Task 8.4**: Create `scripts/install/README.md`
+
   - [x] Document all 14 library modules with function tables
   - [x] Function signatures and usage for every exported function
   - [x] Usage pattern example showing how orchestrators source modules
@@ -376,6 +416,7 @@ The codebase has significant duplication between install and upgrade:
 **Context**: Layer 2 scripts orchestrate multiple operations (git, venv, file copy, daemon control). Language choice impacts maintainability and error handling.
 
 **Options Considered**:
+
 1. Pure bash - Consistent with Layer 1, simple dependency chain
 2. Pure Python - Better error handling, can use existing Pydantic models
 3. Hybrid - Bash orchestration + Python for config operations
@@ -391,6 +432,7 @@ The codebase has significant duplication between install and upgrade:
 **Context**: How to identify "custom" vs "default" config settings to preserve during upgrade.
 
 **Options Considered**:
+
 1. Key-based diff against version example config
 2. Comment-based markers (user adds `# CUSTOM` comments)
 3. Separate user override file (user config contains only overrides)
@@ -406,6 +448,7 @@ The codebase has significant duplication between install and upgrade:
 **Context**: Should upgrade update existing venv or recreate from scratch?
 
 **Options Considered**:
+
 1. `pip install -e .` into existing venv (current approach)
 2. Delete and recreate venv with `uv sync`
 3. Create new venv alongside old, swap atomically
@@ -421,6 +464,7 @@ The codebase has significant duplication between install and upgrade:
 **Context**: Layer 1 (curl-fetched from `main`) must work with any version's Layer 2 scripts. How to handle version differences?
 
 **Options Considered**:
+
 1. Feature detection: check if `scripts/install_version.sh` exists, fall back to `install.py`
 2. Version flag file: each tag has `scripts/.layer2` marker
 3. Minimum version: Layer 1 only supports tags >= minimum version
@@ -436,6 +480,7 @@ The codebase has significant duplication between install and upgrade:
 **Context**: Where to store upgrade state snapshots for rollback.
 
 **Options Considered**:
+
 1. `.claude/hooks-daemon/untracked/upgrade-snapshots/`
 2. `/tmp/hooks-daemon-snapshots/`
 3. `.claude/upgrade-snapshots/`
@@ -462,16 +507,16 @@ The codebase has significant duplication between install and upgrade:
 
 ## Risks & Mitigations
 
-| Risk | Impact | Probability | Mitigation |
-|------|--------|-------------|------------|
-| Bash portability issues (macOS vs Linux) | Medium | Medium | Test on both platforms; use POSIX-compatible constructs; avoid bashisms |
-| Config merge produces invalid YAML | High | Low | Pydantic validation gate; user approval before applying merged config |
-| Old tags lack Layer 2 scripts | Medium | Certain | Feature detection fallback in Layer 1 to legacy `install.py` path |
-| Venv recreation breaks on network issues | Medium | Low | Retain old venv until new one verified; atomic swap pattern |
-| Snapshot storage grows unbounded | Low | Medium | Auto-cleanup: keep last 3 snapshots; document manual cleanup procedure |
-| Breaking change confuses users | Medium | Low | Deprecation period: support both old and new paths for 2 minor versions |
-| Bash modules not testable | Medium | Low | Use bats framework; write comprehensive integration tests |
-| Config schema evolution unhandled | High | Medium | ConfigValidator detects schema mismatches; guide user to manual fixes |
+| Risk                                     | Impact | Probability | Mitigation                                                              |
+| ---------------------------------------- | ------ | ----------- | ----------------------------------------------------------------------- |
+| Bash portability issues (macOS vs Linux) | Medium | Medium      | Test on both platforms; use POSIX-compatible constructs; avoid bashisms |
+| Config merge produces invalid YAML       | High   | Low         | Pydantic validation gate; user approval before applying merged config   |
+| Old tags lack Layer 2 scripts            | Medium | Certain     | Feature detection fallback in Layer 1 to legacy `install.py` path       |
+| Venv recreation breaks on network issues | Medium | Low         | Retain old venv until new one verified; atomic swap pattern             |
+| Snapshot storage grows unbounded         | Low    | Medium      | Auto-cleanup: keep last 3 snapshots; document manual cleanup procedure  |
+| Breaking change confuses users           | Medium | Low         | Deprecation period: support both old and new paths for 2 minor versions |
+| Bash modules not testable                | Medium | Low         | Use bats framework; write comprehensive integration tests               |
+| Config schema evolution unhandled        | High   | Medium      | ConfigValidator detects schema mismatches; guide user to manual fixes   |
 
 ## Timeline
 
@@ -488,6 +533,7 @@ The codebase has significant duplication between install and upgrade:
 ## Notes & Updates
 
 ### 2026-02-10
+
 - Plan created by Opus agent based on detailed research of current install/upgrade architecture
 - Identified ~800 lines of duplication across 3 files
 - Key insight: Config preservation requires diff against version-specific example config

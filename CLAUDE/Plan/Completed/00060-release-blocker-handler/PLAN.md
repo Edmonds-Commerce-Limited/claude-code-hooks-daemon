@@ -5,6 +5,7 @@
 ## Context
 
 **Problem**: During v2.13.0 release, I (Claude) repeatedly tried to skip or shortcut acceptance testing despite it being a MANDATORY BLOCKING GATE in RELEASING.md Step 8. This included:
+
 - Suggesting "Option B: Targeted Testing" to skip most tests
 - Claiming MarkdownOrganizationHandler "isn't testable" without even checking
 - Delegating to sub-agents despite explicit prohibition in RELEASING.md
@@ -19,6 +20,7 @@
 ✅ **Research Complete** - See detailed findings in agent output above.
 
 **Key Discoveries**:
+
 - Stop event uses top-level `decision: "block"` with `reason` (NO hookSpecificOutput wrapper)
 - Must check `stop_hook_active` flag to prevent infinite loops (both snake_case and camelCase)
 - Existing patterns: AutoContinueStopHandler (priority 15), HedgingLanguageDetector (priority 30)
@@ -32,6 +34,7 @@
 **Test File**: `tests/unit/handlers/stop/test_release_blocker.py`
 
 **Test Cases**:
+
 1. **Initialization**: Verify handler ID, priority=12, terminal=True
 2. **Infinite Loop Prevention**: `matches()` returns False when `stop_hook_active=True`
 3. **No Release Context**: `matches()` returns False when no version files modified
@@ -44,11 +47,13 @@
 **IMPLEMENTATION NOTE**: This was implemented as a **PROJECT HANDLER** (not a built-in library handler) because it's specific to THIS project's release workflow.
 
 **Actual Files**:
+
 - `.claude/project-handlers/stop/release_blocker.py` (project-level handler)
 - `.claude/project-handlers/stop/test_release_blocker.py` (co-located tests)
 - `.claude/project-handlers/stop/test_release_blocker_integration.py` (co-located integration tests)
 
 **Handler Logic**:
+
 ```python
 class ReleaseBlockerHandler(Handler):
     """Blocks Stop event during releases until acceptance tests complete."""
@@ -125,6 +130,7 @@ class ReleaseBlockerHandler(Handler):
 **Test File**: `tests/integration/test_release_blocker_integration.py`
 
 **Tests**:
+
 - Handler returns valid Stop event response
 - Response format matches Claude Code expectations
 - Integration with FrontController
@@ -132,6 +138,7 @@ class ReleaseBlockerHandler(Handler):
 ### Phase 4: Configuration
 
 **Add to `.claude/hooks-daemon.yaml`**:
+
 ```yaml
 stop:
   release_blocker:
@@ -147,6 +154,7 @@ stop:
 ## Tasks
 
 ### Phase 1: TDD Implementation (COMPLETE)
+
 - [x] Create `.claude/project-handlers/stop/test_release_blocker.py`
 - [x] Write failing test for initialization
 - [x] Write failing test for infinite loop prevention
@@ -155,6 +163,7 @@ stop:
 - [x] Verify tests FAIL (no implementation yet)
 
 ### Phase 2: Handler Implementation (COMPLETE)
+
 - [x] Create `.claude/project-handlers/stop/release_blocker.py` (PROJECT HANDLER)
 - [x] Implement ReleaseBlockerHandler class
 - [x] Implement `matches()` with git status checking
@@ -163,6 +172,7 @@ stop:
 - [x] Verify tests PASS
 
 ### Phase 3: Integration & QA (COMPLETE)
+
 - [x] Create integration tests (`.claude/project-handlers/stop/test_release_blocker_integration.py`)
 - [x] Project handlers auto-discovered (no config needed)
 - [x] Run full QA suite
@@ -170,6 +180,7 @@ stop:
 - [x] All tests passing
 
 ### Phase 4: Live Testing (COMPLETE)
+
 - [x] Handler tested in real Claude Code sessions
 - [x] Verified handler detects release context correctly
 - [x] Verified handler blocks with appropriate message
@@ -179,6 +190,7 @@ stop:
 ## Files Created/Modified
 
 **ACTUAL IMPLEMENTATION** (Project Handler):
+
 - `.claude/project-handlers/stop/release_blocker.py` ✅ (handler implementation)
 - `.claude/project-handlers/stop/test_release_blocker.py` ✅ (co-located unit tests)
 - `.claude/project-handlers/stop/test_release_blocker_integration.py` ✅ (co-located integration tests)
@@ -200,22 +212,26 @@ stop:
 ## Verification
 
 ### Unit Testing
+
 ```bash
 pytest tests/unit/handlers/stop/test_release_blocker.py -v
 pytest tests/unit/handlers/stop/test_release_blocker.py --cov=src/claude_code_hooks_daemon/handlers/stop/release_blocker.py --cov-report=term-missing
 ```
 
 ### Integration Testing
+
 ```bash
 pytest tests/integration/test_release_blocker_integration.py -v
 ```
 
 ### Full QA
+
 ```bash
 ./scripts/qa/run_all.sh
 ```
 
 ### Daemon Verification
+
 ```bash
 $PYTHON -m claude_code_hooks_daemon.daemon.cli restart
 $PYTHON -m claude_code_hooks_daemon.daemon.cli status
@@ -223,6 +239,7 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli status
 ```
 
 ### Live Testing
+
 ```bash
 # Trigger release context
 echo "test change" >> pyproject.toml
@@ -239,12 +256,12 @@ git restore pyproject.toml
 
 ## Risks & Mitigations
 
-| Risk | Impact | Probability | Mitigation |
-|------|--------|-------------|------------|
-| Handler blocks legitimate session ends | Medium | Low | Clear disable instructions in error message |
-| Git command fails/hangs | Medium | Low | Timeout (5s) + silent allow on error |
-| Infinite loop if handler re-triggers | High | Low | Check `stop_hook_active` flag (both variants) |
-| False positives (detects release when not releasing) | Low | Medium | Only checks specific release files, not general changes |
+| Risk                                                 | Impact | Probability | Mitigation                                              |
+| ---------------------------------------------------- | ------ | ----------- | ------------------------------------------------------- |
+| Handler blocks legitimate session ends               | Medium | Low         | Clear disable instructions in error message             |
+| Git command fails/hangs                              | Medium | Low         | Timeout (5s) + silent allow on error                    |
+| Infinite loop if handler re-triggers                 | High   | Low         | Check `stop_hook_active` flag (both variants)           |
+| False positives (detects release when not releasing) | Low    | Medium      | Only checks specific release files, not general changes |
 
 ## Notes
 
@@ -261,7 +278,8 @@ git restore pyproject.toml
 **Implementation**: Successfully created as a **project-level handler** in `.claude/project-handlers/stop/release_blocker.py` with co-located tests.
 
 **Key Features Implemented**:
-1. ✅ Detects release context by checking git status for modified version files (pyproject.toml, version.py, README.md, CLAUDE.md, CHANGELOG.md, RELEASES/*.md)
+
+1. ✅ Detects release context by checking git status for modified version files (pyproject.toml, version.py, README.md, CLAUDE.md, CHANGELOG.md, RELEASES/\*.md)
 2. ✅ Blocks Stop event with clear message referencing RELEASING.md Step 8
 3. ✅ Prevents infinite loops by checking `stop_hook_active` flag (both snake_case and camelCase)
 4. ✅ Fails safely on git errors with silent allow

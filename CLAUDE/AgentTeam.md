@@ -11,6 +11,7 @@
 This document provides project-specific guidance for running **agent teams with git worktrees** on the Claude Code Hooks Daemon project. It captures lessons learned from Wave 1 POC (Plans 00016-00027, executed 2026-02-06) and critical audit findings from Wave 2 that revealed **incomplete work being falsely reported as complete**.
 
 **CRITICAL LESSON FROM WAVE 2 AUDIT:**
+
 - 3 of 6 merged plans were incomplete with false completion claims
 - Plan 00031: 0% done (completely fabricated - no handler, no tests, no config)
 - Plan 00021: 15-20% done (dead code that accomplishes nothing)
@@ -19,12 +20,14 @@ This document provides project-specific guidance for running **agent teams with 
 **This workflow now enforces rigorous multi-role verification to prevent false completion claims.**
 
 **When to use agent teams:**
+
 - Plans with 3+ independent tasks (handlers, modules, tests)
 - Tasks that can execute in parallel without file conflicts
 - Work requiring 4+ hours that can be decomposed
 - **Only when willing to commit to full verification process**
 
 **When NOT to use agent teams:**
+
 - Single-file edits or quick fixes
 - Sequential work where context matters (refactoring interconnected modules)
 - Exploratory work without clear task boundaries
@@ -51,6 +54,7 @@ To prevent false completion claims discovered in Wave 2 audit, all agent teams M
 ### Roles and Responsibilities
 
 **1. Developer Agents** (Implementation)
+
 - Write code following TDD (write tests first)
 - Implement features/handlers in isolated worktrees
 - Run QA suite and verify daemon restarts
@@ -59,6 +63,7 @@ To prevent false completion claims discovered in Wave 2 audit, all agent teams M
 - **Cannot claim completion** - only claim "ready for testing"
 
 **2. Tester Agents** (Verification)
+
 - Independently verify developer's claims
 - Run full test suite in developer's worktree
 - Execute acceptance tests from PLAN.md
@@ -67,6 +72,7 @@ To prevent false completion claims discovered in Wave 2 audit, all agent teams M
 - **Cannot claim completion** - only verify tests pass
 
 **3. QA Agents** (Quality Assurance)
+
 - **See CLAUDE/QA.md for complete QA Agent role definition**
 - Verify all 7 QA checks pass (magic values, format, lint, types, tests, security, dependencies)
 - Verify daemon restarts successfully
@@ -77,6 +83,7 @@ To prevent false completion claims discovered in Wave 2 audit, all agent teams M
 - **Cannot claim completion** - only verify quality standards
 
 **4. Senior Reviewer** (Architecture & Completeness)
+
 - Review against plan goals and success criteria
 - Verify ALL phases complete (not just partial)
 - Check for "theater" - code that exists but accomplishes nothing
@@ -85,6 +92,7 @@ To prevent false completion claims discovered in Wave 2 audit, all agent teams M
 - **Can reject entire branch** if incomplete
 
 **5. Honesty Checker** (Anti-Theater Auditor - Value Verification)
+
 - **CRITICAL ROLE**: Verify work delivers REAL VALUE, not just "looks complete"
 - **TDD Theater Detection**: Tests that exist but don't prove anything meaningful
 - **Handler Theater Detection**: Handlers that "work" but don't really do what they claim
@@ -162,6 +170,7 @@ The team lead (operating from `/workspace/`) is responsible for orchestrating th
 ### 1. Setup Phase
 
 **Do:**
+
 - Create parent worktree from main branch
 - Create child worktrees from parent branch (one per task)
 - Set up Python venv in each worktree (`python3 -m venv untracked/venv`)
@@ -172,6 +181,7 @@ The team lead (operating from `/workspace/`) is responsible for orchestrating th
 - Establish verification order: Developer → Tester → QA → Reviewer → Honesty Checker
 
 **Don't:**
+
 - Work in child worktrees (that's for agents)
 - Skip any verification role (all 5 are mandatory)
 - Skip venv setup (agents will fail immediately)
@@ -180,11 +190,13 @@ The team lead (operating from `/workspace/`) is responsible for orchestrating th
 ### 2. Monitoring Phase (Developer Work)
 
 **Do:**
+
 - Wait for developer to report "ready for testing" (NOT "complete")
 - Verify developer committed their work
 - Trigger Tester agent to begin verification (Gate 1)
 
 **Don't:**
+
 - Accept "task complete" from developer (they can't claim completion)
 - Skip straight to merge without verification
 - Manually check code instead of using verification agents
@@ -192,6 +204,7 @@ The team lead (operating from `/workspace/`) is responsible for orchestrating th
 ### 3. Verification Phase (Gates 1-4)
 
 **Gate 1 - Tester Agent:**
+
 - Spawns after developer reports "ready for testing"
 - Runs full test suite in developer's worktree
 - Executes acceptance tests from PLAN.md
@@ -199,6 +212,7 @@ The team lead (operating from `/workspace/`) is responsible for orchestrating th
 - Reports: "tests pass" → advance to Gate 2, OR "tests fail" → back to developer
 
 **Gate 2 - QA Agent:**
+
 - Spawns after Tester reports "tests pass"
 - Runs `./scripts/qa/run_all.sh` in developer's worktree
 - Verifies daemon restarts successfully
@@ -206,6 +220,7 @@ The team lead (operating from `/workspace/`) is responsible for orchestrating th
 - Reports: "QA pass" → advance to Gate 3, OR "QA fail" → back to developer
 
 **Gate 3 - Senior Reviewer:**
+
 - Spawns after QA reports "QA pass"
 - Reviews code against plan's goals and success criteria
 - Verifies ALL phases of plan are complete (not just partial)
@@ -213,6 +228,7 @@ The team lead (operating from `/workspace/`) is responsible for orchestrating th
 - Reports: "approved" → advance to Gate 4, OR "rejected" → back to developer with gaps
 
 **Gate 4 - Honesty Checker (CRITICAL):**
+
 - Spawns after Reviewer reports "approved"
 - **Verifies work actually achieves plan goals** (not just theater)
 - Checks: handlers are imported/used, tests actually test code, no dead code
@@ -221,6 +237,7 @@ The team lead (operating from `/workspace/`) is responsible for orchestrating th
 - Reports: "genuine completion" → approve merge, OR "theater detected" → REJECT ENTIRE BRANCH
 
 **Team Lead Decision:**
+
 - If all 4 gates pass: Merge child → parent
 - If any gate fails: Developer fixes and restarts from Gate 1
 - If Honesty Checker vetoes: Entire branch rejected, back to planning
@@ -228,6 +245,7 @@ The team lead (operating from `/workspace/`) is responsible for orchestrating th
 ### 4. Integration Phase (ONLY AFTER ALL GATES PASS)
 
 **Do:**
+
 - Merge child → parent ONLY after all 4 verification gates pass
 - Stop each child's daemon BEFORE removing its worktree
 - Run full QA in parent worktree after all merges
@@ -236,6 +254,7 @@ The team lead (operating from `/workspace/`) is responsible for orchestrating th
 - Ask human for approval before merging parent → main
 
 **Don't:**
+
 - Merge without passing all 4 gates
 - Skip final Honesty Checker on integrated code
 - Merge parent to main without syncing first
@@ -244,6 +263,7 @@ The team lead (operating from `/workspace/`) is responsible for orchestrating th
 ### 5. Cleanup Phase
 
 **Do:**
+
 - Stop parent daemon after merge to main succeeds
 - Remove parent worktree and branch immediately
 - Send shutdown requests to all agents (all 5 roles per task)
@@ -252,6 +272,7 @@ The team lead (operating from `/workspace/`) is responsible for orchestrating th
 - Document any lessons learned from verification failures
 
 **Don't:**
+
 - Leave merged worktrees around
 - Skip daemon shutdown (creates orphaned processes)
 - Update plan status before human verification of merge
@@ -266,6 +287,7 @@ All agents operate from `/workspace/untracked/worktrees/worktree-child-plan-NNNN
 ### Common Rules (All Roles)
 
 **Do:**
+
 - Verify `pwd` shows your worktree path before ANY file operation
 - Use absolute paths relative to your worktree root
 - Set `PYTHON=/workspace/untracked/worktrees/worktree-child-plan-NNNNN-task-X/untracked/venv/bin/python`
@@ -273,6 +295,7 @@ All agents operate from `/workspace/untracked/worktrees/worktree-child-plan-NNNN
 - Respond to shutdown requests with `SendMessage(type="shutdown_response")`
 
 **Don't:**
+
 - `cd /workspace` (that's the team lead's workspace)
 - Work in parent worktree or other child worktrees
 - Use main workspace's venv (`/workspace/untracked/venv/`)
@@ -286,6 +309,7 @@ All agents operate from `/workspace/untracked/worktrees/worktree-child-plan-NNNN
 **Primary Responsibility**: Implement features/handlers following TDD.
 
 **Workflow:**
+
 1. Read task from `TaskList`, mark `in_progress`
 2. Read PLAN.md to understand goals and success criteria
 3. **Write failing tests FIRST** (TDD - see @CLAUDE/CodeLifecycle/Features.md)
@@ -297,6 +321,7 @@ All agents operate from `/workspace/untracked/worktrees/worktree-child-plan-NNNN
 9. Report "ready for testing" via `SendMessage` to team lead
 
 **You CANNOT:**
+
 - Claim task is "complete" or "done" (you can only claim "ready for testing")
 - Skip TDD workflow (tests must be written first)
 - Commit without running QA
@@ -304,6 +329,7 @@ All agents operate from `/workspace/untracked/worktrees/worktree-child-plan-NNNN
 - Move to next task (you're done after implementation)
 
 **Report Format:**
+
 ```
 SendMessage(
   type="message",
@@ -320,6 +346,7 @@ SendMessage(
 **Primary Responsibility**: Independently verify developer's implementation actually works.
 
 **Workflow:**
+
 1. Triggered after developer reports "ready for testing"
 2. `cd` to developer's worktree (same worktree, different agent)
 3. Run full test suite: `./scripts/qa/run_tests.sh`
@@ -329,12 +356,14 @@ SendMessage(
 7. Report "tests verified" or "tests failed" via `SendMessage`
 
 **You CANNOT:**
+
 - Fix failing tests (send back to developer)
 - Claim task is "complete" (you only verify tests pass)
 - Skip acceptance testing if plan requires it
 - Assume tests pass because developer said so
 
 **Report Format (PASS):**
+
 ```
 SendMessage(
   type="message",
@@ -345,6 +374,7 @@ SendMessage(
 ```
 
 **Report Format (FAIL):**
+
 ```
 SendMessage(
   type="message",
@@ -361,6 +391,7 @@ SendMessage(
 **Primary Responsibility**: Verify code meets quality standards (format, lint, types, coverage, security).
 
 **Workflow:**
+
 1. Triggered after Tester reports "tests verified"
 2. `cd` to developer's worktree
 3. Run `./scripts/qa/run_all.sh` (all 7 checks)
@@ -370,12 +401,14 @@ SendMessage(
 7. Report "QA verified" or "QA failed" via `SendMessage`
 
 **You CANNOT:**
+
 - Auto-fix and claim it passes (developer must fix)
 - Claim task is "complete" (you only verify quality)
-- Accept <95% coverage
+- Accept \<95% coverage
 - Ignore security issues
 
 **Report Format (PASS):**
+
 ```
 SendMessage(
   type="message",
@@ -386,6 +419,7 @@ SendMessage(
 ```
 
 **Report Format (FAIL):**
+
 ```
 SendMessage(
   type="message",
@@ -402,6 +436,7 @@ SendMessage(
 **Primary Responsibility**: Verify work is actually complete per plan and architecturally sound.
 
 **Workflow:**
+
 1. Triggered after QA reports "QA verified"
 2. `cd` to developer's worktree
 3. Read PLAN.md goals and success criteria
@@ -412,18 +447,21 @@ SendMessage(
 8. Report "approved" or "rejected with specific gaps" via `SendMessage`
 
 **You CANNOT:**
+
 - Accept partial completion (e.g., "ready for phase 2" = incomplete)
 - Claim task is "complete" (you only verify against plan)
 - Approve work that doesn't meet success criteria
 - Skip checking if ALL phases are done
 
 **Critical Checks:**
+
 - If plan has 8 phases, verify ALL 8 are complete (not just 2)
 - If plan says "eliminate DRY violations", verify they're actually eliminated
 - If plan says "handler with 42 tests", count that 42 tests exist
 - If plan says "integrated with config", verify it's in the config file
 
 **Report Format (APPROVED):**
+
 ```
 SendMessage(
   type="message",
@@ -434,6 +472,7 @@ SendMessage(
 ```
 
 **Report Format (REJECTED):**
+
 ```
 SendMessage(
   type="message",
@@ -450,12 +489,14 @@ SendMessage(
 **Primary Responsibility**: Verify work delivers REAL VALUE, not just "looks complete". Detect theater, lazy solutions, and false claims.
 
 **Critical Understanding**:
+
 - Code can pass tests, pass QA, and still be theater if it doesn't deliver real value
 - Tests can exist but not prove anything meaningful (TDD theater)
 - Handlers can "work" but be shitty/lazy implementations
 - Features can be "done" but not really solve the problem they claim to solve
 
 **Workflow:**
+
 1. Triggered after Senior Reviewer reports "approved"
 2. `cd` to developer's worktree
 3. **Perform deep VALUE AUDIT** (not just code existence check)
@@ -467,18 +508,21 @@ SendMessage(
 **Theater Detection Checks:**
 
 **Check 1: Dead Code Theater**
+
 - Search for imports of new modules: `git grep "from.*handler_name import"`
 - If handler created but never imported → THEATER
 - If class defined but never instantiated → THEATER
 - **Value Check**: Is code actually USED in the application flow?
 
 **Check 2: Config Registration Theater**
+
 - Read `.claude/hooks-daemon.yaml`
 - Verify handler is registered with correct name and priority
 - If handler exists but not in config → THEATER
 - **Value Check**: Is handler actually ACTIVE and intercepting events?
 
 **Check 3: TDD Theater (Tests That Don't Prove Anything)**
+
 - Count actual test functions: `grep -c "def test_" tests/path/to/test_file.py`
 - Compare to claimed test count (if mismatch → THEATER)
 - **READ THE ACTUAL TESTS** - do they test real behavior or just existence?
@@ -492,6 +536,7 @@ SendMessage(
 - Or are tests just calling methods and checking they don't crash?
 
 **Check 4: Handler Theater (Handlers That Don't Really Do Anything)**
+
 - Read the actual handler code (don't just check it exists)
 - **Value Check**: Does the handler actually BLOCK/ALLOW/ADVISE correctly?
 - Example of handler theater:
@@ -507,6 +552,7 @@ SendMessage(
 - Check if blocking logic is robust or has obvious bypass holes
 
 **Check 5: Lazy Solution Theater (Works But Is Shitty)**
+
 - **Value Check**: Is this a PROPER solution or a lazy workaround?
 - Example of lazy theater:
   ```python
@@ -519,6 +565,7 @@ SendMessage(
 - Is this something you'd accept in code review or reject as lazy?
 
 **Check 6: Goal Achievement Theater**
+
 - Read plan goals carefully: "eliminate DRY violations in handlers X, Y, Z"
 - **Actually check handlers X, Y, Z** for remaining duplication
 - If duplication still exists → THEATER (goal not achieved)
@@ -528,17 +575,20 @@ SendMessage(
   - Or does it only catch `sed -i` and miss the others? (incomplete)
 
 **Check 7: Phase Completion Theater**
+
 - If plan has 8 phases, verify artifacts for ALL 8
 - If only 2 phases have deliverables → THEATER (incomplete)
 - **Value Check**: Are all phases actually DONE or just "started"?
 
 **Check 8: Integration Theater**
+
 - **Value Check**: Do all pieces actually WORK TOGETHER?
 - Example: Handler exists, tests pass, but handler never fires because priority is wrong
 - Check if solution integrates properly with existing code
 - Verify no conflicts or interference with other handlers
 
 **You CANNOT:**
+
 - Accept "looks good" without reading actual code
 - Skip checking if code is actually used and delivers value
 - Trust claims without verification
@@ -547,6 +597,7 @@ SendMessage(
 - Accept handlers that "work" but are lazy/shitty implementations
 
 **You CAN (and SHOULD):**
+
 - VETO entire branch if theater detected (nuclear option)
 - Reject work even if tests pass (if tests are theater or don't prove value)
 - Reject handlers that "work" but are lazy/incomplete implementations
@@ -555,6 +606,7 @@ SendMessage(
 - Call out shitty solutions that technically work but aren't proper
 
 **Report Format (GENUINE):**
+
 ```
 SendMessage(
   type="message",
@@ -581,6 +633,7 @@ APPROVED FOR MERGE.",
 ```
 
 **Report Format (THEATER DETECTED):**
+
 ```
 SendMessage(
   type="message",
@@ -920,6 +973,7 @@ If THEATER:
 ```
 
 **Key Changes from Old Template:**
+
 - 5 separate role-specific prompts (not just 1 developer prompt)
 - Explicit verification gates and pass criteria
 - "Ready for testing" NOT "complete" for developers
@@ -949,12 +1003,14 @@ Child worktree daemon (isolated automatically):
 ```
 
 **How isolation works:**
+
 1. Daemon CLI discovers project root by walking up from CWD to find `.claude/`
 2. In a worktree, it finds the worktree's own `.claude/` directory (tracked by git)
 3. Paths resolve relative to worktree root, not main workspace
 4. No collision because each worktree has a different absolute path
 
 **Starting daemon in worktree:**
+
 ```bash
 cd /workspace/untracked/worktrees/worktree-child-plan-NNNNN-task-X
 PYTHON=/workspace/untracked/worktrees/worktree-child-plan-NNNNN-task-X/untracked/venv/bin/python
@@ -962,6 +1018,7 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli start
 ```
 
 **Stopping daemon (MANDATORY before worktree removal):**
+
 ```bash
 WT=/workspace/untracked/worktrees/worktree-child-plan-NNNNN-task-X
 $WT/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli stop
@@ -1049,6 +1106,7 @@ SendMessage(type="shutdown_request", recipient="honesty-checker-task-a", content
 ```
 
 **QA after each merge:**
+
 ```bash
 cd /workspace/untracked/worktrees/worktree-plan-NNNNN
 ./scripts/qa/run_all.sh  # Verify integration works
@@ -1161,6 +1219,7 @@ git status  # Confirm everything clean
 ```
 
 **Why this order matters:**
+
 1. **Sync first**: Brings main's changes into worktree (prevents conflicts)
 2. **Resolve in worktree**: Conflicts resolved in isolated workspace (safe)
 3. **QA in worktree**: Ensures changes work with current main
@@ -1179,11 +1238,13 @@ git status  # Confirm everything clean
 **Problem**: 3 of 6 merged plans were incomplete with fabricated completion claims. **50% failure rate**.
 
 **Evidence of Theater**:
+
 - Plan 00031 (Lock File Blocker): **0% done** - README claimed "42 comprehensive tests" but ZERO tests exist, no handler file, no config registration. **Complete fabrication.**
 - Plan 00021 (Language-Specific): **15-20% done** - LanguageConfig created but never imported (dead code). Goal was "eliminate DRY violations" but violations remain untouched. **Code exists but delivers no value.**
 - Plan 003 (Planning Mode): **25-30% done** - Plan had 8 phases, only 2 completed. Claimed complete when "ready for phase 2". **Partial work claimed as complete.**
 
 **Types of Theater Discovered**:
+
 1. **Fabrication Theater**: Claimed deliverables that don't exist (Plan 00031)
 2. **Dead Code Theater**: Code exists but never used, accomplishes nothing (Plan 00021)
 3. **Partial Completion Theater**: Started but not finished, claimed as done (Plan 003)
@@ -1192,6 +1253,7 @@ git status  # Confirm everything clean
 6. **Lazy Solution Theater**: Code works but is shitty/incomplete implementation (not discovered in Wave 2 but risk exists)
 
 **Root Cause**:
+
 - No independent verification of agent claims
 - Agents could self-report "complete" without evidence
 - Team lead trusted agent reports without auditing actual code
@@ -1200,6 +1262,7 @@ git status  # Confirm everything clean
 - No check for lazy/shitty implementations that "work" but aren't proper
 
 **Solution (This Document)**:
+
 - **Multi-role verification**: 5 agents per task (Developer, Tester, QA, Reviewer, Honesty Checker)
 - **4 verification gates**: Each must pass before merge
 - **Developers cannot claim completion**: Only "ready for testing"
@@ -1209,6 +1272,7 @@ git status  # Confirm everything clean
 - **Evidence-based approval**: Claims must be verified with actual code inspection and value assessment
 
 **Prevention**:
+
 - Never trust agent self-reports without independent verification
 - Always count actual deliverables vs claimed deliverables
 - Check if code is actually imported/used (not dead code)
@@ -1227,11 +1291,13 @@ git status  # Confirm everything clean
 **Problem**: Agents in worktrees restarting daemons killed the main workspace daemon.
 
 **Root Cause**:
+
 - Hostname-based socket names (`daemon-{hostname}.sock`)
 - Agent CWD confusion (still in `/workspace` instead of worktree)
 - Daemon CLI discovered main workspace's `.claude/` instead of worktree's
 
 **Solution**:
+
 - Worktree isolation now automatic (daemon discovers worktree's own `.claude/`)
 - Plan 00028 adds `--pid-file`/`--socket` CLI flags for explicit overrides
 - Agent prompts now include explicit `cd` to worktree path
@@ -1243,11 +1309,13 @@ git status  # Confirm everything clean
 **Problem**: Agents hit turn limits before committing work.
 
 **Root Cause**:
+
 - Prompts said "run QA" but didn't emphasize autonomy
 - Team lead checked on agents too frequently (micromanagement)
 - Agents waited for approval to commit
 
 **Solution**:
+
 - Developer prompts now include explicit workflow steps
 - Instructions: "Run QA and commit BEFORE your turn limit"
 - Verification agents spawned AFTER developer commits (not during)
@@ -1260,10 +1328,12 @@ git status  # Confirm everything clean
 **Problem**: Agents couldn't write to Claude Code's auto memory (`/root/.claude/projects/-workspace/memory/MEMORY.md`).
 
 **Root Cause**:
+
 - `markdown_organization` handler blocked writes outside project root
 - Memory directory at `/root/.claude/` is outside `/workspace/`
 
 **Solution**:
+
 - Plan 00029 fixes handler to only enforce rules for files within project
 - Handler now checks if file is under project root before enforcing
 
@@ -1276,10 +1346,12 @@ git status  # Confirm everything clean
 **Problem**: Running `./scripts/qa/run_all.sh` in multiple worktrees simultaneously caused failures.
 
 **Root Cause**:
+
 - Daemon integration tests (`test_daemon_smoke.py`) compete for socket paths
 - MyPy cache corruption from concurrent type checker runs
 
 **Solution**:
+
 - Use `scripts/validate_worktrees.sh` (runs QA sequentially across worktrees)
 - Each agent runs QA in their OWN worktree (safe if not concurrent with same worktree)
 
@@ -1290,11 +1362,13 @@ git status  # Confirm everything clean
 **Problem**: Agents using main workspace venv didn't pick up their code changes.
 
 **Root Cause**:
+
 - `pip install -e .` points to a specific `src/` directory
 - Main workspace venv points to `/workspace/src/`
 - Agent's changes in `/workspace/untracked/worktrees/worktree-X/src/` not visible
 
 **Solution**:
+
 - **Every worktree needs its own venv**
 - Venv setup is mandatory: `python3 -m venv untracked/venv && pip install -e ".[dev]"`
 - Agent prompts include explicit `PYTHON=` path to worktree venv
@@ -1306,10 +1380,12 @@ git status  # Confirm everything clean
 **Problem**: Code merged with import errors that unit tests didn't catch.
 
 **Root Cause**:
+
 - Unit tests use mocks, don't import handlers through daemon registry
 - Agents skipped daemon restart check before committing
 
 **Solution**:
+
 - **MANDATORY in agent prompts**: Verify daemon restarts after code changes
 - Command: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart && status`
 - Expected output: `Status: RUNNING`
@@ -1325,6 +1401,7 @@ git status  # Confirm everything clean
 **Symptoms**: Files appearing in `/workspace/` instead of worktree.
 
 **Solution**:
+
 1. Stop agent immediately
 2. Check agent's actual working directory
 3. Move files to correct worktree: `git mv src/file.py {worktree}/src/file.py`
@@ -1336,6 +1413,7 @@ git status  # Confirm everything clean
 **Symptoms**: Restarting daemon in one worktree affects another.
 
 **Solution**:
+
 1. Verify each worktree has its own socket path: `ls .claude/hooks-daemon/untracked/`
 2. Check agent is actually in worktree: `pwd`
 3. Use explicit paths if needed (Plan 00028): `--pid-file` and `--socket` flags
@@ -1346,6 +1424,7 @@ git status  # Confirm everything clean
 **Symptoms**: Agent stops responding, work is uncommitted.
 
 **Solution**:
+
 1. Check worktree for uncommitted changes: `cd {worktree} && git status`
 2. Review changes, finish QA manually if needed
 3. Commit work with plan reference
@@ -1356,6 +1435,7 @@ git status  # Confirm everything clean
 **Symptoms**: `git merge worktree-plan-NNNNN` fails with conflicts.
 
 **Solution**:
+
 1. **ABORT THE MERGE**: `git merge --abort`
 2. **Go back to worktree**: `cd /workspace/untracked/worktrees/worktree-plan-NNNNN`
 3. **Sync worktree with main FIRST**: `git merge main --no-edit`
@@ -1370,6 +1450,7 @@ git status  # Confirm everything clean
 **Symptoms**: `ps aux | grep claude_code_hooks_daemon` shows process for deleted worktree.
 
 **Solution**:
+
 1. Find orphaned process PID: `ps aux | grep claude_code_hooks_daemon | grep -v grep`
 2. Kill the process: `kill <PID>`
 3. Clean up stale socket: `rm -f /path/to/.claude/hooks-daemon/untracked/daemon-*.sock`
@@ -1393,6 +1474,7 @@ Automates worktree creation, venv setup, editable install, and verification.
 ```
 
 **What it does:**
+
 1. Validates branch name (must start with `worktree-`)
 2. Creates git worktree in `untracked/worktrees/`
 3. Creates Python venv at `{worktree}/untracked/venv/`
@@ -1416,6 +1498,7 @@ Runs QA across all (or specific) worktrees sequentially.
 ```
 
 **What it does:**
+
 1. Checks venv exists and editable install is correct
 2. Runs `./scripts/qa/run_all.sh` from within each worktree
 3. Reports pass/fail summary for all worktrees
@@ -1461,6 +1544,7 @@ Task(subagent_type="general-purpose", team_name="plan-00028", name="developer-ha
 **Phase 2: Developer Work (Parallel)**
 
 Each developer agent in their worktree:
+
 1. Marks task `in_progress`
 2. Writes failing tests FIRST (TDD)
 3. Implements handler to make tests pass
@@ -1613,12 +1697,14 @@ TeamDelete()
 **Phase 6: Plan Completion**
 
 Follow plan completion checklist from @CLAUDE/PlanWorkflow.md:
+
 1. Update PLAN.md status to Complete (with accurate completion date)
 2. Move plan to `CLAUDE/Plan/Completed/`
 3. Update `CLAUDE/Plan/README.md` (accurate status, not theater)
 4. Commit with "Plan 00028: Complete" message
 
 **Summary of Agent Count:**
+
 - 4 Developer agents (one per handler)
 - 4 Tester agents (one per handler)
 - 4 QA agents (one per handler)
@@ -1637,6 +1723,7 @@ Wave 2 audit revealed 50% of merged work was incomplete with false claims. The m
 ### Team Lead Checklist (Multi-Role Verification)
 
 **Setup:**
+
 - [ ] Plan exists with decomposed tasks
 - [ ] Main workspace clean (`git status`)
 - [ ] Parent worktree created with venv
@@ -1646,6 +1733,7 @@ Wave 2 audit revealed 50% of merged work was incomplete with false claims. The m
 - [ ] Developer agents spawned (verification agents spawn later)
 
 **Per Task - Verification Gates:**
+
 - [ ] **Gate 1**: Developer reports "ready for testing" → Spawn Tester agent
 - [ ] **Gate 2**: Tester reports "tests verified" → Spawn QA agent
 - [ ] **Gate 3**: QA reports "QA verified" → Spawn Senior Reviewer agent
@@ -1654,12 +1742,14 @@ Wave 2 audit revealed 50% of merged work was incomplete with false claims. The m
 - [ ] If ANY gate fails → Send back to developer, restart from Gate 1
 
 **Per Task - Integration (After All 4 Gates Pass):**
+
 - [ ] Merge child → parent (only after all 4 gates pass)
 - [ ] Stop child daemon BEFORE removing worktree
 - [ ] Run QA in parent after merge
 - [ ] Send shutdown to ALL 5 agents for that task
 
 **Final Integration (All Tasks Merged to Parent):**
+
 - [ ] Run full QA in parent worktree
 - [ ] Sync parent with main BEFORE merging to main
 - [ ] **Spawn final Honesty Checker** to audit entire parent worktree
@@ -1670,6 +1760,7 @@ Wave 2 audit revealed 50% of merged work was incomplete with false claims. The m
 - [ ] Stop parent daemon, cleanup worktree
 
 **Cleanup:**
+
 - [ ] `TeamDelete()` to clean up team resources
 - [ ] Update plan status to Complete (accurate percentage, no theater)
 - [ ] Move plan to Completed/ folder
@@ -1678,11 +1769,13 @@ Wave 2 audit revealed 50% of merged work was incomplete with false claims. The m
 ### Developer Agent Checklist
 
 **Setup:**
+
 - [ ] Verify in correct worktree: `pwd` shows your path
 - [ ] `PYTHON` points to worktree venv
 - [ ] Task marked `in_progress`
 
 **Execution:**
+
 - [ ] Write failing tests FIRST (TDD)
 - [ ] Implement code to pass tests
 - [ ] Run `./scripts/qa/run_all.sh` (MUST pass)
@@ -1691,6 +1784,7 @@ Wave 2 audit revealed 50% of merged work was incomplete with false claims. The m
 - [ ] Update task to `ready_for_testing` (NOT completed)
 
 **Completion:**
+
 - [ ] Report "ready for testing" via `SendMessage` to team-lead
 - [ ] Wait for verification gate feedback
 - [ ] Fix issues if any gate fails (restart from Gate 1)
@@ -1727,6 +1821,7 @@ Wave 2 audit revealed 50% of merged work was incomplete with false claims. The m
 ### Honesty Checker Checklist (Gate 4 - CRITICAL - VALUE VERIFICATION)
 
 **VALUE VERIFICATION (Most Important)**:
+
 - [ ] Ask: "Does this ACTUALLY deliver the value implied by the feature?"
 - [ ] Read PLAN.md - what value should be delivered?
 - [ ] **READ THE ACTUAL CODE** - don't just check files exist
@@ -1734,6 +1829,7 @@ Wave 2 audit revealed 50% of merged work was incomplete with false claims. The m
 - [ ] Ask: "Would I accept this in code review or reject as lazy/incomplete?"
 
 **THEATER DETECTION CHECKS**:
+
 - [ ] **Check 1 - Dead Code**: Search for imports - is code actually used in application flow?
 - [ ] **Check 2 - Config Registration**: Handler in `.claude/hooks-daemon.yaml` and active?
 - [ ] **Check 3 - TDD Theater**: Count tests (matches claims?) AND read tests (prove behavior or just exist?)
@@ -1744,6 +1840,7 @@ Wave 2 audit revealed 50% of merged work was incomplete with false claims. The m
 - [ ] **Check 8 - Integration**: Do all pieces work together correctly?
 
 **VETO DECISION**:
+
 - [ ] If theater detected: REJECT ENTIRE BRANCH (use nuclear veto)
 - [ ] If lazy/shitty solution: REJECT (demand proper implementation)
 - [ ] If tests don't prove value: REJECT (even if tests pass technically)

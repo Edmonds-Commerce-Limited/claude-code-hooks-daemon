@@ -36,12 +36,14 @@ The daemon has response schema validation (`response_schemas.py`) but no input v
 ## Tasks
 
 ### Phase 1: Log Analysis Setup
+
 - [x] ✅ **Task 1.1**: Confirm daemon in DEBUG mode with verbose logging
   - [x] ✅ Verify log_level: DEBUG in config
   - [x] ✅ Test log retrieval via CLI: `logs -n 100 -l DEBUG`
   - [x] ✅ Confirm hook_input data being logged (line 368 of server.py)
 
 ### Phase 2: Parallel Event Verification (6 agents dispatched)
+
 - [x] ✅ **Task 2.1**: Verify PreToolUse test fixtures
   - [x] ✅ Extract PreToolUse events from logs
   - [x] ✅ Compare against test fixtures in tests/unit/handlers/pre_tool_use/
@@ -69,6 +71,7 @@ The daemon has response schema validation (`response_schemas.py`) but no input v
   - [x] ✅ All tests passing, 95% coverage maintained
 
 ### Phase 3: Analysis & Documentation
+
 - [x] ✅ **Task 3.1**: Generate critical analysis report
   - [x] ✅ Document silent failure pattern
   - [x] ✅ Explain why no errors are logged
@@ -83,6 +86,7 @@ The daemon has response schema validation (`response_schemas.py`) but no input v
   - [x] ✅ UserPromptSubmit: Report confirms correctness
 
 ### Phase 4: Completion
+
 - [x] ✅ **Task 4.1**: Commit all changes
   - [x] ✅ Stage env var implementation
   - [x] ✅ Stage verification reports
@@ -97,8 +101,10 @@ The daemon has response schema validation (`response_schemas.py`) but no input v
 ## Technical Decisions
 
 ### Decision 1: Parallel Agent Execution
+
 **Context**: Need to verify 6+ event types efficiently
 **Options Considered**:
+
 1. Sequential verification - slower but simpler
 2. Parallel agent dispatch - faster but more coordination
 
@@ -107,8 +113,10 @@ The daemon has response schema validation (`response_schemas.py`) but no input v
 **Date**: 2026-01-27
 
 ### Decision 2: Use general-purpose vs Explore agents
+
 **Context**: Need to parse logs and compare structures
 **Options Considered**:
+
 1. Explore agents - fast but read-only
 2. General-purpose agents - can read, analyze, and generate reports
 
@@ -117,8 +125,10 @@ The daemon has response schema validation (`response_schemas.py`) but no input v
 **Date**: 2026-01-27
 
 ### Decision 3: Environment Variable for Log Level
+
 **Context**: debug_hooks.sh was copying config files (ugly)
 **Options Considered**:
+
 1. Keep config file copying with sed
 2. Add environment variable override
 3. Add CLI flag to daemon start
@@ -141,24 +151,28 @@ The daemon has response schema validation (`response_schemas.py`) but no input v
 ## Key Findings
 
 ### ✅ Correct Test Fixtures
+
 - **PreToolUse**: Minimal fixtures (tool_name, tool_input only) are correct
 - **UserPromptSubmit**: Properly handles Pydantic camelCase → snake_case conversion
 
 ### ❌ Critical Issues Found
 
 #### PostToolUse (HIGH SEVERITY)
+
 - **Wrong field name**: Tests use `tool_output`, real events use `tool_response`
 - **Missing field**: Tests include `exit_code`, real events DON'T have this
 - **Impact**: BashErrorDetectorHandler completely broken in production
 - **Files**: `bash_error_detector.py`, `test_bash_error_detector.py`
 
 #### PermissionRequest (HIGH SEVERITY)
+
 - **Wrong structure**: Tests use `permission_type` and `resource` fields
 - **Real structure**: Events use `permission_suggestions` array
 - **Impact**: AutoApproveReadsHandler never matches (matches() always False)
 - **Files**: `auto_approve_reads.py`, `test_auto_approve_reads.py`
 
 #### Notification (MEDIUM SEVERITY)
+
 - **Wrong field name**: Tests use `severity`, real events use `notification_type`
 - **Impact**: Handler works (generic) but tests validate wrong structure
 - **Files**: `test_notification_logger.py`
@@ -168,16 +182,19 @@ The daemon has response schema validation (`response_schemas.py`) but no input v
 Located in `/workspace/CLAUDE/Plan/001-test-fixture-validation/`:
 
 1. **POSTTOOLUSE_FIXTURE_VERIFICATION.md** (7.7K)
+
    - Detailed PostToolUse mismatch analysis
    - Tool-specific response structures
    - Step-by-step fix recommendations
 
 2. **USERPROMPTSUBMIT_FIXTURE_VERIFICATION.md** (7.9K)
+
    - Verification of correct implementation
    - Pydantic conversion explanation
    - No issues found (reference example)
 
 3. **CRITICAL_ANALYSIS_SILENT_FAILURES.md** (8.1K)
+
    - Silent failure pattern explanation
    - Why no errors are logged
    - Test coverage paradox
@@ -190,12 +207,14 @@ Located in `/workspace/CLAUDE/Plan/001-test-fixture-validation/`:
 ### HOOKS_DAEMON_LOG_LEVEL Implementation
 
 **Files Modified**:
-- `src/claude_code_hooks_daemon/daemon/server.py` - Added env var check in _setup_logging()
+
+- `src/claude_code_hooks_daemon/daemon/server.py` - Added env var check in \_setup_logging()
 - `src/claude_code_hooks_daemon/daemon/config.py` - Added CRITICAL to valid levels
 - `scripts/debug_hooks.sh` - Updated to use env var instead of sed/cp
 - `tests/daemon/test_log_level_override.py` - 12 comprehensive tests
 
 **Test Coverage**:
+
 - Environment variable override works
 - Config value used when env var not set
 - Case-insensitive (debug, DEBUG, DeBuG all work)
@@ -215,6 +234,7 @@ Located in `/workspace/CLAUDE/Plan/001-test-fixture-validation/`:
 ## Notes & Updates
 
 ### 2026-01-27
+
 - Initial validation work complete
 - All 6 event types analyzed
 - Critical issues documented for Plan 002
@@ -225,6 +245,7 @@ Located in `/workspace/CLAUDE/Plan/001-test-fixture-validation/`:
 ## Follow-Up Work
 
 See **Plan 002: Fix Silent Handler Failures** for remediation work:
+
 - Fix BashErrorDetectorHandler (tool_output → tool_response)
 - Fix AutoApproveReadsHandler (restructure for permission_suggestions)
 - Fix Notification tests (severity → notification_type)

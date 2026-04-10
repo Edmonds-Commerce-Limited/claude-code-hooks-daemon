@@ -36,6 +36,7 @@ Currently, acceptance tests are maintained manually in `CLAUDE/AcceptanceTests/P
 ### Current Acceptance Testing (Manual)
 
 **Location**: `CLAUDE/AcceptanceTests/PLAYBOOK.md`
+
 - 15 test scenarios covering all handler types
 - Manual execution required per release
 - Test definitions duplicated between playbook and handler code
@@ -43,6 +44,7 @@ Currently, acceptance tests are maintained manually in `CLAUDE/AcceptanceTests/P
 - FAIL-FAST principle: any bug found → fix with TDD → restart from Test 1.1
 
 **Format Example**:
+
 ```markdown
 ## Test N: HandlerName
 **Handler ID**: handler-id
@@ -78,6 +80,7 @@ Currently, acceptance tests are maintained manually in `CLAUDE/AcceptanceTests/P
 ### Phase 1: Core Infrastructure (TDD)
 
 - [ ] **Task 1.1**: Create `AcceptanceTest` dataclass with validation
+
   - [ ] Write failing tests for dataclass structure
   - [ ] Create `src/claude_code_hooks_daemon/core/acceptance_test.py`
   - [ ] Implement `AcceptanceTest` dataclass with all fields
@@ -87,6 +90,7 @@ Currently, acceptance tests are maintained manually in `CLAUDE/AcceptanceTests/P
   - [ ] Run QA: `./scripts/qa/run_all.sh`
 
 - [ ] **Task 1.2**: Extend Handler base class (BREAKING CHANGE)
+
   - [ ] Write failing tests for `get_acceptance_tests()` abstract method
   - [ ] Add **REQUIRED** `@abstractmethod` to `Handler` base class
   - [ ] Method signature: `def get_acceptance_tests(self) -> list[AcceptanceTest]`
@@ -97,6 +101,7 @@ Currently, acceptance tests are maintained manually in `CLAUDE/AcceptanceTests/P
   - [ ] Run QA: `./scripts/qa/run_all.sh` (WILL FAIL until all handlers updated)
 
 - [ ] **Task 1.3**: Add empty array validation
+
   - [ ] Write failing tests for empty array detection
   - [ ] Add validation in handler registry or playbook generator
   - [ ] Raise descriptive error if `get_acceptance_tests()` returns `[]`
@@ -105,6 +110,7 @@ Currently, acceptance tests are maintained manually in `CLAUDE/AcceptanceTests/P
   - [ ] Run QA: `./scripts/qa/run_all.sh`
 
 - [ ] **Task 1.4**: Create PlaybookGenerator core
+
   - [ ] Write failing tests for generator logic
   - [ ] Create `src/claude_code_hooks_daemon/daemon/playbook_generator.py`
   - [ ] Implement handler discovery (built-in handlers)
@@ -126,6 +132,7 @@ Currently, acceptance tests are maintained manually in `CLAUDE/AcceptanceTests/P
 Start with 3 representative handlers to validate approach, then complete remaining 51:
 
 - [ ] **Task 2.1**: DestructiveGitHandler (blocking, multiple patterns)
+
   - [ ] Write failing tests for `get_acceptance_tests()` implementation
   - [ ] Implement 7 test cases (one per destructive pattern):
     - [ ] git reset --hard
@@ -139,6 +146,7 @@ Start with 3 representative handlers to validate approach, then complete remaini
   - [ ] Run QA: `./scripts/qa/run_all.sh`
 
 - [ ] **Task 2.2**: BritishEnglishHandler (advisory, non-terminal)
+
   - [ ] Write failing tests for advisory test definitions
   - [ ] Implement test case with `test_type=TestType.ADVISORY`
   - [ ] Expected decision: ALLOW with context message
@@ -147,6 +155,7 @@ Start with 3 representative handlers to validate approach, then complete remaini
   - [ ] Run QA: `./scripts/qa/run_all.sh`
 
 - [ ] **Task 2.3**: SedBlockerHandler (complex matching logic)
+
   - [ ] Write failing tests for sed blocking scenarios
   - [ ] Implement test cases for:
     - [ ] Direct sed -i command (actual Bash tool)
@@ -159,6 +168,7 @@ Start with 3 representative handlers to validate approach, then complete remaini
 ### Phase 3: CLI Command (TDD)
 
 - [ ] **Task 3.1**: Implement `generate-playbook` CLI command (STDOUT ONLY)
+
   - [ ] Write failing tests for CLI command
   - [ ] Add `generate-playbook` subcommand to `cli.py`
   - [ ] Implement argparse integration
@@ -169,6 +179,7 @@ Start with 3 representative handlers to validate approach, then complete remaini
   - [ ] Run QA: `./scripts/qa/run_all.sh`
 
 - [ ] **Task 3.2**: Integration testing
+
   - [ ] Write integration test: generate playbook with sample handlers
   - [ ] Verify markdown output format matches current PLAYBOOK.md
   - [ ] Verify config-aware filtering (only enabled handlers)
@@ -177,6 +188,7 @@ Start with 3 representative handlers to validate approach, then complete remaini
   - [ ] Run QA: `./scripts/qa/run_all.sh`
 
 - [ ] **Task 3.3**: Daemon restart verification (CRITICAL)
+
   - [ ] Restart daemon: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
   - [ ] Verify daemon status: `$PYTHON -m claude_code_hooks_daemon.daemon.cli status` (RUNNING)
   - [ ] Check logs for errors
@@ -189,6 +201,7 @@ Start with 3 representative handlers to validate approach, then complete remaini
 Migrate all remaining built-in handlers by category:
 
 - [ ] **Task 4.1**: Safety handlers (10 handlers, priority 10-20)
+
   - [ ] pip_break_system (blocks --break-system-packages)
   - [ ] sudo_pip (blocks sudo pip)
   - [ ] curl_pipe_shell (blocks curl | bash)
@@ -203,6 +216,7 @@ Migrate all remaining built-in handlers by category:
   - [ ] Verify daemon restarts successfully
 
 - [ ] **Task 4.2**: QA enforcement handlers (5 handlers, priority 25-35)
+
   - [ ] tdd_enforcement (blocks handler creation without tests)
   - [ ] python_qa_suppression_blocker (blocks # type: ignore, # noqa)
   - [ ] php_qa_suppression_blocker (blocks @phpstan-ignore)
@@ -212,6 +226,7 @@ Migrate all remaining built-in handlers by category:
   - [ ] Verify daemon restarts successfully
 
 - [ ] **Task 4.3**: Workflow handlers (10 handlers, priority 40-55)
+
   - [ ] markdown_organization (enforces markdown location rules)
   - [ ] validate_plan_number (validates plan numbering)
   - [ ] plan_time_estimates (warns about time estimates)
@@ -226,6 +241,7 @@ Migrate all remaining built-in handlers by category:
   - [ ] Verify daemon restarts successfully
 
 - [ ] **Task 4.4**: Post-event handlers (3 handlers)
+
   - [ ] bash_error_detector (PostToolUse - detects command errors)
   - [ ] validate_eslint_on_write (PostToolUse - runs eslint after write)
   - [ ] validate_sitemap (PostToolUse - validates sitemap structure)
@@ -233,6 +249,7 @@ Migrate all remaining built-in handlers by category:
   - [ ] Verify daemon restarts successfully
 
 - [ ] **Task 4.5**: Context injection handlers (5 handlers)
+
   - [ ] git_context_injector (UserPromptSubmit - adds git status)
   - [ ] workflow_state_restoration (SessionStart - restores workflow)
   - [ ] daemon_stats (StatusLine - shows daemon health)
@@ -243,6 +260,7 @@ Migrate all remaining built-in handlers by category:
   - [ ] Verify daemon restarts successfully
 
 - [ ] **Task 4.6**: Special event handlers (remaining)
+
   - [ ] SessionStart handlers (yolo_container_detection, suggest_statusline)
   - [ ] SessionEnd handlers (cleanup_handler)
   - [ ] PreCompact handlers (workflow_state_pre_compact, transcript_archiver)
@@ -256,6 +274,7 @@ Migrate all remaining built-in handlers by category:
 ### Phase 5: Documentation & Validation
 
 - [ ] **Task 5.1**: Update handler development documentation
+
   - [ ] Add "Acceptance Testing" section to `CLAUDE/HANDLER_DEVELOPMENT.md`
   - [ ] Document `AcceptanceTest` dataclass structure
   - [ ] Provide complete examples (blocking, advisory, with setup)
@@ -264,6 +283,7 @@ Migrate all remaining built-in handlers by category:
   - [ ] Run QA: `./scripts/qa/run_all.sh`
 
 - [ ] **Task 5.2**: Create plugin migration guide
+
   - [ ] Create `CLAUDE/Plugin/ACCEPTANCE_TESTING.md`
   - [ ] Document how custom handlers should define tests
   - [ ] Provide plugin handler example
@@ -271,6 +291,7 @@ Migrate all remaining built-in handlers by category:
   - [ ] Run QA: `./scripts/qa/run_all.sh`
 
 - [ ] **Task 5.3**: Replace PLAYBOOK.md with generation instructions
+
   - [ ] Replace `CLAUDE/AcceptanceTests/PLAYBOOK.md` with `GENERATING.md`
   - [ ] Document how to generate playbook: `generate-playbook > playbook.md`
   - [ ] Explain playbook is ALWAYS generated from code (never stored)
@@ -279,6 +300,7 @@ Migrate all remaining built-in handlers by category:
   - [ ] Run QA: `./scripts/qa/run_all.sh`
 
 - [ ] **Task 5.4**: Validate generated playbook format
+
   - [ ] Run: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-playbook`
   - [ ] Verify all handler test sections present
   - [ ] Verify safety warnings included
@@ -287,6 +309,7 @@ Migrate all remaining built-in handlers by category:
   - [ ] Test different output formats (--format json, yaml)
 
 - [ ] **Task 5.5**: Manual acceptance testing workflow
+
   - [ ] Generate fresh playbook: `generate-playbook > /tmp/test-playbook.md`
   - [ ] Execute tests manually from generated playbook
   - [ ] Mark PASS/FAIL for each test
@@ -301,6 +324,7 @@ Migrate all remaining built-in handlers by category:
 **REQUIREMENT**: Custom project-level plugins MUST be fully supported.
 
 - [ ] **Task 6.1**: Plugin handler discovery and integration
+
   - [ ] Write tests for plugin handler discovery from project plugins
   - [ ] Implement plugin test aggregation in PlaybookGenerator
   - [ ] Test with sample custom plugin handler in `.claude/plugins/`
@@ -310,6 +334,7 @@ Migrate all remaining built-in handlers by category:
   - [ ] Run QA: `./scripts/qa/run_all.sh`
 
 - [ ] **Task 6.2**: Plugin development documentation
+
   - [ ] Create `CLAUDE/Plugin/ACCEPTANCE_TESTING.md` guide
   - [ ] Document that `get_acceptance_tests()` is REQUIRED (abstract method)
   - [ ] Update plugin template with complete `get_acceptance_tests()` example
@@ -320,6 +345,7 @@ Migrate all remaining built-in handlers by category:
   - [ ] Run QA: `./scripts/qa/run_all.sh`
 
 - [ ] **Task 6.3**: Plugin validation workflow
+
   - [ ] Document how to verify plugin tests: `generate-playbook | grep "MyPlugin"`
   - [ ] Create test project with custom plugin
   - [ ] Generate playbook and verify plugin section appears
@@ -328,6 +354,7 @@ Migrate all remaining built-in handlers by category:
   - [ ] Verify empty array rejection works for plugin handlers
 
 - [ ] **Task 6.4**: Final validation
+
   - [ ] Restart daemon successfully with custom plugins loaded
   - [ ] Generate playbook: verify built-in + plugin handlers appear
   - [ ] Verify plugin tests grouped/labeled correctly
@@ -345,61 +372,72 @@ Migrate all remaining built-in handlers by category:
 ## Technical Decisions
 
 ### Decision 1: Make get_acceptance_tests() REQUIRED (@abstractmethod)
+
 **Context**: Need to enforce acceptance testing discipline across ALL handlers
 **Options Considered**:
+
 1. Make method required via @abstractmethod (forces all handlers to implement)
 2. Make method optional with default implementation (allows gradual adoption)
 
 **Decision**: Option 1 - REQUIRED abstract method (breaking change)
 **Rationale**:
+
 - **User requirement**: "every single handler" must have acceptance tests
 - **Quality enforcement**: No handler can skip acceptance testing
 - **Plugin discipline**: Custom plugins MUST define tests (no shortcuts)
 - **Long-term benefit**: Ensures all handlers are testable and documented
 - **Breaking change acceptable**: Worth it for enforced quality
 - **Empty arrays REJECTED**: Returning `[]` raises `ValueError` - no exceptions
-**Date**: 2026-02-02
+  **Date**: 2026-02-02
 
 ### Decision 1.5: Reject Empty Array Returns
+
 **Context**: Prevent handlers from returning empty test lists
 **Decision**: Validate and reject `[]` returns from `get_acceptance_tests()`
 **Rationale**:
+
 - **User requirement**: "reject empty array return" - no handler can skip tests
 - **Zero tolerance**: Every handler must have at least 1 test
 - **No loopholes**: Can't satisfy abstract method with empty implementation
 - **Conscious testing**: Forces developers to think about testability
 - **Validation location**: Handler registry or playbook generator
-**Date**: 2026-02-02
+  **Date**: 2026-02-02
 
 ### Decision 2: Playbook Format Must Match Exactly
+
 **Context**: Need compatibility with existing manual acceptance testing workflow
 **Options Considered**:
+
 1. Create new format optimized for programmatic generation
 2. Match existing PLAYBOOK.md format exactly
 
 **Decision**: Option 2 - Match existing format
 **Rationale**:
+
 - Testers already familiar with format
 - Can compare generated vs manual easily
 - Transition is smoother
 - Eventually replace manual with generated
-**Date**: 2026-02-02
+  **Date**: 2026-02-02
 
 ### Decision 3: Use Dataclass for Test Definitions
+
 **Context**: Need type-safe, validated test structures
 **Options Considered**:
+
 1. Plain dictionaries (flexible but no validation)
 2. Dataclass (type-safe, validated)
 3. Custom class with methods (more complex)
 
 **Decision**: Option 2 - Dataclass
 **Rationale**:
+
 - Type safety via type annotations
 - Automatic validation
 - IDE autocomplete support
 - Simpler than custom classes
 - Pythonic and widely understood
-**Date**: 2026-02-02
+  **Date**: 2026-02-02
 
 ## Success Criteria
 
@@ -419,13 +457,13 @@ Migrate all remaining built-in handlers by category:
 
 ## Risks & Mitigations
 
-| Risk | Impact | Probability | Mitigation |
-|------|--------|-------------|------------|
-| Generated playbook format diverges from manual | Medium | Low | Strict format validation tests, side-by-side comparison |
-| Handler test definitions incomplete/incorrect | High | Medium | Manual review during migration, execute generated playbook |
-| Plugin compatibility issues | Medium | Low | Thorough plugin testing, backward compatibility design |
-| Daemon fails to load after changes | High | Low | Daemon restart verification after each phase |
-| Missing edge cases in test definitions | Medium | Medium | Compare with existing playbook, manual acceptance testing |
+| Risk                                           | Impact | Probability | Mitigation                                                 |
+| ---------------------------------------------- | ------ | ----------- | ---------------------------------------------------------- |
+| Generated playbook format diverges from manual | Medium | Low         | Strict format validation tests, side-by-side comparison    |
+| Handler test definitions incomplete/incorrect  | High   | Medium      | Manual review during migration, execute generated playbook |
+| Plugin compatibility issues                    | Medium | Low         | Thorough plugin testing, backward compatibility design     |
+| Daemon fails to load after changes             | High   | Low         | Daemon restart verification after each phase               |
+| Missing edge cases in test definitions         | Medium | Medium      | Compare with existing playbook, manual acceptance testing  |
 
 ## Notes & Updates
 
@@ -434,19 +472,21 @@ Migrate all remaining built-in handlers by category:
 **PLAN COMPLETE** - All work successfully implemented and committed in commits 10ff955 through 60e412c.
 
 **What Was Delivered**:
-1. ✅ AcceptanceTest dataclass with full validation (acceptance_test.py)
-2. ✅ Handler.get_acceptance_tests() is now @abstractmethod (REQUIRED for all handlers)
-3. ✅ Empty array rejection - handlers MUST return at least 1 test
-4. ✅ PlaybookGenerator with plugin discovery (playbook_generator.py)
-5. ✅ generate-playbook CLI command (outputs to STDOUT only)
-6. ✅ ALL 63 handlers migrated with acceptance tests
-7. ✅ Full plugin support (project-level custom handlers)
-8. ✅ Config-aware generation (only enabled handlers)
-9. ✅ GENERATING.md created, manual PLAYBOOK.md archived
+
+01. ✅ AcceptanceTest dataclass with full validation (acceptance_test.py)
+02. ✅ Handler.get_acceptance_tests() is now @abstractmethod (REQUIRED for all handlers)
+03. ✅ Empty array rejection - handlers MUST return at least 1 test
+04. ✅ PlaybookGenerator with plugin discovery (playbook_generator.py)
+05. ✅ generate-playbook CLI command (outputs to STDOUT only)
+06. ✅ ALL 63 handlers migrated with acceptance tests
+07. ✅ Full plugin support (project-level custom handlers)
+08. ✅ Config-aware generation (only enabled handlers)
+09. ✅ GENERATING.md created, manual PLAYBOOK.md archived
 10. ✅ All QA checks pass
 11. ✅ Daemon loads successfully
 
 **Key Implementation Details**:
+
 - Playbooks are ALWAYS generated fresh from code (never stored)
 - Single source of truth: handler code, not markdown
 - Plugin handlers automatically discovered and included
@@ -454,6 +494,7 @@ Migrate all remaining built-in handlers by category:
 - Ephemeral workflow: generate > test > delete
 
 **Verification**:
+
 ```bash
 # Generate playbook works
 $PYTHON -m claude_code_hooks_daemon.daemon.cli generate-playbook > /tmp/test.md
@@ -466,6 +507,7 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli restart  # ✅ RUNNING
 ```
 
 **Commits**:
+
 - 10ff955: Plan 00025: Programmatic Acceptance Testing System
 - e065214: Plan 00025: Make get_acceptance_tests() REQUIRED with empty array rejection
 - 205c467: Plan 00025 Phase 1-2: Migrate ALL 59 handlers to programmatic acceptance tests
@@ -477,6 +519,7 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli restart  # ✅ RUNNING
 Initial plan created based on user requirements for programmatic acceptance testing system.
 
 **User Requirements**:
+
 - **EVERY SINGLE HANDLER** must have acceptance tests (mandatory, not optional)
 - Test objects have: title, command, description, should_block, expected_message_patterns
 - Universal support (built-in + plugin handlers)
@@ -484,6 +527,7 @@ Initial plan created based on user requirements for programmatic acceptance test
 - Config-aware (only enabled handlers)
 
 **Key Design Decisions**:
+
 1. **REQUIRED** `get_acceptance_tests()` abstract method (breaking change, enforced quality)
 2. **REJECT empty arrays** - returning `[]` raises `ValueError` (zero tolerance)
 3. `AcceptanceTest` dataclass with validation
@@ -492,6 +536,7 @@ Initial plan created based on user requirements for programmatic acceptance test
 6. Big bang migration - all 54 handlers updated in one phase
 
 **Next Steps**:
+
 1. Begin Phase 1: Create dataclass and extend Handler base class
 2. Validate approach with 3 sample handlers (Phase 2)
 3. Implement CLI command (Phase 3)
@@ -502,11 +547,13 @@ Initial plan created based on user requirements for programmatic acceptance test
 ## Critical Files for Implementation
 
 ### New Files
+
 - `/workspace/src/claude_code_hooks_daemon/core/acceptance_test.py` - AcceptanceTest dataclass and TestType enum
 - `/workspace/src/claude_code_hooks_daemon/daemon/playbook_generator.py` - PlaybookGenerator class for markdown generation
 - `/workspace/CLAUDE/Plugin/ACCEPTANCE_TESTING.md` - Plugin acceptance testing guide
 
 ### Modified Files
+
 - `/workspace/src/claude_code_hooks_daemon/core/handler.py` - Add `get_acceptance_tests()` optional method
 - `/workspace/src/claude_code_hooks_daemon/daemon/cli.py` - Add `generate-playbook` subcommand
 - `/workspace/src/claude_code_hooks_daemon/handlers/pre_tool_use/destructive_git.py` - Example: First handler with test definitions
@@ -514,6 +561,7 @@ Initial plan created based on user requirements for programmatic acceptance test
 - `/workspace/CLAUDE/AcceptanceTests/PLAYBOOK.md` - Update header with generation instructions
 
 ### Test Files
+
 - `/workspace/tests/unit/core/test_acceptance_test.py` - Tests for AcceptanceTest dataclass
 - `/workspace/tests/unit/core/test_handler.py` - Tests for Handler.get_acceptance_tests() (update existing)
 - `/workspace/tests/unit/daemon/test_playbook_generator.py` - Tests for PlaybookGenerator

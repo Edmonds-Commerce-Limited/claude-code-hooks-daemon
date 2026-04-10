@@ -46,10 +46,12 @@ The fix: parse the hooks daemon config (`hooks-daemon.yaml`) for a `ci_enabled` 
 Two modes controlled by `ci_enabled` in `hooks-daemon.yaml`:
 
 **Default (fail open):**
+
 1. First call: `ensure_daemon()` fails -> warn to stderr -> write `.hooks-passthrough` state file -> return advisory context
 2. Subsequent calls: detect state file -> silently passthrough (`{}`) with no noise
 
 **`ci_enabled: true` (fail closed):**
+
 1. Every call: `ensure_daemon()` fails -> hard deny/block with STOP message
 2. No state file written — every call blocks
 3. Message clearly instructs agent to stop and report hooks daemon needs installing
@@ -103,6 +105,7 @@ ensure_daemon() called
 ### emit_hook_error() CI Enforcement
 
 When `_HOOKS_DAEMON_CI_ENFORCED=true`:
+
 - PreToolUse: `{"decision": "deny", "reason": "STOP - DO NOT PROCEED..."}`
 - Stop/SubagentStop: `{"decision": "block", "reason": "..."}`
 - Other events: `{"hookSpecificOutput": {...}}` with loud STOP context
@@ -110,11 +113,13 @@ When `_HOOKS_DAEMON_CI_ENFORCED=true`:
 ## Tasks
 
 ### Phase 1: Research & Design
+
 - [x] ✅ **Task 1.1**: Analyse current `init.sh` behaviour when daemon fails
 - [x] ✅ **Task 1.2**: Design config-based approach (replaced env var approach per user feedback)
 - [x] ✅ **Task 1.3**: Design state file pattern for one-time noise
 
 ### Phase 2: TDD Implementation
+
 - [x] ✅ **Task 2.1**: Write tests for default fail-open behaviour (6 tests)
   - [x] First call returns advisory context with INACTIVE message
   - [x] First call logs warning to stderr
@@ -135,12 +140,14 @@ When `_HOOKS_DAEMON_CI_ENFORCED=true`:
 - [x] ✅ **Task 2.6**: Modify `emit_hook_error()` with CI enforcement responses
 
 ### Phase 3: Integration & Verification
+
 - [x] ✅ **Task 3.1**: All 12 tests pass
 - [x] ✅ **Task 3.2**: Full QA suite passes (8/8 checks)
 - [x] ✅ **Task 3.3**: Daemon restarts successfully
 - [x] ✅ **Task 3.4**: Update `hooks-daemon.yaml.example` with `ci_enabled` documentation
 
 ### Phase 4: Documentation
+
 - [x] ✅ **Task 4.1**: Document `ci_enabled` in example config with comments explaining behaviour
 
 ## Dependencies
@@ -154,6 +161,7 @@ When `_HOOKS_DAEMON_CI_ENFORCED=true`:
 **Context**: How to control CI behaviour.
 
 **Options Considered**:
+
 1. Check CI-specific env vars (GITHUB_ACTIONS, GITLAB_CI, CI=true, etc.)
 2. Parse `hooks-daemon.yaml` for a `ci_enabled` setting
 
@@ -196,6 +204,7 @@ When `_HOOKS_DAEMON_CI_ENFORCED=true`:
 ## Notes & Updates
 
 ### 2026-03-23
+
 - Plan created based on user report of GitHub Actions triage being broken
 - Initial design used env var detection — user rejected this approach
 - Redesigned around config-based `ci_enabled` setting

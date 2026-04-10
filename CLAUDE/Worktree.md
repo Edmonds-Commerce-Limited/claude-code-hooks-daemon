@@ -27,6 +27,7 @@ Worktrees support **parent-child relationships** for complex plans:
 - **Child (Task) Worktrees**: Individual tasks within the plan
 
 **Merge Rules:**
+
 - ✅ **ALLOWED**: Child → Parent worktree (automatic, no approval needed)
 - ❌ **NOT ALLOWED**: Parent → Main project (requires human approval)
 
@@ -35,6 +36,7 @@ Worktrees support **parent-child relationships** for complex plans:
 ### 1. Worktree Location
 
 **ALL worktree folders MUST be in:**
+
 ```
 ./untracked/worktrees/<branch-name>/
 ```
@@ -43,6 +45,7 @@ Worktrees support **parent-child relationships** for complex plans:
 ❌ **Wrong**: `../plan-00028/`, `/tmp/worktree/`, etc.
 
 **Why**:
+
 - Keeps workspace organised
 - Prevents git confusion
 - Easy cleanup (just delete `untracked/worktrees/`)
@@ -51,11 +54,13 @@ Worktrees support **parent-child relationships** for complex plans:
 ### 2. Branch Naming
 
 **Parent (Plan) Worktrees:**
+
 - Prefix: `worktree-`
 - Format: `worktree-<plan-name>`
 - ✅ Examples: `worktree-plan-00028`, `worktree-handler-refactor`
 
 **Child (Task) Worktrees:**
+
 - Prefix: `worktree-child-`
 - Format: `worktree-child-<parent-name>-<task-name>`
 - ✅ Examples: `worktree-child-plan-00028-handler-1`, `worktree-child-plan-00028-config-fix`
@@ -63,6 +68,7 @@ Worktrees support **parent-child relationships** for complex plans:
 ❌ **Wrong**: `plan-00028`, `feature/headers`, `temp-work`, `child-handler-1`
 
 **Why**:
+
 - Clear identification of worktree hierarchy
 - Easy filtering in `git branch` output
 - Shows parent-child relationships
@@ -84,6 +90,7 @@ PYTHON=/workspace/untracked/worktrees/worktree-plan-00028/untracked/venv/bin/pyt
 ```
 
 **Why**:
+
 - Editable installs (`pip install -e .`) point to a specific `src/` directory
 - The main workspace venv imports from `/workspace/src/`, not the worktree's `src/`
 - Using the wrong venv means your code changes won't be picked up
@@ -156,10 +163,12 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli \
 ```
 
 **Supported CLI Flags**:
+
 - `--pid-file PATH`: Explicit PID file path (overrides env vars and auto-discovery)
 - `--socket PATH`: Explicit socket path (overrides env vars and auto-discovery)
 
 **When to use CLI flags**:
+
 - Testing specific path configurations
 - Debugging daemon isolation issues
 - Temporary path overrides without modifying environment
@@ -222,6 +231,7 @@ rm -f /path/to/.claude/hooks-daemon/untracked/daemon-*.sock
 **Agents working in worktrees MUST stay in their worktree**
 
 When launching sub-agents for worktree tasks:
+
 - Set working directory explicitly
 - Verify agent is in correct worktree
 - Never `cd` back to main workspace
@@ -229,6 +239,7 @@ When launching sub-agents for worktree tasks:
 - Use the worktree's own `$PYTHON`, not the main workspace's
 
 **Example agent prompt:**
+
 ```
 You are working in a git worktree at /workspace/untracked/worktrees/worktree-plan-00028/
 DO NOT work in /workspace - only work in YOUR worktree directory.
@@ -251,6 +262,7 @@ git merge worktree-child-plan-00028-handler-1
 ```
 
 **Why allowed:**
+
 - Isolated to plan worktree
 - Doesn't affect main project
 - Part of plan execution workflow
@@ -261,6 +273,7 @@ git merge worktree-child-plan-00028-handler-1
 ❌ **MUST ask human approval first**
 
 Before merging parent to main:
+
 1. ✋ **STOP** - Ask human for approval
 2. Verify no other agents working in main workspace
 3. Verify no conflicts with main branch
@@ -268,6 +281,7 @@ Before merging parent to main:
 5. Only then proceed with merge
 
 **Why requires approval:**
+
 - Multiple agents may be working simultaneously
 - Main workspace might have uncommitted changes
 - Conflicts need human resolution
@@ -300,6 +314,7 @@ git branch -d worktree-plan-00028
 ```
 
 **Why mandatory:**
+
 - **Daemon stop prevents orphaned processes** with stale PID files and dangling sockets
 - Prevents worktree clutter
 - Reduces confusion about active work
@@ -467,6 +482,7 @@ git status  # Confirm everything clean
 ```
 
 **Why this order matters:**
+
 1. **ALWAYS sync worktree first** (`main → worktree`):
    - Prevents conflicts by updating worktree with main's latest changes
    - Lets you resolve conflicts IN THE WORKTREE (isolated, safe)
@@ -648,6 +664,7 @@ The team lead operates from the **main workspace** and coordinates all worktree 
 **Phase 1: Setup**
 
 1. Create the team:
+
    ```
    TeamCreate(team_name="plan-00028", description="Implement 3 new handlers")
    ```
@@ -657,6 +674,7 @@ The team lead operates from the **main workspace** and coordinates all worktree 
 3. Create parent worktree + child worktrees (with venv setup for each)
 
 4. Spawn teammates via `Task` tool, one per child worktree:
+
    ```
    Task(
      subagent_type="general-purpose",
@@ -695,6 +713,7 @@ The team lead operates from the **main workspace** and coordinates all worktree 
 ### Teammate Responsibilities
 
 Each teammate MUST:
+
 - **Stay in their worktree** - never `cd /workspace`
 - **Use their own `$PYTHON`** - the worktree-local venv
 - **Run QA before committing** - `./scripts/qa/run_all.sh`
@@ -727,6 +746,7 @@ The shutdown order matters to avoid orphaned processes:
 ```
 
 **If a teammate is unresponsive:**
+
 ```bash
 # Find its daemon PID
 cat {worktree}/.claude/hooks-daemon/untracked/daemon-*.pid
@@ -744,12 +764,12 @@ git branch -D worktree-child-plan-00028-stuck
 
 Teams share a task list. Map tasks to worktrees:
 
-| Task | Worktree | Teammate |
-|------|----------|----------|
+| Task                | Worktree                              | Teammate        |
+| ------------------- | ------------------------------------- | --------------- |
 | Implement handler A | `worktree-child-plan-00028-handler-a` | `handler-a-dev` |
 | Implement handler B | `worktree-child-plan-00028-handler-b` | `handler-b-dev` |
-| Integration testing | `worktree-plan-00028` (parent) | Team lead |
-| Merge to main | Main workspace | Team lead |
+| Integration testing | `worktree-plan-00028` (parent)        | Team lead       |
+| Merge to main       | Main workspace                        | Team lead       |
 
 ### Avoiding Conflicts Between Teammates
 
@@ -775,6 +795,7 @@ Automates: worktree creation, venv setup, editable install, verification.
 ```
 
 **What it does:**
+
 1. Validates branch name (must start with `worktree-`)
 2. Creates git worktree in `untracked/worktrees/`
 3. Creates Python venv at `untracked/venv/`
@@ -796,6 +817,7 @@ Runs QA sequentially across all (or specific) worktrees.
 ```
 
 **What it does:**
+
 1. Checks venv exists and editable install is correct
 2. Runs `./scripts/qa/run_all.sh` from within each worktree
 3. Reports pass/fail summary for all worktrees
@@ -812,6 +834,7 @@ Running `./scripts/qa/run_all.sh` in multiple worktrees simultaneously causes:
 **Correct approach**: Use `scripts/validate_worktrees.sh` which runs QA sequentially.
 
 **When agents work in parallel**: Each agent runs QA in their OWN worktree. This is safe because:
+
 - Each worktree has its own venv, daemon socket, and test isolation
 - The daemon smoke tests use `/tmp/test-daemon-{unique-id}.sock` for test isolation
 - Conflicts only occur when the same worktree's QA runs concurrently with another's
@@ -839,6 +862,7 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli restart  # Imports main src, not 
 ```
 
 ✅ **Solution**: Always use the worktree's own venv:
+
 ```bash
 PYTHON=/workspace/untracked/worktrees/worktree-plan-00028/untracked/venv/bin/python
 ```
@@ -881,6 +905,7 @@ git merge worktree-plan-00028  # Merged code with import errors!
 ```
 
 ✅ **Solution**: Always verify daemon starts in worktree before merging:
+
 ```bash
 $PYTHON -m claude_code_hooks_daemon.daemon.cli restart
 $PYTHON -m claude_code_hooks_daemon.daemon.cli status
@@ -896,6 +921,7 @@ git worktree remove untracked/worktrees/worktree-plan-00028  # Orphaned daemon p
 ```
 
 ✅ **Solution**: Always stop daemon first:
+
 ```bash
 WT=/workspace/untracked/worktrees/worktree-plan-00028
 $WT/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli stop
@@ -925,12 +951,14 @@ $ git worktree list
 ## When to Use Worktrees
 
 ✅ **Use worktrees for:**
+
 - Multi-task plans with parallel phases
 - Handler creation that can be done independently
 - Refactoring multiple modules simultaneously
 - Any work requiring 2+ parallel agents
 
 ❌ **Don't use worktrees for:**
+
 - Single-file edits
 - Quick fixes
 - Sequential work where context matters
@@ -978,6 +1006,7 @@ $ git worktree list
 ```
 
 **Hierarchy:**
+
 - Main project (`/workspace/`) ← Parent worktrees merge here (with approval)
 - Parent worktrees (`worktree-plan-00028`) ← Child worktrees merge here (automatic)
 - Child worktrees (`worktree-child-*`) ← Individual tasks worked on here
@@ -985,11 +1014,13 @@ $ git worktree list
 ## Verification Checklist
 
 ### Before Creating Parent Worktree:
+
 - [ ] Directory will be `untracked/worktrees/worktree-<plan-name>`
 - [ ] Branch name starts with `worktree-` (not `worktree-child-`)
 - [ ] Branching from main
 
 ### Before Creating Child Worktree:
+
 - [ ] Directory will be `untracked/worktrees/worktree-child-<parent>-<task>`
 - [ ] Branch name starts with `worktree-child-`
 - [ ] Branch name includes parent plan name
@@ -997,12 +1028,14 @@ $ git worktree list
 - [ ] Agent knows to stay in their child worktree
 
 ### After Creating Any Worktree:
+
 - [ ] Python venv created: `python3 -m venv untracked/venv`
 - [ ] Package installed in editable mode: `untracked/venv/bin/pip install -e ".[dev]"`
 - [ ] `$PYTHON` set to worktree's own venv Python
 - [ ] QA scripts work: `./scripts/qa/run_all.sh`
 
 ### Before Merging Child → Parent:
+
 - [ ] Working in parent worktree directory
 - [ ] Reviewed child changes
 - [ ] No conflicts expected
@@ -1010,6 +1043,7 @@ $ git worktree list
 - [ ] Ready to stop child daemon and cleanup immediately after merge
 
 ### Before Merging Parent → Main:
+
 - [ ] ✋ **STEP 1**: ⚠️ **MERGED MAIN INTO WORKTREE FIRST** ⚠️ (`cd worktree && git merge main`)
 - [ ] ✋ **STEP 2**: Resolved any conflicts in parent worktree (NOT in main!)
 - [ ] ✋ **STEP 3**: Full QA passes in worktree (`./scripts/qa/run_all.sh`)
@@ -1024,12 +1058,14 @@ $ git worktree list
 **REMINDER**: The merge order is ALWAYS: `main → worktree` FIRST, then `worktree → main`
 
 ### After Merging Child → Parent:
+
 - [ ] Stopped child worktree daemon (`$CHILD_WT/.../daemon.cli stop`)
 - [ ] Removed child worktree folder immediately
 - [ ] Deleted child branch immediately
 - [ ] Verified parent worktree still works
 
 ### After Merging Parent → Main:
+
 - [ ] ✋ **STEP 11**: Verified merge succeeded (`git status` shows clean)
 - [ ] ✋ **STEP 12**: Full QA passes (`./scripts/qa/run_all.sh`)
 - [ ] ✋ **STEP 13**: Daemon restarts successfully (`$PYTHON -m claude_code_hooks_daemon.daemon.cli restart && status`)
@@ -1059,6 +1095,7 @@ $ git worktree list
 
 **Cause**: Worktree folder wasn't properly removed
 **Solution**: Manual cleanup:
+
 ```bash
 rm -rf untracked/worktrees/worktree-plan-00028
 git worktree prune
@@ -1068,6 +1105,7 @@ git worktree prune
 
 **Cause**: Venv not set up in worktree, or using wrong Python
 **Solution**:
+
 ```bash
 cd /workspace/untracked/worktrees/worktree-plan-00028
 python3 -m venv untracked/venv
@@ -1080,6 +1118,7 @@ PYTHON=/workspace/untracked/worktrees/worktree-plan-00028/untracked/venv/bin/pyt
 **Cause**: Worktree removed without stopping its daemon first
 **Symptoms**: `ps aux | grep claude_code_hooks_daemon` shows process for deleted worktree
 **Solution**:
+
 ```bash
 # Find the PID from the stale PID file (if worktree still partially exists)
 # Or find it from process list
@@ -1096,6 +1135,7 @@ rm -f /path/to/.claude/hooks-daemon/untracked/daemon-*.sock
 
 **Symptoms**: Files appearing in main workspace instead of worktree
 **Solution**:
+
 1. Stop agent immediately
 2. Verify agent's working directory
 3. Move files to correct worktree
@@ -1105,6 +1145,7 @@ rm -f /path/to/.claude/hooks-daemon/untracked/daemon-*.sock
 
 **Symptoms**: Child worktree doesn't have parent's changes
 **Solution**:
+
 1. Remove incorrect child worktree
 2. Recreate child from parent branch:
    ```bash
@@ -1118,6 +1159,7 @@ rm -f /path/to/.claude/hooks-daemon/untracked/daemon-*.sock
 
 **Symptoms**: Agent attempts `git merge worktree-plan-00028` from main workspace
 **Solution**:
+
 1. Stop immediately
 2. Undo merge if it happened: `git merge --abort`
 3. Ask human for approval
@@ -1141,12 +1183,12 @@ Child Worktrees (worktree-child-plan-00028-*)
 
 ### Key Rules Summary
 
-| Action | Approval Required | Cleanup |
-|--------|------------------|---------|
-| Create parent worktree | No | After merge to main |
-| Create child worktree | No | After merge to parent |
-| Merge child → parent | **NO** | Immediate |
-| Merge parent → main | **YES** | Immediate |
+| Action                 | Approval Required | Cleanup               |
+| ---------------------- | ----------------- | --------------------- |
+| Create parent worktree | No                | After merge to main   |
+| Create child worktree  | No                | After merge to parent |
+| Merge child → parent   | **NO**            | Immediate             |
+| Merge parent → main    | **YES**           | Immediate             |
 
 ### Naming Cheat Sheet
 
@@ -1220,6 +1262,7 @@ git branch -d worktree-plan-00028
 ---
 
 **Remember**:
+
 - Worktrees are for **parallel execution** on complex plans
 - **Parent worktrees** isolate entire plans from main project
 - **Child worktrees** allow parallel work within a plan

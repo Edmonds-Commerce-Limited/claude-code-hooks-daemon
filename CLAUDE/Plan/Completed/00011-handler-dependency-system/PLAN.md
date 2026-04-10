@@ -27,6 +27,7 @@ Implement `shares_options_with` attribute in Handler base class to create explic
 **File**: `src/claude_code_hooks_daemon/core/handler.py`
 
 Add two new attributes to Handler `__init__`:
+
 - `shares_options_with: str | None = None` - parent handler name to inherit options from
 - `depends_on: list[str] | None = None` - list of required handler names (for future use)
 
@@ -37,6 +38,7 @@ Update `__slots__` to include these attributes.
 **File**: `src/claude_code_hooks_daemon/config/models.py`
 
 Add `@model_validator(mode="after")` to `HandlersConfig` class:
+
 - Validate that if child handler is enabled and has `shares_options_with`, parent must be enabled
 - Provide clear error messages: "Handler 'plan_number_helper' shares options with 'markdown_organization' but 'markdown_organization' is disabled"
 - Add helper function `_snake_to_class_name()` for config-to-class name conversion
@@ -48,6 +50,7 @@ Add `@model_validator(mode="after")` to `HandlersConfig` class:
 Replace hasattr() hack (lines 251-263) with generic options inheritance:
 
 **Two-pass algorithm**:
+
 1. First pass: collect all handler options into `options_registry` dict keyed by `{event_type}.{handler_name}`
 2. Second pass: register handlers
    - If handler has `shares_options_with`, lookup parent options
@@ -61,6 +64,7 @@ This eliminates the brittle `if hasattr(instance, "_track_plans_in_project"):` c
 **File**: `src/claude_code_hooks_daemon/handlers/pre_tool_use/plan_number_helper.py`
 
 Change `__init__` to declare parent relationship:
+
 ```python
 super().__init__(
     name="plan-number-helper",
@@ -120,12 +124,14 @@ plan_number_helper:
 **New Test File**: `tests/unit/handlers/test_dependency_system.py`
 
 Create comprehensive tests:
+
 - `test_shares_options_with_parent_enabled` - verify options inheritance works
 - `test_shares_options_with_parent_disabled_fails` - verify validation catches error
 - `test_child_options_override_parent` - verify child can override specific options
 - `test_missing_parent_handler_warning` - verify graceful handling of missing parent
 
 **Update Existing Tests**:
+
 - `tests/unit/handlers/test_registry.py` - add options inheritance tests
 - `tests/unit/handlers/pre_tool_use/test_plan_number_helper.py` - verify handler still works with new attribute
 
@@ -134,26 +140,28 @@ Target: Maintain 95% coverage.
 ### Phase 8: Documentation
 
 Update docs to explain dependency system:
+
 - **CLAUDE/HANDLER_DEVELOPMENT.md**: Add section on handler dependencies and options sharing
 - **CLAUDE/ARCHITECTURE.md**: Document the parent-child handler pattern
 
 ## Critical Files
 
-| File | Changes | Lines |
-|------|---------|-------|
-| `src/claude_code_hooks_daemon/core/handler.py` | Add shares_options_with, depends_on to __init__ | ~15 |
-| `src/claude_code_hooks_daemon/config/models.py` | Add dependency validator | ~60 |
-| `src/claude_code_hooks_daemon/handlers/registry.py` | Replace hasattr hack with options inheritance | ~80 |
-| `src/claude_code_hooks_daemon/handlers/pre_tool_use/plan_number_helper.py` | Add shares_options_with declaration | ~2 |
-| `src/claude_code_hooks_daemon/daemon/init_config.py` | Update templates with comments | ~20 |
-| `.claude/hooks-daemon.yaml` | Remove YAML anchors, simplify config | ~5 |
-| `tests/unit/handlers/test_dependency_system.py` | New test file for dependencies | ~120 |
+| File                                                                       | Changes                                         | Lines |
+| -------------------------------------------------------------------------- | ----------------------------------------------- | ----- |
+| `src/claude_code_hooks_daemon/core/handler.py`                             | Add shares_options_with, depends_on to __init__ | ~15   |
+| `src/claude_code_hooks_daemon/config/models.py`                            | Add dependency validator                        | ~60   |
+| `src/claude_code_hooks_daemon/handlers/registry.py`                        | Replace hasattr hack with options inheritance   | ~80   |
+| `src/claude_code_hooks_daemon/handlers/pre_tool_use/plan_number_helper.py` | Add shares_options_with declaration             | ~2    |
+| `src/claude_code_hooks_daemon/daemon/init_config.py`                       | Update templates with comments                  | ~20   |
+| `.claude/hooks-daemon.yaml`                                                | Remove YAML anchors, simplify config            | ~5    |
+| `tests/unit/handlers/test_dependency_system.py`                            | New test file for dependencies                  | ~120  |
 
 **Total**: ~300 lines across 7 files
 
 ## Verification Steps
 
 ### 1. Config Validation Test
+
 ```bash
 # Test: Parent disabled, child enabled should fail
 cat > /tmp/test-config.yaml << 'EOF'
@@ -176,6 +184,7 @@ except ValueError as e:
 ```
 
 ### 2. Options Inheritance Test
+
 ```bash
 # Test: Child inherits parent options
 python -c "
@@ -213,12 +222,14 @@ print(f'✓ Child inherited: {handler._track_plans_in_project}')
 ```
 
 ### 3. Full QA Suite
+
 ```bash
 ./scripts/qa/run_all.sh
 # Expected: All tests pass, 95%+ coverage maintained
 ```
 
 ### 4. Daemon Restart Test
+
 ```bash
 # Update config and restart daemon
 vim .claude/hooks-daemon.yaml  # Remove YAML anchors
@@ -228,6 +239,7 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli status
 ```
 
 ### 5. Integration Test
+
 Try to trigger plan_number_helper handler and verify it works correctly with inherited options.
 
 ## Benefits
@@ -251,6 +263,7 @@ Try to trigger plan_number_helper handler and verify it works correctly with inh
 ## Migration Path
 
 Existing configs using YAML anchors continue to work:
+
 - If child has explicit options, they're used (backward compatible)
 - If child options are empty/missing, inherited from parent (new behavior)
 - No breaking changes
@@ -258,11 +271,13 @@ Existing configs using YAML anchors continue to work:
 ## Risk Assessment
 
 **Low Risk**:
+
 - Config validation (catches errors early, clear messages)
 - Handler base class changes (additive, backward compatible)
 - Template updates (documentation only)
 
 **Medium Risk**:
+
 - Registry refactor (two-pass algorithm, options injection)
   - Mitigation: Comprehensive tests, verify existing handlers still work
 

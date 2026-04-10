@@ -13,11 +13,13 @@ The `markdown_organization` PreToolUse handler blocks writes to Claude Code's au
 ## Problem
 
 When an agent tries to save learnings to the auto memory file:
+
 ```
 Write to: /root/.claude/projects/-workspace/memory/MEMORY.md
 ```
 
 The markdown_organization handler blocks it with:
+
 ```
 MARKDOWN FILE IN WRONG LOCATION
 This location is NOT allowed.
@@ -70,12 +72,14 @@ This prevents agents from building persistent memory across sessions, which is a
 The fix was already implemented in the codebase. The `matches()` method in `markdown_organization.py` (lines 354-362) checks if a file path is outside the project root using `Path.relative_to()` and returns `False` (doesn't match) for paths outside the project.
 
 **Key implementation details**:
+
 - Absolute paths are checked to see if they're under `ProjectContext.project_root()`
 - If `path.relative_to(project_root)` raises `ValueError`, the path is outside the project
 - Handler returns `False` for outside-project paths, allowing the write to proceed
 - Project-relative paths continue to be validated for correct markdown organization
 
 **Tests verified**:
+
 - `test_matches_returns_false_for_paths_outside_project_root` ✅
 - `test_matches_returns_false_for_claude_auto_memory` ✅
 - `test_matches_returns_false_for_any_absolute_path_outside_project` ✅

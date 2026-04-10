@@ -16,6 +16,7 @@ When a hooks-daemon-based project is freshly cloned, the committed `.claude/hook
 This is **wrong advice** for a fresh clone — the daemon has never been installed and `restart` will fail. The LLM needs to be guided to read and follow `CLAUDE/LLM-INSTALL.md` instead.
 
 CI environments are already handled:
+
 - `ci_enabled: false` (default) + CI env vars → silent passthrough mode ✅
 - `ci_enabled: true` → hard STOP with install instructions ✅
 
@@ -69,6 +70,7 @@ _is_daemon_installed() {
 ```
 
 This correctly handles:
+
 - Fresh clone (no `hooks-daemon/` dir at all) → not installed
 - Broken partial install (dir exists, venv missing) → not installed → guide to reinstall
 - Installed but crashed → installed, fail → "restart" advice (unchanged)
@@ -80,6 +82,7 @@ This correctly handles:
 - [x] ✅ **Task 1.1**: Add global flag `_HOOKS_DAEMON_NOT_INSTALLED=false` near `_HOOKS_DAEMON_CI_ENFORCED=false` (line ~21)
 
 - [x] ✅ **Task 1.2**: Add `_is_daemon_installed()` helper function (after `_is_ci_environment()`, around line 445):
+
   ```bash
   _is_daemon_installed() {
       [[ -d "$HOOKS_DAEMON_ROOT_DIR" ]] && [[ -f "$PYTHON_CMD" ]]
@@ -87,6 +90,7 @@ This correctly handles:
   ```
 
 - [x] ✅ **Task 1.3**: Update `ensure_daemon()` non-CI failure branch (around line 555) to detect not-installed state before returning 1:
+
   ```bash
   # Non-CI environment: fail with error so agent sees it and can act
   # Distinguish not-installed (fresh clone) from installed-but-broken
@@ -97,6 +101,7 @@ This correctly handles:
   ```
 
 - [x] ✅ **Task 1.4**: Add "not installed" message branch in `emit_hook_error()` between the CI-enforced branch and the standard branch (around line 51):
+
   ```bash
   elif [[ "$_HOOKS_DAEMON_NOT_INSTALLED" == "true" ]]; then
       context_msg=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s' \
@@ -114,10 +119,12 @@ This correctly handles:
   ```
 
   For the JSON output section (around line 92), add corresponding branch:
+
   - PreToolUse: fail-open advisory context (same as standard not-running, but "not installed" message)
   - Stop/SubagentStop: block (same as standard not-running)
 
 - [x] ✅ **Task 1.5**: Verify shellcheck passes on the modified `init.sh`
+
   ```bash
   shellcheck .claude/init.sh
   ```
@@ -125,6 +132,7 @@ This correctly handles:
 ### Phase 2: Verification
 
 - [x] ✅ **Task 2.1**: Daemon restart verification — confirm daemon still starts cleanly
+
   ```bash
   $PYTHON -m claude_code_hooks_daemon.daemon.cli restart
   $PYTHON -m claude_code_hooks_daemon.daemon.cli status
@@ -132,6 +140,7 @@ This correctly handles:
   ```
 
 - [x] ✅ **Task 2.2**: Manual test — simulate not-installed by checking what `emit_hook_error` outputs with flag set:
+
   ```bash
   # Source init.sh, set flag, call emit_hook_error, verify output JSON
   bash -c '
@@ -143,6 +152,7 @@ This correctly handles:
   ```
 
 - [x] ✅ **Task 2.3**: Manual test — verify not-running case still shows restart guidance (flag not set):
+
   ```bash
   bash -c '
     source .claude/init.sh 2>/dev/null || true
@@ -153,6 +163,7 @@ This correctly handles:
   ```
 
 - [x] ✅ **Task 2.4**: Manual test — verify CI enforced case unchanged:
+
   ```bash
   bash -c '
     source .claude/init.sh 2>/dev/null || true
@@ -175,6 +186,7 @@ This correctly handles:
 - [x] ✅ **Task 4.1**: Check if the `init.sh` path is tested via `generate-playbook` — it's a shell script so won't appear in Python handler playbook. Document the manual verification steps from Phase 2 as the acceptance test record.
 
 - [x] ✅ **Task 4.2**: Commit with clear message:
+
   ```
   Fix: fresh-clone shows install guidance instead of restart advice
   ```
@@ -182,6 +194,7 @@ This correctly handles:
 ## Message Design
 
 ### Not installed (new)
+
 ```
 HOOKS DAEMON: Not installed
 
@@ -200,6 +213,7 @@ After installing, the daemon starts automatically on the next hook event.
 **Stop/SubagentStop**: block — don't let session end silently with safety inactive
 
 ### Not running (unchanged)
+
 ```
 HOOKS DAEMON: Not currently running
 ...
@@ -207,6 +221,7 @@ TO FIX: Run: python -m claude_code_hooks_daemon.daemon.cli restart
 ```
 
 ### CI enforced (unchanged)
+
 ```
 STOP - DO NOT PROCEED
 ...
@@ -223,8 +238,8 @@ STOP - DO NOT PROCEED
 
 ## Files Changed
 
-| File | Change |
-|------|--------|
+| File              | Change                                                                                     |
+| ----------------- | ------------------------------------------------------------------------------------------ |
 | `.claude/init.sh` | Add flag, helper fn, detection in ensure_daemon(), new message branch in emit_hook_error() |
 
 No Python files, no config changes, no new handlers.

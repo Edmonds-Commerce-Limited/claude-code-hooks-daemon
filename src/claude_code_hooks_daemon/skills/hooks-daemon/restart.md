@@ -15,6 +15,7 @@ configuration once at startup and caches it in memory. Changes to the config fil
 are not picked up until the daemon is restarted.
 
 Common reasons to restart:
+
 - Edited `.claude/hooks-daemon.yaml` to enable/disable handlers or change priorities
 - Added or modified project-level handlers in `.claude/project-handlers/`
 - Daemon appears unresponsive or is producing unexpected results
@@ -36,6 +37,7 @@ the bash scripts directly (no blocking, no errors).
 ```
 
 Expected output:
+
 ```
 ✅ Daemon Status: RUNNING (PID: 12345)
 ✅ Handlers Loaded: 67 (63 library + 4 project)

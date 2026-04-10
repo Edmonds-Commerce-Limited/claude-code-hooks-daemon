@@ -23,6 +23,7 @@ python -m claude_code_hooks_daemon.daemon.cli config-validate
 ```
 
 **Expected healthy output from `status`:**
+
 ```
 Daemon: RUNNING
 PID: 12345
@@ -59,6 +60,7 @@ python -m claude_code_hooks_daemon.daemon.cli config-validate
 ```
 
 If validation fails, fix the errors in `.claude/hooks-daemon.yaml`. Common YAML issues:
+
 - Incorrect indentation (YAML uses spaces, not tabs)
 - Missing colons after keys
 - Boolean values must be `true`/`false` (not `yes`/`no`)
@@ -161,6 +163,7 @@ python -m claude_code_hooks_daemon.daemon.cli logs
 ```
 
 If the daemon is receiving requests, you will see log lines like:
+
 ```
 Routing PreToolUse event to chain with 17 handlers
 ```
@@ -370,12 +373,12 @@ python -m claude_code_hooks_daemon.daemon.cli logs
 
 ### Log levels
 
-| Level | What it shows |
-|-------|--------------|
-| `DEBUG` | Everything: handler matching, dispatch chains, request details |
-| `INFO` | Normal operations: startup, shutdown, handler blocks, warnings |
-| `WARNING` | Issues that need attention but are not critical |
-| `ERROR` | Failures that affect functionality |
+| Level     | What it shows                                                  |
+| --------- | -------------------------------------------------------------- |
+| `DEBUG`   | Everything: handler matching, dispatch chains, request details |
+| `INFO`    | Normal operations: startup, shutdown, handler blocks, warnings |
+| `WARNING` | Issues that need attention but are not critical                |
+| `ERROR`   | Failures that affect functionality                             |
 
 ### Changing log level
 
@@ -432,6 +435,7 @@ python -m claude_code_hooks_daemon.daemon.cli logs
 ```
 
 5. Look for lines showing:
+
    - Which event type was routed
    - How many handlers were in the chain
    - Which handlers matched
@@ -455,6 +459,7 @@ For targeted debugging of specific scenarios:
 ```
 
 This script:
+
 - Temporarily enables DEBUG logging
 - Injects boundary markers into the logs
 - Filters to show only logs from your test session
@@ -703,19 +708,19 @@ File issues on the GitHub repository with:
 
 ### CLI command reference
 
-| Command | Description |
-|---------|-------------|
-| `status` | Check if daemon is running, show PID and socket path |
-| `start` | Start daemon in background |
-| `stop` | Stop the running daemon |
-| `restart` | Stop and start the daemon |
-| `logs` | View in-memory log buffer |
-| `health` | Check daemon health (memory, uptime) |
-| `handlers` | List all registered handlers |
-| `config` | Show loaded configuration |
-| `config-validate` | Validate config against schema |
-| `config-diff` | Compare your config to default |
-| `config-merge` | Merge new defaults into your config |
-| `init-config` | Generate a configuration template |
-| `repair` | Repair broken virtual environment |
-| `generate-playbook` | Generate acceptance test playbook |
+| Command             | Description                                          |
+| ------------------- | ---------------------------------------------------- |
+| `status`            | Check if daemon is running, show PID and socket path |
+| `start`             | Start daemon in background                           |
+| `stop`              | Stop the running daemon                              |
+| `restart`           | Stop and start the daemon                            |
+| `logs`              | View in-memory log buffer                            |
+| `health`            | Check daemon health (memory, uptime)                 |
+| `handlers`          | List all registered handlers                         |
+| `config`            | Show loaded configuration                            |
+| `config-validate`   | Validate config against schema                       |
+| `config-diff`       | Compare your config to default                       |
+| `config-merge`      | Merge new defaults into your config                  |
+| `init-config`       | Generate a configuration template                    |
+| `repair`            | Repair broken virtual environment                    |
+| `generate-playbook` | Generate acceptance test playbook                    |

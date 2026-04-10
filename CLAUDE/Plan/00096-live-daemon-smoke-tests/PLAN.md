@@ -61,11 +61,11 @@ DECISION=$(echo "$RESPONSE" | jq -r '.decision // empty')
 
 ### The Three Core Probes
 
-| Probe | Input | Expected | What it catches |
-|-------|-------|----------|-----------------|
-| **Stop (no explanation)** | `Stop, stop_hook_active:false, no transcript` | `decision=block, reason contains STOPPING` | Stale daemon, handler disabled, wrong code path |
-| **Stop (loop guard)** | `Stop, stop_hook_active:true` | `{}` (empty/allow) | Loop guard regression — if this blocks, infinite loops occur |
-| **PreToolUse (destructive git)** | `Bash, command="git reset --hard HEAD"` | `decision=block` | Blocking handler down, stale code, import error |
+| Probe                            | Input                                         | Expected                                   | What it catches                                              |
+| -------------------------------- | --------------------------------------------- | ------------------------------------------ | ------------------------------------------------------------ |
+| **Stop (no explanation)**        | `Stop, stop_hook_active:false, no transcript` | `decision=block, reason contains STOPPING` | Stale daemon, handler disabled, wrong code path              |
+| **Stop (loop guard)**            | `Stop, stop_hook_active:true`                 | `{}` (empty/allow)                         | Loop guard regression — if this blocks, infinite loops occur |
+| **PreToolUse (destructive git)** | `Bash, command="git reset --hard HEAD"`       | `decision=block`                           | Blocking handler down, stale code, import error              |
 
 ## Tasks
 
@@ -73,6 +73,7 @@ DECISION=$(echo "$RESPONSE" | jq -r '.decision // empty')
 
 - [ ] ⬜ **Task 1.1**: Write `tests/unit/qa/test_smoke_test.py` — unit tests for the
   probe logic using subprocess mocks. Tests should cover:
+
   - All 3 probes pass → exit 0
   - Probe 1 fails (daemon down) → exit 1 with clear message
   - Probe 2 returns `decision=block` (loop guard broken) → exit 1
@@ -80,6 +81,7 @@ DECISION=$(echo "$RESPONSE" | jq -r '.decision // empty')
   - Daemon socket missing → exit 1 with "daemon not running" message
 
 - [ ] ⬜ **Task 1.2**: Implement `scripts/qa/run_smoke_test.sh`:
+
   - Source socket path from daemon (same lookup as hook scripts)
   - Check socket exists before probing (fast-fail with actionable message)
   - Run 3 probes in sequence, report PASS/FAIL per probe
@@ -91,6 +93,7 @@ DECISION=$(echo "$RESPONSE" | jq -r '.decision // empty')
 ### Phase 2: Integration with llm_qa.py
 
 - [ ] ⬜ **Task 2.1**: Add `smoke_test` to `scripts/qa/llm_qa.py`:
+
   - Add as check 9 (after `error_hiding`, before summary)
   - Use same JSON output pattern as other checks
   - Key: `smoke_test`, label: `Smoke Test (live daemon)`
@@ -103,6 +106,7 @@ DECISION=$(echo "$RESPONSE" | jq -r '.decision // empty')
   as step 9
 
 - [ ] ⬜ **Task 2.4**: Verify the smoke test shows in `llm_qa.py all` output:
+
   ```
   ✅ smoke_test: 3/3 probes passed
   ```
@@ -110,11 +114,13 @@ DECISION=$(echo "$RESPONSE" | jq -r '.decision // empty')
 ### Phase 3: QA + Daemon Verification
 
 - [ ] ⬜ **Task 3.1**: Run full QA suite — all 9 checks must pass:
+
   ```bash
   ./scripts/qa/llm_qa.py all
   ```
 
 - [ ] ⬜ **Task 3.2**: Confirm smoke test fails as expected when daemon is stopped:
+
   ```bash
   $PYTHON -m claude_code_hooks_daemon.daemon.cli stop
   ./scripts/qa/run_smoke_test.sh
@@ -123,6 +129,7 @@ DECISION=$(echo "$RESPONSE" | jq -r '.decision // empty')
   ```
 
 - [ ] ⬜ **Task 3.3**: Daemon restart verification:
+
   ```bash
   $PYTHON -m claude_code_hooks_daemon.daemon.cli restart
   $PYTHON -m claude_code_hooks_daemon.daemon.cli status
@@ -139,9 +146,9 @@ DECISION=$(echo "$RESPONSE" | jq -r '.decision // empty')
 
 ## Files Changed
 
-| File | Change |
-|------|--------|
-| `scripts/qa/run_smoke_test.sh` | New: 3-probe live daemon smoke test |
-| `scripts/qa/llm_qa.py` | Add smoke_test as check 9 |
-| `scripts/qa/run_all.sh` | Add run_smoke_test.sh as step 9 |
+| File                               | Change                               |
+| ---------------------------------- | ------------------------------------ |
+| `scripts/qa/run_smoke_test.sh`     | New: 3-probe live daemon smoke test  |
+| `scripts/qa/llm_qa.py`             | Add smoke_test as check 9            |
+| `scripts/qa/run_all.sh`            | Add run_smoke_test.sh as step 9      |
 | `tests/unit/qa/test_smoke_test.py` | New: unit tests for smoke test logic |

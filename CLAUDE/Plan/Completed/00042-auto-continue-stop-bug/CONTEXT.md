@@ -19,6 +19,7 @@ The `auto_continue_stop` handler is configured and enabled but FAILED to fire wh
 ```
 
 Key fields:
+
 - `preventedContinuation: false` - NO handler blocked the stop
 - `hookErrors: []` - No errors from hook execution
 - `hasOutput: true` - Hook DID produce output (daemon responded)
@@ -27,6 +28,7 @@ Key fields:
 ### The Message That Should Have Triggered
 
 Claude's last assistant message before the Stop event:
+
 ```
 **Next Phase**: Phase 2 - Python Config Preservation Engine (4 modules using TDD)
 - `config_differ.py` - Extract user customizations vs version example
@@ -46,6 +48,7 @@ This SHOULD match (case-insensitive regex).
 ## Unit Tests PASS
 
 Tests written at `tests/unit/handlers/stop/test_auto_continue_stop_bug.py` all PASS:
+
 - `test_bug_should_i_proceed_pattern_not_matching` - PASSES (handler matches correctly in isolation)
 - `test_bug_variations_of_should_i_proceed` - PASSES
 - `test_should_not_match_error_patterns` - PASSES
@@ -55,6 +58,7 @@ This means the handler's `matches()` and `handle()` logic is CORRECT in isolatio
 ## Handler Configuration
 
 From `.claude/hooks-daemon.yaml`:
+
 ```yaml
 stop:
     auto_continue_stop:
@@ -63,6 +67,7 @@ stop:
 ```
 
 Handler imports and instantiates correctly:
+
 ```
 Handler loaded: HandlerIDMeta(class_name='AutoContinueStopHandler', config_key='auto_continue_stop', display_name='auto-continue-stop'), priority: 15
 ```
@@ -74,6 +79,7 @@ NOTE: Config says priority 10, but handler __init__ uses Priority.AUTO_CONTINUE_
 File: `src/claude_code_hooks_daemon/handlers/stop/auto_continue_stop.py`
 
 Key `matches()` logic:
+
 1. Check `stop_hook_active` is False (prevent infinite loops)
 2. Get `transcript_path` from hook_input
 3. Read last assistant message from transcript JSONL

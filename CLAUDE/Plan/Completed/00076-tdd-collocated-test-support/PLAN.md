@@ -28,11 +28,11 @@ tdd_enforcement:
 
 ### Files to Modify
 
-| File | Change |
-|------|--------|
+| File                                               | Change                                                                                                                             |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | `src/.../handlers/pre_tool_use/tdd_enforcement.py` | Add constants, `_test_locations` attr, `_effective_test_locations` property, 2 new static methods, modify `_get_test_file_paths()` |
-| `tests/unit/handlers/test_tdd_enforcement.py` | ~30 new test methods (TDD: written first) |
-| `.claude/hooks-daemon.yaml` | Add commented `test_locations` example |
+| `tests/unit/handlers/test_tdd_enforcement.py`      | ~30 new test methods (TDD: written first)                                                                                          |
+| `.claude/hooks-daemon.yaml`                        | Add commented `test_locations` example                                                                                             |
 
 ### Files NOT Modified
 
@@ -45,6 +45,7 @@ tdd_enforcement:
 ### Phase 1: Constants + Config Option (RED → GREEN)
 
 **RED**: Add failing tests for:
+
 - Module constants: `_TEST_LOCATION_SEPARATE`, `_TEST_LOCATION_COLLOCATED`, `_TEST_LOCATION_TEST_SUBDIR`, `_TEST_SUBDIR_NAME`, `_DEFAULT_TEST_LOCATIONS`
 - `handler._test_locations` defaults to `None`
 - `handler._effective_test_locations` returns all 3 when None/empty, respects config when set
@@ -56,6 +57,7 @@ tdd_enforcement:
 ### Phase 2: Collocated Path Method (RED → GREEN)
 
 **RED**: Add failing tests for `_map_collocated_test_path(source_path, test_filename)`:
+
 - Same directory as source: `src/pkg/utils/helpers.ts` → `src/pkg/utils/helpers.test.ts`
 - Works for Python, Go, deeply nested paths
 
@@ -66,6 +68,7 @@ tdd_enforcement:
 ### Phase 3: Test Subdir Path Method (RED → GREEN)
 
 **RED**: Add failing tests for `_map_test_subdir_path(source_path, test_filename)`:
+
 - `__tests__/` subdir: `src/pkg/utils/helpers.ts` → `src/pkg/utils/__tests__/helpers.test.ts`
 - Works for all languages
 
@@ -76,6 +79,7 @@ tdd_enforcement:
 ### Phase 4: Wire Into `_get_test_file_paths()` (RED → GREEN)
 
 **RED**: Add failing tests for:
+
 - `_get_test_file_paths()` includes collocated candidate in results
 - `_get_test_file_paths()` includes `__tests__/` candidate in results
 - Config `["separate"]` excludes collocated/test_subdir candidates

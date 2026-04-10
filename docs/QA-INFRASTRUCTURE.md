@@ -40,6 +40,7 @@ Comprehensive QA infrastructure with JSON output logging for the daemon project.
 **Output**: `untracked/qa/lint.json`
 
 **Format**:
+
 ```json
 {
   "tool": "ruff",
@@ -65,6 +66,7 @@ Comprehensive QA infrastructure with JSON output logging for the daemon project.
 ```
 
 **Exit Code**:
+
 - `0` = No violations
 - `1` = Violations found
 
@@ -75,6 +77,7 @@ Comprehensive QA infrastructure with JSON output logging for the daemon project.
 **Output**: `untracked/qa/type_check.json`
 
 **Format**:
+
 ```json
 {
   "tool": "mypy",
@@ -97,6 +100,7 @@ Comprehensive QA infrastructure with JSON output logging for the daemon project.
 ```
 
 **Exit Code**:
+
 - `0` = No type errors
 - `1` = Type errors found
 
@@ -105,10 +109,12 @@ Comprehensive QA infrastructure with JSON output logging for the daemon project.
 **Purpose**: Run pytest test suite with coverage reporting
 
 **Output**:
+
 - `untracked/qa/tests.json` - Test results
 - `untracked/qa/coverage.json` - Coverage data
 
 **Format**:
+
 ```json
 {
   "tool": "pytest",
@@ -135,6 +141,7 @@ Comprehensive QA infrastructure with JSON output logging for the daemon project.
 ```
 
 **Exit Code**:
+
 - `0` = All tests passed
 - `1` = Tests failed
 
@@ -145,6 +152,7 @@ Comprehensive QA infrastructure with JSON output logging for the daemon project.
 **Output**: `untracked/qa/format.json`
 
 **Format**:
+
 ```json
 {
   "tool": "black",
@@ -162,6 +170,7 @@ Comprehensive QA infrastructure with JSON output logging for the daemon project.
 ```
 
 **Exit Code**:
+
 - `0` = All files formatted correctly
 - `1` = Formatting issues found
 
@@ -170,6 +179,7 @@ Comprehensive QA infrastructure with JSON output logging for the daemon project.
 **Purpose**: Run ALL QA checks in sequence and provide summary
 
 **Execution Order**:
+
 1. Format Check
 2. Linter
 3. Type Checker
@@ -178,6 +188,7 @@ Comprehensive QA infrastructure with JSON output logging for the daemon project.
 **Output**: All JSON files in `untracked/qa/`
 
 **Console Output**:
+
 ```
 ========================================
 Running ALL QA Checks
@@ -211,6 +222,7 @@ Overall Status: ❌ SOME CHECKS FAILED
 ```
 
 **Exit Code**:
+
 - `0` = ALL checks passed
 - `1` = At least one check failed
 
@@ -309,6 +321,7 @@ All QA infrastructure is tested following TDD principles.
 **Test File**: `tests/test_qa_scripts.py`
 
 **Test Coverage**:
+
 - Directory structure exists
 - Scripts exist and are executable
 - Scripts create JSON output files
@@ -317,6 +330,7 @@ All QA infrastructure is tested following TDD principles.
 - `run_all.sh` runs all checks
 
 **Run Tests**:
+
 ```bash
 # Run QA infrastructure tests
 python3 -m pytest tests/test_qa_scripts.py -v

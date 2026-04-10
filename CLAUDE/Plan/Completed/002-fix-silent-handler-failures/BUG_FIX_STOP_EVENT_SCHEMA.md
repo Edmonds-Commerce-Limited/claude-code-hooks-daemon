@@ -68,11 +68,13 @@ def generate_daemon_error_response(
 ### 2. Updated `init.sh`
 
 **Before** (73 lines of duplicated code):
+
 - Bash `emit_hook_error()` with jq - 48 lines
 - Bash fallback without jq - 3 lines
 - Python `emit_error_json()` - 22 lines
 
 **After** (6 lines total):
+
 ```bash
 emit_hook_error() {
     # Uses Python utility for event-specific formatting
@@ -84,6 +86,7 @@ emit_hook_error() {
 ### 3. Comprehensive Test Coverage
 
 Added `tests/unit/core/test_error_response.py` with 27 tests:
+
 - Event-specific format validation for all 10 event types
 - Schema compliance verification using `validate_response()`
 - CLI interface testing

@@ -25,28 +25,31 @@ Multiple handlers contain project-specific assumptions (hardcoded paths, Python-
 
 ## Document Overview
 
-| Document | Purpose | Lines |
-|----------|---------|-------|
-| **PLAN.md** | Complete plan with tasks, decisions, phases | 453 |
-| **INVESTIGATION.md** | Detailed analysis of all affected handlers | 441 |
-| **EXAMPLES.md** | Configuration examples for different project types | 440 |
-| **IMPLEMENTATION.md** | Detailed code changes and migration guide | 693 |
+| Document              | Purpose                                            | Lines |
+| --------------------- | -------------------------------------------------- | ----- |
+| **PLAN.md**           | Complete plan with tasks, decisions, phases        | 453   |
+| **INVESTIGATION.md**  | Detailed analysis of all affected handlers         | 441   |
+| **EXAMPLES.md**       | Configuration examples for different project types | 440   |
+| **IMPLEMENTATION.md** | Detailed code changes and migration guide          | 693   |
 
 **Total Documentation**: 2,027 lines
 
 ## Quick Start
 
 ### For Reviewers
+
 1. Read **PLAN.md** (overview, goals, tasks)
 2. Skim **INVESTIGATION.md** (understand scope)
 3. Review **Technical Decisions** section in PLAN.md
 
 ### For Implementers
+
 1. Start with **IMPLEMENTATION.md** (detailed code changes)
 2. Reference **EXAMPLES.md** (see how it works)
 3. Follow **Tasks** section in PLAN.md
 
 ### For Users (After Implementation)
+
 1. Read **EXAMPLES.md** (find your project type)
 2. Update `.claude/hooks-daemon.yaml` with your paths
 3. Test with: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`

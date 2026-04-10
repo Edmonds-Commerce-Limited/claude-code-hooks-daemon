@@ -25,13 +25,13 @@ LLMs read structured JSON. Both workflows coexist.
 
 Use an `llm:` or `llm-` prefix depending on the ecosystem's script runner:
 
-| Ecosystem | Runner | Convention | Examples |
-|-----------|--------|------------|----------|
-| Node.js | npm scripts | `llm:` prefix | `llm:lint`, `llm:test`, `llm:typecheck` |
-| Python | Makefile | `llm-` prefix | `llm-lint`, `llm-test`, `llm-typecheck` |
-| PHP | Composer scripts | `llm:` prefix | `llm:analyse`, `llm:test` |
-| Go | Makefile | `llm-` prefix | `llm-lint`, `llm-test`, `llm-vet` |
-| Ruby | Rake tasks | `llm:` namespace | `llm:lint`, `llm:test` |
+| Ecosystem | Runner           | Convention       | Examples                                |
+| --------- | ---------------- | ---------------- | --------------------------------------- |
+| Node.js   | npm scripts      | `llm:` prefix    | `llm:lint`, `llm:test`, `llm:typecheck` |
+| Python    | Makefile         | `llm-` prefix    | `llm-lint`, `llm-test`, `llm-typecheck` |
+| PHP       | Composer scripts | `llm:` prefix    | `llm:analyse`, `llm:test`               |
+| Go        | Makefile         | `llm-` prefix    | `llm-lint`, `llm-test`, `llm-vet`       |
+| Ruby      | Rake tasks       | `llm:` namespace | `llm:lint`, `llm:test`                  |
 
 The prefix makes LLM commands instantly discoverable and distinguishable from
 human commands.
@@ -48,6 +48,7 @@ Line 4: (optional) Additional jq example or schema hint
 ```
 
 **Example output (passing)**:
+
 ```
 OK 45 files checked, 0 errors, 3 warnings
 Details: ./var/qa/eslint-cache.json
@@ -55,6 +56,7 @@ Query: jq '.[] | select(.warningCount > 0) | .filePath' ./var/qa/eslint-cache.js
 ```
 
 **Example output (failing)**:
+
 ```
 FAIL 45 files checked, 12 errors, 3 warnings
 Details: ./var/qa/eslint-cache.json
@@ -97,6 +99,7 @@ ESLint has native JSON output via `--format json`:
 ```
 
 **Common jq queries for ESLint JSON**:
+
 ```bash
 # Files with errors
 jq '.[] | select(.errorCount > 0) | .filePath' ./var/qa/eslint-cache.json
@@ -122,6 +125,7 @@ Jest has native JSON output via `--json`:
 ```
 
 **Common jq queries for Jest JSON**:
+
 ```bash
 # Failed test files
 jq '.testResults[] | select(.status != "passed") | .name' ./var/qa/jest-results.json
@@ -348,6 +352,7 @@ project-root/
 ```
 
 Add to `.gitignore`:
+
 ```
 var/
 ```
@@ -366,19 +371,19 @@ To add LLM command wrappers to your project:
 
 ## Tool JSON Support Reference
 
-| Tool | Native JSON | Flag | Notes |
-|------|-------------|------|-------|
-| ESLint | Yes | `--format json` | Array of file results |
-| Jest | Yes | `--json` | Single result object |
-| Vitest | Yes | `--reporter json` | Jest-compatible format |
-| tsc | No | N/A | Requires text parsing wrapper |
-| Ruff | Yes | `--output-format json` | Array of violations |
-| mypy | Yes | `--output json` | NDJSON (one object per line, mypy 1.5+) |
-| pytest | Plugin | `pytest-json-report` | Requires plugin install |
-| PHPStan | Yes | `--error-format=json` | Object with files and totals |
-| PHPUnit | Partial | `--log-junit` (XML) | No native JSON; XML available |
-| golangci-lint | Yes | `--out-format json` | Object with Issues array |
-| go test | Yes | `-json` | NDJSON (one event per line) |
-| RuboCop | Yes | `--format json` | Object with files array |
-| Bandit | Yes | `--format json` | Object with results array |
-| Black | No | `--check --diff` | Requires text parsing wrapper |
+| Tool          | Native JSON | Flag                   | Notes                                   |
+| ------------- | ----------- | ---------------------- | --------------------------------------- |
+| ESLint        | Yes         | `--format json`        | Array of file results                   |
+| Jest          | Yes         | `--json`               | Single result object                    |
+| Vitest        | Yes         | `--reporter json`      | Jest-compatible format                  |
+| tsc           | No          | N/A                    | Requires text parsing wrapper           |
+| Ruff          | Yes         | `--output-format json` | Array of violations                     |
+| mypy          | Yes         | `--output json`        | NDJSON (one object per line, mypy 1.5+) |
+| pytest        | Plugin      | `pytest-json-report`   | Requires plugin install                 |
+| PHPStan       | Yes         | `--error-format=json`  | Object with files and totals            |
+| PHPUnit       | Partial     | `--log-junit` (XML)    | No native JSON; XML available           |
+| golangci-lint | Yes         | `--out-format json`    | Object with Issues array                |
+| go test       | Yes         | `-json`                | NDJSON (one event per line)             |
+| RuboCop       | Yes         | `--format json`        | Object with files array                 |
+| Bandit        | Yes         | `--format json`        | Object with results array               |
+| Black         | No          | `--check --diff`       | Requires text parsing wrapper           |

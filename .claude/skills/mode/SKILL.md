@@ -1,8 +1,6 @@
 ---
-name: mode
-description: Get or set daemon operating mode - switch between default and unattended (blocks Stop events)
-argument-hint: "[get|unattended|default] [message]"
----
+
+## name: mode description: Get or set daemon operating mode - switch between default and unattended (blocks Stop events) argument-hint: "[get|unattended|default] [message]"
 
 # /mode - Daemon Mode Management
 
@@ -29,14 +27,15 @@ View or change the daemon's operating mode. Supports `default` (normal operation
 
 ## Modes
 
-| Mode | Behavior |
-|------|----------|
-| `default` | Normal operation - all handlers process events as configured |
+| Mode         | Behavior                                                                       |
+| ------------ | ------------------------------------------------------------------------------ |
+| `default`    | Normal operation - all handlers process events as configured                   |
 | `unattended` | Blocks Stop events unconditionally to keep Claude working without interruption |
 
 ## What Unattended Mode Does
 
 When enabled, a **mode interceptor** runs before the handler chain on every event:
+
 - **Stop events**: Blocked with a DENY response instructing Claude to continue working
 - **SubagentStop events**: NOT blocked (subagents should stop normally)
 - **All other events**: Pass through to normal handler chain unchanged
@@ -70,11 +69,13 @@ fi
 The skill communicates with the daemon via Unix socket system requests:
 
 **Get mode:**
+
 ```json
 {"event": "_system", "hook_input": {"action": "get_mode"}}
 ```
 
 **Set mode:**
+
 ```json
 {"event": "_system", "hook_input": {"action": "set_mode", "mode": "unattended", "custom_message": "optional"}}
 ```
@@ -82,17 +83,20 @@ The skill communicates with the daemon via Unix socket system requests:
 ## Output
 
 ### On get mode:
+
 ```
 Mode: default
 ```
 
 ### On set unattended:
+
 ```
 Mode: unattended (changed)
 Message: finish the release
 ```
 
 ### On set default:
+
 ```
 Mode: default (changed)
 ```

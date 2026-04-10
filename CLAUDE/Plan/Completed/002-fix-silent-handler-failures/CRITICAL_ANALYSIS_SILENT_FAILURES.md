@@ -42,6 +42,7 @@ Real events have `tool_response`, not `tool_output`. The handler gets an empty d
 ### 1. No Input Schema Validation
 
 **Current State**:
+
 - ✅ Response schemas exist (`response_schemas.py`)
 - ✅ Responses to Claude Code are validated
 - ❌ **NO INPUT VALIDATION** - incoming hook_input is not validated
@@ -79,11 +80,13 @@ tool_output = hook_input.get("tool_output", {})  # Returns {} if missing
 **Status**: SILENTLY BROKEN
 
 **Issue**:
+
 - Uses: `tool_output` (WRONG)
 - Real events have: `tool_response` (CORRECT)
 - Also expects: `exit_code` field that doesn't exist
 
 **Impact**:
+
 - Error detection completely non-functional
 - Never detects Bash errors or warnings
 - Always returns ALLOW
@@ -95,10 +98,12 @@ tool_output = hook_input.get("tool_output", {})  # Returns {} if missing
 **Status**: NEVER MATCHES
 
 **Issue**:
+
 - Uses: `permission_type` and `resource` fields (WRONG)
 - Real events have: `permission_suggestions` field (CORRECT)
 
 **Impact**:
+
 - Handler.matches() always returns False
 - Never executes at all
 - Completely non-functional
@@ -110,11 +115,13 @@ tool_output = hook_input.get("tool_output", {})  # Returns {} if missing
 **Status**: WORKS BUT TESTS WRONG
 
 **Issue**:
+
 - Handler works (generic, passes through all fields)
 - Tests use: `severity` field (WRONG)
 - Real events have: `notification_type` field (CORRECT)
 
 **Impact**:
+
 - Handler functional in production
 - Tests validate wrong data structure
 - False sense of test coverage
@@ -178,18 +185,22 @@ hook_input = {
 ### How Did This Happen?
 
 1. **Handlers written before debugging real events**
+
    - Developers assumed what fields would be present
    - No actual Claude Code events captured
 
 2. **No input schema validation**
+
    - Only response schemas exist
    - Input structure never validated
 
 3. **Tests written to match handler code**
+
    - TDD done against assumptions, not reality
    - Test data matches handler expectations, not Claude Code events
 
 4. **Fail-open design masks errors**
+
    - Missing data returns empty values, not exceptions
    - Default to ALLOW hides problems
 
@@ -221,34 +232,41 @@ if errors:
 ### Immediate Actions
 
 1. **Fix broken handlers** (dispatch python-developer agents)
+
    - BashErrorDetectorHandler: tool_output → tool_response, remove exit_code dependency
    - AutoApproveReadsHandler: permission_type → permission_suggestions
    - NotificationLoggerHandler tests: severity → notification_type
 
 2. **Add input schema validation**
+
    - Create `input_schemas.py` alongside `response_schemas.py`
    - Validate hook_input in server.py before dispatch
    - Log validation errors, return errors to Claude Code
 
 3. **Update debug_hooks.sh script**
+
    - Remove config file copying (use HOOKS_DAEMON_LOG_LEVEL env var)
    - Already implemented by python-developer agent
 
 ### Long-Term Prevention
 
 1. **Debug-first development**
+
    - ALWAYS capture real events with `scripts/debug_hooks.sh` BEFORE writing handlers
    - Document in CLAUDE/DEBUGGING_HOOKS.md (already exists)
 
 2. **Input validation in tests**
+
    - Add fixtures from real captured events
    - Validate test fixtures match real event structure
 
 3. **Integration tests with real event data**
+
    - Test against captured real events, not mock data
    - Detect field name mismatches
 
 4. **Monitoring and alerting**
+
    - Log when handlers match but return empty results
    - Alert when handlers never match expected events
 

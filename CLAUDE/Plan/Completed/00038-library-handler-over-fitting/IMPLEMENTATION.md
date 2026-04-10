@@ -37,6 +37,7 @@ class ProjectPathsConfig:
 ```
 
 **YAML Schema Update**:
+
 ```yaml
 # .claude/hooks-daemon.yaml
 version: 1.0
@@ -569,6 +570,7 @@ class PythonQaSuppressionBlocker(Handler):
 ```
 
 **Configuration:**
+
 ```yaml
 handlers:
   pre_tool_use:
@@ -640,6 +642,7 @@ def test_typescript_tdd_enforcement(tmp_path):
 ## Migration Checklist
 
 - [ ] Phase 1: Infrastructure
+
   - [ ] Create ProjectPathsConfig dataclass
   - [ ] Create ProjectPaths utility
   - [ ] Extend LanguageConfig with test patterns
@@ -648,14 +651,16 @@ def test_typescript_tdd_enforcement(tmp_path):
   - [ ] Write unit tests
 
 - [ ] Phase 2: TDD Handler
+
   - [ ] Refactor matches() for multi-language
-  - [ ] Refactor _get_test_file_path()
+  - [ ] Refactor \_get_test_file_path()
   - [ ] Add pattern substitution logic
   - [ ] Update error messages
   - [ ] Write comprehensive tests
   - [ ] Verify 95%+ coverage
 
 - [ ] Phase 3: Plan Handlers
+
   - [ ] Refactor ValidatePlanNumberHandler
   - [ ] Refactor PlanNumberHelperHandler
   - [ ] Refactor PlanWorkflowHandler
@@ -664,17 +669,20 @@ def test_typescript_tdd_enforcement(tmp_path):
   - [ ] Test with custom paths
 
 - [ ] Phase 4: QA Handlers
+
   - [ ] Make skip_directories configurable
   - [ ] Update all QA blockers
   - [ ] Test with custom skip dirs
 
 - [ ] Phase 5: Documentation
+
   - [ ] Update CLAUDE.md
   - [ ] Create configuration guide
   - [ ] Add multi-language examples
   - [ ] Update handler development docs
 
 - [ ] Phase 6: Validation
+
   - [ ] All tests pass
   - [ ] Daemon restarts successfully
   - [ ] This project behavior unchanged

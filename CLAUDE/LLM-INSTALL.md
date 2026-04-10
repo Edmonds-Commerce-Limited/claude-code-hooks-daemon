@@ -48,6 +48,7 @@ bash /tmp/hooks-daemon-install.sh
 > pattern as a security risk. Practice what we preach.
 
 This will:
+
 1. Validate prerequisites (git required)
 2. Clone the daemon repository to `.claude/hooks-daemon/`
 3. Delegate to the version-specific Layer 2 installer which:
@@ -64,10 +65,10 @@ This will:
 
 ### Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DAEMON_BRANCH` | `main` | Git branch or tag to install |
-| `FORCE` | `false` | Set to `true` to reinstall over existing |
+| Variable        | Default | Description                              |
+| --------------- | ------- | ---------------------------------------- |
+| `DAEMON_BRANCH` | `main`  | Git branch or tag to install             |
+| `FORCE`         | `false` | Set to `true` to reinstall over existing |
 
 ```bash
 # Install specific version
@@ -133,12 +134,14 @@ cd ../..
 ```
 
 **Files created:**
+
 - `.claude/init.sh` - Daemon lifecycle functions
 - `.claude/hooks/*` - Forwarder scripts
 - `.claude/settings.json` - Hook registration
 - `.claude/hooks-daemon.yaml` - Handler config (with container auto-detection)
 
 **Container Auto-Detection**:
+
 - During config generation, the installer detects container environments (Docker, Podman, YOLO mode)
 - If container detected, automatically enables `enforce_single_daemon_process: true`
 - In containers: Ensures only ONE daemon process runs system-wide (kills duplicates)
@@ -162,6 +165,7 @@ git commit -m "Install Claude Code Hooks Daemon" && git push
 ```
 
 **CRITICAL**:
+
 1. Verify `.claude/.gitignore` exists before `git add` or you'll commit hooks-daemon/
 2. Tell user to **restart Claude session** (exit and re-enter). Hooks won't activate until Claude reloads `.claude/settings.json`.
 3. Do NOT proceed to step 5 until session restarts.
@@ -229,14 +233,14 @@ cat /tmp/full-config.yaml
 
 Use these guidelines — when in doubt, **enable it**. Handlers can always be disabled later, but missing protection cannot be retroactively applied to code already written.
 
-| Category | Handlers | Recommendation |
-|----------|----------|----------------|
-| **Safety** (priority 10-22) | `destructive_git`, `sed_blocker`, `absolute_path`, `error_hiding_blocker`, `security_antipattern`, `curl_pipe_shell`, `pipe_blocker`, `dangerous_permissions`, `lock_file_edit_blocker`, `pip_break_system`, `sudo_pip` | **Enable ALL** — these prevent data loss and security issues |
-| **Code Quality** (priority 25-35) | `qa_suppression`, `tdd_enforcement`, `lint_on_edit` | **Enable ALL** — prevents suppressed linting, enforces TDD, validates edits |
-| **Workflow** (priority 36-55) | `npm_command`, `global_npm_advisor`, `gh_issue_comments`, `daemon_restart_verifier` | **Enable ALL** — enforces best practices |
-| **Advisory** (priority 55-60) | `british_english`, `web_search_year` | Enable based on project preferences |
-| **Session/Lifecycle** | `git_context_injector`, `bash_error_detector`, `version_check`, `optimal_config_checker` | **Enable ALL** — provides valuable context at zero cost |
-| **Planning** | `plan_workflow`, `validate_plan_number`, `plan_time_estimates`, `plan_completion_advisor`, `markdown_organization` | Enable if using the planning workflow (see Planning section below) |
+| Category                          | Handlers                                                                                                                                                                                                                | Recommendation                                                              |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| **Safety** (priority 10-22)       | `destructive_git`, `sed_blocker`, `absolute_path`, `error_hiding_blocker`, `security_antipattern`, `curl_pipe_shell`, `pipe_blocker`, `dangerous_permissions`, `lock_file_edit_blocker`, `pip_break_system`, `sudo_pip` | **Enable ALL** — these prevent data loss and security issues                |
+| **Code Quality** (priority 25-35) | `qa_suppression`, `tdd_enforcement`, `lint_on_edit`                                                                                                                                                                     | **Enable ALL** — prevents suppressed linting, enforces TDD, validates edits |
+| **Workflow** (priority 36-55)     | `npm_command`, `global_npm_advisor`, `gh_issue_comments`, `daemon_restart_verifier`                                                                                                                                     | **Enable ALL** — enforces best practices                                    |
+| **Advisory** (priority 55-60)     | `british_english`, `web_search_year`                                                                                                                                                                                    | Enable based on project preferences                                         |
+| **Session/Lifecycle**             | `git_context_injector`, `bash_error_detector`, `version_check`, `optimal_config_checker`                                                                                                                                | **Enable ALL** — provides valuable context at zero cost                     |
+| **Planning**                      | `plan_workflow`, `validate_plan_number`, `plan_time_estimates`, `plan_completion_advisor`, `markdown_organization`                                                                                                      | Enable if using the planning workflow (see Planning section below)          |
 
 **Step 6.3: Edit `.claude/hooks-daemon.yaml` and enable handlers:**
 
@@ -315,6 +319,7 @@ untracked/venv/bin/python scripts/handler_status.py
 ```
 
 This displays:
+
 - **All available handlers** organized by event type
 - **Enabled/Disabled status** — review this carefully
 - **Priority and terminal settings**
@@ -323,6 +328,7 @@ This displays:
 **Check your enabled count.** A well-configured installation typically has **30+ handlers enabled**. If you see fewer than 15 enabled, you are likely missing valuable protection and workflow enforcement. Return to Step 6 and review the handler categories.
 
 **Save for reference:**
+
 ```bash
 cd .claude/hooks-daemon
 untracked/venv/bin/python scripts/handler_status.py > /tmp/handler-status.txt
@@ -413,6 +419,7 @@ Ask yourself (or the user): Does this project benefit from structured planning f
 ### Setup Steps
 
 **1. Create planning directories and copy workflow documentation:**
+
 ```bash
 mkdir -p CLAUDE/Plan
 cp .claude/hooks-daemon/CLAUDE/PlanWorkflow.md CLAUDE/PlanWorkflow.md
@@ -430,6 +437,7 @@ fi
 ```
 
 **2. Enable ALL planning enforcement handlers** in `.claude/hooks-daemon.yaml`:
+
 ```yaml
 handlers:
   pre_tool_use:
@@ -442,21 +450,24 @@ handlers:
 ```
 
 **What each handler does:**
-| Handler | What It Enforces |
-|---------|-----------------|
-| `plan_workflow` | Guides agents through proper planning steps when creating plans |
-| `validate_plan_number` | Ensures plan folders use sequential numbering (001, 002, ...) |
-| `plan_time_estimates` | Blocks time estimates in plan documents (they are always wrong) |
-| `plan_completion_advisor` | Reminds to follow the completion checklist when closing plans |
-| `plan_number_helper` | Provides the correct next plan number when agents search for it |
-| `markdown_organization` | Enforces markdown file placement rules in CLAUDE/ directory |
+
+| Handler                   | What It Enforces                                                |
+| ------------------------- | --------------------------------------------------------------- |
+| `plan_workflow`           | Guides agents through proper planning steps when creating plans |
+| `validate_plan_number`    | Ensures plan folders use sequential numbering (001, 002, ...)   |
+| `plan_time_estimates`     | Blocks time estimates in plan documents (they are always wrong) |
+| `plan_completion_advisor` | Reminds to follow the completion checklist when closing plans   |
+| `plan_number_helper`      | Provides the correct next plan number when agents search for it |
+| `markdown_organization`   | Enforces markdown file placement rules in CLAUDE/ directory     |
 
 **3. Restart daemon:**
+
 ```bash
 .claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
 ```
 
 **4. Verify planning handlers loaded:**
+
 ```bash
 .claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli status
 ```
@@ -468,17 +479,20 @@ handlers:
 If you had custom hooks before install (backed up to `.claude/hooks.bak.TIMESTAMP/`):
 
 **1. Find backup:**
+
 ```bash
 ls -d .claude/hooks.bak.* 2>/dev/null | tail -1
 ```
 
 **2. Create handler file:**
+
 ```bash
 mkdir -p .claude/hooks/handlers/pre_tool_use
 # Create .claude/hooks/handlers/pre_tool_use/my_handler.py
 ```
 
 **3. Handler template:**
+
 ```python
 """MyHandler - brief description."""
 import sys
@@ -500,6 +514,7 @@ class MyHandler(Handler):
 ```
 
 **4. Register in config:**
+
 ```yaml
 handlers:
   pre_tool_use:
@@ -507,6 +522,7 @@ handlers:
 ```
 
 **5. Restart:**
+
 ```bash
 .claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
 ```
@@ -520,6 +536,7 @@ handlers:
 ### Quick Diagnostics
 
 **Generate full debug report:**
+
 ```bash
 .claude/hooks-daemon/scripts/debug_info.py /tmp/debug_report.md
 ```
@@ -527,6 +544,7 @@ handlers:
 ### Common Quick Fixes
 
 **Daemon won't start:**
+
 ```bash
 # Check Python version (must be 3.11+)
 python3 --version
@@ -539,6 +557,7 @@ python3 --version
 ```
 
 **Handlers not blocking:**
+
 ```bash
 # Test hook manually
 echo '{"tool_name": "Bash", "tool_input": {"command": "git reset --hard"}}' | .claude/hooks/pre-tool-use
@@ -548,6 +567,7 @@ grep -A 1 "destructive_git:" .claude/hooks-daemon.yaml
 ```
 
 **Hooks not working after install:**
+
 1. **Restart Claude session** (required for settings.json changes)
 2. Run debug script to see what's wrong
 3. Check [BUG_REPORTING.md](../BUG_REPORTING.md)
@@ -558,6 +578,7 @@ If you see "Layer 2 installer not found" during install, you are installing an o
 ### Rollback to Previous Hooks
 
 **Option 1 - Git restore (if you committed before install):**
+
 ```bash
 .claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
 git restore .claude/
@@ -565,6 +586,7 @@ rm -rf .claude/hooks-daemon/
 ```
 
 **Option 2 - Backup directory (if no git commit):**
+
 ```bash
 BACKUP_DIR=$(ls -d .claude/hooks.bak.* 2>/dev/null | tail -1)
 if [ -z "$BACKUP_DIR" ]; then
@@ -631,6 +653,7 @@ project/
 ```
 
 **Git Integration:**
+
 - Installer automatically creates `.claude/.gitignore` with daemon exclusion entries
 - Root `.gitignore` also updated automatically with `.claude/hooks-daemon/` entry
 - If auto-creation fails, manual instructions are displayed
@@ -706,6 +729,7 @@ EOF
 ### What to Document During Installation
 
 Actively note throughout the process:
+
 - **Every command** you run and its output (especially errors/warnings)
 - **Every decision point** where you had to choose between options
 - **Documentation inconsistencies** where docs said one thing but reality was different
@@ -731,6 +755,7 @@ The feedback file can be shared with project maintainers to improve the install 
 ## Bug Reports
 
 Include in issue:
+
 ```bash
 # Version
 .claude/hooks-daemon/untracked/venv/bin/python -c "import claude_code_hooks_daemon; print(claude_code_hooks_daemon.__version__)"

@@ -13,6 +13,7 @@ The codebase has THREE inconsistent language-aware systems:
 3. **ESLint Disable Handler** (1 language, hardcoded) - should be part of QA suppression
 
 The user wants:
+
 - **ONE** canonical list of supported languages
 - **Project-level** `languages` config (under `daemon:`) that all handlers respect
 - **Handler override** capability (handler-level `options.languages` overrides project default)
@@ -36,6 +37,7 @@ The user wants:
 ## Pre-Work: Revert Partial Implementation
 
 Before starting, revert the partial handler-level language filtering added earlier in this session:
+
 - `tdd_enforcement.py`: Remove `_apply_language_filter()`, `_languages`, `_languages_applied` (will be re-implemented properly in Phase 4)
 - `test_tdd_enforcement.py`: Remove language filtering tests (will be rewritten for project-level flow)
 - `test_tdd_strategy_registry.py`: Keep `filter_by_languages` tests (registry method stays)
@@ -63,19 +65,19 @@ daemon:
 
 ### Files to Modify
 
-| File | Change |
-|------|--------|
-| `src/.../config/models.py` | Add `languages: list[str] \| None = None` to `DaemonConfig` |
-| `src/.../handlers/registry.py` | Modify `register_all()` to accept + inject `_project_languages` into all handlers via setattr |
-| `src/.../daemon/controller.py` | Extract `daemon.languages` and pass to `register_all()` |
-| `src/.../daemon/init_config.py` | Add commented-out `languages:` to config templates |
+| File                            | Change                                                                                        |
+| ------------------------------- | --------------------------------------------------------------------------------------------- |
+| `src/.../config/models.py`      | Add `languages: list[str] \| None = None` to `DaemonConfig`                                   |
+| `src/.../handlers/registry.py`  | Modify `register_all()` to accept + inject `_project_languages` into all handlers via setattr |
+| `src/.../daemon/controller.py`  | Extract `daemon.languages` and pass to `register_all()`                                       |
+| `src/.../daemon/init_config.py` | Add commented-out `languages:` to config templates                                            |
 
 ### Tasks
 
 - [ ] Write failing tests for DaemonConfig accepting languages field
-- [ ] Write failing tests for registry injecting _project_languages
+- [ ] Write failing tests for registry injecting \_project_languages
 - [ ] Implement DaemonConfig.languages field
-- [ ] Implement registry injection of _project_languages
+- [ ] Implement registry injection of \_project_languages
 - [ ] Wire controller to pass languages through
 - [ ] Update config templates with commented-out languages list
 - [ ] QA + daemon restart
@@ -152,6 +154,7 @@ Extract `matches_directory()` from `strategies/tdd/common.py` to `strategies/com
 ### New File
 
 `src/.../handlers/pre_tool_use/qa_suppression.py` - single `QaSuppressionHandler`:
+
 - Creates registry, delegates all language logic to strategies
 - Has `_languages` (handler override) and `_project_languages` (project default)
 - `_apply_language_filter()`: handler languages > project languages > ALL
@@ -188,6 +191,7 @@ handlers:
 ### File to Modify
 
 `src/.../handlers/pre_tool_use/tdd_enforcement.py` - update `_apply_language_filter()`:
+
 - Check `self._languages` (handler override) first
 - If not set, check `self._project_languages` (project default)
 - If neither, ALL languages (current behavior)
@@ -195,7 +199,7 @@ handlers:
 ### Tasks
 
 - [ ] Write failing tests for project_languages fallback
-- [ ] Update _apply_language_filter() logic
+- [ ] Update \_apply_language_filter() logic
 - [ ] QA + daemon restart
 
 ---
@@ -236,19 +240,20 @@ In `register_all()`: if old config keys (`python_qa_suppression_blocker`, etc.) 
 
 ## Critical Files
 
-| File | Role |
-|------|------|
-| `src/.../config/models.py` | Add daemon.languages field |
-| `src/.../handlers/registry.py` | Inject _project_languages into all handlers |
-| `src/.../core/language_config.py` | Data source to absorb then deprecate |
-| `src/.../handlers/pre_tool_use/python_qa_suppression_blocker.py` | Source of truth for duplicated QA logic |
-| `src/.../handlers/pre_tool_use/tdd_enforcement.py` | Update for project-languages fallback |
-| `src/.../strategies/tdd/common.py` | Extract shared utils to strategies/common.py |
-| `src/.../strategies/tdd/protocol.py` | Reference archetype for QA Protocol |
+| File                                                             | Role                                         |
+| ---------------------------------------------------------------- | -------------------------------------------- |
+| `src/.../config/models.py`                                       | Add daemon.languages field                   |
+| `src/.../handlers/registry.py`                                   | Inject \_project_languages into all handlers |
+| `src/.../core/language_config.py`                                | Data source to absorb then deprecate         |
+| `src/.../handlers/pre_tool_use/python_qa_suppression_blocker.py` | Source of truth for duplicated QA logic      |
+| `src/.../handlers/pre_tool_use/tdd_enforcement.py`               | Update for project-languages fallback        |
+| `src/.../strategies/tdd/common.py`                               | Extract shared utils to strategies/common.py |
+| `src/.../strategies/tdd/protocol.py`                             | Reference archetype for QA Protocol          |
 
 ## Verification
 
 After each phase:
+
 1. `./scripts/qa/run_all.sh` - all 7 checks pass
 2. `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart` - daemon starts
 3. `$PYTHON -m claude_code_hooks_daemon.daemon.cli status` - RUNNING
@@ -256,8 +261,8 @@ After each phase:
 
 ## Risks
 
-| Risk | Mitigation |
-|------|------------|
-| Breaking existing QA suppression | Phase 5 provides backward-compat config mapping; old handlers stay until verified |
-| TDD common.py refactor breaks imports | Re-export from old path for backward compat |
-| New languages have wrong QA patterns | Research correct linter patterns; mark as best-effort |
+| Risk                                  | Mitigation                                                                        |
+| ------------------------------------- | --------------------------------------------------------------------------------- |
+| Breaking existing QA suppression      | Phase 5 provides backward-compat config mapping; old handlers stay until verified |
+| TDD common.py refactor breaks imports | Re-export from old path for backward compat                                       |
+| New languages have wrong QA patterns  | Research correct linter patterns; mark as best-effort                             |

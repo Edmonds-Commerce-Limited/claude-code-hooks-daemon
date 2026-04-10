@@ -10,6 +10,7 @@
 **Total violations found: 22 CRITICAL, 2 MODERATE**
 
 This is a **systemic failure** of the FAIL FAST principle. Error hiding patterns are pervasive throughout the codebase, with the most catastrophic violations in:
+
 - Workflow state management (6 violations)
 - YOLO container detection (4 violations)
 - Daemon path operations (4 violations)
@@ -17,6 +18,7 @@ This is a **systemic failure** of the FAIL FAST principle. Error hiding patterns
 ## Root Cause
 
 The original daemon/cli.py violation that masked config errors:
+
 ```python
 except Exception:
     # Config load failure - treat as normal install mode
@@ -24,6 +26,7 @@ except Exception:
 ```
 
 This pattern was replicated throughout the codebase, leading to:
+
 - Silent failures that mask errors
 - Defaults to permissive behavior on failure
 - No distinction between expected vs unexpected errors
@@ -34,6 +37,7 @@ This pattern was replicated throughout the codebase, leading to:
 ## CRITICAL Violations (Silent failures that mask errors)
 
 ### 1. daemon/paths.py:126-127 - Broad exception swallowing in is_pid_alive
+
 **File:** src/claude_code_hooks_daemon/daemon/paths.py
 **Lines:** 126-127
 
@@ -52,6 +56,7 @@ except Exception:
 ---
 
 ### 2. daemon/paths.py:152 - Triple exception handler hides parse errors
+
 **File:** src/claude_code_hooks_daemon/daemon/paths.py
 **Lines:** 152
 
@@ -67,6 +72,7 @@ except (FileNotFoundError, ValueError, Exception):
 ---
 
 ### 3. daemon/paths.py:180-181 - Silent socket cleanup failure
+
 **File:** src/claude_code_hooks_daemon/daemon/paths.py
 **Lines:** 180-181
 
@@ -82,6 +88,7 @@ except Exception:
 ---
 
 ### 4. daemon/paths.py:195-196 - Silent PID file cleanup failure
+
 **File:** src/claude_code_hooks_daemon/daemon/paths.py
 **Lines:** 195-196
 
@@ -97,6 +104,7 @@ except Exception:
 ---
 
 ### 5. handlers/pre_compact/workflow_state_pre_compact.py:108-109 - Silent JSON parse failure
+
 **File:** src/claude_code_hooks_daemon/handlers/pre_compact/workflow_state_pre_compact.py
 **Lines:** 108-109
 
@@ -118,6 +126,7 @@ except Exception:
 ---
 
 ### 6. handlers/pre_compact/workflow_state_pre_compact.py:119-121 - CATASTROPHIC fail-open
+
 **File:** src/claude_code_hooks_daemon/handlers/pre_compact/workflow_state_pre_compact.py
 **Lines:** 119-121
 
@@ -136,6 +145,7 @@ except Exception:
 ---
 
 ### 7. handlers/pre_compact/workflow_state_pre_compact.py:149-150 - Silent file read failure
+
 **File:** src/claude_code_hooks_daemon/handlers/pre_compact/workflow_state_pre_compact.py
 **Lines:** 149-150
 
@@ -151,6 +161,7 @@ except Exception:
 ---
 
 ### 8. handlers/pre_compact/workflow_state_pre_compact.py:168-169 - Silent plan file read
+
 **File:** src/claude_code_hooks_daemon/handlers/pre_compact/workflow_state_pre_compact.py
 **Lines:** 168-169
 
@@ -166,6 +177,7 @@ except Exception:
 ---
 
 ### 9. handlers/pre_compact/workflow_state_pre_compact.py:210-211 - Silent memory parsing failure
+
 **File:** src/claude_code_hooks_daemon/handlers/pre_compact/workflow_state_pre_compact.py
 **Lines:** 210-211
 
@@ -181,6 +193,7 @@ except Exception:
 ---
 
 ### 10. handlers/pre_compact/workflow_state_pre_compact.py:223-224 - Silent plan parsing failure
+
 **File:** src/claude_code_hooks_daemon/handlers/pre_compact/workflow_state_pre_compact.py
 **Lines:** 223-224
 
@@ -196,6 +209,7 @@ except Exception:
 ---
 
 ### 11. handlers/status_line/daemon_stats.py:68-69 - Silent psutil failure
+
 **File:** src/claude_code_hooks_daemon/handlers/status_line/daemon_stats.py
 **Lines:** 68-69
 
@@ -215,6 +229,7 @@ except Exception:
 ---
 
 ### 12. handlers/status_line/git_branch.py:70-72 - Silent git command failure
+
 **File:** src/claude_code_hooks_daemon/handlers/status_line/git_branch.py
 **Lines:** 70-72
 
@@ -231,6 +246,7 @@ except Exception:
 ---
 
 ### 13. config/validator.py:112-114 - Silent module import failure
+
 **File:** src/claude_code_hooks_daemon/config/validator.py
 **Lines:** 112-114
 
@@ -251,6 +267,7 @@ except Exception:
 ---
 
 ### 14. daemon/memory_log_handler.py:38-40 - Exception in exception handler
+
 **File:** src/claude_code_hooks_daemon/daemon/memory_log_handler.py
 **Lines:** 38-40
 
@@ -269,6 +286,7 @@ except Exception:
 ---
 
 ### 15. daemon/validation.py:70-71 - Silent git remote failure
+
 **File:** src/claude_code_hooks_daemon/daemon/validation.py
 **Lines:** 70-71
 
@@ -284,6 +302,7 @@ except Exception:
 ---
 
 ### 16. handlers/stop/auto_continue_stop.py:159-160 - Silent transcript read failure
+
 **File:** src/claude_code_hooks_daemon/handlers/stop/auto_continue_stop.py
 **Lines:** 159-160
 
@@ -299,6 +318,7 @@ except Exception:
 ---
 
 ### 17. handlers/session_start/yolo_container_detection.py:114-116 - Silent filesystem errors
+
 **File:** src/claude_code_hooks_daemon/handlers/session_start/yolo_container_detection.py
 **Lines:** 114-116
 
@@ -315,6 +335,7 @@ except Exception:
 ---
 
 ### 18. handlers/session_start/yolo_container_detection.py:168-170 - Silent indicator detection failure
+
 **File:** src/claude_code_hooks_daemon/handlers/session_start/yolo_container_detection.py
 **Lines:** 168-170
 
@@ -331,6 +352,7 @@ except Exception:
 ---
 
 ### 19. handlers/session_start/yolo_container_detection.py:200-202 - Silent matches() failure
+
 **File:** src/claude_code_hooks_daemon/handlers/session_start/yolo_container_detection.py
 **Lines:** 200-202
 
@@ -347,6 +369,7 @@ except Exception:
 ---
 
 ### 20. handlers/session_start/yolo_container_detection.py:240-242 - CATASTROPHIC handle() failure
+
 **File:** src/claude_code_hooks_daemon/handlers/session_start/yolo_container_detection.py
 **Lines:** 240-242
 
@@ -365,6 +388,7 @@ except Exception:
 ---
 
 ### 21. handlers/session_start/workflow_state_restoration.py:112-114 - Silent restoration failure
+
 **File:** src/claude_code_hooks_daemon/handlers/session_start/workflow_state_restoration.py
 **Lines:** 112-114
 
@@ -381,6 +405,7 @@ except Exception:
 ---
 
 ### 22. handlers/subagent_stop/remind_validator.py:171-172 - Silent transcript parsing failure
+
 **File:** src/claude_code_hooks_daemon/handlers/subagent_stop/remind_validator.py
 **Lines:** 171-172
 
@@ -398,6 +423,7 @@ except Exception:
 ## MODERATE Violations (Overly broad handlers - should be specific)
 
 ### 23. daemon/validation.py:47-48 - Broad subprocess exception
+
 **File:** src/claude_code_hooks_daemon/daemon/validation.py
 **Lines:** 47-48
 
@@ -413,6 +439,7 @@ except (subprocess.TimeoutExpired, FileNotFoundError):
 ---
 
 ### 24. daemon/server.py:464-468 - Broad exception in client handler
+
 **File:** src/claude_code_hooks_daemon/daemon/server.py
 **Lines:** 464-468
 
@@ -433,6 +460,7 @@ except Exception as e:
 ## ACCEPTABLE Patterns (Not violations)
 
 ### 25. daemon/paths.py:149 - contextlib.suppress(Exception)
+
 ```python
 with contextlib.suppress(Exception):
     pid_path.unlink()
@@ -445,6 +473,7 @@ with contextlib.suppress(Exception):
 ---
 
 ### 26. daemon/server.py:347-348 - asyncio.CancelledError suppression
+
 ```python
 with contextlib.suppress(asyncio.CancelledError):
     await idle_monitor_task
@@ -469,12 +498,14 @@ with contextlib.suppress(asyncio.CancelledError):
 ## Impact Analysis
 
 **User-visible impact:**
+
 - Config validation errors masked (daemon won't start, confusing error)
 - Workflow state loss invisible (data loss)
 - Handler failures silent (protection not active)
 - Filesystem issues hidden (full disk, permissions)
 
 **Developer impact:**
+
 - Debugging nearly impossible (no error traces)
 - Tests can't validate error handling (no errors propagate)
 - Coverage metrics misleading (error paths untested)

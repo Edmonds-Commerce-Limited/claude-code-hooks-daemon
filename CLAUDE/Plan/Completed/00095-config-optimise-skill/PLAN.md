@@ -38,16 +38,20 @@ heredoc that tells Claude what to do step-by-step.
 ## Tasks
 
 ### Phase 1: Plan Document
+
 - [x] **Task 1.1**: Create `CLAUDE/Plan/00095-config-optimise-skill/PLAN.md`
 
 ### Phase 2: Skill Files
+
 - [x] **Task 2.1**: Create `.claude/skills/optimise/SKILL.md` following SSOT rule
 - [x] **Task 2.2**: Create `.claude/skills/optimise/invoke.sh` with full instruction set
 
 ### Phase 3: Plan Index Update
+
 - [x] **Task 3.1**: Update `CLAUDE/Plan/README.md` — add to Completed Plans, update stats
 
 ### Phase 4: Commit
+
 - [x] **Task 4.1**: Commit all files with standard message
 
 ## Success Criteria
@@ -62,6 +66,7 @@ heredoc that tells Claude what to do step-by-step.
 ## Notes & Updates
 
 ### 2026-03-30
+
 - Implemented as shell script + instruction heredoc (no Python changes needed)
 - Five analysis areas: Safety (7 handlers), Stop Quality (4), Plan Workflow (7),
   Code Quality (6), Daemon Settings (5) = 29 total check points

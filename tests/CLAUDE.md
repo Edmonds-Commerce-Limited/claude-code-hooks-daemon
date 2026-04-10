@@ -25,6 +25,7 @@ Project-level handlers support **co-located tests**. When you scaffold project h
 ```
 
 Run your project handler tests:
+
 ```bash
 $PYTHON -m claude_code_hooks_daemon.daemon.cli test-project-handlers --verbose
 ```
@@ -36,17 +37,20 @@ See the full guide: [Project-Level Handlers Guide](../CLAUDE/PROJECT_HANDLERS.md
 **Do NOT fix it here.** Write a detailed bug report and ask your human to submit it upstream:
 
 1. Generate a diagnostic report:
+
    ```bash
    .claude/hooks-daemon/scripts/debug_info.py /tmp/hooks-daemon-bug-report.md
    ```
 
 2. Save your bug report to an untracked location:
+
    ```bash
    mkdir -p untracked/bug-reports
    # Write report to untracked/bug-reports/YYYY-MM-DD-description.md
    ```
 
 3. **Ask your human** to submit it:
+
    - GitHub Issues: https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/issues
 
 See the full guide: [Bug Reporting Guide](../BUG_REPORTING.md)

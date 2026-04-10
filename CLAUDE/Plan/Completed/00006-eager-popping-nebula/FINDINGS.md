@@ -8,24 +8,28 @@
 ### Request/Response Flow
 
 1. **Bash Hook Entry Point** (`.claude/hooks/{event}`)
+
    - Sources `init.sh` for helper functions
    - Lazy daemon startup via `ensure_daemon()`
    - Pipes JSON through `send_request_stdin` function
    - Uses `jq` to format request: `{event: "EventName", hook_input: ...}`
 
 2. **Unix Socket Server** (`daemon/server.py`)
+
    - Asyncio-based TCP socket over Unix domain socket
    - Reads newline-delimited JSON requests
    - 30-second timeout per connection
    - Optional input/output validation via JSON schemas
 
 3. **DaemonController** (`daemon/controller.py`)
+
    - Parses request into `HookEvent` Pydantic model
    - Routes to `EventRouter` which dispatches to handler chains
    - Accumulates stats: requests, timing, errors
    - Returns formatted response dict
 
 4. **Handler Chain Execution**
+
    - Handlers run in priority order (lowest first)
    - **Terminal handlers**: Stop chain, return immediately
    - **Non-terminal handlers**: Continue chain, accumulate context
@@ -33,27 +37,29 @@
 
 ### Key Files
 
-| File | Purpose |
-|------|---------|
-| `.claude/init.sh` | Socket communication helpers, daemon lifecycle |
-| `daemon/server.py` | Asyncio socket server, request processing |
+| File                   | Purpose                                         |
+| ---------------------- | ----------------------------------------------- |
+| `.claude/init.sh`      | Socket communication helpers, daemon lifecycle  |
+| `daemon/server.py`     | Asyncio socket server, request processing       |
 | `daemon/controller.py` | Event routing, handler dispatch, stats tracking |
-| `core/router.py` | Routes events to appropriate handler chains |
-| `core/chain.py` | Chain of Responsibility execution logic |
-| `core/handler.py` | Handler base class interface |
-| `core/hook_result.py` | Result formatting (event-specific JSON) |
-| `core/event.py` | Event type enum, HookEvent/HookInput models |
+| `core/router.py`       | Routes events to appropriate handler chains     |
+| `core/chain.py`        | Chain of Responsibility execution logic         |
+| `core/handler.py`      | Handler base class interface                    |
+| `core/hook_result.py`  | Result formatting (event-specific JSON)         |
+| `core/event.py`        | Event type enum, HookEvent/HookInput models     |
 
 ## Handler Patterns
 
 ### Terminal vs Non-Terminal
 
 **Terminal Handlers** (`terminal=True`, default):
+
 - Block the operation or stop the chain
 - Used for enforcement: destructive git, sed blocker, TDD checks
 - Example priorities: 10-20 (safety), 25-35 (code quality)
 
 **Non-Terminal Handlers** (`terminal=False`):
+
 - Advisory/informational
 - Accumulate context for Claude
 - Continue to next handler
@@ -62,6 +68,7 @@
 ### Context Accumulation
 
 From `chain.py` (lines 76-102):
+
 ```python
 accumulated_context: list[str] = []
 
@@ -162,6 +169,7 @@ HookResult.error(
 **Example**: `Sonnet | Ctx: 42.5% | main | ⚡ 1.2s | 45MB | INFO`
 
 **Color Codes** (from current implementation):
+
 - Green (0-40%): `\033[42m\033[30m` (green bg, black text)
 - Yellow (41-60%): `\033[43m\033[30m` (yellow bg, black text)
 - Orange (61-80%): `\033[48;5;208m\033[30m` (orange bg, black text)
@@ -174,13 +182,13 @@ HookResult.error(
 
 Different events expect different response structures:
 
-| Event Type | Response Format |
-|------------|----------------|
-| PreToolUse | `hookSpecificOutput` with `permissionDecision` |
-| PostToolUse | `decision` + `hookSpecificOutput` |
-| SessionStart/End | `hookSpecificOutput` with `additionalContext` only |
-| Stop/SubagentStop | `decision` + `reason` (no hookSpecificOutput) |
-| **Status** | **Plain text** (not JSON hookSpecificOutput) |
+| Event Type        | Response Format                                    |
+| ----------------- | -------------------------------------------------- |
+| PreToolUse        | `hookSpecificOutput` with `permissionDecision`     |
+| PostToolUse       | `decision` + `hookSpecificOutput`                  |
+| SessionStart/End  | `hookSpecificOutput` with `additionalContext` only |
+| Stop/SubagentStop | `decision` + `reason` (no hookSpecificOutput)      |
+| **Status**        | **Plain text** (not JSON hookSpecificOutput)       |
 
 ### Special Case: Status Event
 
@@ -226,12 +234,12 @@ Access via: `get_controller().get_stats()`
 
 Based on existing conventions:
 
-| Range | Purpose | Example |
-|-------|---------|---------|
-| 0-19 | Critical safety | Destructive git (10) |
-| 20-39 | Code quality | ESLint, TDD |
-| 40-59 | Workflow | Planning (35) |
-| 60-79 | Advisory | British English (60) |
+| Range | Purpose         | Example                 |
+| ----- | --------------- | ----------------------- |
+| 0-19  | Critical safety | Destructive git (10)    |
+| 20-39 | Code quality    | ESLint, TDD             |
+| 40-59 | Workflow        | Planning (35)           |
+| 60-79 | Advisory        | British English (60)    |
 | 80-99 | Logging/metrics | **Status line (10-30)** |
 
 Status line handlers: 10, 20, 30 (within status_line event namespace)
@@ -247,7 +255,7 @@ Status line handlers: 10, 20, 30 (within status_line event namespace)
 - **Socket warmup**: First request slower (daemon startup)
 - **After warmup**: ~20x faster than subprocess spawn
 - **Caching**: Consider caching git operations (0.5s timeout currently)
-- **Memory**: psutil.Process().memory_info() is fast (<1ms)
+- **Memory**: psutil.Process().memory_info() is fast (\<1ms)
 
 ## References
 

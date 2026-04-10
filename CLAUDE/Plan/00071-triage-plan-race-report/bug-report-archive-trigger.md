@@ -23,6 +23,7 @@ The plan number validation hook fires incorrectly when archiving a completed pla
 ## Expected Behaviour
 
 The hook should NOT trigger when:
+
 - Moving/archiving an existing plan to `CLAUDE/Plan/Completed/`
 - The operation is a `git mv` (not creating a new directory)
 - The plan number already exists (it's the same plan being moved, not a new one)
@@ -34,12 +35,14 @@ The hook treats the `git mv` target path as a new plan creation attempt, sees th
 ## Root Cause
 
 The hook appears to match any Bash command that contains a `CLAUDE/Plan/NNN-` path pattern without distinguishing between:
+
 - Creating a new plan directory (`mkdir -p CLAUDE/Plan/024-new-thing`)
 - Archiving an existing plan (`git mv CLAUDE/Plan/023-old-thing CLAUDE/Plan/Completed/023-old-thing`)
 
 ## Suggested Fix
 
 The hook should:
+
 1. **Ignore `git mv` operations** — these are moves, not creations
 2. **Ignore paths under `CLAUDE/Plan/Completed/`** — archiving is not creation
 3. **Only trigger on `mkdir` commands** that create new plan directories in `CLAUDE/Plan/` (not `CLAUDE/Plan/Completed/`)

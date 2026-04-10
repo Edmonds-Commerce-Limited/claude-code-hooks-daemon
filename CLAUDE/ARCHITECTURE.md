@@ -26,21 +26,25 @@ Claude Code Hooks Daemon is a reusable, configurable hook system for Claude Code
 ### Use Hooks Daemon For (Deterministic)
 
 ✅ **Pattern matching and regex validation**
+
 - Block dangerous commands: `sed -i`, `git reset --hard`, `rm -rf`
 - Validate file paths (absolute vs relative)
 - Check for QA suppression comments
 
 ✅ **Fast, synchronous validation**
+
 - String contains/matches checks
 - File extension validation
 - Simple conditional logic
 
 ✅ **Reusable safety handlers**
+
 - Apply same protection across multiple projects
 - Configurable enable/disable per project
 - Battle-tested patterns
 
 **Examples:**
+
 - `DestructiveGitHandler` - blocks `git reset --hard` via regex
 - `SedBlockerHandler` - blocks `sed` command usage
 - `AbsolutePathHandler` - validates file paths are absolute
@@ -49,35 +53,40 @@ Claude Code Hooks Daemon is a reusable, configurable hook system for Claude Code
 ### Use Claude Code Native Agent Hooks For (Complex Evaluation)
 
 ✅ **Workflow compliance validation**
+
 - Verify release process is followed
 - Check if planning workflow adhered to
 - Validate architectural patterns
 
 ✅ **Context analysis requiring reasoning**
+
 - Read session transcripts to detect agent context
 - Analyze git state and commit history
 - Evaluate whether changes align with project standards
 
 ✅ **Multi-turn investigation**
+
 - Read multiple files to understand intent
 - Execute commands to gather context
 - Make judgment calls based on session history
 
 **Examples:**
+
 - Release workflow enforcement - verify `/release` skill was used
 - Architecture compliance - check if changes follow documented patterns
 - Planning workflow - ensure plan exists before implementation
 
 ### Configuration Locations
 
-| Hook Type | Configuration File | Purpose |
-|-----------|-------------------|---------|
-| Daemon Handlers | `.claude/hooks-daemon.yaml` | Deterministic validation, reusable handlers |
-| Native Agent Hooks | `.claude/hooks.json` | Complex evaluation, project-specific workflow |
+| Hook Type          | Configuration File          | Purpose                                       |
+| ------------------ | --------------------------- | --------------------------------------------- |
+| Daemon Handlers    | `.claude/hooks-daemon.yaml` | Deterministic validation, reusable handlers   |
+| Native Agent Hooks | `.claude/hooks.json`        | Complex evaluation, project-specific workflow |
 
 ### Example: Release Workflow Protection
 
 **Wrong Approach** (Daemon Handler):
+
 ```python
 # ❌ This requires analyzing session context and workflow state
 class ReleaseWorkflowHandler(Handler):
@@ -89,6 +98,7 @@ class ReleaseWorkflowHandler(Handler):
 ```
 
 **Correct Approach** (Native Agent Hook in `.claude/hooks.json`):
+
 ```json
 {
   "PreToolUse": [{
@@ -171,6 +181,7 @@ Need to validate something?
 ### 1. Front Controller (`core/front_controller.py`)
 
 **Responsibilities**:
+
 - Register handlers and sort by priority
 - Read hook input from stdin (JSON)
 - Dispatch to matching handlers
@@ -199,6 +210,7 @@ return HookResult("allow", context=accumulated_context)
 ```
 
 **Key Features**:
+
 - **Terminal handlers**: Stop dispatch immediately (block/allow/ask)
 - **Non-terminal handlers**: Provide guidance, allow fall-through
 - **Priority-based**: Lower number runs first (5-60 range)
@@ -225,21 +237,25 @@ class Handler:
 **Handler Categories**:
 
 1. **Safety Handlers** (priority 10-20)
+
    - Block destructive operations
    - Prevent data loss
    - Terminal: Yes
 
 2. **Code Quality Handlers** (priority 25-35)
+
    - QA suppression blockers
    - Lint enforcement
    - Terminal: Yes
 
 3. **Workflow Handlers** (priority 36-55)
+
    - Enforce best practices
    - Provide guidance
    - Terminal: Configurable
 
 4. **Advisory Handlers** (priority 56-60)
+
    - Warnings and suggestions
    - Terminal: Usually No
 
@@ -258,6 +274,7 @@ class HookResult:
 ```
 
 **Decision Types**:
+
 - **allow**: Operation proceeds (silent or with context/guidance)
 - **deny**: Operation blocked (must provide reason)
 - **ask**: User approval required (must provide reason)
@@ -265,6 +282,7 @@ class HookResult:
 ### 4. Configuration System (`config/`)
 
 **File Discovery** (in order):
+
 1. `.claude/hooks-daemon.yaml` (project root)
 2. `.claude/hooks-daemon.json` (alternative format)
 3. `~/.config/claude-code/hooks-daemon.yaml` (user global)
@@ -303,6 +321,7 @@ plugins:
 ```
 
 **Configuration Loading**:
+
 1. Find config file (search paths)
 2. Parse YAML/JSON
 3. Validate against schema (jsonschema)
@@ -316,17 +335,20 @@ plugins:
 Prevents multiple daemon instances from running simultaneously. Behaviour varies by environment:
 
 **Container Environments** (Docker, Podman, YOLO mode):
+
 - System-wide enforcement: Only ONE daemon process allowed anywhere in the system
 - Aggressive cleanup: Kills ALL other `claude_code_hooks_daemon` processes
 - Safe assumption: Container is dedicated to one project
 - Detection: Automatic via confidence scoring (>= 3 indicators)
 
 **Non-Container Environments**:
+
 - Conservative cleanup: Only removes stale PID files for current project
 - No process killing: Multiple projects may have their own daemons
 - Safety first: Don't interfere with other users/projects
 
 **Process Termination**:
+
 ```python
 # Graceful → Forceful escalation
 process.terminate()  # SIGTERM
@@ -336,17 +358,20 @@ process.kill()  # SIGKILL
 ```
 
 **Configuration**:
+
 ```yaml
 daemon:
   enforce_single_daemon_process: true  # Auto-enabled in containers during init
 ```
 
 **When Enforcement Runs**:
+
 - On daemon startup (`cmd_start()` in `cli.py`)
 - Before checking if daemon already running
 - Only if `enforce_single_daemon_process: true` in config
 
 **Container Detection**:
+
 - Uses confidence scoring from `utils/container_detection.py`
 - Checks: `/.dockerenv`, cgroup paths, YOLO env vars, filesystem indicators
 - Threshold: >= 3 indicators = container environment
@@ -366,6 +391,7 @@ handler_class = load_handler("npm_command_handler", ".claude/hooks/controller/ha
 ```
 
 **Requirements**:
+
 - Handler must inherit from `Handler` base class
 - Module must export handler class
 - Class name must follow PascalCase convention
@@ -420,6 +446,7 @@ project_handlers:
 ```
 
 **Conflict Resolution**:
+
 - If a project handler has the same `handler_id` as a built-in handler, the built-in handler takes precedence (logged as warning)
 - Priority collisions use existing alphabetical-sorting tiebreaker in HandlerChain
 
@@ -431,17 +458,17 @@ project_handlers:
 
 ### Built-in Handlers (Daemon Package)
 
-| Handler | Priority | Terminal | Purpose |
-|---------|----------|----------|---------|
-| `destructive_git` | 10 | Yes | Block `git reset --hard`, `git clean -f`, etc. |
-| `sed_blocker` | 10 | Yes | Block all sed usage (causes file corruption) |
-| `absolute_path` | 12 | Yes | Prevent container-specific paths in code |
-| `tdd_enforcement` | 15 | Yes | Require test file before handler implementation |
-| `worktree_file_copy` | 15 | Yes | Prevent copying files between worktrees |
-| `git_stash` | 20 | Yes | Block git stash creation (dangerous workflow) |
-| `eslint_disable` | 30 | Yes | Block ESLint suppression comments |
-| `web_search_year` | 55 | Yes | Ensure current year in search queries |
-| `british_english` | 60 | No | Warn about American spellings (non-blocking) |
+| Handler              | Priority | Terminal | Purpose                                         |
+| -------------------- | -------- | -------- | ----------------------------------------------- |
+| `destructive_git`    | 10       | Yes      | Block `git reset --hard`, `git clean -f`, etc.  |
+| `sed_blocker`        | 10       | Yes      | Block all sed usage (causes file corruption)    |
+| `absolute_path`      | 12       | Yes      | Prevent container-specific paths in code        |
+| `tdd_enforcement`    | 15       | Yes      | Require test file before handler implementation |
+| `worktree_file_copy` | 15       | Yes      | Prevent copying files between worktrees         |
+| `git_stash`          | 20       | Yes      | Block git stash creation (dangerous workflow)   |
+| `eslint_disable`     | 30       | Yes      | Block ESLint suppression comments               |
+| `web_search_year`    | 55       | Yes      | Ensure current year in search queries           |
+| `british_english`    | 60       | No       | Warn about American spellings (non-blocking)    |
 
 ### Project-Specific Handlers (Plugins)
 
@@ -482,6 +509,7 @@ These remain in individual projects due to project-specific logic:
 ### Terminal Handlers (default)
 
 **Behavior**:
+
 - Stop dispatch immediately after execution
 - Decision becomes final result (allow/deny/ask)
 - Use for enforcement and blocking
@@ -503,6 +531,7 @@ class DestructiveGitHandler(Handler):
 ### Non-Terminal Handlers
 
 **Behavior**:
+
 - Provide context/guidance but allow dispatch to continue
 - Decision is ignored (treated as "allow")
 - Context accumulated into final result
@@ -568,14 +597,15 @@ class PlanWorkflowHandler(Handler):
 
 ### Benchmarks
 
-| Operation | Time | Notes |
-|-----------|------|-------|
-| Cold start | ~50ms | Config load + handler init |
-| Warm dispatch | ~20ms | Cached handlers |
-| Handler match | ~1-5ms | Per handler check |
-| Terminal handler | ~20ms | Includes match + handle |
+| Operation        | Time   | Notes                      |
+| ---------------- | ------ | -------------------------- |
+| Cold start       | ~50ms  | Config load + handler init |
+| Warm dispatch    | ~20ms  | Cached handlers            |
+| Handler match    | ~1-5ms | Per handler check          |
+| Terminal handler | ~20ms  | Includes match + handle    |
 
 **Compare to**:
+
 - Standalone hooks: ~200ms (process spawn overhead)
 - Multiple standalone hooks: 200ms × N (serial execution)
 

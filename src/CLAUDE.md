@@ -26,11 +26,13 @@ Project handlers use the same `Handler` ABC as built-in handlers but are scoped 
 **Do NOT fix it here.** Instead, write a detailed bug report and ask your human to submit it upstream:
 
 1. Generate a diagnostic report:
+
    ```bash
    .claude/hooks-daemon/scripts/debug_info.py /tmp/hooks-daemon-bug-report.md
    ```
 
 2. Write a detailed bug report to an untracked location:
+
    ```bash
    # Save to untracked/ so it won't be committed to your project
    mkdir -p untracked/bug-reports
@@ -38,6 +40,7 @@ Project handlers use the same `Handler` ABC as built-in handlers but are scoped 
    ```
 
 3. Include in your bug report:
+
    - What you expected to happen
    - What actually happened
    - Steps to reproduce
@@ -45,6 +48,7 @@ Project handlers use the same `Handler` ABC as built-in handlers but are scoped 
    - Any relevant hook event logs
 
 4. **Ask your human** to submit the report upstream:
+
    - GitHub Issues: https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/issues
    - Attach the bug report file
 
@@ -57,6 +61,7 @@ Edit your project's `.claude/hooks-daemon.yaml` — that IS part of your project
 ### Need to Understand How Something Works?
 
 Read the documentation in the `CLAUDE/` directory (not this source code):
+
 - `CLAUDE/ARCHITECTURE.md` — System design
 - `CLAUDE/HANDLER_DEVELOPMENT.md` — Handler creation guide
 - `CLAUDE/PROJECT_HANDLERS.md` — Project-level handler guide

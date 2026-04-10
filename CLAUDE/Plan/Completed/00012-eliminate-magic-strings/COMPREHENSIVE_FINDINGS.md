@@ -8,6 +8,7 @@ This document contains the complete findings of what Plan 00012 originally MISSE
 ## Executive Summary
 
 **Original Plan Completeness**: 60%
+
 - ✅ Handler naming (HandlerID) - GOOD
 - ✅ Event naming (EventID) - GOOD
 - ✅ Priority constants - GOOD
@@ -23,6 +24,7 @@ This document contains the complete findings of what Plan 00012 originally MISSE
 ## 1. TAGS SYSTEM - CRITICAL OMISSION
 
 ### Impact
+
 - **67 handler files** with hardcoded tag strings
 - Config filtering with `enable_tags`/`disable_tags`
 - Zero constants, zero type safety
@@ -32,6 +34,7 @@ This document contains the complete findings of what Plan 00012 originally MISSE
 **Language tags**: `"python"`, `"typescript"`, `"javascript"`, `"php"`, `"go"`, `"bash"`
 
 **Category tags**:
+
 - Safety: `"safety"`, `"blocking"`, `"terminal"`, `"non-terminal"`
 - Workflow: `"workflow"`, `"advisory"`, `"validation"`, `"automation"`
 - QA: `"qa-enforcement"`, `"qa-suppression-prevention"`, `"tdd"`
@@ -41,6 +44,7 @@ This document contains the complete findings of what Plan 00012 originally MISSE
 - Other: `"planning"`, `"environment"`, `"yolo-mode"`, `"state-management"`, `"context-injection"`
 
 ### Where Tags Are Used
+
 1. Handler definitions: `tags=["python", "qa-enforcement"]`
 2. Config filtering: `enable_tags: [python, typescript]`
 3. Registry filtering: `handlers/registry.py` lines 279-293
@@ -118,10 +122,12 @@ TagLiteral = Literal[
 ## 2. TOOL NAMES - CRITICAL OMISSION
 
 ### Impact
+
 - **31 handler files** with hardcoded tool names
 - `tool_name == "Bash"`, `tool_name == "Write"`, etc.
 
 ### Found Occurrences
+
 - `tool_name == "Bash"` (8 occurrences)
 - `tool_name == "Write"` (9 occurrences)
 - `tool_name == "Edit"` (12 occurrences)
@@ -159,6 +165,7 @@ ToolNameLiteral = Literal[
 ## 3. CONFIG KEYS - CRITICAL OMISSION
 
 ### Impact
+
 - Config key strings hardcoded throughout config system
 - No single source of truth for config field names
 
@@ -202,6 +209,7 @@ class ConfigKey:
 ## 4. PROTOCOL FIELD NAMES - CRITICAL OMISSION
 
 ### Impact
+
 - JSON input/output field names hardcoded
 - Part of contract with Claude Code CLI
 
@@ -240,6 +248,7 @@ class HookOutputField:
 ## 5. VALIDATION LIMITS - PARTIAL OMISSION
 
 ### Impact
+
 - Min/max validation thresholds are magic numbers
 
 ### Found Limits
@@ -278,16 +287,19 @@ class FormatLimit:
 ## 6. DECISION ENUM - EXISTS BUT NOT ENFORCED
 
 ### Status
+
 - `Decision` enum EXISTS in `core/hook_result.py`
 - But some handlers still use `"allow"` strings instead of `Decision.ALLOW`
 
 ### Required
+
 - QA rule to enforce Decision enum usage
 - Migrate remaining string usages
 
 ## 7. EVENT_TYPE_MAPPING - MISSED
 
 ### Problem
+
 `handlers/registry.py` has hardcoded event type string keys:
 
 ```python
@@ -299,16 +311,19 @@ EVENT_TYPE_MAPPING: dict[str, EventType] = {
 ```
 
 ### Solution
+
 Use EventID constants for keys
 
 ## 8. ADDITIONAL MAGIC NUMBERS
 
 ### Subprocess Timeouts
+
 - `timeout=30` in `validate_eslint_on_write.py`
 - `timeout=0.5` in `git_branch.py`
 - `timeout=5` in `git_context_injector.py`
 
 ### Should Be
+
 ```python
 timeout=Timeout.ESLINT_CHECK  # 30 seconds
 timeout=Timeout.GIT_STATUS_SHORT  # 0.5 seconds
@@ -336,21 +351,27 @@ constants/
 ## FILES AFFECTED BY CATEGORY
 
 ### Tags (67 files)
+
 All handler files + config system + registry
 
 ### Tool Names (31 files)
+
 Handlers that check tool_name in matches()
 
 ### Config Keys (15+ files)
+
 Config loading, validation, registry
 
 ### Protocol Fields (5 files)
+
 Event models, HookResult, input schemas
 
 ### Validation Limits (3 files)
+
 Config models, validators
 
 ### Decision Strings (42 files)
+
 All handlers that return HookResult
 
 ## ASSESSMENT

@@ -33,6 +33,7 @@ The handler includes a configurable whitelist for filtering commands (grep, awk,
 ## Context & Background
 
 From codebase exploration:
+
 - Handlers follow pattern in `/workspace/src/claude_code_hooks_daemon/handlers/pre_tool_use/`
 - Similar blocking handlers: `destructive_git.py` (priority 10), `sed_blocker.py` (priority 10)
 - Configuration via `.claude/hooks-daemon.yaml` with options support
@@ -44,11 +45,13 @@ From codebase exploration:
 ### Phase 1: Test Infrastructure (TDD)
 
 - [x] ✅ **Create test file structure**
+
   - [x] ✅ Create `tests/unit/handlers/test_pipe_blocker.py`
   - [x] ✅ Add pytest fixture for handler instance
   - [x] ✅ Set up test class structure
 
 - [x] ✅ **Write initialization tests** (5 tests)
+
   - [ ] ⬜ Test handler name is "pipe-blocker"
   - [ ] ⬜ Test priority is 15
   - [ ] ⬜ Test terminal is True
@@ -68,6 +71,7 @@ From codebase exploration:
 ### Phase 3: Pipe Detection Logic (TDD)
 
 - [ ] ⬜ **Write basic pipe detection tests** (10 tests)
+
   - [ ] ⬜ Test: `find . | tail -n 20` (should match)
   - [ ] ⬜ Test: `npm test | head -n 10` (should match)
   - [ ] ⬜ Test: `tail -n 20 file.txt` (no pipe - should NOT match)
@@ -80,6 +84,7 @@ From codebase exploration:
   - [ ] ⬜ Test: spacing variations `|tail`, `| tail`, `|  tail`
 
 - [ ] ⬜ **Implement basic pipe detection**
+
   - [ ] ⬜ Import `get_bash_command` from core.utils
   - [ ] ⬜ Compile regex pattern: `\|\s*(tail|head)\b`
   - [ ] ⬜ Check for pipe pattern in matches()
@@ -90,6 +95,7 @@ From codebase exploration:
 ### Phase 4: Whitelist Logic (TDD)
 
 - [ ] ⬜ **Write whitelist tests** (25 tests)
+
   - [ ] ⬜ Test: `grep error log | tail` (should NOT match - whitelisted)
   - [ ] ⬜ Test: `rg pattern | head` (should NOT match - whitelisted)
   - [ ] ⬜ Test: `awk '{print $1}' | tail` (should NOT match - whitelisted)
@@ -102,6 +108,7 @@ From codebase exploration:
   - [ ] ⬜ Test: non-whitelisted `npm run test | tail` (should match)
 
 - [ ] ⬜ **Implement command extraction**
+
   - [ ] ⬜ Create `_extract_source_command()` helper method
   - [ ] ⬜ Split command by pipe character
   - [ ] ⬜ Find segment before tail/head
@@ -110,6 +117,7 @@ From codebase exploration:
   - [ ] ⬜ Return command name
 
 - [ ] ⬜ **Implement whitelist checking**
+
   - [ ] ⬜ Add `_allowed_pipe_sources` attribute
   - [ ] ⬜ Check extracted command against whitelist
   - [ ] ⬜ Return False (allow) if whitelisted
@@ -119,6 +127,7 @@ From codebase exploration:
 ### Phase 5: Edge Cases (TDD)
 
 - [ ] ⬜ **Write edge case tests** (15 tests)
+
   - [ ] ⬜ Test: `git commit -m "tail behavior"` (should NOT match - no pipe)
   - [ ] ⬜ Test: malformed pipe `cmd |` (should handle gracefully)
   - [ ] ⬜ Test: multiple tail/head `cmd | tail | head`
@@ -131,6 +140,7 @@ From codebase exploration:
   - [ ] ⬜ Test: pipe to other commands `cmd | wc -l`
 
 - [ ] ⬜ **Refine detection logic**
+
   - [ ] ⬜ Add defensive checks for None/empty
   - [ ] ⬜ Handle extraction failures gracefully (default to block)
   - [ ] ⬜ Run tests (should pass)
@@ -138,6 +148,7 @@ From codebase exploration:
 ### Phase 6: handle() Implementation (TDD)
 
 - [ ] ⬜ **Write handle() tests** (12 tests)
+
   - [ ] ⬜ Test: Returns Decision.DENY
   - [ ] ⬜ Test: Reason contains blocked command
   - [ ] ⬜ Test: Reason explains why (expensive re-run)
@@ -147,6 +158,7 @@ From codebase exploration:
   - [ ] ⬜ Test: Message format is clear and actionable
 
 - [ ] ⬜ **Implement handle() method**
+
   - [ ] ⬜ Extract command via get_bash_command()
   - [ ] ⬜ Extract source command
   - [ ] ⬜ Build comprehensive error message
@@ -160,12 +172,14 @@ From codebase exploration:
 ### Phase 7: Configuration Integration
 
 - [ ] ⬜ **Write config tests** (5 tests)
+
   - [ ] ⬜ Test: Options loaded from YAML
   - [ ] ⬜ Test: Custom whitelist works
   - [ ] ⬜ Test: Empty whitelist blocks all
   - [ ] ⬜ Test: Whitelist is case-sensitive
 
 - [ ] ⬜ **Add configuration**
+
   - [ ] ⬜ Add pipe_blocker section to `.claude/hooks-daemon.yaml`
   - [ ] ⬜ Include default whitelist (grep, rg, awk, jq, etc.)
   - [ ] ⬜ Set priority: 15
@@ -211,8 +225,10 @@ From codebase exploration:
 ## Technical Decisions
 
 ### Decision 1: Whitelist vs Blacklist Approach
+
 **Context**: How to determine which commands are safe to pipe?
 **Options Considered**:
+
 1. Blacklist expensive commands (find, npm, docker, git, etc.)
 2. Whitelist safe filtering commands (grep, awk, jq, etc.)
 
@@ -221,8 +237,10 @@ From codebase exploration:
 **Date**: 2026-01-29
 
 ### Decision 2: Configuration Format
+
 **Context**: How should users customize the whitelist?
 **Options Considered**:
+
 1. Simple list of command names (`["grep", "awk"]`)
 2. Regex patterns for each command (`["\\bgrep\\b", "\\bawk\\b"]`)
 3. Mix of both
@@ -232,8 +250,10 @@ From codebase exploration:
 **Date**: 2026-01-29
 
 ### Decision 3: Command Extraction Strategy
+
 **Context**: How to parse complex pipes?
 **Options Considered**:
+
 1. Full bash parser (complete AST)
 2. Simple split by pipe + regex for command extraction
 3. Heuristic pattern matching
@@ -243,8 +263,10 @@ From codebase exploration:
 **Date**: 2026-01-29
 
 ### Decision 4: Priority Level
+
 **Context**: Where in the handler chain should this run?
 **Options Considered**:
+
 1. Priority 10 (same as destructive_git, sed_blocker)
 2. Priority 15 (between worktree and git_stash)
 3. Priority 20+ (workflow category)
@@ -268,12 +290,12 @@ From codebase exploration:
 
 ## Risks & Mitigations
 
-| Risk | Impact | Probability | Mitigation |
-|------|--------|-------------|------------|
-| False positives (blocking valid cases) | Medium | Low | Generous default whitelist; users can extend via config |
-| Command extraction fails on edge cases | Low | Medium | Default to blocking (fail-safe); extensive testing |
-| Performance impact on every bash command | Low | Low | Pre-compiled regex patterns; simple string operations |
-| User doesn't understand why blocked | Medium | Medium | Clear error messages with examples and alternatives |
+| Risk                                     | Impact | Probability | Mitigation                                              |
+| ---------------------------------------- | ------ | ----------- | ------------------------------------------------------- |
+| False positives (blocking valid cases)   | Medium | Low         | Generous default whitelist; users can extend via config |
+| Command extraction fails on edge cases   | Low    | Medium      | Default to blocking (fail-safe); extensive testing      |
+| Performance impact on every bash command | Low    | Low         | Pre-compiled regex patterns; simple string operations   |
+| User doesn't understand why blocked      | Medium | Medium      | Clear error messages with examples and alternatives     |
 
 ## Timeline
 
@@ -288,13 +310,16 @@ From codebase exploration:
 ## Notes & Updates
 
 ### 2026-01-29 - Plan Created
+
 - Initial plan created after Sonnet-based design exploration
 - User feedback incorporated: Use Sonnet (not Haiku) for design
 - Key user insight: Whitelist for safe filtering commands
 - Design complete and approved, ready for TDD implementation
 
 ### 2026-01-29 - COMPLETED ✅
+
 **Implementation Summary:**
+
 - Created `pipe_blocker.py` handler with priority 15 (safety category)
 - Created comprehensive test suite with 70 tests (all passing)
 - Added configuration to `.claude/hooks-daemon.yaml`
@@ -304,6 +329,7 @@ From codebase exploration:
 - Provides clear error messages with temp file alternatives
 
 **Key Features:**
+
 - Regex-based pipe detection with case-insensitive matching
 - Command extraction for whitelist checking
 - Allows tail -f (follow) and head -c (byte count) as exceptions
@@ -311,6 +337,7 @@ From codebase exploration:
 - Fail-safe error handling (defaults to blocking on extraction failures)
 
 **Files Modified:**
+
 - `src/claude_code_hooks_daemon/handlers/pre_tool_use/pipe_blocker.py` (NEW)
 - `tests/unit/handlers/test_pipe_blocker.py` (NEW - 70 tests)
 - `.claude/hooks-daemon.yaml` (added pipe_blocker config)

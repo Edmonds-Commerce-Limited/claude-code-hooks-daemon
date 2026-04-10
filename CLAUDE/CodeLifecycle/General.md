@@ -8,6 +8,7 @@
 Standard process for any code modification that isn't a new feature or bug fix.
 
 **Use this for**:
+
 - Refactoring
 - Documentation updates
 - Configuration changes
@@ -16,6 +17,7 @@ Standard process for any code modification that isn't a new feature or bug fix.
 - Code cleanup
 
 **Don't use this for**:
+
 - New features/handlers → Use @CLAUDE/CodeLifecycle/Features.md
 - Bug fixes → Use @CLAUDE/CodeLifecycle/Bugs.md
 
@@ -46,6 +48,7 @@ git commit -m "Description"
 ### Step 1: Make Changes
 
 **Best Practices**:
+
 - Keep changes focused and atomic
 - One logical change per commit
 - Don't mix refactoring with feature work
@@ -54,6 +57,7 @@ git commit -m "Description"
 ### Step 2: Update Tests
 
 If you changed code behavior:
+
 - Update existing tests
 - Add new tests if needed
 - Maintain 95%+ coverage
@@ -84,6 +88,7 @@ pytest tests/unit/path/to/test_module.py --cov=src/path/to/module.py --cov-repor
 ```
 
 **Expected output**:
+
 ```
 ========================================
 QA Summary
@@ -147,23 +152,27 @@ All QA checks pass, daemon loads successfully."
 A general code change is DONE when ALL of the following are verified:
 
 ### 1. Code Quality
+
 - [ ] Black formatted (run `./scripts/qa/run_autofix.sh`)
 - [ ] Ruff linted (no violations)
 - [ ] MyPy typed (strict mode, all functions typed)
 - [ ] No security issues (Bandit scan passes)
 
 ### 2. Tests
+
 - [ ] Relevant tests added/updated
 - [ ] 95%+ coverage maintained
 - [ ] All tests pass: `pytest tests/ -v`
 
 ### 3. Daemon Load (MANDATORY)
+
 - [ ] Daemon restarts without errors
 - [ ] No import failures in logs
 - [ ] Run: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
 - [ ] Verify: `$PYTHON -m claude_code_hooks_daemon.daemon.cli status` (RUNNING)
 
 ### 4. Full QA
+
 - [ ] Run: `./scripts/qa/run_all.sh`
 - [ ] Expected: "ALL CHECKS PASSED"
 
@@ -172,6 +181,7 @@ A general code change is DONE when ALL of the following are verified:
 ### Refactoring
 
 **Before**:
+
 ```python
 # Duplicated code
 def handler_a():
@@ -188,6 +198,7 @@ def handler_b():
 ```
 
 **After**:
+
 ```python
 # Extracted common logic
 def _process_if_condition(condition):
@@ -204,6 +215,7 @@ def handler_b():
 ```
 
 **Checklist**:
+
 - [ ] Extract common patterns
 - [ ] Update all callers
 - [ ] Maintain test coverage
@@ -213,13 +225,15 @@ def handler_b():
 ### Documentation Updates
 
 **What to update**:
+
 - Docstrings in code
 - README.md
-- CLAUDE/*.md files
+- CLAUDE/\*.md files
 - Configuration examples
 - Inline comments (only where necessary)
 
 **Checklist**:
+
 - [ ] Check spelling and grammar
 - [ ] Verify code examples are correct
 - [ ] Update links if files moved
@@ -229,12 +243,14 @@ def handler_b():
 ### Configuration Changes
 
 **Examples**:
+
 - Adding/removing handlers from `.claude/hooks-daemon.yaml`
 - Changing handler priorities
 - Updating configuration schema
 - Modifying defaults
 
 **Checklist**:
+
 - [ ] Update configuration file
 - [ ] Update schema/validation if needed
 - [ ] Update documentation
@@ -244,12 +260,14 @@ def handler_b():
 ### Test Improvements
 
 **Examples**:
+
 - Adding missing test cases
 - Improving test coverage
 - Refactoring test utilities
 - Adding integration tests
 
 **Checklist**:
+
 - [ ] New tests pass
 - [ ] Coverage increased
 - [ ] No test regressions
@@ -296,6 +314,7 @@ git add .claude/hooks-daemon.yaml
 ```
 
 **Why**: Prevents accidentally committing:
+
 - Secrets (.env files)
 - IDE configs (.vscode/, .idea/)
 - Large binaries
@@ -304,6 +323,7 @@ git add .claude/hooks-daemon.yaml
 ### Commit Messages
 
 **Good commit messages**:
+
 ```
 Refactor: Extract common validation logic
 
@@ -316,6 +336,7 @@ All QA checks pass, daemon loads successfully.
 ```
 
 **Bad commit messages**:
+
 ```
 fix stuff
 update
@@ -326,25 +347,27 @@ changes
 ### Atomic Commits
 
 **One commit per logical change**:
+
 - ✅ Refactor validation logic
 - ✅ Update documentation
 - ✅ Fix typo in error message
 
 **Not**:
+
 - ❌ Refactor validation + add new feature + fix bug
 
 ## When to Use Other Lifecycles
 
-| Change Description | Use This Document |
-|-------------------|-------------------|
-| Add new handler | @CLAUDE/CodeLifecycle/Features.md |
-| Add new feature | @CLAUDE/CodeLifecycle/Features.md |
-| Fix a bug | @CLAUDE/CodeLifecycle/Bugs.md |
-| Refactor code | @CLAUDE/CodeLifecycle/General.md |
-| Update docs | @CLAUDE/CodeLifecycle/General.md |
-| Update config | @CLAUDE/CodeLifecycle/General.md |
-| Improve tests | @CLAUDE/CodeLifecycle/General.md |
-| Performance optimization | @CLAUDE/CodeLifecycle/General.md |
+| Change Description       | Use This Document                 |
+| ------------------------ | --------------------------------- |
+| Add new handler          | @CLAUDE/CodeLifecycle/Features.md |
+| Add new feature          | @CLAUDE/CodeLifecycle/Features.md |
+| Fix a bug                | @CLAUDE/CodeLifecycle/Bugs.md     |
+| Refactor code            | @CLAUDE/CodeLifecycle/General.md  |
+| Update docs              | @CLAUDE/CodeLifecycle/General.md  |
+| Update config            | @CLAUDE/CodeLifecycle/General.md  |
+| Improve tests            | @CLAUDE/CodeLifecycle/General.md  |
+| Performance optimization | @CLAUDE/CodeLifecycle/General.md  |
 
 ## Summary
 
@@ -360,6 +383,7 @@ changes
 ---
 
 **See Also**:
+
 - @CLAUDE/CodeLifecycle/Features.md - Feature development
 - @CLAUDE/CodeLifecycle/Bugs.md - Bug fixes
 - @CLAUDE/AcceptanceTests/GENERATING.md - Acceptance test generation

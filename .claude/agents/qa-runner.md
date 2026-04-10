@@ -1,9 +1,6 @@
 ---
-name: qa-runner
-description: Run QA checks quickly and report results. Read-only execution that returns summaries with log file paths for detailed analysis.
-tools: Bash, Read, Glob
-model: haiku
----
+
+## name: qa-runner description: Run QA checks quickly and report results. Read-only execution that returns summaries with log file paths for detailed analysis. tools: Bash, Read, Glob model: haiku
 
 # QA Runner Agent - Fast Quality Assurance Execution
 
@@ -127,6 +124,7 @@ Overall: ✅ PASS / ❌ FAIL
 ## Error Handling
 
 If a QA script fails to run:
+
 ```
 ⚠️ Script Execution Error
 
@@ -143,6 +141,7 @@ Check script exists and has correct permissions.
 ## Usage
 
 Invoke from main Claude:
+
 ```
 Use the qa-runner agent to execute QA checks and report results.
 ```

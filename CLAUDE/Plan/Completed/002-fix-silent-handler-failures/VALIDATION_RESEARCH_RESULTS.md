@@ -7,25 +7,28 @@
 
 Tested with 10,000 validation iterations:
 
-| Approach | Compile Time | Per Event Time | Events/sec |
-|----------|-------------|----------------|------------|
-| Full jsonschema validation | 0.022ms | 0.028ms | 35,673 |
-| Simple field checks | 0ms | 0.0001ms | 13,513,733 |
-| Hybrid (essential + full) | 0.028ms | 0.028ms | 35,732 |
+| Approach                   | Compile Time | Per Event Time | Events/sec |
+| -------------------------- | ------------ | -------------- | ---------- |
+| Full jsonschema validation | 0.022ms      | 0.028ms        | 35,673     |
+| Simple field checks        | 0ms          | 0.0001ms       | 13,513,733 |
+| Hybrid (essential + full)  | 0.028ms      | 0.028ms        | 35,732     |
 
 ## Key Findings
 
 1. **Full jsonschema validation is FAST**
+
    - Only 0.028ms per event (28 microseconds)
    - Well under 5ms performance target
    - One-time compile cost: 0.022ms (cached in daemon)
 
 2. **Simple checks are faster but insufficient**
+
    - 280x faster than full schema
    - But only catches missing fields, not wrong field names
    - Wouldn't catch the `tool_output` vs `tool_response` bug
 
 3. **Hybrid approach offers no advantage**
+
    - Same performance as full schema validation
    - Full validation overhead is negligible
    - No reason to split into layers
@@ -88,6 +91,7 @@ if self._should_validate_input():
 ```
 
 **Rationale**:
+
 - Aligns with existing fail-open architecture
 - Version mismatches between daemon and Claude Code won't break functionality
 - Validation failures are logged for debugging
@@ -105,6 +109,7 @@ if self._is_strict_validation() and validation_errors:
 ```
 
 **Use Cases**:
+
 - Testing and debugging
 - Identifying real event structure changes
 - Enforcing strict compliance
@@ -141,6 +146,7 @@ daemon:
 ```
 
 **Environment Variables**:
+
 - `HOOKS_DAEMON_INPUT_VALIDATION=true|false` - Master switch
 - `HOOKS_DAEMON_VALIDATION_STRICT=true|false` - Strict mode
 
@@ -153,13 +159,13 @@ daemon:
 
 ## Comparison with Response Validation
 
-| Aspect | Response Validation | Input Validation |
-|--------|-------------------|------------------|
-| Location | Tests only | Daemon runtime |
-| Purpose | Ensure handlers return correct format | Catch wrong field names |
-| Performance | Test-time only | 0.028ms per event |
-| Failure mode | Test fails | Log warning, optional fail-closed |
-| Coverage | Handler outputs | Claude Code inputs |
+| Aspect       | Response Validation                   | Input Validation                  |
+| ------------ | ------------------------------------- | --------------------------------- |
+| Location     | Tests only                            | Daemon runtime                    |
+| Purpose      | Ensure handlers return correct format | Catch wrong field names           |
+| Performance  | Test-time only                        | 0.028ms per event                 |
+| Failure mode | Test fails                            | Log warning, optional fail-closed |
+| Coverage     | Handler outputs                       | Claude Code inputs                |
 
 ## Next Steps
 

@@ -1,6 +1,6 @@
 # Release Process
 
-**ALWAYS use `/release` skill. NEVER manually tag, edit CHANGELOG.md, or edit RELEASES/*.md.**
+**ALWAYS use `/release` skill. NEVER manually tag, edit CHANGELOG.md, or edit RELEASES/\*.md.**
 
 ## Prerequisites
 
@@ -52,6 +52,7 @@ Agent verifies: clean git state, all QA passes, version consistency across files
 ### 2. Version Detection
 
 Auto-detects from commits since last tag:
+
 - **PATCH**: fix/bug/docs/refactor keywords
 - **MINOR**: feat/Add/Implement keywords
 - **MAJOR**: BREAKING/incompatible keywords
@@ -77,6 +78,7 @@ Creates `RELEASES/vX.Y.Z.md` with: summary, changelog, upgrade instructions (if 
 ## Step 6: Opus Documentation Review
 
 Opus reviews **documentation only** (not code/QA):
+
 - Version numbers consistent across files
 - README.md stats updated
 - Changelog accurate and categorized
@@ -103,6 +105,7 @@ All 8 checks must pass. ANY failure = ABORT.
 ### Detection
 
 Scan the new CHANGELOG.md entry for:
+
 1. Any entries in "Removed" section
 2. "BREAKING" keyword in "Changed" section
 3. Keywords: "BREAKING", "breaking change", "incompatible", "renamed"
@@ -112,11 +115,11 @@ Scan the new CHANGELOG.md entry for:
 
 ### Decision
 
-| Breaking Changes? | Upgrade Guide Exists? | Action |
-|---|---|---|
-| Yes | Yes | Proceed |
-| Yes | No | **ABORT** - create guide first |
-| No | N/A | Proceed |
+| Breaking Changes? | Upgrade Guide Exists? | Action                         |
+| ----------------- | --------------------- | ------------------------------ |
+| Yes               | Yes                   | Proceed                        |
+| Yes               | No                    | **ABORT** - create guide first |
+| No                | N/A                   | Proceed                        |
 
 ### Upgrade Guide Requirements
 
@@ -139,6 +142,7 @@ git diff "${LAST_TAG}..HEAD" -- src/
 ```
 
 Review checklist:
+
 - No bugs in `matches()`/`handle()` logic
 - No security anti-patterns
 - Priority ranges correct (10-20 safety, 25-35 quality, 36-55 workflow, 100+ logging)
@@ -171,11 +175,11 @@ LAST_TAG=$(git describe --tags --abbrev=0)
 HANDLER_CHANGES=$(git diff "${LAST_TAG}..HEAD" --name-only -- src/claude_code_hooks_daemon/handlers/)
 ```
 
-| Bump | Handler Changes? | Action |
-|---|---|---|
-| MAJOR/MINOR | Any | Full suite |
-| PATCH | Yes | Targeted tests for changed handlers |
-| PATCH | No | Skip — document in release notes |
+| Bump        | Handler Changes? | Action                              |
+| ----------- | ---------------- | ----------------------------------- |
+| MAJOR/MINOR | Any              | Full suite                          |
+| PATCH       | Yes              | Targeted tests for changed handlers |
+| PATCH       | No               | Skip — document in release notes    |
 
 ### Execution
 
@@ -186,6 +190,7 @@ HANDLER_CHANGES=$(git diff "${LAST_TAG}..HEAD" --name-only -- src/claude_code_ho
 **Step 11.3**: Generate playbook: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-playbook > /tmp/playbook.md`
 
 **Step 11.4**: Execute tests sequentially in main thread:
+
 - **BLOCKING tests** (~65): Bash/Write/Edit with dangerous commands, verify hook denies
 - **ADVISORY tests** (~24): Verify system-reminder shows context
 - **Skip**: Untriggerable lifecycle events (verified by daemon load + unit tests)
@@ -244,12 +249,12 @@ gh release view vX.Y.Z --json tagName,isDraft,isPrerelease,url \
 
 ## Rollback
 
-| State | Action |
-|---|---|
-| Before commit | `git restore .` |
-| After commit, not pushed | `git reset HEAD~1` |
-| After push | Create immediate patch release (NEVER force-push tags) |
-| Tag created | `git tag -d vX.Y.Z && git push origin :refs/tags/vX.Y.Z && gh release delete vX.Y.Z --yes` |
+| State                    | Action                                                                                     |
+| ------------------------ | ------------------------------------------------------------------------------------------ |
+| Before commit            | `git restore .`                                                                            |
+| After commit, not pushed | `git reset HEAD~1`                                                                         |
+| After push               | Create immediate patch release (NEVER force-push tags)                                     |
+| Tag created              | `git tag -d vX.Y.Z && git push origin :refs/tags/vX.Y.Z && gh release delete vX.Y.Z --yes` |
 
 ## Manual Release (Bypass Skill)
 
@@ -265,10 +270,10 @@ gh release view vX.Y.Z --json tagName,isDraft,isPrerelease,url \
 
 ## Semver Guidelines
 
-| Level | When |
-|---|---|
-| PATCH | Bug fixes, security patches, docs |
-| MINOR | New handlers/features, config options, backwards-compatible |
+| Level | When                                                                |
+| ----- | ------------------------------------------------------------------- |
+| PATCH | Bug fixes, security patches, docs                                   |
+| MINOR | New handlers/features, config options, backwards-compatible         |
 | MAJOR | Breaking API/config changes, removed features, Python version bumps |
 
 No fixed schedule. Critical bugs = immediate patch. Features = minor when stable. Breaking = plan ahead.

@@ -23,6 +23,7 @@
 ## Installation Method
 
 Used the one-line automated installer:
+
 ```bash
 curl -sSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/install.sh | bash
 ```
@@ -34,6 +35,7 @@ curl -sSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code
 ### Step 1: Pre-Installation Checks ✅
 
 **Command**: Pre-installation check script
+
 ```bash
 if [ -d ".claude/hooks-daemon" ]; then
   echo "DAEMON ALREADY INSTALLED"
@@ -47,6 +49,7 @@ fi
 **Output**: "No existing installation found - safe to proceed with installation"
 
 **Notes**:
+
 - Clear, unambiguous check
 - Good guidance on what to do if daemon already exists (UPDATE vs REINSTALL)
 
@@ -72,6 +75,7 @@ fi
 ### Step 5: One-Line Installer Execution ⚠️ PARTIAL SUCCESS
 
 **Command**:
+
 ```bash
 curl -sSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/install.sh | bash
 ```
@@ -186,6 +190,7 @@ hooks-daemon/untracked/
 **Exit Code**: 1 (warning about .gitignore)
 
 **What Worked**:
+
 - ✅ Repository cloned successfully
 - ✅ Virtual environment created
 - ✅ Dependencies installed (13 packages)
@@ -195,6 +200,7 @@ hooks-daemon/untracked/
 - ✅ Daemon directory structure created
 
 **What Required Manual Fix**:
+
 - ⚠️ `.claude/.gitignore` not created automatically
 - ⚠️ Installer showed warning but didn't create the file
 - ⚠️ Exit code 1 suggests failure, but installation actually succeeded
@@ -204,6 +210,7 @@ hooks-daemon/untracked/
 **Required Action**: Copy template .gitignore to .claude/
 
 **Command**:
+
 ```bash
 cp .claude/hooks-daemon/.claude/.gitignore .claude/.gitignore
 ```
@@ -216,6 +223,7 @@ cp .claude/hooks-daemon/.claude/.gitignore .claude/.gitignore
 **Problem Discovered**: Daemon started in **DEGRADED MODE** immediately after installation
 
 **Error Messages** (appeared on EVERY tool call):
+
 ```
 WARNING: DEGRADED MODE - Hooks daemon configuration is invalid.
 
@@ -231,6 +239,7 @@ CONFIGURATION ERRORS (2):
 **Root Cause**: Default `.claude/hooks-daemon.yaml` included a handler that doesn't exist in v2.10.0
 
 **Configuration Fragment (BROKEN)**:
+
 ```yaml
 status_line:
   model_context:
@@ -243,6 +252,7 @@ status_line:
 ```
 
 **Fix Applied**:
+
 ```yaml
 # stats_cache_reader: # REMOVED - handler not available in this version
 #   enabled: true
@@ -250,6 +260,7 @@ status_line:
 ```
 
 **Commands to Fix**:
+
 ```bash
 # Edit config to comment out invalid handler
 # Then restart daemon:
@@ -261,11 +272,13 @@ status_line:
 ### Step 8: Daemon Verification ✅
 
 **Commands**:
+
 ```bash
 .claude/hooks-daemon/untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli status
 ```
 
 **Output**:
+
 ```
 Daemon: RUNNING
 PID: 1890
@@ -278,6 +291,7 @@ PID file: /workspace/.claude/hooks-daemon/untracked/daemon-0381074f7a37.pid
 ### Step 9: Hook System Verification ✅
 
 **Evidence**: System reminder messages on tool calls:
+
 ```
 PreToolUse:Bash hook additional context: ✅ PreToolUse hook system active
 PostToolUse:Bash hook additional context: ✅ PostToolUse hook system active
@@ -288,6 +302,7 @@ PostToolUse:Bash hook additional context: ✅ PostToolUse hook system active
 ### Step 10: Commit Installation ✅
 
 **Commands**:
+
 ```bash
 git add .claude/ .gitignore
 git commit -m "Install Claude Code Hooks Daemon"
@@ -305,6 +320,7 @@ git commit -m "Install Claude Code Hooks Daemon"
 **Problem**: Out-of-the-box config file contains invalid handler that doesn't exist in v2.10.0
 
 **Impact**:
+
 - Daemon runs in DEGRADED MODE immediately after installation
 - User sees scary warning messages on EVERY tool call
 - Creates impression that installation failed
@@ -314,16 +330,19 @@ git commit -m "Install Claude Code Hooks Daemon"
 **Expected Behavior**: Default config should contain ONLY valid handlers for the installed version
 
 **Actual Behavior**: Config references `stats_cache_reader` which:
+
 1. Doesn't exist as a handler in v2.10.0
 2. Has priority 70 (out of valid range 5-60)
 
 **Recommendation**:
+
 1. **IMMEDIATE**: Remove `stats_cache_reader` from default config template
 2. **VERIFICATION**: Run daemon startup test in CI to catch invalid default configs
 3. **TESTING**: Add integration test that validates default config loads without errors
 4. **DOCUMENTATION**: If handler is experimental/future, mark it as such and disable by default
 
 **How to Reproduce**:
+
 ```bash
 # Fresh install
 curl -sSL .../install.sh | bash
@@ -335,6 +354,7 @@ curl -sSL .../install.sh | bash
 **Problem**: Installer exits with code 1 even when installation succeeds
 
 **Impact**:
+
 - Automated scripts may treat installation as failed
 - CI/CD pipelines may stop
 - Users may think installation failed when it actually worked
@@ -344,6 +364,7 @@ curl -sSL .../install.sh | bash
 **Actual Behavior**: Exit code 1 when .gitignore setup has warnings
 
 **Recommendation**:
+
 - Exit code 0 for successful installation (even with warnings)
 - Exit code 1 for actual failures (git not found, Python too old, etc.)
 - Distinguish between fatal errors and actionable warnings
@@ -353,11 +374,13 @@ curl -sSL .../install.sh | bash
 **Problem**: Installer shows .gitignore template but doesn't create the file
 
 **Impact**:
+
 - User must manually copy .gitignore
 - Risk of committing daemon directory to git if user skips this step
 - Extra manual step that should be automated
 
 **What Installer Does**:
+
 ```
 ⚠  .claude/.gitignore not found
 ⚠  .gitignore files may need manual adjustment
@@ -367,6 +390,7 @@ Manual .gitignore Setup (if needed):
 ```
 
 **What Installer Should Do**:
+
 ```
 → Creating .claude/.gitignore...
 ✓ Created .claude/.gitignore from template
@@ -374,6 +398,7 @@ Manual .gitignore Setup (if needed):
 ```
 
 **Recommendation**:
+
 1. Automatically copy `.claude/hooks-daemon/.claude/.gitignore` to `.claude/.gitignore`
 2. Only show manual instructions if automatic creation fails
 3. Make .gitignore creation non-optional (required for safe git usage)
@@ -385,12 +410,14 @@ Manual .gitignore Setup (if needed):
 ### Issue #4: UV Hardlink Warning (SEVERITY: LOW-MEDIUM)
 
 **Warning Shown**:
+
 ```
 warning: Failed to hardlink files; falling back to full copy.
 This may lead to degraded performance.
 ```
 
 **Impact**:
+
 - Looks scary to users (is installation broken?)
 - Appears during every installation in containers
 - Actually benign in most cases
@@ -398,6 +425,7 @@ This may lead to degraded performance.
 **Context**: This happens in containerized environments where filesystems don't support hardlinks
 
 **Recommendation**:
+
 1. Suppress this warning by default (set UV_LINK_MODE=copy in installer)
 2. Only show if user explicitly needs performance optimization
 3. Add note in docs: "This warning is normal in containers and can be ignored"
@@ -405,6 +433,7 @@ This may lead to degraded performance.
 ### Issue #5: Installer Documentation Says "DISPLAYS but does not create" (SEVERITY: MEDIUM)
 
 **LLM-INSTALL.md states**:
+
 ```markdown
 # DISPLAYS (but does not create) required .claude/.gitignore content
 ```
@@ -412,11 +441,13 @@ This may lead to degraded performance.
 **Reality**: This is confusing and creates expectation mismatch
 
 **Problem**:
+
 - Documentation explicitly says it won't create the file
 - But then shows warnings suggesting you should have created it
 - Creates confusion: "Am I supposed to do this or not?"
 
 **Recommendation**:
+
 1. Either: Automatically create the file and say "Created .claude/.gitignore"
 2. Or: Make it clear upfront this is a manual step BEFORE running installer
 3. Don't leave it ambiguous - be explicit about what's automated vs manual
@@ -428,12 +459,14 @@ This may lead to degraded performance.
 ### Issue #6: Conflicting Information About .gitignore (SEVERITY: MEDIUM)
 
 **LLM-INSTALL.md Section 3 says**:
+
 ```
 The installer will display a large banner with the REQUIRED `.claude/.gitignore` content.
 **YOU MUST** create the gitignore in step 4.
 ```
 
 **But then Quick Install section says**:
+
 ```
 This will:
 ...
@@ -443,6 +476,7 @@ This will:
 **Problem**: Says both "you must create it" AND "sets up all .gitignore files"
 
 **Recommendation**: Pick one approach and be consistent:
+
 - EITHER: "Installer creates .gitignore automatically"
 - OR: "You must manually create .gitignore after installation"
 
@@ -453,6 +487,7 @@ This will:
 **Current State**: Docs show individual commands but don't paint picture of successful completion
 
 **Recommendation**: Add section to LLM-INSTALL.md:
+
 ```markdown
 ## Installation Success Criteria
 
@@ -475,20 +510,23 @@ If you see degraded mode warnings, check config for invalid handlers.
 **Current State**: User discovers config errors through scary runtime warnings
 
 **Recommendation**: Add troubleshooting section for config validation:
-```markdown
+
+````markdown
 ## Validating Configuration
 
 After installation, verify config is valid:
 
 ```bash
 $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli validate-config
-```
+````
 
 Common issues:
+
 - Unknown handlers (removed in newer versions)
 - Priority out of range (must be 5-60)
 - Missing required fields
-```
+
+````
 
 ---
 
@@ -506,7 +544,7 @@ Step 8: Validating configuration
 ✓ Configuration valid
 ✓ All handlers available
 ✓ All priorities in range
-```
+````
 
 **Benefit**: Catches invalid configs before user sees degraded mode warnings
 
@@ -515,6 +553,7 @@ Step 8: Validating configuration
 **Current**: Installer deploys files but doesn't verify daemon starts
 
 **Proposed**:
+
 ```bash
 Step 9: Testing daemon startup
 ----------------------------------------
@@ -555,6 +594,7 @@ Step 9: Testing daemon startup
 **Current**: User gets default config with all handlers
 
 **Proposed**: Offer interactive setup:
+
 ```bash
 ./install.sh --interactive
 
@@ -598,16 +638,16 @@ $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli smoke-test
 
 ### What Worked Well ✅
 
-1. **One-line installer is convenient**: Single command to get everything installed
-2. **Detailed progress output**: Each step clearly labeled with status icons
-3. **Automatic dependency installation**: uv installed automatically without user intervention
-4. **Clear daemon status commands**: Easy to check if daemon is running
-5. **Hook system activation is obvious**: System reminders make it clear hooks are working
-6. **Good error messages**: When daemon is in degraded mode, error clearly explains problem
-7. **Template .gitignore available**: Easy to find and copy when needed
-8. **Version pinning works**: Installed exact version (v2.10.0) as expected
-9. **Virtual environment isolation**: Daemon dependencies don't pollute system Python
-10. **Fast installation**: Whole process took <5 minutes of actual work
+01. **One-line installer is convenient**: Single command to get everything installed
+02. **Detailed progress output**: Each step clearly labeled with status icons
+03. **Automatic dependency installation**: uv installed automatically without user intervention
+04. **Clear daemon status commands**: Easy to check if daemon is running
+05. **Hook system activation is obvious**: System reminders make it clear hooks are working
+06. **Good error messages**: When daemon is in degraded mode, error clearly explains problem
+07. **Template .gitignore available**: Easy to find and copy when needed
+08. **Version pinning works**: Installed exact version (v2.10.0) as expected
+09. **Virtual environment isolation**: Daemon dependencies don't pollute system Python
+10. **Fast installation**: Whole process took \<5 minutes of actual work
 
 ### Documentation Strengths ✅
 
@@ -623,6 +663,7 @@ $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli smoke-test
 ## ENVIRONMENT DETAILS
 
 **Container Environment**:
+
 - Engine: Podman
 - Image: Custom (.claude/ccy/Dockerfile)
 - Working directory: /workspace
@@ -630,6 +671,7 @@ $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli smoke-test
 - Filesystem: overlayfs (explains UV hardlink warning)
 
 **Project Type**:
+
 - White-label booking platform (Symfony + React)
 - Multi-service architecture (backend, frontend, postgres, nginx)
 - Heavy use of Claude Code for development
@@ -643,16 +685,19 @@ $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli smoke-test
 ### vs Other Python Tool Installations
 
 **Better Than**:
+
 - More automated than manual pip install
 - Better error messages than many Python tools
 - Clear status indicators throughout
 
 **Similar To**:
+
 - Poetry installer (one-line curl | bash)
 - Rye installer (automated venv setup)
 - uv itself (self-contained installation)
 
 **Room for Improvement vs**:
+
 - Homebrew (always validates after install)
 - Rust installer (shows clear success message)
 - Node version managers (interactive config)
@@ -662,22 +707,26 @@ $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli smoke-test
 ## RECOMMENDATIONS SUMMARY (Priority Order)
 
 ### P0 (Critical - Fix Immediately)
+
 1. **Remove invalid `stats_cache_reader` from default config** - Users hit this instantly
 2. **Add config validation to installer** - Prevent shipping broken configs
 
 ### P1 (High - Fix Soon)
+
 1. **Exit code 0 on successful install** - Don't fail CI/CD
 2. **Auto-create .claude/.gitignore** - Required for safe git usage
 3. **Add daemon startup verification to installer** - Prove it works
 4. **Fix conflicting .gitignore documentation** - Be consistent
 
 ### P2 (Medium - Nice to Have)
+
 1. **Suppress UV hardlink warning by default** - Less scary
 2. **Add "Installation Success Criteria" to docs** - Clear expectations
 3. **Add verify_install.sh script** - Easy post-install check
 4. **Add smoke-test command** - Quick sanity check
 
 ### P3 (Low - Enhancement)
+
 1. **Interactive config wizard** - Better UX for first-time users
 2. **Better progress indicators** - Spinner during long operations
 3. **Installation time estimates** - Set expectations
@@ -687,6 +736,7 @@ $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli smoke-test
 ## METRICS
 
 **Time Breakdown**:
+
 - Reading docs: 3 minutes
 - Running pre-checks: 1 minute
 - Installer execution: 2 minutes
@@ -706,12 +756,14 @@ $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli smoke-test
 ### Overall Experience: B+ (Good, with fixable issues)
 
 **Pros**:
+
 - Installation ultimately successful
 - Core functionality works correctly
 - Documentation comprehensive
 - Automated where it matters
 
 **Cons**:
+
 - Out-of-box config is broken (critical issue)
 - Requires manual fixes that should be automated
 - Exit code misleading
@@ -724,6 +776,7 @@ The tool itself is excellent and the installation *mostly* works. The broken def
 ### Estimated Improvement Impact
 
 If all P0/P1 recommendations implemented:
+
 - User friction: Reduced by ~80%
 - Support burden: Reduced by ~70%
 - Installation success rate: 95% → 99%
@@ -734,6 +787,7 @@ If all P0/P1 recommendations implemented:
 ## TESTING NOTES
 
 This installation was performed:
+
 - By an AI agent (Claude Sonnet 4.5)
 - Following documentation exactly as written
 - In a containerized development environment

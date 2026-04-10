@@ -19,6 +19,7 @@ except Exception:
 ```
 
 **Impact:**
+
 - Config errors masked → confusing error messages
 - Handler failures invisible → protection not active
 - Data loss silent → workflow state disappears
@@ -29,15 +30,18 @@ except Exception:
 ## How We Got Here
 
 1. **Original violation:** daemon/cli.py:120-122
+
    - Config validation errors swallowed
    - Pattern: `except Exception: pass`
 
 2. **Pattern replicated:** Copied to 21 other locations
+
    - No code review caught it
    - No tests for error paths
    - Silent failures became standard practice
 
 3. **Discovery trigger:** User reported:
+
    ```
    ERROR: This is the hooks-daemon repository.
    To run the daemon for development, add to .claude/hooks-daemon.yaml:
@@ -54,11 +58,13 @@ except Exception:
 **Sonnet agent scanned entire codebase** (Agent ID: a2ffddb)
 
 **Found:**
+
 - 22 CRITICAL violations (silent failures)
 - 2 MODERATE violations (overly broad handlers)
 - 2 ACCEPTABLE patterns (intentional, documented)
 
 **Most critical:**
+
 1. workflow_state_pre_compact.py - Data loss invisible
 2. yolo_container_detection.py - Security handler fails silently
 3. daemon/paths.py - Infrastructure errors hidden
@@ -69,15 +75,16 @@ except Exception:
 
 **5-phase remediation plan:**
 
-| Phase | Target | Violations | Impact |
-|-------|--------|------------|--------|
-| 1 | daemon/ core | 6 | Foundation |
-| 2 | Workflow state | 7 | Data loss |
-| 3 | Security (YOLO) | 4 | Safety |
-| 4 | User-facing | 4 | UX |
-| 5 | Config | 1 | Discovery |
+| Phase | Target          | Violations | Impact     |
+| ----- | --------------- | ---------- | ---------- |
+| 1     | daemon/ core    | 6          | Foundation |
+| 2     | Workflow state  | 7          | Data loss  |
+| 3     | Security (YOLO) | 4          | Safety     |
+| 4     | User-facing     | 4          | UX         |
+| 5     | Config          | 1          | Discovery  |
 
 **Fix pattern:**
+
 ```python
 # BEFORE (bad):
 try:
@@ -104,12 +111,14 @@ except Exception as e:
 > FAIL FAST - Detect errors early, validate at boundaries, explicit error handling
 
 **Consequences of silent failures:**
+
 1. **Users confused** - See wrong error messages
 2. **Data lost** - Workflow state disappears silently
 3. **Security bypassed** - Handlers fail but appear to work
 4. **Debugging impossible** - No error traces
 
 **The fix:**
+
 1. **Specific exceptions** - Catch only expected errors
 2. **Comprehensive logging** - Debug/warning/error levels
 3. **Error visibility** - Surface critical failures to users
@@ -122,6 +131,7 @@ except Exception as e:
 **Execution strategy:** Phase-by-phase with QA checkpoints
 
 **Timeline:**
+
 - Phase 1: daemon/ core (foundational)
 - Phase 2: Workflow state (data loss prevention)
 - Phase 3: Security handlers (safety)
@@ -129,6 +139,7 @@ except Exception as e:
 - Phase 5: Config (discovery)
 
 **Quality gates:**
+
 - QA after each phase (format, lint, types, tests, security)
 - Maintain 95%+ test coverage
 - Integration tests for error visibility

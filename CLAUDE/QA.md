@@ -29,31 +29,38 @@ Complete quality assurance for the Claude Code Hooks Daemon consists of **three 
 ### The 7 Automated Checks
 
 1. **Magic Values Check** (`check_magic_values.py`)
+
    - Detects hardcoded strings/numbers that should be constants
    - Enforces single source of truth for all values
    - Rules: handler names, priorities, tool names, event types, tags
 
 2. **Format Check** (Black)
+
    - Code formatting (line length 100)
    - Auto-fixes with `./scripts/qa/run_autofix.sh`
 
 3. **Linter** (Ruff)
+
    - Style violations, code smells, common bugs
    - Auto-fixes with `./scripts/qa/run_autofix.sh`
 
 4. **Type Check** (MyPy)
+
    - Strict mode type checking
    - All functions must have type annotations
 
 5. **Tests** (Pytest)
+
    - Minimum 95% code coverage required
    - Unit tests + integration tests
 
 6. **Security Check** (Bandit)
+
    - Scans for security vulnerabilities
    - Zero HIGH/MEDIUM/LOW issues allowed
 
 7. **Dependency Check** (Deptry)
+
    - Missing dependencies (DEP001)
    - Misplaced dependencies (DEP004)
 
@@ -85,12 +92,14 @@ Overall Status: ✅ ALL CHECKS PASSED
 ### When to Run Sub-Agent QA
 
 Sub-agent QA is required for:
+
 - ✅ Architectural changes (new handlers, refactoring)
 - ✅ Complex features (multiple files, cross-cutting concerns)
 - ✅ Before merging significant work
 - ✅ When using agent teams (see `CLAUDE/AgentTeam.md`)
 
 Sub-agent QA is optional for:
+
 - Small bug fixes (single file, trivial change)
 - Documentation-only changes
 - Configuration updates
@@ -352,6 +361,7 @@ SendMessage(type="message", recipient="team-lead",
 **See `CLAUDE/AcceptanceTests/GENERATING.md` for complete acceptance testing guide.**
 
 Acceptance testing is **agentic** - AI agents execute real-world test scenarios:
+
 - Test definitions are in handler code (`get_acceptance_tests()` method)
 - Playbooks are generated fresh from code (ephemeral, never committed)
 - **AI agents execute the playbook** and validate behavior
@@ -383,6 +393,7 @@ Acceptance Testing → Find Bug → STOP → Fix with TDD → Run Full QA → Re
 Your fix might have affected earlier tests. Full re-run ensures no regressions.
 
 **Process**:
+
 1. Generate fresh playbook
 2. Execute tests sequentially
 3. **If bug found**: STOP immediately
@@ -480,6 +491,7 @@ Merge (ONLY after all 4 gates pass)
 ✅ NO "dogfooding" language
 
 **Examples**:
+
 - `destructive_git` - Blocks dangerous git operations (generic)
 - `tdd_enforcement` - Enforces test-first development (generic)
 - `sed_blocker` - Blocks sed usage (generic)
@@ -495,6 +507,7 @@ Merge (ONLY after all 4 gates pass)
 ⚠️ NOT reusable by other projects
 
 **Examples**:
+
 - `dogfooding_reminder` - Reminds about bug handling protocol (project-specific)
   - References `@CLAUDE/CodeLifecycle/Bugs.md`
   - Uses "dogfooding" terminology
@@ -546,6 +559,7 @@ grep -r "dogfooding" src/claude_code_hooks_daemon/handlers/
 ### Automated + Sub-Agent + Acceptance Testing (Pre-Release)
 
 **Required before production releases:**
+
 - ✅ New handler implementations
 - ✅ Handler behavior changes
 - ✅ Major features
@@ -569,16 +583,19 @@ grep -r "dogfooding" src/claude_code_hooks_daemon/handlers/
 ### Sub-Agent QA Fails
 
 **QA Agent (Gate 2) Fails**:
+
 - Developer must fix quality issues
 - Re-run automated QA
 - Restart from Gate 1 (Tester)
 
 **Senior Reviewer (Gate 3) Rejects**:
+
 - Developer must complete missing phases
 - Address architectural issues
 - Restart from Gate 1
 
 **Honesty Checker (Gate 4) Rejects (THEATER)**:
+
 - ENTIRE BRANCH REJECTED
 - May require replanning
 - Fix theater issues with proper implementation

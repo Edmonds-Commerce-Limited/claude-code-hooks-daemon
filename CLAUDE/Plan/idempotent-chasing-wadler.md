@@ -29,6 +29,7 @@ The plan redirect system has a major UX flaw: ExitPlanMode shows a redirect stub
 **Goal**: Plan config becomes a first-class top-level section, not handler options.
 
 **New config structure**:
+
 ```yaml
 plan_workflow:
   enabled: true
@@ -38,12 +39,14 @@ plan_workflow:
 ```
 
 **Files**:
+
 - `src/claude_code_hooks_daemon/config/models.py` - Add `PlanWorkflowConfig` model + add to root `Config`
 - `src/claude_code_hooks_daemon/config/models.py` - Add migration validator: old handler options → new top-level section
 - `.claude/hooks-daemon.yaml` - Add `plan_workflow:` section, remove from handler options
 - All plan handlers - Read from top-level config instead of handler options
 
 **Migration** (in `Config` model validator):
+
 ```python
 @model_validator(mode="after")
 def migrate_plan_config(self) -> Self:
@@ -55,6 +58,7 @@ def migrate_plan_config(self) -> Self:
 ```
 
 **Handler changes**:
+
 - `markdown_organization` - Read `plan_workflow.directory` instead of `_track_plans_in_project`
 - `plan_number_helper` - Read from `plan_workflow` instead of inherited options
 - `validate_plan_number` - Read from `plan_workflow` instead of inherited options
@@ -82,6 +86,7 @@ def migrate_plan_config(self) -> Self:
 4. If in sync → proceed with normal plan write handling
 
 **Edge cases**:
+
 - `plansDirectory` not set at all → DENY (must be explicitly set)
 - `plansDirectory` set but different path → DENY (must match)
 - `plan_workflow.enabled: false` → skip enforcement entirely
@@ -97,15 +102,15 @@ def migrate_plan_config(self) -> Self:
 
 ## Key Files
 
-| File | Phase | Changes |
-|------|-------|---------|
-| `.claude/settings.json` | 1 | `plansDirectory: "./CLAUDE/Plan"` |
-| `src/.../pre_tool_use/markdown_organization.py` | 1, 3 | ALLOW flow, numbered folders, sync enforcement |
-| `src/.../config/models.py` | 2 | `PlanWorkflowConfig` model, migration validator |
-| `.claude/hooks-daemon.yaml` | 2 | Top-level `plan_workflow:` section |
-| `src/.../pre_tool_use/plan_number_helper.py` | 2 | Read from top-level config |
-| `src/.../pre_tool_use/validate_plan_number.py` | 2 | Read from top-level config |
-| `tests/...` | 1-3 | Tests for each phase |
+| File                                            | Phase | Changes                                         |
+| ----------------------------------------------- | ----- | ----------------------------------------------- |
+| `.claude/settings.json`                         | 1     | `plansDirectory: "./CLAUDE/Plan"`               |
+| `src/.../pre_tool_use/markdown_organization.py` | 1, 3  | ALLOW flow, numbered folders, sync enforcement  |
+| `src/.../config/models.py`                      | 2     | `PlanWorkflowConfig` model, migration validator |
+| `.claude/hooks-daemon.yaml`                     | 2     | Top-level `plan_workflow:` section              |
+| `src/.../pre_tool_use/plan_number_helper.py`    | 2     | Read from top-level config                      |
+| `src/.../pre_tool_use/validate_plan_number.py`  | 2     | Read from top-level config                      |
+| `tests/...`                                     | 1-3   | Tests for each phase                            |
 
 ## Verification
 

@@ -13,6 +13,7 @@
 ### The Goal
 
 The hooks daemon exists to **prevent ME (Claude Code AI assistant) from:**
+
 - Destroying your uncommitted work with destructive git commands
 - Using risky shell patterns that lose information
 - Bypassing code quality tools with suppression comments
@@ -45,6 +46,7 @@ Acceptance Testing → Find Bug → Fix with TDD → Run QA → Restart Acceptan
 ```
 
 **Quick Reference:**
+
 1. Find failing test during acceptance testing
 2. Fix bug using TDD (write failing test, implement fix, verify)
 3. Run FULL QA: `./scripts/qa/run_all.sh` (must pass 100%)
@@ -57,10 +59,12 @@ Acceptance Testing → Find Bug → Fix with TDD → Run QA → Restart Acceptan
 ### Process for Handling Failures
 
 1. **Identify the Bug**
+
    - Test fails = handler not working as expected
    - Document exact command and what went wrong
 
 2. **Write Failing Test (TDD)**
+
    ```bash
    # Create test file: tests/unit/handlers/test_broken_handler.py
    # Write test that reproduces the bug
@@ -69,20 +73,24 @@ Acceptance Testing → Find Bug → Fix with TDD → Run QA → Restart Acceptan
    ```
 
 3. **Fix the Handler**
+
    - Implement the fix in the handler code
    - Re-run tests - should now PASS
 
 4. **Re-run Acceptance Test**
+
    - Verify the bug is fixed in real usage
    - Mark test as PASS in playbook
 
 5. **Commit the Fix**
+
    - Commit BEFORE proceeding with release
    - Include in release notes
 
 ### Example: git restore Bug
 
 During Jan 2026 release testing, we discovered `git restore` wasn't blocked:
+
 1. Test failed - `git restore README.md` went through and destroyed changes
 2. Wrote 4 failing tests for git restore patterns
 3. Added blocking pattern: `\bgit\s+restore\s+(?!--staged).*\S`
@@ -101,20 +109,25 @@ During Jan 2026 release testing, we discovered `git restore` wasn't blocked:
 This playbook uses **triple-layer safety** for all destructive command tests:
 
 ### Layer 1: Use `echo` (MANDATORY)
+
 ✅ **CORRECT**: `echo "git reset --hard NONEXISTENT_REF"`
 ❌ **NEVER DO**: `git reset --hard NONEXISTENT_REF`
 
 ### Layer 2: Hooks Block Commands
+
 The daemon hooks will intercept and block destructive commands.
 
 ### Layer 3: Fail-Safe Arguments (NEW)
+
 All destructive commands use non-existent refs/paths/files that would fail harmlessly if somehow executed:
+
 - `git reset --hard NONEXISTENT_REF_SAFE_TEST` - non-existent git ref
 - `git clean -fd /nonexistent/safe/test/path` - non-existent directory
 - `git push --force NONEXISTENT_REMOTE NONEXISTENT_BRANCH` - non-existent remote
 - `sed -i 's/foo/bar/' /nonexistent/safe/test.txt` - non-existent file
 
 **Why All Three Layers?**
+
 - Layer 1 (echo): Zero risk even if hooks completely fail
 - Layer 2 (hooks): Tests the actual blocking behavior
 - Layer 3 (fail-safe args): Defense-in-depth - even catastrophic failure is harmless
@@ -128,21 +141,27 @@ All destructive commands use non-existent refs/paths/files that would fail harml
 Before starting:
 
 1. **Restart daemon to ensure latest code is loaded**:
+
    ```bash
    $PYTHON -m claude_code_hooks_daemon.daemon.cli restart
    ```
+
    Should show: `Daemon started successfully`
 
 2. **Verify daemon is running**:
+
    ```bash
    $PYTHON -m claude_code_hooks_daemon.daemon.cli status
    ```
+
    Should show: `Status: RUNNING`
 
 3. **Git working tree is clean**:
+
    ```bash
    git status
    ```
+
    Should show: `nothing to commit, working tree clean`
 
 ---
@@ -213,6 +232,7 @@ Before starting:
 ### Test 2.1: sed -i with substitution (actual command)
 
 **Setup**: Create a test file first
+
 ```bash
 echo "test content" > /tmp/sed_test.txt
 ```
@@ -290,12 +310,14 @@ echo "test content" > /tmp/sed_test.txt
 ### Test 5.1: Create handler without test file
 
 **Setup**: Ensure test directory structure exists
+
 ```bash
 mkdir -p /tmp/test-handlers/pre_tool_use
 mkdir -p /tmp/tests/handlers/pre_tool_use
 ```
 
 **Action**: Attempt to Write to `/tmp/test-handlers/pre_tool_use/fake_handler.py` with content:
+
 ```python
 from claude_code_hooks_daemon.core import Handler, HookResult
 
@@ -322,21 +344,25 @@ class FakeHandler(Handler):
 ### Test 6.1: eslint-disable-next-line in JS
 
 **Action**: Attempt to Write to `/tmp/test.js` with content:
+
 ```javascript
 // eslint-disable-next-line
 const x = 1;
 ```
+
 **Expected**: BLOCKED with message about fixing linting issue instead
 **Result**: [ ] PASS [ ] FAIL
 
 ### Test 6.2: eslint-disable block in TypeScript
 
 **Action**: Attempt to Write to `/tmp/test.ts` with content:
+
 ```typescript
 /* eslint-disable */
 const y = 2;
 /* eslint-enable */
 ```
+
 **Expected**: BLOCKED with message about fixing linting issue
 **Result**: [ ] PASS [ ] FAIL
 
@@ -352,18 +378,22 @@ const y = 2;
 ### Test 7.1: type: ignore comment
 
 **Action**: Attempt to Write to `/tmp/test.py` with content:
+
 ```python
 x: str = 1  # type: ignore
 ```
+
 **Expected**: BLOCKED with message about fixing type error instead
 **Result**: [ ] PASS [ ] FAIL
 
 ### Test 7.2: noqa comment
 
 **Action**: Attempt to Write to `/tmp/test.py` with content:
+
 ```python
 import os  # noqa
 ```
+
 **Expected**: BLOCKED with message about fixing the issue instead
 **Result**: [ ] PASS [ ] FAIL
 
@@ -379,9 +409,11 @@ import os  # noqa
 ### Test 8.1: nolint comment
 
 **Action**: Attempt to Write to `/tmp/test.go` with content:
+
 ```go
 func main() {} // nolint
 ```
+
 **Expected**: BLOCKED with message about fixing linting issue
 **Result**: [ ] PASS [ ] FAIL
 
@@ -399,21 +431,25 @@ func main() {} // nolint
 ### Test 9.1: American spellings in markdown
 
 **Setup**: Create directory first
+
 ```bash
 mkdir -p /tmp/docs
 ```
 
 **Action**: Attempt to Write to `/tmp/docs/test.md` with content:
+
 ```markdown
 The color of the organization is gray.
 ```
 
 **Expected**:
+
 - File CREATED successfully (not blocked)
 - Advisory context APPEARS in tool result or system messages suggesting British spellings: "colour", "organisation", "grey"
 - Check hook output/logs for advisory messages
 
 **How to Verify**:
+
 1. File should exist at /tmp/docs/test.md
 2. Check for advisory guidance in response (may appear as context, not blocking error)
 3. Advisory handlers add context but don't prevent action
@@ -468,9 +504,11 @@ The color of the organization is gray.
 ### Test 12.1: Writing to PLAN.md file
 
 **Action**: Attempt to Write to `/tmp/CLAUDE/Plan/00999-test/PLAN.md` with content:
+
 ```markdown
 # Test Plan
 ```
+
 **Expected**: ALLOWED with advisory about plan workflow
 **Result**: [ ] PASS [ ] FAIL
 
@@ -544,29 +582,29 @@ rm -rf /tmp/CLAUDE
 
 ## Results Summary
 
-| # | Handler | Type | Result | Notes |
-|---|---------|------|--------|-------|
-| 1 | DestructiveGitHandler | Blocking | [ ] PASS [ ] FAIL | |
-| 2 | SedBlockerHandler | Blocking | [ ] PASS [ ] FAIL | |
-| 3 | PipeBlockerHandler | Blocking | [ ] PASS [ ] FAIL | |
-| 4 | AbsolutePathHandler | Blocking | [ ] PASS [ ] FAIL | |
-| 5 | TddEnforcementHandler | Blocking | [ ] PASS [ ] FAIL | |
-| 6 | EslintDisableHandler | Blocking | [ ] PASS [ ] FAIL | |
-| 7 | PythonQaSuppressionBlocker | Blocking | [ ] PASS [ ] FAIL | |
-| 8 | GoQaSuppressionBlocker | Blocking | [ ] PASS [ ] FAIL | |
-| 9 | BritishEnglishHandler | Advisory | [ ] PASS [ ] FAIL | |
-| 10 | WebSearchYearHandler | Advisory | [ ] PASS [ ] FAIL [ ] SKIP | |
-| 11 | BashErrorDetectorHandler | Advisory | [ ] PASS [ ] FAIL | |
-| 12 | PlanWorkflowHandler | Advisory | [ ] PASS [ ] FAIL | |
-| 13 | GitContextInjectorHandler | Context | [ ] PASS [ ] FAIL | |
-| 14 | WorkflowStateRestorationHandler | Context | [ ] SKIP | |
-| 15 | DaemonStatsHandler | StatusLine | [ ] PASS [ ] FAIL [ ] SKIP | |
+| #   | Handler                         | Type       | Result                     | Notes |
+| --- | ------------------------------- | ---------- | -------------------------- | ----- |
+| 1   | DestructiveGitHandler           | Blocking   | [ ] PASS [ ] FAIL          |       |
+| 2   | SedBlockerHandler               | Blocking   | [ ] PASS [ ] FAIL          |       |
+| 3   | PipeBlockerHandler              | Blocking   | [ ] PASS [ ] FAIL          |       |
+| 4   | AbsolutePathHandler             | Blocking   | [ ] PASS [ ] FAIL          |       |
+| 5   | TddEnforcementHandler           | Blocking   | [ ] PASS [ ] FAIL          |       |
+| 6   | EslintDisableHandler            | Blocking   | [ ] PASS [ ] FAIL          |       |
+| 7   | PythonQaSuppressionBlocker      | Blocking   | [ ] PASS [ ] FAIL          |       |
+| 8   | GoQaSuppressionBlocker          | Blocking   | [ ] PASS [ ] FAIL          |       |
+| 9   | BritishEnglishHandler           | Advisory   | [ ] PASS [ ] FAIL          |       |
+| 10  | WebSearchYearHandler            | Advisory   | [ ] PASS [ ] FAIL [ ] SKIP |       |
+| 11  | BashErrorDetectorHandler        | Advisory   | [ ] PASS [ ] FAIL          |       |
+| 12  | PlanWorkflowHandler             | Advisory   | [ ] PASS [ ] FAIL          |       |
+| 13  | GitContextInjectorHandler       | Context    | [ ] PASS [ ] FAIL          |       |
+| 14  | WorkflowStateRestorationHandler | Context    | [ ] SKIP                   |       |
+| 15  | DaemonStatsHandler              | StatusLine | [ ] PASS [ ] FAIL [ ] SKIP |       |
 
-**Total**: ___ PASS, ___ FAIL, ___ SKIP
+**Total**: \_\_\_ PASS, \_\_\_ FAIL, \_\_\_ SKIP
 
-**Test Date**: ___________
-**Daemon Version**: ___________
-**Tester**: ___________
+**Test Date**: \_\_\_\_\_\_\_\_\_\_\_
+**Daemon Version**: \_\_\_\_\_\_\_\_\_\_\_
+**Tester**: \_\_\_\_\_\_\_\_\_\_\_
 
 ---
 
@@ -574,12 +612,9 @@ rm -rf /tmp/CLAUDE
 
 ### Issues Found
 
-
 ### Handlers Working Correctly
 
-
 ### Recommendations
-
 
 ---
 

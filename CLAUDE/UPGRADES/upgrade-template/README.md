@@ -129,6 +129,7 @@ untracked/venv/bin/pip install -e .
 ```
 
 **Expected output**:
+
 ```
 Successfully installed claude-code-hooks-daemon-X.Z.0
 ```
@@ -140,6 +141,7 @@ Successfully installed claude-code-hooks-daemon-X.Z.0
 **Action**: [Add/Modify/Remove] the following sections.
 
 **Important**: See supporting files in this directory:
+
 - `config-before.yaml` - Shows config before upgrade
 - `config-after.yaml` - Shows complete config after upgrade
 - `config-additions.yaml` - Shows **only what to add** (merge this in)
@@ -181,6 +183,7 @@ untracked/venv/bin/python install.py --project-root ../..
 ```
 
 **Prompts**:
+
 - "Overwrite existing hooks?" → **Yes** (update forwarder scripts)
 - "Overwrite existing config?" → **No** (keep your modified config)
 
@@ -214,6 +217,7 @@ untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli restart
 ```
 
 **Expected output**:
+
 ```
 Daemon stopped successfully
 Daemon started with PID: XXXXX
@@ -243,12 +247,14 @@ Daemon started with PID: XXXXX
 **Example**:
 
 Before (vX.Y):
+
 ```yaml
 old_config:
   field: value
 ```
 
 After (vX.Z):
+
 ```yaml
 new_config:
   renamed_field: value
@@ -267,6 +273,7 @@ cat src/claude_code_hooks_daemon/version.py
 ```
 
 **Expected output**:
+
 ```python
 __version__ = "X.Z.0"
 ```
@@ -279,12 +286,14 @@ untracked/venv/bin/python -m claude_code_hooks_daemon.daemon.cli status
 ```
 
 **Expected output** (daemon running):
+
 ```
 Daemon is running (PID: XXXXX)
 Socket: .claude/hooks-daemon/untracked/venv/socket
 ```
 
 **Expected output** (daemon not running - normal for lazy startup):
+
 ```
 Daemon is not running
 ```
@@ -297,6 +306,7 @@ echo '{"hook_event_name":"EventType","tool_name":"Bash","tool_input":{"command":
 ```
 
 **Expected output**:
+
 ```json
 {
   "decision": "allow",
@@ -310,6 +320,7 @@ echo '{"hook_event_name":"EventType","tool_name":"Bash","tool_input":{"command":
 [Specific tests for new handlers added in this version]
 
 Example:
+
 ```bash
 # Test SessionStart hook with new handler
 echo '{"hook_event_name":"SessionStart","source":"new"}' | \
@@ -317,6 +328,7 @@ echo '{"hook_event_name":"SessionStart","source":"new"}' | \
 ```
 
 **Expected context** (if new handler is advisory):
+
 ```json
 {
   "decision": "allow",
@@ -335,6 +347,7 @@ cd .claude/hooks-daemon
 ```
 
 **Expected output**:
+
 ```
 ✅ All QA checks passed
 Coverage: 95%+
@@ -350,6 +363,7 @@ bash CLAUDE/UPGRADES/vX/vX.Y-to-vX.Z/verification.sh
 ```
 
 **Expected output**:
+
 ```
 ✅ Version check: PASS
 ✅ Config validation: PASS
@@ -424,6 +438,7 @@ cat src/claude_code_hooks_daemon/version.py
 **Affected Versions**: vX.Z.0 (fixed in vX.Z.1)
 
 **Workaround**:
+
 ```bash
 [Steps to work around the issue]
 ```
@@ -439,6 +454,7 @@ cat src/claude_code_hooks_daemon/version.py
 [Any other information users should know]
 
 Examples:
+
 - Performance improvements
 - Deprecation warnings
 - Future breaking changes planned
@@ -449,6 +465,7 @@ Examples:
 If you encounter issues during upgrade:
 
 1. **Check daemon logs**:
+
    ```bash
    cat .claude/hooks-daemon/untracked/venv/daemon.log
    ```
@@ -458,10 +475,12 @@ If you encounter issues during upgrade:
 3. **Check verification steps** (see "Verification Steps" above)
 
 4. **Report issue**:
+
    - GitHub: https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/issues
    - Include: version info, error output, daemon logs, steps you followed
 
 5. **Emergency fix**:
+
    ```bash
    # If daemon won't stop
    pkill -f claude_code_hooks_daemon

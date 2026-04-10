@@ -14,16 +14,16 @@
 
 Claude Code stores session transcripts as JSONL files (one JSON object per line). Each line is an event:
 
-| Field | Description |
-|-------|-------------|
-| `type` | Event type: `"assistant"`, `"user"`, `"progress"` |
-| `message.role` | `"assistant"` (tool calls) or `"user"` (tool results) |
+| Field             | Description                                           |
+| ----------------- | ----------------------------------------------------- |
+| `type`            | Event type: `"assistant"`, `"user"`, `"progress"`     |
+| `message.role`    | `"assistant"` (tool calls) or `"user"` (tool results) |
 | `message.content` | Array of content blocks (text, tool_use, tool_result) |
-| `uuid` | Unique event ID |
-| `parentUuid` | Links events in a chain |
-| `timestamp` | ISO 8601 timestamp |
-| `sessionId` | Session identifier |
-| `version` | Claude Code CLI version |
+| `uuid`            | Unique event ID                                       |
+| `parentUuid`      | Links events in a chain                               |
+| `timestamp`       | ISO 8601 timestamp                                    |
+| `sessionId`       | Session identifier                                    |
+| `version`         | Claude Code CLI version                               |
 
 ### Tool Call Events (assistant)
 
@@ -82,6 +82,7 @@ Claude Code stores session transcripts as JSONL files (one JSON object per line)
 ### From the Current Session
 
 Transcripts for the current project are at:
+
 ```
 ~/.claude/projects/<encoded-project-path>/<session-id>.jsonl
 ```
@@ -152,6 +153,7 @@ For a tool call, there are typically 3-4 events in sequence:
 4. **User tool_result** — The result returned to Claude
 
 Extract all events for a specific tool call:
+
 ```bash
 grep 'toolu_XXXX' session.jsonl
 ```
@@ -167,6 +169,7 @@ Tool result: 16:52:15.590  (same as PostToolUse)
 ```
 
 **Key indicators:**
+
 - **< 200ms total** = Tool was auto-dismissed (user never saw it)
 - **Seconds to minutes** = Normal user interaction
 - **Large gap before PostToolUse** = Tool execution took time (normal for Bash)
@@ -181,19 +184,20 @@ grep 'toolu_XXXX' session.jsonl | grep '"type":"user"' | jq '.toolUseResult'
 ```
 
 Look for:
+
 - Empty `answers: {}` on AskUserQuestion = auto-dismissed
 - Error messages in tool_result content
 - Missing or unexpected fields
 
 ### Step 6: Determine the Cause
 
-| Finding | Likely Cause |
-|---------|-------------|
-| PreToolUse returned deny | Hooks daemon handler blocked it |
+| Finding                    | Likely Cause                                      |
+| -------------------------- | ------------------------------------------------- |
+| PreToolUse returned deny   | Hooks daemon handler blocked it                   |
 | Tool result empty, < 200ms | Claude Code auto-dismissed (YOLO/permission mode) |
-| Tool result has error | Tool execution failed |
-| No hook_progress events | Hooks not configured for this event type |
-| PostToolUse has advisory | Daemon injected context (non-blocking) |
+| Tool result has error      | Tool execution failed                             |
+| No hook_progress events    | Hooks not configured for this event type          |
+| PostToolUse has advisory   | Daemon injected context (non-blocking)            |
 
 ## Worked Example: AskUserQuestion Empty Answers
 
@@ -206,34 +210,41 @@ AskUserQuestion returned `answers: {}` with the message `"User has answered your
 **1. Found the session** via sessions-index.json search
 
 **2. Searched for the tool call:**
+
 ```bash
 grep '"name":"AskUserQuestion"' session.jsonl
 ```
 
 **3. Extracted the full event chain** by tool_use_id:
+
 ```bash
 grep 'toolu_014RfJnNQtLzVAPVqQCC6Kcq' session.jsonl
 ```
 
 **4. Analysed timing:**
+
 - PreToolUse → PostToolUse: **106ms**
 - Far too fast for user interaction = auto-dismissed
 
 **5. Checked the tool result:**
+
 ```json
 {
   "answers": {},
   "questions": [...]
 }
 ```
+
 Empty answers confirmed — user never saw the prompt.
 
 **6. Checked caller context:**
+
 - `caller.type: "direct"` — main thread, not sub-agent
 - Claude Code version: 2.1.63
 - PreToolUse hook allowed the call (daemon did not block)
 
 **7. Reproduction test** in current session (v2.1.76):
+
 - AskUserQuestion worked correctly with full UI and captured answers
 - Same YOLO mode, same container type
 

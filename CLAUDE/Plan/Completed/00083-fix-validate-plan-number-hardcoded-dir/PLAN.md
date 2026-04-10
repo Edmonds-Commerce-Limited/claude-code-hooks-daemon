@@ -39,10 +39,10 @@ Bug report: `untracked/hooks-daemon-plans-plural-dir-problems.md`
 
 ## Files to Modify
 
-| File | Change |
-|------|--------|
+| File                                                                         | Change                                   |
+| ---------------------------------------------------------------------------- | ---------------------------------------- |
 | `src/claude_code_hooks_daemon/handlers/pre_tool_use/validate_plan_number.py` | Add config inheritance, use dynamic path |
-| `tests/unit/handlers/pre_tool_use/test_validate_plan_number.py` | Add tests for config-aware behaviour |
+| `tests/unit/handlers/pre_tool_use/test_validate_plan_number.py`              | Add tests for config-aware behaviour     |
 
 ## Reference: Correct Pattern (from plan_number_helper.py)
 

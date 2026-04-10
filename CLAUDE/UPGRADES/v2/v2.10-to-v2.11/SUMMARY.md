@@ -3,6 +3,7 @@
 ## What Changed
 
 **Removed Handlers**:
+
 1. `validate_sitemap` (PostToolUse) - Project-specific sitemap validation reminder
 2. `remind_validator` (SubagentStop) - Project-specific validator agent reminder
 
@@ -38,12 +39,14 @@ CLAUDE/UPGRADES/v2/v2.10-to-v2.11/
 ### For Users Who Use These Handlers
 
 **Option 1 - Automated** (recommended):
+
 ```bash
 cd /path/to/your/project
 bash .claude/hooks-daemon/CLAUDE/UPGRADES/v2/v2.10-to-v2.11/migration-script.sh
 ```
 
 **Option 2 - Manual**:
+
 1. Open `.claude/hooks-daemon.yaml`
 2. Remove or comment out `validate_sitemap` and `remind_validator` entries
 3. If you need the functionality, recreate as project handlers (see guide)
@@ -51,12 +54,14 @@ bash .claude/hooks-daemon/CLAUDE/UPGRADES/v2/v2.10-to-v2.11/migration-script.sh
 ## Migration to Project Handlers
 
 If you relied on these handlers, the upgrade guide includes:
+
 - Complete Python code examples for recreating both handlers
 - Step-by-step setup instructions
 - Testing procedures
 - Documentation references
 
 **Key Files to Read**:
+
 - Migration guide: `v2.10-to-v2.11.md` (section "Migration to Project Handlers")
 - Project handlers docs: `.claude/hooks-daemon/CLAUDE/PROJECT_HANDLERS.md`
 
@@ -70,6 +75,7 @@ bash .claude/hooks-daemon/CLAUDE/UPGRADES/v2/v2.10-to-v2.11/verification.sh
 ```
 
 Expected output:
+
 - ✅ Version: v2.11.0
 - ✅ Config: No obsolete handlers
 - ✅ Daemon: Restarts successfully
@@ -80,6 +86,7 @@ Expected output:
 ### Main Upgrade Guide (v2.10-to-v2.11.md)
 
 **Structure** (follows v2.0-to-v2.1 template):
+
 - Summary of changes
 - Version compatibility matrix
 - Pre-upgrade checklist
@@ -96,6 +103,7 @@ Expected output:
 **Length**: 595 lines
 
 **Completeness**:
+
 - ✅ Clear explanation of why handlers were removed
 - ✅ Migration path for both removed handlers
 - ✅ Complete Python code examples for recreation
@@ -106,15 +114,18 @@ Expected output:
 ### Supporting Files
 
 **config-before.yaml** (67 lines):
+
 - Shows typical v2.10 config with removed handlers
 - Annotated to identify what gets removed
 
 **config-after.yaml** (64 lines):
+
 - Shows clean v2.11 config
 - Includes comments showing where handlers were removed
 - References project handlers documentation
 
 **migration-script.sh** (257 lines):
+
 - Detects if obsolete handlers are in config
 - Creates backup automatically
 - Two migration modes: comment out or delete
@@ -123,12 +134,14 @@ Expected output:
 - Provides next steps
 
 **verification.sh** (113 lines):
+
 - 5 verification checks
 - Clear pass/fail indicators
 - Helpful error messages
 - Exit codes for automation
 
 **README.md** (151 lines):
+
 - Quick start guide
 - File descriptions
 - Impact assessment

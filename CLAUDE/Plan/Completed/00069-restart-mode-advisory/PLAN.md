@@ -46,10 +46,10 @@ The fix: make `cmd_restart` query the current mode before stopping, then after a
 
 ## Critical Files
 
-| File | Action |
-|------|--------|
-| `src/claude_code_hooks_daemon/daemon/cli.py` | Modify `cmd_restart`, add 2 helpers |
-| `tests/unit/daemon/test_cli_modes.py` | Add tests for new helpers + restart integration |
+| File                                         | Action                                          |
+| -------------------------------------------- | ----------------------------------------------- |
+| `src/claude_code_hooks_daemon/daemon/cli.py` | Modify `cmd_restart`, add 2 helpers             |
+| `tests/unit/daemon/test_cli_modes.py`        | Add tests for new helpers + restart integration |
 
 ## Success Criteria
 

@@ -7,6 +7,7 @@
 The QA runner is a Python module within the hooks daemon that executes quality checks (ESLint, TypeScript, Prettier, CSpell) and provides structured results in JSON format.
 
 **Key features:**
+
 - Fast execution (haiku model suitable)
 - Structured JSON output
 - Tool-agnostic (easily extensible)
@@ -170,20 +171,24 @@ Total: 28/28 PASSED
 ### Core Classes
 
 **QAExecutionError**
+
 - Exception for tool execution failures
 - Wraps subprocess errors with descriptive messages
 
 **ToolResult**
+
 - Dataclass for single tool execution result
 - Fields: tool_name, passed, error_count, warning_count, output, duration_ms, files_affected
 - Serializable to dict/JSON
 
 **QAResult**
+
 - Dataclass for overall QA execution
 - Fields: status, tools_run, total_errors, total_warnings, tool_results, summary, timestamp
 - Represents complete QA run
 
 **QARunner**
+
 - Main orchestrator
 - Runs individual tools or all tools
 - Parses output and extracts metrics
@@ -194,22 +199,26 @@ Total: 28/28 PASSED
 Each QA tool wrapped with dedicated method:
 
 1. **`run_eslint()`**
+
    - Auto-fixes issues first
    - Then runs linter
    - Parses error/warning counts
    - Returns ToolResult
 
 2. **`run_typescript()`**
+
    - Runs TypeScript type check
    - Parses error count from output
    - Returns ToolResult
 
 3. **`run_prettier()`**
+
    - Checks formatting
    - Returns pass/fail status
    - Returns ToolResult
 
 4. **`run_spell_check()`**
+
    - Runs CSpell
    - Counts unknown words
    - Returns ToolResult
@@ -242,6 +251,7 @@ runner = QARunner(project_root="/custom/path")
 ## Performance
 
 Typical execution times:
+
 - ESLint auto-fix: 2-5 seconds
 - TypeScript check: 5-10 seconds
 - Prettier check: 1-3 seconds
@@ -334,6 +344,7 @@ All 28 tests should pass.
 Module is fully tested (77.78% coverage on module itself).
 
 Coverage includes:
+
 - Initialization and configuration
 - Tool execution (mocked subprocess)
 - Output parsing (regex patterns)
@@ -400,6 +411,7 @@ ModuleNotFoundError: No module named 'claude_code_hooks_daemon'
 ```
 
 **Solution**: Ensure daemon is installed:
+
 ```bash
 cd .claude/hooks/claude-code-hooks-daemon
 pip install -e .
@@ -412,6 +424,7 @@ Command failed: ESLint check
 ```
 
 **Solution**: Ensure project has npm packages installed:
+
 ```bash
 cd /workspace
 npm install
@@ -424,6 +437,7 @@ PermissionError: [Errno 13] Permission denied: '/var/qa'
 ```
 
 **Solution**: Create directory with proper permissions:
+
 ```bash
 mkdir -p /var/qa
 chmod 755 /var/qa

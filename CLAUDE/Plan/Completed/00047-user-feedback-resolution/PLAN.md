@@ -51,16 +51,19 @@ These were reported in the v2.3.0→v2.9.0 upgrade feedback but are resolved:
 ### P0 - Critical (Breaks Out-of-Box Experience)
 
 #### Issue 1: `stats_cache_reader` in Default Config Template
+
 **Source**: Install feedback Issue #1
 **Files**: `.claude/hooks-daemon.yaml.example` (line ~269)
 **Problem**: Default config includes `stats_cache_reader` as a handler entry with `priority: 70`, but `stats_cache_reader.py` is a **utility module** (only contains functions), NOT a handler class. No `StatsCacheReaderHandler` class exists. Fresh installs using this config get DEGRADED MODE immediately with two errors:
+
 1. "Unknown handler 'stats_cache_reader'"
 2. "Priority 70 out of range 5-60"
-**Fix**: Remove `stats_cache_reader` entry from `.claude/hooks-daemon.yaml.example`
-**Also**: Remove orphaned `get_acceptance_tests()` method at line 118 of `stats_cache_reader.py` (floating at module level, not inside any class)
-**Also**: Remove `STATS_CACHE_READER` from `HandlerID` constants and `VALID_STATUS_LINE_HANDLER_KEYS` since no handler class exists
+   **Fix**: Remove `stats_cache_reader` entry from `.claude/hooks-daemon.yaml.example`
+   **Also**: Remove orphaned `get_acceptance_tests()` method at line 118 of `stats_cache_reader.py` (floating at module level, not inside any class)
+   **Also**: Remove `STATS_CACHE_READER` from `HandlerID` constants and `VALID_STATUS_LINE_HANDLER_KEYS` since no handler class exists
 
 #### Issue 2: Duplicate Priorities in Default Config
+
 **Source**: Upgrade feedback Issue #5
 **Files**: `.claude/hooks-daemon.yaml.example`
 **Problem**: 18+ duplicate priorities across handlers (e.g., 6 handlers at priority 10, 3 at 15). Generates noisy warnings on every daemon start/stop/status.
@@ -69,56 +72,66 @@ These were reported in the v2.3.0→v2.9.0 upgrade feedback but are resolved:
 ### P1 - High (Requires Manual Intervention or Misleading)
 
 #### Issue 3: Installer Exit Code 1 on Successful Install
+
 **Source**: Install feedback Issue #2
 **Files**: `scripts/install_version.sh` (line 310)
 **Problem**: `setup_all_gitignores()` returns 1 when `.claude/.gitignore` verification fails (even though root .gitignore was created successfully). The installer doesn't catch this, so bash `set -e` (if enabled) or the final exit code propagates as failure.
 **Fix**:
+
 - Auto-create `.claude/.gitignore` with correct content (not just verify)
 - Change `setup_all_gitignores` call to not fail the install on .gitignore warnings
 - Only return 1 for actual fatal errors
 
 #### Issue 4: `.claude/.gitignore` Not Auto-Created
+
 **Source**: Install feedback Issue #3
 **Files**: `scripts/install/gitignore.sh`
 **Problem**: `verify_claude_gitignore()` checks if `.claude/.gitignore` exists but doesn't create it. The template exists at `.claude/hooks-daemon/.claude/.gitignore` but is never copied.
 **Fix**: Add `ensure_claude_gitignore()` function that creates `.claude/.gitignore` with `hooks-daemon/untracked/` entry if it doesn't exist (normal mode only). Call it from `setup_all_gitignores()` before verification.
 
 #### Issue 5: UV Hardlink Warning in Containers
+
 **Source**: Install feedback Issue #4
 **Files**: `scripts/install/venv.sh`
 **Problem**: UV shows scary "Failed to hardlink files; falling back to full copy" warning in containers. Benign but alarming to users.
 **Fix**: Set `UV_LINK_MODE=copy` before uv commands in `venv.sh`
 
 #### Issue 6: Conflicting .gitignore Documentation
+
 **Source**: Install feedback Issues #5, #6
 **Files**: `CLAUDE/LLM-INSTALL.md`
 **Problem**: Doc says both "you must create .gitignore" AND "sets up all .gitignore files". Contradictory.
 **Fix**: After implementing Issue 4 fix, update docs to say "Installer creates .gitignore files automatically"
 
 #### Issue 7: init.sh Socket Path Fallback Mismatch
+
 **Source**: Upgrade feedback Issue #10
 **Files**: `init.sh` (socket path computation)
 **Problem**: When AF_UNIX path is too long, Python daemon falls back to `/run/user/{uid}/` or `/tmp/`, but `init.sh` always computes the default path. Hook forwarders can't find daemon.
 **Note**: This only affects deep project paths (>108 chars for full socket path). Plan 00046 added the Python-side fallback but didn't add matching logic to init.sh.
 **Fix**: Two options:
-  - (A) Add matching fallback logic to init.sh
-  - (B) Have daemon write actual socket path to a discovery file that init.sh reads
 
-  Option B is simpler and eliminates dual-computation. Daemon writes socket path to `untracked/daemon.socket-path` on startup; init.sh reads it if the default socket doesn't exist.
+- (A) Add matching fallback logic to init.sh
+- (B) Have daemon write actual socket path to a discovery file that init.sh reads
+
+Option B is simpler and eliminates dual-computation. Daemon writes socket path to `untracked/daemon.socket-path` on startup; init.sh reads it if the default socket doesn't exist.
 
 ### P2 - Medium (Documentation/UX)
 
 #### Issue 8: No "Installation Success Criteria" in Docs
+
 **Source**: Install feedback Issue #7
 **Files**: `CLAUDE/LLM-INSTALL.md`
 **Fix**: Add "Installation Success Criteria" section listing what success looks like
 
 #### Issue 9: Restart Claude Code Not Prominently Documented
+
 **Source**: Upgrade feedback Issue #9
 **Files**: `CLAUDE/LLM-UPDATE.md`
 **Fix**: Make "Restart Claude Code" a numbered step (not a footnote exception) for multi-version upgrades
 
 #### Issue 10: Project-Level Handlers Template Directory Confusion
+
 **Source**: v2.10.0 upgrade feedback Issue 3
 **Files**: Documentation
 **Fix**: Add note in upgrade docs explaining `.claude/` inside daemon repo is intentional for project-level handler templates, NOT a nested installation
@@ -183,15 +196,16 @@ These were reported in the v2.3.0→v2.9.0 upgrade feedback but are resolved:
 
 ## Risks & Mitigations
 
-| Risk | Impact | Probability | Mitigation |
-|------|--------|-------------|------------|
-| Removing HandlerID constant breaks imports | High | Low | Grep for all references before removing |
-| Priority reassignment changes handler ordering | Medium | Medium | Only change example config, not live dogfood config |
-| Socket discovery file not cleaned up | Low | Low | Daemon already manages PID files similarly |
+| Risk                                           | Impact | Probability | Mitigation                                          |
+| ---------------------------------------------- | ------ | ----------- | --------------------------------------------------- |
+| Removing HandlerID constant breaks imports     | High   | Low         | Grep for all references before removing             |
+| Priority reassignment changes handler ordering | Medium | Medium      | Only change example config, not live dogfood config |
+| Socket discovery file not cleaned up           | Low    | Low         | Daemon already manages PID files similarly          |
 
 ## Notes & Updates
 
 ### 2026-02-11
+
 - Plan created from three user feedback reports
 - Verified stats_cache_reader.py is utility module, not handler class
 - Confirmed 18+ duplicate priorities in yaml.example

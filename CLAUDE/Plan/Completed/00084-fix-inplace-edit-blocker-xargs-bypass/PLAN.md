@@ -14,12 +14,14 @@ Bug report: `CLAUDE/Plan/00084-fix-inplace-edit-blocker-xargs-bypass/bug-report.
 ## Root Cause
 
 In `_is_safe_readonly_command()` line 204:
+
 ```python
 if re.search(r"(^|\s|[;&|])\s*grep\s+", command):
     return True  # ← Returns safe without checking rest of pipeline
 ```
 
 When the command is `grep -rl 'X' | xargs sed -i 's/X/Y/g'`:
+
 1. `matches()` finds `\bsed\b` in the command → proceeds
 2. Not git/gh command → proceeds
 3. `_is_safe_readonly_command()` finds `grep` → returns True (safe!)
@@ -49,7 +51,7 @@ When the command is `grep -rl 'X' | xargs sed -i 's/X/Y/g'`:
 
 ## Files to Modify
 
-| File | Change |
-|------|--------|
-| `src/.../handlers/pre_tool_use/sed_blocker.py` | Fix `_is_safe_readonly_command()` |
-| `tests/unit/handlers/pre_tool_use/test_sed_blocker.py` | Add bypass regression tests |
+| File                                                   | Change                            |
+| ------------------------------------------------------ | --------------------------------- |
+| `src/.../handlers/pre_tool_use/sed_blocker.py`         | Fix `_is_safe_readonly_command()` |
+| `tests/unit/handlers/pre_tool_use/test_sed_blocker.py` | Add bypass regression tests       |

@@ -43,6 +43,7 @@ The commit message says "Regenerated hook scripts to match installer output" - t
 ## Root Cause
 
 The `.claude/hooks/` directory serves dual purposes:
+
 1. **Hook entry point scripts** (bash scripts that Claude Code calls)
 2. **Plugin handler directory** (Python handlers loaded by daemon)
 
@@ -50,15 +51,15 @@ The client validator commit treated `.claude/hooks/` as purely hook scripts and 
 
 ## Current State
 
-| Deliverable | Status |
-|---|---|
-| dogfooding_reminder removed from library | Done (constants cleaned) |
-| dogfooding_reminder as plugin | **LOST** - deleted by `3642c29` |
-| Plugin config registration | **LOST** - config rewritten by `3642c29` |
-| Plugin tests | **LOST** - deleted by `3642c29` |
-| `CLAUDE/QA.md` created | Done (still exists) |
-| `run_all.sh` sub-agent reminder | Done (still exists) |
-| AgentTeam.md updated | Done (updated in `7a201db`) |
+| Deliverable                              | Status                                   |
+| ---------------------------------------- | ---------------------------------------- |
+| dogfooding_reminder removed from library | Done (constants cleaned)                 |
+| dogfooding_reminder as plugin            | **LOST** - deleted by `3642c29`          |
+| Plugin config registration               | **LOST** - config rewritten by `3642c29` |
+| Plugin tests                             | **LOST** - deleted by `3642c29`          |
+| `CLAUDE/QA.md` created                   | Done (still exists)                      |
+| `run_all.sh` sub-agent reminder          | Done (still exists)                      |
+| AgentTeam.md updated                     | Done (updated in `7a201db`)              |
 
 ## Options
 

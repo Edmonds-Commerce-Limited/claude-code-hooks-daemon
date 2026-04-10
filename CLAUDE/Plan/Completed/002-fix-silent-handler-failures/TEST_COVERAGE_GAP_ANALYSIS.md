@@ -7,6 +7,7 @@
 **However**, this investigation revealed significant **testing methodology gaps** that would allow similar bugs to go undetected.
 
 **Root Cause of Original Report**: Confusion between:
+
 - Having `"terminal"` in tags (documentation/categorization)
 - Having `terminal=True` configuration (actual behavior)
 - Explicitly setting vs. relying on defaults
@@ -14,6 +15,7 @@
 ## Verification of Handler Configuration
 
 All 11 handlers with `"terminal"` in their tags:
+
 - Do NOT explicitly set `terminal=True` in their `__init__()`
 - Rely on the default value `terminal=True` from the Handler base class
 - Are therefore correctly configured as terminal handlers
@@ -34,19 +36,19 @@ Handler: tdd_enforcement - has 'terminal' tag, uses default terminal=True
 
 ## Handler Reference Table
 
-| Handler | Priority | Terminal | Behavior |
-|---------|----------|----------|----------|
-| `destructive_git.py` | 10 | True (default) | Blocks destructive git commands |
-| `sed_blocker.py` | 10 | True (default) | Blocks sed commands |
-| `absolute_path.py` | 12 | True (default) | Blocks relative paths |
-| `tdd_enforcement.py` | 15 | True (default) | Blocks handler creation without tests |
-| `worktree_file_copy.py` | 15 | True (default) | Blocks worktree file copying |
-| `git_stash.py` | 20 | True (default) | Warns about git stash (ALLOW with guidance) |
-| `eslint_disable.py` | 30 | True (default) | Blocks ESLint disable comments |
-| `python_qa_suppression_blocker.py` | 30 | True (default) | Blocks Python QA suppressions |
-| `go_qa_suppression_blocker.py` | 30 | True (default) | Blocks Go QA suppressions |
-| `php_qa_suppression_blocker.py` | 30 | True (default) | Blocks PHP QA suppressions |
-| `markdown_organization.py` | 35 | True (default) | Blocks markdown in wrong locations |
+| Handler                            | Priority | Terminal       | Behavior                                    |
+| ---------------------------------- | -------- | -------------- | ------------------------------------------- |
+| `destructive_git.py`               | 10       | True (default) | Blocks destructive git commands             |
+| `sed_blocker.py`                   | 10       | True (default) | Blocks sed commands                         |
+| `absolute_path.py`                 | 12       | True (default) | Blocks relative paths                       |
+| `tdd_enforcement.py`               | 15       | True (default) | Blocks handler creation without tests       |
+| `worktree_file_copy.py`            | 15       | True (default) | Blocks worktree file copying                |
+| `git_stash.py`                     | 20       | True (default) | Warns about git stash (ALLOW with guidance) |
+| `eslint_disable.py`                | 30       | True (default) | Blocks ESLint disable comments              |
+| `python_qa_suppression_blocker.py` | 30       | True (default) | Blocks Python QA suppressions               |
+| `go_qa_suppression_blocker.py`     | 30       | True (default) | Blocks Go QA suppressions                   |
+| `php_qa_suppression_blocker.py`    | 30       | True (default) | Blocks PHP QA suppressions                  |
+| `markdown_organization.py`         | 35       | True (default) | Blocks markdown in wrong locations          |
 
 ## ACTUAL BUGS FOUND: Tag/Config Mismatches
 
@@ -54,24 +56,25 @@ Investigation revealed **7 handlers with tag/config mismatches** - handlers that
 
 ### Critical Bugs (DENY handlers that should be terminal but have wrong tag)
 
-| Handler | Tag | Config | Returns | Issue |
-|---------|-----|--------|---------|-------|
-| `validate_eslint_on_write.py` | non-terminal | terminal=True (default) | DENY | Tag is wrong - should be "terminal" |
-| `plan_time_estimates.py` | non-terminal | terminal=True (default) | DENY | Tag is wrong - should be "terminal" |
-| `npm_command.py` | non-terminal | terminal=True (default) | DENY | Tag is wrong - should be "terminal" |
+| Handler                       | Tag          | Config                  | Returns | Issue                               |
+| ----------------------------- | ------------ | ----------------------- | ------- | ----------------------------------- |
+| `validate_eslint_on_write.py` | non-terminal | terminal=True (default) | DENY    | Tag is wrong - should be "terminal" |
+| `plan_time_estimates.py`      | non-terminal | terminal=True (default) | DENY    | Tag is wrong - should be "terminal" |
+| `npm_command.py`              | non-terminal | terminal=True (default) | DENY    | Tag is wrong - should be "terminal" |
 
 ### Advisory Handlers (ALLOW with context - should be non-terminal)
 
-| Handler | Tag | Config | Returns | Issue |
-|---------|-----|--------|---------|-------|
-| `validate_sitemap.py` | non-terminal | terminal=True (default) | ALLOW + context | Config should be terminal=False |
-| `web_search_year.py` | non-terminal | terminal=True (default) | ALLOW + context | Config should be terminal=False |
-| `remind_validator.py` | non-terminal | terminal=True (default) | ALLOW + context | Config should be terminal=False |
+| Handler                    | Tag          | Config                  | Returns         | Issue                           |
+| -------------------------- | ------------ | ----------------------- | --------------- | ------------------------------- |
+| `validate_sitemap.py`      | non-terminal | terminal=True (default) | ALLOW + context | Config should be terminal=False |
+| `web_search_year.py`       | non-terminal | terminal=True (default) | ALLOW + context | Config should be terminal=False |
+| `remind_validator.py`      | non-terminal | terminal=True (default) | ALLOW + context | Config should be terminal=False |
 | `remind_prompt_library.py` | non-terminal | terminal=True (default) | ALLOW + context | Config should be terminal=False |
 
 ### Analysis
 
 **Pattern 1: DENY handlers with wrong tag**
+
 - `validate_eslint_on_write.py`, `plan_time_estimates.py`, `npm_command.py`
 - These handlers correctly block operations (DENY)
 - They correctly use `terminal=True` (default)
@@ -79,6 +82,7 @@ Investigation revealed **7 handlers with tag/config mismatches** - handlers that
 - **Impact**: Documentation/categorization is wrong, but blocking works
 
 **Pattern 2: ALLOW handlers with wrong config**
+
 - `validate_sitemap.py`, `web_search_year.py`, `remind_validator.py`, `remind_prompt_library.py`
 - These handlers provide advisory context but allow operations
 - They use `terminal=True` (default) but should use `terminal=False`
@@ -88,6 +92,7 @@ Investigation revealed **7 handlers with tag/config mismatches** - handlers that
 ### Why This Matters
 
 For Pattern 2 handlers (advisory/non-terminal):
+
 - `terminal=True` means the dispatch chain stops after this handler
 - Other non-terminal handlers that would provide useful context don't run
 - Example: If `web_search_year.py` matches first and stops dispatch, other advisory handlers can't add their guidance
@@ -260,11 +265,13 @@ if handler.matches(hook_input):
 ### Reason 4: Line Coverage != Behavior Coverage
 
 **Coverage Report Shows**:
+
 - 95% line coverage
 - All handler code executed in tests
 - All branches covered
 
 **But**:
+
 - No test covers "dispatch stopped at this handler"
 - No test covers "subsequent handlers didn't run"
 - No test covers "blocking actually blocked"
@@ -273,27 +280,27 @@ if handler.matches(hook_input):
 
 ### Gap Type 1: Missing Integration Tests
 
-| What's Tested | What's Missing |
-|---------------|----------------|
-| Handler.matches() | FrontController.dispatch() stopping |
-| Handler.handle() return value | Subsequent handlers not executing |
-| Handler.terminal attribute | Actual blocking in full system |
+| What's Tested                 | What's Missing                      |
+| ----------------------------- | ----------------------------------- |
+| Handler.matches()             | FrontController.dispatch() stopping |
+| Handler.handle() return value | Subsequent handlers not executing   |
+| Handler.terminal attribute    | Actual blocking in full system      |
 
 ### Gap Type 2: Test Data vs Production Data
 
-| Test Data | Production Data |
-|-----------|-----------------|
-| Matches handler's expected fields | May have different field names |
-| Crafted to trigger handler logic | Real Claude Code event structure |
+| Test Data                            | Production Data                          |
+| ------------------------------------ | ---------------------------------------- |
+| Matches handler's expected fields    | May have different field names           |
+| Crafted to trigger handler logic     | Real Claude Code event structure         |
 | Validates handler works in isolation | Doesn't validate handler works in system |
 
 ### Gap Type 3: Attribute Tests vs Behavior Tests
 
-| Attribute Test | Behavior Test |
-|----------------|---------------|
-| `assert handler.terminal is True` | `assert dispatch_chain_stopped_here()` |
-| `assert "terminal" in handler.tags` | `assert no_subsequent_handlers_ran()` |
-| `assert result.decision == "deny"` | `assert claude_code_received_deny()` |
+| Attribute Test                      | Behavior Test                          |
+| ----------------------------------- | -------------------------------------- |
+| `assert handler.terminal is True`   | `assert dispatch_chain_stopped_here()` |
+| `assert "terminal" in handler.tags` | `assert no_subsequent_handlers_ran()`  |
+| `assert result.decision == "deny"`  | `assert claude_code_received_deny()`   |
 
 ## Recommendations
 
@@ -430,10 +437,10 @@ Add to CI pipeline:
 
 **The investigation found 7 actual bugs** - handlers with tag/config mismatches:
 
-| Severity | Count | Issue |
-|----------|-------|-------|
-| Low | 3 | DENY handlers with wrong tag ("non-terminal" should be "terminal") |
-| Medium | 4 | ALLOW handlers with wrong config (terminal=True should be terminal=False) |
+| Severity | Count | Issue                                                                     |
+| -------- | ----- | ------------------------------------------------------------------------- |
+| Low      | 3     | DENY handlers with wrong tag ("non-terminal" should be "terminal")        |
+| Medium   | 4     | ALLOW handlers with wrong config (terminal=True should be terminal=False) |
 
 ### Testing Gaps
 

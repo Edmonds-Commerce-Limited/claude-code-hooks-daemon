@@ -26,22 +26,26 @@ A high-performance daemon for Claude Code hooks using Unix socket IPC to elimina
 ### Key Features
 
 **Performance**:
+
 - **Sub-millisecond** response times after warmup (vs 21ms process spawn)
 - Handlers loaded in memory (no repeated imports)
 - Asyncio concurrent request handling
 
 **Lifecycle**:
+
 - **Lazy startup** - Daemon starts on first hook call
 - **Auto-shutdown** - Exits after 10 minutes of inactivity (configurable)
 - **Graceful shutdown** - Completes in-flight requests before exit
 
 **Multi-Project**:
+
 - Unique socket per project directory
 - Socket path: `/tmp/claude-hooks-{project-name}-{hash}.sock`
 - Hash based on absolute project path (MD5 first 8 chars)
 - Multiple Claude instances in same project share one daemon
 
 **Reliability**:
+
 - PID file management with stale PID detection
 - Fail-open philosophy (errors don't block operations)
 - Signal handling (SIGTERM, SIGINT)
@@ -57,6 +61,7 @@ python3 install.py
 ```
 
 The installer:
+
 1. Backs up existing `.claude/hooks/` to `.claude/hooks.bak`
 2. Copies `init.sh` to `.claude/init.sh`
 3. Creates forwarder scripts in `.claude/hooks/`
@@ -72,6 +77,7 @@ The installer:
 **Class**: `HooksDaemon`
 
 Asyncio Unix socket server that:
+
 - Listens on project-specific socket path
 - Reads JSON requests from socket
 - Routes to `FrontController.dispatch()`
@@ -80,6 +86,7 @@ Asyncio Unix socket server that:
 - Handles graceful shutdown on signals
 
 **Protocol**:
+
 ```json
 // Request
 {
@@ -119,6 +126,7 @@ Asyncio Unix socket server that:
 **Architecture**: Validation happens at the **front controller** (outermost layer) in `_process_request()`. Events are validated ONCE per request before any handler processing.
 
 **Implementation**:
+
 - JSON Schema validation using `jsonschema` library
 - Schemas defined in `src/claude_code_hooks_daemon/core/input_schemas.py`
 - Validators cached per event type (compilation happens once)
@@ -127,21 +135,25 @@ Asyncio Unix socket server that:
 **Behavior Modes**:
 
 1. **Fail-Open (Default)**: Validation enabled, errors logged but processing continues
+
    - Logs validation failures at WARNING level
    - Dispatches to handlers normally
    - Resilient to schema changes and edge cases
 
 2. **Fail-Closed (Strict Mode)**: Validation enabled, errors block processing
+
    - Logs validation failures at ERROR level
    - Returns error response to Claude Code
    - Does NOT dispatch to handlers
    - Use for debugging and testing
 
 3. **Disabled**: Validation completely off
+
    - No validation overhead
    - Use only if validation causes issues
 
 **Configuration**:
+
 ```yaml
 daemon:
   input_validation:
@@ -151,10 +163,12 @@ daemon:
 ```
 
 **Environment Variables** (override config):
+
 - `HOOKS_DAEMON_INPUT_VALIDATION=true|false` - Enable/disable validation
 - `HOOKS_DAEMON_VALIDATION_STRICT=true|false` - Enable/disable strict mode
 
 **Example Validation Errors**:
+
 ```
 PostToolUse validation failed:
   - tool_response: required field missing
@@ -166,11 +180,13 @@ PermissionRequest validation failed:
 ```
 
 **Supported Event Types**:
+
 - PreToolUse, PostToolUse, SessionStart, SessionEnd, Stop
 - PreCompact, UserPromptSubmit, PermissionRequest, Notification
 - SubagentStop
 
 **Design Rationale**:
+
 - Validates at system boundary (fail fast)
 - Single source of truth for valid event structure
 - Handlers can trust input is well-formed
@@ -189,6 +205,7 @@ Bash functions for daemon lifecycle:
 - `send_request()` - Send JSON to socket via netcat (Python fallback)
 
 Exported variables:
+
 - `SOCKET_PATH` - Project-specific socket path
 - `PID_FILE` - Project-specific PID file path
 - `PROJECT_ROOT` - Detected project root directory
@@ -198,6 +215,7 @@ Exported variables:
 **Files**: `hooks/pre-tool-use`, `hooks/post-tool-use`, `hooks/session-start`
 
 Thin bash scripts that:
+
 1. Source `init.sh` for daemon functions
 2. Call `ensure_daemon()` (lazy startup)
 3. Read hook input from stdin
@@ -206,6 +224,7 @@ Thin bash scripts that:
 6. Output response to stdout
 
 **Example** (`hooks/pre-tool-use`):
+
 ```bash
 #!/bin/bash
 set -euo pipefail
@@ -269,6 +288,7 @@ plugins: []
 **Module**: `claude_code_hooks_daemon.daemon.cli`
 
 Commands:
+
 ```bash
 python3 -m claude_code_hooks_daemon.daemon.cli start   # Start daemon
 python3 -m claude_code_hooks_daemon.daemon.cli stop    # Stop daemon
@@ -316,11 +336,13 @@ PROJECT B (/home/dev/beta)
 ### Benchmarks
 
 **Before (Direct Process Spawn)**:
+
 - ~21ms per hook call (Python interpreter startup + module loading)
 
 **After (Daemon)**:
+
 - ~85ms first call (daemon startup + handler loading)
-- **<1ms** subsequent calls (warm socket communication)
+- **\<1ms** subsequent calls (warm socket communication)
 
 **Speedup**: 20x faster after warmup
 
@@ -329,6 +351,7 @@ PROJECT B (/home/dev/beta)
 Default: 600 seconds (10 minutes)
 
 After 10 minutes of no hook calls:
+
 1. Daemon detects idle timeout
 2. Graceful shutdown initiated
 3. Socket and PID files cleaned up
@@ -339,22 +362,26 @@ After 10 minutes of no hook calls:
 ### Daemon Won't Start
 
 **Check socket file**:
+
 ```bash
 ls -la /tmp/claude-hooks-*
 ```
 
 If stale socket exists:
+
 ```bash
 rm /tmp/claude-hooks-*.sock
 ```
 
 **Check PID file**:
+
 ```bash
 cat /tmp/claude-hooks-*.pid
 ps aux | grep <pid>
 ```
 
 If stale PID:
+
 ```bash
 rm /tmp/claude-hooks-*.pid
 ```
@@ -362,6 +389,7 @@ rm /tmp/claude-hooks-*.pid
 ### Permission Errors
 
 Socket files require read/write permissions:
+
 ```bash
 chmod 755 .claude/hooks/*
 chmod 755 .claude/init.sh
@@ -370,11 +398,13 @@ chmod 755 .claude/init.sh
 ### Daemon Crashes
 
 Check logs:
+
 ```bash
 tail -f .claude/hooks/daemon.log
 ```
 
 Restart daemon:
+
 ```bash
 python3 -m claude_code_hooks_daemon.daemon.cli restart
 ```
@@ -384,6 +414,7 @@ python3 -m claude_code_hooks_daemon.daemon.cli restart
 Each project has unique socket - no conflicts possible.
 
 Verify socket paths:
+
 ```bash
 # From project A
 echo $SOCKET_PATH

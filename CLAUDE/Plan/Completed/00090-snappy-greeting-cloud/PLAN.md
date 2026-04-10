@@ -11,6 +11,7 @@
 Currently, blocking PreToolUse handlers deny a command and tell Claude the corrected version. Claude then has to re-run the corrected command in a separate turn. This wastes a turn every time.
 
 Example (gh_issue_comments handler):
+
 ```
 Turn 1: Claude runs `gh issue view 26 --json number,title,url`
          → BLOCKED: add --comments
@@ -85,11 +86,11 @@ Handlers call the utility from `handle()` — no base class changes needed.
 
 ### Candidate Handlers
 
-| Handler | Corrected Command | Complexity |
-|---------|-------------------|------------|
-| `gh_issue_comments` | Adds `--comments` flag | Simple — already computes `suggested_command` |
-| `npm_command` | Rewrites to `npm run llm:*` | Simple — already computes `suggested` |
-| `pipe_blocker` | Removes pipe, redirects to file | Medium — needs to extract base command |
+| Handler             | Corrected Command               | Complexity                                    |
+| ------------------- | ------------------------------- | --------------------------------------------- |
+| `gh_issue_comments` | Adds `--comments` flag          | Simple — already computes `suggested_command` |
+| `npm_command`       | Rewrites to `npm run llm:*`     | Simple — already computes `suggested`         |
+| `pipe_blocker`      | Removes pipe, redirects to file | Medium — needs to extract base command        |
 
 **Phase 1**: `gh_issue_comments` (proof of concept)
 **Phase 2**: `npm_command`, `pipe_blocker`

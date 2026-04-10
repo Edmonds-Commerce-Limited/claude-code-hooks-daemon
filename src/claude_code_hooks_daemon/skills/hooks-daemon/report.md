@@ -177,6 +177,7 @@ Write a single markdown file with this structure:
 ### Step 5: Save the report
 
 Generate a filename slug from the problem description:
+
 - Lowercase
 - Replace spaces with hyphens
 - Remove special characters

@@ -15,6 +15,7 @@ Every handler implements `get_acceptance_tests()` which returns structured test 
 ### Why Programmatic?
 
 **OLD WAY** (Manual PLAYBOOK.md):
+
 - ❌ Tests hardcoded in markdown
 - ❌ Must manually sync with handler changes
 - ❌ No type safety
@@ -22,6 +23,7 @@ Every handler implements `get_acceptance_tests()` which returns structured test 
 - ❌ Duplication between code and docs
 
 **NEW WAY** (Programmatic):
+
 - ✅ Tests defined in handler code
 - ✅ Single source of truth
 - ✅ Type-safe (AcceptanceTest dataclass)
@@ -51,16 +53,19 @@ rm /tmp/playbook.md
 The playbook contains three categories of tests:
 
 **1. EXECUTABLE (Blocking + Advisory)** (~89 tests):
+
 - PreToolUse handlers that block or advise on commands
 - **Must be tested by running commands** in main thread
 - Time: 20-30 minutes
 
 **2. OBSERVABLE (Context - Visible)** (~3 checks):
+
 - SessionStart, UserPromptSubmit, PostToolUse handlers
 - **Verified by checking system-reminders** in current session
 - Time: 30 seconds (just look at existing system-reminders)
 
 **3. VERIFIED_BY_LOAD (Context - Untriggerable)** (~37 handlers):
+
 - SessionEnd, PreCompact, Stop, SubagentStop, Status, Notification, PermissionRequest
 - **Cannot be triggered on demand** - verified by daemon loading + unit tests passing
 - Time: 0 minutes (already verified by daemon restart)
@@ -93,17 +98,20 @@ generate-playbook | grep -E "(SessionStart|UserPromptSubmit|PostToolUse)" | grep
 **NEVER commit generated playbook files to git.**
 
 Playbooks are EPHEMERAL:
+
 1. Generate fresh before testing
 2. Use for manual testing
 3. Delete after testing
 4. Regenerate next time
 
 **Why?**
+
 - Code is source of truth
 - Generated playbooks can become stale
 - Defeats single source of truth principle
 
 **Workflow**:
+
 ```bash
 # Generate for testing
 generate-playbook > /tmp/test-playbook.md
@@ -126,6 +134,7 @@ Acceptance Testing → Find Bug → Fix with TDD → Run QA → Restart FROM TES
 ```
 
 **Process**:
+
 1. Generate fresh playbook
 2. Find failing test during acceptance testing
 3. **STOP acceptance testing immediately**
@@ -148,19 +157,24 @@ Your fix might have affected earlier tests. Full re-run ensures no regressions.
 All acceptance tests use **triple-layer safety**:
 
 ### Layer 1: Use `echo` (MANDATORY)
+
 ✅ **CORRECT**: `echo "git reset --hard NONEXISTENT_REF"`
 ❌ **NEVER DO**: `git reset --hard NONEXISTENT_REF`
 
 ### Layer 2: Hooks Block Commands
+
 The daemon hooks will intercept and block destructive commands.
 
 ### Layer 3: Fail-Safe Arguments
+
 All destructive commands use non-existent refs/paths/files that would fail harmlessly if somehow executed:
+
 - `git reset --hard NONEXISTENT_REF_SAFE_TEST` - non-existent git ref
 - `git clean -fd /nonexistent/safe/test/path` - non-existent directory
 - `sed -i 's/foo/bar/' /nonexistent/safe/test.txt` - non-existent file
 
 **Why All Three Layers?**
+
 - Layer 1 (echo): Zero risk even if hooks completely fail
 - Layer 2 (hooks): Tests the actual blocking behavior
 - Layer 3 (fail-safe args): Defense-in-depth - even catastrophic failure is harmless
@@ -172,24 +186,28 @@ All destructive commands use non-existent refs/paths/files that would fail harml
 ## 🔧 BEFORE TESTING
 
 ### 1. Restart Daemon
+
 ```bash
 $PYTHON -m claude_code_hooks_daemon.daemon.cli restart
 # Should show: Daemon started successfully
 ```
 
 ### 2. Verify Daemon Running
+
 ```bash
 $PYTHON -m claude_code_hooks_daemon.daemon.cli status
 # Should show: Status: RUNNING
 ```
 
 ### 3. Git Working Tree Clean
+
 ```bash
 git status
 # Should show: nothing to commit, working tree clean
 ```
 
 ### 4. Generate Fresh Playbook
+
 ```bash
 generate-playbook > /tmp/playbook.md
 # Open /tmp/playbook.md for testing
@@ -202,11 +220,13 @@ generate-playbook > /tmp/playbook.md
 ### Test Categories & How to Test Them
 
 **EXECUTABLE Tests (Blocking + Advisory):**
+
 - Must be tested by running commands in main thread
 - Execute each test sequentially
 - Mark PASS/FAIL based on observed behaviour
 
 **OBSERVABLE Tests (Lifecycle - Visible in Context):**
+
 - Check system-reminders in current session
 - Look for "SessionStart hook system active"
 - Look for "UserPromptSubmit hook system active"
@@ -214,6 +234,7 @@ generate-playbook > /tmp/playbook.md
 - No commands needed - just verify messages visible
 
 **VERIFIED_BY_LOAD Tests (Lifecycle - Untriggerable):**
+
 - Skip these tests entirely
 - Cannot be triggered on demand
 - Verified by daemon loading successfully + unit tests passing
@@ -247,14 +268,17 @@ Generated playbooks contain tests in this format:
 - Document any failures
 
 ### For Blocking Handlers
+
 ✅ **PASS** = Command BLOCKED with appropriate error message
 ❌ **FAIL** = Command executed (protection failed!)
 
 ### For Advisory Handlers
+
 ✅ **PASS** = Command ALLOWED with advisory context shown in system-reminders
 ❌ **FAIL** = Command blocked OR no advisory shown
 
 ### For Context Handlers
+
 - **OBSERVABLE**: Check system-reminders for expected messages
 - **VERIFIED_BY_LOAD**: Skip test - verified by daemon load + unit tests
 
@@ -309,24 +333,24 @@ def get_acceptance_tests(self) -> list[AcceptanceTest]:
 
 Hook visibility in sub-agents was empirically tested by spawning a general-purpose sub-agent and observing which hook events fire. Results:
 
-| Hook Event | Fires in Sub-Agent? | Notes |
-|-----------|---------------------|-------|
-| PreToolUse (blocking) | ✅ Yes | Sub-agent commands are blocked correctly |
-| PostToolUse (advisory) | ✅ Yes | system-reminders visible to sub-agent |
-| SessionStart | ❌ No | Only fires once in main session at startup |
-| UserPromptSubmit | ❌ No | Not triggered by sub-agent prompts |
-| Write tool | ✅ Yes | Sub-agents CAN use Write — TDD hooks fire normally |
+| Hook Event             | Fires in Sub-Agent? | Notes                                              |
+| ---------------------- | ------------------- | -------------------------------------------------- |
+| PreToolUse (blocking)  | ✅ Yes              | Sub-agent commands are blocked correctly           |
+| PostToolUse (advisory) | ✅ Yes              | system-reminders visible to sub-agent              |
+| SessionStart           | ❌ No               | Only fires once in main session at startup         |
+| UserPromptSubmit       | ❌ No               | Not triggered by sub-agent prompts                 |
+| Write tool             | ✅ Yes              | Sub-agents CAN use Write — TDD hooks fire normally |
 
 ### Execution Routing Rules
 
 These rules are encoded in every `AcceptanceTest` via `recommended_model` and `requires_main_thread`:
 
-| test_type | Handler Event | recommended_model | requires_main_thread | Rationale |
-|-----------|---------------|-------------------|----------------------|-----------|
-| BLOCKING | PreToolUse | haiku | False | Blocking hooks fire in sub-agents; Haiku is fast/cheap |
-| ADVISORY | PreToolUse/PostToolUse | sonnet | False | Advisory context visible in sub-agents; Sonnet for judgement |
-| CONTEXT (Observable) | SessionStart, UserPromptSubmit | sonnet | True | These events don't fire in sub-agents |
-| CONTEXT (Verified-by-load) | SessionEnd, PreCompact, Stop, etc. | sonnet | True | Untriggerable on demand; main session only |
+| test_type                  | Handler Event                      | recommended_model | requires_main_thread | Rationale                                                    |
+| -------------------------- | ---------------------------------- | ----------------- | -------------------- | ------------------------------------------------------------ |
+| BLOCKING                   | PreToolUse                         | haiku             | False                | Blocking hooks fire in sub-agents; Haiku is fast/cheap       |
+| ADVISORY                   | PreToolUse/PostToolUse             | sonnet            | False                | Advisory context visible in sub-agents; Sonnet for judgement |
+| CONTEXT (Observable)       | SessionStart, UserPromptSubmit     | sonnet            | True                 | These events don't fire in sub-agents                        |
+| CONTEXT (Verified-by-load) | SessionEnd, PreCompact, Stop, etc. | sonnet            | True                 | Untriggerable on demand; main session only                   |
 
 ### Efficient Execution Strategy
 
@@ -393,6 +417,7 @@ rm -rf /tmp/test-handlers /tmp/docs /tmp/test.*
 ### If Tests Passed
 
 All tests passed with ZERO code changes:
+
 1. Document test completion
 2. Note any observations
 3. Ready for release
@@ -400,6 +425,7 @@ All tests passed with ZERO code changes:
 ### If Tests Failed
 
 Any test failed OR code was changed:
+
 1. **STOP** - Do not continue testing
 2. Fix bug using TDD
 3. Run full QA

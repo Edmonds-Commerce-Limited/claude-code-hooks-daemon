@@ -28,6 +28,7 @@ This directory contains complete upgrade documentation for migrating from v2.11.
 ### Migration Tools
 
 - **migration-script.sh** - Automated migration script
+
   - Detects old handler name in config
   - Creates timestamped backup
   - Performs safe string replacement using Python
@@ -35,6 +36,7 @@ This directory contains complete upgrade documentation for migrating from v2.11.
   - Shows before/after diff
 
 - **verification.sh** - Post-upgrade verification script
+
   - Checks daemon version (2.12.0)
   - Validates config file syntax
   - Confirms old handler name removed

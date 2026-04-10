@@ -44,15 +44,19 @@ Steps 2-4 are routinely forgotten because the agent considers the plan "done" af
 ### Real-World Example (Plan 00014)
 
 Agent edited `CLAUDE/Plan/00014-eliminate-cwd-calculated-constants/PLAN.md` to change:
+
 ```
 **Status**: In Progress
 ```
+
 to:
+
 ```
 **Status**: Complete (2026-02-06)
 ```
 
 The handler should fire and advise:
+
 ```
 Plan 00014 appears to be marked as complete. Remember to:
 1. Move to Completed/: git mv CLAUDE/Plan/00014-eliminate-cwd-calculated-constants CLAUDE/Plan/Completed/
@@ -65,15 +69,18 @@ Plan 00014 appears to be marked as complete. Remember to:
 The handler should detect these completion signals in file content:
 
 **Primary (Status field change)**:
+
 - `**Status**: Complete` (with optional date suffix)
 - `**Status**: Completed`
 - `**Status**:` followed by text containing "complete" (case-insensitive)
 
 **Secondary (Edit tool - old_string/new_string changes)**:
+
 - `old_string` contains a non-complete status and `new_string` contains "Complete"
 - Changing `- [ ]` to `- [x]` for ALL tasks is NOT sufficient alone (could be partial progress)
 
 **Exclusions (must NOT trigger)**:
+
 - Files already in `CLAUDE/Plan/Completed/` (already moved)
 - Files not matching `CLAUDE/Plan/NNNNN-*/PLAN.md` pattern
 - Writing a new plan that happens to mention the word "complete" in its body
@@ -102,26 +109,31 @@ The handler should detect these completion signals in file content:
 ### Phase 2: Implementation (Green)
 
 - [ ] **Task 2.1**: Add constants
+
   - [ ] Add `PLAN_COMPLETION_ADVISOR` to `HandlerID` enum in `constants/handlers.py`
   - [ ] Add `PLAN_COMPLETION_ADVISOR = 50` to `Priority` enum in `constants/priority.py`
 
 - [ ] **Task 2.2**: Create handler file `src/claude_code_hooks_daemon/handlers/pre_tool_use/plan_completion_advisor.py`
+
   - [ ] Implement `__init__()` with correct handler_id, priority, terminal=False, tags
   - [ ] Implement `matches()` to detect completion markers in PLAN.md edits
   - [ ] Implement `handle()` to return advisory guidance with `git mv` command
   - [ ] Implement `get_acceptance_tests()` for programmatic acceptance testing
 
 - [ ] **Task 2.3**: Register handler
+
   - [ ] Add to handler registry/`__init__.py` if needed
   - [ ] Add to `.claude/hooks-daemon.yaml` config
 
 ### Phase 3: Refactor and Verify
 
 - [ ] **Task 3.1**: Refactor for clarity
+
   - [ ] Extract completion detection patterns to named constants
   - [ ] Ensure DRY with existing plan handlers
 
 - [ ] **Task 3.2**: Run QA suite
+
   - [ ] `./scripts/qa/run_autofix.sh`
   - [ ] `./scripts/qa/run_all.sh` - ALL checks pass
   - [ ] Verify 95%+ coverage on new handler
@@ -129,15 +141,18 @@ The handler should detect these completion signals in file content:
 ### Phase 4: Integration
 
 - [ ] **Task 4.1**: Daemon load verification
+
   - [ ] `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`
   - [ ] `$PYTHON -m claude_code_hooks_daemon.daemon.cli status` shows RUNNING
   - [ ] No import errors in daemon logs
 
 - [ ] **Task 4.2**: Integration tests
+
   - [ ] Add handler to `tests/integration/test_handler_instantiation.py` if applicable
   - [ ] Verify dogfooding tests pass: `pytest tests/integration/test_dogfooding*.py -v`
 
 - [ ] **Task 4.3**: Live testing
+
   - [ ] Edit a PLAN.md to mark as complete - verify advisory fires
   - [ ] Edit a PLAN.md in Completed/ - verify advisory does NOT fire
   - [ ] Edit a non-plan .md file with "complete" - verify no false positive
@@ -186,11 +201,13 @@ class PlanCompletionAdvisorHandler(Handler):
 ### Detection Logic Detail
 
 **For Write tool** (`tool_name == "Write"`):
+
 1. Check `file_path` matches `CLAUDE/Plan/<digits>-<name>/PLAN.md`
 2. Check `file_path` does NOT contain `/Completed/`
 3. Check `content` contains `**Status**:` followed by "complete" (case-insensitive)
 
 **For Edit tool** (`tool_name == "Edit"`):
+
 1. Check `file_path` matches `CLAUDE/Plan/<digits>-<name>/PLAN.md`
 2. Check `file_path` does NOT contain `/Completed/`
 3. Check `new_string` contains "Complete" in a status context
@@ -213,14 +230,17 @@ Plan {number} appears to be marked as complete. Remember to:
 ## Technical Decisions
 
 ### Decision 1: Advisory vs Blocking
+
 **Context**: Should this handler block the edit or just advise?
 **Decision**: Advisory (ALLOW + guidance). Blocking would be too aggressive - the status change itself is correct and necessary. The handler just reminds about follow-up steps.
 
 ### Decision 2: Write + Edit vs Write Only
+
 **Context**: Should we detect both Write and Edit tool calls?
 **Decision**: Both. Agents may use Write to rewrite the entire PLAN.md, or Edit to change just the status line. Both patterns are common.
 
 ### Decision 3: Priority 50
+
 **Context**: What priority should this handler have?
 **Decision**: Priority 50 (workflow range). This is a workflow advisory, similar to `plan_workflow` (45) and `npm_command` (50). It should run after safety and code quality handlers but before low-priority advisories.
 
@@ -238,15 +258,16 @@ Plan {number} appears to be marked as complete. Remember to:
 
 ## Risks & Mitigations
 
-| Risk | Impact | Probability | Mitigation |
-|------|--------|-------------|------------|
-| False positives on "complete" in body text | Low | Medium | Only match `**Status**:` pattern, not arbitrary text |
-| Missing Edit tool detection | Medium | Low | Test both Write and Edit tool paths |
-| Handler not loading (import error) | High | Low | Daemon restart verification in Phase 4 |
-| Conflict with plan_workflow handler | Low | Low | Different trigger conditions (creation vs completion) |
+| Risk                                       | Impact | Probability | Mitigation                                            |
+| ------------------------------------------ | ------ | ----------- | ----------------------------------------------------- |
+| False positives on "complete" in body text | Low    | Medium      | Only match `**Status**:` pattern, not arbitrary text  |
+| Missing Edit tool detection                | Medium | Low         | Test both Write and Edit tool paths                   |
+| Handler not loading (import error)         | High   | Low         | Daemon restart verification in Phase 4                |
+| Conflict with plan_workflow handler        | Low    | Low         | Different trigger conditions (creation vs completion) |
 
 ## Notes & Updates
 
 ### 2026-02-06
+
 - Plan created based on real-world experience with Plan 00014 completion oversight
 - Agent updated PLAN.md status but forgot `git mv` to Completed/ and README.md update

@@ -48,18 +48,21 @@ The Plan System is a structured approach to organizing development work through:
 ### Why Use Structured Planning?
 
 **For Human Developers:**
+
 - Clearer thinking through explicit task breakdown
 - Visible progress tracking
 - Better handoffs between team members
 - Historical knowledge preservation
 
 **For AI Assistants:**
+
 - Context preservation across sessions
 - Explicit task prioritization
 - Reduced hallucination (written goals vs assumed goals)
 - Better collaboration between multiple AI agents
 
 **For Projects:**
+
 - Architectural decision log
 - Work estimation improvement over time
 - Audit trail for changes
@@ -67,17 +70,18 @@ The Plan System is a structured approach to organizing development work through:
 
 ### Benefits Over Ad-Hoc Development
 
-| Ad-Hoc Approach | Plan Workflow Approach |
-|----------------|----------------------|
+| Ad-Hoc Approach                     | Plan Workflow Approach                 |
+| ----------------------------------- | -------------------------------------- |
 | Tasks scattered across tools/memory | Single source of truth in CLAUDE/Plan/ |
-| Lost context after interruptions | State preserved in PLAN.md |
-| Unclear completion criteria | Explicit success criteria |
-| No decision rationale | Technical decisions documented |
-| Hard to resume work | README.md index shows all active plans |
+| Lost context after interruptions    | State preserved in PLAN.md             |
+| Unclear completion criteria         | Explicit success criteria              |
+| No decision rationale               | Technical decisions documented         |
+| Hard to resume work                 | README.md index shows all active plans |
 
 ### When to Use Plans vs Simple Tasks
 
 **Use Plan Workflow For:**
+
 - Work taking > 2 hours
 - Multi-phase implementation
 - Architectural decisions needed
@@ -86,6 +90,7 @@ The Plan System is a structured approach to organizing development work through:
 - Anything with significant risk
 
 **Use Simple Task Lists For:**
+
 - Quick fixes (< 1 hour)
 - Single-session work
 - No architectural decisions
@@ -113,6 +118,7 @@ Plans use **5-digit zero-padded sequential numbering**:
 ```
 
 **Why this format?**
+
 - **Sortable**: Filesystem sorts correctly (00001 before 00002)
 - **Trackable**: Easy to reference in commits ("Plan 00042: ...")
 - **Scalable**: Supports 00001-99999 plans
@@ -129,11 +135,13 @@ Not Started → In Progress → Complete
 ```
 
 **Status tracking** in PLAN.md header:
+
 ```markdown
 **Status**: In Progress
 ```
 
 **Completion** triggers move to archive:
+
 ```bash
 git mv CLAUDE/Plan/00042-feature CLAUDE/Plan/Completed/00042-feature
 ```
@@ -154,6 +162,7 @@ All plan-related documents stay together:
 ```
 
 **Benefits:**
+
 - No scattered documentation
 - Everything moves together to Completed/
 - Easy to find all context for a plan
@@ -169,6 +178,7 @@ All plan-related documents stay together:
 - Independent completion (no cross-plan dependencies if possible)
 
 **If a plan grows too large**, split it:
+
 ```
 00050-large-feature/           → Split into:
                                  00050-feature-phase-1/
@@ -180,17 +190,18 @@ All plan-related documents stay together:
 
 Plans use **emoji status indicators** for visual clarity:
 
-| Status | Icon | Markdown | Usage |
-|--------|------|----------|-------|
-| Not Started | ⬜ | `⬜` | Task hasn't begun |
-| In Progress | 🔄 | `🔄` | Currently working |
-| Completed | ✅ | `✅` | Done and verified |
-| Blocked | 🚫 | `🚫` | Cannot proceed |
-| Cancelled | ❌ | `❌` | No longer needed |
-| On Hold | ⏸️ | `⏸️` | Paused temporarily |
-| Needs Review | 👁️ | `👁️` | Awaiting review |
+| Status       | Icon | Markdown | Usage              |
+| ------------ | ---- | -------- | ------------------ |
+| Not Started  | ⬜   | `⬜`     | Task hasn't begun  |
+| In Progress  | 🔄   | `🔄`     | Currently working  |
+| Completed    | ✅   | `✅`     | Done and verified  |
+| Blocked      | 🚫   | `🚫`     | Cannot proceed     |
+| Cancelled    | ❌   | `❌`     | No longer needed   |
+| On Hold      | ⏸️   | `⏸️`     | Paused temporarily |
+| Needs Review | 👁️   | `👁️`     | Awaiting review    |
 
 **Example:**
+
 ```markdown
 ### Phase 1: Implementation
 - [ ] ⬜ **Setup environment**
@@ -227,6 +238,7 @@ project-root/
 ### Key Files
 
 **README.md** - Master index of all plans:
+
 ```markdown
 # Plans Index
 
@@ -245,6 +257,7 @@ project-root/
 ```
 
 **CLAUDE.md** - Lifecycle instructions for AI assistants:
+
 ```markdown
 # Plan Lifecycle
 
@@ -356,6 +369,7 @@ Every `PLAN.md` follows this structure:
 ### Template Sections Explained
 
 **Header Block**: Quick reference metadata
+
 - **Status**: Current state (In Progress, Complete, etc.)
 - **Created**: Start date
 - **Owner**: Person/agent responsible
@@ -371,16 +385,19 @@ Every `PLAN.md` follows this structure:
 **Context & Background**: Why this work is needed (link to issues, previous discussions)
 
 **Tasks**: Concrete work items with status tracking
+
 - Break into phases if multi-stage
 - Use emoji status indicators
 - Include subtasks for granularity
 
 **Dependencies**: Cross-plan relationships
+
 - **Depends on**: Must complete before this starts
 - **Blocks**: This blocks other plans
 - **Related**: Associated but not blocking
 
 **Technical Decisions**: Architectural choices with rationale
+
 - Document options considered
 - Explain why chosen path was selected
 - Date decisions for historical context
@@ -408,12 +425,14 @@ The Claude Code Hooks Daemon includes optional handlers that support the Plan Sy
 **Purpose**: Enforces markdown file organization rules, including CLAUDE/Plan/ structure.
 
 **What it does**:
+
 - Allows markdown files in approved locations (CLAUDE/Plan/, docs/, etc.)
 - Blocks markdown files outside approved locations
 - Allows edits to PLAN.md and supporting docs within plan folders
 - Allows Completed/, Cancelled/, Archive/ subdirectories
 
 **Configuration**:
+
 ```yaml
 handlers:
   post_tool_use:
@@ -432,6 +451,7 @@ handlers:
 **Purpose**: Reminds agent to properly close out completed plans.
 
 **What it does**:
+
 - Detects edits to PLAN.md that change status to "Complete"
 - Provides advisory about completion steps:
   - Move folder to Completed/
@@ -439,6 +459,7 @@ handlers:
   - Update plan statistics
 
 **Example advisory**:
+
 ```
 Plan 00042-feature appears to be marked as complete. Remember to:
 1. Move to Completed/: git mv CLAUDE/Plan/00042-feature CLAUDE/Plan/Completed/
@@ -455,6 +476,7 @@ Plan 00042-feature appears to be marked as complete. Remember to:
 **Purpose**: Suggests referencing plan numbers in git commits.
 
 **Commit message format**:
+
 ```
 Plan 00042: Implement feature X
 
@@ -555,6 +577,7 @@ See [Installation Guide](../CLAUDE/LLM-INSTALL.md) for daemon installation.
 ### Step 5: Git Integration
 
 Add to `.git/info/exclude` (or `.gitignore` if shared):
+
 ```
 # Plan drafts and work-in-progress notes
 CLAUDE/Plan/*/DRAFT-*.md
@@ -585,6 +608,7 @@ research/experiments/
 ```
 
 **Update handler config** if using daemon:
+
 ```yaml
 handlers:
   post_tool_use:
@@ -595,6 +619,7 @@ handlers:
 #### Custom Numbering Scheme
 
 **3-digit numbering** for smaller projects:
+
 ```
 001-feature/
 002-bugfix/
@@ -603,6 +628,7 @@ handlers:
 ```
 
 **Date-based numbering** for research projects:
+
 ```
 2026-02-17-experiment-a/
 2026-02-18-experiment-b/
@@ -615,6 +641,7 @@ handlers:
 Add project-specific sections:
 
 **For API projects**:
+
 ```markdown
 ## API Changes
 
@@ -625,6 +652,7 @@ Add project-specific sections:
 ```
 
 **For UI projects**:
+
 ```markdown
 ## Design Review
 
@@ -635,6 +663,7 @@ Add project-specific sections:
 ```
 
 **For data projects**:
+
 ```markdown
 ## Data Impact
 
@@ -647,6 +676,7 @@ Add project-specific sections:
 #### Task Tracking Integration
 
 **Jira integration**:
+
 ```markdown
 ## Tasks
 
@@ -656,6 +686,7 @@ Add project-specific sections:
 ```
 
 **GitHub Issues integration**:
+
 ```markdown
 **GitHub Issue**: #42
 
@@ -680,6 +711,7 @@ Add project-specific supporting docs:
 ### Language-Specific Adaptations
 
 **Python projects** - Add QA requirements:
+
 ```markdown
 ## Success Criteria
 - [ ] All tests passing (pytest)
@@ -690,6 +722,7 @@ Add project-specific supporting docs:
 ```
 
 **JavaScript projects** - Add build checks:
+
 ```markdown
 ## Success Criteria
 - [ ] All tests passing (jest)
@@ -700,6 +733,7 @@ Add project-specific supporting docs:
 ```
 
 **Go projects** - Add Go-specific checks:
+
 ```markdown
 ## Success Criteria
 - [ ] All tests passing (go test)
@@ -715,6 +749,7 @@ Add project-specific supporting docs:
 ### 1. Plan Creation
 
 **Good plan titles**:
+
 ```
 ✅ 00042-add-user-authentication
 ✅ 00043-fix-memory-leak-in-parser
@@ -722,6 +757,7 @@ Add project-specific supporting docs:
 ```
 
 **Bad plan titles**:
+
 ```
 ❌ 00042-stuff
 ❌ 00043-fix-things
@@ -729,6 +765,7 @@ Add project-specific supporting docs:
 ```
 
 **When to create a plan**:
+
 - Work will take > 2 hours
 - Multiple related tasks
 - Requires architectural decisions
@@ -736,6 +773,7 @@ Add project-specific supporting docs:
 - Needs documentation for others
 
 **When NOT to create a plan**:
+
 - Quick fixes (< 1 hour)
 - Simple typo corrections
 - Single-file changes with no design decisions
@@ -744,6 +782,7 @@ Add project-specific supporting docs:
 ### 2. Task Writing
 
 **Good tasks** (specific, actionable, testable):
+
 ```markdown
 ✅ **Create user authentication handler**
   - [ ] Write failing test for login validation
@@ -760,6 +799,7 @@ Add project-specific supporting docs:
 ```
 
 **Bad tasks** (vague, non-actionable):
+
 ```markdown
 ❌ **Fix the system**
 ❌ **Make it better**
@@ -767,6 +807,7 @@ Add project-specific supporting docs:
 ```
 
 **Task granularity**:
+
 - **Task**: 15-60 minutes of focused work
 - **Subtask**: 5-15 minutes of specific action
 - **Phase**: Group of related tasks (hours/days)
@@ -774,6 +815,7 @@ Add project-specific supporting docs:
 ### 3. Status Update Discipline
 
 **Update frequently**:
+
 ```markdown
 # Morning: Start work
 - [ ] 🔄 **Task 1**: Currently implementing
@@ -786,6 +828,7 @@ Add project-specific supporting docs:
 ```
 
 **Rules**:
+
 1. **Limit work in progress**: Max 1-2 tasks marked 🔄 at a time
 2. **Update immediately**: Change status as soon as state changes
 3. **Document blocks**: If 🚫, add note explaining why
@@ -810,12 +853,14 @@ Original goal was X, but stakeholder requested Y instead.
 ```
 
 **When to split a plan**:
+
 - Original estimate was way off (2x+ longer)
 - Natural breakpoint discovered
 - Part can ship independently
 - Different priorities emerge
 
 **How to split**:
+
 ```bash
 # Original: 00042-large-feature (too big)
 
@@ -842,6 +887,7 @@ mkdir CLAUDE/Plan/00044-feature-phase-3
 - [ ] Post-mortem notes added (what went well, what didn't)
 
 **Completion workflow**:
+
 ```bash
 # 1. Update PLAN.md status
 # Change: **Status**: In Progress
@@ -866,18 +912,21 @@ See Completed/00042-feature/PLAN.md for full details."
 ### 6. Plan Reviews
 
 **Daily review** (if actively working on plan):
+
 - Are tasks up to date?
 - Any blockers need attention?
 - Is plan still on track?
 - Any scope changes needed?
 
 **Weekly review** (for active plans):
+
 - Progress vs timeline?
 - Dependencies still valid?
 - Risks materialized?
 - Lessons learned so far?
 
 **Completion review**:
+
 - All success criteria met?
 - Lessons learned documented?
 - Follow-up work identified?
@@ -890,6 +939,7 @@ See Completed/00042-feature/PLAN.md for full details."
 ### Git Integration
 
 **Commit message format**:
+
 ```
 Plan 00042: Add user authentication
 
@@ -901,6 +951,7 @@ Refs: CLAUDE/Plan/00042-user-auth/PLAN.md
 ```
 
 **Branch naming** (for larger plans):
+
 ```bash
 # Create feature branch from plan
 git checkout -b plan/00042-user-auth
@@ -915,6 +966,7 @@ git branch -d plan/00042-user-auth
 ```
 
 **Tags for milestones**:
+
 ```bash
 # Tag major plan completions
 git tag -a milestone-v1.0-complete -m "Plans 00001-00025 complete - v1.0 feature set"
@@ -923,6 +975,7 @@ git tag -a milestone-v1.0-complete -m "Plans 00001-00025 complete - v1.0 feature
 ### Issue Tracker Integration
 
 **Link plans to issues**:
+
 ```markdown
 # Plan 00042: Fix Memory Leak
 
@@ -935,6 +988,7 @@ git tag -a milestone-v1.0-complete -m "Plans 00001-00025 complete - v1.0 feature
 ```
 
 **Close issues when plan completes**:
+
 ```bash
 # In plan completion commit message
 git commit -m "Plan 00042: Complete - Memory leak fixed
@@ -946,6 +1000,7 @@ Resolves PROJ-456"
 ### CI/CD Integration
 
 **Validation hooks**:
+
 ```yaml
 # .github/workflows/validate-plans.yml
 name: Validate Plans
@@ -966,6 +1021,7 @@ jobs:
 ```
 
 **Auto-generate documentation**:
+
 ```yaml
 # Generate PLAN-INDEX.md from all plans
 - name: Generate plan index
@@ -977,6 +1033,7 @@ jobs:
 ### Documentation Generation
 
 **Extract technical decisions**:
+
 ```python
 # scripts/extract-decisions.py
 # Reads all PLAN.md files
@@ -985,6 +1042,7 @@ jobs:
 ```
 
 **Generate metrics**:
+
 ```python
 # scripts/plan-metrics.py
 # Calculates:
@@ -1467,12 +1525,14 @@ Plan Workflow provides structured planning through:
 - **Handler support** (optional) for automation
 
 **Key Benefits**:
+
 - Clearer thinking through explicit planning
 - Context preservation across interruptions
 - Better collaboration between people and AI
 - Historical knowledge base for the project
 
 **Getting Started**:
+
 1. Create CLAUDE/Plan/ directory structure
 2. Copy plan template
 3. Create your first plan
@@ -1480,6 +1540,7 @@ Plan Workflow provides structured planning through:
 5. Iterate and adapt to your workflow
 
 **Next Steps**:
+
 - Read [Handler Development Guide](../CLAUDE/HANDLER_DEVELOPMENT.md) for custom handlers
 - See [Architecture Documentation](../CLAUDE/ARCHITECTURE.md) for system design
 - Review example plans in [CLAUDE/Plan/Completed/](../CLAUDE/Plan/Completed/)

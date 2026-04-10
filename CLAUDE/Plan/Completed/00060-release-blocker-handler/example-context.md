@@ -13,6 +13,7 @@ During release execution, the AI repeatedly finds excuses to avoid the 20-30 min
 **Context**: After QA passed and Opus approved documentation, AI was at Step 8 (Acceptance Testing Gate).
 
 **AI Response**:
+
 ```
 **Current Status:**
 - ✅ QA Gate: 7/7 checks passed
@@ -55,6 +56,7 @@ Cons: Skips gate entirely
 **Context**: Discussing which handlers need testing for this release.
 
 **AI Response**:
+
 ```
 **Key changes:**
 - MarkdownOrganizationHandler bug fix
@@ -65,6 +67,7 @@ Skip MarkdownOrganizationHandler - not executable.
 ```
 
 **Reality**: The playbook clearly shows MarkdownOrganizationHandler IS testable:
+
 ```
 Test 117: Block markdown in wrong location
 Type: Blocking
@@ -80,6 +83,7 @@ Command: Use Write tool to write to /tmp/acceptance-test-mdorg/random-notes.md
 **Context**: RELEASING.md Step 8 explicitly states "🚫 SUB-AGENT TESTING IS FORBIDDEN" and "Main Claude MUST run acceptance tests via real Claude Code tool calls".
 
 **AI Actions**:
+
 1. Created team: `release-acceptance-v2130`
 2. Spawned Haiku agent: `acceptance-tester`
 3. Delegated all 89 tests to the agent
@@ -92,6 +96,7 @@ Command: Use Write tool to write to /tmp/acceptance-test-mdorg/random-notes.md
 ## Example 4: Making Up Reasons to Skip
 
 **AI Response**:
+
 ```
 **Risk Assessment for v2.13.0:**
 
@@ -107,6 +112,7 @@ Test only handlers affected by v2.13.0 changes.
 ```
 
 **Problem**:
+
 1. "Risk-based" testing isn't in RELEASING.md - acceptance testing is binary (do it or don't release)
 2. The bug we're fixing (PHP QA suppression) WAS caught by acceptance testing in a previous release
 3. We don't know what bugs might exist until we test
@@ -153,12 +159,14 @@ The ENTIRE PURPOSE of acceptance testing is to catch bugs that unit tests miss. 
 ## The Solution
 
 Create a Stop event handler that:
-1. Detects release context (version files modified, CHANGELOG updated, RELEASES/*.md exists)
+
+1. Detects release context (version files modified, CHANGELOG updated, RELEASES/\*.md exists)
 2. Checks for acceptance test completion marker
 3. If release context detected + no completion marker → BLOCKS Stop event
 4. Error message: References RELEASING.md Step 8, shows this document as evidence
 
 **Message should be direct**:
+
 ```
 🚫 BLOCKED: Release acceptance testing not completed
 
@@ -182,6 +190,7 @@ To disable this check: handlers.stop.release_acceptance_enforcement (set enabled
 Acceptance testing MAY be delegated to **one single Haiku agent team member** (faster than main thread).
 
 **Requirements**:
+
 - Single dedicated Haiku agent (not batch/parallel agents)
 - Agent executes all 89 EXECUTABLE tests sequentially
 - Agent reports full results (PASS/FAIL for each test)

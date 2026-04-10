@@ -44,6 +44,7 @@ When a release includes breaking changes (handler removals, renames, API changes
 ## Placement
 
 The "⚠️ BREAKING CHANGES" section MUST appear:
+
 1. **After** the "## Summary" and "## Highlights" sections
 2. **Before** the "## Changes" section (with full changelog)
 
@@ -69,7 +70,7 @@ This ensures users see breaking changes immediately when reviewing release notes
 
 ## Example 2: Handler Rename (v2.12.0)
 
-```markdown
+````markdown
 ## ⚠️ BREAKING CHANGES
 
 ### Handler Renames
@@ -93,7 +94,7 @@ This ensures users see breaking changes immediately when reviewing release notes
           priority: 30
     ```
   - **Guide**: [v2.11-to-v2.12 Upgrade Guide](../CLAUDE/UPGRADES/v2/v2.11-to-v2.12/v2.11-to-v2.12.md)
-```
+````
 
 ## Example 3: Multiple Breaking Changes
 
@@ -132,6 +133,7 @@ This ensures users see breaking changes immediately when reviewing release notes
 The Release Agent (`.claude/agents/release-agent.md`) MUST:
 
 1. **Detect breaking changes** by analyzing the generated CHANGELOG.md entry:
+
    - Scan "### Removed" section for handler removals
    - Scan "### Changed" section for handler renames and items marked `**BREAKING**`
    - Search entire entry for keywords: "BREAKING", "incompatible", "breaking change"
@@ -147,18 +149,21 @@ The Release Agent (`.claude/agents/release-agent.md`) MUST:
 ## Content Guidelines
 
 **Why**: Be specific and technical
+
 - ✅ "Project-specific validation code that doesn't belong in core daemon"
 - ✅ "Handler extended from ESLint-only to 9 languages"
 - ❌ "We decided to remove it"
 - ❌ "Better approach"
 
 **Migration**: Be actionable and precise
+
 - ✅ "Remove handler from config, or move to `.claude/project-handlers/` if needed"
 - ✅ "Update config key from `validate_eslint_on_write` to `lint_on_edit`"
 - ❌ "Update your config"
 - ❌ "Migrate to new version"
 
 **Guide Links**: Always use relative paths from RELEASES/ directory
+
 - ✅ `../CLAUDE/UPGRADES/v2/v2.11-to-v2.12/v2.11-to-v2.12.md`
 - ❌ Absolute paths
 - ❌ GitHub URLs

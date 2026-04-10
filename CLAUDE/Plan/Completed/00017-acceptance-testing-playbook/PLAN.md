@@ -19,6 +19,7 @@ The playbook will contain safe test commands that trigger handler patterns witho
 ## Problem Statement
 
 Despite comprehensive unit tests (2,699 tests, 95%+ coverage), handlers sometimes don't work as expected in actual Claude Code sessions because:
+
 - Tests use mock hook inputs, not real Claude Code event formats
 - No validation against actual daemon integration
 - Need real-world acceptance testing
@@ -28,6 +29,7 @@ Despite comprehensive unit tests (2,699 tests, 95%+ coverage), handlers sometime
 ## Solution
 
 **Single markdown playbook** (`CLAUDE/AcceptanceTests/PLAYBOOK.md`) that:
+
 - Contains step-by-step test instructions
 - Uses SAFE commands (e.g., `echo "git reset --hard"`) that won't cause harm if handlers fail
 - Tests by attempting tool calls that trigger handlers
@@ -35,6 +37,7 @@ Despite comprehensive unit tests (2,699 tests, 95%+ coverage), handlers sometime
 - Can be executed by Claude Code directly
 
 **Key Insight**: Commands like `echo "git reset --hard"` are safe because:
+
 - If handler works → Blocks the echo command (no execution)
 - If handler broken → Echo executes harmlessly (just prints text)
 - The handler matches on the full command string, so pattern is detected
@@ -78,6 +81,7 @@ Despite comprehensive unit tests (2,699 tests, 95%+ coverage), handlers sometime
 ## Implementation Tasks
 
 ### Phase 1: Create Playbook File Structure
+
 - [ ] Create `CLAUDE/AcceptanceTests/` directory
 - [ ] Create `PLAYBOOK.md` with header and instructions
 - [ ] Add prerequisites section
@@ -86,6 +90,7 @@ Despite comprehensive unit tests (2,699 tests, 95%+ coverage), handlers sometime
 ### Phase 2: Blocking Handler Tests (Priority 10-30)
 
 **Test 1: DestructiveGitHandler** (Priority 10)
+
 - [ ] Test 1.1: `echo "git reset --hard HEAD"` → should block
 - [ ] Test 1.2: `echo "git clean -fd"` → should block
 - [ ] Test 1.3: `echo "git push --force origin main"` → should block
@@ -93,59 +98,74 @@ Despite comprehensive unit tests (2,699 tests, 95%+ coverage), handlers sometime
 - [ ] Test 1.5: `echo "git checkout -- src/file.py"` → should block
 
 **Test 2: SedBlockerHandler** (Priority 11)
+
 - [ ] Test 2.1: `echo "sed -i 's/foo/bar/g' file.txt"` → should block
 - [ ] Test 2.2: `echo "sed -e 's/old/new/' input.txt"` → should block
 
 **Test 3: PipeBlockerHandler** (Priority 12)
+
 - [ ] Test 3.1: `echo "npm test | tail -5"` → should block
 - [ ] Test 3.2: `echo "pytest | head -20"` → should block
 
 **Test 4: AbsolutePathHandler** (Priority 20)
+
 - [ ] Test 4.1: Attempt Read with relative path `relative/path/file.txt` → should block
 - [ ] Test 4.2: Attempt Write to `some/relative/path.txt` → should block
 
 **Test 5: TddEnforcementHandler** (Priority 25)
+
 - [ ] Test 5.1: Attempt Write to `/tmp/test-handlers/fake_handler.py` (no test file) → should block
 
 **Test 6: EslintDisableHandler** (Priority 30)
+
 - [ ] Test 6.1: Attempt Write to `/tmp/test.js` with `// eslint-disable-next-line` → should block
 - [ ] Test 6.2: Attempt Write to `/tmp/test.ts` with `/* eslint-disable */` → should block
 
 **Test 7: PythonQaSuppressionBlocker** (Priority 28)
+
 - [ ] Test 7.1: Attempt Write to `/tmp/test.py` with `# type: ignore` → should block
 - [ ] Test 7.2: Attempt Write to `/tmp/test.py` with `# noqa` → should block
 
 **Test 8: GoQaSuppressionBlocker** (Priority 29)
+
 - [ ] Test 8.1: Attempt Write to `/tmp/test.go` with `// nolint` → should block
 
 ### Phase 3: Advisory Handler Tests (Priority 36-60)
 
 **Test 9: BritishEnglishHandler** (Priority 56)
+
 - [ ] Test 9.1: Attempt Write to `/tmp/docs/test.md` with "color" → should allow with advisory
 
 **Test 10: WebSearchYearHandler** (Priority 50)
+
 - [ ] Test 10.1: Observational - note if outdated year suggestions appear in web searches
 
 **Test 11: BashErrorDetectorHandler** (PostToolUse)
+
 - [ ] Test 11.1: Run `ls /nonexistent/path/that/does/not/exist` → should provide advisory after error
 
 **Test 12: PlanWorkflowHandler** (Priority 48)
+
 - [ ] Test 12.1: Attempt Write to `/tmp/CLAUDE/Plan/00999-test/PLAN.md` → should allow with advisory
 
 ### Phase 4: Context Injection Tests
 
 **Test 13: GitContextInjectorHandler** (UserPromptSubmit)
+
 - [ ] Test 13.1: Observational - verify git context appears in responses
 
 **Test 14: WorkflowStateRestorationHandler** (SessionStart)
+
 - [ ] Test 14.1: Mark as SKIP (requires session compaction event)
 
 **Test 15: DaemonStatsHandler** (StatusLine)
+
 - [ ] Test 15.1: Observational - verify daemon stats in status line
 
 ### Phase 5: Finalization
+
 - [ ] Review all tests for safety (confirm no destructive operations possible)
-- [ ] Add cleanup section (remove /tmp/test* files after testing)
+- [ ] Add cleanup section (remove /tmp/test\* files after testing)
 - [ ] Test the playbook by executing it myself
 - [ ] Document any handler failures found
 - [ ] Update plan status to Complete
@@ -155,7 +175,9 @@ Despite comprehensive unit tests (2,699 tests, 95%+ coverage), handlers sometime
 ## Safe Command Patterns
 
 ### For Bash Tool Tests
+
 Use `echo "dangerous command"` pattern:
+
 - `echo "git reset --hard HEAD"` ✅ Safe
 - `echo "sed -i 's/foo/bar/' file.txt"` ✅ Safe
 - `echo "rm -rf /"` ✅ Safe (but should also be blocked!)
@@ -163,7 +185,9 @@ Use `echo "dangerous command"` pattern:
 Handlers match on the full command string, so patterns are detected even inside echo.
 
 ### For Write Tool Tests
+
 Write to `/tmp/` with test content:
+
 - `/tmp/test-handlers/fake_handler.py` ✅ Safe (writes to /tmp)
 - `/tmp/test.js` with suppressions ✅ Safe (writes to /tmp)
 - `/tmp/docs/test.md` with American spellings ✅ Safe (writes to /tmp)
@@ -171,7 +195,9 @@ Write to `/tmp/` with test content:
 If handler fails, harmless files created in /tmp (cleaned up after testing).
 
 ### For Read Tool Tests
+
 Use non-existent relative paths:
+
 - `relative/path/file.txt` ✅ Safe (file doesn't exist, Read fails harmlessly)
 - `some/relative/path.txt` ✅ Safe (handler blocks before Read executes)
 

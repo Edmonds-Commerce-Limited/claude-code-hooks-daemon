@@ -1,8 +1,6 @@
 ---
-name: optimise
-description: Analyse hooks daemon configuration and recommend improvements across Safety, Stop Quality, Plan Workflow, Code Quality, and Daemon Settings
-argument-hint: ""
----
+
+## name: optimise description: Analyse hooks daemon configuration and recommend improvements across Safety, Stop Quality, Plan Workflow, Code Quality, and Daemon Settings argument-hint: ""
 
 # /optimise - Configuration Optimiser Skill
 
@@ -62,6 +60,7 @@ After viewing the report, Claude asks whether to apply recommendations:
 ## Reference Documentation
 
 **SINGLE SOURCE OF TRUTH:**
+
 - Handler options and values: @docs/guides/HANDLER_REFERENCE.md
 - Configuration format: @docs/guides/CONFIGURATION.md
 - Available handlers: @.claude/HOOKS-DAEMON.md

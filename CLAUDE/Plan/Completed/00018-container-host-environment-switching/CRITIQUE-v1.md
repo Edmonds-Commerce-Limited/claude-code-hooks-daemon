@@ -44,6 +44,7 @@ The original plan proposes replacing ~140 lines of embedded Python in `init.sh` 
 `uv run --project` does dependency resolution on every invocation. While the plan says this "only happens once", daemon restarts after idle timeout (600s default) mean it happens regularly.
 
 More critically, `uv run` introduces new failure modes:
+
 - Network-dependent resolution on first run (or after cache eviction)
 - `uv` version incompatibilities
 - `uv` cache corruption
@@ -54,6 +55,7 @@ The plan trades one fragility (venv paths) for another (uv runtime resolution).
 ### 3. Pure bash JSON escaping is fragile
 
 The proposed `emit_hook_error()` does manual JSON escaping:
+
 ```bash
 error_details="${error_details//\\/\\\\}"
 error_details="${error_details//\"/\\\"}"
@@ -66,6 +68,7 @@ This misses: newlines, tabs, control characters, Unicode sequences. The current 
 ### 4. The plan removes granular error handling
 
 The current Python socket client distinguishes 5 error types:
+
 - `socket.timeout` — daemon hung
 - `FileNotFoundError` — socket missing
 - `ConnectionRefusedError` — daemon shutting down
@@ -89,16 +92,16 @@ The current Python `hashlib.md5` is cross-platform. The bash version needs platf
 
 ## Risk Assessment
 
-| Risk | Severity | Likelihood | Notes |
-|------|----------|------------|-------|
-| `socat` not installed on user systems | **High** | **High** | New dependency, not default on any major OS |
-| `uv run` network dependency on first use | **Medium** | **Medium** | Cold cache requires internet access |
-| `uv` not installed at runtime | **High** | **Medium** | Currently used only at install time |
-| Loss of granular error diagnostics | **Medium** | **Certain** | `socat` doesn't distinguish error types |
-| Bash JSON escaping bugs | **Medium** | **High** | Manual escaping always misses edge cases |
-| md5sum cross-platform differences | **Low** | **Medium** | macOS vs Linux output format |
-| Daemon auto-restart masking hung daemon | **Medium** | **Low** | Conflates "not running" with "broken" |
-| Regression in self-install mode | **Medium** | **Medium** | `uv run --project` behaves differently for editable installs |
+| Risk                                     | Severity   | Likelihood  | Notes                                                        |
+| ---------------------------------------- | ---------- | ----------- | ------------------------------------------------------------ |
+| `socat` not installed on user systems    | **High**   | **High**    | New dependency, not default on any major OS                  |
+| `uv run` network dependency on first use | **Medium** | **Medium**  | Cold cache requires internet access                          |
+| `uv` not installed at runtime            | **High**   | **Medium**  | Currently used only at install time                          |
+| Loss of granular error diagnostics       | **Medium** | **Certain** | `socat` doesn't distinguish error types                      |
+| Bash JSON escaping bugs                  | **Medium** | **High**    | Manual escaping always misses edge cases                     |
+| md5sum cross-platform differences        | **Low**    | **Medium**  | macOS vs Linux output format                                 |
+| Daemon auto-restart masking hung daemon  | **Medium** | **Low**     | Conflates "not running" with "broken"                        |
+| Regression in self-install mode          | **Medium** | **Medium**  | `uv run --project` behaves differently for editable installs |
 
 ---
 

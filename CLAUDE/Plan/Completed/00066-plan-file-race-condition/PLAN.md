@@ -44,6 +44,7 @@ it would **overwrite the redirect stub** with the raw plan content, defeating th
 **Change `Decision.ALLOW` → `Decision.DENY` in `handle_planning_mode_write()`.**
 
 When DENY is returned, Claude's Write tool is blocked entirely. The handler has already:
+
 - Saved the content to the correct location
 - Written the redirect stub
 
@@ -56,12 +57,14 @@ doesn't retry.
 ## Tasks
 
 ### Phase 1: TDD — Write Failing Tests
+
 - [ ] Add test to `test_markdown_organization.py`: planning mode write returns `Decision.DENY`
 - [ ] Add test: deny reason contains "PLAN SAVED" or "saved" keyword
 - [ ] Add test: deny reason contains the correct folder path
 - [ ] Verify tests FAIL before fix (RED)
 
 ### Phase 2: Implement Fix
+
 - [ ] Change `handle_planning_mode_write()` return from `Decision.ALLOW` to `Decision.DENY`
 - [ ] Change `context=context_parts` → `reason="".join(reason_parts)`
 - [ ] Update reason message to clearly say content was saved (not blocked)
@@ -69,6 +72,7 @@ doesn't retry.
 - [ ] Update any existing tests that assert `Decision.ALLOW`
 
 ### Phase 3: QA & Verification
+
 - [ ] Run `./scripts/qa/llm_qa.py all` — all 8 checks pass
 - [ ] Daemon restart: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart` → RUNNING
 - [ ] Enter plan mode in Claude Code to verify the fix works in practice
@@ -79,6 +83,7 @@ doesn't retry.
 **File**: `src/claude_code_hooks_daemon/handlers/pre_tool_use/markdown_organization.py`
 
 **Before** (lines ~306-327):
+
 ```python
 context_parts = [
     f"Planning mode write successfully redirected.\n\n"
@@ -102,6 +107,7 @@ return HookResult(
 ```
 
 **After**:
+
 ```python
 reason_parts = [
     f"PLAN SAVED SUCCESSFULLY\n\n"

@@ -44,14 +44,14 @@ TddEnforcementHandler (Orchestrator)
 
 ### Separation of Concerns (SOLID)
 
-| Component | Responsibility | Knows About Languages? |
-|-----------|---------------|----------------------|
-| **Handler** | Orchestrates workflow (matches → handle → test path) | NO |
-| **Protocol** | Defines the contract all strategies must satisfy | NO |
-| **Registry** | Maps extensions to strategy instances | NO (data-driven) |
-| **Strategy** | ALL language-specific logic for one language | YES (its own only) |
-| **Common** | Shared utilities used by multiple strategies | NO |
-| **LanguageConfig** | Pure config data (names, extensions) | N/A (data only) |
+| Component          | Responsibility                                       | Knows About Languages? |
+| ------------------ | ---------------------------------------------------- | ---------------------- |
+| **Handler**        | Orchestrates workflow (matches → handle → test path) | NO                     |
+| **Protocol**       | Defines the contract all strategies must satisfy     | NO                     |
+| **Registry**       | Maps extensions to strategy instances                | NO (data-driven)       |
+| **Strategy**       | ALL language-specific logic for one language         | YES (its own only)     |
+| **Common**         | Shared utilities used by multiple strategies         | NO                     |
+| **LanguageConfig** | Pure config data (names, extensions)                 | N/A (data only)        |
 
 ---
 
@@ -79,24 +79,26 @@ class TddStrategy(Protocol):
 
 ### Why Protocol, Not ABC?
 
-| Feature | Protocol (chosen) | ABC |
-|---------|-------------------|-----|
-| Typing | Structural (duck typing) | Nominal (inheritance) |
-| Coupling | Zero - no base class import needed | Tight - must inherit |
-| Testing | Any object satisfying shape works | Must subclass ABC |
-| Runtime check | `@runtime_checkable` + `isinstance()` | `isinstance()` |
-| Python idiom | Pythonic, modern (PEP 544) | Traditional OOP |
+| Feature       | Protocol (chosen)                     | ABC                   |
+| ------------- | ------------------------------------- | --------------------- |
+| Typing        | Structural (duck typing)              | Nominal (inheritance) |
+| Coupling      | Zero - no base class import needed    | Tight - must inherit  |
+| Testing       | Any object satisfying shape works     | Must subclass ABC     |
+| Runtime check | `@runtime_checkable` + `isinstance()` | `isinstance()`        |
+| Python idiom  | Pythonic, modern (PEP 544)            | Traditional OOP       |
 
 **Decision**: Protocol enables true Open/Closed Principle. New strategies need zero imports from the framework - they just need to match the shape.
 
 ### Method Contract Details
 
 #### `language_name: str` (property)
+
 - Human-readable name for error messages (e.g., `"Python"`, `"JavaScript/TypeScript"`)
 - Used in TDD denial messages shown to the developer
 - Must be stable - changing it changes user-facing output
 
 #### `extensions: tuple[str, ...]` (property)
+
 - File extensions this strategy handles (e.g., `(".py",)`, `(".js", ".jsx", ".ts", ".tsx")`)
 - Must include the dot prefix
 - Must be lowercase
@@ -104,23 +106,27 @@ class TddStrategy(Protocol):
 - One strategy can handle multiple extensions (JS/TS pattern)
 
 #### `is_test_file(file_path: str) -> bool`
+
 - Returns `True` if the file IS a test file (should be allowed through)
 - MUST check common test directories via `is_in_common_test_directory()`
 - MUST check language-specific naming patterns (e.g., `test_*.py`, `*_test.go`)
 - Called by handler's `matches()` to skip test files
 
 #### `is_production_source(file_path: str) -> bool`
+
 - Returns `True` if the file is in a production source directory
 - Checks language-specific source directory conventions (e.g., `/src/`, `/lib/`, `/app/`)
 - Should exclude language-specific init/config files (e.g., Python's `__init__.py`)
 - Called by handler's `matches()` to identify files that need TDD enforcement
 
 #### `should_skip(file_path: str) -> bool`
+
 - Returns `True` if the file should be skipped entirely (no TDD enforcement)
 - Checks for vendor dirs, build output, virtual environments, etc.
 - Called by handler's `matches()` before any other checks
 
 #### `compute_test_filename(source_filename: str) -> str`
+
 - Takes a source filename (not full path), returns expected test filename
 - Language-specific transformation:
   - Python: `module.py` -> `test_module.py`
@@ -137,6 +143,7 @@ class TddStrategy(Protocol):
 - Used by handler to construct the expected test file path
 
 #### `get_acceptance_tests(self) -> list[Any]` (MANDATORY)
+
 - Returns a list of `AcceptanceTest` instances for this language
 - MUST return at least one test (enforced by QA checker)
 - Tests should be BLOCKING type (expected_decision=Decision.DENY)
@@ -151,6 +158,7 @@ class TddStrategy(Protocol):
 ## Acceptance Test Provision (MANDATORY)
 
 Every strategy MUST provide acceptance tests. This is enforced by:
+
 1. **Protocol contract**: `get_acceptance_tests()` is part of the TddStrategy Protocol
 2. **Unit tests**: `test_acceptance_tests.py` validates all 11 strategies provide valid tests
 3. **QA checker**: `strategy_pattern_checker.py` AST-checks for missing `get_acceptance_tests()`
@@ -311,6 +319,7 @@ strategy = registry.get_strategy("/workspace/README.md")
 The `create_default()` class method creates a registry with ALL built-in strategies. This is the standard entry point used by the handler.
 
 **Adding a new strategy**: Add one line to `create_default()`:
+
 ```python
 registry.register(NewLanguageTddStrategy())
 ```
@@ -322,6 +331,7 @@ registry.register(NewLanguageTddStrategy())
 `common.py` contains logic used by multiple strategies:
 
 ### `COMMON_TEST_DIRECTORIES`
+
 ```python
 COMMON_TEST_DIRECTORIES: tuple[str, ...] = (
     "/tests/",
@@ -330,24 +340,27 @@ COMMON_TEST_DIRECTORIES: tuple[str, ...] = (
     "/spec/",
 )
 ```
+
 Cross-language test directory names. Every strategy's `is_test_file()` checks these first.
 
 ### `is_in_common_test_directory(file_path: str) -> bool`
+
 Quick check if a file is in any common test directory. Called by ALL strategies in `is_test_file()`.
 
 ### `matches_directory(file_path: str, directories: tuple[str, ...]) -> bool`
+
 Generic directory pattern matcher. Handles normalization (leading `/`, trailing `/`). Used by strategies for both `is_production_source()` and `should_skip()`.
 
 ### When to Add to Common vs Strategy
 
-| Logic | Where | Why |
-|-------|-------|-----|
-| Test directory names used by 3+ languages | `common.py` | DRY |
-| Directory matching utility | `common.py` | DRY |
-| Test filename pattern (e.g., `test_*.py`) | Strategy | Language-specific |
-| Source directory list (e.g., `/src/main/`) | Strategy | Language-specific |
-| Skip directory list (e.g., `vendor/`) | Strategy | Language-specific |
-| Init file exclusion (e.g., `__init__.py`) | Strategy | Language-specific |
+| Logic                                      | Where       | Why               |
+| ------------------------------------------ | ----------- | ----------------- |
+| Test directory names used by 3+ languages  | `common.py` | DRY               |
+| Directory matching utility                 | `common.py` | DRY               |
+| Test filename pattern (e.g., `test_*.py`)  | Strategy    | Language-specific |
+| Source directory list (e.g., `/src/main/`) | Strategy    | Language-specific |
+| Skip directory list (e.g., `vendor/`)      | Strategy    | Language-specific |
+| Init file exclusion (e.g., `__init__.py`)  | Strategy    | Language-specific |
 
 **Rule**: If 3+ strategies share the same logic, extract to `common.py`. Otherwise keep it in the strategy.
 
@@ -454,6 +467,7 @@ registry.register({Language}TddStrategy())
 #### 6. Update registry tests
 
 Edit `tests/unit/strategies/tdd/test_registry.py`:
+
 - Add language to `test_create_default_registers_all_languages` expected list
 - Add extension test case to `test_get_strategy_returns_correct_strategy`
 
@@ -476,19 +490,19 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli status
 
 ## Registered Languages (11 total)
 
-| Language | Strategy Class | Extensions | Test Pattern | Source Dirs |
-|----------|---------------|------------|-------------|-------------|
-| Python | `PythonTddStrategy` | `.py` | `test_*.py` | `/src/` |
-| Go | `GoTddStrategy` | `.go` | `*_test.go` | `/src/`, `/cmd/`, `/pkg/`, `/internal/` |
-| JavaScript/TypeScript | `JavaScriptTddStrategy` | `.js`, `.jsx`, `.ts`, `.tsx` | `*.test.*`, `*.spec.*` | `/src/`, `/lib/`, `/app/` |
-| PHP | `PhpTddStrategy` | `.php` | `*Test.php` | `/src/`, `/app/` |
-| Rust | `RustTddStrategy` | `.rs` | `*_test.rs` | `/src/` |
-| Java | `JavaTddStrategy` | `.java` | `*Test.java` | `/src/main/` |
-| C# | `CSharpTddStrategy` | `.cs` | `*Tests.cs`, `*Test.cs` | `/src/` |
-| Kotlin | `KotlinTddStrategy` | `.kt` | `*Test.kt` | `/src/main/` |
-| Ruby | `RubyTddStrategy` | `.rb` | `*_spec.rb`, `*_test.rb` | `/lib/`, `/app/` |
-| Swift | `SwiftTddStrategy` | `.swift` | `*Tests.swift` | `/Sources/`, `/src/` |
-| Dart | `DartTddStrategy` | `.dart` | `*_test.dart` | `/lib/` |
+| Language              | Strategy Class          | Extensions                   | Test Pattern             | Source Dirs                             |
+| --------------------- | ----------------------- | ---------------------------- | ------------------------ | --------------------------------------- |
+| Python                | `PythonTddStrategy`     | `.py`                        | `test_*.py`              | `/src/`                                 |
+| Go                    | `GoTddStrategy`         | `.go`                        | `*_test.go`              | `/src/`, `/cmd/`, `/pkg/`, `/internal/` |
+| JavaScript/TypeScript | `JavaScriptTddStrategy` | `.js`, `.jsx`, `.ts`, `.tsx` | `*.test.*`, `*.spec.*`   | `/src/`, `/lib/`, `/app/`               |
+| PHP                   | `PhpTddStrategy`        | `.php`                       | `*Test.php`              | `/src/`, `/app/`                        |
+| Rust                  | `RustTddStrategy`       | `.rs`                        | `*_test.rs`              | `/src/`                                 |
+| Java                  | `JavaTddStrategy`       | `.java`                      | `*Test.java`             | `/src/main/`                            |
+| C#                    | `CSharpTddStrategy`     | `.cs`                        | `*Tests.cs`, `*Test.cs`  | `/src/`                                 |
+| Kotlin                | `KotlinTddStrategy`     | `.kt`                        | `*Test.kt`               | `/src/main/`                            |
+| Ruby                  | `RubyTddStrategy`       | `.rb`                        | `*_spec.rb`, `*_test.rb` | `/lib/`, `/app/`                        |
+| Swift                 | `SwiftTddStrategy`      | `.swift`                     | `*Tests.swift`           | `/Sources/`, `/src/`                    |
+| Dart                  | `DartTddStrategy`       | `.dart`                      | `*_test.dart`            | `/lib/`                                 |
 
 ---
 

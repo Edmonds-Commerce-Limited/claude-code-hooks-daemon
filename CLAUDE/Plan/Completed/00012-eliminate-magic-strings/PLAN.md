@@ -13,6 +13,7 @@
 This plan addresses a **CRITICAL** code quality issue discovered through deep codebase analysis: magic strings and magic numbers are scattered throughout the entire codebase. The original plan covered only 60% of the problem.
 
 **Comprehensive Analysis Results**:
+
 - **Original plan**: 60% complete, missed 4 critical categories
 - **Tags system**: 40+ tag strings in 67 files - **COMPLETELY MISSED**
 - **Tool names**: 6+ tool names in 31 files - **COMPLETELY MISSED**
@@ -48,6 +49,7 @@ See `COMPREHENSIVE_FINDINGS.md` for complete analysis.
 ### Problems Discovered
 
 **ORIGINAL PLAN COVERED** (60% of issues):
+
 1. Handler naming chaos (3 formats)
 2. Event type chaos (4 formats)
 3. Priority magic numbers (40+ values)
@@ -55,14 +57,14 @@ See `COMPREHENSIVE_FINDINGS.md` for complete analysis.
 5. Duplicated `_to_snake_case()` (3 files)
 
 **NEWLY DISCOVERED** (40% MISSED):
-6. **Tags system** - 40+ tag strings (`"python"`, `"safety"`, `"workflow"`) in 67 handler files
-7. **Tool names** - `"Bash"`, `"Write"`, `"Edit"` hardcoded in 31 handler files
-8. **Config keys** - `"enabled"`, `"priority"`, `"options"`, `"enable_tags"` hardcoded everywhere
-9. **Protocol field names** - `"toolName"`, `"hook SpecificOutput"` - JSON contract strings
-10. **Validation limits** - Buffer sizes, timeout min/max are magic numbers
-11. **Decision strings** - Some handlers still use `"allow"` instead of `Decision.ALLOW`
-12. **EVENT_TYPE_MAPPING** - Dict keys are magic strings
-13. **Subprocess timeouts** - Handler-specific timeouts are magic numbers
+6\. **Tags system** - 40+ tag strings (`"python"`, `"safety"`, `"workflow"`) in 67 handler files
+7\. **Tool names** - `"Bash"`, `"Write"`, `"Edit"` hardcoded in 31 handler files
+8\. **Config keys** - `"enabled"`, `"priority"`, `"options"`, `"enable_tags"` hardcoded everywhere
+9\. **Protocol field names** - `"toolName"`, `"hook SpecificOutput"` - JSON contract strings
+10\. **Validation limits** - Buffer sizes, timeout min/max are magic numbers
+11\. **Decision strings** - Some handlers still use `"allow"` instead of `Decision.ALLOW`
+12\. **EVENT_TYPE_MAPPING** - Dict keys are magic strings
+13\. **Subprocess timeouts** - Handler-specific timeouts are magic numbers
 
 ### Root Cause
 
@@ -92,6 +94,7 @@ constants/
 ### Phase 1: Create ALL Constants Modules (8-10 hours)
 
 #### Already Created (from original plan - Phases 1-3 complete)
+
 - [x] ✅ **`constants/__init__.py`**
 - [x] ✅ **`constants/handlers.py`** - HandlerID (54 handlers), HandlerKey
 - [x] ✅ **`constants/events.py`** - EventID (11 events), EventKey
@@ -104,6 +107,7 @@ constants/
 #### NEW - Must Create
 
 - [ ] ⬜ **Create `constants/tags.py`** (HIGH PRIORITY - 67 files affected)
+
   - [ ] ⬜ Define `HandlerTag` class with ALL 40+ tag constants:
     ```python
     class HandlerTag:
@@ -163,6 +167,7 @@ constants/
   - [ ] ⬜ Run QA: `./scripts/qa/run_all.sh`
 
 - [ ] ⬜ **Create `constants/tools.py`** (HIGH PRIORITY - 31 files affected)
+
   - [ ] ⬜ Define `ToolName` class:
     ```python
     class ToolName:
@@ -184,6 +189,7 @@ constants/
   - [ ] ⬜ Run QA
 
 - [ ] ⬜ **Create `constants/config.py`** (HIGH PRIORITY - config system)
+
   - [ ] ⬜ Define `ConfigKey` class:
     ```python
     class ConfigKey:
@@ -215,6 +221,7 @@ constants/
   - [ ] ⬜ Run QA
 
 - [ ] ⬜ **Create `constants/protocol.py`** (MEDIUM PRIORITY)
+
   - [ ] ⬜ Define `HookInputField` class (camelCase names):
     ```python
     class HookInputField:
@@ -230,6 +237,7 @@ constants/
   - [ ] ⬜ Run QA
 
 - [ ] ⬜ **Create `constants/validation.py`** (MEDIUM PRIORITY)
+
   - [ ] ⬜ Define `ValidationLimit` class:
     ```python
     class ValidationLimit:
@@ -244,6 +252,7 @@ constants/
   - [ ] ⬜ Run QA
 
 - [ ] ⬜ **Create `constants/formatting.py`** (LOW PRIORITY)
+
   - [ ] ⬜ Define `FormatLimit` class:
     ```python
     class FormatLimit:
@@ -255,6 +264,7 @@ constants/
   - [ ] ⬜ Run QA
 
 - [ ] ⬜ **Enhance `constants/timeout.py`**
+
   - [ ] ⬜ Add handler-specific timeouts:
     ```python
     # Add to Timeout class:
@@ -265,6 +275,7 @@ constants/
   - [ ] ⬜ Run QA
 
 - [ ] ⬜ **Enhance `constants/paths.py`**
+
   - [ ] ⬜ Add `TempPath` class:
     ```python
     class TempPath:
@@ -277,6 +288,7 @@ constants/
   - [ ] ⬜ Run QA
 
 - [ ] ⬜ **Update `constants/__init__.py`**
+
   - [ ] ⬜ Export all new constants
   - [ ] ⬜ Update module docstring with usage examples
   - [ ] ⬜ Run QA
@@ -288,40 +300,50 @@ constants/
 **STATUS**: ✅ **COMPLETE** (2026-01-29) - Found 320 violations across 8 categories
 
 - [x] ✅ **Research QA extensibility**
+
   - [x] ✅ Investigated Ruff custom rules (not supported for complex AST patterns)
   - [x] ✅ Created standalone Python checker with AST parsing (optimal solution)
 
 - [x] ✅ **Create custom rule: `no-magic-handler-names`**
+
   - [x] ✅ Detect `name="string"` in Handler.__init__ calls
   - [x] ✅ Found 51 violations across handler files
 
 - [x] ✅ **Create custom rule: `no-magic-tags`**
+
   - [x] ✅ Detect `tags=["string"]` patterns
   - [x] ✅ Found 179 violations across 67 files (largest category)
 
 - [x] ✅ **Create custom rule: `no-magic-tool-names`**
+
   - [x] ✅ Detect `tool_name == "string"` patterns
   - [x] ✅ Found 41 violations across 31 handler files
 
 - [x] ✅ **Create custom rule: `no-magic-config-keys`**
+
   - [x] ✅ Detect dict access with string literals: `config["enabled"]`
   - [x] ✅ Found 3 violations in config system
 
 - [x] ✅ **Create custom rule: `no-magic-priorities`**
+
   - [x] ✅ Detect `priority=number` where number not from Priority class
   - [x] ✅ Found 39 violations across handler files
 
 - [x] ✅ **Create custom rule: `no-magic-timeouts`**
+
   - [x] ✅ Detect `timeout=number` patterns
   - [x] ✅ Found 7 violations in handler files
 
 - [x] ✅ **Create custom rule: `enforce-decision-enum`**
+
   - [x] ✅ Detect `decision="string"` in HookResult (not implemented - Decision enum already enforced)
 
 - [x] ✅ **Create custom rule: `no-magic-event-types`**
+
   - [x] ✅ Detect event type string comparisons (merged into handler names check)
 
 - [x] ✅ **Create standalone QA checker script**
+
   - [x] ✅ Created `scripts/qa/check_magic_values.py` with 8 detection rules
   - [x] ✅ AST-based parsing (no false positives)
   - [x] ✅ Outputs violations with file:line:column
@@ -330,6 +352,7 @@ constants/
   - [x] ✅ Runs in 96ms on full codebase
 
 - [x] ✅ **Test QA rules catch EVERYTHING**
+
   - [x] ✅ Ran against current codebase
   - [x] ✅ **Found 320 total violations**:
     - 179 magic tags
@@ -342,11 +365,13 @@ constants/
   - [x] ✅ Created 35 comprehensive tests
 
 - [x] ✅ **Update `scripts/qa/run_all.sh`**
+
   - [x] ✅ Added magic value checker as first check
   - [x] ✅ Runs before other checks (fail fast)
   - [x] ✅ Writes JSON output to untracked/qa/magic_values.json
 
 - [ ] ⬜ **Update `CONTRIBUTING.md`**
+
   - [ ] ⬜ Document all 8 custom QA rules
   - [ ] ⬜ Explain what each rule catches
   - [ ] ⬜ Provide examples of violations and fixes
@@ -369,6 +394,7 @@ constants/
 #### Batch 1: pre_tool_use Handlers (22 handlers)
 
 - [ ] ⬜ **Safety handlers (Priority 10-20)**
+
   - [ ] ⬜ Update DestructiveGitHandler
     ```python
     super().__init__(
@@ -384,6 +410,7 @@ constants/
   - [ ] ⬜ Run QA: `./scripts/qa/run_all.sh`
 
 - [ ] ⬜ **QA enforcement handlers (Priority 30-35)**
+
   - [ ] ⬜ Update PythonQaSuppressionBlocker
   - [ ] ⬜ Update PhpQaSuppressionBlocker
   - [ ] ⬜ Update GoQaSuppressionBlocker
@@ -393,6 +420,7 @@ constants/
   - [ ] ⬜ Run QA
 
 - [ ] ⬜ **Workflow handlers (Priority 40-60)**
+
   - [ ] ⬜ Update GhIssueCommentsHandler
   - [ ] ⬜ Update NpmCommandHandler
   - [ ] ⬜ Update WebSearchYearHandler
@@ -404,6 +432,7 @@ constants/
   - [ ] ⬜ Run QA
 
 - [ ] ⬜ **Update all tool_name comparisons to use ToolName constants**
+
   - [ ] ⬜ Replace `tool_name == "Bash"` with `tool_name == ToolName.BASH`
   - [ ] ⬜ Replace `tool_name == "Write"` with `tool_name == ToolName.WRITE`
   - [ ] ⬜ Replace `tool_name == "Edit"` with `tool_name == ToolName.EDIT`
@@ -500,6 +529,7 @@ constants/
 ### Phase 5: Migrate Registry and Config (3-4 hours)
 
 - [ ] ⬜ **Update `handlers/registry.py`**
+
   - [ ] ⬜ Replace EVENT_TYPE_MAPPING string keys with EventID constants:
     ```python
     EVENT_TYPE_MAPPING: dict[str, EventType] = {
@@ -517,6 +547,7 @@ constants/
   - [ ] ⬜ Run QA
 
 - [ ] ⬜ **Update `config/models.py`**
+
   - [ ] ⬜ Remove duplicated `_to_snake_case()` function
   - [ ] ⬜ Import from `utils.naming` instead
   - [ ] ⬜ Use ConfigKey constants for all field access:
@@ -538,6 +569,7 @@ constants/
   - [ ] ⬜ Run QA
 
 - [ ] ⬜ **Update `config/validator.py`**
+
   - [ ] ⬜ Remove duplicated `_to_snake_case()` function
   - [ ] ⬜ Import from `utils.naming` instead
   - [ ] ⬜ Use ConfigKey constants
@@ -546,6 +578,7 @@ constants/
   - [ ] ⬜ Run QA
 
 - [ ] ⬜ **Update `daemon/init_config.py`**
+
   - [ ] ⬜ Use Priority constants for all default priorities
   - [ ] ⬜ Use Timeout constants for all timeouts
   - [ ] ⬜ Use ConfigKey constants for config key names
@@ -555,6 +588,7 @@ constants/
 ### Phase 6: Migrate Core Components (2-3 hours)
 
 - [ ] ⬜ **Update `core/event.py`**
+
   - [ ] ⬜ Use EventID constants
   - [ ] ⬜ Use HookInputField constants for field names
   - [ ] ⬜ Add EventKey literal type
@@ -562,6 +596,7 @@ constants/
   - [ ] ⬜ Run QA
 
 - [ ] ⬜ **Update `core/hook_result.py`**
+
   - [ ] ⬜ Use HookOutputField constants for JSON field names
   - [ ] ⬜ Replace event name string comparisons:
     ```python
@@ -573,6 +608,7 @@ constants/
   - [ ] ⬜ Run QA
 
 - [ ] ⬜ **Update `daemon/paths.py`**
+
   - [ ] ⬜ Use DaemonPath constants
   - [ ] ⬜ Use TempPath constants:
     ```python
@@ -585,6 +621,7 @@ constants/
   - [ ] ⬜ Run QA
 
 - [ ] ⬜ **Update `daemon/server.py`**
+
   - [ ] ⬜ Use Timeout constants
   - [ ] ⬜ Use DaemonPath constants
   - [ ] ⬜ Write tests
@@ -609,6 +646,7 @@ constants/
 ### Phase 8: Update Tests (2-3 hours)
 
 - [ ] ⬜ **Update all handler tests**
+
   - [ ] ⬜ Use HandlerID constants in test handler creation
   - [ ] ⬜ Use Priority constants
   - [ ] ⬜ Use HandlerTag constants for tag assertions
@@ -618,11 +656,13 @@ constants/
   - [ ] ⬜ Verify 95%+ coverage maintained
 
 - [ ] ⬜ **Update config tests**
+
   - [ ] ⬜ Use ConfigKey constants
   - [ ] ⬜ Use EventKey constants
   - [ ] ⬜ Run QA
 
 - [ ] ⬜ **Update registry tests**
+
   - [ ] ⬜ Use HandlerKey constants
   - [ ] ⬜ Use EventKey constants
   - [ ] ⬜ Run QA
@@ -630,18 +670,21 @@ constants/
 ### Phase 9: Update Configuration Files (1 hour)
 
 - [ ] ⬜ **Verify `.claude/hooks-daemon.yaml`**
+
   - [ ] ⬜ Ensure all handler config keys match HandlerID registry
   - [ ] ⬜ Add comments referencing constants module
   - [ ] ⬜ Test daemon starts with updated handlers
   - [ ] ⬜ Test all hooks work correctly
 
 - [ ] ⬜ **Update test configs**
+
   - [ ] ⬜ Update test fixtures to use correct config keys
   - [ ] ⬜ Run full test suite
 
 ### Phase 10: Documentation (2-3 hours)
 
 - [ ] ⬜ **Create `CLAUDE/CODING_STANDARDS.md`**
+
   - [ ] ⬜ Document DRY principles
   - [ ] ⬜ Document constants usage requirements
   - [ ] ⬜ Document ALL constant modules and what they contain
@@ -650,6 +693,7 @@ constants/
   - [ ] ⬜ Provide examples of violations and fixes
 
 - [ ] ⬜ **Update `CLAUDE/HANDLER_DEVELOPMENT.md`**
+
   - [ ] ⬜ Show examples using HandlerID
   - [ ] ⬜ Show examples using Priority constants
   - [ ] ⬜ Show examples using HandlerTag constants
@@ -658,18 +702,21 @@ constants/
   - [ ] ⬜ Document how to add new handlers (must add to HandlerID registry first)
 
 - [ ] ⬜ **Update `CLAUDE/ARCHITECTURE.md`**
+
   - [ ] ⬜ Document complete constants module structure (12 modules)
   - [ ] ⬜ Document naming utilities
   - [ ] ⬜ Document custom QA rules system
   - [ ] ⬜ Update diagrams if needed
 
 - [ ] ⬜ **Update `CLAUDE.md`**
+
   - [ ] ⬜ Add section on constants usage
   - [ ] ⬜ Reference CODING_STANDARDS.md
   - [ ] ⬜ Update quick reference examples
   - [ ] ⬜ Update handler count to 54
 
 - [ ] ⬜ **Update `CONTRIBUTING.md`**
+
   - [ ] ⬜ Document all 8 custom QA rules
   - [ ] ⬜ Explain how violations are caught
   - [ ] ⬜ Add examples of correct vs incorrect code for each rule
@@ -683,6 +730,7 @@ constants/
 ### Phase 11: Final Verification (1-2 hours)
 
 - [ ] ⬜ **Run COMPREHENSIVE QA suite**
+
   - [ ] ⬜ `./scripts/qa/run_all.sh` passes
   - [ ] ⬜ Custom magic value checker reports ZERO violations
   - [ ] ⬜ All 2916+ tests passing
@@ -691,6 +739,7 @@ constants/
   - [ ] ⬜ No security issues
 
 - [ ] ⬜ **Manual verification**
+
   - [ ] ⬜ Grep for remaining magic strings:
     ```bash
     # Should find ZERO results in src/ (excluding tests)
@@ -706,6 +755,7 @@ constants/
   - [ ] ⬜ Test enable_tags/disable_tags filtering works
 
 - [ ] ⬜ **Code review**
+
   - [ ] ⬜ Review all constant definitions for completeness
   - [ ] ⬜ Review all handler migrations
   - [ ] ⬜ Review custom QA rules effectiveness
@@ -713,6 +763,7 @@ constants/
   - [ ] ⬜ Verify naming conversion is centralized
 
 - [ ] ⬜ **Performance check**
+
   - [ ] ⬜ Verify daemon startup time hasn't regressed
   - [ ] ⬜ Verify hook dispatch time hasn't regressed
   - [ ] ⬜ Constants imports should be negligible overhead
@@ -725,58 +776,68 @@ constants/
 ## Technical Decisions
 
 ### Decision 1: Use Dataclasses for Metadata
+
 **Context**: Need structured way to store multiple naming formats for handlers/events
 **Decision**: Use frozen dataclasses with explicit field names
 **Rationale**: Type safety, self-documenting, immutable
 **Date**: 2026-01-29
 
 ### Decision 2: Keep Display Names Separate from Config Keys
+
 **Context**: Handlers have both config keys (snake_case) and display names (kebab-case)
 **Decision**: Keep both config_key and display_name as separate fields in HandlerIDMeta
 **Rationale**: Config keys are Python identifiers, display names can be more descriptive
 **Date**: 2026-01-29
 
 ### Decision 3: Centralize Naming Conversion in utils.naming
+
 **Context**: `_to_snake_case()` duplicated in 3 files
 **Decision**: Move to utils.naming module
 **Rationale**: DRY principle, single source of truth
 **Date**: 2026-01-29
 
 ### Decision 4: Create Custom QA Rules BEFORE Migration
+
 **Context**: Need to prevent regression and catch existing violations
 **Decision**: Build comprehensive QA checker in Phase 2, run it BEFORE migrating code
 **Rationale**:
+
 - Catches ALL existing violations (100+)
 - Prevents new violations during migration
 - Documents what needs fixing
 - Enforces standards going forward
-**Date**: 2026-01-29
+  **Date**: 2026-01-29
 
 ### Decision 5: Use Literal Types for Type Safety
+
 **Context**: Need compile-time checking for valid string/tag values
 **Decision**: Define TagLiteral, ToolNameLiteral, HandlerKey, EventKey types
 **Rationale**: MyPy can catch invalid values at type-check time
 **Date**: 2026-01-29
 
 ### Decision 6: Require handler_id Parameter (No Backward Compat)
+
 **Context**: Need clean migration path
 **Decision**: Make handler_id required, migrate all 54 handlers
 **Rationale**: Clean implementation, no magic strings, enforced by QA
 **Date**: 2026-01-29
 
 ### Decision 7: Comprehensive Constants System
+
 **Context**: Original plan missed 40% of magic values
 **Decision**: Create 12 constants modules covering ALL magic values
 **Rationale**:
+
 - Tags system affects 67 files
 - Tool names affect 31 files
 - Config keys affect entire config system
 - 100% coverage = 100% type safety
-**Date**: 2026-01-29
+  **Date**: 2026-01-29
 
 ## Success Criteria
 
 **COMPREHENSIVE ELIMINATION** (not just major items):
+
 - [ ] Zero magic strings for handler/event/tag/tool/config identifiers
 - [ ] Zero magic numbers for priorities, timeouts, limits, thresholds
 - [ ] All 54 handlers use HandlerID constants
@@ -793,14 +854,14 @@ constants/
 
 ## Risks & Mitigations
 
-| Risk | Impact | Probability | Mitigation |
-|------|--------|-------------|------------|
-| Breaking existing handlers during migration | High | Medium | Migrate incrementally, run QA after each batch, keep daemon running |
-| Custom QA rules too strict (false positives) | Medium | Medium | Test thoroughly, allow explicit exceptions if needed, iterate on rules |
-| Missing some magic values | Medium | Low | Comprehensive grep search before completion, multiple review passes |
-| Performance regression | Low | Very Low | Frozen dataclasses have minimal overhead, measure if concerned |
-| Migration takes longer than estimated | Medium | High | Plan is comprehensive, some tasks will take longer, prioritize critical ones first |
-| QA rule implementation complexity | Medium | Medium | Start with simple grep-based checker, enhance later if needed |
+| Risk                                         | Impact | Probability | Mitigation                                                                         |
+| -------------------------------------------- | ------ | ----------- | ---------------------------------------------------------------------------------- |
+| Breaking existing handlers during migration  | High   | Medium      | Migrate incrementally, run QA after each batch, keep daemon running                |
+| Custom QA rules too strict (false positives) | Medium | Medium      | Test thoroughly, allow explicit exceptions if needed, iterate on rules             |
+| Missing some magic values                    | Medium | Low         | Comprehensive grep search before completion, multiple review passes                |
+| Performance regression                       | Low    | Very Low    | Frozen dataclasses have minimal overhead, measure if concerned                     |
+| Migration takes longer than estimated        | Medium | High        | Plan is comprehensive, some tasks will take longer, prioritize critical ones first |
+| QA rule implementation complexity            | Medium | Medium      | Start with simple grep-based checker, enhance later if needed                      |
 
 ## Timeline
 
@@ -822,11 +883,13 @@ constants/
 ## Notes & Updates
 
 ### 2026-01-29 - Plan Created
+
 - Original plan covered ~60% of magic value issues
 - Missed tags (67 files), tool names (31 files), config keys, protocol fields
 - Created comprehensive plan with all findings
 
 ### 2026-01-29 - Comprehensive Analysis Complete
+
 - Subagent deep analysis found 4 critical omissions
 - Expanded plan from 6 to 12 constants modules
 - Restructured to create QA rules FIRST (Phase 2)
@@ -834,6 +897,7 @@ constants/
 - Estimated effort increased from 12-16h to 38-56h (realistic)
 
 ### 2026-01-29 - Phases 1-3 Partial Progress (Original Plan)
+
 - ✅ Created constants modules: handlers.py, events.py, priority.py, timeout.py, paths.py
 - ✅ Created utils/naming.py with centralized naming conversion
 - ✅ Created comprehensive tests for naming utilities (23 tests passing)
@@ -842,6 +906,7 @@ constants/
 - **Next**: Create remaining 6 constants modules, then build QA rules BEFORE migrating
 
 ### 2026-01-29 - Phase 2 Complete: QA System Built (CHECKPOINT)
+
 - ✅ **Commit e1f1118**: QA system + initial constants committed
 - ✅ Created comprehensive AST-based magic value checker (96ms runtime)
 - ✅ Integrated into scripts/qa/run_all.sh (fail fast, runs first)
@@ -857,6 +922,7 @@ constants/
 - ✅ Naming utilities centralized (eliminates duplication)
 
 ### Current Status - Ready for Systematic Fix
+
 - **Phase 1**: 6/12 constants modules complete ✅
 - **Phase 2**: QA system complete ✅ (320 violations documented)
 - **Phase 3-11**: Ready to execute systematically
@@ -868,7 +934,9 @@ constants/
   5. Final verification: ZERO violations
 
 ### Critical Confirmation
+
 **ALL 320 QA violations MUST be fixed before plan completion.**
+
 - No magic strings allowed (enforced by QA)
 - No magic numbers allowed (enforced by QA)
 - STRICT DRY principles (single source of truth)
@@ -878,6 +946,7 @@ constants/
 ### 2026-01-29 - PLAN COMPLETE ✅
 
 **Final Results**:
+
 - ✅ **0 magic value violations** (was 320)
 - ✅ **All 54 handlers migrated** to use constants
 - ✅ **12/12 constants modules created** (handlers, events, priority, timeout, paths, tags, tools, config, protocol, validation, formatting, naming utils)
@@ -885,6 +954,7 @@ constants/
 - ✅ **All QA checks passing** (magic values, format, lint, type, tests, security)
 
 **Execution Strategy - Parallel Agent Deployment**:
+
 - Phase 1 (Constants): Created all 12 modules + 152 tests → 6 commits
 - Phase 2 (QA System): AST-based checker with 8 violation rules → 1 commit
 - **Phases 3-11 (Migration)**: Spawned 5 parallel python-developer agents:
@@ -896,6 +966,7 @@ constants/
 - Parallel execution: **301 violations → 0 in ~90 minutes**
 
 **Migration Breakdown**:
+
 1. **Batch 1**: 4 post_tool_use handlers (19 violations fixed)
 2. **Batches 2-9** (parallel): 49 handlers + core components (242 violations fixed)
 3. **Tool names + timeouts**: 7 violations fixed in core/event.py, daemon/validation.py, qa/runner.py
@@ -903,6 +974,7 @@ constants/
 5. **Cleanup**: Removed 2 unused type: ignore comments
 
 **Constants Replaced** (320 total):
+
 - Handler IDs: 54 handlers → HandlerID.XXX
 - Priorities: 60+ values → Priority.XXX
 - Tags: 179+ strings → HandlerTag.XXX
@@ -915,11 +987,13 @@ constants/
 - Formatting limits: 5+ values → FormatLimit.XXX
 
 **Critical Bug Fixed**:
+
 - Protocol field constants were initially camelCase ("toolName")
 - Actual protocol uses snake_case ("tool_name")
 - Fixed all HookInputField constants to match real protocol
 
 **Commits**:
+
 1. `e1f1118` - QA system + 6/12 constants
 2. `b79cdda` - Phase 1 complete - All 12 constants modules created
 3. `21be89c` - First handler migration (validate_eslint_on_write)
@@ -935,6 +1009,7 @@ constants/
 **Time Saved**: ~85% through parallel agent orchestration
 
 **Lessons Learned**:
+
 1. **Plan comprehensively first** - Original plan missed 40% of violations
 2. **Build QA rules BEFORE migration** - Prevents regression
 3. **Use parallel agents** - 5 agents working simultaneously = 5x speedup

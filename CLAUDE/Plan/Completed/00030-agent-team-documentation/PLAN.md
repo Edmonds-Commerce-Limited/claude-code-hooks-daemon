@@ -29,22 +29,26 @@ Create `CLAUDE/AgentTeam.md` with project-specific guidance for running agent te
 ### Phase 1: Gather Lessons Learned
 
 - [ ] **Task 1.1**: Document daemon isolation issues encountered
+
   - Cross-kill between worktree daemons
   - Daemon restart command confusion
   - Solution: explicit --pid-file/--socket flags (Plan 00028)
 
 - [ ] **Task 1.2**: Document agent autonomy issues
+
   - Agents hitting turn limits before committing
   - Team lead micromanagement (checking every idle)
   - Solution: complete self-sufficient prompts with QA+commit
 
 - [ ] **Task 1.3**: Document markdown handler blocking memory writes
+
   - Memory writes blocked by markdown_organization handler
   - Solution: fix handler scope (Plan 00029)
 
 ### Phase 2: Write Documentation
 
 - [ ] **Task 2.1**: Create `CLAUDE/AgentTeam.md` with sections:
+
   - Overview and when to use agent teams
   - Prerequisites (python3-venv, worktree docs)
   - Team setup checklist

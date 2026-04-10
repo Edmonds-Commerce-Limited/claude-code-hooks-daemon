@@ -57,23 +57,23 @@ SessionEnd
 
 ### Event Summary Table
 
-| Hook Event          | When It Fires                          | Can Block? | Has Matcher? |
-|---------------------|----------------------------------------|------------|--------------|
-| `SessionStart`      | Session begins or resumes              | No         | Yes*         |
-| `Setup`             | `--init`, `--init-only`, `--maintenance` | No       | Yes*         |
-| `UserPromptSubmit`  | User submits a prompt                  | Yes        | No           |
-| `PreToolUse`        | Before tool execution                  | Yes        | Yes          |
-| `PermissionRequest` | Permission dialog shown                | Yes        | Yes          |
-| `PostToolUse`       | After tool succeeds                    | Feedback   | Yes          |
-| `PostToolUseFailure`| After tool fails                       | Feedback   | Yes          |
-| `SubagentStart`     | Subagent spawned                       | No         | No           |
-| `SubagentStop`      | Subagent finishes                      | Yes        | No           |
-| `Stop`              | Claude finishes responding             | Yes        | No           |
-| `PreCompact`        | Before context compaction              | No         | Yes*         |
-| `Notification`      | Claude sends notification              | No         | Yes*         |
-| `SessionEnd`        | Session terminates                     | No         | No           |
+| Hook Event           | When It Fires                            | Can Block? | Has Matcher? |
+| -------------------- | ---------------------------------------- | ---------- | ------------ |
+| `SessionStart`       | Session begins or resumes                | No         | Yes\*        |
+| `Setup`              | `--init`, `--init-only`, `--maintenance` | No         | Yes\*        |
+| `UserPromptSubmit`   | User submits a prompt                    | Yes        | No           |
+| `PreToolUse`         | Before tool execution                    | Yes        | Yes          |
+| `PermissionRequest`  | Permission dialog shown                  | Yes        | Yes          |
+| `PostToolUse`        | After tool succeeds                      | Feedback   | Yes          |
+| `PostToolUseFailure` | After tool fails                         | Feedback   | Yes          |
+| `SubagentStart`      | Subagent spawned                         | No         | No           |
+| `SubagentStop`       | Subagent finishes                        | Yes        | No           |
+| `Stop`               | Claude finishes responding               | Yes        | No           |
+| `PreCompact`         | Before context compaction                | No         | Yes\*        |
+| `Notification`       | Claude sends notification                | No         | Yes\*        |
+| `SessionEnd`         | Session terminates                       | No         | No           |
 
-*These matchers filter on event subtypes rather than tool names.
+\*These matchers filter on event subtypes rather than tool names.
 
 ### Detailed Event Descriptions
 
@@ -108,6 +108,7 @@ SessionEnd
 **When**: After Claude creates tool parameters, before the tool executes.
 
 **Matchers** (tool names, case-sensitive, supports regex):
+
 - `Bash` - Shell commands
 - `Write` - File writing
 - `Edit` - File editing
@@ -213,13 +214,13 @@ All hooks receive JSON data via stdin. Every event includes common fields plus e
 }
 ```
 
-| Field             | Type   | Description                                                                     |
-|-------------------|--------|---------------------------------------------------------------------------------|
-| `session_id`      | string | Unique session identifier                                                       |
-| `transcript_path` | string | Path to conversation JSON log                                                   |
-| `cwd`             | string | Current working directory when hook is invoked                                  |
+| Field             | Type   | Description                                                                              |
+| ----------------- | ------ | ---------------------------------------------------------------------------------------- |
+| `session_id`      | string | Unique session identifier                                                                |
+| `transcript_path` | string | Path to conversation JSON log                                                            |
+| `cwd`             | string | Current working directory when hook is invoked                                           |
 | `permission_mode` | string | Current mode: `"default"`, `"plan"`, `"acceptEdits"`, `"dontAsk"`, `"bypassPermissions"` |
-| `hook_event_name` | string | Event type name                                                                 |
+| `hook_event_name` | string | Event type name                                                                          |
 
 ### Event-Specific Fields
 
@@ -241,12 +242,12 @@ All hooks receive JSON data via stdin. Every event includes common fields plus e
 
 **tool_input varies by tool:**
 
-| Tool    | Key Fields                                              |
-|---------|---------------------------------------------------------|
+| Tool    | Key Fields                                               |
+| ------- | -------------------------------------------------------- |
 | `Bash`  | `command`, `description`, `timeout`, `run_in_background` |
-| `Write` | `file_path`, `content`                                  |
-| `Edit`  | `file_path`, `old_string`, `new_string`, `replace_all`  |
-| `Read`  | `file_path`, `offset`, `limit`                          |
+| `Write` | `file_path`, `content`                                   |
+| `Edit`  | `file_path`, `old_string`, `new_string`, `replace_all`   |
+| `Read`  | `file_path`, `offset`, `limit`                           |
 
 #### PostToolUse
 
@@ -381,25 +382,25 @@ Hooks communicate back to Claude Code through two mechanisms: exit codes and JSO
 
 ### Exit Code Protocol
 
-| Exit Code | Meaning                | stdout behavior                           | stderr behavior                    |
-|-----------|------------------------|-------------------------------------------|------------------------------------|
-| **0**     | Success                | Parsed as JSON if valid; context for some events | Ignored                       |
-| **2**     | Blocking error         | **Ignored** (JSON not processed)          | Used as error message, fed to Claude |
-| **Other** | Non-blocking error     | Ignored                                   | Shown to user in verbose mode      |
+| Exit Code | Meaning            | stdout behavior                                  | stderr behavior                      |
+| --------- | ------------------ | ------------------------------------------------ | ------------------------------------ |
+| **0**     | Success            | Parsed as JSON if valid; context for some events | Ignored                              |
+| **2**     | Blocking error     | **Ignored** (JSON not processed)                 | Used as error message, fed to Claude |
+| **Other** | Non-blocking error | Ignored                                          | Shown to user in verbose mode        |
 
 **Exit code 2 behavior by event:**
 
-| Event             | Effect                                           |
-|-------------------|--------------------------------------------------|
-| `PreToolUse`      | Blocks tool call, stderr shown to Claude         |
+| Event               | Effect                                         |
+| ------------------- | ---------------------------------------------- |
+| `PreToolUse`        | Blocks tool call, stderr shown to Claude       |
 | `PermissionRequest` | Denies permission, stderr shown to Claude      |
-| `PostToolUse`     | Shows stderr to Claude (tool already ran)        |
-| `UserPromptSubmit`| Blocks prompt, erases it, stderr shown to user   |
-| `Stop`            | Blocks stopping, stderr shown to Claude          |
-| `SubagentStop`    | Blocks stopping, stderr shown to subagent        |
-| `Notification`    | Shows stderr to user only                        |
-| `SessionStart`    | Shows stderr to user only                        |
-| `SessionEnd`      | Shows stderr to user only                        |
+| `PostToolUse`       | Shows stderr to Claude (tool already ran)      |
+| `UserPromptSubmit`  | Blocks prompt, erases it, stderr shown to user |
+| `Stop`              | Blocks stopping, stderr shown to Claude        |
+| `SubagentStop`      | Blocks stopping, stderr shown to subagent      |
+| `Notification`      | Shows stderr to user only                      |
+| `SessionStart`      | Shows stderr to user only                      |
+| `SessionEnd`        | Shows stderr to user only                      |
 
 ### JSON Output (Exit Code 0 Only)
 
@@ -433,11 +434,11 @@ Hooks communicate back to Claude Code through two mechanisms: exit codes and JSO
 }
 ```
 
-| Decision  | Effect                                              |
-|-----------|-----------------------------------------------------|
+| Decision  | Effect                                                |
+| --------- | ----------------------------------------------------- |
 | `"allow"` | Bypasses permission system. Reason shown to user only |
-| `"deny"`  | Blocks tool call. Reason shown to Claude            |
-| `"ask"`   | Shows confirmation UI. Reason shown to user only    |
+| `"deny"`  | Blocks tool call. Reason shown to Claude              |
+| `"ask"`   | Shows confirmation UI. Reason shown to user only      |
 
 `updatedInput` modifies tool parameters before execution. `additionalContext` adds information to Claude's context.
 
@@ -475,6 +476,7 @@ For `"deny"`: include `"message"` (tells model why) and optional `"interrupt"` b
 #### UserPromptSubmit Decision Control
 
 Two ways to add context (exit code 0):
+
 1. **Plain text stdout** -- simplest approach
 2. **JSON with `additionalContext`** -- more structured
 
@@ -581,13 +583,13 @@ class MyHandler(Handler):
 
 ### Priority Ranges
 
-| Range | Category     | Examples                                    |
-|-------|-------------|---------------------------------------------|
-| 5-9   | Architecture | Controller pattern enforcement              |
-| 10-20 | Safety       | Destructive git, sed blocker, data loss     |
-| 21-30 | Code Quality | ESLint disable, TypeScript errors           |
-| 31-45 | Workflow     | TDD enforcement, plan validation            |
-| 46-60 | Advisory     | British English warnings, suggestions       |
+| Range | Category     | Examples                                |
+| ----- | ------------ | --------------------------------------- |
+| 5-9   | Architecture | Controller pattern enforcement          |
+| 10-20 | Safety       | Destructive git, sed blocker, data loss |
+| 21-30 | Code Quality | ESLint disable, TypeScript errors       |
+| 31-45 | Workflow     | TDD enforcement, plan validation        |
+| 46-60 | Advisory     | British English warnings, suggestions   |
 
 **Lower priority number = runs first.**
 
@@ -648,12 +650,12 @@ See `/workspace/CLAUDE/DEBUGGING_HOOKS.md` for the complete introspection guide 
 
 Hooks are configured in Claude Code settings files (JSON):
 
-| File | Scope |
-|------|-------|
-| `~/.claude/settings.json` | User (all projects) |
-| `.claude/settings.json` | Project (committed) |
+| File                          | Scope                         |
+| ----------------------------- | ----------------------------- |
+| `~/.claude/settings.json`     | User (all projects)           |
+| `.claude/settings.json`       | Project (committed)           |
 | `.claude/settings.local.json` | Local project (not committed) |
-| Managed policy settings | Enterprise |
+| Managed policy settings       | Enterprise                    |
 
 ### Configuration Structure
 
@@ -703,12 +705,12 @@ MCP tools follow the pattern `mcp__<server>__<tool>`:
 
 ### Environment Variables
 
-| Variable | Available In | Description |
-|----------|-------------|-------------|
-| `CLAUDE_PROJECT_DIR` | All hooks | Absolute path to project root |
-| `CLAUDE_ENV_FILE` | SessionStart, Setup only | File path for persisting env vars |
-| `CLAUDE_CODE_REMOTE` | All hooks | `"true"` if remote/web, empty if local |
-| `CLAUDE_PLUGIN_ROOT` | Plugin hooks only | Absolute path to plugin directory |
+| Variable             | Available In             | Description                            |
+| -------------------- | ------------------------ | -------------------------------------- |
+| `CLAUDE_PROJECT_DIR` | All hooks                | Absolute path to project root          |
+| `CLAUDE_ENV_FILE`    | SessionStart, Setup only | File path for persisting env vars      |
+| `CLAUDE_CODE_REMOTE` | All hooks                | `"true"` if remote/web, empty if local |
+| `CLAUDE_PLUGIN_ROOT` | Plugin hooks only        | Absolute path to plugin directory      |
 
 ### Hooks in Skills and Agents
 
