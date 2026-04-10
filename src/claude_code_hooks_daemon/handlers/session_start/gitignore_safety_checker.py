@@ -26,6 +26,11 @@ _REQUIRED_GITIGNORE_PATTERNS: tuple[tuple[str, str, str], ...] = (
         "worktrees",
         ".claude/worktrees/ (Claude Code managed worktrees — path is not configurable)",
     ),
+    (
+        ".CLAUDE.md.pre-inject",
+        "",
+        ".CLAUDE.md.pre-inject (ClaudeMdInjector backup — session artifact, never commit)",
+    ),
 )
 
 _GITIGNORE_FILE = ".gitignore"
@@ -214,7 +219,7 @@ class GitignoreSafetyCheckerHandler(Handler):
         ]
         for root_pattern, _, description in _REQUIRED_GITIGNORE_PATTERNS:
             if description in missing:
-                context.append(f"  {root_pattern}/")
+                context.append(f"  {root_pattern}")
         context += [
             "",
             "These paths are managed by Claude Code and must never be committed.",

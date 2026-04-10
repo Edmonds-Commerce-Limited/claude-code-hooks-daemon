@@ -80,12 +80,17 @@ class TestFindMissingEntries:
     def test_returns_empty_when_claude_gitignore_covers_all(
         self, handler: GitignoreSafetyCheckerHandler, tmp_path: Path
     ) -> None:
-        """All entries present in .claude/.gitignore → no missing."""
+        """Scoped entries in .claude/.gitignore + root-only entries in .gitignore → no missing."""
+        # Patterns with a scoped_pattern go into .claude/.gitignore
         claude_dir = tmp_path / ".claude"
         claude_dir.mkdir()
         claude_gitignore = claude_dir / ".gitignore"
-        lines = [f"{scoped}\n" for _, scoped, _ in _REQUIRED_GITIGNORE_PATTERNS if scoped]
-        claude_gitignore.write_text("".join(lines))
+        scoped_lines = [f"{scoped}\n" for _, scoped, _ in _REQUIRED_GITIGNORE_PATTERNS if scoped]
+        claude_gitignore.write_text("".join(scoped_lines))
+        # Patterns with empty scoped_pattern must be in root .gitignore
+        root_only = [f"{root}\n" for root, scoped, _ in _REQUIRED_GITIGNORE_PATTERNS if not scoped]
+        if root_only:
+            (tmp_path / ".gitignore").write_text("".join(root_only))
         assert handler._find_missing_entries(tmp_path) == []
 
     def test_returns_descriptions_for_missing_entries(
@@ -97,6 +102,25 @@ class TestFindMissingEntries:
         assert len(missing) == len(_REQUIRED_GITIGNORE_PATTERNS)
         for _, _, description in _REQUIRED_GITIGNORE_PATTERNS:
             assert description in missing
+
+    def test_pre_inject_pattern_is_required(
+        self, handler: GitignoreSafetyCheckerHandler, tmp_path: Path
+    ) -> None:
+        """Regression: .CLAUDE.md.pre-inject must be in required patterns."""
+        # Only worktrees covered, pre-inject missing
+        gitignore = tmp_path / ".gitignore"
+        gitignore.write_text(".claude/worktrees/\n")
+        missing = handler._find_missing_entries(tmp_path)
+        assert any(".CLAUDE.md.pre-inject" in m for m in missing)
+
+    def test_pre_inject_satisfied_in_root_gitignore(
+        self, handler: GitignoreSafetyCheckerHandler, tmp_path: Path
+    ) -> None:
+        """pre-inject entry in root .gitignore satisfies requirement."""
+        gitignore = tmp_path / ".gitignore"
+        gitignore.write_text(".claude/worktrees/\n.CLAUDE.md.pre-inject\n")
+        missing = handler._find_missing_entries(tmp_path)
+        assert missing == []
 
     def test_ignores_commented_lines(
         self, handler: GitignoreSafetyCheckerHandler, tmp_path: Path

@@ -67,19 +67,38 @@ EOF
         return 0
     fi
 
-    # Check if entry already exists
+    # Check if daemon entry already exists
+    local needs_daemon=true
+    local needs_inject=true
+
     if grep -qF "$ignore_entry" "$gitignore_file"; then
-        print_verbose "Daemon entry already in .gitignore"
+        needs_daemon=false
+    fi
+    if grep -qF "$INJECT_BACKUP_GITIGNORE_ENTRY" "$gitignore_file"; then
+        needs_inject=false
+    fi
+
+    if [ "$needs_daemon" = false ] && [ "$needs_inject" = false ]; then
+        print_verbose "All daemon entries already in .gitignore"
         return 0
     fi
 
-    # Add entry to .gitignore
-    cat >> "$gitignore_file" <<EOF
+    # Add missing entries to .gitignore
+    if [ "$needs_daemon" = true ]; then
+        cat >> "$gitignore_file" <<EOF
 
 # Claude Code Hooks Daemon
 $ignore_entry
+EOF
+    fi
+
+    if [ "$needs_inject" = true ]; then
+        cat >> "$gitignore_file" <<EOF
+
+# ClaudeMdInjector backup (session artifact, never commit)
 $INJECT_BACKUP_GITIGNORE_ENTRY
 EOF
+    fi
 
     print_success "Added daemon entries to .gitignore"
     return 0
