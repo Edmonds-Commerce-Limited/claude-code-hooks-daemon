@@ -261,6 +261,87 @@ class TestHandle:
         result = handler.handle(hook_input)
         assert result.decision == Decision.ALLOW
 
+    def test_preserves_yaml_frontmatter_byte_for_byte(
+        self, handler: MarkdownTableFormatterHandler, tmp_path: Path
+    ) -> None:
+        """YAML frontmatter (e.g. in SKILL.md) must be preserved exactly.
+
+        Regression test for mdformat mangling `---`-delimited frontmatter into
+        a thematic break followed by collapsed heading text.
+        """
+        test_file = tmp_path / "SKILL.md"
+        original = (
+            "---\n"
+            "name: hooks-daemon\n"
+            'description: "A daemon"\n'
+            'argument-hint: "[command]"\n'
+            "allowed-tools: Bash, Read, Edit\n"
+            "---\n"
+            "\n"
+            "# Heading\n"
+            "\n"
+            "| a | b |\n"
+            "|-|-|\n"
+            "| 1 | 2 |\n"
+        )
+        test_file.write_text(original)
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(test_file)},
+        }
+        handler.handle(hook_input)
+        content_after = test_file.read_text()
+        # Frontmatter block must be preserved exactly as written, with a
+        # blank line separating it from the body (mdformat strips leading
+        # whitespace, so the handler must re-insert the separator).
+        assert content_after.startswith(
+            "---\n"
+            "name: hooks-daemon\n"
+            'description: "A daemon"\n'
+            'argument-hint: "[command]"\n'
+            "allowed-tools: Bash, Read, Edit\n"
+            "---\n"
+            "\n"
+        )
+        # mdformat must not have turned `---` into a thematic break
+        assert "_" * 70 not in content_after
+        assert "## name:" not in content_after
+        # Body tables still get aligned
+        assert "| a | b |" in content_after or "| a   | b   |" in content_after
+
+    def test_preserves_frontmatter_with_tripled_dashes_in_body(
+        self, handler: MarkdownTableFormatterHandler, tmp_path: Path
+    ) -> None:
+        """Only the leading frontmatter is stripped; `---` in body still gets thematic-break treatment."""
+        test_file = tmp_path / "doc.md"
+        test_file.write_text(
+            "---\n" "title: Test\n" "---\n" "\n" "# Top\n" "\n" "---\n" "\n" "## Section\n"
+        )
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(test_file)},
+        }
+        handler.handle(hook_input)
+        content_after = test_file.read_text()
+        # Frontmatter preserved
+        assert content_after.startswith("---\ntitle: Test\n---\n")
+        # Body thematic break stays as --- (not 70 underscores)
+        assert "_" * 70 not in content_after
+
+    def test_no_frontmatter_still_formats_normally(
+        self, handler: MarkdownTableFormatterHandler, tmp_path: Path
+    ) -> None:
+        """Files without frontmatter behave exactly as before."""
+        test_file = tmp_path / "doc.md"
+        test_file.write_text(_UNALIGNED_TABLE)
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(test_file)},
+        }
+        handler.handle(hook_input)
+        content_after = test_file.read_text()
+        assert "| Field             |" in content_after
+
 
 class TestGuidance:
     def test_get_claude_md_returns_non_empty_guidance(

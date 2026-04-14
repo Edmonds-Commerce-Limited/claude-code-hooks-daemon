@@ -30,6 +30,7 @@ import json
 import logging
 import os
 import platform
+import re
 import signal
 import socket
 import subprocess  # nosec B404 - subprocess used for daemon management (systemctl) only
@@ -1825,6 +1826,15 @@ _MDFORMAT_OPTIONS: dict[str, Any] = {"number": True}
 _THEMATIC_BREAK_UNDERSCORES = "_" * 70
 _THEMATIC_BREAK_DASHES = "---"
 
+# YAML frontmatter: ``---`` on line 1, YAML body, then a closing ``---``
+# on its own line. mdformat does not understand frontmatter and would
+# mangle it into a thematic break + heading, so we strip it before
+# formatting and re-attach it byte-for-byte afterwards.
+_FRONTMATTER_RE = re.compile(
+    r"\A(---\r?\n.*?\r?\n---\r?\n)(.*)\Z",
+    re.DOTALL,
+)
+
 
 def _restore_thematic_breaks(content: str) -> str:
     """Replace mdformat's 70-underscore thematic break with ``---``."""
@@ -1832,6 +1842,19 @@ def _restore_thematic_breaks(content: str) -> str:
         _THEMATIC_BREAK_DASHES if line == _THEMATIC_BREAK_UNDERSCORES else line
         for line in content.split("\n")
     )
+
+
+def _split_frontmatter(content: str) -> tuple[str, str]:
+    """Split leading YAML frontmatter from the document body.
+
+    Returns ``("", content)`` when there is no frontmatter, otherwise
+    ``(frontmatter_block, body)`` where ``frontmatter_block`` includes
+    both ``---`` delimiters and the trailing newline.
+    """
+    match = _FRONTMATTER_RE.match(content)
+    if match is None:
+        return "", content
+    return match.group(1), match.group(2)
 
 
 def _format_single_markdown_file(path: Path, check: bool) -> tuple[bool, bool]:
@@ -1849,12 +1872,19 @@ def _format_single_markdown_file(path: Path, check: bool) -> tuple[bool, bool]:
     """
     try:
         before = path.read_text(encoding="utf-8")
-        formatted = mdformat.text(
-            before,
+        frontmatter, body = _split_frontmatter(before)
+        formatted_body = mdformat.text(
+            body,
             extensions=_MDFORMAT_EXTENSIONS,
             options=_MDFORMAT_OPTIONS,
         )
-        formatted = _restore_thematic_breaks(formatted)
+        formatted_body = _restore_thematic_breaks(formatted_body)
+        # Ensure a blank line separates frontmatter from body — mdformat
+        # strips leading whitespace, so without this the closing ``---``
+        # delimiter would butt directly against the first body line.
+        if frontmatter and formatted_body and not formatted_body.startswith("\n"):
+            formatted_body = "\n" + formatted_body
+        formatted = frontmatter + formatted_body
     except Exception as exc:
         # FAIL SAFE: Surface the failure but do not crash the whole run
         # when processing a directory of many files.

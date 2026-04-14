@@ -3,14 +3,20 @@
 Runs after Write/Edit of .md files, reformats the content with mdformat so tables
 have aligned pipes and consistent column widths, then writes back only if changed.
 
-Applies two mitigations to constrain mdformat's default behaviour:
+Applies three mitigations to constrain mdformat's default behaviour:
 
 1. `options={"number": True}` preserves consecutive ordered-list numbering
    (1. 2. 3.) instead of renumbering everything to 1.
 2. Post-processes mdformat's output to restore `---` thematic breaks
    (mdformat hardcodes 70 underscores for thematic breaks with no config option).
+3. Strips leading YAML frontmatter (``---`` block) before formatting and
+   re-attaches it byte-for-byte afterwards. mdformat does not understand
+   YAML frontmatter and would otherwise mangle it into a thematic break
+   followed by collapsed heading text — which would break Claude Code
+   SKILL.md files and any other frontmatter-bearing markdown document.
 """
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +47,16 @@ _MDFORMAT_EXTENSIONS: set[str] = {"gfm"}
 # convert them back to the more common `---` form.
 _THEMATIC_BREAK_UNDERSCORES = "_" * 70
 _THEMATIC_BREAK_DASHES = "---"
+
+# YAML frontmatter: a `---` delimiter on the very first line, YAML body,
+# then a closing `---` delimiter on its own line. Captures the full block
+# (delimiters included) in group 1 and the remainder of the document in
+# group 2. Non-greedy match on the body so nested `---` thematic breaks
+# in the document body are never swallowed.
+_FRONTMATTER_RE = re.compile(
+    r"\A(---\r?\n.*?\r?\n---\r?\n)(.*)\Z",
+    re.DOTALL,
+)
 
 
 class MarkdownTableFormatterHandler(Handler):
@@ -92,12 +108,19 @@ class MarkdownTableFormatterHandler(Handler):
 
         try:
             before = path.read_text(encoding="utf-8")
-            formatted = mdformat.text(
-                before,
+            frontmatter, body = self._split_frontmatter(before)
+            formatted_body = mdformat.text(
+                body,
                 extensions=_MDFORMAT_EXTENSIONS,
                 options=_MDFORMAT_OPTIONS,
             )
-            formatted = self._restore_thematic_breaks(formatted)
+            formatted_body = self._restore_thematic_breaks(formatted_body)
+            # Ensure a blank line separates frontmatter from body — mdformat
+            # strips leading whitespace, so without this the `---` closing
+            # delimiter would butt directly against the first body line.
+            if frontmatter and formatted_body and not formatted_body.startswith("\n"):
+                formatted_body = "\n" + formatted_body
+            formatted = frontmatter + formatted_body
         except Exception as exc:
             # FAIL SAFE: mdformat can raise many parser/IO/unicode errors.
             # Never crash the PostToolUse dispatch chain — surface the error
@@ -125,6 +148,26 @@ class MarkdownTableFormatterHandler(Handler):
             _THEMATIC_BREAK_DASHES if line == _THEMATIC_BREAK_UNDERSCORES else line
             for line in content.split("\n")
         )
+
+    @staticmethod
+    def _split_frontmatter(content: str) -> tuple[str, str]:
+        """Split off YAML frontmatter (if any) for lossless round-tripping.
+
+        mdformat does not understand YAML frontmatter — it treats the leading
+        ``---`` as a thematic break and collapses the YAML key/value lines
+        into a heading. To preserve frontmatter byte-for-byte we strip it
+        before invoking mdformat and re-attach the original string afterwards.
+
+        Returns:
+            A tuple of ``(frontmatter, body)``. ``frontmatter`` is the empty
+            string when the document has none; otherwise it includes both
+            delimiters and the trailing newline so it can be concatenated
+            with the formatted body directly.
+        """
+        match = _FRONTMATTER_RE.match(content)
+        if match is None:
+            return "", content
+        return match.group(1), match.group(2)
 
     def get_claude_md(self) -> str | None:
         return (
