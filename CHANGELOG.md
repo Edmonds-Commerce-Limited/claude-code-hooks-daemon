@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-04-14
+
+### Added
+
+- **`post-upgrade-tasks/` convention**: New generic mechanism for giving upgrading LLMs/humans formal post-upgrade instructions (audits of prior-version bugs, config migrations, workflow changes, notifications). Tasks are drafted in `CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/` during the release cycle, then moved into the versioned upgrade guide at release time. Each task is a self-contained markdown file with mandatory header (`Type`/`Severity`/`Applies to`/`Idempotent`) and sections `Why`/`How to detect`/`How to handle`/`How to confirm`/`Rollback`. Advisory only — nothing runs them automatically.
+- **Release pipeline BLOCKING gate for UNRELEASED tasks (Step 6)**: `RELEASING.md` and the `/release` skill now require moving every `CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/NN-*.md` into the versioned upgrade guide before the Opus documentation review. Release ABORTS if any task file remains in `UNRELEASED/` after this step. The Opus review checklist verifies the versioned guide's task index is populated and that release notes reference post-upgrade tasks when any are `critical` or `recommended`.
+- **Per-release task index README**: `CLAUDE/UPGRADES/upgrade-template/post-upgrade-tasks/README.md` template with the task-index table schema, populated per release with one row per moved task (ordered by filename).
+
+### Fixed
+
+- **`markdown_table_formatter` YAML frontmatter mangling**: The PostToolUse handler (`markdown_table_formatter`) and the `format-markdown` CLI subcommand previously passed entire markdown files to `mdformat`, which does not understand YAML frontmatter. Any `.md` file whose first line was `---` — notably Claude Code `SKILL.md` files, Jekyll/Hugo/MkDocs pages, and any frontmatter-using documentation — was silently rewritten so that the opening `---` became a 70-underscore thematic break, the YAML body was collapsed onto a single line prefixed with `##`, and the closing `---` was lost. Frontmatter is now stripped before formatting and re-attached byte-for-byte afterwards. **Files already damaged on disk before this release remain damaged** — see the post-upgrade task `01-audit-markdown-frontmatter.md` in the v3.2-to-v3.3 upgrade guide for detection and remediation guidance.
+
 ## [3.2.1] - 2026-04-10
 
 ### Changed
