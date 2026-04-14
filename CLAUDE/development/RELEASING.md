@@ -19,20 +19,21 @@
 ## Pipeline Overview
 
 ```
-1. Pre-Release Validation (Agent)
-2. Version Detection
-3. Version Update (Agent)
-4. Changelog Generation (Agent)
-5. Release Notes Creation (Agent)
-6. Opus Documentation Review
-7. QA Verification Gate          <- BLOCKING
-8. Breaking Changes Check        <- BLOCKING
-9. Code Review Gate              <- BLOCKING
-10. CLAUDE.md Guidance Audit     <- BLOCKING
-11. Acceptance Testing Gate      <- BLOCKING
-12. Commit & Push
-13. Tag & GitHub Release
-14. Post-Release Verification
+1.  Pre-Release Validation (Agent)
+2.  Version Detection
+3.  Version Update (Agent)
+4.  Changelog Generation (Agent)
+5.  Release Notes Creation (Agent)
+6.  Move UNRELEASED Post-Upgrade Tasks   <- BLOCKING
+7.  Opus Documentation Review
+8.  QA Verification Gate                 <- BLOCKING
+9.  Breaking Changes Check               <- BLOCKING
+10. Code Review Gate                     <- BLOCKING
+11. CLAUDE.md Guidance Audit             <- BLOCKING
+12. Acceptance Testing Gate              <- BLOCKING
+13. Commit & Push
+14. Tag & GitHub Release
+15. Post-Release Verification
 ```
 
 **ANY blocking gate failure = ABORT release immediately. No exceptions.**
@@ -75,7 +76,74 @@ Creates `RELEASES/vX.Y.Z.md` with: summary, changelog, upgrade instructions (if 
 
 ---
 
-## Step 6: Opus Documentation Review
+## Step 6: Move UNRELEASED Post-Upgrade Tasks (BLOCKING)
+
+**Context**: `CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/` accumulates task files written during the release cycle (audits of prior-version bugs, config-migration guidance, workflow-change notifications, etc.). At release time these MUST be moved into the versioned upgrade guide so upgrading users see them.
+
+**See**: `CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/README.md` for the convention and schema.
+
+### What to check
+
+```bash
+ls CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/
+```
+
+| State                           | Action                                                                                                |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Only `README.md` present        | Nothing to move. Delete `post-upgrade-tasks/` from the versioned upgrade guide if one was scaffolded. |
+| `NN-*.md` task files present    | Move them (steps below). Do NOT leave them in `UNRELEASED/`.                                          |
+| Versioned upgrade guide missing | **ABORT** — create it from `CLAUDE/UPGRADES/upgrade-template/` first (see Step 9).                    |
+
+### How to move
+
+Target: `CLAUDE/UPGRADES/v{MAJOR}/v{PREV}-to-v{NEW}/post-upgrade-tasks/`.
+
+```bash
+TARGET="CLAUDE/UPGRADES/v{MAJOR}/v{PREV}-to-v{NEW}/post-upgrade-tasks"
+mkdir -p "$TARGET"
+
+# Copy the per-release index README (if not already present)
+cp CLAUDE/UPGRADES/upgrade-template/post-upgrade-tasks/README.md "$TARGET/README.md"
+
+# Move each task file — use git mv so history follows
+git mv CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/NN-*.md "$TARGET/"
+```
+
+### Populate the per-release task index
+
+Edit `$TARGET/README.md`:
+
+1. Update the heading: `# Post-Upgrade Tasks — vPREV → vNEW`
+2. Replace the placeholder task-index table with one row per moved task, ordered by filename. Each row: `| file | type | severity | applies-to | one-line summary |`.
+3. Delete the `00-EXAMPLE-task.md` reference — that file only belongs in the template.
+
+### Verify
+
+```bash
+# UNRELEASED should contain only README.md
+ls CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/
+# Expected: README.md  (nothing else)
+
+# Versioned guide should list every moved task
+cat CLAUDE/UPGRADES/v{MAJOR}/v{PREV}-to-v{NEW}/post-upgrade-tasks/README.md
+# Expected: task index populated, no placeholder rows, no 00-EXAMPLE reference
+```
+
+### Reference from release notes
+
+If any moved tasks have `Severity: critical` or `recommended`, `RELEASES/vX.Y.Z.md` MUST reference the post-upgrade-tasks directory so upgrading users know to read it:
+
+```markdown
+## Post-Upgrade Tasks
+
+After upgrading, review `CLAUDE/UPGRADES/v{MAJOR}/v{PREV}-to-v{NEW}/post-upgrade-tasks/` — it contains [N] task(s) that may require action in your project (e.g. auditing files damaged by prior-version bugs, adapting to changed defaults).
+```
+
+**ABORT condition**: any `NN-*.md` file remains in `UNRELEASED/post-upgrade-tasks/` when moving to the next step.
+
+---
+
+## Step 7: Opus Documentation Review
 
 Opus reviews **documentation only** (not code/QA):
 
@@ -85,12 +153,15 @@ Opus reviews **documentation only** (not code/QA):
 - Release notes comprehensive
 - Security/breaking changes marked
 - Upgrade instructions clear
+- `UNRELEASED/post-upgrade-tasks/` contains only `README.md` (all tasks moved in Step 6)
+- Moved tasks have populated the versioned guide's `post-upgrade-tasks/README.md` task index
+- Release notes reference post-upgrade tasks if any are `critical` or `recommended`
 
 Approved -> proceed. Issues found -> agent fixes docs, re-submit until approved.
 
 ---
 
-## Step 7: QA Verification Gate (BLOCKING)
+## Step 8: QA Verification Gate (BLOCKING)
 
 Main Claude runs: `./scripts/qa/run_all.sh`
 
@@ -98,7 +169,7 @@ All 10 checks must pass. ANY failure = ABORT.
 
 ---
 
-## Step 8: Breaking Changes Check (BLOCKING)
+## Step 9: Breaking Changes Check (BLOCKING)
 
 **Context**: v2.11 and v2.12 shipped breaking changes without upgrade docs.
 
@@ -133,7 +204,7 @@ Release notes MUST reference upgrade guide with BREAKING CHANGES section.
 
 ---
 
-## Step 9: Code Review Gate (BLOCKING)
+## Step 10: Code Review Gate (BLOCKING)
 
 ```bash
 LAST_TAG=$(git describe --tags --abbrev=0)
@@ -154,7 +225,7 @@ Issues found = ABORT, fix, re-run `/release`.
 
 ---
 
-## Step 10: CLAUDE.md Guidance Audit (BLOCKING)
+## Step 11: CLAUDE.md Guidance Audit (BLOCKING)
 
 Launch sub-agent to analyse `get_claude_md()` completeness across all handlers.
 
@@ -164,7 +235,7 @@ Fix any missing/inaccurate guidance. If changes made: run QA, restart daemon, up
 
 ---
 
-## Step 11: Acceptance Testing Gate (BLOCKING)
+## Step 12: Acceptance Testing Gate (BLOCKING)
 
 **Main thread ONLY. Sub-agent testing is FORBIDDEN** (v2.9.0 incident: async agents create race conditions; sub-agents can't use Write/Edit tools; lifecycle events only fire in main session).
 
@@ -183,19 +254,19 @@ HANDLER_CHANGES=$(git diff "${LAST_TAG}..HEAD" --name-only -- src/claude_code_ho
 
 ### Execution
 
-**Step 11.1**: Restart daemon, verify RUNNING.
+**Step 12.1**: Restart daemon, verify RUNNING.
 
-**Step 11.2**: Verify OBSERVABLE handlers in system-reminders (SessionStart, UserPromptSubmit, PostToolUse).
+**Step 12.2**: Verify OBSERVABLE handlers in system-reminders (SessionStart, UserPromptSubmit, PostToolUse).
 
-**Step 11.3**: Generate playbook: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-playbook > /tmp/playbook.md`
+**Step 12.3**: Generate playbook: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-playbook > /tmp/playbook.md`
 
-**Step 11.4**: Execute tests sequentially in main thread:
+**Step 12.4**: Execute tests sequentially in main thread:
 
 - **BLOCKING tests** (~65): Bash/Write/Edit with dangerous commands, verify hook denies
 - **ADVISORY tests** (~24): Verify system-reminder shows context
 - **Skip**: Untriggerable lifecycle events (verified by daemon load + unit tests)
 
-**Step 11.5**: All tests must pass. Failed = 0.
+**Step 12.5**: All tests must pass. Failed = 0.
 
 ### FAIL-FAST Cycle
 
@@ -203,15 +274,17 @@ HANDLER_CHANGES=$(git diff "${LAST_TAG}..HEAD" --name-only -- src/claude_code_ho
 2. Fix bug with TDD
 3. Run full QA: `./scripts/qa/run_all.sh`
 4. Restart daemon
-5. **RESTART ALL tests from Step 11.1** (code changes can regress earlier tests)
+5. **RESTART ALL tests from Step 12.1** (code changes can regress earlier tests)
 6. Repeat until zero failures
 
 ---
 
-## Step 12: Commit & Push
+## Step 13: Commit & Push
 
 ```bash
-git add pyproject.toml version.py README.md CLAUDE.md CHANGELOG.md RELEASES/vX.Y.Z.md
+git add pyproject.toml version.py README.md CLAUDE.md CHANGELOG.md RELEASES/vX.Y.Z.md \
+  CLAUDE/UPGRADES/v{MAJOR}/v{PREV}-to-v{NEW}/ \
+  CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/
 git commit -m "Release vX.Y.Z: [Title]
 
 - Updated version to X.Y.Z across all files
@@ -224,7 +297,7 @@ Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
 git push origin main
 ```
 
-## Step 13: Tag & GitHub Release
+## Step 14: Tag & GitHub Release
 
 ```bash
 git tag -a vX.Y.Z -m "[Full release notes from RELEASES/vX.Y.Z.md]"
@@ -236,7 +309,7 @@ gh release create vX.Y.Z \
   --latest
 ```
 
-## Step 14: Post-Release Verification
+## Step 15: Post-Release Verification
 
 ```bash
 git tag -l vX.Y.Z
@@ -262,10 +335,12 @@ gh release view vX.Y.Z --json tagName,isDraft,isPrerelease,url \
 # 1. Edit versions: pyproject.toml, version.py, README.md, CLAUDE.md
 # 2. Update CHANGELOG.md (Keep a Changelog format)
 # 3. Create RELEASES/vX.Y.Z.md
-# 4. Run QA: ./scripts/qa/run_all.sh
-# 5. Commit and push
-# 6. Tag: git tag -a vX.Y.Z -m "Release vX.Y.Z" && git push origin vX.Y.Z
-# 7. gh release create vX.Y.Z --title "vX.Y.Z - [Title]" --notes-file RELEASES/vX.Y.Z.md --latest
+# 4. Move UNRELEASED/post-upgrade-tasks/NN-*.md into the versioned upgrade guide
+#    and populate its post-upgrade-tasks/README.md task index
+# 5. Run QA: ./scripts/qa/run_all.sh
+# 6. Commit and push
+# 7. Tag: git tag -a vX.Y.Z -m "Release vX.Y.Z" && git push origin vX.Y.Z
+# 8. gh release create vX.Y.Z --title "vX.Y.Z - [Title]" --notes-file RELEASES/vX.Y.Z.md --latest
 ```
 
 ## Semver Guidelines
