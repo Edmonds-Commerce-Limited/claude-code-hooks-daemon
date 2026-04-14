@@ -39,15 +39,16 @@ Automate the complete release process: version updates, changelog generation, Op
 03. **Updates** version across all files
 04. **Generates** CHANGELOG.md entry from commits
 05. **Creates** release notes (RELEASES/vX.Y.Z.md)
-06. **Detects** breaking changes automatically and generates upgrade guide templates
-07. **Submits** to Opus agent for documentation review
-08. **🚨 UPGRADE GUIDE GATE** - Verify upgrade guide complete if breaking changes (BLOCKING)
-09. **🚨 QA VERIFICATION GATE** - Main Claude runs `./scripts/qa/run_all.sh` (BLOCKING)
-10. **🚨 CODE REVIEW GATE** - Main Claude reviews code diff since last tag (BLOCKING)
-11. **🚨 ACCEPTANCE TESTING GATE** - Main Claude executes acceptance tests: full suite for MAJOR/MINOR, targeted or skipped for PATCH (BLOCKING)
-12. **Commits** and pushes changes (only after gates pass)
-13. **Tags** release and creates GitHub release
-14. **Verifies** release published successfully
+06. **Moves** `CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/NN-*.md` into the versioned upgrade guide — BLOCKING, no task files may remain in `UNRELEASED/` after this step
+07. **Detects** breaking changes automatically and generates upgrade guide templates
+08. **Submits** to Opus agent for documentation review
+09. **🚨 UPGRADE GUIDE GATE** - Verify upgrade guide complete if breaking changes (BLOCKING)
+10. **🚨 QA VERIFICATION GATE** - Main Claude runs `./scripts/qa/run_all.sh` (BLOCKING)
+11. **🚨 CODE REVIEW GATE** - Main Claude reviews code diff since last tag (BLOCKING)
+12. **🚨 ACCEPTANCE TESTING GATE** - Main Claude executes acceptance tests: full suite for MAJOR/MINOR, targeted or skipped for PATCH (BLOCKING)
+13. **Commits** and pushes changes (only after gates pass)
+14. **Tags** release and creates GitHub release
+15. **Verifies** release published successfully
 
 **CRITICAL**: Release process ABORTS immediately on ANY validation failure or if blocking gates fail. NO auto-fixing of QA issues or git state.
 
@@ -73,6 +74,11 @@ Update Version Files
 Generate Changelog
     ↓
 Create Release Notes
+    ↓
+🚨 MOVE UNRELEASED POST-UPGRADE TASKS (BLOCKING)
+    Move CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/NN-*.md
+    into the versioned upgrade guide
+    ABORT if any task file remains in UNRELEASED/
     ↓
 Detect Breaking Changes (automatic)
     ↓
@@ -205,7 +211,7 @@ cat > ./untracked/workflow-state/release/state-release-$(date +%Y%m%d_%H%M%S).js
   "workflow_type": "release",
   "phase": {
     "current": 1,
-    "total": 14,
+    "total": 15,
     "name": "Pre-Release Validation",
     "status": "in_progress"
   },
@@ -220,6 +226,7 @@ cat > ./untracked/workflow-state/release/state-release-$(date +%Y%m%d_%H%M%S).js
   },
   "key_reminders": [
     "All validation checks must pass before proceeding",
+    "Move UNRELEASED/post-upgrade-tasks/NN-*.md into the versioned upgrade guide before the Opus review",
     "QA gate is BLOCKING - must pass before commit",
     "Acceptance testing gate is BLOCKING - must pass before commit"
   ],
@@ -397,8 +404,9 @@ Main Claude commits, tags, and publishes - see RELEASING.md Steps 9-11.
 This skill implements the process defined in the release documentation. For complete details on:
 
 - Pre-release validation steps
-- Breaking changes detection and upgrade guide generation (Step 6)
-- Upgrade guide verification gate (Step 6.5)
+- UNRELEASED post-upgrade-tasks move (Step 6)
+- Breaking changes detection and upgrade guide generation
+- Upgrade guide verification gate
 - Acceptance testing requirements and FAIL-FAST cycle (Step 8)
 - Version detection rules
 - Changelog generation format

@@ -26,6 +26,11 @@ This directory contains LLM-optimized version migration guides that allow AI ass
 ```
 CLAUDE/UPGRADES/
 ├── README.md                           # This file
+├── UNRELEASED/                         # Staging for the NEXT release
+│   ├── README.md
+│   └── post-upgrade-tasks/             # Tasks accumulating between releases
+│       ├── README.md                   # Convention + current task index
+│       └── NN-*.md                     # One file per task
 ├── upgrade-template/                   # Template for future upgrades
 │   ├── README.md                       # Main upgrade guide template
 │   ├── config-before.yaml             # Example: config before
@@ -206,6 +211,14 @@ Required sections:
 - Example outputs (JSON, logs)
 - Test scripts for new features
 - Expected behavior demonstrations
+
+**post-upgrade-tasks/** (optional):
+
+- Instructions for an LLM/human to follow **after** a successful upgrade.
+- Use for: audits of files possibly damaged by bugs in prior versions, config-value reviews, workflow changes, data migrations, or any other situation where a clean upgrade alone is not enough.
+- Schema and conventions: `CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/README.md`.
+- Authoring during a release cycle: drop tasks into `CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/`. The `/release` skill moves them into the versioned guide at release time.
+- Omit the directory entirely if no post-upgrade tasks apply to the release.
 
 ## Creating a New Upgrade Guide
 

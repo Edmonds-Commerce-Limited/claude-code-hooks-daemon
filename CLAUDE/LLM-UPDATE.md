@@ -606,6 +606,7 @@ Contains LLM-optimized migration guides with step-by-step instructions, config e
 ```
 CLAUDE/UPGRADES/
 ├── README.md                     # Upgrade system documentation
+├── UNRELEASED/                   # Staging for the NEXT release (post-upgrade tasks etc.)
 ├── upgrade-template/             # Template for new upgrade guides
 ├── v1/                           # Upgrades FROM v1.x versions
 └── v2/                           # Upgrades FROM v2.x versions
@@ -615,7 +616,8 @@ CLAUDE/UPGRADES/
         ├── config-after.yaml     # Config after upgrade
         ├── config-additions.yaml # New config to add
         ├── verification.sh       # Verification script
-        └── examples/             # Expected outputs
+        ├── examples/             # Expected outputs
+        └── post-upgrade-tasks/   # OPTIONAL: tasks for the LLM to handle AFTER upgrade
 ```
 
 ---
@@ -653,8 +655,33 @@ ls -la CLAUDE/UPGRADES/v*/
 3. Read `CLAUDE/UPGRADES/v2/v2.1-to-v2.2/v2.1-to-v2.2.md` (if exists)
 4. Apply v2.1 to v2.2 upgrade steps
 5. Verify with `verification.sh` at each step
+6. **Process post-upgrade tasks** (if `post-upgrade-tasks/` exists in any traversed upgrade guide) — see next section.
 
 **If no upgrade guide exists**: Check `RELEASES/vX.Y.Z.md` for that version's upgrade instructions section.
+
+### Post-Upgrade Tasks (MANDATORY after upgrade completes)
+
+After every successful upgrade, check each traversed upgrade guide for a `post-upgrade-tasks/` directory. These are advisory instructions the upgrading LLM (or human) is expected to read and act on — they cover audits for damage from prior versions, config-value reviews, workflow changes, and similar work that a clean code upgrade alone does not handle.
+
+**Workflow**:
+
+1. For each upgrade in the path (`v2.0-to-v2.1`, `v2.1-to-v2.2`, …):
+   ```bash
+   ls .claude/hooks-daemon/CLAUDE/UPGRADES/v*/v*-to-v*/post-upgrade-tasks/ 2>/dev/null
+   ```
+2. If a `post-upgrade-tasks/` directory exists, open its `README.md` for the task index.
+3. For each task:
+   - Read the header block (Type, Severity, Applies to, Idempotent).
+   - **Skip** if `Applies to` does not cover the project's prior version.
+   - Otherwise, follow the `## How to detect`, `## How to handle`, and `## How to confirm` sections. Adapt sample commands to the project; do not run them blindly.
+4. Report a summary to the user grouped by severity:
+   - `critical` — block the user's next step until acknowledged.
+   - `recommended` — surface clearly; user can defer.
+   - `optional` — mention briefly.
+
+**Why this matters**: A successful code upgrade does not undo damage already done by a buggy prior version, nor does it migrate stale config, nor does it adapt the user's workflow to changed handler behaviour. Skipping post-upgrade tasks leaves known issues unaddressed.
+
+Schema and full convention: `CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/README.md`.
 
 ---
 
