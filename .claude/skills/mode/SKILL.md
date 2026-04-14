@@ -1,6 +1,8 @@
 ---
-
-## name: mode description: Get or set daemon operating mode - switch between default and unattended (blocks Stop events) argument-hint: "[get|unattended|default] [message]"
+name: mode
+description: Get or set daemon operating mode - switch between default and unattended (blocks Stop events)
+argument-hint: "[get|unattended|default] [message]"
+---
 
 # /mode - Daemon Mode Management
 

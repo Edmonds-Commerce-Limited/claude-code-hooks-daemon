@@ -1,6 +1,6 @@
 # Claude Code Hooks Daemon
 
-![Version](https://img.shields.io/badge/version-3.3.0-blue)
+![Version](https://img.shields.io/badge/version-3.3.1-blue)
 ![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Tests](https://img.shields.io/badge/tests-7621%2B%20passing-success)

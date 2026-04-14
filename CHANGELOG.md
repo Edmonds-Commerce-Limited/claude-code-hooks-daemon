@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.3.1] - 2026-04-14
+
+### Fixed
+
+- **Shipped-broken skill and agent frontmatter restored**: v3.3.0 shipped with 6 `SKILL.md` files (`hooks-daemon`, `release`, `acceptance-test`, `configure`, `mode`, `optimise`) and 6 `.claude/agents/*.md` files still damaged by the very bug v3.3.0 announced fixing. The v3.1.0 batch-format commit (`30db070`) had run the pre-fix `mdformat` over all project markdown, collapsing each file's YAML frontmatter into a `## name: ... description: ... argument-hint: ...` heading and dropping the closing `---` delimiter. The handler fix in v3.3.0 prevents *new* corruption but does not repair files already damaged on disk — and the damaged files were still checked into the release artefact, so every upgrader re-deployed broken skill/agent metadata. All 12 files have now been restored to their pre-corruption frontmatter from git history (`30db070^`), and a round-trip through the fixed `format-markdown` CLI confirms frontmatter is preserved byte-for-byte on subsequent edits. **This is exactly the scenario the v3.3.0 post-upgrade task `01-audit-markdown-frontmatter.md` documents for client projects.**
+
 ## [3.3.0] - 2026-04-14
 
 ### Added

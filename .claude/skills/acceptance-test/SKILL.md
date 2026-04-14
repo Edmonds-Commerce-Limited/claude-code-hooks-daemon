@@ -1,6 +1,8 @@
 ---
-
-## name: acceptance-test description: Acceptance testing - execute handler tests via real Claude Code tool calls in main thread argument-hint: "[all|blocking-only|advisory-only|context-only|handler-name]"
+name: acceptance-test
+description: Acceptance testing - execute handler tests via real Claude Code tool calls in main thread
+argument-hint: "[all|blocking-only|advisory-only|context-only|handler-name]"
+---
 
 # /acceptance-test - Acceptance Testing Skill
 
@@ -64,7 +66,6 @@ Execute acceptance tests for hooks daemon handlers via **real Claude Code tool c
 Tests are executed **one at a time** via real Claude Code tool calls:
 
 **BLOCKING tests** (expected: deny):
-
 ```
 # Use Bash tool with the test command
 Bash: echo "git reset --hard HEAD"
@@ -73,7 +74,6 @@ Bash: echo "git reset --hard HEAD"
 ```
 
 **ADVISORY tests** (expected: allow with context):
-
 ```
 # Use Bash tool with the test command
 Bash: echo "git stash"
@@ -82,7 +82,6 @@ Bash: echo "git stash"
 ```
 
 **WRITE/EDIT tests** (expected: deny or allow):
-
 ```
 # Use Write tool with test content
 Write: file_path="/tmp/test.py" content="x = 1  # type: ignore"
@@ -91,7 +90,6 @@ Write: file_path="/tmp/test.py" content="x = 1  # type: ignore"
 ```
 
 **CONTEXT tests** (expected: allow with context):
-
 ```
 # Verified by observing system-reminders during normal tool use
 # SessionStart, PostToolUse, UserPromptSubmit already fire every turn
@@ -101,19 +99,16 @@ Write: file_path="/tmp/test.py" content="x = 1  # type: ignore"
 ## Test Types
 
 **BLOCKING Tests**:
-
 - Command is blocked by handler (deny decision)
 - Verifies destructive operations are prevented
 - Examples: git reset --hard, rm -rf, sudo pip, sed -i
 
 **ADVISORY Tests**:
-
 - Command succeeds but handler adds advisory context
 - Verifies informational messages appear in system-reminders
 - Examples: npm install warnings, git stash warnings, TDD reminders
 
 **CONTEXT Tests**:
-
 - Handler injects context into system-reminder
 - Verified by observing system-reminders during session
 - Examples: SessionStart hook active, PostToolUse hook active
@@ -132,7 +127,6 @@ These are marked **PASS (verified via session)** rather than individually execut
 ## Output
 
 On success:
-
 ```
 Acceptance Tests Complete!
 
@@ -146,7 +140,6 @@ All tests passed! Handlers working correctly.
 ```
 
 On failure:
-
 ```
 Acceptance Tests FAILED!
 

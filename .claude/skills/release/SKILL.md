@@ -1,6 +1,8 @@
 ---
-
-## name: release description: Automated release management - version updates, changelog generation, git tagging, and GitHub release creation argument-hint: "[major|minor|patch|X.Y.Z]"
+name: release
+description: Automated release management - version updates, changelog generation, git tagging, and GitHub release creation
+argument-hint: "[major|minor|patch|X.Y.Z]"
+---
 
 # /release - Automated Release Management Skill
 

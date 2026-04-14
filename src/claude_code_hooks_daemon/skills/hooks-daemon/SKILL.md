@@ -1,6 +1,11 @@
 ---
-
-## name: hooks-daemon description: Manage Claude Code Hooks Daemon - install, upgrade, check health, restart, and develop project-level handlers argument-hint: "[install|upgrade|health|restart|dev-handlers|logs] [args...]" disable-model-invocation: false user-invocable: true allowed-tools: Bash, Read, Write, Edit
+name: hooks-daemon
+description: Manage Claude Code Hooks Daemon - install, upgrade, check health, restart, and develop project-level handlers
+argument-hint: "[install|upgrade|health|restart|dev-handlers|logs] [args...]"
+disable-model-invocation: false
+user-invocable: true
+allowed-tools: Bash, Read, Write, Edit
+---
 
 # Hooks Daemon Management
 
@@ -9,9 +14,7 @@ Manage your Claude Code Hooks Daemon installation with these commands.
 ## Available Commands
 
 ### Install Daemon
-
 Install the hooks daemon on a fresh clone (daemon not yet present):
-
 ```bash
 /hooks-daemon install          # Install daemon from GitHub
 /hooks-daemon install --force  # Force reinstall over existing
@@ -20,9 +23,7 @@ Install the hooks daemon on a fresh clone (daemon not yet present):
 See [install.md](install.md) for detailed install documentation.
 
 ### Upgrade Daemon
-
 Update to a new version of the hooks daemon:
-
 ```bash
 /hooks-daemon upgrade          # Auto-detect and upgrade to latest version
 /hooks-daemon upgrade 2.14.0   # Upgrade to specific version
@@ -32,9 +33,7 @@ Update to a new version of the hooks daemon:
 See [upgrade.md](upgrade.md) for detailed upgrade documentation.
 
 ### Restart Daemon
-
 **Required after editing `.claude/hooks-daemon.yaml` or project handlers:**
-
 ```bash
 /hooks-daemon restart
 ```
@@ -44,9 +43,7 @@ The daemon caches config at startup — restart picks up any config or handler c
 See [restart.md](restart.md) for details.
 
 ### Check Health & Status
-
 Verify daemon is running correctly:
-
 ```bash
 /hooks-daemon health           # Quick health check
 /hooks-daemon logs             # View last 50 lines of logs
@@ -56,9 +53,7 @@ Verify daemon is running correctly:
 See [health.md](health.md) for health check details.
 
 ### Develop Project Handlers
-
 Scaffold new project-level handlers:
-
 ```bash
 /hooks-daemon dev-handlers     # Interactive handler scaffolding
 ```
@@ -66,9 +61,7 @@ Scaffold new project-level handlers:
 See [dev-handlers.md](dev-handlers.md) for handler development guide.
 
 ### Investigate an Issue
-
 Generate a detailed investigation report with timeline, evidence, and analysis:
-
 ```bash
 /hooks-daemon report "daemon stopped responding during edits"
 ```
@@ -80,14 +73,12 @@ See [report.md](report.md) for details.
 ## Quick Start
 
 After editing `.claude/hooks-daemon.yaml`:
-
 ```bash
 /hooks-daemon restart   # Apply config changes
 /hooks-daemon health    # Verify it's running
 ```
 
 If you're experiencing issues:
-
 ```bash
 # 1. Check daemon status
 /hooks-daemon health
