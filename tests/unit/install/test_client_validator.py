@@ -548,6 +548,56 @@ class TestVerifyHookRegistrations:
         warnings_text = "\n".join(result.warnings)
         assert "duplicate" not in warnings_text.lower()
 
+    def test_local_hooks_without_duplicate_still_warned(self, tmp_path):
+        """Any hooks entry in settings.local.json must be flagged."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        claude_dir = project_root / ".claude"
+        claude_dir.mkdir()
+
+        settings = _build_valid_settings()
+        # Remove Notification from main so the local entry is NOT a duplicate
+        settings["hooks"].pop("Notification", None)
+
+        settings_path = claude_dir / "settings.json"
+        settings_path.write_text(json.dumps(settings))
+
+        local_settings = {
+            "hooks": {
+                "Notification": [
+                    {"hooks": [{"type": "command", "command": ".claude/hooks/notification"}]}
+                ]
+            }
+        }
+        local_path = claude_dir / "settings.local.json"
+        local_path.write_text(json.dumps(local_settings))
+
+        result = ClientInstallValidator._verify_hook_registrations(project_root)
+        assert result.passed is True
+        warnings_text = "\n".join(result.warnings)
+        assert "settings.local.json" in warnings_text
+        assert "Notification" in warnings_text
+
+    def test_legacy_hook_command_warned(self, tmp_path):
+        """Inline/custom hook commands that bypass the daemon must be flagged."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        claude_dir = project_root / ".claude"
+        claude_dir.mkdir()
+
+        settings = _build_valid_settings()
+        settings["hooks"]["Stop"] = [
+            {"hooks": [{"type": "command", "command": "python /opt/hooks/my_stop.py"}]}
+        ]
+        settings_path = claude_dir / "settings.json"
+        settings_path.write_text(json.dumps(settings))
+
+        result = ClientInstallValidator._verify_hook_registrations(project_root)
+        assert result.passed is True
+        warnings_text = "\n".join(result.warnings)
+        assert "legacy" in warnings_text.lower()
+        assert "Stop" in warnings_text
+
 
 class TestValidatePreInstall:
     """Test validate_pre_install main entry point."""

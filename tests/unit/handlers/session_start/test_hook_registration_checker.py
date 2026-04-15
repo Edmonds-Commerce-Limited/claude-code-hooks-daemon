@@ -229,14 +229,76 @@ class TestHookRegistrationCheckerHandle:
         assert result.decision.value == "allow"
         assert result.context == []
 
+    def test_local_settings_hook_flagged_even_without_duplicate(
+        self, handler: HookRegistrationCheckerHandler, tmp_path: Path
+    ) -> None:
+        """A hook present only in settings.local.json must still be flagged."""
+        settings = _build_valid_settings()
+        # Remove Notification from main so the local entry is unique, not duplicate
+        settings["hooks"].pop("Notification", None)
+
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(json.dumps(settings))
+
+        local_settings = {
+            "hooks": {
+                "Notification": [
+                    {"hooks": [{"type": "command", "command": ".claude/hooks/notification"}]}
+                ]
+            }
+        }
+        local_path = tmp_path / ".claude" / "settings.local.json"
+        local_path.write_text(json.dumps(local_settings))
+
+        with patch.object(handler, "_get_project_root", return_value=tmp_path):
+            result = handler.handle(_session_start_input())
+
+        assert result.decision.value == "allow"
+        context_text = "\n".join(result.context)
+        assert "settings.local.json" in context_text
+        assert "Notification" in context_text
+
+    def test_legacy_command_flagged(
+        self, handler: HookRegistrationCheckerHandler, tmp_path: Path
+    ) -> None:
+        """Legacy-style inline scripts bypassing the daemon must be flagged."""
+        settings = _build_valid_settings()
+        settings["hooks"]["Stop"] = [
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "python /opt/custom/my_stop.py",
+                    }
+                ]
+            }
+        ]
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(json.dumps(settings))
+
+        with patch.object(handler, "_get_project_root", return_value=tmp_path):
+            result = handler.handle(_session_start_input())
+
+        assert result.decision.value == "allow"
+        context_text = "\n".join(result.context)
+        assert "legacy" in context_text.lower()
+        assert "Stop" in context_text
+
 
 class TestHookRegistrationCheckerClaudeMd:
     """get_claude_md() tests."""
 
-    def test_returns_none(self) -> None:
-        """No CLAUDE.md guidance needed for a startup check."""
+    def test_returns_remediation_guidance(self) -> None:
+        """Handler must supply agent-facing remediation guidance."""
         handler = HookRegistrationCheckerHandler()
-        assert handler.get_claude_md() is None
+        guidance = handler.get_claude_md()
+        assert guidance is not None
+        # Must mention the two key remediation actions
+        assert "settings.local.json" in guidance
+        assert "settings.json" in guidance
+        assert "project-level handler" in guidance or "project handler" in guidance
 
 
 class TestHookRegistrationCheckerAcceptanceTests:

@@ -19,6 +19,8 @@ from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.utils.hook_registration import (
     detect_duplicate_hooks,
+    detect_legacy_hook_commands,
+    detect_local_hooks_misplacement,
     validate_hook_commands,
     validate_settings_hooks,
 )
@@ -151,7 +153,10 @@ class HookRegistrationCheckerHandler(Handler):
         all_issues: list[str] = []
         all_issues.extend(validate_settings_hooks(settings))
         all_issues.extend(detect_duplicate_hooks(settings, local_settings))
+        all_issues.extend(detect_local_hooks_misplacement(local_settings))
         all_issues.extend(validate_hook_commands(settings))
+        all_issues.extend(detect_legacy_hook_commands(settings))
+        all_issues.extend(detect_legacy_hook_commands(local_settings))
 
         # Build context
         lines: list[str] = []
@@ -163,13 +168,59 @@ class HookRegistrationCheckerHandler(Handler):
             for issue in all_issues:
                 lines.append(f"  WARNING: {issue}")
             lines.append("")
-            lines.append("Fix: Edit .claude/settings.json and/or .claude/settings.local.json")
+            lines.append(
+                "Fix: Consolidate ALL hooks into .claude/settings.json "
+                "(remove any hooks entries from .claude/settings.local.json). "
+                "For legacy-style scripts, port them to project-level handlers "
+                "via `init-project-handlers`."
+            )
 
         return HookResult(decision=Decision.ALLOW, context=lines)
 
     def get_claude_md(self) -> str | None:
-        """No CLAUDE.md guidance needed for a startup check."""
-        return None
+        """Return agent-facing remediation guidance for hook-config drift."""
+        return (
+            "## hook_registration_checker — hooks configuration policy\n"
+            "\n"
+            "On every new session this handler audits hook configuration "
+            "across `.claude/settings.json` and `.claude/settings.local.json`. "
+            "When it reports issues, fix them — do not ignore the warning.\n"
+            "\n"
+            "### Policy\n"
+            "\n"
+            "1. **All hooks live in `settings.json`.** That file is tracked "
+            "in version control, visible to teammates, and is the single "
+            "source of truth for the daemon.\n"
+            "2. **`settings.local.json` must contain ZERO `hooks` entries.** "
+            "It exists for per-developer `permissions` and IDE state only. "
+            "A `hooks` block there is either (a) invisible to the rest of "
+            "the team, or (b) duplicated with `settings.json` — in which "
+            "case the hook fires twice per event.\n"
+            "3. **Hook commands must invoke the daemon wrapper.** Every "
+            "registered command must end with `/.claude/hooks/{event}`. "
+            "Anything else (inline Python, custom shell scripts, bespoke "
+            "paths) is a legacy setup that bypasses the daemon entirely.\n"
+            "\n"
+            "### Remediation\n"
+            "\n"
+            "- **Hooks in `settings.local.json`**: move each `hooks` entry "
+            "to `settings.json`, then delete the `hooks` key from "
+            "`settings.local.json`. Confirm no duplicates remain.\n"
+            "- **Legacy-style commands**: replace them with a project-level "
+            "handler. Run "
+            "`$PYTHON -m claude_code_hooks_daemon.daemon.cli init-project-handlers` "
+            "to scaffold `.claude/project-handlers/`, port the logic into "
+            "a handler class, then restore the daemon wrapper in "
+            "`settings.json`. The daemon will auto-discover the new handler "
+            "on restart.\n"
+            "- **Missing hooks**: the daemon's installer writes the full "
+            "set. If any are missing, re-run `install.py` or manually add "
+            "the missing `{event_name}` entry pointing at "
+            "`\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/{bash-key}`.\n"
+            "- **Duplicate hooks**: a hook registered in both files fires "
+            "twice. Keep the `settings.json` entry, delete from "
+            "`settings.local.json`.\n"
+        )
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for this handler."""

@@ -18,6 +18,8 @@ from pathlib import Path
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.utils.hook_registration import (
     detect_duplicate_hooks,
+    detect_legacy_hook_commands,
+    detect_local_hooks_misplacement,
     validate_hook_commands,
     validate_settings_hooks,
 )
@@ -488,7 +490,10 @@ class ClientInstallValidator:
         # Run validations using shared utilities
         warnings.extend(validate_settings_hooks(settings))
         warnings.extend(detect_duplicate_hooks(settings, local_settings))
+        warnings.extend(detect_local_hooks_misplacement(local_settings))
         warnings.extend(validate_hook_commands(settings))
+        warnings.extend(detect_legacy_hook_commands(settings))
+        warnings.extend(detect_legacy_hook_commands(local_settings))
 
         return ValidationResult(passed=True, errors=[], warnings=warnings)
 

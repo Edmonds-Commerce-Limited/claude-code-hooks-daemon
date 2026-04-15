@@ -1,12 +1,16 @@
 """Hook registration validation utility.
 
 Shared logic for validating Claude Code hook registrations in settings.json.
-Used by both the SessionStart handler and the install validator.
+Used by the SessionStart handler, install/upgrade validator, and health CLI.
 
 Validates:
 - All expected hook event types are registered
 - No duplicate registrations across settings.json and settings.local.json
-- Hook commands point to the correct scripts
+- Hook commands point to the correct daemon wrapper scripts
+- settings.local.json contains NO hooks (policy: hooks are tracked in
+  settings.json only)
+- No legacy-style direct scripts that bypass the daemon — these should
+  migrate to project-level handlers
 """
 
 from __future__ import annotations
@@ -20,6 +24,11 @@ from claude_code_hooks_daemon.constants.events import EventID, EventIDMeta
 # key in settings.json rather than the "hooks" section, so it is excluded.
 
 _STATUS_LINE_JSON_KEY = "StatusLine"
+
+# Fragment that identifies a daemon-wrapper hook command.  Daemon-installed
+# hooks always end with `/.claude/hooks/{bash_key}` — anything else is either
+# a misconfiguration or a pre-daemon "legacy" inline script.
+_DAEMON_WRAPPER_FRAGMENT = "/.claude/hooks/"
 
 
 def _build_hook_events_map() -> dict[str, str]:
@@ -93,6 +102,94 @@ def detect_duplicate_hooks(
                 f"Duplicate hook: {event_key} is registered in both "
                 f"settings.json and settings.local.json — hook will fire twice"
             )
+    return issues
+
+
+def detect_local_hooks_misplacement(local_settings: dict[str, object]) -> list[str]:
+    """Detect ANY hooks registered in settings.local.json.
+
+    Policy: hooks configuration must live exclusively in settings.json.
+    settings.local.json is for per-developer overrides (permissions, IDE
+    settings) and is typically git-ignored, so any hooks there are:
+
+    - Not tracked in version control → invisible to teammates and CI
+    - Easily mistaken for tracked config → confusing to debug
+    - Likely to cause silent duplicate firing if the same key also exists
+      in settings.json
+
+    Args:
+        local_settings: Parsed contents of settings.local.json
+
+    Returns:
+        List of issue descriptions (empty means local settings contain no hooks)
+    """
+    local_hooks = local_settings.get("hooks", {})
+    if not isinstance(local_hooks, dict):
+        return []
+
+    issues: list[str] = []
+    for event_key in sorted(local_hooks.keys()):
+        issues.append(
+            f"Hook '{event_key}' is registered in settings.local.json — "
+            "hooks must live in settings.json only (move the entry there and "
+            "delete it from settings.local.json)"
+        )
+    return issues
+
+
+def detect_legacy_hook_commands(settings: dict[str, object]) -> list[str]:
+    """Detect hook commands that bypass the daemon's wrapper scripts.
+
+    Daemon-installed hooks invoke `.../.claude/hooks/{bash_key}` — thin bash
+    wrappers that forward events over the Unix socket to the daemon.  Any
+    other command shape (inline Python, raw shell, absolute paths to bespoke
+    scripts) bypasses the daemon entirely and represents a "legacy-style"
+    setup from before the daemon was installed.
+
+    The supported way to add project-specific behaviour is project-level
+    handlers — see `init-project-handlers`.  A legacy script should either
+    be removed (if redundant) or ported to a project handler so that it:
+
+    - Benefits from the daemon's priority/dispatch ordering
+    - Participates in the daemon's logging and error handling
+    - Can be unit-tested alongside the rest of the handler suite
+
+    Args:
+        settings: Parsed contents of a settings file (main or local)
+
+    Returns:
+        List of issue descriptions (empty means all commands go through the
+        daemon wrapper)
+    """
+    hooks = settings.get("hooks", {})
+    if not isinstance(hooks, dict):
+        return []
+
+    issues: list[str] = []
+    for event_key in sorted(hooks.keys()):
+        event_hooks = hooks.get(event_key)
+        if not isinstance(event_hooks, list):
+            continue
+        for hook_entry in event_hooks:
+            if not isinstance(hook_entry, dict):
+                continue
+            inner_hooks = hook_entry.get("hooks", [])
+            if not isinstance(inner_hooks, list):
+                continue
+            for command_entry in inner_hooks:
+                if not isinstance(command_entry, dict):
+                    continue
+                command = command_entry.get("command", "")
+                if not isinstance(command, str) or not command:
+                    continue
+                if _DAEMON_WRAPPER_FRAGMENT in command:
+                    continue
+                issues.append(
+                    f"Hook '{event_key}' uses a legacy-style command "
+                    f"that bypasses the hooks daemon: {command!r}. "
+                    "Port it to a project-level handler via "
+                    "`init-project-handlers` so it runs through the daemon."
+                )
     return issues
 
 
