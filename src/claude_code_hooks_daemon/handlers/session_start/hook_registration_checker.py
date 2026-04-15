@@ -216,7 +216,7 @@ class HookRegistrationCheckerHandler(Handler):
             "- **Missing hooks**: the daemon's installer writes the full "
             "set. If any are missing, re-run `install.py` or manually add "
             "the missing `{event_name}` entry pointing at "
-            "`\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/{bash-key}`.\n"
+            '`"$CLAUDE_PROJECT_DIR"/.claude/hooks/{bash-key}`.\n'
             "- **Duplicate hooks**: a hook registered in both files fires "
             "twice. Keep the `settings.json` entry, delete from "
             "`settings.local.json`.\n"
