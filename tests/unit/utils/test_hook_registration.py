@@ -6,6 +6,8 @@ from claude_code_hooks_daemon.constants.events import EventID, EventIDMeta
 from claude_code_hooks_daemon.utils.hook_registration import (
     HOOK_EVENTS_IN_SETTINGS,
     detect_duplicate_hooks,
+    detect_legacy_hook_commands,
+    detect_local_hooks_misplacement,
     validate_hook_commands,
     validate_settings_hooks,
 )
@@ -210,3 +212,188 @@ class TestValidateHookCommands:
         assert len(issues) >= 1
         assert "Stop" in issues[0]
         assert "multiple" in issues[0].lower() or "2" in issues[0]
+
+
+class TestDetectLocalHooksMisplacement:
+    """Tests for detect_local_hooks_misplacement().
+
+    Policy: hooks config must live exclusively in settings.json. Any hooks
+    entry in settings.local.json violates the policy regardless of whether
+    it duplicates an entry in settings.json.
+    """
+
+    def test_no_hooks_in_local_returns_empty(self) -> None:
+        local_settings = {"permissions": {"allow": ["Bash(ls:*)"]}}
+        issues = detect_local_hooks_misplacement(local_settings)
+        assert issues == []
+
+    def test_empty_local_returns_empty(self) -> None:
+        assert detect_local_hooks_misplacement({}) == []
+
+    def test_empty_hooks_dict_returns_empty(self) -> None:
+        assert detect_local_hooks_misplacement({"hooks": {}}) == []
+
+    def test_single_hook_in_local_flagged(self) -> None:
+        local_settings = {
+            "hooks": {
+                "PreToolUse": [{"hooks": [{"type": "command", "command": "x"}]}],
+            }
+        }
+        issues = detect_local_hooks_misplacement(local_settings)
+        assert len(issues) == 1
+        assert "PreToolUse" in issues[0]
+        assert "settings.local.json" in issues[0]
+
+    def test_multiple_hooks_in_local_each_flagged(self) -> None:
+        local_settings = {
+            "hooks": {
+                "PreToolUse": [{"hooks": [{"type": "command", "command": "x"}]}],
+                "PostToolUse": [{"hooks": [{"type": "command", "command": "y"}]}],
+                "Stop": [{"hooks": [{"type": "command", "command": "z"}]}],
+            }
+        }
+        issues = detect_local_hooks_misplacement(local_settings)
+        assert len(issues) == 3
+        for key in ("PreToolUse", "PostToolUse", "Stop"):
+            assert any(key in issue for issue in issues)
+
+    def test_local_hooks_flagged_even_if_unique(self) -> None:
+        """A local-only hook (not a duplicate) is still a policy violation."""
+        local_settings = {
+            "hooks": {
+                "Notification": [{"hooks": [{"type": "command", "command": "x"}]}],
+            }
+        }
+        issues = detect_local_hooks_misplacement(local_settings)
+        assert len(issues) == 1
+        assert "Notification" in issues[0]
+
+    def test_non_dict_hooks_key_returns_empty(self) -> None:
+        """Malformed hooks key (not a dict) is not flagged — it's a parse issue."""
+        assert detect_local_hooks_misplacement({"hooks": "garbage"}) == []
+
+    def test_message_mentions_moving_to_settings_json(self) -> None:
+        """Warning text must include remediation guidance."""
+        local_settings = {
+            "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "x"}]}]}
+        }
+        issues = detect_local_hooks_misplacement(local_settings)
+        assert len(issues) == 1
+        assert "settings.json" in issues[0]
+
+
+class TestDetectLegacyHookCommands:
+    """Tests for detect_legacy_hook_commands().
+
+    A "legacy-style" hook is a settings entry whose command does not invoke
+    the daemon's .claude/hooks/{bash_key} wrapper — e.g. a raw python script
+    or inline shell. Such setups bypass the daemon entirely; custom logic
+    should live in project-level handlers instead.
+    """
+
+    def test_all_daemon_wrappers_returns_empty(self) -> None:
+        settings = _build_settings_with_all_hooks()
+        issues = detect_legacy_hook_commands(settings)
+        assert issues == []
+
+    def test_inline_python_command_flagged(self) -> None:
+        settings = {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "python /opt/custom/my_hook.py",
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+        issues = detect_legacy_hook_commands(settings)
+        assert len(issues) == 1
+        assert "PreToolUse" in issues[0]
+        assert "project-level handler" in issues[0] or "project handler" in issues[0]
+
+    def test_bash_inline_command_flagged(self) -> None:
+        settings = {
+            "hooks": {
+                "Stop": [
+                    {"hooks": [{"type": "command", "command": "echo hello"}]}
+                ]
+            }
+        }
+        issues = detect_legacy_hook_commands(settings)
+        assert len(issues) == 1
+        assert "Stop" in issues[0]
+
+    def test_custom_script_path_flagged(self) -> None:
+        settings = {
+            "hooks": {
+                "PostToolUse": [
+                    {
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "/opt/myapp/scripts/hook.sh",
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+        issues = detect_legacy_hook_commands(settings)
+        assert len(issues) == 1
+        assert "PostToolUse" in issues[0]
+
+    def test_unknown_event_type_with_custom_command_flagged(self) -> None:
+        """Unknown event types with custom commands are still legacy setups."""
+        settings = {
+            "hooks": {
+                "UnknownEventXYZ": [
+                    {"hooks": [{"type": "command", "command": "python foo.py"}]}
+                ]
+            }
+        }
+        issues = detect_legacy_hook_commands(settings)
+        assert len(issues) == 1
+        assert "UnknownEventXYZ" in issues[0]
+
+    def test_mixed_daemon_and_legacy_only_legacy_flagged(self) -> None:
+        settings = _build_settings_with_all_hooks()
+        settings["hooks"]["Stop"] = [
+            {"hooks": [{"type": "command", "command": "python /opt/x.py"}]}
+        ]
+        issues = detect_legacy_hook_commands(settings)
+        assert len(issues) == 1
+        assert "Stop" in issues[0]
+
+    def test_no_hooks_key_returns_empty(self) -> None:
+        assert detect_legacy_hook_commands({}) == []
+
+    def test_empty_event_array_ignored(self) -> None:
+        assert detect_legacy_hook_commands({"hooks": {"Stop": []}}) == []
+
+    def test_entry_without_hooks_list_ignored(self) -> None:
+        """Malformed entries should be tolerated (other validators catch them)."""
+        settings = {"hooks": {"Stop": [{"hooks": []}]}}
+        assert detect_legacy_hook_commands(settings) == []
+
+    def test_command_with_claude_hooks_path_not_flagged(self) -> None:
+        """Any command ending with /.claude/hooks/<script> is a daemon wrapper."""
+        settings = {
+            "hooks": {
+                "Stop": [
+                    {
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "/abs/path/.claude/hooks/stop",
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+        assert detect_legacy_hook_commands(settings) == []
