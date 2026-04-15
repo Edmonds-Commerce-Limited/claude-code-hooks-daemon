@@ -16,6 +16,7 @@ import pytest
 
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.cli import (
+    check_hook_registration_warnings,
     cmd_handlers,
     cmd_health,
     cmd_logs,
@@ -264,6 +265,185 @@ class TestCmdHealth:
         ):
             result = cmd_health(args)
             assert result == 1
+
+    def test_healthy_daemon_prints_hook_registration_warnings(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """cmd_health must surface hook-registration warnings in its output."""
+        import json
+
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        hooks_daemon_dir = claude_dir / "hooks-daemon"
+        hooks_daemon_dir.mkdir()
+
+        config_file = claude_dir / "hooks-daemon.yaml"
+        config_file.write_text("version: '1.0'\n")
+
+        # settings.local.json contains a hook — policy violation that
+        # must surface in the `health` output.
+        settings_path = claude_dir / "settings.json"
+        settings_path.write_text(json.dumps({"hooks": {}}))
+        local_path = claude_dir / "settings.local.json"
+        local_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "hooks": [
+                                    {"type": "command", "command": ".claude/hooks/pre-tool-use"}
+                                ]
+                            }
+                        ]
+                    }
+                }
+            )
+        )
+
+        args = argparse.Namespace(project_root=tmp_path)
+        mock_response = {
+            "result": {
+                "status": "healthy",
+                "stats": {
+                    "uptime_seconds": 1.0,
+                    "requests_processed": 0,
+                    "avg_processing_time_ms": 0.0,
+                    "errors": 0,
+                },
+                "handlers": {},
+            }
+        }
+
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=12345),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.send_daemon_request",
+                return_value=mock_response,
+            ),
+        ):
+            result = cmd_health(args)
+
+        captured = capsys.readouterr()
+        assert result == 0  # warnings are advisory
+        assert "Hook registration" in captured.out
+        assert "PreToolUse" in captured.out
+        assert "settings.local.json" in captured.out
+
+    def test_healthy_daemon_clean_hooks_prints_ok(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Clean hook registration must print an OK line, not warnings."""
+        import json
+
+        from claude_code_hooks_daemon.utils.hook_registration import HOOK_EVENTS_IN_SETTINGS
+
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        hooks_daemon_dir = claude_dir / "hooks-daemon"
+        hooks_daemon_dir.mkdir()
+
+        config_file = claude_dir / "hooks-daemon.yaml"
+        config_file.write_text("version: '1.0'\n")
+
+        # Fully-valid settings.json (all daemon wrappers, no local hooks)
+        hooks: dict = {}
+        for json_key, bash_key in HOOK_EVENTS_IN_SETTINGS.items():
+            hooks[json_key] = [
+                {
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": f'"$CLAUDE_PROJECT_DIR"/.claude/hooks/{bash_key}',
+                        }
+                    ]
+                }
+            ]
+        (claude_dir / "settings.json").write_text(json.dumps({"hooks": hooks}))
+
+        args = argparse.Namespace(project_root=tmp_path)
+        mock_response = {
+            "result": {
+                "status": "healthy",
+                "stats": {
+                    "uptime_seconds": 1.0,
+                    "requests_processed": 0,
+                    "avg_processing_time_ms": 0.0,
+                    "errors": 0,
+                },
+                "handlers": {},
+            }
+        }
+
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=12345),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.send_daemon_request",
+                return_value=mock_response,
+            ),
+        ):
+            cmd_health(args)
+
+        captured = capsys.readouterr()
+        assert "Hook registration" in captured.out
+        assert "OK" in captured.out
+
+
+class TestCheckHookRegistrationWarnings:
+    """Tests for the pure helper used by cmd_health."""
+
+    def test_no_settings_returns_empty(self, tmp_path: Path) -> None:
+        """Projects without settings.json are not yet configured — no warnings."""
+        (tmp_path / ".claude").mkdir()
+        assert check_hook_registration_warnings(tmp_path) == []
+
+    def test_unreadable_settings_returns_empty(self, tmp_path: Path) -> None:
+        """Malformed settings.json must not crash health — return empty."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / "settings.json").write_text("{not valid json")
+        # Unreadable file is treated as absent
+        assert check_hook_registration_warnings(tmp_path) == []
+
+    def test_local_hooks_surfaced(self, tmp_path: Path) -> None:
+        """Any hook in settings.local.json must appear in warnings."""
+        import json
+
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / "settings.json").write_text(json.dumps({"hooks": {}}))
+        (claude_dir / "settings.local.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "Stop": [{"hooks": [{"type": "command", "command": ".claude/hooks/stop"}]}]
+                    }
+                }
+            )
+        )
+        warnings = check_hook_registration_warnings(tmp_path)
+        assert any("settings.local.json" in w for w in warnings)
+        assert any("Stop" in w for w in warnings)
+
+    def test_legacy_command_surfaced(self, tmp_path: Path) -> None:
+        """Inline-script hook commands must surface as legacy warnings."""
+        import json
+
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / "settings.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "Stop": [
+                            {"hooks": [{"type": "command", "command": "python /opt/custom.py"}]}
+                        ]
+                    }
+                }
+            )
+        )
+        warnings = check_hook_registration_warnings(tmp_path)
+        assert any("legacy" in w.lower() for w in warnings)
 
 
 class TestCmdHandlers:

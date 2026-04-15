@@ -64,6 +64,13 @@ from claude_code_hooks_daemon.daemon.validation import (
     is_hooks_daemon_repo,
     is_inside_daemon_directory,
 )
+from claude_code_hooks_daemon.utils.hook_registration import (
+    detect_duplicate_hooks,
+    detect_legacy_hook_commands,
+    detect_local_hooks_misplacement,
+    validate_hook_commands,
+    validate_settings_hooks,
+)
 
 from .init_config import generate_config
 
@@ -630,6 +637,56 @@ def cmd_logs(args: argparse.Namespace) -> int:
     return 0
 
 
+def check_hook_registration_warnings(project_path: Path) -> list[str]:
+    """Collect hook-registration warnings for `health` output.
+
+    Reads .claude/settings.json and .claude/settings.local.json and returns
+    a flat list of warning strings covering:
+
+    - missing hook events in settings.json
+    - duplicate entries across settings.json and settings.local.json
+    - ANY hook entries in settings.local.json (policy violation)
+    - hook commands that don't match the expected daemon wrapper
+    - legacy-style commands that bypass the daemon entirely
+
+    Args:
+        project_path: Project root containing the .claude directory
+
+    Returns:
+        List of warning strings (empty if everything is clean). Unreadable
+        or missing files are treated as empty, so they don't break health.
+    """
+    claude_dir = project_path / ".claude"
+    settings_path = claude_dir / "settings.json"
+    local_path = claude_dir / "settings.local.json"
+
+    def _read(path: Path) -> dict[str, object]:
+        if not path.exists():
+            return {}
+        try:
+            with path.open() as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    settings = _read(settings_path)
+    local_settings = _read(local_path)
+
+    # No settings at all → project isn't a hooks-daemon consumer yet.
+    if not settings:
+        return []
+
+    warnings: list[str] = []
+    warnings.extend(validate_settings_hooks(settings))
+    warnings.extend(detect_duplicate_hooks(settings, local_settings))
+    warnings.extend(detect_local_hooks_misplacement(local_settings))
+    warnings.extend(validate_hook_commands(settings))
+    warnings.extend(detect_legacy_hook_commands(settings))
+    warnings.extend(detect_legacy_hook_commands(local_settings))
+    return warnings
+
+
 def cmd_health(args: argparse.Namespace) -> int:
     """Check daemon health status.
 
@@ -678,6 +735,22 @@ def cmd_health(args: argparse.Namespace) -> int:
     for event_type, count in handlers.items():
         if count > 0:
             print(f"  {event_type}: {count}")
+
+    # Hook-registration drift (advisory — never changes the exit code).
+    hook_warnings = check_hook_registration_warnings(project_path)
+    print("\nHook registration:")
+    if not hook_warnings:
+        print("  OK — all hooks registered correctly in settings.json")
+    else:
+        print(f"  {len(hook_warnings)} issue(s) found:")
+        for warning in hook_warnings:
+            print(f"  ⚠️  {warning}")
+        print(
+            "\n  Fix: consolidate ALL hooks into .claude/settings.json "
+            "(settings.local.json must contain ZERO hooks entries). "
+            "Port legacy-style scripts to project-level handlers via "
+            "`init-project-handlers`."
+        )
 
     return 0 if status == "healthy" else 1
 

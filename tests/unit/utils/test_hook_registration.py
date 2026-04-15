@@ -274,9 +274,7 @@ class TestDetectLocalHooksMisplacement:
 
     def test_message_mentions_moving_to_settings_json(self) -> None:
         """Warning text must include remediation guidance."""
-        local_settings = {
-            "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "x"}]}]}
-        }
+        local_settings = {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "x"}]}]}}
         issues = detect_local_hooks_misplacement(local_settings)
         assert len(issues) == 1
         assert "settings.json" in issues[0]
@@ -317,13 +315,7 @@ class TestDetectLegacyHookCommands:
         assert "project-level handler" in issues[0] or "project handler" in issues[0]
 
     def test_bash_inline_command_flagged(self) -> None:
-        settings = {
-            "hooks": {
-                "Stop": [
-                    {"hooks": [{"type": "command", "command": "echo hello"}]}
-                ]
-            }
-        }
+        settings = {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "echo hello"}]}]}}
         issues = detect_legacy_hook_commands(settings)
         assert len(issues) == 1
         assert "Stop" in issues[0]
@@ -351,9 +343,7 @@ class TestDetectLegacyHookCommands:
         """Unknown event types with custom commands are still legacy setups."""
         settings = {
             "hooks": {
-                "UnknownEventXYZ": [
-                    {"hooks": [{"type": "command", "command": "python foo.py"}]}
-                ]
+                "UnknownEventXYZ": [{"hooks": [{"type": "command", "command": "python foo.py"}]}]
             }
         }
         issues = detect_legacy_hook_commands(settings)
