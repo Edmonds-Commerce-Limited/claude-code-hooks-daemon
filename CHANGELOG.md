@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.4.0] - 2026-04-15
+
+### Added
+
+- **Hook-registration drift detection at SessionStart**: The `hook_registration_checker` handler now detects and flags two additional policy violations beyond duplicate hooks: (1) any `hooks` entry present in `settings.local.json` is flagged as a policy violation (previously only duplicates of `settings.json` entries were flagged; now any hooks in `settings.local.json` are caught regardless of whether they duplicate `settings.json`); (2) any hook command that does not invoke the daemon wrapper (`.claude/hooks/{event}`) is flagged as a legacy-style bypass, with guidance to port the logic into a project-level handler via `init-project-handlers`.
+- **`cli health` surfaces hook-registration drift**: The `health` CLI subcommand now includes hook-registration validation in its output, giving operators an install-time and upgrade-time check for misplaced hooks and legacy-style commands without needing to start a new Claude Code session.
+
 ## [3.3.1] - 2026-04-14
 
 ### Fixed
