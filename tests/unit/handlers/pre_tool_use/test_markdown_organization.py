@@ -285,6 +285,52 @@ class TestMarkdownOrganizationHandler:
         write_input["tool_input"]["file_path"] = "untracked/test.md"
         assert handler.matches(write_input) is False
 
+    # --- vendor/ as implicit monorepo (PHP Composer) ---
+
+    def test_matches_returns_false_for_vendor_docs_subdir(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Handler allows docs/ inside a vendor package (sub-project rules)."""
+        write_input["tool_input"]["file_path"] = "vendor/lts/php-qa-ci/docs/tools/phpstan.md"
+        assert handler.matches(write_input) is False
+
+    def test_matches_returns_true_for_vendor_invalid_location(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Handler blocks markdown in disallowed vendor package paths."""
+        write_input["tool_input"]["file_path"] = "vendor/acme/package/random/stuff.md"
+        assert handler.matches(write_input) is True
+
+    def test_matches_returns_false_for_vendor_readme(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Handler allows README.md at vendor package root (allowed anywhere)."""
+        write_input["tool_input"]["file_path"] = "vendor/acme/package/README.md"
+        assert handler.matches(write_input) is False
+
+    # --- node_modules/ as implicit monorepo (npm) ---
+
+    def test_matches_returns_false_for_node_modules_docs(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Handler allows docs/ inside a node_modules package."""
+        write_input["tool_input"]["file_path"] = "node_modules/express/docs/guide.md"
+        assert handler.matches(write_input) is False
+
+    def test_matches_returns_true_for_node_modules_invalid_location(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Handler blocks markdown in disallowed node_modules package paths."""
+        write_input["tool_input"]["file_path"] = "node_modules/express/random/stuff.md"
+        assert handler.matches(write_input) is True
+
+    def test_matches_returns_false_for_scoped_node_modules_docs(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Handler allows docs/ inside a scoped npm package."""
+        write_input["tool_input"]["file_path"] = "node_modules/@angular/core/docs/api.md"
+        assert handler.matches(write_input) is False
+
     def test_matches_returns_false_for_eslint_rules(
         self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
     ) -> None:
@@ -346,6 +392,17 @@ class TestMarkdownOrganizationHandler:
         assert "src/invalid.md" in result.reason
         assert "CLAUDE/Plan" in result.reason
         assert "docs/" in result.reason
+
+    def test_handle_deny_reason_advises_config_options(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Deny message advises about allowed_markdown_paths and monorepo config."""
+        write_input["tool_input"]["file_path"] = "src/invalid.md"
+        result = handler.handle(write_input)
+        assert result.decision == Decision.DENY
+        assert "allowed_markdown_paths" in result.reason
+        assert "monorepo_subproject_patterns" in result.reason
+        assert "hooks-daemon.yaml" in result.reason
 
     def test_matches_returns_false_for_paths_outside_project_root(
         self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]

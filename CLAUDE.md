@@ -806,9 +806,13 @@ Writing a new `.md` file to an unrecognised location is blocked. Markdown files 
 
 **Common allowed locations**: `CLAUDE/`, `docs/`, `RELEASES/`, `CLAUDE/Plan/`, root-level `README.md`, or any path matching the `allowed_markdown_paths` config.
 
+**Dependency directories**: `vendor/` (PHP) and `node_modules/` (JS) are treated as implicit monorepos — each package is a sub-project where normal markdown rules apply (e.g. `vendor/acme/lib/docs/guide.md` is allowed, `vendor/acme/lib/random/notes.md` is blocked).
+
 **Plan file redirection**: when `track_plans_in_project` is enabled, Claude Code planning mode writes are automatically redirected to the project's `CLAUDE/Plan/` directory. Plan folders must follow the `NNNN-description/` naming convention.
 
 If you need a markdown file in a new location, add a pattern to `allowed_markdown_paths` in `.claude/hooks-daemon.yaml`.
+
+If your project has sub-projects with their own `docs/`, `CLAUDE/`, etc., configure `monorepo_subproject_patterns` in `.claude/hooks-daemon.yaml` so normal rules apply within each sub-project.
 
 ## validate_instruction_content — CLAUDE.md and README.md must have stable content
 
