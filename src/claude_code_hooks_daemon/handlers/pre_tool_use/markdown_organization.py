@@ -25,6 +25,11 @@ _PLAN_SUBDIRECTORIES: Final[tuple[str, ...]] = ("completed", "cancelled", "archi
 # Files in the plan directory root that are NOT plan files (excluded from interception)
 _PLAN_ROOT_EXCLUDED_FILES: Final[frozenset[str]] = frozenset({"readme"})
 
+# Third-party dependency directories that act as implicit monorepos.
+# Each top-level package inside these is treated as a sub-project —
+# normal markdown organization rules apply within each package root.
+_DEPENDENCY_DIRECTORIES: Final[tuple[str, ...]] = ("vendor/", "node_modules/")
+
 
 class MarkdownOrganizationHandler(Handler):
     """Enforce markdown file organization rules.
@@ -164,6 +169,48 @@ class MarkdownOrganizationHandler(Handler):
             match = re.match(rf"^({pattern})/(.+)$", normalized_path)
             if match:
                 return match.group(2)
+
+        return None
+
+    @staticmethod
+    def _strip_dependency_prefix(lowered_path: str) -> str | None:
+        """Strip dependency directory prefix to get package-relative path.
+
+        Treats vendor/ and node_modules/ as implicit monorepos where each
+        package is a sub-project. Normal markdown rules apply within each.
+
+        Package root conventions:
+        - vendor/{vendor}/{package}/  (PHP Composer — two levels)
+        - node_modules/{package}/     (npm — one level)
+        - node_modules/@{scope}/{package}/  (npm scoped — two levels)
+
+        Args:
+            lowered_path: Lowercased, slash-normalized path (no leading slash)
+
+        Returns:
+            Package-relative path, or None if not inside a dependency dir
+        """
+        for prefix in _DEPENDENCY_DIRECTORIES:
+            if not lowered_path.startswith(prefix):
+                continue
+
+            after_prefix = lowered_path[len(prefix) :]
+
+            if prefix == "vendor/":
+                # Composer: vendor/{vendor}/{package}/{rest}
+                match = re.match(r"^[^/]+/[^/]+/(.+)$", after_prefix)
+            elif after_prefix.startswith("@"):
+                # npm scoped: node_modules/@{scope}/{package}/{rest}
+                match = re.match(r"^@[^/]+/[^/]+/(.+)$", after_prefix)
+            else:
+                # npm unscoped: node_modules/{package}/{rest}
+                match = re.match(r"^[^/]+/(.+)$", after_prefix)
+
+            if match:
+                return match.group(1)
+
+            # Path is at the package root level (no file inside) — not actionable
+            return None
 
         return None
 
@@ -560,6 +607,20 @@ class MarkdownOrganizationHandler(Handler):
         if self.is_page_colocated_file(file_path):
             return False
 
+        # Third-party dependency directories act as implicit monorepos.
+        # Each package inside is a sub-project — apply normal rules within it.
+        # Must check the raw path because normalize_path strips to project
+        # markers (e.g. vendor/x/docs/y.md → docs/y.md).
+        raw_lower = file_path.lstrip("/").lower()
+        # Also strip workspace/ prefix for absolute test paths
+        for ws_prefix in ("workspace/", "workspace\\"):
+            if raw_lower.startswith(ws_prefix):
+                raw_lower = raw_lower[len(ws_prefix) :]
+                break
+        dep_relative = self._strip_dependency_prefix(raw_lower)
+        if dep_relative is not None:
+            return self._is_invalid_location(dep_relative)
+
         # Check monorepo sub-project paths: strip prefix and validate remainder
         subproject_relative = self.strip_monorepo_prefix(normalized)
         if subproject_relative is not None:
@@ -702,14 +763,19 @@ class MarkdownOrganizationHandler(Handler):
                 "3. ./eslint-rules/ - ESLint rule documentation\n"
                 "4. ./untracked/ - Ad-hoc temporary docs\n"
                 "5. ./RELEASES/ - Release notes\n"
-                "6. ./.claude/commands/ - Slash command definitions\n\n"
+                "6. ./.claude/commands/ - Slash command definitions\n"
+                "7. ./vendor/, ./node_modules/ - Third-party dependencies\n\n"
                 "CHOOSE THE RIGHT LOCATION:\n"
                 "- Is this for LLMs/agents? -> CLAUDE/\n"
                 "- Is this for the current plan? -> CLAUDE/Plan/{plan-number}-*/\n"
                 "- Is this temporary/ad-hoc? -> untracked/\n"
                 "- Is this for humans? -> docs/\n"
                 "- Is this a release note? -> RELEASES/\n"
-                "- Is this a slash command? -> .claude/commands/"
+                "- Is this a slash command? -> .claude/commands/\n\n"
+                "NEED A DIFFERENT LOCATION? Configure in .claude/hooks-daemon.yaml:\n"
+                "- allowed_markdown_paths: add regex patterns for extra allowed paths\n"
+                "- monorepo_subproject_patterns: for sub-projects with their own "
+                "docs/, CLAUDE/, etc."
             ),
         )
 
@@ -720,11 +786,18 @@ class MarkdownOrganizationHandler(Handler):
             "Markdown files must be placed in project-configured allowed paths.\n\n"
             "**Common allowed locations**: `CLAUDE/`, `docs/`, `RELEASES/`, `CLAUDE/Plan/`, "
             "root-level `README.md`, or any path matching the `allowed_markdown_paths` config.\n\n"
+            "**Dependency directories**: `vendor/` (PHP) and `node_modules/` (JS) are treated "
+            "as implicit monorepos — each package is a sub-project where normal markdown rules "
+            "apply (e.g. `vendor/acme/lib/docs/guide.md` is allowed, "
+            "`vendor/acme/lib/random/notes.md` is blocked).\n\n"
             "**Plan file redirection**: when `track_plans_in_project` is enabled, Claude Code "
             "planning mode writes are automatically redirected to the project's `CLAUDE/Plan/` "
             "directory. Plan folders must follow the `NNNN-description/` naming convention.\n\n"
             "If you need a markdown file in a new location, add a pattern to "
-            "`allowed_markdown_paths` in `.claude/hooks-daemon.yaml`."
+            "`allowed_markdown_paths` in `.claude/hooks-daemon.yaml`.\n\n"
+            "If your project has sub-projects with their own `docs/`, `CLAUDE/`, etc., "
+            "configure `monorepo_subproject_patterns` in `.claude/hooks-daemon.yaml` "
+            "so normal rules apply within each sub-project."
         )
 
     def get_acceptance_tests(self) -> list[Any]:
