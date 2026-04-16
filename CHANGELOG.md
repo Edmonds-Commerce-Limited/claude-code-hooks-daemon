@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.5.0] - 2026-04-16
+
+### Added
+
+- **Implicit monorepo support for `vendor/` and `node_modules/` in `markdown_organization` handler**: The `markdown_organization` handler now treats `vendor/` (PHP Composer) and `node_modules/` (npm) dependency directories as implicit monorepo roots. Normal per-package markdown rules apply within each package subtree — files in recognised locations such as `docs/` are allowed, while files in unrecognised locations are blocked — preventing spurious blocks on markdown files shipped inside third-party packages. The deny message now advises users about the `allowed_markdown_paths` and `monorepo_subproject_patterns` config options. The handler's `get_claude_md()` guidance documents the dependency-directory behaviour so agents understand why markdown in vendor trees is handled differently.
+
 ## [3.4.0] - 2026-04-15
 
 ### Added
