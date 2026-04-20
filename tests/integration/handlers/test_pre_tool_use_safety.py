@@ -279,15 +279,14 @@ class TestGitStashHandler:
         ],
         ids=["stash", "stash-push", "stash-save"],
     )
-    def test_warns_on_git_stash(self, handler: Any, command: str) -> None:
+    def test_blocks_git_stash(self, handler: Any, command: str) -> None:
         hook_input = make_bash_hook_input(command)
         assert handler.matches(hook_input) is True
         result = handler.handle(hook_input)
-        # GitStashHandler is advisory - allows with warning context
-        assert result.decision == Decision.ALLOW
-        assert result.context is not None
-        assert len(result.context) > 0
-        assert "WARNING" in result.context[0]
+        # GitStashHandler defaults to deny — use git commit instead
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "BLOCKED" in result.reason
 
     @pytest.mark.parametrize(
         "command",
