@@ -11,6 +11,7 @@ Usage:
 """
 
 import logging
+import subprocess  # nosec B404 - subprocess used for git commands only (trusted system tool)
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
@@ -156,6 +157,75 @@ class ClaudeMdInjector:
             claude_md_path,
             len(sections),
         )
+
+        ClaudeMdInjector._auto_commit_if_dirty(claude_md_path)
+
+    @staticmethod
+    def _auto_commit_if_dirty(claude_md_path: Path) -> None:
+        """Auto-commit CLAUDE.md if it has uncommitted changes.
+
+        Prevents LLMs from seeing a dirty CLAUDE.md after daemon restart
+        and attempting to revert or stash it. Only commits CLAUDE.md —
+        never touches other staged files. Advisory: logs errors but
+        never raises.
+        """
+        # All subprocess calls use check=False — failures are handled via
+        # returncode checks, not exceptions. If git binary is missing entirely,
+        # the FileNotFoundError bubbles to inject() which already handles it.
+        cwd = claude_md_path.parent
+        filename = str(claude_md_path.name)
+
+        # Check if we are in a git repo
+        git_check = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
+            ["git", "rev-parse", "--git-dir"],
+            cwd=cwd,
+            capture_output=True,
+            check=False,
+        )
+        if git_check.returncode != 0:
+            return  # Not a git repo — nothing to commit
+
+        # Check if CLAUDE.md has changes (staged or unstaged)
+        status = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
+            ["git", "status", "--porcelain", filename],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if not status.stdout.strip():
+            return  # CLAUDE.md is clean — no commit needed
+
+        # Stage only CLAUDE.md (preserve any other staged files untouched)
+        stage = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
+            ["git", "add", filename],
+            cwd=cwd,
+            capture_output=True,
+            check=False,
+        )
+        if stage.returncode != 0:
+            logger.debug("ClaudeMdInjector: auto-commit staging failed (rc=%d)", stage.returncode)
+            return
+
+        # Commit with clear auto-generated message
+        commit = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
+            [
+                "git",
+                "commit",
+                "--only",
+                filename,
+                "-m",
+                "Auto: hooks daemon regenerated CLAUDE.md handler guidance",
+            ],
+            cwd=cwd,
+            capture_output=True,
+            check=False,
+        )
+        if commit.returncode != 0:
+            logger.debug("ClaudeMdInjector: auto-commit failed (rc=%d)", commit.returncode)
+            return
+
+        logger.info("ClaudeMdInjector: auto-committed CLAUDE.md changes")
 
     @staticmethod
     def _extract_user_content(content: str) -> str:
