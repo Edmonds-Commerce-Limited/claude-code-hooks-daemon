@@ -700,14 +700,18 @@ pytest tests/ > /tmp/pytest_out.txt 2>&1
 - Regular files: `chmod 644` (owner rw, group/other r)
 - Private files: `chmod 600` (owner rw only)
 
-## git_stash — git stash is advisory by default
+## git_stash — git stash is blocked by default
 
-`git stash`, `git stash push`, and `git stash save` trigger this handler. `git stash pop`, `git stash apply`, `git stash list`, and `git stash show` are always allowed.
+`git stash`, `git stash push`, and `git stash save` are blocked. `git stash pop`, `git stash apply`, `git stash list`, and `git stash show` are always allowed.
 
-**Default mode** (`warn`): stash is allowed but an advisory message explains risks.
-**Deny mode** (`deny`): stash is blocked — use `git commit` to checkpoint work instead.
+**Why**: stashes get forgotten, lost, and block `git pull`. Use `git commit -m 'WIP: ...'` instead — WIP commits are acceptable.
 
-Configure via `handlers.pre_tool_use.git_stash.options.mode: deny` to enforce the stricter policy.
+**Escape hatch** (when commit truly won't work):
+```
+MUST_STASH_BECAUSE="explain why"; git stash
+```
+
+Configure via `handlers.pre_tool_use.git_stash.options.mode: warn` for advisory-only mode.
 
 ## lock_file_edit_blocker — never directly edit lock files
 

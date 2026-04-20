@@ -484,16 +484,16 @@ class TestGitStashHandler:
     @pytest.mark.parametrize(
         "hook_input,expected_decision,description",
         [
-            # Warning about git stash
+            # Blocked: git stash creation commands (default deny mode)
             (
                 {"tool_name": "Bash", "tool_input": {"command": "git stash"}},
-                Decision.ALLOW,
-                "Warn about git stash",
+                Decision.DENY,
+                "Block git stash",
             ),
             (
                 {"tool_name": "Bash", "tool_input": {"command": "git stash push -m 'WIP'"}},
-                Decision.ALLOW,
-                "Warn about git stash push",
+                Decision.DENY,
+                "Block git stash push",
             ),
             # Allow non-stash commands
             (

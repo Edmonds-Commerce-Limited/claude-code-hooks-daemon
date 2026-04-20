@@ -11,7 +11,7 @@ class TestGitStashHandler:
 
     @pytest.fixture
     def handler(self):
-        """Create handler instance."""
+        """Create handler instance (default mode is deny)."""
         return GitStashHandler()
 
     # Initialization Tests
@@ -175,58 +175,33 @@ class TestGitStashHandler:
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git log --grep='mustache'"}}
         assert handler.matches(hook_input) is False
 
-    # handle() Tests
-    def test_handle_returns_allow_decision(self, handler):
-        """handle() should return allow decision with warning."""
+    # handle() Tests — default mode is deny
+    def test_handle_returns_deny_decision_by_default(self, handler):
+        """handle() should return deny decision by default."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash"}}
         result = handler.handle(hook_input)
-        assert result.decision == "allow"
+        assert result.decision == "deny"
 
-    def test_handle_context_contains_warning(self, handler):
-        """handle() context should contain warning messages."""
+    def test_handle_reason_contains_blocked(self, handler):
+        """handle() reason should indicate the command is blocked."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash"}}
         result = handler.handle(hook_input)
-        assert len(result.context) > 0
-        assert any("WARNING" in msg for msg in result.context)
+        assert result.reason is not None
+        assert "BLOCKED" in result.reason
 
-    def test_handle_guidance_explains_why_risky(self, handler):
-        """handle() guidance should explain why stash is risky."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash push"}}
-        result = handler.handle(hook_input)
-        assert result.guidance is not None
-        assert "WHY" in result.guidance
-        assert "lost" in result.guidance or "forgotten" in result.guidance
-
-    def test_handle_guidance_provides_alternatives(self, handler):
-        """handle() guidance should provide safe alternatives."""
+    def test_handle_reason_recommends_commit(self, handler):
+        """handle() reason should recommend git commit as alternative."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash"}}
         result = handler.handle(hook_input)
-        assert result.guidance is not None
-        assert "SAFE ALTERNATIVES" in result.guidance or "ALTERNATIVES" in result.guidance
-        assert "git commit" in result.guidance
+        assert result.reason is not None
+        assert "git commit" in result.reason
 
-    def test_handle_guidance_mentions_worktree_issues(self, handler):
-        """handle() guidance should mention worktree-related problems."""
+    def test_handle_reason_documents_escape_hatch(self, handler):
+        """handle() reason should document the MUST_STASH_BECAUSE escape hatch."""
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash"}}
         result = handler.handle(hook_input)
-        assert result.guidance is not None
-        assert "worktree" in result.guidance.lower()
-
-    def test_handle_guidance_suggests_asking_human(self, handler):
-        """handle() guidance should suggest asking human for help."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash"}}
-        result = handler.handle(hook_input)
-        assert result.guidance is not None
-        assert "human" in result.guidance.lower()
-
-    def test_handle_allows_but_warns(self, handler):
-        """handle() should allow but provide strong warnings."""
-        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash"}}
-        result = handler.handle(hook_input)
-        # Should allow with guidance, not deny
-        assert result.decision == "allow"
-        assert result.guidance is not None
-        assert len(result.context) > 0
+        assert result.reason is not None
+        assert "MUST_STASH_BECAUSE" in result.reason
 
     # Integration Tests
     def test_allows_recovery_workflow(self, handler):
@@ -270,18 +245,81 @@ class TestGitStashHandler:
             hook_input = {"tool_name": "Bash", "tool_input": {"command": cmd}}
             assert handler.matches(hook_input) is True, f"Should block: {cmd}"
 
+    # === Escape Hatch Tests ===
+    def test_escape_hatch_bypasses_block(self, handler):
+        """MUST_STASH_BECAUSE with reason should bypass the block."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": 'MUST_STASH_BECAUSE="need to test stash recovery flow"; git stash'
+            },
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_escape_hatch_with_push(self, handler):
+        """Escape hatch should work with git stash push."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": (
+                    'MUST_STASH_BECAUSE="switching to hotfix branch with'
+                    ' uncommittable partial changes"; git stash push -m "hotfix switch"'
+                )
+            },
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_escape_hatch_requires_non_empty_reason(self, handler):
+        """Escape hatch with empty reason should NOT bypass."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": 'MUST_STASH_BECAUSE=""; git stash'},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_escape_hatch_without_reason_still_blocked(self, handler):
+        """MUST_STASH_BECAUSE without value should NOT bypass."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "MUST_STASH_BECAUSE=; git stash"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_escape_hatch_missing_entirely_still_blocked(self, handler):
+        """Plain git stash without escape hatch stays blocked."""
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash"}}
+        assert handler.matches(hook_input) is True
+
+    def test_escape_hatch_single_quotes(self, handler):
+        """Escape hatch should work with single quotes too."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "MUST_STASH_BECAUSE='user asked to stash explicitly'; git stash"
+            },
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_escape_hatch_with_save_subcommand(self, handler):
+        """Escape hatch should work with git stash save."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": ('MUST_STASH_BECAUSE="save for later"; git stash save "temp changes"')
+            },
+        }
+        assert handler.matches(hook_input) is False
+
     # Mode Configuration Tests
-    def test_default_mode_is_warn(self):
-        """Handler should default to 'warn' mode for backward compatibility."""
+    def test_default_mode_is_deny(self):
+        """Handler should default to 'deny' mode."""
         handler = GitStashHandler()
-        # Default mode should be 'warn'
         assert hasattr(handler, "_mode")
-        assert handler._mode == "warn"
+        assert handler._mode == "deny"
 
     def test_accepts_deny_mode_configuration(self):
         """Handler should accept 'deny' mode configuration."""
         handler = GitStashHandler()
-        # Simulate config system setting mode
         handler._mode = "deny"
         assert handler._mode == "deny"
 
@@ -306,16 +344,16 @@ class TestGitStashHandler:
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash"}}
         result = handler.handle(hook_input)
         assert result.reason is not None
-        assert "BLOCKED" in result.reason or "blocked" in result.reason.lower()
+        assert "BLOCKED" in result.reason
 
     def test_deny_mode_provides_alternatives(self):
-        """In 'deny' mode, reason should still provide alternatives."""
+        """In 'deny' mode, reason should provide alternatives."""
         handler = GitStashHandler()
         handler._mode = "deny"
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git stash"}}
         result = handler.handle(hook_input)
         assert result.reason is not None
-        assert "git commit" in result.reason or "ALTERNATIVES" in result.reason
+        assert "git commit" in result.reason
 
     def test_warn_mode_returns_allow_decision(self):
         """In 'warn' mode, handle() should return allow decision."""
@@ -335,7 +373,7 @@ class TestGitStashHandler:
         assert "WARNING" in result.guidance
 
     def test_mode_only_affects_handle_not_matches(self):
-        """Mode configuration should not affect matches() behavior."""
+        """Mode configuration should not affect matches() behavior (without escape hatch)."""
         deny_handler = GitStashHandler()
         deny_handler._mode = "deny"
         warn_handler = GitStashHandler()
@@ -347,13 +385,20 @@ class TestGitStashHandler:
         assert deny_handler.matches(hook_input) == warn_handler.matches(hook_input)
 
 
-class TestGitStashAcceptanceTestsDenyMode:
-    """Test get_acceptance_tests in deny mode (line 109)."""
+class TestGitStashAcceptanceTests:
+    """Test get_acceptance_tests returns correct tests for each mode."""
 
     def test_deny_mode_returns_blocking_tests(self):
         """Deny mode returns acceptance tests with DENY decisions."""
         handler = GitStashHandler()
         handler._mode = "deny"
+        tests = handler.get_acceptance_tests()
+        assert len(tests) >= 2
+        assert all(t.expected_decision == Decision.DENY for t in tests)
+
+    def test_default_mode_returns_blocking_tests(self):
+        """Default mode (deny) returns acceptance tests with DENY decisions."""
+        handler = GitStashHandler()
         tests = handler.get_acceptance_tests()
         assert len(tests) >= 2
         assert all(t.expected_decision == Decision.DENY for t in tests)
