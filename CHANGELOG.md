@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.6.0] - 2026-04-20
+
+### Added
+
+- **`git stash` blocked by default with `MUST_STASH_BECAUSE` escape hatch**: The `git_stash` handler default mode has changed from `warn` to `deny`. Stashing is now blocked unless the command is prefixed with `MUST_STASH_BECAUSE="<reason>"` (e.g. `MUST_STASH_BECAUSE="switching branches for hotfix" git stash`). An empty or missing reason does not bypass the block. The deny message explains the escape hatch. To revert to advisory-only behaviour, set `handlers.pre_tool_use.git_stash.options.mode: warn` in `.claude/hooks-daemon.yaml`.
+- **Auto-commit `CLAUDE.md` after daemon restart injection**: When the daemon restarts and regenerates the `<hooksdaemon>` guidance section in `CLAUDE.md`, the file is now automatically committed if dirty. This prevents LLMs from seeing an unexplained dirty `CLAUDE.md` and attempting to revert or stash it. The commit uses `git commit --only` for atomic single-file commits, touches no other staged files, and skips silently in non-git repos or when git operations fail.
+
 ## [3.5.0] - 2026-04-16
 
 ### Added
