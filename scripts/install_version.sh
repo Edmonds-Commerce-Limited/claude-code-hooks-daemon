@@ -38,6 +38,8 @@ source "$INSTALL_LIB_DIR/prerequisites.sh"
 source "$INSTALL_LIB_DIR/project_detection.sh"
 # shellcheck source=install/venv.sh
 source "$INSTALL_LIB_DIR/venv.sh"
+# shellcheck source=install/python_fingerprint.sh
+source "$INSTALL_LIB_DIR/python_fingerprint.sh"
 # shellcheck source=install/hooks_deploy.sh
 source "$INSTALL_LIB_DIR/hooks_deploy.sh"
 # shellcheck source=install/gitignore.sh
@@ -200,8 +202,8 @@ if [ ! -d "$DAEMON_DIR" ]; then
     fail_fast "Daemon directory does not exist: $DAEMON_DIR"
 fi
 
-# Derived paths
-VENV_PYTHON="$DAEMON_DIR/untracked/venv/bin/python"
+# Derived paths — VENV_PYTHON populated after ensure_venv returns the real path
+VENV_PYTHON=""
 EXAMPLE_CONFIG="$DAEMON_DIR/.claude/hooks-daemon.yaml.example"
 SETTINGS_JSON_SOURCE="$DAEMON_DIR/.claude/settings.json"
 
@@ -234,15 +236,28 @@ check_all_prerequisites "true"
 # ============================================================
 
 log_step "3" "Creating virtual environment"
-create_venv "$DAEMON_DIR"
+
+# Plan 00099: venv is keyed by fingerprint of the target Python environment so
+# concurrent containers (sharing the same project filesystem with different
+# Pythons) each get their own venv without clobbering each other.
+INSTALLED_VERSION=$(git -C "$DAEMON_DIR" describe --tags --exact-match 2>/dev/null || git -C "$DAEMON_DIR" rev-parse --short HEAD)
+VENV_PATH=$(ensure_venv "$DAEMON_DIR" "$INSTALLED_VERSION" "${HOOKS_DAEMON_PYTHON:-python3}")
+if [ -z "$VENV_PATH" ]; then
+    fail_fast "ensure_venv returned empty path"
+fi
+VENV_PYTHON="$VENV_PATH/bin/python"
 
 if ! verify_venv "$VENV_PYTHON" "$DAEMON_DIR"; then
     fail_fast "Virtual environment verification failed"
 fi
 
-# Stamp venv with installed version for stale-venv detection on future upgrades
-INSTALLED_VERSION=$(git -C "$DAEMON_DIR" describe --tags --exact-match 2>/dev/null || git -C "$DAEMON_DIR" rev-parse --short HEAD)
-stamp_venv_version "$DAEMON_DIR/untracked/venv" "$INSTALLED_VERSION"
+# Plan 00099: clean up any pre-v3.7.0 legacy venv that may have been left by a
+# previous install so users don't see two venv directories side by side.
+LEGACY_VENV="$DAEMON_DIR/untracked/venv"
+if [ -d "$LEGACY_VENV" ] && [ "$VENV_PATH" != "$LEGACY_VENV" ]; then
+    print_info "Removing legacy pre-v3.7.0 venv at $LEGACY_VENV"
+    rm -rf "$LEGACY_VENV"
+fi
 
 # ============================================================
 # Step 4: Deploy hook scripts
