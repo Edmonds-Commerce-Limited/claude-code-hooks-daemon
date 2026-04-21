@@ -309,14 +309,18 @@ Each venv is ~150-250MB. Typical developer machine: 2 venvs (container + host). 
 
 ### Phase 4: Update Daemon Runtime (init.sh)
 
-- [ ] ⬜ **Task 4.1**: Update `init.sh::PYTHON_CMD` derivation (line 230)
-  - [ ] ⬜ Source `scripts/install/python_fingerprint.sh`
-  - [ ] ⬜ Compute `VENV_FINGERPRINT` from resolved system Python
-  - [ ] ⬜ Set `PYTHON_CMD` to `$HOOKS_DAEMON_ROOT_DIR/untracked/venv-$VENV_FINGERPRINT/bin/python`
-- [ ] ⬜ **Task 4.2**: Call `ensure_venv` at init (guarded by CI gate)
-- [ ] ⬜ **Task 4.3**: Preserve `HOOKS_DAEMON_PYTHON` override
-- [ ] ⬜ **Task 4.4**: Add `HOOKS_DAEMON_VENV_PATH` override (skips fingerprint computation)
-- [ ] ⬜ **Task 4.5**: **Do NOT touch** `SOCKET_PATH` or `PID_PATH` derivations — hostname-scoped stays hostname-scoped
+- [x] ✅ **Task 4.1**: Update `init.sh::PYTHON_CMD` derivation (line 230)
+  - [x] ✅ `_resolve_python_cmd()` sources `scripts/install/python_fingerprint.sh` lazily
+  - [x] ✅ Computes fingerprint from `$HOOKS_DAEMON_PYTHON` (default: `python3`)
+  - [x] ✅ Resolves to `$HOOKS_DAEMON_ROOT_DIR/untracked/venv-$FINGERPRINT/bin/python` when present
+  - [x] ✅ **Zero hot-path cost**: called only from `validate_venv()` / `start_daemon()`, never on forwarder hot path
+- [~] ⚠️ **Task 4.2**: Call `ensure_venv` at init (guarded by CI gate) — **DEFERRED**
+  - Decision: auto-bootstrap at daemon restart time conflates install/runtime concerns and pays Python-fingerprint cost on every restart. Instead, `ensure_venv` is called from `install.sh` / `upgrade.sh` (Phase 3). If venv is missing at runtime, `validate_venv` surfaces an actionable error message directing the user to run the installer.
+- [x] ✅ **Task 4.3**: Preserve `HOOKS_DAEMON_PYTHON` override — resolver honors it for fingerprint computation
+- [x] ✅ **Task 4.4**: Add `HOOKS_DAEMON_VENV_PATH` override — skips fingerprint computation entirely (highest precedence)
+- [x] ✅ **Task 4.5**: **Do NOT touch** `SOCKET_PATH` or `PID_PATH` derivations — hostname-scoped stays hostname-scoped (verified: lines 285-286 unchanged)
+- [x] ✅ **Legacy fallback**: if `venv-$FINGERPRINT/` doesn't exist, resolver falls through to legacy `untracked/venv/` — backwards-compatible with pre-v3.7.0 installs
+- [x] ✅ 5 pytest-driven shell integration tests in `test_init_sh_venv_resolution.py`
 
 ### Phase 5: CLI Enhancements
 
