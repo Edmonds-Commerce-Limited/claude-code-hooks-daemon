@@ -324,15 +324,15 @@ Each venv is ~150-250MB. Typical developer machine: 2 venvs (container + host). 
 - [x] ✅ **Legacy fallback**: if `venv-$FINGERPRINT/` doesn't exist, resolver falls through to legacy `untracked/venv/` — backwards-compatible with pre-v3.7.0 installs
 - [x] ✅ 5 pytest-driven shell integration tests in `test_init_sh_venv_resolution.py`
 
-### Phase 5: CLI Enhancements
+### Phase 5: CLI Enhancements ✅ Complete
 
-- [ ] ⬜ **Task 5.1**: Update `daemon.cli repair` to operate on current env's venv
-- [ ] ⬜ **Task 5.2**: Implement `list-venvs`
-  - [ ] ⬜ TDD: output format = table with (fingerprint, python-version, path, stamped-version, size, current-marker)
-  - [ ] ⬜ Read each venv's `.daemon-version` stamp
-- [ ] ⬜ **Task 5.3**: Implement `prune-venvs` with flags `--stale`, `--legacy`, `--all-except-current`, `--dry-run`, `--force`
-  - [ ] ⬜ TDD each flag combination
-  - [ ] ⬜ Safety: never delete current env's venv without `--force --yes`
+- [x] ✅ **Task 5.1**: Update `daemon.cli repair` to operate on current env's venv via `get_venv_path()`
+- [x] ✅ **Task 5.2**: Implement `list-venvs`
+  - [x] ✅ TDD: output format = table with (fingerprint, python-version, path, stamped-version, size, current-marker); `--json` mode for machine-readable output
+  - [x] ✅ Reads each venv's `.daemon-version` stamp
+- [x] ✅ **Task 5.3**: Implement `prune-venvs` with flags `--stale`, `--legacy`, `--all-except-current`, `--dry-run`, `--force`
+  - [x] ✅ TDD each flag combination — 9 unit tests passing
+  - [x] ✅ Safety: never deletes current fingerprint venv; `--force` required for destructive runs
 
 ### Phase 6: Documentation
 
