@@ -805,6 +805,16 @@ Default mode (`block_once`): the first symbol-lookup grep in a session is denied
 
 If using `--json`, include `comments` in the field list instead of adding `--comments`.
 
+## gh_pr_comments — always include --comments on gh pr view
+
+`gh pr view` without `--comments` is blocked. PR comments often contain review feedback, reviewer requests, and decisions not in the PR body.
+
+**Blocked**: `gh pr view 123`, `gh pr view 123 --repo owner/repo`
+
+**Allowed**: `gh pr view 123 --comments`, `gh pr view 123 --json title,body,comments`
+
+If using `--json`, include `comments` in the field list instead of adding `--comments`.
+
 ## npm_command — use llm: prefixed npm commands
 
 Direct `npm run` and `npx` commands are blocked or advised against. Projects with `llm:` prefixed scripts in `package.json` should use those instead.
