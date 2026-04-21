@@ -85,6 +85,8 @@ FORCE=true bash /tmp/hooks-daemon-install.sh
 
 If you prefer manual control over each step:
 
+> **v3.7.0+ venv layout**: From v3.7.0 the installer creates a **fingerprint-keyed** venv at `.claude/hooks-daemon/untracked/venv-py{MM}-{fingerprint}/` (where `{fingerprint} = md5(sys.version | sys.base_prefix | platform.machine())[:8]`), not the legacy `untracked/venv/`. The commands below show the legacy path for readability; the actual installer script handles the fingerprint-keyed path. To find the active venv after install: `$PYTHON -m claude_code_hooks_daemon.daemon.cli list-venvs`.
+
 ### 1. Verify Prerequisites
 
 ```bash
