@@ -4,6 +4,15 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00099: Python-Fingerprint Venv Isolation](00099-python-fingerprint-venv-isolation/PLAN.md) - Not Started
+
+  - Keys venvs by Python-environment fingerprint (`venv-py311-2fa8b3c1/`) — concurrent containers share one venv, distinct Pythons get distinct venvs, cross-arch safe
+  - Preserves hostname-scoped socket/PID paths unchanged (correct grain for concurrent live processes)
+  - Adds `ensure_venv` auto-bootstrap (CI-gated) and `.daemon-version` stamp-based lazy rebuild across non-active envs on upgrade
+  - Auto-deletes legacy `untracked/venv/` after upgrade (ordered post-restart-verification with rollback)
+  - Adds `list-venvs` and `prune-venvs` (`--stale`, `--legacy`, `--all-except-current`) CLI commands
+  - Relates to closed Issue #15 (hot-path solved by Plan 00018) and open Issue #28 (upgrade idempotent-path `uv sync` skip)
+
 - [00096: Live Daemon Smoke Tests in QA Stack](00096-live-daemon-smoke-tests/PLAN.md) - Not Started
 
   - Add check 9 to QA stack: 3 nc-based probes against the live daemon via hook scripts
@@ -600,9 +609,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 93
+- **Total Plans Created**: 94
 - **Completed**: 79 (1 with reduced scope)
-- **Active**: 2 (1 not started, 1 in progress)
+- **Active**: 3 (2 not started, 1 in progress)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation)
 
