@@ -283,15 +283,16 @@ Each venv is ~150-250MB. Typical developer machine: 2 venvs (container + host). 
 
 ### Phase 2: Auto-Bootstrap (`ensure_venv`)
 
-- [ ] ⬜ **Task 2.1**: Add `ensure_venv()` to `scripts/install/venv.sh`
-  - [ ] ⬜ Failing shell test: no venv → `ensure_venv` creates one and stamps it
-  - [ ] ⬜ Failing shell test: stamp mismatch → `ensure_venv` recreates and re-stamps
-  - [ ] ⬜ Failing shell test: venv present + stamp matches → no-op (exit 0 with zero side effects)
-  - [ ] ⬜ Implement delegating to existing `create_venv` / `recreate_venv` / `stamp_venv_version` / `venv_version_matches`
-- [ ] ⬜ **Task 2.2**: Wire CI gate
-  - [ ] ⬜ Test: set `CI=true` → `ensure_venv` is not called by init path
-  - [ ] ⬜ Test: set `HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1` → same
-  - [ ] ⬜ Update `init.sh` to gate `ensure_venv` invocation
+- [x] ✅ **Task 2.1**: Add `ensure_venv()` to `scripts/install/venv.sh`
+  - [x] ✅ Failing pytest-driven shell test: no venv → `ensure_venv` creates one and stamps it
+  - [x] ✅ Failing pytest-driven shell test: stamp mismatch → `ensure_venv` recreates and re-stamps
+  - [x] ✅ Failing pytest-driven shell test: venv present + stamp matches → no-op (SENTINEL file preserved)
+  - [x] ✅ Implement delegates to `python_venv_fingerprint` (SSOT) + new `create_venv_at_path` + existing `stamp_venv_version` / `venv_version_matches`
+  - [x] ✅ Prints venv path to stdout so callers can capture it
+- [x] ✅ **Task 2.2**: Wire CI gate (partial — bash-side done; init.sh wiring is Task 4.2)
+  - [x] ✅ `HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1` → `ensure_venv` early-returns 0
+  - [x] ✅ `CI=true` → same
+  - [ ] ⬜ `init.sh` wiring deferred to Task 4.2
 
 ### Phase 3: Update Install/Upgrade Scripts
 

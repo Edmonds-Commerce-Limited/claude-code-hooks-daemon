@@ -313,6 +313,146 @@ venv_version_matches() {
 }
 
 #
+# ensure_venv() - Auto-bootstrap venv for current Python environment fingerprint
+#
+# Plan 00099: the entry point init.sh calls on every daemon start. Computes
+# the fingerprint of the target Python, then:
+#   - venv missing                  -> create + stamp
+#   - venv present, stamp missing   -> recreate + stamp (lazy upgrade from pre-stamp builds)
+#   - venv present, stamp mismatch  -> recreate + stamp
+#   - venv present, stamp matches   -> no-op (fast path)
+#
+# Honors HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1 and CI=true to skip entirely
+# (CI environments stub venvs out of band).
+#
+# Args:
+#   $1 - daemon_dir: Path to daemon installation directory
+#   $2 - target_version: Daemon version to stamp into the venv (e.g. v3.7.0)
+#   $3 - python_bin (optional, default: python3): Target Python to fingerprint
+#
+# Side effect:
+#   Prints the computed venv path to stdout on success so callers can
+#   capture it (e.g. `VENV_PATH="$(ensure_venv ...)"`). Log messages go
+#   to stderr via print_* helpers.
+#
+# Returns:
+#   Exit code 0 on success (including skip), 1 on failure
+#
+ensure_venv() {
+    local daemon_dir="$1"
+    local target_version="$2"
+    local python_bin="${3:-python3}"
+
+    if [ -z "$daemon_dir" ] || [ -z "$target_version" ]; then
+        print_error "ensure_venv: daemon_dir and target_version required"
+        return 1
+    fi
+
+    # CI gate: allow opt-out for CI environments that stub venvs
+    if [ "${HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP:-0}" = "1" ] || [ "${CI:-}" = "true" ]; then
+        print_verbose "ensure_venv: skipped (HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP or CI set)"
+        return 0
+    fi
+
+    # Compute fingerprint via the SSOT helper. Must be sourced by the caller.
+    if ! declare -F python_venv_fingerprint > /dev/null; then
+        print_error "ensure_venv: python_venv_fingerprint not loaded — source scripts/install/python_fingerprint.sh first"
+        return 1
+    fi
+
+    local fingerprint
+    if ! fingerprint=$(python_venv_fingerprint "$python_bin"); then
+        print_error "ensure_venv: failed to compute fingerprint for $python_bin"
+        return 1
+    fi
+
+    local venv_path="$daemon_dir/untracked/venv-$fingerprint"
+
+    # Fast path: venv exists and stamp matches — no-op
+    if [ -d "$venv_path" ] && venv_version_matches "$venv_path" "$target_version"; then
+        print_verbose "ensure_venv: venv up-to-date at $venv_path"
+        echo "$venv_path"
+        return 0
+    fi
+
+    # Slow path: need to (re)create
+    if [ -d "$venv_path" ]; then
+        print_info "ensure_venv: stamp mismatch — rebuilding $venv_path"
+        rm -rf "$venv_path"
+    else
+        print_info "ensure_venv: creating venv at $venv_path"
+    fi
+
+    HOOKS_DAEMON_PYTHON="$python_bin" \
+        create_venv_at_path "$daemon_dir" "$venv_path" "true" || return 1
+
+    stamp_venv_version "$venv_path" "$target_version" || return 1
+    echo "$venv_path"
+    return 0
+}
+
+#
+# create_venv_at_path() - Create venv at an explicit path (fingerprint-keyed)
+#
+# Thin wrapper around `uv sync` that lets callers specify the venv location
+# directly. Used by ensure_venv(). Keeps the existing create_venv() signature
+# unchanged for backwards compatibility with install.sh / upgrade.sh.
+#
+# Args:
+#   $1 - daemon_dir: Path to daemon project (for `uv sync --project`)
+#   $2 - venv_path: Absolute path where the venv should be created
+#   $3 - quiet (optional, default: false)
+#
+# Returns:
+#   Exit code 0 on success, 1 on failure
+#
+create_venv_at_path() {
+    local daemon_dir="$1"
+    local venv_path="$2"
+    local quiet="${3:-false}"
+
+    if [ -z "$daemon_dir" ] || [ -z "$venv_path" ]; then
+        print_error "create_venv_at_path: daemon_dir and venv_path required"
+        return 1
+    fi
+
+    mkdir -p "$daemon_dir/untracked"
+    if [ ! -f "$daemon_dir/untracked/.gitignore" ]; then
+        echo "/untracked/" > "$daemon_dir/untracked/.gitignore"
+    fi
+
+    local python_args=()
+    if [ -n "${HOOKS_DAEMON_PYTHON:-}" ]; then
+        python_args=(--python "$HOOKS_DAEMON_PYTHON")
+    fi
+
+    export UV_LINK_MODE=copy
+
+    if [ "$quiet" = "true" ]; then
+        if UV_PROJECT_ENVIRONMENT="$venv_path" uv sync --project "$daemon_dir" "${python_args[@]}" > /tmp/uv_sync_output.txt 2>&1; then
+            print_verbose "Virtual environment created at: $venv_path"
+            rm -f /tmp/uv_sync_output.txt
+            return 0
+        else
+            print_error "Failed to create virtual environment at $venv_path"
+            if [ -f /tmp/uv_sync_output.txt ]; then
+                cat /tmp/uv_sync_output.txt >&2
+                rm -f /tmp/uv_sync_output.txt
+            fi
+            return 1
+        fi
+    else
+        if UV_PROJECT_ENVIRONMENT="$venv_path" uv sync --project "$daemon_dir" "${python_args[@]}"; then
+            print_success "Virtual environment created at: $venv_path"
+            return 0
+        else
+            print_error "Failed to create virtual environment at $venv_path"
+            return 1
+        fi
+    fi
+}
+
+#
 # install_package_editable() - Install package in editable mode
 #
 # Installs the daemon package in editable mode (-e) into the venv.
