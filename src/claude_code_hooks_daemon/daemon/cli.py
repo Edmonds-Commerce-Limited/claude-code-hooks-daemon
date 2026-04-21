@@ -31,6 +31,7 @@ import logging
 import os
 import platform
 import re
+import shutil
 import signal
 import socket
 import subprocess  # nosec B404 - subprocess used for daemon management (systemctl) only
@@ -56,6 +57,8 @@ from claude_code_hooks_daemon.daemon.paths import (
     cleanup_stale_daemon_files,
     get_pid_path,
     get_socket_path,
+    get_venv_path,
+    python_venv_fingerprint,
     read_pid_file,
     write_cleanup_status,
 )
@@ -1083,8 +1086,10 @@ def cmd_repair(args: argparse.Namespace) -> int:
         cmd_stop(args)
         time.sleep(0.5)
 
-    # Run uv sync to rebuild venv
-    venv_path = Path(project_root) / "untracked" / "venv"
+    # Plan 00099: target the current Python-environment's fingerprint-keyed
+    # venv so concurrent environments (container vs host, different Pythons)
+    # each repair their own venv without clobbering the other.
+    venv_path = get_venv_path(project_root)
     env = os.environ.copy()
     env["UV_PROJECT_ENVIRONMENT"] = str(venv_path)
 
@@ -1129,6 +1134,220 @@ def cmd_repair(args: argparse.Namespace) -> int:
     except subprocess.TimeoutExpired:
         print(f"ERROR: uv sync timed out after {Timeout.BASH_DEFAULT / 1000:.0f} seconds")
         return 1
+
+
+# Plan 00099: venv directories that the fingerprint-keyed scheme recognises.
+# Any untracked/ subdirectory named "venv" or matching "venv-<fingerprint>/"
+# is considered a candidate for listing and pruning.
+_VENV_DIR_PREFIX = "venv"
+_VENV_STAMP_FILENAME = ".daemon-version"
+_LEGACY_VENV_DIR_NAME = "venv"
+
+
+def _read_venv_stamp(venv_dir: Path) -> str:
+    stamp = venv_dir / _VENV_STAMP_FILENAME
+    if stamp.is_file():
+        try:
+            return stamp.read_text().strip()
+        except OSError:
+            return ""
+    return ""
+
+
+def _directory_size_bytes(path: Path) -> int:
+    total = 0
+    for entry in path.rglob("*"):
+        try:
+            if entry.is_file() and not entry.is_symlink():
+                total += entry.stat().st_size
+        except OSError:
+            continue
+    return total
+
+
+def _human_bytes(size: int) -> str:
+    units = ["B", "KB", "MB", "GB"]
+    value = float(size)
+    for unit in units:
+        if value < 1024 or unit == units[-1]:
+            return f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{value:.1f} GB"
+
+
+def _enumerate_venvs(project_root: Path) -> list[dict[str, Any]]:
+    """Return metadata dicts for every venv directory under untracked/.
+
+    Detects both fingerprint-keyed ``venv-<fp>/`` and legacy ``venv/`` paths.
+    Each entry: fingerprint, path, stamped_version, size_bytes, is_current,
+    is_legacy.
+    """
+    untracked = project_root / "untracked"
+    if not untracked.is_dir():
+        return []
+
+    current_fp = python_venv_fingerprint()
+    entries: list[dict[str, Any]] = []
+
+    for child in sorted(untracked.iterdir()):
+        if not child.is_dir():
+            continue
+        name = child.name
+        if name == _LEGACY_VENV_DIR_NAME:
+            fingerprint = ""
+            is_legacy = True
+        elif name.startswith(_VENV_DIR_PREFIX + "-"):
+            fingerprint = name[len(_VENV_DIR_PREFIX) + 1 :]
+            is_legacy = False
+        else:
+            continue
+
+        python_bin = child / "bin" / "python"
+        if not python_bin.exists():
+            python_alt = child / "bin" / "python3"
+            if not python_alt.exists():
+                continue
+
+        entries.append(
+            {
+                "fingerprint": fingerprint,
+                "path": str(child),
+                "stamped_version": _read_venv_stamp(child),
+                "size_bytes": _directory_size_bytes(child),
+                "is_current": (not is_legacy) and (fingerprint == current_fp),
+                "is_legacy": is_legacy,
+            }
+        )
+    return entries
+
+
+def cmd_list_venvs(args: argparse.Namespace) -> int:
+    """List all Plan 00099 fingerprint-keyed venvs (plus any legacy venv).
+
+    Args:
+        args: Command-line arguments; ``--json`` emits machine-readable output.
+
+    Returns:
+        0 on success.
+    """
+    project_root = Path(get_project_path(getattr(args, "project_root", None)))
+    entries = _enumerate_venvs(project_root)
+    as_json = getattr(args, "json", False)
+
+    if as_json:
+        print(json.dumps(entries, indent=2))
+        return 0
+
+    if not entries:
+        print("No venvs found under untracked/.")
+        return 0
+
+    current_fp = python_venv_fingerprint()
+    print(f"Current Python-env fingerprint: {current_fp}")
+    print()
+    print(
+        f"{'Fingerprint':<20} {'Stamp':<10} {'Size':>10}  {'Marker':<8} Path"
+    )
+    print("-" * 80)
+    for entry in entries:
+        marker = "← current" if entry["is_current"] else ("legacy" if entry["is_legacy"] else "")
+        fp_display = entry["fingerprint"] or "(legacy)"
+        print(
+            f"{fp_display:<20} {entry['stamped_version'] or '-':<10} "
+            f"{_human_bytes(entry['size_bytes']):>10}  {marker:<8} {entry['path']}"
+        )
+    return 0
+
+
+def cmd_prune_venvs(args: argparse.Namespace) -> int:
+    """Delete stale / legacy Plan 00099 venvs.
+
+    Selection flags (at least one required):
+      --legacy                 remove untracked/venv/ (pre-v3.7.0 layout)
+      --all-except-current     remove every venv-<fp>/ whose fp != current
+      --stale                  remove venvs whose stamped daemon version
+                               differs from the current env's stamp
+
+    Safety flags:
+      --dry-run   print the removal plan without touching the filesystem
+      --force     required for actual deletion (plus at least one selection flag)
+
+    The current Python-env's fingerprint-keyed venv is NEVER deleted.
+    """
+    project_root = Path(get_project_path(getattr(args, "project_root", None)))
+    entries = _enumerate_venvs(project_root)
+
+    select_legacy = getattr(args, "legacy", False)
+    select_all_except_current = getattr(args, "all_except_current", False)
+    select_stale = getattr(args, "stale", False)
+    dry_run = getattr(args, "dry_run", False)
+    force = getattr(args, "force", False)
+
+    if not (select_legacy or select_all_except_current or select_stale):
+        print(
+            "ERROR: pass at least one of --legacy, --all-except-current, --stale",
+            file=sys.stderr,
+        )
+        return 1
+
+    if not force and not dry_run:
+        print(
+            "ERROR: destructive operation — pass --dry-run to preview or --force to proceed",
+            file=sys.stderr,
+        )
+        return 1
+
+    current_fp = python_venv_fingerprint()
+    current_stamp = ""
+    for entry in entries:
+        if entry["is_current"]:
+            current_stamp = entry["stamped_version"]
+            break
+
+    to_remove: list[dict[str, Any]] = []
+    for entry in entries:
+        if entry["is_current"]:
+            continue  # never touch current fingerprint
+        chosen = False
+        if select_legacy and entry["is_legacy"]:
+            chosen = True
+        if select_all_except_current and not entry["is_legacy"]:
+            chosen = True
+        if (
+            select_stale
+            and not entry["is_legacy"]
+            and current_stamp
+            and entry["stamped_version"]
+            and entry["stamped_version"] != current_stamp
+        ):
+            chosen = True
+        if chosen:
+            to_remove.append(entry)
+
+    if not to_remove:
+        print("Nothing to prune. Current venv:", current_fp)
+        return 0
+
+    print(f"{'(dry-run) ' if dry_run else ''}Pruning {len(to_remove)} venv(s):")
+    for entry in to_remove:
+        label = entry["fingerprint"] or "(legacy)"
+        print(f"  - {label:<20} {_human_bytes(entry['size_bytes']):>10}  {entry['path']}")
+
+    if dry_run:
+        print("(dry-run) No changes made.")
+        return 0
+
+    failures = 0
+    for entry in to_remove:
+        try:
+            shutil.rmtree(entry["path"])
+        except OSError as exc:
+            print(f"ERROR removing {entry['path']}: {exc}", file=sys.stderr)
+            failures += 1
+    if failures:
+        return 1
+    print(f"Removed {len(to_remove)} venv(s). Current venv preserved: {current_fp}")
+    return 0
 
 
 def cmd_init_config(args: argparse.Namespace) -> int:
@@ -2441,6 +2660,48 @@ def main() -> int:
     # repair command
     parser_repair = subparsers.add_parser("repair", help="Repair broken venv (runs uv sync)")
     parser_repair.set_defaults(func=cmd_repair)
+
+    # list-venvs command (Plan 00099)
+    parser_list_venvs = subparsers.add_parser(
+        "list-venvs",
+        help="List fingerprint-keyed venvs under untracked/ (Plan 00099)",
+    )
+    parser_list_venvs.add_argument(
+        "--json", action="store_true", help="Emit JSON instead of a human-readable table"
+    )
+    parser_list_venvs.set_defaults(func=cmd_list_venvs)
+
+    # prune-venvs command (Plan 00099)
+    parser_prune_venvs = subparsers.add_parser(
+        "prune-venvs",
+        help="Delete stale / legacy venvs (Plan 00099)",
+    )
+    parser_prune_venvs.add_argument(
+        "--legacy",
+        action="store_true",
+        help="Remove the pre-v3.7.0 untracked/venv/ directory",
+    )
+    parser_prune_venvs.add_argument(
+        "--all-except-current",
+        action="store_true",
+        help="Remove every fingerprint-keyed venv whose fingerprint != current env",
+    )
+    parser_prune_venvs.add_argument(
+        "--stale",
+        action="store_true",
+        help="Remove venvs whose stamped daemon version differs from the current env's",
+    )
+    parser_prune_venvs.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the removal plan without deleting anything",
+    )
+    parser_prune_venvs.add_argument(
+        "--force",
+        action="store_true",
+        help="Required for actual deletion (combined with a selection flag)",
+    )
+    parser_prune_venvs.set_defaults(func=cmd_prune_venvs)
 
     # init-config command
     parser_init_config = subparsers.add_parser(
