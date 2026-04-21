@@ -83,9 +83,7 @@ class TestFingerprintKeyed:
         result = _run(project)
         assert result == str(keyed)
 
-    def test_fingerprint_keyed_preferred_for_creation_when_no_legacy(
-        self, tmp_path: Path
-    ) -> None:
+    def test_fingerprint_keyed_preferred_for_creation_when_no_legacy(self, tmp_path: Path) -> None:
         """If neither fingerprint nor legacy venv exists, prefer keyed path."""
         project = _setup_fake_project(tmp_path)
         from claude_code_hooks_daemon.daemon.paths import python_venv_fingerprint

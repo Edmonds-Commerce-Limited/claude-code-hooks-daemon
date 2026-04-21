@@ -22,7 +22,7 @@ from claude_code_hooks_daemon.daemon.paths import get_venv_path, python_venv_fin
 def _make_venv(path: Path, stamp_version: str | None = None) -> None:
     """Materialise a fake venv on disk that looks healthy enough for listing."""
     (path / "bin").mkdir(parents=True)
-    (path / "bin" / "python").write_text("#!/bin/sh\nexec /usr/bin/python3 \"$@\"\n")
+    (path / "bin" / "python").write_text('#!/bin/sh\nexec /usr/bin/python3 "$@"\n')
     (path / "bin" / "python").chmod(0o755)
     if stamp_version is not None:
         (path / ".daemon-version").write_text(stamp_version)
@@ -55,9 +55,7 @@ class TestListVenvs:
     ) -> None:
         (tmp_path / "untracked").mkdir()
 
-        with patch(
-            "claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path
-        ):
+        with patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path):
             rc = cli.cmd_list_venvs(_args(tmp_path))
 
         assert rc == 0
@@ -74,9 +72,7 @@ class TestListVenvs:
         _make_venv(untracked / "venv-py310-deadbeef", stamp_version="v3.6.0")
         _make_venv(untracked / "venv", stamp_version="v3.5.0")  # legacy pre-fp
 
-        with patch(
-            "claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path
-        ):
+        with patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path):
             rc = cli.cmd_list_venvs(_args(tmp_path))
 
         assert rc == 0
@@ -97,9 +93,7 @@ class TestListVenvs:
         fp = python_venv_fingerprint()
         _make_venv(untracked / f"venv-{fp}", stamp_version="v3.7.0")
 
-        with patch(
-            "claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path
-        ):
+        with patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path):
             rc = cli.cmd_list_venvs(_args(tmp_path, json_output=True))
 
         assert rc == 0
@@ -125,9 +119,7 @@ class TestPruneVenvs:
         stale = untracked / "venv-py310-deadbeef"
         _make_venv(stale, stamp_version="v3.6.0")
 
-        with patch(
-            "claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path
-        ):
+        with patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path):
             rc = cli.cmd_prune_venvs(
                 _args(tmp_path, all_except_current=True, dry_run=True, force=True)
             )
@@ -146,9 +138,7 @@ class TestPruneVenvs:
         legacy = untracked / "venv"
         _make_venv(legacy, stamp_version="v3.5.0")
 
-        with patch(
-            "claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path
-        ):
+        with patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path):
             rc = cli.cmd_prune_venvs(_args(tmp_path, legacy=True, force=True))
 
         assert rc == 0
@@ -166,12 +156,8 @@ class TestPruneVenvs:
         _make_venv(other1, stamp_version="v3.6.0")
         _make_venv(other2, stamp_version="v3.5.0")
 
-        with patch(
-            "claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path
-        ):
-            rc = cli.cmd_prune_venvs(
-                _args(tmp_path, all_except_current=True, force=True)
-            )
+        with patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path):
+            rc = cli.cmd_prune_venvs(_args(tmp_path, all_except_current=True, force=True))
 
         assert rc == 0
         assert current.exists()
@@ -189,9 +175,7 @@ class TestPruneVenvs:
         stale = untracked / "venv-py310-deadbeef"
         _make_venv(stale, stamp_version="v3.6.0")
 
-        with patch(
-            "claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path
-        ):
+        with patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path):
             rc = cli.cmd_prune_venvs(_args(tmp_path, all_except_current=True))
 
         assert rc == 1
@@ -208,15 +192,61 @@ class TestPruneVenvs:
         current = untracked / f"venv-{fp}"
         _make_venv(current, stamp_version="v3.7.0")
 
-        with patch(
-            "claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path
-        ):
-            rc = cli.cmd_prune_venvs(
-                _args(tmp_path, all_except_current=True, force=True)
-            )
+        with patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path):
+            rc = cli.cmd_prune_venvs(_args(tmp_path, all_except_current=True, force=True))
 
         assert rc == 0
         assert current.exists()
+
+
+class TestEnumerateAndHelpers:
+    def test_enumerate_returns_empty_when_untracked_missing(self, tmp_path: Path) -> None:
+        # No untracked/ dir at all
+        with patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path):
+            rc = cli.cmd_list_venvs(_args(tmp_path))
+        assert rc == 0
+
+    def test_enumerate_skips_non_directories_and_unrelated_names(self, tmp_path: Path) -> None:
+        untracked = tmp_path / "untracked"
+        untracked.mkdir()
+        (untracked / "not_a_dir.txt").write_text("irrelevant")
+        (untracked / "random_other_dir").mkdir()
+        fp = python_venv_fingerprint()
+        _make_venv(untracked / f"venv-{fp}", stamp_version="v3.7.0")
+
+        with patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path):
+            rc = cli.cmd_list_venvs(_args(tmp_path, json_output=True))
+        assert rc == 0
+
+    def test_enumerate_skips_venv_without_python_binary(self, tmp_path: Path) -> None:
+        untracked = tmp_path / "untracked"
+        untracked.mkdir()
+        broken = untracked / "venv-py311-badbadba"
+        (broken / "bin").mkdir(parents=True)
+        # No bin/python or bin/python3 — should be skipped
+        fp = python_venv_fingerprint()
+        _make_venv(untracked / f"venv-{fp}", stamp_version="v3.7.0")
+
+        with patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path):
+            rc = cli.cmd_list_venvs(_args(tmp_path, json_output=True))
+        assert rc == 0
+
+    def test_human_bytes_covers_all_units(self) -> None:
+        assert "B" in cli._human_bytes(100)
+        assert "KB" in cli._human_bytes(100 * 1024)
+        assert "MB" in cli._human_bytes(100 * 1024 * 1024)
+        assert "GB" in cli._human_bytes(100 * 1024 * 1024 * 1024)
+
+    def test_prune_refuses_without_selection_flag(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        untracked = tmp_path / "untracked"
+        untracked.mkdir()
+        with patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path):
+            rc = cli.cmd_prune_venvs(_args(tmp_path, force=True))
+        assert rc == 1
+        captured = capsys.readouterr()
+        assert "--legacy" in captured.err or "--legacy" in captured.out
 
 
 class TestRepairUsesFingerprintKeyedPath:
@@ -231,9 +261,7 @@ class TestRepairUsesFingerprintKeyedPath:
         def fake_run(cmd: list[str], **kw: object) -> MagicMock:
             env = kw.get("env", {})
             if isinstance(env, dict) and env.get("UV_PROJECT_ENVIRONMENT"):
-                sync_call["UV_PROJECT_ENVIRONMENT"] = str(
-                    env["UV_PROJECT_ENVIRONMENT"]
-                )
+                sync_call["UV_PROJECT_ENVIRONMENT"] = str(env["UV_PROJECT_ENVIRONMENT"])
             m = MagicMock()
             m.returncode = 0
             m.stderr = ""

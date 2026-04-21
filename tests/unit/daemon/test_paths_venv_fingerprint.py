@@ -141,9 +141,7 @@ class TestPythonVenvFingerprintHashLogic:
         import platform as _platform
 
         parts = f"{sys.version}|{sys.base_prefix}|{_platform.machine()}"
-        expected_hash = hashlib.md5(
-            parts.encode("utf-8"), usedforsecurity=False
-        ).hexdigest()[:8]
+        expected_hash = hashlib.md5(parts.encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
         expected = f"py{sys.version_info.major}{sys.version_info.minor}-{expected_hash}"
         assert python_venv_fingerprint() == expected
 
