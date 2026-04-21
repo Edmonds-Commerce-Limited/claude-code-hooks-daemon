@@ -85,6 +85,7 @@ class Priority:
 
     # Workflow handlers (Priority: 35-55)
     GH_ISSUE_COMMENTS = 40
+    GH_PR_COMMENTS = 40
     YOLO_CONTAINER_DETECTION = 40
     PLAN_TIME_ESTIMATES = 40
     GLOBAL_NPM_ADVISOR = 40
