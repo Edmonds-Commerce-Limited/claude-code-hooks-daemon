@@ -1178,14 +1178,27 @@ def _human_bytes(size: int) -> str:
     return f"{value:.1f} GB"
 
 
+def _daemon_untracked_dir(project_root: Path) -> Path:
+    """Resolve the daemon's untracked directory for the current install mode.
+
+    Self-install (dogfooding) keeps venvs at ``{project}/untracked/``; normal
+    installs keep them at ``{project}/.claude/hooks-daemon/untracked/``.
+    Detection mirrors ``ProjectContext``: presence of
+    ``src/claude_code_hooks_daemon/`` at the project root signals self-install.
+    """
+    if (project_root / "src" / "claude_code_hooks_daemon").exists():
+        return project_root / "untracked"
+    return project_root / ".claude" / "hooks-daemon" / "untracked"
+
+
 def _enumerate_venvs(project_root: Path) -> list[dict[str, Any]]:
-    """Return metadata dicts for every venv directory under untracked/.
+    """Return metadata dicts for every venv directory under the daemon's untracked/.
 
     Detects both fingerprint-keyed ``venv-<fp>/`` and legacy ``venv/`` paths.
     Each entry: fingerprint, path, stamped_version, size_bytes, is_current,
     is_legacy.
     """
-    untracked = project_root / "untracked"
+    untracked = _daemon_untracked_dir(project_root)
     if not untracked.is_dir():
         return []
 
@@ -1242,7 +1255,7 @@ def cmd_list_venvs(args: argparse.Namespace) -> int:
         return 0
 
     if not entries:
-        print("No venvs found under untracked/.")
+        print(f"No venvs found under {_daemon_untracked_dir(project_root)}/.")
         return 0
 
     current_fp = python_venv_fingerprint()
