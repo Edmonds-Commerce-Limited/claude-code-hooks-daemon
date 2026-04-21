@@ -1,7 +1,8 @@
 # Plan 00099: Python-Fingerprint Venv Isolation
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-04-21
+**Started**: 2026-04-21
 **Owner**: TBD
 **Priority**: High
 **Type**: Bug Fix / Architectural Enhancement
@@ -268,16 +269,17 @@ Each venv is ~150-250MB. Typical developer machine: 2 venvs (container + host). 
 
 ### Phase 1: Fingerprint Helper (SSOT)
 
-- [ ] ⬜ **Task 1.1**: Add `python_venv_fingerprint()` + `get_venv_path()` to `src/claude_code_hooks_daemon/daemon/paths.py`
-  - [ ] ⬜ Write failing test in `tests/unit/daemon/test_paths.py` — stable output for same inputs, differs across python/arch/executable
-  - [ ] ⬜ Implement using `hashlib.md5(..., usedforsecurity=False)`
-  - [ ] ⬜ Edge case tests: Python version extraction, short fingerprint length, safe characters only
-- [ ] ⬜ **Task 1.2**: Create `scripts/install/python_fingerprint.sh`
-  - [ ] ⬜ Bash wrapper that invokes the target Python and runs the same MD5 logic (no dual implementation)
-  - [ ] ⬜ Write bats-style test covering: default `python3`, explicit path, missing interpreter error
-- [ ] ⬜ **Task 1.3**: Parity integration test `tests/integration/test_fingerprint_parity.py`
-  - [ ] ⬜ Run bash helper and Python helper in the same process — assert exact string equality
-  - [ ] ⬜ Run against a matrix: current Python, `/usr/bin/python3`, container Python — assert differentiation
+- [x] ✅ **Task 1.1**: Add `python_venv_fingerprint()` + `get_venv_path()` to `src/claude_code_hooks_daemon/daemon/paths.py`
+  - [x] ✅ Write failing test in `tests/unit/daemon/test_paths_venv_fingerprint.py` — 21 tests covering format, stability, differentiation, path integration, unicode/filesystem safety
+  - [x] ✅ Implement using `hashlib.md5(..., usedforsecurity=False)` keyed on `sys.version | sys.base_prefix | platform.machine()` (base_prefix stable between system-python and venv-python so bash-side and Python-side agree)
+  - [x] ✅ Edge case tests: Python version extraction, short fingerprint length, safe characters only
+  - [x] ✅ Verified: this container fingerprint = `py311-66bbc57c`, venv_path = `/workspace/untracked/venv-py311-66bbc57c`
+- [x] ✅ **Task 1.2**: Create `scripts/install/python_fingerprint.sh`
+  - [x] ✅ Bash wrapper that invokes the target Python and runs the same MD5 logic (no dual implementation)
+  - [x] ✅ Smoke-tested against `python3` (default) and explicit `/usr/bin/python3` / venv python — all produce identical fingerprint
+- [x] ✅ **Task 1.3**: Parity integration test `tests/integration/test_fingerprint_parity.py`
+  - [x] ✅ 5 tests: helper-exists, helper-executable, bash↔Python parity, format regex, system↔venv parity (same base_prefix)
+  - [x] ✅ Verified: bash-side and Python-side produce byte-identical `py311-66bbc57c` against the same interpreter
 
 ### Phase 2: Auto-Bootstrap (`ensure_venv`)
 

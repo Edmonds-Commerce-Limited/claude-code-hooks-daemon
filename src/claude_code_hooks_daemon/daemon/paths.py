@@ -13,6 +13,8 @@ import hashlib
 import json
 import logging
 import os
+import platform
+import sys
 import time
 from pathlib import Path
 
@@ -52,6 +54,54 @@ def _get_hostname_suffix() -> str:
     # Sanitize hostname for filesystem safety: lowercase, no spaces
     sanitized = hostname.lower().replace(" ", "-")
     return f"-{sanitized}"
+
+
+def python_venv_fingerprint() -> str:
+    """Return a stable per-Python-environment fingerprint for venv keying.
+
+    Components hashed (separator ``|``):
+    - ``sys.version`` (catches patch version + build-tag differences)
+    - ``sys.base_prefix`` (distinguishes pyenv vs distro vs other installs)
+    - ``platform.machine()`` (distinguishes architectures cross-mounted)
+
+    ``sys.base_prefix`` is deliberately used in place of ``sys.executable``
+    so that the fingerprint is stable whether computed from the system
+    Python (during fresh install, before a venv exists) or from the venv
+    Python (once the daemon is running). Both share the same base prefix
+    (``/usr``, ``/home/user/.pyenv/versions/3.11.5``, etc.).
+
+    Concurrent containers from the same image produce the same fingerprint
+    and share one venv. Distinct Pythons (pyenv vs distro, different minor
+    versions, different arches) produce distinct fingerprints and get
+    distinct venvs.
+
+    Format: ``py{MAJOR}{MINOR}-{8-hex-char-md5-digest}``
+    Example: ``py311-2fa8b3c1``
+
+    MD5 is used for short path-identifier purposes only (``usedforsecurity=False``).
+    """
+    parts = f"{sys.version}|{sys.base_prefix}|{platform.machine()}"
+    digest = hashlib.md5(parts.encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
+    return f"py{sys.version_info.major}{sys.version_info.minor}-{digest}"
+
+
+def get_venv_path(project_dir: Path | str) -> Path:
+    """Return the current Python env's isolated venv directory.
+
+    The venv directory name embeds the Python-env fingerprint so that
+    two different Pythons on the same filesystem (e.g. container Python
+    and desktop-host pyenv Python) never stomp on each other's venv.
+
+    Args:
+        project_dir: Path to the project directory.
+
+    Returns:
+        ``{project}/untracked/venv-{fingerprint}/`` in self-install mode or
+        ``{project}/.claude/hooks-daemon/untracked/venv-{fingerprint}/`` otherwise.
+    """
+    project_path = Path(project_dir).resolve()
+    untracked_dir = _get_untracked_dir(project_path)
+    return untracked_dir / f"venv-{python_venv_fingerprint()}"
 
 
 def get_project_hash(project_path: Path | str) -> str:
