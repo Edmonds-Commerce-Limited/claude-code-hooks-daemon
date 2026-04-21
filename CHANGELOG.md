@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.7.0] - 2026-04-21
+
+### Added
+
+- **Fingerprint-keyed venv layout (`untracked/venv-py{MM}-{fp}/`)**: The daemon now keys its virtual environment by a Python-environment fingerprint — `md5(sys.version | sys.base_prefix | platform.machine())[:8]` — so concurrent containers sharing the same image reuse one venv while distinct Python environments (different version, prefix, or architecture) get their own isolated venv. The legacy path `untracked/venv/` is retained as a fallback if the fingerprint venv is absent, preserving full backwards compatibility.
+- **Auto-bootstrap on first startup in a new environment**: A stamp-based invalidation mechanism detects when the current Python environment has no matching venv. On the first daemon start in a new environment, `ensure_venv()` provisions a fresh fingerprint-keyed venv automatically. Subsequent starts skip the check for zero-overhead operation. The CI gate (`HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1` or `CI=true`) disables bootstrap to keep CI fast.
+- **Auto-deletion of legacy `untracked/venv/` after successful upgrade**: The installer and upgrader now delete the pre-fingerprint `untracked/venv/` once the fingerprint-keyed venv is provisioned and the daemon is confirmed RUNNING. The deletion is skipped if the daemon fails to start, ensuring safe fallback. Self-install mode and normal install mode are both handled.
+- **`list-venvs` CLI subcommand**: `$PYTHON -m claude_code_hooks_daemon.daemon.cli list-venvs` displays a table of all venvs under the daemon's untracked directory, with columns for name, Python version, size, and whether it is the current-environment venv. Accepts `--json` for machine-readable output.
+- **`prune-venvs` CLI subcommand**: `$PYTHON -m claude_code_hooks_daemon.daemon.cli prune-venvs` removes stale or legacy venvs. Modes: `--legacy` (removes only the pre-fingerprint `untracked/venv/`), `--all-except-current` (removes all fingerprint venvs except the one for the active Python environment), `--stale` (removes venvs whose stamp predates the installed daemon version). Always requires `--force` to delete; `--dry-run` previews what would be removed. The current-environment fingerprint venv is never deleted by any mode.
+- **`cmd_repair` retargeted to fingerprint-keyed path**: The `repair` CLI subcommand now rebuilds the venv at `get_venv_path()` (the fingerprint-keyed path for the active Python environment) rather than the legacy `untracked/venv/`. This ensures repair is always coherent with the environment that is actually running the daemon.
+- **Fingerprint SSOT helpers (Python + bash)**: A shared `get_venv_fingerprint()` function and its bash equivalent (`venv-include.bash`) provide a single source of truth for the fingerprint algorithm across Python code, shell scripts, and the installer. All scripts (`init.sh`, `install.sh`, `upgrade.sh`, QA scripts) resolve `PYTHON_CMD` lazily via the SSOT helper at runtime rather than at clone time.
+- **`init.sh` lazy `PYTHON_CMD` resolution**: `init.sh` now sources `venv-include.bash` to resolve the correct fingerprint-keyed venv path dynamically on every invocation, ensuring that the shell functions used by Claude Code hooks always target the active Python environment's venv regardless of which Python ran the installer.
+
+### Changed
+
+- **Install and upgrade scripts use fingerprint-keyed paths**: `install.sh` and `upgrade.sh` now call `ensure_venv()` to provision or reuse the fingerprint-keyed venv, replacing hard-coded `untracked/venv/` paths. QA scripts (`run_all.sh`, `run_tests.sh`, etc.) resolve `PYTHON_CMD` via `venv-include.bash` for the same reason.
+
 ## [3.6.0] - 2026-04-20
 
 ### Added
