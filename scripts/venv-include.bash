@@ -10,8 +10,42 @@ set -euo pipefail
 # Project root directory
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# Venv location (like PHP vendor/)
-VENV_DIR="${PROJECT_ROOT}/untracked/venv"
+# Plan 00099: venv is keyed by a Python-environment fingerprint so concurrent
+# containers from the same image share one venv while distinct Pythons
+# (pyenv vs distro, different minor versions, cross-arch) are kept apart.
+# Resolution precedence (highest first):
+#   1. $HOOKS_DAEMON_VENV_PATH (explicit override)
+#   2. untracked/venv-{fingerprint}/ (fingerprint-keyed)
+#   3. untracked/venv/ (legacy fallback, pre-v3.7.0)
+_resolve_venv_dir() {
+    if [ -n "${HOOKS_DAEMON_VENV_PATH:-}" ]; then
+        echo "$HOOKS_DAEMON_VENV_PATH"
+        return 0
+    fi
+    local fp_helper="${PROJECT_ROOT}/scripts/install/python_fingerprint.sh"
+    if [ -f "$fp_helper" ]; then
+        # shellcheck disable=SC1090
+        source "$fp_helper"
+        local fingerprint
+        if fingerprint=$(python_venv_fingerprint "${HOOKS_DAEMON_PYTHON:-python3}" 2>/dev/null); then
+            local keyed="${PROJECT_ROOT}/untracked/venv-${fingerprint}"
+            if [ -d "$keyed" ] && [ -f "$keyed/bin/python3" ]; then
+                echo "$keyed"
+                return 0
+            fi
+            # Fingerprint venv absent but helper worked — prefer keyed path for
+            # creation so new venvs land at the correct location.
+            if [ ! -d "${PROJECT_ROOT}/untracked/venv" ]; then
+                echo "$keyed"
+                return 0
+            fi
+        fi
+    fi
+    # Legacy fallback (pre-v3.7.0 installs)
+    echo "${PROJECT_ROOT}/untracked/venv"
+}
+
+VENV_DIR="$(_resolve_venv_dir)"
 VENV_PYTHON="${VENV_DIR}/bin/python3"
 VENV_PIP="${VENV_DIR}/bin/pip"
 

@@ -38,6 +38,8 @@ source "$INSTALL_LIB_DIR/prerequisites.sh"
 source "$INSTALL_LIB_DIR/project_detection.sh"
 # shellcheck source=install/venv.sh
 source "$INSTALL_LIB_DIR/venv.sh"
+# shellcheck source=install/python_fingerprint.sh
+source "$INSTALL_LIB_DIR/python_fingerprint.sh"
 # shellcheck source=install/hooks_deploy.sh
 source "$INSTALL_LIB_DIR/hooks_deploy.sh"
 # shellcheck source=install/gitignore.sh
@@ -74,7 +76,24 @@ if [ ! -d "$DAEMON_DIR" ]; then
 fi
 
 # Derived paths
-VENV_PYTHON="$DAEMON_DIR/untracked/venv/bin/python"
+# Plan 00099: resolve the existing venv by preferring a fingerprint-keyed path
+# for the current Python, then falling back to the legacy untracked/venv/ for
+# pre-v3.7.0 installs. ensure_venv below rebuilds/refreshes as needed.
+_resolve_existing_venv_python() {
+    local python_bin="${HOOKS_DAEMON_PYTHON:-python3}"
+    if declare -F python_venv_fingerprint > /dev/null; then
+        local fp
+        if fp=$(python_venv_fingerprint "$python_bin" 2>/dev/null); then
+            local keyed="$DAEMON_DIR/untracked/venv-$fp/bin/python"
+            if [ -x "$keyed" ]; then
+                echo "$keyed"
+                return 0
+            fi
+        fi
+    fi
+    echo "$DAEMON_DIR/untracked/venv/bin/python"
+}
+VENV_PYTHON="$(_resolve_existing_venv_python)"
 EXAMPLE_CONFIG="$DAEMON_DIR/.claude/hooks-daemon.yaml.example"
 SETTINGS_JSON_SOURCE="$DAEMON_DIR/.claude/settings.json"
 TARGET_CONFIG="$PROJECT_ROOT/.claude/hooks-daemon.yaml"
@@ -174,17 +193,17 @@ if [ "$ROLLBACK_REF" = "$TARGET_VERSION" ]; then
     print_success "Already at version $TARGET_VERSION"
     print_info "Running idempotent deployment steps to ensure files are current..."
 
-    # Check if venv was built for this version — recreate if stale
-    VENV_PATH="$DAEMON_DIR/untracked/venv"
-    if ! venv_version_matches "$VENV_PATH" "$TARGET_VERSION"; then
-        print_info "Venv is stale or unstamped — recreating for $TARGET_VERSION"
-        recreate_venv "$DAEMON_DIR"
+    # Plan 00099: ensure_venv uses a fingerprint-keyed venv path so concurrent
+    # environments (container vs host, different Pythons) don't clobber each
+    # other. Handles stale/missing stamps internally (recreate+restamp).
+    VENV_PATH=$(ensure_venv "$DAEMON_DIR" "$TARGET_VERSION" "${HOOKS_DAEMON_PYTHON:-python3}")
+    if [ -z "$VENV_PATH" ]; then
+        fail_fast "ensure_venv returned empty path"
+    fi
+    VENV_PYTHON="$VENV_PATH/bin/python"
 
-        if ! verify_venv "$VENV_PYTHON" "$DAEMON_DIR"; then
-            fail_fast "Virtual environment verification failed after recreate"
-        fi
-
-        stamp_venv_version "$VENV_PATH" "$TARGET_VERSION"
+    if ! verify_venv "$VENV_PYTHON" "$DAEMON_DIR"; then
+        fail_fast "Virtual environment verification failed"
     fi
 
     deploy_all_hooks "$PROJECT_ROOT" "$DAEMON_DIR" "normal"
@@ -532,13 +551,28 @@ print_success "Checked out $TARGET_VERSION"
 # ============================================================
 
 log_step "7" "Recreating virtual environment"
-recreate_venv "$DAEMON_DIR"
+
+# Plan 00099: use fingerprint-keyed venv so concurrent environments (container
+# vs host, different Pythons) each keep their own healthy venv. ensure_venv
+# rebuilds when the stamp is missing/stale and handles creation atomically.
+VENV_PATH=$(ensure_venv "$DAEMON_DIR" "$TARGET_VERSION" "${HOOKS_DAEMON_PYTHON:-python3}")
+if [ -z "$VENV_PATH" ]; then
+    fail_fast "ensure_venv returned empty path"
+fi
+VENV_PYTHON="$VENV_PATH/bin/python"
 
 if ! verify_venv "$VENV_PYTHON" "$DAEMON_DIR"; then
-    fail_fast "Virtual environment verification failed after recreate"
+    fail_fast "Virtual environment verification failed"
 fi
 
-stamp_venv_version "$DAEMON_DIR/untracked/venv" "$TARGET_VERSION"
+# Plan 00099: clean up pre-v3.7.0 legacy venv to avoid confusion. Only remove
+# the legacy path if we successfully provisioned a fingerprint-keyed venv at a
+# distinct location.
+LEGACY_VENV="$DAEMON_DIR/untracked/venv"
+if [ -d "$LEGACY_VENV" ] && [ "$VENV_PATH" != "$LEGACY_VENV" ]; then
+    print_info "Removing legacy pre-v3.7.0 venv at $LEGACY_VENV"
+    rm -rf "$LEGACY_VENV"
+fi
 
 # ============================================================
 # Step 8: Redeploy hook scripts
