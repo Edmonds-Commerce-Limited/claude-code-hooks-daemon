@@ -85,9 +85,9 @@ This file's lower half should list the tasks currently in this directory, so an 
 
 <!-- BEGIN TASK INDEX — regenerate when adding/removing tasks -->
 
-| File                               | Type  | Severity    | Applies to     | One-line summary                                                                                                            |
-| ---------------------------------- | ----- | ----------- | -------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `01-audit-markdown-frontmatter.md` | audit | recommended | v3.0.0..v3.2.1 | Find `.md` files whose YAML frontmatter was mangled by the pre-fix `markdown_table_formatter` and restore from git history. |
+| File                      | Type            | Severity    | Applies to | One-line summary                                                                                                            |
+| ------------------------- | --------------- | ----------- | ---------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `01-prune-legacy-venv.md` | workflow-change | recommended | pre-v3.7.0 | Verify the legacy `untracked/venv/` was auto-removed on upgrade; use `prune-venvs --legacy` to clean it up manually if not. |
 
 <!-- END TASK INDEX -->
 

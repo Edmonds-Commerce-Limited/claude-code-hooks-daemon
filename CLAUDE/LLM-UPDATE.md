@@ -1,5 +1,7 @@
 # Claude Code Hooks Daemon - LLM Update Guide
 
+> **v3.7.0+ venv layout change**: From v3.7.0, the venv is **fingerprint-keyed** — `untracked/venv-py{MM}-{fingerprint}/` instead of the legacy `untracked/venv/`. This lets the same project directory work in two different Python envs (e.g. YOLO container + desktop host) without corruption. The upgrader auto-provisions the fingerprint-keyed venv and, when upgrade verification succeeds, auto-deletes the legacy `untracked/venv/`. If you had a bespoke venv location or the auto-cleanup was skipped, run `$PYTHON -m claude_code_hooks_daemon.daemon.cli prune-venvs --legacy --dry-run` after upgrading to see what's left. Commands below that reference `untracked/venv/` are representative — the actual path after v3.7.0 is resolved dynamically by `scripts/venv-include.bash`.
+
 ## CRITICAL: Determine Your Location First
 
 **Before doing ANYTHING, determine where you are.** Working directory confusion is the #1 cause of upgrade failures.

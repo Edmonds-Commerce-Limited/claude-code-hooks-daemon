@@ -20,14 +20,31 @@ When `self_install_mode: true` in `.claude/hooks-daemon.yaml`, the daemon runs f
 
 ```
 /workspace/
-├── untracked/venv/              # Virtual environment
-├── untracked/socket             # Unix socket
-├── untracked/daemon.pid         # PID file
+├── untracked/venv-py{MM}-{fp}/  # Virtual environment (fingerprint-keyed, v3.7.0+)
+├── untracked/venv/              # Legacy (pre-v3.7.0) — auto-deleted on upgrade
+├── untracked/daemon-{host}.sock # Unix socket (hostname-scoped)
+├── untracked/daemon-{host}.pid  # PID file (hostname-scoped)
 ├── src/claude_code_hooks_daemon/  # Source code (not pip package)
 └── .claude/
     ├── hooks-daemon.yaml        # Config with self_install_mode: true
     └── hooks-daemon.env         # Sets HOOKS_DAEMON_ROOT_DIR
 ```
+
+### Why the venv is fingerprint-keyed (v3.7.0+)
+
+Pre-v3.7.0 all installs shared a single `untracked/venv/`. That corrupts when the same project directory is opened in two different Python environments — e.g. inside a YOLO container (Fedora `/usr/bin/python3`) **and** directly on the desktop host (pyenv, homebrew, distro, or different arch).
+
+v3.7.0 derives a fingerprint from `md5(sys.version | sys.base_prefix | platform.machine())[:8]` and uses it as the venv suffix. Two containers from the same image share a venv; different Pythons get different venvs and never collide. The daemon auto-detects stamp mismatches and rebuilds on first use in a new environment. CI sets `HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1` (or relies on `CI=true`) to bypass bootstrap.
+
+Manage venvs with:
+
+```bash
+$PYTHON -m claude_code_hooks_daemon.daemon.cli list-venvs
+$PYTHON -m claude_code_hooks_daemon.daemon.cli prune-venvs --legacy --dry-run
+$PYTHON -m claude_code_hooks_daemon.daemon.cli prune-venvs --all-except-current --force
+```
+
+The current-environment venv is never deleted, even with `--force`.
 
 ## Critical Paths
 

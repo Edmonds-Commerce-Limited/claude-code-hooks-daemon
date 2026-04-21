@@ -334,12 +334,12 @@ Each venv is ~150-250MB. Typical developer machine: 2 venvs (container + host). 
   - [x] ✅ TDD each flag combination — 9 unit tests passing
   - [x] ✅ Safety: never deletes current fingerprint venv; `--force` required for destructive runs
 
-### Phase 6: Documentation
+### Phase 6: Documentation ✅ Complete
 
-- [ ] ⬜ **Task 6.1**: Update `CLAUDE.md` — "Key Paths" section shows fingerprint-keyed path
-- [ ] ⬜ **Task 6.2**: Update `CLAUDE/SELF_INSTALL.md` — document fingerprint venv isolation + container/host rationale
-- [ ] ⬜ **Task 6.3**: Update `CLAUDE/LLM-INSTALL.md` + `CLAUDE/LLM-UPDATE.md`
-- [ ] ⬜ **Task 6.4**: Add post-upgrade task file under `CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/` (severity: recommended) pointing users with dual container+host setups at the new layout + `prune-venvs --legacy`
+- [x] ✅ **Task 6.1**: Update `CLAUDE.md` — "Key Paths" section now shows fingerprint-keyed path with fallback to legacy, plus `list-venvs`/`prune-venvs` references
+- [x] ✅ **Task 6.2**: Update `CLAUDE/SELF_INSTALL.md` — added fingerprint venv section with container/host rationale and management CLI commands
+- [x] ✅ **Task 6.3**: Update `CLAUDE/LLM-INSTALL.md` + `CLAUDE/LLM-UPDATE.md` with v3.7.0 venv-layout callouts
+- [x] ✅ **Task 6.4**: Added `CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/01-prune-legacy-venv.md` (severity: recommended) and updated README task index
 
 ### Phase 7: Integration Tests & QA
 
