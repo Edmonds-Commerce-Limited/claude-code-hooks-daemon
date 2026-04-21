@@ -127,6 +127,10 @@ handlers:
       enabled: true
       priority: 40
 
+    gh_pr_comments:        # Requires --comments flag for gh pr view
+      enabled: true
+      priority: 40
+
     validate_plan_number:  # Validates plan number format (001-, 002-, etc)
       enabled: false       # Enable for projects using CLAUDE/Plan/
       priority: 38

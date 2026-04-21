@@ -276,6 +276,11 @@ class HandlerID:
         config_key="gh_issue_comments",
         display_name="require-gh-issue-comments",
     )
+    GH_PR_COMMENTS = HandlerIDMeta(
+        class_name="GhPrCommentsHandler",
+        config_key="gh_pr_comments",
+        display_name="require-gh-pr-comments",
+    )
     YOLO_CONTAINER_DETECTION = HandlerIDMeta(
         class_name="YoloContainerDetectionHandler",
         config_key="yolo_container_detection",
@@ -540,6 +545,7 @@ HandlerKey = Literal[
     "lsp_enforcement",
     # Workflow handlers
     "gh_issue_comments",
+    "gh_pr_comments",
     "yolo_container_detection",
     "plan_time_estimates",
     "plan_workflow",

@@ -6,6 +6,7 @@ from .daemon_location_guard import DaemonLocationGuardHandler
 from .destructive_git import DestructiveGitHandler
 from .error_hiding_blocker import ErrorHidingBlockerHandler
 from .gh_issue_comments import GhIssueCommentsHandler
+from .gh_pr_comments import GhPrCommentsHandler
 from .git_stash import GitStashHandler
 from .markdown_organization import MarkdownOrganizationHandler
 from .npm_command import NpmCommandHandler
@@ -27,6 +28,7 @@ __all__ = [
     "DestructiveGitHandler",
     "ErrorHidingBlockerHandler",
     "GhIssueCommentsHandler",
+    "GhPrCommentsHandler",
     "GitStashHandler",
     "MarkdownOrganizationHandler",
     "NpmCommandHandler",
