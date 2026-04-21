@@ -51,16 +51,12 @@ def _extract_resolver(tmp: Path) -> Path:
     helper = tmp / "resolver.sh"
     helper.write_text(
         '#!/bin/bash\nPYTHON_CMD=""\nHOOKS_DAEMON_ROOT_DIR="${HOOKS_DAEMON_ROOT_DIR:-}"\n'
-        'PROJECT_PATH="${PROJECT_PATH:-$HOOKS_DAEMON_ROOT_DIR}"\n'
-        + resolver
-        + "\n"
+        'PROJECT_PATH="${PROJECT_PATH:-$HOOKS_DAEMON_ROOT_DIR}"\n' + resolver + "\n"
     )
     return helper
 
 
-def _run_resolver(
-    helper: Path, root_dir: Path, env_overrides: dict[str, str] | None = None
-) -> str:
+def _run_resolver(helper: Path, root_dir: Path, env_overrides: dict[str, str] | None = None) -> str:
     env = os.environ.copy()
     env["HOOKS_DAEMON_ROOT_DIR"] = str(root_dir)
     env["PROJECT_PATH"] = str(root_dir)
@@ -146,9 +142,7 @@ class TestLegacyFallback:
         result = _run_resolver(helper, root_dir=root)
         assert result == f"{root}/untracked/venv/bin/python"
 
-    def test_legacy_fallback_when_fingerprint_helper_missing(
-        self, tmp_path: Path
-    ) -> None:
+    def test_legacy_fallback_when_fingerprint_helper_missing(self, tmp_path: Path) -> None:
         """If the bash fingerprint helper isn't shipped, fall through cleanly."""
         helper = _extract_resolver(tmp_path)
         root = tmp_path / "project"
@@ -162,9 +156,7 @@ class TestLegacyFallback:
 class TestHookDaemonPythonOverride:
     """HOOKS_DAEMON_PYTHON lets the user pin a specific interpreter for fingerprinting."""
 
-    def test_honors_hooks_daemon_python_when_fingerprinting(
-        self, tmp_path: Path
-    ) -> None:
+    def test_honors_hooks_daemon_python_when_fingerprinting(self, tmp_path: Path) -> None:
         helper = _extract_resolver(tmp_path)
         root = tmp_path / "project"
         root.mkdir()

@@ -73,9 +73,7 @@ class TestBashPythonParity:
         """Running interpreter: bash-side and Python-side match exactly."""
         bash_fp = _bash_fingerprint(sys.executable)
         py_fp = _python_fingerprint(sys.executable)
-        assert bash_fp == py_fp, (
-            f"Parity violation!\n  bash: {bash_fp}\n  python: {py_fp}"
-        )
+        assert bash_fp == py_fp, f"Parity violation!\n  bash: {bash_fp}\n  python: {py_fp}"
 
     def test_fingerprint_format(self) -> None:
         """Both helpers emit the documented `pyMM-XXXXXXXX` format."""

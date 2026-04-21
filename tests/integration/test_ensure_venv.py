@@ -86,9 +86,7 @@ class TestEnsureVenvCreatesWhenMissing:
 
         assert not expected_venv.exists(), "Precondition: venv should not exist"
 
-        result = _run_bash(
-            f'ensure_venv "{daemon_dir}" "v99.0.0" "{sys.executable}"'
-        )
+        result = _run_bash(f'ensure_venv "{daemon_dir}" "v99.0.0" "{sys.executable}"')
         assert result.returncode == 0, f"ensure_venv failed: {result.stderr}"
         assert expected_venv.exists(), "ensure_venv did not create venv"
         assert (expected_venv / "bin" / "python").exists() or (
@@ -116,9 +114,7 @@ class TestEnsureVenvNoOpWhenMatching:
         marker = fake_venv / "SENTINEL"
         marker.write_text("must-survive-noop")
 
-        result = _run_bash(
-            f'ensure_venv "{daemon_dir}" "v99.0.0" "{sys.executable}"'
-        )
+        result = _run_bash(f'ensure_venv "{daemon_dir}" "v99.0.0" "{sys.executable}"')
         assert result.returncode == 0, f"ensure_venv failed: {result.stderr}"
         assert marker.exists(), "ensure_venv wrongly destroyed a matching venv"
         assert marker.read_text() == "must-survive-noop"
@@ -141,9 +137,7 @@ class TestEnsureVenvRecreatesOnStampMismatch:
         sentinel = stale_venv / "SENTINEL"
         sentinel.write_text("should-be-deleted")
 
-        result = _run_bash(
-            f'ensure_venv "{daemon_dir}" "v99.0.0" "{sys.executable}"'
-        )
+        result = _run_bash(f'ensure_venv "{daemon_dir}" "v99.0.0" "{sys.executable}"')
         assert result.returncode == 0, f"ensure_venv failed: {result.stderr}"
         assert stale_venv.exists(), "New venv should exist after recreate"
         assert not sentinel.exists(), "Stale venv contents should have been wiped"
@@ -159,7 +153,7 @@ class TestEnsureVenvCIGate:
         _minimal_daemon_dir(daemon_dir)
 
         result = _run_bash(
-            f'HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1 '
+            f"HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1 "
             f'ensure_venv "{daemon_dir}" "v99.0.0" "{sys.executable}"'
         )
         assert result.returncode == 0, f"ensure_venv failed: {result.stderr}"

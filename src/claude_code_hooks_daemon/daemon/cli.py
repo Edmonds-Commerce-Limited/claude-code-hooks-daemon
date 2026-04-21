@@ -1160,8 +1160,11 @@ def _directory_size_bytes(path: Path) -> int:
         try:
             if entry.is_file() and not entry.is_symlink():
                 total += entry.stat().st_size
-        except OSError:
-            continue
+        except OSError as exc:
+            print(
+                f"warning: could not stat {entry} while sizing {path}: {exc}",
+                file=sys.stderr,
+            )
     return total
 
 
@@ -1245,9 +1248,7 @@ def cmd_list_venvs(args: argparse.Namespace) -> int:
     current_fp = python_venv_fingerprint()
     print(f"Current Python-env fingerprint: {current_fp}")
     print()
-    print(
-        f"{'Fingerprint':<20} {'Stamp':<10} {'Size':>10}  {'Marker':<8} Path"
-    )
+    print(f"{'Fingerprint':<20} {'Stamp':<10} {'Size':>10}  {'Marker':<8} Path")
     print("-" * 80)
     for entry in entries:
         marker = "← current" if entry["is_current"] else ("legacy" if entry["is_legacy"] else "")
