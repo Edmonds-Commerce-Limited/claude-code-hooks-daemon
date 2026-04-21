@@ -28,6 +28,16 @@ def _make_venv(path: Path, stamp_version: str | None = None) -> None:
         (path / ".daemon-version").write_text(stamp_version)
 
 
+def _mark_self_install(project_root: Path) -> None:
+    """Stamp ``project_root`` with the self-install sentinel.
+
+    ``_daemon_untracked_dir`` uses the presence of ``src/claude_code_hooks_daemon/``
+    at the project root to route venv lookups to ``untracked/`` instead of
+    ``.claude/hooks-daemon/untracked/``.
+    """
+    (project_root / "src" / "claude_code_hooks_daemon").mkdir(parents=True, exist_ok=True)
+
+
 def _args(
     project_root: Path,
     *,
@@ -53,6 +63,7 @@ class TestListVenvs:
     def test_list_empty_when_no_venvs_exist(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
+        _mark_self_install(tmp_path)
         (tmp_path / "untracked").mkdir()
 
         with patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path):
@@ -65,6 +76,7 @@ class TestListVenvs:
     def test_list_shows_fingerprint_keyed_and_legacy(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
+        _mark_self_install(tmp_path)
         untracked = tmp_path / "untracked"
         untracked.mkdir()
         fp = python_venv_fingerprint()
@@ -88,6 +100,7 @@ class TestListVenvs:
     def test_list_json_mode_emits_machine_readable(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
+        _mark_self_install(tmp_path)
         untracked = tmp_path / "untracked"
         untracked.mkdir()
         fp = python_venv_fingerprint()
@@ -112,6 +125,7 @@ class TestPruneVenvs:
     def test_dry_run_lists_but_does_not_delete(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
+        _mark_self_install(tmp_path)
         untracked = tmp_path / "untracked"
         untracked.mkdir()
         fp = python_venv_fingerprint()
@@ -131,6 +145,7 @@ class TestPruneVenvs:
         assert "dry-run" in out.lower()
 
     def test_prune_legacy_removes_untracked_venv(self, tmp_path: Path) -> None:
+        _mark_self_install(tmp_path)
         untracked = tmp_path / "untracked"
         untracked.mkdir()
         fp = python_venv_fingerprint()
@@ -146,6 +161,7 @@ class TestPruneVenvs:
         assert (untracked / f"venv-{fp}").exists()  # current preserved
 
     def test_prune_all_except_current_keeps_current_fp_venv(self, tmp_path: Path) -> None:
+        _mark_self_install(tmp_path)
         untracked = tmp_path / "untracked"
         untracked.mkdir()
         fp = python_venv_fingerprint()
@@ -168,6 +184,7 @@ class TestPruneVenvs:
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """Destructive delete requires --force or --dry-run — otherwise abort."""
+        _mark_self_install(tmp_path)
         untracked = tmp_path / "untracked"
         untracked.mkdir()
         fp = python_venv_fingerprint()
@@ -186,6 +203,7 @@ class TestPruneVenvs:
 
     def test_prune_refuses_to_delete_current_fingerprint(self, tmp_path: Path) -> None:
         """Even with --all-except-current + --force, never touch current-env venv."""
+        _mark_self_install(tmp_path)
         untracked = tmp_path / "untracked"
         untracked.mkdir()
         fp = python_venv_fingerprint()
@@ -207,6 +225,7 @@ class TestEnumerateAndHelpers:
         assert rc == 0
 
     def test_enumerate_skips_non_directories_and_unrelated_names(self, tmp_path: Path) -> None:
+        _mark_self_install(tmp_path)
         untracked = tmp_path / "untracked"
         untracked.mkdir()
         (untracked / "not_a_dir.txt").write_text("irrelevant")
@@ -219,6 +238,7 @@ class TestEnumerateAndHelpers:
         assert rc == 0
 
     def test_enumerate_skips_venv_without_python_binary(self, tmp_path: Path) -> None:
+        _mark_self_install(tmp_path)
         untracked = tmp_path / "untracked"
         untracked.mkdir()
         broken = untracked / "venv-py311-badbadba"
@@ -240,6 +260,7 @@ class TestEnumerateAndHelpers:
     def test_prune_refuses_without_selection_flag(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
+        _mark_self_install(tmp_path)
         untracked = tmp_path / "untracked"
         untracked.mkdir()
         with patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path):
@@ -247,6 +268,79 @@ class TestEnumerateAndHelpers:
         assert rc == 1
         captured = capsys.readouterr()
         assert "--legacy" in captured.err or "--legacy" in captured.out
+
+
+class TestEnumerateVenvsInstallModes:
+    """Regression coverage: `_enumerate_venvs` must look in the right untracked dir.
+
+    Normal install: venvs live under ``$PROJECT/.claude/hooks-daemon/untracked/``.
+    Self install:   venvs live under ``$PROJECT/untracked/``.
+
+    Reported in untracked/hooks-daemon-post-install-venv-cleanup-broken.md:
+    ``list-venvs`` / ``prune-venvs --legacy`` returned empty for normal-install
+    users because the function hardcoded ``project_root / "untracked"``.
+    """
+
+    def _make_normal_install_layout(
+        self, tmp_path: Path, with_legacy: bool = True
+    ) -> tuple[Path, Path]:
+        """Build a fake normal-install project tree; return (untracked_dir, legacy)."""
+        untracked = tmp_path / ".claude" / "hooks-daemon" / "untracked"
+        untracked.mkdir(parents=True)
+        fp = python_venv_fingerprint()
+        _make_venv(untracked / f"venv-{fp}", stamp_version="v3.7.0")
+        legacy = untracked / "venv"
+        if with_legacy:
+            _make_venv(legacy, stamp_version="v3.5.0")
+        return untracked, legacy
+
+    def test_list_finds_venvs_in_normal_install_layout(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        untracked, _ = self._make_normal_install_layout(tmp_path)
+        fp = python_venv_fingerprint()
+
+        with patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path):
+            rc = cli.cmd_list_venvs(_args(tmp_path))
+
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "No venvs found" not in out, (
+            "Regression: normal-install venvs under .claude/hooks-daemon/untracked/ "
+            "were not detected"
+        )
+        assert fp in out
+        assert str(untracked) in out or str(untracked / f"venv-{fp}") in out
+
+    def test_prune_legacy_works_in_normal_install_layout(self, tmp_path: Path) -> None:
+        _, legacy = self._make_normal_install_layout(tmp_path)
+        assert legacy.exists()
+
+        with patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path):
+            rc = cli.cmd_prune_venvs(_args(tmp_path, legacy=True, force=True))
+
+        assert rc == 0
+        assert (
+            not legacy.exists()
+        ), "Regression: prune-venvs --legacy --force was a no-op in normal-install mode"
+
+    def test_self_install_layout_still_works(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # Self-install sentinel: daemon source at project root
+        (tmp_path / "src" / "claude_code_hooks_daemon").mkdir(parents=True)
+        _mark_self_install(tmp_path)
+        untracked = tmp_path / "untracked"
+        untracked.mkdir()
+        fp = python_venv_fingerprint()
+        _make_venv(untracked / f"venv-{fp}", stamp_version="v3.7.0")
+
+        with patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path):
+            rc = cli.cmd_list_venvs(_args(tmp_path))
+
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert fp in out
 
 
 class TestRepairUsesFingerprintKeyedPath:

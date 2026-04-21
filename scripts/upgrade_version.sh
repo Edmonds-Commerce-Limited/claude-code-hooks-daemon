@@ -206,6 +206,16 @@ if [ "$ROLLBACK_REF" = "$TARGET_VERSION" ]; then
         fail_fast "Virtual environment verification failed"
     fi
 
+    # Plan 00099: clean up pre-v3.7.0 legacy venv on idempotent re-runs too.
+    # The full upgrade path (Step 7) already does this, but multi-host projects
+    # hit the fast path on every host after the first upgrade — so the legacy
+    # venv lingered until manually removed. Match the slow-path cleanup exactly.
+    LEGACY_VENV="$DAEMON_DIR/untracked/venv"
+    if [ -d "$LEGACY_VENV" ] && [ "$VENV_PATH" != "$LEGACY_VENV" ]; then
+        print_info "Removing legacy pre-v3.7.0 venv at $LEGACY_VENV"
+        rm -rf "$LEGACY_VENV"
+    fi
+
     deploy_all_hooks "$PROJECT_ROOT" "$DAEMON_DIR" "normal"
 
     if [ -f "$SETTINGS_JSON_SOURCE" ]; then
