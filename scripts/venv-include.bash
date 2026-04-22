@@ -15,8 +15,10 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # (pyenv vs distro, different minor versions, cross-arch) are kept apart.
 # Resolution precedence (highest first):
 #   1. $HOOKS_DAEMON_VENV_PATH (explicit override)
-#   2. untracked/venv-{fingerprint}/ (fingerprint-keyed)
-#   3. untracked/venv/ (legacy fallback, pre-v3.7.0)
+#   2. untracked/venv-{fingerprint}/ (fingerprint-keyed, recomputed)
+#   3. untracked/venv-*/ (any existing fingerprint venv — handles mismatch
+#      between recomputed fingerprint and installer-picked Python)
+#   4. untracked/venv/ (legacy fallback, pre-v3.7.0)
 _resolve_venv_dir() {
     if [ -n "${HOOKS_DAEMON_VENV_PATH:-}" ]; then
         echo "$HOOKS_DAEMON_VENV_PATH"
@@ -33,12 +35,26 @@ _resolve_venv_dir() {
                 echo "$keyed"
                 return 0
             fi
-            # Fingerprint venv absent but helper worked — prefer keyed path for
-            # creation so new venvs land at the correct location.
-            if [ ! -d "${PROJECT_ROOT}/untracked/venv" ]; then
-                echo "$keyed"
-                return 0
-            fi
+        fi
+    fi
+    # Scan fallback: any existing venv-*/bin/python3. Handles installer-vs-resolver
+    # Python mismatch (installer used python3.13, resolver sees python3=3.9).
+    local candidate
+    for candidate in "${PROJECT_ROOT}"/untracked/venv-*; do
+        if [ -d "$candidate" ] && [ -f "$candidate/bin/python3" ]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    # Prefer keyed path for creation if fingerprint helper worked and no
+    # legacy venv exists, so new venvs land at the correct location.
+    if [ -f "$fp_helper" ] && [ ! -d "${PROJECT_ROOT}/untracked/venv" ]; then
+        local fingerprint_create
+        # shellcheck disable=SC1090
+        source "$fp_helper"
+        if fingerprint_create=$(python_venv_fingerprint "${HOOKS_DAEMON_PYTHON:-python3}" 2>/dev/null); then
+            echo "${PROJECT_ROOT}/untracked/venv-${fingerprint_create}"
+            return 0
         fi
     fi
     # Legacy fallback (pre-v3.7.0 installs)
