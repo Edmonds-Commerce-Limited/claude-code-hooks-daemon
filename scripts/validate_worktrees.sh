@@ -25,6 +25,16 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 WORKTREES_DIR="${PROJECT_ROOT}/untracked/worktrees"
+
+# Load SSOT venv resolver so fingerprint-keyed (v3.7.0+) and legacy
+# (pre-v3.7.0) layouts are honoured with one precedence.
+if ! declare -F resolve_existing_venv_python > /dev/null; then
+    if [ -f "${SCRIPT_DIR}/install/venv_resolver.sh" ]; then
+        # shellcheck source=install/venv_resolver.sh
+        source "${SCRIPT_DIR}/install/venv_resolver.sh"
+    fi
+fi
+
 # Track results
 declare -a PASSED_WTS=()
 declare -a FAILED_WTS=()
@@ -46,21 +56,34 @@ validate_worktree() {
         return 1
     fi
 
-    # Check venv exists
-    if [[ ! -f "${wt_dir}/untracked/venv/bin/python" ]]; then
+    # Resolve venv python via SSOT (handles v3.7.0+ fingerprint-keyed
+    # untracked/venv-*/ and legacy untracked/venv/ in one precedence).
+    local wt_venv_python
+    if declare -F resolve_existing_venv_python > /dev/null; then
+        wt_venv_python="$(resolve_existing_venv_python "${wt_dir}")"
+    else
+        wt_venv_python="${wt_dir}/untracked/venv/bin/python"
+    fi
+
+    if [[ ! -x "${wt_venv_python}" ]]; then
         echo -e "${RED}ERROR${NC}: Venv not found. Run: ./scripts/setup_worktree.sh ${wt_name}"
         FAILED_WTS+=("${wt_name} (NO VENV)")
         return 1
     fi
 
+    # pip lives alongside python inside the venv bin dir
+    local wt_venv_bin wt_venv_pip
+    wt_venv_bin="$(dirname "${wt_venv_python}")"
+    wt_venv_pip="${wt_venv_bin}/pip"
+
     # Verify editable install points to worktree
     local editable_location
-    editable_location=$("${wt_dir}/untracked/venv/bin/pip" show claude-code-hooks-daemon 2>/dev/null | grep "Editable project location" | cut -d' ' -f4- || echo "UNKNOWN")
+    editable_location=$("${wt_venv_pip}" show claude-code-hooks-daemon 2>/dev/null | grep "Editable project location" | cut -d' ' -f4- || echo "UNKNOWN")
     if [[ "${editable_location}" != "${wt_dir}" ]]; then
         echo -e "${RED}ERROR${NC}: Editable install points to wrong location"
         echo "  Expected: ${wt_dir}"
         echo "  Got: ${editable_location}"
-        echo "  Fix: cd ${wt_dir} && untracked/venv/bin/pip install -e '.[dev]'"
+        echo "  Fix: cd ${wt_dir} && ${wt_venv_pip} install -e '.[dev]'"
         FAILED_WTS+=("${wt_name} (WRONG VENV TARGET)")
         return 1
     fi

@@ -31,6 +31,29 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 WORKTREES_DIR="${PROJECT_ROOT}/untracked/worktrees"
 
+# Load SSOT venv helpers (v3.7.0+ fingerprint-keyed layout).
+# shellcheck source=install/output.sh
+source "${SCRIPT_DIR}/install/output.sh"
+# shellcheck source=install/python_fingerprint.sh
+source "${SCRIPT_DIR}/install/python_fingerprint.sh"
+# shellcheck source=install/venv.sh
+source "${SCRIPT_DIR}/install/venv.sh"
+# shellcheck source=install/venv_resolver.sh
+source "${SCRIPT_DIR}/install/venv_resolver.sh"
+
+# Read the daemon version string so ensure_venv can stamp the venv with it.
+_read_daemon_version() {
+    local version_file="$1"
+    python3 - "$version_file" <<'PY'
+import sys, re, pathlib
+path = pathlib.Path(sys.argv[1])
+match = re.search(r'__version__\s*=\s*"([^"]+)"', path.read_text())
+if not match:
+    sys.exit("version.py missing __version__")
+print(match.group(1))
+PY
+}
+
 usage() {
     echo "Usage: $0 <branch-name> [base-branch]"
     echo ""
@@ -100,18 +123,22 @@ else
 fi
 echo -e "${GREEN}✓${NC} Worktree created"
 
-# Step 4: Create Python venv
-echo -e "${YELLOW}→${NC} Creating Python venv..."
-python3 -m venv "${WORKTREE_DIR}/untracked/venv"
-echo -e "${GREEN}✓${NC} Venv created at ${WORKTREE_DIR}/untracked/venv"
+# Step 4: Create fingerprint-keyed Python venv via SSOT helper.
+# ensure_venv picks untracked/venv-{fingerprint}/ so concurrent containers
+# with the same Python share one venv, and distinct Pythons don't collide.
+DAEMON_VERSION="$(_read_daemon_version "${WORKTREE_DIR}/src/claude_code_hooks_daemon/version.py")"
+echo -e "${YELLOW}→${NC} Creating Python venv (fingerprint-keyed) via uv sync..."
+WT_VENV_PATH="$(ensure_venv "${WORKTREE_DIR}" "v${DAEMON_VERSION}" python3)"
+if [[ -z "${WT_VENV_PATH}" ]] || [[ ! -x "${WT_VENV_PATH}/bin/python" ]]; then
+    echo -e "${RED}✗${NC} Failed to create venv via ensure_venv"
+    exit 1
+fi
+WT_VENV_PIP="${WT_VENV_PATH}/bin/pip"
+echo -e "${GREEN}✓${NC} Venv created at ${WT_VENV_PATH}"
 
-# Step 5: Install dependencies in editable mode
-echo -e "${YELLOW}→${NC} Installing dependencies (pip install -e '.[dev]')..."
-"${WORKTREE_DIR}/untracked/venv/bin/pip" install -e "${WORKTREE_DIR}[dev]" --quiet
-echo -e "${GREEN}✓${NC} Dependencies installed"
-
-# Step 6: Verify editable install points to correct source
-EDITABLE_LOCATION=$("${WORKTREE_DIR}/untracked/venv/bin/pip" show claude-code-hooks-daemon 2>/dev/null | grep "Editable project location" | cut -d' ' -f4-)
+# Step 5: Verify editable install points to correct source
+# uv sync already installed the package editable via pyproject; just verify.
+EDITABLE_LOCATION=$("${WT_VENV_PIP}" show claude-code-hooks-daemon 2>/dev/null | grep "Editable project location" | cut -d' ' -f4-)
 if [[ "${EDITABLE_LOCATION}" == "${WORKTREE_DIR}" ]]; then
     echo -e "${GREEN}✓${NC} Editable install points to worktree source: ${EDITABLE_LOCATION}"
 else
@@ -137,7 +164,7 @@ echo -e "${GREEN}=== Worktree Ready ===${NC}"
 echo ""
 echo "Quick start:"
 echo "  cd ${WORKTREE_DIR}"
-echo "  PYTHON=${WORKTREE_DIR}/untracked/venv/bin/python"
+echo "  PYTHON=${WT_VENV_PATH}/bin/python"
 echo ""
 echo "Run QA:"
 echo "  cd ${WORKTREE_DIR} && ./scripts/qa/run_all.sh"
@@ -149,5 +176,5 @@ echo ""
 echo "Agent prompt template:"
 echo "  You are working in a git worktree at ${WORKTREE_DIR}/"
 echo "  DO NOT work in /workspace - only work in YOUR worktree directory."
-echo "  PYTHON=${WORKTREE_DIR}/untracked/venv/bin/python"
+echo "  PYTHON=${WT_VENV_PATH}/bin/python"
 echo "  Run ./scripts/qa/run_all.sh before committing."

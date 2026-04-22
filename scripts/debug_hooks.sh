@@ -6,9 +6,23 @@
 
 set -euo pipefail
 
-VENV_PYTHON="untracked/venv/bin/python"
 BACKUP_FILE=".claude/hooks-daemon.yaml.debug_backup"
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Load SSOT venv resolver (v3.7.0+ fingerprint-keyed + legacy fallback).
+if [ -f "${SCRIPT_DIR}/install/venv_resolver.sh" ]; then
+    # shellcheck source=install/venv_resolver.sh
+    source "${SCRIPT_DIR}/install/venv_resolver.sh"
+fi
+
+# Self-install: daemon_dir IS the project root. resolve_existing_venv_python
+# returns an absolute path, so we no longer need the legacy relative path.
+if declare -F resolve_existing_venv_python > /dev/null; then
+    VENV_PYTHON="$(resolve_existing_venv_python "$PROJECT_ROOT")"
+else
+    VENV_PYTHON="$PROJECT_ROOT/untracked/venv/bin/python"
+fi
 
 # Find daemon socket in project's untracked directory
 # Supports both suffixed (container) and unsuffixed (desktop) paths

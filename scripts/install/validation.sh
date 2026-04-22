@@ -166,9 +166,15 @@ try:
     from claude_code_hooks_daemon.install import ClientInstallValidator
 
     project_root = Path("PROJECT_ROOT_PLACEHOLDER")
+    venv_python = Path("VENV_PYTHON_PLACEHOLDER")
 
-    # Run post-install validation
-    result = ClientInstallValidator.validate_post_install(project_root)
+    # Run post-install validation. Pass the bash-resolved venv_python so the
+    # Python-side verifier uses the same interpreter the installer just
+    # provisioned (fingerprint-keyed or legacy), instead of re-resolving and
+    # risking a mismatch.
+    result = ClientInstallValidator.validate_post_install(
+        project_root, venv_python=venv_python
+    )
 
     # Print warnings
     for warning in result.warnings:
@@ -194,6 +200,7 @@ PYTHON_EOF
     # Replace placeholders
     validation_script="${validation_script//PROJECT_ROOT_PLACEHOLDER/$project_root}"
     validation_script="${validation_script//DAEMON_DIR_PLACEHOLDER/$daemon_dir}"
+    validation_script="${validation_script//VENV_PYTHON_PLACEHOLDER/$venv_python}"
 
     # Run validation
     local validation_output

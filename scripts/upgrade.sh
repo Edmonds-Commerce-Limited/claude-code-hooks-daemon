@@ -147,10 +147,29 @@ fi
 _ok "Daemon directory: $DAEMON_DIR"
 
 # Step 4: Best-effort daemon stop (before checkout)
-VENV_PYTHON="$DAEMON_DIR/untracked/venv/bin/python"
+# Resolve any existing venv python. v3.7.0+ uses fingerprint-keyed dirs
+# (untracked/venv-{fp}/), pre-v3.7.0 used untracked/venv/. Prefer an
+# executable fingerprint-keyed path when present, fall back to the legacy
+# path otherwise. We cannot source the SSOT helper here because Layer 1 may
+# be run standalone (curl | bash) before any scripts/install/ checkout.
+VENV_PYTHON=""
+for _vp in "$DAEMON_DIR"/untracked/venv-*/bin/python; do
+    if [ -x "$_vp" ]; then
+        VENV_PYTHON="$_vp"
+        break
+    fi
+done
+unset _vp
+if [ -z "$VENV_PYTHON" ]; then
+    VENV_PYTHON="$DAEMON_DIR/untracked/venv/bin/python"
+fi
 if [ -f "$VENV_PYTHON" ]; then
     _info "Stopping daemon..."
-    "$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
+    # Best-effort stop: failure is non-fatal — the subsequent checkout +
+    # reinstall re-provisions cleanly. Explicit `if` avoids bulk error-hiding.
+    if ! "$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli stop 2> /dev/null; then
+        :
+    fi
     sleep 1
 fi
 

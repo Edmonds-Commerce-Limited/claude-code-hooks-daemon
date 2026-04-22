@@ -18,6 +18,18 @@ if [ -z "${OUTPUT_SH_LOADED+x}" ]; then
     source "$INSTALL_LIB_DIR/output.sh"
 fi
 
+# Ensure the SSOT venv resolver is loaded so get_venv_python can honour the
+# fingerprint-keyed layout (v3.7.0+) with scan-fallback (v3.8.1+) and the
+# legacy path (pre-v3.7.0) in one consistent precedence.
+if ! declare -F resolve_existing_venv_python > /dev/null; then
+    _pd_helper_dir="$(dirname "${BASH_SOURCE[0]}")"
+    if [ -f "$_pd_helper_dir/venv_resolver.sh" ]; then
+        # shellcheck source=venv_resolver.sh
+        source "$_pd_helper_dir/venv_resolver.sh"
+    fi
+    unset _pd_helper_dir
+fi
+
 #
 # detect_project_root() - Find project root by walking up directory tree
 #
@@ -220,6 +232,11 @@ get_daemon_dir() {
 #
 # get_venv_python() - Get path to venv Python binary based on mode
 #
+# Resolution delegates to the SSOT helper resolve_existing_venv_python so the
+# fingerprint-keyed layout (v3.7.0+), scan-fallback for fingerprint mismatch
+# (v3.8.1+), and legacy untracked/venv/ (pre-v3.7.0) are all honoured with
+# the same precedence used by skills/hooks-daemon/scripts/_resolve-venv.sh.
+#
 # Args:
 #   $1 - Project root path
 #   $2 - Install mode ("self-install" or "normal")
@@ -235,10 +252,20 @@ get_venv_python() {
         fail_fast "get_venv_python: project_root parameter required"
     fi
 
+    local daemon_dir
     if [ "$install_mode" = "self-install" ]; then
-        echo "$project_root/untracked/venv/bin/python"
+        daemon_dir="$project_root"
     else
-        echo "$project_root/.claude/hooks-daemon/untracked/venv/bin/python"
+        daemon_dir="$project_root/.claude/hooks-daemon"
+    fi
+
+    if declare -F resolve_existing_venv_python > /dev/null; then
+        resolve_existing_venv_python "$daemon_dir"
+    else
+        # Defensive fallback: helper wasn't sourced. Preserve the legacy path
+        # so the caller's own "venv missing" error path still fires rather
+        # than crashing inside this helper.
+        echo "$daemon_dir/untracked/venv/bin/python"
     fi
 }
 

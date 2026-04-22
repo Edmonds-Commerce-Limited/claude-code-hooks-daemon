@@ -40,6 +40,8 @@ source "$INSTALL_LIB_DIR/project_detection.sh"
 source "$INSTALL_LIB_DIR/venv.sh"
 # shellcheck source=install/python_fingerprint.sh
 source "$INSTALL_LIB_DIR/python_fingerprint.sh"
+# shellcheck source=install/venv_resolver.sh
+source "$INSTALL_LIB_DIR/venv_resolver.sh"
 # shellcheck source=install/hooks_deploy.sh
 source "$INSTALL_LIB_DIR/hooks_deploy.sh"
 # shellcheck source=install/gitignore.sh
@@ -76,24 +78,12 @@ if [ ! -d "$DAEMON_DIR" ]; then
 fi
 
 # Derived paths
-# Plan 00099: resolve the existing venv by preferring a fingerprint-keyed path
-# for the current Python, then falling back to the legacy untracked/venv/ for
-# pre-v3.7.0 installs. ensure_venv below rebuilds/refreshes as needed.
-_resolve_existing_venv_python() {
-    local python_bin="${HOOKS_DAEMON_PYTHON:-python3}"
-    if declare -F python_venv_fingerprint > /dev/null; then
-        local fp
-        if fp=$(python_venv_fingerprint "$python_bin" 2>/dev/null); then
-            local keyed="$DAEMON_DIR/untracked/venv-$fp/bin/python"
-            if [ -x "$keyed" ]; then
-                echo "$keyed"
-                return 0
-            fi
-        fi
-    fi
-    echo "$DAEMON_DIR/untracked/venv/bin/python"
-}
-VENV_PYTHON="$(_resolve_existing_venv_python)"
+# v3.7.0+ venvs are fingerprint-keyed; v3.8.1 added a scan-fallback for the
+# fingerprint-mismatch case (installer used python3.13, resolver's python3
+# is 3.9). The shared helper implements the same precedence as
+# src/.../skills/hooks-daemon/scripts/_resolve-venv.sh so install-time and
+# skill-time resolvers always agree. ensure_venv rebuilds/refreshes below.
+VENV_PYTHON="$(resolve_existing_venv_python "$DAEMON_DIR")"
 EXAMPLE_CONFIG="$DAEMON_DIR/.claude/hooks-daemon.yaml.example"
 SETTINGS_JSON_SOURCE="$DAEMON_DIR/.claude/settings.json"
 TARGET_CONFIG="$PROJECT_ROOT/.claude/hooks-daemon.yaml"
