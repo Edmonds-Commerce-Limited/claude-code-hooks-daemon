@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.8.0] - 2026-04-22
+
+### Fixed
+
+- **Hooks-daemon skill wrapper scripts broken on v3.7.0+ installs**: The `/hooks-daemon` skill wrappers (`daemon-cli.sh`, `health-check.sh`, `init-handlers.sh`) hardcoded the pre-v3.7.0 venv path `$DAEMON_DIR/untracked/venv/bin/python`. On fresh v3.7.0 installs with only a fingerprint-keyed venv at `untracked/venv-py{MM}-{fp}/`, every skill invocation died with "Python venv not found: …/untracked/venv/bin/python" and the skill was unusable. A new shared helper `_resolve-venv.sh` now ships alongside the wrappers and applies the same resolution precedence as `init.sh`'s `_resolve_python_cmd()`: `$HOOKS_DAEMON_VENV_PATH` (explicit override) → `untracked/venv-{fingerprint}/bin/python` (v3.7.0+) → `untracked/venv/bin/python` (legacy fallback). All three wrappers now source the helper. The skill is restored on v3.7.0+ installs without regressing pre-v3.7.0 layouts.
+- **Venv cleanup and inspection broken in normal-install mode**: The post-install cleanup and `list-venvs`/`prune-venvs` inspection paths resolved against `self_install_mode` defaults and failed silently in normal-install setups. Fixed path resolution so both modes behave identically.
+
+### Added
+
+- **`gh_pr_comments` handler**: `gh pr view <N>` without `--comments` is now blocked by a `PreToolUse` handler at priority 40. PR comments often contain review feedback and decisions not in the PR body; requiring the flag prevents agents from missing critical context. `gh pr view <N> --comments` and `gh pr view <N> --json title,body,comments` are allowed. Mirrors the existing `gh_issue_comments` handler.
+
 ## [3.7.0] - 2026-04-21
 
 ### Added

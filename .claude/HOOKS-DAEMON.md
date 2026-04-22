@@ -1,10 +1,10 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-04-20 (v3.6.0) by `generate-docs`. Regenerate: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-docs`
+> Generated on 2026-04-21 (v3.8.0) by `generate-docs`. Regenerate: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-docs`
 
 ## Active Handlers
 
-### PreToolUse (32 handlers)
+### PreToolUse (33 handlers)
 
 | Priority | Handler | Behavior | Description |
 |----------|---------|----------|-------------|
@@ -29,6 +29,7 @@
 | 36 | task_tdd_advisor | ADVISORY | Advise on TDD workflow when spawning Task agents for implementation work |
 | 38 | lsp_enforcement | BLOCKING | Enforce LSP tool usage instead of Grep/Bash grep for symbol lookups |
 | 40 | gh_issue_comments | BLOCKING | Ensure gh issue view commands always include --comments flag |
+| 40 | gh_pr_comments | BLOCKING | Ensure gh pr view commands always include --comments flag |
 | 41 | validate_plan_number | ADVISORY | Validate plan folder numbering to ensure sequential plans |
 | 42 | global_npm_advisor | NON-TERMINAL | Advise on global npm/yarn package installations |
 | 45 | plan_time_estimates | ADVISORY | Block time estimates in plan documents |
