@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from claude_code_hooks_daemon.constants import Timeout
+from claude_code_hooks_daemon.daemon.paths import resolve_existing_venv_python
 from claude_code_hooks_daemon.utils.hook_registration import (
     detect_duplicate_hooks,
     detect_legacy_hook_commands,
@@ -98,13 +99,17 @@ class ClientInstallValidator:
         )
 
     @staticmethod
-    def validate_post_install(project_root: Path) -> ValidationResult:
+    def validate_post_install(
+        project_root: Path, venv_python: Path | None = None
+    ) -> ValidationResult:
         """Run all post-installation verification checks.
 
         Ensures the installation completed correctly and config is sane.
 
         Args:
             project_root: Project root directory
+            venv_python: Optional explicit path to venv's bin/python,
+                forwarded to :meth:`validate_daemon_can_start`.
 
         Returns:
             ValidationResult with any errors or warnings
@@ -133,7 +138,9 @@ class ClientInstallValidator:
         warnings.extend(result.warnings)
 
         # Check 5: Verify daemon can actually start (catches missing dependencies)
-        result = ClientInstallValidator.validate_daemon_can_start(project_root)
+        result = ClientInstallValidator.validate_daemon_can_start(
+            project_root, venv_python=venv_python
+        )
         errors.extend(result.errors)
         warnings.extend(result.warnings)
 
@@ -431,7 +438,7 @@ class ClientInstallValidator:
                     f"Expected daemon paths for client installation:\n"
                     f"  Daemon root: {project_root}/.claude/hooks-daemon/\n"
                     f"  Source:      {project_root}/.claude/hooks-daemon/src/\n"
-                    f"  Venv:        {project_root}/.claude/hooks-daemon/untracked/venv/\n"
+                    f"  Venv:        {project_root}/.claude/hooks-daemon/untracked/venv-{{fingerprint}}/\n"
                     f"  Runtime:     {project_root}/.claude/hooks-daemon/untracked/*.sock\n"
                     f"\n"
                     f"Installation appears to have added self_install_mode incorrectly.\n"
@@ -498,11 +505,17 @@ class ClientInstallValidator:
         return ValidationResult(passed=True, errors=[], warnings=warnings)
 
     @staticmethod
-    def validate_daemon_can_start(project_root: Path) -> ValidationResult:
+    def validate_daemon_can_start(
+        project_root: Path, venv_python: Path | None = None
+    ) -> ValidationResult:
         """Verify daemon can start with the installed configuration.
 
         Args:
             project_root: Project root to check
+            venv_python: Optional explicit path to venv's bin/python. If not
+                supplied, the fingerprint-keyed layout is resolved via
+                ``resolve_existing_venv_python`` (with scan-fallback and legacy
+                fallback for pre-v3.7.0 installs).
 
         Returns:
             ValidationResult
@@ -510,9 +523,11 @@ class ClientInstallValidator:
         errors: list[str] = []
         warnings: list[str] = []
 
-        # Find venv python
+        # Resolve venv python using the shared SSOT precedence:
+        # env override -> fingerprint-match -> scan any venv-* -> legacy venv/
         daemon_dir = project_root / ".claude" / "hooks-daemon"
-        venv_python = daemon_dir / "untracked" / "venv" / "bin" / "python"
+        if venv_python is None:
+            venv_python = resolve_existing_venv_python(daemon_dir)
 
         if not venv_python.exists():
             errors.append(

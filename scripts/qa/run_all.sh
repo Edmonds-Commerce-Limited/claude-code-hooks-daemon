@@ -12,6 +12,18 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
+# Resolve venv python via SSOT so fingerprint-keyed (v3.7.0+) and legacy
+# (pre-v3.7.0) layouts are both honoured.
+if [ -f "${PROJECT_ROOT}/scripts/install/venv_resolver.sh" ]; then
+    # shellcheck source=../install/venv_resolver.sh
+    source "${PROJECT_ROOT}/scripts/install/venv_resolver.sh"
+fi
+if declare -F resolve_existing_venv_python > /dev/null; then
+    VENV_PYTHON="$(resolve_existing_venv_python "${PROJECT_ROOT}")"
+else
+    VENV_PYTHON="${PROJECT_ROOT}/untracked/venv/bin/python"
+fi
+
 cd "${PROJECT_ROOT}"
 
 echo "========================================"
@@ -25,7 +37,7 @@ OVERALL_EXIT_CODE=0
 # Run each check, capturing exit codes
 echo "1. Running Magic Value Check..."
 echo "----------------------------------------"
-if ! "${PROJECT_ROOT}/untracked/venv/bin/python" "${SCRIPT_DIR}/check_magic_values.py" --json; then
+if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/check_magic_values.py" --json; then
     OVERALL_EXIT_CODE=1
     echo "❌ Magic value check FAILED"
 else
@@ -105,7 +117,7 @@ echo ""
 
 echo "9. Running Error Hiding Audit..."
 echo "----------------------------------------"
-if ! "${PROJECT_ROOT}/untracked/venv/bin/python" "${SCRIPT_DIR}/audit_error_hiding.py" --json; then
+if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/audit_error_hiding.py" --json; then
     OVERALL_EXIT_CODE=1
     echo "❌ Error hiding audit FAILED"
 else
@@ -115,7 +127,7 @@ echo ""
 
 echo "10. Running Skill Reference Check..."
 echo "----------------------------------------"
-if ! "${PROJECT_ROOT}/untracked/venv/bin/python" "${SCRIPT_DIR}/check_skill_references.py" --json; then
+if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/check_skill_references.py" --json; then
     OVERALL_EXIT_CODE=1
     echo "❌ Skill reference check FAILED"
 else

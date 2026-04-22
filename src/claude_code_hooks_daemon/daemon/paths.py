@@ -104,6 +104,60 @@ def get_venv_path(project_dir: Path | str) -> Path:
     return untracked_dir / f"venv-{python_venv_fingerprint()}"
 
 
+def resolve_existing_venv_python(daemon_dir: Path | str) -> Path:
+    """Resolve the bin/python of an already-installed venv under ``daemon_dir``.
+
+    Precedence (matches
+    ``src/claude_code_hooks_daemon/skills/hooks-daemon/scripts/_resolve-venv.sh``
+    so Python-side and bash-side resolvers agree):
+
+    1. ``$HOOKS_DAEMON_VENV_PATH/bin/python`` — explicit override
+    2. ``{daemon_dir}/untracked/venv-{current-fingerprint}/bin/python`` — fingerprint match
+    3. First executable ``{daemon_dir}/untracked/venv-*/bin/python`` — scan fallback
+    4. ``{daemon_dir}/untracked/venv/bin/python`` — legacy (pre-v3.7.0)
+
+    The scan fallback (step 3) handles the case where the installer built
+    the venv under one interpreter (e.g. ``/usr/bin/python3.13`` →
+    fingerprint ``py313-956ed987``) but the resolver's current Python is
+    a different interpreter (e.g. ``python3`` → 3.9 → fingerprint
+    ``py39-3bb0ae3d``). The venv's own ``bin/python`` is a symlink to the
+    installer's chosen base interpreter, so the scanned venv is fully
+    usable regardless of the resolver's current PATH.
+
+    Step 4 is returned without an existence check so callers can produce
+    a useful "venv missing" error message that still mentions the legacy
+    path (relevant for brand-new installs where nothing has been
+    provisioned yet).
+
+    Args:
+        daemon_dir: Daemon installation directory (holds ``untracked/``).
+          In client installs: ``{project}/.claude/hooks-daemon``.
+          In self-install mode: the project root itself.
+
+    Returns:
+        Absolute path to the resolved ``bin/python``.
+    """
+    daemon_path = Path(daemon_dir)
+
+    override = os.environ.get("HOOKS_DAEMON_VENV_PATH")
+    if override:
+        return Path(override) / "bin" / "python"
+
+    untracked = daemon_path / "untracked"
+
+    keyed = untracked / f"venv-{python_venv_fingerprint()}" / "bin" / "python"
+    if keyed.is_file() and os.access(keyed, os.X_OK):
+        return keyed
+
+    if untracked.is_dir():
+        for candidate_dir in sorted(untracked.glob("venv-*")):
+            candidate = candidate_dir / "bin" / "python"
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return candidate
+
+    return untracked / "venv" / "bin" / "python"
+
+
 def get_project_hash(project_path: Path | str) -> str:
     """
     Generate a short hash from the absolute project path.

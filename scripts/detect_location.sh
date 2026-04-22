@@ -22,6 +22,14 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Load SSOT venv resolver (v3.7.0+ fingerprint-keyed layout + legacy fallback).
+if [ -f "${SCRIPT_DIR}/install/venv_resolver.sh" ]; then
+    # shellcheck source=install/venv_resolver.sh
+    source "${SCRIPT_DIR}/install/venv_resolver.sh"
+fi
+
 # Colors for output (only when stdout is a terminal)
 if [ -t 1 ]; then
     RED='\033[0;31m'
@@ -127,10 +135,18 @@ except Exception:
 
     if [ "$local_self_install" = "true" ]; then
         echo "Mode: self-install (development)" >&2
-        echo "Python: $PROJECT_ROOT/untracked/venv/bin/python" >&2
+        if declare -F resolve_existing_venv_python > /dev/null; then
+            echo "Python: $(resolve_existing_venv_python "$PROJECT_ROOT")" >&2
+        else
+            echo "Python: $PROJECT_ROOT/untracked/venv/bin/python" >&2
+        fi
     elif [ -d "$HOOKS_DAEMON_DIR" ]; then
         echo "Mode: normal installation" >&2
-        echo "Python: $HOOKS_DAEMON_DIR/untracked/venv/bin/python" >&2
+        if declare -F resolve_existing_venv_python > /dev/null; then
+            echo "Python: $(resolve_existing_venv_python "$HOOKS_DAEMON_DIR")" >&2
+        else
+            echo "Python: $HOOKS_DAEMON_DIR/untracked/venv/bin/python" >&2
+        fi
     fi
 
     exit 0

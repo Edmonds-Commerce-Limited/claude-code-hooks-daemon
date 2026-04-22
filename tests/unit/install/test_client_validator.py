@@ -698,8 +698,10 @@ class TestValidatePostInstall:
             return_value=daemon_error,
         ) as mock_check:
             result = ClientInstallValidator.validate_post_install(project_root)
-            # validate_daemon_can_start must be called
-            mock_check.assert_called_once_with(project_root)
+            # validate_daemon_can_start must be called; venv_python kwarg is
+            # forwarded (None when caller didn't supply an explicit path so
+            # validate_daemon_can_start resolves via the SSOT precedence).
+            mock_check.assert_called_once_with(project_root, venv_python=None)
             # Post-install must FAIL when daemon can't start
             assert result.passed is False
             assert any("mdformat" in err for err in result.errors)
@@ -740,3 +742,78 @@ class TestValidatePostInstall:
         result = ClientInstallValidator.validate_post_install(project_root)
         assert result.passed is False
         assert any("self_install_mode: true" in err for err in result.errors)
+
+
+class TestValidateDaemonCanStartVenvResolution:
+    """Regression tests for validate_daemon_can_start's venv-python resolution.
+
+    v3.8.2 fix: the post-install verifier used to hardcode
+    ``{daemon_dir}/untracked/venv/bin/python`` (the pre-v3.7.0 legacy
+    path). The v3.7.0 upgrader auto-deletes that directory after the
+    fingerprint-keyed venv is confirmed healthy, so every upgrade ran to
+    completion but then aborted the verifier with "Python interpreter not
+    found" even on fully-healthy installs.
+
+    The fix: accept an optional explicit ``venv_python`` path from the
+    bash caller (which already resolved the fingerprint-keyed venv), OR
+    fall back to :func:`resolve_existing_venv_python` which uses the same
+    SSOT 4-step precedence as the shipped skill helper.
+    """
+
+    def test_uses_explicit_venv_python_when_supplied(self, tmp_path):
+        """When venv_python is passed, it is used verbatim (no resolution)."""
+        project_root = tmp_path / "project"
+        daemon_dir = project_root / ".claude" / "hooks-daemon"
+        daemon_dir.mkdir(parents=True)
+
+        # Point at a non-existent path to prove the function uses our supplied
+        # path rather than re-resolving something that exists elsewhere.
+        explicit = tmp_path / "custom" / "bin" / "python"
+        result = ClientInstallValidator.validate_daemon_can_start(
+            project_root, venv_python=explicit
+        )
+        assert result.passed is False
+        assert any(str(explicit) in err for err in result.errors)
+
+    def test_finds_fingerprint_keyed_venv_when_no_explicit_path(self, tmp_path):
+        """Without an explicit path, resolves via SSOT (not the legacy path).
+
+        The legacy ``untracked/venv/bin/python`` does not exist; the
+        fingerprint-keyed ``untracked/venv-{fp}/bin/python`` does. The
+        verifier must pick the fingerprint-keyed one.
+        """
+        import stat as _stat
+
+        from claude_code_hooks_daemon.daemon.paths import python_venv_fingerprint
+
+        project_root = tmp_path / "project"
+        daemon_dir = project_root / ".claude" / "hooks-daemon"
+        venv_bin = daemon_dir / "untracked" / f"venv-{python_venv_fingerprint()}" / "bin"
+        venv_bin.mkdir(parents=True)
+        fake_python = venv_bin / "python"
+        # Script that exits non-zero so import check fails but *existence* passes.
+        # This proves the verifier found the fingerprint-keyed path instead of
+        # falling through to the missing legacy path.
+        fake_python.write_text("#!/bin/sh\nexit 1\n")
+        fake_python.chmod(
+            fake_python.stat().st_mode | _stat.S_IXUSR | _stat.S_IXGRP | _stat.S_IXOTH
+        )
+
+        result = ClientInstallValidator.validate_daemon_can_start(project_root)
+        # The "Python interpreter not found" branch must NOT fire:
+        assert not any("Python interpreter not found" in err for err in result.errors)
+
+    def test_legacy_path_used_only_as_final_fallback(self, tmp_path):
+        """When nothing exists on disk, error mentions the legacy path.
+
+        Preserves the historic diagnostic for brand-new installs where no
+        venv has been provisioned yet.
+        """
+        project_root = tmp_path / "project"
+        daemon_dir = project_root / ".claude" / "hooks-daemon"
+        daemon_dir.mkdir(parents=True)
+
+        result = ClientInstallValidator.validate_daemon_can_start(project_root)
+        assert result.passed is False
+        legacy = daemon_dir / "untracked" / "venv" / "bin" / "python"
+        assert any(str(legacy) in err for err in result.errors)

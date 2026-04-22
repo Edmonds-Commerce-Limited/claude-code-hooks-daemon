@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.8.2] - 2026-04-22
+
+### Fixed
+
+- **Hardcoded legacy `untracked/venv/bin/python` paths across install, upgrade, QA, and diagnostic scripts**: v3.7.0 moved the venv to `untracked/venv-py{MM}-{fp}/` and auto-deletes the legacy `untracked/venv/` after a successful upgrade, but many scripts still referenced the old path directly. v3.8.1 fixed the skill wrappers and `venv-include.bash`; v3.8.2 completes the cleanup for every remaining consumer. Affected scripts — `scripts/upgrade.sh`, `scripts/upgrade_version.sh`, `scripts/install/project_detection.sh`, `scripts/install/rollback.sh`, `scripts/install/validation.sh`, `scripts/validate_worktrees.sh`, `scripts/setup_worktree.sh`, `scripts/detect_location.sh`, `scripts/debug_hooks.sh`, `scripts/qa/run_all.sh`, `scripts/qa/run_strategy_pattern_check.sh` — now resolve the venv through the new shared `scripts/install/venv_resolver.sh` SSOT helper and only fall through to the legacy path when the resolver is unavailable.
+- **`client_validator.py` reported "venv missing" on fingerprint-keyed installs**: The installer validator checked `untracked/venv/bin/python` directly instead of the v3.7.0+ fingerprint-keyed path, so `install.sh`'s post-install validation flagged every correctly-installed v3.7.0+ install as broken. `client_validator.py` now calls the Python-side SSOT `daemon.paths.resolve_existing_venv_python()` and applies the same 4-step precedence as every other consumer.
+- **`init.sh` missed scan-fallback between fingerprint-match and legacy**: `_resolve_python_cmd()` previously fell straight to the legacy `untracked/venv/bin/python` when the recomputed fingerprint did not match an existing venv directory, even when another `venv-*/bin/python` was present (the same bug v3.8.1 fixed in the skill resolver). `init.sh` now scans `untracked/venv-*/bin/python` before the legacy fallback, so agents whose PATH `python3` differs from the installer's Python still find the real venv.
+- **`CLAUDE/UPGRADES/upgrade-template/verification.sh` hardcoded legacy path**: The generic verification template shipped to every future upgrade guide checked `untracked/venv/bin/python`, meaning any upgrade guide generated from the template would false-fail on v3.7.0+ installs. The template now applies the same scan-fallback precedence as every other consumer.
+
+### Added
+
+- **`scripts/install/venv_resolver.sh` — shared bash SSOT for install/upgrade/verify scripts**: New bash helper that implements the canonical 4-step resolution precedence — `$HOOKS_DAEMON_VENV_PATH` → `untracked/venv-{current-fingerprint}/bin/python` → first matching `untracked/venv-*/bin/python` → legacy `untracked/venv/bin/python`. Mirrors `src/.../skills/hooks-daemon/scripts/_resolve-venv.sh` and `daemon.paths.resolve_existing_venv_python()` so all four SSOTs (Python, install bash, skill bash, `venv-include.bash`) stay in lockstep. Covered by 7 new integration tests in `tests/integration/test_install_venv_resolver.py`.
+- **`daemon.paths.resolve_existing_venv_python()` — Python SSOT**: Exposes the same 4-step precedence to Python consumers (currently used by `client_validator.py`, with room for other call sites to migrate). Covered by new unit tests in `tests/unit/daemon/test_paths_resolve_existing_venv.py`.
+
 ## [3.8.1] - 2026-04-22
 
 ### Fixed

@@ -73,10 +73,27 @@ fi
 # 4. Check daemon can start
 info "Checking daemon startup..."
 cd "$DAEMON_DIR"
-VENV_PYTHON="untracked/venv/bin/python"
 
-# Stop daemon if running
-$VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli stop > /dev/null 2>&1 || true
+# Resolve venv python — v3.7.0+ uses fingerprint-keyed untracked/venv-*/,
+# pre-v3.7.0 used untracked/venv/. Prefer any fingerprint-keyed path that
+# exists, fall back to legacy. See scripts/install/venv_resolver.sh for the
+# SSOT precedence shipped with the daemon.
+VENV_PYTHON=""
+for _vp in untracked/venv-*/bin/python; do
+    if [ -x "$_vp" ]; then
+        VENV_PYTHON="$_vp"
+        break
+    fi
+done
+unset _vp
+if [ -z "$VENV_PYTHON" ]; then
+    VENV_PYTHON="untracked/venv/bin/python"
+fi
+
+# Stop daemon if running (best-effort; failure means it wasn't running)
+if ! $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli stop 2> /tmp/verify_daemon_stop.log; then
+    : # daemon wasn't running — that's fine, we're about to start it
+fi
 
 # Try to get status (daemon should start on first request)
 if $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli status > /dev/null 2>&1; then

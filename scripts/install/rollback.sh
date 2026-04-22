@@ -17,6 +17,18 @@ if [ -z "${OUTPUT_SH_LOADED+x}" ]; then
     source "$INSTALL_LIB_DIR/output.sh"
 fi
 
+# Ensure the SSOT venv resolver is loaded. Snapshot metadata captures the
+# venv Python version, which requires finding the actual venv (fingerprint-
+# keyed or legacy) rather than hardcoding the pre-v3.7.0 path.
+if ! declare -F resolve_existing_venv_python > /dev/null; then
+    _rb_helper_dir="$(dirname "${BASH_SOURCE[0]}")"
+    if [ -f "$_rb_helper_dir/venv_resolver.sh" ]; then
+        # shellcheck source=venv_resolver.sh
+        source "$_rb_helper_dir/venv_resolver.sh"
+    fi
+    unset _rb_helper_dir
+fi
+
 # Snapshot directory structure
 readonly SNAPSHOT_BASE_DIR="untracked/upgrade-snapshots"
 
@@ -92,11 +104,13 @@ create_state_snapshot() {
         git_ref=$(git -C "$daemon_dir" rev-parse HEAD 2>/dev/null || echo "unknown")
     fi
 
-    # Capture venv metadata
+    # Capture venv metadata. Use the shared resolver so fingerprint-keyed
+    # venvs are picked up (install_mode doesn't affect layout — daemon_dir
+    # is already the right base in both modes).
     local python_version="unknown"
     local venv_python
-    if [ "$install_mode" = "self-install" ]; then
-        venv_python="$daemon_dir/untracked/venv/bin/python"
+    if declare -F resolve_existing_venv_python > /dev/null; then
+        venv_python="$(resolve_existing_venv_python "$daemon_dir")"
     else
         venv_python="$daemon_dir/untracked/venv/bin/python"
     fi

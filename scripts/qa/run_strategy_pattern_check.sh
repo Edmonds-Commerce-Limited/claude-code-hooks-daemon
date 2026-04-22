@@ -27,8 +27,16 @@ NC='\033[0m' # No Color
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-# Python command
-PYTHON="${PROJECT_ROOT}/untracked/venv/bin/python"
+# Resolve venv python via SSOT (fingerprint-keyed + legacy fallback).
+if [ -f "${PROJECT_ROOT}/scripts/install/venv_resolver.sh" ]; then
+    # shellcheck source=../install/venv_resolver.sh
+    source "${PROJECT_ROOT}/scripts/install/venv_resolver.sh"
+fi
+if declare -F resolve_existing_venv_python > /dev/null; then
+    PYTHON="$(resolve_existing_venv_python "${PROJECT_ROOT}")"
+else
+    PYTHON="${PROJECT_ROOT}/untracked/venv/bin/python"
+fi
 
 if [ ! -f "$PYTHON" ]; then
     echo -e "${RED}ERROR: Python not found at $PYTHON${NC}" >&2
