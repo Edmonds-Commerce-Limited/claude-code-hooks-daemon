@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.8.1] - 2026-04-22
+
+### Fixed
+
+- **Skill wrapper venv resolver broken when system `python3` differs from the installer's chosen Python**: v3.8.0's `_resolve-venv.sh` recomputed the fingerprint using `${HOOKS_DAEMON_PYTHON:-python3}`, but the installer may have built the venv with a specific interpreter (e.g. `/usr/bin/python3.13`) that produces a different fingerprint than the `python3` on PATH at skill-invocation time (e.g. 3.9). On such systems the resolver computed a mismatched fingerprint, failed to find the real `venv-py313-<fp>` directory, and fell through to the legacy `untracked/venv/` path — which v3.7.0 auto-deletes after a successful upgrade. Result: `/hooks-daemon status`/`health`/`init-handlers` reported "Python venv not found" on v3.7.0+ installs despite a healthy running daemon. The resolver now scans for any existing `untracked/venv-*/bin/python` as a fallback after fingerprint-match fails and before falling through to legacy. The same scan fallback was applied to `scripts/venv-include.bash`'s `_resolve_venv_dir()`. Covered by 3 new integration tests in `tests/integration/test_skill_scripts_venv_resolution.py::TestFingerprintMismatchFallback`.
+
 ## [3.8.0] - 2026-04-22
 
 ### Fixed

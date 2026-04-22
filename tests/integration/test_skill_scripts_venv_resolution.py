@@ -141,6 +141,75 @@ class TestLegacyFallback:
         assert result == f"{daemon_dir}/untracked/venv/bin/python"
 
 
+class TestFingerprintMismatchFallback:
+    """When the installer built the venv with one Python (e.g. /usr/bin/python3.13)
+    but the agent's PATH resolves `python3` to a different Python (e.g. 3.9),
+    the recomputed fingerprint won't match the venv directory name. The resolver
+    MUST still find the existing venv-* by scanning, not fall through to the
+    deleted legacy path.
+
+    Regression test for v3.8.0 bug: /hooks-daemon skill broken on systems where
+    system python3 != installer-chosen Python.
+    """
+
+    def test_scans_for_any_venv_when_fingerprint_does_not_match(self, tmp_path: Path) -> None:
+        daemon_dir = tmp_path / "daemon"
+        daemon_dir.mkdir()
+        _link_fingerprint_helper(daemon_dir)
+
+        # Create a venv with a fingerprint that DOES NOT match what the
+        # current python3 would compute — simulates installer having used a
+        # different Python (e.g. installer used python3.13, resolver sees python3=3.9).
+        foreign_venv = daemon_dir / "untracked" / "venv-py313-deadbeef"
+        _make_venv_skeleton(foreign_venv)
+        # No legacy venv — v3.7.0 upgrade deletes it.
+
+        result = _run_resolver(daemon_dir)
+        assert result == f"{foreign_venv}/bin/python", (
+            "Resolver must scan for existing venv-* directories rather than "
+            "relying solely on fingerprint recomputation. The installer's "
+            "Python may differ from whatever `python3` resolves to when the "
+            "skill wrapper fires."
+        )
+
+    def test_matching_fingerprint_still_preferred_over_foreign_venv(self, tmp_path: Path) -> None:
+        """When both a matching-fingerprint venv AND a foreign venv exist, the
+        matching one wins (correct multi-Python behaviour — container + host
+        sharing the same project dir)."""
+        from claude_code_hooks_daemon.daemon.paths import python_venv_fingerprint
+
+        daemon_dir = tmp_path / "daemon"
+        daemon_dir.mkdir()
+        _link_fingerprint_helper(daemon_dir)
+
+        fingerprint = python_venv_fingerprint()
+        matching_venv = daemon_dir / "untracked" / f"venv-{fingerprint}"
+        _make_venv_skeleton(matching_venv)
+
+        foreign_venv = daemon_dir / "untracked" / "venv-py313-deadbeef"
+        _make_venv_skeleton(foreign_venv)
+
+        result = _run_resolver(daemon_dir)
+        assert result == f"{matching_venv}/bin/python"
+
+    def test_scan_fallback_skips_broken_venvs(self, tmp_path: Path) -> None:
+        """A venv-* directory without a usable bin/python is skipped (e.g.
+        partial install, cleanup-in-progress)."""
+        daemon_dir = tmp_path / "daemon"
+        daemon_dir.mkdir()
+        _link_fingerprint_helper(daemon_dir)
+
+        broken_venv = daemon_dir / "untracked" / "venv-py313-broken00"
+        (broken_venv / "bin").mkdir(parents=True)
+        # No bin/python at all
+
+        working_venv = daemon_dir / "untracked" / "venv-py313-working0"
+        _make_venv_skeleton(working_venv)
+
+        result = _run_resolver(daemon_dir)
+        assert result == f"{working_venv}/bin/python"
+
+
 class TestWrappersUseResolver:
     """The three skill wrapper scripts must source the shared resolver and
     not hardcode the legacy venv path."""
