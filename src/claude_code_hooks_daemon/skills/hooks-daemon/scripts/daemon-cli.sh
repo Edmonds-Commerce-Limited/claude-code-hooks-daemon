@@ -29,7 +29,8 @@ if [ ! -f "$PROJECT_ROOT/.claude/hooks-daemon.yaml" ]; then
 fi
 
 DAEMON_DIR="$PROJECT_ROOT/.claude/hooks-daemon"
-PYTHON="$DAEMON_DIR/untracked/venv/bin/python"
+# shellcheck source=_resolve-venv.sh
+source "$(dirname "$0")/_resolve-venv.sh"
 
 # Check if Python exists
 if [ ! -f "$PYTHON" ]; then
