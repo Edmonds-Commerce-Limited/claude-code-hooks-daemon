@@ -1,8 +1,9 @@
 # Plan 00100 (v2): Venv SSOT Consolidation — Stop the Release Treadmill
 
-**Status**: Not Started
+**Status**: In Progress (Phase 0)
 **Created**: 2026-04-23
 **Revised**: 2026-04-23 (v2 — addresses CRITIQUE-v1.md)
+**Started**: 2026-04-23
 **Owner**: TBD
 **Priority**: Critical
 **Type**: Bug Fix / Architectural Consolidation
@@ -15,18 +16,18 @@
 
 The hostile Opus review of v1 identified 3 FATAL and 7 RISKY flaws. Full details in CRITIQUE-v1.md. v2 corrects each:
 
-| v1 Flaw                                     | v2 Correction                                                                                                                         |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| FATAL-1: `uv.lock` doesn't exist            | Phase 3.0 introduces `uv lock` generation + commit; stamp becomes `sha256(pyproject.toml + uv.lock)`                                  |
-| FATAL-2: PID/socket race misdiagnosed       | Task 0.2 rewritten: replace `cli.py:341` fixed `sleep(0.5)` with polling loop; socket-poll is a belt-and-braces secondary check       |
-| FATAL-3: Retry loop treats symptom          | Task 0.1 rewritten: call `sync -f` after `uv sync`; switch `UV_LINK_MODE` to hardlink-with-copy-fallback. No retry loop.              |
-| RISKY-1: Bootstrap fallback under-specified | Task 2.5 rewritten: bootstrap performs PID-kill only, no venv resolution                                                              |
-| RISKY-2: Hardcoded min Python in wrapper    | Task 0.3: min Python parsed from `pyproject.toml:requires-python`                                                                     |
-| RISKY-3: Fail-on-missing-persisted-Python   | Decision 3 revised: on missing persisted Python, retry `find_compatible_python` then fail only if no compatible Python found         |
-| RISKY-4: Phase 5 runtime unproven           | Task 5.0 added: timing spike before committing to `run_all.sh` inclusion                                                              |
-| RISKY-5: `flock` across bind-mounts unclear | Task 4.0 added: verify `flock` under Podman bind-mount before implementation                                                          |
-| RISKY-6: Metadata write not atomic          | Tasks 3.1/3.3 revised: single `.daemon-metadata.json`, temp-file + rename                                                             |
-| RISKY-7: Task 1.5 vs 2.5 conflict           | Task 1.5 moved to end of Phase 2 (merged as Task 2.7); Phase 1 no longer contains guard                                               |
+| v1 Flaw                                     | v2 Correction                                                                                                                   |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| FATAL-1: `uv.lock` doesn't exist            | Phase 3.0 introduces `uv lock` generation + commit; stamp becomes `sha256(pyproject.toml + uv.lock)`                            |
+| FATAL-2: PID/socket race misdiagnosed       | Task 0.2 rewritten: replace `cli.py:341` fixed `sleep(0.5)` with polling loop; socket-poll is a belt-and-braces secondary check |
+| FATAL-3: Retry loop treats symptom          | Task 0.1 rewritten: call `sync -f` after `uv sync`; switch `UV_LINK_MODE` to hardlink-with-copy-fallback. No retry loop.        |
+| RISKY-1: Bootstrap fallback under-specified | Task 2.5 rewritten: bootstrap performs PID-kill only, no venv resolution                                                        |
+| RISKY-2: Hardcoded min Python in wrapper    | Task 0.3: min Python parsed from `pyproject.toml:requires-python`                                                               |
+| RISKY-3: Fail-on-missing-persisted-Python   | Decision 3 revised: on missing persisted Python, retry `find_compatible_python` then fail only if no compatible Python found    |
+| RISKY-4: Phase 5 runtime unproven           | Task 5.0 added: timing spike before committing to `run_all.sh` inclusion                                                        |
+| RISKY-5: `flock` across bind-mounts unclear | Task 4.0 added: verify `flock` under Podman bind-mount before implementation                                                    |
+| RISKY-6: Metadata write not atomic          | Tasks 3.1/3.3 revised: single `.daemon-metadata.json`, temp-file + rename                                                       |
+| RISKY-7: Task 1.5 vs 2.5 conflict           | Task 1.5 moved to end of Phase 2 (merged as Task 2.7); Phase 1 no longer contains guard                                         |
 
 ## Field Evidence (2026-04-23)
 
@@ -121,12 +122,12 @@ Opus orchestrates a team. Each phase lands a green state before the next begins.
 
 **Why first**: three field-proven bugs. Every user upgrading today can hit them.
 
-- [ ] ⬜ **Task 0.1**: Fix `uv sync` file-visibility race at the source (NOT via retry loop)
-  - [ ] ⬜ Write failing test: `tests/integration/test_verify_venv_file_visibility.py` — simulate a delayed-visibility filesystem; assert `verify_venv` succeeds without polling
-  - [ ] ⬜ Update `scripts/install/venv.sh:create_venv_at_path()`: after `uv sync` exits 0, call `sync -f "$venv_path" 2>/dev/null || sync` to force metadata flush (Linux: `sync -f`; macOS/fallback: `sync`)
-  - [ ] ⬜ Switch `UV_LINK_MODE` default from `copy` to `hardlink`. Wrap `uv sync` invocation with try-hardlink, detect the "Failed to hardlink files" warning on stderr, and retry once with `UV_LINK_MODE=copy` only when hardlink emits that specific warning
-  - [ ] ⬜ Remove any existing retry logic in `verify_venv()` — the sync-after-uv fix is at the correct layer
-  - [ ] ⬜ Document the choice inline: link to Plan 00047 (the original overlay-fs motivation) and Plan 00100 (this decision)
+- [x] ✅ **Task 0.1**: Fix `uv sync` file-visibility race at the source (NOT via retry loop)
+  - [x] ✅ Write failing test: `tests/integration/test_verify_venv_file_visibility.py` — 5 tests, 3 RED → GREEN after fix
+  - [x] ✅ Update `scripts/install/venv.sh:create_venv_at_path()`: after `uv sync` exits 0, call `sync -f "$venv_path" 2>/dev/null || sync` to force metadata flush
+  - [x] ✅ Switch `UV_LINK_MODE` default from `copy` to `hardlink`. Detect "Failed to hardlink" stderr warning and retry once with `UV_LINK_MODE=copy`
+  - [x] ✅ Confirmed no retry loop in `verify_venv()` — fix is at the correct layer
+  - [x] ✅ Inline comment references Plan 00100 Task 0.1
 - [ ] ⬜ **Task 0.2**: Fix `restart_daemon_verified` false-negative at its root cause
   - [ ] ⬜ Write failing test: `tests/integration/test_restart_verified_slow_startup.py` — mock a daemon whose child takes 1200ms to write PID file; assert verification succeeds
   - [ ] ⬜ Replace `src/claude_code_hooks_daemon/daemon/cli.py:341` fixed `time.sleep(0.5)` with a polling loop: 100ms interval × 50 iterations = 5s ceiling, exit early on PID file appearance
@@ -333,10 +334,11 @@ Opus orchestrates a team. Each phase lands a green state before the next begins.
 **Context**: v1 proposed 3×500ms retry loop in `verify_venv`.
 **v1 flaw**: Symptom treatment. Adds latency (up to 4.5s worst case) and still fails on slow filesystems.
 **v2 Decision**: Two independent mitigations at the correct layer:
+
 1. After `uv sync` exits, call `sync -f "$venv_path"` on Linux (filesystem-scoped flush) or `sync` on macOS/fallback. Force metadata flush before verification.
 2. Switch `UV_LINK_MODE` default from `copy` to `hardlink` (works on native filesystems, faster, no rename race). Detect the overlay-fs "Failed to hardlink" warning and retry once with `UV_LINK_MODE=copy` — preserving Plan 00047's container-safety behaviour as a fallback, not the default.
-**Trade-off**: Slightly more complex invocation wrapper. Net latency *decreases* on most hosts.
-**Date**: 2026-04-23
+   **Trade-off**: Slightly more complex invocation wrapper. Net latency *decreases* on most hosts.
+   **Date**: 2026-04-23
 
 ### Decision 6 (NEW in v2): Fix PID/socket race at `cli.py:341`, not by reordering
 
@@ -369,16 +371,16 @@ Opus orchestrates a team. Each phase lands a green state before the next begins.
 
 ## Risks & Mitigations
 
-| Risk                                                                 | Impact | Probability | Mitigation                                                                                                                         |
-| -------------------------------------------------------------------- | ------ | ----------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| Upgrade-cycle test too slow, gets excluded from CI                   | High   | Medium      | Task 5.0 spike first. If > 3 min, move to nightly with release-skill dependency. Decision at spike time, not execution time       |
-| `uv lock` generates non-deterministic output across platforms        | Medium | Low         | uv is documented as deterministic. If drift observed, CI failure is explicit (not silent) and can be investigated                 |
-| Hardlink default breaks on overlay-fs users                          | Medium | Low         | Detect "Failed to hardlink" warning, fall back to copy. Plan 00047's users see no behaviour change                                |
-| `sync -f` unavailable on macOS                                       | Low    | High        | Fallback to plain `sync`. Acceptable cost on dev hosts                                                                             |
-| `flock` fails under Podman bind-mount                                | High   | Medium      | Task 4.0 spike. PID-file lock fallback if needed                                                                                    |
-| Migration destroys a user's custom venv they hand-edited             | Medium | Low         | Post-upgrade task warns. Legacy deletion is logged. User can opt out via env var                                                   |
-| Polling loop in cli.py:341 races with signal handling                | Medium | Low         | Standard polling idiom; Python handles signals on each iteration. Existing 500ms sleep already has this property                   |
-| Four-resolver drift re-emerges post-merge                            | High   | Low         | Phase 2 deletes three. Grep-based CI check could catch regressions (consider in Phase 5)                                           |
+| Risk                                                          | Impact | Probability | Mitigation                                                                                                                  |
+| ------------------------------------------------------------- | ------ | ----------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Upgrade-cycle test too slow, gets excluded from CI            | High   | Medium      | Task 5.0 spike first. If > 3 min, move to nightly with release-skill dependency. Decision at spike time, not execution time |
+| `uv lock` generates non-deterministic output across platforms | Medium | Low         | uv is documented as deterministic. If drift observed, CI failure is explicit (not silent) and can be investigated           |
+| Hardlink default breaks on overlay-fs users                   | Medium | Low         | Detect "Failed to hardlink" warning, fall back to copy. Plan 00047's users see no behaviour change                          |
+| `sync -f` unavailable on macOS                                | Low    | High        | Fallback to plain `sync`. Acceptable cost on dev hosts                                                                      |
+| `flock` fails under Podman bind-mount                         | High   | Medium      | Task 4.0 spike. PID-file lock fallback if needed                                                                            |
+| Migration destroys a user's custom venv they hand-edited      | Medium | Low         | Post-upgrade task warns. Legacy deletion is logged. User can opt out via env var                                            |
+| Polling loop in cli.py:341 races with signal handling         | Medium | Low         | Standard polling idiom; Python handles signals on each iteration. Existing 500ms sleep already has this property            |
+| Four-resolver drift re-emerges post-merge                     | High   | Low         | Phase 2 deletes three. Grep-based CI check could catch regressions (consider in Phase 5)                                    |
 
 ## Effort
 

@@ -426,30 +426,63 @@ create_venv_at_path() {
         python_args=(--python "$HOOKS_DAEMON_PYTHON")
     fi
 
-    export UV_LINK_MODE=copy
+    # Plan 00100 Task 0.1: hardlink-first with copy fallback.
+    # - Plan 00047 set UV_LINK_MODE=copy as default to silence the "Failed to
+    #   hardlink" warning on overlay-fs (container) installs.
+    # - Plan 00100 v2 reverses the default: hardlink is faster and avoids the
+    #   copy-then-rename file-visibility race (field bug 2026-04-23 on
+    #   /srv/example-app/front). If uv emits the "Failed to hardlink"
+    #   warning, retry once with UV_LINK_MODE=copy — preserving Plan 00047's
+    #   container-safety behaviour as a fallback, not the default.
+    unset UV_LINK_MODE  # start from default (hardlink)
 
-    if [ "$quiet" = "true" ]; then
-        if UV_PROJECT_ENVIRONMENT="$venv_path" uv sync --project "$daemon_dir" "${python_args[@]}" > /tmp/uv_sync_output.txt 2>&1; then
-            print_verbose "Virtual environment created at: $venv_path"
-            rm -f /tmp/uv_sync_output.txt
-            return 0
-        else
-            print_error "Failed to create virtual environment at $venv_path"
-            if [ -f /tmp/uv_sync_output.txt ]; then
-                cat /tmp/uv_sync_output.txt >&2
-                rm -f /tmp/uv_sync_output.txt
-            fi
-            return 1
-        fi
+    local uv_output="/tmp/uv_sync_output.$$.txt"
+    local uv_rc=0
+
+    # First attempt: default link mode (hardlink on most filesystems)
+    if UV_PROJECT_ENVIRONMENT="$venv_path" uv sync --project "$daemon_dir" "${python_args[@]}" \
+            > "$uv_output" 2>&1; then
+        uv_rc=0
     else
-        if UV_PROJECT_ENVIRONMENT="$venv_path" uv sync --project "$daemon_dir" "${python_args[@]}"; then
-            print_success "Virtual environment created at: $venv_path"
-            return 0
+        uv_rc=$?
+    fi
+
+    # Detect overlay-fs "Failed to hardlink files" warning and retry with copy
+    if [ -f "$uv_output" ] && grep -q "Failed to hardlink" "$uv_output"; then
+        print_verbose "uv reported hardlink failure — retrying with UV_LINK_MODE=copy"
+        rm -rf "$venv_path"  # clean slate for the retry
+        if UV_LINK_MODE=copy UV_PROJECT_ENVIRONMENT="$venv_path" uv sync --project "$daemon_dir" "${python_args[@]}" \
+                > "$uv_output" 2>&1; then
+            uv_rc=0
         else
-            print_error "Failed to create virtual environment at $venv_path"
-            return 1
+            uv_rc=$?
         fi
     fi
+
+    if [ "$uv_rc" -ne 0 ]; then
+        print_error "Failed to create virtual environment at $venv_path"
+        if [ -f "$uv_output" ]; then
+            cat "$uv_output" >&2
+            rm -f "$uv_output"
+        fi
+        return 1
+    fi
+
+    # Plan 00100 Task 0.1: force metadata flush before verify_venv runs.
+    # `uv sync` with copy mode does copy-then-rename; the rename may land in
+    # the page cache without being visible to a subsequent `[ -f ]` check on
+    # overlay-fs / NFS / slow disks. `sync -f <path>` is filesystem-scoped
+    # (fast); plain `sync` is the macOS/fallback.
+    sync -f "$venv_path" 2>/dev/null || sync
+
+    if [ "$quiet" = "true" ]; then
+        print_verbose "Virtual environment created at: $venv_path"
+    else
+        print_success "Virtual environment created at: $venv_path"
+    fi
+
+    rm -f "$uv_output"
+    return 0
 }
 
 #
