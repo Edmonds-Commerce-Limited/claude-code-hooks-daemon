@@ -14,6 +14,10 @@ set -euo pipefail
 GITHUB_ORG="Edmonds-Commerce-Limited"
 GITHUB_REPO="claude-code-hooks-daemon"
 INSTALL_URL="https://raw.githubusercontent.com/${GITHUB_ORG}/${GITHUB_REPO}/main/install.sh"
+# Plan 00100 Task 0.3: daemon's requires-python is the single source of truth
+# for minimum Python. Fetched from the repo's pyproject.toml below and used
+# to pre-check the active python3 BEFORE the installer runs.
+PYPROJECT_URL="https://raw.githubusercontent.com/${GITHUB_ORG}/${GITHUB_REPO}/main/pyproject.toml"
 
 # Detect project root by searching upward for .claude/
 PROJECT_ROOT="$(pwd)"
@@ -39,6 +43,33 @@ echo "Claude Code Hooks Daemon - Install"
 echo ""
 echo "Project: $PROJECT_ROOT"
 echo ""
+
+# Plan 00100 Task 0.3: Python version pre-check BEFORE download & install.
+# Fetch the daemon's pyproject.toml to parse requires-python (single source
+# of truth). If the active python3 is too old, emit an actionable
+# HOOKS_DAEMON_PYTHON hint and exit WITHOUT downloading the installer.
+PYPROJECT_TMP="/tmp/hooks-daemon-precheck-pyproject.toml.$$"
+if curl -sSL "$PYPROJECT_URL" -o "$PYPROJECT_TMP" && [ -s "$PYPROJECT_TMP" ]; then
+    REQ_LINE="$(grep -E '^requires-python\s*=' "$PYPROJECT_TMP" || echo '')"
+    if [ -n "$REQ_LINE" ]; then
+        MIN_PY="$(echo "$REQ_LINE" | grep -oE '[0-9]+\.[0-9]+' | head -n 1)"
+        ACTIVE_PY_CMD="${HOOKS_DAEMON_PYTHON:-python3}"
+        if [ -n "$MIN_PY" ] && command -v "$ACTIVE_PY_CMD" >/dev/null; then
+            ACTIVE_PY_VER="$("$ACTIVE_PY_CMD" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+            MIN_MAJOR="${MIN_PY%.*}"; MIN_MINOR="${MIN_PY#*.}"
+            ACT_MAJOR="${ACTIVE_PY_VER%.*}"; ACT_MINOR="${ACTIVE_PY_VER#*.}"
+            if [ "$ACT_MAJOR" -lt "$MIN_MAJOR" ] || { [ "$ACT_MAJOR" -eq "$MIN_MAJOR" ] && [ "$ACT_MINOR" -lt "$MIN_MINOR" ]; }; then
+                echo "Error: Active python3 is $ACTIVE_PY_VER but daemon requires >=$MIN_PY (from pyproject.toml:requires-python)"
+                echo ""
+                echo "Retry with a compatible interpreter:"
+                echo "  HOOKS_DAEMON_PYTHON=python${MIN_PY} /hooks-daemon install"
+                rm -f "$PYPROJECT_TMP"
+                exit 1
+            fi
+        fi
+    fi
+    rm -f "$PYPROJECT_TMP"
+fi
 
 # Check if already installed
 if [ -d "$DAEMON_DIR" ] && [ "$FORCE_FLAG" != "--force" ]; then

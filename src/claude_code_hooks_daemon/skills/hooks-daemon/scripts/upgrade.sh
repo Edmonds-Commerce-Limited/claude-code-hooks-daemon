@@ -45,6 +45,32 @@ if [ ! -d "$DAEMON_DIR" ]; then
     exit 1
 fi
 
+# Plan 00100 Task 0.3: Python version pre-check BEFORE any daemon mutation.
+# Parse the daemon's requires-python from pyproject.toml (single source of
+# truth; never hardcoded) and compare with the active python3 --version.
+# If the active python3 is too old and HOOKS_DAEMON_PYTHON is unset, emit
+# an actionable hint and exit WITHOUT touching daemon state.
+PYPROJECT_PATH="$DAEMON_DIR/pyproject.toml"
+PARSE_MIN_PYTHON="$DAEMON_DIR/scripts/install/parse_min_python.sh"
+if [ -f "$PYPROJECT_PATH" ] && [ -f "$PARSE_MIN_PYTHON" ]; then
+    MIN_PY="$(bash "$PARSE_MIN_PYTHON" "$PYPROJECT_PATH")"
+    ACTIVE_PY_CMD="${HOOKS_DAEMON_PYTHON:-python3}"
+    if command -v "$ACTIVE_PY_CMD" >/dev/null; then
+        ACTIVE_PY_VER="$("$ACTIVE_PY_CMD" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+        MIN_MAJOR="${MIN_PY%.*}"; MIN_MINOR="${MIN_PY#*.}"
+        ACT_MAJOR="${ACTIVE_PY_VER%.*}"; ACT_MINOR="${ACTIVE_PY_VER#*.}"
+        if [ "$ACT_MAJOR" -lt "$MIN_MAJOR" ] || { [ "$ACT_MAJOR" -eq "$MIN_MAJOR" ] && [ "$ACT_MINOR" -lt "$MIN_MINOR" ]; }; then
+            echo "Error: Active python3 is $ACTIVE_PY_VER but daemon requires >=$MIN_PY (from pyproject.toml)"
+            echo ""
+            echo "Retry with a compatible interpreter:"
+            echo "  HOOKS_DAEMON_PYTHON=python${MIN_PY} /hooks-daemon upgrade"
+            echo ""
+            echo "Daemon state unchanged."
+            exit 1
+        fi
+    fi
+fi
+
 # Check if upgrade script exists
 UPGRADE_SCRIPT="$DAEMON_DIR/scripts/upgrade.sh"
 if [ ! -f "$UPGRADE_SCRIPT" ]; then

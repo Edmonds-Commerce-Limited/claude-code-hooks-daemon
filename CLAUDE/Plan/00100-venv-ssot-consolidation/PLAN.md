@@ -134,11 +134,12 @@ Opus orchestrates a team. Each phase lands a green state before the next begins.
   - [x] ✅ `daemon_control.sh:restart_daemon_verified()` extended to 15s with `get_daemon_status` polling
   - [x] ✅ Progress logging every 1s: "waiting for daemon (N/15s)"
   - [x] ✅ pgrep fallback: if timeout expires but process exists, retry status for 5 more seconds before aborting
-- [ ] ⬜ **Task 0.3**: Skill-wrapper Python version pre-check (single source of truth)
-  - [ ] ⬜ Write failing test: stub `python3`=3.9 on PATH; assert clear error and no daemon stop
-  - [ ] ⬜ Add a helper `scripts/install/parse_min_python.sh` that extracts the minimum version from `pyproject.toml:requires-python` — single source of truth, no hardcoded version
-  - [ ] ⬜ Update `src/claude_code_hooks_daemon/skills/hooks-daemon/scripts/upgrade.sh` (and install.sh) to call `parse_min_python.sh`, compare with `python3 --version`, and short-circuit BEFORE stopping the daemon
-  - [ ] ⬜ On mismatch, run `find_compatible_python` to surface an actionable `HOOKS_DAEMON_PYTHON=...` command; exit 1 without touching daemon state
+- [x] ✅ **Task 0.3**: Skill-wrapper Python version pre-check (single source of truth)
+  - [x] ✅ Write failing test: `tests/integration/test_skill_python_version_precheck.py` — 6 tests, 6 RED → GREEN
+  - [x] ✅ `scripts/install/parse_min_python.sh` — parses `pyproject.toml:requires-python` → MAJOR.MINOR on stdout, no hardcoded version
+  - [x] ✅ `upgrade.sh`: inline pre-check BEFORE daemon mutation (uses installed pyproject.toml + parse_min_python.sh)
+  - [x] ✅ `install.sh`: fetch remote pyproject.toml, inline pre-check BEFORE downloading installer
+  - [x] ✅ Actionable `HOOKS_DAEMON_PYTHON=python3.X` hint surfaced on mismatch; daemon state unchanged on failure
 - [ ] ⬜ **Task 0.4**: Clear error surfacing across all three fixes
   - [ ] ⬜ Error messages must include: what was checked, what was found, what to do next (exact command)
   - [ ] ⬜ No silent truncation
