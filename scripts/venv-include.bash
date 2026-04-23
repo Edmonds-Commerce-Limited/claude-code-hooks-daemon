@@ -79,6 +79,21 @@ ensure_venv() {
         return 0
     fi
 
+    # Plan 00100 Task 2.7: refuse to create a fresh venv at the bare legacy
+    # path ``.../untracked/venv``. That is the shape that caused the v3.7.0
+    # cross-Python corruption when two containers sharing an image landed on
+    # the same directory. Pre-existing legacy venvs are still accepted above
+    # (venv_exists returns true); this guard only fires on creation.
+    if [[ "${VENV_DIR}" == */untracked/venv ]]; then
+        echo -e "${RED}✗${NC} Refusing to create venv at legacy path: ${VENV_DIR}" >&2
+        echo "    The legacy path has no Python-environment fingerprint and" >&2
+        echo "    cannot safely be shared between concurrent installs." >&2
+        echo "    Cause: the SSOT at src/claude_code_hooks_daemon/daemon/paths.py" >&2
+        echo "    is unreachable, so venv-include.bash fell back to the legacy" >&2
+        echo "    filename. Reinstall the daemon so paths.py is present." >&2
+        return 1
+    fi
+
     echo -e "${YELLOW}⚠${NC}  Venv not found, creating..."
 
     # Create venv directory structure

@@ -212,10 +212,10 @@ Opus orchestrates a team. Each phase lands a green state before the next begins.
   - [x] ✅ `upgrade.sh` now defines `_stop_running_daemons()` which iterates `untracked/daemon-*.pid`, reads each PID, `kill -0` checks, `kill -TERM`, sleep 1. Zero venv resolution, zero Python invocation.
   - [x] ✅ Refactor pinned by `tests/integration/test_upgrade_sh_stop_bootstrap.py` (9 tests): function defined, no venv refs in body, SIGTERMs the sleeper, handles multiple daemons, and silently skips missing/empty/stale/non-numeric PID files.
   - [x] ✅ After this refactor, there is zero duplication of resolver logic outside the Python SSOT.
-- [ ] ⬜ **Task 2.6**: Full QA + daemon restart + re-run phase 0 and 1 tests
-- [ ] ⬜ **Task 2.7** (MOVED from v1 Task 1.5): Add a guard in `ensure_venv()` that refuses to create at the legacy path
-  - [ ] ⬜ Write failing test FIRST: `tests/integration/test_legacy_path_refused.py` — confirms `ensure_venv` cannot produce `untracked/venv/`
-  - [ ] ⬜ If `venv_path` ends in `/untracked/venv` (no fingerprint suffix), FAIL FAST with a loud error
+- [x] ✅ **Task 2.6**: Full QA + daemon restart + re-run phase 0 and 1 tests (10/10 QA, daemon RUNNING, all suites green)
+- [x] ✅ **Task 2.7** (MOVED from v1 Task 1.5): Add a guard in `ensure_venv()` that refuses to create at the legacy path
+  - [x] ✅ Failing tests written FIRST: `tests/integration/test_legacy_path_refused.py` — 4 tests (refuse-create, accept-existing, fingerprint-allowed, suffix-exact)
+  - [x] ✅ `ensure_venv()` checks `VENV_DIR == */untracked/venv` and FAILS FAST with loud multi-line error naming the SSOT as the cause; pre-existing legacy venvs still accepted (guard fires only on creation)
 
 **Success gate**: Grep for resolver precedence logic returns exactly one definition (Python). Bash wrappers each < 20 lines. All Phase 0 + 1 tests still pass. `ensure_venv` rejects legacy path.
 
