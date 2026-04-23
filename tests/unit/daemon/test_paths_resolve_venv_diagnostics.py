@@ -31,6 +31,22 @@ def _make_fake_venv(venv_dir: Path) -> Path:
     return py
 
 
+def _make_fake_venv_python3_only(venv_dir: Path) -> Path:
+    """Create a fake venv that only has ``bin/python3`` (no ``bin/python``).
+
+    Some bash callers (notably ``scripts/venv-include.bash`` and its tests)
+    create venvs where only ``bin/python3`` exists. The SSOT must accept
+    either ``bin/python`` or ``bin/python3`` so every caller agrees on
+    whether a venv is usable.
+    """
+    bin_dir = venv_dir / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    py3 = bin_dir / "python3"
+    py3.write_text("#!/bin/bash\necho fake-py3\n")
+    py3.chmod(py3.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    return py3
+
+
 class TestDiagnosticsHelper:
     def test_override_hit(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         override = tmp_path / "override"
@@ -199,4 +215,126 @@ class TestCliDispatcher:
         monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
         exit_code = main(["resolve-venv", "--daemon-dir", str(tmp_path / "empty")])
         assert isinstance(exit_code, int)
+        assert exit_code == 1
+
+
+class TestPython3OnlyAcceptance:
+    """Real venvs have both ``bin/python`` and ``bin/python3`` symlinks, but
+    fake venvs in bash callers (notably ``scripts/venv-include.bash``) often
+    create only ``bin/python3``. The SSOT must accept either so there is ONE
+    authoritative notion of "is this a usable venv"."""
+
+    def test_fingerprint_keyed_python3_only_is_accepted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        fp = python_venv_fingerprint()
+        keyed = daemon_dir / "untracked" / f"venv-{fp}"
+        py3 = _make_fake_venv_python3_only(keyed)
+
+        resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        assert resolved == py3, "fingerprint-keyed venv with only bin/python3 must be accepted"
+        assert any("step 2" in s and "OK" in s for s in steps)
+
+    def test_scan_fallback_python3_only_is_accepted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        foreign = daemon_dir / "untracked" / "venv-py999-deadbeef"
+        py3 = _make_fake_venv_python3_only(foreign)
+
+        resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        assert resolved == py3, "scan fallback must accept foreign venv with only bin/python3"
+        assert any("step 3" in s and "scan-fallback hit" in s for s in steps)
+
+    def test_legacy_python3_only_is_accepted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        legacy = daemon_dir / "untracked" / "venv"
+        py3 = _make_fake_venv_python3_only(legacy)
+
+        resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        assert resolved == py3, "legacy venv with only bin/python3 must be accepted"
+        assert any("step 4" in s and "OK" in s for s in steps)
+
+    def test_bin_python_preferred_when_both_exist(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When both symlinks exist, ``bin/python`` is preferred — matches the
+        existing contract consumed by ``scripts/install/venv_resolver.sh`` and
+        ``src/claude_code_hooks_daemon/skills/hooks-daemon/scripts/_resolve-venv.sh``."""
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        fp = python_venv_fingerprint()
+        keyed = daemon_dir / "untracked" / f"venv-{fp}"
+        py = _make_fake_venv(keyed)
+        _make_fake_venv_python3_only(keyed)  # adds bin/python3 too
+
+        resolved, _ = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        assert resolved == py, "bin/python must be preferred when both exist"
+
+
+class TestFallbackTargetFlag:
+    """The ``--fallback-target`` flag turns the CLI from 'resolve existing'
+    into 'resolve or suggest creation path'. Consumed by
+    ``scripts/venv-include.bash`` whose ``ensure_venv`` needs a target path
+    on fresh projects before any venv has been created."""
+
+    def test_flag_prints_fingerprint_keyed_path_when_nothing_exists(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        fp = python_venv_fingerprint()
+        expected = daemon_dir / "untracked" / f"venv-{fp}" / "bin" / "python"
+
+        exit_code = main(["resolve-venv", "--daemon-dir", str(daemon_dir), "--fallback-target"])
+        assert exit_code == 0
+        assert capsys.readouterr().out.strip() == str(expected)
+
+    def test_flag_returns_existing_venv_when_found(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The flag does NOT override normal resolution — it only changes
+        miss-behaviour. An existing venv must still win."""
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        fp = python_venv_fingerprint()
+        keyed = daemon_dir / "untracked" / f"venv-{fp}"
+        py = _make_fake_venv(keyed)
+
+        exit_code = main(["resolve-venv", "--daemon-dir", str(daemon_dir), "--fallback-target"])
+        assert exit_code == 0
+        assert capsys.readouterr().out.strip() == str(py)
+
+    def test_flag_respects_override(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        override = tmp_path / "override"
+        py = _make_fake_venv(override)
+        monkeypatch.setenv("HOOKS_DAEMON_VENV_PATH", str(override))
+
+        exit_code = main(
+            [
+                "resolve-venv",
+                "--daemon-dir",
+                str(tmp_path / "daemon"),
+                "--fallback-target",
+            ]
+        )
+        assert exit_code == 0
+        assert capsys.readouterr().out.strip() == str(py)
+
+    def test_without_flag_exit_code_is_still_1_on_miss(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Regression guard: the flag is opt-in. Omitting it MUST keep the
+        previous contract so existing callers (``venv_resolver.sh``,
+        ``_resolve-venv.sh``) continue to surface 'no venv found' diagnostics."""
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        exit_code = main(["resolve-venv", "--daemon-dir", str(tmp_path / "empty")])
         assert exit_code == 1

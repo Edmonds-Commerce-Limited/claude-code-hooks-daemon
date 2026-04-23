@@ -10,63 +10,46 @@ set -euo pipefail
 # Project root directory
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# Plan 00099: venv is keyed by a Python-environment fingerprint so concurrent
-# containers from the same image share one venv while distinct Pythons
-# (pyenv vs distro, different minor versions, cross-arch) are kept apart.
-# Resolution precedence (highest first):
-#   1. $HOOKS_DAEMON_VENV_PATH (explicit override)
-#   2. untracked/venv-{fingerprint}/ (fingerprint-keyed, recomputed)
-#   3. untracked/venv-*/ (any existing fingerprint venv — handles mismatch
-#      between recomputed fingerprint and installer-picked Python)
-#   4. untracked/venv/ (legacy fallback, pre-v3.7.0)
+# Plan 00100 Phase 2: venv resolution is delegated to the Python SSOT at
+# src/claude_code_hooks_daemon/daemon/paths.py. This file is now a thin bash
+# wrapper; the fingerprint + scan + legacy precedence lives in Python so the
+# three other wrappers (scripts/install/venv_resolver.sh,
+# src/.../skills/hooks-daemon/scripts/_resolve-venv.sh, and this file) stay
+# in lock-step.
+#
+# Precedence (implemented in paths.py::resolve_existing_venv_python_with_diagnostics):
+#   1. $HOOKS_DAEMON_VENV_PATH                — explicit override
+#   2. ${PROJECT_ROOT}/untracked/venv-{fingerprint}/ — fingerprint-keyed
+#   3. ${PROJECT_ROOT}/untracked/venv-*/      — scan for any existing venv
+#   4. ${PROJECT_ROOT}/untracked/venv/        — legacy fallback (pre-v3.7.0)
+#
+# `--fallback-target` is passed because this file is sourced BEFORE the venv
+# exists on fresh clones (ensure_venv creates it). On a miss the SSOT prints
+# the fingerprint-keyed creation target instead of exiting 1, so ensure_venv
+# has a stable path to mkdir/python3 -m venv into.
+#
+# The SSOT is invoked as a DIRECT SCRIPT (not `python -m`) so the package
+# __init__.py — which imports pydantic — is bypassed. This matters here
+# because venv-include.bash runs under the host `python3`, which at that
+# point only has stdlib. paths.py is stdlib-only by design.
 _resolve_venv_dir() {
-    if [ -n "${HOOKS_DAEMON_VENV_PATH:-}" ]; then
-        echo "$HOOKS_DAEMON_VENV_PATH"
+    local paths_script="${PROJECT_ROOT}/src/claude_code_hooks_daemon/daemon/paths.py"
+    local python_cmd="${HOOKS_DAEMON_PYTHON:-python3}"
+    local python_path
+
+    if [ -f "$paths_script" ] && python_path=$(
+        "$python_cmd" "$paths_script" resolve-venv \
+            --daemon-dir "$PROJECT_ROOT" --fallback-target 2>/dev/null
+    ); then
+        # SSOT returns bin/python or bin/python3 depending on which interpreter
+        # the venv actually ships. Derive the venv dir via dirname-of-dirname
+        # so either suffix works.
+        dirname "$(dirname "$python_path")"
         return 0
     fi
-    local fp_helper="${PROJECT_ROOT}/scripts/install/python_fingerprint.sh"
-    if [ -f "$fp_helper" ]; then
-        # shellcheck disable=SC1090
-        source "$fp_helper"
-        local fingerprint
-        if fingerprint=$(python_venv_fingerprint "${HOOKS_DAEMON_PYTHON:-python3}" 2>/dev/null); then
-            local keyed="${PROJECT_ROOT}/untracked/venv-${fingerprint}"
-            if [ -d "$keyed" ] && [ -f "$keyed/bin/python3" ]; then
-                echo "$keyed"
-                return 0
-            fi
-        fi
-    fi
-    # Scan fallback: any existing venv-*/bin/python3. Handles installer-vs-resolver
-    # Python mismatch (installer used python3.13, resolver sees python3=3.9).
-    local candidate
-    for candidate in "${PROJECT_ROOT}"/untracked/venv-*; do
-        if [ -d "$candidate" ] && [ -f "$candidate/bin/python3" ]; then
-            echo "$candidate"
-            return 0
-        fi
-    done
-    # Prefer keyed path for creation if fingerprint helper worked and no
-    # legacy venv exists, so new venvs land at the correct location.
-    # Plan 00100 Task 1.4 (deferred): this branch is load-bearing for fresh
-    # dev-machine `ensure_venv` (verified by
-    # tests/integration/test_venv_include_resolution.py::test_fingerprint_keyed_preferred_for_creation_when_no_legacy).
-    # Phase 2 replaces the whole resolver with a Python SSOT shell-out, at
-    # which point this branch goes away with the rest.
-    if [ -f "$fp_helper" ] && [ ! -d "${PROJECT_ROOT}/untracked/venv" ]; then
-        local fingerprint_create
-        # shellcheck disable=SC1090
-        source "$fp_helper"
-        if fingerprint_create=$(python_venv_fingerprint "${HOOKS_DAEMON_PYTHON:-python3}" 2>/dev/null); then
-            echo "${PROJECT_ROOT}/untracked/venv-${fingerprint_create}"
-            return 0
-        fi
-    fi
-    # Legacy fallback (pre-v3.7.0 installs)
-    # TODO Plan 00100 Phase 2: remove — replace this resolver with a thin
-    # wrapper around `python -m claude_code_hooks_daemon.daemon.paths
-    # resolve-venv`. The `untracked/venv/` path only exists on pre-v3.7.0
-    # installs and is deleted on first upgrade.
+
+    # SSOT unavailable (missing script or interpreter failure): legacy
+    # fallback so pre-v3.7.0 installs still boot.
     echo "${PROJECT_ROOT}/untracked/venv"
 }
 

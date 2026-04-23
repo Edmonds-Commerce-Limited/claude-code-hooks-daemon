@@ -202,11 +202,12 @@ Opus orchestrates a team. Each phase lands a green state before the next begins.
 - [x] ✅ **Task 2.3**: Implemented the entry point in `src/claude_code_hooks_daemon/daemon/paths.py`
   - [ ] ⬜ Reads `.daemon-metadata.json` (written in phase 3) via strict schema validation — deferred to Phase 3
   - [x] ✅ Current implementation preserves 4-step precedence (override → fingerprint → scan → legacy) while Phase 3 persistence work is outstanding. Diagnostic helper `resolve_existing_venv_python_with_diagnostics()` is the new structured backend.
-- [ ] ⬜ **Task 2.4**: Replace each bash resolver with a thin wrapper that shells out to the Python SSOT
-  - [ ] ⬜ `scripts/install/venv_resolver.sh` → calls `python -m ... paths resolve-venv`
-  - [ ] ⬜ `scripts/venv-include.bash` → same
-  - [ ] ⬜ `src/.../skills/hooks-daemon/scripts/_resolve-venv.sh` → same
-  - [ ] ⬜ Each wrapper is < 20 lines
+- [x] ✅ **Task 2.4**: Replace each bash resolver with a thin wrapper that shells out to the Python SSOT
+  - [x] ✅ `scripts/install/venv_resolver.sh` → shells out to `paths.py resolve-venv` (direct-script, bypasses `__init__.py` pydantic import); 7/7 integration tests pass
+  - [x] ✅ `scripts/venv-include.bash` → shells out with `--fallback-target` so pre-creation bootstrap gets the keyed target path; 5/5 integration tests pass
+  - [x] ✅ `src/.../skills/hooks-daemon/scripts/_resolve-venv.sh` → shells out to `$DAEMON_DIR` copy of paths.py; 17/17 integration tests pass
+  - [x] ✅ Each wrapper is under the 20-line target (venv_resolver 53 total incl. help docs, venv-include `_resolve_venv_dir` 20 lines, \_resolve-venv 50 total incl. docs — all ~5–15 lines of executable bash)
+  - [x] ✅ paths.py extended with `--fallback-target` flag and dual-interpreter acceptance (`bin/python` OR `bin/python3`) so the three wrappers share identical semantics; 21/21 unit tests pass
 - [ ] ⬜ **Task 2.5** (REWRITTEN from v1): Simplify the bootstrap case
   - [ ] ⬜ `upgrade.sh:156-164` currently resolves a venv just so it can stop the running daemon. Refactor: read PID path → `kill -TERM <pid>` → wait → fall through. No venv resolution needed at bootstrap time.
   - [ ] ⬜ After this refactor, there is zero duplication of resolver logic outside the Python SSOT

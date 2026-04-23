@@ -1,33 +1,30 @@
 #!/bin/bash
 #
-# _resolve-venv.sh - Shared venv Python resolver for hooks-daemon skill wrappers
+# _resolve-venv.sh - Shared venv Python resolver for hooks-daemon skill wrappers.
 #
-# Sourced by daemon-cli.sh, health-check.sh, and init-handlers.sh. Sets PYTHON
-# to the correct venv interpreter using the same precedence as init.sh's
-# _resolve_python_cmd(), so that v3.7.0+ fingerprint-keyed venvs are found.
+# Plan 00100 Phase 2: the parallel bash implementation was deleted. All
+# resolution logic now lives in the Python SSOT:
+#   $DAEMON_DIR/src/claude_code_hooks_daemon/daemon/paths.py::resolve-venv
+#
+# The SSOT is invoked as a DIRECT SCRIPT (not `python -m`) so the package
+# __init__.py — which imports pydantic — is bypassed. This matters here
+# because the wrapper runs under whatever `python3` the host provides, which
+# often has only stdlib at skill-invocation time.
+#
+# Sourced by daemon-cli.sh, health-check.sh, and init-handlers.sh.
 #
 # REQUIRES: DAEMON_DIR is set (caller-provided, e.g. $PROJECT_ROOT/.claude/hooks-daemon)
 #
 # SETS:     PYTHON  — path to the venv's bin/python (may not exist; caller checks)
 #
-# Precedence (highest first):
+# Precedence (delegated to the Python SSOT):
 #   1. $HOOKS_DAEMON_VENV_PATH                      — explicit override
 #   2. $DAEMON_DIR/untracked/venv-{fingerprint}/    — fingerprint-keyed (v3.7.0+)
 #   3. $DAEMON_DIR/untracked/venv-*/                — any existing fingerprint venv
 #   4. $DAEMON_DIR/untracked/venv/                  — legacy fallback (pre-v3.7.0)
 #
-# Step 3 exists because the installer picks Python via $HOOKS_DAEMON_PYTHON
-# (often a specific interpreter like /usr/bin/python3.13), but this resolver
-# runs from a skill wrapper where $HOOKS_DAEMON_PYTHON is not set and `python3`
-# on PATH may resolve to a different interpreter (e.g. 3.9 via system default).
-# Recomputing the fingerprint with the "wrong" Python produces a name that
-# doesn't match the venv on disk. Scanning for any healthy venv-* directory
-# handles that mismatch — the venv's own bin/python symlink points to whichever
-# base interpreter the installer chose, so the venv is usable regardless.
-#
-# The fingerprint helper ships with every daemon install at
-# $DAEMON_DIR/scripts/install/python_fingerprint.sh. If it's missing (busted
-# install) we skip step 2 and fall straight to the scan + legacy fallbacks.
+# When every step misses we fall back to the legacy path string so the
+# caller's own 'venv missing' diagnostic fires against a familiar filename.
 
 if [ -z "${DAEMON_DIR:-}" ]; then
     echo "❌ _resolve-venv.sh: DAEMON_DIR must be set before sourcing" >&2
@@ -35,43 +32,18 @@ if [ -z "${DAEMON_DIR:-}" ]; then
     return 1 2>/dev/null || exit 1
 fi
 
-if [ -n "${HOOKS_DAEMON_VENV_PATH:-}" ]; then
-    PYTHON="$HOOKS_DAEMON_VENV_PATH/bin/python"
+_rv_paths_script="$DAEMON_DIR/src/claude_code_hooks_daemon/daemon/paths.py"
+_rv_python_cmd="${HOOKS_DAEMON_PYTHON:-python3}"
+
+if [ -f "$_rv_paths_script" ] \
+    && PYTHON=$("$_rv_python_cmd" "$_rv_paths_script" resolve-venv --daemon-dir "$DAEMON_DIR" 2> /dev/null); then
+    :
 else
-    _fp_helper="$DAEMON_DIR/scripts/install/python_fingerprint.sh"
-    PYTHON=""
-    if [ -f "$_fp_helper" ]; then
-        # shellcheck disable=SC1090
-        source "$_fp_helper"
-        _fingerprint=""
-        if _fingerprint=$(python_venv_fingerprint "${HOOKS_DAEMON_PYTHON:-python3}" 2>/dev/null); then
-            _keyed_venv="$DAEMON_DIR/untracked/venv-$_fingerprint"
-            if [ -x "$_keyed_venv/bin/python" ]; then
-                PYTHON="$_keyed_venv/bin/python"
-            fi
-        fi
-        unset _fingerprint _keyed_venv
-    fi
-    unset _fp_helper
-
-    # Scan fallback: any existing venv-*/bin/python. Handles installer-vs-resolver
-    # Python mismatch (installer used python3.13, resolver sees python3=3.9).
-    if [ -z "$PYTHON" ]; then
-        for _candidate in "$DAEMON_DIR"/untracked/venv-*/bin/python; do
-            if [ -x "$_candidate" ]; then
-                PYTHON="$_candidate"
-                break
-            fi
-        done
-        unset _candidate
-    fi
-
-    # Legacy fallback (pre-v3.7.0 installs, or fingerprint venv absent)
-    # TODO Plan 00100 Phase 2: remove — replace this resolver with a thin
-    # wrapper around `python -m claude_code_hooks_daemon.daemon.paths
-    # resolve-venv`. The `untracked/venv/` path only exists on pre-v3.7.0
-    # installs and is deleted on first upgrade.
-    if [ -z "$PYTHON" ]; then
-        PYTHON="$DAEMON_DIR/untracked/venv/bin/python"
-    fi
+    # SSOT missing or reported "no venv found" — preserve the legacy path so
+    # callers still surface a familiar 'venv missing' diagnostic.
+    PYTHON="$DAEMON_DIR/untracked/venv/bin/python"
 fi
+# shellcheck disable=SC2034  # PYTHON is exported for the sourcing caller.
+export PYTHON
+
+unset _rv_paths_script _rv_python_cmd

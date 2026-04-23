@@ -17,6 +17,11 @@ implements the same precedence as init.sh's `_resolve_python_cmd()`:
 and have daemon-cli.sh, health-check.sh, init-handlers.sh source it instead of
 hardcoding the legacy path.
 
+Plan 00100 Phase 2: the resolver is now a thin wrapper around the Python
+SSOT at $DAEMON_DIR/src/claude_code_hooks_daemon/daemon/paths.py. Tests
+that previously linked python_fingerprint.sh now link paths.py — same
+dependency-injection shape, different underlying helper.
+
 These tests exercise the helper directly and also assert the three wrappers
 actually source it (no hardcoded legacy path remains).
 """
@@ -49,11 +54,18 @@ def _make_venv_skeleton(path: Path) -> None:
 
 
 def _link_fingerprint_helper(daemon_dir: Path) -> None:
-    """Symlink the real python_fingerprint.sh into a fake DAEMON_DIR."""
-    install_dir = daemon_dir / "scripts" / "install"
-    install_dir.mkdir(parents=True)
-    (install_dir / "python_fingerprint.sh").symlink_to(
-        REPO_ROOT / "scripts" / "install" / "python_fingerprint.sh"
+    """Symlink the Python SSOT (paths.py) into a fake DAEMON_DIR.
+
+    The skill resolver now delegates to
+    ``$DAEMON_DIR/src/claude_code_hooks_daemon/daemon/paths.py`` rather than
+    re-implementing the precedence in bash. The name of this helper is kept
+    for continuity with prior test history (the fingerprint logic now lives
+    inside the Python SSOT, which we link here).
+    """
+    paths_parent = daemon_dir / "src" / "claude_code_hooks_daemon" / "daemon"
+    paths_parent.mkdir(parents=True)
+    (paths_parent / "paths.py").symlink_to(
+        REPO_ROOT / "src" / "claude_code_hooks_daemon" / "daemon" / "paths.py"
     )
 
 
@@ -85,6 +97,7 @@ class TestExplicitOverride:
     def test_hooks_daemon_venv_path_wins(self, tmp_path: Path) -> None:
         daemon_dir = tmp_path / "daemon"
         daemon_dir.mkdir()
+        _link_fingerprint_helper(daemon_dir)
         override = tmp_path / "explicit"
         _make_venv_skeleton(override)
 

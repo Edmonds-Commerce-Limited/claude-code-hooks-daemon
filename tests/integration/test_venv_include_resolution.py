@@ -1,10 +1,14 @@
 """Integration tests for scripts/venv-include.bash's `_resolve_venv_dir()`.
 
-Plan 00099 Phase 3: venv-include.bash (sourced by all QA scripts) resolves
-VENV_DIR using the same precedence as init.sh:
-  1. $HOOKS_DAEMON_VENV_PATH     — explicit override
-  2. untracked/venv-{fingerprint}/ — fingerprint-keyed (when present)
-  3. untracked/venv/              — legacy fallback (pre-v3.7.0)
+Plan 00099 Phase 3 laid out the precedence; Plan 00100 Phase 2 collapsed it
+into a single Python SSOT at src/claude_code_hooks_daemon/daemon/paths.py.
+venv-include.bash is now a thin wrapper that shells out to that SSOT; the
+tests below exercise the combined behaviour:
+
+  1. $HOOKS_DAEMON_VENV_PATH        — explicit override
+  2. untracked/venv-{fingerprint}/  — fingerprint-keyed (when present)
+  3. untracked/venv-*/              — scan for any existing venv
+  4. untracked/venv/                — legacy fallback (pre-v3.7.0)
 
 Tests source the file in an isolated PROJECT_ROOT so we can control which
 paths exist.
@@ -19,7 +23,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VENV_INCLUDE = REPO_ROOT / "scripts" / "venv-include.bash"
-FP_HELPER = REPO_ROOT / "scripts" / "install" / "python_fingerprint.sh"
+PATHS_SSOT = REPO_ROOT / "src" / "claude_code_hooks_daemon" / "daemon" / "paths.py"
 
 
 def _run(project_root: Path, env_overrides: dict[str, str] | None = None) -> str:
@@ -41,14 +45,21 @@ def _run(project_root: Path, env_overrides: dict[str, str] | None = None) -> str
 
 
 def _setup_fake_project(tmp_path: Path, include_fp_helper: bool = True) -> Path:
-    """Create a minimal project directory layout that venv-include.bash expects."""
+    """Create a minimal project directory layout that venv-include.bash expects.
+
+    Plan 00100 Phase 2: ``include_fp_helper`` now controls whether the Python
+    SSOT (paths.py) is linked. The name is kept for test-history continuity;
+    the concept has moved from a bash helper to the SSOT script.
+    """
     project = tmp_path / "project"
     (project / "scripts" / "install").mkdir(parents=True)
     # venv-include.bash computes PROJECT_ROOT as parent of its own directory,
     # so the sourced script must live at {project}/scripts/venv-include.bash
     (project / "scripts" / "venv-include.bash").symlink_to(VENV_INCLUDE)
     if include_fp_helper:
-        (project / "scripts" / "install" / "python_fingerprint.sh").symlink_to(FP_HELPER)
+        ssot_parent = project / "src" / "claude_code_hooks_daemon" / "daemon"
+        ssot_parent.mkdir(parents=True)
+        (ssot_parent / "paths.py").symlink_to(PATHS_SSOT)
     return project
 
 

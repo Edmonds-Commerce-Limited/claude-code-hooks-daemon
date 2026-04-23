@@ -181,15 +181,29 @@ def resolve_existing_venv_python_with_diagnostics(
     daemon_path = Path(daemon_dir)
     steps: list[str] = []
 
+    def _pick_interpreter(venv_dir: Path) -> Path | None:
+        """Return the first executable interpreter in ``venv_dir/bin``.
+
+        Real venvs have both ``bin/python`` and ``bin/python3``. Some bash
+        callers (notably ``scripts/venv-include.bash`` and its test fakes)
+        create only one of the two. The SSOT must accept either so every
+        caller agrees on whether a venv is usable.
+        """
+        for name in ("python", "python3"):
+            candidate = venv_dir / "bin" / name
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return candidate
+        return None
+
     override = os.environ.get("HOOKS_DAEMON_VENV_PATH")
     if override:
-        override_py = Path(override) / "bin" / "python"
-        if override_py.is_file() and os.access(override_py, os.X_OK):
+        override_py = _pick_interpreter(Path(override))
+        if override_py is not None:
             steps.append(f"step 1: HOOKS_DAEMON_VENV_PATH={override} OK — using {override_py}")
             return override_py, steps
         steps.append(
             f"step 1: HOOKS_DAEMON_VENV_PATH={override} set but "
-            f"{override_py} is missing or not executable"
+            f"{Path(override) / 'bin' / 'python'} is missing or not executable"
         )
     else:
         steps.append("step 1: HOOKS_DAEMON_VENV_PATH unset")
@@ -197,20 +211,24 @@ def resolve_existing_venv_python_with_diagnostics(
     untracked = daemon_path / "untracked"
 
     fingerprint = python_venv_fingerprint()
-    keyed = untracked / f"venv-{fingerprint}" / "bin" / "python"
-    if keyed.is_file() and os.access(keyed, os.X_OK):
-        steps.append(f"step 2: fingerprint-keyed venv OK — using {keyed}")
-        return keyed, steps
-    steps.append(f"step 2: fingerprint-keyed path {keyed} missing or not executable")
+    keyed_dir = untracked / f"venv-{fingerprint}"
+    keyed_py = _pick_interpreter(keyed_dir)
+    if keyed_py is not None:
+        steps.append(f"step 2: fingerprint-keyed venv OK — using {keyed_py}")
+        return keyed_py, steps
+    steps.append(
+        f"step 2: fingerprint-keyed path {keyed_dir / 'bin' / 'python'} "
+        "missing or not executable"
+    )
 
     scanned: list[str] = []
     if untracked.is_dir():
         for candidate_dir in sorted(untracked.glob("venv-*")):
-            candidate = candidate_dir / "bin" / "python"
-            scanned.append(str(candidate))
-            if candidate.is_file() and os.access(candidate, os.X_OK):
-                steps.append(f"step 3: scan-fallback hit — using {candidate}")
-                return candidate, steps
+            scanned.append(str(candidate_dir / "bin" / "python"))
+            candidate_py = _pick_interpreter(candidate_dir)
+            if candidate_py is not None:
+                steps.append(f"step 3: scan-fallback hit — using {candidate_py}")
+                return candidate_py, steps
         if scanned:
             steps.append(f"step 3: scan fallback found no executable bin/python among {scanned}")
         else:
@@ -218,11 +236,12 @@ def resolve_existing_venv_python_with_diagnostics(
     else:
         steps.append(f"step 3: scan fallback — {untracked} does not exist")
 
-    legacy = untracked / "venv" / "bin" / "python"
-    if legacy.is_file() and os.access(legacy, os.X_OK):
-        steps.append(f"step 4: legacy fallback OK — using {legacy}")
-        return legacy, steps
-    steps.append(f"step 4: legacy path {legacy} missing or not executable")
+    legacy_dir = untracked / "venv"
+    legacy_py = _pick_interpreter(legacy_dir)
+    if legacy_py is not None:
+        steps.append(f"step 4: legacy fallback OK — using {legacy_py}")
+        return legacy_py, steps
+    steps.append(f"step 4: legacy path {legacy_dir / 'bin' / 'python'} missing or not executable")
 
     return None, steps
 
@@ -725,19 +744,31 @@ def _cli_resolve_venv(args: argparse.Namespace) -> int:
     Plan 00100 Task 2.3: Python SSOT entry point that bash wrappers shell out
     to. Prints the resolved ``bin/python`` path to stdout on success (exit 0),
     or a per-step diagnostic trace to stderr on failure (exit 1).
+
+    Plan 00100 Task 2.4: when ``--fallback-target`` is set, a miss returns
+    the fingerprint-keyed creation target (exit 0) instead of exit 1 — this
+    is what ``scripts/venv-include.bash::ensure_venv`` needs when no venv
+    has been created yet on a fresh project.
     """
     daemon_dir = Path(args.daemon_dir) if args.daemon_dir else Path.cwd()
+    fallback_target: bool = getattr(args, "fallback_target", False)
     resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
-    if resolved is None:
-        print(
-            "resolve-venv: no usable venv found. Precedence trace:",
-            file=sys.stderr,
-        )
-        for step in steps:
-            print(f"  {step}", file=sys.stderr)
-        return 1
-    print(str(resolved))
-    return 0
+    if resolved is not None:
+        print(str(resolved))
+        return 0
+
+    if fallback_target:
+        fingerprint = python_venv_fingerprint()
+        print(str(daemon_dir / "untracked" / f"venv-{fingerprint}" / "bin" / "python"))
+        return 0
+
+    print(
+        "resolve-venv: no usable venv found. Precedence trace:",
+        file=sys.stderr,
+    )
+    for step in steps:
+        print(f"  {step}", file=sys.stderr)
+    return 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -762,6 +793,16 @@ def main(argv: list[str] | None = None) -> int:
             "Daemon installation directory (defaults to the current working "
             "directory). Self-install mode: the project root. Client install: "
             "{project}/.claude/hooks-daemon."
+        ),
+    )
+    resolve_venv_parser.add_argument(
+        "--fallback-target",
+        action="store_true",
+        help=(
+            "On miss, print the fingerprint-keyed creation target path "
+            "($DAEMON_DIR/untracked/venv-{fingerprint}/bin/python) and exit "
+            "0 instead of exit 1. Used by scripts/venv-include.bash so "
+            "ensure_venv has a creation target before any venv exists."
         ),
     )
     resolve_venv_parser.set_defaults(func=_cli_resolve_venv)
