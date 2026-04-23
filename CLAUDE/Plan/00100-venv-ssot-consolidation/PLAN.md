@@ -208,9 +208,10 @@ Opus orchestrates a team. Each phase lands a green state before the next begins.
   - [x] ✅ `src/.../skills/hooks-daemon/scripts/_resolve-venv.sh` → shells out to `$DAEMON_DIR` copy of paths.py; 17/17 integration tests pass
   - [x] ✅ Each wrapper is under the 20-line target (venv_resolver 53 total incl. help docs, venv-include `_resolve_venv_dir` 20 lines, \_resolve-venv 50 total incl. docs — all ~5–15 lines of executable bash)
   - [x] ✅ paths.py extended with `--fallback-target` flag and dual-interpreter acceptance (`bin/python` OR `bin/python3`) so the three wrappers share identical semantics; 21/21 unit tests pass
-- [ ] ⬜ **Task 2.5** (REWRITTEN from v1): Simplify the bootstrap case
-  - [ ] ⬜ `upgrade.sh:156-164` currently resolves a venv just so it can stop the running daemon. Refactor: read PID path → `kill -TERM <pid>` → wait → fall through. No venv resolution needed at bootstrap time.
-  - [ ] ⬜ After this refactor, there is zero duplication of resolver logic outside the Python SSOT
+- [x] ✅ **Task 2.5** (REWRITTEN from v1): Simplify the bootstrap case
+  - [x] ✅ `upgrade.sh` now defines `_stop_running_daemons()` which iterates `untracked/daemon-*.pid`, reads each PID, `kill -0` checks, `kill -TERM`, sleep 1. Zero venv resolution, zero Python invocation.
+  - [x] ✅ Refactor pinned by `tests/integration/test_upgrade_sh_stop_bootstrap.py` (9 tests): function defined, no venv refs in body, SIGTERMs the sleeper, handles multiple daemons, and silently skips missing/empty/stale/non-numeric PID files.
+  - [x] ✅ After this refactor, there is zero duplication of resolver logic outside the Python SSOT.
 - [ ] ⬜ **Task 2.6**: Full QA + daemon restart + re-run phase 0 and 1 tests
 - [ ] ⬜ **Task 2.7** (MOVED from v1 Task 1.5): Add a guard in `ensure_venv()` that refuses to create at the legacy path
   - [ ] ⬜ Write failing test FIRST: `tests/integration/test_legacy_path_refused.py` — confirms `ensure_venv` cannot produce `untracked/venv/`

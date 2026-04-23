@@ -147,31 +147,46 @@ fi
 _ok "Daemon directory: $DAEMON_DIR"
 
 # Step 4: Best-effort daemon stop (before checkout)
-# Resolve any existing venv python. v3.7.0+ uses fingerprint-keyed dirs
-# (untracked/venv-{fp}/), pre-v3.7.0 used untracked/venv/. Prefer an
-# executable fingerprint-keyed path when present, fall back to the legacy
-# path otherwise. We cannot source the SSOT helper here because Layer 1 may
-# be run standalone (curl | bash) before any scripts/install/ checkout.
-VENV_PYTHON=""
-for _vp in "$DAEMON_DIR"/untracked/venv-*/bin/python; do
-    if [ -x "$_vp" ]; then
-        VENV_PYTHON="$_vp"
-        break
-    fi
-done
-unset _vp
-if [ -z "$VENV_PYTHON" ]; then
-    VENV_PYTHON="$DAEMON_DIR/untracked/venv/bin/python"
-fi
-if [ -f "$VENV_PYTHON" ]; then
-    _info "Stopping daemon..."
-    # Best-effort stop: failure is non-fatal — the subsequent checkout +
-    # reinstall re-provisions cleanly. Explicit `if` avoids bulk error-hiding.
-    if ! "$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli stop 2> /dev/null; then
-        :
-    fi
-    sleep 1
-fi
+# Plan 00100 Task 2.5: PID-kill only. The previous implementation resolved a
+# venv python just to invoke `daemon.cli stop`, reintroducing the very
+# precedence logic the Phase 2 SSOT consolidated. Bootstrap now reads PID
+# files directly so zero venv / Python resolution is needed here.
+#
+# Contract (pinned by tests/integration/test_upgrade_sh_stop_bootstrap.py):
+#   - SIGTERM every PID listed in $DAEMON_DIR/untracked/daemon-*.pid
+#   - Skip missing/empty/non-numeric/stale PID files silently
+#   - Skip missing untracked/ directory silently
+#   - Never invoke python, python3, or daemon.cli
+_stop_running_daemons() {
+    local daemon_dir="$1"
+    local untracked="$daemon_dir/untracked"
+    [ -d "$untracked" ] || return 0
+
+    local pid_file pid_raw pid
+    local any_killed=0
+    for pid_file in "$untracked"/daemon-*.pid; do
+        [ -f "$pid_file" ] || continue
+        if ! pid_raw=$(tr -d '[:space:]' < "$pid_file" 2> /dev/null); then
+            continue
+        fi
+        pid="$pid_raw"
+        # Require a pure positive integer; skip empty / garbage / stale.
+        case "$pid" in
+            '' | *[!0-9]*) continue ;;
+        esac
+        if kill -0 "$pid" 2> /dev/null; then
+            if kill -TERM "$pid" 2> /dev/null; then
+                any_killed=1
+            fi
+        fi
+    done
+    # Give terminated daemons a moment to shut sockets before checkout runs.
+    [ "$any_killed" -eq 1 ] && sleep 1
+    return 0
+}
+
+_info "Stopping daemon (best-effort, PID-only)..."
+_stop_running_daemons "$DAEMON_DIR"
 
 # Step 5: Fetch tags and determine target version
 _info "Fetching latest tags..."
