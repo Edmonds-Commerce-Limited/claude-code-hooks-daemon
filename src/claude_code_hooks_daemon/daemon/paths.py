@@ -8,6 +8,7 @@ SECURITY: All runtime files stored in daemon's untracked directory,
 not /tmp, to prevent security vulnerabilities.
 """
 
+import argparse
 import contextlib
 import hashlib
 import json
@@ -160,6 +161,70 @@ def resolve_existing_venv_python(daemon_dir: Path | str) -> Path:
     # return based solely on the persisted `.daemon-metadata.json` choice.
     # Legacy fallback retained only for pre-v3.7.0 installs.
     return untracked / "venv" / "bin" / "python"
+
+
+def resolve_existing_venv_python_with_diagnostics(
+    daemon_dir: Path | str,
+) -> tuple[Path | None, list[str]]:
+    """Resolve the venv python path, returning diagnostics for every step tried.
+
+    Unlike :func:`resolve_existing_venv_python`, this function never returns a
+    path that does not exist. It returns ``(resolved_path, steps)`` where
+    ``resolved_path`` is ``None`` on failure and ``steps`` is the full
+    per-precedence-step diagnostic log (always populated, for both success
+    and failure).
+
+    Precedence (Plan 00100 Task 2.3): same as ``resolve_existing_venv_python``.
+
+    This is the Python SSOT entry point referenced by bash wrappers.
+    """
+    daemon_path = Path(daemon_dir)
+    steps: list[str] = []
+
+    override = os.environ.get("HOOKS_DAEMON_VENV_PATH")
+    if override:
+        override_py = Path(override) / "bin" / "python"
+        if override_py.is_file() and os.access(override_py, os.X_OK):
+            steps.append(f"step 1: HOOKS_DAEMON_VENV_PATH={override} OK — using {override_py}")
+            return override_py, steps
+        steps.append(
+            f"step 1: HOOKS_DAEMON_VENV_PATH={override} set but "
+            f"{override_py} is missing or not executable"
+        )
+    else:
+        steps.append("step 1: HOOKS_DAEMON_VENV_PATH unset")
+
+    untracked = daemon_path / "untracked"
+
+    fingerprint = python_venv_fingerprint()
+    keyed = untracked / f"venv-{fingerprint}" / "bin" / "python"
+    if keyed.is_file() and os.access(keyed, os.X_OK):
+        steps.append(f"step 2: fingerprint-keyed venv OK — using {keyed}")
+        return keyed, steps
+    steps.append(f"step 2: fingerprint-keyed path {keyed} missing or not executable")
+
+    scanned: list[str] = []
+    if untracked.is_dir():
+        for candidate_dir in sorted(untracked.glob("venv-*")):
+            candidate = candidate_dir / "bin" / "python"
+            scanned.append(str(candidate))
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                steps.append(f"step 3: scan-fallback hit — using {candidate}")
+                return candidate, steps
+        if scanned:
+            steps.append(f"step 3: scan fallback found no executable bin/python among {scanned}")
+        else:
+            steps.append(f"step 3: scan fallback found no venv-* under {untracked}")
+    else:
+        steps.append(f"step 3: scan fallback — {untracked} does not exist")
+
+    legacy = untracked / "venv" / "bin" / "python"
+    if legacy.is_file() and os.access(legacy, os.X_OK):
+        steps.append(f"step 4: legacy fallback OK — using {legacy}")
+        return legacy, steps
+    steps.append(f"step 4: legacy path {legacy} missing or not executable")
+
+    return None, steps
 
 
 def get_project_hash(project_path: Path | str) -> str:
@@ -652,3 +717,58 @@ def write_cleanup_status(project_dir: Path | str, total_removed: int) -> None:
         logger.debug("Wrote cleanup status: %d files removed", total_removed)
     except OSError as e:
         logger.warning("Failed to write cleanup status: %s", e)
+
+
+def _cli_resolve_venv(args: argparse.Namespace) -> int:
+    """CLI handler for the ``resolve-venv`` subcommand.
+
+    Plan 00100 Task 2.3: Python SSOT entry point that bash wrappers shell out
+    to. Prints the resolved ``bin/python`` path to stdout on success (exit 0),
+    or a per-step diagnostic trace to stderr on failure (exit 1).
+    """
+    daemon_dir = Path(args.daemon_dir) if args.daemon_dir else Path.cwd()
+    resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+    if resolved is None:
+        print(
+            "resolve-venv: no usable venv found. Precedence trace:",
+            file=sys.stderr,
+        )
+        for step in steps:
+            print(f"  {step}", file=sys.stderr)
+        return 1
+    print(str(resolved))
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Dispatcher for ``python -m claude_code_hooks_daemon.daemon.paths``.
+
+    Currently exposes the ``resolve-venv`` subcommand (Plan 00100 Phase 2);
+    more SSOT subcommands may be added later.
+    """
+    parser = argparse.ArgumentParser(
+        description="Hooks-daemon path utilities (SSOT for bash wrappers).",
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    resolve_venv_parser = subparsers.add_parser(
+        "resolve-venv",
+        help="Resolve the active venv's bin/python path for this daemon install.",
+    )
+    resolve_venv_parser.add_argument(
+        "--daemon-dir",
+        default=None,
+        help=(
+            "Daemon installation directory (defaults to the current working "
+            "directory). Self-install mode: the project root. Client install: "
+            "{project}/.claude/hooks-daemon."
+        ),
+    )
+    resolve_venv_parser.set_defaults(func=_cli_resolve_venv)
+
+    args = parser.parse_args(argv)
+    return int(args.func(args))
+
+
+if __name__ == "__main__":
+    sys.exit(main())

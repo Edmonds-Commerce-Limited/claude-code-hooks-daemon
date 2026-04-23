@@ -195,13 +195,13 @@ Opus orchestrates a team. Each phase lands a green state before the next begins.
 
 **Why**: drift is inevitable with four parallel implementations.
 
-- [ ] ⬜ **Task 2.1**: Design a single Python entry point: `python -m claude_code_hooks_daemon.daemon.paths resolve-venv [--python PYTHON] [--daemon-dir DIR]`
-  - [ ] ⬜ Output: single line, the venv python path, exit 0 on success
-  - [ ] ⬜ On failure: stderr cites every precedence step tried and why each failed; exit 1
-- [ ] ⬜ **Task 2.2**: Write failing unit tests covering every precedence and every failure mode
-- [ ] ⬜ **Task 2.3**: Implement the entry point in `src/claude_code_hooks_daemon/daemon/paths.py`
-  - [ ] ⬜ Reads `.daemon-metadata.json` (written in phase 3) via strict schema validation
-  - [ ] ⬜ No scan fallback in steady state. Explicit lookup only.
+- [x] ✅ **Task 2.1**: Design a single Python entry point: `python -m claude_code_hooks_daemon.daemon.paths resolve-venv [--daemon-dir DIR]`
+  - [x] ✅ Output: single line, the venv python path, exit 0 on success
+  - [x] ✅ On failure: stderr cites every precedence step tried and why each failed; exit 1
+- [x] ✅ **Task 2.2**: Wrote failing unit tests covering every precedence and every failure mode (`tests/integration/test_paths_resolve_venv_cli.py`, 8 tests)
+- [x] ✅ **Task 2.3**: Implemented the entry point in `src/claude_code_hooks_daemon/daemon/paths.py`
+  - [ ] ⬜ Reads `.daemon-metadata.json` (written in phase 3) via strict schema validation — deferred to Phase 3
+  - [x] ✅ Current implementation preserves 4-step precedence (override → fingerprint → scan → legacy) while Phase 3 persistence work is outstanding. Diagnostic helper `resolve_existing_venv_python_with_diagnostics()` is the new structured backend.
 - [ ] ⬜ **Task 2.4**: Replace each bash resolver with a thin wrapper that shells out to the Python SSOT
   - [ ] ⬜ `scripts/install/venv_resolver.sh` → calls `python -m ... paths resolve-venv`
   - [ ] ⬜ `scripts/venv-include.bash` → same
