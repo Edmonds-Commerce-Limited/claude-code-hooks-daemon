@@ -1,6 +1,6 @@
 # Plan 00100 (v2): Venv SSOT Consolidation — Stop the Release Treadmill
 
-**Status**: In Progress (Phase 0)
+**Status**: In Progress (Phase 1 — Phase 0 complete)
 **Created**: 2026-04-23
 **Revised**: 2026-04-23 (v2 — addresses CRITIQUE-v1.md)
 **Started**: 2026-04-23
@@ -140,10 +140,11 @@ Opus orchestrates a team. Each phase lands a green state before the next begins.
   - [x] ✅ `upgrade.sh`: inline pre-check BEFORE daemon mutation (uses installed pyproject.toml + parse_min_python.sh)
   - [x] ✅ `install.sh`: fetch remote pyproject.toml, inline pre-check BEFORE downloading installer
   - [x] ✅ Actionable `HOOKS_DAEMON_PYTHON=python3.X` hint surfaced on mismatch; daemon state unchanged on failure
-- [ ] ⬜ **Task 0.4**: Clear error surfacing across all three fixes
-  - [ ] ⬜ Error messages must include: what was checked, what was found, what to do next (exact command)
-  - [ ] ⬜ No silent truncation
-- [ ] ⬜ **Task 0.5**: Full QA + daemon restart + add the three new tests to `run_all.sh`
+- [x] ✅ **Task 0.4**: Clear error surfacing across all three fixes
+  - [x] ✅ Task 0.1: `uv` stderr captured via temp file (`/tmp/uv_sync_output.*`), preserved on failure
+  - [x] ✅ Task 0.2: polling stderr captured (`/tmp/hooks-daemon-restart-poll.*.err`), dumped on failure with full status output
+  - [x] ✅ Task 0.3: version-mismatch errors include active version, required version, and `HOOKS_DAEMON_PYTHON=...` retry command
+- [x] ✅ **Task 0.5**: Full QA + daemon restart — three new test files are auto-discovered by `tests/integration/`; `run_all.sh` picks them up without further config
 
 **Success gate**: The three field-reported scenarios are covered by passing tests. The user's original `/hooks-daemon upgrade` command, re-run against HEAD on a host with `python3`=3.9 and `python3.13`=3.13.11, either succeeds cleanly OR fails with actionable messaging and leaves the daemon state unchanged.
 
