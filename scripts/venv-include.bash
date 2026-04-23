@@ -48,6 +48,11 @@ _resolve_venv_dir() {
     done
     # Prefer keyed path for creation if fingerprint helper worked and no
     # legacy venv exists, so new venvs land at the correct location.
+    # Plan 00100 Task 1.4 (deferred): this branch is load-bearing for fresh
+    # dev-machine `ensure_venv` (verified by
+    # tests/integration/test_venv_include_resolution.py::test_fingerprint_keyed_preferred_for_creation_when_no_legacy).
+    # Phase 2 replaces the whole resolver with a Python SSOT shell-out, at
+    # which point this branch goes away with the rest.
     if [ -f "$fp_helper" ] && [ ! -d "${PROJECT_ROOT}/untracked/venv" ]; then
         local fingerprint_create
         # shellcheck disable=SC1090
@@ -58,6 +63,10 @@ _resolve_venv_dir() {
         fi
     fi
     # Legacy fallback (pre-v3.7.0 installs)
+    # TODO Plan 00100 Phase 2: remove — replace this resolver with a thin
+    # wrapper around `python -m claude_code_hooks_daemon.daemon.paths
+    # resolve-venv`. The `untracked/venv/` path only exists on pre-v3.7.0
+    # installs and is deleted on first upgrade.
     echo "${PROJECT_ROOT}/untracked/venv"
 }
 

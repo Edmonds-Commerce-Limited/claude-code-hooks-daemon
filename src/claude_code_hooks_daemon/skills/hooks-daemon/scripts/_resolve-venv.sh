@@ -67,6 +67,10 @@ else
     fi
 
     # Legacy fallback (pre-v3.7.0 installs, or fingerprint venv absent)
+    # TODO Plan 00100 Phase 2: remove — replace this resolver with a thin
+    # wrapper around `python -m claude_code_hooks_daemon.daemon.paths
+    # resolve-venv`. The `untracked/venv/` path only exists on pre-v3.7.0
+    # installs and is deleted on first upgrade.
     if [ -z "$PYTHON" ]; then
         PYTHON="$DAEMON_DIR/untracked/venv/bin/python"
     fi

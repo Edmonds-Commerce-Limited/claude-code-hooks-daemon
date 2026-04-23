@@ -155,6 +155,10 @@ def resolve_existing_venv_python(daemon_dir: Path | str) -> Path:
             if candidate.is_file() and os.access(candidate, os.X_OK):
                 return candidate
 
+    # TODO Plan 00100 Phase 2: once this Python entry point becomes the single
+    # SSOT (bash resolvers shell out here), remove the scan fallback above and
+    # return based solely on the persisted `.daemon-metadata.json` choice.
+    # Legacy fallback retained only for pre-v3.7.0 installs.
     return untracked / "venv" / "bin" / "python"
 
 

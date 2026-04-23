@@ -70,17 +70,20 @@ Locates project root by walking up directory tree looking for `.claude/hooks-dae
 
 ### venv.sh - Virtual Environment Management
 
-Creates, recreates, and verifies isolated Python virtual environments.
+Provisions and verifies fingerprint-keyed Python virtual environments
+(`untracked/venv-py{MM}-{fingerprint}/`, introduced in v3.7.0).
 
-| Function                   | Args       | Description                                    |
-| -------------------------- | ---------- | ---------------------------------------------- |
-| `create_venv`              | daemon_dir | Creates venv at `{daemon_dir}/untracked/venv/` |
-| `recreate_venv`            | daemon_dir | Removes and recreates venv (for upgrades)      |
-| `verify_venv`              | daemon_dir | Checks venv exists and python works            |
-| `get_venv_python_version`  | daemon_dir | Prints venv Python version                     |
-| `install_package_editable` | daemon_dir | Runs `pip install -e .` in venv                |
+| Function                   | Args                               | Description                                             |
+| -------------------------- | ---------------------------------- | ------------------------------------------------------- |
+| `ensure_venv`              | daemon_dir, target_version, python | Public entry — resolves path, stamps version            |
+| `create_venv_at_path`      | daemon_dir, venv_path, quiet       | Runs `uv sync` at an explicit path (called by ensure\_) |
+| `verify_venv`              | venv_python, daemon_dir            | Checks venv exists and daemon package imports           |
+| `get_venv_python_version`  | daemon_dir                         | Prints venv Python version                              |
+| `install_package_editable` | daemon_dir                         | Runs `pip install -e .` in venv                         |
 
-Uses `uv` for venv creation when available, falls back to `python3 -m venv`.
+Uses `uv sync` for venv creation. Pre-v3.7.0 `create_venv` / `recreate_venv`
+were removed in Plan 00100 Task 1.2 — they wrote to the legacy
+`untracked/venv/` path and had zero production callers.
 
 ### hooks_deploy.sh - Hook Script Deployment
 
@@ -211,7 +214,7 @@ print_header "Installing Claude Code Hooks Daemon"
 log_step "1" "Checking prerequisites"
 check_all_prerequisites
 log_step "2" "Creating virtual environment"
-create_venv "$DAEMON_DIR"
+ensure_venv "$DAEMON_DIR" "$TARGET_VERSION" "$PYTHON_BIN"
 ```
 
 ## Maintenance

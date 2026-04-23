@@ -2,12 +2,17 @@
 #
 # venv.sh - Unified virtual environment management using uv
 #
-# Provides functions to create, recreate, and verify Python virtual environments
-# using the uv package manager. Standardizes venv location and management.
+# Provides functions to create and verify Python virtual environments at
+# fingerprint-keyed paths using the uv package manager.
+#
+# Plan 00100 Task 1.2: `create_venv()` and `recreate_venv()` (legacy
+# pre-v3.7.0 functions writing to `untracked/venv/`) were removed. The
+# live entry point is `ensure_venv()`, which delegates to
+# `create_venv_at_path()` for the fingerprint-keyed path.
 #
 # Usage:
-#   source "$(dirname "$0")/lib/venv.sh"
-#   create_venv "$DAEMON_DIR"
+#   source "$(dirname "$0")/venv.sh"
+#   ensure_venv "$DAEMON_DIR"
 #   verify_venv "$VENV_PYTHON"
 #
 
@@ -21,112 +26,6 @@ fi
 if [ -d "$HOME/.local/bin" ]; then
     export PATH="$HOME/.local/bin:$PATH"
 fi
-
-#
-# create_venv() - Create virtual environment using uv sync
-#
-# Creates venv at {daemon_dir}/untracked/venv/ using uv.
-# Sets up untracked directory structure with .gitignore.
-#
-# Args:
-#   $1 - daemon_dir: Path to daemon installation directory
-#   $2 - quiet (optional, default: false)
-#        If true, suppresses uv output
-#
-# Returns:
-#   Exit code 0 on success, 1 on failure
-#
-create_venv() {
-    local daemon_dir="$1"
-    local quiet="${2:-false}"
-
-    if [ -z "$daemon_dir" ]; then
-        fail_fast "create_venv: daemon_dir parameter required"
-    fi
-
-    if [ ! -d "$daemon_dir" ]; then
-        fail_fast "create_venv: daemon_dir does not exist: $daemon_dir"
-    fi
-
-    print_info "Creating virtual environment with uv..."
-
-    # Create untracked directory with self-excluding .gitignore
-    mkdir -p "$daemon_dir/untracked"
-    echo "/untracked/" > "$daemon_dir/untracked/.gitignore"
-
-    # Use uv to sync dependencies to untracked/venv
-    # UV_PROJECT_ENVIRONMENT tells uv where to create the venv
-    local venv_path="$daemon_dir/untracked/venv"
-
-    # If a specific Python interpreter was found, tell uv to use it
-    local python_args=()
-    if [ -n "${HOOKS_DAEMON_PYTHON:-}" ]; then
-        python_args=(--python "$HOOKS_DAEMON_PYTHON")
-    fi
-
-    # Suppress "Failed to hardlink files" warning in containers/overlay filesystems
-    export UV_LINK_MODE=copy
-
-    if [ "$quiet" = "true" ]; then
-        if UV_PROJECT_ENVIRONMENT="$venv_path" uv sync --project "$daemon_dir" "${python_args[@]}" > /tmp/uv_sync_output.txt 2>&1; then
-            print_success "Virtual environment created at: $venv_path"
-            rm -f /tmp/uv_sync_output.txt
-            return 0
-        else
-            print_error "Failed to create virtual environment"
-            if [ -f /tmp/uv_sync_output.txt ]; then
-                cat /tmp/uv_sync_output.txt >&2
-                rm -f /tmp/uv_sync_output.txt
-            fi
-            return 1
-        fi
-    else
-        if UV_PROJECT_ENVIRONMENT="$venv_path" uv sync --project "$daemon_dir" "${python_args[@]}"; then
-            print_success "Virtual environment created at: $venv_path"
-            return 0
-        else
-            print_error "Failed to create virtual environment"
-            print_info "Manual installation command:"
-            echo "  cd $daemon_dir"
-            echo "  UV_PROJECT_ENVIRONMENT=\$(pwd)/untracked/venv uv sync"
-            return 1
-        fi
-    fi
-}
-
-#
-# recreate_venv() - Delete existing venv and create fresh one
-#
-# Used during upgrades to ensure clean venv state.
-# Follows "upgrade = clean reinstall" philosophy.
-#
-# Args:
-#   $1 - daemon_dir: Path to daemon installation directory
-#   $2 - quiet (optional, default: false)
-#
-# Returns:
-#   Exit code 0 on success, 1 on failure
-#
-recreate_venv() {
-    local daemon_dir="$1"
-    local quiet="${2:-false}"
-
-    if [ -z "$daemon_dir" ]; then
-        fail_fast "recreate_venv: daemon_dir parameter required"
-    fi
-
-    local venv_path="$daemon_dir/untracked/venv"
-
-    # Delete existing venv if it exists
-    if [ -d "$venv_path" ]; then
-        print_info "Removing existing virtual environment..."
-        rm -rf "$venv_path"
-        print_success "Existing venv removed"
-    fi
-
-    # Create fresh venv
-    create_venv "$daemon_dir" "$quiet"
-}
 
 #
 # verify_venv() - Verify venv exists and can import daemon package
@@ -395,8 +294,8 @@ ensure_venv() {
 # create_venv_at_path() - Create venv at an explicit path (fingerprint-keyed)
 #
 # Thin wrapper around `uv sync` that lets callers specify the venv location
-# directly. Used by ensure_venv(). Keeps the existing create_venv() signature
-# unchanged for backwards compatibility with install.sh / upgrade.sh.
+# directly. Used by ensure_venv() — the public entry point — as part of the
+# fingerprint-keyed venv scheme introduced in v3.7.0.
 #
 # Args:
 #   $1 - daemon_dir: Path to daemon project (for `uv sync --project`)

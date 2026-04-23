@@ -79,6 +79,10 @@ resolve_existing_venv_python() {
     done
 
     # Legacy fallback
+    # TODO Plan 00100 Phase 2: remove — replace this resolver with a thin
+    # wrapper around `python -m claude_code_hooks_daemon.daemon.paths
+    # resolve-venv`. The legacy `untracked/venv/` path only exists on
+    # pre-v3.7.0 installs and is deleted on first upgrade.
     echo "$daemon_dir/untracked/venv/bin/python"
 }
 

@@ -1,6 +1,6 @@
 # Plan 00100 (v2): Venv SSOT Consolidation — Stop the Release Treadmill
 
-**Status**: In Progress (Phase 1 — Phase 0 complete)
+**Status**: In Progress (Phase 2 — Phases 0 & 1 complete)
 **Created**: 2026-04-23
 **Revised**: 2026-04-23 (v2 — addresses CRITIQUE-v1.md)
 **Started**: 2026-04-23
@@ -154,14 +154,36 @@ Opus orchestrates a team. Each phase lands a green state before the next begins.
 
 **Why**: every future phase is easier once the legacy path is impossible to reach.
 
-- [ ] ⬜ **Task 1.1**: Grep for all callers of `create_venv`, `recreate_venv`, and hardcoded `untracked/venv/` strings across `src/`, `scripts/`, `tests/`, `docs/`
-  - [ ] ⬜ Produce a caller list with file:line; classify each as production/test/docs/dead
-- [ ] ⬜ **Task 1.2**: Delete `create_venv()` and `recreate_venv()` from `scripts/install/venv.sh`
-  - [ ] ⬜ Delete `scripts/install/test_venv_manual.sh` (tested dead functions)
-  - [ ] ⬜ Update any sourcer that referenced them
-- [ ] ⬜ **Task 1.3**: Mark the legacy-fallback step in all resolvers with a `# TODO Plan 00100 Phase 2: remove` comment and a deprecation log line (full removal lands in Phase 2)
-- [ ] ⬜ **Task 1.4**: Delete the `venv-include.bash` 5th branch drift (verify it was never load-bearing — scan branch already covers it)
-- [ ] ⬜ **Task 1.5**: Full QA + daemon restart verification
+- [x] ✅ **Task 1.1**: Grep for all callers of `create_venv`, `recreate_venv`, and hardcoded `untracked/venv/` strings across `src/`, `scripts/`, `tests/`, `docs/`
+  - [x] ✅ Classification (2026-04-23):
+    - **`create_venv` / `recreate_venv` — zero production callers** (confirms plan diagnosis).
+      Definition: `scripts/install/venv.sh:39,110` (DEAD — delete Task 1.2).
+      Intra-function calls: `scripts/install/venv.sh:128` (inside `recreate_venv` — deleted with it).
+      Tests: `scripts/install/test_venv_manual.sh:40,105` (DELETE — Task 1.2).
+      Docs: `scripts/install/README.md:77,78,214` (UPDATE — Task 1.2).
+      NOTE: `create_venv_at_path()` is the live function and stays.
+    - **Hardcoded `untracked/venv/` outside the dead functions — all are Layer-4 legacy fallbacks**:
+      - `scripts/install/venv_resolver.sh:14,82` (Resolver #1 — Task 1.3 TODO)
+      - `scripts/venv-include.bash:21,51,61` (Resolver #2, 5th branch — Tasks 1.3 + 1.4)
+      - `src/.../skills/hooks-daemon/scripts/_resolve-venv.sh:17,71` (Resolver #3 — Task 1.3)
+      - `src/.../daemon/paths.py:117` (Resolver #4 — docstring; Task 1.3)
+      - Other hits are in cleanup/migration code (post-upgrade deletion, repair, validator) — those are intentional and stay.
+- [x] ✅ **Task 1.2**: Delete `create_venv()` and `recreate_venv()` from `scripts/install/venv.sh`
+  - [x] ✅ Delete `scripts/install/test_venv_manual.sh` (tested dead functions)
+  - [x] ✅ Update `scripts/install/README.md` (replaced the dead-function docs with the live `ensure_venv`/`create_venv_at_path` table; updated the example call)
+  - [x] ✅ TDD RED-GREEN-REFACTOR via `tests/integration/test_venv_sh_dead_code_removed.py` (5 tests, all passing)
+- [x] ✅ **Task 1.3**: Mark the legacy-fallback step in all four resolvers with `# TODO Plan 00100 Phase 2: remove`
+  - `scripts/install/venv_resolver.sh:82` ✅
+  - `scripts/venv-include.bash:61` ✅
+  - `src/claude_code_hooks_daemon/skills/hooks-daemon/scripts/_resolve-venv.sh:71` ✅
+  - `src/claude_code_hooks_daemon/daemon/paths.py:158` ✅
+- [x] ✅ **Task 1.4 (DEFERRED)**: The "5th branch" in `venv-include.bash` is load-bearing
+  after all — it preserves fingerprint-keyed creation on fresh dev machines
+  (see `test_fingerprint_keyed_preferred_for_creation_when_no_legacy`).
+  Deletion deferred to Phase 2, where the resolver is replaced wholesale by a
+  thin shell-out to the Python SSOT. Added an explanatory comment citing the
+  guarding test so the intent survives.
+- [x] ✅ **Task 1.5**: Full QA (10/10) + daemon restart (RUNNING @ PID 61411) verified 2026-04-23
 
 **Note (v2)**: The `ensure_venv()` legacy-path guard that was Task 1.5 in v1 moved to Task 2.7 (end of Phase 2) per CRITIQUE RISKY-7. Guarding before the bootstrap is redesigned creates a conflict with the Phase 2 bootstrap simplification.
 
