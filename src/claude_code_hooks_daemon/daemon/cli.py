@@ -337,9 +337,15 @@ def cmd_start(args: argparse.Namespace) -> int:
         # First fork
         pid = os.fork()
         if pid > 0:
-            # Parent process - wait briefly then check daemon started
-            time.sleep(0.5)
-            daemon_pid = read_pid_file(str(pid_path))
+            # Parent process - poll for PID file (child startup time is
+            # variable on slow hosts: imports + config load + handler init).
+            # Plan 00100 Task 0.2: replace fixed 0.5s sleep with polling.
+            daemon_pid = None
+            for _ in range(Timeout.DAEMON_PID_POLL_MAX_ITERATIONS):
+                time.sleep(Timeout.DAEMON_PID_POLL_INTERVAL_SEC)
+                daemon_pid = read_pid_file(str(pid_path))
+                if daemon_pid is not None:
+                    break
             if daemon_pid is not None:
                 print(f"Daemon started successfully (PID: {daemon_pid})")
                 print(f"Socket: {socket_path}")

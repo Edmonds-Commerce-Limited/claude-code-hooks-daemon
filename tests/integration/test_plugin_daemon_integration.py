@@ -726,13 +726,15 @@ plugins:
 """)
 
         # Start daemon - should CRASH with missing plugin (FAIL FAST)
+        # Plan 00100 Task 0.2: cli.py start polls for PID file up to 5s, so
+        # the subprocess timeout must exceed that window plus fork overhead.
         start_cmd = [sys.executable, "-m", "claude_code_hooks_daemon.daemon.cli", "start"]
         result = subprocess.run(
             start_cmd,
             cwd=tmp_path,
             env=test_env,
             capture_output=True,
-            timeout=Timeout.SOCKET_CONNECT,
+            timeout=Timeout.REQUEST_DEFAULT,
         )
 
         # Daemon MUST crash if configured plugin can't be loaded

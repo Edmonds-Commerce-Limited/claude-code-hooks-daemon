@@ -128,12 +128,12 @@ Opus orchestrates a team. Each phase lands a green state before the next begins.
   - [x] ✅ Switch `UV_LINK_MODE` default from `copy` to `hardlink`. Detect "Failed to hardlink" stderr warning and retry once with `UV_LINK_MODE=copy`
   - [x] ✅ Confirmed no retry loop in `verify_venv()` — fix is at the correct layer
   - [x] ✅ Inline comment references Plan 00100 Task 0.1
-- [ ] ⬜ **Task 0.2**: Fix `restart_daemon_verified` false-negative at its root cause
-  - [ ] ⬜ Write failing test: `tests/integration/test_restart_verified_slow_startup.py` — mock a daemon whose child takes 1200ms to write PID file; assert verification succeeds
-  - [ ] ⬜ Replace `src/claude_code_hooks_daemon/daemon/cli.py:341` fixed `time.sleep(0.5)` with a polling loop: 100ms interval × 50 iterations = 5s ceiling, exit early on PID file appearance
-  - [ ] ⬜ Update `scripts/install/daemon_control.sh:restart_daemon_verified()`: extend overall timeout to 15s; secondary check — if timeout expires, verify via `get_daemon_status` CLI (which checks socket reachability) before declaring failure
-  - [ ] ⬜ Add progress logging every 1s so user sees "waiting for daemon (N/15s)"
-  - [ ] ⬜ If overall timeout expires but `pgrep claude-hooks-daemon` finds the process, log "daemon process exists but not yet responsive — retrying status check for 5 more seconds" before aborting
+- [x] ✅ **Task 0.2**: Fix `restart_daemon_verified` false-negative at its root cause
+  - [x] ✅ Write failing test: `tests/integration/test_restart_verified_slow_startup.py` — 6 static-analysis tests, 5 RED → GREEN
+  - [x] ✅ Replace `cli.py` fixed `time.sleep(0.5)` with polling loop (`Timeout.DAEMON_PID_POLL_INTERVAL_SEC` × `DAEMON_PID_POLL_MAX_ITERATIONS` = 5s ceiling, early-exit on PID appearance)
+  - [x] ✅ `daemon_control.sh:restart_daemon_verified()` extended to 15s with `get_daemon_status` polling
+  - [x] ✅ Progress logging every 1s: "waiting for daemon (N/15s)"
+  - [x] ✅ pgrep fallback: if timeout expires but process exists, retry status for 5 more seconds before aborting
 - [ ] ⬜ **Task 0.3**: Skill-wrapper Python version pre-check (single source of truth)
   - [ ] ⬜ Write failing test: stub `python3`=3.9 on PATH; assert clear error and no daemon stop
   - [ ] ⬜ Add a helper `scripts/install/parse_min_python.sh` that extracts the minimum version from `pyproject.toml:requires-python` — single source of truth, no hardcoded version

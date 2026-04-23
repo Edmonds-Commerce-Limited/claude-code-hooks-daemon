@@ -61,3 +61,8 @@ class Timeout:
 
     # Process management timeouts (seconds)
     PROCESS_KILL_WAIT = 2  # 2 seconds (wait for SIGTERM before SIGKILL)
+
+    # Daemon startup polling (Plan 00100 Task 0.2)
+    DAEMON_PID_POLL_INTERVAL_SEC = 0.1  # 100ms between PID-file checks
+    DAEMON_PID_POLL_MAX_ITERATIONS = 50  # 50 × 100ms = 5s ceiling
+    DAEMON_RESTART_VERIFY_TIMEOUT_SEC = 15  # Overall restart verification ceiling

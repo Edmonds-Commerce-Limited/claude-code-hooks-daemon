@@ -208,22 +208,59 @@ restart_daemon_verified() {
         return 1
     fi
 
-    # Give daemon time to start
-    sleep 2
+    # Step 3: Poll for daemon RUNNING status — up to 15s.
+    # Plan 00100 Task 0.2: extended timeout (from implicit 2s) with
+    # progress logging every 1s so the user sees activity on slow hosts.
+    # Route polling stderr to a log file (errors expected during startup).
+    local poll_err="/tmp/hooks-daemon-restart-poll.$$.err"
+    local status_output=""
+    local daemon_running=0
+    local elapsed=0
+    local timeout=15
+    while [ "$elapsed" -lt "$timeout" ]; do
+        status_output=$(get_daemon_status "$venv_python" 2>>"$poll_err")
+        if echo "$status_output" | grep -qE "(Daemon|Status): RUNNING"; then
+            daemon_running=1
+            break
+        fi
+        print_verbose "waiting for daemon (${elapsed}/15s)"
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
 
-    # Step 3: Get status
-    print_verbose "Checking daemon status..."
-    local status_output
-    status_output=$(get_daemon_status "$venv_python")
+    # Step 4: pgrep fallback — if status poll timed out but the daemon
+    # process exists, retry status for another 5s before declaring failure.
+    if [ "$daemon_running" -eq 0 ]; then
+        if pgrep -f "claude-hooks-daemon\|claude_code_hooks_daemon" > /dev/null; then
+            print_verbose "daemon process exists but not yet responsive — retrying status check for 5 more seconds"
+            local retry_elapsed=0
+            while [ "$retry_elapsed" -lt 5 ]; do
+                status_output=$(get_daemon_status "$venv_python" 2>>"$poll_err")
+                if echo "$status_output" | grep -qE "(Daemon|Status): RUNNING"; then
+                    daemon_running=1
+                    break
+                fi
+                sleep 1
+                retry_elapsed=$((retry_elapsed + 1))
+            done
+        fi
+    fi
 
-    # Step 4: Verify running
-    if ! echo "$status_output" | grep -qE "(Daemon|Status): RUNNING"; then
+    # Clean up polling stderr log (contents logged only if failure below).
+    if [ "$daemon_running" -eq 0 ]; then
         print_error "Daemon is not running after restart"
         echo ""
         echo "Status output:"
         echo "$status_output"
+        if [ -s "$poll_err" ]; then
+            echo ""
+            echo "Polling stderr:"
+            cat "$poll_err"
+        fi
+        rm -f "$poll_err"
         return 1
     fi
+    rm -f "$poll_err"
 
     print_success "Daemon is running"
 
