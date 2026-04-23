@@ -4,6 +4,17 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00100 (v2): Venv SSOT Consolidation — Stop the Release Treadmill](00100-venv-ssot-consolidation/PLAN.md) - Not Started
+
+  - Critical: five consecutive releases (v3.1.1, v3.7.0, v3.8.0, v3.8.1, v3.8.2) patched venv bugs; this plan ends the treadmill
+  - **v2 after hostile Opus review** (see CRITIQUE-v1.md): PLAN-v1 had 3 FATAL + 7 RISKY flaws; v2 corrects each at the right architectural layer
+  - **Phase 0 (field-pain fixes, lands first)**: `sync -f` + `UV_LINK_MODE=hardlink` (with copy fallback) fixes `uv sync` visibility race at the source — no retry loop; `cli.py:341` fixed sleep replaced with polling loop (true root cause of `restart_daemon_verified` false-negative); skill wrapper pre-checks `python3` against `pyproject.toml:requires-python` (single source of truth, no hardcoded version)
+  - Collapses four parallel resolvers into one Python SSOT (bash shells out); deletes dead `create_venv`/`recreate_venv`; bootstrap simplified to PID-kill only (no venv resolution needed)
+  - Persists installer's chosen Python in atomic `.daemon-metadata.json` — resolver reads instead of recomputing; falls back to `find_compatible_python` on missing persisted Python (handles legitimate OS upgrades)
+  - Commits `uv.lock` as a first-class repo artefact (Phase 3.0); stamp becomes `sha256(pyproject.toml + uv.lock)` — catches dep changes without version bumps (v3.1.1's bug)
+  - `flock` concurrency protection with Podman bind-mount spike before implementation; end-to-end upgrade-cycle test parameterised over every prior released tag (runtime spike before committing to `run_all.sh` inclusion)
+  - Seven phases (0–6), Opus + sub-agent team execution, checkpoint commits after each phase
+
 - [00099: Python-Fingerprint Venv Isolation](00099-python-fingerprint-venv-isolation/PLAN.md) - Not Started
 
   - Keys venvs by Python-environment fingerprint (`venv-py311-2fa8b3c1/`) — concurrent containers share one venv, distinct Pythons get distinct venvs, cross-arch safe
