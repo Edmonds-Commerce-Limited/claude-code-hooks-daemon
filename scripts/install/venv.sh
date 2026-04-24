@@ -286,6 +286,21 @@ ensure_venv() {
         create_venv_at_path "$daemon_dir" "$venv_path" "true" || return 1
 
     stamp_venv_version "$venv_path" "$target_version" || return 1
+
+    # Plan 00100 Task 3.3: persist atomic .daemon-metadata.json via the Python
+    # SSOT so the daemon's startup resolver can treat the venv's python_path as
+    # authoritative and compare the project lock_hash to decide stale/fresh.
+    # Failure here is non-fatal — the venv still works, but startup will treat
+    # the metadata as missing and fall back to fingerprint/scan precedence.
+    if ! "$venv_path/bin/python" -m claude_code_hooks_daemon.daemon.cli \
+        write-venv-metadata \
+        --venv-path "$venv_path" \
+        --fingerprint "$fingerprint" \
+        --daemon-version "$target_version" \
+        --project-root "$daemon_dir"; then
+        print_verbose "ensure_venv: write-venv-metadata failed (non-fatal)"
+    fi
+
     echo "$venv_path"
     return 0
 }

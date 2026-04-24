@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from claude_code_hooks_daemon.daemon.paths import (
+from claude_code_hooks_daemon.daemon.metadata import (
     DaemonVenvMetadata,
     read_daemon_metadata,
     write_daemon_metadata,
@@ -97,7 +97,7 @@ class TestDaemonVenvMetadataSchema:
 class TestWriteDaemonMetadataAtomicity:
     """``write_daemon_metadata`` is atomic — no half-written file visible."""
 
-    def _valid_meta(self) -> "DaemonVenvMetadata":
+    def _valid_meta(self) -> DaemonVenvMetadata:
         return DaemonVenvMetadata(
             python_path="/usr/bin/python3.11",
             fingerprint="workspace-py311-2fa8b3c1",
@@ -141,7 +141,7 @@ class TestWriteDaemonMetadataAtomicity:
 class TestReadDaemonMetadata:
     """``read_daemon_metadata`` returns None on any unusable condition."""
 
-    def _valid_meta(self) -> "DaemonVenvMetadata":
+    def _valid_meta(self) -> DaemonVenvMetadata:
         return DaemonVenvMetadata(
             python_path="/usr/bin/python3.11",
             fingerprint="workspace-py311-2fa8b3c1",
@@ -165,9 +165,7 @@ class TestReadDaemonMetadata:
         (tmp_path / ".daemon-metadata.json").write_text("{not valid json")
         assert read_daemon_metadata(tmp_path) is None
 
-    def test_returns_none_when_schema_validation_fails(
-        self, tmp_path: Path
-    ) -> None:
+    def test_returns_none_when_schema_validation_fails(self, tmp_path: Path) -> None:
         """Good JSON but wrong shape → signal stale-rebuild, never raise."""
         (tmp_path / ".daemon-metadata.json").write_text(
             json.dumps({"python_path": "/x", "fingerprint": "y"})  # missing fields

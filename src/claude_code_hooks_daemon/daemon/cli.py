@@ -51,6 +51,11 @@ from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.constants.modes import DaemonMode
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.daemon.metadata import (
+    DaemonVenvMetadata,
+    compute_project_lock_hash,
+    write_daemon_metadata,
+)
 from claude_code_hooks_daemon.daemon.paths import (
     cleanup_pid_file,
     cleanup_socket,
@@ -1367,6 +1372,55 @@ def cmd_prune_venvs(args: argparse.Namespace) -> int:
     if failures:
         return 1
     print(f"Removed {len(to_remove)} venv(s). Current venv preserved: {current_fp}")
+    return 0
+
+
+def cmd_write_venv_metadata(args: argparse.Namespace) -> int:
+    """Write ``.daemon-metadata.json`` inside a freshly-provisioned venv.
+
+    Plan 00100 Task 3.3: bash ``ensure_venv`` shells out to this after
+    ``uv sync`` so the schema lives in one place (the Pydantic model in
+    ``paths.py``) and bash never reimplements it. The metadata gives the
+    daemon's startup resolver an authoritative ``python_path`` and a
+    ``lock_hash`` to compare against the current project state.
+    """
+    venv_path = Path(args.venv_path)
+    if not venv_path.is_dir():
+        print(f"ERROR: venv path does not exist: {venv_path}", file=sys.stderr)
+        return 1
+    python_binary = venv_path / "bin" / "python"
+    if not python_binary.is_file():
+        print(f"ERROR: no bin/python inside venv: {venv_path}", file=sys.stderr)
+        return 1
+
+    project_root = Path(args.project_root) if args.project_root else Path.cwd()
+
+    try:
+        lock_hash = compute_project_lock_hash(project_root)
+    except FileNotFoundError as exc:
+        print(f"ERROR: cannot compute lock hash: {exc}", file=sys.stderr)
+        return 1
+
+    written_at = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    try:
+        meta = DaemonVenvMetadata(
+            python_path=str(python_binary.resolve()),
+            fingerprint=args.fingerprint,
+            lock_hash=lock_hash,
+            daemon_version=args.daemon_version,
+            written_at=written_at,
+        )
+    except PydanticValidationError as exc:
+        print(f"ERROR: metadata failed schema validation: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        write_daemon_metadata(venv_path, meta)
+    except OSError as exc:
+        print(f"ERROR: failed to write metadata: {exc}", file=sys.stderr)
+        return 1
+
     return 0
 
 
@@ -2722,6 +2776,33 @@ def main() -> int:
         help="Required for actual deletion (combined with a selection flag)",
     )
     parser_prune_venvs.set_defaults(func=cmd_prune_venvs)
+
+    # write-venv-metadata command (Plan 00100 Task 3.3)
+    parser_write_venv_metadata = subparsers.add_parser(
+        "write-venv-metadata",
+        help="Write .daemon-metadata.json inside a provisioned venv (Plan 00100)",
+    )
+    parser_write_venv_metadata.add_argument(
+        "--venv-path",
+        required=True,
+        help="Absolute path to the venv directory that just finished provisioning",
+    )
+    parser_write_venv_metadata.add_argument(
+        "--fingerprint",
+        required=True,
+        help="Fingerprint embedded in the venv directory name " "(e.g. 'workspace-py311-2fa8b3c1')",
+    )
+    parser_write_venv_metadata.add_argument(
+        "--daemon-version",
+        required=True,
+        help="Daemon version stamp (vMAJOR.MINOR.PATCH) to record in the metadata",
+    )
+    parser_write_venv_metadata.add_argument(
+        "--project-root",
+        default=None,
+        help="Project root for lock-hash computation (defaults to current working directory)",
+    )
+    parser_write_venv_metadata.set_defaults(func=cmd_write_venv_metadata)
 
     # init-config command
     parser_init_config = subparsers.add_parser(

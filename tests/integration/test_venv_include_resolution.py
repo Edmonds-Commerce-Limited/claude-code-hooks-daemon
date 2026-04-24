@@ -95,11 +95,16 @@ class TestFingerprintKeyed:
         assert result == str(keyed)
 
     def test_fingerprint_keyed_preferred_for_creation_when_no_legacy(self, tmp_path: Path) -> None:
-        """If neither fingerprint nor legacy venv exists, prefer keyed path."""
+        """If neither fingerprint nor legacy venv exists, prefer keyed path.
+
+        ``python_venv_fingerprint(project)`` prepends the project-path slug
+        (Task 3.0.5) so host-vs-container views of the same interpreter get
+        distinct venv directories.
+        """
         project = _setup_fake_project(tmp_path)
         from claude_code_hooks_daemon.daemon.paths import python_venv_fingerprint
 
-        fp = python_venv_fingerprint()
+        fp = python_venv_fingerprint(project)
         expected = project / "untracked" / f"venv-{fp}"
 
         result = _run(project)

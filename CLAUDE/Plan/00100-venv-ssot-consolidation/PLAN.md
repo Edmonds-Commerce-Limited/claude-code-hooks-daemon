@@ -250,14 +250,16 @@ Opus orchestrates a team. Each phase lands a green state before the next begins.
   - [x] ✅ Bash SSOT `scripts/install/python_fingerprint.sh` accepts `$2` positional root and `HOOKS_DAEMON_ROOT_DIR` env; mirrors slug logic inline
   - [x] ✅ Bash↔Python parity tests in `test_fingerprint_parity.py` (6 new, 11 total) — byte-identical slug + hash
   - [x] ✅ 656 daemon unit tests + 11 parity tests pass; migration deferred to Task 3.5 below
-- [ ] ⬜ **Task 3.1** (REVISED from v1): Design single atomic metadata file inside venv dir
-  - [ ] ⬜ `.daemon-metadata.json`: `{"python_path": "...", "fingerprint": "py313-956ed987", "lock_hash": "sha256:...", "daemon_version": "v3.9.0", "written_at": "ISO8601"}`
-  - [ ] ⬜ Schema: pydantic model in `paths.py` for read-side validation
-- [ ] ⬜ **Task 3.2**: Write failing tests for metadata write and read
-- [ ] ⬜ **Task 3.3** (REVISED from v1): Atomic write in `ensure_venv()` and `create_venv_at_path()`
-  - [ ] ⬜ Write to `{venv}/.daemon-metadata.json.tmp`
-  - [ ] ⬜ `mv .daemon-metadata.json.tmp .daemon-metadata.json` (single atomic rename)
-  - [ ] ⬜ Interruption mid-write leaves the venv without metadata → resolver treats as stale → rebuild. Safe.
+- [x] ✅ **Task 3.1** (REVISED from v1): Design single atomic metadata file inside venv dir
+  - [x] ✅ `.daemon-metadata.json`: `{"python_path": "...", "fingerprint": "py313-956ed987", "lock_hash": "sha256:...", "daemon_version": "v3.9.0", "written_at": "ISO8601"}`
+  - [x] ✅ Schema: pydantic model in `daemon/metadata.py` (extracted from `paths.py` so install-time stdlib-only invocation survives — see Phase 3 notes in `daemon/metadata.py` docstring)
+- [x] ✅ **Task 3.2**: Write failing tests for metadata write and read (`tests/unit/daemon/test_metadata.py` + `test_project_lock_hash.py`)
+- [x] ✅ **Task 3.3** (REVISED from v1): Atomic write via Python SSOT CLI, invoked from bash `ensure_venv()`
+  - [x] ✅ New `write-venv-metadata` subcommand (`src/claude_code_hooks_daemon/daemon/cli.py`) writes the metadata through the Pydantic schema
+  - [x] ✅ `scripts/install/venv.sh::ensure_venv` shells out to it after `uv sync` completes
+  - [x] ✅ Write to `{venv}/.daemon-metadata.json.tmp` → `os.replace` → `.daemon-metadata.json` (single atomic rename in `write_daemon_metadata`)
+  - [x] ✅ Interruption mid-write leaves the venv without metadata → resolver treats as stale → rebuild. Safe.
+  - [x] ✅ `tests/unit/daemon/test_cli_write_venv_metadata.py` covers the CLI entry point end-to-end
 - [ ] ⬜ **Task 3.4**: Update the Python SSOT resolver to:
   - [ ] ⬜ Read `.daemon-metadata.json` and use `python_path` as authoritative interpreter
   - [ ] ⬜ Compare `lock_hash` against `sha256(current pyproject.toml + uv.lock)`; mismatch → rebuild

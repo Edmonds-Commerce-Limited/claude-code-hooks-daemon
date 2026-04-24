@@ -622,10 +622,7 @@ class MarkdownOrganizationHandler(Handler):
             _proj_rel = Path(file_path).resolve().relative_to(ProjectContext.project_root())
         else:
             _proj_rel = Path(file_path)
-        if (
-            _proj_rel.parent == Path()
-            and _proj_rel.name.lower() in _STANDARD_ROOT_MARKDOWN_FILES
-        ):
+        if _proj_rel.parent == Path() and _proj_rel.name.lower() in _STANDARD_ROOT_MARKDOWN_FILES:
             return False  # Allow — standard repo-root file at project root
 
         # Use centralized normalization

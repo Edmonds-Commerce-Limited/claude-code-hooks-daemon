@@ -47,9 +47,7 @@ def _bash_fingerprint(
 
         env = {**os.environ, "HOOKS_DAEMON_ROOT_DIR": root}
     else:
-        command = (
-            f'source "{BASH_HELPER}" && python_venv_fingerprint "{python_bin}" "{root}"'
-        )
+        command = f'source "{BASH_HELPER}" && python_venv_fingerprint "{python_bin}" "{root}"'
         env = None
 
     result = subprocess.run(
@@ -149,17 +147,15 @@ class TestBashPythonSlugParity:
         """Bash (positional) and Python produce matching slug-prefixed fingerprints."""
         bash_fp = _bash_fingerprint(sys.executable, root=str(tmp_path))
         py_fp = _python_fingerprint(sys.executable, root=str(tmp_path))
-        assert bash_fp == py_fp, (
-            f"Slug parity violation!\n  bash: {bash_fp}\n  python: {py_fp}"
-        )
+        assert bash_fp == py_fp, f"Slug parity violation!\n  bash: {bash_fp}\n  python: {py_fp}"
 
     def test_slug_parity_via_env_var(self, tmp_path: Path) -> None:
         """Bash (via HOOKS_DAEMON_ROOT_DIR env) matches Python with the same root."""
         bash_fp = _bash_fingerprint(sys.executable, root=str(tmp_path), via_env=True)
         py_fp = _python_fingerprint(sys.executable, root=str(tmp_path))
-        assert bash_fp == py_fp, (
-            f"Slug-via-env parity violation!\n  bash: {bash_fp}\n  python: {py_fp}"
-        )
+        assert (
+            bash_fp == py_fp
+        ), f"Slug-via-env parity violation!\n  bash: {bash_fp}\n  python: {py_fp}"
 
     def test_slug_positional_and_env_equivalent(self, tmp_path: Path) -> None:
         """Passing root positionally or via env var yields the same output."""
@@ -174,9 +170,7 @@ class TestBashPythonSlugParity:
         fp = _bash_fingerprint(sys.executable, root=str(tmp_path))
         assert re.match(r"^[A-Za-z0-9_-]+-py\d{2,3}-[0-9a-f]{8}$", fp), f"Bad format: {fp}"
 
-    def test_distinct_roots_produce_distinct_fingerprints(
-        self, tmp_path: Path
-    ) -> None:
+    def test_distinct_roots_produce_distinct_fingerprints(self, tmp_path: Path) -> None:
         """Host-vs-container case: different roots -> different venvs."""
         root_a = tmp_path / "view_a"
         root_b = tmp_path / "view_b"
@@ -195,6 +189,6 @@ class TestBashPythonSlugParity:
         import re
 
         fp = _bash_fingerprint(sys.executable)
-        assert re.match(r"^py\d{2,3}-[0-9a-f]{8}$", fp), (
-            f"No-root invocation must preserve legacy format, got: {fp}"
-        )
+        assert re.match(
+            r"^py\d{2,3}-[0-9a-f]{8}$", fp
+        ), f"No-root invocation must preserve legacy format, got: {fp}"

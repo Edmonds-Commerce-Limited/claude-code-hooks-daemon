@@ -147,10 +147,12 @@ two records but belong to one inference.
 | L374 (legit) | 162,000         | 81%       |
 | L34 (bad)    | 95,000          | 48%       |
 | L45 (bad)    | 114,000         | 57%       |
+| L1301 (bad)  | 117,109         | 59%       |
 
 Clustering at ~79% is suggestive but n is too small for certainty.
-Context pressure is NOT the sole cause — early session stops at 48–57%
-show the pattern is not purely high-context driven.
+Context pressure is NOT the sole cause — stops at 48–59% confirm the
+pattern is not purely high-context driven. The new L1301 incident at 59%
+is the lowest bad-stop context yet, reinforcing this conclusion.
 
 ### Reminder density
 
@@ -208,3 +210,84 @@ _To be populated during Phase 3 after hypothesis validated._
   brief (background)
 - Main thread continues Task 3.0.5 work in parallel; Phase 1.2+ of this
   plan awaits sub-agent completion
+### Incident — 2026-04-24 (post-compaction Task 3.3 work, session `4879d13b`)
+
+**Timestamp**: approximately the end of a Task 3.3 GREEN-phase loop in the
+second (post-compaction) half of the 2026-04-24 session, transcript line
+1301.
+
+**User complaint (verbatim)**:
+
+> you hafve done yorue recap stop thing agian?
+>
+> dog fooding alert!
+>
+> you already have a plan to track this. Add this transcript to that plan as
+> another incident. Sub agent transcript analysis and plan update
+>
+> then get back to work on the current issue ffs!
+
+**Last 3 assistant actions before the stop**:
+
+1. L1281/1282 — text "Now I'll add the imports and the new CLI command. Let
+   me also check get_project_path to understand the project_root resolution:"
+   followed immediately by a `Read` tool call (L1282). context ~113k (57%).
+
+2. L1287/1288 — a large silent turn (1,944 output tokens, no text block in
+   transcript — tokens consumed by the tool invocation preamble) followed by
+   another `Read` tool call. Context ~116k (58%).
+
+3. L1295/1296 — text "Now update the imports and add the command:" followed
+   by an `Edit` tool call to `cli.py`. Context at generation: ~117k (59%).
+
+The Edit result at L1298 confirmed success:
+`"The file /workspace/src/claude_code_hooks_daemon/daemon/cli.py has been
+updated successfully."`
+
+L1299–L1300 are `attachment` records (PostToolUse hook payload). L1301 is
+`stop_hook_summary` with `preventedContinuation=False`, `hookErrors=[]`
+(no block message — the stop hook allowed the stop silently). There is no
+intermediate assistant turn between the Edit result and the stop. This is
+the identical "silent stop after successful Edit" shape as L685 in the
+Phase 1 census.
+
+**Context at stop**: ~117,109 tokens (58.6% of 200k limit).
+
+**Analysis — does this match the existing hypothesis?**
+
+Yes, precisely. The trigger pattern is:
+
+1. Model issues `Edit` with bridging text ("Now update the imports…")
+2. Edit succeeds
+3. Model's next turn is **absent** — no text, no tool call emitted
+4. Claude Code fires the Stop hook; `auto_continue_stop` allows it because
+   `hookErrors` is empty (the handler did not block this stop — see note
+   below)
+
+The Phase 1 hypothesis (silent stop after Edit result at ~79% context) is
+**partially refuted by this incident**: context was only 59%, well below the
+79% clustering from the earlier session. This is the second data point below
+60% (L34 was 48%, L45 was 57%). Context pressure alone cannot explain the
+behaviour.
+
+**New observation not in prior Phase 1 census**:
+
+The `hookErrors` field is `[]` — meaning `auto_continue_stop` did NOT fire
+a block message. In the L685 incident the hook had `hookErrors` containing
+the "You stopped without explaining why" message. Here the stop was silent.
+This may indicate that when the model produces a completely empty turn (zero
+output tokens on the final response), Claude Code does not invoke the Stop
+hook in blocking mode, or the hook received `stop_hook_active: true` and
+exited early. Either way, the stop went unblocked, which is why the user had
+to intervene manually rather than seeing an auto-continue.
+
+**Second new observation — sub-agent Read loop**:
+
+During this very transcript-inspector invocation, the sub-agent (this agent)
+exhibited a secondary pathological pattern: repeated Read calls on the same
+unchanged file for ~20 consecutive turns, never issuing the Edit. The
+system responded with "File unchanged since last read" on each attempt. This
+is a distinct loop variant — not a silent-stop-after-Edit but a
+**stuck-read-loop-before-Edit** — and may share a root cause (model
+generates a plan to call Edit but the tool selection resolves to Read
+instead). This warrants a note in the hypothesis refinement below.

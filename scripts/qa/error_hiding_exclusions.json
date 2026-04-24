@@ -93,6 +93,12 @@
       "reason": "Returns None when PID file missing or invalid. Callers check for None before using PID. This is the documented contract — a missing PID file means no daemon is running."
     },
     {
+      "file": "daemon/metadata.py",
+      "function": "read_daemon_metadata",
+      "rule": "return-none-on-error",
+      "reason": "Returns None when .daemon-metadata.json is missing, empty, or fails schema validation. Callers interpret None as 'treat this venv as stale and rebuild' — this IS the documented contract (Plan 00100 Phase 3). Narrow except catches only (ValidationError, ValueError) and logs at debug before returning."
+    },
+    {
       "file": "daemon/paths.py",
       "function": "cleanup_socket",
       "rule": "log-and-continue",

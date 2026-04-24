@@ -85,8 +85,8 @@ class TestProjectPathSlugTruncation:
     """Long paths are truncated to 36 chars + ``-`` + 4-hex suffix."""
 
     _long_path = (
-        "/aaaaaaaa/bbbbbbbb/cccccccc/dddddddd/eeeeeeee/ffff"
-    )  # 50 chars; slug would be 49 > 40
+        "/aaaaaaaa/bbbbbbbb/cccccccc/dddddddd/eeeeeeee/ffff"  # 50 chars; slug would be 49 > 40
+    )
 
     def test_long_path_truncated_to_36_plus_hash(self) -> None:
         result = project_path_slug(self._long_path)
@@ -114,13 +114,13 @@ class TestProjectPathSlugTruncation:
     def test_suffix_is_md5_of_original_absolute_path(self) -> None:
         """Determinism: suffix = md5(absolute_path)[:4]."""
         abs_path = str(Path(self._long_path).resolve())
-        expected_suffix = hashlib.md5(
-            abs_path.encode("utf-8"), usedforsecurity=False
-        ).hexdigest()[:4]
+        expected_suffix = hashlib.md5(abs_path.encode("utf-8"), usedforsecurity=False).hexdigest()[
+            :4
+        ]
         result = project_path_slug(self._long_path)
-        assert result.endswith(f"-{expected_suffix}"), (
-            f"{result!r} should end with -{expected_suffix}"
-        )
+        assert result.endswith(
+            f"-{expected_suffix}"
+        ), f"{result!r} should end with -{expected_suffix}"
 
 
 class TestProjectPathSlugHostContainerIsolation:
@@ -181,9 +181,9 @@ class TestGetVenvPathEmbedsSlug:
         (tmp_path / "src" / "claude_code_hooks_daemon").mkdir(parents=True)
         result = get_venv_path(tmp_path)
         expected_slug = project_path_slug(tmp_path)
-        assert f"venv-{expected_slug}-py" in str(result.name), (
-            f"Expected slug {expected_slug!r} in dir name {result.name!r}"
-        )
+        assert f"venv-{expected_slug}-py" in str(
+            result.name
+        ), f"Expected slug {expected_slug!r} in dir name {result.name!r}"
 
     def test_venv_dir_name_includes_slug_normal_install(self, tmp_path: Path) -> None:
         """Normal install: same slug embedding applies."""
@@ -191,9 +191,7 @@ class TestGetVenvPathEmbedsSlug:
         expected_slug = project_path_slug(tmp_path)
         assert f"venv-{expected_slug}-py" in str(result.name)
 
-    def test_different_project_dirs_produce_different_venv_paths(
-        self, tmp_path: Path
-    ) -> None:
+    def test_different_project_dirs_produce_different_venv_paths(self, tmp_path: Path) -> None:
         """Two project dirs on the same host get distinct venv paths."""
         (tmp_path / "a").mkdir()
         (tmp_path / "b").mkdir()
