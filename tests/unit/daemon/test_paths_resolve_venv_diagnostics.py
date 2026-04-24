@@ -560,3 +560,118 @@ class TestMetadataDrivenResolution:
         assert (
             "pyproject" in step2.lower() or "no lock" in step2.lower()
         ), f"step 2 must mention inability to compute current lock_hash; got: {step2}"
+
+
+class TestLegacyStampMigration:
+    """Plan 00100 Task 3.5: a venv with ``.daemon-version`` (legacy v3.1.1
+    stamp from Plan 00099) but no ``.daemon-metadata.json`` is a pre-Phase-3
+    leftover that MUST be rebuilt. The resolver refuses to return it from
+    any subsequent step (3, 4, or 5) and emits a clear migration diagnostic
+    so upgrades surface the reason for the rebuild."""
+
+    def test_fingerprint_keyed_with_legacy_stamp_is_skipped(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A fingerprint-keyed venv with only ``.daemon-version`` must not be
+        returned by step 3 — the stamp is legacy, metadata is the new SSOT."""
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        _write_pyproject(daemon_dir)
+        fp = python_venv_fingerprint(daemon_dir)
+        keyed = daemon_dir / "untracked" / f"venv-{fp}"
+        _make_fake_venv(keyed)
+        (keyed / ".daemon-version").write_text("v3.2.0\n")  # legacy stamp, no metadata
+
+        resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        assert (
+            resolved is None
+        ), "legacy-stamp-only venv must NOT be resolvable — it's stale and needs rebuild"
+        migration_step = next(
+            (s for s in steps if "legacy" in s.lower() and "stamp" in s.lower()), None
+        )
+        assert (
+            migration_step is not None
+        ), f"expected clear migration diagnostic naming 'legacy stamp'; got: {steps}"
+
+    def test_scan_fallback_skips_legacy_stamped_venv(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Scan fallback (step 4) must also refuse legacy-stamp-only venvs."""
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        _write_pyproject(daemon_dir)
+        foreign = daemon_dir / "untracked" / "venv-py999-legacystamp"
+        _make_fake_venv(foreign)
+        (foreign / ".daemon-version").write_text("v3.2.0\n")
+
+        resolved, _ = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        assert resolved is None, "scan fallback must refuse legacy-stamp-only venv"
+
+    def test_legacy_bare_venv_with_stamp_is_skipped(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The bare ``untracked/venv/`` path (step 5) with ``.daemon-version``
+        but no metadata is a pre-Phase-3 leftover — must be rebuilt."""
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        _write_pyproject(daemon_dir)
+        legacy = daemon_dir / "untracked" / "venv"
+        _make_fake_venv(legacy)
+        (legacy / ".daemon-version").write_text("v3.2.0\n")
+
+        resolved, _ = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        assert resolved is None, "legacy bare venv with .daemon-version must not resolve"
+
+    def test_legacy_bare_venv_without_stamp_still_accepted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Pristine pre-v3.1.1 venv (no stamp, no metadata) at the bare path
+        is still accepted by step 5 — Task 3.5 only targets the stamp->metadata
+        migration, not true ancients (Task 3.9 handles those via eager cleanup).
+        """
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        _write_pyproject(daemon_dir)
+        legacy = daemon_dir / "untracked" / "venv"
+        py = _make_fake_venv(legacy)  # no .daemon-version, no .daemon-metadata.json
+
+        resolved, _ = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        assert resolved == py, "pristine pre-stamp bare venv is still valid until 3.9"
+
+    def test_fingerprint_keyed_without_any_stamp_still_accepted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A fingerprint-keyed venv with NEITHER ``.daemon-version`` NOR
+        ``.daemon-metadata.json`` is unusual but not obviously stale —
+        still usable via step 3 fingerprint-keyed fallback."""
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        _write_pyproject(daemon_dir)
+        fp = python_venv_fingerprint(daemon_dir)
+        keyed = daemon_dir / "untracked" / f"venv-{fp}"
+        py = _make_fake_venv(keyed)
+
+        resolved, _ = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        assert resolved == py
+
+    def test_legacy_stamped_venv_coexists_with_metadata_bearing_venv(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When one venv has only ``.daemon-version`` and another has valid
+        metadata, the metadata-bearing one wins via step 2 without touching
+        the legacy-stamped one."""
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        _write_pyproject(daemon_dir)
+        lock_hash = _compute_test_lock_hash(daemon_dir)
+
+        legacy = daemon_dir / "untracked" / "venv-py999-legacy"
+        _make_fake_venv(legacy)
+        (legacy / ".daemon-version").write_text("v3.2.0\n")
+
+        fresh = daemon_dir / "untracked" / "venv-py999-fresh"
+        py_fresh = _make_fake_venv(fresh)
+        _write_metadata(fresh, python_path=str(py_fresh), lock_hash=lock_hash)
+
+        resolved, _ = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        assert resolved == py_fresh, "metadata-bearing venv must win even when legacy exists"

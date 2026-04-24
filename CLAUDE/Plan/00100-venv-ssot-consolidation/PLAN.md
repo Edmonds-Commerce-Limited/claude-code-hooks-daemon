@@ -266,7 +266,13 @@ Opus orchestrates a team. Each phase lands a green state before the next begins.
   - [x] ✅ Never recompute fingerprint for lookup — metadata discovery is by JSON read, fingerprint is only used in step 3 (legacy naming convenience)
   - [x] ✅ Stdlib-only helpers `_read_venv_metadata_stdlib` + `_compute_project_lock_hash_stdlib` mirror `metadata.py` byte-for-byte so `paths.py` stays Pydantic-free at install time
   - [x] ✅ 8 new tests in `tests/unit/daemon/test_paths_resolve_venv_diagnostics.py::TestMetadataDrivenResolution`; existing diagnostic tests renumbered 2→3, 3→4, 4→5; integration CLI precedence docstring updated to 5 steps
-- [ ] ⬜ **Task 3.5**: Migration — if a venv has `.daemon-version` file but no `.daemon-metadata.json`, treat as stale → rebuild. Log clearly.
+- [x] ✅ **Task 3.5**: Migration — if a venv has `.daemon-version` file but no `.daemon-metadata.json`, treat as stale → rebuild. Log clearly.
+  - [x] ✅ 6 RED tests added in `tests/unit/daemon/test_paths_resolve_venv_diagnostics.py::TestLegacyStampMigration` covering: fingerprint-keyed/scan/legacy-bare skip paths; pristine pre-stamp venv still accepted; fingerprint-keyed without any markers still accepted; co-existence with metadata-bearing sibling
+  - [x] ✅ New constant `_LEGACY_DAEMON_VERSION_STAMP = ".daemon-version"` + helper `_is_legacy_stamp_only(venv_dir)` in `paths.py` — returns True iff `.daemon-version` present AND `.daemon-metadata.json` absent
+  - [x] ✅ Steps 3/4/5 of `resolve_existing_venv_python_with_diagnostics` each wrap candidate checks with `_is_legacy_stamp_only` — legacy-stamp-only venvs emit a clear migration diagnostic (`"skipping legacy-stamped venv … — needs rebuild via ensure_venv"`) and fall through
+  - [x] ✅ Docstring precedence list refreshed to reflect Task 3.5 migration behaviour
+  - [x] ✅ All 6 new tests GREEN; 43/43 tests across `test_paths_resolve_venv_diagnostics.py` + `test_paths_resolve_venv_cli.py` pass
+  - [x] ✅ 1358 daemon + integration tests pass with zero regressions; QA 10/10; daemon restart RUNNING
 - [ ] ⬜ **Task 3.6** (REVISED from v1): Missing-persisted-Python recovery (Decision 3 change)
   - [ ] ⬜ Write failing test: persisted Python path no longer exists; assert resolver falls back to `find_compatible_python` and succeeds if a compatible one is found
   - [ ] ⬜ Implement: on `os.path.exists(metadata.python_path) == False`, run `find_compatible_python`, emit log message ("persisted Python X missing — searching for compatible alternative"), rebuild venv with the alternative

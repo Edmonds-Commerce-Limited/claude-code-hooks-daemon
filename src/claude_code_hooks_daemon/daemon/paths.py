@@ -166,6 +166,16 @@ _UV_LOCK_FILENAME = "uv.lock"
 _UV_LOCK_ABSENT_MARKER = b"\x00no-uv-lock\x00"
 _REQUIRED_METADATA_KEYS = ("python_path", "lock_hash")
 
+# Plan 00099 v3.1.1 wrote ``.daemon-version`` into every provisioned venv as
+# a simple upgrade marker. Plan 00100 Phase 3 supersedes that stamp with the
+# richer ``.daemon-metadata.json`` (Pydantic-validated, lock-hash-indexed).
+# A venv that still carries the legacy stamp but lacks the new metadata file
+# is a pre-Phase-3 leftover — returning it from the resolver would hand the
+# daemon a venv whose dependency state is unknown relative to the current
+# pyproject.toml/uv.lock. Task 3.5 refuses those venvs so the next
+# ``ensure_venv`` cycle rebuilds cleanly; Task 3.9 adds eager removal.
+_LEGACY_DAEMON_VERSION_STAMP = ".daemon-version"
+
 
 def _read_venv_metadata_stdlib(venv_dir: Path) -> dict[str, str] | None:
     """Stdlib-only reader for ``.daemon-metadata.json``.
@@ -198,6 +208,23 @@ def _read_venv_metadata_stdlib(venv_dir: Path) -> dict[str, str] | None:
         if not isinstance(value, str) or not value:
             return None
     return data
+
+
+def _is_legacy_stamp_only(venv_dir: Path) -> bool:
+    """Return True iff ``venv_dir`` is a Plan-00099-era legacy leftover.
+
+    A legacy leftover is a venv directory that carries the old
+    ``.daemon-version`` stamp but NOT the new ``.daemon-metadata.json``.
+    The resolver refuses those venvs so ``ensure_venv`` rebuilds them with
+    the current lock_hash on the next install/upgrade.
+
+    A venv with neither marker is NOT legacy — it may be a pristine
+    pre-v3.1.1 install or a test double. Task 3.9 handles those via eager
+    upgrade-time cleanup; until then the resolver accepts them.
+    """
+    has_stamp = (venv_dir / _LEGACY_DAEMON_VERSION_STAMP).is_file()
+    has_metadata = (venv_dir / _DAEMON_METADATA_FILENAME).is_file()
+    return has_stamp and not has_metadata
 
 
 def _compute_project_lock_hash_stdlib(project_root: Path) -> str | None:
@@ -312,7 +339,7 @@ def resolve_existing_venv_python_with_diagnostics(
     per-precedence-step diagnostic log (always populated, for both success
     and failure).
 
-    Precedence (Plan 00100 Task 3.4 — 5 steps):
+    Precedence (Plan 00100 Task 3.5 — 5 steps, with legacy-stamp migration):
 
     1. ``$HOOKS_DAEMON_VENV_PATH/bin/python(3)`` — explicit override
     2. **Metadata-authoritative**: any ``{daemon_dir}/untracked/venv-*/`` whose
@@ -321,10 +348,17 @@ def resolve_existing_venv_python_with_diagnostics(
        ``metadata.python_path`` directly — fingerprint is NOT recomputed
        for lookup.
     3. ``{daemon_dir}/untracked/venv-{current-fingerprint}/bin/python(3)`` —
-       fingerprint-keyed (legacy naming convenience, retained until Task 3.5)
+       fingerprint-keyed (legacy naming convenience)
     4. First executable ``{daemon_dir}/untracked/venv-*/bin/python(3)`` —
        scan fallback (legacy)
     5. ``{daemon_dir}/untracked/venv/bin/python(3)`` — legacy (pre-v3.7.0)
+
+    Steps 3, 4 and 5 refuse any venv that carries the Plan-00099-era
+    ``.daemon-version`` stamp without the new ``.daemon-metadata.json``
+    (see :func:`_is_legacy_stamp_only`). Those venvs are pre-Phase-3
+    leftovers whose dependency state is unknown relative to the current
+    lock_hash — the resolver skips them so ``ensure_venv`` rebuilds on
+    the next install/upgrade.
 
     This is the Python SSOT entry point referenced by bash wrappers.
     """
@@ -414,22 +448,41 @@ def resolve_existing_venv_python_with_diagnostics(
     keyed_dir = untracked / f"venv-{fingerprint}"
     keyed_py = _pick_interpreter(keyed_dir)
     if keyed_py is not None:
-        steps.append(f"step 3: fingerprint-keyed venv OK — using {keyed_py}")
-        return keyed_py, steps
-    steps.append(
-        f"step 3: fingerprint-keyed path {keyed_dir / 'bin' / 'python'} "
-        "missing or not executable"
-    )
+        if _is_legacy_stamp_only(keyed_dir):
+            steps.append(
+                f"step 3: skipping legacy-stamped venv {keyed_dir} "
+                f"(has {_LEGACY_DAEMON_VERSION_STAMP}, lacks {_DAEMON_METADATA_FILENAME}) "
+                "— needs rebuild via ensure_venv"
+            )
+        else:
+            steps.append(f"step 3: fingerprint-keyed venv OK — using {keyed_py}")
+            return keyed_py, steps
+    else:
+        steps.append(
+            f"step 3: fingerprint-keyed path {keyed_dir / 'bin' / 'python'} "
+            "missing or not executable"
+        )
 
     scanned: list[str] = []
+    legacy_skipped: list[str] = []
     if untracked.is_dir():
         for candidate_dir in sorted(untracked.glob("venv-*")):
             scanned.append(str(candidate_dir / "bin" / "python"))
             candidate_py = _pick_interpreter(candidate_dir)
-            if candidate_py is not None:
-                steps.append(f"step 4: scan-fallback hit — using {candidate_py}")
-                return candidate_py, steps
-        if scanned:
+            if candidate_py is None:
+                continue
+            if _is_legacy_stamp_only(candidate_dir):
+                legacy_skipped.append(str(candidate_dir))
+                continue
+            steps.append(f"step 4: scan-fallback hit — using {candidate_py}")
+            return candidate_py, steps
+        if legacy_skipped:
+            steps.append(
+                f"step 4: skipping legacy-stamped venv(s) {legacy_skipped} "
+                f"(have {_LEGACY_DAEMON_VERSION_STAMP}, lack {_DAEMON_METADATA_FILENAME}) "
+                "— need rebuild via ensure_venv"
+            )
+        elif scanned:
             steps.append(f"step 4: scan fallback found no executable bin/python among {scanned}")
         else:
             steps.append(f"step 4: scan fallback found no venv-* under {untracked}")
@@ -439,9 +492,19 @@ def resolve_existing_venv_python_with_diagnostics(
     legacy_dir = untracked / "venv"
     legacy_py = _pick_interpreter(legacy_dir)
     if legacy_py is not None:
-        steps.append(f"step 5: legacy fallback OK — using {legacy_py}")
-        return legacy_py, steps
-    steps.append(f"step 5: legacy path {legacy_dir / 'bin' / 'python'} missing or not executable")
+        if _is_legacy_stamp_only(legacy_dir):
+            steps.append(
+                f"step 5: skipping legacy-stamped venv {legacy_dir} "
+                f"(has {_LEGACY_DAEMON_VERSION_STAMP}, lacks {_DAEMON_METADATA_FILENAME}) "
+                "— needs rebuild via ensure_venv"
+            )
+        else:
+            steps.append(f"step 5: legacy fallback OK — using {legacy_py}")
+            return legacy_py, steps
+    else:
+        steps.append(
+            f"step 5: legacy path {legacy_dir / 'bin' / 'python'} missing or not executable"
+        )
 
     return None, steps
 
