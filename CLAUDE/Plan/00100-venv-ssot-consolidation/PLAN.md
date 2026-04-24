@@ -236,12 +236,12 @@ Opus orchestrates a team. Each phase lands a green state before the next begins.
 
 **Why**: the fingerprint mismatch that v3.8.1 papered over becomes impossible if the resolver *reads* the installer's choice.
 
-- [ ] 🔄 **Task 3.0** (NEW in v2): Establish `uv.lock` as a first-class repo artefact
-  - [x] ✅ Generate `uv.lock` at HEAD via `uv lock` (at project root) — 377K lockfile present in working tree
-  - [ ] ⬜ Commit the lockfile
-  - [ ] ⬜ Add a CI step: `uv lock --check` must pass (fails if pyproject.toml diverges from uv.lock)
+- [x] ✅ **Task 3.0** (NEW in v2): Establish `uv.lock` as a first-class repo artefact
+  - [x] ✅ Generate `uv.lock` at HEAD via `uv lock` (at project root) — 377K lockfile committed
+  - [x] ✅ Commit the lockfile (commit `ed02c72`)
+  - [x] ✅ Add a CI step: `uv lock --check` runs in `scripts/qa/run_dependency_check.sh` before deptry (fails if pyproject.toml diverges from uv.lock)
   - [x] ✅ Verified `.gitignore`: `uv.lock` is NOT ignored (Pipfile.lock / venv/ / .venv / untracked/ are the only lock/venv patterns); no change needed
-  - [ ] ⬜ Update CONTRIBUTING.md with the lockfile workflow (regenerate via `uv lock`, commit alongside dep changes)
+  - [x] ✅ Update CONTRIBUTING.md with the lockfile workflow (regenerate via `uv lock`, commit alongside dep changes)
 - [ ] ⬜ **Task 3.0.5** (NEW in v3): Add human-readable path slug to venv dir name
   - [ ] ⬜ Failing test first: `tests/unit/daemon/test_paths_venv_slug.py` — verify host vs container view of the same project produce distinct slugs (`/home/user/proj` → `home_user_proj`; `/workspace` → `workspace`), verify truncation + 4-hex suffix kicks in at >40 chars, verify filesystem-safe chars only
   - [ ] ⬜ Implement `project_path_slug(root: str) -> str` in `src/claude_code_hooks_daemon/daemon/paths.py`:
