@@ -10,6 +10,9 @@ Detected patterns:
 - Out of scope: "outside the scope of", "out of scope", "separate issue"
 - Someone else's job: "not our responsibility", "different task entirely"
 - Defer/ignore: "can be addressed later", "not worth fixing", "best left alone"
+- Premature stop: "natural checkpoint", "logical stopping point", "clean break",
+  "good pausing point", "ready to continue on your cue" — used to quit partway
+  through a multi-step plan when an auto-continue / proceed directive is active
 """
 
 import logging
@@ -91,6 +94,22 @@ class DismissiveLanguageDetectorHandler(Handler):
         r"\blet's not (?:worry|concern ourselves) (?:about|with)\b",
     ]
 
+    # "Premature stop" - dressing up a mid-task halt as a principled pause.
+    # The agent uses these phrases to quit partway through a multi-step plan
+    # without actually finishing the next task. "Natural checkpoint",
+    # "logical stopping point", "clean break" etc. are thin cover for:
+    # "I've done some work, now I want you to explicitly tell me to continue."
+    # When the user has issued an auto-continue / proceed directive, these
+    # phrases are a direct violation — surface them and challenge explicitly.
+    PREMATURE_STOP_PATTERNS: ClassVar[list[str]] = [
+        r"\bnatural (?:checkpoint|stopping point|pause|pausing point|break)\b",
+        r"\blogical (?:checkpoint|stopping point|pause|pausing point|break)\b",
+        r"\bclean (?:checkpoint|break)\b",
+        r"\bgood (?:pausing point|place to pause|stopping point|time to stop)\b",
+        r"\bready to continue (?:on your cue|when you'?re ready|at your signal)\b",
+        r"\bawait(?:ing)? (?:your|further) (?:instruction|direction|signal|cue|go-?ahead)\b",
+    ]
+
     def __init__(self) -> None:
         """Initialise the dismissive language detector handler."""
         super().__init__(
@@ -111,6 +130,7 @@ class DismissiveLanguageDetectorHandler(Handler):
             + self.OUT_OF_SCOPE_PATTERNS
             + self.SOMEONE_ELSES_JOB_PATTERNS
             + self.DEFER_IGNORE_PATTERNS
+            + self.PREMATURE_STOP_PATTERNS
         ):
             self._all_patterns.append((pattern_str, re.compile(pattern_str, re.IGNORECASE)))
 
@@ -201,19 +221,38 @@ class DismissiveLanguageDetectorHandler(Handler):
 
         if phrases:
             phrase_list = ", ".join(f'"{p}"' for p in phrases)
-            context = (
-                f"DISMISSIVE LANGUAGE DETECTED: {phrase_list}\n"
-                "\n"
-                "Don't dismiss issues as someone else's problem.\n"
-                "If you encountered an error, test failure, or quality issue:\n"
-                "\n"
-                "  1. ACKNOWLEDGE the problem clearly\n"
-                '  2. ASK the user: "I found [issue]. Want me to fix it?"\n'
-                "  3. NEVER assume it's pre-existing or out of scope without evidence\n"
-                "\n"
-                "The user expects you to FIX problems, not explain them away.\n"
-                "Only defer if the user explicitly asks you to stay focused on something else."
-            )
+            premature_readable = {p.replace(r"\b", "") for p in self.PREMATURE_STOP_PATTERNS}
+            premature_stop_hit = any(p in premature_readable for p in phrases)
+            if premature_stop_hit:
+                context = (
+                    f"PREMATURE-STOP LANGUAGE DETECTED: {phrase_list}\n"
+                    "\n"
+                    'Phrases like "natural checkpoint" / "logical stopping point" /\n'
+                    '"clean break" / "ready to continue on your cue" are thin cover\n'
+                    "for stopping mid-plan. They describe YOUR comfort, not the task.\n"
+                    "\n"
+                    "If an auto-continue / proceed directive is active, or the\n"
+                    "current plan has more tasks queued, you must NOT stop here.\n"
+                    "Keep going. Commit at real checkpoints (passing tests, completed\n"
+                    "task) without announcing them as reasons to halt.\n"
+                    "\n"
+                    "If you genuinely need user input, say exactly what you need\n"
+                    "('I need X to proceed') instead of dressing it up as a pause."
+                )
+            else:
+                context = (
+                    f"DISMISSIVE LANGUAGE DETECTED: {phrase_list}\n"
+                    "\n"
+                    "Don't dismiss issues as someone else's problem.\n"
+                    "If you encountered an error, test failure, or quality issue:\n"
+                    "\n"
+                    "  1. ACKNOWLEDGE the problem clearly\n"
+                    '  2. ASK the user: "I found [issue]. Want me to fix it?"\n'
+                    "  3. NEVER assume it's pre-existing or out of scope without evidence\n"
+                    "\n"
+                    "The user expects you to FIX problems, not explain them away.\n"
+                    "Only defer if the user explicitly asks you to stay focused on something else."
+                )
         else:
             context = (
                 "DISMISSIVE LANGUAGE WARNING: Your response dismissed an issue.\n"

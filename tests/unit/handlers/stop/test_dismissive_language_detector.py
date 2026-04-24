@@ -362,6 +362,56 @@ class TestDismissiveLanguageDetectorMatches:
         path = _make_transcript([_assistant_message("These warnings are not from my changes")])
         assert handler.matches({HookInputField.TRANSCRIPT_PATH: path}) is True
 
+    # --- Premature stop patterns ---
+    # Agents use "natural checkpoint", "clean break", "logical stopping point"
+    # etc. as thin cover for quitting partway through a multi-step task. The
+    # Plan 00100 Task 3.3/3.4 session on 2026-04-24 surfaced this: agent landed
+    # Task 3.3, then stopped citing "natural checkpoint" with Task 3.4 still
+    # pending in an explicit auto-continue directive.
+
+    def test_matches_natural_checkpoint(self, handler: Any) -> None:
+        """Detect 'natural checkpoint' — stopping mid-plan."""
+        path = _make_transcript(
+            [_assistant_message("This is a natural checkpoint. Ready to continue on your cue.")]
+        )
+        assert handler.matches({HookInputField.TRANSCRIPT_PATH: path}) is True
+
+    def test_matches_natural_stopping_point(self, handler: Any) -> None:
+        """Detect 'natural stopping point'."""
+        path = _make_transcript([_assistant_message("This feels like a natural stopping point")])
+        assert handler.matches({HookInputField.TRANSCRIPT_PATH: path}) is True
+
+    def test_matches_natural_pause(self, handler: Any) -> None:
+        """Detect 'natural pause'."""
+        path = _make_transcript([_assistant_message("A natural pause here before the next task.")])
+        assert handler.matches({HookInputField.TRANSCRIPT_PATH: path}) is True
+
+    def test_matches_logical_stopping_point(self, handler: Any) -> None:
+        """Detect 'logical stopping point'."""
+        path = _make_transcript([_assistant_message("This is a logical stopping point.")])
+        assert handler.matches({HookInputField.TRANSCRIPT_PATH: path}) is True
+
+    def test_matches_good_pausing_point(self, handler: Any) -> None:
+        """Detect 'good pausing point' / 'good place to pause'."""
+        path_a = _make_transcript([_assistant_message("Looks like a good pausing point.")])
+        path_b = _make_transcript([_assistant_message("Seems a good place to pause here.")])
+        assert handler.matches({HookInputField.TRANSCRIPT_PATH: path_a}) is True
+        assert handler.matches({HookInputField.TRANSCRIPT_PATH: path_b}) is True
+
+    def test_matches_clean_checkpoint(self, handler: Any) -> None:
+        """Detect 'clean checkpoint' / 'clean break' used to justify stopping."""
+        path_a = _make_transcript([_assistant_message("Committed a clean checkpoint here.")])
+        path_b = _make_transcript([_assistant_message("Good time for a clean break.")])
+        assert handler.matches({HookInputField.TRANSCRIPT_PATH: path_a}) is True
+        assert handler.matches({HookInputField.TRANSCRIPT_PATH: path_b}) is True
+
+    def test_matches_ready_to_continue_on_your_cue(self, handler: Any) -> None:
+        """Detect 'ready to continue on your cue' — asking permission to resume an in-progress task."""
+        path = _make_transcript(
+            [_assistant_message("Done with Task 3.3. Ready to continue on your cue.")]
+        )
+        assert handler.matches({HookInputField.TRANSCRIPT_PATH: path}) is True
+
     # --- Case insensitivity ---
 
     def test_matches_case_insensitive(self, handler: Any) -> None:
