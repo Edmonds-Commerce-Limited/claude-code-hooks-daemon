@@ -79,7 +79,7 @@ class TestListVenvs:
         _mark_self_install(tmp_path)
         untracked = tmp_path / "untracked"
         untracked.mkdir()
-        fp = python_venv_fingerprint()
+        fp = python_venv_fingerprint(tmp_path)
         _make_venv(untracked / f"venv-{fp}", stamp_version="v3.7.0")
         _make_venv(untracked / "venv-py310-deadbeef", stamp_version="v3.6.0")
         _make_venv(untracked / "venv", stamp_version="v3.5.0")  # legacy pre-fp
@@ -103,7 +103,7 @@ class TestListVenvs:
         _mark_self_install(tmp_path)
         untracked = tmp_path / "untracked"
         untracked.mkdir()
-        fp = python_venv_fingerprint()
+        fp = python_venv_fingerprint(tmp_path)
         _make_venv(untracked / f"venv-{fp}", stamp_version="v3.7.0")
 
         with patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path):
@@ -128,7 +128,7 @@ class TestPruneVenvs:
         _mark_self_install(tmp_path)
         untracked = tmp_path / "untracked"
         untracked.mkdir()
-        fp = python_venv_fingerprint()
+        fp = python_venv_fingerprint(tmp_path)
         _make_venv(untracked / f"venv-{fp}", stamp_version="v3.7.0")
         stale = untracked / "venv-py310-deadbeef"
         _make_venv(stale, stamp_version="v3.6.0")
@@ -148,7 +148,7 @@ class TestPruneVenvs:
         _mark_self_install(tmp_path)
         untracked = tmp_path / "untracked"
         untracked.mkdir()
-        fp = python_venv_fingerprint()
+        fp = python_venv_fingerprint(tmp_path)
         _make_venv(untracked / f"venv-{fp}", stamp_version="v3.7.0")
         legacy = untracked / "venv"
         _make_venv(legacy, stamp_version="v3.5.0")
@@ -164,7 +164,7 @@ class TestPruneVenvs:
         _mark_self_install(tmp_path)
         untracked = tmp_path / "untracked"
         untracked.mkdir()
-        fp = python_venv_fingerprint()
+        fp = python_venv_fingerprint(tmp_path)
         current = untracked / f"venv-{fp}"
         _make_venv(current, stamp_version="v3.7.0")
         other1 = untracked / "venv-py310-deadbeef"
@@ -187,7 +187,7 @@ class TestPruneVenvs:
         _mark_self_install(tmp_path)
         untracked = tmp_path / "untracked"
         untracked.mkdir()
-        fp = python_venv_fingerprint()
+        fp = python_venv_fingerprint(tmp_path)
         _make_venv(untracked / f"venv-{fp}", stamp_version="v3.7.0")
         stale = untracked / "venv-py310-deadbeef"
         _make_venv(stale, stamp_version="v3.6.0")
@@ -206,7 +206,7 @@ class TestPruneVenvs:
         _mark_self_install(tmp_path)
         untracked = tmp_path / "untracked"
         untracked.mkdir()
-        fp = python_venv_fingerprint()
+        fp = python_venv_fingerprint(tmp_path)
         current = untracked / f"venv-{fp}"
         _make_venv(current, stamp_version="v3.7.0")
 
@@ -230,7 +230,7 @@ class TestEnumerateAndHelpers:
         untracked.mkdir()
         (untracked / "not_a_dir.txt").write_text("irrelevant")
         (untracked / "random_other_dir").mkdir()
-        fp = python_venv_fingerprint()
+        fp = python_venv_fingerprint(tmp_path)
         _make_venv(untracked / f"venv-{fp}", stamp_version="v3.7.0")
 
         with patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path):
@@ -244,7 +244,7 @@ class TestEnumerateAndHelpers:
         broken = untracked / "venv-py311-badbadba"
         (broken / "bin").mkdir(parents=True)
         # No bin/python or bin/python3 — should be skipped
-        fp = python_venv_fingerprint()
+        fp = python_venv_fingerprint(tmp_path)
         _make_venv(untracked / f"venv-{fp}", stamp_version="v3.7.0")
 
         with patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path):
@@ -287,7 +287,7 @@ class TestEnumerateVenvsInstallModes:
         """Build a fake normal-install project tree; return (untracked_dir, legacy)."""
         untracked = tmp_path / ".claude" / "hooks-daemon" / "untracked"
         untracked.mkdir(parents=True)
-        fp = python_venv_fingerprint()
+        fp = python_venv_fingerprint(tmp_path)
         _make_venv(untracked / f"venv-{fp}", stamp_version="v3.7.0")
         legacy = untracked / "venv"
         if with_legacy:
@@ -298,7 +298,7 @@ class TestEnumerateVenvsInstallModes:
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         untracked, _ = self._make_normal_install_layout(tmp_path)
-        fp = python_venv_fingerprint()
+        fp = python_venv_fingerprint(tmp_path)
 
         with patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path):
             rc = cli.cmd_list_venvs(_args(tmp_path))
@@ -332,7 +332,7 @@ class TestEnumerateVenvsInstallModes:
         _mark_self_install(tmp_path)
         untracked = tmp_path / "untracked"
         untracked.mkdir()
-        fp = python_venv_fingerprint()
+        fp = python_venv_fingerprint(tmp_path)
         _make_venv(untracked / f"venv-{fp}", stamp_version="v3.7.0")
 
         with patch("claude_code_hooks_daemon.daemon.cli.get_project_path", return_value=tmp_path):

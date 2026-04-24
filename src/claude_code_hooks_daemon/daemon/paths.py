@@ -57,7 +57,56 @@ def _get_hostname_suffix() -> str:
     return f"-{sanitized}"
 
 
-def python_venv_fingerprint() -> str:
+# Plan 00100 Task 3.0.5: filesystem-safe chars for the project path slug.
+# Anything outside this alphabet is stripped after path-separator substitution.
+_SLUG_SAFE_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+# Slug is truncated to this total length; longer paths get ``36 + "-" + 4-hex`` = 41.
+_SLUG_MAX_LEN = 40
+_SLUG_TRUNCATED_PREFIX_LEN = 36
+_SLUG_TRUNCATED_HASH_LEN = 4
+
+
+def project_path_slug(root: str | Path) -> str:
+    """Return a filesystem-safe slug derived from the project root path.
+
+    Purpose: distinguish venvs for the same Python interpreter viewed from
+    different project roots. The same image may be opened as both a host
+    (``/home/dev/proj``) and a container (``/workspace``); the Python
+    fingerprint alone matches but each view needs its own venv.
+
+    Algorithm:
+        1. Resolve to absolute path, coerce to string.
+        2. Strip leading ``/``; replace remaining ``/`` with ``_``.
+        3. Remove any character not in ``[A-Za-z0-9_-]``.
+        4. If length > 40: keep first 36 chars + ``-`` + 4-hex md5 suffix
+           computed on the full original absolute path (deterministic
+           disambiguator for pathological paths sharing a long common prefix).
+
+    Examples::
+
+        project_path_slug("/workspace")         -> "workspace"
+        project_path_slug("/home/user/proj")    -> "home_user_proj"
+        project_path_slug("/a/b/c/.../very/long") -> 36 chars + "-" + 4 hex
+
+    MD5 is used for a short path-identifier only (``usedforsecurity=False``).
+    """
+    abs_path = str(Path(root).resolve())
+    stripped = abs_path.lstrip("/")
+    if not stripped:
+        stripped = "root"
+    replaced = stripped.replace("/", "_")
+    safe = "".join(ch for ch in replaced if ch in _SLUG_SAFE_CHARS)
+    if not safe:
+        safe = "root"
+    if len(safe) > _SLUG_MAX_LEN:
+        suffix = hashlib.md5(
+            abs_path.encode("utf-8"), usedforsecurity=False
+        ).hexdigest()[:_SLUG_TRUNCATED_HASH_LEN]
+        safe = safe[:_SLUG_TRUNCATED_PREFIX_LEN] + "-" + suffix
+    return safe
+
+
+def python_venv_fingerprint(root: str | Path | None = None) -> str:
     """Return a stable per-Python-environment fingerprint for venv keying.
 
     Components hashed (separator ``|``):
@@ -76,14 +125,21 @@ def python_venv_fingerprint() -> str:
     versions, different arches) produce distinct fingerprints and get
     distinct venvs.
 
-    Format: ``py{MAJOR}{MINOR}-{8-hex-char-md5-digest}``
-    Example: ``py311-2fa8b3c1``
+    When ``root`` is provided, the project path slug (see
+    :func:`project_path_slug`) is prepended to disambiguate host-vs-container
+    views of the same Python interpreter on the same filesystem.
+
+    Format (no root):   ``py{MM}-{8-hex}``           e.g. ``py311-2fa8b3c1``
+    Format (with root): ``{slug}-py{MM}-{8-hex}``    e.g. ``workspace-py311-2fa8b3c1``
 
     MD5 is used for short path-identifier purposes only (``usedforsecurity=False``).
     """
     parts = f"{sys.version}|{sys.base_prefix}|{platform.machine()}"
     digest = hashlib.md5(parts.encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
-    return f"py{sys.version_info.major}{sys.version_info.minor}-{digest}"
+    py_fp = f"py{sys.version_info.major}{sys.version_info.minor}-{digest}"
+    if root is None:
+        return py_fp
+    return f"{project_path_slug(root)}-{py_fp}"
 
 
 def get_venv_path(project_dir: Path | str) -> Path:
@@ -102,7 +158,7 @@ def get_venv_path(project_dir: Path | str) -> Path:
     """
     project_path = Path(project_dir).resolve()
     untracked_dir = _get_untracked_dir(project_path)
-    return untracked_dir / f"venv-{python_venv_fingerprint()}"
+    return untracked_dir / f"venv-{python_venv_fingerprint(project_path)}"
 
 
 def resolve_existing_venv_python(daemon_dir: Path | str) -> Path:
@@ -146,7 +202,7 @@ def resolve_existing_venv_python(daemon_dir: Path | str) -> Path:
 
     untracked = daemon_path / "untracked"
 
-    keyed = untracked / f"venv-{python_venv_fingerprint()}" / "bin" / "python"
+    keyed = untracked / f"venv-{python_venv_fingerprint(daemon_path)}" / "bin" / "python"
     if keyed.is_file() and os.access(keyed, os.X_OK):
         return keyed
 
@@ -210,7 +266,7 @@ def resolve_existing_venv_python_with_diagnostics(
 
     untracked = daemon_path / "untracked"
 
-    fingerprint = python_venv_fingerprint()
+    fingerprint = python_venv_fingerprint(daemon_path)
     keyed_dir = untracked / f"venv-{fingerprint}"
     keyed_py = _pick_interpreter(keyed_dir)
     if keyed_py is not None:
@@ -758,7 +814,7 @@ def _cli_resolve_venv(args: argparse.Namespace) -> int:
         return 0
 
     if fallback_target:
-        fingerprint = python_venv_fingerprint()
+        fingerprint = python_venv_fingerprint(daemon_dir)
         print(str(daemon_dir / "untracked" / f"venv-{fingerprint}" / "bin" / "python"))
         return 0
 

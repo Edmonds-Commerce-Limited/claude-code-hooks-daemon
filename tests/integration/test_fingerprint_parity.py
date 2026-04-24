@@ -24,30 +24,58 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 BASH_HELPER = REPO_ROOT / "scripts" / "install" / "python_fingerprint.sh"
 
 
-def _bash_fingerprint(python_bin: str) -> str:
-    """Invoke the bash helper against a specific Python interpreter."""
+def _bash_fingerprint(
+    python_bin: str,
+    root: str | None = None,
+    *,
+    via_env: bool = False,
+) -> str:
+    """Invoke the bash helper against a specific Python interpreter.
+
+    Args:
+        python_bin: path to the Python interpreter to fingerprint
+        root: optional project root; if given, prepends slug
+        via_env: when True, pass ``root`` through ``HOOKS_DAEMON_ROOT_DIR``
+            env var instead of the positional argument
+    """
+    if root is None:
+        command = f'source "{BASH_HELPER}" && python_venv_fingerprint "{python_bin}"'
+        env = None
+    elif via_env:
+        command = f'source "{BASH_HELPER}" && python_venv_fingerprint "{python_bin}"'
+        import os
+
+        env = {**os.environ, "HOOKS_DAEMON_ROOT_DIR": root}
+    else:
+        command = (
+            f'source "{BASH_HELPER}" && python_venv_fingerprint "{python_bin}" "{root}"'
+        )
+        env = None
+
     result = subprocess.run(
-        [
-            "bash",
-            "-c",
-            f'source "{BASH_HELPER}" && python_venv_fingerprint "{python_bin}"',
-        ],
+        ["bash", "-c", command],
         capture_output=True,
         text=True,
         check=True,
+        env=env,
     )
     return result.stdout.strip()
 
 
-def _python_fingerprint(python_bin: str) -> str:
+def _python_fingerprint(python_bin: str, root: str | None = None) -> str:
     """Invoke python_venv_fingerprint() via the Python import under the given interpreter."""
-    result = subprocess.run(
-        [
-            python_bin,
-            "-c",
+    if root is None:
+        snippet = (
             "from claude_code_hooks_daemon.daemon.paths import python_venv_fingerprint; "
-            "print(python_venv_fingerprint())",
-        ],
+            "print(python_venv_fingerprint())"
+        )
+    else:
+        snippet = (
+            "from claude_code_hooks_daemon.daemon.paths import python_venv_fingerprint; "
+            f"print(python_venv_fingerprint({root!r}))"
+        )
+    result = subprocess.run(
+        [python_bin, "-c", snippet],
         capture_output=True,
         text=True,
         check=True,
@@ -106,3 +134,67 @@ class TestBashPythonParity:
                 f"  system ({system_python}): {system_fp}\n"
                 f"  venv   ({sys.executable}): {venv_fp}"
             )
+
+
+class TestBashPythonSlugParity:
+    """Plan 00100 Task 3.0.5: slug-prefixed fingerprints must also match.
+
+    When a project root is supplied, both helpers must emit
+    ``{slug}-py{MM}-{hash}`` with byte-identical slug and hash components so
+    that the bash-installed venv and the Python-resolved venv land at the
+    same directory.
+    """
+
+    def test_slug_parity_via_positional_arg(self, tmp_path: Path) -> None:
+        """Bash (positional) and Python produce matching slug-prefixed fingerprints."""
+        bash_fp = _bash_fingerprint(sys.executable, root=str(tmp_path))
+        py_fp = _python_fingerprint(sys.executable, root=str(tmp_path))
+        assert bash_fp == py_fp, (
+            f"Slug parity violation!\n  bash: {bash_fp}\n  python: {py_fp}"
+        )
+
+    def test_slug_parity_via_env_var(self, tmp_path: Path) -> None:
+        """Bash (via HOOKS_DAEMON_ROOT_DIR env) matches Python with the same root."""
+        bash_fp = _bash_fingerprint(sys.executable, root=str(tmp_path), via_env=True)
+        py_fp = _python_fingerprint(sys.executable, root=str(tmp_path))
+        assert bash_fp == py_fp, (
+            f"Slug-via-env parity violation!\n  bash: {bash_fp}\n  python: {py_fp}"
+        )
+
+    def test_slug_positional_and_env_equivalent(self, tmp_path: Path) -> None:
+        """Passing root positionally or via env var yields the same output."""
+        fp_positional = _bash_fingerprint(sys.executable, root=str(tmp_path))
+        fp_env = _bash_fingerprint(sys.executable, root=str(tmp_path), via_env=True)
+        assert fp_positional == fp_env
+
+    def test_slug_fingerprint_format(self, tmp_path: Path) -> None:
+        """Format is ``{slug}-py{MM}-{8-hex}`` when root is supplied."""
+        import re
+
+        fp = _bash_fingerprint(sys.executable, root=str(tmp_path))
+        assert re.match(r"^[A-Za-z0-9_-]+-py\d{2,3}-[0-9a-f]{8}$", fp), f"Bad format: {fp}"
+
+    def test_distinct_roots_produce_distinct_fingerprints(
+        self, tmp_path: Path
+    ) -> None:
+        """Host-vs-container case: different roots -> different venvs."""
+        root_a = tmp_path / "view_a"
+        root_b = tmp_path / "view_b"
+        root_a.mkdir()
+        root_b.mkdir()
+
+        fp_a = _bash_fingerprint(sys.executable, root=str(root_a))
+        fp_b = _bash_fingerprint(sys.executable, root=str(root_b))
+        assert fp_a != fp_b, (
+            f"Distinct roots must produce distinct fingerprints!\n"
+            f"  root_a ({root_a}): {fp_a}\n  root_b ({root_b}): {fp_b}"
+        )
+
+    def test_bare_fingerprint_still_unchanged(self) -> None:
+        """Without root: bash still emits legacy ``py{MM}-{hash}`` (no slug)."""
+        import re
+
+        fp = _bash_fingerprint(sys.executable)
+        assert re.match(r"^py\d{2,3}-[0-9a-f]{8}$", fp), (
+            f"No-root invocation must preserve legacy format, got: {fp}"
+        )

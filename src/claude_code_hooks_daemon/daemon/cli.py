@@ -1208,7 +1208,7 @@ def _enumerate_venvs(project_root: Path) -> list[dict[str, Any]]:
     if not untracked.is_dir():
         return []
 
-    current_fp = python_venv_fingerprint()
+    current_fp = python_venv_fingerprint(project_root)
     entries: list[dict[str, Any]] = []
 
     for child in sorted(untracked.iterdir()):
@@ -1264,7 +1264,7 @@ def cmd_list_venvs(args: argparse.Namespace) -> int:
         print(f"No venvs found under {_daemon_untracked_dir(project_root)}/.")
         return 0
 
-    current_fp = python_venv_fingerprint()
+    current_fp = python_venv_fingerprint(project_root)
     print(f"Current Python-env fingerprint: {current_fp}")
     print()
     print(f"{'Fingerprint':<20} {'Stamp':<10} {'Size':>10}  {'Marker':<8} Path")
@@ -1317,7 +1317,7 @@ def cmd_prune_venvs(args: argparse.Namespace) -> int:
         )
         return 1
 
-    current_fp = python_venv_fingerprint()
+    current_fp = python_venv_fingerprint(project_root)
     current_stamp = ""
     for entry in entries:
         if entry["is_current"]:

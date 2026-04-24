@@ -155,8 +155,12 @@ class TestGetVenvPath:
         assert isinstance(result, Path)
 
     def test_path_contains_fingerprint(self, tmp_path: Path) -> None:
-        """Returned path embeds the current fingerprint as directory name."""
-        fingerprint = python_venv_fingerprint()
+        """Returned path embeds the slug-prefixed fingerprint as directory name.
+
+        Plan 00100 Task 3.0.5: fingerprint now accepts the project root so
+        the slug disambiguates host-vs-container views of the same project.
+        """
+        fingerprint = python_venv_fingerprint(tmp_path)
         result = get_venv_path(tmp_path)
         assert result.name == f"venv-{fingerprint}"
 

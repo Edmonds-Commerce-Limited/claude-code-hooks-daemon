@@ -72,7 +72,7 @@ class TestDiagnosticsHelper:
     def test_fingerprint_keyed_hit(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
         daemon_dir = tmp_path / "daemon"
-        fp = python_venv_fingerprint()
+        fp = python_venv_fingerprint(daemon_dir)
         keyed = daemon_dir / "untracked" / f"venv-{fp}"
         py = _make_fake_venv(keyed)
 
@@ -146,7 +146,7 @@ class TestCliDispatcher:
     ) -> None:
         monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
         daemon_dir = tmp_path / "daemon"
-        fp = python_venv_fingerprint()
+        fp = python_venv_fingerprint(daemon_dir)
         py = _make_fake_venv(daemon_dir / "untracked" / f"venv-{fp}")
 
         exit_code = main(["resolve-venv", "--daemon-dir", str(daemon_dir)])
@@ -176,7 +176,7 @@ class TestCliDispatcher:
     ) -> None:
         monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
         daemon_dir = tmp_path / "daemon"
-        fp = python_venv_fingerprint()
+        fp = python_venv_fingerprint(daemon_dir)
         py = _make_fake_venv(daemon_dir / "untracked" / f"venv-{fp}")
         monkeypatch.chdir(daemon_dir)
 
@@ -194,7 +194,7 @@ class TestCliDispatcher:
 
         monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
         daemon_dir = tmp_path / "daemon"
-        fp = python_venv_fingerprint()
+        fp = python_venv_fingerprint(daemon_dir)
         py = _make_fake_venv(daemon_dir / "untracked" / f"venv-{fp}")
 
         ns = argparse.Namespace(daemon_dir=str(daemon_dir))
@@ -229,7 +229,7 @@ class TestPython3OnlyAcceptance:
     ) -> None:
         monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
         daemon_dir = tmp_path / "daemon"
-        fp = python_venv_fingerprint()
+        fp = python_venv_fingerprint(daemon_dir)
         keyed = daemon_dir / "untracked" / f"venv-{fp}"
         py3 = _make_fake_venv_python3_only(keyed)
 
@@ -269,7 +269,7 @@ class TestPython3OnlyAcceptance:
         ``src/claude_code_hooks_daemon/skills/hooks-daemon/scripts/_resolve-venv.sh``."""
         monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
         daemon_dir = tmp_path / "daemon"
-        fp = python_venv_fingerprint()
+        fp = python_venv_fingerprint(daemon_dir)
         keyed = daemon_dir / "untracked" / f"venv-{fp}"
         py = _make_fake_venv(keyed)
         _make_fake_venv_python3_only(keyed)  # adds bin/python3 too
@@ -289,7 +289,7 @@ class TestFallbackTargetFlag:
     ) -> None:
         monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
         daemon_dir = tmp_path / "daemon"
-        fp = python_venv_fingerprint()
+        fp = python_venv_fingerprint(daemon_dir)
         expected = daemon_dir / "untracked" / f"venv-{fp}" / "bin" / "python"
 
         exit_code = main(["resolve-venv", "--daemon-dir", str(daemon_dir), "--fallback-target"])
@@ -303,7 +303,7 @@ class TestFallbackTargetFlag:
         miss-behaviour. An existing venv must still win."""
         monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
         daemon_dir = tmp_path / "daemon"
-        fp = python_venv_fingerprint()
+        fp = python_venv_fingerprint(daemon_dir)
         keyed = daemon_dir / "untracked" / f"venv-{fp}"
         py = _make_fake_venv(keyed)
 
