@@ -675,3 +675,127 @@ class TestLegacyStampMigration:
 
         resolved, _ = resolve_existing_venv_python_with_diagnostics(daemon_dir)
         assert resolved == py_fresh, "metadata-bearing venv must win even when legacy exists"
+
+
+class TestMissingPersistedPythonRecovery:
+    """Plan 00100 Task 3.6: when metadata matches the current lock_hash but
+    ``metadata.python_path`` no longer exists on disk (base interpreter
+    uninstalled, path relocated, etc.), the resolver must not return the
+    broken venv. Instead it searches for a compatible Python (3.11+) on PATH
+    and surfaces an actionable diagnostic — either "rebuild possible with X"
+    or "install Python 3.11+".
+
+    The resolver itself never rebuilds; it still falls through (returns None
+    or the next usable candidate). The *diagnostic* is what makes recovery
+    possible upstream in ``ensure_venv`` and its caller.
+    """
+
+    def test_missing_python_with_compatible_alternative_found(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """metadata matches + python_path gone + a compatible Python is
+        resolvable on PATH → diagnostic names the alternative so the caller
+        knows the rebuild is unblocked."""
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        _write_pyproject(daemon_dir)
+        lock_hash = _compute_test_lock_hash(daemon_dir)
+
+        venv = daemon_dir / "untracked" / "venv-py999-recover"
+        venv.mkdir(parents=True)
+        ghost_python = str(tmp_path / "ghosts" / "python3.13")  # never created
+        _write_metadata(venv, python_path=ghost_python, lock_hash=lock_hash)
+
+        alternative = tmp_path / "alt" / "python3.13"
+        alternative.parent.mkdir(parents=True)
+        alternative.write_text("#!/bin/bash\necho alt\n")
+        alternative.chmod(alternative.stat().st_mode | stat.S_IXUSR)
+
+        import claude_code_hooks_daemon.daemon.paths as paths_mod
+
+        monkeypatch.setattr(
+            paths_mod, "_find_compatible_python_on_path", lambda: alternative, raising=False
+        )
+
+        resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        assert resolved is None, (
+            "broken metadata venv must NOT resolve; "
+            "the fallthrough lets ensure_venv rebuild with the alternative"
+        )
+        recovery_step = next((s for s in steps if "compatible alternative" in s.lower()), None)
+        assert (
+            recovery_step is not None
+        ), f"expected diagnostic mentioning 'compatible alternative'; got: {steps}"
+        assert (
+            str(alternative) in recovery_step
+        ), f"recovery diagnostic must name the alternative path {alternative}; got: {recovery_step}"
+
+    def test_missing_python_with_no_compatible_alternative(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """metadata matches + python_path gone + NO compatible Python on PATH
+        → diagnostic must be actionable: tell the user to install 3.11+."""
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        _write_pyproject(daemon_dir)
+        lock_hash = _compute_test_lock_hash(daemon_dir)
+
+        venv = daemon_dir / "untracked" / "venv-py999-norecover"
+        venv.mkdir(parents=True)
+        _write_metadata(
+            venv, python_path=str(tmp_path / "ghosts" / "python3.13"), lock_hash=lock_hash
+        )
+
+        import claude_code_hooks_daemon.daemon.paths as paths_mod
+
+        monkeypatch.setattr(
+            paths_mod, "_find_compatible_python_on_path", lambda: None, raising=False
+        )
+
+        resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        assert resolved is None
+        actionable_step = next(
+            (s for s in steps if "install" in s.lower() and ("3.11" in s or "3.11+" in s)),
+            None,
+        )
+        assert (
+            actionable_step is not None
+        ), f"expected actionable 'install Python 3.11+' diagnostic; got: {steps}"
+
+    def test_missing_python_diagnostic_names_the_lost_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The diagnostic must name BOTH the lost path and the recovery state
+        so debugging an upgrade doesn't require re-reading the metadata file."""
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        _write_pyproject(daemon_dir)
+        lock_hash = _compute_test_lock_hash(daemon_dir)
+
+        venv = daemon_dir / "untracked" / "venv-py999-lost"
+        venv.mkdir(parents=True)
+        lost_path = str(tmp_path / "removed" / "python3.13")
+        _write_metadata(venv, python_path=lost_path, lock_hash=lock_hash)
+
+        import claude_code_hooks_daemon.daemon.paths as paths_mod
+
+        monkeypatch.setattr(
+            paths_mod, "_find_compatible_python_on_path", lambda: None, raising=False
+        )
+
+        _, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        joined = " | ".join(steps)
+        assert (
+            lost_path in joined
+        ), f"expected lost python_path {lost_path} named in diagnostics; got: {joined}"
+
+    def test_find_compatible_python_on_path_returns_none_when_empty_path(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The stdlib helper must itself return None when no Python candidates
+        are resolvable on PATH. This is the hook used by the resolver."""
+        monkeypatch.setenv("PATH", "/nonexistent-dir-xyz-abc")
+
+        from claude_code_hooks_daemon.daemon.paths import _find_compatible_python_on_path
+
+        assert _find_compatible_python_on_path() is None

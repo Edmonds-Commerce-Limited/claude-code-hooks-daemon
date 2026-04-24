@@ -273,10 +273,13 @@ Opus orchestrates a team. Each phase lands a green state before the next begins.
   - [x] ✅ Docstring precedence list refreshed to reflect Task 3.5 migration behaviour
   - [x] ✅ All 6 new tests GREEN; 43/43 tests across `test_paths_resolve_venv_diagnostics.py` + `test_paths_resolve_venv_cli.py` pass
   - [x] ✅ 1358 daemon + integration tests pass with zero regressions; QA 10/10; daemon restart RUNNING
-- [ ] ⬜ **Task 3.6** (REVISED from v1): Missing-persisted-Python recovery (Decision 3 change)
-  - [ ] ⬜ Write failing test: persisted Python path no longer exists; assert resolver falls back to `find_compatible_python` and succeeds if a compatible one is found
-  - [ ] ⬜ Implement: on `os.path.exists(metadata.python_path) == False`, run `find_compatible_python`, emit log message ("persisted Python X missing — searching for compatible alternative"), rebuild venv with the alternative
-  - [ ] ⬜ Only error if no compatible Python exists — emit actionable message
+- [x] ✅ **Task 3.6** (REVISED from v1): Missing-persisted-Python recovery (Decision 3 change)
+  - [x] ✅ 4 RED tests added in `tests/unit/daemon/test_paths_resolve_venv_diagnostics.py::TestMissingPersistedPythonRecovery` covering: alternative-found branch, no-alternative branch, diagnostic names lost path, `_find_compatible_python_on_path` returns None on empty PATH
+  - [x] ✅ New constants `_COMPATIBLE_PYTHON_CANDIDATES = ("python3", "python3.13", "python3.12", "python3.11")`, `_MIN_COMPATIBLE_PYTHON = (3, 11)`, `_COMPATIBLE_PYTHON_PROBE_TIMEOUT_SECS = 3.0` + helper `_find_compatible_python_on_path()` in `paths.py` — mirrors `scripts/upgrade.sh::find_compatible_python` byte-for-byte, runs a tiny `sys.version_info >= (3,11)` probe on each candidate resolvable through `shutil.which`
+  - [x] ✅ Step 2 of `resolve_existing_venv_python_with_diagnostics` extended: when `.daemon-metadata.json` has a matching `lock_hash` but `python_path` no longer exists or is not executable, the resolver now appends a `"step 2 recovery: …"` diagnostic naming the alternative (or "no compatible alternative — install Python 3.11+") so ensure_venv/upgrade can act on it
+  - [x] ✅ Function-level exclusion added to `scripts/qa/error_hiding_exclusions.json` for `_find_compatible_python_on_path` — the `except (OSError, subprocess.SubprocessError): continue` is the documented candidate-skip recovery path, same pattern as `scripts/upgrade.sh`
+  - [x] ✅ All 4 new tests GREEN; 1362 daemon + integration tests pass with zero regressions
+  - [x] ✅ QA 10/10 PASSED; daemon restart RUNNING (PID 90731)
 - [ ] ⬜ **Task 3.7**: Downgrade safety — if `lock_hash` matches current state, do NOT rebuild on daemon version change
 - [ ] ⬜ **Task 3.8**: Full QA + daemon restart + all prior phase tests
 - [ ] ⬜ **Task 3.9** (NEW in v3): Eager upgrade cleanup — `hooks-daemon upgrade` leaves zero stale venvs

@@ -106,6 +106,12 @@
     },
     {
       "file": "daemon/paths.py",
+      "function": "_find_compatible_python_on_path",
+      "rule": "silent-continue",
+      "reason": "Candidate-interpreter probe loop (Plan 00100 Task 3.6): mirrors scripts/upgrade.sh::find_compatible_python byte-for-byte. Each candidate in (python3, python3.13, python3.12, python3.11) is probed with a tiny version check; OSError/SubprocessError from subprocess.run means 'this candidate is not usable — try the next one', which IS the documented recovery behaviour. Silent continue is correct here; logging every missing interpreter would be extremely noisy on every daemon restart. The caller receives None only if no candidate survives, and that None is surfaced in the resolver diagnostic as 'Install Python 3.11+ before retrying the upgrade'."
+    },
+    {
+      "file": "daemon/paths.py",
       "function": "cleanup_socket",
       "rule": "log-and-continue",
       "reason": "Stale socket/PID file cleanup routine: log-and-continue is correct. Cleanup failing for one stale file should not prevent cleanup of others or block daemon startup. Already logged at warning level."

@@ -210,6 +210,57 @@ def _read_venv_metadata_stdlib(venv_dir: Path) -> dict[str, str] | None:
     return data
 
 
+# Plan 00100 Task 3.6: recovery candidates when ``metadata.python_path`` is
+# gone. Order mirrors ``scripts/upgrade.sh::find_compatible_python`` so both
+# resolvers agree on which interpreter an upgrade would pick. Keep these
+# stdlib-only: this function runs under the host ``python3`` at install time.
+_COMPATIBLE_PYTHON_CANDIDATES = ("python3", "python3.13", "python3.12", "python3.11")
+_MIN_COMPATIBLE_PYTHON = (3, 11)
+_PYTHON_VERSION_PROBE = (
+    "import sys; v=sys.version_info; " f"exit(0 if v >= {_MIN_COMPATIBLE_PYTHON!r} else 1)"
+)
+# Subprocess version probe ceiling — an unreachable Python shouldn't block
+# the resolver for more than a couple of seconds. Upstream install flows
+# have their own longer timeouts for actual venv creation.
+_COMPATIBLE_PYTHON_PROBE_TIMEOUT_SECS = 3.0
+
+
+def _find_compatible_python_on_path() -> Path | None:
+    """Return the first Python 3.11+ interpreter resolvable on ``PATH``.
+
+    Mirrors ``scripts/upgrade.sh::find_compatible_python`` so the Python and
+    bash resolvers pick the same interpreter under identical environments.
+
+    Used by :func:`resolve_existing_venv_python_with_diagnostics` when
+    ``metadata.python_path`` matches the current ``lock_hash`` but no longer
+    exists on disk — the resolver surfaces either "rebuild possible with X"
+    or "install Python 3.11+" so upgrades fail loudly rather than silently.
+
+    Stdlib-only by design: called at install time before the venv exists.
+    Returns ``None`` when no candidate is both resolvable and >= 3.11 — the
+    caller converts that into an actionable diagnostic.
+    """
+    import shutil
+    import subprocess  # nosec B404 — trusted: only probes PATH-resolved python candidates
+
+    for candidate in _COMPATIBLE_PYTHON_CANDIDATES:
+        resolved = shutil.which(candidate)
+        if resolved is None:
+            continue
+        try:
+            result = subprocess.run(  # nosec B603 — fixed argv, no shell
+                [resolved, "-c", _PYTHON_VERSION_PROBE],
+                check=False,
+                capture_output=True,
+                timeout=_COMPATIBLE_PYTHON_PROBE_TIMEOUT_SECS,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if result.returncode == 0:
+            return Path(resolved)
+    return None
+
+
 def _is_legacy_stamp_only(venv_dir: Path) -> bool:
     """Return True iff ``venv_dir`` is a Plan-00099-era legacy leftover.
 
@@ -360,6 +411,16 @@ def resolve_existing_venv_python_with_diagnostics(
     lock_hash — the resolver skips them so ``ensure_venv`` rebuilds on
     the next install/upgrade.
 
+    **Task 3.6 recovery**: when step 2 finds a lock-hash-matching metadata
+    file but ``metadata.python_path`` no longer exists (base interpreter
+    uninstalled, relocated, broken symlink), the resolver calls
+    :func:`_find_compatible_python_on_path` and appends a recovery
+    diagnostic — either "rebuild possible with X" so the caller knows an
+    ``ensure_venv`` rebuild will succeed, or "install Python 3.11+" so
+    upgrades fail loudly rather than silently. The resolver still returns
+    ``None`` for this entry and falls through; rebuilding is
+    ``ensure_venv``'s job, not the resolver's.
+
     This is the Python SSOT entry point referenced by bash wrappers.
     """
     daemon_path = Path(daemon_dir)
@@ -430,6 +491,19 @@ def resolve_existing_venv_python_with_diagnostics(
                 f"matches current lock_hash but python_path={python_path} "
                 "is missing or not executable"
             )
+            alternative = _find_compatible_python_on_path()
+            if alternative is not None:
+                steps.append(
+                    f"step 2 recovery: compatible alternative found — {alternative} "
+                    f"(rebuild of {candidate_dir} with this interpreter will unblock the daemon)"
+                )
+            else:
+                steps.append(
+                    "step 2 recovery: no compatible alternative — "
+                    f"no Python {'.'.join(str(n) for n in _MIN_COMPATIBLE_PYTHON)}+ "
+                    f"found on PATH among {list(_COMPATIBLE_PYTHON_CANDIDATES)}. "
+                    "Install Python 3.11+ before retrying the upgrade."
+                )
             matched = True
             break
         if not matched:
