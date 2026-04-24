@@ -212,6 +212,66 @@ venv_version_matches() {
 }
 
 #
+# venv_lock_hash_matches() - Check if the venv's metadata lock_hash is current
+#
+# Plan 00100 Task 3.7: downgrade safety. The authoritative freshness signal
+# is the `lock_hash` inside `.daemon-metadata.json`, not the legacy
+# `.daemon-version` SemVer stamp. When dependencies are unchanged, a daemon
+# upgrade or downgrade must reuse the existing venv.
+#
+# Shells out to the Python SSOT (paths.py check-venv-fresh) using the host
+# python3 — stdlib-only, no venv required (by design, paths.py avoids Pydantic).
+#
+# Args:
+#   $1 - daemon_dir: Path to daemon installation directory
+#   $2 - venv_path: Path to venv directory to check
+#
+# Returns:
+#   Exit code 0 if metadata lock_hash matches current project state
+#   Exit code 1 otherwise (missing metadata, mismatched hash, no pyproject)
+#
+# Stderr from the Python SSOT is routed to print_verbose-level logging
+# so diagnostic details remain visible when the daemon is started with
+# HOOKS_DAEMON_VERBOSE_INSTALL=1. Stdout is discarded — the only interesting
+# signal is the exit code.
+#
+venv_lock_hash_matches() {
+    local daemon_dir="$1"
+    local venv_path="$2"
+
+    if [ -z "$daemon_dir" ] || [ -z "$venv_path" ]; then
+        return 1
+    fi
+
+    if ! command -v python3 > /dev/null; then
+        return 1
+    fi
+
+    # paths.py is invoked as a direct script (NOT `python3 -m ...`) so the
+    # package __init__.py — which pulls Pydantic — is bypassed. This matters
+    # at install time, when the daemon venv may not yet exist and the host
+    # python3 only has stdlib. Same pattern as scripts/install/venv_resolver.sh.
+    local paths_script="$daemon_dir/src/claude_code_hooks_daemon/daemon/paths.py"
+    if [ ! -f "$paths_script" ]; then
+        return 1
+    fi
+
+    local stderr_capture
+    stderr_capture="$(
+        python3 "$paths_script" check-venv-fresh \
+            --venv-path "$venv_path" \
+            --daemon-dir "$daemon_dir" \
+            2>&1 > /dev/null
+    )"
+    local rc=$?
+
+    if [ -n "$stderr_capture" ]; then
+        print_verbose "check-venv-fresh: $stderr_capture"
+    fi
+    return $rc
+}
+
+#
 # ensure_venv() - Auto-bootstrap venv for current Python environment fingerprint
 #
 # Plan 00099: the entry point init.sh calls on every daemon start. Computes
@@ -267,9 +327,19 @@ ensure_venv() {
 
     local venv_path="$daemon_dir/untracked/venv-$fingerprint"
 
-    # Fast path: venv exists and stamp matches — no-op
+    # Plan 00100 Task 3.7: lock_hash is authoritative. A daemon upgrade or
+    # downgrade with unchanged deps (pyproject.toml + uv.lock) must reuse the
+    # existing venv — the legacy `.daemon-version` SemVer stamp is advisory.
+    if [ -d "$venv_path" ] && venv_lock_hash_matches "$daemon_dir" "$venv_path"; then
+        print_verbose "ensure_venv: lock_hash unchanged — reusing $venv_path"
+        echo "$venv_path"
+        return 0
+    fi
+
+    # Fallback fast path: no usable metadata but legacy stamp matches — no-op.
+    # Kept for pre-Phase-3 venvs that predate `.daemon-metadata.json`.
     if [ -d "$venv_path" ] && venv_version_matches "$venv_path" "$target_version"; then
-        print_verbose "ensure_venv: venv up-to-date at $venv_path"
+        print_verbose "ensure_venv: venv up-to-date at $venv_path (stamp match)"
         echo "$venv_path"
         return 0
     fi

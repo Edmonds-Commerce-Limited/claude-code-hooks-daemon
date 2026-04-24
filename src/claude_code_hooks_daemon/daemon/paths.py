@@ -1108,11 +1108,64 @@ def _cli_resolve_venv(args: argparse.Namespace) -> int:
     return 1
 
 
+def _cli_check_venv_fresh(args: argparse.Namespace) -> int:
+    """CLI handler for the ``check-venv-fresh`` subcommand.
+
+    Plan 00100 Task 3.7 — downgrade safety. Exit 0 when the venv's
+    ``.daemon-metadata.json`` records a ``lock_hash`` that matches the
+    current project state; exit 1 otherwise (including the "no metadata
+    present" state — callers fall back to stamp comparison or rebuild).
+
+    ``lock_hash`` is the authoritative freshness signal; the legacy
+    ``.daemon-version`` stamp only tracks daemon SemVer and must not
+    trigger a rebuild when dependencies are unchanged.
+    """
+    venv_path = Path(args.venv_path)
+    daemon_dir = Path(args.daemon_dir) if args.daemon_dir else Path.cwd()
+
+    if not venv_path.is_dir():
+        print(
+            f"check-venv-fresh: venv dir does not exist: {venv_path}",
+            file=sys.stderr,
+        )
+        return 1
+
+    metadata = _read_venv_metadata_stdlib(venv_path)
+    if metadata is None:
+        print(
+            f"check-venv-fresh: no usable {_DAEMON_METADATA_FILENAME} in {venv_path}",
+            file=sys.stderr,
+        )
+        return 1
+
+    current_lock_hash = _compute_project_lock_hash_stdlib(daemon_dir)
+    if current_lock_hash is None:
+        print(
+            f"check-venv-fresh: cannot compute current lock_hash "
+            f"(no {_PYPROJECT_FILENAME} at {daemon_dir})",
+            file=sys.stderr,
+        )
+        return 1
+
+    if metadata["lock_hash"] == current_lock_hash:
+        return 0
+
+    print(
+        f"check-venv-fresh: lock_hash mismatch "
+        f"(venv={metadata['lock_hash'][:15]}..., "
+        f"current={current_lock_hash[:15]}...)",
+        file=sys.stderr,
+    )
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     """Dispatcher for ``python -m claude_code_hooks_daemon.daemon.paths``.
 
-    Currently exposes the ``resolve-venv`` subcommand (Plan 00100 Phase 2);
-    more SSOT subcommands may be added later.
+    Exposes:
+
+    - ``resolve-venv`` (Plan 00100 Phase 2) — SSOT venv resolver
+    - ``check-venv-fresh`` (Plan 00100 Task 3.7) — lock_hash freshness gate
     """
     parser = argparse.ArgumentParser(
         description="Hooks-daemon path utilities (SSOT for bash wrappers).",
@@ -1143,6 +1196,26 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     resolve_venv_parser.set_defaults(func=_cli_resolve_venv)
+
+    check_fresh_parser = subparsers.add_parser(
+        "check-venv-fresh",
+        help=(
+            "Exit 0 if the venv's .daemon-metadata.json lock_hash matches "
+            "the current project's pyproject.toml/uv.lock state. Exit 1 "
+            "otherwise (including no-metadata and cannot-compute states)."
+        ),
+    )
+    check_fresh_parser.add_argument(
+        "--venv-path",
+        required=True,
+        help="Absolute path to the venv directory to check.",
+    )
+    check_fresh_parser.add_argument(
+        "--daemon-dir",
+        default=None,
+        help="Daemon installation directory (defaults to CWD).",
+    )
+    check_fresh_parser.set_defaults(func=_cli_check_venv_fresh)
 
     args = parser.parse_args(argv)
     return int(args.func(args))

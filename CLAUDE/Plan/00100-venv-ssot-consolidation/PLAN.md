@@ -280,7 +280,13 @@ Opus orchestrates a team. Each phase lands a green state before the next begins.
   - [x] ✅ Function-level exclusion added to `scripts/qa/error_hiding_exclusions.json` for `_find_compatible_python_on_path` — the `except (OSError, subprocess.SubprocessError): continue` is the documented candidate-skip recovery path, same pattern as `scripts/upgrade.sh`
   - [x] ✅ All 4 new tests GREEN; 1362 daemon + integration tests pass with zero regressions
   - [x] ✅ QA 10/10 PASSED; daemon restart RUNNING (PID 90731)
-- [ ] ⬜ **Task 3.7**: Downgrade safety — if `lock_hash` matches current state, do NOT rebuild on daemon version change
+- [x] ✅ **Task 3.7**: Downgrade safety — if `lock_hash` matches current state, do NOT rebuild on daemon version change
+  - [x] ✅ 2 RED integration tests added in `tests/integration/test_ensure_venv.py::TestEnsureVenvDowngradeSafety`: `test_noop_when_lock_hash_matches_even_if_stamp_differs` (venv with current lock_hash + stale `v1.0.0` stamp must survive `ensure_venv ... v99.0.0`) and `test_rebuilds_when_metadata_absent_and_stamp_differs` (backward-compat: legacy pre-Phase-3 venv still rebuilds on stamp mismatch)
+  - [x] ✅ New CLI subcommand `check-venv-fresh` in `src/claude_code_hooks_daemon/daemon/paths.py` (`_cli_check_venv_fresh`) — stdlib-only (invokable under host python3 at install time), exits 0 when `.daemon-metadata.json::lock_hash` matches `_compute_project_lock_hash_stdlib(daemon_dir)`, else 1 (including missing venv dir, missing/malformed metadata, missing pyproject)
+  - [x] ✅ New bash helper `venv_lock_hash_matches` in `scripts/install/venv.sh` — invokes `paths.py` as a direct script file (avoids pydantic import), routes stderr through `print_verbose` instead of `>/dev/null 2>&1` (error_hiding hook compliant)
+  - [x] ✅ `ensure_venv` fast path rewired: lock_hash check runs BEFORE legacy `venv_version_matches` stamp check; stamp retained as fallback for venvs lacking `.daemon-metadata.json`
+  - [x] ✅ 6 RED unit tests added in `tests/unit/daemon/test_paths_check_venv_fresh.py` exercising all branches of `_cli_check_venv_fresh` (match, mismatch, missing venv, missing metadata, no-pyproject, cwd-default)
+  - [x] ✅ All 8 new tests GREEN; 1364 integration + daemon unit tests pass with zero regressions; QA 10/10 (coverage 95.0%); daemon restart RUNNING (PID 107285)
 - [ ] ⬜ **Task 3.8**: Full QA + daemon restart + all prior phase tests
 - [ ] ⬜ **Task 3.9** (NEW in v3): Eager upgrade cleanup — `hooks-daemon upgrade` leaves zero stale venvs
   - [ ] ⬜ Failing test: `tests/integration/test_upgrade_eager_cleanup.py` — pre-seed three fake `venv-*/` dirs (legacy bare, old slug, current), run upgrade, assert only current survives

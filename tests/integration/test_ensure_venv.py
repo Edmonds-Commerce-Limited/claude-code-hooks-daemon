@@ -144,6 +144,77 @@ class TestEnsureVenvRecreatesOnStampMismatch:
         assert (stale_venv / ".daemon-version").read_text().strip() == "v99.0.0"
 
 
+class TestEnsureVenvDowngradeSafety:
+    """Plan 00100 Task 3.7: lock_hash is the authoritative freshness signal.
+
+    When ``.daemon-metadata.json`` records a ``lock_hash`` that matches the
+    current project's pyproject.toml/uv.lock state, ``ensure_venv`` MUST
+    reuse the venv even if the legacy ``.daemon-version`` stamp says it
+    was built for a different daemon release. This makes daemon
+    upgrades/downgrades cheap when dependencies are unchanged — the venv
+    itself is only driven by the lock_hash, not by the daemon SemVer.
+    """
+
+    def test_noop_when_lock_hash_matches_even_if_stamp_differs(self, tmp_path: Path) -> None:
+        daemon_dir = tmp_path / "project"
+        daemon_dir.mkdir()
+        _minimal_daemon_dir(daemon_dir)
+
+        fp_result = _run_bash(f'python_venv_fingerprint "{sys.executable}"')
+        fingerprint = fp_result.stdout.strip()
+        venv_dir = daemon_dir / "untracked" / f"venv-{fingerprint}"
+        (venv_dir / "bin").mkdir(parents=True)
+        (venv_dir / "bin" / "python").symlink_to(sys.executable)
+        (venv_dir / ".daemon-version").write_text("v1.0.0\n")
+
+        from claude_code_hooks_daemon.daemon.metadata import compute_project_lock_hash
+
+        current_lock_hash = compute_project_lock_hash(daemon_dir)
+        metadata_json = (
+            "{"
+            f'"python_path": "{(venv_dir / "bin" / "python").resolve()}",'
+            f'"fingerprint": "{fingerprint}",'
+            f'"lock_hash": "{current_lock_hash}",'
+            '"daemon_version": "v1.0.0",'
+            '"written_at": "2026-01-01T00:00:00Z"'
+            "}"
+        )
+        (venv_dir / ".daemon-metadata.json").write_text(metadata_json)
+
+        sentinel = venv_dir / "SENTINEL"
+        sentinel.write_text("must-survive-downgrade-safety-noop")
+
+        result = _run_bash(f'ensure_venv "{daemon_dir}" "v99.0.0" "{sys.executable}"')
+        assert result.returncode == 0, f"ensure_venv failed: {result.stderr}"
+        assert sentinel.exists(), (
+            "ensure_venv wrongly rebuilt venv despite matching lock_hash. "
+            f"stderr: {result.stderr}"
+        )
+        assert sentinel.read_text() == "must-survive-downgrade-safety-noop"
+
+    def test_rebuilds_when_metadata_absent_and_stamp_differs(self, tmp_path: Path) -> None:
+        """Backward-compat: with no metadata, falls back to legacy stamp check."""
+        daemon_dir = tmp_path / "project"
+        daemon_dir.mkdir()
+        _minimal_daemon_dir(daemon_dir)
+
+        fp_result = _run_bash(f'python_venv_fingerprint "{sys.executable}"')
+        fingerprint = fp_result.stdout.strip()
+        stale_venv = daemon_dir / "untracked" / f"venv-{fingerprint}"
+        (stale_venv / "bin").mkdir(parents=True)
+        (stale_venv / ".daemon-version").write_text("v1.0.0\n")
+        # Intentionally NO .daemon-metadata.json — pure legacy state.
+        sentinel = stale_venv / "SENTINEL"
+        sentinel.write_text("legacy-stamp-only-should-be-rebuilt")
+
+        result = _run_bash(f'ensure_venv "{daemon_dir}" "v99.0.0" "{sys.executable}"')
+        assert result.returncode == 0, f"ensure_venv failed: {result.stderr}"
+        assert not sentinel.exists(), (
+            "ensure_venv must still rebuild on stamp mismatch when metadata "
+            "is absent — legacy pre-Phase-3 state."
+        )
+
+
 class TestEnsureVenvCIGate:
     """CI environments + HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1 must skip the bootstrap."""
 
