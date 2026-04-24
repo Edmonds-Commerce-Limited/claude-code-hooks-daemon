@@ -178,18 +178,35 @@ set_hook_permissions() {
     fi
 
     local chmod_count=0
+    local chmod_failed=0
+    local failed_files=""
 
+    # Issue #29: do NOT silence chmod failures. A silently-failing chmod
+    # leaves wrappers non-executable, which the daemon cannot detect and
+    # the user only notices when hooks silently stop firing.
     for hook_file in $hook_files; do
-        chmod +x "$hook_file" 2>/dev/null || true
-        chmod_count=$((chmod_count + 1))
+        if chmod +x "$hook_file"; then
+            chmod_count=$((chmod_count + 1))
+        else
+            chmod_failed=$((chmod_failed + 1))
+            failed_files="$failed_files $hook_file"
+        fi
     done
 
-    # Check if permissions stuck (git core.fileMode=false detection)
+    if [ "$chmod_failed" -gt 0 ]; then
+        print_error "Failed to set executable on $chmod_failed hook script(s):$failed_files"
+        return 1
+    fi
+
+    # Verify permissions actually stuck. The common cause of a successful
+    # chmod call producing a still-non-executable file is git's
+    # core.fileMode=false combined with a subsequent filesystem event
+    # (e.g. checkout/merge) resetting tracked modes — advisory, not fatal.
     local test_file
     test_file=$(echo "$hook_files" | awk 'NR==1')
     if [ -f "$test_file" ] && [ ! -x "$test_file" ]; then
         print_warning "Hook permissions may not persist (git core.fileMode=false)"
-        print_info "Hooks will still work, but permissions won't be tracked by git"
+        print_info "Hooks will still work after re-chmod, but permissions won't be tracked by git"
     else
         print_verbose "Set executable on $chmod_count hook scripts"
     fi
@@ -317,11 +334,14 @@ deploy_all_hooks() {
         return 1
     fi
 
-    # Set permissions (only needed in normal mode, symlinks inherit permissions)
-    if [ "$install_mode" != "self-install" ]; then
-        if ! set_hook_permissions "$project_root"; then
-            print_warning "Failed to set hook permissions (may still work)"
-        fi
+    # Issue #29: always set permissions, in BOTH modes. Previously self-install
+    # relied on install.py's `hook_file.chmod(0o755)` + git checkout preserving
+    # 100755 tree mode, but any filesystem event that strips exec bits (IDE
+    # save over network FS, core.fileMode=false checkout, manual cp from
+    # non-executable source) would leave wrappers broken with no remediation.
+    # Running set_hook_permissions unconditionally is idempotent and cheap.
+    if ! set_hook_permissions "$project_root"; then
+        print_warning "Failed to set hook permissions — hooks may not fire"
     fi
 
     # Force executable bit in git index (both install modes benefit from this)
