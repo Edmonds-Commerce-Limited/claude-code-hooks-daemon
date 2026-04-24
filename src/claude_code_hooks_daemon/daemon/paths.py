@@ -15,9 +15,13 @@ import json
 import logging
 import os
 import platform
+import re
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +144,111 @@ def python_venv_fingerprint(root: str | Path | None = None) -> str:
     if root is None:
         return py_fp
     return f"{project_path_slug(root)}-{py_fp}"
+
+
+# ----------------------------------------------------------------------
+# Plan 00100 Phase 3: atomic metadata persistence inside each venv dir.
+#
+# The daemon startup resolver must not recompute the fingerprint to find
+# the right venv — recomputation disagrees with install-time computation
+# when Python changes (the pyenv-shim case). Instead, the installer
+# persists its choices into ``.daemon-metadata.json`` inside the venv;
+# startup reads this file and uses the persisted ``python_path`` as the
+# authoritative interpreter. The fingerprint remains a directory-naming
+# convenience only.
+# ----------------------------------------------------------------------
+
+_DAEMON_METADATA_FILENAME = ".daemon-metadata.json"
+_LOCK_HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_DAEMON_VERSION_RE = re.compile(r"^v\d+\.\d+\.\d+$")
+
+
+class DaemonVenvMetadata(BaseModel):
+    """Installer-time venv metadata persisted atomically inside each venv.
+
+    Written on venv creation; read by the daemon on every startup so the
+    resolver can use ``python_path`` authoritatively and compare
+    ``lock_hash`` against the current project state to decide stale/fresh.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    python_path: str = Field(min_length=1)
+    fingerprint: str = Field(min_length=1)
+    lock_hash: str
+    daemon_version: str
+    written_at: str
+
+    @field_validator("python_path")
+    @classmethod
+    def _python_path_must_be_absolute(cls, value: str) -> str:
+        if not Path(value).is_absolute():
+            raise ValueError("python_path must be an absolute path")
+        return value
+
+    @field_validator("lock_hash")
+    @classmethod
+    def _lock_hash_must_be_sha256_prefixed(cls, value: str) -> str:
+        if not _LOCK_HASH_RE.fullmatch(value):
+            raise ValueError("lock_hash must be 'sha256:<64 lowercase hex>'")
+        return value
+
+    @field_validator("daemon_version")
+    @classmethod
+    def _daemon_version_must_be_v_prefixed(cls, value: str) -> str:
+        if not _DAEMON_VERSION_RE.fullmatch(value):
+            raise ValueError("daemon_version must match 'vMAJOR.MINOR.PATCH'")
+        return value
+
+    @field_validator("written_at")
+    @classmethod
+    def _written_at_must_be_iso8601(cls, value: str) -> str:
+        # ``fromisoformat`` accepts the trailing ``Z`` from Python 3.11+;
+        # normalise for safety on earlier runtimes.
+        candidate = value.replace("Z", "+00:00") if value.endswith("Z") else value
+        try:
+            datetime.fromisoformat(candidate)
+        except ValueError as exc:
+            raise ValueError("written_at must be ISO 8601") from exc
+        return value
+
+
+def write_daemon_metadata(venv_dir: Path | str, meta: DaemonVenvMetadata) -> None:
+    """Atomically persist metadata to ``{venv_dir}/.daemon-metadata.json``.
+
+    Writes to a sibling ``.tmp`` file and ``os.replace``s it into final
+    position so readers never observe a half-written file. Caller owns
+    the venv directory layout — if ``venv_dir`` does not exist, the
+    write raises; we do not silently create missing parents.
+    """
+    venv_path = Path(venv_dir)
+    if not venv_path.is_dir():
+        raise FileNotFoundError(f"venv dir does not exist: {venv_path}")
+    final_path = venv_path / _DAEMON_METADATA_FILENAME
+    tmp_path = venv_path / f"{_DAEMON_METADATA_FILENAME}.tmp"
+    tmp_path.write_text(meta.model_dump_json())
+    os.replace(tmp_path, final_path)
+
+
+def read_daemon_metadata(venv_dir: Path | str) -> "DaemonVenvMetadata | None":
+    """Return the metadata if present and valid, else ``None``.
+
+    Any unusable state — missing file, empty file, malformed JSON,
+    schema-mismatch — collapses to ``None``. Callers interpret ``None``
+    as "treat this venv as stale and rebuild"; the function never raises
+    for ordinary "no metadata" conditions.
+    """
+    candidate = Path(venv_dir) / _DAEMON_METADATA_FILENAME
+    if not candidate.is_file():
+        return None
+    raw = candidate.read_text()
+    if not raw.strip():
+        return None
+    try:
+        return DaemonVenvMetadata.model_validate_json(raw)
+    except Exception:
+        logger.debug("metadata at %s failed schema validation", candidate)
+        return None
 
 
 def get_venv_path(project_dir: Path | str) -> Path:
