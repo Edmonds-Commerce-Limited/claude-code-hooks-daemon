@@ -209,6 +209,16 @@ handlers:
           - "^eslint-rules/.*\\.md$"
           - "^src/claude_code_hooks_daemon/guides/.*\\.md$"
           - "^\\.github/.*\\.md$"
+          # Standard repo-root files (exact root-level only)
+          - "^README\\.md$"
+          - "^CHANGELOG\\.md$"
+          - "^CONTRIBUTING\\.md$"
+          - "^LICENSE\\.md$"
+          - "^SECURITY\\.md$"
+          - "^CODE_OF_CONDUCT\\.md$"
+          - "^AUTHORS\\.md$"
+          - "^NOTICE\\.md$"
+          - "^MAINTAINERS\\.md$"
 
     # TOOL USAGE HANDLERS (Priority 50-60)
     web_search_year:       # Fixes year in web search queries (uses current year)

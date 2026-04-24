@@ -30,6 +30,22 @@ _PLAN_ROOT_EXCLUDED_FILES: Final[frozenset[str]] = frozenset({"readme"})
 # normal markdown organization rules apply within each package root.
 _DEPENDENCY_DIRECTORIES: Final[tuple[str, ...]] = ("vendor/", "node_modules/")
 
+# Industry-standard markdown files that live at the project root.
+# These are exact filenames (no path components) — subdirectory copies are blocked.
+# README.md and CHANGELOG.md are handled by is_adhoc_instruction_file (allowed anywhere);
+# these additional files are root-only.
+_STANDARD_ROOT_MARKDOWN_FILES: Final[frozenset[str]] = frozenset(
+    {
+        "contributing.md",
+        "license.md",
+        "security.md",
+        "code_of_conduct.md",
+        "authors.md",
+        "notice.md",
+        "maintainers.md",
+    }
+)
+
 
 class MarkdownOrganizationHandler(Handler):
     """Enforce markdown file organization rules.
@@ -596,6 +612,22 @@ class MarkdownOrganizationHandler(Handler):
                 # File is outside project root - allow it (don't match)
                 return False
 
+        # Standard repo-root files allowed at the project root only.
+        # Compute project-relative path accurately:
+        # - For absolute paths, resolve() + relative_to() gives the true relative path.
+        # - For relative paths, use Path(file_path) directly.
+        # We check this BEFORE normalize_path because normalize_path cannot reliably
+        # strip arbitrary absolute path prefixes when no project marker is present.
+        if Path(file_path).is_absolute():
+            _proj_rel = Path(file_path).resolve().relative_to(ProjectContext.project_root())
+        else:
+            _proj_rel = Path(file_path)
+        if (
+            _proj_rel.parent == Path()
+            and _proj_rel.name.lower() in _STANDARD_ROOT_MARKDOWN_FILES
+        ):
+            return False  # Allow — standard repo-root file at project root
+
         # Use centralized normalization
         normalized = self.normalize_path(file_path)
 
@@ -733,8 +765,10 @@ class MarkdownOrganizationHandler(Handler):
             return False  # Allow
 
         # 8. eslint-rules/ - ESLint rule docs
-        # Not in allowed location - block (negated condition returns True)
-        return not re.match(r"^eslint-rules/.*\.md$", normalized, re.IGNORECASE)
+        if re.match(r"^eslint-rules/.*\.md$", normalized, re.IGNORECASE):
+            return False  # Allow
+
+        return True  # Block — no rule matched
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Handle markdown write based on location.
@@ -764,7 +798,10 @@ class MarkdownOrganizationHandler(Handler):
                 "4. ./untracked/ - Ad-hoc temporary docs\n"
                 "5. ./RELEASES/ - Release notes\n"
                 "6. ./.claude/commands/ - Slash command definitions\n"
-                "7. ./vendor/, ./node_modules/ - Third-party dependencies\n\n"
+                "7. ./vendor/, ./node_modules/ - Third-party dependencies\n"
+                "8. Standard repo-root files (exact root only): README.md, CHANGELOG.md,\n"
+                "   CONTRIBUTING.md, LICENSE.md, SECURITY.md, CODE_OF_CONDUCT.md,\n"
+                "   AUTHORS.md, NOTICE.md, MAINTAINERS.md\n\n"
                 "CHOOSE THE RIGHT LOCATION:\n"
                 "- Is this for LLMs/agents? -> CLAUDE/\n"
                 "- Is this for the current plan? -> CLAUDE/Plan/{plan-number}-*/\n"

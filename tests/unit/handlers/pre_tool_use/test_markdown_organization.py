@@ -381,6 +381,78 @@ class TestMarkdownOrganizationHandler:
         write_input["tool_input"]["file_path"] = "test.md"
         assert handler.matches(write_input) is True
 
+    # --- Standard repo-root files (CONTRIBUTING.md, SECURITY.md, etc.) ---
+
+    def test_matches_returns_false_for_contributing_md_at_root(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Handler allows CONTRIBUTING.md at project root."""
+        write_input["tool_input"]["file_path"] = "CONTRIBUTING.md"
+        assert handler.matches(write_input) is False
+
+    def test_matches_returns_false_for_contributing_md_absolute_root(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Handler allows CONTRIBUTING.md at project root (absolute path)."""
+        write_input["tool_input"]["file_path"] = "/tmp/test/CONTRIBUTING.md"
+        assert handler.matches(write_input) is False
+
+    def test_matches_returns_false_for_security_md_at_root(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Handler allows SECURITY.md at project root."""
+        write_input["tool_input"]["file_path"] = "SECURITY.md"
+        assert handler.matches(write_input) is False
+
+    def test_matches_returns_false_for_code_of_conduct_md_at_root(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Handler allows CODE_OF_CONDUCT.md at project root."""
+        write_input["tool_input"]["file_path"] = "CODE_OF_CONDUCT.md"
+        assert handler.matches(write_input) is False
+
+    def test_matches_returns_false_for_license_md_at_root(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Handler allows LICENSE.md at project root."""
+        write_input["tool_input"]["file_path"] = "LICENSE.md"
+        assert handler.matches(write_input) is False
+
+    def test_matches_returns_false_for_authors_md_at_root(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Handler allows AUTHORS.md at project root."""
+        write_input["tool_input"]["file_path"] = "AUTHORS.md"
+        assert handler.matches(write_input) is False
+
+    def test_matches_returns_false_for_notice_md_at_root(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Handler allows NOTICE.md at project root."""
+        write_input["tool_input"]["file_path"] = "NOTICE.md"
+        assert handler.matches(write_input) is False
+
+    def test_matches_returns_false_for_maintainers_md_at_root(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Handler allows MAINTAINERS.md at project root."""
+        write_input["tool_input"]["file_path"] = "MAINTAINERS.md"
+        assert handler.matches(write_input) is False
+
+    def test_matches_returns_true_for_contributing_md_in_subdir(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Handler blocks CONTRIBUTING.md in subdirectories (exact root-only match)."""
+        write_input["tool_input"]["file_path"] = "some/subdir/CONTRIBUTING.md"
+        assert handler.matches(write_input) is True
+
+    def test_matches_returns_true_for_security_md_in_subdir(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Handler blocks SECURITY.md in subdirectories (exact root-only match)."""
+        write_input["tool_input"]["file_path"] = "src/SECURITY.md"
+        assert handler.matches(write_input) is True
+
     def test_handle_returns_deny_with_reason(
         self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
     ) -> None:
