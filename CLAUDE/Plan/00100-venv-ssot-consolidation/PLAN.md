@@ -242,17 +242,14 @@ Opus orchestrates a team. Each phase lands a green state before the next begins.
   - [x] ✅ Add a CI step: `uv lock --check` runs in `scripts/qa/run_dependency_check.sh` before deptry (fails if pyproject.toml diverges from uv.lock)
   - [x] ✅ Verified `.gitignore`: `uv.lock` is NOT ignored (Pipfile.lock / venv/ / .venv / untracked/ are the only lock/venv patterns); no change needed
   - [x] ✅ Update CONTRIBUTING.md with the lockfile workflow (regenerate via `uv lock`, commit alongside dep changes)
-- [ ] ⬜ **Task 3.0.5** (NEW in v3): Add human-readable path slug to venv dir name
-  - [ ] ⬜ Failing test first: `tests/unit/daemon/test_paths_venv_slug.py` — verify host vs container view of the same project produce distinct slugs (`/home/user/proj` → `home_user_proj`; `/workspace` → `workspace`), verify truncation + 4-hex suffix kicks in at >40 chars, verify filesystem-safe chars only
-  - [ ] ⬜ Implement `project_path_slug(root: str) -> str` in `src/claude_code_hooks_daemon/daemon/paths.py`:
-    - Strip leading `/`, replace `/` with `_`, strip other non-`[A-Za-z0-9_-]` chars
-    - If length > 40: keep first 36 chars + `-` + 4-hex md5 suffix (deterministic disambiguator for pathological paths)
-  - [ ] ⬜ Update `python_venv_fingerprint()` → now returns `{pathslug}-py{MM}-{pyhash}`; dir name remains `venv-{fingerprint}/`
-    - Example: `/workspace` + cpython 3.11 /usr → `venv-workspace-py311-2fa8b3c1/`
-    - Example: `/home/user/projects/hooks-daemon` + pyenv 3.13 → `venv-home_user_projects_hooks-daemon-py313-9d4e0f82/`
-  - [ ] ⬜ Update bash SSOT `scripts/install/python_fingerprint.sh` to accept `HOOKS_DAEMON_ROOT_DIR` and invoke same Python helper (no drift)
-  - [ ] ⬜ Bash↔Python parity test extended in `test_fingerprint_parity.py`
-  - [ ] ⬜ Migration: Task 3.5 below subsumes — old-format `venv-py{MM}-{fp}/` without slug prefix → treat as stale → rebuild under new name → delete old
+- [x] ✅ **Task 3.0.5** (NEW in v3): Add human-readable path slug to venv dir name — committed `37df4cd`
+  - [x] ✅ Failing test first: `tests/unit/daemon/test_paths_venv_slug.py` — host vs container distinct slugs, truncation + 4-hex at >40 chars, filesystem-safe chars only
+  - [x] ✅ Implement `project_path_slug(root: str) -> str` in `src/claude_code_hooks_daemon/daemon/paths.py` (strip `/`, safe chars, truncate at 40 with 4-hex suffix)
+  - [x] ✅ `python_venv_fingerprint(root=None)` returns `{pathslug}-py{MM}-{pyhash}` when root given, legacy `py{MM}-{pyhash}` when None (back-compat)
+  - [x] ✅ All three cli.py callers (`_enumerate_venvs`, `cmd_list_venvs`, `cmd_prune_venvs`) + both `resolve_existing_venv_python*` pass project_root
+  - [x] ✅ Bash SSOT `scripts/install/python_fingerprint.sh` accepts `$2` positional root and `HOOKS_DAEMON_ROOT_DIR` env; mirrors slug logic inline
+  - [x] ✅ Bash↔Python parity tests in `test_fingerprint_parity.py` (6 new, 11 total) — byte-identical slug + hash
+  - [x] ✅ 656 daemon unit tests + 11 parity tests pass; migration deferred to Task 3.5 below
 - [ ] ⬜ **Task 3.1** (REVISED from v1): Design single atomic metadata file inside venv dir
   - [ ] ⬜ `.daemon-metadata.json`: `{"python_path": "...", "fingerprint": "py313-956ed987", "lock_hash": "sha256:...", "daemon_version": "v3.9.0", "written_at": "ISO8601"}`
   - [ ] ⬜ Schema: pydantic model in `paths.py` for read-side validation
