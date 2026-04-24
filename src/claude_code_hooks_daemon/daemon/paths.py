@@ -149,7 +149,79 @@ def python_venv_fingerprint(root: str | Path | None = None) -> str:
 # in here would break that guarantee — so the schema, persistence and
 # lock-hash helpers all live in ``metadata.py`` and are imported only by
 # callers that run under the daemon venv.
+#
+# The two ``_stdlib`` helpers below (``_read_venv_metadata_stdlib`` and
+# ``_compute_project_lock_hash_stdlib``) exist solely so that
+# ``resolve_existing_venv_python_with_diagnostics`` — which runs under
+# bare-stdlib ``python3`` at install time — can perform metadata-driven
+# resolution without touching Pydantic. They mirror the schema-field
+# names and hash algorithm from ``metadata.py`` byte-for-byte; any change
+# to ``metadata.DaemonVenvMetadata`` or ``metadata.compute_project_lock_hash``
+# MUST be reflected here.
 # ----------------------------------------------------------------------
+
+_DAEMON_METADATA_FILENAME = ".daemon-metadata.json"
+_PYPROJECT_FILENAME = "pyproject.toml"
+_UV_LOCK_FILENAME = "uv.lock"
+_UV_LOCK_ABSENT_MARKER = b"\x00no-uv-lock\x00"
+_REQUIRED_METADATA_KEYS = ("python_path", "lock_hash")
+
+
+def _read_venv_metadata_stdlib(venv_dir: Path) -> dict[str, str] | None:
+    """Stdlib-only reader for ``.daemon-metadata.json``.
+
+    Returns the parsed dict if the file exists, parses as valid JSON, is a
+    dict, and contains both ``python_path`` and ``lock_hash`` keys with
+    string values. Any deviation collapses to ``None`` — callers treat
+    ``None`` as "no usable metadata, skip this venv".
+
+    Never raises. Mirrors the permissive contract of
+    :func:`metadata.read_daemon_metadata` but without Pydantic.
+    """
+    candidate = venv_dir / _DAEMON_METADATA_FILENAME
+    if not candidate.is_file():
+        return None
+    try:
+        raw = candidate.read_text()
+    except OSError:
+        return None
+    if not raw.strip():
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    for key in _REQUIRED_METADATA_KEYS:
+        value = data.get(key)
+        if not isinstance(value, str) or not value:
+            return None
+    return data
+
+
+def _compute_project_lock_hash_stdlib(project_root: Path) -> str | None:
+    """Stdlib-only mirror of :func:`metadata.compute_project_lock_hash`.
+
+    Returns ``sha256:<64-hex>`` when ``pyproject.toml`` exists under
+    ``project_root``; returns ``None`` when it does not (so the resolver
+    can report "cannot compute current lock_hash" rather than raise).
+
+    Must match the algorithm in ``metadata.compute_project_lock_hash``
+    byte-for-byte, including the ``uv.lock`` absence sentinel, or
+    installer-written hashes will fail to match.
+    """
+    pyproject = project_root / _PYPROJECT_FILENAME
+    if not pyproject.is_file():
+        return None
+    hasher = hashlib.sha256()
+    hasher.update(pyproject.read_bytes())
+    uv_lock = project_root / _UV_LOCK_FILENAME
+    if uv_lock.is_file():
+        hasher.update(uv_lock.read_bytes())
+    else:
+        hasher.update(_UV_LOCK_ABSENT_MARKER)
+    return f"sha256:{hasher.hexdigest()}"
 
 
 def get_venv_path(project_dir: Path | str) -> Path:
@@ -240,7 +312,19 @@ def resolve_existing_venv_python_with_diagnostics(
     per-precedence-step diagnostic log (always populated, for both success
     and failure).
 
-    Precedence (Plan 00100 Task 2.3): same as ``resolve_existing_venv_python``.
+    Precedence (Plan 00100 Task 3.4 — 5 steps):
+
+    1. ``$HOOKS_DAEMON_VENV_PATH/bin/python(3)`` — explicit override
+    2. **Metadata-authoritative**: any ``{daemon_dir}/untracked/venv-*/`` whose
+       ``.daemon-metadata.json`` has ``lock_hash`` matching the current
+       project's ``sha256(pyproject.toml + uv.lock)``. Returns
+       ``metadata.python_path`` directly — fingerprint is NOT recomputed
+       for lookup.
+    3. ``{daemon_dir}/untracked/venv-{current-fingerprint}/bin/python(3)`` —
+       fingerprint-keyed (legacy naming convenience, retained until Task 3.5)
+    4. First executable ``{daemon_dir}/untracked/venv-*/bin/python(3)`` —
+       scan fallback (legacy)
+    5. ``{daemon_dir}/untracked/venv/bin/python(3)`` — legacy (pre-v3.7.0)
 
     This is the Python SSOT entry point referenced by bash wrappers.
     """
@@ -276,14 +360,64 @@ def resolve_existing_venv_python_with_diagnostics(
 
     untracked = daemon_path / "untracked"
 
+    # Step 2: metadata-authoritative resolution.
+    current_lock_hash = _compute_project_lock_hash_stdlib(daemon_path)
+    if current_lock_hash is None:
+        steps.append(
+            f"step 2: no pyproject.toml at {daemon_path / _PYPROJECT_FILENAME} "
+            "— cannot compute current lock_hash, skipping metadata-driven resolution"
+        )
+    elif not untracked.is_dir():
+        steps.append(f"step 2: untracked dir {untracked} does not exist — no metadata to read")
+    else:
+        metadata_candidates: list[Path] = sorted(untracked.glob("venv-*"))
+        stale_reports: list[str] = []
+        no_metadata_count = 0
+        matched = False
+        for candidate_dir in metadata_candidates:
+            metadata = _read_venv_metadata_stdlib(candidate_dir)
+            if metadata is None:
+                no_metadata_count += 1
+                continue
+            if metadata["lock_hash"] != current_lock_hash:
+                stale_reports.append(
+                    f"{candidate_dir.name} (lock_hash={metadata['lock_hash'][:15]}...)"
+                )
+                continue
+            python_path = Path(metadata["python_path"])
+            if python_path.is_file() and os.access(python_path, os.X_OK):
+                steps.append(
+                    f"step 2: metadata match OK — using {python_path} "
+                    f"(from {candidate_dir / _DAEMON_METADATA_FILENAME})"
+                )
+                return python_path, steps
+            steps.append(
+                f"step 2: metadata at {candidate_dir / _DAEMON_METADATA_FILENAME} "
+                f"matches current lock_hash but python_path={python_path} "
+                "is missing or not executable"
+            )
+            matched = True
+            break
+        if not matched:
+            if stale_reports:
+                steps.append(
+                    f"step 2: metadata stale — lock_hash mismatch in: {', '.join(stale_reports)}"
+                )
+            elif metadata_candidates and no_metadata_count == len(metadata_candidates):
+                steps.append(
+                    f"step 2: no venv-*/ under {untracked} has a readable " ".daemon-metadata.json"
+                )
+            else:
+                steps.append(f"step 2: no venv-*/ found under {untracked}")
+
     fingerprint = python_venv_fingerprint(daemon_path)
     keyed_dir = untracked / f"venv-{fingerprint}"
     keyed_py = _pick_interpreter(keyed_dir)
     if keyed_py is not None:
-        steps.append(f"step 2: fingerprint-keyed venv OK — using {keyed_py}")
+        steps.append(f"step 3: fingerprint-keyed venv OK — using {keyed_py}")
         return keyed_py, steps
     steps.append(
-        f"step 2: fingerprint-keyed path {keyed_dir / 'bin' / 'python'} "
+        f"step 3: fingerprint-keyed path {keyed_dir / 'bin' / 'python'} "
         "missing or not executable"
     )
 
@@ -293,21 +427,21 @@ def resolve_existing_venv_python_with_diagnostics(
             scanned.append(str(candidate_dir / "bin" / "python"))
             candidate_py = _pick_interpreter(candidate_dir)
             if candidate_py is not None:
-                steps.append(f"step 3: scan-fallback hit — using {candidate_py}")
+                steps.append(f"step 4: scan-fallback hit — using {candidate_py}")
                 return candidate_py, steps
         if scanned:
-            steps.append(f"step 3: scan fallback found no executable bin/python among {scanned}")
+            steps.append(f"step 4: scan fallback found no executable bin/python among {scanned}")
         else:
-            steps.append(f"step 3: scan fallback found no venv-* under {untracked}")
+            steps.append(f"step 4: scan fallback found no venv-* under {untracked}")
     else:
-        steps.append(f"step 3: scan fallback — {untracked} does not exist")
+        steps.append(f"step 4: scan fallback — {untracked} does not exist")
 
     legacy_dir = untracked / "venv"
     legacy_py = _pick_interpreter(legacy_dir)
     if legacy_py is not None:
-        steps.append(f"step 4: legacy fallback OK — using {legacy_py}")
+        steps.append(f"step 5: legacy fallback OK — using {legacy_py}")
         return legacy_py, steps
-    steps.append(f"step 4: legacy path {legacy_dir / 'bin' / 'python'} missing or not executable")
+    steps.append(f"step 5: legacy path {legacy_dir / 'bin' / 'python'} missing or not executable")
 
     return None, steps
 

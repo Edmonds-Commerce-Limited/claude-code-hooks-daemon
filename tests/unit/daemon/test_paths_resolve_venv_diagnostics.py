@@ -9,6 +9,7 @@ verify the shell contract; this file verifies the Python internals.
 
 from __future__ import annotations
 
+import json
 import stat
 from pathlib import Path
 
@@ -29,6 +30,55 @@ def _make_fake_venv(venv_dir: Path) -> Path:
     py.write_text("#!/bin/bash\necho fake\n")
     py.chmod(py.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     return py
+
+
+def _write_pyproject(daemon_dir: Path, content: str = "[project]\nname = 'x'\n") -> Path:
+    daemon_dir.mkdir(parents=True, exist_ok=True)
+    path = daemon_dir / "pyproject.toml"
+    path.write_text(content)
+    return path
+
+
+def _compute_test_lock_hash(daemon_dir: Path) -> str:
+    """Tiny stdlib helper mirroring the stdlib lock-hash computation."""
+    import hashlib
+
+    hasher = hashlib.sha256()
+    hasher.update((daemon_dir / "pyproject.toml").read_bytes())
+    uv_lock = daemon_dir / "uv.lock"
+    if uv_lock.is_file():
+        hasher.update(uv_lock.read_bytes())
+    else:
+        hasher.update(b"\x00no-uv-lock\x00")
+    return f"sha256:{hasher.hexdigest()}"
+
+
+def _write_metadata(
+    venv_dir: Path,
+    *,
+    python_path: str,
+    lock_hash: str,
+    fingerprint: str = "py311-testfake",
+    daemon_version: str = "v3.8.0",
+    written_at: str = "2026-04-24T00:00:00Z",
+) -> Path:
+    """Write a ``.daemon-metadata.json`` file directly via stdlib JSON.
+
+    Bypasses the Pydantic writer so these unit tests don't require the
+    daemon's install-time helper. Metadata contents exactly mirror the
+    Pydantic schema field names.
+    """
+    venv_dir.mkdir(parents=True, exist_ok=True)
+    meta = {
+        "python_path": python_path,
+        "fingerprint": fingerprint,
+        "lock_hash": lock_hash,
+        "daemon_version": daemon_version,
+        "written_at": written_at,
+    }
+    metadata_path = venv_dir / ".daemon-metadata.json"
+    metadata_path.write_text(json.dumps(meta))
+    return metadata_path
 
 
 def _make_fake_venv_python3_only(venv_dir: Path) -> Path:
@@ -67,7 +117,7 @@ class TestDiagnosticsHelper:
         resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
         assert resolved is None
         assert any("step 1" in s and "missing" in s for s in steps)
-        assert any(s.startswith("step 4") for s in steps)
+        assert any(s.startswith("step 5") for s in steps)
 
     def test_fingerprint_keyed_hit(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
@@ -78,7 +128,7 @@ class TestDiagnosticsHelper:
 
         resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
         assert resolved == py
-        assert any("step 2" in s and "OK" in s for s in steps)
+        assert any("step 3" in s and "OK" in s for s in steps)
 
     def test_scan_fallback_hit(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
@@ -88,7 +138,7 @@ class TestDiagnosticsHelper:
 
         resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
         assert resolved == py
-        assert any("step 3" in s and "scan-fallback hit" in s for s in steps)
+        assert any("step 4" in s and "scan-fallback hit" in s for s in steps)
 
     def test_scan_finds_candidates_but_none_executable(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -103,7 +153,7 @@ class TestDiagnosticsHelper:
 
         resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
         assert resolved is None
-        scan_step = next(s for s in steps if s.startswith("step 3"))
+        scan_step = next(s for s in steps if s.startswith("step 4"))
         assert "no executable" in scan_step
 
     def test_scan_fallback_no_untracked_dir(
@@ -114,7 +164,7 @@ class TestDiagnosticsHelper:
 
         resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
         assert resolved is None
-        scan_step = next(s for s in steps if s.startswith("step 3"))
+        scan_step = next(s for s in steps if s.startswith("step 4"))
         assert "does not exist" in scan_step
 
     def test_scan_untracked_exists_but_empty(
@@ -126,7 +176,7 @@ class TestDiagnosticsHelper:
 
         resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
         assert resolved is None
-        scan_step = next(s for s in steps if s.startswith("step 3"))
+        scan_step = next(s for s in steps if s.startswith("step 4"))
         assert "no venv-*" in scan_step
 
     def test_legacy_fallback_hit(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -137,7 +187,7 @@ class TestDiagnosticsHelper:
 
         resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
         assert resolved == py
-        assert any("step 4" in s and "OK" in s for s in steps)
+        assert any("step 5" in s and "OK" in s for s in steps)
 
 
 class TestCliDispatcher:
@@ -165,7 +215,7 @@ class TestCliDispatcher:
         assert exit_code == 1
         captured = capsys.readouterr()
         assert captured.out == ""
-        for marker in ("step 1", "step 2", "step 3", "step 4"):
+        for marker in ("step 1", "step 2", "step 3", "step 4", "step 5"):
             assert marker in captured.err
 
     def test_main_defaults_daemon_dir_to_cwd(
@@ -235,7 +285,7 @@ class TestPython3OnlyAcceptance:
 
         resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
         assert resolved == py3, "fingerprint-keyed venv with only bin/python3 must be accepted"
-        assert any("step 2" in s and "OK" in s for s in steps)
+        assert any("step 3" in s and "OK" in s for s in steps)
 
     def test_scan_fallback_python3_only_is_accepted(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -247,7 +297,7 @@ class TestPython3OnlyAcceptance:
 
         resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
         assert resolved == py3, "scan fallback must accept foreign venv with only bin/python3"
-        assert any("step 3" in s and "scan-fallback hit" in s for s in steps)
+        assert any("step 4" in s and "scan-fallback hit" in s for s in steps)
 
     def test_legacy_python3_only_is_accepted(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -259,7 +309,7 @@ class TestPython3OnlyAcceptance:
 
         resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
         assert resolved == py3, "legacy venv with only bin/python3 must be accepted"
-        assert any("step 4" in s and "OK" in s for s in steps)
+        assert any("step 5" in s and "OK" in s for s in steps)
 
     def test_bin_python_preferred_when_both_exist(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -338,3 +388,175 @@ class TestFallbackTargetFlag:
         monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
         exit_code = main(["resolve-venv", "--daemon-dir", str(tmp_path / "empty")])
         assert exit_code == 1
+
+
+class TestMetadataDrivenResolution:
+    """Plan 00100 Task 3.4: the resolver reads ``.daemon-metadata.json`` and
+    uses ``python_path`` authoritatively when ``lock_hash`` matches the
+    current project state. Fingerprint is never recomputed for lookup —
+    metadata discovery is by JSON read, not by directory-name matching."""
+
+    def test_metadata_match_returns_python_path_authoritatively(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A venv with valid metadata + matching lock_hash resolves via
+        ``metadata.python_path`` — not via ``bin/python`` existence."""
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        _write_pyproject(daemon_dir)
+        lock_hash = _compute_test_lock_hash(daemon_dir)
+
+        venv = daemon_dir / "untracked" / "venv-py999-deadbeef"
+        py = _make_fake_venv(venv)
+        _write_metadata(venv, python_path=str(py), lock_hash=lock_hash)
+
+        resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        assert resolved == py
+        assert any(
+            "step 2" in s and "metadata" in s.lower() and "OK" in s for s in steps
+        ), f"expected step 2 metadata OK in trace; got: {steps}"
+
+    def test_metadata_match_preferred_over_fingerprint_keyed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When both a metadata-bearing venv and a fingerprint-keyed legacy
+        venv exist, metadata wins (step 2 over step 3)."""
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        _write_pyproject(daemon_dir)
+        lock_hash = _compute_test_lock_hash(daemon_dir)
+
+        fp = python_venv_fingerprint(daemon_dir)
+        legacy_keyed = daemon_dir / "untracked" / f"venv-{fp}"
+        _make_fake_venv(legacy_keyed)  # no metadata — fallback target
+
+        metadata_venv = daemon_dir / "untracked" / "venv-py999-freshmeta"
+        py_meta = _make_fake_venv(metadata_venv)
+        _write_metadata(metadata_venv, python_path=str(py_meta), lock_hash=lock_hash)
+
+        resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        assert resolved == py_meta, "metadata-bearing venv must win over fingerprint-keyed legacy"
+        assert any(
+            "step 2" in s and "OK" in s for s in steps
+        ), f"trace must show step 2 metadata hit; got: {steps}"
+
+    def test_metadata_lock_hash_mismatch_is_skipped_as_stale(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A venv whose metadata.lock_hash does NOT match the current project
+        state is stale — resolver logs it, skips it, falls through."""
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        _write_pyproject(daemon_dir)
+
+        venv = daemon_dir / "untracked" / "venv-py999-stale"
+        _make_fake_venv(venv)
+        bogus = "sha256:" + "0" * 64
+        _write_metadata(venv, python_path=str(venv / "bin" / "python"), lock_hash=bogus)
+
+        resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        # No OTHER venv exists so the scan fallback can still hit this
+        # broken venv's bin/python — that's fine. The step-2 diagnostic
+        # MUST mention stale.
+        stale_step = next(
+            (s for s in steps if s.startswith("step 2") and "stale" in s.lower()),
+            None,
+        )
+        assert stale_step is not None, f"expected step 2 stale diagnostic; got: {steps}"
+        # Scan fallback still finds bin/python since 3.4 has not yet
+        # removed legacy behaviour (that is Task 3.5).
+        assert resolved == venv / "bin" / "python"
+
+    def test_metadata_absent_falls_through_to_fingerprint_keyed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No metadata anywhere → step 2 reports no match, step 3
+        fingerprint-keyed (legacy) still resolves (Task 3.5 tightens this)."""
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        _write_pyproject(daemon_dir)
+        fp = python_venv_fingerprint(daemon_dir)
+        keyed = daemon_dir / "untracked" / f"venv-{fp}"
+        py = _make_fake_venv(keyed)  # no metadata written
+
+        resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        assert resolved == py
+        assert any(
+            "step 2" in s and ("no" in s.lower() or "without" in s.lower()) for s in steps
+        ), f"step 2 must announce no-metadata-found; got: {steps}"
+        assert any("step 3" in s and "OK" in s for s in steps)
+
+    def test_metadata_python_path_executable_check(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """If metadata matches but ``python_path`` is not executable, step 2
+        reports the issue and falls through. (Task 3.6 will add recovery.)"""
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        _write_pyproject(daemon_dir)
+        lock_hash = _compute_test_lock_hash(daemon_dir)
+
+        venv = daemon_dir / "untracked" / "venv-py999-ghost"
+        venv.mkdir(parents=True)
+        missing = "/nonexistent/fake/python3.13"
+        _write_metadata(venv, python_path=missing, lock_hash=lock_hash)
+
+        resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        assert resolved is None
+        step2 = next(s for s in steps if s.startswith("step 2"))
+        assert (
+            "missing" in step2.lower() or "not executable" in step2.lower()
+        ), f"step 2 must report missing python_path; got: {step2}"
+
+    def test_metadata_malformed_json_falls_through(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Malformed metadata JSON is treated as absent — resolver never
+        raises; it just skips to step 3."""
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        _write_pyproject(daemon_dir)
+
+        venv = daemon_dir / "untracked" / "venv-py999-bad"
+        py = _make_fake_venv(venv)
+        (venv / ".daemon-metadata.json").write_text("{not valid json")
+
+        resolved, _ = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        # Scan fallback still picks up bin/python.
+        assert resolved == py
+
+    def test_metadata_missing_required_keys_falls_through(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Metadata missing ``python_path`` or ``lock_hash`` → treated as absent."""
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"
+        _write_pyproject(daemon_dir)
+
+        venv = daemon_dir / "untracked" / "venv-py999-partial"
+        py = _make_fake_venv(venv)
+        (venv / ".daemon-metadata.json").write_text('{"fingerprint": "x"}')
+
+        resolved, _ = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        assert resolved == py
+
+    def test_metadata_step_runs_even_without_pyproject(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When pyproject.toml does not exist under daemon_dir, we cannot
+        compute a current lock_hash for comparison — step 2 must gracefully
+        announce that and fall through, never raise."""
+        monkeypatch.delenv("HOOKS_DAEMON_VENV_PATH", raising=False)
+        daemon_dir = tmp_path / "daemon"  # no pyproject.toml
+
+        venv = daemon_dir / "untracked" / "venv-py999-orphan"
+        py = _make_fake_venv(venv)
+        _write_metadata(venv, python_path=str(py), lock_hash="sha256:" + "f" * 64)
+
+        resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
+        # Scan fallback still hits bin/python.
+        assert resolved == py
+        step2 = next(s for s in steps if s.startswith("step 2"))
+        assert (
+            "pyproject" in step2.lower() or "no lock" in step2.lower()
+        ), f"step 2 must mention inability to compute current lock_hash; got: {step2}"

@@ -100,6 +100,12 @@
     },
     {
       "file": "daemon/paths.py",
+      "function": "_read_venv_metadata_stdlib",
+      "rule": "return-none-on-error",
+      "reason": "Stdlib-only mirror of metadata.read_daemon_metadata (Plan 00100 Task 3.4). Returns None when .daemon-metadata.json is missing, unreadable (OSError), malformed (JSONDecodeError), or fails minimal shape checks. Callers (resolve_existing_venv_python_with_diagnostics) interpret None as 'skip this venv, fall through'. Exists separately because paths.py must stay stdlib-only — it runs under host python3 at install time, before Pydantic is installed."
+    },
+    {
+      "file": "daemon/paths.py",
       "function": "cleanup_socket",
       "rule": "log-and-continue",
       "reason": "Stale socket/PID file cleanup routine: log-and-continue is correct. Cleanup failing for one stale file should not prevent cleanup of others or block daemon startup. Already logged at warning level."

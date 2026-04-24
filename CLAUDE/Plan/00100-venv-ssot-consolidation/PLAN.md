@@ -260,10 +260,12 @@ Opus orchestrates a team. Each phase lands a green state before the next begins.
   - [x] ✅ Write to `{venv}/.daemon-metadata.json.tmp` → `os.replace` → `.daemon-metadata.json` (single atomic rename in `write_daemon_metadata`)
   - [x] ✅ Interruption mid-write leaves the venv without metadata → resolver treats as stale → rebuild. Safe.
   - [x] ✅ `tests/unit/daemon/test_cli_write_venv_metadata.py` covers the CLI entry point end-to-end
-- [ ] ⬜ **Task 3.4**: Update the Python SSOT resolver to:
-  - [ ] ⬜ Read `.daemon-metadata.json` and use `python_path` as authoritative interpreter
-  - [ ] ⬜ Compare `lock_hash` against `sha256(current pyproject.toml + uv.lock)`; mismatch → rebuild
-  - [ ] ⬜ Never recompute fingerprint for lookup (fingerprint stays a directory-naming convenience)
+- [x] ✅ **Task 3.4**: Update the Python SSOT resolver to:
+  - [x] ✅ Read `.daemon-metadata.json` and use `python_path` as authoritative interpreter — new step 2 in `resolve_existing_venv_python_with_diagnostics` (`src/claude_code_hooks_daemon/daemon/paths.py`)
+  - [x] ✅ Compare `lock_hash` against `sha256(current pyproject.toml + uv.lock)`; mismatch → diagnostic stale report, fall through to step 3 (Task 3.5 tightens this to unconditional skip)
+  - [x] ✅ Never recompute fingerprint for lookup — metadata discovery is by JSON read, fingerprint is only used in step 3 (legacy naming convenience)
+  - [x] ✅ Stdlib-only helpers `_read_venv_metadata_stdlib` + `_compute_project_lock_hash_stdlib` mirror `metadata.py` byte-for-byte so `paths.py` stays Pydantic-free at install time
+  - [x] ✅ 8 new tests in `tests/unit/daemon/test_paths_resolve_venv_diagnostics.py::TestMetadataDrivenResolution`; existing diagnostic tests renumbered 2→3, 3→4, 4→5; integration CLI precedence docstring updated to 5 steps
 - [ ] ⬜ **Task 3.5**: Migration — if a venv has `.daemon-version` file but no `.daemon-metadata.json`, treat as stale → rebuild. Log clearly.
 - [ ] ⬜ **Task 3.6** (REVISED from v1): Missing-persisted-Python recovery (Decision 3 change)
   - [ ] ⬜ Write failing test: persisted Python path no longer exists; assert resolver falls back to `find_compatible_python` and succeeds if a compatible one is found

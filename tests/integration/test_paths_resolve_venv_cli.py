@@ -18,9 +18,11 @@ Failure contract:
 
 Precedence (matches resolve_existing_venv_python):
   1. ``$HOOKS_DAEMON_VENV_PATH/bin/python`` (explicit override)
-  2. ``{daemon_dir}/untracked/venv-{fingerprint}/bin/python``
-  3. First existing ``{daemon_dir}/untracked/venv-*/bin/python`` (scan)
-  4. ``{daemon_dir}/untracked/venv/bin/python`` (legacy)
+  2. Metadata-authoritative — any ``venv-*/`` with ``.daemon-metadata.json``
+     whose ``lock_hash`` matches the current project state (Task 3.4)
+  3. ``{daemon_dir}/untracked/venv-{fingerprint}/bin/python`` (legacy)
+  4. First existing ``{daemon_dir}/untracked/venv-*/bin/python`` (scan)
+  5. ``{daemon_dir}/untracked/venv/bin/python`` (legacy pre-v3.7.0)
 
 These tests drive Task 2.3 implementation. They must fail first, pass after
 the CLI is implemented in paths.py.
@@ -106,7 +108,7 @@ def test_resolve_venv_override_via_env(tmp_path: Path) -> None:
 
 
 def test_resolve_venv_fingerprint_keyed(tmp_path: Path) -> None:
-    """Fingerprint-keyed venv is picked when present (step 2)."""
+    """Fingerprint-keyed venv is picked when present (step 3)."""
     daemon_dir = tmp_path / "daemon"
     fp = python_venv_fingerprint()
     keyed_venv = daemon_dir / "untracked" / f"venv-{fp}"
@@ -118,7 +120,7 @@ def test_resolve_venv_fingerprint_keyed(tmp_path: Path) -> None:
 
 
 def test_resolve_venv_scan_fallback(tmp_path: Path) -> None:
-    """Any existing venv-*/bin/python is picked via scan (step 3)."""
+    """Any existing venv-*/bin/python is picked via scan (step 4)."""
     daemon_dir = tmp_path / "daemon"
     # Use a fingerprint that will NOT match the current interpreter.
     foreign_venv = daemon_dir / "untracked" / "venv-py999-deadbeef"
@@ -130,7 +132,7 @@ def test_resolve_venv_scan_fallback(tmp_path: Path) -> None:
 
 
 def test_resolve_venv_legacy_fallback(tmp_path: Path) -> None:
-    """Legacy untracked/venv/bin/python is picked when nothing else (step 4)."""
+    """Legacy untracked/venv/bin/python is picked when nothing else (step 5)."""
     daemon_dir = tmp_path / "daemon"
     legacy = daemon_dir / "untracked" / "venv"
     py = _make_fake_venv(legacy)
@@ -143,7 +145,7 @@ def test_resolve_venv_legacy_fallback(tmp_path: Path) -> None:
 def test_resolve_venv_fails_when_nothing_exists(tmp_path: Path) -> None:
     """When no venv can be found, CLI exits 1 with detailed stderr.
 
-    Stderr must cite all four precedence steps, showing what was tried
+    Stderr must cite all five precedence steps, showing what was tried
     and why each failed. This is the key improvement over the legacy
     behaviour (which returned the legacy path even when it didn't exist
     — silent failure).
@@ -161,7 +163,7 @@ def test_resolve_venv_fails_when_nothing_exists(tmp_path: Path) -> None:
     ), "stdout must be empty on failure (single-line success contract)"
     # Stderr must mention every step tried.
     err = result.stderr.lower()
-    for keyword in ("step 1", "step 2", "step 3", "step 4"):
+    for keyword in ("step 1", "step 2", "step 3", "step 4", "step 5"):
         assert keyword in err, (
             f"Failure stderr must cite each precedence step. "
             f"Missing '{keyword}' in: {result.stderr!r}"
