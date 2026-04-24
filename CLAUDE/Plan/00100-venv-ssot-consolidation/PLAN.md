@@ -287,7 +287,11 @@ Opus orchestrates a team. Each phase lands a green state before the next begins.
   - [x] ✅ `ensure_venv` fast path rewired: lock_hash check runs BEFORE legacy `venv_version_matches` stamp check; stamp retained as fallback for venvs lacking `.daemon-metadata.json`
   - [x] ✅ 6 RED unit tests added in `tests/unit/daemon/test_paths_check_venv_fresh.py` exercising all branches of `_cli_check_venv_fresh` (match, mismatch, missing venv, missing metadata, no-pyproject, cwd-default)
   - [x] ✅ All 8 new tests GREEN; 1364 integration + daemon unit tests pass with zero regressions; QA 10/10 (coverage 95.0%); daemon restart RUNNING (PID 107285)
-- [ ] ⬜ **Task 3.8**: Full QA + daemon restart + all prior phase tests
+- [x] ✅ **Task 3.8**: Full QA + daemon restart + all prior phase tests
+  - [x] ✅ Full QA 10/10 PASSED (magic_values, format, lint, type_check, tests, security, dependencies, error_hiding, skill_refs, smoke_test); shell_check passes with 0 errors / 0 warnings (58 info-level only)
+  - [x] ✅ 7979 tests pass, coverage 95.0% (meets 95% gate)
+  - [x] ✅ Phase-specific regression: all 140 Plan 00100 tests pass (`test_paths_resolve_existing_venv`, `test_paths_resolve_venv_diagnostics`, `test_paths_venv_fingerprint`, `test_paths_venv_slug`, `test_paths_stale_cleanup`, `test_paths_check_venv_fresh`, `test_paths_resolve_venv_cli`, `test_ensure_venv`)
+  - [x] ✅ Daemon restart verified RUNNING (PID 107285)
 - [ ] ⬜ **Task 3.9** (NEW in v3): Eager upgrade cleanup — `hooks-daemon upgrade` leaves zero stale venvs
   - [ ] ⬜ Failing test: `tests/integration/test_upgrade_eager_cleanup.py` — pre-seed three fake `venv-*/` dirs (legacy bare, old slug, current), run upgrade, assert only current survives
   - [ ] ⬜ Implement in `scripts/upgrade.sh`: after `restart_daemon_verified` confirms RUNNING on the new venv, enumerate `untracked/venv*` and `rm -rf` every entry whose absolute path != current venv path
