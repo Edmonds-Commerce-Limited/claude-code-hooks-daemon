@@ -1,8 +1,9 @@
-# Plan 00100 (v2): Venv SSOT Consolidation — Stop the Release Treadmill
+# Plan 00100 (v3): Venv SSOT Consolidation — Stop the Release Treadmill
 
-**Status**: In Progress (Phase 2 — Phases 0 & 1 complete)
+**Status**: In Progress (Phase 2 complete; Phase 3 scope expanded; Phase 3.5 added)
 **Created**: 2026-04-23
-**Revised**: 2026-04-23 (v2 — addresses CRITIQUE-v1.md)
+**Revised**: 2026-04-24 (v3 — path slug + eager upgrade cleanup + self-healing bootstrap)
+**Prior Revision**: 2026-04-23 (v2 — addresses CRITIQUE-v1.md)
 **Started**: 2026-04-23
 **Owner**: TBD
 **Priority**: Critical
@@ -28,6 +29,16 @@ The hostile Opus review of v1 identified 3 FATAL and 7 RISKY flaws. Full details
 | RISKY-5: `flock` across bind-mounts unclear | Task 4.0 added: verify `flock` under Podman bind-mount before implementation                                                    |
 | RISKY-6: Metadata write not atomic          | Tasks 3.1/3.3 revised: single `.daemon-metadata.json`, temp-file + rename                                                       |
 | RISKY-7: Task 1.5 vs 2.5 conflict           | Task 1.5 moved to end of Phase 2 (merged as Task 2.7); Phase 1 no longer contains guard                                         |
+
+## v2 → v3 Scope Expansion (2026-04-24)
+
+User-driven corrections after re-examining the fingerprint scheme against real cross-env use. Each flips a v2/Plan-00099 assumption that doesn't survive contact with reality.
+
+| v2 / Plan-00099 Assumption                                                                             | v3 Correction                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Python fingerprint (`sys.version \| sys.base_prefix \| platform.machine()`) uniquely identifies an env | **Fingerprint collision case missed**: host at `/home/user/proj` and container bind-mounting that project at `/workspace` can both resolve Python at `/usr/bin/python3.11` with `sys.base_prefix="/usr"`. Identical fingerprint, different libc/ABI runtime. Wheels built on one corrupt the other — the exact bug Plan 00099 was meant to prevent. Fix: include a **human-readable path slug** derived from `HOOKS_DAEMON_ROOT_DIR` in the venv dir name. |
+| Plan 00099 Decision 4: lazy rebuild of non-current venvs via stamp mismatch                            | **User directive**: `hooks-daemon upgrade` must leave a clean state. Eagerly delete ALL `untracked/venv-*/` except the current-fingerprint+lockhash match after the new venv is verified. Lazy rebuild preserved for *plain daemon start* (non-upgrade paths) where eager delete would surprise.                                                                                                                                                           |
+| Plan 00099 Task 4.2 deferred: "conflates install/runtime, pays fingerprint cost every restart"         | Weak rationale. Cost is ~50ms one-time when venv is actually missing. **User directive**: auto-bootstrap inline when the situation is unambiguous; emit an LLM-guided hook otherwise. Preconditions-for-inline (all must hold): `uv` on PATH, `pyproject.toml` readable, `uv.lock` present, compatible Python resolvable, target dir writable.                                                                                                             |
 
 ## Field Evidence (2026-04-23)
 
@@ -225,12 +236,23 @@ Opus orchestrates a team. Each phase lands a green state before the next begins.
 
 **Why**: the fingerprint mismatch that v3.8.1 papered over becomes impossible if the resolver *reads* the installer's choice.
 
-- [ ] ⬜ **Task 3.0** (NEW in v2): Establish `uv.lock` as a first-class repo artefact
-  - [ ] ⬜ Generate `uv.lock` at HEAD via `uv lock` (at project root)
+- [ ] 🔄 **Task 3.0** (NEW in v2): Establish `uv.lock` as a first-class repo artefact
+  - [x] ✅ Generate `uv.lock` at HEAD via `uv lock` (at project root) — 377K lockfile present in working tree
   - [ ] ⬜ Commit the lockfile
   - [ ] ⬜ Add a CI step: `uv lock --check` must pass (fails if pyproject.toml diverges from uv.lock)
-  - [ ] ⬜ Update `.gitignore` if needed (currently not ignored, so likely no change)
+  - [x] ✅ Verified `.gitignore`: `uv.lock` is NOT ignored (Pipfile.lock / venv/ / .venv / untracked/ are the only lock/venv patterns); no change needed
   - [ ] ⬜ Update CONTRIBUTING.md with the lockfile workflow (regenerate via `uv lock`, commit alongside dep changes)
+- [ ] ⬜ **Task 3.0.5** (NEW in v3): Add human-readable path slug to venv dir name
+  - [ ] ⬜ Failing test first: `tests/unit/daemon/test_paths_venv_slug.py` — verify host vs container view of the same project produce distinct slugs (`/home/user/proj` → `home_user_proj`; `/workspace` → `workspace`), verify truncation + 4-hex suffix kicks in at >40 chars, verify filesystem-safe chars only
+  - [ ] ⬜ Implement `project_path_slug(root: str) -> str` in `src/claude_code_hooks_daemon/daemon/paths.py`:
+    - Strip leading `/`, replace `/` with `_`, strip other non-`[A-Za-z0-9_-]` chars
+    - If length > 40: keep first 36 chars + `-` + 4-hex md5 suffix (deterministic disambiguator for pathological paths)
+  - [ ] ⬜ Update `python_venv_fingerprint()` → now returns `{pathslug}-py{MM}-{pyhash}`; dir name remains `venv-{fingerprint}/`
+    - Example: `/workspace` + cpython 3.11 /usr → `venv-workspace-py311-2fa8b3c1/`
+    - Example: `/home/user/projects/hooks-daemon` + pyenv 3.13 → `venv-home_user_projects_hooks-daemon-py313-9d4e0f82/`
+  - [ ] ⬜ Update bash SSOT `scripts/install/python_fingerprint.sh` to accept `HOOKS_DAEMON_ROOT_DIR` and invoke same Python helper (no drift)
+  - [ ] ⬜ Bash↔Python parity test extended in `test_fingerprint_parity.py`
+  - [ ] ⬜ Migration: Task 3.5 below subsumes — old-format `venv-py{MM}-{fp}/` without slug prefix → treat as stale → rebuild under new name → delete old
 - [ ] ⬜ **Task 3.1** (REVISED from v1): Design single atomic metadata file inside venv dir
   - [ ] ⬜ `.daemon-metadata.json`: `{"python_path": "...", "fingerprint": "py313-956ed987", "lock_hash": "sha256:...", "daemon_version": "v3.9.0", "written_at": "ISO8601"}`
   - [ ] ⬜ Schema: pydantic model in `paths.py` for read-side validation
@@ -250,8 +272,48 @@ Opus orchestrates a team. Each phase lands a green state before the next begins.
   - [ ] ⬜ Only error if no compatible Python exists — emit actionable message
 - [ ] ⬜ **Task 3.7**: Downgrade safety — if `lock_hash` matches current state, do NOT rebuild on daemon version change
 - [ ] ⬜ **Task 3.8**: Full QA + daemon restart + all prior phase tests
+- [ ] ⬜ **Task 3.9** (NEW in v3): Eager upgrade cleanup — `hooks-daemon upgrade` leaves zero stale venvs
+  - [ ] ⬜ Failing test: `tests/integration/test_upgrade_eager_cleanup.py` — pre-seed three fake `venv-*/` dirs (legacy bare, old slug, current), run upgrade, assert only current survives
+  - [ ] ⬜ Implement in `scripts/upgrade.sh`: after `restart_daemon_verified` confirms RUNNING on the new venv, enumerate `untracked/venv*` and `rm -rf` every entry whose absolute path != current venv path
+  - [ ] ⬜ Order: cleanup runs AFTER restart verification, so a failed upgrade preserves prior state (rollback safety)
+  - [ ] ⬜ Emit per-deletion log line: `"Removed stale venv: <path> (reason: <fingerprint-mismatch|lockhash-mismatch|legacy-name>)"`
+  - [ ] ⬜ Plain daemon start (non-upgrade) path UNCHANGED — still uses lazy-rebuild-via-stamp to avoid surprise eviction of a host venv when a container starts up
+  - [ ] ⬜ Update `prune-venvs` CLI doc to reference automatic upgrade-time cleanup; keep `--all-except-current` for manual eager cleanup outside upgrade flow
 
-**Success gate**: A venv built at HEAD on python 3.13 and queried under `python3`=3.11 on PATH resolves correctly via `.daemon-metadata.json` without any scan fallback. Missing persisted Python triggers recovery, not hard failure.
+**Success gate**: A venv built at HEAD on python 3.13 and queried under `python3`=3.11 on PATH resolves correctly via `.daemon-metadata.json` without any scan fallback. Missing persisted Python triggers recovery, not hard failure. `untracked/` after `hooks-daemon upgrade` contains exactly one `venv-*/` directory.
+
+---
+
+### Phase 3.5: Self-Healing Bootstrap (reopens Plan 00099 Task 4.2)
+
+**Why**: Current behaviour on missing venv is "error, run installer manually". Friction for every fresh-clone / post-prune / cross-env first-start. User directive: if the preconditions are unambiguous, bootstrap inline; otherwise emit a hook for LLM-guided recovery.
+
+- [ ] ⬜ **Task 3.5.1**: Define the "inline-safe" precondition predicate
+  - [ ] ⬜ New helper `can_inline_bootstrap(daemon_dir: Path) -> BootstrapDecision` in `src/claude_code_hooks_daemon/daemon/paths.py` returning a dataclass with `(allowed: bool, missing: list[str], reason: str)`
+  - [ ] ⬜ All five must hold for `allowed=True`:
+    1. `shutil.which("uv")` returns a path
+    2. `{daemon_dir}/pyproject.toml` exists and parses
+    3. `{daemon_dir}/uv.lock` exists
+    4. `find_compatible_python()` returns a Python satisfying `pyproject.toml:requires-python`
+    5. Target venv parent (`{daemon_dir}/untracked/`) is writable
+  - [ ] ⬜ Failing tests first: `tests/unit/daemon/test_bootstrap_decision.py` — one test per precondition-missing path; one test for all-green case
+- [ ] ⬜ **Task 3.5.2**: Wire daemon startup to call `ensure_venv` when resolver finds no current venv AND `can_inline_bootstrap` says yes
+  - [ ] ⬜ Hook site: `scripts/init.sh::validate_venv` → on failure, branch on `BootstrapDecision`
+  - [ ] ⬜ Inline path: invoke `ensure_venv` via the Python SSOT CLI (from Phase 2) with a timeout ceiling (180s) — log progress, stream uv output
+  - [ ] ⬜ On success: continue startup as normal
+  - [ ] ⬜ On inline failure or timeout: fall through to LLM-guided path (Task 3.5.3)
+- [ ] ⬜ **Task 3.5.3**: LLM-guided fallback when preconditions NOT all green
+  - [ ] ⬜ Emit a structured error JSON to stderr describing exactly which precondition(s) failed and the remediation command for each
+  - [ ] ⬜ Add a SessionStart handler `venv_missing_advisor` that detects the no-venv state on session start and injects actionable guidance into context (install command, required Python version, uv install instructions per-OS)
+  - [ ] ⬜ Advisory-only handler (never blocks); priority ~53 (early advisory range)
+  - [ ] ⬜ Tests: `tests/unit/handlers/session_start/test_venv_missing_advisor.py` + integration test verifying the hook fires when venv absent
+- [ ] ⬜ **Task 3.5.4**: Concurrency — inline bootstrap MUST respect the flock from Phase 4 (two simultaneous first-starts don't race)
+  - [ ] ⬜ Ordering note: Phase 4 ships the flock primitive; Phase 3.5 depends on it. If Phase 3.5 lands first, use a PID-file lock as interim and migrate when Phase 4 lands.
+- [ ] ⬜ **Task 3.5.5**: Acceptance test in a fresh container (no venv, uv pre-installed) — daemon starts, bootstraps, ends in RUNNING state with exactly one current-fingerprint venv
+- [ ] ⬜ **Task 3.5.6**: Acceptance test with uv absent — daemon surfaces the advisory, does NOT attempt bootstrap, does NOT corrupt anything
+- [ ] ⬜ **Task 3.5.7**: Full QA + daemon restart
+
+**Success gate**: Fresh clone with `uv` installed → `hooks-daemon status` on first invocation reports RUNNING without a separate install step. Fresh clone without `uv` → clear advisory, zero mutation, daemon does not claim to be running.
 
 ---
 
@@ -373,6 +435,45 @@ Opus orchestrates a team. Each phase lands a green state before the next begins.
 **Trade-off**: Slightly more complex startup verification. Latency on a *successful* fast startup unchanged (polling exits on first observation).
 **Date**: 2026-04-23
 
+### Decision 7 (NEW in v3): Human-readable path slug in venv dir name, not an MD5 hash
+
+**Context**: Python fingerprint alone collides when host and container both resolve `/usr/bin/python3.11` with `sys.base_prefix="/usr"`. Need a second axis that distinguishes host view from container view of the same mounted project.
+**Options**:
+
+1. `md5(HOOKS_DAEMON_ROOT_DIR)[:8]` — opaque, requires lookup to debug
+2. Slug: strip leading `/`, replace `/` with `_`, trim to 40 chars with 4-hex hash suffix only when truncated — readable, debuggable, collision-safe
+
+**Decision**: Option 2. User directive: "pathhash is fine but keep it human readable not an md5". A directory name of `venv-home_user_projects_hooks-daemon-py311-2fa8b3c1/` reads out loud; `venv-a1b2c3d4-py311-2fa8b3c1/` does not.
+**Trade-off**: Slightly longer dir names. Filesystem name-length cap (255 bytes) is untouchable; the 40-char cap + hash suffix handles the pathological case deterministically.
+**Date**: 2026-04-24
+
+### Decision 8 (NEW in v3): Eager venv cleanup on `upgrade`; lazy rebuild preserved on plain start
+
+**Context**: Plan 00099 Decision 4 chose lazy rebuild for all non-current venvs via stamp mismatch — the concern was surprising users by deleting a host venv when a container started. But on `hooks-daemon upgrade` the user is explicitly acting on the project and expects a clean end-state.
+**Decision**: Split the policy by path:
+
+- `hooks-daemon upgrade`: after the new venv is built AND daemon restart verification passes, `rm -rf` every `untracked/venv-*/` whose absolute path != current venv path. Ordered AFTER restart so a failed upgrade rolls back.
+- Plain daemon start (non-upgrade): unchanged — stamp mismatch triggers lazy rebuild of the *current* env only; other envs untouched until they themselves start.
+
+**Trade-off**: Two behaviours instead of one. The difference is intentional and reflects intent (explicit upgrade vs implicit start).
+**Date**: 2026-04-24
+
+### Decision 9 (NEW in v3): Inline auto-bootstrap when preconditions are unambiguous; LLM-guided hook otherwise
+
+**Context**: Plan 00099 Task 4.2 deferred on the argument that auto-bootstrap "conflates install/runtime, pays fingerprint cost every restart". Cost analysis: fingerprint ≈ 50ms *once*, only when venv absent. The real question is whether the daemon has enough information to bootstrap unambiguously.
+**Decision**: Two-mode bootstrap guarded by a five-precondition gate:
+
+1. `uv` on PATH
+2. `pyproject.toml` readable
+3. `uv.lock` present (Task 3.0)
+4. `find_compatible_python` returns a Python matching `requires-python`
+5. Target venv parent dir writable
+
+All five hold → daemon runs `ensure_venv` inline on startup (180s timeout, streaming uv output).
+Any fail → daemon surfaces actionable structured error + emits a SessionStart advisory handler (`venv_missing_advisor`, priority ~53) that tells the LLM agent precisely what to fix.
+**Trade-off**: More code paths in startup. Mitigated by the precondition gate being a pure-Python predicate with 6 targeted unit tests.
+**Date**: 2026-04-24
+
 ---
 
 ## Success Criteria
@@ -383,6 +484,10 @@ Opus orchestrates a team. Each phase lands a green state before the next begins.
 - [ ] Phase 0: The exact scenario on `/srv/example-app/front` (2026-04-23) runs clean end-to-end against HEAD
 - [ ] Phase 3: `uv.lock` committed; CI `uv lock --check` passes
 - [ ] Phase 3: Resolver falls back gracefully when persisted Python is missing (test passes)
+- [ ] Phase 3 (v3): Path slug in venv dir name — host view and container view of same project get distinct venv dirs even when Python fingerprints collide (test passes)
+- [ ] Phase 3 (v3): `hooks-daemon upgrade` leaves exactly one `venv-*/` dir in `untracked/` after success; rollback preserves prior state on failure
+- [ ] Phase 3.5 (v3): Fresh clone with `uv` available → daemon self-bootstraps on first start → RUNNING status
+- [ ] Phase 3.5 (v3): Fresh clone without `uv` → advisory surfaces via SessionStart handler; zero mutation to filesystem
 - [ ] Grep: exactly one implementation of venv precedence lookup (Python, `paths.py`)
 - [ ] Grep: zero production references to `untracked/venv/` as write target
 - [ ] Grep: zero calls to `create_venv` or `recreate_venv`
@@ -413,6 +518,14 @@ Opus orchestrates a team. Each phase lands a green state before the next begins.
 Each phase ships a checkpoint commit; the plan survives context compaction. Single focused push preferred over interleaving. Effort breakdown withheld to comply with project plan-time-estimate policy.
 
 ## Notes & Updates
+
+### 2026-04-24 (v2 → v3 scope expansion)
+
+- User challenged three standing design decisions and cited specific failure modes the existing scheme doesn't cover
+- Fingerprint collision between host and container both using `/usr/bin/python3.11` with matching `sys.base_prefix` — Plan 00099's fingerprint is insufficient. Fix: add human-readable path slug to the venv dir name (Decision 7, Task 3.0.5)
+- Plan 00099 Decision 4 lazy-rebuild policy is wrong for the upgrade path — users expect `hooks-daemon upgrade` to leave a clean state, not accumulate dead dirs. Fix: eager delete on upgrade, lazy preserved elsewhere (Decision 8, Task 3.9)
+- Plan 00099 Task 4.2 bootstrap deferral rationale doesn't survive scrutiny — the fingerprint cost is one-time and only paid when venv missing. Fix: inline bootstrap gated by unambiguous preconditions, LLM-guided advisory otherwise (Decision 9, Phase 3.5)
+- User directive: "lets get this done properly and without lazy assumptions or plain stupid assertsion"
 
 ### 2026-04-23 (v1 → v2 revision)
 
