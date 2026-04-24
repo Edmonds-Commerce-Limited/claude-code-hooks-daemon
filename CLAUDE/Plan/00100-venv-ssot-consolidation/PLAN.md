@@ -292,13 +292,14 @@ Opus orchestrates a team. Each phase lands a green state before the next begins.
   - [x] ✅ 7979 tests pass, coverage 95.0% (meets 95% gate)
   - [x] ✅ Phase-specific regression: all 140 Plan 00100 tests pass (`test_paths_resolve_existing_venv`, `test_paths_resolve_venv_diagnostics`, `test_paths_venv_fingerprint`, `test_paths_venv_slug`, `test_paths_stale_cleanup`, `test_paths_check_venv_fresh`, `test_paths_resolve_venv_cli`, `test_ensure_venv`)
   - [x] ✅ Daemon restart verified RUNNING (PID 107285)
-- [ ] ⬜ **Task 3.9** (NEW in v3): Eager upgrade cleanup — `hooks-daemon upgrade` leaves zero stale venvs
-  - [ ] ⬜ Failing test: `tests/integration/test_upgrade_eager_cleanup.py` — pre-seed three fake `venv-*/` dirs (legacy bare, old slug, current), run upgrade, assert only current survives
-  - [ ] ⬜ Implement in `scripts/upgrade.sh`: after `restart_daemon_verified` confirms RUNNING on the new venv, enumerate `untracked/venv*` and `rm -rf` every entry whose absolute path != current venv path
-  - [ ] ⬜ Order: cleanup runs AFTER restart verification, so a failed upgrade preserves prior state (rollback safety)
-  - [ ] ⬜ Emit per-deletion log line: `"Removed stale venv: <path> (reason: <fingerprint-mismatch|lockhash-mismatch|legacy-name>)"`
-  - [ ] ⬜ Plain daemon start (non-upgrade) path UNCHANGED — still uses lazy-rebuild-via-stamp to avoid surprise eviction of a host venv when a container starts up
-  - [ ] ⬜ Update `prune-venvs` CLI doc to reference automatic upgrade-time cleanup; keep `--all-except-current` for manual eager cleanup outside upgrade flow
+- [x] ✅ **Task 3.9** (NEW in v3): Eager upgrade cleanup — `hooks-daemon upgrade` leaves zero stale venvs
+  - [x] ✅ Failing test (RED): `tests/integration/test_upgrade_eager_cleanup.py` — 6 tests across 6 classes (function-exists preflight, removes-stale-keeping-current, per-deletion log lines, no-op when only current, missing-untracked silent no-op, non-venv entries preserved)
+  - [x] ✅ Implemented in `scripts/install/venv.sh` as `eager_cleanup_stale_venvs(daemon_dir, current_venv)` — enumerates `untracked/venv` + `untracked/venv-*`, skips the current path, `rm -rf` the rest
+  - [x] ✅ Wired into `scripts/upgrade_version.sh` AFTER `restart_daemon_verified` confirms RUNNING on `$VENV_PATH` (rollback safety — failed upgrade leaves prior state intact)
+  - [x] ✅ Per-deletion log line emitted: `"Removed stale venv: <abs-path> (reason: <legacy-name|fingerprint-mismatch>)"`
+  - [x] ✅ Plain daemon start (non-upgrade) path UNCHANGED — still uses lazy-rebuild-via-stamp inside `ensure_venv`
+  - [x] ✅ `cmd_prune_venvs` docstring in `src/claude_code_hooks_daemon/daemon/cli.py` updated to reference automatic upgrade-time cleanup; `--all-except-current` remains available for manual eager cleanup outside the upgrade flow
+  - [x] ✅ QA 10/10 (coverage 95.0%), daemon restart RUNNING (PID 121109)
 
 **Success gate**: A venv built at HEAD on python 3.13 and queried under `python3`=3.11 on PATH resolves correctly via `.daemon-metadata.json` without any scan fallback. Missing persisted Python triggers recovery, not hard failure. `untracked/` after `hooks-daemon upgrade` contains exactly one `venv-*/` directory.
 

@@ -523,3 +523,63 @@ install_package_editable() {
         fi
     fi
 }
+
+#
+# eager_cleanup_stale_venvs() - Plan 00100 Task 3.9
+#
+# Remove every `{daemon_dir}/untracked/venv*` entry whose absolute path
+# differs from the current venv. Emits one log line per deletion:
+#   "Removed stale venv: <path> (reason: <legacy-name|fingerprint-mismatch>)"
+#
+# Called by upgrade_version.sh AFTER restart_daemon_verified confirms the
+# new daemon is RUNNING on the current venv — so a failed upgrade preserves
+# prior state (rollback safety).
+#
+# Plain (non-upgrade) daemon start is UNCHANGED: lazy-rebuild-via-stamp in
+# ensure_venv still governs, so a host venv is not evicted when a container
+# starts up alongside it.
+#
+# Arguments:
+#   $1 - daemon_dir      (absolute)
+#   $2 - current_venv    (absolute, the venv the daemon was just verified on)
+#
+# Returns 0 always.
+#
+eager_cleanup_stale_venvs() {
+    local daemon_dir="$1"
+    local current_venv="$2"
+    local untracked_dir="$daemon_dir/untracked"
+
+    if [ -z "$daemon_dir" ] || [ -z "$current_venv" ]; then
+        return 0
+    fi
+    if [ ! -d "$untracked_dir" ]; then
+        return 0
+    fi
+
+    local current_abs
+    if [ -d "$current_venv" ]; then
+        current_abs="$(cd "$current_venv" && pwd)"
+    else
+        current_abs="$current_venv"
+    fi
+
+    local entry entry_abs reason
+    for entry in "$untracked_dir"/venv "$untracked_dir"/venv-*; do
+        [ -d "$entry" ] || continue
+        entry_abs="$(cd "$entry" && pwd)"
+        if [ "$entry_abs" = "$current_abs" ]; then
+            continue
+        fi
+
+        case "$(basename "$entry_abs")" in
+            venv) reason="legacy-name" ;;
+            *) reason="fingerprint-mismatch" ;;
+        esac
+
+        echo "Removed stale venv: $entry_abs (reason: $reason)"
+        rm -rf "$entry_abs"
+    done
+
+    return 0
+}

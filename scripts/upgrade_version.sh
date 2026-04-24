@@ -690,6 +690,13 @@ fi
 # Clear version check cache to prevent stale upgrade indicators
 rm -f "$DAEMON_DIR/untracked/version_check_cache.json"
 
+# Plan 00100 Task 3.9: eager cleanup of stale venvs after the new daemon
+# is verified RUNNING on $VENV_PATH. Order matters — cleanup runs AFTER
+# restart_daemon_verified so a failed upgrade leaves prior state intact
+# (rollback safety). Plain daemon start (non-upgrade) is unaffected; it
+# still uses lazy-rebuild-via-stamp inside ensure_venv.
+eager_cleanup_stale_venvs "$DAEMON_DIR" "$VENV_PATH"
+
 # ============================================================
 # Step 15: Post-upgrade validation
 # ============================================================
