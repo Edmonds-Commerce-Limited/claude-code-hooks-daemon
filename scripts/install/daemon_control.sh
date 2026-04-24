@@ -46,8 +46,9 @@ stop_daemon_safe() {
 
     print_verbose "Stopping daemon..."
 
-    # Stop daemon, ignore errors (daemon may not be running)
-    "$venv_python" -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
+    # Stop daemon — daemon may not be running. `if` wrapper preserves
+    # set -e safety while tolerating the expected "not running" exit code.
+    if "$venv_python" -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null; then :; fi
 
     return 0
 }

@@ -288,8 +288,10 @@ PYTHON_EOF
     cleanup_script="${cleanup_script//PROJECT_ROOT_PLACEHOLDER/$project_root}"
     cleanup_script="${cleanup_script//DAEMON_DIR_PLACEHOLDER/$daemon_dir}"
 
-    # Run cleanup (suppress errors)
-    "$venv_python" -c "$cleanup_script" 2>/dev/null || true
+    # Run cleanup — best-effort pre-install tidy. Failure (e.g. stale sockets
+    # already gone, python interpreter missing on a freshly-provisioned host)
+    # must not abort validation. `if` wrapper tolerates failure under set -e.
+    if "$venv_python" -c "$cleanup_script" 2>/dev/null; then :; fi
 
     return 0
 }

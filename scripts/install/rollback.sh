@@ -173,21 +173,26 @@ EOF
         done
     fi
 
-    # Backup root .gitignore (extract daemon-specific entries)
+    # Backup root .gitignore (extract daemon-specific entries).
+    # grep-no-match (exit 1) is a legitimate outcome here — the user's
+    # .gitignore may not contain our pattern yet. `if` wrapper preserves
+    # set -e safety; an empty output file is acceptable.
     if [ -f "$project_root/.gitignore" ]; then
         if [ "$install_mode" = "self-install" ]; then
-            grep -F "/untracked/" "$project_root/.gitignore" > "$snapshot_dir/files/gitignore/root.gitignore" 2>/dev/null || true
+            if grep -F "/untracked/" "$project_root/.gitignore" > "$snapshot_dir/files/gitignore/root.gitignore" 2>/dev/null; then :; fi
         else
-            grep -F ".claude/hooks-daemon" "$project_root/.gitignore" > "$snapshot_dir/files/gitignore/root.gitignore" 2>/dev/null || true
+            if grep -F ".claude/hooks-daemon" "$project_root/.gitignore" > "$snapshot_dir/files/gitignore/root.gitignore" 2>/dev/null; then :; fi
         fi
     fi
 
-    # Backup venv package list
+    # Backup venv package list — best-effort. If pip freeze fails (broken venv
+    # during upgrade rollback), we still want the snapshot to complete with the
+    # rest of the files; requirements.txt will just be empty.
     if [ -f "$venv_python" ]; then
         local venv_pip
         venv_pip="$(dirname "$venv_python")/pip"
         if [ -f "$venv_pip" ]; then
-            "$venv_pip" freeze > "$snapshot_dir/files/venv/requirements.txt" 2>/dev/null || true
+            if "$venv_pip" freeze > "$snapshot_dir/files/venv/requirements.txt" 2>/dev/null; then :; fi
         fi
     fi
 

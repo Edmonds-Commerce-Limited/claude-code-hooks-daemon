@@ -91,7 +91,8 @@ case "${1:-}" in
             touch "$BACKUP_FILE"
             echo "✓ Enabled DEBUG logging via HOOKS_DAEMON_LOG_LEVEL"
 
-            "$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
+            # Daemon may or may not be running — tolerate non-zero without aborting set -e.
+            if "$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null; then :; fi
             sleep 1
             # Start daemon with DEBUG log level via environment variable
             HOOKS_DAEMON_LOG_LEVEL=DEBUG "$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli start
@@ -140,8 +141,9 @@ case "${1:-}" in
         # Clean up
         rm -f "$TEMP_LOGS" "$BACKUP_FILE"
 
-        # Restart daemon without DEBUG env var (will use config log level)
-        "$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null || true
+        # Restart daemon without DEBUG env var (will use config log level).
+        # Daemon may or may not be running — tolerate non-zero without aborting set -e.
+        if "$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli stop 2>/dev/null; then :; fi
         sleep 1
         "$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli start
 

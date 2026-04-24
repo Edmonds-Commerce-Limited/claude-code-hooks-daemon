@@ -98,11 +98,12 @@ validate_worktree() {
         PASSED_WTS+=("${wt_name}")
     else
         echo -e "${RED}✗${NC} QA FAILED - see ${qa_log}"
-        # Show the summary section
-        grep -A 12 "QA Summary" "${qa_log}" 2>/dev/null || true
+        # Diagnostic prints — grep-no-match (exit 1) is expected here, so we
+        # wrap in `if` to keep set -e from aborting the function before the
+        # final `return 1`. A real grep failure (exit >=2) is surfaced.
+        if grep -A 12 "QA Summary" "${qa_log}" 2>/dev/null; then :; fi
         echo ""
-        # Show failed tests
-        grep "FAILED" "${qa_log}" 2>/dev/null || true
+        if grep "FAILED" "${qa_log}" 2>/dev/null; then :; fi
         FAILED_WTS+=("${wt_name}")
         return 1
     fi

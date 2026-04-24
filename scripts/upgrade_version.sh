@@ -125,7 +125,10 @@ cleanup_on_failure() {
         # Try to restart daemon with old code
         if [ -f "$VENV_PYTHON" ]; then
             print_info "Attempting to restart daemon with previous version..."
-            restart_daemon_quick "$VENV_PYTHON" 2>/dev/null || true
+            # Best-effort rollback — we're already inside cleanup_on_failure, so
+            # we cannot abort the trap if restart also fails. `if` wrapper
+            # preserves set -e safety while tolerating the failure.
+            if restart_daemon_quick "$VENV_PYTHON" 2>/dev/null; then :; fi
         fi
     fi
 }

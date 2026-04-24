@@ -135,6 +135,16 @@ else
 fi
 echo ""
 
+echo "11. Running Shell Audit..."
+echo "----------------------------------------"
+if ! "${VENV_PYTHON}" "${SCRIPT_DIR}/audit_shell.py" --json; then
+    OVERALL_EXIT_CODE=1
+    echo "❌ Shell audit FAILED"
+else
+    echo "✅ Shell audit PASSED"
+fi
+echo ""
+
 # Print overall summary
 echo "========================================"
 echo "QA Summary"
@@ -154,6 +164,7 @@ results = {
     "Shell Check": "untracked/qa/shell_check.json",
     "Error Hiding": "untracked/qa/error_hiding.json",
     "Skill Refs": "untracked/qa/skill_references.json",
+    "Shell Audit": "untracked/qa/shell_audit.json",
 }
 
 all_passed = True
