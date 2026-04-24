@@ -32,6 +32,21 @@ fi
 # Ensure output directory exists
 mkdir -p "$(dirname "${OUTPUT_FILE}")"
 
+# Plan 00100 Task 3.0: uv.lock is a first-class repo artefact. CI-gate it so
+# pyproject.toml drift without a regenerated lockfile surfaces immediately.
+# `uv lock --check` exits non-zero when the lockfile is stale.
+if command -v uv >/dev/null; then
+    echo "Running uv lock --check..."
+    if ! uv lock --check; then
+        echo "❌ uv.lock is out of sync with pyproject.toml." >&2
+        echo "   Fix: run 'uv lock' and commit the updated uv.lock." >&2
+        exit 1
+    fi
+else
+    echo "⚠️  uv not on PATH — skipping uv lock --check"
+    echo "   Install uv to run the lockfile freshness gate locally."
+fi
+
 echo "Running deptry dependency checker..."
 
 # Run deptry on src/ only, capture output

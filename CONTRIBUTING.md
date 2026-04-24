@@ -66,6 +66,21 @@ Install pre-commit hooks to run checks automatically:
 pre-commit install
 ```
 
+### Dependency Lockfile (`uv.lock`)
+
+`uv.lock` is committed alongside `pyproject.toml` and is CI-gated via `uv lock --check` (runs as part of `./scripts/qa/run_dependency_check.sh`). Any change to `pyproject.toml` dependencies MUST be accompanied by a regenerated lockfile.
+
+```bash
+# After editing pyproject.toml dependencies:
+uv lock
+
+# Commit both files together:
+git add pyproject.toml uv.lock
+git commit -m "Add dependency X"
+```
+
+If QA fails with `uv.lock is out of sync`, regenerate with `uv lock` and commit. Do NOT hand-edit `uv.lock`.
+
 ## Creating a New Handler
 
 ### 1. Choose the Right Event
