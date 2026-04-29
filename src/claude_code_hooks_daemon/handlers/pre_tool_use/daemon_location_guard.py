@@ -90,7 +90,22 @@ class DaemonLocationGuardHandler(Handler):
         )
 
     def get_claude_md(self) -> str | None:
-        return None
+        return (
+            "## daemon_location_guard — do not cd into .claude/hooks-daemon/\n\n"
+            "Bash commands that change directory into `.claude/hooks-daemon/` (or `cd` "
+            "into a daemon-internal subdirectory and then run something) are blocked. "
+            "The daemon is an upstream dependency that must remain untouched in client repos.\n\n"
+            "**Run daemon CLI from the project root instead** — it always works regardless "
+            "of cwd:\n\n"
+            "```\n"
+            "$PYTHON -m claude_code_hooks_daemon.daemon.cli status\n"
+            "$PYTHON -m claude_code_hooks_daemon.daemon.cli restart\n"
+            "$PYTHON -m claude_code_hooks_daemon.daemon.cli logs\n"
+            "```\n\n"
+            "If you need to inspect daemon source for debugging, use `Read` from the project "
+            "root with the absolute path — never `cd` in. Do NOT edit anything inside "
+            "`.claude/hooks-daemon/`; changes will be overwritten on the next upgrade."
+        )
 
     def get_acceptance_tests(self) -> list[AcceptanceTest]:
         """Return acceptance tests for this handler."""

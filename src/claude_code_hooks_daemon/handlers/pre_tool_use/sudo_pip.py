@@ -118,7 +118,21 @@ NEVER use sudo pip install as default behavior."""
         )
 
     def get_claude_md(self) -> str | None:
-        return None
+        return (
+            "## sudo_pip — sudo pip install is blocked\n\n"
+            "`sudo pip install` (and the `sudo pip3` / `sudo python -m pip` / "
+            "`sudo python3 -m pip` variants) is blocked. Installing as root corrupts the "
+            "system Python managed by the OS package manager and creates "
+            "permission/ownership issues that are painful to recover from.\n\n"
+            "**Use a virtualenv or `--user` install instead**:\n\n"
+            "```\n"
+            "python3 -m venv /tmp/venv && /tmp/venv/bin/pip install <package>\n"
+            "# or\n"
+            "pip install --user <package>\n"
+            "```\n\n"
+            "Even in a container running as root, `sudo` adds nothing — drop it and use "
+            "a venv."
+        )
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for sudo pip handler."""

@@ -262,7 +262,22 @@ class DismissiveLanguageDetectorHandler(Handler):
         return HookResult(decision=Decision.ALLOW, context=[context])
 
     def get_claude_md(self) -> str | None:
-        return None
+        return (
+            "## dismissive_language_detector — do not deflect or prematurely halt\n\n"
+            "Stop-time advisory that fires on language patterns signalling avoidance of "
+            "work. The handler does NOT block the stop, but injects context for the next "
+            "turn so the agent self-corrects.\n\n"
+            "**Avoid**:\n\n"
+            "- Dismissing issues as `pre-existing`, `out of scope`, `not our problem`, "
+            "  or `not relevant` to deflect work that is in fact yours.\n"
+            "- Premature-halt phrasing like `natural checkpoint`, `ready to continue on your "
+            "  cue`, `pausing here` mid-plan when there is more to do — finish the task "
+            "  rather than dressing up a halt.\n"
+            "- Speculative `should be fine` or `probably works` when verification is "
+            "  cheap (run the test, read the file).\n\n"
+            "**Do**: acknowledge the issue, fix it, or — if it genuinely is out of scope — "
+            "say so once with the specific reason and continue with the in-scope work."
+        )
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for this handler."""

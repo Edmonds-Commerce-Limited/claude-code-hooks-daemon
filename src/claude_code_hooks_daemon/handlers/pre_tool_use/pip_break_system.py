@@ -121,7 +121,22 @@ NEVER use --break-system-packages as default behavior."""
         )
 
     def get_claude_md(self) -> str | None:
-        return None
+        return (
+            "## pip_break_system — --break-system-packages is blocked\n\n"
+            "`pip install --break-system-packages` (and the `pip3` / `python -m pip` / "
+            "`python3 -m pip` variants) is blocked. The flag bypasses PEP 668 system-package "
+            "protection and corrupts the system Python environment in containers and on "
+            "modern Linux distros.\n\n"
+            "**Use a virtualenv or `--user` install instead**:\n\n"
+            "```\n"
+            "python3 -m venv /tmp/venv && /tmp/venv/bin/pip install <package>\n"
+            "# or\n"
+            "pip install --user <package>\n"
+            "```\n\n"
+            "If a tool's installer insists on `--break-system-packages` (some quick-start "
+            "scripts do), download it first, inspect, and run it inside a venv — do not "
+            "shortcut by adding the flag."
+        )
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for pip break system handler."""

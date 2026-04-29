@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.9.0] - 2026-04-29
+
+### Added
+
+- **`git_filemode_checker` handler (SessionStart, priority 53)**: New advisory handler that warns when `git core.fileMode=false` is detected. On macOS/Linux this setting silently discards executable-bit changes, causing hook wrappers to lose their exec bit and breaking the daemon invocation chain. The handler surfaces this as a session-start advisory so developers can fix it immediately.
+- **`bash <path>` settings.json hook invocation + auto-migration (Plan 00102)**: Hook entries in `.claude/settings.json` are now invoked via `bash "$CLAUDE_PROJECT_DIR"/.claude/hooks/<event>` instead of a direct path reference. This defends against exec-bit loss (Issue #29): even if a hook wrapper loses its executable permission, `bash <path>` still runs it. The installer writes the new form; an auto-migration routine silently upgrades existing installations on daemon restart — no manual action required.
+- **`init.sh` exec-bit self-heal (Plan 00102)**: `init.sh` now detects hook wrapper files that have lost their executable bit and calls `chmod +x` to restore them before invoking the daemon. Provides a second layer of defense against the Issue #29 exec-bit loss failure mode.
+- **Shell-script error-hiding auditor (Issue #29 QA gap)**: New QA check (`scripts/qa/run_error_hiding_check.sh`) scans all shell scripts in the repo for patterns that silently suppress errors (`2>/dev/null`, `|| true`, `|| :`, `>/dev/null 2>&1` on non-read commands). Integrated into `run_all.sh` as check 11. Closes the gap that allowed the Issue #29 `chmod` failure to go undetected.
+- **Fingerprint-keyed venv SSOT with `.daemon-metadata.json` (Plan 00100)**: New `DaemonVenvMetadata` dataclass and `AtomicMetadataStore` provide a single source of truth for the active venv path, Python version, and lock hash. Written atomically on venv creation; read by all consumers (daemon startup, skill wrappers, install/upgrade scripts) through a unified `resolve_existing_venv_python()` API. Eliminates the class of fingerprint-recomputation bugs fixed piecemeal in v3.8.x.
+- **`DaemonVenvMetadata` schema and atomic read/write (Plan 00100 Tasks 3.1–3.3)**: `daemon.paths` exposes `read_daemon_metadata()` / `write_daemon_metadata()` using `os.replace()` for atomic writes. Includes `lock_hash` field so the resolver can detect stale venvs without re-running `uv lock`.
+- **`lock_hash` authoritative freshness signal (Plan 00100 Task 3.7)**: The venv resolver uses the `lock_hash` stored in `.daemon-metadata.json` to determine whether the existing venv is fresh, avoiding unnecessary `uv sync` runs on every startup.
+- **`can_inline_bootstrap` precondition predicate (Plan 00100 Task 3.5.1)**: New predicate centralises the decision of whether inline bootstrap (venv creation at startup time) is safe to attempt, replacing scattered ad-hoc checks.
+- **`skill-wrapper` Python version pre-check (Plan 00100 Task 0.3)**: Skill wrappers now verify the resolved Python meets the minimum version requirement before attempting to start the daemon, providing a clear error message instead of a cryptic import failure.
+- **`uv lock` CI gate and contributor docs (Plan 00100 Task 3.0)**: `uv.lock` is now committed and a CI check ensures it stays in sync. `CONTRIBUTING.md` documents the `uv` workflow.
+- **CLAUDE.md guidance for four previously-silent handlers**: Added `get_claude_md()` content for `daemon_location_guard`, `pip_break_system`, `sudo_pip` (all PreToolUse blocking), and `dismissive_language_detector` (Stop advisory) so agents see the rules before triggering the hook rather than only after a denial. Surfaced as part of the v3.9.0 release-process CLAUDE.md guidance audit.
+
+### Changed
+
+- **`resolve_existing_venv_python()` as unified Python SSOT (Plan 00100)**: All venv-path consumers — daemon startup, skill bash wrappers, `venv-include.bash`, install/upgrade scripts, `client_validator.py` — now route through the same 4-step precedence: `$HOOKS_DAEMON_VENV_PATH` → fingerprint-keyed path from `.daemon-metadata.json` → glob scan of `untracked/venv-*/bin/python` → legacy `untracked/venv/bin/python`. Removes the per-consumer reimplementation that caused the v3.8.x regression series.
+- **Eager upgrade cleanup leaves exactly one venv (Plan 00100 Task 3.9)**: After a successful venv rebuild the upgrade path now removes all stale `untracked/venv-*` directories, keeping only the current fingerprint-keyed venv. Prevents disk accumulation across Python version changes.
+- **`resolve_existing_venv_python()` refuses legacy-stamped venvs (Plan 00100 Task 3.5)**: If `.daemon-metadata.json` records a legacy (pre-fingerprint) path that no longer exists, the resolver forces a rebuild rather than silently falling back to a potentially incompatible environment.
+- **Path-slug disambiguation in fingerprint SSOT (Plan 00100 Task 3.0.5)**: The fingerprint now incorporates a path slug derived from the project root, preventing two projects with identical Python environments from sharing a venv directory.
+- **All three bash resolvers delegate to SSOT (Plan 00100 Phase 2)**: `scripts/upgrade.sh`, `scripts/venv-include.bash`, and `scripts/install/venv_resolver.sh` all shell out to the Python SSOT via `resolve-venv` CLI subcommand, eliminating bash-side fingerprint reimplementation.
+- **`upgrade.sh` bootstrap simplified to PID-kill only (Plan 00100 Task 2.5)**: Removed the fragile process-scan logic from `upgrade.sh`; it now only kills the daemon by PID file, delegating all venv resolution to the SSOT.
+
+### Fixed
+
+- **Silent-stop discriminator distinguishes genuine re-entry (Plan 00101)**: The `auto_continue_stop` handler was incorrectly classifying some genuine task completions as "silent stops" that needed auto-continuation. The updated discriminator uses a richer signal set — including prior-turn tool use, response length, and explicit completion language — to distinguish genuine stops from mid-task pauses.
+- **Hook wrapper exec-bit loss — `chmod` failures no longer silenced (Issue #29)**: `set_hook_permissions()` in self-install mode previously caught and swallowed `PermissionError` from `chmod`, masking the failure. The error is now re-raised so the installer and daemon startup fail fast with a clear message rather than producing hooks that silently do nothing.
+- **`restart_daemon_verified` slow-startup false-negative (Plan 00100 Task 0.2)**: The daemon restart verifier polled for process readiness with a fixed short timeout. On slow machines or under load the daemon could still be initialising when the poll fired, producing a false "restart failed" advisory. The verifier now uses an adaptive wait with exponential backoff.
+- **`uv sync` file-visibility race at source (Plan 00100 Task 0.1)**: `uv sync` was invoked before the source tree was fully flushed to disk after a `git checkout`, causing it to occasionally miss newly added files and install a stale environment. A sync barrier was added before the `uv sync` call.
+- **`markdown_organization` allows standard repo-root files**: `CONTRIBUTING.md`, `SECURITY.md`, and other conventional root-level markdown files were incorrectly blocked by the organisation handler. The handler now recognises the standard set of repo-root filenames as always-allowed.
+
+### Removed
+
+- **Dead `venv.sh` functions and TODO legacy fallbacks (Plan 00100 Phase 1)**: Removed functions from `venv.sh` that were superseded by the SSOT architecture, along with their accompanying `# TODO: remove legacy fallback` comments. The legacy `untracked/venv/` path is still supported as a final fallback but is no longer the primary resolution path.
+
 ## [3.8.2] - 2026-04-22
 
 ### Fixed
