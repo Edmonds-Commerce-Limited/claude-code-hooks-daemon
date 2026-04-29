@@ -626,6 +626,20 @@ If the user needs to run one of these, ask them to do it manually. Do not attemp
   2. Dispatch one Haiku agent per file
   3. Each agent uses the `Edit` tool (never `sed`)
 
+## daemon_location_guard — do not cd into .claude/hooks-daemon/
+
+Bash commands that change directory into `.claude/hooks-daemon/` (or `cd` into a daemon-internal subdirectory and then run something) are blocked. The daemon is an upstream dependency that must remain untouched in client repos.
+
+**Run daemon CLI from the project root instead** — it always works regardless of cwd:
+
+```
+$PYTHON -m claude_code_hooks_daemon.daemon.cli status
+$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
+$PYTHON -m claude_code_hooks_daemon.daemon.cli logs
+```
+
+If you need to inspect daemon source for debugging, use `Read` from the project root with the absolute path — never `cd` in. Do NOT edit anything inside `.claude/hooks-daemon/`; changes will be overwritten on the next upgrade.
+
 ## absolute_path — always use absolute paths
 
 The `Read`, `Write`, and `Edit` tools require absolute paths. Relative paths are blocked.
@@ -736,6 +750,34 @@ Direct `Write` or `Edit` to package manager lock files is blocked. Lock files ar
 - Ruby: `bundle install` / `bundle add gem`
 - Rust: `cargo add crate`
 - Go: `go get module`
+
+## pip_break_system — --break-system-packages is blocked
+
+`pip install --break-system-packages` (and the `pip3` / `python -m pip` / `python3 -m pip` variants) is blocked. The flag bypasses PEP 668 system-package protection and corrupts the system Python environment in containers and on modern Linux distros.
+
+**Use a virtualenv or `--user` install instead**:
+
+```
+python3 -m venv /tmp/venv && /tmp/venv/bin/pip install <package>
+# or
+pip install --user <package>
+```
+
+If a tool's installer insists on `--break-system-packages` (some quick-start scripts do), download it first, inspect, and run it inside a venv — do not shortcut by adding the flag.
+
+## sudo_pip — sudo pip install is blocked
+
+`sudo pip install` (and the `sudo pip3` / `sudo python -m pip` / `sudo python3 -m pip` variants) is blocked. Installing as root corrupts the system Python managed by the OS package manager and creates permission/ownership issues that are painful to recover from.
+
+**Use a virtualenv or `--user` install instead**:
+
+```
+python3 -m venv /tmp/venv && /tmp/venv/bin/pip install <package>
+# or
+pip install --user <package>
+```
+
+Even in a container running as root, `sudo` adds nothing — drop it and use a venv.
 
 ## daemon_restart_verifier — restart the daemon before committing
 
@@ -909,5 +951,17 @@ STOPPING BECAUSE: all tasks complete, QA passes, daemon restart verified.
 - Tautological/rhetorical questions with obvious answers ("Should I continue?", "Would you like me to proceed?") — do NOT ask, just do it
 - Errors with a clear next step ("The test failed, should I fix it?") — do NOT ask, just fix it
 - Genuine choice questions where all options are valid ("Which of A, B, or C should we use?") — these deserve a response. Use `STOPPING BECAUSE: need user input` and ask your question
+
+## dismissive_language_detector — do not deflect or prematurely halt
+
+Stop-time advisory that fires on language patterns signalling avoidance of work. The handler does NOT block the stop, but injects context for the next turn so the agent self-corrects.
+
+**Avoid**:
+
+- Dismissing issues as `pre-existing`, `out of scope`, `not our problem`,   or `not relevant` to deflect work that is in fact yours.
+- Premature-halt phrasing like `natural checkpoint`, `ready to continue on your   cue`, `pausing here` mid-plan when there is more to do — finish the task   rather than dressing up a halt.
+- Speculative `should be fine` or `probably works` when verification is   cheap (run the test, read the file).
+
+**Do**: acknowledge the issue, fix it, or — if it genuinely is out of scope — say so once with the specific reason and continue with the in-scope work.
 
 </hooksdaemon>
