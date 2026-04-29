@@ -86,16 +86,25 @@ class TestAutoContinueStopHandler:
         assert "AUTO-CONTINUE" in result.reason
 
     def test_prevents_infinite_loop(self, handler: Any, tmp_path: Any) -> None:
-        # When stop_hook_active is True, should not match (prevents loop)
+        # Genuine re-entry (prior Stop block marker in transcript) MUST not match
+        # to prevent infinite loops. Without a block marker, stop_hook_active=True
+        # is the silent-stop bug shape and matches() must still fire.
         transcript = tmp_path / "transcript.jsonl"
-        message = {
+        assistant_msg = {
             "type": "message",
             "message": {
                 "role": "assistant",
                 "content": [{"type": "text", "text": "Would you like me to continue?"}],
             },
         }
-        transcript.write_text(json.dumps(message) + "\n")
+        block_marker = {
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": "Stop hook feedback:\nYou stopped without explaining why.",
+            },
+        }
+        transcript.write_text(json.dumps(assistant_msg) + "\n" + json.dumps(block_marker) + "\n")
 
         hook_input = make_stop_input(
             stop_hook_active=True,

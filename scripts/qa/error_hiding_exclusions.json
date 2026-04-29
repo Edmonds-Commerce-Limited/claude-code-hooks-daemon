@@ -63,6 +63,12 @@
       "reason": "JSONL transcript parsing loop: except json.JSONDecodeError: continue is the standard JSONL pattern. Malformed lines are skipped to process the rest of the transcript. Same pattern already excluded in hedging_language_detector and auto_continue_stop."
     },
     {
+      "file": "utils/stop_hook_helpers.py",
+      "function": "has_recent_stop_hook_block",
+      "rule": "silent-continue",
+      "reason": "JSONL transcript tail scan for Stop-hook block markers: except json.JSONDecodeError: continue is the standard JSONL pattern. The discriminator must skip malformed lines to evaluate the rest of the lookback window — a single bad line cannot mask a genuine block marker further along. Same pattern already excluded in transcript_reader.read_incremental."
+    },
+    {
       "file": "daemon/cli.py",
       "function": "get_project_path",
       "rule": "log-and-continue",

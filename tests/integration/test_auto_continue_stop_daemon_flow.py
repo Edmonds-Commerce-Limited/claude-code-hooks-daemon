@@ -184,12 +184,15 @@ class TestAutoContinueStopDaemonFlow:
         ), f"model_dump lost stop_hook_active! Keys: {list(dumped.keys())}"
         assert dumped["stop_hook_active"] is True
 
-    def test_camelcase_stop_hook_active_detected_by_handler(self) -> None:
-        """Handler detects stopHookActive in BOTH snake_case and camelCase.
+    def test_camelcase_stop_hook_active_detected_by_handler(self, tmp_path: Path) -> None:
+        """Handler detects stopHookActive in BOTH snake_case and camelCase
+        for genuine re-entry (transcript contains a Stop hook block marker).
 
         When Claude Code sends stopHookActive (camelCase), Pydantic stores it
         as an extra field with original casing. The handler must check BOTH
-        variants to prevent infinite loops.
+        variants to prevent infinite loops on genuine re-entry. Without a
+        block marker the silent-stop bug shape applies — see
+        TestSilentStopAfterToolErrorReentryGuard.
         """
         from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
             AutoContinueStopHandler,
@@ -197,14 +200,28 @@ class TestAutoContinueStopDaemonFlow:
 
         handler = AutoContinueStopHandler()
 
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(
+            json.dumps(
+                {
+                    "type": "user",
+                    "message": {
+                        "role": "user",
+                        "content": "Stop hook feedback:\nYou stopped without explaining why.",
+                    },
+                }
+            )
+            + "\n"
+        )
+
         # snake_case: standard check works
-        snake_input = {"stop_hook_active": True, "transcript_path": "/some/path"}
+        snake_input = {"stop_hook_active": True, "transcript_path": str(transcript)}
         assert (
             handler.matches(snake_input) is False
         ), "snake_case stop_hook_active=True should prevent matching"
 
         # camelCase: handler must also detect this
-        camel_input = {"stopHookActive": True, "transcript_path": "/some/path"}
+        camel_input = {"stopHookActive": True, "transcript_path": str(transcript)}
         assert (
             handler.matches(camel_input) is False
         ), "camelCase stopHookActive=True should prevent matching (infinite loop prevention)"

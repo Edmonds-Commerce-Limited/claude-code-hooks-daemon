@@ -37,6 +37,7 @@ from claude_code_hooks_daemon.core.transcript_reader import (
 )
 from claude_code_hooks_daemon.utils.stop_hook_helpers import (
     get_transcript_reader,
+    has_recent_stop_hook_block,
     is_stop_hook_active,
 )
 
@@ -182,10 +183,22 @@ class AutoContinueStopHandler(Handler):
         Returns:
             False only for re-entry or AskUserQuestion; True for everything else
         """
-        # CRITICAL: Prevent infinite loops - check both casing variants
+        # Discriminate genuine re-entry from silent-stop bug:
+        # - Genuine re-entry: stop_hook_active=True AND a prior Stop block marker
+        #   exists in the transcript tail (Claude Code re-fired Stop after we
+        #   denied) — skip to avoid an infinite loop.
+        # - Silent-stop bug: stop_hook_active=True but NO prior block marker —
+        #   Claude Code spuriously set the flag after a tool error or empty turn.
+        #   Treat as a normal Stop and run the routing logic.
         if is_stop_hook_active(hook_input):
-            logger.debug("Stop hook is active (re-entry) - skipping to prevent infinite loop")
-            return False
+            transcript_path = hook_input.get("transcript_path")
+            if has_recent_stop_hook_block(transcript_path):
+                logger.debug("Stop hook re-entry confirmed by transcript block marker - skipping")
+                return False
+            logger.info(
+                "stop_hook_active=true but no prior block marker — silent-stop bug,"
+                " treating as fresh Stop event"
+            )
 
         # Check AskUserQuestion — user must answer, not auto-continue
         reader = get_transcript_reader(hook_input)

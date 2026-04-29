@@ -64,8 +64,16 @@ echo "Running smoke test probes (socket: ${SOCKET_PATH})..."
 
 # ── Probes ─────────────────────────────────────────────────────────────────────
 
+# Write a transcript with a Stop-hook block marker so PROBE2 represents
+# a GENUINE re-entry (Claude Code re-fires Stop after a prior block). Without
+# the marker the discriminator treats stop_hook_active=true as the silent-stop
+# bug shape — see Plan 00101 "Incident — 2026-04-29".
+SMOKE_TRANSCRIPT="$(mktemp -t smoke-stop-loop-XXXXXX.jsonl)"
+trap 'rm -f "${SMOKE_TRANSCRIPT}"' EXIT
+printf '%s\n' '{"type":"user","message":{"role":"user","content":"Stop hook feedback:\nYou stopped without explaining why."}}' > "${SMOKE_TRANSCRIPT}"
+
 PROBE1='{"hook_event_name":"Stop","stop_hook_active":false,"session_id":"smoke-test-probe"}'
-PROBE2='{"hook_event_name":"Stop","stop_hook_active":true,"session_id":"smoke-test-probe"}'
+PROBE2="$(printf '{"hook_event_name":"Stop","stop_hook_active":true,"transcript_path":"%s","session_id":"smoke-test-probe"}' "${SMOKE_TRANSCRIPT}")"
 PROBE3='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git reset --hard HEAD"},"session_id":"smoke-test-probe"}'
 
 RESPONSE1=$(echo "${PROBE1}" | "${HOOK_STOP}" 2>/dev/null || echo "{}")

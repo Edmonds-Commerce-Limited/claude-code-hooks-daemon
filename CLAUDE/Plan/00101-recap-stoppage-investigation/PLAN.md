@@ -1,6 +1,6 @@
 # Plan 00101: Recap-Stoppage Investigation
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-04-24
 **Owner**: Claude (Opus) + transcript-inspector sub-agent
 **Priority**: High (dogfooding — degrades main-thread productivity)
@@ -210,11 +210,12 @@ _To be populated during Phase 3 after hypothesis validated._
   brief (background)
 - Main thread continues Task 3.0.5 work in parallel; Phase 1.2+ of this
   plan awaits sub-agent completion
+
 ### Incident — 2026-04-24 (post-compaction Task 3.3 work, session `4879d13b`)
 
 **Timestamp**: approximately the end of a Task 3.3 GREEN-phase loop in the
 second (post-compaction) half of the 2026-04-24 session, transcript line
-1301.
+1301\.
 
 **User complaint (verbatim)**:
 
@@ -241,8 +242,7 @@ second (post-compaction) half of the 2026-04-24 session, transcript line
    by an `Edit` tool call to `cli.py`. Context at generation: ~117k (59%).
 
 The Edit result at L1298 confirmed success:
-`"The file /workspace/src/claude_code_hooks_daemon/daemon/cli.py has been
-updated successfully."`
+`"The file /workspace/src/claude_code_hooks_daemon/daemon/cli.py has been updated successfully."`
 
 L1299–L1300 are `attachment` records (PostToolUse hook payload). L1301 is
 `stop_hook_summary` with `preventedContinuation=False`, `hookErrors=[]`
@@ -291,3 +291,120 @@ is a distinct loop variant — not a silent-stop-after-Edit but a
 **stuck-read-loop-before-Edit** — and may share a root cause (model
 generates a plan to call Edit but the tool selection resolves to Read
 instead). This warrants a note in the hypothesis refinement below.
+
+### Incident — 2026-04-29 (Plan 00102 Phase 2 work, session `6c8042e2`)
+
+**Verified root cause: handler bug, not model bug.**
+
+This incident, plus a live socket probe, **disproved** the prior
+"model-side empty-turn behaviour" hypothesis. The bug is in
+`auto_continue_stop.matches()` — its re-entry guard.
+
+**Timestamp**: 2026-04-29T14:24:01Z, transcript line 1394
+(session `6c8042e2-05ca-4b1e-9553-6bfd06524bfc.jsonl`).
+
+**Trigger sequence**:
+
+1. L1391 — assistant `tool_use: Edit` against
+   `/workspace/CLAUDE/Plan/00102-hook-exec-bit-defense/PLAN.md`
+2. L1392 — `tool_result is_error=True`, content
+   `"<tool_use_error>File has not been read yet. Read it first before writing to it.</tool_use_error>"`
+3. L1393 — Stop hook attachment, `stdout="{}\n"` (daemon allowed)
+4. L1394 — `stop_hook_summary` with `hookErrors=[]`,
+   `preventedContinuation=false`
+
+There is **no intermediate assistant text** between the tool error and the
+stop. The previous assistant turn was tool-only (`Edit`).
+
+**Live socket probe (run after the incident, daemon was RUNNING)**:
+
+```text
+$ echo '{"event":"Stop","hook_input":{"hook_event_name":"Stop",
+        "stop_hook_active":true,"transcript_path":"/tmp/empty.jsonl"}}' \
+        | nc -U <daemon.sock>
+{}
+
+$ echo '{"event":"Stop","hook_input":{"hook_event_name":"Stop",
+        "stop_hook_active":false,"transcript_path":"/tmp/empty.jsonl"}}' \
+        | nc -U <daemon.sock>
+{"decision": "block", "reason": "You stopped without explaining why...
+```
+
+**The discriminator currently used is binary on `stop_hook_active`.**
+The handler treats `stop_hook_active=true` as proof of legitimate hook-driven
+re-entry and skips. But Claude Code apparently sets `stop_hook_active=true`
+on at least some abnormal-stop paths too (silent stop after a tool error),
+and that is the bug case — there was never a hook block to "re-enter" from.
+
+**Corrected root cause**:
+
+`AutoContinueStopHandler.matches()` returns False when `stop_hook_active`
+is True regardless of whether a Stop block was actually emitted recently.
+That guard is too broad. It must additionally require evidence of a recent
+Stop hook block in the transcript before treating `stop_hook_active=true`
+as a genuine re-entry.
+
+**Evidence shape of a genuine prior block** (for the discriminator):
+
+When the Stop hook actually blocks, Claude Code injects two transcript
+records:
+
+- a `type=user` JSONL entry with `message.role=user` and `message.content`
+  starting with `"Stop hook feedback:"` (verified: L80 of this transcript)
+- an `attachment` JSONL entry of subtype `hook_blocking_error` (L81)
+
+Either marker, present in the recent tail of the transcript, indicates a
+genuine re-entry. Their absence on a `stop_hook_active=true` event indicates
+the silent-stop bug.
+
+**Why prior hypothesis was wrong**:
+
+The Phase 1 "context pressure" theory survived as a partial correlation
+because high-context turns more often produce tool-only output (no text
+block), which triggers the bug shape. But the bug fires at any context
+level — see L1301 (59%) and the L1394 incident here. The variable that
+matters is whether the assistant's next turn is empty/tool-only AND whether
+`stop_hook_active=true` is set, NOT context pressure.
+
+### Phase 3 (revised): Mitigation — handler fix
+
+- [x] ✅ **Task 3.1**: Mitigation chosen — option (c): enhance
+  `auto_continue_stop` re-entry guard so it requires evidence of a recent
+  Stop hook block in the transcript before honouring
+  `stop_hook_active=true`.
+- [x] ✅ **Task 3.2**: TDD fix.
+  - [x] ✅ RED — failing unit test: `stop_hook_active=true` with NO recent
+    Stop hook block in transcript → handler must block, not allow silently.
+  - [x] ✅ GREEN — add `has_recent_stop_hook_block()` helper to
+    `stop_hook_helpers.py`; update `matches()` to use it.
+  - [x] ✅ REFACTOR.
+  - [x] ✅ Additional tests: genuine re-entry still passes through;
+    explicit `STOPPING BECAUSE:` legit stop still passes; tool-error +
+    empty turn now blocks; tool-success + empty turn now blocks.
+- [x] ✅ **Task 3.3**: QA 11/11 PASSED, daemon RUNNING after restart, live
+  socket probe with `stop_hook_active=true` + empty transcript now returns
+  block instead of `{}`.
+
+### Incident — 2026-04-29 (post-compaction continuation, session `6c8042e2`)
+
+**Same bug, same session — observed AGAIN during the very fix.** User flagged
+another silent stop after an Edit. This is the third in this session and the
+fourth across both 2026-04-24 and 2026-04-29 sessions.
+
+**Significance**: The fix lands in this commit. Repeat occurrence during the
+fix-in-progress reinforces that the daemon was running stale code throughout —
+which is the dogfooding rule restated: handler edits are invisible until
+restart. After this commit lands and daemon restarts, regression behaviour
+should disappear.
+
+**Status of fix at incident time**:
+
+- `has_recent_stop_hook_block()` implemented and unit-tested (22/22 helper
+  tests pass, 6/6 silent-stop discriminator tests pass)
+- Two pre-existing tests updated to include genuine block markers (those tests
+  pinned the broken contract; they now match the corrected one)
+- Daemon NOT yet restarted with the fix at the moment of this incident — that
+  is why the bug recurred
+- Plan 00102 Phase 5 will restart the daemon and verify
+
+**Next regression check**: zero silent stops in the post-fix session.

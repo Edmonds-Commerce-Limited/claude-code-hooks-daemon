@@ -292,13 +292,45 @@ class TestAutoContinueStopHandlerMatchesFalse:
     def test_matches_false_when_stop_hook_active_true(
         self, handler: AutoContinueStopHandler, mock_transcript_path: Path
     ) -> None:
-        """CRITICAL: Should return False when stop_hook_active is True to prevent infinite loops."""
-        self._write_transcript(
-            mock_transcript_path, "Would you like me to continue with the next phase"
-        )
+        """Genuine re-entry (block marker present) MUST return False to prevent infinite loops."""
+        # Write a transcript with a prior "Stop hook feedback:" user message —
+        # this is the genuine re-entry shape Claude Code creates after a Stop
+        # block. Without the marker, stop_hook_active=True is the silent-stop
+        # bug shape and matches() must still fire (see
+        # TestSilentStopAfterToolErrorReentryGuard).
+        with mock_transcript_path.open("w") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "type": "message",
+                        "message": {
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": "Would you like me to continue with the next phase?",
+                                }
+                            ],
+                        },
+                    }
+                )
+                + "\n"
+            )
+            f.write(
+                json.dumps(
+                    {
+                        "type": "user",
+                        "message": {
+                            "role": "user",
+                            "content": ("Stop hook feedback:\nYou stopped without explaining why."),
+                        },
+                    }
+                )
+                + "\n"
+            )
         hook_input = {
             "transcript_path": str(mock_transcript_path),
-            "stop_hook_active": True,  # This prevents infinite loops
+            "stop_hook_active": True,  # Genuine re-entry — block marker confirms it
         }
         assert handler.matches(hook_input) is False
 
@@ -784,11 +816,41 @@ class TestAutoContinueStopContinueOnErrors:
     def test_continue_on_errors_still_checks_stop_hook_active(
         self, handler: AutoContinueStopHandler, mock_transcript_path: Path
     ) -> None:
-        """Even with continue_on_errors=True, stop_hook_active must prevent infinite loops."""
-        self._write_transcript(
-            mock_transcript_path,
-            "Error: something broke. Should I proceed?",
-        )
+        """Genuine re-entry (block marker present) MUST return False to prevent infinite loops.
+
+        Without a block marker, stop_hook_active=True alone is the silent-stop bug
+        shape and matches() must still fire — see TestSilentStopAfterToolErrorReentryGuard.
+        """
+        with mock_transcript_path.open("w") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "type": "message",
+                        "message": {
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": "An issue surfaced. Should I proceed?",
+                                }
+                            ],
+                        },
+                    }
+                )
+                + "\n"
+            )
+            f.write(
+                json.dumps(
+                    {
+                        "type": "user",
+                        "message": {
+                            "role": "user",
+                            "content": ("Stop hook feedback:\nYou stopped without explaining why."),
+                        },
+                    }
+                )
+                + "\n"
+            )
         hook_input = {
             "transcript_path": str(mock_transcript_path),
             "stop_hook_active": True,
@@ -1712,3 +1774,269 @@ class TestHasStopExplanationStaleTranscriptRace:
         result = handler._has_stop_explanation(reader)
 
         assert result is True
+
+
+class TestSilentStopAfterToolErrorReentryGuard:
+    """Tests for Plan 00101 incident — silent stop after tool error / empty turn.
+
+    Bug: Claude Code sets stop_hook_active=true on at least some abnormal-stop
+    paths (e.g. silent stop after a failed Edit with no following assistant
+    text). The handler's re-entry guard treats stop_hook_active=true as proof
+    of legitimate Stop-hook re-entry and returns matches()=False, so the daemon
+    returns {} (allow) and the user has to manually intervene.
+
+    Fix: matches() must additionally require evidence of a recent prior Stop
+    hook block in the transcript before honouring stop_hook_active=true.
+    Markers of a real prior block:
+      - user-role JSONL entry whose message.content begins with
+        "Stop hook feedback:"
+      - attachment entry of type "hook_blocking_error" with hookEvent=Stop
+    Either marker, present in the recent tail of the transcript, signals a
+    genuine re-entry. Absence signals the silent-stop bug.
+    """
+
+    @pytest.fixture
+    def handler(self) -> AutoContinueStopHandler:
+        """Create handler instance."""
+        return AutoContinueStopHandler()
+
+    def _write_lines(self, path: Path, lines: list[dict[str, Any]]) -> None:
+        with path.open("w") as f:
+            for line in lines:
+                f.write(json.dumps(line) + "\n")
+
+    # ── BUG REGRESSION ──────────────────────────────────────────────────────
+
+    def test_matches_true_when_stop_hook_active_but_no_prior_block_with_tool_error(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """REGRESSION (Plan 00101 incident 2026-04-29):
+
+        stop_hook_active=true + previous turn was tool_use Edit with tool_result
+        is_error=true + NO prior Stop hook block in transcript.
+
+        Old behaviour: matches() returned False (re-entry guard tripped) →
+        daemon returned {} → user had to intervene manually.
+
+        New behaviour: matches() must return True so handle() runs and (in
+        default config) blocks with the explain-or-continue message.
+        """
+        path = tmp_path / "transcript.jsonl"
+        self._write_lines(
+            path,
+            [
+                {
+                    "type": "assistant",
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "name": "Edit",
+                                "input": {
+                                    "file_path": "/workspace/some/file.md",
+                                    "old_string": "x",
+                                    "new_string": "y",
+                                },
+                            }
+                        ],
+                    },
+                },
+                {
+                    "type": "user",
+                    "message": {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "is_error": True,
+                                "content": (
+                                    "<tool_use_error>"
+                                    "File has not been read yet"
+                                    "</tool_use_error>"
+                                ),
+                                "tool_use_id": "tu_1",
+                            }
+                        ],
+                    },
+                },
+            ],
+        )
+        hook_input = {
+            "transcript_path": str(path),
+            "stop_hook_active": True,
+        }
+        # Bug: handler currently returns False; after fix must return True.
+        assert handler.matches(hook_input) is True
+
+    def test_matches_true_when_stop_hook_active_after_tool_success_empty_turn(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """Silent stop after a SUCCESSFUL Edit with no following assistant text.
+
+        This is the original L685 / L1301 / L1394 bug shape: tool_use Edit →
+        tool_result success → empty assistant turn → Stop fires with
+        stop_hook_active=true. Without a prior Stop block in the transcript,
+        the handler must NOT silently allow the stop.
+        """
+        path = tmp_path / "transcript.jsonl"
+        self._write_lines(
+            path,
+            [
+                {
+                    "type": "assistant",
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "name": "Edit",
+                                "input": {
+                                    "file_path": "/workspace/some/file.py",
+                                    "old_string": "old",
+                                    "new_string": "new",
+                                },
+                            }
+                        ],
+                    },
+                },
+                {
+                    "type": "user",
+                    "message": {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "is_error": False,
+                                "content": "File updated successfully.",
+                                "tool_use_id": "tu_1",
+                            }
+                        ],
+                    },
+                },
+            ],
+        )
+        hook_input = {
+            "transcript_path": str(path),
+            "stop_hook_active": True,
+        }
+        assert handler.matches(hook_input) is True
+
+    # ── GENUINE RE-ENTRY (must still pass through) ──────────────────────────
+
+    def test_matches_false_when_stop_hook_active_with_prior_feedback_message(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """Genuine re-entry: prior 'Stop hook feedback:' user message in tail.
+
+        This is the original infinite-loop-prevention scenario. After a Stop
+        hook block, Claude Code re-fires Stop with stop_hook_active=true, and
+        the transcript contains the injected 'Stop hook feedback:' user
+        message that proves a real prior block existed. Handler must return
+        False to prevent infinite loops.
+        """
+        path = tmp_path / "transcript.jsonl"
+        self._write_lines(
+            path,
+            [
+                {
+                    "type": "user",
+                    "message": {
+                        "role": "user",
+                        "content": (
+                            "Stop hook feedback:\n"
+                            "You stopped without explaining why. "
+                            "Either:\n1. Prefix your stop message..."
+                        ),
+                    },
+                },
+                {
+                    "type": "assistant",
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "STOPPING BECAUSE: my work is complete.",
+                            }
+                        ],
+                    },
+                },
+            ],
+        )
+        hook_input = {
+            "transcript_path": str(path),
+            "stop_hook_active": True,
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_matches_false_when_stop_hook_active_with_prior_blocking_attachment(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """Genuine re-entry detected via hook_blocking_error attachment marker."""
+        path = tmp_path / "transcript.jsonl"
+        self._write_lines(
+            path,
+            [
+                {
+                    "type": "attachment",
+                    "attachment": {
+                        "type": "hook_blocking_error",
+                        "hookName": "Stop",
+                        "hookEvent": "Stop",
+                        "blockingError": {"blockingError": "You stopped..."},
+                    },
+                },
+                {
+                    "type": "assistant",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "STOPPING BECAUSE: done."}],
+                    },
+                },
+            ],
+        )
+        hook_input = {
+            "transcript_path": str(path),
+            "stop_hook_active": True,
+        }
+        assert handler.matches(hook_input) is False
+
+    # ── stop_hook_active=false unchanged ────────────────────────────────────
+
+    def test_matches_true_when_stop_hook_active_false_and_no_block_marker(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """stop_hook_active=false → always matches (handle() routes)."""
+        path = tmp_path / "transcript.jsonl"
+        self._write_lines(
+            path,
+            [
+                {
+                    "type": "assistant",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "I am done"}],
+                    },
+                },
+            ],
+        )
+        hook_input = {
+            "transcript_path": str(path),
+            "stop_hook_active": False,
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_true_when_stop_hook_active_but_transcript_missing(
+        self, handler: AutoContinueStopHandler
+    ) -> None:
+        """stop_hook_active=true with no transcript_path → cannot prove prior
+        block exists → must NOT silently allow.
+
+        This protects against the bug shape where Claude Code sets
+        stop_hook_active=true but no transcript info is available.
+        """
+        hook_input = {"stop_hook_active": True}
+        # No transcript_path provided → has_recent_stop_hook_block returns
+        # False → matches must return True
+        assert handler.matches(hook_input) is True
