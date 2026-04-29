@@ -607,6 +607,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Cancelled Plans
 
+- [00091: Hook Executable Permissions](Completed/00091-hook-executable-permissions/PLAN.md) - Cancelled
+
+  - Superseded by [00102](00102-hook-exec-bit-defense/PLAN.md). The new plan invokes hooks via `bash <abs-path>`, which makes the executable bit irrelevant entirely — root cause goes away. `git_filemode_checker` (originally Plan 00091 Phase 2) was folded into Plan 00102 Phase 4.
+
 - [00087: Post-Clear Auto-Execute](Cancelled/00087-post-clear-auto-execute/PLAN.md) - Cancelled
 
   - Hooks cannot solve `/clear <text>` auto-execution — client-side `local-command-caveat` and no auto-submit

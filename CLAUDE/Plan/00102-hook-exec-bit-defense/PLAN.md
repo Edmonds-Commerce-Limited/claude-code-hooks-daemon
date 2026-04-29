@@ -103,10 +103,10 @@ See `TRIAGE.md` for the analysis and rationale. Decisions made:
 
 ### Phase 5 — Verification & docs
 
-- [ ] ⬜ **Task 5.1**: Restart daemon, verify RUNNING.
-- [ ] ⬜ **Task 5.2**: Regenerate docs: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-docs`.
-- [ ] ⬜ **Task 5.3**: Acceptance-test the full flow: install in a fresh test project, `chmod -x .claude/hooks/*`, verify hooks still fire after auto-migration runs on session start.
-- [ ] ⬜ **Task 5.4**: Mark Plan 00091 as Cancelled (superseded), update its README entry.
+- [x] ✅ **Task 5.1**: Daemon restart verified RUNNING (PID 71299, socket exists, fingerprint-keyed venv).
+- [x] ✅ **Task 5.2**: `generate-docs` regenerated `.claude/HOOKS-DAEMON.md`. New `git_filemode_checker` row visible at priority 53 in the SessionStart table.
+- [ ] ⬜ **Task 5.3**: Acceptance-test the full flow at release time — covered by `/release` skill's mandatory acceptance gate.
+- [x] ✅ **Task 5.4**: Plan 00091 marked Cancelled (superseded by 00102), moved to `Completed/`, README's Cancelled Plans section updated with cross-reference.
 
 ## Success Criteria
 
