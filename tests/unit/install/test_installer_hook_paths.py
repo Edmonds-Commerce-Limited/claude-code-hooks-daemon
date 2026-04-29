@@ -48,3 +48,43 @@ def test_create_settings_json_uses_project_dir_variable(tmp_path):
                     assert (
                         "$CLAUDE_PROJECT_DIR" in cmd
                     ), f"{event_name} hook must use $CLAUDE_PROJECT_DIR, got: {cmd}"
+
+
+def test_create_settings_json_invokes_hooks_via_bash(tmp_path):
+    """Hook command strings must invoke the wrapper through `bash`, not directly.
+
+    Plan 00102 Tier 1: invoking the wrapper as `bash <abs-path>` makes the
+    file's executable bit irrelevant — `bash` reads the script as data, the
+    kernel never has to honour `+x`. This eliminates an entire class of
+    silent breakage (core.fileMode=false, Windows clones, tarball transfers,
+    IDE-save mode loss, `cp` without `-p`).
+
+    Hook events MUST start with `bash `; statusLine is exempt because Claude
+    Code's status-line invocation path is separate.
+    """
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+    from install import create_settings_json
+
+    project_root = tmp_path
+    (project_root / ".claude").mkdir()
+    create_settings_json(project_root, force=True)
+
+    with open(project_root / ".claude" / "settings.json") as f:
+        settings = json.load(f)
+
+    for event_name, hook_configs in settings["hooks"].items():
+        for hook_config in hook_configs:
+            for hook in hook_config["hooks"]:
+                if hook["type"] != "command":
+                    continue
+                cmd = hook["command"]
+                assert cmd.startswith("bash "), (
+                    f"{event_name} hook command must invoke wrapper via `bash` "
+                    f"so the exec bit is irrelevant — got: {cmd!r}"
+                )
+                assert "/.claude/hooks/" in cmd, (
+                    f"{event_name} hook command must still reference "
+                    f".claude/hooks/, got: {cmd!r}"
+                )

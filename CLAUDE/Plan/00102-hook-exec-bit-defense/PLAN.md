@@ -70,11 +70,11 @@ See `TRIAGE.md` for the analysis and rationale. Decisions made:
 
 ### Phase 1 — Tier 1: Switch to `bash <abs-path>` invocation (the actual fix)
 
-- [ ] ⬜ **Task 1.1**: Locate the `command:` emitter in `install.py` (around lines 528–565) — confirm the exact dict-literal format.
-- [ ] ⬜ **Task 1.2**: Write failing test in `tests/unit/install/test_settings_emit.py` asserting the emitter produces `bash "$CLAUDE_PROJECT_DIR"/.claude/hooks/<event>` form (RED).
-- [ ] ⬜ **Task 1.3**: Update `install.py` emitter to produce the `bash <path>` form (GREEN).
-- [ ] ⬜ **Task 1.4**: Update this repo's own dogfood `.claude/settings.json` to match.
-- [ ] ⬜ **Task 1.5**: Add acceptance-style integration test that simulates `chmod -x` on `.claude/hooks/*` and verifies hooks still fire end-to-end via the daemon socket.
+- [x] ✅ **Task 1.1**: Locate the `command:` emitter in `install.py` (around lines 528–565) — confirm the exact dict-literal format.
+- [x] ✅ **Task 1.2**: Write failing test in `tests/unit/install/test_installer_hook_paths.py` asserting the emitter produces `bash "$CLAUDE_PROJECT_DIR"/.claude/hooks/<event>` form (RED).
+- [x] ✅ **Task 1.3**: Update `install.py` emitter to produce the `bash <path>` form via `_hook_cmd()` helper (GREEN — 2/2 pass).
+- [x] ✅ **Task 1.4**: Update this repo's own dogfood `.claude/settings.json` — all 10 hook events now use `bash <path>`; statusLine left untouched (exempt by Claude Code design).
+- [x] ✅ **Task 1.5**: Acceptance integration test added at `tests/integration/test_hook_exec_bit_irrelevant.py` — copies real `pre-tool-use` wrapper, drops +x, asserts direct invocation fails AND `bash <path>` does NOT produce Permission denied. 2/2 pass.
 - [ ] ⬜ **Task 1.6**: Run `./scripts/qa/run_all.sh` — all 10 checks must pass.
 
 ### Phase 2 — Tier 2: Auto-migrate existing client `settings.json`
