@@ -89,17 +89,17 @@ See `TRIAGE.md` for the analysis and rationale. Decisions made:
 
 ### Phase 3 — Tier 3a: `init.sh` sibling self-heal (belt-and-braces)
 
-- [ ] ⬜ **Task 3.1**: Add throttled (once-per-hour) sibling chmod block near the top of `.claude/init.sh`. Throttle via fingerprint file `.claude/hooks-daemon/untracked/.exec-bit-checked`.
-- [ ] ⬜ **Task 3.2**: Confirm shellcheck passes on `init.sh`.
-- [ ] ⬜ **Task 3.3**: Confirm shell-script error-hiding auditor (added in commit `0fbc412`) still passes.
+- [x] ✅ **Task 3.1**: Added `_exec_bit_selfheal()` to `.claude/init.sh` after `_get_hostname_suffix()`. Throttle file `$_untracked_dir/.exec-bit-checked` is mtime-checked (Linux `stat -c %Y`, BSD `stat -f %m` fallback) — fresh stamp (< 3600s) short-circuits, stale or missing runs the chmod loop. Loop iterates the explicit known-hooks list so unrelated files (README.md, init.sh sibling) are never touched. Renamed prior `HOOK_SCRIPT_DIR` (init.sh's own dir) to private `_INIT_SCRIPT_DIR` so `HOOK_SCRIPT_DIR` now points at `.claude/hooks/` for the function. Integration tests `tests/integration/test_init_sh_exec_bit_selfheal.py` (5/5 pass) extract the function via curly-brace slicing and assert: chmods all 10 hooks on first call, creates throttle, recent throttle skips, stale throttle re-runs, README.md/init.sh sibling left at 0644.
+- [x] ✅ **Task 3.2**: `shellcheck -x .claude/init.sh` exits 0 (zero issues).
+- [x] ✅ **Task 3.3**: `scripts/qa/audit_shell.py` reports zero violations — function uses `2>/dev/null` only inside `if mtime=$(...)` guards, never the `2>/dev/null || true` double-suppression pattern.
 
 ### Phase 4 — Tier 3b: `git_filemode_checker` SessionStart handler (folded from Plan 00091 Phase 2)
 
-- [ ] ⬜ **Task 4.1**: Add `HandlerID.GIT_FILEMODE_CHECKER` and `Priority.GIT_FILEMODE_CHECKER = 53`.
-- [ ] ⬜ **Task 4.2**: Write failing tests in `tests/unit/handlers/session_start/test_git_filemode_checker.py` (init, matches new-vs-resume, handle filemode=true/false/no-repo/timeout).
-- [ ] ⬜ **Task 4.3**: Implement `handlers/session_start/git_filemode_checker.py` following `optimal_config_checker.py` pattern.
-- [ ] ⬜ **Task 4.4**: Register in `__init__.py` and `.claude/hooks-daemon.yaml`.
-- [ ] ⬜ **Task 4.5**: Update `docs/guides/HANDLER_REFERENCE.md`.
+- [x] ✅ **Task 4.1**: `HandlerID.GIT_FILEMODE_CHECKER` and `Priority.GIT_FILEMODE_CHECKER = 53` registered (constants/handlers.py + constants/priority.py).
+- [x] ✅ **Task 4.2**: Failing tests added at `tests/unit/handlers/session_start/test_git_filemode_checker.py`.
+- [x] ✅ **Task 4.3**: `handlers/session_start/git_filemode_checker.py` implemented following `optimal_config_checker.py` pattern.
+- [x] ✅ **Task 4.4**: Registered in `handlers/session_start/__init__.py` and active in `.claude/hooks-daemon.yaml` (priority 53, advisory).
+- [x] ✅ **Task 4.5**: `docs/guides/HANDLER_REFERENCE.md` — added detailed entry between `optimal_config_checker` and `suggest_status_line`, plus row in priority summary table.
 
 ### Phase 5 — Verification & docs
 

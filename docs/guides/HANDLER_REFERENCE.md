@@ -1007,6 +1007,29 @@ handlers:
 
 ---
 
+#### git_filemode_checker
+
+| Property       | Value                  |
+| -------------- | ---------------------- |
+| **Config key** | `git_filemode_checker` |
+| **Priority**   | 53                     |
+| **Type**       | Advisory               |
+| **Event**      | SessionStart           |
+
+**Description:** Warns once per new session when the current repo has `git config core.fileMode=false`. That setting causes git to lose `100755` on hook scripts during checkout/merge/rebase, which is the primary trigger for the broken-hook-bit bug class. The handler emits an advisory `additionalContext` block explaining the impact and the fix (`git config core.fileMode true`). Skipped on session resume, no-ops outside git repos.
+
+**Config example:**
+
+```yaml
+handlers:
+  session_start:
+    git_filemode_checker:
+      enabled: true
+      priority: 53
+```
+
+---
+
 #### suggest_status_line
 
 | Property       | Value                 |
@@ -1514,6 +1537,7 @@ These handlers generate the terminal status line displayed by Claude Code. They 
 | `validate_eslint_on_write`   | PostToolUse      | 20       | Runs ESLint after .ts/.tsx writes      |
 | `yolo_container_detection`   | SessionStart     | 10       | Detects container environments         |
 | `optimal_config_checker`     | SessionStart     | 52       | Audits Claude Code settings            |
+| `git_filemode_checker`       | SessionStart     | 53       | Warns when core.fileMode=false         |
 | `suggest_status_line`        | SessionStart     | 55       | Suggests status line setup             |
 | `version_check`              | SessionStart     | 56       | Checks for daemon updates              |
 | `workflow_state_restoration` | SessionStart     | 60       | Restores workflow state                |

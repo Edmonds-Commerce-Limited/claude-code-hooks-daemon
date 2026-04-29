@@ -146,10 +146,10 @@ FALLBACK_EOF
     fi
 }
 
-# Detect project path (should be called from .claude/hooks/ directory)
-# Walk up directory tree to find .claude directory
-HOOK_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_PATH="${HOOK_SCRIPT_DIR}"
+# Detect project path by walking up from init.sh's directory.
+# (init.sh lives at .claude/init.sh, so its parent contains the project.)
+_INIT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_PATH="${_INIT_SCRIPT_DIR}"
 
 # Walk up to find .claude directory
 while [[ "$PROJECT_PATH" != "/" ]]; do
@@ -325,6 +325,63 @@ _get_hostname_suffix() {
     echo "-${sanitized}"
 }
 
+#
+# _exec_bit_selfheal() - Restore +x on sibling hook scripts (Plan 00102 Phase 3).
+#
+# Defense-in-depth: even though the daemon's invocation form is `bash <abs-path>`
+# (Phase 1, makes the bit irrelevant), defensively restore the executable bit on
+# sibling hook wrappers if it has been dropped by core.fileMode=false, an IDE
+# rewrite, a tarball/ZIP transfer, etc. Throttled once per hour via mtime on a
+# fingerprint file so the cost is amortised across hook invocations.
+#
+# Variables required in scope:
+#   HOOK_SCRIPT_DIR - directory containing hook wrapper scripts
+#   _untracked_dir  - daemon's untracked dir (where the throttle file lives)
+#
+_exec_bit_selfheal() {
+    local throttle="$_untracked_dir/.exec-bit-checked"
+    local now mtime
+    now=$(date +%s)
+
+    if [[ -f "$throttle" ]]; then
+        # Linux: stat -c %Y. macOS/BSD: stat -f %m. If both fail we fall
+        # through to running the chmod (safer than silently skipping).
+        if mtime=$(stat -c %Y "$throttle" 2>/dev/null); then
+            :
+        elif mtime=$(stat -f %m "$throttle" 2>/dev/null); then
+            :
+        else
+            mtime=0
+        fi
+
+        if [[ "$mtime" =~ ^[0-9]+$ ]] && [[ $((now - mtime)) -lt 3600 ]]; then
+            return 0
+        fi
+    fi
+
+    local hooks=(
+        pre-tool-use
+        post-tool-use
+        session-start
+        session-end
+        stop
+        subagent-stop
+        user-prompt-submit
+        notification
+        pre-compact
+        permission-request
+    )
+    local h
+    for h in "${hooks[@]}"; do
+        local p="$HOOK_SCRIPT_DIR/$h"
+        if [[ -f "$p" ]]; then
+            chmod +x "$p"
+        fi
+    done
+
+    touch "$throttle"
+}
+
 # Generate socket and PID paths using pure bash (no Python dependency)
 # SECURITY: Paths stored in daemon's untracked directory, NOT /tmp
 # Pattern: {project}/.claude/hooks-daemon/untracked/daemon.{sock|pid}
@@ -339,6 +396,12 @@ _untracked_dir="${HOOKS_DAEMON_ROOT_DIR}/untracked"
 
 # Create untracked directory if it doesn't exist
 mkdir -p "$_untracked_dir"
+
+# Plan 00102 Phase 3 (Tier 3a): defensively restore +x on sibling hook
+# wrappers if dropped (core.fileMode=false, IDE rewrite, tarball transfer).
+# Throttled once per hour via mtime on $_untracked_dir/.exec-bit-checked.
+HOOK_SCRIPT_DIR="$PROJECT_PATH/.claude/hooks"
+_exec_bit_selfheal
 
 # Generate hostname-based suffix for path isolation
 _hostname_suffix=$(_get_hostname_suffix)
