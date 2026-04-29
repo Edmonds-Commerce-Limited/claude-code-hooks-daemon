@@ -1,11 +1,22 @@
 # Plan: Fix Hook Script Executable Permissions
 
-**Status**: Not Started
+**Status**: Cancelled (2026-04-29) — superseded by Plan 00102
 **Created**: 2026-03-16
 **Priority**: High
 **Recommended Executor**: Sonnet
 
-## Context
+## Cancellation Note (2026-04-29)
+
+Superseded by [Plan 00102 — Hook Exec-Bit Defense](../00102-hook-exec-bit-defense/PLAN.md). The new plan takes a stronger approach:
+
+- **Tier 1** (shipped in 405a1ad): hooks are invoked as `bash <abs-path>`, which makes the executable bit irrelevant entirely — the root cause goes away.
+- **Tier 2** (shipped in 11a4cda): existing client repos auto-migrate `settings.json` to the new invocation form on session start.
+- **Tier 3a** (shipped in 7cc6b99): `init.sh` defensively restores +x once per hour as belt-and-braces.
+- **Tier 3b** (shipped in ca8ec85): `git_filemode_checker` SessionStart handler warns when `core.fileMode=false` is detected.
+
+The original Plan 00091 strategy (force-commit hooks as `100755` via `git update-index --chmod=+x`) is no longer needed because the bash-invocation form sidesteps the exec-bit dependency entirely.
+
+## Original Context (preserved for history)
 
 When users install the hooks daemon, hook scripts (`.claude/hooks/pre-tool-use`, etc.) are deployed with `chmod +x`. However, if the user's git repo has `core.fileMode=false`, git doesn't track the executable bit. After any merge/checkout/rebase, scripts revert to `100644` (non-executable) and hooks silently break.
 
