@@ -287,6 +287,56 @@ class TestHookRegistrationCheckerHandle:
         assert "Stop" in context_text
 
 
+class TestHookRegistrationCheckerMigratesLegacyCommands:
+    """Plan 00102 Phase 2: legacy bare-path entries are auto-rewritten."""
+
+    @pytest.fixture()
+    def handler(self) -> HookRegistrationCheckerHandler:
+        return HookRegistrationCheckerHandler()
+
+    def test_legacy_settings_are_migrated_and_announced(
+        self, handler: HookRegistrationCheckerHandler, tmp_path: Path
+    ) -> None:
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        # The fixture builds the *legacy* shape (bare path, no `bash` prefix).
+        settings_path.write_text(json.dumps(_build_valid_settings()))
+
+        with patch.object(handler, "_get_project_root", return_value=tmp_path):
+            result = handler.handle(_session_start_input())
+
+        assert result.decision.value == "allow"
+        # File on disk now has the bash-prefixed form for every event.
+        on_disk = json.loads(settings_path.read_text())
+        for event_value in on_disk["hooks"].values():
+            command = event_value[0]["hooks"][0]["command"]
+            assert command.startswith("bash ")
+        # Backup written exactly once.
+        backup = settings_path.with_name("settings.json.bak.pre-bash-migration")
+        assert backup.exists()
+        # Context tells the agent what just happened.
+        context_text = "\n".join(result.context)
+        assert "MIGRATION" in context_text.upper()
+
+    def test_opt_out_disables_migration(
+        self, handler: HookRegistrationCheckerHandler, tmp_path: Path
+    ) -> None:
+        handler.configure({"auto_migrate_settings": False})
+
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        original = json.dumps(_build_valid_settings())
+        settings_path.write_text(original)
+
+        with patch.object(handler, "_get_project_root", return_value=tmp_path):
+            handler.handle(_session_start_input())
+
+        # File untouched when opt-out is set.
+        assert settings_path.read_text() == original
+        backup = settings_path.with_name("settings.json.bak.pre-bash-migration")
+        assert not backup.exists()
+
+
 class TestHookRegistrationCheckerClaudeMd:
     """get_claude_md() tests."""
 

@@ -75,22 +75,17 @@ See `TRIAGE.md` for the analysis and rationale. Decisions made:
 - [x] ✅ **Task 1.3**: Update `install.py` emitter to produce the `bash <path>` form via `_hook_cmd()` helper (GREEN — 2/2 pass).
 - [x] ✅ **Task 1.4**: Update this repo's own dogfood `.claude/settings.json` — all 10 hook events now use `bash <path>`; statusLine left untouched (exempt by Claude Code design).
 - [x] ✅ **Task 1.5**: Acceptance integration test added at `tests/integration/test_hook_exec_bit_irrelevant.py` — copies real `pre-tool-use` wrapper, drops +x, asserts direct invocation fails AND `bash <path>` does NOT produce Permission denied. 2/2 pass.
-- [ ] ⬜ **Task 1.6**: Run `./scripts/qa/run_all.sh` — all 10 checks must pass.
+- [x] ✅ **Task 1.6**: Run `./scripts/qa/llm_qa.py all` — 11/11 PASSED, coverage 95.0%, daemon RUNNING.
 
 ### Phase 2 — Tier 2: Auto-migrate existing client `settings.json`
 
-- [ ] ⬜ **Task 2.1**: Read `src/claude_code_hooks_daemon/handlers/session_start/hook_registration_checker.py` to find the audit point where `command:` strings are inspected.
-- [ ] ⬜ **Task 2.2**: Add `_LEGACY_COMMAND_PATTERN` constant matching bare-path command values ending in `.claude/hooks/<event-name>` (no leading `bash `, no shell args).
-- [ ] ⬜ **Task 2.3**: Add `_NEW_COMMAND_FORMAT` constant for the `bash <path>` shape.
-- [ ] ⬜ **Task 2.4**: Write failing tests covering:
-  - legacy form detected
-  - new form generated correctly
-  - one-shot `settings.json.bak` created (overwrite-protected: never overwritten on subsequent migrations)
-  - idempotent on second run (no rewrite, no second backup)
-  - hand-edited non-daemon command paths left untouched
-- [ ] ⬜ **Task 2.5**: Implement migration: rewrite matching entries, write `.bak` if absent, emit `additionalContext` message naming what was migrated.
-- [ ] ⬜ **Task 2.6**: Add config option `auto_migrate_settings: true` (default on) for opt-out.
-- [ ] ⬜ **Task 2.7**: Run QA, restart daemon, verify RUNNING.
+- [x] ✅ **Task 2.1**: Read `src/claude_code_hooks_daemon/handlers/session_start/hook_registration_checker.py` to find the audit point where `command:` strings are inspected.
+- [x] ✅ **Task 2.2**: Added `_LEGACY_PATH_PATTERN` regex in `utils/hook_command_migration.py` matching bare-path commands ending in `.claude/hooks/<event-name>`.
+- [x] ✅ **Task 2.3**: Added `_BASH_PREFIX = "bash "` constant; `is_legacy_hook_command()` predicate detects legacy form.
+- [x] ✅ **Task 2.4**: 18 tests in `tests/unit/utils/test_hook_command_migration.py` cover legacy detection, rewrite-in-place, one-shot `.bak.pre-bash-migration` overwrite-protected, idempotent second run, custom user paths preserved, missing/malformed-file no-ops, defensive isinstance branches. All pass.
+- [x] ✅ **Task 2.5**: `migrate_settings_to_bash_invocation()` rewrites matching entries; `.bak` created only if absent. Handler folds `MigrationResult` into `additionalContext` naming migrated events.
+- [x] ✅ **Task 2.6**: Added `auto_migrate_settings: true` (default) under `handlers.session_start.hook_registration_checker.options`. Handler `configure()` reads it.
+- [x] ✅ **Task 2.7**: QA 11/11 PASSED, coverage 95.0%, daemon RUNNING.
 
 ### Phase 3 — Tier 3a: `init.sh` sibling self-heal (belt-and-braces)
 

@@ -17,6 +17,10 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.constants.protocol import HookInputField
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.utils.hook_command_migration import (
+    MigrationResult,
+    migrate_settings_to_bash_invocation,
+)
 from claude_code_hooks_daemon.utils.hook_registration import (
     detect_duplicate_hooks,
     detect_legacy_hook_commands,
@@ -60,6 +64,15 @@ class HookRegistrationCheckerHandler(Handler):
                 HandlerTag.ENVIRONMENT,
             ],
         )
+        # Plan 00102 Phase 2: auto-migrate legacy bare-path commands to
+        # ``bash <path>`` form on first new session after upgrade. Opt-out
+        # via .claude/hooks-daemon.yaml:
+        #   handlers.session_start.hook_registration_checker.options.auto_migrate_settings: false
+        self.config: dict[str, Any] = {"auto_migrate_settings": True}
+
+    def configure(self, config: dict[str, Any]) -> None:
+        """Apply per-handler config from the daemon's config loader."""
+        self.config.update(config)
 
     def _is_resume_session(self, hook_input: dict[str, Any]) -> bool:
         """Check if this is a resumed session (transcript has content).
@@ -141,6 +154,18 @@ class HookRegistrationCheckerHandler(Handler):
 
         claude_dir = project_root / _CLAUDE_DIR
 
+        # Plan 00102 Phase 2: rewrite legacy bare-path command entries to
+        # ``bash <path>`` form before auditing. Migration is idempotent and
+        # only writes when at least one entry actually needs rewriting; the
+        # audit below sees the post-migration shape.
+        migration_result: MigrationResult | None = None
+        if self.config.get("auto_migrate_settings", True):
+            try:
+                migration_result = migrate_settings_to_bash_invocation(claude_dir / _SETTINGS_FILE)
+            except OSError as exc:
+                logger.warning("Hook command migration aborted: %s", exc)
+                migration_result = None
+
         # Read settings files
         settings = self._read_json_file(claude_dir / _SETTINGS_FILE)
         local_settings = self._read_json_file(claude_dir / _SETTINGS_LOCAL_FILE)
@@ -160,6 +185,16 @@ class HookRegistrationCheckerHandler(Handler):
 
         # Build context
         lines: list[str] = []
+        if migration_result is not None and migration_result.migrated:
+            events_str = ", ".join(migration_result.events_migrated)
+            lines.append(
+                "HOOK COMMAND MIGRATION: Rewrote legacy bare-path entries to "
+                f"`bash <path>` form ({events_str}). "
+                f"Original saved to {_SETTINGS_FILE}{'.bak.pre-bash-migration'} "
+                "for rollback. This makes hooks resilient to dropped exec bits "
+                "(see Plan 00102)."
+            )
+            lines.append("")
         if not all_issues:
             lines.append("HOOK REGISTRATION: All checks passed")
         else:
