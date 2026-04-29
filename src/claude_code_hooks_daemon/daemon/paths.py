@@ -15,9 +15,14 @@ import json
 import logging
 import os
 import platform
+import re
+import shutil
 import sys
 import time
+import tomllib
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -300,6 +305,156 @@ def _compute_project_lock_hash_stdlib(project_root: Path) -> str | None:
     else:
         hasher.update(_UV_LOCK_ABSENT_MARKER)
     return f"sha256:{hasher.hexdigest()}"
+
+
+# Plan 00100 Phase 3.5: inline-safe bootstrap precondition predicate.
+#
+# Before the daemon attempts to self-bootstrap a missing venv (Task 3.5.2),
+# it consults `can_inline_bootstrap`. Every one of the five preconditions
+# must hold — any failure routes to the LLM-guided fallback (Task 3.5.3)
+# so the user sees actionable remediation rather than an opaque crash.
+_BOOTSTRAP_MISSING_UV = "uv"
+_BOOTSTRAP_MISSING_PYPROJECT = _PYPROJECT_FILENAME
+_BOOTSTRAP_MISSING_UV_LOCK = _UV_LOCK_FILENAME
+_BOOTSTRAP_MISSING_PYTHON = "compatible-python"
+_BOOTSTRAP_MISSING_UNTRACKED_WRITABLE = "untracked-writable"
+_UNTRACKED_SUBDIR_NAME = "untracked"
+_REQUIRES_PYTHON_MIN_PATTERN = re.compile(r">=\s*(\d+)\.(\d+)")
+_PROBE_VERSION_TUPLE = "import sys;print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+
+
+@dataclass(frozen=True)
+class BootstrapDecision:
+    """Outcome of :func:`can_inline_bootstrap`.
+
+    Attributes:
+        allowed: True only when all preconditions hold.
+        missing: Stable identifiers for each failed precondition (one of
+            ``uv``, ``pyproject.toml``, ``uv.lock``, ``compatible-python``,
+            ``untracked-writable``). Empty when ``allowed`` is True.
+        reason: Human-readable enumeration of every failure, joined by ``; ``.
+            When ``allowed`` is True, a single confirmation line.
+    """
+
+    allowed: bool
+    missing: list[str] = field(default_factory=list)
+    reason: str = ""
+
+
+def _parse_requires_python_min(spec: str) -> tuple[int, int] | None:
+    """Extract the ``(major, minor)`` lower bound from a PEP 621 spec.
+
+    Supports the ``>=X.Y`` / ``>=X.Y.Z`` forms this project uses. Returns
+    None for specs the parser doesn't cover — callers fall back to the
+    ``_find_compatible_python_on_path`` hardcoded 3.11 gate rather than
+    rejecting unfamiliar specs outright.
+    """
+    match = _REQUIRES_PYTHON_MIN_PATTERN.search(spec)
+    if match is None:
+        return None
+    return (int(match.group(1)), int(match.group(2)))
+
+
+def _probe_python_major_minor(python: Path) -> tuple[int, int]:
+    """Return ``(major, minor)`` of ``python`` by subprocess probe.
+
+    Used only during precondition checking — the hot path never runs this.
+    Raises ``subprocess.SubprocessError`` (incl. ``CalledProcessError`` on a
+    non-zero exit and ``TimeoutExpired`` on hang), ``OSError`` if the binary
+    is unreachable, or ``ValueError`` if stdout is not the expected
+    ``MAJOR.MINOR`` shape. Callers that want failure to mean "version
+    incompatible" must catch these explicitly.
+    """
+    import subprocess  # nosec B404 — trusted: probing a PATH-resolved python
+
+    result = subprocess.run(  # nosec B603 — fixed argv, no shell
+        [str(python), "-c", _PROBE_VERSION_TUPLE],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=_COMPATIBLE_PYTHON_PROBE_TIMEOUT_SECS,
+    )
+    major_str, minor_str = result.stdout.strip().split(".", 1)
+    return (int(major_str), int(minor_str))
+
+
+def can_inline_bootstrap(daemon_dir: Path) -> BootstrapDecision:
+    """Decide whether the daemon may bootstrap its own venv in-place.
+
+    All five preconditions must hold; see module-level comment above the
+    ``_BOOTSTRAP_MISSING_*`` constants. When any fails, the returned
+    :class:`BootstrapDecision` carries stable missing-ids plus a concatenated
+    ``reason`` so the Task 3.5.3 SessionStart advisor can translate each
+    missing-id into precise remediation text.
+    """
+    import subprocess  # nosec B404 — only the exception type is needed here
+
+    missing: list[str] = []
+    reasons: list[str] = []
+
+    if shutil.which("uv") is None:
+        missing.append(_BOOTSTRAP_MISSING_UV)
+        reasons.append("uv not resolvable on PATH")
+
+    pyproject_path = daemon_dir / _PYPROJECT_FILENAME
+    pyproject_data: dict[str, Any] | None = None
+    if not pyproject_path.is_file():
+        missing.append(_BOOTSTRAP_MISSING_PYPROJECT)
+        reasons.append(f"{_PYPROJECT_FILENAME} missing at {daemon_dir}")
+    else:
+        try:
+            pyproject_data = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
+        except (tomllib.TOMLDecodeError, OSError, UnicodeDecodeError) as exc:
+            missing.append(_BOOTSTRAP_MISSING_PYPROJECT)
+            reasons.append(f"{_PYPROJECT_FILENAME} failed to parse: {exc}")
+
+    if not (daemon_dir / _UV_LOCK_FILENAME).is_file():
+        missing.append(_BOOTSTRAP_MISSING_UV_LOCK)
+        reasons.append(f"{_UV_LOCK_FILENAME} missing at {daemon_dir}")
+
+    candidate = _find_compatible_python_on_path()
+    if candidate is None:
+        missing.append(_BOOTSTRAP_MISSING_PYTHON)
+        reasons.append(
+            "no compatible python on PATH " f"(tried {list(_COMPATIBLE_PYTHON_CANDIDATES)})"
+        )
+    elif pyproject_data is not None:
+        requires = pyproject_data.get("project", {}).get("requires-python")
+        if isinstance(requires, str):
+            min_version = _parse_requires_python_min(requires)
+            if min_version is not None:
+                try:
+                    candidate_version = _probe_python_major_minor(candidate)
+                except (OSError, subprocess.SubprocessError, ValueError):
+                    missing.append(_BOOTSTRAP_MISSING_PYTHON)
+                    reasons.append(f"{candidate} probe failed (cannot verify version)")
+                else:
+                    if candidate_version < min_version:
+                        missing.append(_BOOTSTRAP_MISSING_PYTHON)
+                        reasons.append(
+                            f"{candidate} does not satisfy " f"requires-python={requires!r}"
+                        )
+
+    untracked = daemon_dir / _UNTRACKED_SUBDIR_NAME
+    if untracked.is_dir():
+        if not os.access(untracked, os.W_OK):
+            missing.append(_BOOTSTRAP_MISSING_UNTRACKED_WRITABLE)
+            reasons.append(f"{untracked} exists but is not writable")
+    elif not os.access(daemon_dir, os.W_OK):
+        missing.append(_BOOTSTRAP_MISSING_UNTRACKED_WRITABLE)
+        reasons.append(f"{daemon_dir} not writable — cannot create {_UNTRACKED_SUBDIR_NAME}/")
+
+    if not missing:
+        return BootstrapDecision(
+            allowed=True,
+            missing=[],
+            reason="all inline-bootstrap preconditions satisfied",
+        )
+    return BootstrapDecision(
+        allowed=False,
+        missing=missing,
+        reason="; ".join(reasons),
+    )
 
 
 def get_venv_path(project_dir: Path | str) -> Path:

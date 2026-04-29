@@ -309,15 +309,15 @@ Opus orchestrates a team. Each phase lands a green state before the next begins.
 
 **Why**: Current behaviour on missing venv is "error, run installer manually". Friction for every fresh-clone / post-prune / cross-env first-start. User directive: if the preconditions are unambiguous, bootstrap inline; otherwise emit a hook for LLM-guided recovery.
 
-- [ ] ⬜ **Task 3.5.1**: Define the "inline-safe" precondition predicate
-  - [ ] ⬜ New helper `can_inline_bootstrap(daemon_dir: Path) -> BootstrapDecision` in `src/claude_code_hooks_daemon/daemon/paths.py` returning a dataclass with `(allowed: bool, missing: list[str], reason: str)`
-  - [ ] ⬜ All five must hold for `allowed=True`:
+- [x] ✅ **Task 3.5.1**: Define the "inline-safe" precondition predicate
+  - [x] ✅ New helper `can_inline_bootstrap(daemon_dir: Path) -> BootstrapDecision` in `src/claude_code_hooks_daemon/daemon/paths.py` returning a dataclass with `(allowed: bool, missing: list[str], reason: str)`
+  - [x] ✅ All five must hold for `allowed=True`:
     1. `shutil.which("uv")` returns a path
     2. `{daemon_dir}/pyproject.toml` exists and parses
     3. `{daemon_dir}/uv.lock` exists
     4. `find_compatible_python()` returns a Python satisfying `pyproject.toml:requires-python`
     5. Target venv parent (`{daemon_dir}/untracked/`) is writable
-  - [ ] ⬜ Failing tests first: `tests/unit/daemon/test_bootstrap_decision.py` — one test per precondition-missing path; one test for all-green case
+  - [x] ✅ Failing tests first: `tests/unit/daemon/test_bootstrap_decision.py` — one test per precondition-missing path; one test for all-green case; plus the probe-failure exception branch (FAIL-FAST: `_probe_python_major_minor` raises rather than returning None)
 - [ ] ⬜ **Task 3.5.2**: Wire daemon startup to call `ensure_venv` when resolver finds no current venv AND `can_inline_bootstrap` says yes
   - [ ] ⬜ Hook site: `scripts/init.sh::validate_venv` → on failure, branch on `BootstrapDecision`
   - [ ] ⬜ Inline path: invoke `ensure_venv` via the Python SSOT CLI (from Phase 2) with a timeout ceiling (180s) — log progress, stream uv output
