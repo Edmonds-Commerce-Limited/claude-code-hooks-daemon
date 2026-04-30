@@ -112,16 +112,52 @@ class TestFingerprintKeyed:
 
 
 class TestLegacyFallback:
-    def test_falls_back_to_legacy_when_fp_helper_missing(self, tmp_path: Path) -> None:
-        project = _setup_fake_project(tmp_path, include_fp_helper=False)
+    def test_missing_paths_py_exits_nonzero_with_reinstall_directive(self, tmp_path: Path) -> None:
+        """``paths.py`` SSOT missing → non-zero exit + clear stderr.
 
-        result = _run(project)
-        assert result == str(project / "untracked" / "venv")
+        Plan 00103 Decision 2: when the SSOT is unreachable the resolver
+        must fail loudly. The previous behaviour silently fell back to the
+        unversioned ``${PROJECT_ROOT}/untracked/venv`` path that v3.7.0
+        retired, so callers got a confusing "venv not found" instead of
+        the actionable "reinstall the daemon".
+        """
+        project = _setup_fake_project(tmp_path, include_fp_helper=False)
+        fake_script = project / "scripts" / "venv-include.bash"
+
+        env = os.environ.copy()
+        env.pop("HOOKS_DAEMON_VENV_PATH", None)
+        result = subprocess.run(
+            ["bash", "-c", f'source "{fake_script}" && echo "$VENV_DIR"'],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
+
+        assert result.returncode != 0, (
+            "venv-include.bash must exit non-zero when paths.py is missing. "
+            f"returncode={result.returncode}, stdout={result.stdout!r}, "
+            f"stderr={result.stderr!r}"
+        )
+        assert (
+            "paths.py" in result.stderr or "SSOT" in result.stderr
+        ), f"stderr must reference the missing SSOT. Got stderr=\n{result.stderr}"
+        # The unversioned legacy path must NEVER be emitted to stdout.
+        assert f"{project}/untracked/venv\n" not in result.stdout, (
+            "Resolver must not silently emit the unversioned legacy path. "
+            f"Got stdout={result.stdout!r}"
+        )
 
     def test_falls_back_to_legacy_when_legacy_exists_and_keyed_does_not(
         self, tmp_path: Path
     ) -> None:
-        """Pre-v3.7.0 installs have untracked/venv/ but no keyed venv yet."""
+        """Pre-v3.7.0 installs have untracked/venv/ but no keyed venv yet.
+
+        This is the SSOT's own legacy precedence (paths.py is present and
+        returns the legacy path because that is where a venv actually
+        lives). It must keep working — Plan 00103 only forbids silent
+        fallback when the SSOT itself can't be invoked.
+        """
         project = _setup_fake_project(tmp_path)
         _fake_venv(project / "untracked" / "venv")
 

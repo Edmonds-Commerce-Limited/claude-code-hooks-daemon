@@ -1,22 +1,18 @@
 """Integration tests for Plan 00100 Task 2.7 — ``ensure_venv()`` guard.
 
-Context: the Phase 2 SSOT refactor removed duplicate resolvers, but one
-failure mode persisted in principle — if paths.py was missing at
-venv-include sourcing time, the wrapper fell back to the legacy
-``$PROJECT_ROOT/untracked/venv`` path AND ``ensure_venv`` would happily
-create a fresh venv there. That path is the very shape that caused the
-concurrent-container cross-Python corruption in v3.7.0, so we must never
-create at it even as a degraded fallback.
+Plan 00103 Decision 2 supersedes the original failure mode this guard
+defended against. When paths.py is missing at sourcing time the wrapper
+no longer falls back to the bare legacy path silently — sourcing itself
+fails loudly with a stderr directive. The legacy-path creation refusal
+is now achieved at sourcing time rather than inside ensure_venv.
 
-Guard contract:
+Surviving guard responsibilities (Plan 00103-compatible):
 
-  1. ``ensure_venv`` detects when VENV_DIR is the bare legacy path
-     (ends with ``/untracked/venv`` — no fingerprint suffix) AND the venv
-     does not already exist.
-  2. In that state it FAILS FAST with a clear error naming the issue.
-  3. Existing legacy venvs (pre-v3.7.0 installs) are still accepted —
-     the guard only refuses *creation*, never pre-existing installs.
-  4. Fingerprint-keyed paths (``untracked/venv-py311-abc12345``) are
+  1. Sourcing fails loudly when paths.py is missing — no opportunity to
+     reach ensure_venv or to create at the bare legacy path.
+  2. Existing legacy venvs (pre-v3.7.0 installs) are still accepted via
+     the SSOT's own legacy-precedence return.
+  3. Fingerprint-keyed paths (``untracked/venv-py311-abc12345``) are
      always permitted — those are the canonical target.
 """
 
@@ -68,42 +64,52 @@ def _run_ensure_venv(
 
 
 class TestLegacyPathCreationRefused:
-    """The core guard: creating a NEW venv at the bare legacy path must fail."""
+    """Plan 00103 supersedes the original guard via fail-loud sourcing.
+
+    When paths.py is absent the wrapper no longer falls back to the bare
+    legacy path — sourcing aborts before ensure_venv ever runs. The
+    end-result invariant ("no venv is created at the legacy path") is
+    preserved; the failure point moves earlier.
+    """
 
     def test_refuses_to_create_at_legacy_path_when_ssot_unavailable(self, tmp_path: Path) -> None:
-        """No SSOT script present → wrapper falls back to legacy path. Without
-        the guard, ensure_venv would silently create the exact failure mode
-        Plan 00100 deleted. The guard must stop it."""
+        """No SSOT script present → sourcing fails with a stderr directive.
+
+        Pre-Plan-00103: wrapper silently fell through to the legacy path
+        and the ensure_venv guard caught it. Post-Plan-00103: sourcing
+        itself fails — the legacy path is never assigned to VENV_DIR.
+        """
         project = _setup_fake_project(tmp_path, include_ssot=False)
 
         result = _run_ensure_venv(project)
         assert result.returncode != 0, (
-            f"ensure_venv must refuse to create at the legacy path, but it "
-            f"succeeded.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+            f"Sourcing venv-include.bash must fail loudly when paths.py is "
+            f"missing.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
-        combined = (result.stdout + result.stderr).lower()
-        assert "legacy" in combined, (
-            "Error message should explain why the legacy path is refused. "
+        assert "paths.py" in result.stderr or "SSOT" in result.stderr, (
+            "Error message should reference the missing SSOT. "
             f"Got: {result.stdout}\n{result.stderr}"
         )
         # And it must NOT have created the venv.
         assert not (
             project / "untracked" / "venv" / "bin" / "python3"
-        ).exists(), "Guard must fail BEFORE creating the venv — no side effects."
+        ).exists(), "Sourcing must fail BEFORE creating any venv — no side effects."
 
 
 class TestExistingLegacyVenvAccepted:
-    """A pre-v3.7.0 install that already has untracked/venv/ is still valid —
-    we only refuse *creation* at that path."""
+    """A pre-v3.7.0 install that already has ``untracked/venv/`` is still
+    valid. The SSOT's own legacy-precedence return preserves this — paths.py
+    must be present (Plan 00103 contract), and when only the legacy venv
+    exists it gets returned as the resolved VENV_DIR."""
 
     def test_pre_existing_legacy_venv_is_accepted(self, tmp_path: Path) -> None:
-        project = _setup_fake_project(tmp_path, include_ssot=False)
+        project = _setup_fake_project(tmp_path, include_ssot=True)
         _fake_venv(project / "untracked" / "venv")
 
         result = _run_ensure_venv(project)
         assert result.returncode == 0, (
-            f"ensure_venv must accept an existing legacy venv.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            f"ensure_venv must accept an existing legacy venv when the SSOT "
+            f"is reachable.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
 
