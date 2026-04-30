@@ -30,15 +30,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
-_PHASE2_REASON = (
-    "Plan 00103 Phase 2 not yet landed — paths.py still has top-level "
-    "`import tomllib` (line 22). Marker is removed as part of the Phase 2 "
-    "deferred-import commit; strict=True forces the marker to be removed "
-    "the moment the fix lands."
-)
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PATHS_PY = REPO_ROOT / "src" / "claude_code_hooks_daemon" / "daemon" / "paths.py"
 
@@ -101,7 +92,6 @@ def _compute_lock_hash_for(daemon_dir: Path) -> str:
     return result
 
 
-@pytest.mark.xfail(strict=True, reason=_PHASE2_REASON)
 def test_check_venv_fresh_does_not_crash_when_tomllib_unavailable(tmp_path: Path) -> None:
     """``check-venv-fresh`` must not surface ``ModuleNotFoundError`` under <3.11.
 
@@ -140,7 +130,6 @@ def test_check_venv_fresh_does_not_crash_when_tomllib_unavailable(tmp_path: Path
     )
 
 
-@pytest.mark.xfail(strict=True, reason=_PHASE2_REASON)
 def test_check_venv_fresh_returns_1_on_mismatch_when_tomllib_unavailable(
     tmp_path: Path,
 ) -> None:

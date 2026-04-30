@@ -19,7 +19,6 @@ import re
 import shutil
 import sys
 import time
-import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -378,6 +377,26 @@ def _probe_python_major_minor(python: Path) -> tuple[int, int]:
     return (int(major_str), int(minor_str))
 
 
+class _TomlParseError(Exception):
+    """Wraps tomllib.TOMLDecodeError so callers don't need tomllib in scope.
+
+    Plan 00103 Decision 1: keeping ``tomllib`` deferred lets ``paths.py`` import
+    cleanly on Python <3.11 hosts where the stdlib module is unavailable.
+    """
+
+
+def _load_toml_or_raise(path: Path) -> dict[str, Any]:
+    # ``tomllib`` is Python 3.11+ stdlib; deferred so ``paths.py`` imports cleanly
+    # on 3.9/3.10 hosts. Only ``can_inline_bootstrap`` calls this helper, and the
+    # bootstrap precondition is itself gated on a 3.11+ interpreter being found.
+    import tomllib
+
+    try:
+        return tomllib.loads(path.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as exc:
+        raise _TomlParseError(str(exc)) from exc
+
+
 def can_inline_bootstrap(daemon_dir: Path) -> BootstrapDecision:
     """Decide whether the daemon may bootstrap its own venv in-place.
 
@@ -403,8 +422,8 @@ def can_inline_bootstrap(daemon_dir: Path) -> BootstrapDecision:
         reasons.append(f"{_PYPROJECT_FILENAME} missing at {daemon_dir}")
     else:
         try:
-            pyproject_data = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
-        except (tomllib.TOMLDecodeError, OSError, UnicodeDecodeError) as exc:
+            pyproject_data = _load_toml_or_raise(pyproject_path)
+        except (_TomlParseError, OSError, UnicodeDecodeError) as exc:
             missing.append(_BOOTSTRAP_MISSING_PYPROJECT)
             reasons.append(f"{_PYPROJECT_FILENAME} failed to parse: {exc}")
 
