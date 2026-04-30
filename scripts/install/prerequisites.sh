@@ -37,49 +37,131 @@ Installation:
 }
 
 #
-# check_python3() - Verify python3 is installed and meets version requirements
+# _is_python_at_least_311() - Verify a Python interpreter is 3.11 or newer
 #
-# Requires Python 3.11 or higher
+# Plan 00103 Decision 3 Rule B: parses ``--version`` output rather than
+# trusting the command name (because ``python3`` on RHEL/CentOS is 3.9 and
+# on a Debian image may be anything from 3.7 to 3.13). Asserts MAJOR == 3
+# AND MINOR >= 11, OR MAJOR > 3 (covers a hypothetical Python 4).
+#
+# Args:
+#   $1 - cmd: Path or name of Python interpreter to probe
 #
 # Returns:
-#   0 - python3 found and version >= 3.11
-#   1 - python3 not found or version too old (also exits via fail_fast)
+#   0 - cmd is executable AND reports Python 3.11+
+#   1 - cmd missing, non-executable, or reports Python <3.11
 #
-check_python3() {
-    # If Layer 1 already found a compatible Python, use it
-    if [ -n "${HOOKS_DAEMON_PYTHON:-}" ]; then
-        if "$HOOKS_DAEMON_PYTHON" -c 'import sys; v=sys.version_info; exit(0 if v >= (3,11) else 1)' 2>/dev/null; then
-            local found_version
-            found_version=$("$HOOKS_DAEMON_PYTHON" -c 'import sys; print(".".join(map(str, sys.version_info[:2])))' 2>/dev/null)
-            print_success "Python $found_version found (via HOOKS_DAEMON_PYTHON=$HOOKS_DAEMON_PYTHON)"
+# (Plan 00104 will move this helper into a shared library; currently
+# duplicated between scripts/upgrade.sh and scripts/install/prerequisites.sh
+# per the Decision 3 acceptance plan.)
+#
+_is_python_at_least_311() {
+    local cmd="$1"
+    [ -n "$cmd" ] || return 1
+    if ! command -v "$cmd" > /dev/null; then
+        return 1
+    fi
+    local version_output=""
+    version_output="$("$cmd" --version 2>&1)" || return 1
+    if [[ "$version_output" =~ Python[[:space:]]+([0-9]+)\.([0-9]+) ]]; then
+        local major="${BASH_REMATCH[1]}"
+        local minor="${BASH_REMATCH[2]}"
+        if [ "$major" -gt 3 ]; then
+            return 0
+        fi
+        if [ "$major" -eq 3 ] && [ "$minor" -ge 11 ]; then
             return 0
         fi
     fi
+    return 1
+}
 
-    # Search for compatible Python: python3 first, then versioned candidates
-    local candidates=("python3" "python3.13" "python3.12" "python3.11")
-    local candidate
+#
+# check_python3() - Verify a Python 3.11+ interpreter is available
+#
+# Plan 00103 Decision 3 Rule B (probe-list ban):
+#   - Bare ``python3`` is INTENTIONALLY excluded from the candidate list.
+#     Bare ``python3`` is unreliable on the user's PATH (RHEL/CentOS-default
+#     is 3.9, Debian/container images vary). Probing it first means the
+#     daemon gets bootstrapped against the wrong interpreter and fails deep
+#     in the call stack. The probe must only use versioned commands.
+#   - ``compgen -c python3.`` discovers any ``python3.NN`` so future versions
+#     are picked up automatically.
+#   - ``HOOKS_DAEMON_PYTHON`` is honoured as an explicit *input* override
+#     (validated against 3.11+). An invalid override fails fast — never
+#     silently falls back to PATH probing.
+#
+# Returns:
+#   0 - compatible Python found (HOOKS_DAEMON_PYTHON exported)
+#   1 - no compatible Python found (also exits via fail_fast)
+#
+check_python3() {
+    # Step 1: explicit override wins (validated, no fallback on failure).
+    if [ -n "${HOOKS_DAEMON_PYTHON:-}" ]; then
+        if _is_python_at_least_311 "$HOOKS_DAEMON_PYTHON"; then
+            export HOOKS_DAEMON_PYTHON
+            local found_version=""
+            found_version=$("$HOOKS_DAEMON_PYTHON" -c 'import sys; print(".".join(map(str, sys.version_info[:2])))' 2> /dev/null) || found_version="?"
+            print_success "Python $found_version found (via HOOKS_DAEMON_PYTHON=$HOOKS_DAEMON_PYTHON)"
+            return 0
+        fi
+        fail_fast "HOOKS_DAEMON_PYTHON=$HOOKS_DAEMON_PYTHON is not a usable Python 3.11+ interpreter.
 
-    for candidate in "${candidates[@]}"; do
-        if command -v "$candidate" &> /dev/null; then
-            if "$candidate" -c 'import sys; v=sys.version_info; exit(0 if v >= (3,11) else 1)' 2>/dev/null; then
-                HOOKS_DAEMON_PYTHON="$(command -v "$candidate")"
-                export HOOKS_DAEMON_PYTHON
-                local found_version
-                found_version=$("$HOOKS_DAEMON_PYTHON" -c 'import sys; print(".".join(map(str, sys.version_info[:2])))' 2>/dev/null)
-                print_success "Python $found_version found ($HOOKS_DAEMON_PYTHON)"
-                return 0
+Refusing to fall back to PATH probing — that would silently mask your broken override.
+
+Either:
+  - Unset HOOKS_DAEMON_PYTHON and let the installer probe PATH, or
+  - Point HOOKS_DAEMON_PYTHON at an absolute path to a Python 3.11 or newer interpreter."
+    fi
+
+    # Step 2: build candidate list (versioned only) + open-ended discovery.
+    local candidates=("python3.13" "python3.12" "python3.11")
+    local discovered=""
+    discovered="$(compgen -c "python3." 2> /dev/null)" || discovered=""
+    if [ -n "$discovered" ]; then
+        local cmd
+        while IFS= read -r cmd; do
+            [[ "$cmd" =~ ^python3\.[0-9]+$ ]] || continue
+            local already=0
+            local existing
+            for existing in "${candidates[@]}"; do
+                if [ "$existing" = "$cmd" ]; then
+                    already=1
+                    break
+                fi
+            done
+            if [ "$already" -eq 0 ]; then
+                candidates+=("$cmd")
             fi
+        done <<< "$discovered"
+    fi
+
+    # Step 3: probe candidates in order; first 3.11+ match wins.
+    local candidate
+    for candidate in "${candidates[@]}"; do
+        if _is_python_at_least_311 "$candidate"; then
+            HOOKS_DAEMON_PYTHON="$(command -v "$candidate")"
+            export HOOKS_DAEMON_PYTHON
+            local found_version=""
+            found_version=$("$HOOKS_DAEMON_PYTHON" -c 'import sys; print(".".join(map(str, sys.version_info[:2])))' 2> /dev/null) || found_version="?"
+            print_success "Python $found_version found ($HOOKS_DAEMON_PYTHON)"
+            return 0
         fi
     done
 
-    fail_fast "No compatible Python (3.11+) found. Searched for: ${candidates[*]}
+    fail_fast "No compatible Python (3.11+) found.
+
+Searched (versioned commands only — bare \"python3\" is intentionally not probed
+because it is unreliable across distros): ${candidates[*]}
 
 Please install Python 3.11 or higher:
   Ubuntu/Debian: sudo apt-get install python3.11
   macOS: brew install python@3.11
   Fedora: sudo dnf install python3.11
-  Arch: sudo pacman -S python"
+  Arch: sudo pacman -S python
+
+Or set HOOKS_DAEMON_PYTHON to the absolute path of a 3.11+ interpreter:
+  HOOKS_DAEMON_PYTHON=/usr/bin/python3.12 ..."
 }
 
 #

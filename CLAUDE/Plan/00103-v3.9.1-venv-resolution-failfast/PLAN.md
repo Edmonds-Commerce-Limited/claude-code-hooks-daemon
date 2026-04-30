@@ -202,10 +202,10 @@ Each site is a small independent edit. No common library — that is Plan 00104.
 
 ### Phase 4: Bootstrap explicit probe — `install.sh` and `upgrade.sh`
 
-- [ ] ⬜ **Task 4.1**: Add helper `_is_python_at_least_311` (parses `--version` output, asserts `MAJOR == 3 && MINOR >= 11`) to both `install.sh` and `upgrade.sh`. Acceptable to duplicate — DRY in Plan 00104.
-- [ ] ⬜ **Task 4.2**: Replace `${HOOKS_DAEMON_PYTHON:-python3}` and the `python3` candidate in `install.sh:40-89` with the Decision 3 probe block.
-- [ ] ⬜ **Task 4.3**: Same in `upgrade.sh:86-110` (`find_compatible_python`).
-- [ ] ⬜ **Task 4.4**: Verify Phase 1 Task 1.5 (5 bootstrap-probe assertions) now passes.
+- [x] ✅ **Task 4.1**: Add helper `_is_python_at_least_311` (parses `--version` output, asserts `MAJOR == 3 && MINOR >= 11`) to both `install.sh` and `upgrade.sh`. Acceptable to duplicate — DRY in Plan 00104.
+- [x] ✅ **Task 4.2**: Replace `${HOOKS_DAEMON_PYTHON:-python3}` and the `python3` candidate in `install.sh:40-89` with the Decision 3 probe block. (Implemented in `scripts/install/prerequisites.sh::check_python3` — the actual install probe has migrated out of `install.sh` since the plan was authored.)
+- [x] ✅ **Task 4.3**: Same in `upgrade.sh:86-110` (`find_compatible_python`).
+- [x] ✅ **Task 4.4**: Verify Phase 1 Task 1.5 (5 bootstrap-probe assertions) now passes.
 
 ### Phase 5: Acceptance fidelity — multi-Python fixture
 

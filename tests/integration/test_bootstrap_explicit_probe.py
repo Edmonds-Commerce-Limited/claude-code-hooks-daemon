@@ -47,19 +47,9 @@ import subprocess
 import textwrap
 from pathlib import Path
 
-import pytest
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 UPGRADE_SCRIPT = REPO_ROOT / "scripts" / "upgrade.sh"
 BASH = shutil.which("bash") or "/bin/bash"
-
-_PHASE4_REASON = (
-    "Plan 00103 Phase 4 not yet landed — find_compatible_python in "
-    "scripts/upgrade.sh still uses bare ``python3`` candidate and ignores "
-    "``HOOKS_DAEMON_PYTHON`` as input. Marker is removed as part of the "
-    "Phase 4 bootstrap-probe rewrite; strict=True forces the marker to be "
-    "removed the moment the fix lands."
-)
 
 _HELPER_STUBS = textwrap.dedent("""\
     #!/usr/bin/env bash
@@ -72,33 +62,46 @@ _HELPER_STUBS = textwrap.dedent("""\
 
 
 def _extract_probe_function(tmp_path: Path) -> Path:
-    """Extract ``find_compatible_python`` to a self-contained sourceable file.
+    """Extract ``find_compatible_python`` (and its helpers) to a sourceable file.
 
-    Reads ``scripts/upgrade.sh``, locates the function definition, writes a
-    file with stubbed ``_ok`` / ``_err`` / ``_fail`` helpers and the function
-    body. This lets the test source the function in isolation without
-    triggering upgrade.sh's main body (which would attempt git operations
-    against a non-existent project root).
+    Reads ``scripts/upgrade.sh``, locates each required function definition,
+    writes a file with stubbed ``_ok`` / ``_err`` / ``_fail`` helpers and the
+    function bodies. This lets the test source the functions in isolation
+    without triggering upgrade.sh's main body (which would attempt git
+    operations against a non-existent project root).
+
+    Plan 00103 Phase 4 added the ``_is_python_at_least_311`` helper that
+    ``find_compatible_python`` depends on; the extractor pulls both so the
+    helper is available when the probe is sourced.
     """
     text = UPGRADE_SCRIPT.read_text(encoding="utf-8")
     lines = text.splitlines()
-    start = None
-    end = None
-    for index, line in enumerate(lines):
-        if line.strip().startswith("find_compatible_python()"):
-            start = index
-            continue
-        if start is not None and line.strip() == "}":
-            end = index
-            break
-    assert start is not None and end is not None, (
-        "could not locate find_compatible_python() in scripts/upgrade.sh — "
-        "if the function was renamed or moved, update the extraction logic"
-    )
-    func_body = "\n".join(lines[start : end + 1])
+
+    def _slice_function(name: str) -> str:
+        start: int | None = None
+        end: int | None = None
+        for index, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped.startswith(f"{name}()"):
+                start = index
+                continue
+            if start is not None and stripped == "}":
+                end = index
+                break
+        assert start is not None and end is not None, (
+            f"could not locate {name}() in scripts/upgrade.sh — if the function "
+            f"was renamed or moved, update the extraction logic"
+        )
+        return "\n".join(lines[start : end + 1])
+
+    helper_body = _slice_function("_is_python_at_least_311")
+    func_body = _slice_function("find_compatible_python")
 
     sourceable = tmp_path / "probe_func.sh"
-    sourceable.write_text(_HELPER_STUBS + func_body + "\n", encoding="utf-8")
+    sourceable.write_text(
+        _HELPER_STUBS + helper_body + "\n\n" + func_body + "\n",
+        encoding="utf-8",
+    )
     sourceable.chmod(0o755)
     return sourceable
 
@@ -185,7 +188,6 @@ def _selected_python(stdout: str) -> str:
     return ""
 
 
-@pytest.mark.xfail(strict=True, reason=_PHASE4_REASON)
 def test_bootstrap_probes_versioned_commands_first(tmp_path: Path) -> None:
     """When both ``python3`` and ``python3.13`` exist & both work, prefer versioned.
 
@@ -224,7 +226,6 @@ def test_bootstrap_probes_versioned_commands_first(tmp_path: Path) -> None:
     )
 
 
-@pytest.mark.xfail(strict=True, reason=_PHASE4_REASON)
 def test_bootstrap_probes_open_ended_for_future_versions(tmp_path: Path) -> None:
     """Probe must discover future versions like ``python3.14`` via compgen.
 
@@ -288,7 +289,6 @@ def test_bootstrap_fails_fast_when_no_compatible_python(tmp_path: Path) -> None:
     )
 
 
-@pytest.mark.xfail(strict=True, reason=_PHASE4_REASON)
 def test_bootstrap_honours_explicit_override(tmp_path: Path) -> None:
     """``HOOKS_DAEMON_PYTHON`` explicit override short-circuits the probe.
 
@@ -328,7 +328,6 @@ def test_bootstrap_honours_explicit_override(tmp_path: Path) -> None:
     )
 
 
-@pytest.mark.xfail(strict=True, reason=_PHASE4_REASON)
 def test_bootstrap_rejects_invalid_override(tmp_path: Path) -> None:
     """``HOOKS_DAEMON_PYTHON`` pointing at <3.11 must fail fast.
 
