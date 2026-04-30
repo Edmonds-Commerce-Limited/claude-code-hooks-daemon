@@ -1,13 +1,18 @@
 """Integration tests for scripts/install/venv_resolver.sh.
 
 The bash SSOT helper that all install/upgrade/verify scripts source so they
-find the same venv skill wrappers do. It MUST implement the same 4-step
-precedence as `_resolve-venv.sh` (shipped alongside the skill):
+find the same venv skill wrappers do. It MUST implement the same precedence
+as `_resolve-venv.sh` (shipped alongside the skill):
 
   1. $HOOKS_DAEMON_VENV_PATH                    — explicit override
   2. $DAEMON_DIR/untracked/venv-{fingerprint}/  — recomputed fingerprint
   3. $DAEMON_DIR/untracked/venv-*/              — any existing fingerprint venv
-  4. $DAEMON_DIR/untracked/venv/                — legacy fallback (pre-v3.7.0)
+
+When none of the above resolve, the resolver fails loudly with exit 5 + a
+stderr directive (Plan 00103 Decision 2). The pre-v3.7.0 unversioned legacy
+``untracked/venv/`` path is no longer accepted as a silent fallback because
+that hid the v3.9.0 field-bug regression — operators got "venv not found"
+when the real cause was a 3.9-vs-3.11 ``import tomllib`` crash.
 
 These tests exercise the resolver directly by sourcing it in a bash harness.
 They mirror tests/integration/test_skill_scripts_venv_resolution.py so parity
@@ -134,15 +139,50 @@ class TestScanFallback:
 
 
 class TestLegacyFallback:
-    def test_legacy_path_returned_when_nothing_exists(self, tmp_path: Path) -> None:
+    """Plan 00103 Decision 2: when no venv exists, the resolver MUST fail
+    loudly with exit 5 + stderr directive. The pre-v3.7.0 silent fallback to
+    ``$DAEMON_DIR/untracked/venv/bin/python`` is gone because it hid real
+    failures (ModuleNotFoundError, broken venvs) behind a generic "venv
+    missing" message."""
+
+    def test_no_venv_exits_nonzero_with_install_directive(self, tmp_path: Path) -> None:
         daemon_dir = tmp_path / "daemon"
         daemon_dir.mkdir()
 
-        result = _run_resolver(daemon_dir)
-        assert result == f"{daemon_dir}/untracked/venv/bin/python", (
-            "When no venv exists anywhere, resolver must still return the "
-            "legacy path so the caller's own 'venv missing' diagnostic fires "
-            "against a familiar path."
+        env = os.environ.copy()
+        env.pop("HOOKS_DAEMON_VENV_PATH", None)
+        env.pop("HOOKS_DAEMON_PYTHON", None)
+        env["PATH"] = os.environ["PATH"]
+
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                HARNESS,
+                "_",
+                str(daemon_dir),
+                str(FINGERPRINT_HELPER),
+                str(RESOLVER),
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
+
+        assert result.returncode != 0, (
+            "Resolver must exit non-zero when no venv exists anywhere. "
+            f"returncode={result.returncode}, stdout={result.stdout!r}, "
+            f"stderr={result.stderr!r}"
+        )
+        assert "no usable venv" in result.stderr or "install" in result.stderr.lower(), (
+            f"stderr must reference the missing venv and the install directive. "
+            f"Got stderr=\n{result.stderr}"
+        )
+        # The unversioned legacy path must NEVER be emitted to stdout.
+        assert f"{daemon_dir}/untracked/venv/bin/python" not in result.stdout, (
+            "Resolver must not silently emit the unversioned legacy path. "
+            f"Got stdout={result.stdout!r}"
         )
 
 
