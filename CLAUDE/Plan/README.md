@@ -4,6 +4,23 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00103: v3.9.1 — venv resolution fail-fast (narrow hotfix)](00103-v3.9.1-venv-resolution-failfast/PLAN.md) - Not Started
+
+  - Patches v3.9.0 regression: `paths.py:22 import tomllib` crashes when wrappers invoke it with `python3 → 3.9` on RHEL/CentOS hosts; silent `2>/dev/null` + legacy fallback hides the crash
+  - Five sites fixed in place (no DRY consolidation — that is Plan 00104): `_resolve-venv.sh`, `venv-include.bash`, `venv_resolver.sh`, `init.sh::_resolve_python_cmd`, `venv.sh:261`
+  - Defers `tomllib` import in `paths.py` so `resolve-venv` subcommand works under any Python 3.x; `check-venv-fresh` raises clear error on \<3.11 instead of silent module-load crash
+  - Bootstrap probe replaces `${HOOKS_DAEMON_PYTHON:-python3}` and bare `python3` candidate with explicit `python3.13/3.12/3.11` + open-ended `compgen` discovery (no Python-version ceiling)
+  - Acceptance fixture: multi-Python container (`python3 → 3.9` AND `python3.13` co-resident) reproducing the field-bug topology
+  - **v1 superseded**: ambitious version bundled patch + DRY consolidation, returned three FATAL Opus reviews; split per reviewer recommendation
+
+- [00104: v3.10.0 — venv resolver DRY consolidation (structural)](00104-v3.10.0-venv-resolver-dry-consolidation/PLAN.md) - Not Started (blocked on 00103)
+
+  - Single canonical bash library `scripts/lib/resolve_venv.sh` sourced by all five sites
+  - `venv_resolver.sh` collapses to re-export shim (NOT deletion — has 9 callers per Review #3 F12)
+  - Static-check QA gate `check_canonical_callers.sh` enforces forbidden patterns
+  - Multi-host NFS hostname fail-fast, `requires-python` cross-check on probed interpreters, `set -euo pipefail` exit-vs-return contract
+  - Inherits all unresolved RISKY findings from 00103's review history (R17–R25)
+
 - [00100 (v2): Venv SSOT Consolidation — Stop the Release Treadmill](00100-venv-ssot-consolidation/PLAN.md) - Not Started
 
   - Critical: five consecutive releases (v3.1.1, v3.7.0, v3.8.0, v3.8.1, v3.8.2) patched venv bugs; this plan ends the treadmill
@@ -624,9 +641,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 94
+- **Total Plans Created**: 96
 - **Completed**: 79 (1 with reduced scope)
-- **Active**: 3 (2 not started, 1 in progress)
+- **Active**: 5 (4 not started, 1 in progress)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation)
 
