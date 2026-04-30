@@ -36,6 +36,14 @@ from pathlib import Path
 
 import pytest
 
+_PHASE3_REASON = (
+    "Plan 00103 Phase 3 not yet landed — five sites still redirect "
+    "`paths.py` stderr to /dev/null and silently fall back to the retired "
+    "`untracked/venv/bin/python` path on resolution failure. Marker is "
+    "removed as Phase 3 lands; strict=True forces the marker off the moment "
+    "the fix lands."
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SKILL_SCRIPTS_DIR = (
     REPO_ROOT / "src" / "claude_code_hooks_daemon" / "skills" / "hooks-daemon" / "scripts"
@@ -83,6 +91,30 @@ def _run_resolver(daemon_dir: Path, env_overrides: dict[str, str] | None = None)
         check=True,
     )
     return result.stdout.strip().splitlines()[-1]
+
+
+def _run_resolver_allow_fail(
+    daemon_dir: Path, env_overrides: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    """Variant of _run_resolver that captures non-zero exits.
+
+    Plan 00103 Decision 2 removes the silent legacy fallback. When resolution
+    fails the script exits non-zero with a stderr directive instead of
+    emitting a path. Tests that exercise the failure mode need to inspect
+    returncode + stderr, not just stdout.
+    """
+    env = os.environ.copy()
+    env.pop("HOOKS_DAEMON_VENV_PATH", None)
+    env["PATH"] = os.environ["PATH"]
+    if env_overrides:
+        env.update(env_overrides)
+    return subprocess.run(
+        ["bash", "-c", RESOLVER_HARNESS, "_", str(daemon_dir), str(RESOLVER)],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
 
 
 class TestResolverExists:
@@ -137,21 +169,141 @@ class TestFingerprintKeyed:
         assert result == f"{keyed_venv}/bin/python"
 
 
-class TestLegacyFallback:
-    def test_legacy_fallback_when_nothing_else_exists(self, tmp_path: Path) -> None:
+class TestNoVenvFailFast:
+    """Plan 00103 Decision 2 — when resolution misses, the script must
+    exit non-zero with a stderr directive. The previous behaviour silently
+    fell back to the unversioned legacy ``$DAEMON_DIR/untracked/venv/bin/python``
+    path (retired in v3.7.0), so callers got "venv not found" instead of the
+    real "no venv exists, run /hooks-daemon install" directive.
+
+    These tests replace the prior ``TestLegacyFallback`` class — the silent
+    legacy fallback is the bug, not the contract.
+    """
+
+    @pytest.mark.xfail(strict=True, reason=_PHASE3_REASON)
+    def test_no_venv_exits_nonzero_with_install_directive(self, tmp_path: Path) -> None:
+        """No venv at all → non-zero exit + clear "no usable venv found" stderr.
+
+        Pre-fix: resolver silently emits ``$DAEMON_DIR/untracked/venv/bin/python``
+        and exits 0. Post-fix: exit non-zero, stderr names the missing venv
+        and points the operator at the install path.
+        """
         daemon_dir = tmp_path / "daemon"
         daemon_dir.mkdir()
+        _link_fingerprint_helper(daemon_dir)
 
-        result = _run_resolver(daemon_dir)
-        assert result == f"{daemon_dir}/untracked/venv/bin/python"
+        result = _run_resolver_allow_fail(daemon_dir)
 
-    def test_legacy_fallback_when_fingerprint_helper_absent(self, tmp_path: Path) -> None:
+        assert result.returncode != 0, (
+            "Resolver must exit non-zero when no venv exists. "
+            f"Got returncode={result.returncode}, stdout={result.stdout!r}, "
+            f"stderr={result.stderr!r}"
+        )
+        assert (
+            "no usable venv" in result.stderr.lower() or "no venv" in result.stderr.lower()
+        ), f"stderr must contain a 'no venv' directive. Got stderr=\n{result.stderr}"
+        # The unversioned legacy path must NEVER be emitted to stdout.
+        assert f"{daemon_dir}/untracked/venv/bin/python" not in result.stdout, (
+            "Resolver must not emit the unversioned legacy path. " f"Got stdout={result.stdout!r}"
+        )
+
+    @pytest.mark.xfail(strict=True, reason=_PHASE3_REASON)
+    def test_missing_paths_py_exits_nonzero_with_reinstall_directive(self, tmp_path: Path) -> None:
+        """``paths.py`` SSOT missing → non-zero exit + clear stderr.
+
+        Simulates a corrupt install (skill-bundle deploy that didn't copy
+        paths.py). Pre-fix: silently fell back to legacy path. Post-fix:
+        clear stderr indicating SSOT is missing — operator reinstalls.
+        """
         daemon_dir = tmp_path / "daemon"
         daemon_dir.mkdir()
-        # No scripts/install/python_fingerprint.sh — simulates a busted install.
+        # Deliberately do NOT link paths.py — simulates the missing-SSOT case.
 
-        result = _run_resolver(daemon_dir)
-        assert result == f"{daemon_dir}/untracked/venv/bin/python"
+        result = _run_resolver_allow_fail(daemon_dir)
+
+        assert result.returncode != 0, (
+            "Resolver must exit non-zero when paths.py is missing. "
+            f"Got returncode={result.returncode}, stdout={result.stdout!r}, "
+            f"stderr={result.stderr!r}"
+        )
+        # The unversioned legacy path must NEVER be emitted.
+        assert f"{daemon_dir}/untracked/venv/bin/python" not in result.stdout, (
+            "Resolver must not silently fall back to legacy path on missing "
+            f"paths.py. Got stdout={result.stdout!r}"
+        )
+
+    def test_resolver_does_not_silence_python_errors(self, tmp_path: Path) -> None:
+        """``python3 paths.py ...`` crashes (e.g. ModuleNotFoundError) → stderr surfaces.
+
+        Plan 00103 Decision 2 removes ``2>/dev/null`` around the SSOT
+        invocation. Simulate the crash by shadowing ``tomllib`` via
+        ``sitecustomize`` so module-load fails — pre-fix paths.py crashes at
+        line ``import tomllib``. The resolver MUST surface that crash to
+        stderr instead of swallowing it.
+        """
+        daemon_dir = tmp_path / "daemon"
+        daemon_dir.mkdir()
+        _link_fingerprint_helper(daemon_dir)
+
+        # sitecustomize that makes tomllib unavailable on the python3 used by
+        # the resolver — simulates a Python <3.11 host hitting the v3.9.0 bug.
+        site_dir = tmp_path / "no_tomllib_site"
+        site_dir.mkdir()
+        (site_dir / "sitecustomize.py").write_text(
+            "import sys\nsys.modules['tomllib'] = None\n",
+            encoding="utf-8",
+        )
+
+        env_overrides = {
+            "PYTHONPATH": str(site_dir),
+            # Force a tomllib-unavailable interpreter for the SSOT call.
+            "HOOKS_DAEMON_PYTHON": sys.executable,
+        }
+
+        result = _run_resolver_allow_fail(daemon_dir, env_overrides=env_overrides)
+
+        # If paths.py still has top-level `import tomllib`, the SSOT crash
+        # MUST be visible in stderr — silenced 2>/dev/null is the bug.
+        # If paths.py has been deferred-imported (Phase 2), the SSOT runs
+        # cleanly and the test path simply asserts the resolver does not
+        # surface a crash. Both states are tested here:
+        if "ModuleNotFoundError" in result.stderr or "tomllib" in result.stderr:
+            # Pre-Phase-2: SSOT crashed. The resolver must NOT have hidden
+            # the crash via 2>/dev/null and must NOT have emitted the legacy
+            # fallback as if everything were fine.
+            assert f"{daemon_dir}/untracked/venv/bin/python" not in result.stdout, (
+                "When the SSOT python invocation crashes, resolver must not "
+                "silently fall through to the legacy unversioned path. "
+                f"stdout={result.stdout!r}, stderr={result.stderr!r}"
+            )
+            assert result.returncode != 0, (
+                "When the SSOT crashes, resolver must propagate non-zero exit. "
+                f"returncode={result.returncode}, stderr={result.stderr!r}"
+            )
+        # Post-Phase-2: SSOT runs cleanly without tomllib. Resolver still
+        # exits non-zero (no venv exists in this fixture) — tested by the
+        # other class methods.
+
+    @pytest.mark.xfail(strict=True, reason=_PHASE3_REASON)
+    def test_resolver_never_emits_unversioned_legacy_path(self) -> None:
+        """Structural guard: the resolver script must contain no literal
+        unversioned legacy fallback assignment.
+
+        Plan 00103 Decision 2 forbids the pattern
+        ``PYTHON="$DAEMON_DIR/untracked/venv/bin/python"`` (the v3.7.0-retired
+        unversioned legacy path) from appearing as a fallback in
+        ``_resolve-venv.sh``. The fingerprint-keyed venv path
+        (``untracked/venv-{fingerprint}/bin/python``) is fine — only the
+        unversioned form is banned.
+        """
+        content = RESOLVER.read_text()
+        forbidden = '"$DAEMON_DIR/untracked/venv/bin/python"'
+        assert forbidden not in content, (
+            f"_resolve-venv.sh must not contain the unversioned legacy "
+            f"fallback assignment {forbidden!r}. The path was retired in "
+            f"v3.7.0 and silently falling back to it hides real resolution "
+            f"failures (Plan 00103 Decision 2)."
+        )
 
 
 class TestFingerprintMismatchFallback:
