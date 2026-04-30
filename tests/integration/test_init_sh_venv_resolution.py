@@ -1,13 +1,21 @@
 """Integration tests for init.sh's `_resolve_python_cmd()` function.
 
-Plan 00099 Phase 4: init.sh now resolves PYTHON_CMD lazily using the
-fingerprint-keyed venv when one exists, falling through to the legacy
-`untracked/venv/` path for backwards compatibility with pre-v3.7.0 installs.
+Plan 00099 Phase 4: init.sh resolves PYTHON_CMD lazily using the
+fingerprint-keyed venv when one exists, with a scan-fallback for
+foreign-fingerprint venv directories.
+
+Plan 00103 Decision 2: when none of the precedence steps resolve, the
+resolver fails loudly with `return 5` + a stderr directive. The pre-v3.7.0
+unversioned legacy `untracked/venv/bin/python` is no longer accepted as
+a silent fallback because that hid the v3.9.0 field-bug regression where
+operators saw "venv missing" while the real cause was a 3.9-vs-3.11
+``import tomllib`` crash.
 
 Precedence (highest first):
   1. $HOOKS_DAEMON_VENV_PATH       — explicit override
-  2. venv-{fingerprint}/bin/python — fingerprint-keyed (when present)
-  3. venv/bin/python               — legacy fallback
+  2. venv-{fingerprint}/bin/python — fingerprint-keyed (recomputed)
+  3. venv-*/bin/python             — any existing fingerprint venv (scan)
+  4. fail loudly with return 5 + stderr directive
 
 Tests invoke init.sh's resolver in an isolated subshell with a fake
 $HOOKS_DAEMON_ROOT_DIR so we can control which paths exist.
@@ -132,25 +140,95 @@ class TestFingerprintKeyed:
 
 
 class TestLegacyFallback:
-    """Without override or fingerprint venv, fall through to legacy path."""
+    """Plan 00103 Decision 2: when no venv exists, the resolver MUST fail
+    loudly with `return 5` + stderr directive. The pre-v3.7.0 silent fallback
+    to ``$HOOKS_DAEMON_ROOT_DIR/untracked/venv/bin/python`` is gone because
+    it hid real failures (ModuleNotFoundError, broken venvs) behind a
+    generic "venv missing" message produced by validate_venv."""
 
-    def test_legacy_fallback_when_nothing_else_exists(self, tmp_path: Path) -> None:
+    def _run_resolver_expecting_failure(
+        self, helper: Path, root_dir: Path
+    ) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        env["HOOKS_DAEMON_ROOT_DIR"] = str(root_dir)
+        env["PROJECT_PATH"] = str(root_dir)
+        env["PATH"] = os.environ["PATH"]
+        env.pop("HOOKS_DAEMON_VENV_PATH", None)
+        env.pop("HOOKS_DAEMON_PYTHON", None)
+        return subprocess.run(
+            [
+                "bash",
+                "-c",
+                f'source "{helper}" && _resolve_python_cmd && echo "$PYTHON_CMD"',
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
+
+    def test_no_venv_exits_nonzero_with_install_directive(self, tmp_path: Path) -> None:
         helper = _extract_resolver(tmp_path)
         root = tmp_path / "project"
         root.mkdir()
 
-        result = _run_resolver(helper, root_dir=root)
-        assert result == f"{root}/untracked/venv/bin/python"
+        result = self._run_resolver_expecting_failure(helper, root)
 
-    def test_legacy_fallback_when_fingerprint_helper_missing(self, tmp_path: Path) -> None:
-        """If the bash fingerprint helper isn't shipped, fall through cleanly."""
+        assert result.returncode != 0, (
+            "Resolver must exit non-zero when no venv exists anywhere. "
+            f"returncode={result.returncode}, stdout={result.stdout!r}, "
+            f"stderr={result.stderr!r}"
+        )
+        assert "no usable venv" in result.stderr or "install" in result.stderr.lower(), (
+            f"stderr must reference the missing venv and the install directive. "
+            f"Got stderr=\n{result.stderr}"
+        )
+        assert f"{root}/untracked/venv/bin/python" not in result.stdout, (
+            "Resolver must not silently emit the unversioned legacy path. "
+            f"Got stdout={result.stdout!r}"
+        )
+
+    def test_no_venv_exits_nonzero_when_fingerprint_helper_missing(self, tmp_path: Path) -> None:
+        """If the bash fingerprint helper isn't shipped, scan-fallback still
+        runs; with no venv-*/ directories it must fail loudly rather than
+        emit the legacy path."""
         helper = _extract_resolver(tmp_path)
         root = tmp_path / "project"
         root.mkdir()
         # Deliberately NO scripts/install/python_fingerprint.sh
 
+        result = self._run_resolver_expecting_failure(helper, root)
+
+        assert result.returncode != 0, (
+            f"Resolver must exit non-zero when fingerprint helper is missing "
+            f"AND no venv-*/ exists. returncode={result.returncode}, "
+            f"stdout={result.stdout!r}, stderr={result.stderr!r}"
+        )
+        assert f"{root}/untracked/venv/bin/python" not in result.stdout
+
+
+class TestScanFallback:
+    """Plan 00103: when fingerprint computation fails or finds no match,
+    the resolver scans `untracked/venv-*/bin/python` and uses any usable
+    interpreter rather than falling through to legacy."""
+
+    def test_foreign_fingerprint_venv_used_when_no_match(self, tmp_path: Path) -> None:
+        helper = _extract_resolver(tmp_path)
+        root = tmp_path / "project"
+        root.mkdir()
+        (root / "scripts" / "install").mkdir(parents=True)
+        (root / "scripts" / "install" / "python_fingerprint.sh").symlink_to(
+            REPO_ROOT / "scripts" / "install" / "python_fingerprint.sh"
+        )
+
+        foreign_venv = root / "untracked" / "venv-py313-deadbeef"
+        _make_venv_skeleton(foreign_venv)
+
         result = _run_resolver(helper, root_dir=root)
-        assert result == f"{root}/untracked/venv/bin/python"
+        assert result == f"{foreign_venv}/bin/python", (
+            "Resolver must scan existing venv-*/ dirs rather than falling "
+            "through to legacy when the recomputed fingerprint does not match."
+        )
 
 
 class TestHookDaemonPythonOverride:

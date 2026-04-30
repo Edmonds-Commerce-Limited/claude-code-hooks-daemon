@@ -238,13 +238,43 @@ fi
 # Precedence (highest first):
 #   1. $HOOKS_DAEMON_VENV_PATH (explicit override)
 #   2. $HOOKS_DAEMON_ROOT_DIR/untracked/venv-{fingerprint}/ (fingerprint-keyed)
-#   3. $HOOKS_DAEMON_ROOT_DIR/untracked/venv/ (legacy fallback — pre-v3.7.0)
+#   3. $HOOKS_DAEMON_ROOT_DIR/untracked/venv-*/ (any existing fingerprint venv)
+#
+# Plan 00103 Decision 2: when none of the above resolve, fail loudly with
+# return 5 + stderr directive. The pre-v3.7.0 unversioned legacy
+# `untracked/venv/bin/python` is no longer accepted as a silent fallback —
+# it hid the v3.9.0 field-bug regression where operators saw "venv not
+# found" while the real cause was a 3.9-vs-3.11 `import tomllib` crash.
+#
+# Plan 00103 Decision 3 Rule A: no `${VAR:-python3}` parameter expansion —
+# the fingerprint helper is invoked under a venv-resident interpreter
+# (HOOKS_DAEMON_PYTHON or a discovered venv-*/bin/python), never bare
+# `python3`. The scan-fallback handles cross-fingerprint resolution.
 PYTHON_CMD=""  # populated lazily by _resolve_python_cmd
 
 _resolve_python_cmd() {
     if [ -n "${HOOKS_DAEMON_VENV_PATH:-}" ]; then
         PYTHON_CMD="$HOOKS_DAEMON_VENV_PATH/bin/python"
         return 0
+    fi
+
+    # Discover a venv-resident interpreter for fingerprint computation.
+    # HOOKS_DAEMON_PYTHON wins; otherwise pick any existing venv's bin/python.
+    # Bare `python3` is forbidden here (Decision 3 Rule A) — distro python3
+    # may differ from the installed venv's Python (e.g. 3.9 vs 3.13) and
+    # would compute a non-matching fingerprint, sending us straight to the
+    # scan-fallback or fail-loud.
+    local python_bin=""
+    if [ -n "${HOOKS_DAEMON_PYTHON:-}" ]; then
+        python_bin="${HOOKS_DAEMON_PYTHON}"
+    else
+        local candidate
+        for candidate in "$HOOKS_DAEMON_ROOT_DIR"/untracked/venv-*/bin/python; do
+            if [ -x "$candidate" ]; then
+                python_bin="$candidate"
+                break
+            fi
+        done
     fi
 
     # Locate the bash fingerprint helper (shipped in scripts/install/)
@@ -258,12 +288,11 @@ _resolve_python_cmd() {
         fi
     done
 
-    if [ -n "$fp_helper" ]; then
+    if [ -n "$fp_helper" ] && [ -n "$python_bin" ]; then
         # shellcheck disable=SC1090
         source "$fp_helper"
         local fingerprint=""
-        local python_bin="${HOOKS_DAEMON_PYTHON:-python3}"
-        if fingerprint=$(python_venv_fingerprint "$python_bin" 2>/dev/null); then
+        if fingerprint=$(python_venv_fingerprint "$python_bin"); then
             local keyed_venv="$HOOKS_DAEMON_ROOT_DIR/untracked/venv-$fingerprint"
             if [ -x "$keyed_venv/bin/python" ]; then
                 PYTHON_CMD="$keyed_venv/bin/python"
@@ -273,10 +302,11 @@ _resolve_python_cmd() {
     fi
 
     # Scan-fallback (v3.8.1+): the installer's Python and the resolver's
-    # python3 may produce different fingerprints (e.g. 3.13 vs 3.9), but
-    # the venv's bin/python symlinks the installer's interpreter so any
-    # existing untracked/venv-*/bin/python is usable. Matches the 4-step
-    # precedence in skills/hooks-daemon/scripts/_resolve-venv.sh.
+    # discovered interpreter may produce different fingerprints (e.g. 3.13
+    # vs 3.9), but the venv's bin/python symlinks the installer's
+    # interpreter so any existing untracked/venv-*/bin/python is usable.
+    # Matches the 4-step precedence in
+    # skills/hooks-daemon/scripts/_resolve-venv.sh.
     if [ -d "$HOOKS_DAEMON_ROOT_DIR/untracked" ]; then
         local candidate
         for candidate in "$HOOKS_DAEMON_ROOT_DIR"/untracked/venv-*/bin/python; do
@@ -287,8 +317,14 @@ _resolve_python_cmd() {
         done
     fi
 
-    # Legacy fallback (pre-v3.7.0 installs without fingerprint keying)
-    PYTHON_CMD="$HOOKS_DAEMON_ROOT_DIR/untracked/venv/bin/python"
+    # Plan 00103 Decision 2: fail loudly. The unversioned legacy
+    # `untracked/venv/bin/python` fallback is gone because it silently
+    # masked real failures (broken venv, ModuleNotFoundError, etc.) behind
+    # a generic "venv missing" message in validate_venv.
+    echo "❌ _resolve_python_cmd: no usable venv found under $HOOKS_DAEMON_ROOT_DIR/untracked/" >&2
+    echo "   Use the hooks-daemon skill to install (Skill tool: skill=hooks-daemon, args=install)." >&2
+    PYTHON_CMD=""
+    return 5
 }
 
 #
@@ -452,13 +488,24 @@ validate_venv() {
 
     # Plan 00099: lazy fingerprint-keyed venv resolution (paid only on daemon
     # startup, never on hot path). No-op on subsequent calls.
+    #
+    # Plan 00103 Decision 2: _resolve_python_cmd returns 5 + stderr on
+    # failure instead of silently emitting the legacy path. Capture the
+    # return code explicitly — a bare call would propagate via set -e and
+    # kill init.sh sourcing before validate_venv's caller-friendly
+    # VENV_ERROR diagnostic can be reported.
     if [ -z "$PYTHON_CMD" ]; then
-        _resolve_python_cmd
+        local resolve_rv=0
+        _resolve_python_cmd || resolve_rv=$?
+        if [ "$resolve_rv" -ne 0 ]; then
+            VENV_ERROR="Venv Python could not be resolved (exit $resolve_rv). Run: cd $HOOKS_DAEMON_ROOT_DIR && uv sync"
+            return 1
+        fi
     fi
 
     # Check venv Python binary exists
-    if [[ ! -f "$PYTHON_CMD" ]]; then
-        VENV_ERROR="Venv Python not found at $PYTHON_CMD. Run: cd $HOOKS_DAEMON_ROOT_DIR && uv sync"
+    if [[ -z "$PYTHON_CMD" || ! -f "$PYTHON_CMD" ]]; then
+        VENV_ERROR="Venv Python not found at ${PYTHON_CMD:-<unresolved>}. Run: cd $HOOKS_DAEMON_ROOT_DIR && uv sync"
         return 1
     fi
 
