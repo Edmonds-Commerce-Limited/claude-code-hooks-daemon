@@ -36,14 +36,6 @@ from pathlib import Path
 
 import pytest
 
-_PHASE3_REASON = (
-    "Plan 00103 Phase 3 not yet landed — five sites still redirect "
-    "`paths.py` stderr to /dev/null and silently fall back to the retired "
-    "`untracked/venv/bin/python` path on resolution failure. Marker is "
-    "removed as Phase 3 lands; strict=True forces the marker off the moment "
-    "the fix lands."
-)
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SKILL_SCRIPTS_DIR = (
     REPO_ROOT / "src" / "claude_code_hooks_daemon" / "skills" / "hooks-daemon" / "scripts"
@@ -180,7 +172,6 @@ class TestNoVenvFailFast:
     legacy fallback is the bug, not the contract.
     """
 
-    @pytest.mark.xfail(strict=True, reason=_PHASE3_REASON)
     def test_no_venv_exits_nonzero_with_install_directive(self, tmp_path: Path) -> None:
         """No venv at all → non-zero exit + clear "no usable venv found" stderr.
 
@@ -207,7 +198,6 @@ class TestNoVenvFailFast:
             "Resolver must not emit the unversioned legacy path. " f"Got stdout={result.stdout!r}"
         )
 
-    @pytest.mark.xfail(strict=True, reason=_PHASE3_REASON)
     def test_missing_paths_py_exits_nonzero_with_reinstall_directive(self, tmp_path: Path) -> None:
         """``paths.py`` SSOT missing → non-zero exit + clear stderr.
 
@@ -284,7 +274,6 @@ class TestNoVenvFailFast:
         # exits non-zero (no venv exists in this fixture) — tested by the
         # other class methods.
 
-    @pytest.mark.xfail(strict=True, reason=_PHASE3_REASON)
     def test_resolver_never_emits_unversioned_legacy_path(self) -> None:
         """Structural guard: the resolver script must contain no literal
         unversioned legacy fallback assignment.
