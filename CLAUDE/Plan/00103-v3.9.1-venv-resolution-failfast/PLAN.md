@@ -195,10 +195,10 @@ Each site is a small independent edit. No common library — that is Plan 00104.
   - Same `2>/dev/null` removal and `:-python3` replacement.
   - Preserve the existing `untracked/.python-cmd-cache` write at the same call site (no behaviour change to caching).
   - Source `python_fingerprint.sh` from its current location (`scripts/install/python_fingerprint.sh`); do not relocate.
-- [ ] ⬜ **Task 3.5**: `scripts/install/venv.sh:261` (`venv_lock_hash_matches`):
+- [x] ✅ **Task 3.5**: `scripts/install/venv.sh:261` (`venv_lock_hash_matches`):
   - Replace literal `python3` with the venv's own `bin/python` (resolved by reusing the existing local resolver in `venv_resolver.sh`).
   - This caller runs on the upgrade path with a venv already present; reuse — don't probe.
-- [ ] ⬜ **Task 3.6**: Verify Phase 1 Task 1.4 (4 split assertions) now passes.
+- [x] ✅ **Task 3.6**: Verify Phase 1 Task 1.4 (4 split assertions) now passes.
 
 ### Phase 4: Bootstrap explicit probe — `install.sh` and `upgrade.sh`
 

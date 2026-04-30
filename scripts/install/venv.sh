@@ -243,14 +243,19 @@ venv_lock_hash_matches() {
         return 1
     fi
 
-    if ! command -v python3 > /dev/null; then
+    # Plan 00103 Decision 3 Rule A: do NOT probe the host for a generic
+    # `python3` here. The caller has already guarded `[ -d "$venv_path" ]`
+    # so the venv directory exists; use its own interpreter. If `bin/python`
+    # is missing or non-executable the venv is broken — return 1 to force a
+    # rebuild rather than silently masquerading as fresh.
+    local venv_python="$venv_path/bin/python"
+    if [ ! -x "$venv_python" ]; then
         return 1
     fi
 
-    # paths.py is invoked as a direct script (NOT `python3 -m ...`) so the
-    # package __init__.py — which pulls Pydantic — is bypassed. This matters
-    # at install time, when the daemon venv may not yet exist and the host
-    # python3 only has stdlib. Same pattern as scripts/install/venv_resolver.sh.
+    # paths.py is invoked as a direct script (NOT `python -m ...`) so the
+    # package __init__.py — which pulls Pydantic — is bypassed. Stays stdlib
+    # only, so it loads even if the venv is mid-rebuild.
     local paths_script="$daemon_dir/src/claude_code_hooks_daemon/daemon/paths.py"
     if [ ! -f "$paths_script" ]; then
         return 1
@@ -258,7 +263,7 @@ venv_lock_hash_matches() {
 
     local stderr_capture
     stderr_capture="$(
-        python3 "$paths_script" check-venv-fresh \
+        "$venv_python" "$paths_script" check-venv-fresh \
             --venv-path "$venv_path" \
             --daemon-dir "$daemon_dir" \
             2>&1 > /dev/null
