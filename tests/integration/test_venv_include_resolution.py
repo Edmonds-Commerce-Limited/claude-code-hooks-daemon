@@ -24,6 +24,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VENV_INCLUDE = REPO_ROOT / "scripts" / "venv-include.bash"
 PATHS_SSOT = REPO_ROOT / "src" / "claude_code_hooks_daemon" / "daemon" / "paths.py"
+CANONICAL_LIB = REPO_ROOT / "scripts" / "lib" / "resolve_venv.sh"
 
 
 def _run(project_root: Path, env_overrides: dict[str, str] | None = None) -> str:
@@ -56,6 +57,11 @@ def _setup_fake_project(tmp_path: Path, include_fp_helper: bool = True) -> Path:
     # venv-include.bash computes PROJECT_ROOT as parent of its own directory,
     # so the sourced script must live at {project}/scripts/venv-include.bash
     (project / "scripts" / "venv-include.bash").symlink_to(VENV_INCLUDE)
+    # Plan 00104 Phase 5 Task 5.5: venv-include.bash now sources the
+    # canonical bash library at scripts/lib/resolve_venv.sh.
+    lib_dir = project / "scripts" / "lib"
+    lib_dir.mkdir(parents=True)
+    (lib_dir / "resolve_venv.sh").symlink_to(CANONICAL_LIB)
     if include_fp_helper:
         ssot_parent = project / "src" / "claude_code_hooks_daemon" / "daemon"
         ssot_parent.mkdir(parents=True)

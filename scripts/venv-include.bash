@@ -17,94 +17,40 @@
 # Project root directory
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# Plan 00100 Phase 2: venv resolution is delegated to the Python SSOT at
-# src/claude_code_hooks_daemon/daemon/paths.py. This file is now a thin bash
-# wrapper; the fingerprint + scan + legacy precedence lives in Python so the
-# four wrappers (scripts/install/venv_resolver.sh,
-# src/.../skills/hooks-daemon/scripts/_resolve-venv.sh, init.sh, and this
-# file) stay in lock-step.
+# Plan 00104 Phase 5 Task 5.5: venv resolution is delegated to the canonical
+# bash library at ``scripts/lib/resolve_venv.sh``. That library invokes the
+# Python SSOT (``daemon/paths.py``) under the venv's own ``bin/python`` (or
+# ``bin/python3``) when one exists, so the fingerprint + scan + legacy
+# precedence lives in Python and every wrapper agrees.
 #
-# Precedence (implemented in paths.py::resolve_existing_venv_python_with_diagnostics):
-#   1. $HOOKS_DAEMON_VENV_PATH                — explicit override
-#   2. ${PROJECT_ROOT}/untracked/venv-{fingerprint}/ — fingerprint-keyed
-#   3. ${PROJECT_ROOT}/untracked/venv-*/      — scan for any existing venv
-#   4. ${PROJECT_ROOT}/untracked/venv/        — legacy fallback (pre-v3.7.0)
+# The library is sourced inside its own subshell isolation (see
+# ``resolve_venv.sh::resolve_venv_python``), so ``set -euo pipefail`` does
+# NOT leak into this file's caller — preserving the Phase 4 Task 3.2 fix
+# that prevents poisoning the caller's shell options.
 #
-# `--fallback-target` is passed because this file is sourced BEFORE the venv
-# exists on fresh clones (ensure_venv creates it). On a miss the SSOT prints
-# the fingerprint-keyed creation target instead of exiting 1, so ensure_venv
-# has a stable path to mkdir/python3 -m venv into.
-#
-# The SSOT is invoked as a DIRECT SCRIPT (not `python -m`) so the package
-# __init__.py — which imports pydantic — is bypassed. This matters here
-# because venv-include.bash runs under the host `python3`, which at that
-# point only has stdlib. paths.py is stdlib-only by design (Plan 00103
-# Phase 2 deferred the tomllib import to a function-local helper, so the
-# module loads cleanly on 3.9/3.10 hosts as well).
-#
-# Plan 00103 Decision 2/3: a venv-resident bin/python is preferred for the
-# SSOT call when one exists. System ``python3`` is only used on fresh
-# clones (no venv yet) where there's nothing else to call. Errors from
-# paths.py are NOT silenced (no ``2>/dev/null``) and a missing or crashing
-# SSOT fails loudly with a stderr directive — never silently falls back to
-# the unversioned legacy path that v3.7.0 retired.
-_resolve_venv_dir() {
-    local paths_script="${PROJECT_ROOT}/src/claude_code_hooks_daemon/daemon/paths.py"
-    local python_cmd=""
-    local python_path
-    local candidate
-
-    if [ ! -f "$paths_script" ]; then
-        echo "❌ venv-include.bash: paths.py SSOT missing at $paths_script" >&2
-        echo "   Reinstall the daemon so paths.py is present." >&2
-        return 5
-    fi
-
-    # Prefer a venv-resident interpreter when one exists. ``-x`` follows
-    # symlinks and returns false for broken ones, so partial-install /
-    # cleanup-in-progress venvs are skipped automatically.
-    if [ -n "${HOOKS_DAEMON_PYTHON:-}" ]; then
-        python_cmd="${HOOKS_DAEMON_PYTHON}"
-    elif [ -n "${HOOKS_DAEMON_VENV_PATH:-}" ] && [ -x "${HOOKS_DAEMON_VENV_PATH}/bin/python" ]; then
-        python_cmd="${HOOKS_DAEMON_VENV_PATH}/bin/python"
-    else
-        for candidate in "${PROJECT_ROOT}"/untracked/venv-*/bin/python; do
-            if [ -x "$candidate" ]; then
-                python_cmd="$candidate"
-                break
-            fi
-        done
-        if [ -z "$python_cmd" ]; then
-            # Fresh-clone bootstrap: no venv exists yet, so there is no
-            # venv-resident interpreter to prefer. Use system ``python3`` —
-            # paths.py is stdlib-only and works on 3.9+. Bootstrap-time
-            # version validation lives in install.sh / upgrade.sh, not here.
-            python_cmd="python3"
-        fi
-    fi
-
-    # Stderr is NOT silenced — Plan 00103 Decision 2: surface real failures.
-    if python_path=$(
-        "$python_cmd" "$paths_script" resolve-venv \
-            --daemon-dir "$PROJECT_ROOT" --fallback-target
-    ); then
-        # SSOT returns bin/python or bin/python3 depending on which
-        # interpreter the venv actually ships. Derive the venv dir via
-        # dirname-of-dirname so either suffix works.
-        dirname "$(dirname "$python_path")"
-        return 0
-    fi
-
-    local rv=$?
-    echo "❌ venv-include.bash: paths.py resolve-venv failed (exit $rv)" >&2
-    return 5
-}
+# ``--fallback-target`` is passed because this file is sourced BEFORE the
+# venv exists on fresh clones (``ensure_venv`` creates it). On a miss the
+# SSOT prints the fingerprint-keyed creation target instead of exiting 1,
+# so ``ensure_venv`` has a stable path to ``mkdir`` / ``python3 -m venv``
+# into. Errors from the SSOT are NOT silenced — failures fail loudly, never
+# silently fall back to the unversioned legacy path that v3.7.0 retired.
+_RV_LIB="${PROJECT_ROOT}/scripts/lib/resolve_venv.sh"
+if [ ! -f "$_RV_LIB" ]; then
+    echo "❌ venv-include.bash: canonical resolver missing at $_RV_LIB" >&2
+    echo "   Reinstall the daemon so scripts/lib/resolve_venv.sh is present." >&2
+    unset _RV_LIB
+    # shellcheck disable=SC2317  # `return` is reachable when sourced
+    return 5 2>/dev/null || exit 5
+fi
+# shellcheck disable=SC1090  # path is computed at runtime from PROJECT_ROOT
+source "$_RV_LIB"
+unset _RV_LIB
 
 # Plan 00103 Decision 2: ``set -e`` does not fire on ``var=$(cmd)`` failures
 # (bash's documented variable-assignment exception), so the resolver's exit
 # status must be propagated explicitly. Falling through silently here would
 # resurrect the legacy-path fallback bug Decision 2 just removed.
-if ! VENV_DIR="$(_resolve_venv_dir)"; then
+if ! VENV_DIR="$(resolve_venv_dir "$PROJECT_ROOT" --fallback-target)"; then
     # shellcheck disable=SC2317  # `return` is reachable when sourced
     return 5 2>/dev/null || exit 5
 fi

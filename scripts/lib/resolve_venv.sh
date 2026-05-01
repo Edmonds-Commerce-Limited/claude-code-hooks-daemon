@@ -91,11 +91,27 @@ _rv_pick_python() {
         echo "${HOOKS_DAEMON_PYTHON}"
         return 0
     fi
-    if [ -n "${HOOKS_DAEMON_VENV_PATH:-}" ] && [ -x "${HOOKS_DAEMON_VENV_PATH}/bin/python" ]; then
-        echo "${HOOKS_DAEMON_VENV_PATH}/bin/python"
-        return 0
+    # Real venvs ship both bin/python AND bin/python3, but bash test fakes
+    # and some minimal layouts ship only one. Mirror paths.py's
+    # _pick_interpreter (python preferred, python3 as fallback) so every
+    # caller agrees on whether a venv is usable.
+    if [ -n "${HOOKS_DAEMON_VENV_PATH:-}" ]; then
+        if [ -x "${HOOKS_DAEMON_VENV_PATH}/bin/python" ]; then
+            echo "${HOOKS_DAEMON_VENV_PATH}/bin/python"
+            return 0
+        fi
+        if [ -x "${HOOKS_DAEMON_VENV_PATH}/bin/python3" ]; then
+            echo "${HOOKS_DAEMON_VENV_PATH}/bin/python3"
+            return 0
+        fi
     fi
     for candidate in "${daemon_dir}"/untracked/venv-*/bin/python; do
+        if [ -x "$candidate" ]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    for candidate in "${daemon_dir}"/untracked/venv-*/bin/python3; do
         if [ -x "$candidate" ]; then
             echo "$candidate"
             return 0
@@ -187,10 +203,11 @@ resolve_venv_python() {
 resolve_venv_dir() {
     local python_path
     python_path="$(resolve_venv_python "$@")" || return $?
-    # Strip the trailing /bin/python — works for venv layouts where
-    # the python binary lives at <venv>/bin/python (POSIX). We don't
-    # ship Windows support today, so /bin/ is sufficient.
-    printf '%s\n' "${python_path%/bin/python}"
+    # paths.py SSOT may return bin/python OR bin/python3 depending on
+    # which interpreter the venv ships (real venvs have both, test fakes
+    # often have only one). ${var%/bin/*} strips either suffix in one
+    # parameter expansion. POSIX-only — no Windows support.
+    printf '%s\n' "${python_path%/bin/*}"
 }
 
 # ============================================================
