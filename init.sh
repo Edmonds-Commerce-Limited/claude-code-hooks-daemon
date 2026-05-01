@@ -252,79 +252,33 @@ fi
 # `python3`. The scan-fallback handles cross-fingerprint resolution.
 PYTHON_CMD=""  # populated lazily by _resolve_python_cmd
 
+# Plan 00104 Phase 4: delegate to canonical library at
+# ${HOOKS_DAEMON_ROOT_DIR}/scripts/lib/resolve_venv.sh. The library invokes
+# paths.py SSOT — including the metadata-authoritative step (Plan 00100
+# Task 3.5) — so init.sh, install/venv_resolver.sh, _resolve-venv.sh, and
+# venv-include.bash all converge on the same venv. This closes the drift
+# the v3.9.x bash scan-fallback created: alphabetic ordering picked the
+# wrong fingerprint when two venvs coexisted, while the SSOT correctly
+# preferred the lock_hash-matching one.
 _resolve_python_cmd() {
-    if [ -n "${HOOKS_DAEMON_VENV_PATH:-}" ]; then
-        PYTHON_CMD="$HOOKS_DAEMON_VENV_PATH/bin/python"
+    local lib="${HOOKS_DAEMON_ROOT_DIR}/scripts/lib/resolve_venv.sh"
+    if [ ! -f "$lib" ]; then
+        echo "❌ _resolve_python_cmd: canonical library missing at $lib" >&2
+        echo "   Reinstall the daemon so scripts/lib/resolve_venv.sh is present." >&2
+        PYTHON_CMD=""
+        return 5
+    fi
+
+    # shellcheck disable=SC1090  # path is computed at runtime
+    source "$lib"
+
+    if PYTHON_CMD="$(resolve_venv_python "$HOOKS_DAEMON_ROOT_DIR")"; then
         return 0
     fi
 
-    # Discover a venv-resident interpreter for fingerprint computation.
-    # HOOKS_DAEMON_PYTHON wins; otherwise pick any existing venv's bin/python.
-    # Bare `python3` is forbidden here (Decision 3 Rule A) — distro python3
-    # may differ from the installed venv's Python (e.g. 3.9 vs 3.13) and
-    # would compute a non-matching fingerprint, sending us straight to the
-    # scan-fallback or fail-loud.
-    local python_bin=""
-    if [ -n "${HOOKS_DAEMON_PYTHON:-}" ]; then
-        python_bin="${HOOKS_DAEMON_PYTHON}"
-    else
-        local candidate
-        for candidate in "$HOOKS_DAEMON_ROOT_DIR"/untracked/venv-*/bin/python; do
-            if [ -x "$candidate" ]; then
-                python_bin="$candidate"
-                break
-            fi
-        done
-    fi
-
-    # Locate the bash fingerprint helper (shipped in scripts/install/)
-    local fp_helper=""
-    for candidate in \
-        "$HOOKS_DAEMON_ROOT_DIR/scripts/install/python_fingerprint.sh" \
-        "$PROJECT_PATH/scripts/install/python_fingerprint.sh"; do
-        if [ -f "$candidate" ]; then
-            fp_helper="$candidate"
-            break
-        fi
-    done
-
-    if [ -n "$fp_helper" ] && [ -n "$python_bin" ]; then
-        # shellcheck disable=SC1090
-        source "$fp_helper"
-        local fingerprint=""
-        if fingerprint=$(python_venv_fingerprint "$python_bin"); then
-            local keyed_venv="$HOOKS_DAEMON_ROOT_DIR/untracked/venv-$fingerprint"
-            if [ -x "$keyed_venv/bin/python" ]; then
-                PYTHON_CMD="$keyed_venv/bin/python"
-                return 0
-            fi
-        fi
-    fi
-
-    # Scan-fallback (v3.8.1+): the installer's Python and the resolver's
-    # discovered interpreter may produce different fingerprints (e.g. 3.13
-    # vs 3.9), but the venv's bin/python symlinks the installer's
-    # interpreter so any existing untracked/venv-*/bin/python is usable.
-    # Matches the 4-step precedence in
-    # skills/hooks-daemon/scripts/_resolve-venv.sh.
-    if [ -d "$HOOKS_DAEMON_ROOT_DIR/untracked" ]; then
-        local candidate
-        for candidate in "$HOOKS_DAEMON_ROOT_DIR"/untracked/venv-*/bin/python; do
-            if [ -x "$candidate" ]; then
-                PYTHON_CMD="$candidate"
-                return 0
-            fi
-        done
-    fi
-
-    # Plan 00103 Decision 2: fail loudly. The unversioned legacy
-    # `untracked/venv/bin/python` fallback is gone because it silently
-    # masked real failures (broken venv, ModuleNotFoundError, etc.) behind
-    # a generic "venv missing" message in validate_venv.
-    echo "❌ _resolve_python_cmd: no usable venv found under $HOOKS_DAEMON_ROOT_DIR/untracked/" >&2
-    echo "   Use the hooks-daemon skill to install (Skill tool: skill=hooks-daemon, args=install)." >&2
+    local rv=$?
     PYTHON_CMD=""
-    return 5
+    return "$rv"
 }
 
 #

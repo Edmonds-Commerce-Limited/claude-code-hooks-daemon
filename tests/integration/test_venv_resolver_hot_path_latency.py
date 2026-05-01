@@ -96,6 +96,15 @@ def _build_fingerprint_keyed_fixture(tmp_path: Path) -> Path:
     install_dir.mkdir(parents=True)
     (install_dir / "python_fingerprint.sh").symlink_to(FINGERPRINT_HELPER)
 
+    lib_dir = daemon_dir / "scripts" / "lib"
+    lib_dir.mkdir(parents=True)
+    (lib_dir / "resolve_venv.sh").symlink_to(REPO_ROOT / "scripts" / "lib" / "resolve_venv.sh")
+    ssot_parent = daemon_dir / "src" / "claude_code_hooks_daemon" / "daemon"
+    ssot_parent.mkdir(parents=True)
+    (ssot_parent / "paths.py").symlink_to(
+        REPO_ROOT / "src" / "claude_code_hooks_daemon" / "daemon" / "paths.py"
+    )
+
     untracked = daemon_dir / "untracked"
     untracked.mkdir()
 

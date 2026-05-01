@@ -4,8 +4,15 @@
 #
 # Usage: source scripts/venv-include.bash
 #
-
-set -euo pipefail
+# Plan 00104 Phase 4 Task 3.2 fix: this file no longer enables errexit
+# at file top. Sourcing executes in the caller's shell context, so a
+# top-level ``set -euo pipefail`` poisons the caller's shell options —
+# a caller whose errexit was previously OFF is silently flipped on and
+# dies on the next non-zero command. Per-function errexit is enforced
+# by adding explicit ``|| return $?`` checks to the few sites that
+# need it (install_deps' pip calls). The top-level body itself uses
+# explicit ``if !`` for every fallible call, so errexit was never
+# actually load-bearing here.
 
 # Project root directory
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -167,11 +174,15 @@ install_deps() {
 
     echo -e "${YELLOW}→${NC} Installing dependencies..."
 
-    # Install in editable mode with dev dependencies
+    # Install in editable mode with dev dependencies. Plan 00104 Phase 4
+    # Task 3.2 fix: explicit ``|| return $?`` because the file no longer
+    # enables errexit at top level (so we don't poison the caller's
+    # shell). Without this propagation, a pip failure would silently
+    # report "Dependencies installed".
     if [[ "${force_reinstall}" == "true" ]]; then
-        "${VENV_PIP}" install -e ".[dev]" --force-reinstall --quiet
+        "${VENV_PIP}" install -e ".[dev]" --force-reinstall --quiet || return $?
     else
-        "${VENV_PIP}" install -e ".[dev]" --quiet
+        "${VENV_PIP}" install -e ".[dev]" --quiet || return $?
     fi
 
     echo -e "${GREEN}✓${NC} Dependencies installed"

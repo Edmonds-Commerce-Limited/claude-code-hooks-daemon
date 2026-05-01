@@ -90,6 +90,21 @@ def _make_venv_skeleton(path: Path) -> None:
     (path / "bin" / "python").symlink_to(sys.executable)
 
 
+def _symlink_canonical_library(root: Path) -> None:
+    """Plan 00104 Phase 4: init.sh's _resolve_python_cmd delegates to
+    `scripts/lib/resolve_venv.sh`. The fixture project must ship a symlink
+    to the real library so the resolver can source it.
+    """
+    lib_dir = root / "scripts" / "lib"
+    lib_dir.mkdir(parents=True, exist_ok=True)
+    (lib_dir / "resolve_venv.sh").symlink_to(REPO_ROOT / "scripts" / "lib" / "resolve_venv.sh")
+    ssot_parent = root / "src" / "claude_code_hooks_daemon" / "daemon"
+    ssot_parent.mkdir(parents=True, exist_ok=True)
+    (ssot_parent / "paths.py").symlink_to(
+        REPO_ROOT / "src" / "claude_code_hooks_daemon" / "daemon" / "paths.py"
+    )
+
+
 class TestExplicitOverride:
     """HOOKS_DAEMON_VENV_PATH takes precedence over everything."""
 
@@ -97,6 +112,7 @@ class TestExplicitOverride:
         helper = _extract_resolver(tmp_path)
         root = tmp_path / "project"
         root.mkdir()
+        _symlink_canonical_library(root)
         # Symlink the helper into project scripts/install so sourcing works
         (root / "scripts" / "install").mkdir(parents=True)
         (root / "scripts" / "install" / "python_fingerprint.sh").symlink_to(
@@ -121,6 +137,7 @@ class TestFingerprintKeyed:
         helper = _extract_resolver(tmp_path)
         root = tmp_path / "project"
         root.mkdir()
+        _symlink_canonical_library(root)
         (root / "scripts" / "install").mkdir(parents=True)
         (root / "scripts" / "install" / "python_fingerprint.sh").symlink_to(
             REPO_ROOT / "scripts" / "install" / "python_fingerprint.sh"
@@ -216,6 +233,7 @@ class TestScanFallback:
         helper = _extract_resolver(tmp_path)
         root = tmp_path / "project"
         root.mkdir()
+        _symlink_canonical_library(root)
         (root / "scripts" / "install").mkdir(parents=True)
         (root / "scripts" / "install" / "python_fingerprint.sh").symlink_to(
             REPO_ROOT / "scripts" / "install" / "python_fingerprint.sh"
@@ -238,6 +256,7 @@ class TestHookDaemonPythonOverride:
         helper = _extract_resolver(tmp_path)
         root = tmp_path / "project"
         root.mkdir()
+        _symlink_canonical_library(root)
         (root / "scripts" / "install").mkdir(parents=True)
         (root / "scripts" / "install" / "python_fingerprint.sh").symlink_to(
             REPO_ROOT / "scripts" / "install" / "python_fingerprint.sh"

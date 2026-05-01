@@ -52,8 +52,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INIT_SH = REPO_ROOT / "init.sh"
 VENV_RESOLVER_SH = REPO_ROOT / "scripts" / "install" / "venv_resolver.sh"
@@ -135,6 +133,13 @@ def _build_fixture_daemon_dir(tmp_path: Path) -> tuple[Path, Path]:
     install_dir = daemon_dir / "scripts" / "install"
     install_dir.mkdir(parents=True)
     (install_dir / "python_fingerprint.sh").symlink_to(FINGERPRINT_HELPER)
+
+    # Plan 00104 Phase 4: init.sh and venv-include.bash now source
+    # scripts/lib/resolve_venv.sh — the canonical library — so the fixture
+    # must expose it at the same relative path the production tree does.
+    lib_dir = daemon_dir / "scripts" / "lib"
+    lib_dir.mkdir(parents=True)
+    (lib_dir / "resolve_venv.sh").symlink_to(REPO_ROOT / "scripts" / "lib" / "resolve_venv.sh")
 
     # venv-include.bash derives PROJECT_ROOT from its own BASH_SOURCE.
     # Copy (don't symlink) so it sees the fixture daemon_dir as its root.
@@ -304,6 +309,9 @@ def test_all_sites_return_a_path_with_single_venv(tmp_path: Path) -> None:
     install_dir = daemon_dir / "scripts" / "install"
     install_dir.mkdir(parents=True)
     (install_dir / "python_fingerprint.sh").symlink_to(FINGERPRINT_HELPER)
+    lib_dir = daemon_dir / "scripts" / "lib"
+    lib_dir.mkdir(parents=True)
+    (lib_dir / "resolve_venv.sh").symlink_to(REPO_ROOT / "scripts" / "lib" / "resolve_venv.sh")
     shutil.copy2(VENV_INCLUDE_BASH, daemon_dir / "scripts" / "venv-include.bash")
 
     untracked = daemon_dir / "untracked"
@@ -332,25 +340,19 @@ def test_all_sites_return_a_path_with_single_venv(tmp_path: Path) -> None:
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Plan 00104 Phase 3 Task 3.1 — drives Phase 4 canonical library. "
-        "init.sh::_resolve_python_cmd has no metadata-authoritative step, so "
-        "its bash scan-fallback picks venv-aaa-fake while the SSOT (and the "
-        "3 bash sites that delegate to it) pick venv-zzz-real. When Phase 4 "
-        "lands and init.sh sources the canonical library, this test flips "
-        "to xpass and the strict marker forces removal."
-    ),
-)
 def test_all_sites_agree_on_metadata_authoritative_venv(tmp_path: Path) -> None:
     """All 5 sites must converge on the metadata-authoritative venv.
 
     Two venvs exist: ``venv-aaa-fake`` (no metadata, alphabetically first)
     and ``venv-zzz-real`` (lock-hash-matching metadata). The SSOT picks
-    ``venv-zzz-real`` via Plan 00100 Task 3.5 step 2. ``init.sh`` has its
-    own bash resolver with no metadata step — its scan-fallback picks
-    ``venv-aaa-fake``. The parity assertion fails until Phase 4 lands.
+    ``venv-zzz-real`` via Plan 00100 Task 3.5 step 2.
+
+    Plan 00104 Phase 4 contract: every site delegates to the canonical
+    library at ``scripts/lib/resolve_venv.sh``, which calls the SSOT.
+    ``init.sh::_resolve_python_cmd`` was the historical drift site —
+    its old scan-fallback picked ``venv-aaa-fake`` because the bash
+    resolver had no metadata-authoritative step. Phase 4 wired init.sh
+    through the canonical library; this test pins the convergence.
     """
     daemon_dir, real_venv = _build_fixture_daemon_dir(tmp_path)
 

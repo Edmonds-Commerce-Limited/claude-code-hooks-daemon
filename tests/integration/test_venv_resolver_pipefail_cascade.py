@@ -34,8 +34,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VENV_INCLUDE = REPO_ROOT / "scripts" / "venv-include.bash"
 PATHS_SSOT = REPO_ROOT / "src" / "claude_code_hooks_daemon" / "daemon" / "paths.py"
@@ -101,28 +99,19 @@ def test_caller_under_default_options_survives_sourcing(tmp_path: Path) -> None:
     assert "POST_SOURCE_REACHED" in stdout, f"Marker missing. stdout={stdout!r} stderr={stderr!r}"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Plan 00104 Phase 3 Task 3.2 — drives Phase 4 canonical library. "
-        "scripts/venv-include.bash line 8 unconditionally enables "
-        "`set -euo pipefail`, which leaks into the caller's shell because "
-        "sourcing executes in the caller's context. After Phase 4 Task 4.1 "
-        "lands a canonical library that runs its internal logic in a "
-        "subshell (or saves/restores caller options), this xfail flips to "
-        "xpass and the strict marker forces removal."
-    ),
-)
 def test_resolver_when_sourced_under_pipefail_does_not_kill_caller_shell(
     tmp_path: Path,
 ) -> None:
-    """Caller starts with ``set +e`` (errexit OFF) and runs a deliberately
-    failing command after sourcing. If the resolver poisons the caller's
-    shell options (forcing errexit on), the caller dies on the failing
-    command and the post-source marker is never printed.
+    """Caller has errexit OFF and runs a deliberately failing command
+    after sourcing. The resolver MUST NOT poison the caller's shell
+    options — otherwise the failing command kills the caller and the
+    post-source marker is never printed.
 
-    Target behaviour: the caller's shell options are preserved across the
-    source, so ``false`` is non-fatal and ``STILL_ALIVE`` reaches stdout.
+    Plan 00104 Phase 4 Task 3.2 contract: the canonical library runs
+    its internal logic in a subshell, and ``scripts/venv-include.bash``
+    no longer enables errexit at file top — so the caller's pre-source
+    shell-option state survives sourcing. ``false`` is non-fatal and
+    ``STILL_ALIVE`` reaches stdout.
     """
     project = _setup_fake_project(tmp_path)
     _fake_venv(project / "untracked" / "venv")
