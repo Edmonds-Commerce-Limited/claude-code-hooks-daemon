@@ -13,13 +13,14 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Acceptance fixture: multi-Python container (`python3 → 3.9` AND `python3.13` co-resident) reproducing the field-bug topology
   - **v1 superseded**: ambitious version bundled patch + DRY consolidation, returned three FATAL Opus reviews; split per reviewer recommendation
 
-- [00104: v3.10.0 — venv resolver DRY consolidation (structural)](00104-v3.10.0-venv-resolver-dry-consolidation/PLAN.md) - Not Started (blocked on 00103)
+- [00104: v3.10.0 — venv resolver DRY + upgrade-flow resilience + production bug fixes](00104-v3.10.0-venv-resolver-dry-consolidation/PLAN.md) - Not Started
 
-  - Single canonical bash library `scripts/lib/resolve_venv.sh` sourced by all five sites
-  - `venv_resolver.sh` collapses to re-export shim (NOT deletion — has 9 callers per Review #3 F12)
-  - Static-check QA gate `check_canonical_callers.sh` enforces forbidden patterns
-  - Multi-host NFS hostname fail-fast, `requires-python` cross-check on probed interpreters, `set -euo pipefail` exit-vs-return contract
+  - **Rewritten** to absorb the post-v3.9.1 field report (see plan `context/` dir — six production issues encountered during a real v2.26 → v3.9.1 upgrade now ship in this plan rather than fragmenting into 00105/00106
+  - **Phase 2 production bug fixes (ship FIRST)**: `write-venv-metadata` records `sys.executable` not system `python3` (issue #4 — currently breaks `daemon-cli.sh` for every fresh install of v3.9.1); `health-check.sh` consistently uses resolved `$PYTHON` (issue #6); daemon `.gitignore` covers `uv.lock` (issue #3)
+  - **Phase 5 upgrade-flow resilience**: skill `upgrade.sh` self-bootstraps from GitHub before destructive work (issue #1); `upgrade_version.sh` falls back to `ensure_venv` when no valid venv exists (issue #2 — the bootstrap paradox); `verify_venv` retry loop tolerates Podman overlay-fs visibility lag after `UV_LINK_MODE=copy` (issue #5)
+  - **Structural (carries the original 00104 scope)**: single canonical bash library `scripts/lib/resolve_venv.sh` sourced by all five sites; `venv_resolver.sh` collapses to re-export shim (NOT deletion — 9 callers per Review #3 F12); static-check QA gate `check_canonical_callers.sh` as 11th `run_all.sh` check; multi-host NFS hostname fail-fast; `requires-python` cross-check; `set -euo pipefail` exit-vs-return contract
   - Inherits all unresolved RISKY findings from 00103's review history (R17–R25)
+  - One release: v3.10.0 via `/release minor`
 
 - [00100 (v2): Venv SSOT Consolidation — Stop the Release Treadmill](00100-venv-ssot-consolidation/PLAN.md) - Not Started
 
