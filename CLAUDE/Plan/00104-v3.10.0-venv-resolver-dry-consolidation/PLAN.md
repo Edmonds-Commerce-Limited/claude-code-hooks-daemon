@@ -548,31 +548,32 @@ recovery path.
     bootstrap-resolved Python when `resolve_existing_venv_python` fails.
   - [ ] ⬜ Daemon restart RUNNING; QA green; commit.
 
-- [ ] ⬜ **Task 5.3 — Issue #5 fix (verify_venv overlay-fs race) + C-6 silent-fallback removal**:
+- [ ] 🔄 **Task 5.3 — Issue #5 fix (verify_venv overlay-fs race) + C-6 silent-fallback removal**:
 
   - [ ] ⬜ Reproduce locally on overlay-fs (this repo runs in a Podman
     container so reproduction is in-tree).
   - [ ] ⬜ Failing test: `tests/integration/test_verify_venv_after_uv_link_copy.py`
     — fixture forces `UV_LINK_MODE=copy`, asserts `verify_venv` succeeds
     after the sync without needing manual retry.
-  - [ ] ⬜ Failing test:
-    `tests/integration/test_venv_sh_sync_failure_is_visible.py` —
-    `scripts/install/venv.sh:465` currently does
-    `sync -f "$venv_path" 2>/dev/null || sync` which hides real failures
-    (project memory: `feedback_silent_fallback_antipattern.md`). Asserts
-    that when `sync -f` fails for a non-overlay-fs reason, the failure
-    surfaces (stderr captured/logged, not silenced). Closes hostile
-    review C-6.
+  - [x] ✅ Failing test:
+    `tests/integration/test_venv_sh_sync_failure_is_visible.py` (2026-05-01).
+    Asserts that the silent-fallback antipattern in `create_venv_at_path` is
+    gone AND that a visible diagnostic path exists. Closes hostile review C-6.
   - [ ] ⬜ Implement: `verify_venv` retries on transient
     `ModuleNotFoundError` / missing-binary errors with a small bounded sleep
     loop (e.g. 5 attempts × 200ms) when `UV_LINK_MODE=copy` was used. Flag
     that this is a workaround for overlay-fs visibility, not the canonical
-    expected path.
-  - [ ] ⬜ Implement: remove `2>/dev/null` from `venv.sh:465`. If
-    `sync -f` fails for the documented overlay-fs reason, the retry loop
-    above absorbs it. For any other failure mode the stderr now reaches
-    the user. (See feedback memory `silent fallback hides regressions`.)
-  - [ ] ⬜ Daemon restart RUNNING; QA green; commit.
+    expected path. (Deferred — conflicts with existing
+    `test_verify_venv_has_no_retry_loop` (Plan 00100). Needs policy decision
+    before implementation; not blocking v3.10.0 release. Tracked separately.)
+  - [x] ✅ Implement: silent-fallback removal at `create_venv_at_path`'s
+    post-uv-sync flush (2026-05-01). Replaced the redirect-to-null-or-fall-through
+    pattern with stderr-capture, allowlist of known platform/fs limitations
+    (macOS lacks `-f`, overlay-fs returns the "not supported" errno),
+    print_verbose surfacing for any other failure. (See feedback memory
+    `silent fallback hides regressions`.) 7/7 targeted + 11/11 QA + daemon
+    RUNNING.
+  - [x] ✅ Daemon restart RUNNING; QA green; commit. (2026-05-01, 5.3.A only.)
 
 - [x] ✅ **Task 5.4**: `_resolve-venv.sh` collapses to canonical shim. (2026-05-01, commit 2fc0e30)
 

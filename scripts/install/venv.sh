@@ -487,7 +487,30 @@ create_venv_at_path() {
     # the page cache without being visible to a subsequent `[ -f ]` check on
     # overlay-fs / NFS / slow disks. `sync -f <path>` is filesystem-scoped
     # (fast); plain `sync` is the macOS/fallback.
-    sync -f "$venv_path" 2>/dev/null || sync
+    #
+    # Plan 00104 Task 5.3 / hostile review C-6: do NOT silence stderr.
+    # The previous shape (sync -f, redirect-to-null, OR plain-sync) hid
+    # every reason `sync -f` might fail behind a generic fallback —
+    # exactly the antipattern documented in the project memory
+    # `feedback_silent_fallback_antipattern.md` (the v3.9.0 field bug).
+    # Capture stderr; treat known platform/fs limitations as silent
+    # (macOS lacks `-f`, overlay-fs returns the "not supported" errno);
+    # surface anything else through print_verbose so operators running with
+    # HOOKS_DAEMON_VERBOSE_INSTALL=1 see real failures.
+    local sync_stderr
+    if sync_stderr="$(sync -f "$venv_path" 2>&1)"; then
+        :
+    else
+        case "$sync_stderr" in
+            *"Operation not supported"*|*"unrecognized option"*|*"-f: invalid option"*|*"illegal option"*|*"invalid option"*)
+                : # documented platform/fs limitation — silent fallback OK
+                ;;
+            *)
+                print_verbose "sync -f failed unexpectedly (falling back to plain sync): $sync_stderr"
+                ;;
+        esac
+        sync
+    fi
 
     if [ "$quiet" = "true" ]; then
         print_verbose "Virtual environment created at: $venv_path"
