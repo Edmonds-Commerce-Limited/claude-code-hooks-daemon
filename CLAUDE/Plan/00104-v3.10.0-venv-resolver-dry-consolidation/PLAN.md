@@ -581,8 +581,18 @@ recovery path.
 - [x] ✅ **Task 5.6**: `venv_resolver.sh` collapses to re-export shim
   preserving all 9 caller signatures. (2026-05-01)
 
-- [ ] ⬜ **Task 5.7**: `init.sh::_resolve_python_cmd` collapses; preserves
-  fingerprint cache write.
+- [x] ✅ **Task 5.7**: `init.sh::_resolve_python_cmd` collapses; preserves
+  fingerprint cache write. (2026-05-01 — done-by-Phase-4 commit 50224d6.
+  init.sh:263-282 is already a 20-line shim sourcing
+  `${HOOKS_DAEMON_ROOT_DIR}/scripts/lib/resolve_venv.sh` and delegating to
+  `resolve_venv_python`. The bespoke fingerprint/scan ladder was removed in
+  Phase 4. No fingerprint cache write exists today — Phase 8 Task 8.1 adds
+  `untracked/.python-cmd-cache` on top of the canonical library. The shim
+  preserves the surface needed for that future write: `_resolve_python_cmd`
+  remains the single hot-path entry, and the canonical library is the only
+  layer that needs cache logic added. Verified by parity matrix tests
+
+  - pipefail cascade tests + hot-path latency harness smoke.)
 
 - [ ] ⬜ **Task 5.8**: `venv.sh:venv_lock_hash_matches` collapses.
 
