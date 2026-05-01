@@ -83,7 +83,19 @@ fi
 # is 3.9). The shared helper implements the same precedence as
 # src/.../skills/hooks-daemon/scripts/_resolve-venv.sh so install-time and
 # skill-time resolvers always agree. ensure_venv rebuilds/refreshes below.
-VENV_PYTHON="$(resolve_existing_venv_python "$DAEMON_DIR")"
+#
+# Plan 00104 Task 5.2: tolerate the no-existing-venv case so set -e does
+# not abort the upgrade on a fresh clone or v2.x-stamp project (no
+# .daemon-metadata.json, no fingerprint venv yet). Step 7 (ensure_venv)
+# bootstraps the new venv from $HOOKS_DAEMON_PYTHON / python3. Stderr is
+# NOT silenced — any genuine failure from the canonical resolver
+# (paths.py SSOT missing, daemon_dir invalid, paths.py crash) is surfaced
+# to the operator. The downstream `[ -f "$VENV_PYTHON" ]` guards already
+# gate the codepaths that require an existing interpreter.
+VENV_PYTHON="$(resolve_existing_venv_python "$DAEMON_DIR")" || VENV_PYTHON=""
+if [ -z "$VENV_PYTHON" ]; then
+    print_info "No existing venv found — Step 7 will bootstrap a fresh one via ensure_venv."
+fi
 EXAMPLE_CONFIG="$DAEMON_DIR/.claude/hooks-daemon.yaml.example"
 SETTINGS_JSON_SOURCE="$DAEMON_DIR/.claude/settings.json"
 TARGET_CONFIG="$PROJECT_ROOT/.claude/hooks-daemon.yaml"
