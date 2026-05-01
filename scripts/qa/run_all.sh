@@ -145,6 +145,16 @@ else
 fi
 echo ""
 
+echo "12. Running Canonical-Caller Check..."
+echo "----------------------------------------"
+if ! "${SCRIPT_DIR}/run_canonical_callers_check.sh"; then
+    OVERALL_EXIT_CODE=1
+    echo "❌ Canonical-caller check FAILED"
+else
+    echo "✅ Canonical-caller check PASSED"
+fi
+echo ""
+
 # Print overall summary
 echo "========================================"
 echo "QA Summary"
@@ -165,6 +175,7 @@ results = {
     "Error Hiding": "untracked/qa/error_hiding.json",
     "Skill Refs": "untracked/qa/skill_references.json",
     "Shell Audit": "untracked/qa/shell_audit.json",
+    "Canonical Callers": "untracked/qa/canonical_callers.json",
 }
 
 all_passed = True

@@ -625,12 +625,30 @@ recovery path.
 
 ### Phase 6: Static-check QA gate
 
-- [ ] ⬜ **Task 6.1**: Author `scripts/qa/check_canonical_callers.sh` per
+- [x] ✅ **Task 6.1**: Author `scripts/qa/check_canonical_callers.sh` per
   Decision 7. Positive-include allowlist; inline `# canonical-resolver-exempt:`
-  marker support; actionable error output (R24).
-- [ ] ⬜ **Task 6.2**: Wire into `run_all.sh` as the 11th check.
-- [ ] ⬜ **Task 6.3**: Phase 3 Task 3.5 turns green; full QA passes (11/11).
-- [ ] ⬜ **Task 6.4**: Daemon restart RUNNING; commit.
+  marker support; actionable error output (R24). (Done: bash static-check
+  scans `scripts/`, `src/`, `CLAUDE/UPGRADES/`, top-level `*.sh`/`*.bash`,
+  plus extra cmdline args; allowlist exempts canonical lib + upgrade-template
+  verification.sh; inline marker honoured; rc=0 on HEAD with detailed R24
+  directive on rc=1.)
+- [x] ✅ **Task 6.2**: Wire into `run_all.sh` as the 11th check + into
+  `llm_qa.py` registry. (Done: added `run_canonical_callers_check.sh`
+  JSON-emitting wrapper that delegates to the canonical resolver via
+  `resolve_venv_python` (DRY, dogfoodingly correct). Wired as check #12 in
+  `run_all.sh` and as 11th-position registry entry in `llm_qa.py` —
+  `smoke_test` remains last in registry (live-daemon probe runs after all
+  static checks; existing `test_smoke_test_is_last_in_registry` invariant
+  preserved by intentional ordering).)
+- [x] ✅ **Task 6.3**: Phase 3 Task 3.5 turns green; full QA passes (12/12).
+  (Done: removed all 3 `@pytest.mark.xfail(strict=True)` markers from
+  `tests/integration/test_canonical_callers_static_check.py`; all 3 tests
+  PASS. Full `llm_qa.py all` reports 12/12 PASSED — magic_values, format,
+  lint, type_check, tests (8098 passed, 0 failed, 5 skipped, 95.0% cov),
+  security, dependencies, error_hiding, shell_audit, skill_refs,
+  canonical_callers, smoke_test (3/3 probes).)
+- [x] ✅ **Task 6.4**: Daemon restart RUNNING; commit. (Done: daemon
+  restart succeeded; status RUNNING PID 174874; socket present.)
 
 ### Phase 7: Multi-host NFS + `requires-python` cross-check
 

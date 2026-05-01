@@ -103,6 +103,11 @@ TOOL_REGISTRY: dict[str, ToolConfig] = {
         json_file="skill_references.json",
         jq_hint="jq '.violations[] | {file, line, rule, message}'",
     ),
+    "canonical_callers": ToolConfig(
+        command=_bash("run_canonical_callers_check.sh"),
+        json_file="canonical_callers.json",
+        jq_hint="jq '.violations[]'",
+    ),
     "smoke_test": ToolConfig(
         command=_bash("run_smoke_test.sh"),
         json_file="smoke_test.json",
@@ -184,6 +189,11 @@ def _summarize_smoke_test(data: dict) -> str:
     return f"{passed}/{total} probes passed ({failed} failed)"
 
 
+def _summarize_canonical_callers(data: dict) -> str:
+    total = data.get("summary", {}).get("total_violations", 0)
+    return f"{total} violations"
+
+
 SUMMARIZERS: dict[str, Summarizer] = {
     "magic_values": _summarize_magic_values,
     "format": _summarize_format,
@@ -195,6 +205,7 @@ SUMMARIZERS: dict[str, Summarizer] = {
     "error_hiding": _summarize_error_hiding,
     "shell_audit": _summarize_shell_audit,
     "skill_refs": _summarize_skill_refs,
+    "canonical_callers": _summarize_canonical_callers,
     "smoke_test": _summarize_smoke_test,
 }
 
