@@ -408,3 +408,49 @@ should disappear.
 - Plan 00102 Phase 5 will restart the daemon and verify
 
 **Next regression check**: zero silent stops in the post-fix session.
+
+### Incident — 2026-05-01 (silent stop after Bash exit-code-2, NEW signature)
+
+Transcript: `/root/.claude/projects/-workspace/bf5c972d-32f0-49e9-af1e-1d49db20c98e.jsonl`,
+session opened on a fresh `/clear`. User pointed at
+`untracked/hooks-daemon-upgrade-issues.md`. Two stops occurred:
+
+1. **First stop (line 20)** — classic Plan 00101 signature: recap text + a
+   confirmation question ("What would you like me to do?"), then end-of-turn.
+   Stop hook fired AUTO-CONTINUE.
+2. **Second stop (line 37)** — **new signature**: `Bash` ran
+   `ls /workspace/install_version.sh /workspace/upgrade_version.sh ...` (line
+   33). Three of four files were missing → exit code 2 with one path printed.
+   Assistant produced **zero text** after the tool result and ended the turn.
+
+**Discriminators against existing signature**:
+
+| Dimension                | Existing Plan 00101 signature | This incident            |
+| ------------------------ | ----------------------------- | ------------------------ |
+| Recap text present       | Yes                           | **No**                   |
+| Confirmation question    | Yes                           | **No**                   |
+| Context fill at stop     | High (>150k input + cache)    | **~46% (~92.6k)**        |
+| `<system-reminder>` spam | Often present in prior turns  | **Zero in last 4 turns** |
+| Trigger                  | Multi-edit loop reaching end  | **Bash returned exit 2** |
+
+Token usage on the assistant message immediately before the silent stop
+(line 33): `input_tokens=6`, `cache_read_input_tokens=92067`,
+`cache_creation_input_tokens=528`, `output_tokens=146`. Context-pressure
+hypothesis from earlier in this plan does NOT explain this incident.
+
+**Hypothesis**: a non-zero `exit code` in the last tool result is being read
+as "task failed → bail out" rather than "partial info → analyse and adapt".
+The tool result was actually informative (one of four paths existed); the
+correct next move was to read that single path or follow up with `Glob`. The
+model halted instead.
+
+**Mitigation candidates** (to evaluate before any code change):
+
+- Detect non-zero-exit tool result + zero output tokens in the same turn,
+  inject a more specific reminder than the generic AUTO-CONTINUE message
+  (e.g. "previous tool returned exit N — analyse what was returned and
+  retry/adapt rather than stopping").
+- Distinct counter so this discriminator is observable in dogfooding.
+
+**Status**: not yet actioned. Captured here for the next pass on
+`auto_continue_stop` heuristics.
