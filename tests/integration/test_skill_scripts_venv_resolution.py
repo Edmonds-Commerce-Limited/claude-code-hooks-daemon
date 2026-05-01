@@ -67,6 +67,11 @@ def _link_fingerprint_helper(daemon_dir: Path) -> None:
     (paths_parent / "paths.py").symlink_to(
         REPO_ROOT / "src" / "claude_code_hooks_daemon" / "daemon" / "paths.py"
     )
+    # Plan 00104 Phase 5 Task 5.4: skill _resolve-venv.sh now sources the
+    # canonical library at $DAEMON_DIR/scripts/lib/resolve_venv.sh.
+    lib_dir = daemon_dir / "scripts" / "lib"
+    lib_dir.mkdir(parents=True)
+    (lib_dir / "resolve_venv.sh").symlink_to(REPO_ROOT / "scripts" / "lib" / "resolve_venv.sh")
 
 
 def _run_resolver(daemon_dir: Path, env_overrides: dict[str, str] | None = None) -> str:

@@ -47,6 +47,7 @@ RESOLVE_VENV_SCRIPT = (
     / "_resolve-venv.sh"
 )
 PATHS_PY = REPO_ROOT / "src" / "claude_code_hooks_daemon" / "daemon" / "paths.py"
+CANONICAL_LIB = REPO_ROOT / "scripts" / "lib" / "resolve_venv.sh"
 BASH = shutil.which("bash") or "/bin/bash"
 
 
@@ -138,6 +139,10 @@ def _build_daemon_dir_with_venv(tmp_path: Path) -> Path:
     paths_target.parent.mkdir(parents=True)
     os.symlink(PATHS_PY, paths_target)
 
+    lib_target = daemon_dir / "scripts" / "lib" / "resolve_venv.sh"
+    lib_target.parent.mkdir(parents=True)
+    os.symlink(CANONICAL_LIB, lib_target)
+
     venv_dir = daemon_dir / "untracked" / "venv-py311-acceptance"
     venv_bin = venv_dir / "bin"
     venv_bin.mkdir(parents=True)
@@ -223,6 +228,9 @@ def test_resolve_venv_fails_fast_with_directive_when_no_venv(tmp_path: Path) -> 
     paths_target = daemon_dir / "src" / "claude_code_hooks_daemon" / "daemon" / "paths.py"
     paths_target.parent.mkdir(parents=True)
     os.symlink(PATHS_PY, paths_target)
+    lib_target = daemon_dir / "scripts" / "lib" / "resolve_venv.sh"
+    lib_target.parent.mkdir(parents=True)
+    os.symlink(CANONICAL_LIB, lib_target)
     (daemon_dir / "untracked").mkdir()
 
     fake_path_dir = _build_fake_path_dir(tmp_path)

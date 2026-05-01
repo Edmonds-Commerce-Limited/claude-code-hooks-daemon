@@ -59,8 +59,18 @@
 # ``BASH_SOURCE[0]`` always points at the sourced file even when the
 # library is sourced from arbitrary cwd by an arbitrary caller.
 
-_RV_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-_RV_PROJECT_ROOT="$(cd "${_RV_LIB_DIR}/../.." && pwd)"
+# Use bash parameter expansion (not `dirname`) so resolution works even on a
+# hostile PATH that omits coreutils — see field-regression test
+# tests/acceptance/test_v391_field_regression.py which strips PATH down to a
+# single fake directory. ${var%/*} drops the trailing /component.
+_RV_LIB_DIR="${BASH_SOURCE[0]%/*}"
+case "$_RV_LIB_DIR" in
+    /*) ;;
+    *) _RV_LIB_DIR="$PWD/$_RV_LIB_DIR" ;;
+esac
+# _RV_LIB_DIR is .../scripts/lib — strip the last two components to get
+# the project root. ${var%/*/*} removes /scripts/lib in one expansion.
+_RV_PROJECT_ROOT="${_RV_LIB_DIR%/*/*}"
 _RV_PATHS_SCRIPT="${_RV_PROJECT_ROOT}/src/claude_code_hooks_daemon/daemon/paths.py"
 
 # ============================================================
@@ -129,7 +139,7 @@ _rv_resolve_python_impl() {
 
     local python_cmd
     if ! python_cmd="$(_rv_pick_python "$daemon_dir" "$fallback_flag")"; then
-        echo "resolve_venv: no usable interpreter for paths.py invocation" >&2
+        echo "resolve_venv: no usable venv found under $daemon_dir/untracked/" >&2
         echo "  Searched: \$HOOKS_DAEMON_PYTHON, \$HOOKS_DAEMON_VENV_PATH/bin/python," >&2
         echo "    $daemon_dir/untracked/venv-*/bin/python" >&2
         if [ "$fallback_flag" != "--fallback-target" ]; then
