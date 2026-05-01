@@ -1,8 +1,8 @@
 # Plan 00104: v3.10.0 — venv resolver DRY + upgrade-flow resilience + production bug fixes
 
-**Status**: Not Started
+**Status**: Complete (2026-05-01) — released as v3.10.0 (https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/releases/tag/v3.10.0)
 **Created**: 2026-04-30 (rewritten 2026-05-01 to absorb field-report issues)
-**Owner**: TBD
+**Owner**: joseph
 **Priority**: High — contains active production bugs (issues #4 and #6 below) plus the structural DRY work that was previously deferred
 **Recommended Executor**: Opus 4.6 (Sub-Agent Teams) — complexity warrants strategic oversight per three prior FATAL reviews of the original v1 attempt
 **Execution Strategy**: Sub-Agent Teams with explicit commit-by-commit ordering and per-commit verification gates

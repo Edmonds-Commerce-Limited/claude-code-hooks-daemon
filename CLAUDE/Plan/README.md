@@ -13,15 +13,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Acceptance fixture: multi-Python container (`python3 → 3.9` AND `python3.13` co-resident) reproducing the field-bug topology
   - **v1 superseded**: ambitious version bundled patch + DRY consolidation, returned three FATAL Opus reviews; split per reviewer recommendation
 
-- [00104: v3.10.0 — venv resolver DRY + upgrade-flow resilience + production bug fixes](00104-v3.10.0-venv-resolver-dry-consolidation/PLAN.md) - Not Started
-
-  - **Rewritten** to absorb the post-v3.9.1 field report (see plan `context/` dir — six production issues encountered during a real v2.26 → v3.9.1 upgrade now ship in this plan rather than fragmenting into 00105/00106
-  - **Phase 2 production bug fixes (ship FIRST)**: `write-venv-metadata` records `sys.executable` not system `python3` (issue #4 — currently breaks `daemon-cli.sh` for every fresh install of v3.9.1); `health-check.sh` consistently uses resolved `$PYTHON` (issue #6); daemon `.gitignore` covers `uv.lock` (issue #3)
-  - **Phase 5 upgrade-flow resilience**: skill `upgrade.sh` self-bootstraps from GitHub before destructive work (issue #1); `upgrade_version.sh` falls back to `ensure_venv` when no valid venv exists (issue #2 — the bootstrap paradox); `verify_venv` retry loop tolerates Podman overlay-fs visibility lag after `UV_LINK_MODE=copy` (issue #5)
-  - **Structural (carries the original 00104 scope)**: single canonical bash library `scripts/lib/resolve_venv.sh` sourced by all five sites; `venv_resolver.sh` collapses to re-export shim (NOT deletion — 9 callers per Review #3 F12); static-check QA gate `check_canonical_callers.sh` as 11th `run_all.sh` check; multi-host NFS hostname fail-fast; `requires-python` cross-check; `set -euo pipefail` exit-vs-return contract
-  - Inherits all unresolved RISKY findings from 00103's review history (R17–R25)
-  - One release: v3.10.0 via `/release minor`
-
 - [00100 (v2): Venv SSOT Consolidation — Stop the Release Treadmill](00100-venv-ssot-consolidation/PLAN.md) - Not Started
 
   - Critical: five consecutive releases (v3.1.1, v3.7.0, v3.8.0, v3.8.1, v3.8.2) patched venv bugs; this plan ends the treadmill
@@ -72,6 +63,18 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - SessionState cache still viable when upstream unblocks
 
 ## Completed Plans
+
+- [00104: v3.10.0 — venv resolver DRY + upgrade-flow resilience + production bug fixes](Completed/00104-v3.10.0-venv-resolver-dry-consolidation/PLAN.md) - Complete
+
+  - Released as v3.10.0 — see GitHub releases for the published artifacts
+  - Canonical resolver library `scripts/lib/resolve_venv.sh` — five resolver sites collapsed to thin shims
+  - 12th QA gate: canonical-callers static-check prevents future drift
+  - H-1 acceptance gate (`tests/acceptance/test_diagnostic_scripts.py`) wired into `RELEASING.md` Step 12.0 as BLOCKING
+  - Issue #4 root-cause fix: `cli.py:1415` `.resolve()` drop (the bug that produced every `ModuleNotFoundError` in the field report)
+  - Skill `upgrade.sh` self-bootstrap with sha256 verification (Issue #1)
+  - Multi-host NFS fail-fast + `requires-python` cross-check (Phase 7)
+  - Hot-path cache for `_resolve_python_cmd` (Phase 8)
+  - QA: 12/12 PASSED, 8125 tests, 95.0% coverage
 
 - [00098: Human-Friendly Markdown Tables](Completed/00098-human-friendly-markdown/PLAN.md) - Complete
 
