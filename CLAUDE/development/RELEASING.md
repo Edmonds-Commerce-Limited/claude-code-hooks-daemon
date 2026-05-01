@@ -254,6 +254,23 @@ HANDLER_CHANGES=$(git diff "${LAST_TAG}..HEAD" --name-only -- src/claude_code_ho
 
 ### Execution
 
+**Step 12.0** (H-1 diagnostic-script gate — Plan 00104 Phase 9 Task 9.6): Run the
+deterministic acceptance gate that exercises the production diagnostic scripts
+end-to-end against a fresh fixture project. This catches the v3.9.x regression
+class — `write-venv-metadata` writing the system interpreter as `python_path`,
+`daemon-cli.sh` / `health-check.sh` crashing with `ModuleNotFoundError`, skill
+`upgrade.sh` self-bootstrap silently falling back on network failure — without
+needing a live Claude Code session.
+
+```bash
+$PYTHON -m pytest tests/acceptance/test_diagnostic_scripts.py -v
+# Expected: 5 passed, 1 skipped (Decision 3.B placeholder), 0 failed
+```
+
+ANY failure here = ABORT release. The 2026-05-01 field report (Issues #1, #4,
+#6) escaped because the v3.9.0 acceptance suite never invoked the diagnostic
+scripts — only hook dispatch.
+
 **Step 12.1**: Restart daemon, verify RUNNING.
 
 **Step 12.2**: Verify OBSERVABLE handlers in system-reminders (SessionStart, UserPromptSubmit, PostToolUse).
