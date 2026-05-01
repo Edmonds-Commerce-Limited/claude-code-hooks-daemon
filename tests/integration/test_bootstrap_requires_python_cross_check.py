@@ -1,40 +1,36 @@
-"""Plan 00104 Phase 3 Task 3.6 — bootstrap requires-python cross-check (xfail driver for Phase 7).
+"""Plan 00104 Phase 7 Task 7.2 — bootstrap requires-python cross-check (closed Phase 3 Task 3.6).
 
-PLAN.md Task 7.2: bootstrap probe must reject an interpreter that
-satisfies the hardcoded ``>=3.11`` floor but violates the daemon's actual
+PLAN.md Task 7.2: bootstrap probe rejects an interpreter that satisfies
+the hardcoded ``>=3.11`` floor but violates the daemon's actual
 ``pyproject.toml::requires-python`` constraint.
 
-Today's probe (``scripts/upgrade.sh::find_compatible_python``) only
-checks the hardcoded floor via ``_is_python_at_least_311``. If the
-daemon's ``pyproject.toml`` says ``requires-python = ">=3.13"`` and the
-operator has only Python 3.11 on PATH, today's probe happily selects
-3.11 and the daemon explodes deep in the call stack with a confusing
+Without this cross-check, ``scripts/upgrade.sh::find_compatible_python``
+checked only the hardcoded floor via ``_is_python_at_least_311``. If the
+daemon's ``pyproject.toml`` said ``requires-python = ">=3.13"`` and the
+operator had only Python 3.11 on PATH, the probe happily selected 3.11
+and the daemon exploded deep in the call stack with a confusing
 ``SyntaxError`` from a 3.13-only language feature. The contract Phase 7
-Task 7.2 will land:
+Task 7.2 landed:
 
     find_compatible_python <daemon_dir>
 
-When ``<daemon_dir>/pyproject.toml`` exists and parses, the probe MUST
-parse the ``requires-python`` lower bound and reject any candidate whose
+When ``<daemon_dir>/pyproject.toml`` exists and parses, the probe parses
+the ``requires-python`` lower bound and rejects any candidate whose
 ``--version`` falls below it — even if it satisfies the hardcoded 3.11
-floor. The error MUST be actionable: stderr names the candidate, the
-discovered version, and the ``requires-python`` constraint that
-disqualified it.
+floor. The error is actionable: stderr names the
+``requires-python`` constraint and the lower bound version so the
+operator can install the right interpreter.
 
 The test plants a fake ``python3.11`` on PATH and a fixture
 ``pyproject.toml`` with ``requires-python = ">=3.99"`` (an impossible
-ceiling that no real interpreter can satisfy). The probe MUST fail
-non-zero AND the stderr directive MUST mention ``requires-python`` AND
-``3.99``. Today the probe accepts the 3.11 interpreter (because it has
-no awareness of ``pyproject.toml``), so this assertion fails — exactly
-the xfail-strict outcome that flips to xpass when Phase 7 Task 7.2
-ships and forces the marker's removal.
+ceiling that no real interpreter can satisfy). The probe fails
+non-zero AND the stderr directive mentions ``requires-python`` AND
+``3.99``.
 
-The smoke test pins the inverse — with the real (in-repo)
-``pyproject.toml`` whose ``requires-python = ">=3.11"`` AND a 3.11
-fake on PATH — the probe MUST currently succeed. That guarantees the
-xfail above is failing for the right reason (cross-check absent), not
-because the probe is broken in some other way.
+The smoke test pins the inverse — ``requires-python = ">=3.11"`` plus a
+3.11 fake on PATH — to ensure the cross-check is constraint-aware (only
+fires when the candidate is below the bound) rather than always
+rejecting.
 """
 
 from __future__ import annotations
@@ -43,8 +39,6 @@ import shutil
 import subprocess
 import textwrap
 from pathlib import Path
-
-import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 UPGRADE_SCRIPT = REPO_ROOT / "scripts" / "upgrade.sh"
@@ -222,22 +216,6 @@ def test_smoke_probe_succeeds_when_pyproject_satisfiable(tmp_path: Path) -> None
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Plan 00104 Phase 3 Task 3.6 — drives Phase 7 Task 7.2 "
-        "(requires-python cross-check in bootstrap probe). Today's probe "
-        "in scripts/upgrade.sh::find_compatible_python only checks the "
-        "hardcoded 3.11 floor via _is_python_at_least_311 — it has no "
-        "awareness of the daemon's pyproject.toml::requires-python. A "
-        "user with pyproject saying '>=3.13' and only python3.11 on PATH "
-        "today gets a successful probe followed by a deep SyntaxError. "
-        "When Phase 7.2 lands the cross-check, the probe rejects the "
-        "candidate with an actionable directive citing both the "
-        "candidate version and the requires-python constraint, and this "
-        "xfail-strict flips to xpass."
-    ),
-)
 def test_probe_rejects_candidate_below_pyproject_requires_python(tmp_path: Path) -> None:
     """3.11 fake on PATH + pyproject says ``>=3.99`` → probe must reject.
 

@@ -69,6 +69,13 @@ _SLUG_MAX_LEN = 40
 _SLUG_TRUNCATED_PREFIX_LEN = 36
 _SLUG_TRUNCATED_HASH_LEN = 4
 
+# Plan 00104 Phase 7 Task 7.1: detect hostname-suffixed venvs of the form
+# ``venv-[<slug>-]py{MM}-{hex}-<hostname>``. Used by the multi-host NFS
+# fail-fast check in ``_cli_resolve_venv`` — when ``HOSTNAME`` is unset and
+# two or more such siblings share a fingerprint, the resolver cannot
+# disambiguate without operator input.
+_HOSTNAME_SUFFIX_VENV_PATTERN = re.compile(r"^venv-(?:.+-)?py\d+-[a-f0-9]+-(.+)$")
+
 
 def project_path_slug(root: str | Path) -> str:
     """Return a filesystem-safe slug derived from the project root path.
@@ -1249,6 +1256,27 @@ def write_cleanup_status(project_dir: Path | str, total_removed: int) -> None:
         logger.warning("Failed to write cleanup status: %s", e)
 
 
+def _collect_hostname_suffixed_venvs(untracked_dir: Path) -> list[tuple[Path, str]]:
+    """Return ``[(venv_dir, hostname_suffix), ...]`` for hostname-suffixed venvs.
+
+    Plan 00104 Phase 7 Task 7.1 — used by ``_cli_resolve_venv`` to fail
+    fast on multi-host NFS deployments. Pattern matched:
+    ``venv-[<slug>-]py{MM}-{hex}-<hostname>``. Fingerprint-only venvs
+    (``venv-py311-deadbeef``) do NOT match and are skipped, so a healthy
+    single-host install never trips the check.
+    """
+    if not untracked_dir.is_dir():
+        return []
+    matches: list[tuple[Path, str]] = []
+    for entry in sorted(untracked_dir.iterdir()):
+        if not entry.is_dir():
+            continue
+        match = _HOSTNAME_SUFFIX_VENV_PATTERN.match(entry.name)
+        if match is not None:
+            matches.append((entry, match.group(1)))
+    return matches
+
+
 def _cli_resolve_venv(args: argparse.Namespace) -> int:
     """CLI handler for the ``resolve-venv`` subcommand.
 
@@ -1260,9 +1288,32 @@ def _cli_resolve_venv(args: argparse.Namespace) -> int:
     the fingerprint-keyed creation target (exit 0) instead of exit 1 — this
     is what ``scripts/venv-include.bash::ensure_venv`` needs when no venv
     has been created yet on a fresh project.
+
+    Plan 00104 Phase 7 Task 7.1: multi-host NFS fail-fast. When ``HOSTNAME``
+    is unset and ``$daemon_dir/untracked/`` contains two or more
+    hostname-suffixed sibling venvs, the resolver cannot disambiguate
+    without corrupting one host's state. Exit non-zero with both hostnames
+    listed in stderr so the operator picks one explicitly via
+    ``HOSTNAME=...``.
     """
     daemon_dir = Path(args.daemon_dir) if args.daemon_dir else Path.cwd()
     fallback_target: bool = getattr(args, "fallback_target", False)
+
+    if not os.environ.get("HOSTNAME", "").strip():
+        suffixed = _collect_hostname_suffixed_venvs(daemon_dir / "untracked")
+        distinct_hostnames = sorted({hostname for _, hostname in suffixed})
+        if len(distinct_hostnames) >= 2:
+            print(
+                "resolve-venv: HOSTNAME unset and multiple hostname-suffixed "
+                f"venvs found under {daemon_dir / 'untracked'}: "
+                f"{', '.join(distinct_hostnames)}. "
+                "Set HOSTNAME=<one-of-these> explicitly to disambiguate "
+                "before re-invoking the resolver "
+                "(multi-host NFS deployments require an explicit hostname).",
+                file=sys.stderr,
+            )
+            return 2
+
     resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
     if resolved is not None:
         print(str(resolved))

@@ -138,12 +138,62 @@ _is_python_at_least_311() {
 #   1 - no compatible Python found (exits via _fail)
 #
 find_compatible_python() {
+    # Plan 00104 Phase 7 Task 7.2: optional <daemon_dir> positional arg.
+    # When provided AND its pyproject.toml carries a parseable
+    # requires-python lower bound, every candidate's --version is
+    # cross-checked against that bound. Without the cross-check, a 3.11
+    # interpreter satisfies the hardcoded 3.11 floor and the daemon
+    # explodes deep in the call stack on a 3.13-only language feature.
+    local daemon_dir="${1:-}"
+
+    # Parse pyproject's [project] requires-python lower bound. Inlined
+    # rather than extracted to a helper because the integration test in
+    # tests/integration/test_bootstrap_requires_python_cross_check.py
+    # extracts only this function and _is_python_at_least_311 — adding a
+    # new helper would silently break the extraction. Supports the
+    # forms users actually write: ``>=3.13``, ``~=3.13`` (with optional
+    # whitespace, with or without trailing upper bound).
+    local _rp_min_major="" _rp_min_minor="" _rp_constraint=""
+    if [ -n "$daemon_dir" ] && [ -f "$daemon_dir/pyproject.toml" ]; then
+        local _rp_line _rp_value=""
+        while IFS= read -r _rp_line; do
+            if [[ "$_rp_line" =~ ^[[:space:]]*requires-python[[:space:]]*=[[:space:]]*[\"\']([^\"\']+)[\"\'] ]]; then
+                _rp_value="${BASH_REMATCH[1]}"
+                break
+            fi
+        done < "$daemon_dir/pyproject.toml"
+        if [ -n "$_rp_value" ] && [[ "$_rp_value" =~ (\>=|~=)[[:space:]]*([0-9]+)\.([0-9]+) ]]; then
+            _rp_min_major="${BASH_REMATCH[2]}"
+            _rp_min_minor="${BASH_REMATCH[3]}"
+            _rp_constraint="$_rp_value"
+        fi
+    fi
+
     # Step 1: explicit override wins (validated, no fallback on failure).
     if [ -n "${HOOKS_DAEMON_PYTHON:-}" ]; then
         if _is_python_at_least_311 "$HOOKS_DAEMON_PYTHON"; then
-            export HOOKS_DAEMON_PYTHON
-            _ok "Compatible Python found: $HOOKS_DAEMON_PYTHON ($("$HOOKS_DAEMON_PYTHON" --version 2>&1))"
-            return 0
+            local _ovr_ok=1
+            if [ -n "$_rp_min_major" ]; then
+                local _ovr_ver _ovr_maj _ovr_min
+                _ovr_ver="$("$HOOKS_DAEMON_PYTHON" --version 2>&1)" || _ovr_ver=""
+                if [[ "$_ovr_ver" =~ Python[[:space:]]+([0-9]+)\.([0-9]+) ]]; then
+                    _ovr_maj="${BASH_REMATCH[1]}"
+                    _ovr_min="${BASH_REMATCH[2]}"
+                    if [ "$_ovr_maj" -lt "$_rp_min_major" ] \
+                        || { [ "$_ovr_maj" -eq "$_rp_min_major" ] \
+                             && [ "$_ovr_min" -lt "$_rp_min_minor" ]; }; then
+                        _ovr_ok=0
+                    fi
+                fi
+            fi
+            if [ "$_ovr_ok" -eq 1 ]; then
+                export HOOKS_DAEMON_PYTHON
+                _ok "Compatible Python found: $HOOKS_DAEMON_PYTHON ($("$HOOKS_DAEMON_PYTHON" --version 2>&1))"
+                return 0
+            fi
+            _fail "HOOKS_DAEMON_PYTHON=$HOOKS_DAEMON_PYTHON satisfies the hardcoded 3.11 floor but violates pyproject.toml requires-python = \"$_rp_constraint\".
+
+Point HOOKS_DAEMON_PYTHON at a Python ${_rp_min_major}.${_rp_min_minor}+ interpreter (or unset it to let the installer probe PATH for one)."
         fi
         _fail "HOOKS_DAEMON_PYTHON=$HOOKS_DAEMON_PYTHON is not a usable Python 3.11+ interpreter.
 
@@ -176,16 +226,41 @@ Either:
         done <<< "$discovered"
     fi
 
-    # Step 3: probe candidates in order; first 3.11+ match wins.
+    # Step 3: probe candidates in order; first 3.11+ AND requires-python match wins.
     local candidate
     for candidate in "${candidates[@]}"; do
         if _is_python_at_least_311 "$candidate"; then
-            HOOKS_DAEMON_PYTHON="$(command -v "$candidate")"
-            export HOOKS_DAEMON_PYTHON
-            _ok "Compatible Python found: $HOOKS_DAEMON_PYTHON ($("$HOOKS_DAEMON_PYTHON" --version 2>&1))"
-            return 0
+            local _accept=1
+            if [ -n "$_rp_min_major" ]; then
+                local _cand_ver _cand_maj _cand_min
+                _cand_ver="$("$candidate" --version 2>&1)" || _cand_ver=""
+                if [[ "$_cand_ver" =~ Python[[:space:]]+([0-9]+)\.([0-9]+) ]]; then
+                    _cand_maj="${BASH_REMATCH[1]}"
+                    _cand_min="${BASH_REMATCH[2]}"
+                    if [ "$_cand_maj" -lt "$_rp_min_major" ] \
+                        || { [ "$_cand_maj" -eq "$_rp_min_major" ] \
+                             && [ "$_cand_min" -lt "$_rp_min_minor" ]; }; then
+                        _accept=0
+                    fi
+                fi
+            fi
+            if [ "$_accept" -eq 1 ]; then
+                HOOKS_DAEMON_PYTHON="$(command -v "$candidate")"
+                export HOOKS_DAEMON_PYTHON
+                _ok "Compatible Python found: $HOOKS_DAEMON_PYTHON ($("$HOOKS_DAEMON_PYTHON" --version 2>&1))"
+                return 0
+            fi
         fi
     done
+
+    if [ -n "$_rp_min_major" ]; then
+        _fail "No Python interpreter satisfying requires-python = \"$_rp_constraint\" found.
+
+Searched (versioned commands only): ${candidates[*]}
+Every candidate clears the hardcoded 3.11 floor, but none meets the requires-python lower bound of ${_rp_min_major}.${_rp_min_minor}.
+
+Install Python ${_rp_min_major}.${_rp_min_minor} or newer, or set HOOKS_DAEMON_PYTHON explicitly to an interpreter that satisfies the constraint."
+    fi
 
     _fail "No compatible Python (3.11+) found.
 
@@ -216,7 +291,18 @@ PROJECT_ROOT="$(cd "$PROJECT_ROOT" && pwd)" # Resolve to absolute path
 _ok "Project root: $PROJECT_ROOT"
 
 # Step 2: Find compatible Python interpreter (3.11+)
-find_compatible_python
+#
+# Plan 00104 Phase 7 Task 7.2: locate the daemon's pyproject.toml so the
+# probe can cross-check requires-python. Prefer the namespaced install
+# path; fall back to PROJECT_ROOT only when this script lives inside the
+# daemon's own repo (self-install — scripts/upgrade.sh is daemon-only).
+_DAEMON_PYPROJECT_DIR=""
+if [ -f "$PROJECT_ROOT/.claude/hooks-daemon/pyproject.toml" ]; then
+    _DAEMON_PYPROJECT_DIR="$PROJECT_ROOT/.claude/hooks-daemon"
+elif [ -f "$PROJECT_ROOT/pyproject.toml" ] && [ -f "$PROJECT_ROOT/scripts/upgrade.sh" ]; then
+    _DAEMON_PYPROJECT_DIR="$PROJECT_ROOT"
+fi
+find_compatible_python "$_DAEMON_PYPROJECT_DIR"
 
 # Step 3: Determine daemon directory and mode
 DAEMON_DIR="$PROJECT_ROOT/.claude/hooks-daemon"

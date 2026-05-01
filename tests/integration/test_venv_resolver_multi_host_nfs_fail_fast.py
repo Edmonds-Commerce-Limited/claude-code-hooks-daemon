@@ -1,4 +1,4 @@
-"""Plan 00104 Phase 3 Task 3.4 — multi-host NFS fail-fast (xfail driver for Phase 7).
+"""Plan 00104 Phase 7 Task 7.1 — multi-host NFS fail-fast (closed Phase 3 Task 3.4).
 
 PLAN.md §8 Multi-host NFS hostname fail-fast: when ``HOSTNAME`` is unset
 AND multiple hostname-suffixed venvs exist in ``$daemon_dir/untracked/``,
@@ -15,18 +15,11 @@ disambiguate and silently picking either venv corrupts the loser host's
 state. The contract is: fail loudly, list both hostnames in stderr,
 direct the operator to set ``HOSTNAME`` explicitly.
 
-Today's resolver in ``init.sh`` lines 255-328 has no hostname-suffix
-awareness — its scan-fallback walks ``untracked/venv-*/bin/python`` in
-alphabetic order and picks the first executable, which on a fixture with
-``venv-py311-deadbeef-hostA`` and ``venv-py311-deadbeef-hostB`` would
-silently land on the alphabetic winner. Phase 7 Task 7.1 adds the
-hostname-aware fail-fast logic to the canonical library; when that
-lands, this xfail-strict flips to xpass and forces removal.
-
-The test invokes the SSOT CLI (``paths.py resolve-venv``) because that
-is where the canonical hostname-aware logic will live (the bash sites
-delegate to it). The fixture mirrors a multi-host NFS layout exactly:
-two hostname-suffixed venvs with the same fingerprint, no
+The check lives in ``paths.py::_cli_resolve_venv`` (the SSOT CLI that
+bash callers delegate to via ``scripts/lib/resolve_venv.sh``), so every
+caller — daemon CLI, install scripts, status-line probes — gets the
+same fail-fast behaviour. The fixture mirrors a multi-host NFS layout
+exactly: two hostname-suffixed venvs with the same fingerprint, no
 ``HOSTNAME`` env var.
 """
 
@@ -36,8 +29,6 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-
-import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PATHS_PY = REPO_ROOT / "src" / "claude_code_hooks_daemon" / "daemon" / "paths.py"
@@ -106,18 +97,6 @@ def test_multi_host_fixture_plants_both_venvs(tmp_path: Path) -> None:
     ]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Plan 00104 Phase 3 Task 3.4 — drives Phase 7 Task 7.1 "
-        "(canonical-library hostname-aware fail-fast). Today's resolver "
-        "has no hostname-suffix awareness: its scan-fallback picks the "
-        "alphabetically-first venv and silently corrupts the other host. "
-        "When Phase 7 lands the directive-listing fail-fast logic, the "
-        "resolver returns non-zero with both hostnames in stderr and this "
-        "xfail-strict flips to xpass."
-    ),
-)
 def test_resolve_venv_fails_fast_with_hostname_directive_when_hostname_unset(
     tmp_path: Path,
 ) -> None:

@@ -652,11 +652,28 @@ recovery path.
 
 ### Phase 7: Multi-host NFS + `requires-python` cross-check
 
-- [ ] ⬜ **Task 7.1**: Multi-host fail-fast logic in canonical library; Phase 3
-  Task 3.4 turns green.
-- [ ] ⬜ **Task 7.2**: `requires-python` cross-check in bootstrap probe; Phase
-  3 Task 3.6 turns green.
-- [ ] ⬜ **Task 7.3**: Daemon restart RUNNING; QA green; commit.
+- [x] ✅ **Task 7.1**: Multi-host fail-fast logic in canonical library; Phase 3
+  Task 3.4 turns green. (Done: `_HOSTNAME_SUFFIX_VENV_PATTERN` +
+  `_collect_hostname_suffixed_venvs` in `paths.py`; fail-fast branch in
+  `_cli_resolve_venv` exits 2 with both hostnames listed when HOSTNAME
+  unset and ≥2 suffixed venvs present. Driver test
+  `test_venv_resolver_multi_host_nfs_fail_fast.py` xfail decorator
+  removed; passes green. Coverage held at 95.0% via in-process unit
+  tests in `tests/unit/daemon/test_paths_hostname_suffix_resolution.py`.)
+- [x] ✅ **Task 7.2**: `requires-python` cross-check in bootstrap probe; Phase
+  3 Task 3.6 turns green. (Done: `find_compatible_python` now accepts
+  `<daemon_dir>` and inline-parses `pyproject.toml::requires-python`
+  for `>=` and `~=` lower bounds; cross-checks every candidate's
+  `--version` against the bound and fails with an actionable directive
+  citing both `requires-python` and the bound version. Call site at
+  `scripts/upgrade.sh:~297` resolves `_DAEMON_PYPROJECT_DIR` (preferring
+  `.claude/hooks-daemon/pyproject.toml`, falling back to self-install
+  `pyproject.toml`). Driver test
+  `test_bootstrap_requires_python_cross_check.py` xfail decorator
+  removed; both probes green.)
+- [x] ✅ **Task 7.3**: Daemon restart RUNNING; QA green; commit. (Done:
+  daemon restarted PID 195728; status RUNNING; QA 12/12 PASSED; tests
+  8110 passed, 0 failed, 5 skipped, coverage 95.0%.)
 
 ### Phase 8: Hot-path latency verification
 
