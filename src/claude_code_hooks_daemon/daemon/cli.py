@@ -1412,7 +1412,7 @@ def cmd_write_venv_metadata(args: argparse.Namespace) -> int:
 
     try:
         meta = DaemonVenvMetadata(
-            python_path=str(python_binary.resolve()),
+            python_path=str(python_binary),
             fingerprint=args.fingerprint,
             lock_hash=lock_hash,
             daemon_version=args.daemon_version,
