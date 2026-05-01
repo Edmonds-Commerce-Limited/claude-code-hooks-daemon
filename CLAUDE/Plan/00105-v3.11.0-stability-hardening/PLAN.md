@@ -42,9 +42,11 @@ The lesson, captured in `feedback_acceptance_gates_must_run_real_path.md`: a gat
 The single highest-leverage item. Once this is in place, any bug class in the install chain — including the next print-before-echo regression — fails QA before tagging.
 
 - [x] ✅ **Task 1.1**: Add `tests/acceptance/test_install_sh_end_to_end.py` with one case: build a fresh fixture project (no `.claude/`, no venv), run `scripts/install.sh` against it under a controlled environment, assert (a) exit code 0, (b) `.daemon-metadata.json` exists with `python_path` pointing at the venv's own `bin/python`, (c) `daemon-cli.sh status` reports daemon RUNNING.
-- [ ] ⬜ **Task 1.2**: Wire the new case into `RELEASING.md` Step 12.0 alongside the existing diagnostic-script gate. Make the BLOCKING wording cover both files.
+- [x] ✅ **Task 1.2**: Wire the new case into `RELEASING.md` Step 12.0 alongside the existing diagnostic-script gate. Make the BLOCKING wording cover both files.
 - [ ] ⬜ **Task 1.3**: Add a second case for the upgrade path: pre-load a fixture with the v3.10.0 source layout, then run `scripts/upgrade.sh` and assert the same daemon-RUNNING outcome. This guards against upgrade-only regressions.
-- [ ] ⬜ **Task 1.4**: Confirm the v3.10.0 print_info bug WOULD fail this gate — temporarily revert `output.sh`, run the new case, see the failure, restore `output.sh`, see it pass.
+- [x] ✅ **Task 1.4**: Confirm the v3.10.0 print_info bug WOULD fail this gate — temporarily revert `output.sh`, run the new case, see the failure, restore `output.sh`, see it pass. **VERIFIED 2026-05-01**: with `print_info` reverted to write to stdout, the test fails with the EXACT bug signature: `Virtual environment Python not found: → ensure_venv: creating venv at <path>\n<path>` (the print_info message and ensure_venv's echoed venv path concatenated into the `VAR=$(ensure_venv ...)` capture). Restoring `print_info` restores the test to green.
+
+**Bonus bug fix (caught by Task 1.1's first run)**: `scripts/install_version.sh` line 243 fell back to `git rev-parse --short HEAD` when no exact tag matched. The 7-char SHA fails `write-venv-metadata`'s `vMAJOR.MINOR.PATCH` Pydantic validator and silently skips writing `.daemon-metadata.json` on every non-release-tag install. Fixed by reading `pyproject.toml` as the canonical fallback. This is a sister-bug to the v3.10.0 SEV-1 — same silent-degradation class — and exactly the kind of latent bug Plan 00105 Goal 1 is meant to catch.
 
 ### Phase 2: VAR=$(fn) capture-corruption static + dynamic check (Goal 2)
 

@@ -254,22 +254,33 @@ HANDLER_CHANGES=$(git diff "${LAST_TAG}..HEAD" --name-only -- src/claude_code_ho
 
 ### Execution
 
-**Step 12.0** (H-1 diagnostic-script gate — Plan 00104 Phase 9 Task 9.6): Run the
-deterministic acceptance gate that exercises the production diagnostic scripts
-end-to-end against a fresh fixture project. This catches the v3.9.x regression
-class — `write-venv-metadata` writing the system interpreter as `python_path`,
-`daemon-cli.sh` / `health-check.sh` crashing with `ModuleNotFoundError`, skill
-`upgrade.sh` self-bootstrap silently falling back on network failure — without
-needing a live Claude Code session.
+**Step 12.0** (H-1 deterministic install/diagnostic gates — Plan 00104 Phase 9
+Task 9.6 + Plan 00105 Phase 1): Run BOTH deterministic acceptance gates that
+exercise the production install path and the production diagnostic scripts
+end-to-end against a fresh fixture project. Together they catch:
+
+- The v3.9.x regression class — `write-venv-metadata` writing the system
+  interpreter as `python_path`, `daemon-cli.sh` / `health-check.sh` crashing
+  with `ModuleNotFoundError`, skill `upgrade.sh` self-bootstrap silently
+  falling back on network failure.
+- The v3.10.0 SEV-1 class — `print_info` writing to stdout corrupting every
+  `VAR=$(ensure_venv ...)` capture, breaking every upgrade in the field.
+- Any future bug in `install_version.sh` → `ensure_venv` → `verify_venv` →
+  `write-venv-metadata` → daemon-start that produces a non-running daemon.
 
 ```bash
-$PYTHON -m pytest tests/acceptance/test_diagnostic_scripts.py -v
-# Expected: 5 passed, 1 skipped (Decision 3.B placeholder), 0 failed
+$PYTHON -m pytest tests/acceptance/test_diagnostic_scripts.py tests/acceptance/test_install_sh_end_to_end.py -v
+# Expected: tests/acceptance/test_diagnostic_scripts.py — 5 passed, 1 skipped
+#           tests/acceptance/test_install_sh_end_to_end.py — 1 passed
+#           combined: 6 passed, 1 skipped, 0 failed
 ```
 
-ANY failure here = ABORT release. The 2026-05-01 field report (Issues #1, #4,
-#6) escaped because the v3.9.0 acceptance suite never invoked the diagnostic
-scripts — only hook dispatch.
+ANY failure in either file = ABORT release. The 2026-05-01 field report
+(Issues #1, #4, #6) escaped because the v3.9.0 acceptance suite never invoked
+the diagnostic scripts — only hook dispatch. The v3.10.0 SEV-1 escaped
+because the v3.10.0 H-1 gate synthesised state via `write-venv-metadata`
+directly instead of running the production `ensure_venv` capture chain. Both
+gaps are closed by adding `test_install_sh_end_to_end.py` here.
 
 **Step 12.1**: Restart daemon, verify RUNNING.
 

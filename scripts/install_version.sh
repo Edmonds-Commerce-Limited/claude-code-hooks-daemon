@@ -240,7 +240,26 @@ log_step "3" "Creating virtual environment"
 # Plan 00099: venv is keyed by fingerprint of the target Python environment so
 # concurrent containers (sharing the same project filesystem with different
 # Pythons) each get their own venv without clobbering each other.
-INSTALLED_VERSION=$(git -C "$DAEMON_DIR" describe --tags --exact-match 2>/dev/null || git -C "$DAEMON_DIR" rev-parse --short HEAD)
+# Plan 00105 Phase 1: derive a schema-valid daemon version even when HEAD
+# is not exactly tagged. The previous fallback (`git rev-parse --short HEAD`)
+# returned a 7-char SHA which fails write-venv-metadata's strict
+# 'vMAJOR.MINOR.PATCH' Pydantic validator and silently skipped writing
+# .daemon-metadata.json on every non-release-tag install. Solution: when no
+# exact tag matches, read the canonical version from pyproject.toml. Never
+# fall back to a SHA — fail loudly instead.
+if INSTALLED_VERSION=$(git -C "$DAEMON_DIR" describe --tags --exact-match 2>/dev/null); then
+    : # tagged release — INSTALLED_VERSION is already vMAJOR.MINOR.PATCH
+else
+    PYPROJECT_FILE="$DAEMON_DIR/pyproject.toml"
+    if [ ! -f "$PYPROJECT_FILE" ]; then
+        fail_fast "cannot determine daemon version: HEAD is not tagged and $PYPROJECT_FILE is missing"
+    fi
+    PYPROJECT_VERSION=$(awk -F'"' '/^version[[:space:]]*=/ { print $2; exit }' "$PYPROJECT_FILE")
+    if [ -z "$PYPROJECT_VERSION" ]; then
+        fail_fast "cannot determine daemon version: pyproject.toml has no [project].version entry"
+    fi
+    INSTALLED_VERSION="v$PYPROJECT_VERSION"
+fi
 VENV_PATH=$(ensure_venv "$DAEMON_DIR" "$INSTALLED_VERSION" "${HOOKS_DAEMON_PYTHON:-python3}")
 if [ -z "$VENV_PATH" ]; then
     fail_fast "ensure_venv returned empty path"
