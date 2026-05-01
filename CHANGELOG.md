@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.9.1] - 2026-05-01
+
+### Fixed
+
+- **`paths.py` module-load crash under Python < 3.11 (Plan 00103, commit 6.B)**: `import tomllib` at module top caused a `ModuleNotFoundError` on any host where the system `python3` is 3.9 or 3.10, even when a compatible Python (3.11+) was co-resident and the daemon itself was running healthily on it. The import is now deferred inside a `_load_toml_or_raise()` helper function. The `resolve-venv` CLI subcommand — which does not use TOML — now works under any Python 3.x. Subcommands that genuinely require `tomllib` (e.g. `check-venv-fresh`) fail fast with a clear error message rather than a silent module-load crash. Reported in field report `context/2026-04-30-field-report.md`.
+- **Silent venv-resolution failure at five shell sites (Plan 00103, commits 6.C–6.G)**: All five shell-side resolver sites (`_resolve-venv.sh`, `venv-include.bash`, `scripts/install/venv_resolver.sh`, `init.sh::_resolve_python_cmd`, `scripts/install/venv.sh::venv_lock_hash_matches`) suppressed SSOT errors via `2>/dev/null` and fell back silently to the retired legacy `untracked/venv/bin/python` path when the SSOT crashed. This caused every diagnostic helper script (`health-check.sh`, `daemon-cli.sh status`) to report false "Daemon installation may be corrupted" errors even when the daemon process was healthy. Each site now surfaces stderr from the SSOT, removes the legacy silent fallback, and exits non-zero with a clear directive when resolution genuinely fails.
+- **Bootstrap scripts accepted bare `python3` as a Python candidate (Plan 00103, commit 6.H — Decision 3 Rule B)**: `install.sh` and `upgrade.sh` used `${HOOKS_DAEMON_PYTHON:-python3}` as a fallback candidate, making bootstrap a dice-roll on hosts where `python3 → 3.9` (RHEL/CentOS). Bootstrap now probes explicit versioned commands (`python3.13`, `python3.12`, `python3.11`) and any `python3.NN` with `NN >= 11` discovered via `compgen`, with no bare `python3` candidate. `HOOKS_DAEMON_PYTHON` override is honoured only after version validation.
+- **`venv_lock_hash_matches` used bare `python3` instead of the venv's own interpreter (Plan 00103, commit 6.G — Decision 3 Rule A)**: The lock-hash comparison function in `venv.sh` invoked `python3` directly, bypassing the venv. It now uses the venv's own `bin/python`, ensuring the hash comparison runs under the correct interpreter on the upgrade path.
+- **Smoke-test daemon-start timeout too short (commit `cb46824`)**: The subprocess timeout for waiting on daemon startup in smoke tests was 2 seconds, causing intermittent false failures on slower CI hosts. Increased to 10 seconds.
+
+### Added
+
+- **Acceptance fixtures for the v3.9.0 field regression (Plan 00103, commit 6.I)**: Two deterministic acceptance tests in `tests/acceptance/test_v391_field_regression.py` reproduce the field bug without requiring Docker: a PATH-shim approach installs a hostile `python3` stub (returns `Python 3.9`, crashes on `import tomllib`) alongside a real venv keyed to a 3.11+ interpreter. `test_resolve_venv_succeeds_when_path_python3_is_broken` asserts the resolver finds the venv interpreter and never invokes the broken PATH `python3`. `test_resolve_venv_fails_fast_with_directive_when_no_venv` asserts a clear non-zero exit with an install directive when no venv exists. Docker fixtures (`tests/integration/fixtures/multi-python.Dockerfile`, `single-python-39.Dockerfile`) are also committed for full-fidelity CI runs against a real Python 3.9 base image.
+
 ## [3.9.0] - 2026-04-29
 
 ### Added
