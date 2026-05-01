@@ -520,8 +520,11 @@ recovery path.
     pinned-tag download, sha256 verification against
     `bootstrap-checksums.txt`, `--already-bootstrapped` recursion guard,
     explicit abort on network/checksum failure.
-  - [ ] ⬜ Implement post-bootstrap stage: clean any stray `uv.lock` in
-    daemon dir before `git checkout`. (Closes Task 2.3 xfail.)
+  - [x] ✅ Implement post-bootstrap stage: clean any stray `uv.lock` in
+    daemon dir before `git checkout`. (Closes Task 2.3 xfail. Done:
+    skill `upgrade.sh` now runs `rm -f "$DAEMON_DIR/uv.lock"` before
+    delegating to Layer 1; static-source xfail in
+    `test_skill_upgrade_handles_stale_uv_lock.py` flipped to passing.)
   - [ ] ⬜ Daemon restart RUNNING; QA green; commit.
 
 - [ ] ⬜ **Task 5.1.B — Decision 3.B fix (daemon-cli.sh / health-check.sh / init-handlers.sh self-bootstrap)**:
