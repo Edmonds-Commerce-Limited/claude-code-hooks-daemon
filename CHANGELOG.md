@@ -7,7 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [3.10.0] - 2026-05-01
+## [3.10.1] - 2026-05-01
+
+### Fixed
+
+- **SEV-1 regression: `print_info`-on-stdout broke every `/hooks-daemon upgrade`**: v3.10.0 shipped with `print_info`, `print_success`, `print_warning`, `print_verbose`, `print_header`, and `log_step` writing to stdout. The install scripts use `VAR=$(helper ...)` to capture return values from helpers like `ensure_venv` (which echoes the venv path on stdout). Any progress message printed before the echo corrupted the capture, producing a two-line `$VENV_PATH` such that `$VENV_PATH/bin/python` resolved to a non-existent path and `verify_venv` failed. Every existing v2.x → v3.10.0 upgrade path was broken in the field. Fix: every helper except `print_error` (which was already correct) now writes to stderr. The H-1 acceptance gate added in v3.10.0 did not catch this because its fixture synthesised state via `write-venv-metadata` directly instead of running the actual `ensure_venv` capture chain.
+
+### Added
+
+- **Regression test `tests/integration/test_install_output_stream_separation.py`**: Eight focused tests that exercise the exact `VAR=$(fn)` capture pattern that v3.10.0 broke. Asserts every progress helper writes to stderr only, and that a function calling helpers before its `echo` produces an uncorrupted capture. Would have caught the v3.10.0 regression at QA time.
+
+
 
 ### Added
 

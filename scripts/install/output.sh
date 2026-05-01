@@ -44,11 +44,11 @@ fi
 #   $1 - Header text
 #
 print_header() {
-    echo ""
-    echo "============================================================"
-    echo "$1"
-    echo "============================================================"
-    echo ""
+    echo "" >&2
+    echo "============================================================" >&2
+    echo "$1" >&2
+    echo "============================================================" >&2
+    echo "" >&2
 }
 
 #
@@ -57,8 +57,12 @@ print_header() {
 # Args:
 #   $1 - Success message
 #
+# Writes to stderr so that helper functions which echo their return
+# value via stdout (e.g. ensure_venv) are not corrupted by progress
+# messages when called as VAR=$(helper ...).
+#
 print_success() {
-    echo -e "${GREEN}✓${NC} $1"
+    echo -e "${GREEN}✓${NC} $1" >&2
 }
 
 #
@@ -78,7 +82,7 @@ print_error() {
 #   $1 - Warning message
 #
 print_warning() {
-    echo -e "${YELLOW}⚠${NC}  $1"
+    echo -e "${YELLOW}⚠${NC}  $1" >&2
 }
 
 #
@@ -87,8 +91,13 @@ print_warning() {
 # Args:
 #   $1 - Info message
 #
+# Writes to stderr — see print_success() rationale. v3.10.0 shipped a
+# regression where ensure_venv called print_info before echoing its
+# return value, corrupting VAR=$(ensure_venv ...) captures. Fixed in
+# v3.10.1.
+#
 print_info() {
-    echo -e "${BLUE}→${NC} $1"
+    echo -e "${BLUE}→${NC} $1" >&2
 }
 
 #
@@ -101,9 +110,9 @@ print_info() {
 log_step() {
     local step="$1"
     local message="$2"
-    echo ""
-    echo -e "${BOLD}Step $step: $message${NC}"
-    echo "----------------------------------------"
+    echo "" >&2
+    echo -e "${BOLD}Step $step: $message${NC}" >&2
+    echo "----------------------------------------" >&2
 }
 
 #
@@ -131,6 +140,6 @@ fail_fast() {
 #
 print_verbose() {
     if [ "${VERBOSE:-false}" = "true" ]; then
-        echo -e "${CYAN}[DEBUG]${NC} $1"
+        echo -e "${CYAN}[DEBUG]${NC} $1" >&2
     fi
 }
