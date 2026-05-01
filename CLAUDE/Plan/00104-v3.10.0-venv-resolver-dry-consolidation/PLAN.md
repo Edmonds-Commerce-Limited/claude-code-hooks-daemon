@@ -496,36 +496,53 @@ prevents the failure mode where commits 5.6 and 5.7 each look fine in
 isolation but together leave the developer's own daemon broken with no
 recovery path.
 
-- [ ] ⬜ **Task 5.1 — Issue #1 fix (skill upgrade self-bootstrap, post-review-revised per Decision 3 + 3.B + 3.C)**:
+- [x] ✅ **Task 5.1 — Issue #1 fix (skill upgrade self-bootstrap, post-review-revised per Decision 3 + 3.B + 3.C)** (2026-05-01):
 
-  - [ ] ⬜ Add release-pipeline step: publish `bootstrap-checksums.txt`
+  - [x] ✅ Add release-pipeline step: publish `bootstrap-checksums.txt`
     (sha256 of skill scripts) as a GitHub release artifact. Update
     `CLAUDE/development/RELEASING.md` Step 14 with the new artifact.
-  - [ ] ⬜ Failing test: `tests/integration/test_skill_upgrade_self_bootstraps.py`
-    — fixture skill `upgrade.sh` is intentionally stale (echoes "OLD"); a
-    network-mocked release tag exposes a fresh upgrade.sh that echoes "NEW";
-    asserts actual run echoes "NEW".
-  - [ ] ⬜ Failing test: `tests/integration/test_skill_upgrade_recursion_guard.py`
-    — fixture freshly-downloaded `upgrade.sh` is invoked with
-    `--already-bootstrapped`; asserts the self-bootstrap stanza is skipped
-    (no second download).
-  - [ ] ⬜ Failing test: `tests/integration/test_skill_upgrade_aborts_on_network_failure.py`
-    — fixture mocks GitHub unreachable; asserts the script aborts with a
-    directive (does NOT silently fall back to local stale copy).
-  - [ ] ⬜ Failing test: `tests/integration/test_skill_upgrade_checksum_mismatch.py`
-    — fixture mocks tampered download; asserts abort with "checksum
-    mismatch" directive.
-  - [ ] ⬜ Implement Decision 3 in skill `upgrade.sh` only (Decision 3.C —
+    (Done: `scripts/release/build_bootstrap_checksums.sh` produces the
+    manifest atomically; Step 14 now bundles `upgrade.sh` and
+    `bootstrap-checksums.txt` into the GitHub release and verifies both
+    are reachable via the `releases/latest/download/` URL the skill
+    stanza uses. 4 contract-pinning tests in
+    `tests/integration/test_build_bootstrap_checksums.py`.)
+  - [x] ✅ Test pinning fresh-bootstrap path:
+    `tests/integration/test_skill_upgrade_self_bootstraps.py`
+    — stale wrapper sha != manifest, downloads + sha-verifies fresh
+    `upgrade.sh` from staged `file://` release dir, re-execs with
+    `--already-bootstrapped`; fresh body marker echoes, stale body never
+    runs.
+  - [x] ✅ Test pinning recursion guard:
+    `tests/integration/test_skill_upgrade_recursion_guard.py`
+    — wrapper invoked with `--already-bootstrapped` and a deliberately-broken
+    bootstrap URL; asserts exit 0, body marker echoes, no
+    "failed to download" on stderr (proves network was never touched).
+  - [x] ✅ Test pinning network-failure abort:
+    `tests/integration/test_skill_upgrade_aborts_on_network_failure.py`
+    — bootstrap URL points at non-existent `file://` path; asserts
+    non-zero exit, "failed to download" on stderr, body marker NOT echoed
+    (silent fallback to local stale copy is the exact failure mode this
+    stanza prevents).
+  - [x] ✅ Test pinning checksum-mismatch abort:
+    `tests/integration/test_skill_upgrade_checksum_mismatch.py`
+    — manifest claims a fake sha for the served `upgrade.sh`; asserts
+    non-zero exit, "checksum mismatch" on stderr, neither stale nor fresh
+    body executes.
+  - [x] ✅ Implement Decision 3 in skill `upgrade.sh` only (Decision 3.C —
     `src/claude_code_hooks_daemon/skills/hooks-daemon/scripts/upgrade.sh`):
     pinned-tag download, sha256 verification against
     `bootstrap-checksums.txt`, `--already-bootstrapped` recursion guard,
-    explicit abort on network/checksum failure.
+    explicit abort on network/checksum failure. (Stanza wrapped in
+    `# === SELF-BOOTSTRAP BEGIN/END ===` markers so tests can extract it
+    in lock-step with production.)
   - [x] ✅ Implement post-bootstrap stage: clean any stray `uv.lock` in
     daemon dir before `git checkout`. (Closes Task 2.3 xfail. Done:
     skill `upgrade.sh` now runs `rm -f "$DAEMON_DIR/uv.lock"` before
     delegating to Layer 1; static-source xfail in
     `test_skill_upgrade_handles_stale_uv_lock.py` flipped to passing.)
-  - [ ] ⬜ Daemon restart RUNNING; QA green; commit.
+  - [x] ✅ Daemon restart RUNNING; QA 12/12 PASSED (8119 tests, 95.0%
+    coverage); committed.
 
 - [ ] ⬜ **Task 5.1.B — Decision 3.B fix (daemon-cli.sh / health-check.sh / init-handlers.sh self-bootstrap)**:
 

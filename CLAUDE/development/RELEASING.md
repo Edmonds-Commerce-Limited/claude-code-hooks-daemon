@@ -299,14 +299,47 @@ git push origin main
 
 ## Step 14: Tag & GitHub Release
 
+The release bundle MUST include `bootstrap-checksums.txt` alongside the
+skill `upgrade.sh`. The skill's self-bootstrap stanza (Plan 00104 Task 5.1,
+Decision 3.C) downloads both from the release artifact bundle, sha256-verifies
+the script against the manifest, and aborts the upgrade if either is missing
+or inconsistent. Skipping this step ships a release that every existing
+installation refuses to upgrade to.
+
 ```bash
+# Build the bootstrap manifest. List every artifact the skill self-bootstrap
+# stanza may verify against — at minimum the skill upgrade.sh.
+mkdir -p untracked/release-artifacts
+cp src/claude_code_hooks_daemon/skills/hooks-daemon/scripts/upgrade.sh \
+   untracked/release-artifacts/upgrade.sh
+scripts/release/build_bootstrap_checksums.sh \
+   untracked/release-artifacts/bootstrap-checksums.txt \
+   untracked/release-artifacts/upgrade.sh
+
 git tag -a vX.Y.Z -m "[Full release notes from RELEASES/vX.Y.Z.md]"
 git push origin vX.Y.Z
 
 gh release create vX.Y.Z \
   --title "vX.Y.Z - [Release Title]" \
   --notes-file RELEASES/vX.Y.Z.md \
-  --latest
+  --latest \
+  untracked/release-artifacts/upgrade.sh \
+  untracked/release-artifacts/bootstrap-checksums.txt
+```
+
+**Verification before continuing**:
+
+```bash
+# Both artifacts must be reachable from the latest-release URL the
+# skill stanza uses. ABORT release if either curl fails.
+curl -fsSL -o /tmp/_check.txt \
+  "https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/releases/latest/download/bootstrap-checksums.txt"
+curl -fsSL -o /tmp/_check.sh \
+  "https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/releases/latest/download/upgrade.sh"
+sha256sum /tmp/_check.sh
+awk '/  upgrade\.sh$/ {print $1}' /tmp/_check.txt
+# The two sha values MUST match. If they do not, the release is broken —
+# delete the tag and release (Rollback table) and republish.
 ```
 
 ## Step 15: Post-Release Verification
