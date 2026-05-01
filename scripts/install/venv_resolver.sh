@@ -1,97 +1,74 @@
 #!/bin/bash
 #
-# venv_resolver.sh — thin bash wrapper around the Python SSOT.
+# venv_resolver.sh — Plan 00104 Phase 5 Task 5.6 thin shim.
 #
-# Plan 00100 Phase 2: the parallel bash implementation was deleted. All
-# resolution logic now lives in
-# src/claude_code_hooks_daemon/daemon/paths.py::resolve-venv, invoked as a
-# direct script (NOT `python -m`) so the package __init__.py — which pulls
-# pydantic — is bypassed. This matters at install-time, when the daemon venv
-# may not yet exist and the host `python3` only has stdlib.
+# Re-exports the canonical library's API under the historical install-time
+# function names so the 9 callers (install.sh, upgrade_version.sh,
+# debug_hooks.sh, validate_worktrees.sh, detect_location.sh,
+# project_detection.sh, rollback.sh, run_strategy_pattern_check.sh,
+# run_all.sh) keep working untouched.
 #
-# This file preserves the bash-facing API (resolve_existing_venv_python,
-# resolve_existing_venv_dir) so existing install/upgrade scripts keep
-# working — they now shell out instead of re-implementing the precedence.
+# Public API:
+#   resolve_existing_venv_python <daemon_dir>
+#       Echoes the resolved venv's bin/python on success (exit 0). On
+#       failure (no venv found, paths.py SSOT missing, paths.py crashed)
+#       writes a stderr directive and returns 5.
 #
-# Plan 00103 Decision 2/3: a venv-resident bin/python is preferred for the
-# SSOT call when one exists. System ``python3`` is no longer accepted as a
-# fallback because on RHEL/CentOS it points at 3.9, which crashes paths.py
-# module-load on the retired pre-Phase-2 ``import tomllib`` line — and even
-# after the deferred-import fix the TOML helper still needs 3.11+ for the
-# bootstrap-precondition path. When no venv-resident interpreter exists,
-# we fail loudly with exit 5 + stderr directive instead of silently falling
-# through to the unversioned legacy ``untracked/venv/bin/python`` path that
-# v3.7.0 retired.
+#   resolve_existing_venv_dir <daemon_dir>
+#       Echoes the venv directory.
+#
+# Both functions delegate to the canonical bash library at
+# scripts/lib/resolve_venv.sh — there is NO --fallback-target here. The
+# install-time API is "give me the venv that already exists, fail if none
+# does"; the creation target is the bootstrapping caller's concern.
+#
+# Plan 00103 Decision 2/3 contracts (preserved by the canonical library):
+#   - Stderr is NOT silenced — surface real failures (ModuleNotFoundError,
+#     broken venv) instead of hiding them behind generic "venv not found".
+#   - No silent fallback to the unversioned legacy ``untracked/venv/bin/python``
+#     path that v3.7.0 retired.
+#   - Venv-resident interpreter is preferred over system ``python3`` for
+#     invoking paths.py (RHEL/CentOS hosts have python3 → 3.9 which crashes
+#     on tomllib import).
 
-_VR_PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-_VR_PATHS_SCRIPT="$_VR_PROJECT_ROOT/src/claude_code_hooks_daemon/daemon/paths.py"
+# Source-path resolution uses bash parameter expansion (no `dirname`/`cd`/`pwd`)
+# so this file works on hostile PATHs that strip coreutils. Mirrors the
+# canonical library's pattern — see scripts/lib/resolve_venv.sh and
+# tests/acceptance/test_v391_field_regression.py.
+_VR_DIR="${BASH_SOURCE[0]%/*}"
+case "$_VR_DIR" in
+    /*) ;;
+    *) _VR_DIR="$PWD/$_VR_DIR" ;;
+esac
+# _VR_DIR is .../scripts/install — strip /install + /scripts to get
+# project root. ${var%/*/*} removes the last two /-separated components.
+_VR_PROJECT_ROOT="${_VR_DIR%/*/*}"
+_VR_CANONICAL_LIB="${_VR_PROJECT_ROOT}/scripts/lib/resolve_venv.sh"
+
+if [ ! -f "$_VR_CANONICAL_LIB" ]; then
+    echo "❌ venv_resolver.sh: canonical library missing at $_VR_CANONICAL_LIB" >&2
+    echo "   Reinstall the daemon so scripts/lib/resolve_venv.sh is present." >&2
+    unset _VR_DIR _VR_PROJECT_ROOT _VR_CANONICAL_LIB
+    # shellcheck disable=SC2317  # `return` is reachable when sourced
+    return 5 2>/dev/null || exit 5
+fi
+
+# shellcheck disable=SC1090  # path is computed at runtime from BASH_SOURCE
+source "$_VR_CANONICAL_LIB"
+unset _VR_DIR _VR_PROJECT_ROOT _VR_CANONICAL_LIB
 
 # resolve_existing_venv_python <daemon_dir>
 #
-# Prints the venv's bin/python on success (exit 0). On failure (paths.py SSOT
-# missing, no venv-resident interpreter discoverable, or paths.py resolve-venv
-# crashed/exited non-zero), writes a stderr directive and exits 5. Callers
-# that capture via ``$()`` should propagate the exit code explicitly — bash's
-# variable-assignment exception means ``set -e`` does not fire on failure.
+# Install-time API: NO --fallback-target. If no venv exists, fail with rc 5
+# and a stderr directive. Bootstrap callers that want the creation target
+# call the canonical resolve_venv_python directly with --fallback-target.
 resolve_existing_venv_python() {
-    local daemon_dir="$1"
-    local python_cmd=""
-    local candidate
-
-    if [ -z "$daemon_dir" ]; then
-        echo "resolve_existing_venv_python: daemon_dir required" >&2
-        return 1
-    fi
-
-    if [ ! -f "$_VR_PATHS_SCRIPT" ]; then
-        echo "❌ resolve_existing_venv_python: paths.py SSOT missing at $_VR_PATHS_SCRIPT" >&2
-        echo "   Reinstall the daemon so paths.py is present." >&2
-        return 5
-    fi
-
-    # Prefer a venv-resident interpreter. ``-x`` follows symlinks and returns
-    # false for broken ones, so partial-install / cleanup-in-progress venvs
-    # are skipped automatically. paths.py itself selects the canonical venv
-    # across the discovered candidates — bash only needs ANY usable
-    # interpreter to invoke it under.
-    if [ -n "${HOOKS_DAEMON_PYTHON:-}" ]; then
-        python_cmd="${HOOKS_DAEMON_PYTHON}"
-    elif [ -n "${HOOKS_DAEMON_VENV_PATH:-}" ] && [ -x "${HOOKS_DAEMON_VENV_PATH}/bin/python" ]; then
-        python_cmd="${HOOKS_DAEMON_VENV_PATH}/bin/python"
-    else
-        for candidate in "${daemon_dir}"/untracked/venv-*/bin/python; do
-            if [ -x "$candidate" ]; then
-                python_cmd="$candidate"
-                break
-            fi
-        done
-    fi
-
-    if [ -z "$python_cmd" ]; then
-        echo "❌ resolve_existing_venv_python: no usable venv found under $daemon_dir/untracked/" >&2
-        echo "   Run /hooks-daemon install to create the venv." >&2
-        return 5
-    fi
-
-    # Stderr is NOT silenced — Plan 00103 Decision 2: surface real failures
-    # (e.g. ModuleNotFoundError, broken venv) instead of hiding them behind a
-    # generic "venv not found" message generated by silent fallback.
-    if "$python_cmd" "$_VR_PATHS_SCRIPT" resolve-venv \
-        --daemon-dir "$daemon_dir"; then
-        return 0
-    fi
-
-    local rv=$?
-    echo "❌ resolve_existing_venv_python: paths.py resolve-venv failed (exit $rv)" >&2
-    return 5
+    resolve_venv_python "$@"
 }
 
 # resolve_existing_venv_dir <daemon_dir>
 #
 # Same precedence as resolve_existing_venv_python, but returns the venv dir.
-# Propagates the underlying exit code on failure.
 resolve_existing_venv_dir() {
-    local python_path
-    python_path=$(resolve_existing_venv_python "$@") || return $?
-    echo "${python_path%/bin/python}"
+    resolve_venv_dir "$@"
 }

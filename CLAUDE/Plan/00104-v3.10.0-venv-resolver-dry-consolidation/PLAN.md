@@ -578,8 +578,8 @@ recovery path.
 
 - [x] ✅ **Task 5.5**: `venv-include.bash` collapses to canonical shim. (2026-05-01)
 
-- [ ] ⬜ **Task 5.6**: `venv_resolver.sh` collapses to re-export shim
-  preserving all 9 caller signatures.
+- [x] ✅ **Task 5.6**: `venv_resolver.sh` collapses to re-export shim
+  preserving all 9 caller signatures. (2026-05-01)
 
 - [ ] ⬜ **Task 5.7**: `init.sh::_resolve_python_cmd` collapses; preserves
   fingerprint cache write.
