@@ -153,6 +153,33 @@ _rv_resolve_python_impl() {
         return 5
     fi
 
+    # Hot-path cache (Plan 00104 Phase 8 Task 8.1).
+    # Steady-state hook fires resolve to the same venv every time, but
+    # paths.py spawns python3 to compute the fingerprint MD5 — Python
+    # startup alone is 50-100ms, blowing the <5ms budget defined in
+    # PLAN.md Success Criteria #5. The cache stores
+    # "<untracked_mtime> <python_path>" at
+    # $daemon_dir/untracked/.python-cmd-cache and is invalidated by any
+    # change to untracked/'s directory mtime (a venv added/removed bumps
+    # it; modifications inside venv-*/ do not). Skipped for
+    # --fallback-target since that's the bootstrap path, not steady-state.
+    local untracked_dir="$daemon_dir/untracked"
+    local cache_file="$untracked_dir/.python-cmd-cache"
+    if [ "$fallback_flag" != "--fallback-target" ] \
+        && [ -d "$untracked_dir" ] \
+        && [ -f "$cache_file" ]; then
+        local cached_mtime cached_path current_mtime
+        if read -r cached_mtime cached_path < "$cache_file" \
+            && current_mtime="$(stat -c %Y "$untracked_dir" 2>/dev/null)" \
+            && [ -n "$cached_mtime" ] \
+            && [ "$cached_mtime" = "$current_mtime" ] \
+            && [ -n "$cached_path" ] \
+            && [ -x "$cached_path" ]; then
+            printf '%s\n' "$cached_path"
+            return 0
+        fi
+    fi
+
     local python_cmd
     if ! python_cmd="$(_rv_pick_python "$daemon_dir" "$fallback_flag")"; then
         echo "resolve_venv: no usable venv found under $daemon_dir/untracked/" >&2
@@ -176,6 +203,20 @@ _rv_resolve_python_impl() {
     # lesson "silent fallback hides regressions".
     local resolved
     if resolved="$("$python_cmd" "${args[@]}")"; then
+        # Refresh hot-path cache (skip for --fallback-target). Two-step
+        # write: truncate first to settle untracked/'s mtime (creating a
+        # new file bumps it; truncating an existing file does not), then
+        # stat the post-truncate mtime, then write the real content.
+        # This ensures the recorded mtime equals what readers see on the
+        # next call, so the cache hits.
+        if [ "$fallback_flag" != "--fallback-target" ] && [ -d "$untracked_dir" ]; then
+            local cache_mtime
+            : > "$cache_file"
+            cache_mtime="$(stat -c %Y "$untracked_dir" 2>/dev/null)"
+            if [ -n "$cache_mtime" ]; then
+                printf '%s %s\n' "$cache_mtime" "$resolved" > "$cache_file"
+            fi
+        fi
         printf '%s\n' "$resolved"
         return 0
     fi

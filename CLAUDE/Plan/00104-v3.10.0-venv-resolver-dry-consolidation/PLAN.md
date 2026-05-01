@@ -697,11 +697,31 @@ recovery path.
 
 ### Phase 8: Hot-path latency verification
 
-- [ ] ⬜ **Task 8.1**: Run Phase 3 Task 3.3 benchmark against the consolidated
+- [x] ✅ **Task 8.1**: Run Phase 3 Task 3.3 benchmark against the consolidated
   code. If median exceeds 5ms, optimise `source` cost in `init.sh`
   (e.g. cache the canonical library's resolved output via the existing
   `untracked/.python-cmd-cache` mechanism). Document optimisation in plan.
-- [ ] ⬜ **Task 8.2**: Daemon restart RUNNING; commit.
+  (Done 2026-05-01: median exceeded 5ms because paths.py SSOT spawns
+  python3 to compute the fingerprint MD5. Added a hot-path cache to
+  `_rv_resolve_python_impl` in `scripts/lib/resolve_venv.sh`. Cache file
+  at `$daemon_dir/untracked/.python-cmd-cache` stores
+  `<untracked_mtime> <python_path>` and is invalidated by any change to
+  untracked/'s directory mtime — venv added/removed bumps it,
+  modifications inside venv-\*/ do not. Cache HIT path is pure-bash
+  builtins (`read` + `stat -c %Y` + `[ -x ]`), no python spawn. Skipped
+  for `--fallback-target` since that's the bootstrap write path. Two-step
+  write — truncate first to settle untracked/ mtime, then stat the
+  post-truncate value, then write `<mtime> <path>` — guarantees the
+  recorded mtime equals what readers see on the next call. `xfail-strict`
+  decorator stripped from
+  `tests/integration/test_venv_resolver_hot_path_latency.py::test_resolver_median_latency_under_budget`;
+  it is now an unconditional pass. Parity matrix + pipefail-cascade +
+  multi-host-NFS tests still 6/6 PASSED — cache preserves correctness.)
+- [x] ✅ **Task 8.2**: Daemon restart RUNNING; commit.
+  (Done 2026-05-01: QA 12/12 PASSED, 8120 tests with 95.0% coverage —
+  one more than pre-Phase-8 because the latency test now passes
+  unconditionally instead of being xfail-strict. Daemon restart
+  successful at PID 229392, status RUNNING.)
 
 ### Phase 9: Verification + acceptance
 
