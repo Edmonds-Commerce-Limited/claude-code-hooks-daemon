@@ -4,6 +4,16 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00105: v3.11.0 — Stability Hardening (close gaps that let v3.10.0 ship a SEV-1)](00105-v3.11.0-stability-hardening/PLAN.md) - In Progress
+
+  - **Phase 1**: H-1 acceptance gate runs `install.sh` end-to-end against fresh fixture project — catches the next print-before-echo regression class before tag time
+  - **Phase 2**: 13th QA gate — static + dynamic check for `VAR=$(fn)` capture corruption across `scripts/install/*.sh`
+  - **Phase 3**: Audit every `scripts/install/*.sh` helper for the print-before-echo anti-pattern (the v3.10.0 site)
+  - **Phase 4**: Self-bootstrap with sha256 verification for `daemon-cli.sh`, `health-check.sh`, `init-handlers.sh` (Plan 00104 Decision 3.B deferred)
+  - **Phase 5**: `verify_venv` overlay-fs retry + `venv.sh:465` silent-fallback removal (Plan 00104 Task 5.3 deferred + Opus C-6)
+  - **Phase 6**: Plan 00103 housekeeping (move to `Completed/`, update README index)
+  - **Priority**: High — released as v3.11.0
+
 - [00103: v3.9.1 — venv resolution fail-fast (narrow hotfix)](00103-v3.9.1-venv-resolution-failfast/PLAN.md) - Not Started
 
   - Patches v3.9.0 regression: `paths.py:22 import tomllib` crashes when wrappers invoke it with `python3 → 3.9` on RHEL/CentOS hosts; silent `2>/dev/null` + legacy fallback hides the crash
