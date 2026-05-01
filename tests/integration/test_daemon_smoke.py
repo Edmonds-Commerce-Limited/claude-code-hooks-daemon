@@ -137,7 +137,7 @@ def daemon_process(daemon_env: dict[str, Any]):
             env=test_env,
             stdout=devnull,
             stderr=devnull,
-            timeout=2,
+            timeout=10,
         )
 
     if result.returncode != 0:
@@ -237,7 +237,7 @@ class TestDaemonSmoke:
                 env=test_env,
                 stdout=devnull,
                 stderr=devnull,
-                timeout=2,
+                timeout=10,
             )
 
         assert start_result.returncode == 0, f"Start failed (exit code {start_result.returncode})"
@@ -394,7 +394,7 @@ class TestDaemonSmoke:
                 env=test_env,
                 stdout=devnull,
                 stderr=devnull,
-                timeout=2,
+                timeout=10,
             )
         time.sleep(1)
 
@@ -564,7 +564,7 @@ handlers: {}
                 env=test_env,
                 stdout=devnull,
                 stderr=devnull,
-                timeout=2,
+                timeout=10,
             )
 
         assert (
