@@ -243,14 +243,39 @@ venv_lock_hash_matches() {
         return 1
     fi
 
+    # Plan 00104 Task 5.8: source the canonical library (scripts/lib/
+    # resolve_venv.sh) so the "real venvs ship both bin/python and
+    # bin/python3, fakes ship only one" rule lives in ONE place. Falls
+    # back to in-place bin/python pick if the lib cannot be sourced —
+    # venv.sh has historical callers (worktree setup, install_version)
+    # that may run before the lib is on disk.
+    #
     # Plan 00103 Decision 3 Rule A: do NOT probe the host for a generic
     # `python3` here. The caller has already guarded `[ -d "$venv_path" ]`
-    # so the venv directory exists; use its own interpreter. If `bin/python`
-    # is missing or non-executable the venv is broken — return 1 to force a
-    # rebuild rather than silently masquerading as fresh.
-    local venv_python="$venv_path/bin/python"
-    if [ ! -x "$venv_python" ]; then
-        return 1
+    # so the venv directory exists; use its own interpreter. If neither
+    # bin/python nor bin/python3 is executable the venv is broken —
+    # return 1 to force a rebuild rather than silently masquerading as fresh.
+    #
+    # BASH_SOURCE[0] inside a function points to the file the function
+    # was defined in — venv.sh — regardless of whether INSTALL_LIB_DIR
+    # is still set or has been clobbered by a sourcing caller.
+    local _vlhm_install_dir
+    _vlhm_install_dir="$(dirname "${BASH_SOURCE[0]}")"
+    local venv_python=""
+    local _vlhm_lib="${_vlhm_install_dir%/install}/lib/resolve_venv.sh"
+    if [ -f "$_vlhm_lib" ]; then
+        # shellcheck disable=SC1090
+        source "$_vlhm_lib"
+        venv_python="$(resolve_venv_python_in_venv "$venv_path")" || venv_python=""
+    fi
+    if [ -z "$venv_python" ]; then
+        if [ -x "$venv_path/bin/python" ]; then
+            venv_python="$venv_path/bin/python"
+        elif [ -x "$venv_path/bin/python3" ]; then
+            venv_python="$venv_path/bin/python3"
+        else
+            return 1
+        fi
     fi
 
     # paths.py is invoked as a direct script (NOT `python -m ...`) so the

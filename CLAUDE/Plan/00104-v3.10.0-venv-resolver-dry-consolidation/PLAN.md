@@ -594,7 +594,17 @@ recovery path.
 
   - pipefail cascade tests + hot-path latency harness smoke.)
 
-- [ ] ⬜ **Task 5.8**: `venv.sh:venv_lock_hash_matches` collapses.
+- [x] ✅ **Task 5.8**: `venv.sh:venv_lock_hash_matches` collapses. (2026-05-01
+  — added public helper `resolve_venv_python_in_venv <venv_path>` to the
+  canonical library and rewired `venv_lock_hash_matches` to source the lib
+  and delegate. The bare `bin/python`-only assumption is gone — the
+  canonical helper falls through to `bin/python3` when only that exists,
+  matching paths.py `_pick_interpreter`. In-place fallback retained for
+  the chicken-and-egg case where venv.sh is sourced before the lib is on
+  disk: bin/python preferred, bin/python3 fallback, hard-fail otherwise.
+  Verified: 24/24 targeted (parity matrix + pipefail cascade + install
+  resolver + ensure_venv + paths check-venv-fresh), 11/11 QA, daemon
+  RUNNING.)
 
 ### Phase 6: Static-check QA gate
 

@@ -210,6 +210,35 @@ resolve_venv_dir() {
     printf '%s\n' "${python_path%/bin/*}"
 }
 
+# resolve_venv_python_in_venv <venv_path>
+#
+# Given an explicit venv directory (NOT a daemon_dir), echo its
+# bin/python — falling back to bin/python3 — so callers that already
+# know the venv path don't have to re-run the full precedence ladder.
+# Used by venv.sh::venv_lock_hash_matches (Plan 00104 Task 5.8) which
+# is given an explicit venv_path by ensure_venv after fingerprint
+# computation. Centralising this pick here keeps the
+# "real venvs ship both, test fakes often ship only one" rule in a
+# single place — same DRY motivation that drove the canonical library.
+#
+# Returns 0 on success (interpreter on stdout), 1 if the venv does not
+# exist or has no usable interpreter.
+resolve_venv_python_in_venv() {
+    local venv_path="$1"
+    if [ -z "$venv_path" ] || [ ! -d "$venv_path" ]; then
+        return 1
+    fi
+    if [ -x "$venv_path/bin/python" ]; then
+        echo "$venv_path/bin/python"
+        return 0
+    fi
+    if [ -x "$venv_path/bin/python3" ]; then
+        echo "$venv_path/bin/python3"
+        return 0
+    fi
+    return 1
+}
+
 # ============================================================
 # Script-mode dispatch
 # ============================================================
