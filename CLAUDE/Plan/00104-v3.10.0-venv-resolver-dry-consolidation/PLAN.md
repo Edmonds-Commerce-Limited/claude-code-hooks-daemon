@@ -421,14 +421,21 @@ that gets blamed if anything breaks during structural phases.
     upheld: metadata is authoritative per Plan 00100; the disk-construction
     "fallback" originally proposed in Decision 2.B is DELETED.
   - [ ] ⬜ Daemon restart RUNNING; QA green; commit.
-- [ ] ⬜ **Task 2.2 — Issue #6 fix**:
-  - [ ] ⬜ Audit `health-check.sh` for every daemon-CLI invocation; identify
-    the path that bypasses `$PYTHON`.
-  - [ ] ⬜ Failing test: `tests/integration/test_health_check_uses_resolved_python.py`
-    — fixture with venv at fingerprint path, asserts `health-check.sh` invokes
-    daemon CLI via the venv interpreter (not `/usr/bin/python3.11`).
-  - [ ] ⬜ Implement: every CLI invocation in `health-check.sh` uses the
-    `$PYTHON` resolved by `_resolve-venv.sh`.
+- [ ] ⬜ **Task 2.2 — Issue #6 (DOWNSTREAM PHANTOM of Issue #4 — verified
+  2026-05-01 against `src/.../skills/.../scripts/health-check.sh`)**:
+  - The field-report described "the script body invokes the daemon CLI via a
+    separate hardcoded path rather than `$PYTHON`". Live grep of v3.9.1
+    `health-check.sh` (`grep -nE 'python|claude_code_hooks_daemon'`) shows
+    every daemon-CLI invocation uses `"$PYTHON"`: lines 45, 64, 82, 92. There
+    is no separate hardcoded path. What the field-report user observed was
+    `$PYTHON` resolving to `/usr/bin/python3.11` because the metadata file
+    stored the wrong `python_path` (Issue #4). Fixing Task 2.1 fixes this.
+  - [ ] ⬜ Add static-source regression test
+    `tests/integration/test_health_check_script_uses_resolved_python.py` that
+    parses `health-check.sh` and asserts every `claude_code_hooks_daemon.daemon.cli`
+    invocation is preceded by `"$PYTHON"`. Catches any future regression that
+    re-introduces a hardcoded interpreter path.
+  - No implementation change needed — Task 2.1 closes the underlying defect.
   - [ ] ⬜ Daemon restart RUNNING; QA green; commit.
 - [ ] ⬜ **Task 2.3 — Issue #3 fix**:
   - [ ] ⬜ Add `uv.lock` to the daemon repo's `.gitignore` if not already
