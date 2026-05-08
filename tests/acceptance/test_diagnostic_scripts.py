@@ -186,6 +186,12 @@ def test_write_venv_metadata_records_venv_resident_python_path(tmp_path: Path) -
 def _run_daemon_cli_status(project_root: Path) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["HOME"] = str(project_root.parent)
+    # Plan 00105 Phase 4: daemon-cli.sh now carries the same self-bootstrap
+    # stanza as upgrade.sh. This test exercises the daemon-CLI dispatch path,
+    # not the bootstrap path — disable bootstrap so the test does not depend
+    # on a published release manifest. The bootstrap path itself is covered
+    # by test_skill_*_self_bootstrap_* below.
+    env["HOOKS_DAEMON_SKIP_BOOTSTRAP"] = "1"
     return subprocess.run(
         [BASH, str(DAEMON_CLI_SH), "status"],
         capture_output=True,
@@ -242,6 +248,12 @@ def test_health_check_runs_without_module_not_found_error(tmp_path: Path) -> Non
     project_root, _ = _build_diagnostic_fixture(tmp_path)
     env = os.environ.copy()
     env["HOME"] = str(project_root.parent)
+    # Plan 00105 Phase 4: health-check.sh now carries the same self-bootstrap
+    # stanza as upgrade.sh. This test exercises the daemon-CLI dispatch path,
+    # not the bootstrap path — disable bootstrap so the test does not depend
+    # on a published release manifest. The bootstrap path itself is covered
+    # by test_skill_*_self_bootstrap_* below.
+    env["HOOKS_DAEMON_SKIP_BOOTSTRAP"] = "1"
     result = subprocess.run(
         [BASH, str(HEALTH_CHECK_SH)],
         capture_output=True,
@@ -382,17 +394,173 @@ def test_skill_upgrade_aborts_on_network_failure_with_directive(tmp_path: Path) 
     )
 
 
-@pytest.mark.skip(
-    reason=(
-        "Plan 00104 Task 5.1.B (Decision 3.B) is deferred from v3.10.0 — the "
-        "self-bootstrap library that makes daemon-cli.sh / health-check.sh / "
-        "init-handlers.sh fetch their own latest copies on first invocation "
-        "per session is not landing in this release. v3.10.0's metadata fix "
-        "(Task 2.1) closes Issues #4 and #6, which were the user-visible "
-        "manifestations; #1's diagnostic-script analogue can land in a "
-        "future plan. This placeholder keeps the file synced with PLAN.md "
-        "Phase 9 Task 9.6 case 6 verbatim."
-    ),
-)
-def test_stale_daemon_cli_self_bootstraps_on_first_invocation(tmp_path: Path) -> None:
-    """Case 6 (deferred): Decision 3.B self-bootstrap for diagnostic scripts."""
+# Plan 00105 Phase 4 — Decision 3.B activated. The bootstrap stanza is now
+# parameterised by ``$(basename "$0")`` and shared verbatim by upgrade.sh,
+# daemon-cli.sh, health-check.sh, and init-handlers.sh. The cases below pin
+# the contract that EVERY diagnostic script self-bootstraps on first
+# invocation per session and short-circuits via a per-(basename, own-sha)
+# cache marker on subsequent invocations.
+
+_BOOTSTRAPPED_BASENAMES = ["daemon-cli.sh", "health-check.sh", "init-handlers.sh"]
+
+
+@pytest.mark.parametrize("basename", _BOOTSTRAPPED_BASENAMES)
+def test_stale_diagnostic_script_self_bootstraps_on_first_invocation(
+    tmp_path: Path, basename: str
+) -> None:
+    """Case 6: stale diagnostic scripts self-bootstrap to the fresh release.
+
+    Plan 00105 Phase 4 lands the parameterised bootstrap stanza in
+    daemon-cli.sh, health-check.sh, and init-handlers.sh. This test pins the
+    same contract as case 4 (skill upgrade.sh) but per-script: a stale local
+    body detects its sha256 mismatch, downloads the fresh body, re-execs
+    with ``--already-bootstrapped``, and the fresh body runs.
+    """
+    # Use a unique TMPDIR so an earlier test run's cache marker doesn't
+    # short-circuit this fixture.
+    bootstrap_tmp = tmp_path / "bootstrap-tmp"
+    bootstrap_tmp.mkdir()
+
+    fresh_dir = tmp_path / "release-mock"
+    fresh_dir.mkdir()
+    fresh_script_path = fresh_dir / basename
+    fresh_script_path.write_text(_wrap_stanza("FRESH_BODY_RAN"), encoding="utf-8")
+    fresh_script_path.chmod(fresh_script_path.stat().st_mode | stat.S_IEXEC)
+
+    fresh_sha = _sha256_hex(fresh_script_path.read_bytes())
+    checksums_path = fresh_dir / "bootstrap-checksums.txt"
+    checksums_path.write_text(f"{fresh_sha}  {basename}\n", encoding="utf-8")
+
+    install_dir = tmp_path / "stale-install"
+    install_dir.mkdir()
+    stale_script_path = install_dir / basename
+    stale_script_path.write_text(_wrap_stanza("STALE_BODY_RAN"), encoding="utf-8")
+    stale_script_path.chmod(stale_script_path.stat().st_mode | stat.S_IEXEC)
+
+    env = os.environ.copy()
+    env["HOOKS_DAEMON_BOOTSTRAP_BASE_URL"] = f"file://{fresh_dir}"
+    env["TMPDIR"] = str(bootstrap_tmp)
+
+    result = subprocess.run(
+        [str(stale_script_path)],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+
+    assert result.returncode == 0, (
+        f"{basename} self-bootstrap must succeed end-to-end. "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    assert "FRESH_BODY_RAN" in result.stdout, (
+        f"{basename}: the fresh script body MUST execute after self-bootstrap. "
+        f"stdout={result.stdout!r}"
+    )
+    assert "STALE_BODY_RAN" not in result.stdout, (
+        f"{basename}: the stale script body MUST NOT execute — it was bypassed "
+        f"by the re-exec. stdout={result.stdout!r}"
+    )
+
+
+@pytest.mark.parametrize("basename", _BOOTSTRAPPED_BASENAMES)
+def test_diagnostic_script_aborts_on_network_failure(tmp_path: Path, basename: str) -> None:
+    """Case 7: network unreachable MUST abort loudly for every diagnostic script.
+
+    Mirrors case 5 (skill upgrade.sh) for the three diagnostic scripts. The
+    bootstrap stanza MUST exit non-zero with a clear operator-facing
+    directive when the manifest URL cannot be reached, rather than silently
+    continuing on with the stale local body — that would be the
+    silent-fallback antipattern that caused the v3.9.0 field bug.
+    """
+    bootstrap_tmp = tmp_path / "bootstrap-tmp"
+    bootstrap_tmp.mkdir()
+
+    install_dir = tmp_path / "stale-install"
+    install_dir.mkdir()
+    stale_script_path = install_dir / basename
+    stale_script_path.write_text(_wrap_stanza("STALE_BODY_RAN"), encoding="utf-8")
+    stale_script_path.chmod(stale_script_path.stat().st_mode | stat.S_IEXEC)
+
+    unreachable_dir = tmp_path / "does-not-exist"
+    env = os.environ.copy()
+    env["HOOKS_DAEMON_BOOTSTRAP_BASE_URL"] = f"file://{unreachable_dir}"
+    env["TMPDIR"] = str(bootstrap_tmp)
+
+    result = subprocess.run(
+        [str(stale_script_path)],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+
+    assert result.returncode != 0, (
+        f"{basename} self-bootstrap MUST exit non-zero when the bootstrap "
+        f"source is unreachable. stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    assert "STALE_BODY_RAN" not in result.stdout, (
+        f"{basename}: the stale body MUST NOT run after a failed bootstrap — "
+        f"that would be the silent-fallback antipattern. stdout={result.stdout!r}"
+    )
+    assert "failed to download" in result.stderr.lower(), (
+        f"{basename}: failure message MUST direct the operator at the network "
+        f"problem. stderr={result.stderr!r}"
+    )
+
+
+@pytest.mark.parametrize("basename", _BOOTSTRAPPED_BASENAMES + ["upgrade.sh"])
+def test_bootstrap_cache_marker_short_circuits_network_round_trip(
+    tmp_path: Path, basename: str
+) -> None:
+    """Case 8: a pre-existing per-(basename, own-sha) marker skips the network.
+
+    The stanza writes a marker at
+    ``${TMPDIR:-/tmp}/hooks-daemon-bootstrap/<basename>-<own-sha>.ok`` after
+    a successful verify. On the next invocation with the same body, the
+    stanza must short-circuit — no curl call, no manifest fetch — so
+    repeated invocations within a session do not hammer the network. We
+    pin this by pointing ``HOOKS_DAEMON_BOOTSTRAP_BASE_URL`` at an
+    unreachable URL: with the marker present, the script must still run
+    successfully because the bootstrap stanza never tries to fetch.
+    """
+    bootstrap_tmp = tmp_path / "bootstrap-tmp"
+    marker_dir = bootstrap_tmp / "hooks-daemon-bootstrap"
+    marker_dir.mkdir(parents=True)
+
+    install_dir = tmp_path / "install"
+    install_dir.mkdir()
+    script_path = install_dir / basename
+    script_path.write_text(_wrap_stanza("BODY_RAN"), encoding="utf-8")
+    script_path.chmod(script_path.stat().st_mode | stat.S_IEXEC)
+
+    own_sha = _sha256_hex(script_path.read_bytes())
+    marker_path = marker_dir / f"{basename}-{own_sha}.ok"
+    marker_path.write_text("", encoding="utf-8")
+
+    unreachable_dir = tmp_path / "does-not-exist"
+    env = os.environ.copy()
+    env["HOOKS_DAEMON_BOOTSTRAP_BASE_URL"] = f"file://{unreachable_dir}"
+    env["TMPDIR"] = str(bootstrap_tmp)
+
+    result = subprocess.run(
+        [str(script_path)],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+
+    assert result.returncode == 0, (
+        f"{basename}: a pre-existing cache marker MUST short-circuit the "
+        f"bootstrap stanza so the script runs without a network call. "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    assert "BODY_RAN" in result.stdout, (
+        f"{basename}: the script body MUST run when the cache marker is "
+        f"present. stdout={result.stdout!r}"
+    )
+    assert "failed to download" not in result.stderr.lower(), (
+        f"{basename}: with the marker present, the stanza MUST NOT attempt "
+        f"to fetch the manifest. stderr={result.stderr!r}"
+    )

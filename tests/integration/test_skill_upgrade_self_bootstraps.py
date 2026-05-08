@@ -96,7 +96,14 @@ def test_skill_upgrade_self_bootstraps(tmp_path: Path) -> None:
     fresh_sha = _sha256_hex(fresh_bytes)
 
     stale_text = _build_wrapped_script("STALE_BODY_RAN")
-    stale_path = tmp_path / "stale_upgrade.sh"
+    # Plan 00105 Phase 4: the bootstrap stanza now uses
+    # `awk -v name="$(basename "$0")" '$2 == name'` for an exact basename match
+    # against the manifest. The stale wrapper MUST be named `upgrade.sh` so its
+    # basename matches the manifest entry — staging it under a dedicated
+    # subdirectory keeps it isolated from the fresh release/ directory below.
+    stale_dir = tmp_path / "stale-install"
+    stale_dir.mkdir()
+    stale_path = stale_dir / "upgrade.sh"
     stale_path.write_bytes(stale_text.encode("utf-8"))
     _make_executable(stale_path)
 

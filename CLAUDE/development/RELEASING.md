@@ -327,22 +327,30 @@ git push origin main
 
 ## Step 14: Tag & GitHub Release
 
-The release bundle MUST include `bootstrap-checksums.txt` alongside the
-skill `upgrade.sh`. The skill's self-bootstrap stanza (Plan 00104 Task 5.1,
-Decision 3.C) downloads both from the release artifact bundle, sha256-verifies
-the script against the manifest, and aborts the upgrade if either is missing
-or inconsistent. Skipping this step ships a release that every existing
-installation refuses to upgrade to.
+The release bundle MUST include `bootstrap-checksums.txt` alongside ALL FOUR
+self-bootstrapping skill scripts: `upgrade.sh`, `daemon-cli.sh`,
+`health-check.sh`, and `init-handlers.sh`. Each script's self-bootstrap stanza
+(Plan 00104 Task 5.1 Decision 3.C + Plan 00105 Phase 4 Decision 3.B)
+downloads the manifest, looks up its own basename, sha256-verifies its own
+body, and aborts the run if either is missing or inconsistent. Skipping any
+of these four artifacts ships a release that every existing installation
+refuses to run for that script — every diagnostic invocation aborts loudly
+with `Error: bootstrap-checksums.txt has no entry for <basename>`.
 
 ```bash
-# Build the bootstrap manifest. List every artifact the skill self-bootstrap
-# stanza may verify against — at minimum the skill upgrade.sh.
+# Build the bootstrap manifest. List every artifact every self-bootstrap
+# stanza may verify against — all four skill scripts.
 mkdir -p untracked/release-artifacts
-cp src/claude_code_hooks_daemon/skills/hooks-daemon/scripts/upgrade.sh \
-   untracked/release-artifacts/upgrade.sh
+SKILL_SCRIPTS_DIR="src/claude_code_hooks_daemon/skills/hooks-daemon/scripts"
+for script in upgrade.sh daemon-cli.sh health-check.sh init-handlers.sh; do
+    cp "$SKILL_SCRIPTS_DIR/$script" "untracked/release-artifacts/$script"
+done
 scripts/release/build_bootstrap_checksums.sh \
    untracked/release-artifacts/bootstrap-checksums.txt \
-   untracked/release-artifacts/upgrade.sh
+   untracked/release-artifacts/upgrade.sh \
+   untracked/release-artifacts/daemon-cli.sh \
+   untracked/release-artifacts/health-check.sh \
+   untracked/release-artifacts/init-handlers.sh
 
 git tag -a vX.Y.Z -m "[Full release notes from RELEASES/vX.Y.Z.md]"
 git push origin vX.Y.Z
@@ -352,22 +360,32 @@ gh release create vX.Y.Z \
   --notes-file RELEASES/vX.Y.Z.md \
   --latest \
   untracked/release-artifacts/upgrade.sh \
+  untracked/release-artifacts/daemon-cli.sh \
+  untracked/release-artifacts/health-check.sh \
+  untracked/release-artifacts/init-handlers.sh \
   untracked/release-artifacts/bootstrap-checksums.txt
 ```
 
 **Verification before continuing**:
 
 ```bash
-# Both artifacts must be reachable from the latest-release URL the
-# skill stanza uses. ABORT release if either curl fails.
-curl -fsSL -o /tmp/_check.txt \
-  "https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/releases/latest/download/bootstrap-checksums.txt"
-curl -fsSL -o /tmp/_check.sh \
-  "https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/releases/latest/download/upgrade.sh"
-sha256sum /tmp/_check.sh
-awk '/  upgrade\.sh$/ {print $1}' /tmp/_check.txt
-# The two sha values MUST match. If they do not, the release is broken —
-# delete the tag and release (Rollback table) and republish.
+# Every artifact must be reachable from the latest-release URL each
+# self-bootstrap stanza uses, and every script's published sha must match
+# its manifest entry. ABORT release if any curl fails or any sha mismatches.
+BASE="https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/releases/latest/download"
+curl -fsSL -o /tmp/_check.txt "$BASE/bootstrap-checksums.txt"
+for script in upgrade.sh daemon-cli.sh health-check.sh init-handlers.sh; do
+    curl -fsSL -o "/tmp/_check_$script" "$BASE/$script"
+    PUBLISHED_SHA="$(sha256sum "/tmp/_check_$script" | awk '{print $1}')"
+    MANIFEST_SHA="$(awk -v name="$script" '$2 == name {print $1; exit}' /tmp/_check.txt)"
+    if [ -z "$MANIFEST_SHA" ]; then
+        echo "ABORT: manifest has no entry for $script"; exit 1
+    fi
+    if [ "$PUBLISHED_SHA" != "$MANIFEST_SHA" ]; then
+        echo "ABORT: published $script sha ($PUBLISHED_SHA) != manifest ($MANIFEST_SHA)"; exit 1
+    fi
+done
+# All four matched: release is internally consistent.
 ```
 
 ## Step 15: Post-Release Verification
