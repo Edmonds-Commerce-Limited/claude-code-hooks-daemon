@@ -76,9 +76,30 @@ Currently only the skill's `upgrade.sh` self-bootstraps from the GitHub release 
 
 ### Phase 5: `verify_venv` overlay-fs retry + venv.sh silent-fallback removal (Goal 5 — Plan 00104 Task 5.3)
 
-- [ ] ⬜ **Task 5.1**: Add overlay-fs detection + retry to `verify_venv` in `scripts/lib/resolve_venv.sh`. On `EBUSY`, sleep briefly, retry once. On second failure, exit 6 with directive.
-- [ ] ⬜ **Task 5.2**: Remove the silent fallback at `venv.sh:465` (Opus review C-6 from Plan 00104). Replace with explicit failure + directive.
-- [ ] ⬜ **Task 5.3**: Add regression tests for both — overlay-fs retry case (mocked) and the silent-fallback path (asserts the new explicit failure message).
+- [x] ⊘ **Task 5.1**: SUPERSEDED. The overlay-fs file-visibility race is already
+  fixed at the *source* (Plan 00100 v2 Task 0.1) inside `create_venv_at_path()`:
+  `sync -f "$venv_path"` flushes filesystem metadata after `uv sync` exits 0,
+  and the hardlink→copy retry handles the broader overlay-fs case. The pre-existing
+  test `tests/integration/test_verify_venv_file_visibility.py::test_verify_venv_has_no_retry_loop`
+  explicitly forbids adding a retry loop inside `verify_venv` — Plan 00100 v2
+  rejected that as symptom-treatment ("the fix belongs in create_venv_at_path,
+  not in verify_venv"). Per the project memory rule "NEVER adjust tests to
+  match code", honouring that test is the right call. No code change needed.
+- [x] ✅ **Task 5.2**: Replaced `print_verbose` with `print_warning` at the
+  hardlink→copy fallback in `scripts/install/venv.sh::create_venv_at_path()`.
+  The retry behaviour is preserved (essential for overlay-fs containers); only
+  the silence is removed. The warning now mentions setting `UV_LINK_MODE=copy`
+  explicitly to skip the hardlink attempt and silence the notice. This closes
+  the silent-fallback antipattern flagged in project memory
+  `feedback_silent_fallback_antipattern.md`.
+- [x] ✅ **Task 5.3**: New regression test
+  `tests/integration/test_venv_sh_hardlink_fallback_loud.py` pins the loud
+  announcement (`test_hardlink_failure_branch_uses_loud_helper`) AND guards
+  against an over-zealous fix that removes the retry along with the silence
+  (`test_hardlink_retry_still_attempted`). Existing
+  `test_verify_venv_file_visibility.py` (5 tests) and
+  `test_venv_sh_sync_failure_is_visible.py` (2 tests) cover the broader
+  visibility-race surface. All 9 tests across the three files pass.
 
 ### Phase 6: Plan 00103 housekeeping (Goal 6)
 

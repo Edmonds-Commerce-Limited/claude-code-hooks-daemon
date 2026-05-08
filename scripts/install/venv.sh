@@ -461,9 +461,15 @@ create_venv_at_path() {
         uv_rc=$?
     fi
 
-    # Detect overlay-fs "Failed to hardlink files" warning and retry with copy
+    # Detect overlay-fs "Failed to hardlink files" warning and retry with copy.
+    # Plan 00105 Phase 5 Task 5.2: announce loudly via print_warning rather
+    # than print_verbose. The previous behaviour hid the fallback unless the
+    # operator set HOOKS_DAEMON_VERBOSE_INSTALL=1, which is exactly the
+    # silent-fallback antipattern flagged in project memory
+    # `feedback_silent_fallback_antipattern.md`. The retry itself is preserved
+    # (essential for overlay-fs container installs) — only the silence is gone.
     if [ -f "$uv_output" ] && grep -q "Failed to hardlink" "$uv_output"; then
-        print_verbose "uv reported hardlink failure — retrying with UV_LINK_MODE=copy"
+        print_warning "uv hardlink failed (likely overlay-fs) — retrying with UV_LINK_MODE=copy. Set UV_LINK_MODE=copy in your environment to skip the hardlink attempt and silence this notice."
         rm -rf "$venv_path"  # clean slate for the retry
         if UV_LINK_MODE=copy UV_PROJECT_ENVIRONMENT="$venv_path" uv sync --project "$daemon_dir" "${python_args[@]}" \
                 > "$uv_output" 2>&1; then
