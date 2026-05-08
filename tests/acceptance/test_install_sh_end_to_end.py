@@ -40,6 +40,7 @@ from claude_code_hooks_daemon.constants.timeout import Timeout
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INSTALL_VERSION_SH = REPO_ROOT / "scripts" / "install_version.sh"
+UPGRADE_VERSION_SH = REPO_ROOT / "scripts" / "upgrade_version.sh"
 BASH = shutil.which("bash") or "/bin/bash"
 
 # Match the dogfood daemon's process-name pattern so we can verify our test
@@ -93,6 +94,54 @@ def _remove_daemon_worktree(worktree_path: Path) -> None:
         capture_output=True,
         text=True,
     )
+
+
+def _create_daemon_clone(daemon_dir: Path) -> None:
+    """Create a real ``git clone`` of the repo at HEAD as ``daemon_dir``.
+
+    Used by the upgrade-path test instead of a worktree because
+    ``upgrade_version.sh`` Step 1 requires ``.git/`` to be a real
+    directory (its check is ``[ ! -d "$DAEMON_DIR/.git" ]``). Worktrees
+    have ``.git`` as a file pointer, which fails that check.
+
+    ``--no-hardlinks`` keeps the clone safe across filesystems (e.g.
+    ``/tmp`` mounted on a different filesystem from ``/workspace``).
+    ``--local`` keeps the clone fast (no network, no pack negotiation).
+    ``protocol.file.allow=always`` lets the upgrade script's
+    ``git fetch --tags`` (Step 6) succeed against the local origin path
+    on Git versions that block file:// remotes by default — even though
+    the idempotent fast path the test uses does not reach Step 6, this
+    keeps the fixture compatible with any future test that does.
+    """
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "protocol.file.allow=always",
+            "clone",
+            "--no-hardlinks",
+            "--local",
+            "--quiet",
+            str(REPO_ROOT),
+            str(daemon_dir),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(daemon_dir), "config", "protocol.file.allow", "always"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _remove_daemon_clone(clone_path: Path) -> None:
+    """Best-effort clone teardown — never raise from cleanup."""
+    if not clone_path.exists():
+        return
+    shutil.rmtree(clone_path, ignore_errors=True)
 
 
 def _stop_test_daemon(venv_python: Path, project_root: Path, env: dict[str, str]) -> None:
@@ -303,3 +352,169 @@ def test_install_sh_end_to_end_produces_running_daemon(tmp_path: Path) -> None:
         if venv_python is not None:
             _stop_test_daemon(venv_python, project_root, env)
         _remove_daemon_worktree(daemon_dir)
+
+
+@pytest.mark.slow
+def test_upgrade_version_sh_end_to_end_produces_running_daemon(tmp_path: Path) -> None:
+    """Plan 00105 Phase 1 Task 1.3 — upgrade-path end-to-end gate.
+
+    Task 1.1 covers the install chain. Upgrades go through a different
+    entrypoint (``scripts/upgrade_version.sh``) and exercise upgrade-only
+    code paths that install never runs:
+
+      - ``stop_daemon_safe`` against an already-running daemon
+      - ``ensure_venv`` from the upgrade context (vs the fresh-install context)
+      - ``deploy_all_hooks`` / ``setup_all_gitignores`` / ``deploy_slash_commands``
+        / ``deploy_skills`` / ``run_post_install_checks`` re-run on a populated
+        project tree (different code path from a green-field install)
+      - ``restart_daemon_verified`` in upgrade-redeploy mode
+
+    Any of these helpers can ship a print-before-echo regression that
+    install_version.sh alone wouldn't surface.
+
+    Strategy: install first via Task 1.1's chain, then run upgrade_version.sh
+    against the same fixture with ``TARGET_VERSION`` equal to the daemon dir's
+    current short SHA. That hits ``upgrade_version.sh``'s idempotent fast
+    path (line 197 ``ROLLBACK_REF == TARGET_VERSION``), which exercises every
+    upgrade-only helper above WITHOUT hitting Step 6's ``git fetch --tags``
+    (which would need network). The fast path still ends with
+    ``restart_daemon_verified`` — so a corrupted upgrade chain produces a
+    NOT-RUNNING daemon and fails this gate, exactly like the install gate.
+    """
+    if not INSTALL_VERSION_SH.is_file():
+        pytest.skip(f"install_version.sh missing at {INSTALL_VERSION_SH}")
+    if not UPGRADE_VERSION_SH.is_file():
+        pytest.skip(f"upgrade_version.sh missing at {UPGRADE_VERSION_SH}")
+    if shutil.which("uv") is None:
+        pytest.skip("uv not installed in this environment")
+
+    project_root = tmp_path / "fresh-project"
+    project_root.mkdir()
+    (project_root / ".claude").mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=project_root, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin", "https://example.invalid/fake.git"],
+        cwd=project_root,
+        check=True,
+        capture_output=True,
+    )
+
+    daemon_dir = project_root / ".claude" / "hooks-daemon"
+    _create_daemon_clone(daemon_dir)
+    venv_python: Path | None = None
+    env = os.environ.copy()
+
+    try:
+        env["HOSTNAME"] = _make_test_hostname()
+        env.pop("CI", None)
+        env.pop("HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP", None)
+        env["NO_COLOR"] = "1"
+
+        # Step A: fresh install via Task 1.1's chain to land a working
+        # baseline. This is the prerequisite state for any upgrade — a
+        # populated daemon dir with venv, settings.json, hooks/, skills/,
+        # and a running daemon. Equivalent to "user is on v3.10.0" in
+        # the field.
+        install_result = subprocess.run(
+            [BASH, str(INSTALL_VERSION_SH), str(project_root), str(daemon_dir)],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+            timeout=_INSTALL_TIMEOUT_SECONDS,
+            cwd=project_root,
+        )
+        if install_result.returncode != 0:
+            pytest.fail(
+                "Pre-upgrade install_version.sh must exit 0 to set up the "
+                "fixture. (If this fails, the install gate would catch it "
+                "first; this test only adds value when install passes.)\n"
+                f"returncode={install_result.returncode}\n"
+                f"--- stdout ---\n{install_result.stdout}\n"
+                f"--- stderr ---\n{install_result.stderr}"
+            )
+
+        venv_candidates = sorted((daemon_dir / "untracked").glob("venv-py*"))
+        assert venv_candidates, (
+            f"Pre-upgrade install must produce a fingerprint-keyed venv under "
+            f"{daemon_dir}/untracked/. Got nothing matching 'venv-py*'."
+        )
+        venv_path = venv_candidates[0]
+        venv_python = venv_path / "bin" / "python"
+        assert venv_python.is_file(), f"venv Python must exist post-install: {venv_python}"
+
+        # Compute the daemon dir's short SHA. upgrade_version.sh sets
+        # ROLLBACK_REF via `git describe --tags --exact-match` then
+        # `git rev-parse --short HEAD`. The worktree is at HEAD with no
+        # tag pinned, so ROLLBACK_REF == short SHA. Passing the same
+        # value as TARGET_VERSION triggers the idempotent fast path
+        # without a network-bound fetch.
+        sha_proc = subprocess.run(
+            ["git", "-C", str(daemon_dir), "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        short_sha = sha_proc.stdout.strip()
+        assert short_sha, "Could not resolve daemon dir short SHA"
+
+        # Step B: invoke upgrade_version.sh with TARGET_VERSION = short SHA.
+        # This re-runs every redeploy helper and ends with
+        # restart_daemon_verified — the canonical upgrade-only chain.
+        upgrade_result = subprocess.run(
+            [BASH, str(UPGRADE_VERSION_SH), str(project_root), str(daemon_dir), short_sha],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+            timeout=_INSTALL_TIMEOUT_SECONDS,
+            cwd=project_root,
+        )
+
+        # Assertion (a): exit 0 — no upgrade-only helper corrupted any
+        # VAR=$(...) capture. Any future print-before-echo bug in
+        # ensure_venv / deploy_all_hooks / restart_daemon_verified
+        # surfaces here.
+        if upgrade_result.returncode != 0:
+            pytest.fail(
+                "upgrade_version.sh idempotent fast path must exit 0. "
+                f"returncode={upgrade_result.returncode}\n"
+                f"--- stdout ---\n{upgrade_result.stdout}\n"
+                f"--- stderr ---\n{upgrade_result.stderr}\n"
+                "If you see 'ensure_venv returned empty path' or any "
+                "unexpected text intermixed in a captured value, this is "
+                "the v3.10.0 print-before-echo bug class recurring on the "
+                "upgrade path."
+            )
+
+        # Assertion (b): metadata still intact and venv-resident.
+        # Idempotent path keeps the existing venv; metadata file stays.
+        metadata_path = venv_path / ".daemon-metadata.json"
+        assert metadata_path.is_file(), (
+            f"Post-upgrade metadata must still exist at {metadata_path}. "
+            f"venv contents: {list(venv_path.iterdir())}"
+        )
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        expected_python_path = str(venv_python)
+        assert metadata["python_path"] == expected_python_path, (
+            f"Post-upgrade python_path must point at the venv's own bin/python. "
+            f"expected={expected_python_path!r}, got={metadata['python_path']!r}"
+        )
+
+        # Assertion (c): daemon RUNNING after the upgrade chain.
+        # restart_daemon_verified at the tail of upgrade_version.sh's
+        # idempotent path is the canonical upgrade success signal.
+        running, last_stdout = _wait_for_daemon_status(
+            venv_python, project_root, env, "Daemon: RUNNING", timeout=Timeout.DAEMON_SHUTDOWN
+        )
+        assert running, (
+            "daemon-cli status must report 'Daemon: RUNNING' after upgrade. "
+            f"Last status output:\n{last_stdout}\n"
+            f"--- upgrade stdout (tail) ---\n{upgrade_result.stdout[-2000:]}\n"
+            f"--- upgrade stderr (tail) ---\n{upgrade_result.stderr[-2000:]}"
+        )
+
+    finally:
+        if venv_python is not None:
+            _stop_test_daemon(venv_python, project_root, env)
+        _remove_daemon_clone(daemon_dir)
