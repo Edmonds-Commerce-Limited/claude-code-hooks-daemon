@@ -155,6 +155,16 @@ else
 fi
 echo ""
 
+echo "13. Running Capture-Corruption Audit..."
+echo "----------------------------------------"
+if ! "${SCRIPT_DIR}/run_capture_corruption_check.sh"; then
+    OVERALL_EXIT_CODE=1
+    echo "❌ Capture-corruption audit FAILED"
+else
+    echo "✅ Capture-corruption audit PASSED"
+fi
+echo ""
+
 # Print overall summary
 echo "========================================"
 echo "QA Summary"
@@ -176,6 +186,7 @@ results = {
     "Skill Refs": "untracked/qa/skill_references.json",
     "Shell Audit": "untracked/qa/shell_audit.json",
     "Canonical Callers": "untracked/qa/canonical_callers.json",
+    "Capture Corruption": "untracked/qa/capture_corruption.json",
 }
 
 all_passed = True

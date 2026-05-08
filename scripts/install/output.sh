@@ -127,8 +127,8 @@ fail_fast() {
     local exit_code="${2:-1}"
 
     print_error "$message"
-    echo ""
-    echo "Operation aborted."
+    echo "" >&2
+    echo "Operation aborted." >&2
     exit "$exit_code"
 }
 

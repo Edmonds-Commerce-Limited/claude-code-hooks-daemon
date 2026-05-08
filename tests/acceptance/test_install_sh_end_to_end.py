@@ -36,6 +36,8 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INSTALL_VERSION_SH = REPO_ROOT / "scripts" / "install_version.sh"
 BASH = shutil.which("bash") or "/bin/bash"
@@ -93,9 +95,7 @@ def _remove_daemon_worktree(worktree_path: Path) -> None:
     )
 
 
-def _stop_test_daemon(
-    venv_python: Path, project_root: Path, env: dict[str, str]
-) -> None:
+def _stop_test_daemon(venv_python: Path, project_root: Path, env: dict[str, str]) -> None:
     """Best-effort daemon shutdown — never raise from cleanup.
 
     The ``env`` MUST include the same ``HOSTNAME`` the install ran under,
@@ -110,7 +110,7 @@ def _stop_test_daemon(
         check=False,
         capture_output=True,
         text=True,
-        timeout=15,
+        timeout=Timeout.DAEMON_RESTART_VERIFY_TIMEOUT_SEC,
         env=env,
     )
 
@@ -142,7 +142,7 @@ def _wait_for_daemon_status(
             capture_output=True,
             text=True,
             check=False,
-            timeout=10,
+            timeout=Timeout.DAEMON_SHUTDOWN,
             env=env,
         )
         last_stdout = result.stdout
@@ -152,9 +152,7 @@ def _wait_for_daemon_status(
             return True, result.stdout
         time.sleep(0.5)
     return False, (
-        f"returncode={last_returncode}\n"
-        f"stdout:\n{last_stdout}\n"
-        f"stderr:\n{last_stderr}\n"
+        f"returncode={last_returncode}\n" f"stdout:\n{last_stdout}\n" f"stderr:\n{last_stderr}\n"
     )
 
 
@@ -189,9 +187,7 @@ def test_install_sh_end_to_end_produces_running_daemon(tmp_path: Path) -> None:
     # them because Layer 1 (install.sh) runs from a project that already has
     # `.claude/` and is a git repo.
     (project_root / ".claude").mkdir()
-    subprocess.run(
-        ["git", "init", "-q"], cwd=project_root, check=True, capture_output=True
-    )
+    subprocess.run(["git", "init", "-q"], cwd=project_root, check=True, capture_output=True)
     # Daemon config validation requires a git remote 'origin'. Layer 1 in
     # real life clones into an existing project that already has one. The
     # remote URL is never contacted — only its presence is checked — so a
@@ -292,11 +288,9 @@ def test_install_sh_end_to_end_produces_running_daemon(tmp_path: Path) -> None:
         # explicitly here so the contract is visible at this layer too —
         # a future install_version.sh that skips Step 11 must still pass
         # this acceptance gate.
-        assert venv_python.is_file(), (
-            f"venv Python must exist after install: {venv_python}"
-        )
+        assert venv_python.is_file(), f"venv Python must exist after install: {venv_python}"
         running, last_stdout = _wait_for_daemon_status(
-            venv_python, project_root, env, "Daemon: RUNNING", timeout=10.0
+            venv_python, project_root, env, "Daemon: RUNNING", timeout=Timeout.DAEMON_SHUTDOWN
         )
         assert running, (
             "daemon-cli status must report 'Daemon: RUNNING' after install. "

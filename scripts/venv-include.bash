@@ -73,6 +73,9 @@ venv_exists() {
 #
 # Create venv if it doesn't exist
 #
+# capture-audit: allow -- legacy ensure_venv, called as `ensure_venv || exit 1`,
+# never via $(...) capture. The captured ensure_venv lives in
+# scripts/install/venv.sh and returns its venv path through stdout.
 ensure_venv() {
     if venv_exists; then
         echo -e "${GREEN}✓${NC} Venv exists: ${VENV_DIR}"
