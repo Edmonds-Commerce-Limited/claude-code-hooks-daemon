@@ -12,16 +12,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - **Blast radius**: 1 handler, 1 new shared utility (`is_bypass_mode`), no core-protocol changes
   - **QUEUED behind Plan 00105**: do NOT start execution until v3.11.0 stability hardening ships
 
-- [00105: v3.11.0 — Stability Hardening (close gaps that let v3.10.0 ship a SEV-1)](00105-v3.11.0-stability-hardening/PLAN.md) - In Progress
-
-  - **Phase 1**: H-1 acceptance gate runs `install.sh` end-to-end against fresh fixture project — catches the next print-before-echo regression class before tag time
-  - **Phase 2**: 13th QA gate — static + dynamic check for `VAR=$(fn)` capture corruption across `scripts/install/*.sh`
-  - **Phase 3**: Audit every `scripts/install/*.sh` helper for the print-before-echo anti-pattern (the v3.10.0 site)
-  - **Phase 4**: Self-bootstrap with sha256 verification for `daemon-cli.sh`, `health-check.sh`, `init-handlers.sh` (Plan 00104 Decision 3.B deferred)
-  - **Phase 5**: `verify_venv` overlay-fs retry + `venv.sh:465` silent-fallback removal (Plan 00104 Task 5.3 deferred + Opus C-6)
-  - **Phase 6**: Plan 00103 housekeeping (move to `Completed/`, update README index)
-  - **Priority**: High — released as v3.11.0
-
 - [00100 (v2): Venv SSOT Consolidation — Stop the Release Treadmill](00100-venv-ssot-consolidation/PLAN.md) - Not Started
 
   - Critical: five consecutive releases (v3.1.1, v3.7.0, v3.8.0, v3.8.1, v3.8.2) patched venv bugs; this plan ends the treadmill
@@ -72,6 +62,17 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - SessionState cache still viable when upstream unblocks
 
 ## Completed Plans
+
+- [00105: v3.11.0 — Stability Hardening (close gaps that let v3.10.0 ship a SEV-1)](Completed/00105-v3.11.0-stability-hardening/PLAN.md) - Complete
+
+  - Released as v3.11.0 — closes the structural gaps that let v3.10.0 ship a SEV-1 print-on-stdout regression
+  - **Phase 1**: H-1 acceptance gate now runs `install.sh` and `upgrade_version.sh` end-to-end against fresh fixture projects (would have caught v3.10.0)
+  - **Phase 2**: 13th QA gate — `audit_capture_corruption.py` static check + integration matrix for `VAR=$(fn ...)` capture sites
+  - **Phase 3**: All 16 `scripts/install/*.sh` helpers certified clean — 0 violations on every QA run
+  - **Phase 4**: Parameterised self-bootstrap stanza now serves all four diagnostic scripts (`upgrade.sh`, `daemon-cli.sh`, `health-check.sh`, `init-handlers.sh`) with sha256 verification + per-(basename, sha) cache marker
+  - **Phase 5**: `venv.sh::create_venv_at_path` hardlink→copy fallback now uses `print_warning` (silent fallback antipattern removed); pinned by `test_venv_sh_hardlink_fallback_loud.py`
+  - **Phase 6**: Plan 00103 housekeeping (moved to `Completed/`, README index updated)
+  - Bonus latent-bug fix: `install_version.sh:243` now reads `pyproject.toml` instead of `git rev-parse --short HEAD` (sister-bug to v3.10.0 SEV-1 — silent metadata-write skip)
 
 - [00103: v3.9.1 — venv resolution fail-fast (narrow hotfix)](Completed/00103-v3.9.1-venv-resolution-failfast/PLAN.md) - Complete
 
@@ -663,7 +664,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 97
-- **Completed**: 80 (1 with reduced scope)
+- **Completed**: 81 (1 with reduced scope)
 - **Active**: 5 (4 not started, 1 in progress)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation)

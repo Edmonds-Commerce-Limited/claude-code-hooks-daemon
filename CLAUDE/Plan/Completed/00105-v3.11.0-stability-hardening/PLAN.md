@@ -1,6 +1,6 @@
 # Plan 00105: v3.11.0 Stability Hardening — close the gaps that let v3.10.0 ship a SEV-1
 
-**Status**: In Progress
+**Status**: Complete (released as v3.11.0)
 **Created**: 2026-05-01
 **Owner**: Claude (Opus 4.7)
 **Priority**: High
@@ -109,9 +109,9 @@ Currently only the skill's `upgrade.sh` self-bootstraps from the GitHub release 
 
 ### Phase 7: Release as v3.11.0 (MINOR — adds new QA gate + new acceptance gate cases + new self-bootstrap stanzas)
 
-- [ ] ⬜ **Task 7.1**: Run full QA. 13/13 must pass.
-- [ ] ⬜ **Task 7.2**: Run `/release minor`.
-- [ ] ⬜ **Task 7.3**: Verify bootstrap artifacts (now four files) reachable at `releases/latest/download` URL with sha256 match.
+- [x] ✅ **Task 7.1**: Full QA passed 13/13 (8170 tests, 95.0% coverage). H-1 gate 17/17 passed pre-release.
+- [x] ✅ **Task 7.2**: `/release minor` executed end-to-end. v3.11.0 tagged and published as commit a8ad726. Step 12 (handler playbook) skipped per RELEASING.md MINOR/no-handler-changes rule and documented in release notes.
+- [x] ✅ **Task 7.3**: All four diagnostic scripts (`upgrade.sh`, `daemon-cli.sh`, `health-check.sh`, `init-handlers.sh`) plus `bootstrap-checksums.txt` reachable at `releases/latest/download/` URL; every published sha256 matches its manifest entry.
 
 ## Dependencies
 
@@ -120,12 +120,12 @@ Currently only the skill's `upgrade.sh` self-bootstraps from the GitHub release 
 
 ## Success Criteria
 
-- [ ] H-1 acceptance gate runs `install.sh` end-to-end and `upgrade.sh` end-to-end, both asserting daemon RUNNING.
-- [ ] 13th QA gate (capture-corruption check) integrated and reports zero violations.
-- [ ] All four diagnostic scripts (`upgrade.sh`, `daemon-cli.sh`, `health-check.sh`, `init-handlers.sh`) self-bootstrap with sha256 verification.
-- [ ] `verify_venv` retries on overlay-fs EBUSY; `venv.sh:465` silent fallback removed.
-- [ ] Plan 00103 moved to `Completed/`, README index updated.
-- [ ] v3.11.0 tagged and published.
+- [x] H-1 acceptance gate runs `install.sh` end-to-end and `upgrade.sh` end-to-end, both asserting daemon RUNNING.
+- [x] 13th QA gate (capture-corruption check) integrated and reports zero violations.
+- [x] All four diagnostic scripts (`upgrade.sh`, `daemon-cli.sh`, `health-check.sh`, `init-handlers.sh`) self-bootstrap with sha256 verification.
+- [x] `verify_venv` retries on overlay-fs EBUSY; `venv.sh:465` silent fallback removed.
+- [x] Plan 00103 moved to `Completed/`, README index updated.
+- [x] v3.11.0 tagged and published.
 
 ## Risks & Mitigations
 
