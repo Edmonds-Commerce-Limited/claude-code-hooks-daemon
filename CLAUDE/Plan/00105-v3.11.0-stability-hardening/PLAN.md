@@ -103,9 +103,9 @@ Currently only the skill's `upgrade.sh` self-bootstraps from the GitHub release 
 
 ### Phase 6: Plan 00103 housekeeping (Goal 6)
 
-- [ ] ⬜ **Task 6.1**: Read `CLAUDE/Plan/00103-v3.9.1-venv-resolution-failfast/PLAN.md` and update Status to Complete with v3.9.1 release date.
-- [ ] ⬜ **Task 6.2**: `git mv CLAUDE/Plan/00103-v3.9.1-venv-resolution-failfast CLAUDE/Plan/Completed/00103-v3.9.1-venv-resolution-failfast`.
-- [ ] ⬜ **Task 6.3**: Update `CLAUDE/Plan/README.md`: remove from Active, add to Completed with brief summary.
+- [x] ✅ **Task 6.1**: Updated status of `CLAUDE/Plan/Completed/00103-v3.9.1-venv-resolution-failfast/PLAN.md` to Complete with v3.9.1 release date and Phase 6 closeout note.
+- [x] ✅ **Task 6.2**: `git mv CLAUDE/Plan/00103-v3.9.1-venv-resolution-failfast CLAUDE/Plan/Completed/00103-v3.9.1-venv-resolution-failfast`.
+- [x] ✅ **Task 6.3**: Updated `CLAUDE/Plan/README.md`: removed 00103 from Active Plans, inserted in Completed Plans section above 00104 entry, decremented Active 6→5 and incremented Completed 79→80 in Plan Statistics.
 
 ### Phase 7: Release as v3.11.0 (MINOR — adds new QA gate + new acceptance gate cases + new self-bootstrap stanzas)
 

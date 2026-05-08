@@ -1,6 +1,6 @@
 # Plan 00103: v3.9.1 — venv resolution fail-fast (narrow hotfix)
 
-**Status**: Not Started — narrowed scope after three FATAL reviews of the ambitious version (`PLAN-v1-ambitious-superseded.md`)
+**Status**: Complete (2026-05-01) — released as v3.9.1; closed out by Plan 00105 Phase 6 housekeeping (2026-05-08). Original scope was narrowed after three FATAL reviews of the ambitious version (`PLAN-v1-ambitious-superseded.md`).
 **Created**: 2026-04-30
 **Owner**: Claude (Opus 4.7)
 **Priority**: High (regression patch — ships in days, not weeks)

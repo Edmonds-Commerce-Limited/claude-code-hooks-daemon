@@ -22,15 +22,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - **Phase 6**: Plan 00103 housekeeping (move to `Completed/`, update README index)
   - **Priority**: High — released as v3.11.0
 
-- [00103: v3.9.1 — venv resolution fail-fast (narrow hotfix)](00103-v3.9.1-venv-resolution-failfast/PLAN.md) - Not Started
-
-  - Patches v3.9.0 regression: `paths.py:22 import tomllib` crashes when wrappers invoke it with `python3 → 3.9` on RHEL/CentOS hosts; silent `2>/dev/null` + legacy fallback hides the crash
-  - Five sites fixed in place (no DRY consolidation — that is Plan 00104): `_resolve-venv.sh`, `venv-include.bash`, `venv_resolver.sh`, `init.sh::_resolve_python_cmd`, `venv.sh:261`
-  - Defers `tomllib` import in `paths.py` so `resolve-venv` subcommand works under any Python 3.x; `check-venv-fresh` raises clear error on \<3.11 instead of silent module-load crash
-  - Bootstrap probe replaces `${HOOKS_DAEMON_PYTHON:-python3}` and bare `python3` candidate with explicit `python3.13/3.12/3.11` + open-ended `compgen` discovery (no Python-version ceiling)
-  - Acceptance fixture: multi-Python container (`python3 → 3.9` AND `python3.13` co-resident) reproducing the field-bug topology
-  - **v1 superseded**: ambitious version bundled patch + DRY consolidation, returned three FATAL Opus reviews; split per reviewer recommendation
-
 - [00100 (v2): Venv SSOT Consolidation — Stop the Release Treadmill](00100-venv-ssot-consolidation/PLAN.md) - Not Started
 
   - Critical: five consecutive releases (v3.1.1, v3.7.0, v3.8.0, v3.8.1, v3.8.2) patched venv bugs; this plan ends the treadmill
@@ -81,6 +72,14 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - SessionState cache still viable when upstream unblocks
 
 ## Completed Plans
+
+- [00103: v3.9.1 — venv resolution fail-fast (narrow hotfix)](Completed/00103-v3.9.1-venv-resolution-failfast/PLAN.md) - Complete
+
+  - Released as v3.9.1 — narrow hotfix for v3.9.0 regression where `paths.py:22 import tomllib` crashed under `python3 → 3.9` (RHEL/CentOS hosts); silent `2>/dev/null` + legacy fallback hid the crash
+  - Five resolver sites fixed in place (no DRY consolidation — deferred to Plan 00104): `_resolve-venv.sh`, `venv-include.bash`, `venv_resolver.sh`, `init.sh::_resolve_python_cmd`, `venv.sh:261`
+  - Bootstrap probe replaces `${HOOKS_DAEMON_PYTHON:-python3}` with explicit `python3.13/3.12/3.11` + open-ended `compgen` discovery (no Python-version ceiling)
+  - **v1 superseded**: ambitious version bundled patch + DRY consolidation, returned three FATAL Opus reviews; split per reviewer recommendation
+  - Closed out by Plan 00105 Phase 6 housekeeping
 
 - [00104: v3.10.0 — venv resolver DRY + upgrade-flow resilience + production bug fixes](Completed/00104-v3.10.0-venv-resolver-dry-consolidation/PLAN.md) - Complete
 
@@ -664,8 +663,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 97
-- **Completed**: 79 (1 with reduced scope)
-- **Active**: 6 (5 not started, 1 in progress)
+- **Completed**: 80 (1 with reduced scope)
+- **Active**: 5 (4 not started, 1 in progress)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation)
 
