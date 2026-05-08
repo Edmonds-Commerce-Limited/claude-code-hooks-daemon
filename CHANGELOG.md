@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.11.0] - 2026-05-08
+
+### Added
+
+- **13th QA gate — capture-corruption static+dynamic check (`scripts/qa/audit_capture_corruption.py`, Plan 00105 Phase 2)**: New QA gate scans every `scripts/install/*.sh` helper for the print-before-echo anti-pattern that caused the v3.10.0 SEV-1. Detects functions that write to stdout (via `echo`/`printf` without `>&2`) before or alongside a bare `echo` return value, and validates that `VAR=$(fn)` capture sites are safe. Integrated into `run_all.sh` as check 13.
+- **H-1 install.sh end-to-end acceptance gate (`tests/acceptance/test_install_sh_end_to_end.py`, Plan 00105 Phase 1 Task 1.1)**: New deterministic acceptance test that runs the production `install.sh` against a fresh fixture project (isolated tmpdir, no pre-existing venv) and asserts the daemon starts successfully. Closes the gap that allowed the v3.10.0 SEV-1 to escape: the previous H-1 gate synthesised state via `write-venv-metadata` directly instead of exercising the real `ensure_venv` capture chain.
+- **H-1 `upgrade_version.sh` end-to-end acceptance gate (`tests/acceptance/test_install_sh_end_to_end.py`, Plan 00105 Phase 1 Task 1.3)**: Extends the install gate to also exercise `upgrade_version.sh` against a fixture project that has already been installed, verifying the full upgrade path end-to-end.
+- **Parameterised self-bootstrap stanza extended to all four diagnostic scripts (Plan 00105 Phase 4)**: `daemon-cli.sh`, `health-check.sh`, and `init-handlers.sh` now include the same sha256-verified self-bootstrap stanza as `upgrade.sh`. The stanza is parameterised by `$(basename "$0")` so each script verifies its own entry in `bootstrap-checksums.txt`. `RELEASING.md` Step 14 updated to publish all four scripts as release artifacts. Closes Plan 00104 Decision 3.B (deferred from v3.10.0).
+
+### Changed
+
+- **`venv.sh` overlay-fs hardlink→copy fallback now announces via `print_warning` (Plan 00105 Phase 5)**: The fallback from hardlink to full copy (triggered on overlay filesystems where hardlinks are unavailable) previously used `print_verbose`, which is silent unless `VERBOSE=1`. It now uses `print_warning` so the fallback is always visible. Fixes the silent-fallback antipattern identified in Plan 00100 v2 architectural decision. Retry logic remains in `create_venv_at_path` (not `verify_venv`) per architectural decision.
+- **`RELEASING.md` Step 12.0 updated — H-1 gate now covers both `test_diagnostic_scripts.py` and `test_install_sh_end_to_end.py` (Plan 00105 Phase 1 Task 1.2/1.4)**: The step now requires both files to pass (17 combined tests: 5+1 diagnostic, 1+1 install end-to-end, plus version-detection bug fix). Expected counts updated in documentation. Wires the new install gate into the mandatory blocking release pipeline.
+- **Plan 00103 housekeeping — Completed/ moved and README index updated (Plan 00105 Phase 6)**: Completed plan folders moved to `CLAUDE/Plan/Completed/`; `CLAUDE/Plan/README.md` updated to reflect current active/completed plan counts.
+
+### Fixed
+
+- **Latent version-detection bug in `_resolve-venv.sh` (Plan 00105 Phase 1 Task 1.4)**: A subtle off-by-one in the version-string comparison logic caused version detection to misfire in certain edge cases. Fixed as part of wiring the H-1 install gate.
+- **`scripts/install/*.sh` helpers audited and cleared of print-before-echo anti-pattern (Plan 00105 Phase 3)**: Full audit of every install helper confirmed no remaining instances of progress output written to stdout before a capture-site `echo`. Audit is now enforced by the 13th QA gate at every future commit.
+
 ## [3.10.1] - 2026-05-01
 
 ### Fixed
