@@ -4,6 +4,14 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+- [00106: Bypass-Permissions-Aware Auto-Approve (security gap — silent YOLO in default mode)](00106-bypass-permissions-aware-auto-approve/PLAN.md) - Not Started
+
+  - **Security**: `auto_approve_reads` currently approves Read/Glob/Grep regardless of Claude Code permission mode — silently turns a non-YOLO session into YOLO behaviour without consent
+  - **Decision A**: `hook_input["permission_mode"]` is authoritative (5-value enum: default, plan, acceptEdits, dontAsk, bypassPermissions) — already plumbed via `_BASE_PROPERTIES` schema and `HookInputField.PERMISSION_MODE` constant
+  - **Fix**: gate `matches()` on `permission_mode == "bypassPermissions"`; in any other mode the handler defers to Claude Code's normal approval flow
+  - **Blast radius**: 1 handler, 1 new shared utility (`is_bypass_mode`), no core-protocol changes
+  - **QUEUED behind Plan 00105**: do NOT start execution until v3.11.0 stability hardening ships
+
 - [00105: v3.11.0 — Stability Hardening (close gaps that let v3.10.0 ship a SEV-1)](00105-v3.11.0-stability-hardening/PLAN.md) - In Progress
 
   - **Phase 1**: H-1 acceptance gate runs `install.sh` end-to-end against fresh fixture project — catches the next print-before-echo regression class before tag time
@@ -655,9 +663,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 96
+- **Total Plans Created**: 97
 - **Completed**: 79 (1 with reduced scope)
-- **Active**: 5 (4 not started, 1 in progress)
+- **Active**: 6 (5 not started, 1 in progress)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation)
 
