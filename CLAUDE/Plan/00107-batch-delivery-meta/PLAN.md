@@ -216,15 +216,17 @@ Goal: ship the entire bundle as a single release via `/release` skill,
 following `CLAUDE/development/RELEASING.md` end-to-end with no shortcuts.
 
 - [ ] **Task 6.1**: Invoke `/release` skill — auto-detect bump
-  (expected: **MINOR** — multiple new handlers + features, no breaking
-  changes if 00106's behaviour change is gated as a default-on opt-in;
-  otherwise **MAJOR** with upgrade guide)
+  (expected: **MINOR** — multiple new handlers + features. Plan 00106 is
+  a **security bug fix** restoring the intended per-tool approval flow in
+  non-YOLO modes; it is NOT a breaking change and does NOT require an
+  upgrade guide)
 - [ ] **Task 6.2**: Confirm pre-release validation passes (Step 1)
 - [ ] **Task 6.3**: Verify Step 6 (UNRELEASED post-upgrade-tasks moved into
   versioned upgrade guide if any)
 - [ ] **Task 6.4**: Pass Step 8 QA Verification Gate (12 checks, all green)
-- [ ] **Task 6.5**: Pass Step 9 Breaking Changes Check — if 00106 ships as
-  breaking, upgrade guide must exist before this step
+- [ ] **Task 6.5**: Pass Step 9 Breaking Changes Check — bundle contains no
+  breaking changes (00106 is a bug fix; auto-approving in non-YOLO modes
+  was the original bug). Step 9 should pass without an upgrade guide.
 - [ ] **Task 6.6**: Pass Step 10 Code Review Gate
 - [ ] **Task 6.7**: Pass Step 11 CLAUDE.md Guidance Audit
 - [ ] **Task 6.8**: Pass Step 12 Acceptance Testing Gate (includes Step 12.0
@@ -352,14 +354,14 @@ work or regression.
 
 ## Risks & Mitigations
 
-| Risk                                                                          | Impact | Probability | Mitigation                                                                                                   |
-| ----------------------------------------------------------------------------- | ------ | ----------- | ------------------------------------------------------------------------------------------------------------ |
-| A bundled plan introduces a regression that QA misses                         | High   | Medium      | Wave-by-wave checkpoint commits — each wave is independently revertable; H-1 gate catches integration-level  |
-| 00106 is a breaking change for users on `default` mode                        | Medium | High        | Upgrade guide + release-notes post-upgrade-tasks entry documenting the re-appearance of permission prompts   |
-| 00099 / 00100 audit reveals more residue than expected                        | Medium | Medium      | Wave 4 is its own gated phase — if scope grows, can split into v3.12.0 / v3.13.0 boundary at audit time      |
-| ~~`validate_instruction_content` over-fit~~ — false alarm; handler is correct | —      | —           | Convention updated in Task 0.6; index no longer carries dates                                                |
-| Wave 3 dependency chain stalls if 00077 hits an unexpected blocker            | High   | Low         | Spawn the audit sub-agent for 00077 first to catch any latent issue before the chain commits to it           |
-| Release rollback after tag                                                    | High   | Low         | Tag-rollback procedure in RELEASING.md is well-documented; checkpoint commits per wave make revert tractable |
+| Risk                                                                          | Impact | Probability | Mitigation                                                                                                                                           |
+| ----------------------------------------------------------------------------- | ------ | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A bundled plan introduces a regression that QA misses                         | High   | Medium      | Wave-by-wave checkpoint commits — each wave is independently revertable; H-1 gate catches integration-level                                          |
+| User complaints that "permission prompts came back" after upgrade             | Low    | Medium      | Release notes frame 00106 as a **security fix** restoring intended per-tool approval flow; point complainants at YOLO mode if they want auto-approve |
+| 00099 / 00100 audit reveals more residue than expected                        | Medium | Medium      | Wave 4 is its own gated phase — if scope grows, can split into v3.12.0 / v3.13.0 boundary at audit time                                              |
+| ~~`validate_instruction_content` over-fit~~ — false alarm; handler is correct | —      | —           | Convention updated in Task 0.6; index no longer carries dates                                                                                        |
+| Wave 3 dependency chain stalls if 00077 hits an unexpected blocker            | High   | Low         | Spawn the audit sub-agent for 00077 first to catch any latent issue before the chain commits to it                                                   |
+| Release rollback after tag                                                    | High   | Low         | Tag-rollback procedure in RELEASING.md is well-documented; checkpoint commits per wave make revert tractable                                         |
 
 ## Notes & Updates
 
