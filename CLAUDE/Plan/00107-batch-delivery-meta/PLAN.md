@@ -116,6 +116,15 @@ During the README reconciliation (Phase 0), encountered:
 - [x] **Task 0.4**: Update README plan statistics (107 total, 82 completed,
   12 active, 3 on hold, 5 cancelled)
 - [x] **Task 0.5**: Create this meta plan (Plan 00107)
+- [ ] **Task 0.6**: Update plan-index convention — **completion dates removed
+  from `CLAUDE/Plan/README.md` Completed entries; delivery commit hash(es)
+  cited instead** (git is the source of truth for "when"). Update
+  `CLAUDE/PlanWorkflow.md` to record the new convention. Bulk-rewrite the
+  existing Completed/ entries to drop dates and add commit-hash references
+  where the delivery commit is recoverable from `git log -- <plan-folder>`.
+  Justification: the `validate_instruction_content` handler correctly
+  blocks dated content in instruction files; the index was breaking that
+  rule. New convention aligns the index with the handler.
 
 ### Phase 1: Wave 1 — Bug Fixes (independent, parallelisable internally)
 
@@ -148,12 +157,11 @@ Goal: harden the QA stack itself so subsequent waves have stronger detection.
   check 9 — 3 nc-based probes)
   - High priority justification: this is exactly the test category that
     would have caught the v3.10.0 SEV-1 had it existed
-- [ ] **Task 2.3**: Investigate `validate_instruction_content` over-fitting
-  bug (blocks legitimate dated entries in `CLAUDE/Plan/README.md`).
-  Likely fix: narrow handler scope to root-level `CLAUDE.md` and
-  `README.md` only; OR allow timestamps inside `## Completed` /
-  `## Plan Statistics` sections of a plan index file. **Dogfooding
-  bug** — must fix in this release per CLAUDE.md mandate.
+- [ ] **Task 2.3**: ~~Investigate `validate_instruction_content` over-fit~~ —
+  **REJECTED**. User clarified the handler is correct: completion dates do
+  not belong in instruction files. Git is authoritative for "when". Plan
+  index should cite the delivery commit hash(es) instead. Replaced by
+  Task 0.6 (convention update).
 - [ ] **Task 2.4**: Wave 2 gate — QA + daemon restart verification.
 
 ### Phase 3: Wave 3 — Stop-Quality Stack (strict serial dependency chain)
@@ -344,14 +352,14 @@ work or regression.
 
 ## Risks & Mitigations
 
-| Risk                                                               | Impact | Probability | Mitigation                                                                                                   |
-| ------------------------------------------------------------------ | ------ | ----------- | ------------------------------------------------------------------------------------------------------------ |
-| A bundled plan introduces a regression that QA misses              | High   | Medium      | Wave-by-wave checkpoint commits — each wave is independently revertable; H-1 gate catches integration-level  |
-| 00106 is a breaking change for users on `default` mode             | Medium | High        | Upgrade guide + release-notes post-upgrade-tasks entry documenting the re-appearance of permission prompts   |
-| 00099 / 00100 audit reveals more residue than expected             | Medium | Medium      | Wave 4 is its own gated phase — if scope grows, can split into v3.12.0 / v3.13.0 boundary at audit time      |
-| `validate_instruction_content` over-fit causes more workarounds    | Low    | Medium      | Wave 2 Task 2.3 fixes the root cause before any further plan-index edits                                     |
-| Wave 3 dependency chain stalls if 00077 hits an unexpected blocker | High   | Low         | Spawn the audit sub-agent for 00077 first to catch any latent issue before the chain commits to it           |
-| Release rollback after tag                                         | High   | Low         | Tag-rollback procedure in RELEASING.md is well-documented; checkpoint commits per wave make revert tractable |
+| Risk                                                                          | Impact | Probability | Mitigation                                                                                                   |
+| ----------------------------------------------------------------------------- | ------ | ----------- | ------------------------------------------------------------------------------------------------------------ |
+| A bundled plan introduces a regression that QA misses                         | High   | Medium      | Wave-by-wave checkpoint commits — each wave is independently revertable; H-1 gate catches integration-level  |
+| 00106 is a breaking change for users on `default` mode                        | Medium | High        | Upgrade guide + release-notes post-upgrade-tasks entry documenting the re-appearance of permission prompts   |
+| 00099 / 00100 audit reveals more residue than expected                        | Medium | Medium      | Wave 4 is its own gated phase — if scope grows, can split into v3.12.0 / v3.13.0 boundary at audit time      |
+| ~~`validate_instruction_content` over-fit~~ — false alarm; handler is correct | —      | —           | Convention updated in Task 0.6; index no longer carries dates                                                |
+| Wave 3 dependency chain stalls if 00077 hits an unexpected blocker            | High   | Low         | Spawn the audit sub-agent for 00077 first to catch any latent issue before the chain commits to it           |
+| Release rollback after tag                                                    | High   | Low         | Tag-rollback procedure in RELEASING.md is well-documented; checkpoint commits per wave make revert tractable |
 
 ## Notes & Updates
 

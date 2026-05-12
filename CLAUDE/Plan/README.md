@@ -104,7 +104,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00071: Plan Number Validation Hook Bug Fixes](Completed/00071-triage-plan-race-report/PLAN.md) - Complete
 
   - Triaged two false positives in plan validation hook (TOCTOU race + archive trigger) and shipped fixes
-  - Moved to Completed/ during Plan 00107 README reconciliation pass
+  - Delivered in commit `957f97b1`; moved to Completed/ in commit `4d6dc78d` (Plan 00107 housekeeping pass)
 
 - [00105: v3.11.0 — Stability Hardening (close gaps that let v3.10.0 ship a SEV-1)](Completed/00105-v3.11.0-stability-hardening/PLAN.md) - Complete
 

@@ -402,7 +402,8 @@ When new work is identified:
 2. Verify all success criteria met
 3. Mark all tasks as ✅
 4. Mark plan status as Complete
-5. Add completion date to plan
+5. Record the delivery commit hash(es) in the plan's "Notes & Updates" section
+   (NOT a completion date — git is the source of truth for "when")
 6. Document any lessons learned
 7. **Follow the Plan Completion Checklist below**
 
@@ -410,7 +411,7 @@ When new work is identified:
 
 When a plan is complete, follow these steps to properly close it out. Skipping steps leads to stale plan indexes and orphaned folders.
 
-1. **Update PLAN.md status**: Change `**Status**:` to `Complete (YYYY-MM-DD)` with the actual completion date
+1. **Update PLAN.md status**: Change `**Status**:` to `Complete`. Do NOT add a completion date — git history is authoritative for "when". Cite the delivery commit hash(es) in the "Notes & Updates" section instead.
 2. **Mark all tasks**: Change `- [ ]` to `- [x]` for all completed tasks in the plan
 3. **Move to Completed folder**: Relocate the plan directory into the archive
    ```bash
