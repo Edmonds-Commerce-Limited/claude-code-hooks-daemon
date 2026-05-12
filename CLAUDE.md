@@ -928,6 +928,14 @@ On every new session this handler audits hook configuration across `.claude/sett
 - **Missing hooks**: the daemon's installer writes the full set. If any are missing, re-run `install.py` or manually add the missing `{event_name}` entry pointing at `"$CLAUDE_PROJECT_DIR"/.claude/hooks/{bash-key}`.
 - **Duplicate hooks**: a hook registered in both files fires twice. Keep the `settings.json` entry, delete from `settings.local.json`.
 
+## auto_approve_reads — gated on bypassPermissions mode
+
+Read-only tool permission requests (`Read`, `Glob`, `Grep`) are auto-approved **only** when Claude Code reports `permission_mode == "bypassPermissions"` (YOLO mode).
+
+In every other mode (`default`, `plan`, `acceptEdits`, `dontAsk`) the handler defers and Claude Code's normal approval prompt is shown — the user has not opted out of per-tool approvals, so the daemon must not silently approve on their behalf.
+
+If a permission prompt for `Read` appears in `default` mode, that is correct behaviour — approve it via Claude Code's UI.
+
 ### Stop Explanation Required
 
 Before stopping, **prefix your final message** with `STOPPING BECAUSE:` followed by a clear reason:
