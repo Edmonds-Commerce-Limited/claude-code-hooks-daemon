@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.12.0] - 2026-05-12
+
+This is a **batch-delivery release** that closes out the Plan 00107 meta-plan — a six-wave audit-and-close of the backlog accumulated across the v3.x stability cycle. Most of the bundled plans were already shipped in prior releases or superseded by other work; their PLAN.md status records have been reconciled in this release. Two source-code changes ship in this release: a security-tightening fix to `auto_approve_reads` and a behaviour fix to `markdown_organization`'s plan-redirect path.
+
+### Added
+
+- **`utils/permission_mode.py` — single source of truth for permission-mode detection (Plan 00106)**: New helper module that reads `permission_mode` from hook input and provides a typed predicate for bypassPermissions (YOLO) mode. Used by `auto_approve_reads` to ensure the handler only auto-approves when the user has explicitly opted into bypassPermissions mode.
+
+### Fixed
+
+- **`auto_approve_reads` security tightening — only auto-approve in bypassPermissions mode (Plan 00106)**: The handler previously auto-approved Read/Glob/Grep permission requests regardless of the active permission mode. This meant that in `default`, `plan`, `acceptEdits`, and `dontAsk` modes — where the user has NOT opted out of per-tool approvals — the daemon was silently approving on their behalf. The handler now defers in every mode except `bypassPermissions`, restoring Claude Code's normal approval prompt for users who have not explicitly chosen YOLO mode. **Security impact**: previously, any read-only Read/Glob/Grep request bypassed user approval regardless of mode. Users running in `default` mode were not getting the approval prompts they expected.
+- **`markdown_organization` plan-redirect path now returns ALLOW (Plan 00086)**: `_handle_plan_write` previously returned the wrong decision type for plan-mode write redirects to `CLAUDE/Plan/`. The handler now correctly returns `Decision.ALLOW` when redirecting a plan file write to its proper destination, so the redirect actually takes effect instead of silently failing.
+- **`PermissionRequest` `hello_world` handler — sibling registration consistency**: The PermissionRequest `hello_world` test handler is now registered consistently with other event-type hello_world handlers, restoring symmetry across the event-type matrix.
+
+### Changed
+
+- **Plan 00107 batch-delivery meta-plan executed across six waves**: Plans 00063, 00077, 00081, 00086, 00089, 00096, 00099, 00101, 00106 reconciled — each marked Complete (Already Shipped), Cancelled (Superseded), or moved to Completed/ with disposition evidence cited (file/line). Plan 00100 marked Residue Scope (Phases 0–3.9 shipped; Phases 3.5/4/5/6 deferred). Plan 00085 deferred to a future release with documented rationale (8-phase fresh-TDD scope qualitatively different from the audit-and-close pattern). See `CLAUDE/Plan/Completed/00107-batch-delivery-meta/PLAN.md` for the full disposition table.
+- **`CLAUDE/Plan/README.md` index reconciled**: Active/Completed/Cancelled sections updated to reflect the batch outcome; statistics updated accordingly.
+- **Plan workflow standard — no completion dates in plan index**: Plan index entries no longer carry completion dates; commit hashes recorded in the plan's "Notes & Updates" section are the authoritative "when". The `validate_instruction_content` blocking handler enforces this on CLAUDE.md and README.md by blocking ephemeral ISO-date content. Documented in `CLAUDE/PlanWorkflow.md`.
+
 ## [3.11.0] - 2026-05-08
 
 ### Added

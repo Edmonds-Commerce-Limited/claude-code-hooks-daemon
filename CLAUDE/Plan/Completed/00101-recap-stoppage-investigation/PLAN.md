@@ -136,6 +136,104 @@ mitigations.
    session against the actual handlers to confirm regression health. The
    Plan 00107 batch-delivery sessions provided exactly this evidence.
 
+## Post-close-out incident (Plan 00107 Wave 6 — `/release` for v3.12.0)
+
+**Status**: Open — model-side guidance gap; Plan 00102 daemon fix still
+correct. Reopening this plan is NOT required; this is a distinct trigger
+that needs documenting so future work knows the v3.12.0 Wave 5 close-out
+evidence has a known scope limit.
+
+### What happened
+
+In Wave 6 (this release session), the agent stopped silently **twice**
+in rapid succession during the version-update / changelog-edit portion of
+`/release`. Both stops followed the same shape:
+
+1. Model issued `Edit` against a file (`pyproject.toml`, then `CHANGELOG.md`)
+   without having `Read` that file in the current session context
+2. Edit returned a `<tool_use_error>`:
+   `File has not been read yet. Read it first before writing to it.`
+3. Model produced **zero output tokens** in the same turn — no text, no
+   follow-up tool call to read the file and retry
+4. Claude Code fired the Stop hook
+5. Daemon `auto_continue_stop` correctly blocked the stop
+   (`stop_hook_active=false`, decision=deny, `preventedContinuation=False`,
+   `hookErrors=1`) — the daemon fix from Plan 00102 Phase 3 is functioning
+6. User pushed back: "you stopped without explaining why"
+
+A third stop occurred on the second Edit retry: the Edit succeeded, but
+the model still produced no `STOPPING BECAUSE:` prefix on the re-entry
+response, and the re-entry guard (`stop_hook_active=true`) correctly
+allowed the stop. From the user's perspective the agent stopped a third
+time without explanation.
+
+### Why Wave 5's regression evidence did not catch this
+
+The Wave 5 "zero silent stops" verification (line 113–122 above) relied on
+Waves 1–4 work, which was predominantly Bash/Read operations editing plan
+markdown files — files the agent had already Read in the session. The
+Wave 6 trigger requires **Edit-without-prior-Read** as the inciting
+sequence; that sequence did not appear in Waves 1–4. The regression
+evidence had no `tool_use_error` events, so the failure mode was never
+exercised.
+
+**Lesson**: future regression verification for stop-handler health MUST
+include at least one Edit-without-prior-Read scenario, ideally synthesised
+as a probe (see Plan 00096 live-daemon smoke-test pattern).
+
+### Root-cause classification
+
+This is **not** a regression in `auto_continue_stop` or the re-entry
+guard. The daemon is correctly:
+
+- Blocking stops where `stop_hook_active=false` and no `STOPPING BECAUSE:`
+  prefix is present (stops 1 and 2)
+- Allowing re-entry stops where `stop_hook_active=true` to prevent
+  infinite block loops (stop 3)
+
+The root cause is **model behaviour**: a `tool_use_error` returned from
+Edit is being interpreted by the model as a terminal condition that ends
+the turn with zero output, rather than as a recoverable error that should
+be handled by reading the file and retrying. The CLAUDE.md stop guidance
+covers normal stops but does not address what to do after a tool error.
+
+### Additional findings
+
+1. **Trigger generalisation**: the Wave 5 close-out documented the
+   trigger as "silent turn after **successful** Edit tool result"
+   (line 159). Wave 6 shows the trigger is broader — "silent turn after
+   **any** Edit tool result, including `tool_use_error`". The error path
+   is, if anything, more likely to produce a zero-token stop because the
+   model has no implicit "next obvious step" to fall through to.
+2. **Re-entry stops still need `STOPPING BECAUSE:`**: even when the
+   re-entry guard correctly allows a stop, the model must prefix the
+   re-entry response with `STOPPING BECAUSE:`. The current Stop guidance
+   in CLAUDE.md addresses initial stops but is silent on the re-entry
+   case. This is a documentation gap, not a code gap.
+3. **Stop-hook telemetry is sufficient**: the transcript-inspector
+   sub-agent confirmed via the `stop_hook_summary` records that the
+   daemon's behaviour was correct in all three stops. No daemon change
+   is warranted from this incident.
+
+### Recommended follow-up (NOT shipped in v3.12.0)
+
+A future plan should:
+
+1. Audit CLAUDE.md and the `auto_continue_stop` `get_claude_md()` output
+   for explicit guidance on tool_use_error handling — specifically:
+   *"If Edit returns 'File has not been read yet', call Read first, then
+   retry the Edit — do not stop."*
+2. Audit re-entry guidance: *"If you're responding after a stop hook
+   block, your response MUST prefix with `STOPPING BECAUSE:` even if you
+   intend to continue — the re-entry path does not auto-fill the prefix."*
+3. Add a probe to the live-daemon smoke tests (Plan 00096) that issues
+   an Edit-without-prior-Read and asserts the agent recovers within one
+   turn rather than producing a zero-token stop.
+
+These follow-ups are deferred to a future release. v3.12.0 ships with the
+existing daemon fix unchanged; the gap is documented here for the next
+investigator.
+
 ## Root Cause Hypothesis (Phase 1.1 findings — 2026-04-24)
 
 `transcript-inspector` sub-agent (taskId `aea9c6a5020b79c62`) analysed this
