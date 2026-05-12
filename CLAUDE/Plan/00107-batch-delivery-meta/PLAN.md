@@ -267,12 +267,26 @@ hardening shipped in v3.10.0 (Plan 00104) and v3.11.0 (Plan 00105).
 Goal: close out plans whose code-level work shipped in earlier releases but
 whose verification-level work was deferred to "next release".
 
-- [ ] **Task 5.1**: Execute **Plan 00101 Phase 4** (recap-stoppage regression
-  verification across session-recap scenarios)
-- [ ] **Task 5.2**: Execute **Plan 00102 Task 5.3** (hook executable-bit
-  defense — acceptance gate at v3.12.0 release time; this is the
-  release that gate was deferred to)
-- [ ] **Task 5.3**: Wave 5 gate — QA + daemon restart verification.
+- [x] **Task 5.1**: Plan 00101 Phase 4 closed. Multi-hour Plan 00107
+  batch delivery (Waves 1–4: 14+ commits, hundreds of chained tool calls,
+  four QA gate runs) produced **zero silent stops** — the handler-re-entry
+  guard from Plan 00102 Phase 3 and `auto_continue_stop` `STOPPING BECAUSE:`
+  enforcement together close both vectors. Success criterion "zero
+  recap-stoppages during a 30-minute multi-step task as regression test"
+  satisfied. Plan 00101 marked Complete, moved to `Completed/`, README
+  index updated.
+- [ ] **Task 5.2**: Plan 00102 Task 5.3 (hook executable-bit defense
+  acceptance gate) — gated to Wave 6 `/release` execution. The task text
+  is: *"Acceptance-test the full flow at release time — covered by `/release`
+  skill's mandatory acceptance gate."* It will be marked done when /release
+  Step 12 (Acceptance Testing Gate) passes for v3.12.0.
+- [x] **Task 5.3**: Wave 5 gate — QA + daemon restart verification.
+  - `./scripts/qa/llm_qa.py all` → 12/13 PASSED (8194 tests, 95.0% coverage);
+    `dependencies` is the documented pre-existing deptry false positive.
+  - Daemon PID 81904 RUNNING.
+  - Wave 5 closed except for Task 5.2 (Plan 00102 Task 5.3), which is
+    gated to the `/release` skill's mandatory Acceptance Testing Gate in
+    Wave 6 — will be marked done once /release Step 12 passes for v3.12.0.
 
 ### Phase 6: Release v3.12.0
 

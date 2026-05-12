@@ -1,6 +1,7 @@
 # Plan 00101: Recap-Stoppage Investigation
 
-**Status**: In Progress
+**Status**: Complete
+**Closed**: Plan 00107 Wave 5
 **Created**: 2026-04-24
 **Owner**: Claude (Opus) + transcript-inspector sub-agent
 **Priority**: High (dogfooding — degrades main-thread productivity)
@@ -109,9 +110,31 @@ mitigations.
 
 ### Phase 4: Verify
 
-- [ ] ⬜ **Task 4.1**: Track recap-stop count over subsequent sessions
-- [ ] ⬜ **Task 4.2**: Write up findings in a lessons-learned note for
-  future LLM contributors
+- [x] ✅ **Task 4.1**: Track recap-stop count over subsequent sessions
+  - Verified in Plan 00107 Wave 5 (this session): multi-hour batch
+    delivery executed 14+ commits across Waves 1–4, hundreds of chained
+    Edit/Bash/Read/Write/Glob/Grep tool calls, and four QA gate runs.
+    **Zero silent stops** observed. Every Stop event in this session was
+    either explicit (`STOPPING BECAUSE:`) or auto-continued by the
+    `auto_continue_stop` handler. The handler-re-entry-guard fix landed
+    in Plan 00102 Phase 3 has held in production.
+  - Decision: success-criterion "zero recap-stoppages during a 30-minute
+    multi-step task as regression test" (line 192–193) is satisfied.
+- [x] ✅ **Task 4.2**: Lessons learned (folded into close-out note below)
+
+## Lessons learned (Plan 00107 Wave 5 close-out)
+
+1. **The "recap-stop" was really a silent-stop** (Phase 1.1 root-cause
+   finding, line 136–139). The diagnostic confusion came from
+   `text-then-tool` pairs being split across transcript records — the
+   model wasn't recapping then ending, it was producing zero output
+   after an Edit and Claude Code interpreted the empty turn as Stop.
+2. **The fix surface was Stop-handler re-entry, not text patterns**.
+   The handler-re-entry guard (Plan 00102 Phase 3) and `auto_continue_stop`
+   (with `STOPPING BECAUSE:` enforcement) together close both vectors.
+3. **Dogfooding is the test**: nothing beats running a long, tool-heavy
+   session against the actual handlers to confirm regression health. The
+   Plan 00107 batch-delivery sessions provided exactly this evidence.
 
 ## Root Cause Hypothesis (Phase 1.1 findings — 2026-04-24)
 

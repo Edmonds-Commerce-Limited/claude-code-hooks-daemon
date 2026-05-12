@@ -27,15 +27,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Phases 0–3.9 **shipped** in v3.9.0 / v3.10.0 / v3.11.0 (canonical SSOT resolver, `.daemon-metadata.json` writers, dead-code removal, path slug, eager upgrade cleanup, H-1 gate coverage)
   - **Residue deferred from v3.12.0** (Plan 00107 Wave 4): Phase 3.5.2–3.5.7 (bootstrap-fallback wiring), Phase 4 (flock concurrency), Phase 5 (parameterised upgrade-cycle test), Phase 6 (docs) — internally coherent and well-suited to a dedicated v3.13.0 release
 
-- [00101: Recap-Stoppage Investigation](00101-recap-stoppage-investigation/PLAN.md) - In Progress
-
-  - Root cause found (handler re-entry guard) and fix applied via Plan 00102 Phase 3
-  - **Phase 4 pending**: regression verification across multiple session-recap scenarios
-
 - [00102: Hook Executable-Bit Defense](00102-hook-exec-bit-defense/PLAN.md) - In Progress
 
   - Phases 1–4 complete (`bash <path>` invocation, auto-migration, self-heal, filemode checker)
-  - **Task 5.3 pending**: acceptance gate at v3.12.0 release time (folded into meta plan 00107)
+  - **Task 5.3 pending**: acceptance gate at v3.12.0 release time (folded into meta plan 00107 Wave 6 `/release` execution)
 
 ### On Hold (upstream-blocked)
 
@@ -65,6 +60,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Delivered in commit `bce66248` — pre-dated Plan 00107 Wave 2 audit
   - `scripts/qa/run_smoke_test.sh` (3 probes: Stop no-explanation, Stop loop-guard, PreToolUse destructive git) + `llm_qa.py` integration + `tests/unit/qa/test_smoke_test.py` all in place
   - Plan 00107 Wave 2 audit confirmed every Phase 1/2/3 task satisfied; closed out without further code action
+
+- [00101: Recap-Stoppage Investigation](Completed/00101-recap-stoppage-investigation/PLAN.md) - Complete
+
+  - Root cause identified (silent-stop after Edit, not recap-then-stop) and fix landed via Plan 00102 Phase 3 handler-re-entry guard + `auto_continue_stop` `STOPPING BECAUSE:` enforcement
+  - **Phase 4 verification**: closed in Plan 00107 Wave 5 — multi-hour batch delivery across Waves 1–4 (14+ commits, hundreds of chained tool calls, four QA gate runs) produced **zero silent stops**. Success criterion "zero recap-stoppages during a 30-minute multi-step task as regression test" satisfied.
+  - Lessons-learned folded into PLAN.md close-out note
 
 - [00099: Python-Fingerprint Venv Isolation](Completed/00099-python-fingerprint-venv-isolation/PLAN.md) - Complete (Already Shipped)
 
@@ -709,8 +710,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 107
-- **Completed**: 89 (1 with reduced scope, 4 already-shipped)
-- **Active**: 5 (1 meta, 1 stop-quality, 3 long-running/review)
+- **Completed**: 90 (1 with reduced scope, 4 already-shipped)
+- **Active**: 4 (1 meta, 1 stop-quality, 2 long-running/review)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping, 00081 - superseded by 00082)
 - **Last reconciled by**: Plan 00107 housekeeping pass
