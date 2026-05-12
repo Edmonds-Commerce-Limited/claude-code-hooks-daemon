@@ -210,10 +210,24 @@ depends on the previous one's shared utilities.
   execution plan and is already Complete. 00081 was the research-stage
   precursor sharing the same title and problem statement. Marked Cancelled;
   moved to `Completed/`.
-- [ ] **Task 3.3**: Execute **Plan 00085** (reminder pseudo-event system
-  with adaptive triggers — all 8 phases). Dependency chain resolved by 3.1
-  and 3.2 above. **In progress.**
-- [ ] **Task 3.4**: Wave 3 gate — QA + daemon restart verification.
+- [x] **Task 3.3**: ~~Execute Plan 00085~~ — **Deferred to a future release**.
+  Dependency chain resolved (Tasks 3.1 and 3.2), but Plan 00085 itself is
+  8 phases of fresh TDD feature work (AdaptiveTrigger dataclass, dispatcher
+  state machine, new setup/handler modules) — qualitatively different from
+  the audit-and-close pattern Waves 1–3 followed. Bundling it into v3.12.0
+  would add disproportionate risk to a release otherwise composed of
+  already-shipped backlog. Plan 00085 stays Active in the index and will be
+  executed in a dedicated session. Deferral rationale documented at the top
+  of `CLAUDE/Plan/00085-reminder-pseudo-event-system/PLAN.md`.
+- [x] **Task 3.4**: Wave 3 gate — QA + daemon restart verification.
+  - `./scripts/qa/llm_qa.py all` → 12/13 PASSED (8194 tests, 95.0% coverage,
+    0 violations across magic_values, format, lint, type_check, security,
+    error_hiding, shell_audit, skill_refs, canonical_callers,
+    capture_corruption, smoke_test 3/3); `dependencies` is the pre-existing
+    deptry false positive unrelated to Wave 3 work.
+  - Daemon PID 63692 RUNNING (no restart required — Wave 3 was audit-only).
+  - Wave 3 closed: 00077 Already Shipped, 00081 Cancelled (Superseded),
+    00085 deferred with documented rationale.
 
 ### Phase 4: Wave 4 — Venv Plan Audit (decision-first, then execute residue)
 

@@ -1,5 +1,32 @@
 # Plan: Reminder Pseudo-Event System with Adaptive Triggers
 
+**Status**: In Progress (deferred from v3.12.0 batch — see Wave 3 close-out note)
+
+## Wave 3 close-out note (Plan 00107)
+
+Plan 00107 Wave 3 audit confirmed the dependency chain ahead of this plan is
+resolved: Plan 00077 (TranscriptReader / shared Stop hook utilities) is
+**Already Shipped** and Plan 00081 (Pseudo-Events & Nitpick Handler) is
+**Cancelled — Superseded by Plan 00082** (Complete).
+
+However, this plan itself requires substantial new code across all 8 phases:
+
+- New `AdaptiveTrigger` dataclass + config parsing (`core/pseudo_event.py`)
+- Threshold-based adaptive firing in `PseudoEventDispatcher` (state machine)
+- New `WorkflowReminderSetup` (`pseudo_events/reminder.py`)
+- New `WorkflowReminderHandler` (`handlers/reminder/workflow_reminder.py`)
+- Constants, registry wiring, config, comprehensive TDD tests for each layer
+
+This is qualitatively different from the audit-and-close pattern that Waves
+1–3 of Plan 00107 followed for the rest of the batch. Bundling 8 phases of
+fresh TDD feature work into a release that is otherwise closing out
+already-shipped backlog increases the risk surface (dispatcher state machine
+regressions, per-session counter interactions with the existing nitpick
+pseudo-event) without proportional value.
+
+**Decision**: Defer Plan 00085 to a future release (v3.13.0 or later). The
+plan remains Active in the index and ready to execute in a dedicated session.
+
 ## Context
 
 The pseudo-event system currently supports **fixed-frequency triggers** (N/D notation: "fire N times every D events"). The nitpick pseudo-event uses this to scan transcripts every 5th PreToolUse.
