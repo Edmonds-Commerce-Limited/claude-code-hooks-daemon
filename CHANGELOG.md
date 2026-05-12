@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.13.0] - 2026-05-12
+
+This is a **minor release** that extends the status line's `GitBranchHandler` with magicmonty-style status icons. The git branch element now displays repository state at a glance — ahead/behind counts, staged/unstaged change counts, untracked files, merge conflicts, and stash count — using the same iconography popularised by [magicmonty/bash-git-prompt](https://github.com/magicmonty/bash-git-prompt).
+
+### Added
+
+- **Magicmonty-style git status icons in the status line (`GitBranchHandler`)**: The status line's git element now renders status icons after the branch name, parsed from `git status --porcelain=v2 --branch` plus a `git stash list` count. Each icon appears only when its count is non-zero, so a clean repo still shows just the branch. Icons rendered in canonical order:
+  - `↑N` ahead of upstream (green)
+  - `↓N` behind upstream (red)
+  - `●N` staged changes (green)
+  - `✚N` unstaged changes (yellow)
+  - `✖N` merge conflicts (red)
+  - `…N` untracked files (grey)
+  - `⚑N` stashed entries (cyan)
+
+  Example: `⎇ feature-branch ↑2 ●1 ✚3 …5` — branch is 2 commits ahead, has 1 staged change, 3 unstaged changes, and 5 untracked files.
+
+### Changed
+
+- **`GitBranchHandler` subprocess fan-out** — the handler now issues up to three additional git subprocess calls per status-line render (`git status --porcelain=v2 --branch`, `git stash list`, and on first invocation the existing `git symbolic-ref` for default-branch detection). All calls reuse the existing `Timeout.GIT_STATUS_SHORT` timeout and fail silently to an empty icon string on any subprocess error, preserving the handler's "never break the status line" contract. The default-branch cache from v3.12.x is preserved — `_default_branch_detected` is only set once per process.
+
+### Fixed
+
+- None.
+
+### Removed
+
+- None.
+
+### Security
+
+- None.
+
 ## [3.12.1] - 2026-05-12
 
 This is a **patch release** that closes out Plan 00101 (recap-stoppage / silent-stop investigation). The plan was prematurely closed in v3.12.0; this release delivers the outstanding Phases 5/6/7 — handler-level recovery from `tool_use_error` followed by a silent agent stop, plus an acceptance probe that wires the recovery contract into the H-1 release gate.
