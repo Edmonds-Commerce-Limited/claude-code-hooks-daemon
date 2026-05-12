@@ -1,7 +1,7 @@
 # Plan 00101: Recap-Stoppage Investigation
 
-**Status**: Complete
-**Closed**: Plan 00107 Wave 5
+**Status**: In Progress (Re-opened after v3.12.0)
+**Closed**: Plan 00107 Wave 5 — **re-opened** after v3.12.0 release-time incident invalidated the "zero silent stops" verification
 **Created**: 2026-04-24
 **Owner**: Claude (Opus) + transcript-inspector sub-agent
 **Priority**: High (dogfooding — degrades main-thread productivity)

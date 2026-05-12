@@ -6,6 +6,16 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Stop-Quality Stack (dependency chain)
 
+- [00101: Recap-Stoppage Investigation](00101-recap-stoppage-investigation/PLAN.md) - In Progress (Re-opened after v3.12.0)
+
+  - Originally closed in Plan 00107 Wave 5 on the basis of "zero silent stops across the batch delivery"
+  - Re-opened: v3.12.0 release-time incident exposed a remaining trigger pattern (Edit-without-prior-Read → tool_use_error → zero-token stop) that the Wave 5 evidence missed because Waves 1–4 had no Edit-on-unread-file events
+  - **Outstanding follow-ups** (documented in PLAN.md "Post-close-out incident" section):
+    1. CLAUDE.md guidance for tool_use_error recovery (read-before-edit reminder + how to recover after the error rather than silent-stop)
+    2. Strengthen `auto_continue_stop` re-entry behaviour so the model is forced to emit `STOPPING BECAUSE:` after a tool_use_error rather than zero tokens
+    3. Acceptance-test smoke probe that exercises the Edit-on-unread-file pattern end-to-end against the live daemon
+  - Daemon-side fix from Plan 00102 still correct — the remaining gap is model-side guidance + a regression probe
+
 - [00085: Reminder Pseudo-Event System with Adaptive Triggers](00085-reminder-pseudo-event-system/PLAN.md) - In Progress
 
   - 8 phases — AdaptiveTrigger, config parsing, dispatcher, WorkflowReminderSetup, handler, constants/registration, config, verification
@@ -58,12 +68,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Delivered in commit `bce66248` — pre-dated Plan 00107 Wave 2 audit
   - `scripts/qa/run_smoke_test.sh` (3 probes: Stop no-explanation, Stop loop-guard, PreToolUse destructive git) + `llm_qa.py` integration + `tests/unit/qa/test_smoke_test.py` all in place
   - Plan 00107 Wave 2 audit confirmed every Phase 1/2/3 task satisfied; closed out without further code action
-
-- [00101: Recap-Stoppage Investigation](Completed/00101-recap-stoppage-investigation/PLAN.md) - Complete
-
-  - Root cause identified (silent-stop after Edit, not recap-then-stop) and fix landed via Plan 00102 Phase 3 handler-re-entry guard + `auto_continue_stop` `STOPPING BECAUSE:` enforcement
-  - **Phase 4 verification**: closed in Plan 00107 Wave 5 — multi-hour batch delivery across Waves 1–4 (14+ commits, hundreds of chained tool calls, four QA gate runs) produced **zero silent stops**. Success criterion "zero recap-stoppages during a 30-minute multi-step task as regression test" satisfied.
-  - Lessons-learned folded into PLAN.md close-out note
 
 - [00099: Python-Fingerprint Venv Isolation](Completed/00099-python-fingerprint-venv-isolation/PLAN.md) - Complete (Already Shipped)
 
@@ -708,8 +712,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 107
-- **Completed**: 91 (1 with reduced scope, 4 already-shipped)
-- **Active**: 3 (1 stop-quality, 2 long-running/review)
+- **Completed**: 90 (1 with reduced scope, 4 already-shipped)
+- **Active**: 4 (2 stop-quality, 2 long-running/review)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping, 00081 - superseded by 00082)
 - **Last reconciled by**: Plan 00107 housekeeping pass
