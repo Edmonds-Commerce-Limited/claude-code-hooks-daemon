@@ -960,6 +960,17 @@ STOPPING BECAUSE: all tasks complete, QA passes, daemon restart verified.
 - Errors with a clear next step ("The test failed, should I fix it?") — do NOT ask, just fix it
 - Genuine choice questions where all options are valid ("Which of A, B, or C should we use?") — these deserve a response. Use `STOPPING BECAUSE: need user input` and ask your question
 
+**Recovering from a `tool_use_error` — do NOT stop silently**:
+
+Some tool errors require an explicit recovery action, not a halt. The most common shape:
+- You call `Edit` or `Write` on a file you have not yet read.
+- Claude Code returns a `tool_use_error` (e.g. "File has not been read yet").
+- The correct recovery is **Read the file, then retry Edit/Write** — **do not stop**. Stopping silently after a tool error triggers a Stop-hook re-entry loop and wastes a turn.
+
+**Rule: Read before Edit/Write.** If you must edit a file you have not read, Read it first in the same turn. The daemon's Stop handler will detect a `tool_use_error` followed by a silent stop and re-fire to force recovery.
+
+**On Stop hook re-entry (the hook fires again after a prior block)**: your next response is treated like any other — it must either prefix with `STOPPING BECAUSE:` or continue the work. Re-entry does not exempt you from the explanation rule.
+
 ## dismissive_language_detector — do not deflect or prematurely halt
 
 Stop-time advisory that fires on language patterns signalling avoidance of work. The handler does NOT block the stop, but injects context for the next turn so the agent self-corrects.
