@@ -343,32 +343,282 @@ class TestGitBranchColorCoding:
     def test_default_branch_detection_cached(
         self, handler: GitBranchHandler, tmp_path: Path
     ) -> None:
-        """Default branch detection runs only once across multiple handle() calls."""
+        """Default branch detection runs only once across multiple handle() calls.
+
+        Call sequence per handle(): rev-parse, branch --show-current, [symbolic-ref
+        on first call only], git status --porcelain=v2, git stash list.
+        """
         hook_input = {"workspace": {"current_dir": str(tmp_path)}}
 
-        def make_mocks(branch_name: str) -> list[MagicMock]:
+        def make_mocks(branch_name: str, include_symbolic_ref: bool) -> list[MagicMock]:
             mock_toplevel = MagicMock()
             mock_toplevel.returncode = 0
             mock_branch = MagicMock()
             mock_branch.stdout = branch_name.encode() + b"\n"
-            mock_symbolic_ref = MagicMock()
-            mock_symbolic_ref.returncode = 0
-            mock_symbolic_ref.stdout = b"refs/remotes/origin/main\n"
-            return [mock_toplevel, mock_branch, mock_symbolic_ref]
+            mocks = [mock_toplevel, mock_branch]
+            if include_symbolic_ref:
+                mock_symbolic_ref = MagicMock()
+                mock_symbolic_ref.returncode = 0
+                mock_symbolic_ref.stdout = b"refs/remotes/origin/main\n"
+                mocks.append(mock_symbolic_ref)
+            mock_status = MagicMock()
+            mock_status.returncode = 0
+            mock_status.stdout = b""
+            mock_stash = MagicMock()
+            mock_stash.returncode = 0
+            mock_stash.stdout = b""
+            mocks.extend([mock_status, mock_stash])
+            return mocks
 
-        # First call: 3 subprocess invocations (toplevel + branch + symbolic-ref)
+        # First call: 5 subprocess invocations
+        # (toplevel + branch + symbolic-ref + status + stash)
         with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = make_mocks("main")
+            mock_run.side_effect = make_mocks("main", include_symbolic_ref=True)
             handler.handle(hook_input)
             first_call_count = mock_run.call_count
-        assert first_call_count == 3
+        assert first_call_count == 5
 
-        # Second call: only 2 subprocess invocations (toplevel + branch; no symbolic-ref)
+        # Second call: 4 subprocess invocations (no symbolic-ref — cached)
         with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = [
-                MagicMock(returncode=0),
-                MagicMock(stdout=b"feature/x\n"),
-            ]
+            mock_run.side_effect = make_mocks("feature/x", include_symbolic_ref=False)
             handler.handle(hook_input)
             second_call_count = mock_run.call_count
-        assert second_call_count == 2
+        assert second_call_count == 4
+
+
+class TestGitStatusIcons:
+    """Tests for magicmonty-style status icons after branch name."""
+
+    _GREEN = "\033[32m"
+    _RED = "\033[31m"
+    _YELLOW = "\033[33m"
+    _CYAN = "\033[36m"
+    _GREY = "\033[37m"
+    _RESET = "\033[0m"
+
+    @pytest.fixture
+    def handler(self) -> GitBranchHandler:
+        return GitBranchHandler()
+
+    def _make_mocks(
+        self,
+        *,
+        branch: str = "main",
+        status_stdout: bytes = b"",
+        stash_stdout: bytes = b"",
+    ) -> list[MagicMock]:
+        """Build the standard 5-call mock chain.
+
+        toplevel, branch --show-current, symbolic-ref (origin/main),
+        git status --porcelain=v2 --branch, git stash list.
+        """
+        mock_toplevel = MagicMock(returncode=0)
+        mock_branch = MagicMock(stdout=branch.encode() + b"\n")
+        mock_symbolic_ref = MagicMock(returncode=0, stdout=b"refs/remotes/origin/main\n")
+        mock_status = MagicMock(returncode=0, stdout=status_stdout)
+        mock_stash = MagicMock(returncode=0, stdout=stash_stdout)
+        return [mock_toplevel, mock_branch, mock_symbolic_ref, mock_status, mock_stash]
+
+    def test_ahead_shows_up_arrow(self, handler: GitBranchHandler, tmp_path: Path) -> None:
+        """`# branch.ab +2 -0` should render ↑2 in green."""
+        hook_input = {"workspace": {"current_dir": str(tmp_path)}}
+        status_stdout = (
+            b"# branch.oid abc\n"
+            b"# branch.head main\n"
+            b"# branch.upstream origin/main\n"
+            b"# branch.ab +2 -0\n"
+        )
+        mocks = self._make_mocks(status_stdout=status_stdout)
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = mocks
+            result = handler.handle(hook_input)
+        rendered = result.context[0]
+        assert f"{self._GREEN}↑2{self._RESET}" in rendered
+        assert "↓" not in rendered
+
+    def test_behind_shows_down_arrow(self, handler: GitBranchHandler, tmp_path: Path) -> None:
+        """`# branch.ab +0 -3` should render ↓3 in red."""
+        hook_input = {"workspace": {"current_dir": str(tmp_path)}}
+        status_stdout = (
+            b"# branch.head main\n" b"# branch.upstream origin/main\n" b"# branch.ab +0 -3\n"
+        )
+        mocks = self._make_mocks(status_stdout=status_stdout)
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = mocks
+            result = handler.handle(hook_input)
+        rendered = result.context[0]
+        assert f"{self._RED}↓3{self._RESET}" in rendered
+        assert "↑" not in rendered
+
+    def test_ahead_and_behind_both_shown(self, handler: GitBranchHandler, tmp_path: Path) -> None:
+        """Diverged branch shows both arrows."""
+        hook_input = {"workspace": {"current_dir": str(tmp_path)}}
+        status_stdout = (
+            b"# branch.head main\n" b"# branch.upstream origin/main\n" b"# branch.ab +2 -1\n"
+        )
+        mocks = self._make_mocks(status_stdout=status_stdout)
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = mocks
+            result = handler.handle(hook_input)
+        rendered = result.context[0]
+        assert "↑2" in rendered
+        assert "↓1" in rendered
+
+    def test_staged_change_shown(self, handler: GitBranchHandler, tmp_path: Path) -> None:
+        """`1 M. ...` (staged modification) renders ●1 in green."""
+        hook_input = {"workspace": {"current_dir": str(tmp_path)}}
+        status_stdout = (
+            b"# branch.head main\n" b"1 M. N... 100644 100644 100644 abc abc src/foo.py\n"
+        )
+        mocks = self._make_mocks(status_stdout=status_stdout)
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = mocks
+            result = handler.handle(hook_input)
+        rendered = result.context[0]
+        assert f"{self._GREEN}●1{self._RESET}" in rendered
+
+    def test_unstaged_change_shown(self, handler: GitBranchHandler, tmp_path: Path) -> None:
+        """`1 .M ...` (unstaged modification) renders ✚1 in yellow."""
+        hook_input = {"workspace": {"current_dir": str(tmp_path)}}
+        status_stdout = (
+            b"# branch.head main\n" b"1 .M N... 100644 100644 100644 abc abc src/foo.py\n"
+        )
+        mocks = self._make_mocks(status_stdout=status_stdout)
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = mocks
+            result = handler.handle(hook_input)
+        rendered = result.context[0]
+        assert f"{self._YELLOW}✚1{self._RESET}" in rendered
+
+    def test_file_counted_in_both_staged_and_unstaged(
+        self, handler: GitBranchHandler, tmp_path: Path
+    ) -> None:
+        """`1 MM ...` (staged AND unstaged on same file) counts in both."""
+        hook_input = {"workspace": {"current_dir": str(tmp_path)}}
+        status_stdout = (
+            b"# branch.head main\n" b"1 MM N... 100644 100644 100644 abc abc src/foo.py\n"
+        )
+        mocks = self._make_mocks(status_stdout=status_stdout)
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = mocks
+            result = handler.handle(hook_input)
+        rendered = result.context[0]
+        assert "●1" in rendered
+        assert "✚1" in rendered
+
+    def test_untracked_file_shown(self, handler: GitBranchHandler, tmp_path: Path) -> None:
+        """`? path` renders …1 in grey."""
+        hook_input = {"workspace": {"current_dir": str(tmp_path)}}
+        status_stdout = b"# branch.head main\n? new_file.py\n"
+        mocks = self._make_mocks(status_stdout=status_stdout)
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = mocks
+            result = handler.handle(hook_input)
+        rendered = result.context[0]
+        assert f"{self._GREY}…1{self._RESET}" in rendered
+
+    def test_conflicts_shown(self, handler: GitBranchHandler, tmp_path: Path) -> None:
+        """`u UU ...` (unmerged) renders ✖1 in red."""
+        hook_input = {"workspace": {"current_dir": str(tmp_path)}}
+        status_stdout = (
+            b"# branch.head main\n" b"u UU N... 100644 100644 100644 100644 a b c d conflict.py\n"
+        )
+        mocks = self._make_mocks(status_stdout=status_stdout)
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = mocks
+            result = handler.handle(hook_input)
+        rendered = result.context[0]
+        assert f"{self._RED}✖1{self._RESET}" in rendered
+
+    def test_stashed_shown(self, handler: GitBranchHandler, tmp_path: Path) -> None:
+        """`git stash list` with 2 lines renders ⚑2 in cyan."""
+        hook_input = {"workspace": {"current_dir": str(tmp_path)}}
+        stash_stdout = b"stash@{0}: WIP on main: abc Fix\n" b"stash@{1}: WIP on main: def Other\n"
+        mocks = self._make_mocks(stash_stdout=stash_stdout)
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = mocks
+            result = handler.handle(hook_input)
+        rendered = result.context[0]
+        assert f"{self._CYAN}⚑2{self._RESET}" in rendered
+
+    def test_clean_repo_shows_only_branch(self, handler: GitBranchHandler, tmp_path: Path) -> None:
+        """Clean repo with synced upstream and no changes shows only branch."""
+        hook_input = {"workspace": {"current_dir": str(tmp_path)}}
+        status_stdout = (
+            b"# branch.head main\n" b"# branch.upstream origin/main\n" b"# branch.ab +0 -0\n"
+        )
+        mocks = self._make_mocks(status_stdout=status_stdout)
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = mocks
+            result = handler.handle(hook_input)
+        rendered = result.context[0]
+        for icon in ("↑", "↓", "●", "✚", "…", "⚑", "✖"):
+            assert icon not in rendered, f"icon {icon!r} should not appear in clean repo"
+
+    def test_no_upstream_omits_ahead_behind(
+        self, handler: GitBranchHandler, tmp_path: Path
+    ) -> None:
+        """Branch with no upstream tracking has no `# branch.ab` line, so no arrows."""
+        hook_input = {"workspace": {"current_dir": str(tmp_path)}}
+        status_stdout = b"# branch.head feature/x\n"
+        mocks = self._make_mocks(branch="feature/x", status_stdout=status_stdout)
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = mocks
+            result = handler.handle(hook_input)
+        rendered = result.context[0]
+        assert "↑" not in rendered
+        assert "↓" not in rendered
+
+    def test_status_silent_fail_keeps_branch(
+        self, handler: GitBranchHandler, tmp_path: Path
+    ) -> None:
+        """If `git status` raises, branch is still shown without icons."""
+        import subprocess
+
+        hook_input = {"workspace": {"current_dir": str(tmp_path)}}
+        mock_toplevel = MagicMock(returncode=0)
+        mock_branch = MagicMock(stdout=b"main\n")
+        mock_symbolic_ref = MagicMock(returncode=0, stdout=b"refs/remotes/origin/main\n")
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                mock_toplevel,
+                mock_branch,
+                mock_symbolic_ref,
+                subprocess.TimeoutExpired("git", 5),
+                # stash should not be called since status failed first
+            ]
+            result = handler.handle(hook_input)
+        assert "main" in result.context[0]
+        for icon in ("↑", "↓", "●", "✚", "…", "⚑", "✖"):
+            assert icon not in result.context[0]
+
+    def test_combined_state_renders_in_documented_order(
+        self, handler: GitBranchHandler, tmp_path: Path
+    ) -> None:
+        """Combined state: ahead, staged, changed, untracked, stashed."""
+        hook_input = {"workspace": {"current_dir": str(tmp_path)}}
+        status_stdout = (
+            b"# branch.head main\n"
+            b"# branch.upstream origin/main\n"
+            b"# branch.ab +1 -0\n"
+            b"1 M. N... 100644 100644 100644 a b src/foo.py\n"
+            b"1 .M N... 100644 100644 100644 c d src/bar.py\n"
+            b"? new.py\n"
+        )
+        stash_stdout = b"stash@{0}: WIP\n"
+        mocks = self._make_mocks(status_stdout=status_stdout, stash_stdout=stash_stdout)
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = mocks
+            result = handler.handle(hook_input)
+        rendered = result.context[0]
+        # Order: ahead, behind, staged, changed, conflicts, untracked, stashed
+        positions = {
+            "↑1": rendered.index("↑1"),
+            "●1": rendered.index("●1"),
+            "✚1": rendered.index("✚1"),
+            "…1": rendered.index("…1"),
+            "⚑1": rendered.index("⚑1"),
+        }
+        assert (
+            positions["↑1"] < positions["●1"] < positions["✚1"] < positions["…1"] < positions["⚑1"]
+        )
