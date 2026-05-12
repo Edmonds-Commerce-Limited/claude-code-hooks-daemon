@@ -22,15 +22,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Long-Running / Carry-Forward
 
-- [00099: Python-Fingerprint Venv Isolation](00099-python-fingerprint-venv-isolation/PLAN.md) - Needs Review
+- [00100 (v3): Venv SSOT Consolidation](00100-venv-ssot-consolidation/PLAN.md) - In Progress (Residue Scope)
 
-  - Likely partly-superseded by Plan 00104 (v3.10.0) canonical resolver work — meta plan 00107 will audit what is still in-scope vs already shipped
-  - Original scope: fingerprint-keyed venvs, `ensure_venv` auto-bootstrap, legacy `untracked/venv/` cleanup, `list-venvs`/`prune-venvs` CLI
-
-- [00100 (v2): Venv SSOT Consolidation](00100-venv-ssot-consolidation/PLAN.md) - Needs Review
-
-  - Likely partly-superseded by Plan 00104 (v3.10.0) — meta plan 00107 will audit what is still in-scope vs already shipped
-  - Original scope: Python SSOT for venv resolution, deletes dead `create_venv`/`recreate_venv`, persists installer's chosen Python in `.daemon-metadata.json`, commits `uv.lock`
+  - Phases 0–3.9 **shipped** in v3.9.0 / v3.10.0 / v3.11.0 (canonical SSOT resolver, `.daemon-metadata.json` writers, dead-code removal, path slug, eager upgrade cleanup, H-1 gate coverage)
+  - **Residue deferred from v3.12.0** (Plan 00107 Wave 4): Phase 3.5.2–3.5.7 (bootstrap-fallback wiring), Phase 4 (flock concurrency), Phase 5 (parameterised upgrade-cycle test), Phase 6 (docs) — internally coherent and well-suited to a dedicated v3.13.0 release
 
 - [00101: Recap-Stoppage Investigation](00101-recap-stoppage-investigation/PLAN.md) - In Progress
 
@@ -70,6 +65,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Delivered in commit `bce66248` — pre-dated Plan 00107 Wave 2 audit
   - `scripts/qa/run_smoke_test.sh` (3 probes: Stop no-explanation, Stop loop-guard, PreToolUse destructive git) + `llm_qa.py` integration + `tests/unit/qa/test_smoke_test.py` all in place
   - Plan 00107 Wave 2 audit confirmed every Phase 1/2/3 task satisfied; closed out without further code action
+
+- [00099: Python-Fingerprint Venv Isolation](Completed/00099-python-fingerprint-venv-isolation/PLAN.md) - Complete (Already Shipped)
+
+  - Every Phase 1–8 deliverable in tree across v3.7.0 / v3.10.0 / v3.11.0: fingerprint-keyed venv paths (`paths.py::project_path_slug` + `python_venv_fingerprint`); `ensure_venv()` auto-bootstrap with integration coverage; legacy `untracked/venv/` cleanup via `eager_cleanup_stale_venvs()`; `list-venvs` / `prune-venvs` CLI with `--legacy`, `--all-except-current`, `--stale`, `--dry-run`, `--force`; H-1 acceptance gate exercising the production install path end-to-end
+  - Phase 9 (Release) effectively executed across three releases; "In Progress" status was stale documentation. Closed during Plan 00107 Wave 4 audit.
 
 - [00077: TranscriptReader Enhancement & AskUserQuestion Bug Fix](Completed/00077-transcript-reader-askuser-bugfix/PLAN.md) - Complete (Already Shipped)
 
@@ -709,8 +709,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 107
-- **Completed**: 88 (1 with reduced scope, 3 already-shipped)
-- **Active**: 6 (1 meta, 1 stop-quality, 4 long-running/review)
+- **Completed**: 89 (1 with reduced scope, 4 already-shipped)
+- **Active**: 5 (1 meta, 1 stop-quality, 3 long-running/review)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping, 00081 - superseded by 00082)
 - **Last reconciled by**: Plan 00107 housekeeping pass

@@ -1,6 +1,30 @@
 # Plan 00099: Python-Fingerprint Venv Isolation
 
-**Status**: In Progress
+**Status**: Complete (Already Shipped)
+**Closed**: Plan 00107 Wave 4 audit
+
+## Close-out note (Plan 00107 Wave 4)
+
+Audit sub-agent confirmed every Phase 1–8 deliverable is in tree:
+
+- Fingerprint-keyed venv paths via `paths.py::project_path_slug()` and
+  `python_venv_fingerprint()` (lines 80–145) + bash SSOT
+  `scripts/install/python_fingerprint.sh`. Production: live install runs
+  from `untracked/venv-py311-66bbc57c/`.
+- `ensure_venv()` auto-bootstrap in `scripts/install/venv.sh` with
+  integration coverage in `tests/integration/test_ensure_venv.py`.
+- Legacy `untracked/venv/` cleanup via `eager_cleanup_stale_venvs()`
+  (`venv.sh`) and post-upgrade task scaffolding.
+- `list-venvs` / `prune-venvs` CLI subcommands (`daemon/cli.py:1251` +
+  `:1287`) with `--legacy`, `--all-except-current`, `--stale`, `--dry-run`,
+  `--force` flags, and unit coverage in `tests/unit/daemon/test_cli_venv_management.py`.
+- H-1 acceptance gate (Plan 00104) exercises the production install path
+  end-to-end, replacing the synthetic acceptance flow originally drafted
+  for Phase 8.
+
+Phase 9 (Release) was effectively executed across v3.7.0, v3.10.0 and v3.11.0.
+The "In Progress" status was stale documentation. Closed out without further
+code action.
 **Created**: 2026-04-21
 **Started**: 2026-04-21
 **Owner**: TBD

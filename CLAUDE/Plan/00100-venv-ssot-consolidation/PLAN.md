@@ -1,6 +1,38 @@
 # Plan 00100 (v3): Venv SSOT Consolidation — Stop the Release Treadmill
 
-**Status**: In Progress (Phase 2 complete; Phase 3 scope expanded; Phase 3.5 added)
+**Status**: In Progress — residue scope deferred from v3.12.0 (see Wave 4 close-out note)
+
+## Wave 4 close-out note (Plan 00107)
+
+Plan 00107 Wave 4 audit confirmed that Phases 0–3.9 are **fully shipped** in
+v3.9.0 / v3.10.0 / v3.11.0. The canonical SSOT resolver
+(`scripts/lib/resolve_venv.sh`), `.daemon-metadata.json` writers, dead-code
+removal (`create_venv` / `recreate_venv` gone), Phase 0 field-pain fixes
+(`uv sync` file-visibility, polling restart verifier, skill wrapper Python
+pre-check), path slug, and eager upgrade cleanup all landed and are covered
+by the H-1 acceptance gate.
+
+**Residue scope** (not yet shipped):
+
+- **Phase 3.5.2–3.5.7**: Wire `can_inline_bootstrap()` precondition into
+  `init.sh::validate_venv` + emit advisory handler on bootstrap failure
+- **Phase 4**: Concurrency protection (flock around `ensure_venv` mutations)
+- **Phase 5**: Parameterised end-to-end upgrade-cycle acceptance test
+  (`test_full_upgrade_cycle.py`) — blocked by Phase 4
+- **Phase 6**: Release notes + post-upgrade task documentation
+
+**Decision (Plan 00107 Wave 4)**: Defer the Phase 3.5 / 4 / 5 / 6 residue to
+a future release. The reasons mirror the Plan 00085 deferral:
+
+- The residue is fresh implementation work (concurrency primitive, advisory
+  handler wiring, end-to-end test infrastructure) — not audit-and-close
+- The v3.12.0 batch is already substantial; adding flock + bootstrap-fallback
+  wiring increases regression surface in the venv hot path right after
+  v3.11.0 hardened it
+- The residue is internally coherent and well-suited to its own dedicated
+  release (e.g. v3.13.0 "venv self-healing & concurrency")
+
+Plan 00100 stays Active in the index, ready to execute in a dedicated session.
 **Created**: 2026-04-23
 **Revised**: 2026-04-24 (v3 — path slug + eager upgrade cleanup + self-healing bootstrap)
 **Prior Revision**: 2026-04-23 (v2 — addresses CRITIQUE-v1.md)
