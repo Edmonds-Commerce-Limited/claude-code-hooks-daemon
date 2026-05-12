@@ -269,18 +269,25 @@ end-to-end against a fresh fixture project. Together they catch:
   `write-venv-metadata` → daemon-start that produces a non-running daemon.
 
 ```bash
-$PYTHON -m pytest tests/acceptance/test_diagnostic_scripts.py tests/acceptance/test_install_sh_end_to_end.py -v
-# Expected: tests/acceptance/test_diagnostic_scripts.py — 5 passed, 1 skipped
-#           tests/acceptance/test_install_sh_end_to_end.py — 1 passed
-#           combined: 6 passed, 1 skipped, 0 failed
+$PYTHON -m pytest tests/acceptance/test_diagnostic_scripts.py tests/acceptance/test_install_sh_end_to_end.py tests/acceptance/test_tool_use_error_recovery.py -v
+# Expected: tests/acceptance/test_diagnostic_scripts.py — 15 passed
+#           tests/acceptance/test_install_sh_end_to_end.py — 2 passed
+#           tests/acceptance/test_tool_use_error_recovery.py — 2 passed
+#           combined: 19 passed, 0 failed
 ```
 
-ANY failure in either file = ABORT release. The 2026-05-01 field report
+ANY failure in any file = ABORT release. The 2026-05-01 field report
 (Issues #1, #4, #6) escaped because the v3.9.0 acceptance suite never invoked
 the diagnostic scripts — only hook dispatch. The v3.10.0 SEV-1 escaped
 because the v3.10.0 H-1 gate synthesised state via `write-venv-metadata`
 directly instead of running the production `ensure_venv` capture chain. Both
-gaps are closed by adding `test_install_sh_end_to_end.py` here.
+gaps are closed by adding `test_install_sh_end_to_end.py` here. The Plan
+00101 silent-stop recurrence (Edit-on-unread-file → tool_use_error → no
+recovery) is closed by adding `test_tool_use_error_recovery.py` — exercises
+the `auto_continue_stop` Branch 2.5 directly against the live daemon socket.
+The test skips cleanly when no daemon is running locally; under H-1 the
+daemon is always started before this step, so a skip there is itself an
+abort condition.
 
 **Step 12.1**: Restart daemon, verify RUNNING.
 

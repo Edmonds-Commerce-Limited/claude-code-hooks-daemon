@@ -560,6 +560,31 @@ class TranscriptReader:
                             return " ".join(text for text in texts if text)
         return ""
 
+    def last_tool_result_was_error(self) -> bool:
+        """Return True if the most recent tool_result block has is_error=true.
+
+        Scans backwards for the most recent user/human message containing a
+        tool_result block and returns the value of its ``is_error`` field
+        (default False). Used by AutoContinueStopHandler to detect the
+        Edit-on-unread-file recovery pattern: tool_use Edit → tool_result
+        is_error=true → silent stop → specific recovery instruction.
+        """
+        for msg in reversed(self._messages):
+            if msg.role not in ("user", "human"):
+                continue
+            raw_message = msg.raw.get("message", {})
+            if not isinstance(raw_message, dict):
+                continue
+            raw_content = raw_message.get("content", [])
+            if not isinstance(raw_content, list):
+                continue
+            for block in reversed(raw_content):
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "tool_result":
+                    return bool(block.get("is_error", False))
+        return False
+
     def get_last_bash_tool_use(self) -> ContentBlock | None:
         """Get the most recent Bash tool_use block across all assistant messages.
 

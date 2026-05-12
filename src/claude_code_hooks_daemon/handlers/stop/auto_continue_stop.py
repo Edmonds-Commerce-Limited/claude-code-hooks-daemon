@@ -1,12 +1,15 @@
 """AutoContinueStopHandler - True auto-continue without user input.
 
 Intercepts ALL Stop events (except re-entry and AskUserQuestion) and routes
-to one of four branches:
+to one of five branches:
 
 1. QA failure: last Bash command was a QA tool and output indicates failure
    -> DENY with "fix failures and continue" message
 2. Explicit stop explanation: last assistant message starts with "STOPPING BECAUSE:"
    -> ALLOW (Claude has given a valid reason to stop)
+2.5. tool_use_error recovery (Plan 00101 Phase 6): last tool_result has
+   is_error=true and no STOPPING BECAUSE: was provided
+   -> DENY with specific recovery instruction (Read the file + retry)
 3. Confirmation question (backwards compat): last message contains a
    confirmation-style question (existing auto-continue behaviour)
    -> DENY with auto-continue instruction
@@ -64,6 +67,18 @@ _EXPLAIN_OR_CONTINUE_REASON = (
     "(e.g. 'STOPPING BECAUSE: all tasks complete and QA passes'), or\n"
     "2. Use AUTO-CONTINUE to keep working without asking.\n"
     "Do not stop without a reason — continue working or explain why you stopped."
+)
+
+_TOOL_ERROR_RECOVERY_REASON = (
+    "TOOL ERROR RECOVERY: Your last tool_use returned a tool_use_error and "
+    "you stopped without recovering. Do NOT stop after a tool error — "
+    "the correct action is to address the cause and retry.\n\n"
+    "Common pattern: Edit/Write failed because the file was not read first "
+    "(e.g. 'File has not been read yet'). Recovery: Read the file, then "
+    "retry the Edit/Write in the same turn.\n\n"
+    "Examine the tool_use_error text, address its specific cause, then "
+    "retry. Only stop (with STOPPING BECAUSE: prefix) once recovery is "
+    "genuinely impossible."
 )
 
 
@@ -215,6 +230,9 @@ class AutoContinueStopHandler(Handler):
             Last Bash was a QA tool AND result indicates failure -> DENY fix msg.
         Branch 2 - Explicit stop explanation:
             Last assistant text starts with "STOPPING BECAUSE:" -> ALLOW.
+        Branch 2.5 - tool_use_error recovery (Plan 00101 Phase 6):
+            Last tool_result has is_error=true and no STOPPING BECAUSE: was
+            given -> DENY with specific recovery instruction (Read + retry).
         Branch 3 - Confirmation question (backwards compat):
             Text contains a continuation question -> DENY auto-continue msg.
         Branch 4 - Default (requires explanation):
@@ -241,6 +259,18 @@ class AutoContinueStopHandler(Handler):
             logger.info("STOPPING BECAUSE: prefix detected - allowing stop")
             result = HookResult(decision=Decision.ALLOW)
             self._log_stop_event(hook_input, Decision.ALLOW, "")
+            return result
+
+        # Branch 2.5: tool_use_error recovery (Plan 00101 Phase 6)
+        # Last tool_result has is_error=true and the agent did NOT explain.
+        # Emit a specific recovery instruction (Read + retry) instead of the
+        # generic explain-or-continue default. Branch 2 wins if STOPPING
+        # BECAUSE: was provided, so this only fires on a genuine silent
+        # stop after a tool error.
+        if reader and reader.last_tool_result_was_error():
+            logger.info("tool_use_error detected with no recovery - emitting recovery reason")
+            result = HookResult(decision=Decision.DENY, reason=_TOOL_ERROR_RECOVERY_REASON)
+            self._log_stop_event(hook_input, Decision.DENY, _TOOL_ERROR_RECOVERY_REASON)
             return result
 
         # Branch 3: Confirmation question (backwards compat)
@@ -490,7 +520,24 @@ class AutoContinueStopHandler(Handler):
             "- Genuine choice questions where all options are valid "
             '("Which of A, B, or C should we use?") '
             "— these deserve a response. Use "
-            "`STOPPING BECAUSE: need user input` and ask your question"
+            "`STOPPING BECAUSE: need user input` and ask your question\n\n"
+            "**Recovering from a `tool_use_error` — do NOT stop silently**:\n\n"
+            "Some tool errors require an explicit recovery action, not a halt. "
+            "The most common shape:\n"
+            "- You call `Edit` or `Write` on a file you have not yet read.\n"
+            "- Claude Code returns a `tool_use_error` (e.g. "
+            '"File has not been read yet").\n'
+            "- The correct recovery is **Read the file, then retry Edit/Write** — "
+            "**do not stop**. Stopping silently after a tool error triggers a "
+            "Stop-hook re-entry loop and wastes a turn.\n\n"
+            "**Rule: Read before Edit/Write.** If you must edit a file you have not "
+            "read, Read it first in the same turn. The daemon's Stop handler will "
+            "detect a `tool_use_error` followed by a silent stop and re-fire to "
+            "force recovery.\n\n"
+            "**On Stop hook re-entry (the hook fires again after a prior block)**: "
+            "your next response is treated like any other — it must either prefix "
+            "with `STOPPING BECAUSE:` or continue the work. Re-entry does not "
+            "exempt you from the explanation rule."
         )
 
     def get_acceptance_tests(self) -> list[Any]:

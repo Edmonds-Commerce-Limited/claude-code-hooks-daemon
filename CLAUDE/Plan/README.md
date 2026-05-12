@@ -6,16 +6,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Stop-Quality Stack (dependency chain)
 
-- [00101: Recap-Stoppage Investigation](00101-recap-stoppage-investigation/PLAN.md) - In Progress (Re-opened after v3.12.0)
-
-  - Originally closed in Plan 00107 Wave 5 on the basis of "zero silent stops across the batch delivery"
-  - Re-opened: v3.12.0 release-time incident exposed a remaining trigger pattern (Edit-without-prior-Read → tool_use_error → zero-token stop) that the Wave 5 evidence missed because Waves 1–4 had no Edit-on-unread-file events
-  - **Outstanding follow-ups** (documented in PLAN.md "Post-close-out incident" section):
-    1. CLAUDE.md guidance for tool_use_error recovery (read-before-edit reminder + how to recover after the error rather than silent-stop)
-    2. Strengthen `auto_continue_stop` re-entry behaviour so the model is forced to emit `STOPPING BECAUSE:` after a tool_use_error rather than zero tokens
-    3. Acceptance-test smoke probe that exercises the Edit-on-unread-file pattern end-to-end against the live daemon
-  - Daemon-side fix from Plan 00102 still correct — the remaining gap is model-side guidance + a regression probe
-
 - [00085: Reminder Pseudo-Event System with Adaptive Triggers](00085-reminder-pseudo-event-system/PLAN.md) - In Progress
 
   - 8 phases — AdaptiveTrigger, config parsing, dispatcher, WorkflowReminderSetup, handler, constants/registration, config, verification
@@ -49,6 +39,15 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00101: Recap-Stoppage Investigation](Completed/00101-recap-stoppage-investigation/PLAN.md) - Complete
+
+  - **Final close-out** after v3.12.0 re-opening — delivered Phases 5/6/7/8 post-v3.12.0
+  - **Phase 5**: `AutoContinueStopHandler.get_claude_md()` now ships Read-before-Edit, tool_use_error recovery, and re-entry `STOPPING BECAUSE:` guidance (3/3 unit tests in `TestAutoContinueStopGetClaudeMdGuidance`)
+  - **Phase 6**: `TranscriptReader.last_tool_result_was_error()` helper + new Branch 2.5 (`_TOOL_ERROR_RECOVERY_REASON`) in `AutoContinueStopHandler.handle()` — five-branch ordering (1=QA, 2=ALLOW, 2.5=tool_use_error recovery, 3=Confirmation question, 4=Default). 3/3 unit tests in `TestAutoContinueStopAfterToolUseError` + live socket probe verified
+  - **Phase 7**: `tests/acceptance/test_tool_use_error_recovery.py` wired into RELEASING.md Step 12.0 H-1 gate; combined H-1 acceptance suite 19/19 PASS
+  - Final QA 12/13 green (pre-existing deptry baseline); daemon RUNNING; 8202 unit tests pass at 95.0% coverage
+  - Release vehicle: likely v3.12.1 patch (handler change + new acceptance test)
 
 - [00107: Batch Delivery Meta Plan — v3.12.0 Release Bundle](Completed/00107-batch-delivery-meta/PLAN.md) - Complete
 
@@ -712,8 +711,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 107
-- **Completed**: 90 (1 with reduced scope, 4 already-shipped)
-- **Active**: 4 (2 stop-quality, 2 long-running/review)
+- **Completed**: 91 (1 with reduced scope, 4 already-shipped)
+- **Active**: 3 (1 stop-quality, 2 long-running/review)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping, 00081 - superseded by 00082)
 - **Last reconciled by**: Plan 00107 housekeeping pass

@@ -2040,3 +2040,243 @@ class TestSilentStopAfterToolErrorReentryGuard:
         # No transcript_path provided → has_recent_stop_hook_block returns
         # False → matches must return True
         assert handler.matches(hook_input) is True
+
+
+class TestAutoContinueStopGetClaudeMdGuidance:
+    """Plan 00101 Phase 5: get_claude_md() must teach tool_use_error recovery.
+
+    The 2026-05-02 silent-stop incident showed a recurring failure mode:
+    the agent calls Edit on a file it has not Read, Claude Code returns a
+    tool_use_error, and the agent stops with no output. The daemon-side
+    fix (Plan 00102 has_recent_stop_hook_block guard) ensures the Stop
+    hook fires on re-entry — but the model still needs explicit guidance
+    on how to recover. This test class asserts that guidance is now
+    present in the handler's get_claude_md() output.
+    """
+
+    def test_guidance_mentions_read_before_edit(self) -> None:
+        """get_claude_md() must remind agents to Read before Edit/Write."""
+        handler = AutoContinueStopHandler()
+        guidance = handler.get_claude_md() or ""
+        guidance_lower = guidance.lower()
+        assert "read" in guidance_lower and "edit" in guidance_lower, (
+            "get_claude_md() must mention Read-before-Edit to prevent the "
+            "tool_use_error-then-silent-stop incident shape. "
+            f"Current guidance: {guidance!r}"
+        )
+        assert "read before edit" in guidance_lower or (
+            "read the file" in guidance_lower and "edit" in guidance_lower
+        ), (
+            "get_claude_md() must explicitly state the Read-before-Edit "
+            "rule (substring 'read before edit' or 'read the file ... edit'). "
+            f"Current guidance: {guidance!r}"
+        )
+
+    def test_guidance_mentions_tool_use_error_recovery(self) -> None:
+        """get_claude_md() must teach: on tool_use_error, retry — do NOT stop."""
+        handler = AutoContinueStopHandler()
+        guidance = handler.get_claude_md() or ""
+        guidance_lower = guidance.lower()
+        assert "tool_use_error" in guidance_lower or "tool error" in guidance_lower, (
+            "get_claude_md() must mention tool_use_error/tool error explicitly "
+            "so agents recognise the recovery branch. "
+            f"Current guidance: {guidance!r}"
+        )
+        assert "do not stop" in guidance_lower or "do not silently stop" in guidance_lower, (
+            "get_claude_md() must instruct agents NOT to stop on tool error — "
+            "the recovery action is to retry, not to halt. "
+            f"Current guidance: {guidance!r}"
+        )
+
+    def test_guidance_mentions_reentry_stopping_because(self) -> None:
+        """get_claude_md() must say re-entry responses ALSO need STOPPING BECAUSE:.
+
+        When the Stop hook re-fires after blocking, the agent's next response
+        must still prefix with STOPPING BECAUSE: if it intends to stop —
+        otherwise the loop continues. Tell the agent that explicitly.
+        """
+        handler = AutoContinueStopHandler()
+        guidance = handler.get_claude_md() or ""
+        guidance_lower = guidance.lower()
+        assert (
+            "re-entry" in guidance_lower
+            or "re-fires" in guidance_lower
+            or ("stop hook fires again" in guidance_lower)
+        ), (
+            "get_claude_md() must mention Stop hook re-entry/re-fire so the "
+            "agent knows the same STOPPING BECAUSE: rule applies on subsequent "
+            f"stops. Current guidance: {guidance!r}"
+        )
+
+
+class TestAutoContinueStopAfterToolUseError:
+    """Plan 00101 Phase 6: handle() must emit a specific recovery reason after
+    a tool_use_error, not the generic explain-or-continue text.
+
+    Bug shape (recurring): agent calls Edit on a file it hasn't Read, Claude
+    Code returns tool_result is_error=true ("File has not been read yet"),
+    agent stops silently. Plan 00102's matches()-side guard ensures handle()
+    runs. This phase strengthens handle() to emit a *specific* recovery
+    instruction (Read the file, retry) so the model has a clear next action.
+
+    Three cases:
+      A. tool_use Edit → tool_result is_error=true + silent turn → DENY with
+         tool-error recovery reason (NOT generic explain-or-continue).
+      B. Same shape + STOPPING BECAUSE: assistant text → ALLOW (Branch 2 wins).
+      C. tool_use Edit → tool_result success + silent turn → existing default
+         Branch 4 fires (no regression — only fires on actual is_error=true).
+    """
+
+    @pytest.fixture
+    def handler(self) -> AutoContinueStopHandler:
+        return AutoContinueStopHandler()
+
+    def _write_lines(self, path: Path, lines: list[dict[str, Any]]) -> None:
+        with path.open("w") as f:
+            for line in lines:
+                f.write(json.dumps(line) + "\n")
+
+    def _tool_use_edit_block(self) -> dict[str, Any]:
+        return {
+            "type": "message",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "tu_1",
+                        "name": "Edit",
+                        "input": {
+                            "file_path": "/workspace/some/file.py",
+                            "old_string": "old",
+                            "new_string": "new",
+                        },
+                    }
+                ],
+            },
+        }
+
+    def _tool_result_block(self, *, is_error: bool, text: str) -> dict[str, Any]:
+        return {
+            "type": "message",
+            "message": {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "is_error": is_error,
+                        "content": text,
+                        "tool_use_id": "tu_1",
+                    }
+                ],
+            },
+        }
+
+    def test_case_a_tool_use_error_silent_turn_emits_recovery_reason(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """Case A: tool_use_error + silent stop → specific recovery reason.
+
+        The DENY reason must name the tool error and the recovery action
+        (Read the file, retry) — NOT the generic explain-or-continue text.
+        """
+        path = tmp_path / "transcript.jsonl"
+        self._write_lines(
+            path,
+            [
+                self._tool_use_edit_block(),
+                self._tool_result_block(
+                    is_error=True,
+                    text="<tool_use_error>File has not been read yet</tool_use_error>",
+                ),
+            ],
+        )
+        hook_input = {"transcript_path": str(path)}
+        result = handler.handle(hook_input)
+
+        assert result.decision == Decision.DENY, f"Case A must DENY (block stop). Got: {result}"
+        reason = (result.reason or "").lower()
+        assert "tool_use_error" in reason or "tool error" in reason, (
+            "Case A reason must name the tool error explicitly. " f"Got reason: {result.reason!r}"
+        )
+        assert "retry" in reason or "read the file" in reason, (
+            "Case A reason must instruct the agent to retry (Read + retry). "
+            f"Got reason: {result.reason!r}"
+        )
+        assert "stopped without explaining" not in reason, (
+            "Case A must NOT fall through to the generic explain-or-continue "
+            f"reason. Got reason: {result.reason!r}"
+        )
+
+    def test_case_b_stopping_because_overrides_tool_error_branch(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """Case B: tool_use_error + assistant STOPPING BECAUSE: → ALLOW.
+
+        Branch 2 (explicit explanation) must win over the new tool-error
+        recovery branch. The agent has explained the stop — let it stop.
+        """
+        path = tmp_path / "transcript.jsonl"
+        self._write_lines(
+            path,
+            [
+                self._tool_use_edit_block(),
+                self._tool_result_block(
+                    is_error=True,
+                    text="<tool_use_error>File has not been read yet</tool_use_error>",
+                ),
+                {
+                    "type": "assistant",
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": (
+                                    "STOPPING BECAUSE: file is read-only "
+                                    "and edit is genuinely impossible."
+                                ),
+                            }
+                        ],
+                    },
+                },
+            ],
+        )
+        hook_input = {"transcript_path": str(path)}
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.ALLOW, (
+            "Case B: STOPPING BECAUSE: must override the tool-error branch. " f"Got: {result}"
+        )
+
+    def test_case_c_tool_result_success_silent_turn_uses_default_branch(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """Case C: tool_result success + silent stop → existing default branch.
+
+        Regression guard: the new branch must trigger ONLY on is_error=true.
+        A successful tool result followed by a silent stop must continue to
+        fire the existing explain-or-continue default (Branch 4), not the
+        new tool-error recovery reason.
+        """
+        path = tmp_path / "transcript.jsonl"
+        self._write_lines(
+            path,
+            [
+                self._tool_use_edit_block(),
+                self._tool_result_block(
+                    is_error=False,
+                    text="File edited successfully",
+                ),
+            ],
+        )
+        hook_input = {"transcript_path": str(path)}
+        result = handler.handle(hook_input)
+
+        assert (
+            result.decision == Decision.DENY
+        ), f"Case C must still DENY (existing default branch). Got: {result}"
+        reason = (result.reason or "").lower()
+        assert "tool_use_error" not in reason and "tool error" not in reason, (
+            "Case C must NOT trigger the tool-error recovery branch — "
+            f"is_error was False. Got reason: {result.reason!r}"
+        )

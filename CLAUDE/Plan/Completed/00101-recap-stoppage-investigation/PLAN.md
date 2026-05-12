@@ -1,7 +1,9 @@
 # Plan 00101: Recap-Stoppage Investigation
 
-**Status**: In Progress (Re-opened after v3.12.0)
-**Closed**: Plan 00107 Wave 5 — **re-opened** after v3.12.0 release-time incident invalidated the "zero silent stops" verification
+**Status**: Complete
+**Closed**: 2026-05-12 — Phases 5/6/7 delivered post-v3.12.0 (CLAUDE.md tool_use_error
+guidance + handler Branch 2.5 + acceptance probe wired into H-1 gate). Prior close-out
+note: Plan 00107 Wave 5 closed the plan; v3.12.0 release-time incident re-opened it.
 **Created**: 2026-04-24
 **Owner**: Claude (Opus) + transcript-inspector sub-agent
 **Priority**: High (dogfooding — degrades main-thread productivity)
@@ -233,6 +235,68 @@ A future plan should:
 These follow-ups are deferred to a future release. v3.12.0 ships with the
 existing daemon fix unchanged; the gap is documented here for the next
 investigator.
+
+## Phases 5–7: Post-v3.12.0 follow-ups (this stream)
+
+User directive after v3.12.0 ship: *"now lets properly resolve 101"* — the
+three recommendations above are promoted from "deferred" to "deliver now."
+Plan stays open until all three land with QA green and daemon restart
+verified.
+
+### Phase 5: CLAUDE.md tool_use_error recovery guidance
+
+- [x] ✅ **Task 5.1 RED**: Extended
+  `tests/unit/handlers/stop/test_auto_continue_stop.py` with
+  `TestAutoContinueStopGetClaudeMdGuidance` (3 tests). All three failed
+  on the unmodified handler.
+- [x] ✅ **Task 5.2 GREEN**: Updated `AutoContinueStopHandler.get_claude_md()`
+  to include the three guidance pieces. 3/3 tests green.
+- [x] ✅ **Task 5.3**: QA suite ran clean (12/13 — pre-existing deptry
+  failure in `examples/` matches v3.12.0 baseline).
+- [x] ✅ **Task 5.4**: Daemon restarted (PID 180247 RUNNING). Guidance
+  reaches Claude via `.claude/HOOKS-DAEMON.md` regeneration on next
+  generate-docs run.
+
+### Phase 6: Strengthen `auto_continue_stop` after tool_use_error
+
+- [x] ✅ **Task 6.1 RED**: Added `TestAutoContinueStopAfterToolUseError`
+  (cases A/B/C). All three failed on the unmodified handler.
+- [x] ✅ **Task 6.2 GREEN**: Added `TranscriptReader.last_tool_result_was_error()`
+  helper. Added `_TOOL_ERROR_RECOVERY_REASON` constant and Branch 2.5 in
+  `AutoContinueStopHandler.handle()` between Branch 2 and Branch 3.
+  Module docstring updated: "four branches" → "five branches". 3/3 tests
+  green.
+- [x] ✅ **Task 6.3 REFACTOR**: Branch logic kept DRY; helper covered by
+  the handler-level test class.
+- [x] ✅ **Task 6.4**: QA green (12/13 — pre-existing deptry baseline);
+  coverage 95.0% holds; 8202 unit tests pass.
+- [x] ✅ **Task 6.5**: Daemon restarted (PID 180247 RUNNING). Live socket
+  probe confirmed positive case returns `decision=block` with reason
+  containing `TOOL ERROR RECOVERY:`; negative control (is_error=false)
+  falls through to default `STOPPING BECAUSE:` reason.
+
+### Phase 7: Acceptance smoke probe for the trigger pattern
+
+- [x] ✅ **Task 7.1**: Created `tests/acceptance/test_tool_use_error_recovery.py`
+  (~220 lines). Socket discovery filters stale sockets via
+  `_socket_is_alive()` connection probe. Positive case asserts
+  `decision=block` with `TOOL ERROR RECOVERY:` reason; negative control
+  (is_error=false) asserts fallthrough to default `STOPPING BECAUSE:`.
+- [x] ✅ **Task 7.2**: Wired into RELEASING.md Step 12.0 H-1 gate
+  alongside `test_diagnostic_scripts.py` and `test_install_sh_end_to_end.py`.
+  Expected counts updated: 19 passed total (15 + 2 + 2).
+- [x] ✅ **Task 7.3**: Full combined H-1 acceptance gate green — 19/19 PASS.
+
+### Phase 8: Close-out
+
+- [x] ✅ **Task 8.1**: Status header updated to Complete; commit hash
+  cited in Notes & Updates entry below after the close-out commit lands.
+- [x] ✅ **Task 8.2**: Folder moved back to
+  `CLAUDE/Plan/Completed/00101-recap-stoppage-investigation/` via `git mv`.
+- [x] ✅ **Task 8.3**: `CLAUDE/Plan/README.md` updated — removed from
+  Active, restored to Completed; stats bumped Completed +1, Active −1.
+- [x] ✅ **Task 8.4**: Release vehicle decision deferred to release time
+  (handler change + new acceptance test → likely v3.12.1 patch).
 
 ## Root Cause Hypothesis (Phase 1.1 findings — 2026-04-24)
 
@@ -615,3 +679,24 @@ holds for this incident.
 **Status**: captured. Mitigation work belongs in Phase 3 — promotes Task 3.x
 from "decide" to "verify hook decision shape forces hard block, not
 suggestion".
+
+### Close-out — 2026-05-12 (Phases 5/6/7/8 delivered)
+
+User directive *"now lets properly resolve 101"* honoured. Three follow-ups
+deferred from v3.12.0 landed:
+
+- **Phase 5** — `AutoContinueStopHandler.get_claude_md()` now ships
+  Read-before-Edit, tool_use_error recovery, and re-entry `STOPPING BECAUSE:`
+  guidance. 3/3 unit tests in `TestAutoContinueStopGetClaudeMdGuidance`.
+- **Phase 6** — `TranscriptReader.last_tool_result_was_error()` helper +
+  Branch 2.5 (`_TOOL_ERROR_RECOVERY_REASON`) in `handle()`. Five-branch
+  ordering: 1=QA failure, 2=STOPPING BECAUSE: ALLOW, 2.5=tool_use_error
+  recovery (new), 3=Confirmation question, 4=Default explain-or-continue.
+  3/3 unit tests in `TestAutoContinueStopAfterToolUseError` + live socket
+  probe.
+- **Phase 7** — `tests/acceptance/test_tool_use_error_recovery.py` wired
+  into RELEASING.md Step 12.0 H-1 gate. Combined gate 19/19 PASS.
+
+QA 12/13 PASS (pre-existing deptry baseline). Daemon restarted RUNNING
+(PID 180247). 8202 unit tests pass, coverage 95.0%. Release vehicle
+deferred (likely v3.12.1 patch).
