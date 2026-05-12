@@ -1,11 +1,29 @@
 # Plan 00096: Live Daemon Smoke Tests in QA Stack
 
-**Status**: Not Started
+**Status**: Complete (Already Shipped)
 **Created**: 2026-03-30
-**Owner**: TBD
+**Delivered**: commit `bce66248` — closed out in Plan 00107 Wave 2
+**Owner**: Sonnet (delivery), Opus (close-out)
 **Priority**: High
 **Recommended Executor**: Sonnet
 **Execution Strategy**: Single-Threaded
+
+## Close-out note (Plan 00107 Wave 2)
+
+Auditing pre-Wave-2 discovered every deliverable already shipped in commit
+`bce66248`:
+
+- `scripts/qa/run_smoke_test.sh` — 3-probe live daemon smoke test
+  (Stop no-explanation → block; Stop loop-guard → allow; PreToolUse
+  destructive git → block)
+- `scripts/qa/llm_qa.py` — `smoke_test` registered as a check with its own
+  summariser and JSON output at `untracked/qa/smoke_test.json`
+- `tests/unit/qa/test_smoke_test.py` — unit-test coverage for the probe
+  logic
+- `scripts/qa/run_all.sh` — smoke test wired in as one of the 12 gates
+
+All Phase 1 / Phase 2 / Phase 3 tasks below were verified satisfied by the
+shipped state; no further code action required for v3.12.0.
 
 ## Overview
 

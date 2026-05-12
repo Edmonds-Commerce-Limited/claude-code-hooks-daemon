@@ -20,12 +20,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - **Phase 1 DONE**: Plugin handler suffix bug fixed; warning converted to crash
   - **Phase 2 PENDING**: Comprehensive audit for ALL error hiding patterns in codebase (audit script, fix violations)
 
-- [00096: Live Daemon Smoke Tests in QA Stack](00096-live-daemon-smoke-tests/PLAN.md) - Not Started
-
-  - Add check 9 to QA stack: 3 nc-based probes against the live daemon via hook scripts
-  - Catches "daemon running stale code" failure mode that unit tests miss entirely
-  - Higher priority since v3.10.0 SEV-1 — would have caught it
-
 ### Stop-Quality Stack (dependency chain)
 
 - [00077: TranscriptReader Enhancement & AskUserQuestion Bug Fix](00077-transcript-reader-askuser-bugfix/PLAN.md) - In Progress
@@ -81,6 +75,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00096: Live Daemon Smoke Tests in QA Stack](Completed/00096-live-daemon-smoke-tests/PLAN.md) - Complete (Already Shipped)
+
+  - Delivered in commit `bce66248` — pre-dated Plan 00107 Wave 2 audit
+  - `scripts/qa/run_smoke_test.sh` (3 probes: Stop no-explanation, Stop loop-guard, PreToolUse destructive git) + `llm_qa.py` integration + `tests/unit/qa/test_smoke_test.py` all in place
+  - Plan 00107 Wave 2 audit confirmed every Phase 1/2/3 task satisfied; closed out without further code action
 
 - [00086: Plan Redirect System Improvement](Completed/00086-plan-redirect-system-improvement/PLAN.md) - Complete
 
@@ -710,8 +710,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 107
-- **Completed**: 85 (1 with reduced scope)
-- **Active**: 9 (1 meta, 2 quality/infra, 3 stop-quality, 3 long-running/review)
+- **Completed**: 86 (1 with reduced scope, 1 already-shipped)
+- **Active**: 8 (1 meta, 1 quality/infra, 3 stop-quality, 3 long-running/review)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 5 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping)
 - **Last reconciled by**: Plan 00107 housekeeping pass

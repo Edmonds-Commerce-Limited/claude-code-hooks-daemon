@@ -167,10 +167,14 @@ Goal: harden the QA stack itself so subsequent waves have stronger detection.
 
 - [ ] **Task 2.1**: Execute **Plan 00063 Phase 2** (comprehensive error-hiding
   audit + audit-script + fix violations)
-- [ ] **Task 2.2**: Execute **Plan 00096** (live daemon smoke tests as QA
+- [x] **Task 2.2**: Execute **Plan 00096** (live daemon smoke tests as QA
   check 9 — 3 nc-based probes)
-  - High priority justification: this is exactly the test category that
-    would have caught the v3.10.0 SEV-1 had it existed
+  - **Already Shipped (audit decision)** — Wave 2 audit found every
+    deliverable already in place from commit `bce66248`: 3-probe
+    `run_smoke_test.sh`, `llm_qa.py` integration as `smoke_test`,
+    `tests/unit/qa/test_smoke_test.py`. No further code action required.
+  - Plan 00096 marked Complete (Already Shipped), moved to `Completed/`,
+    README index updated.
 - [ ] **Task 2.3**: ~~Investigate `validate_instruction_content` over-fit~~ —
   **REJECTED**. User clarified the handler is correct: completion dates do
   not belong in instruction files. Git is authoritative for "when". Plan
