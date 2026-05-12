@@ -4,64 +4,107 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-- [00106: Bypass-Permissions-Aware Auto-Approve (security gap — silent YOLO in default mode)](00106-bypass-permissions-aware-auto-approve/PLAN.md) - Not Started
+### Meta
+
+- [00107: Batch Delivery Meta Plan — v3.12.0 Release Bundle](00107-batch-delivery-meta/PLAN.md) - In Progress
+
+  - **Meta plan** tracking the optimal delivery order for every outstanding plan, bundled into a single v3.12.0 release
+  - Reconciles README index (this commit), sequences plans into 6 delivery waves, and gates each wave on QA + daemon-restart
+  - **Bundle**: 00089 + 00106 + 00086 + 00063-P2 + 00096 + 00077 + 00081-P2+ + 00085 + 00101-P4 + 00102-Task5.3 + venv-review (00099/00100)
+  - **Excluded**: 00032/00034/00035 (upstream-blocked, On Hold)
+
+### Bug Fixes
+
+- [00089: Fix auto_approve_reads Schema Mismatch + AskUserQuestion YOLO Bypass](00089-fix-auto-approve-reads-and-askuserquestion-bypass/PLAN.md) - In Progress
+
+  - **Bug 1**: `auto_approve_reads` PermissionRequest schema-field mismatch — handler currently misses real requests
+  - **Bug 2**: `AskUserQuestion` not blocked in YOLO mode → agents loop on confirmation prompts in `--dangerously-skip-permissions`
+  - **Overlaps with 00106**: both touch `auto_approve_reads`; per meta-plan 00107, 00089 lands first (schema fix), 00106 layers mode-gating on top
+
+- [00106: Bypass-Permissions-Aware Auto-Approve (security gap — silent YOLO in default mode)](00106-bypass-permissions-aware-auto-approve/PLAN.md) - Not Started (queue cleared)
 
   - **Security**: `auto_approve_reads` currently approves Read/Glob/Grep regardless of Claude Code permission mode — silently turns a non-YOLO session into YOLO behaviour without consent
-  - **Decision A**: `hook_input["permission_mode"]` is authoritative (5-value enum: default, plan, acceptEdits, dontAsk, bypassPermissions) — already plumbed via `_BASE_PROPERTIES` schema and `HookInputField.PERMISSION_MODE` constant
-  - **Fix**: gate `matches()` on `permission_mode == "bypassPermissions"`; in any other mode the handler defers to Claude Code's normal approval flow
+  - **Fix**: gate `matches()` on `permission_mode == "bypassPermissions"`; in any other mode defer to Claude Code's normal approval flow
   - **Blast radius**: 1 handler, 1 new shared utility (`is_bypass_mode`), no core-protocol changes
-  - **QUEUED behind Plan 00105**: do NOT start execution until v3.11.0 stability hardening ships
+  - **Unblocked**: Plan 00105 (v3.11.0) has shipped; lands after 00089 per meta plan
 
-- [00100 (v2): Venv SSOT Consolidation — Stop the Release Treadmill](00100-venv-ssot-consolidation/PLAN.md) - Not Started
+- [00086: Plan Redirect System Improvement](00086-plan-redirect-system-improvement/PLAN.md) - Not Started
 
-  - Critical: five consecutive releases (v3.1.1, v3.7.0, v3.8.0, v3.8.1, v3.8.2) patched venv bugs; this plan ends the treadmill
-  - **v2 after hostile Opus review** (see CRITIQUE-v1.md): PLAN-v1 had 3 FATAL + 7 RISKY flaws; v2 corrects each at the right architectural layer
-  - **Phase 0 (field-pain fixes, lands first)**: `sync -f` + `UV_LINK_MODE=hardlink` (with copy fallback) fixes `uv sync` visibility race at the source — no retry loop; `cli.py:341` fixed sleep replaced with polling loop (true root cause of `restart_daemon_verified` false-negative); skill wrapper pre-checks `python3` against `pyproject.toml:requires-python` (single source of truth, no hardcoded version)
-  - Collapses four parallel resolvers into one Python SSOT (bash shells out); deletes dead `create_venv`/`recreate_venv`; bootstrap simplified to PID-kill only (no venv resolution needed)
-  - Persists installer's chosen Python in atomic `.daemon-metadata.json` — resolver reads instead of recomputing; falls back to `find_compatible_python` on missing persisted Python (handles legitimate OS upgrades)
-  - Commits `uv.lock` as a first-class repo artefact (Phase 3.0); stamp becomes `sha256(pyproject.toml + uv.lock)` — catches dep changes without version bumps (v3.1.1's bug)
-  - `flock` concurrency protection with Podman bind-mount spike before implementation; end-to-end upgrade-cycle test parameterised over every prior released tag (runtime spike before committing to `run_all.sh` inclusion)
-  - Seven phases (0–6), Opus + sub-agent team execution, checkpoint commits after each phase
+  - Fixes plan approval flow using `plansDirectory` setting — 4 phases (local testing, handler update, config sync, cleanup/docs)
 
-- [00099: Python-Fingerprint Venv Isolation](00099-python-fingerprint-venv-isolation/PLAN.md) - Not Started
+### Quality / Infra
 
-  - Keys venvs by Python-environment fingerprint (`venv-py311-2fa8b3c1/`) — concurrent containers share one venv, distinct Pythons get distinct venvs, cross-arch safe
-  - Preserves hostname-scoped socket/PID paths unchanged (correct grain for concurrent live processes)
-  - Adds `ensure_venv` auto-bootstrap (CI-gated) and `.daemon-version` stamp-based lazy rebuild across non-active envs on upgrade
-  - Auto-deletes legacy `untracked/venv/` after upgrade (ordered post-restart-verification with rollback)
-  - Adds `list-venvs` and `prune-venvs` (`--stale`, `--legacy`, `--all-except-current`) CLI commands
-  - Relates to closed Issue #15 (hot-path solved by Plan 00018) and open Issue #28 (upgrade idempotent-path `uv sync` skip)
+- [00063: FAIL FAST - Plugin Handler Bug & Error Hiding Audit](00063-fail-fast-plugin-handler-audit/PLAN.md) - In Progress
+
+  - **Phase 1 DONE**: Plugin handler suffix bug fixed; warning converted to crash
+  - **Phase 2 PENDING**: Comprehensive audit for ALL error hiding patterns in codebase (audit script, fix violations)
 
 - [00096: Live Daemon Smoke Tests in QA Stack](00096-live-daemon-smoke-tests/PLAN.md) - Not Started
 
   - Add check 9 to QA stack: 3 nc-based probes against the live daemon via hook scripts
   - Catches "daemon running stale code" failure mode that unit tests miss entirely
-  - Stop (no explanation) + Stop (loop guard) + PreToolUse (destructive git) probes
+  - Higher priority since v3.10.0 SEV-1 — would have caught it
 
-- [00063: FAIL FAST - Plugin Handler Bug & Error Hiding Audit](00063-fail-fast-plugin-handler-audit/PLAN.md) - In Progress
+### Stop-Quality Stack (dependency chain)
 
-  - **Phase 1 DONE**: Plugin handler suffix bug fixed, warning converted to crash (daemon fails on unregistered handler)
-  - **Phase 2 PENDING**: Comprehensive audit for ALL error hiding patterns in codebase (audit script, fix violations)
-  - **Priority**: High
+- [00077: TranscriptReader Enhancement & AskUserQuestion Bug Fix](00077-transcript-reader-askuser-bugfix/PLAN.md) - In Progress
+
+  - Phase 1 done; Phases 2–5 pending — shared Stop hook utilities, refactor of duplicated Stop handlers
+  - **Unblocks**: 00081
+
+- [00081: Pseudo-Events & Nitpick Handler](00081-pseudo-events-nitpick-handler/PLAN.md) - In Progress
+
+  - Phase 1 (research) complete; Phases 2–5 pending (TranscriptReader hooks, checker protocol, NitpickHandler, integration)
+  - **Blocked by**: 00077 (shared utilities); **Unblocks**: 00085
+
+- [00085: Reminder Pseudo-Event System with Adaptive Triggers](00085-reminder-pseudo-event-system/PLAN.md) - In Progress
+
+  - 8 phases — AdaptiveTrigger, config parsing, dispatcher, WorkflowReminderSetup, handler, constants/registration, config, verification
+  - **Blocked by**: 00081 pseudo-event foundation
+
+### Long-Running / Carry-Forward
+
+- [00099: Python-Fingerprint Venv Isolation](00099-python-fingerprint-venv-isolation/PLAN.md) - Needs Review
+
+  - Likely partly-superseded by Plan 00104 (v3.10.0) canonical resolver work — meta plan 00107 will audit what is still in-scope vs already shipped
+  - Original scope: fingerprint-keyed venvs, `ensure_venv` auto-bootstrap, legacy `untracked/venv/` cleanup, `list-venvs`/`prune-venvs` CLI
+
+- [00100 (v2): Venv SSOT Consolidation](00100-venv-ssot-consolidation/PLAN.md) - Needs Review
+
+  - Likely partly-superseded by Plan 00104 (v3.10.0) — meta plan 00107 will audit what is still in-scope vs already shipped
+  - Original scope: Python SSOT for venv resolution, deletes dead `create_venv`/`recreate_venv`, persists installer's chosen Python in `.daemon-metadata.json`, commits `uv.lock`
+
+- [00101: Recap-Stoppage Investigation](00101-recap-stoppage-investigation/PLAN.md) - In Progress
+
+  - Root cause found (handler re-entry guard) and fix applied via Plan 00102 Phase 3
+  - **Phase 4 pending**: regression verification across multiple session-recap scenarios
+
+- [00102: Hook Executable-Bit Defense](00102-hook-exec-bit-defense/PLAN.md) - In Progress
+
+  - Phases 1–4 complete (`bash <path>` invocation, auto-migration, self-heal, filemode checker)
+  - **Task 5.3 pending**: acceptance gate at v3.12.0 release time (folded into meta plan 00107)
+
+### On Hold (upstream-blocked)
 
 - [00032: Sub-Agent Orchestration for Context Preservation](00032-subagent-orchestration-context-preservation/PLAN.md) - On Hold
 
   - Waiting for upstream Claude Code delegate mode fix (cascades to teammates, breaking agent teams)
   - Blocked by: GitHub issues #23447, #25037 (delegate mode cascade bug)
-  - Also watching: #14859 (agent hierarchy in hook events), #7881 (subagent identification)
-  - Research document: see RESEARCH file in plan folder
 
 - [00034: Model-Aware Agent Team Advisor](00034-model-aware-agent-team-advisor/PLAN.md) - On Hold
 
   - Depends on Plan 00032 orchestration infrastructure
-  - Will reassess when delegate mode is fixed upstream
 
 - [00035: StatusLine Data Cache + Model-Aware Advisor](00035-statusline-data-cache-model-advisor/PLAN.md) - On Hold
 
   - Depends on Plan 00032 orchestration infrastructure
-  - SessionState cache still viable when upstream unblocks
 
 ## Completed Plans
+
+- [00071: Plan Number Validation Hook Bug Fixes](Completed/00071-triage-plan-race-report/PLAN.md) - Complete
+
+  - Triaged two false positives in plan validation hook (TOCTOU race + archive trigger) and shipped fixes
+  - Moved to Completed/ during Plan 00107 README reconciliation pass
 
 - [00105: v3.11.0 — Stability Hardening (close gaps that let v3.10.0 ship a SEV-1)](Completed/00105-v3.11.0-stability-hardening/PLAN.md) - Complete
 
@@ -663,11 +706,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 97
-- **Completed**: 81 (1 with reduced scope)
-- **Active**: 5 (4 not started, 1 in progress)
+- **Total Plans Created**: 107
+- **Completed**: 82 (1 with reduced scope)
+- **Active**: 12 (1 meta, 3 bug-fix, 2 quality/infra, 3 stop-quality, 3 long-running/review)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
-- **Cancelled/Abandoned**: 4 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation)
+- **Cancelled/Abandoned**: 5 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping)
+- **Last reconciled by**: Plan 00107 housekeeping pass
 
 ## Quick Links
 
