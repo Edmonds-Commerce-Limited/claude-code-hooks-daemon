@@ -4,15 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-### Meta
-
-- [00107: Batch Delivery Meta Plan — v3.12.0 Release Bundle](00107-batch-delivery-meta/PLAN.md) - In Progress
-
-  - **Meta plan** tracking the optimal delivery order for every outstanding plan, bundled into a single v3.12.0 release
-  - Reconciles README index (this commit), sequences plans into 6 delivery waves, and gates each wave on QA + daemon-restart
-  - **Bundle**: 00089 + 00106 + 00086 + 00063-P2 + 00096 + 00077 + 00081-P2+ + 00085 + 00101-P4 + 00102-Task5.3 + venv-review (00099/00100)
-  - **Excluded**: 00032/00034/00035 (upstream-blocked, On Hold)
-
 ### Stop-Quality Stack (dependency chain)
 
 - [00085: Reminder Pseudo-Event System with Adaptive Triggers](00085-reminder-pseudo-event-system/PLAN.md) - In Progress
@@ -48,6 +39,13 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00107: Batch Delivery Meta Plan — v3.12.0 Release Bundle](Completed/00107-batch-delivery-meta/PLAN.md) - Complete
+
+  - Six-wave audit-and-close of the v3.x backlog shipped as v3.12.0 in commit `6c5c869`
+  - **Closed in bundle**: 00063, 00077, 00081 (Superseded by 00082), 00086, 00089, 00096, 00099, 00101, 00106
+  - **Residue Scope**: 00100 (Phases 0–3.9 shipped; 3.5/4/5/6 deferred to v3.13.0)
+  - **Deferred**: 00085 (reminder pseudo-event system — 8-phase fresh-TDD scope, future release)
 
 - [00063: FAIL FAST — Plugin Handler Bug & Error Hiding Audit](Completed/00063-fail-fast-plugin-handler-audit/PLAN.md) - Complete (Already Shipped)
 
@@ -710,8 +708,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 107
-- **Completed**: 90 (1 with reduced scope, 4 already-shipped)
-- **Active**: 4 (1 meta, 1 stop-quality, 2 long-running/review)
+- **Completed**: 91 (1 with reduced scope, 4 already-shipped)
+- **Active**: 3 (1 stop-quality, 2 long-running/review)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping, 00081 - superseded by 00082)
 - **Last reconciled by**: Plan 00107 housekeeping pass

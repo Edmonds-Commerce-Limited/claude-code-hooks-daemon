@@ -1,6 +1,6 @@
 # Plan 00107: Batch Delivery Meta Plan — v3.12.0 Release Bundle
 
-**Status**: In Progress
+**Status**: Complete
 **Owner**: Claude (Opus)
 **Priority**: High
 **Recommended Executor**: Opus
@@ -447,3 +447,9 @@ work or regression.
 - After Phase 0 commit, execution moves to Wave 1 (Plan 00089).
 - Each subsequent wave's start triggers a checkpoint commit; each wave's
   end triggers a wave-gate commit (QA + daemon-restart verified).
+- **Complete (v3.12.0 shipped)**: release commit `6c5c869`, tag `v3.12.0`,
+  GitHub release published at
+  https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/releases/tag/v3.12.0
+  with all four skill scripts + bootstrap-checksums.txt verified
+  (published shas match manifest). All six waves closed; bundled plans
+  reconciled per the disposition table above.
