@@ -1,11 +1,35 @@
 # Plan 00063: FAIL FAST - Plugin Handler Bug & Error Hiding Audit
 
-**Status**: In Progress
+**Status**: Complete (Already Shipped)
 **Created**: 2026-02-17
-**Owner**: Claude Sonnet 4.5
+**Delivered**: Phase 1 in original sprint; Phases 2–5 already shipped (audit
+script, QA integration, CLAUDE.md FAIL FAST principle, zero violations)
+prior to Plan 00107 Wave 2 close-out
+**Owner**: Claude Sonnet 4.5 (delivery), Opus (close-out)
 **Priority**: CRITICAL
 **Recommended Executor**: Sonnet
 **Execution Strategy**: Single-Threaded (surgical fix + comprehensive audit)
+
+## Close-out note (Plan 00107 Wave 2)
+
+Wave 2 audit found every Phase 2–5 deliverable already in the tree:
+
+- **Phase 2.1** (Pattern Detection): `scripts/qa/audit_error_hiding.py` exists
+  with all 7 documented patterns + `error_hiding_exclusions.json` for
+  intentional exceptions.
+- **Phase 3** (Fix All Violations): live audit reports
+  `✅ No error hiding violations found!` (zero violations remaining).
+- **Phase 4** (Enforcement): `error_hiding` is one of the 12 QA gates
+  (`scripts/qa/llm_qa.py` registers it with summariser + JSON output);
+  `CLAUDE.md:320` documents `FAIL FAST` as a non-negotiable Engineering
+  Principle and `CLAUDE.md:45` lists Error Hiding as one of the gates.
+- **Phase 5** (Verification): every release since v3.10.0 has shipped with
+  this gate passing 0/0; the daemon's `crash-on-misconfigured-handler`
+  behaviour (Phase 1 Decision 1) is verified by the plugin loader test
+  suite.
+
+No further code action required for v3.12.0. Plan 00063 marked Complete
+(Already Shipped) and moved to `Completed/`.
 
 ## Overview
 

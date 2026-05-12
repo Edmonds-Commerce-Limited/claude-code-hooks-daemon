@@ -13,13 +13,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - **Bundle**: 00089 + 00106 + 00086 + 00063-P2 + 00096 + 00077 + 00081-P2+ + 00085 + 00101-P4 + 00102-Task5.3 + venv-review (00099/00100)
   - **Excluded**: 00032/00034/00035 (upstream-blocked, On Hold)
 
-### Quality / Infra
-
-- [00063: FAIL FAST - Plugin Handler Bug & Error Hiding Audit](00063-fail-fast-plugin-handler-audit/PLAN.md) - In Progress
-
-  - **Phase 1 DONE**: Plugin handler suffix bug fixed; warning converted to crash
-  - **Phase 2 PENDING**: Comprehensive audit for ALL error hiding patterns in codebase (audit script, fix violations)
-
 ### Stop-Quality Stack (dependency chain)
 
 - [00077: TranscriptReader Enhancement & AskUserQuestion Bug Fix](00077-transcript-reader-askuser-bugfix/PLAN.md) - In Progress
@@ -75,6 +68,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00063: FAIL FAST — Plugin Handler Bug & Error Hiding Audit](Completed/00063-fail-fast-plugin-handler-audit/PLAN.md) - Complete (Already Shipped)
+
+  - Phase 1 (plugin handler suffix bug + crash-on-misconfigured-handler) delivered in original sprint
+  - Phases 2–5 audited and found already-shipped during Plan 00107 Wave 2: `scripts/qa/audit_error_hiding.py` + `error_hiding_exclusions.json`; `error_hiding` registered as one of the 12 QA gates; live audit reports zero violations across the codebase; `CLAUDE.md:320` codifies FAIL FAST as a non-negotiable Engineering Principle
+  - Closed out without further code action
 
 - [00096: Live Daemon Smoke Tests in QA Stack](Completed/00096-live-daemon-smoke-tests/PLAN.md) - Complete (Already Shipped)
 
@@ -710,8 +709,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 107
-- **Completed**: 86 (1 with reduced scope, 1 already-shipped)
-- **Active**: 8 (1 meta, 1 quality/infra, 3 stop-quality, 3 long-running/review)
+- **Completed**: 87 (1 with reduced scope, 2 already-shipped)
+- **Active**: 7 (1 meta, 3 stop-quality, 3 long-running/review)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 5 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping)
 - **Last reconciled by**: Plan 00107 housekeeping pass

@@ -165,8 +165,14 @@ against corrected behaviour.
 
 Goal: harden the QA stack itself so subsequent waves have stronger detection.
 
-- [ ] **Task 2.1**: Execute **Plan 00063 Phase 2** (comprehensive error-hiding
+- [x] **Task 2.1**: Execute **Plan 00063 Phase 2** (comprehensive error-hiding
   audit + audit-script + fix violations)
+  - **Already Shipped (audit decision)** — Wave 2 audit found:
+    `scripts/qa/audit_error_hiding.py` + `error_hiding_exclusions.json`
+    detect all 7 documented patterns; integrated as one of the 12 QA gates;
+    live audit reports zero violations across the codebase;
+    `CLAUDE.md:320` codifies `FAIL FAST` as Engineering Principle.
+  - Plan 00063 marked Complete (Already Shipped), moved to `Completed/`.
 - [x] **Task 2.2**: Execute **Plan 00096** (live daemon smoke tests as QA
   check 9 — 3 nc-based probes)
   - **Already Shipped (audit decision)** — Wave 2 audit found every
@@ -180,7 +186,13 @@ Goal: harden the QA stack itself so subsequent waves have stronger detection.
   not belong in instruction files. Git is authoritative for "when". Plan
   index should cite the delivery commit hash(es) instead. Replaced by
   Task 0.6 (convention update).
-- [ ] **Task 2.4**: Wave 2 gate — QA + daemon restart verification.
+- [x] **Task 2.4**: Wave 2 gate — QA + daemon restart verification.
+  - Full QA: 12/13 (only deptry wrapper false positive; same condition
+    as Waves 1 & pre-bundled releases).
+  - Daemon RUNNING (PID 60980, verified post-Wave-1; Wave 2 had no
+    handler code changes — both plans audited as Already Shipped — so
+    no restart needed).
+  - Wave 2 closed.
 
 ### Phase 3: Wave 3 — Stop-Quality Stack (strict serial dependency chain)
 
