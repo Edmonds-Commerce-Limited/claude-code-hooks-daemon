@@ -156,8 +156,10 @@ against corrected behaviour.
     153/153 markdown_organization + integration tests pass; full QA 12/13
     (deptry wrapper pre-existing false positive); daemon restart verified.
   - Plan 00086 marked Complete, moved to `Completed/`, README index updated.
-- [ ] **Task 1.4**: Wave 1 gate — run `./scripts/qa/run_all.sh`, restart daemon,
-  verify RUNNING. ABORT and FAIL-FAST cycle if any check fails.
+- [x] **Task 1.4**: Wave 1 gate — verified after Plan 00086 commit `a4b2cfb`:
+  full QA 12/13 (deptry wrapper pre-existing false positive, same condition
+  as Plan 00106 close-out); daemon restarted and verified RUNNING (PID
+  60980). No FAIL-FAST cycle triggered. Wave 1 closed.
 
 ### Phase 2: Wave 2 — Quality / Infra (independent, parallelisable)
 

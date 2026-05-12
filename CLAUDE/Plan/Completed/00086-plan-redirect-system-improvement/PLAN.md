@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Created**: 2026-03-11
-**Delivered**: Plan 00107 Wave 1 (commit to be recorded after housekeeping commit)
+**Delivered**: Plan 00107 Wave 1, commit `a4b2cfb`
 **Owner**: Opus (executed inside Plan 00107 batch-delivery meta plan)
 **Priority**: High
 **Recommended Executor**: Sonnet
