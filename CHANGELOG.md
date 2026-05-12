@@ -7,7 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [3.12.0] - 2026-05-12
+## [3.12.1] - 2026-05-12
+
+This is a **patch release** that closes out Plan 00101 (recap-stoppage / silent-stop investigation). The plan was prematurely closed in v3.12.0; this release delivers the outstanding Phases 5/6/7 — handler-level recovery from `tool_use_error` followed by a silent agent stop, plus an acceptance probe that wires the recovery contract into the H-1 release gate.
+
+### Added
+
+- **`AutoContinueStopHandler` Branch 2.5 — `tool_use_error` recovery (Plan 00101 Phase 6)**: When the last `tool_result` in the transcript has `is_error=true` and the agent stops silently, the Stop handler now returns `decision=block` with a recovery-specific reason prefixed `TOOL ERROR RECOVERY:` directing the agent to Read-before-Edit and retry. Previously the agent fell through to the generic explain-or-continue branch and silently re-entered the same failure mode (the v3.12.0 field-bug shape: agent calls `Edit` on an unread file → Claude Code returns `tool_use_error` → agent stops → repeat).
+- **`TranscriptReader.last_tool_result_was_error()` helper (Plan 00101 Phase 6)**: New transcript-introspection method that locates the most recent `tool_result` content block and returns `True` when `is_error=true`. Used by `AutoContinueStopHandler` Branch 2.5; reusable for any handler that needs to gate on the last tool-call outcome.
+- **`tests/acceptance/test_tool_use_error_recovery.py` — H-1 acceptance probe (Plan 00101 Phase 7)**: New two-case acceptance test wired into `RELEASING.md` Step 12.0. Positive case asserts Branch 2.5 fires with the `TOOL ERROR RECOVERY:` reason on `is_error=true` silent stops. Negative control asserts Branch 2.5 stays dormant on `is_error=false` and the dispatcher falls through to the default branch. Skips cleanly when no daemon is running locally; under H-1 the daemon is always started before this step, so a skip there is itself an abort condition.
+- **`AutoContinueStopHandler.get_claude_md()` Read-before-Edit guidance (Plan 00101 Phase 5)**: The handler's CLAUDE.md guidance now includes explicit Read-before-Edit instruction, a description of the `tool_use_error` recovery shape, and re-entry `STOPPING BECAUSE:` reminders so the agent recognises the recovery pattern when the daemon re-fires.
+
+### Changed
+
+- **`RELEASING.md` Step 12.0 — H-1 gate extended to 19 combined tests (Plan 00101 Phase 7)**: H-1 acceptance suite now runs `test_diagnostic_scripts.py` (15) + `test_install_sh_end_to_end.py` (2) + `test_tool_use_error_recovery.py` (2) = 19 passed. ANY failure in any file = abort release. Documents the v3.12.0 silent-stop recurrence and the gate that prevents it returning.
+- **Plan 00101 closed (Phases 5/6/7/8 delivered post-v3.12.0)**: Plan moved to `CLAUDE/Plan/Completed/`. `CLAUDE/Plan/README.md` index updated — Active Plans count 4 → 3, Completed Plans count 90 → 91. Plan close-out section appended documenting all three phase deliverables, QA results (12/13 green), and the release vehicle decision.
+
+
 
 This is a **batch-delivery release** that closes out the Plan 00107 meta-plan — a six-wave audit-and-close of the backlog accumulated across the v3.x stability cycle. Most of the bundled plans were already shipped in prior releases or superseded by other work; their PLAN.md status records have been reconciled in this release. Two source-code changes ship in this release: a security-tightening fix to `auto_approve_reads` and a behaviour fix to `markdown_organization`'s plan-redirect path.
 
