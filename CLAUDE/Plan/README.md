@@ -15,13 +15,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Bug Fixes
 
-- [00106: Bypass-Permissions-Aware Auto-Approve (security gap — silent YOLO in default mode)](00106-bypass-permissions-aware-auto-approve/PLAN.md) - Not Started (queue cleared)
-
-  - **Security**: `auto_approve_reads` currently approves Read/Glob/Grep regardless of Claude Code permission mode — silently turns a non-YOLO session into YOLO behaviour without consent
-  - **Fix**: gate `matches()` on `permission_mode == "bypassPermissions"`; in any other mode defer to Claude Code's normal approval flow
-  - **Blast radius**: 1 handler, 1 new shared utility (`is_bypass_mode`), no core-protocol changes
-  - **Unblocked**: Plan 00105 (v3.11.0) has shipped; lands after 00089 per meta plan
-
 - [00086: Plan Redirect System Improvement](00086-plan-redirect-system-improvement/PLAN.md) - Not Started
 
   - Fixes plan approval flow using `plansDirectory` setting — 4 phases (local testing, handler update, config sync, cleanup/docs)
@@ -94,6 +87,13 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00106: Bypass-Permissions-Aware Auto-Approve](Completed/00106-bypass-permissions-aware-auto-approve/PLAN.md) - Complete
+
+  - **Security fix**: `auto_approve_reads` now gates on `permission_mode == "bypassPermissions"` via new shared `utils/permission_mode.py::is_bypass_mode()` — defers to Claude Code's normal approval flow in default/plan/acceptEdits/dontAsk modes
+  - **Sibling bug fixed under same umbrella (dogfooding)**: `HelloWorldPermissionRequestHandler` was silently auto-approving every PermissionRequest by emitting `Decision.ALLOW` from a non-terminal observability handler — switched to `Decision.CONTINUE` (which does not bind `hookSpecificOutput.decision`)
+  - 5 new unit tests guard the hello_world wire-output contract; integration tests updated; HooksSystem.md cross-references the bypass-mode gate
+  - Delivered in Plan 00107 Wave 1; no upgrade guide owed (security bug fix, not a breaking change)
 
 - [00089: Fix auto_approve_reads Schema Mismatch + AskUserQuestion YOLO Bypass](Completed/00089-fix-auto-approve-reads-and-askuserquestion-bypass/PLAN.md) - Complete
 
@@ -707,8 +707,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 107
-- **Completed**: 83 (1 with reduced scope)
-- **Active**: 11 (1 meta, 2 bug-fix, 2 quality/infra, 3 stop-quality, 3 long-running/review)
+- **Completed**: 84 (1 with reduced scope)
+- **Active**: 10 (1 meta, 1 bug-fix, 2 quality/infra, 3 stop-quality, 3 long-running/review)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 5 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping)
 - **Last reconciled by**: Plan 00107 housekeeping pass

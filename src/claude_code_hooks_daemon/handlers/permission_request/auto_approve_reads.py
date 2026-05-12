@@ -3,6 +3,12 @@
 Uses tool_name from the PermissionRequest event to determine whether the
 operation is read-only. Real PermissionRequest events contain tool_name and
 permission_suggestions (NOT permission_type).
+
+Gated on `permission_mode == "bypassPermissions"` — in any other mode the
+handler defers (matches() returns False) so Claude Code's normal approval
+flow runs. Silently auto-approving in non-YOLO modes was the bug fixed by
+Plan 00106: it converted a default session into YOLO behaviour without
+user consent.
 """
 
 from typing import Any
@@ -10,6 +16,7 @@ from typing import Any
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.utils.permission_mode import is_bypass_mode
 
 # Read-only tools that are safe to auto-approve
 _READ_ONLY_TOOLS: tuple[str, ...] = (
@@ -40,19 +47,23 @@ class AutoApproveReadsHandler(Handler):
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """Check if this is a permission request for a read-only tool.
+        """Check if this is a permission request for a read-only tool in bypass mode.
 
-        Uses tool_name from the real PermissionRequest event structure.
-        Only matches read-only tools (Read, Glob, Grep).
+        Only fires when Claude Code reports `permission_mode == "bypassPermissions"`.
+        In every other mode (default, plan, acceptEdits, dontAsk) the handler
+        defers so Claude Code's normal approval prompt is shown — the user
+        has not opted out of per-tool approvals.
 
         Args:
             hook_input: Hook input dictionary from Claude Code
 
         Returns:
-            True if tool_name is a read-only tool
+            True iff in bypass mode AND tool_name is a read-only tool
         """
-        tool_name = hook_input.get(HookInputField.TOOL_NAME)
+        if not is_bypass_mode(hook_input):
+            return False
 
+        tool_name = hook_input.get(HookInputField.TOOL_NAME)
         return tool_name in _READ_ONLY_TOOLS
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
@@ -80,10 +91,26 @@ class AutoApproveReadsHandler(Handler):
         )
 
     def get_claude_md(self) -> str | None:
-        return None
+        return (
+            "## auto_approve_reads — gated on bypassPermissions mode\n\n"
+            "Read-only tool permission requests (`Read`, `Glob`, `Grep`) are "
+            "auto-approved **only** when Claude Code reports "
+            '`permission_mode == "bypassPermissions"` (YOLO mode).\n\n'
+            "In every other mode (`default`, `plan`, `acceptEdits`, `dontAsk`) "
+            "the handler defers and Claude Code's normal approval prompt is "
+            "shown — the user has not opted out of per-tool approvals, so the "
+            "daemon must not silently approve on their behalf.\n\n"
+            "If a permission prompt for `Read` appears in `default` mode, "
+            "that is correct behaviour — approve it via Claude Code's UI."
+        )
 
     def get_acceptance_tests(self) -> list[Any]:
-        """Return acceptance tests for Auto Approve Reads."""
+        """Return acceptance tests for Auto Approve Reads.
+
+        Includes positive (bypass mode → auto-approve) and negative
+        (default mode → defer to Claude Code's prompt) cases to verify
+        the Plan 00106 bypass-mode gate at the daemon boundary.
+        """
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
             Decision,
@@ -93,14 +120,37 @@ class AutoApproveReadsHandler(Handler):
 
         return [
             AcceptanceTest(
-                title="Auto-approve read permissions",
-                command="Read file permission request",
-                description="Auto-approves read-only operations (Read, Glob, Grep)",
+                title="Auto-approve Read in bypassPermissions mode",
+                command="Read file permission request (permission_mode=bypassPermissions)",
+                description=(
+                    "In YOLO/bypass mode, Read/Glob/Grep permission requests "
+                    "are auto-approved by the daemon — no prompt is shown."
+                ),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"read", r"approved"],
-                safety_notes="Read-only operations are safe",
+                safety_notes="Read-only operations are safe to auto-approve in bypass mode",
                 test_type=TestType.CONTEXT,
-                requires_event="PermissionRequest for Read tool",
+                requires_event="PermissionRequest for Read tool in bypassPermissions mode",
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=True,
+            ),
+            AcceptanceTest(
+                title="Defer Read in default mode (Plan 00106 fix)",
+                command="Read file permission request (permission_mode=default)",
+                description=(
+                    "In default (non-bypass) mode the handler MUST defer — "
+                    "Claude Code's normal approval prompt should be shown so "
+                    "the user retains per-tool control. Silently approving "
+                    "here was the security bug fixed by Plan 00106."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r"defer|prompt|approval"],
+                safety_notes=(
+                    "Verifies the daemon does not silently bypass the user's "
+                    "permission settings in non-YOLO sessions."
+                ),
+                test_type=TestType.CONTEXT,
+                requires_event="PermissionRequest for Read tool in default mode",
                 recommended_model=RecommendedModel.SONNET,
                 requires_main_thread=True,
             ),

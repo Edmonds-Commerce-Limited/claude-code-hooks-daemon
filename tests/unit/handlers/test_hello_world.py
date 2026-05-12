@@ -49,11 +49,6 @@ ALL_HANDLERS = [
         {"source": "new"},
     ),
     (
-        HelloWorldPermissionRequestHandler,
-        "PermissionRequest",
-        {"permission": "network"},
-    ),
-    (
         HelloWorldNotificationHandler,
         "Notification",
         {"message": "Test notification"},
@@ -255,3 +250,63 @@ class TestHelloWorldGetAcceptanceTests:
         for test in tests:
             assert hasattr(test, "title")
             assert test.title
+
+
+class TestHelloWorldPermissionRequestDoesNotEmitDecision:
+    """Plan 00106 sibling-bug guard for HelloWorldPermissionRequestHandler.
+
+    The hello_world test handler for PermissionRequest must NOT emit a binding
+    `decision.behavior` field, since doing so silently auto-approves every
+    PermissionRequest — bypassing the user's normal approval flow exactly like
+    the auto_approve_reads bug fixed in Plan 00106.
+
+    Other hello_world handlers (PreToolUse, UserPromptSubmit, etc.) can use
+    Decision.ALLOW safely because their response format does not bind a
+    permission decision. PermissionRequest is the exception: ALLOW here means
+    'skip the user prompt and approve this tool call'.
+    """
+
+    def _hook_input(self):
+        return {"hook_event_name": "PermissionRequest", "tool_name": "Read"}
+
+    def test_handle_does_not_emit_allow_decision(self):
+        """The decision must not be ALLOW.
+
+        Decision.ALLOW emits `hookSpecificOutput.decision.behavior = "allow"` in
+        the PermissionRequest response, which silently bypasses Claude Code's
+        user-approval prompt — the same bug class as Plan 00106 in
+        auto_approve_reads.
+        """
+        from claude_code_hooks_daemon.core import Decision
+
+        handler = HelloWorldPermissionRequestHandler()
+        result = handler.handle(self._hook_input())
+        assert result.decision != Decision.ALLOW
+
+    def test_format_does_not_include_binding_decision(self):
+        """End-to-end: formatted PermissionRequest response must not bind a decision.
+
+        Even if a future maintainer changes the Decision enum, this test guards
+        the actual wire output that Claude Code receives.
+        """
+        handler = HelloWorldPermissionRequestHandler()
+        result = handler.handle(self._hook_input())
+        formatted = result.to_json("PermissionRequest")
+        hook_output = formatted.get("hookSpecificOutput", {})
+        assert "decision" not in hook_output
+
+    def test_handle_still_provides_context(self):
+        """Hello-world is observability — context must still be emitted."""
+        handler = HelloWorldPermissionRequestHandler()
+        result = handler.handle(self._hook_input())
+        assert any("PermissionRequest" in line for line in result.context)
+
+    def test_matches_universally(self):
+        """Hello-world is a universal observability handler — must still match."""
+        handler = HelloWorldPermissionRequestHandler()
+        assert (
+            handler.matches({"hook_event_name": "PermissionRequest", "tool_name": "Read"}) is True
+        )
+        assert (
+            handler.matches({"hook_event_name": "PermissionRequest", "tool_name": "Write"}) is True
+        )

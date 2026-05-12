@@ -34,22 +34,35 @@ class TestAutoApproveReadsHandler:
         return AutoApproveReadsHandler()
 
     def test_approves_file_read(self, handler: Any) -> None:
-        hook_input = make_permission_request_input("Read", resource="/workspace/src/main.py")
+        hook_input = make_permission_request_input(
+            "Read",
+            resource="/workspace/src/main.py",
+            permission_mode="bypassPermissions",
+        )
         assert handler.matches(hook_input) is True
         result = handler.handle(hook_input)
         assert result.decision == Decision.ALLOW
 
     def test_approves_glob(self, handler: Any) -> None:
-        hook_input = make_permission_request_input("Glob")
+        hook_input = make_permission_request_input("Glob", permission_mode="bypassPermissions")
         assert handler.matches(hook_input) is True
         result = handler.handle(hook_input)
         assert result.decision == Decision.ALLOW
 
     def test_approves_grep(self, handler: Any) -> None:
-        hook_input = make_permission_request_input("Grep")
+        hook_input = make_permission_request_input("Grep", permission_mode="bypassPermissions")
         assert handler.matches(hook_input) is True
         result = handler.handle(hook_input)
         assert result.decision == Decision.ALLOW
+
+    def test_defers_in_default_mode_plan_00106(self, handler: Any) -> None:
+        """Plan 00106: matches() must return False outside bypass mode.
+
+        Read/Glob/Grep without permission_mode set (i.e. default) must
+        NOT auto-approve — Claude Code's normal approval prompt must run.
+        """
+        hook_input = make_permission_request_input("Read", resource="/workspace/src/main.py")
+        assert handler.matches(hook_input) is False
 
     def test_denies_file_write(self, handler: Any) -> None:
         hook_input = make_permission_request_input("Write", resource="/workspace/src/main.py")

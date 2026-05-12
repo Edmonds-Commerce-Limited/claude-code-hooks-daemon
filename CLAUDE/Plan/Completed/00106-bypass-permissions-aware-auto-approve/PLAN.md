@@ -1,16 +1,17 @@
 # Plan 00106: Bypass-Permissions-Aware Auto-Approve
 
-**Status**: Not Started (QUEUED behind Plan 00105)
+**Status**: Complete — delivered in Plan 00107 Wave 1 (v3.12.0 bundle)
 **Created**: 2026-05-08
 **Owner**: Claude
 **Priority**: High (security)
 **Recommended Executor**: Opus
 **Execution Strategy**: Sub-Agent Orchestration
 
-> **Queued behind Plan 00105**: v3.11.0 stability hardening is currently
-> in-flight on the main thread. Do NOT begin execution of this plan until
-> 00105 ships and is moved to `Completed/`. This plan is research + planning
-> only at this point.
+> **Delivered**: Plan 00105 (v3.11.0) shipped 2026-05-10. Plan 00106 executed
+> 2026-05-12 as part of the Plan 00107 batched delivery wave. The retrofit
+> uncovered a sibling bug in `hello_world_permission_request` (always
+> returned `Decision.ALLOW`, silently auto-approving every PermissionRequest)
+> which was fixed under the same plan — see Notes & Updates 2026-05-12.
 
 ## Overview
 
@@ -186,19 +187,19 @@ shared helper.
 
 ### Phase 1: Shared utility (TDD)
 
-- [ ] ⬜ **Task 1.1**: Create `tests/unit/utils/test_permission_mode.py`
+- [x] ✅ **Task 1.1**: Create `tests/unit/utils/test_permission_mode.py`
   with failing tests for `is_bypass_mode(hook_input)`:
   - returns True when `permission_mode == "bypassPermissions"`
   - returns False for `default`, `plan`, `acceptEdits`, `dontAsk`
   - returns False when key missing, value None, value empty string
   - returns False when hook_input is `None` or non-dict
-- [ ] ⬜ **Task 1.2**: Implement `src/claude_code_hooks_daemon/utils/permission_mode.py`
+- [x] ✅ **Task 1.2**: Implement `src/claude_code_hooks_daemon/utils/permission_mode.py`
   with `is_bypass_mode()` and module-level constant
   `BYPASS_PERMISSIONS_MODE = "bypassPermissions"`. Tests turn green.
 
 ### Phase 2: Retrofit `auto_approve_reads` (TDD)
 
-- [ ] ⬜ **Task 2.1**: Add failing tests to
+- [x] ✅ **Task 2.1**: Add failing tests to
   `tests/unit/handlers/permission_request/test_auto_approve_reads.py`:
   - `matches()` returns False when `permission_mode == "default"` even
     for Read/Glob/Grep
@@ -206,53 +207,50 @@ shared helper.
   - `matches()` returns False for `plan`, `acceptEdits`, `dontAsk`
   - `matches()` returns True only when tool is read-only AND
     `permission_mode == "bypassPermissions"`
-- [ ] ⬜ **Task 2.2**: Update `auto_approve_reads.py`:
+- [x] ✅ **Task 2.2**: Update `auto_approve_reads.py`:
   - Import `is_bypass_mode` from the new utility
   - `matches()` short-circuits: `if not is_bypass_mode(hook_input): return False`
   - `handle()` keeps existing ALLOW logic (defensive — only reachable in bypass mode)
-- [ ] ⬜ **Task 2.3**: Update existing positive-case tests to include
+- [x] ✅ **Task 2.3**: Update existing positive-case tests to include
   `"permission_mode": "bypassPermissions"` in their hook_input fixtures so
   they continue to exercise the approval path. **Do not weaken any
   assertions.**
-- [ ] ⬜ **Task 2.4**: Implement `get_claude_md()` to return guidance
+- [x] ✅ **Task 2.4**: Implement `get_claude_md()` to return guidance
   explaining: handler is gated on bypass mode; in default mode the user
   will see the normal approval prompt; this is intentional.
 
 ### Phase 3: Acceptance test
 
-- [ ] ⬜ **Task 3.1**: Update the handler's `get_acceptance_tests()` to
+- [x] ✅ **Task 3.1**: Update the handler's `get_acceptance_tests()` to
   include both a positive case (bypass mode → ALLOW) and a negative case
   (default mode → handler does not match, prompt would surface).
 
 ### Phase 4: Daemon verification + QA
 
-- [ ] ⬜ **Task 4.1**: Run `./scripts/qa/run_all.sh` — must pass all 12
+- [x] ✅ **Task 4.1**: Run `./scripts/qa/run_all.sh` — must pass all 12
   gates with zero failures
-- [ ] ⬜ **Task 4.2**: Restart daemon and verify RUNNING:
+- [x] ✅ **Task 4.2**: Restart daemon and verify RUNNING:
   ```
   $PYTHON -m claude_code_hooks_daemon.daemon.cli restart
   $PYTHON -m claude_code_hooks_daemon.daemon.cli status
   ```
-- [ ] ⬜ **Task 4.3**: Probe the live daemon directly with synthetic
+- [x] ✅ **Task 4.3**: Probe the live daemon directly with synthetic
   PermissionRequest events at both `permission_mode == "default"` (must
   return no decision) and `"bypassPermissions"` (must ALLOW) using `nc`.
 
 ### Phase 5: Documentation
 
-- [ ] ⬜ **Task 5.1**: Add a brief note to `CLAUDE/Code/HooksSystem.md`
+- [x] ✅ **Task 5.1**: Add a brief note to `CLAUDE/Code/HooksSystem.md`
   near the `permission_mode` table cross-referencing this plan as the
   rationale for why the daemon gates auto-approve on it.
-- [ ] ⬜ **Task 5.2**: Add a post-upgrade-task note in
-  `CLAUDE/UPGRADES/UNRELEASED/post-upgrade-tasks/` explaining the
-  behavioural change so the next release notes pick it up: users running
-  in `default` mode will start seeing their normal approval prompts for
-  Read/Glob/Grep again. This is the correct, intended behaviour but it
-  WILL feel like a regression for users who had silently relied on the
-  bug.
+- [x] ✅ **Task 5.2 — DROPPED**: post-upgrade-task note. This is a security
+  bug fix, not a breaking change. No upgrade guide is owed. Release notes
+  describe it as a security fix only. (User directive 2026-05-12: "not
+  needing permission is a HUGE BUG that we need to fix urgently".)
 
 ### Phase 6: Plan closure
 
-- [ ] ⬜ **Task 6.1**: Mark all tasks complete, set status to Complete,
+- [x] ✅ **Task 6.1**: Mark all tasks complete, set status to Complete,
   `git mv` plan folder to `Completed/`, update `CLAUDE/Plan/README.md`.
 
 ## Dependencies
@@ -305,20 +303,20 @@ behaviour, the supported path is `claude --dangerously-skip-permissions`.
 
 ## Success Criteria
 
-- [ ] All existing `test_auto_approve_reads.py` tests pass after fixture
+- [x] All existing `test_auto_approve_reads.py` tests pass after fixture
   updates that add `"permission_mode": "bypassPermissions"` to positive
   cases — **no test assertions weakened**.
-- [ ] New tests prove auto-approve does NOT fire in `default`, `plan`,
+- [x] New tests prove auto-approve does NOT fire in `default`, `plan`,
   `acceptEdits`, or `dontAsk` mode.
-- [ ] New tests prove auto-approve DOES fire in `bypassPermissions`
+- [x] New tests prove auto-approve DOES fire in `bypassPermissions`
   mode for Read/Glob/Grep.
-- [ ] `is_bypass_mode()` utility has its own unit tests at 100%
+- [x] `is_bypass_mode()` utility has its own unit tests at 100%
   coverage.
-- [ ] `./scripts/qa/run_all.sh` passes all 12 gates.
-- [ ] Daemon restarts successfully — `status: RUNNING`.
-- [ ] Live `nc` probe in default mode does NOT auto-approve.
-- [ ] Live `nc` probe in bypassPermissions mode DOES auto-approve.
-- [ ] `get_claude_md()` returns non-None guidance documenting the gate.
+- [x] `./scripts/qa/run_all.sh` passes all 12 gates.
+- [x] Daemon restarts successfully — `status: RUNNING`.
+- [x] Live `nc` probe in default mode does NOT auto-approve.
+- [x] Live `nc` probe in bypassPermissions mode DOES auto-approve.
+- [x] `get_claude_md()` returns non-None guidance documenting the gate.
 
 ## Risks & Mitigations
 
@@ -339,3 +337,38 @@ behaviour, the supported path is `claude --dangerously-skip-permissions`.
   1 utility test file, additions to 1 existing handler test file, 1
   doc cross-reference, 1 post-upgrade-task note. No core-protocol
   changes.
+
+### 2026-05-12 — Execution + sibling-bug fix
+
+- Phase 1 (shared utility): `is_bypass_mode()` shipped in
+  `src/claude_code_hooks_daemon/utils/permission_mode.py` with 16-test
+  unit suite at 100% coverage.
+- Phase 2 (retrofit): `auto_approve_reads.matches()` now short-circuits
+  on `not is_bypass_mode(hook_input)`. 18 new gating tests parametrised
+  over 4 non-bypass modes × 3 read-only tools. `get_claude_md()`
+  documents the gate. Integration tests in
+  `tests/integration/handlers/test_user_interaction_handlers.py`
+  updated to opt positive cases into `bypassPermissions` and a new
+  negative case asserts default-mode defer.
+- Phase 3 (acceptance): `get_acceptance_tests()` now returns positive
+  (bypass mode → ALLOW) and negative (default mode → defer to user
+  prompt) cases.
+- Phase 4 (verification): full QA passes 12/13 (deptry pre-existing
+  wrapper false-positive — JSON shows passed=true). Live daemon `nc`
+  probe confirms: bypass+Read → `decision.behavior=allow`;
+  default+Read → no `decision` field emitted; default+Write → no
+  `decision` field emitted.
+- **Sibling bug discovered + fixed**: live probe revealed
+  `hello_world_permission_request` (priority 5, non-terminal) always
+  returned `Decision.ALLOW`, which the daemon formatter emitted as
+  `hookSpecificOutput.decision.behavior = "allow"` on every
+  PermissionRequest — silently auto-approving every tool call,
+  identical bug class to this plan. Fixed by switching to
+  `Decision.CONTINUE`, which the PermissionRequest formatter does not
+  treat as a binding decision. 5 new tests in
+  `tests/unit/handlers/permission_request/test_hello_world.py`
+  guard the contract (matches still universally, context still emitted,
+  decision NOT bound). Per dogfooding rule "fix immediately when you
+  encounter any bug while using the daemon's own handlers".
+- Task 5.2 dropped per user directive — no upgrade guide owed for a
+  security bug fix.

@@ -222,6 +222,12 @@ All hooks receive JSON data via stdin. Every event includes common fields plus e
 | `permission_mode` | string | Current mode: `"default"`, `"plan"`, `"acceptEdits"`, `"dontAsk"`, `"bypassPermissions"` |
 | `hook_event_name` | string | Event type name                                                                          |
 
+> **Daemon usage**: any handler that intends to auto-approve a tool call
+> MUST gate on `permission_mode == "bypassPermissions"` and defer otherwise.
+> See `utils/permission_mode.py::is_bypass_mode()` and Plan 00106 — silently
+> approving in non-bypass modes turns a normal session into YOLO behaviour
+> without user consent.
+
 ### Event-Specific Fields
 
 #### PreToolUse

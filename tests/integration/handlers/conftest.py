@@ -140,11 +140,15 @@ def make_subagent_stop_input(
 def make_permission_request_input(
     tool_name: str,
     resource: str = "",
+    permission_mode: str | None = None,
 ) -> dict[str, Any]:
     """Create a PermissionRequest hook_input using real event structure.
 
     Real PermissionRequest events use tool_name (e.g. "Read", "Write")
     and permission_suggestions array, NOT permission_type.
+
+    Pass `permission_mode="bypassPermissions"` to exercise auto-approve
+    handlers gated on YOLO mode (Plan 00106).
     """
     result: dict[str, Any] = {
         "hook_event_name": "PermissionRequest",
@@ -152,6 +156,8 @@ def make_permission_request_input(
     }
     if resource:
         result["resource"] = resource
+    if permission_mode is not None:
+        result["permission_mode"] = permission_mode
     return result
 
 

@@ -27,9 +27,18 @@ class HelloWorldPermissionRequestHandler(Handler):
         return True
 
     def handle(self, _hook_input: dict[str, Any]) -> HookResult:
-        """Return confirmation that PermissionRequest hook is active."""
+        """Return confirmation that PermissionRequest hook is active.
+
+        Uses `Decision.CONTINUE` rather than `Decision.ALLOW` so the
+        response formatter does NOT emit `hookSpecificOutput.decision`.
+        Emitting `decision.behavior = "allow"` from a non-terminal
+        observability handler silently auto-approves every PermissionRequest
+        — the same security bug class as Plan 00106 in `auto_approve_reads`.
+        Only the explicit `auto_approve_reads` handler (gated on
+        bypassPermissions mode) may bind a permission decision.
+        """
         return HookResult(
-            decision=Decision.ALLOW,
+            decision=Decision.CONTINUE,
             reason=None,
             context=["✅ PermissionRequest hook system active"],
             guidance=None,
