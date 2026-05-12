@@ -454,3 +454,43 @@ model halted instead.
 
 **Status**: not yet actioned. Captured here for the next pass on
 `auto_continue_stop` heuristics.
+
+### Incident — 2026-05-12 (Plan 00086 work, session `85d0a98e`)
+
+**Same shape as L685/L1301/L1394, with a new discriminator.** Mid-Plan 00086
+implementation, after renaming `test_handle_write_creates_plan_folder_and_returns_deny`
+→ `test_handle_write_creates_plan_folder_and_returns_allow`. Sub-agent
+`a402113c9708beaf1` (transcript-inspector) analysed lines 1657–1678 of
+session `85d0a98e-d0c4-4f3d-8b3d-c3b741a51539.jsonl`:
+
+1. **First stop (L1657–L1665)** — assistant text `"Now updating unit tests to match new ALLOW behavior:"` followed by a single `Edit`. Edit succeeded
+   with no error. Zero output on the post-tool turn.
+   `stop_hook_summary` showed `hookErrors` non-empty (the block message was
+   produced) but `preventedContinuation: False` and `level: "suggestion"` —
+   **the daemon's block message was delivered as advisory context for the
+   next user turn rather than as a hard re-entry signal.**
+2. **Second stop (L1676)** — after I resumed with `"Continuing — more tests need updating:"` and one more Edit, I stopped again silently.
+   `hookErrors: []` on this one — completely silent hook (likely
+   `stop_hook_active: true` re-entry path even though there had been no
+   genuine prior block). User then sent "DOG FOODING ALERT".
+
+**New observation not in prior incidents**:
+`preventedContinuation: False` with `level: "suggestion"` and non-empty
+`hookErrors`. The Plan 00102 fix added evidence-of-recent-block to the
+re-entry guard, but did not address the case where the hook IS firing and
+producing output yet Claude Code does not honour the block as a hard stop —
+it filters it through as a suggestion on the next user message instead.
+
+**Implication for mitigation design**: the `auto_continue_stop` handler
+needs to ensure its decision shape forces a hard block (not suggestion), and
+the test suite must verify the wire output Claude Code receives includes
+the field combination that triggers hard re-entry (likely `decision: block`
+in the hook-specific output, not just a context message).
+
+**Context at stop**: ~165k tokens (~82.5% of 200k) — back in the high band
+that the original Phase 1 census flagged. Context-pressure correlation
+holds for this incident.
+
+**Status**: captured. Mitigation work belongs in Phase 3 — promotes Task 3.x
+from "decide" to "verify hook decision shape forces hard block, not
+suggestion".

@@ -687,19 +687,19 @@ class TestPlanningModeIntegration:
         # matches() will return False because the flat file is in an allowed location
         assert handler.matches(flat_plan_write_input) is False
 
-    # ── handle() Write tool — Plan folder creation (DENY flat file) ──
+    # ── handle() Write tool — Plan folder creation (ALLOW flat file, Plan 00086) ──
 
     @patch(
         "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
     )
-    def test_handle_write_creates_plan_folder_and_returns_deny(
+    def test_handle_write_creates_plan_folder_and_returns_allow(
         self,
         mock_get_next: MagicMock,
         handler: MarkdownOrganizationHandler,
         flat_plan_write_input: dict[str, Any],
         tmp_path: Path,
     ) -> None:
-        """Handler creates numbered plan folder and returns DENY to block flat file."""
+        """Handler creates numbered plan folder and returns ALLOW so ExitPlanMode shows content."""
         handler._track_plans_in_project = "CLAUDE/Plan"
         mock_get_next.return_value = "00001"
 
@@ -708,8 +708,8 @@ class TestPlanningModeIntegration:
 
         result = handler.handle(flat_plan_write_input)
 
-        # DENY so flat file is NOT written (prevents duplicate)
-        assert result.decision == Decision.DENY
+        # ALLOW so flat file is written too — ExitPlanMode reads it to show content
+        assert result.decision == Decision.ALLOW
 
         # Numbered folder created alongside
         created_folder = plan_dir / "00001-my-awesome-plan"
@@ -778,14 +778,14 @@ class TestPlanningModeIntegration:
     @patch(
         "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
     )
-    def test_handle_write_returns_deny_with_folder_location_in_reason(
+    def test_handle_write_returns_allow_with_folder_location_in_context(
         self,
         mock_get_next: MagicMock,
         handler: MarkdownOrganizationHandler,
         flat_plan_write_input: dict[str, Any],
         tmp_path: Path,
     ) -> None:
-        """Handler returns DENY with reason containing created folder path."""
+        """Handler returns ALLOW with context describing created folder path."""
         handler._track_plans_in_project = "CLAUDE/Plan"
         mock_get_next.return_value = "00001"
 
@@ -794,10 +794,11 @@ class TestPlanningModeIntegration:
 
         result = handler.handle(flat_plan_write_input)
 
-        assert result.decision == Decision.DENY
-        assert result.reason is not None
-        assert "00001-my-awesome-plan" in result.reason
-        assert "CLAUDE/Plan/" in result.reason
+        assert result.decision == Decision.ALLOW
+        assert result.context is not None
+        context_text = "\n".join(result.context)
+        assert "00001-my-awesome-plan" in context_text
+        assert "CLAUDE/Plan/" in context_text
 
     @patch(
         "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
@@ -824,7 +825,7 @@ class TestPlanningModeIntegration:
 
         created_folder = plan_dir / "00002-my-awesome-plan-2"
         assert created_folder.exists()
-        assert result.decision == Decision.DENY
+        assert result.decision == Decision.ALLOW
 
     @patch(
         "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
@@ -1060,7 +1061,7 @@ class TestPlanningModeIntegration:
         flat_plan_write_input: dict[str, Any],
         tmp_path: Path,
     ) -> None:
-        """Handler includes workflow docs reference in deny reason when file exists."""
+        """Handler includes workflow docs reference in context when file exists."""
         handler._track_plans_in_project = "CLAUDE/Plan"
         handler._plan_workflow_docs = "CLAUDE/PlanWorkflow.md"
         mock_get_next.return_value = "00001"
@@ -1074,9 +1075,10 @@ class TestPlanningModeIntegration:
 
         result = handler.handle(flat_plan_write_input)
 
-        assert result.decision == Decision.DENY
-        assert result.reason is not None
-        assert "PlanWorkflow.md" in result.reason
+        assert result.decision == Decision.ALLOW
+        assert result.context is not None
+        context_text = "\n".join(result.context)
+        assert "PlanWorkflow.md" in context_text
 
 
 class TestMonorepoSupport:
@@ -1631,7 +1633,7 @@ class TestClaudeCodeSyncEnforcement:
     def test_handle_planning_mode_write_proceeds_when_sync_passes(
         self, handler: MarkdownOrganizationHandler, settings_dir: Path, tmp_path: Path
     ) -> None:
-        """handle_planning_mode_write creates plan folder when sync check passes."""
+        """handle_planning_mode_write creates plan folder + ALLOWs flat write when sync passes."""
         settings_file = settings_dir / "settings.json"
         settings_file.write_text('{"plansDirectory": "./CLAUDE/Plan"}', encoding="utf-8")
 
@@ -1644,18 +1646,23 @@ class TestClaudeCodeSyncEnforcement:
             "tool_input": {"file_path": plan_path, "content": "# Test Plan"},
         }
         result = handler.handle_planning_mode_write(hook_input)
-        assert result.decision == Decision.DENY
-        assert result.reason is not None
-        assert "PLAN.md" in result.reason
+        assert result.decision == Decision.ALLOW
+        assert result.context is not None
+        context_text = "\n".join(result.context)
+        assert "PLAN.md" in context_text
 
 
-class TestPlanWriteDenyBehaviour:
-    """Tests for plan write DENY behaviour (bug fix).
+class TestPlanWriteAllowBehaviour:
+    """Tests for plan write ALLOW behaviour (Plan 00086 fix).
 
-    The handler must DENY flat plan file writes after creating the numbered
-    folder — otherwise BOTH the flat file AND numbered folder are created.
-    The deny reason must include the path to the created file and instruct
-    Claude to rename the folder to something semantic.
+    The handler must ALLOW flat plan file writes (after also creating the
+    numbered folder) so ExitPlanMode can read the flat file and display the
+    full plan content to the user for approval. After approval, the agent
+    renames the numbered folder to a semantic name and deletes the flat
+    file.
+
+    The result context must include the path to the created PLAN.md and
+    instruct Claude to rename the folder after approval.
     """
 
     @pytest.fixture
@@ -1669,13 +1676,13 @@ class TestPlanWriteDenyBehaviour:
     @patch(
         "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
     )
-    def test_plan_write_returns_deny(
+    def test_plan_write_returns_allow(
         self,
         mock_get_next: MagicMock,
         handler: MarkdownOrganizationHandler,
         tmp_path: Path,
     ) -> None:
-        """Flat plan file write should be DENIED (not ALLOWED)."""
+        """Flat plan file write should be ALLOWED so ExitPlanMode sees content."""
         mock_get_next.return_value = "00091"
         plan_dir = tmp_path / "CLAUDE" / "Plan"
         plan_dir.mkdir(parents=True)
@@ -1688,18 +1695,18 @@ class TestPlanWriteDenyBehaviour:
             },
         }
         result = handler.handle(hook_input)
-        assert result.decision == Decision.DENY
+        assert result.decision == Decision.ALLOW
 
     @patch(
         "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
     )
-    def test_plan_write_deny_reason_includes_created_path(
+    def test_plan_write_context_includes_created_path(
         self,
         mock_get_next: MagicMock,
         handler: MarkdownOrganizationHandler,
         tmp_path: Path,
     ) -> None:
-        """Deny reason should include the path to the created PLAN.md."""
+        """Context should include the path to the created PLAN.md."""
         mock_get_next.return_value = "00091"
         plan_dir = tmp_path / "CLAUDE" / "Plan"
         plan_dir.mkdir(parents=True)
@@ -1712,20 +1719,21 @@ class TestPlanWriteDenyBehaviour:
             },
         }
         result = handler.handle(hook_input)
-        assert result.reason is not None
-        assert "00091-my-feature" in result.reason
-        assert "PLAN.md" in result.reason
+        assert result.context is not None
+        context_text = "\n".join(result.context)
+        assert "00091-my-feature" in context_text
+        assert "PLAN.md" in context_text
 
     @patch(
         "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
     )
-    def test_plan_write_deny_reason_instructs_rename(
+    def test_plan_write_context_instructs_post_approval_rename(
         self,
         mock_get_next: MagicMock,
         handler: MarkdownOrganizationHandler,
         tmp_path: Path,
     ) -> None:
-        """Deny reason should instruct Claude to rename the folder to something semantic."""
+        """Context should instruct rename + flat-file delete after approval."""
         mock_get_next.return_value = "00091"
         plan_dir = tmp_path / "CLAUDE" / "Plan"
         plan_dir.mkdir(parents=True)
@@ -1738,9 +1746,11 @@ class TestPlanWriteDenyBehaviour:
             },
         }
         result = handler.handle(hook_input)
-        assert result.reason is not None
-        # Must tell Claude to rename the folder to something semantic
-        assert "rename" in result.reason.lower()
+        assert result.context is not None
+        context_text = "\n".join(result.context).lower()
+        assert "rename" in context_text
+        # Plain-language guidance about removing the flat file after approval
+        assert "delete the flat file" in context_text or "rm " in context_text
 
     @patch(
         "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
@@ -1751,7 +1761,7 @@ class TestPlanWriteDenyBehaviour:
         handler: MarkdownOrganizationHandler,
         tmp_path: Path,
     ) -> None:
-        """Even though DENIED, the numbered folder and PLAN.md should be created."""
+        """The numbered folder and PLAN.md should be created alongside the ALLOW."""
         mock_get_next.return_value = "00091"
         plan_dir = tmp_path / "CLAUDE" / "Plan"
         plan_dir.mkdir(parents=True)

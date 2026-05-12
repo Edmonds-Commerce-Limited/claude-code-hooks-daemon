@@ -481,12 +481,14 @@ class MarkdownOrganizationHandler(Handler):
     def _handle_plan_write(
         self, hook_input: dict[str, Any], plan_base: Path, file_path: str
     ) -> HookResult:
-        """Handle Write tool for planning mode — create numbered folder, DENY flat file.
+        """Handle Write tool for planning mode — create numbered folder, ALLOW flat file.
 
-        Creates the numbered plan folder with PLAN.md, then returns DENY so
-        the flat file is NOT also written. The deny reason tells Claude where
-        the file was created and instructs it to rename the folder to something
-        semantic (Claude Code generates random three-word names by default).
+        Creates the numbered plan folder with PLAN.md and returns ALLOW so the
+        flat file is also written. ExitPlanMode reads the flat file to display
+        the full plan content to the user for approval — so the flat write must
+        proceed. After ExitPlanMode approval, the agent should rename the
+        numbered folder to a semantic name and delete the now-redundant flat
+        file.
 
         Args:
             hook_input: Hook input data
@@ -494,7 +496,7 @@ class MarkdownOrganizationHandler(Handler):
             file_path: Path to the flat plan file being written
 
         Returns:
-            HookResult with DENY decision and reason pointing to created file
+            HookResult with ALLOW decision and context describing the numbered folder
         """
         content = hook_input.get(HookInputField.TOOL_INPUT, {}).get("content", "")
 
@@ -513,15 +515,16 @@ class MarkdownOrganizationHandler(Handler):
         plan_relative = f"{self._track_plans_in_project}/{folder_name}/PLAN.md"
         logger.info(f"Plan folder created: {plan_relative}")
 
-        reason_parts = [
-            f"REDIRECTED: Plan written to {plan_relative}",
+        context_parts = [
+            f"Plan also saved to: {plan_relative}",
             "",
-            "Your plan content has been saved to the numbered folder above.",
-            "The flat file write was blocked to prevent duplicate files.",
+            "The flat file is allowed through so ExitPlanMode can display the",
+            "full plan content for user approval. After approval, rename the",
+            "numbered folder to a semantic name and delete the flat file:",
             "",
-            "IMPORTANT: Rename the plan folder to something semantic:",
             f"  git mv {self._track_plans_in_project}/{folder_name} "
             f"{self._track_plans_in_project}/{next_number}-<descriptive-name>",
+            f"  rm {file_path}",
             "",
             "Claude Code generates random three-word folder names by default.",
             "Replace with a short, descriptive kebab-case name for the plan.",
@@ -530,11 +533,11 @@ class MarkdownOrganizationHandler(Handler):
         if self._plan_workflow_docs:
             workflow_path = self._workspace_root / self._plan_workflow_docs
             if workflow_path.exists():
-                reason_parts.append(
-                    f"\nSee `{self._plan_workflow_docs}` for plan workflow conventions."
+                context_parts.append(
+                    f"See `{self._plan_workflow_docs}` for plan workflow conventions."
                 )
 
-        return HookResult.deny(reason="\n".join(reason_parts))
+        return HookResult(decision=Decision.ALLOW, context=context_parts)
 
     def _handle_plan_edit(
         self, hook_input: dict[str, Any], plan_base: Path, file_path: str

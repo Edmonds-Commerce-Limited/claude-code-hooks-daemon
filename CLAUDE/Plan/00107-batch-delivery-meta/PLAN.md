@@ -135,14 +135,27 @@ against corrected behaviour.
   AskUserQuestion YOLO blocker) — **Phases 1 + 2 already delivered in
   commit `eb74e4a`** (this Wave 1 task only handles Phase 3 close-out).
   Verified 30/30 tests pass for both handlers. Plan moved to `Completed/`.
-- [ ] **Task 1.2**: Execute **Plan 00106** (bypass-permissions-aware auto-approve)
-  - All 6 phases per the existing PLAN.md
-  - Lands AFTER 00089 (same handler — sequence enforces correctness)
-  - On completion: checkpoint commit, mark Complete, move to `Completed/`
-- [ ] **Task 1.3**: Execute **Plan 00086** (plan redirect system improvement)
-  - All 4 phases per existing PLAN.md
-  - Independent of 00089 / 00106 — can run in parallel via sub-agent
-  - On completion: checkpoint commit, mark Complete, move to `Completed/`
+- [x] **Task 1.2**: Execute **Plan 00106** (bypass-permissions-aware auto-approve)
+  - All 6 phases delivered in commit `e547c63`
+  - Sibling-bug fix folded in: `HelloWorldPermissionRequestHandler` was
+    silently auto-approving every PermissionRequest via `Decision.ALLOW`
+    from a non-terminal observability handler — switched to `Decision.CONTINUE`
+  - Plan moved to `Completed/`, README updated
+- [x] **Task 1.3**: Execute **Plan 00086** (plan redirect system improvement)
+  - Code: `_handle_plan_write` in `markdown_organization.py` switched from
+    `Decision.DENY` to `Decision.ALLOW` so the flat plan file goes through and
+    `ExitPlanMode` shows full plan content to the user. `plansDirectory` route
+    confirmed working empirically (Apr-10 `idempotent-chasing-wadler.md` flat
+    file at the configured directory root). Phase 2 sync-check
+    (`_check_claude_code_sync` at line 354) already in place from prior work.
+  - Tests: `TestPlanWriteDenyBehaviour` class replaced with
+    `TestPlanWriteAllowBehaviour` (4 ALLOW-asserting tests covering context
+    payload, numbered-folder creation, post-approval rename + flat-file
+    cleanup instructions); 5 sibling tests rewired from DENY→ALLOW;
+    integration test `test_handler_config_blocking.py` updated to match.
+    153/153 markdown_organization + integration tests pass; full QA 12/13
+    (deptry wrapper pre-existing false positive); daemon restart verified.
+  - Plan 00086 marked Complete, moved to `Completed/`, README index updated.
 - [ ] **Task 1.4**: Wave 1 gate — run `./scripts/qa/run_all.sh`, restart daemon,
   verify RUNNING. ABORT and FAIL-FAST cycle if any check fails.
 

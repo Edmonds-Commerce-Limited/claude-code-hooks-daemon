@@ -13,12 +13,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - **Bundle**: 00089 + 00106 + 00086 + 00063-P2 + 00096 + 00077 + 00081-P2+ + 00085 + 00101-P4 + 00102-Task5.3 + venv-review (00099/00100)
   - **Excluded**: 00032/00034/00035 (upstream-blocked, On Hold)
 
-### Bug Fixes
-
-- [00086: Plan Redirect System Improvement](00086-plan-redirect-system-improvement/PLAN.md) - Not Started
-
-  - Fixes plan approval flow using `plansDirectory` setting — 4 phases (local testing, handler update, config sync, cleanup/docs)
-
 ### Quality / Infra
 
 - [00063: FAIL FAST - Plugin Handler Bug & Error Hiding Audit](00063-fail-fast-plugin-handler-audit/PLAN.md) - In Progress
@@ -87,6 +81,15 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00086: Plan Redirect System Improvement](Completed/00086-plan-redirect-system-improvement/PLAN.md) - Complete
+
+  - **Handler fix**: `markdown_organization._handle_plan_write` now returns `Decision.ALLOW` (was `DENY`) so Claude Code's flat plan write succeeds and ExitPlanMode displays full plan content to the user for approval
+  - **Empirical verification**: `plansDirectory: "./CLAUDE/Plan"` setting in `.claude/settings.json` causes Claude Code to write plans directly to project — proved by `idempotent-chasing-wadler.md` (Apr 10) sitting at the configured directory root
+  - **Doc/impl sync**: `handle_planning_mode_write` docstring already said "Returns ALLOW" — Plan 00086 brings impl in line with the documented intent (pre-existing mismatch)
+  - **Phase 2 sync check**: `_check_claude_code_sync()` already implemented at line 354 — no action needed
+  - **Tests rewritten**: `TestPlanWriteDenyBehaviour` class replaced with `TestPlanWriteAllowBehaviour` (4 tests verifying ALLOW + context messaging for rename/cleanup after approval); integration test updated; 153/153 markdown_organization + integration tests pass
+  - Delivered in Plan 00107 Wave 1
 
 - [00106: Bypass-Permissions-Aware Auto-Approve](Completed/00106-bypass-permissions-aware-auto-approve/PLAN.md) - Complete
 
@@ -707,8 +710,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 107
-- **Completed**: 84 (1 with reduced scope)
-- **Active**: 10 (1 meta, 1 bug-fix, 2 quality/infra, 3 stop-quality, 3 long-running/review)
+- **Completed**: 85 (1 with reduced scope)
+- **Active**: 9 (1 meta, 2 quality/infra, 3 stop-quality, 3 long-running/review)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 5 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping)
 - **Last reconciled by**: Plan 00107 housekeeping pass
