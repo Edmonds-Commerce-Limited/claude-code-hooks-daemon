@@ -59,7 +59,7 @@ The active plan queue, after Phase 0 reconciliation:
 | 00081 | Pseudo-Events & Nitpick Handler                          | In Progress  | Phases 2–5 (needs 00077)                       |
 | 00085 | Reminder Pseudo-Event System with Adaptive Triggers      | In Progress  | All 8 phases (needs 00081)                     |
 | 00086 | Plan Redirect System Improvement                         | Not Started  | 4 phases                                       |
-| 00089 | Fix auto_approve_reads schema mismatch + AskUserQuestion | In Progress  | Phases 1–3 (schema fix + YOLO blocker)         |
+| 00089 | Fix auto_approve_reads schema mismatch + AskUserQuestion | Complete     | Delivered in `eb74e4a`; closed out in Wave 1   |
 | 00096 | Live Daemon Smoke Tests in QA Stack                      | Not Started  | Single phase (3 nc-based probes as QA check 9) |
 | 00099 | Python-Fingerprint Venv Isolation                        | Needs Review | Audit vs 00104 / 00105 shipped work            |
 | 00100 | Venv SSOT Consolidation                                  | Needs Review | Audit vs 00104 / 00105 shipped work            |
@@ -131,11 +131,10 @@ During the README reconciliation (Phase 0), encountered:
 Goal: ship the highest-value bug fixes first so that downstream waves run
 against corrected behaviour.
 
-- [ ] **Task 1.1**: Execute **Plan 00089** (auto_approve_reads schema fix +
-  AskUserQuestion YOLO blocker)
-  - Phase 1: PermissionRequest schema-mismatch TDD fix
-  - Phase 2: AskUserQuestion YOLO blocker handler
-  - Phase 3: checkpoint commit, mark 00089 Complete, move to `Completed/`
+- [x] **Task 1.1**: Execute **Plan 00089** (auto_approve_reads schema fix +
+  AskUserQuestion YOLO blocker) — **Phases 1 + 2 already delivered in
+  commit `eb74e4a`** (this Wave 1 task only handles Phase 3 close-out).
+  Verified 30/30 tests pass for both handlers. Plan moved to `Completed/`.
 - [ ] **Task 1.2**: Execute **Plan 00106** (bypass-permissions-aware auto-approve)
   - All 6 phases per the existing PLAN.md
   - Lands AFTER 00089 (same handler — sequence enforces correctness)

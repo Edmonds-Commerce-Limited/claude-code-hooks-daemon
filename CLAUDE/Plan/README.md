@@ -15,12 +15,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Bug Fixes
 
-- [00089: Fix auto_approve_reads Schema Mismatch + AskUserQuestion YOLO Bypass](00089-fix-auto-approve-reads-and-askuserquestion-bypass/PLAN.md) - In Progress
-
-  - **Bug 1**: `auto_approve_reads` PermissionRequest schema-field mismatch — handler currently misses real requests
-  - **Bug 2**: `AskUserQuestion` not blocked in YOLO mode → agents loop on confirmation prompts in `--dangerously-skip-permissions`
-  - **Overlaps with 00106**: both touch `auto_approve_reads`; per meta-plan 00107, 00089 lands first (schema fix), 00106 layers mode-gating on top
-
 - [00106: Bypass-Permissions-Aware Auto-Approve (security gap — silent YOLO in default mode)](00106-bypass-permissions-aware-auto-approve/PLAN.md) - Not Started (queue cleared)
 
   - **Security**: `auto_approve_reads` currently approves Read/Glob/Grep regardless of Claude Code permission mode — silently turns a non-YOLO session into YOLO behaviour without consent
@@ -100,6 +94,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00089: Fix auto_approve_reads Schema Mismatch + AskUserQuestion YOLO Bypass](Completed/00089-fix-auto-approve-reads-and-askuserquestion-bypass/PLAN.md) - Complete
+
+  - **Bug 2 fix**: `auto_approve_reads` now matches on `tool_name` (the real PermissionRequest event field), not the non-existent `permission_type`. Handler is no longer dead code.
+  - **Bug 1 fix**: new `ask_user_question_blocker` PreToolUse handler (disabled by default) blocks `AskUserQuestion` for fully unattended workflows where YOLO mode auto-dismisses with empty answers.
+  - Delivered in commit `eb74e4a`; closed out during Plan 00107 Wave 1.
 
 - [00071: Plan Number Validation Hook Bug Fixes](Completed/00071-triage-plan-race-report/PLAN.md) - Complete
 
@@ -707,8 +707,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 107
-- **Completed**: 82 (1 with reduced scope)
-- **Active**: 12 (1 meta, 3 bug-fix, 2 quality/infra, 3 stop-quality, 3 long-running/review)
+- **Completed**: 83 (1 with reduced scope)
+- **Active**: 11 (1 meta, 2 bug-fix, 2 quality/infra, 3 stop-quality, 3 long-running/review)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 5 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping)
 - **Last reconciled by**: Plan 00107 housekeeping pass
