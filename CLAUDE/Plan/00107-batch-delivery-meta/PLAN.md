@@ -199,15 +199,20 @@ Goal: harden the QA stack itself so subsequent waves have stronger detection.
 Goal: complete the chain that has been blocked for weeks because each plan
 depends on the previous one's shared utilities.
 
-- [ ] **Task 3.1**: Execute **Plan 00077 Phases 2–5** (TranscriptReader
-  enhancement + shared Stop hook utilities + refactor of duplicated
-  Stop handlers)
-- [ ] **Task 3.2**: Execute **Plan 00081 Phases 2–5** (pseudo-events
-  infrastructure + checker protocol + NitpickHandler + integration)
-  - Hard-blocked by 00077 — do NOT start until 00077 ships
+- [x] **Task 3.1**: ~~Execute Plan 00077 Phases 2–5~~ — **Already Shipped**.
+  Audit found `utils/stop_hook_helpers.py` in tree and all three Stop handlers
+  (`auto_continue_stop`, `dismissive_language_detector`,
+  `hedging_language_detector`) importing from it. `ContentBlock` + tool_use
+  parsing already in `core/transcript_reader.py`. Marked Complete (Already
+  Shipped); moved to `Completed/`.
+- [x] **Task 3.2**: ~~Execute Plan 00081 Phases 2–5~~ — **Cancelled (Superseded)**.
+  Plan 00082 ("Pseudo-Events & Nitpick Handler — Revised") is the revised
+  execution plan and is already Complete. 00081 was the research-stage
+  precursor sharing the same title and problem statement. Marked Cancelled;
+  moved to `Completed/`.
 - [ ] **Task 3.3**: Execute **Plan 00085** (reminder pseudo-event system
-  with adaptive triggers — all 8 phases)
-  - Hard-blocked by 00081 — do NOT start until 00081 ships
+  with adaptive triggers — all 8 phases). Dependency chain resolved by 3.1
+  and 3.2 above. **In progress.**
 - [ ] **Task 3.4**: Wave 3 gate — QA + daemon restart verification.
 
 ### Phase 4: Wave 4 — Venv Plan Audit (decision-first, then execute residue)

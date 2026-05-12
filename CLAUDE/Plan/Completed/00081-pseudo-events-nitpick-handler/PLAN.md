@@ -1,11 +1,16 @@
 # Plan 00081: Pseudo-Events & Nitpick Handler
 
-**Status**: In Progress (Research Complete, Implementation Next)
+**Status**: Cancelled — Superseded by Plan 00082
 **Created**: 2026-03-09
+**Closed**: Plan 00107 Wave 3 audit
 **Owner**: Claude
 **Priority**: High
 **Recommended Executor**: Opus
 **Execution Strategy**: Single-Threaded (research), Sub-Agent Orchestration (implementation)
+
+## Close-out note (Plan 00107 Wave 3)
+
+Plan 00082 ("Pseudo-Events & Nitpick Handler — Revised") supersedes this plan. Both share the same title and problem statement; 00082 is the revised execution plan and is marked Complete (2026-03-09). This research-stage plan is preserved for history and moved to `Completed/` as Cancelled.
 
 ## Problem Statement
 

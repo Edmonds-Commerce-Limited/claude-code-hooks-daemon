@@ -15,20 +15,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Stop-Quality Stack (dependency chain)
 
-- [00077: TranscriptReader Enhancement & AskUserQuestion Bug Fix](00077-transcript-reader-askuser-bugfix/PLAN.md) - In Progress
-
-  - Phase 1 done; Phases 2–5 pending — shared Stop hook utilities, refactor of duplicated Stop handlers
-  - **Unblocks**: 00081
-
-- [00081: Pseudo-Events & Nitpick Handler](00081-pseudo-events-nitpick-handler/PLAN.md) - In Progress
-
-  - Phase 1 (research) complete; Phases 2–5 pending (TranscriptReader hooks, checker protocol, NitpickHandler, integration)
-  - **Blocked by**: 00077 (shared utilities); **Unblocks**: 00085
-
 - [00085: Reminder Pseudo-Event System with Adaptive Triggers](00085-reminder-pseudo-event-system/PLAN.md) - In Progress
 
   - 8 phases — AdaptiveTrigger, config parsing, dispatcher, WorkflowReminderSetup, handler, constants/registration, config, verification
-  - **Blocked by**: 00081 pseudo-event foundation
+  - Dependency chain resolved: 00077 (Already Shipped) and 00081 (Superseded by 00082) both closed in Plan 00107 Wave 3
 
 ### Long-Running / Carry-Forward
 
@@ -80,6 +70,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Delivered in commit `bce66248` — pre-dated Plan 00107 Wave 2 audit
   - `scripts/qa/run_smoke_test.sh` (3 probes: Stop no-explanation, Stop loop-guard, PreToolUse destructive git) + `llm_qa.py` integration + `tests/unit/qa/test_smoke_test.py` all in place
   - Plan 00107 Wave 2 audit confirmed every Phase 1/2/3 task satisfied; closed out without further code action
+
+- [00077: TranscriptReader Enhancement & AskUserQuestion Bug Fix](Completed/00077-transcript-reader-askuser-bugfix/PLAN.md) - Complete (Already Shipped)
+
+  - Phase 1 (`ContentBlock` parsing + `tool_use` content blocks in `core/transcript_reader.py`) delivered in original sprint
+  - Phases 2–5 audited and found already-shipped during Plan 00107 Wave 3: `utils/stop_hook_helpers.py` exists; all three Stop handlers (`auto_continue_stop`, `dismissive_language_detector`, `hedging_language_detector`) import from the shared helpers — the duplicated `_get_last_assistant_message` / `_is_stop_hook_active` code from the plan's DRY-violation context is gone
+  - Closed out without further code action
 
 - [00086: Plan Redirect System Improvement](Completed/00086-plan-redirect-system-improvement/PLAN.md) - Complete
 
@@ -695,6 +691,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
   - Superseded by [00102](00102-hook-exec-bit-defense/PLAN.md). The new plan invokes hooks via `bash <abs-path>`, which makes the executable bit irrelevant entirely — root cause goes away. `git_filemode_checker` (originally Plan 00091 Phase 2) was folded into Plan 00102 Phase 4.
 
+- [00081: Pseudo-Events & Nitpick Handler](Completed/00081-pseudo-events-nitpick-handler/PLAN.md) - Cancelled
+
+  - Superseded by [00082](Completed/00082-pseudo-events-nitpick-handler/PLAN.md), the revised execution plan (Complete). Both plans share the same title and problem statement; this research-stage plan is preserved for history. Closed during Plan 00107 Wave 3.
+
 - [00087: Post-Clear Auto-Execute](Cancelled/00087-post-clear-auto-execute/PLAN.md) - Cancelled
 
   - Hooks cannot solve `/clear <text>` auto-execution — client-side `local-command-caveat` and no auto-submit
@@ -709,10 +709,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 107
-- **Completed**: 87 (1 with reduced scope, 2 already-shipped)
-- **Active**: 7 (1 meta, 3 stop-quality, 3 long-running/review)
+- **Completed**: 88 (1 with reduced scope, 3 already-shipped)
+- **Active**: 6 (1 meta, 1 stop-quality, 4 long-running/review)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
-- **Cancelled/Abandoned**: 5 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping)
+- **Cancelled/Abandoned**: 6 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping, 00081 - superseded by 00082)
 - **Last reconciled by**: Plan 00107 housekeeping pass
 
 ## Quick Links

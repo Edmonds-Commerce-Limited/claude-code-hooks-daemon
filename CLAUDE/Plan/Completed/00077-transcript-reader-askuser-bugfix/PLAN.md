@@ -1,5 +1,18 @@
 # Plan 00077: TranscriptReader Enhancement & AskUserQuestion Bug Fix
 
+**Status**: Complete (Already Shipped)
+**Closed**: Plan 00107 Wave 3 audit
+
+## Close-out note (Plan 00107 Wave 3)
+
+Audit found all deliverables in tree:
+
+- `src/claude_code_hooks_daemon/core/transcript_reader.py` — `ContentBlock` dataclass and tool_use parsing in place (17 references).
+- `src/claude_code_hooks_daemon/utils/stop_hook_helpers.py` — shared helper module exists.
+- `handlers/stop/auto_continue_stop.py`, `dismissive_language_detector.py`, `hedging_language_detector.py` — all three Stop handlers import from `stop_hook_helpers`, so the duplicated `_get_last_assistant_message` / `_is_stop_hook_active` code from the plan's DRY-violation context is gone.
+
+The bug fix and refactor described in this plan landed in earlier release work. No further code required.
+
 ## Context
 
 **Bug**: The `AutoContinueStopHandler` incorrectly auto-continues when Claude calls `AskUserQuestion`. The assistant message text contains confirmation-like phrasing ("Would you like to...") which matches the handler's patterns, so it blocks the Stop and tells Claude to continue — the user never sees the question.
