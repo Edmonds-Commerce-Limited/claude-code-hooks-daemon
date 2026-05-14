@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.13.1] - 2026-05-14
+
+This is a **patch release** that ships seven bug fixes: three field-reported "niggles" (boot-race false alarm, health-check handler count, CWD-relative log paths), Plan 00101 Phases 9 + 10 (Stop hook hard-block + asyncio readline buffer), and the plan-folder close-out reconciliation. No new features, no breaking changes. All seven commits are bug fixes against v3.13.0.
+
+### Fixed
+
+- **SessionStart `daemon_startup_failed` boot race (`init.sh::start_daemon`)** — Three-prong fix for the false-alarm "daemon failed to start" message that fired even when the daemon was up within ~1s: (1) `DAEMON_STARTUP_TIMEOUT` raised from 50 to 150 deciseconds (5s → 15s), matching the python-side `Timeout.DAEMON_RESTART_VERIFY_TIMEOUT_SEC` that Plan 00100 Task 0.2 already aligned for `daemon_control.sh::restart_daemon_verified`. (2) Polling loop now combines `is_daemon_running` AND socket-file existence so a transient socket from `enforce_single_daemon` doesn't trigger a false-positive readiness signal. (3) Final retry probe after the loop closes the boundary race where the daemon binds on the same tick `elapsed < TIMEOUT` flips false. (4) Removed the destructive `rm -f "$PID_PATH"` on timeout that was killing the genuinely-coming-up daemon's PID slot. New regression test `tests/integration/test_init_sh_start_daemon_boot_race.py` (4 static-analysis checks, RED before fix, GREEN after).
+- **`health-check.sh` reports correct handler count (niggles Issue 2)** — `health-check.sh:186` scraped the human-formatted output of `daemon.cli handlers` with `grep "^  -"` expecting a leading dash; the actual display format is `"  [T] 10 name"` / `"  [-] 23 name"` where the dash is bracketed and never appears at the literal start of the line. The grep matched zero lines and the silent `|| echo "0"` fallback returned `0` for every install since the bracketed-flag column was added. Fix: expose a machine-readable count via `daemon.cli handlers --count` so the shell script never has to scrape display format. Dropped the silent fallback — if the count query fails, the script now prints a visible failure rather than masking it as 0 (same antipattern that caused the v3.9.0 field bug).
+- **Logger and cleanup handlers resolve untracked path via `ProjectContext` (niggles Issue 3)** — Three handlers (`notification_logger`, `subagent_completion_logger`, `cleanup_handler`) wrote/read a CWD-relative `untracked/...` path. When the daemon's CWD is `/` (typical for a daemonized process), `untracked` resolved to `/untracked` → `Permission denied`, and notification logs and subagent completion logs were silently dropped; `CleanupHandler` silently no-op'd because the target dir never existed at that path. Fix: every log/temp path now resolves against `ProjectContext.daemon_untracked_dir()` so they land in the project's untracked dir regardless of process CWD. `test_cleanup_handler.py` rewritten to use real filesystem operations instead of brittle `Path` mocking.
+- **Stop hook hard-block via exit-code-2 wrapper contract (Plan 00101 Phase 9)** — Claude Code v2.1.114 silently downgrades JSON-stdout `{"decision":"block"}` for Stop/SubagentStop events to suggestion-level (`level: suggestion`, `preventedContinuation: false`); the documented alternative per `CLAUDE/Code/HooksSystem.md` is exit code 2 + stderr explanation, which the daemon Python process cannot emit directly because the wrapper subprocess controls the exit code. Solution: bash wrapper `forward_stop_event` shared helper in `init.sh` (DRY across Stop + SubagentStop) detects `{"decision":"block","reason":"..."}` in the daemon response and re-emits the reason to stderr with exit 2. Installer regenerates wrappers via `_STOP_EVENT_NAMES` branch in `create_forwarder_script`. Daemon JSON output unchanged (back-compat). Three new acceptance tests in `tests/acceptance/test_stop_hook_hard_block.py` wired into RELEASING.md Step 12.0 H-1.
+- **asyncio readline buffer lifted to 16 MiB (Plan 00101 Phase 10)** — Root cause of the dogfooded `LimitOverrunError("Separator is found, but chunk is longer than limit")` PostToolUse output: `asyncio.start_unix_server` defaulted the `StreamReader` buffer to 64 KiB. A single PostToolUse `Edit` on this repo's own `cli.py` (102,927 bytes; `old_string + new_string` roughly doubles that) sends a JSON request well above that ceiling, `readline()` raises `LimitOverrunError`, the bare except in `_handle_client` returns `{"error": "Separator is found..."}` as the daemon response — and the PostToolUse advisory context the model would have seen is silently dropped. Fix: new `SocketLimit.REQUEST_BUFFER_BYTES = 16 MiB` constant in `constants/protocol.py` passed as the `limit=` kwarg to `asyncio.start_unix_server`. RED test in `tests/daemon/test_server.py` reproduces the exact `LimitOverrunError` from `asyncio/streams.py:640` with a 200 KiB request payload and asserts the daemon responds normally instead of returning `{"error": ...}`.
+
+### Changed
+
+- **`daemon.cli handlers --count` machine-readable output** — New flag on the existing `handlers` subcommand prints only the loaded-handler count as a single line, used by `health-check.sh` so it never has to scrape display-formatted output. Two new tests in `TestCmdHandlers` (`test_handlers_count_flag`, `test_handlers_count_flag_zero_when_no_handlers`).
+- **Plan 00101 closed (Phases 9 + 10 delivered post-v3.13.0)** — Plan moved to `CLAUDE/Plan/Completed/`. `CLAUDE/Plan/README.md` index updated — Active Plans count 4 → 3, Completed Plans count 90 → 91. Plan close-out section appended documenting both phase deliverables (commits `f08a2ff`, `4c2688f`) and the release vehicle decision.
+
+### Added
+
+- None.
+
+### Removed
+
+- None.
+
+### Security
+
+- None.
+
 ## [3.13.0] - 2026-05-12
 
 This is a **minor release** that extends the status line's `GitBranchHandler` with magicmonty-style status icons. The git branch element now displays repository state at a glance — ahead/behind counts, staged/unstaged change counts, untracked files, merge conflicts, and stash count — using the same iconography popularised by [magicmonty/bash-git-prompt](https://github.com/magicmonty/bash-git-prompt).
@@ -14,6 +43,7 @@ This is a **minor release** that extends the status line's `GitBranchHandler` wi
 ### Added
 
 - **Magicmonty-style git status icons in the status line (`GitBranchHandler`)**: The status line's git element now renders status icons after the branch name, parsed from `git status --porcelain=v2 --branch` plus a `git stash list` count. Each icon appears only when its count is non-zero, so a clean repo still shows just the branch. Icons rendered in canonical order:
+
   - `↑N` ahead of upstream (green)
   - `↓N` behind upstream (red)
   - `●N` staged changes (green)
@@ -55,8 +85,6 @@ This is a **patch release** that closes out Plan 00101 (recap-stoppage / silent-
 
 - **`RELEASING.md` Step 12.0 — H-1 gate extended to 19 combined tests (Plan 00101 Phase 7)**: H-1 acceptance suite now runs `test_diagnostic_scripts.py` (15) + `test_install_sh_end_to_end.py` (2) + `test_tool_use_error_recovery.py` (2) = 19 passed. ANY failure in any file = abort release. Documents the v3.12.0 silent-stop recurrence and the gate that prevents it returning.
 - **Plan 00101 closed (Phases 5/6/7/8 delivered post-v3.12.0)**: Plan moved to `CLAUDE/Plan/Completed/`. `CLAUDE/Plan/README.md` index updated — Active Plans count 4 → 3, Completed Plans count 90 → 91. Plan close-out section appended documenting all three phase deliverables, QA results (12/13 green), and the release vehicle decision.
-
-
 
 This is a **batch-delivery release** that closes out the Plan 00107 meta-plan — a six-wave audit-and-close of the backlog accumulated across the v3.x stability cycle. Most of the bundled plans were already shipped in prior releases or superseded by other work; their PLAN.md status records have been reconciled in this release. Two source-code changes ship in this release: a security-tightening fix to `auto_approve_reads` and a behaviour fix to `markdown_organization`'s plan-redirect path.
 
@@ -105,8 +133,6 @@ This is a **batch-delivery release** that closes out the Plan 00107 meta-plan �
 ### Added
 
 - **Regression test `tests/integration/test_install_output_stream_separation.py`**: Eight focused tests that exercise the exact `VAR=$(fn)` capture pattern that v3.10.0 broke. Asserts every progress helper writes to stderr only, and that a function calling helpers before its `echo` produces an uncorrupted capture. Would have caught the v3.10.0 regression at QA time.
-
-
 
 ### Added
 
