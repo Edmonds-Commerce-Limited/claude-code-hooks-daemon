@@ -893,6 +893,13 @@ def cmd_handlers(args: argparse.Namespace) -> int:
     result = response.get("result", {})
     handlers = result.get("handlers", {})
 
+    # Machine-readable count for shell consumers (e.g. health-check.sh) so they
+    # never have to scrape the human-formatted handler list.
+    if getattr(args, "count", False):
+        total = sum(len(handler_list) for handler_list in handlers.values())
+        print(total)
+        return 0
+
     if args.json:
         print(json.dumps(handlers, indent=2))
         return 0
@@ -2726,6 +2733,11 @@ def main() -> int:
         "--json",
         action="store_true",
         help="Output as JSON",
+    )
+    parser_handlers.add_argument(
+        "--count",
+        action="store_true",
+        help="Print only the total number of registered handlers (machine-readable)",
     )
     parser_handlers.set_defaults(func=cmd_handlers)
 

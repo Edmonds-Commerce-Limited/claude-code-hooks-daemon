@@ -182,9 +182,16 @@ echo "════════════════════════�
 echo "HANDLERS"
 echo "═══════════════════════════════════════"
 
-# Count handlers
-HANDLER_COUNT=$("$PYTHON" -m claude_code_hooks_daemon.daemon.cli handlers 2>/dev/null | grep -c "^  -" || echo "0")
-echo "✓ Loaded handlers: $HANDLER_COUNT"
+# Count handlers via the daemon's own machine-readable count flag (Plan 00101
+# niggles report Issue 2): scraping the human-formatted handler list with grep
+# was fragile and broke silently when the display format added a [T]/[-] column.
+HANDLER_COUNT=$("$PYTHON" -m claude_code_hooks_daemon.daemon.cli handlers --count)
+HANDLER_COUNT_RC=$?
+if [ $HANDLER_COUNT_RC -ne 0 ] || [ -z "$HANDLER_COUNT" ]; then
+    echo "✗ Failed to query handler count (exit=$HANDLER_COUNT_RC)"
+else
+    echo "✓ Loaded handlers: $HANDLER_COUNT"
+fi
 
 echo ""
 echo "═══════════════════════════════════════"

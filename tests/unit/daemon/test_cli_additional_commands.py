@@ -610,6 +610,81 @@ class TestCmdHandlers:
             result = cmd_handlers(args)
             assert result == 1
 
+    def test_handlers_count_flag(self, tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+        """cmd_handlers --count prints only the total handler count (machine-readable).
+
+        Regression test for health-check.sh's reliance on scraping human-formatted
+        output (Issue 2 in untracked/hooks-daemon-niggles.md): the script grepped
+        for '^  -' and broke when the display format changed. The fix is a
+        machine-readable count flag.
+        """
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        hooks_daemon_dir = claude_dir / "hooks-daemon"
+        hooks_daemon_dir.mkdir()
+
+        config_file = claude_dir / "hooks-daemon.yaml"
+        config_file.write_text("version: '1.0'\n")
+
+        args = argparse.Namespace(project_root=tmp_path, json=False, count=True)
+
+        mock_response = {
+            "result": {
+                "handlers": {
+                    "pre_tool_use": [
+                        {"name": "h1", "priority": 10, "terminal": True},
+                        {"name": "h2", "priority": 20, "terminal": False},
+                    ],
+                    "post_tool_use": [
+                        {"name": "h3", "priority": 30, "terminal": True},
+                    ],
+                    "session_start": [],
+                }
+            }
+        }
+
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=12345),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.send_daemon_request",
+                return_value=mock_response,
+            ),
+        ):
+            result = cmd_handlers(args)
+
+        captured = capsys.readouterr()
+        assert result == 0
+        assert captured.out.strip() == "3"
+
+    def test_handlers_count_flag_zero_when_no_handlers(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture
+    ) -> None:
+        """cmd_handlers --count prints 0 when no handlers are registered."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        hooks_daemon_dir = claude_dir / "hooks-daemon"
+        hooks_daemon_dir.mkdir()
+
+        config_file = claude_dir / "hooks-daemon.yaml"
+        config_file.write_text("version: '1.0'\n")
+
+        args = argparse.Namespace(project_root=tmp_path, json=False, count=True)
+
+        mock_response: dict[str, Any] = {"result": {"handlers": {}}}
+
+        with (
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=12345),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.send_daemon_request",
+                return_value=mock_response,
+            ),
+        ):
+            result = cmd_handlers(args)
+
+        captured = capsys.readouterr()
+        assert result == 0
+        assert captured.out.strip() == "0"
+
 
 class TestCmdLogsFollow:
     """Tests for cmd_logs follow mode (lines 448-475)."""
