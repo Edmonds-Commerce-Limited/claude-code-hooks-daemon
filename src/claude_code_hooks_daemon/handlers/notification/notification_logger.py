@@ -3,13 +3,13 @@
 import json
 import logging
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 
 
 class NotificationLoggerHandler(Handler):
@@ -49,8 +49,9 @@ class NotificationLoggerHandler(Handler):
             HookResult with allow decision (silent logging)
         """
         try:
-            # Create log directory
-            log_dir = Path("untracked/logs/hooks")
+            # Resolve under daemon's untracked dir so logs land in the project
+            # regardless of process CWD (regression fix: Issue 3).
+            log_dir = ProjectContext.daemon_untracked_dir() / "logs" / "hooks"
             log_dir.mkdir(parents=True, exist_ok=True)
 
             # Build log entry

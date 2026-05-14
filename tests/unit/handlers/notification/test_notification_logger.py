@@ -1,6 +1,7 @@
 """Comprehensive tests for NotificationLoggerHandler."""
 
 import json
+from pathlib import Path
 from unittest.mock import mock_open, patch
 
 import pytest
@@ -13,6 +14,15 @@ from claude_code_hooks_daemon.handlers.notification.notification_logger import (
 
 class TestNotificationLoggerHandler:
     """Test suite for NotificationLoggerHandler."""
+
+    @pytest.fixture(autouse=True)
+    def mock_project_context(self, tmp_path: Path):
+        """Patch ProjectContext.daemon_untracked_dir so handler can resolve log path."""
+        with patch(
+            "claude_code_hooks_daemon.handlers.notification.notification_logger.ProjectContext.daemon_untracked_dir",
+            return_value=tmp_path,
+        ):
+            yield
 
     @pytest.fixture
     def handler(self):
@@ -173,3 +183,18 @@ class TestNotificationLoggerHandler:
 
         assert log_entry["timestamp"] == "2024-01-20T10:30:00"
         assert result.decision == "allow"
+
+    # Path resolution tests (regression: Issue 3 — relative path → Permission denied
+    # when daemon CWD is /). Logs must be written under
+    # ProjectContext.daemon_untracked_dir(), not a CWD-relative path.
+    def test_handle_writes_under_project_untracked_dir(
+        self, handler, mock_datetime, tmp_path: Path
+    ):
+        """Log file must resolve under ProjectContext.daemon_untracked_dir()."""
+        hook_input = {"message": "Test"}
+        handler.handle(hook_input)
+
+        log_file = tmp_path / "logs" / "hooks" / "notifications.jsonl"
+        assert log_file.exists()
+        entry = json.loads(log_file.read_text().strip())
+        assert entry["message"] == "Test"

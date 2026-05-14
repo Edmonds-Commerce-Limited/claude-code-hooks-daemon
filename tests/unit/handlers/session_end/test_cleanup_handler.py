@@ -1,7 +1,7 @@
 """Comprehensive tests for CleanupHandler."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -11,6 +11,15 @@ from claude_code_hooks_daemon.handlers.session_end.cleanup_handler import Cleanu
 
 class TestCleanupHandler:
     """Test suite for CleanupHandler."""
+
+    @pytest.fixture(autouse=True)
+    def mock_project_context(self, tmp_path: Path):
+        """Patch ProjectContext.daemon_untracked_dir so handler resolves into tmp_path."""
+        with patch(
+            "claude_code_hooks_daemon.handlers.session_end.cleanup_handler.ProjectContext.daemon_untracked_dir",
+            return_value=tmp_path,
+        ):
+            yield
 
     @pytest.fixture
     def handler(self):
@@ -34,130 +43,76 @@ class TestCleanupHandler:
         hook_input = {"reason": "user_exit"}
         assert handler.matches(hook_input) is True
 
-    @patch("claude_code_hooks_daemon.handlers.session_end.cleanup_handler.Path")
-    def test_handle_cleans_temp_directory(self, mock_path, handler):
-        """Should attempt to clean temp directory."""
-        mock_temp_dir = MagicMock()
-        mock_path.return_value = mock_temp_dir
-        mock_temp_dir.exists.return_value = True
-        mock_temp_dir.is_dir.return_value = True
+    def test_handle_cleans_temp_directory(self, handler, tmp_path: Path):
+        """Should delete files in untracked/temp/hooks/."""
+        temp_dir = tmp_path / "temp" / "hooks"
+        temp_dir.mkdir(parents=True)
+        (temp_dir / "file1.txt").write_text("a")
+        (temp_dir / "file2.txt").write_text("b")
 
-        # Mock temp files
-        mock_file1 = MagicMock(spec=Path)
-        mock_file1.is_file.return_value = True
-        mock_file2 = MagicMock(spec=Path)
-        mock_file2.is_file.return_value = True
+        handler.handle({})
 
-        mock_temp_dir.glob.return_value = [mock_file1, mock_file2]
+        assert not (temp_dir / "file1.txt").exists()
+        assert not (temp_dir / "file2.txt").exists()
 
-        hook_input = {}
-        handler.handle(hook_input)
-
-        # Should attempt to delete files
-        mock_file1.unlink.assert_called_once()
-        mock_file2.unlink.assert_called_once()
-
-    @patch("claude_code_hooks_daemon.handlers.session_end.cleanup_handler.Path")
-    def test_handle_temp_dir_not_exists(self, mock_path, handler):
+    def test_handle_temp_dir_not_exists(self, handler, tmp_path: Path):
         """Should handle gracefully when temp dir doesn't exist."""
-        mock_temp_dir = MagicMock()
-        mock_path.return_value = mock_temp_dir
-        mock_temp_dir.exists.return_value = False
-
-        hook_input = {}
-        result = handler.handle(hook_input)
-
+        # No temp/hooks created under tmp_path.
+        result = handler.handle({})
         assert result.decision == "allow"
-        # Should not call glob if dir doesn't exist
-        mock_temp_dir.glob.assert_not_called()
 
-    @patch("claude_code_hooks_daemon.handlers.session_end.cleanup_handler.Path")
-    def test_handle_returns_allow_decision(self, mock_path, handler):
+    def test_handle_returns_allow_decision(self, handler):
         """Should return allow decision."""
-        mock_temp_dir = MagicMock()
-        mock_path.return_value = mock_temp_dir
-        mock_temp_dir.exists.return_value = False
-
-        hook_input = {}
-        result = handler.handle(hook_input)
-
+        result = handler.handle({})
         assert result.decision == "allow"
 
-    @patch("claude_code_hooks_daemon.handlers.session_end.cleanup_handler.Path")
-    def test_handle_gracefully_handles_deletion_errors(self, mock_path, handler):
+    def test_handle_gracefully_handles_deletion_errors(self, handler, tmp_path: Path):
         """Should handle file deletion errors gracefully."""
-        mock_temp_dir = MagicMock()
-        mock_path.return_value = mock_temp_dir
-        mock_temp_dir.exists.return_value = True
-        mock_temp_dir.is_dir.return_value = True
+        temp_dir = tmp_path / "temp" / "hooks"
+        temp_dir.mkdir(parents=True)
+        target = temp_dir / "stuck.txt"
+        target.write_text("x")
 
-        mock_file = MagicMock(spec=Path)
-        mock_file.is_file.return_value = True
-        mock_file.unlink.side_effect = OSError("Permission denied")
+        with patch.object(Path, "unlink", side_effect=OSError("Permission denied")):
+            result = handler.handle({})
 
-        mock_temp_dir.glob.return_value = [mock_file]
-
-        hook_input = {}
-        result = handler.handle(hook_input)
-
-        # Should not raise exception
         assert result.decision == "allow"
 
-    @patch("claude_code_hooks_daemon.handlers.session_end.cleanup_handler.Path")
-    def test_handle_skips_non_files(self, mock_path, handler):
+    def test_handle_skips_non_files(self, handler, tmp_path: Path):
         """Should skip directories and only delete files."""
-        mock_temp_dir = MagicMock()
-        mock_path.return_value = mock_temp_dir
-        mock_temp_dir.exists.return_value = True
-        mock_temp_dir.is_dir.return_value = True
+        temp_dir = tmp_path / "temp" / "hooks"
+        temp_dir.mkdir(parents=True)
+        (temp_dir / "real_file.txt").write_text("a")
+        (temp_dir / "subdir").mkdir()
 
-        mock_file = MagicMock(spec=Path)
-        mock_file.is_file.return_value = True
+        handler.handle({})
 
-        mock_dir = MagicMock(spec=Path)
-        mock_dir.is_file.return_value = False
+        assert not (temp_dir / "real_file.txt").exists()
+        assert (temp_dir / "subdir").is_dir()
 
-        mock_temp_dir.glob.return_value = [mock_file, mock_dir]
-
-        hook_input = {}
-        handler.handle(hook_input)
-
-        # Should delete file but not directory
-        mock_file.unlink.assert_called_once()
-        mock_dir.unlink.assert_not_called()
-
-    @patch("claude_code_hooks_daemon.handlers.session_end.cleanup_handler.Path")
-    def test_handle_returns_hook_result_instance(self, mock_path, handler):
+    def test_handle_returns_hook_result_instance(self, handler):
         """Should return HookResult instance."""
-        mock_temp_dir = MagicMock()
-        mock_path.return_value = mock_temp_dir
-        mock_temp_dir.exists.return_value = False
-
-        hook_input = {}
-        result = handler.handle(hook_input)
-
+        result = handler.handle({})
         assert isinstance(result, HookResult)
 
-    @patch("claude_code_hooks_daemon.handlers.session_end.cleanup_handler.Path")
-    def test_handle_has_no_context(self, mock_path, handler):
+    def test_handle_has_no_context(self, handler):
         """Should not provide context."""
-        mock_temp_dir = MagicMock()
-        mock_path.return_value = mock_temp_dir
-        mock_temp_dir.exists.return_value = False
-
-        hook_input = {}
-        result = handler.handle(hook_input)
-
+        result = handler.handle({})
         assert result.context == []
 
-    @patch(
-        "claude_code_hooks_daemon.handlers.session_end.cleanup_handler.Path",
-        side_effect=OSError("Path error"),
-    )
-    def test_handle_gracefully_handles_path_errors(self, mock_path, handler):
-        """Should handle Path() construction errors gracefully."""
-        hook_input = {}
-        result = handler.handle(hook_input)
+    # Path resolution test (regression: Issue 3 — relative path → never finds
+    # temp dir when daemon CWD is /). Temp dir must be resolved under
+    # ProjectContext.daemon_untracked_dir(), not a CWD-relative path.
+    def test_handle_resolves_temp_dir_under_project_untracked_dir(
+        self, handler, tmp_path: Path
+    ):
+        """Cleanup must operate on temp dir under daemon_untracked_dir()."""
+        temp_dir = tmp_path / "temp" / "hooks"
+        temp_dir.mkdir(parents=True)
+        stale_file = temp_dir / "stale.txt"
+        stale_file.write_text("delete me")
 
-        # Should not raise exception
+        result = handler.handle({})
+
         assert result.decision == "allow"
+        assert not stale_file.exists(), "Stale file should have been cleaned up"

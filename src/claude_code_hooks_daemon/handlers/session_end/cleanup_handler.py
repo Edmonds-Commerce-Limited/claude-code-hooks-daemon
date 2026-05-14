@@ -2,13 +2,13 @@
 
 import contextlib
 import logging
-from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 
 
 class CleanupHandler(Handler):
@@ -48,7 +48,9 @@ class CleanupHandler(Handler):
             HookResult with allow decision (silent cleanup)
         """
         try:
-            temp_dir = Path("untracked/temp/hooks")
+            # Resolve under daemon's untracked dir so cleanup operates on the
+            # project's temp dir regardless of process CWD (regression fix: Issue 3).
+            temp_dir = ProjectContext.daemon_untracked_dir() / "temp" / "hooks"
 
             # Only proceed if temp directory exists
             if not temp_dir.exists() or not temp_dir.is_dir():

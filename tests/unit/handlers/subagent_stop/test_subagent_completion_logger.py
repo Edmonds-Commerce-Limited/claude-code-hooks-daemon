@@ -1,5 +1,7 @@
 """Comprehensive tests for SubagentCompletionLoggerHandler."""
 
+import json
+from pathlib import Path
 from unittest.mock import mock_open, patch
 
 import pytest
@@ -12,6 +14,15 @@ from claude_code_hooks_daemon.handlers.subagent_stop.subagent_completion_logger 
 
 class TestSubagentCompletionLoggerHandler:
     """Test suite for SubagentCompletionLoggerHandler."""
+
+    @pytest.fixture(autouse=True)
+    def mock_project_context(self, tmp_path: Path):
+        """Patch ProjectContext.daemon_untracked_dir so handler can resolve log path."""
+        with patch(
+            "claude_code_hooks_daemon.handlers.subagent_stop.subagent_completion_logger.ProjectContext.daemon_untracked_dir",
+            return_value=tmp_path,
+        ):
+            yield
 
     @pytest.fixture
     def handler(self):
@@ -94,3 +105,18 @@ class TestSubagentCompletionLoggerHandler:
         hook_input = {"subagent_name": "test"}
         result = handler.handle(hook_input)
         assert isinstance(result, HookResult)
+
+    # Path resolution tests (regression: Issue 3 — relative path → Permission denied
+    # when daemon CWD is /). Logs must be written under
+    # ProjectContext.daemon_untracked_dir(), not a CWD-relative path.
+    def test_handle_writes_under_project_untracked_dir(
+        self, handler, mock_datetime, tmp_path: Path
+    ):
+        """Log file must resolve under ProjectContext.daemon_untracked_dir()."""
+        hook_input = {"subagent_name": "test-agent", "result": "success"}
+        handler.handle(hook_input)
+
+        log_file = tmp_path / "logs" / "hooks" / "subagent_completions.jsonl"
+        assert log_file.exists()
+        entry = json.loads(log_file.read_text().strip())
+        assert entry["subagent_name"] == "test-agent"
