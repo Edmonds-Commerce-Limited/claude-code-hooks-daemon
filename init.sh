@@ -414,8 +414,17 @@ if [[ -z "${CLAUDE_HOOKS_SOCKET_PATH:-}" ]] && [[ ! -S "$SOCKET_PATH" ]]; then
     fi
 fi
 
-# Daemon startup timeout (deciseconds - 1/10th second units)
-DAEMON_STARTUP_TIMEOUT=50
+# Daemon startup timeout (deciseconds - 1/10th second units).
+#
+# 15 seconds matches Timeout.DAEMON_RESTART_VERIFY_TIMEOUT_SEC, the
+# python-side ceiling used by scripts/install/daemon_control.sh::
+# restart_daemon_verified (Plan 00100 Task 0.2). Cold-start Python
+# with 50+ handler imports + config load + asyncio bind can take 5-10s
+# on slow disks (containers, cold caches). The pre-Issue-1 ceiling of
+# 50 deciseconds (5s) produced false `daemon_startup_failed` reports
+# while the daemon was still binding — see Issue 1 in
+# untracked/hooks-daemon-niggles.md (2026-05-14 field report).
+DAEMON_STARTUP_TIMEOUT=150
 
 # Daemon startup check interval (deciseconds)
 DAEMON_STARTUP_CHECK_INTERVAL=1
@@ -544,11 +553,17 @@ start_daemon() {
         --project-root "$PROJECT_PATH" start \
         > /dev/null 2>&1
 
-    # Wait for socket to be ready (using deciseconds for integer arithmetic)
+    # Wait for daemon to be ready (using deciseconds for integer arithmetic).
+    #
+    # Issue 1 (untracked/hooks-daemon-niggles.md, 2026-05-14): the legacy
+    # check polled socket existence alone. enforce_single_daemon_process can
+    # leave a transient socket file on disk during a kill+respawn cycle, so
+    # the socket file alone is not a reliable readiness signal. Combine with
+    # is_daemon_running (PID alive) to guarantee the daemon we spawned is
+    # the one we see.
     local elapsed=0
     while [[ $elapsed -lt $DAEMON_STARTUP_TIMEOUT ]]; do
-        if [[ -S "$SOCKET_PATH" ]]; then
-            # Socket exists, daemon is ready
+        if is_daemon_running && [[ -S "$SOCKET_PATH" ]]; then
             return 0
         fi
 
@@ -557,9 +572,17 @@ start_daemon() {
         elapsed=$((elapsed + DAEMON_STARTUP_CHECK_INTERVAL))
     done
 
-    # Timeout - daemon failed to create socket
-    echo "ERROR: Daemon startup timeout (socket not created)" >&2
-    rm -f "$PID_PATH"
+    # Final retry: the daemon may have bound the socket on the very tick
+    # the loop's `elapsed < TIMEOUT` check went false. One more probe
+    # before declaring failure closes the boundary race.
+    if is_daemon_running && [[ -S "$SOCKET_PATH" ]]; then
+        return 0
+    fi
+
+    # Genuine timeout. NOTE: do NOT unlink PID_PATH — if the daemon is still
+    # coming up, the PID slot belongs to it. is_daemon_running() cleans
+    # stale PID files on next call when the process is actually dead.
+    echo "ERROR: Daemon startup timeout (daemon not ready after ${DAEMON_STARTUP_TIMEOUT}/10 seconds)" >&2
     return 1
 }
 
