@@ -907,6 +907,61 @@ class TestHooksDaemon:
         await daemon.shutdown()
         await server_task
 
+    @pytest.mark.anyio
+    async def test_daemon_handles_request_larger_than_asyncio_default_limit(
+        self, daemon_config: DaemonConfig, front_controller: FrontController
+    ) -> None:
+        """Plan 00101 Phase 10: daemon must accept requests larger than asyncio's 64KiB default.
+
+        Root cause of the dogfooded "Separator is found, but chunk is longer than
+        limit" PostToolUse error: ``asyncio.start_unix_server`` defaults the
+        StreamReader buffer to 64KiB. A PostToolUse Edit on this repo's own
+        ``cli.py`` (~102KB) sends a request JSON larger than the limit, so
+        ``await reader.readline()`` raises ``LimitOverrunError``, the bare
+        except returns ``{"error":"Separator is found..."}`` to the hook, and
+        the PostToolUse advisory context is silently dropped — a recurring
+        contributor to the silent-stop pattern this repo dogfoods.
+
+        Fix: pass an explicit, large ``limit=`` to ``start_unix_server``.
+        """
+        daemon = HooksDaemon(config=daemon_config, controller=front_controller)
+        server_task = asyncio.create_task(daemon.start())
+        await asyncio.sleep(0.1)
+
+        reader, writer = await asyncio.open_unix_connection(str(daemon_config.socket_path))
+
+        # 200KB payload — well above asyncio's 64KiB default, comfortably
+        # above realistic Edit hook payloads on this repo's largest module.
+        large_payload_size = 200 * 1024
+        request = {
+            "event": "PreToolUse",
+            "hook_input": {
+                "tool_name": "Bash",
+                "tool_input": {"command": "x" * large_payload_size},
+            },
+            "request_id": "large-payload-001",
+        }
+
+        writer.write((json.dumps(request) + "\n").encode())
+        await writer.drain()
+
+        # The response is small — the test client's own reader uses asyncio's
+        # default limit which is fine for the response side.
+        response_data = await reader.readline()
+        response = json.loads(response_data.decode())
+
+        # Before the fix: response is {"error": "Separator is found, but chunk is longer than limit"}.
+        # After the fix: response is the normal handler response with the request_id echoed.
+        assert (
+            "error" not in response
+        ), f"Daemon rejected large request — buffer-limit regression: {response}"
+        assert response.get("request_id") == "large-payload-001"
+
+        writer.close()
+        await writer.wait_closed()
+        await daemon.shutdown()
+        await server_task
+
 
 class TestHooksDaemonSystemRequests:
     """Test suite for _system event handling in HooksDaemon."""

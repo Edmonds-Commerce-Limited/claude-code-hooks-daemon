@@ -136,4 +136,27 @@ class PermissionDecision:
     MODIFY = "modify"
 
 
-__all__ = ["HookInputField", "HookOutputField", "PermissionDecision"]
+class SocketLimit:
+    """Unix-socket wire-protocol size limits.
+
+    The daemon's request channel is newline-delimited JSON read with
+    ``asyncio.StreamReader.readline()``. asyncio's default StreamReader buffer
+    limit is 64KiB; a single PostToolUse Edit on this repo's own ``cli.py``
+    (~102KB source × 2 for old_string+new_string) blows past that and
+    ``readline()`` raises ``LimitOverrunError`` ("Separator is found, but
+    chunk is longer than limit"). The bare ``except Exception`` in
+    ``_handle_client`` then returns ``{"error": ...}`` and the hook's advisory
+    context is silently dropped — a recurring contributor to the silent-stop
+    pattern dogfooded in this repo (Plan 00101 Phase 10).
+
+    16MiB is comfortably above any realistic hook payload (full-file Edits,
+    massive transcript_path snippets) while still bounding memory use per
+    connection. If a real workload ever needs more, raise this constant —
+    do NOT switch back to chunked reads, because the newline-delimited
+    protocol relies on ``readline()`` framing.
+    """
+
+    REQUEST_BUFFER_BYTES = 16 * 1024 * 1024  # 16 MiB
+
+
+__all__ = ["HookInputField", "HookOutputField", "PermissionDecision", "SocketLimit"]

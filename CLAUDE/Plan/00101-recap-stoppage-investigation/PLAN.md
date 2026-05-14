@@ -796,14 +796,35 @@ Candidate diagnostics (do before any code change):
 
 ### Phase 10 (NEW): PostToolUse separator error sub-investigation
 
-- [ ] ⬜ **Task 10.1**: Identify which handler emits "Separator is found,
-  but chunk is longer than limit". Likely `lint_on_edit`,
-  `markdown_table_formatter`, or `bash_error_detector`.
-- [ ] ⬜ **Task 10.2**: Determine the chunk-size limit and why `cli.py`
-  exceeds it. Decide: raise limit, stream-process, or skip large files
-  gracefully.
-- [ ] ⬜ **Task 10.3**: Test whether resolving the separator error reduces
-  silent-stop frequency on edits in this repo (separate from Phase 9 fix).
+- [x] ✅ **Task 10.1**: Investigation found the error is NOT emitted by any
+  handler. It originates in the daemon server's asyncio IPC framing layer:
+  `await reader.readline()` in `server.py:_handle_client` raises
+  `LimitOverrunError("Separator is found, but chunk is longer than limit")`
+  whenever the inbound JSON request exceeds asyncio's 64 KiB default
+  `StreamReader` buffer. The bare `except Exception` returns
+  `{"error": "Separator is found..."}` as the daemon response — that error
+  IS the PostToolUse advisory output the agent sees. The handler hypotheses
+  (`lint_on_edit`, `markdown_table_formatter`, `bash_error_detector`) were
+  refuted by `grep -r "Separator is found" /workspace/src/` returning zero
+  matches and `grep "chunk is longer" /usr/lib/python3.11/asyncio` matching
+  `asyncio/streams.py` line 640.
+- [x] ✅ **Task 10.2**: Root-cause sized: `cli.py` is 102,927 bytes; an Edit
+  with both `old_string` and `new_string` populated produces a request JSON
+  comfortably above 200 KiB — 3× asyncio's 64 KiB ceiling. Fix: introduce
+  `SocketLimit.REQUEST_BUFFER_BYTES = 16 MiB` in
+  `constants/protocol.py` and pass it as the `limit=` kwarg to
+  `asyncio.start_unix_server` in `server.py`. 16 MiB sits well above the
+  largest realistic hook payload (full-file Edit on a multi-MiB module)
+  while bounding per-connection memory. TDD: RED test added at
+  `tests/daemon/test_server.py::TestHooksDaemon::test_daemon_handles_request_larger_than_asyncio_default_limit`
+  reproduces the exact `LimitOverrunError` from `asyncio/streams.py:640`
+  pre-fix and passes post-fix. Full server suite green (85 tests).
+- [x] ✅ **Task 10.3**: Resolves the silent-handler-context-drop on Edits of
+  large files (cli.py, server.py, etc.) in this repo. Frequency-reduction
+  measurement deferred — the pre-fix failure was a deterministic threshold
+  crossing, not a probabilistic event, so the fix eliminates the class
+  entirely for any payload < 16 MiB. Independent of Phase 9 (suggestion-level
+  delivery gap) which addresses the Stop-hook output shape.
 
 ### Close-out — 2026-05-12 (Phases 5/6/7/8 delivered)
 

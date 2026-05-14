@@ -46,6 +46,7 @@ from claude_code_hooks_daemon.constants.protocol import (
     HookInputField,
     HookOutputField,
     PermissionDecision,
+    SocketLimit,
 )
 from claude_code_hooks_daemon.constants.tags import HandlerTag, TagLiteral
 from claude_code_hooks_daemon.constants.timeout import Timeout
@@ -80,6 +81,8 @@ __all__ = [
     # Priority constants
     "Priority",
     "ProjectPath",
+    # Socket buffer limits (protocol)
+    "SocketLimit",
     "TagLiteral",
     # Timeout constants
     "Timeout",

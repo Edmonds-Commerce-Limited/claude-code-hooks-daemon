@@ -21,6 +21,7 @@ from functools import partial
 from typing import Any, Protocol, runtime_checkable
 
 from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
+from claude_code_hooks_daemon.constants.protocol import SocketLimit
 from claude_code_hooks_daemon.core.hook_result import HookResult
 from claude_code_hooks_daemon.core.input_schemas import get_input_schema
 from claude_code_hooks_daemon.daemon.config import DaemonConfig
@@ -344,10 +345,17 @@ class HooksDaemon:
             logger.warning("Removing stale socket: %s", socket_path)
             socket_path.unlink()
 
-        # Start Unix socket server
+        # Start Unix socket server. Override asyncio's 64KiB readline buffer
+        # default — a single PostToolUse Edit on a large file (e.g. cli.py at
+        # 102KB) sends a JSON request larger than that and readline() raises
+        # LimitOverrunError, which the caller turns into a silent
+        # {"error":"Separator is found..."} response. See SocketLimit docstring
+        # for full context (Plan 00101 Phase 10).
         try:
             self.server = await asyncio.start_unix_server(
-                self._handle_client, path=str(socket_path)
+                self._handle_client,
+                path=str(socket_path),
+                limit=SocketLimit.REQUEST_BUFFER_BYTES,
             )
         except OSError as e:
             # AF_UNIX socket path too long or other socket creation failure
