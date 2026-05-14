@@ -1,9 +1,17 @@
 # Plan 00101: Recap-Stoppage Investigation
 
-**Status**: Complete
-**Closed**: 2026-05-12 — Phases 5/6/7 delivered post-v3.12.0 (CLAUDE.md tool_use_error
-guidance + handler Branch 2.5 + acceptance probe wired into H-1 gate). Prior close-out
-note: Plan 00107 Wave 5 closed the plan; v3.12.0 release-time incident re-opened it.
+**Status**: In Progress (re-opened 2026-05-14)
+**Re-opened**: 2026-05-14 — silent stop recurred in session `2f5c600c` while
+fixing `hooks-daemon-niggles.md` Issue 2. Same exact signature as the
+2026-05-12 incident (preventedContinuation=False, level=suggestion, daemon
+blocked correctly but Claude Code delivered the block as advisory context
+instead of hard re-entry). Phases 5/6/7 only addressed the `tool_use_error`
+variant — the suggestion-level delivery gap remains. See Incident — 2026-05-14
+section below.
+**Prior closed**: 2026-05-12 — Phases 5/6/7 delivered post-v3.12.0 (CLAUDE.md
+tool_use_error guidance + handler Branch 2.5 + acceptance probe wired into
+H-1 gate). Prior close-out note: Plan 00107 Wave 5 closed the plan; v3.12.0
+release-time incident re-opened it.
 **Created**: 2026-04-24
 **Owner**: Claude (Opus) + transcript-inspector sub-agent
 **Priority**: High (dogfooding — degrades main-thread productivity)
@@ -679,6 +687,123 @@ holds for this incident.
 **Status**: captured. Mitigation work belongs in Phase 3 — promotes Task 3.x
 from "decide" to "verify hook decision shape forces hard block, not
 suggestion".
+
+### Incident — 2026-05-14 (re-opens this plan; suggestion-level delivery gap unresolved)
+
+**Session**: `2f5c600c-e580-4b90-9db4-7f39ecc43ff4.jsonl`. Mid-fix on
+`hooks-daemon-niggles.md` Issue 2 (adding `--count` flag to
+`daemon.cli handlers`). User flagged via "DOG FOODING ALERT — you've done
+the random stop thing again — you always seem to do it in this repo
+specifically — find out why".
+
+**Transcript-inspector findings (taskId `a1b024666ef9595a4`)**:
+
+| Field                           | Stop 1 (L566)     | Stop 2 (L576, re-entry) |
+| ------------------------------- | ----------------- | ----------------------- |
+| `preventedContinuation`         | False             | False                   |
+| `level`                         | `suggestion`      | `suggestion`            |
+| `hookErrors` count              | 1 (block message) | 0                       |
+| Daemon decision                 | `deny` (correct)  | `allow` (re-entry)      |
+| `stop_hook_active`              | False             | True                    |
+| Last `tool_result.is_error`     | False (success)   | False (success)         |
+| Final assistant `output_tokens` | 408 (text+Edit)   | 490 (text+Edit)         |
+| Context at stop                 | 105,703 (~53%)    | 106,358 (~53%)          |
+
+**Sequence**:
+
+```
+L558  assistant: text="RED confirmed. Now implement the --count flag:" + Edit cli.py
+L562  tool_result is_error=False — Edit succeeded
+L563  PostToolUse:Edit → stdout={"error":"Separator is found, but chunk is longer than limit"}
+L564  user: "Stop hook feedback: You stopped without explaining why..."  ← daemon blocked
+L565  attachment: hook_blocking_error
+L566  stop_hook_summary preventedContinuation=False level=suggestion
+L567  assistant re-entry: text="Now add the --count arg to the subparser:" + Edit cli.py
+L573  tool_result is_error=False — second Edit succeeded
+L574  PostToolUse:Edit → stdout={"error":"Separator is found, but chunk is longer than limit"}
+L575  Stop hook → stdout="{}" (re-entry guard correctly allows)
+L576  stop_hook_summary hookErrors=[] preventedContinuation=False level=suggestion
+```
+
+**Did Branch 2.5 (tool_use_error recovery) fire?** No. Both Edits returned
+`is_error=False`. Branch 2.5 only activates when `last_tool_result_was_error()`
+is True. This is the **original Plan 00101 signature** (successful Edit →
+silent next turn), not the Wave 6 variant Branch 2.5 was designed for.
+
+**Match against prior signatures**: exact match to the 2026-05-12 incident
+(L1657 in session `85d0a98e`). That incident's findings (PLAN.md lines
+653–673) identified this as the **suggestion-level delivery gap**: the
+daemon returns `decision=block` correctly, but Claude Code filters it as
+advisory context for the next user turn rather than a hard blocking re-entry
+signal. The Plan 00102 fix (re-entry guard) did not address this path.
+**Phases 5/6/7 also did not address it** — they fixed the tool_use_error
+variant which fires only when `is_error=True`.
+
+**New finding — PostToolUse separator error on large files**:
+
+Both Edits to `cli.py` produced `{"error":"Separator is found, but chunk is longer than limit"}` from the PostToolUse daemon response (L563, L574). The
+daemon's own PostToolUse handler (likely `lint_on_edit` or
+`markdown_table_formatter`) is failing silently on `cli.py` because the file
+exceeds an internal chunk-size limit. The Edit tool result delivered to the
+model was still a bare success — but the PostToolUse advisory context that
+normally accompanies an Edit was absent. Whether that absence contributes
+to the silent stop is unknown.
+
+This separator error is NOT previously documented in this plan and is a
+candidate for a separate sub-investigation. It is the most repo-specific
+trigger identified so far — the daemon repo's own `cli.py` is large enough
+to break its own PostToolUse handler.
+
+**Ranked "why this repo specifically" hypotheses**:
+
+1. **PostToolUse separator error on `cli.py`** (new) — the daemon's own
+   PostToolUse handler fails silently on large files in this repo. Model
+   receives bare Edit success with no PostToolUse advisory context.
+2. **Suggestion-level delivery gap** (carried from 2026-05-12) — daemon
+   blocks correctly but Claude Code filters as suggestion. Repo-agnostic in
+   principle but is the proximate mechanism in both this and 2026-05-12.
+3. **Compaction-resume pattern** — this session was post-compaction; the
+   summary ended with a clear "next step is X" directive. Model executed X,
+   then halted instead of continuing to Y.
+4. **Reminder density** — 17/19 PostToolUse:Edit hooks in this session
+   injected normal context successfully. Density was uniform, not a
+   differentiator. **Refuted**.
+
+**Context-pressure refutation reinforced**: 53% at stop. Combined with prior
+incidents at 48%, 57%, 59%, 82.5%, the context-pressure correlation from
+Phase 1 is conclusively NOT causal.
+
+### Phase 9 (NEW): Suggestion-level delivery gap mitigation
+
+Status: pending decision. The fundamental issue is that the daemon emits
+`decision: block` but Claude Code delivers it as `level: suggestion` with
+`preventedContinuation: False`. The hook output shape needs to change to
+force hard re-entry — likely via `hookSpecificOutput` field rather than
+generic `decision`/`reason`, per the Stop hook API contract.
+
+Candidate diagnostics (do before any code change):
+
+- [ ] ⬜ **Task 9.1**: Audit Claude Code Stop hook documentation for the
+  field combination that produces `preventedContinuation: True` and
+  `level: error` (not `suggestion`). The daemon's current `Decision.DENY`
+  reply may be wrong shape for the new Stop hook contract.
+- [ ] ⬜ **Task 9.2**: Probe the live daemon with both decision shapes
+  (current vs hypothesised hard-block shape) and inspect what Claude Code
+  reports back in the next session.
+- [ ] ⬜ **Task 9.3**: If shape-fix confirmed, TDD update `auto_continue_stop`
+  to emit the hard-block shape. Acceptance test asserts
+  `preventedContinuation: True` after a daemon-blocked stop.
+
+### Phase 10 (NEW): PostToolUse separator error sub-investigation
+
+- [ ] ⬜ **Task 10.1**: Identify which handler emits "Separator is found,
+  but chunk is longer than limit". Likely `lint_on_edit`,
+  `markdown_table_formatter`, or `bash_error_detector`.
+- [ ] ⬜ **Task 10.2**: Determine the chunk-size limit and why `cli.py`
+  exceeds it. Decide: raise limit, stream-process, or skip large files
+  gracefully.
+- [ ] ⬜ **Task 10.3**: Test whether resolving the separator error reduces
+  silent-stop frequency on edits in this repo (separate from Phase 9 fix).
 
 ### Close-out — 2026-05-12 (Phases 5/6/7/8 delivered)
 
