@@ -11,13 +11,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - 8 phases — AdaptiveTrigger, config parsing, dispatcher, WorkflowReminderSetup, handler, constants/registration, config, verification
   - Dependency chain resolved: 00077 (Already Shipped) and 00081 (Superseded by 00082) both closed in Plan 00107 Wave 3
 
-- [00101: Recap-Stoppage Investigation](00101-recap-stoppage-investigation/PLAN.md) - In Progress (re-opened post-v3.13.0)
-
-  - **Re-opened** after silent stop recurred during `hooks-daemon-niggles.md` Issue 2 work. Same exact signature as the prior incident that triggered Phases 5/6/7
-  - Phases 5/6/7 (shipped in v3.12.1) only addressed the `tool_use_error` variant — Branch 2.5 fires when `is_error=True`. The recurrent shape is a **successful Edit followed by silent stop** with daemon block delivered as `level: suggestion` + `preventedContinuation: False` instead of hard re-entry
-  - Phase 9 (NEW) — suggestion-level delivery gap: daemon emits `decision: block` but Claude Code filters as suggestion; needs hook output shape change (likely `hookSpecificOutput`)
-  - Phase 10 (NEW) — PostToolUse separator-error sub-investigation: `cli.py` Edits trigger `"Separator is found, but chunk is longer than limit"` from the daemon's own PostToolUse handler, suppressing advisory context
-
 ### Long-Running / Carry-Forward
 
 - [00100 (v3): Venv SSOT Consolidation](00100-venv-ssot-consolidation/PLAN.md) - In Progress (Residue Scope)
@@ -46,6 +39,13 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00101: Recap-Stoppage Investigation](Completed/00101-recap-stoppage-investigation/PLAN.md) - Complete
+
+  - Re-opened post-v3.13.0 after silent stop recurred with `preventedContinuation: false, level: suggestion` — same signature Phases 5/6/7 thought they had closed
+  - **Phase 9** (commit `f08a2ff`) — bash wrappers `.claude/hooks/stop` and `.claude/hooks/subagent-stop` now translate daemon JSON `decision: block` into exit code 2 + reason on stderr (the contract Claude Code v2.1.114 honours for hard re-entry); daemon JSON output unchanged for back-compat; acceptance test `tests/acceptance/test_stop_hook_hard_block.py` wired into RELEASING.md Step 12.0 H-1
+  - **Phase 10** (commit `4c2688f`) — `SocketLimit.REQUEST_BUFFER_BYTES = 16 MiB` passed as `limit=` kwarg to `asyncio.start_unix_server` in `server.py`; eliminates `LimitOverrunError("Separator is found, but chunk is longer than limit")` for Edit payloads up to 16 MiB
+  - Closes the suggestion-level delivery gap and the PostToolUse separator-error class — both regression vectors that landed silent stops on top of Phases 5/6/7's `tool_use_error` Branch 2.5
 
 - [00107: Batch Delivery Meta Plan — v3.12.0 Release Bundle](Completed/00107-batch-delivery-meta/PLAN.md) - Complete
 
@@ -709,11 +709,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 107
-- **Completed**: 90 (1 with reduced scope, 4 already-shipped)
-- **Active**: 4 (2 stop-quality, 2 long-running/review)
+- **Completed**: 91 (1 with reduced scope, 4 already-shipped)
+- **Active**: 3 (1 stop-quality, 2 long-running/review)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping, 00081 - superseded by 00082)
-- **Last reconciled by**: Plan 00101 re-opening (silent-stop bug recurred post-v3.12.1 close-out)
+- **Last reconciled by**: Plan 00101 Phases 9/10 close-out (silent-stop bug delivered as exit-code-2 wrapper translation + 16 MiB asyncio buffer)
 
 ## Quick Links
 

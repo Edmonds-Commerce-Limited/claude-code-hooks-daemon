@@ -1,13 +1,14 @@
 # Plan 00101: Recap-Stoppage Investigation
 
-**Status**: In Progress (re-opened 2026-05-14)
+**Status**: Complete
 **Re-opened**: 2026-05-14 — silent stop recurred in session `2f5c600c` while
 fixing `hooks-daemon-niggles.md` Issue 2. Same exact signature as the
 2026-05-12 incident (preventedContinuation=False, level=suggestion, daemon
 blocked correctly but Claude Code delivered the block as advisory context
 instead of hard re-entry). Phases 5/6/7 only addressed the `tool_use_error`
-variant — the suggestion-level delivery gap remains. See Incident — 2026-05-14
-section below.
+variant — the suggestion-level delivery gap remained. Phases 9 (exit-code-2
+Stop hook hard-block, commit `f08a2ff`) and 10 (asyncio readline buffer 16
+MiB, commit `4c2688f`) close that gap.
 **Prior closed**: 2026-05-12 — Phases 5/6/7 delivered post-v3.12.0 (CLAUDE.md
 tool_use_error guidance + handler Branch 2.5 + acceptance probe wired into
 H-1 gate). Prior close-out note: Plan 00107 Wave 5 closed the plan; v3.12.0
@@ -866,3 +867,29 @@ deferred from v3.12.0 landed:
 QA 12/13 PASS (pre-existing deptry baseline). Daemon restarted RUNNING
 (PID 180247). 8202 unit tests pass, coverage 95.0%. Release vehicle
 deferred (likely v3.12.1 patch).
+
+### Close-out — 2026-05-14 (Phases 9/10 delivered, plan re-closed)
+
+Plan re-opened 2026-05-14 after silent stop recurred mid-niggles work
+with the same signature (`preventedContinuation: false, level: suggestion`)
+that Phases 5/6/7 thought it had closed. The two-phase fix:
+
+- **Phase 9** (commit `f08a2ff`) — Translated daemon JSON `decision: block`
+  into the documented exit-code-2 + stderr contract at the bash wrapper
+  layer (`.claude/hooks/stop`, `.claude/hooks/subagent-stop`). Claude Code
+  v2.1.114 silently downgrades 100% of JSON-via-stdout blocks to
+  `level: suggestion`; exit code 2 forces hard re-entry. Acceptance test
+  `tests/acceptance/test_stop_hook_hard_block.py` wired into RELEASING.md
+  Step 12.0 H-1.
+- **Phase 10** (commit `4c2688f`) — Lifted asyncio readline buffer from
+  64 KiB default to 16 MiB (`SocketLimit.REQUEST_BUFFER_BYTES` in
+  `constants/protocol.py`, passed as `limit=` kwarg to
+  `asyncio.start_unix_server` in `server.py`). Eliminates the
+  `LimitOverrunError("Separator is found, but chunk is longer than limit")`
+  class for Edit payloads up to 16 MiB — covers full-file Edits on the
+  largest modules in this repo. Regression test pins the threshold.
+
+Both fixes verified: full QA 15/15 PASS, 8226 unit tests / 0 failed,
+94.97% coverage, daemon restart RUNNING with new wrappers. Release vehicle
+TBD (likely v3.13.1 patch — wrapper change + buffer bump on top of
+v3.13.0 status-line release).
