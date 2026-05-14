@@ -863,6 +863,67 @@ except Exception as e:
     return $?
 }
 
+#
+# forward_stop_event() - Forward a Stop / SubagentStop event to the daemon
+#                        and translate decision=block into exit-code-2 + stderr
+#
+# Plan 00101 Phase 9: Claude Code v2.1.114 silently demotes JSON-via-stdout
+# `{"decision":"block"}` to `level: suggestion, preventedContinuation: false`,
+# breaking the auto_continue_stop contract. The daemon CANNOT control the
+# hook subprocess exit code from inside its own Python process — only the
+# bash wrapper that Claude Code spawns can set it. This helper centralises
+# the translation so both .claude/hooks/stop and .claude/hooks/subagent-stop
+# stay one-liners and the JSON-to-exit-code mapping lives in one place.
+#
+# Behaviour:
+#   1. Pipe stdin JSON → jq wrap → send_request_stdin
+#   2. Capture daemon response, echo to stdout (back-compat for agent JSON
+#      visibility + existing test invariants).
+#   3. Parse `.decision`:
+#        - "block" → print `.reason` to stderr, exit 2 (hard re-entry).
+#        - other  → exit 0 (allow stop).
+#
+# Args:
+#   $1 - event_name: "Stop" or "SubagentStop"
+#
+# Reads:
+#   stdin: Claude Code hook input JSON
+#
+# Returns:
+#   2 if daemon emits decision=block
+#   0 otherwise (including daemon socket errors — those are handled by
+#     send_request_stdin's emit_error_json which already returns a block
+#     payload and we DO want hard re-entry on daemon-down).
+#
+forward_stop_event() {
+    local event_name="$1"
+    if [ -z "$event_name" ]; then
+        echo '{"error":"forward_stop_event: event_name required"}' >&2
+        return 1
+    fi
+
+    local response_file
+    response_file="$(mktemp)"
+    # shellcheck disable=SC2064  # intentional early-binding of file path
+    trap "rm -f '$response_file'" EXIT
+
+    jq -c --arg event "$event_name" '{event: $event, hook_input: .}' \
+        | send_request_stdin > "$response_file"
+    cat "$response_file"
+
+    local decision
+    decision="$(jq -r '.decision // ""' < "$response_file" 2>/dev/null || echo "")"
+    if [ "$decision" = "block" ]; then
+        local reason
+        reason="$(jq -r '.reason // ""' < "$response_file" 2>/dev/null || echo "")"
+        if [ -n "$reason" ]; then
+            printf '%s\n' "$reason" >&2
+        fi
+        return 2
+    fi
+    return 0
+}
+
 # Export functions for use by forwarder scripts
 export -f emit_hook_error
 export -f validate_venv
@@ -870,3 +931,4 @@ export -f is_daemon_running
 export -f start_daemon
 export -f ensure_daemon
 export -f send_request_stdin
+export -f forward_stop_event

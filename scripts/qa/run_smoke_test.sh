@@ -69,16 +69,39 @@ echo "Running smoke test probes (socket: ${SOCKET_PATH})..."
 # the marker the discriminator treats stop_hook_active=true as the silent-stop
 # bug shape — see Plan 00101 "Incident — 2026-04-29".
 SMOKE_TRANSCRIPT="$(mktemp -t smoke-stop-loop-XXXXXX.jsonl)"
-trap 'rm -f "${SMOKE_TRANSCRIPT}"' EXIT
+# (EXIT trap installed below — covers both transcript and stdout-capture tmpfile)
 printf '%s\n' '{"type":"user","message":{"role":"user","content":"Stop hook feedback:\nYou stopped without explaining why."}}' > "${SMOKE_TRANSCRIPT}"
 
 PROBE1='{"hook_event_name":"Stop","stop_hook_active":false,"session_id":"smoke-test-probe"}'
 PROBE2="$(printf '{"hook_event_name":"Stop","stop_hook_active":true,"transcript_path":"%s","session_id":"smoke-test-probe"}' "${SMOKE_TRANSCRIPT}")"
 PROBE3='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git reset --hard HEAD"},"session_id":"smoke-test-probe"}'
 
-RESPONSE1=$(echo "${PROBE1}" | "${HOOK_STOP}" 2>/dev/null || echo "{}")
-RESPONSE2=$(echo "${PROBE2}" | "${HOOK_STOP}" 2>/dev/null || echo "{}")
-RESPONSE3=$(echo "${PROBE3}" | "${HOOK_PRE}" 2>/dev/null || echo "{}")
+# Plan 00101 Phase 9: stop wrapper now exits 2 on block (hard re-entry).
+# We need stdout (the daemon JSON) regardless of exit code, since exit 2 is
+# the expected success signal for stop_no_explanation. Use a temp file to
+# separate stdout-capture from exit-code propagation, and only synthesise
+# an empty response when stdout is genuinely empty (e.g. daemon down).
+_smoke_stdout_file="$(mktemp)"
+trap '{ rm -f "${SMOKE_TRANSCRIPT}" "${_smoke_stdout_file}"; }' EXIT
+
+capture_hook_stdout() {
+    local probe="$1" hook="$2"
+    if printf '%s' "${probe}" | "${hook}" >"${_smoke_stdout_file}" 2>/dev/null; then
+        cat "${_smoke_stdout_file}"
+        return
+    fi
+    # Non-zero exit is expected (exit 2 = stop-hook hard re-entry).
+    # Stdout still carries the daemon JSON; fall back only on truly empty stdout.
+    if [[ -s "${_smoke_stdout_file}" ]]; then
+        cat "${_smoke_stdout_file}"
+    else
+        printf '{}'
+    fi
+}
+
+RESPONSE1=$(capture_hook_stdout "${PROBE1}" "${HOOK_STOP}")
+RESPONSE2=$(capture_hook_stdout "${PROBE2}" "${HOOK_STOP}")
+RESPONSE3=$(capture_hook_stdout "${PROBE3}" "${HOOK_PRE}")
 
 # ── Analyse and write JSON ─────────────────────────────────────────────────────
 

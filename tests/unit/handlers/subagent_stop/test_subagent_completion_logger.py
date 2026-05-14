@@ -120,3 +120,18 @@ class TestSubagentCompletionLoggerHandler:
         assert log_file.exists()
         entry = json.loads(log_file.read_text().strip())
         assert entry["subagent_name"] == "test-agent"
+
+    # Regression test: SubagentStop entry point may dispatch this handler in
+    # the default-config branch where ProjectContext is never initialised.
+    # `daemon_untracked_dir()` raises RuntimeError; the handler must swallow
+    # it and return ALLOW silently rather than propagating up through
+    # dispatch, which would emit a `systemMessage` block.
+    def test_handle_skips_when_project_context_uninitialised(self, handler):
+        """RuntimeError from uninitialised ProjectContext must not propagate."""
+        with patch(
+            "claude_code_hooks_daemon.handlers.subagent_stop.subagent_completion_logger.ProjectContext.daemon_untracked_dir",
+            side_effect=RuntimeError("ProjectContext not initialized"),
+        ):
+            result = handler.handle({"subagent_name": "test"})
+
+        assert result.decision == "allow"

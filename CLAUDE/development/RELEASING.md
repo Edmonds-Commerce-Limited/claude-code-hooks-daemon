@@ -269,11 +269,12 @@ end-to-end against a fresh fixture project. Together they catch:
   `write-venv-metadata` → daemon-start that produces a non-running daemon.
 
 ```bash
-$PYTHON -m pytest tests/acceptance/test_diagnostic_scripts.py tests/acceptance/test_install_sh_end_to_end.py tests/acceptance/test_tool_use_error_recovery.py -v
+$PYTHON -m pytest tests/acceptance/test_diagnostic_scripts.py tests/acceptance/test_install_sh_end_to_end.py tests/acceptance/test_tool_use_error_recovery.py tests/acceptance/test_stop_hook_hard_block.py -v
 # Expected: tests/acceptance/test_diagnostic_scripts.py — 15 passed
 #           tests/acceptance/test_install_sh_end_to_end.py — 2 passed
 #           tests/acceptance/test_tool_use_error_recovery.py — 2 passed
-#           combined: 19 passed, 0 failed
+#           tests/acceptance/test_stop_hook_hard_block.py — 3 passed
+#           combined: 22 passed, 0 failed
 ```
 
 ANY failure in any file = ABORT release. The 2026-05-01 field report
@@ -285,9 +286,15 @@ gaps are closed by adding `test_install_sh_end_to_end.py` here. The Plan
 00101 silent-stop recurrence (Edit-on-unread-file → tool_use_error → no
 recovery) is closed by adding `test_tool_use_error_recovery.py` — exercises
 the `auto_continue_stop` Branch 2.5 directly against the live daemon socket.
-The test skips cleanly when no daemon is running locally; under H-1 the
-daemon is always started before this step, so a skip there is itself an
-abort condition.
+The Plan 00101 Phase 9 suggestion-level-downgrade regression class
+(v2.1.114 silently demoting JSON-stdout `decision=block` to
+`level: suggestion, preventedContinuation: false`) is closed by adding
+`test_stop_hook_hard_block.py` — invokes the production bash wrappers
+`.claude/hooks/stop` and `.claude/hooks/subagent-stop` as subprocesses
+and asserts the exit-2 + stderr contract that v2.1.114 honours for hard
+re-entry. The test skips cleanly when no daemon is running locally; under
+H-1 the daemon is always started before this step, so a skip there is
+itself an abort condition.
 
 **Step 12.1**: Restart daemon, verify RUNNING.
 

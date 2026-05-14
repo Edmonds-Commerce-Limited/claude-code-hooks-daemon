@@ -62,6 +62,11 @@ class CleanupHandler(Handler):
                     with contextlib.suppress(OSError):
                         temp_file.unlink()
 
+        except RuntimeError as e:
+            # ProjectContext not initialised — happens in the default-config /
+            # standalone entry-point branch where no .claude/hooks-daemon.yaml
+            # is present. Silently skip cleanup rather than fail the dispatch.
+            logger.warning("Skipping temp-dir cleanup (no project context): %s", e)
         except OSError as e:
             logger.warning("Failed to clean up temp dir: %s", e)
 

@@ -103,9 +103,7 @@ class TestCleanupHandler:
     # Path resolution test (regression: Issue 3 — relative path → never finds
     # temp dir when daemon CWD is /). Temp dir must be resolved under
     # ProjectContext.daemon_untracked_dir(), not a CWD-relative path.
-    def test_handle_resolves_temp_dir_under_project_untracked_dir(
-        self, handler, tmp_path: Path
-    ):
+    def test_handle_resolves_temp_dir_under_project_untracked_dir(self, handler, tmp_path: Path):
         """Cleanup must operate on temp dir under daemon_untracked_dir()."""
         temp_dir = tmp_path / "temp" / "hooks"
         temp_dir.mkdir(parents=True)
@@ -116,3 +114,20 @@ class TestCleanupHandler:
 
         assert result.decision == "allow"
         assert not stale_file.exists(), "Stale file should have been cleaned up"
+
+    # Regression test: when entry points run without a config file
+    # (test_session_end_without_config_file branch), ProjectContext is never
+    # initialised and `daemon_untracked_dir()` raises RuntimeError. The
+    # handler must swallow that and return ALLOW silently rather than
+    # propagating the exception up through dispatch, which would turn the
+    # default-config path into a hard failure.
+    def test_handle_skips_when_project_context_uninitialised(self, handler):
+        """RuntimeError from uninitialised ProjectContext must not propagate."""
+        with patch(
+            "claude_code_hooks_daemon.handlers.session_end.cleanup_handler.ProjectContext.daemon_untracked_dir",
+            side_effect=RuntimeError("ProjectContext not initialized"),
+        ):
+            result = handler.handle({})
+
+        assert result.decision == "allow"
+        assert result.context == []

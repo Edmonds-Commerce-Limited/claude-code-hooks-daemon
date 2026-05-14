@@ -228,6 +228,9 @@ def backup_existing_hooks(project_root: Path) -> None:
     hooks_dir.mkdir(parents=True, exist_ok=True)
 
 
+_STOP_EVENT_NAMES = ("Stop", "SubagentStop")
+
+
 def create_forwarder_script(hooks_dir: Path, hook_name: str, event_name: str) -> None:
     """Create a forwarder script that routes to daemon via Unix socket.
 
@@ -238,7 +241,44 @@ def create_forwarder_script(hooks_dir: Path, hook_name: str, event_name: str) ->
     """
     hook_file = hooks_dir / hook_name
 
-    hook_content = f"""#!/bin/bash
+    # Plan 00101 Phase 9: Stop / SubagentStop need the bash wrapper to
+    # translate the daemon's JSON `decision=block` into exit-code-2 + stderr
+    # so Claude Code v2.1.114 honours the hard re-entry. The shared
+    # `forward_stop_event` helper in init.sh does the translation; the
+    # wrapper is a one-liner. All other events use the generic forwarder
+    # which fires-and-forgets the JSON to stdout.
+    if event_name in _STOP_EVENT_NAMES:
+        hook_content = f"""#!/bin/bash
+#
+# Claude Code Hooks - {event_name} Forwarder
+#
+# Forwards {event_name} hook calls to daemon via Unix socket.
+# CRITICAL: Pipes JSON directly - NEVER store in shell variables.
+# CRITICAL: All errors output valid JSON to stdout for agent visibility.
+#
+# Plan 00101 Phase 9: forward_stop_event in init.sh translates the daemon's
+# JSON decision=block response into the exit-code-2 + stderr contract that
+# Claude Code v2.1.114 honours for hard re-entry. The daemon CANNOT set
+# this process's exit code from its own Python — the bash wrapper must.
+#
+
+set -uo pipefail  # not -e: forward_stop_event returns 2 on block (desired)
+
+SCRIPT_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
+source "$SCRIPT_DIR/../init.sh"
+
+# Try to start daemon - if it fails, output proper JSON error to stdout
+if ! ensure_daemon; then
+    emit_hook_error "{event_name}" "daemon_startup_failed" \\
+        "Failed to start hooks daemon. Use the hooks-daemon skill to check logs (Skill tool: skill=hooks-daemon, args=logs)"
+    exit 0  # Exit 0 so Claude processes the JSON response
+fi
+
+forward_stop_event "{event_name}"
+exit $?  # propagate 0 (allow) or 2 (block / hard re-entry)
+"""
+    else:
+        hook_content = f"""#!/bin/bash
 #
 # Claude Code Hooks - {event_name} Forwarder
 #

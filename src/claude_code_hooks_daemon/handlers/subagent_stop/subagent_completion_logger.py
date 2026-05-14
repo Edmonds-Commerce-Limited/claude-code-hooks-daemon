@@ -65,6 +65,11 @@ class SubagentCompletionLoggerHandler(Handler):
             with log_file.open("a") as f:
                 f.write(json.dumps(log_entry) + "\n")
 
+        except RuntimeError as e:
+            # ProjectContext not initialised — happens in the default-config /
+            # standalone entry-point branch where no .claude/hooks-daemon.yaml
+            # is present. Silently skip logging rather than fail the dispatch.
+            logger.warning("Skipping subagent completion log (no project context): %s", e)
         except OSError as e:
             logger.warning("Failed to write subagent completion log: %s", e)
 

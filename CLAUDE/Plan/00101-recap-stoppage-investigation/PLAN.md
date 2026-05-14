@@ -775,24 +775,44 @@ Phase 1 is conclusively NOT causal.
 
 ### Phase 9 (NEW): Suggestion-level delivery gap mitigation
 
-Status: pending decision. The fundamental issue is that the daemon emits
-`decision: block` but Claude Code delivers it as `level: suggestion` with
-`preventedContinuation: False`. The hook output shape needs to change to
-force hard re-entry — likely via `hookSpecificOutput` field rather than
-generic `decision`/`reason`, per the Stop hook API contract.
+Status: resolved. Root cause was not the daemon's JSON shape — the daemon
+correctly emits `{"decision":"block","reason":"..."}` per the documented
+contract. The fault is in Claude Code v2.1.114 itself: it downgrades 100%
+of JSON-via-stdout blocks to `level: suggestion` with
+`preventedContinuation: false`. Evidence: every `stop_hook_summary` record
+in `/root/.claude/projects/-workspace/<session>.jsonl` shows
+`preventedContinuation: false, level: suggestion` — even on records with
+`hookErrors_count: 1` (i.e. the daemon DID emit a block, Claude Code
+silently demoted it).
 
-Candidate diagnostics (do before any code change):
+The documented alternative (`CLAUDE/Code/HooksSystem.md:395-509`) is
+exit code 2 with reason on stderr — that path is honoured by v2.1.114
+and forces hard re-entry. The fix translates the daemon's JSON response
+into the exit-2 contract at the bash wrapper layer, so the daemon's
+JSON output remains unchanged (back-compat) while v2.1.114 sees the
+exit code and produces `level: error, preventedContinuation: true`.
 
-- [ ] ⬜ **Task 9.1**: Audit Claude Code Stop hook documentation for the
-  field combination that produces `preventedContinuation: True` and
-  `level: error` (not `suggestion`). The daemon's current `Decision.DENY`
-  reply may be wrong shape for the new Stop hook contract.
-- [ ] ⬜ **Task 9.2**: Probe the live daemon with both decision shapes
-  (current vs hypothesised hard-block shape) and inspect what Claude Code
-  reports back in the next session.
-- [ ] ⬜ **Task 9.3**: If shape-fix confirmed, TDD update `auto_continue_stop`
-  to emit the hard-block shape. Acceptance test asserts
-  `preventedContinuation: True` after a daemon-blocked stop.
+- [x] ✅ **Task 9.1**: Audited Claude Code v2.1.114 Stop hook delivery via
+  transcript probe. Direct evidence: `jq -c '{preventedContinuation, level, hookErrors_count}' < <session>.jsonl` returned `false, suggestion, 1` on every block — confirming that JSON-via-stdout
+  decision=block is universally downgraded. Probed the daemon socket
+  directly with the canonical Stop event payload (empty transcript,
+  stop_hook_active=false) and observed
+  `{"decision":"block","reason":"STOPPING BECAUSE: ..."}` — daemon JSON
+  output is correct and on-contract.
+- [x] ✅ **Task 9.2**: Probed live daemon via Unix socket
+  (`acceptance/test_stop_hook_hard_block.py`) and via the bash wrapper.
+  Pre-fix: wrapper exited 0 regardless of daemon decision — Claude Code
+  saw stdout JSON only, applied the v2.1.114 downgrade. Post-fix:
+  wrapper exits 2 with reason on stderr when daemon emits block; stdout
+  JSON unchanged for back-compat.
+- [x] ✅ **Task 9.3**: TDD'd the wrapper fix at `.claude/hooks/stop` and
+  `.claude/hooks/subagent-stop`. RED test reproduced `exit=0` against the
+  pre-fix wrapper; GREEN after capturing the daemon response, echoing it
+  to stdout, and translating `.decision == "block"` into exit 2 +
+  `.reason` on stderr. Daemon-side `auto_continue_stop` and the JSON
+  response shape are unchanged — the translation is purely a delivery-
+  mechanism upgrade. Acceptance test wired into RELEASING.md Step 12.0
+  H-1 alongside `test_tool_use_error_recovery.py`.
 
 ### Phase 10 (NEW): PostToolUse separator error sub-investigation
 

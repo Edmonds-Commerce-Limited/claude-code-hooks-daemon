@@ -198,3 +198,19 @@ class TestNotificationLoggerHandler:
         assert log_file.exists()
         entry = json.loads(log_file.read_text().strip())
         assert entry["message"] == "Test"
+
+    # Regression test: when notification.py runs the default-config branch
+    # (test_notification_without_config_file) ProjectContext is never
+    # initialised and `daemon_untracked_dir()` raises RuntimeError. The
+    # handler must swallow that and return ALLOW silently rather than
+    # propagating it up through dispatch, which turns the no-config path
+    # into a hard failure that emits a `systemMessage` block.
+    def test_handle_skips_when_project_context_uninitialised(self, handler):
+        """RuntimeError from uninitialised ProjectContext must not propagate."""
+        with patch(
+            "claude_code_hooks_daemon.handlers.notification.notification_logger.ProjectContext.daemon_untracked_dir",
+            side_effect=RuntimeError("ProjectContext not initialized"),
+        ):
+            result = handler.handle({"message": "Test"})
+
+        assert result.decision == "allow"
