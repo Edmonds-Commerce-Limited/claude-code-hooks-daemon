@@ -1,8 +1,9 @@
 # Plan 00109: Skill thin-shim + atomic upgrade commit
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-05-15
 **Owner**: joseph
+**Delivered**: v3.15.0 (commit 2ab78df)
 **Priority**: High
 **Recommended Executor**: Opus
 **Execution Strategy**: Sub-Agent Orchestration

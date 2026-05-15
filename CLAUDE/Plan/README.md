@@ -48,6 +48,16 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00109: Skill thin-shim + atomic upgrade commit](Completed/00109-skill-thin-shim-and-atomic-upgrade-commit/PLAN.md) - Complete
+
+  - Shipped as v3.15.0 in commit `2ab78df`
+  - **Phase 1** — Layer 1 `scripts/upgrade.sh` emits 10-field `UPGRADE_METADATA` block (sentinels `<<<UPGRADE_METADATA` / `UPGRADE_METADATA>>>`) on every successful upgrade; agent parses block and writes one atomic `hooks daemon upgrade: vX → vY` commit covering only daemon-owned paths
+  - **Phase 2** — Skill-pushed `scripts/upgrade.sh` collapsed from ~280 lines of frozen logic to a ~23-line thin shim that walks for `.claude/hooks-daemon.yaml`, fetches the canonical script from `${HOOKS_DAEMON_UPGRADE_BASE_URL}/${HOOKS_DAEMON_UPGRADE_REF}/scripts/upgrade.sh` (defaults to `raw/main`), execs with `--project-root`; closes the frozen-at-release-time bug class (v3.9.x `write-venv-metadata`, v3.10.0 `print_info` SEV-1)
+  - **Phase 3** — Skill `upgrade.md` rewritten as 5-step agent workflow (run upgrade, parse metadata, verify RUNNING, stage daemon-owned paths only, commit with metadata in body)
+  - **Phase 4** — Four new acceptance gates: `test_upgrade_metadata_emission.py`, `test_skill_upgrade_shim.py`, `test_upgrade_md_metadata_contract.py` (4 sub-tests), `test_skill_upgrade_end_to_end.py` (full pipeline against installed daemon); six legacy skill-side integration tests removed (covered behaviours that no longer exist on the shim or moved upstream)
+  - **Phase 5** — MINOR release v3.15.0 published with all 5 release artifacts (`upgrade.sh`, `daemon-cli.sh`, `health-check.sh`, `init-handlers.sh`, `bootstrap-checksums.txt`); manifest verified consistent
+  - Long-term review of pull-from-`main` source vs `releases/latest/download` tracked in [gh issue #31](https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/issues/31)
+
 - [00101: Recap-Stoppage Investigation](Completed/00101-recap-stoppage-investigation/PLAN.md) - Complete
 
   - Re-opened post-v3.13.0 after silent stop recurred with `preventedContinuation: false, level: suggestion` — same signature Phases 5/6/7 thought they had closed
