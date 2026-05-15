@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.14.0] - 2026-05-15
+
+This is a **minor release** that ships the `ask_user_question_blocker` handler — a prefix-positive policy for `AskUserQuestion` tool calls that mirrors the Stop handler's `STOPPING BECAUSE:` convention. The handler is opt-in (disabled by default) and fully backwards-compatible.
+
+### Added
+
+- **`ask_user_question_blocker` handler — prefix-positive policy for `AskUserQuestion`** (Plan 00108): `AskUserQuestion` calls are only allowed through when every `question` string begins with `ASKING BECAUSE:` (case-sensitive, leading whitespace OK). The convention mirrors the Stop handler's `STOPPING BECAUSE:` pattern — the agent must declare why it cannot decide autonomously before pausing the session. Without the prefix the call is denied with structured guidance: a list of tautological question archetypes (best-practice vs. bodge, delivering vs. not delivering, fixing vs. leaving broken, following conventions vs. inventing) and the instruction to state the assumed-correct answer in plain output text and proceed, leaving the user an audit trail to interrupt if the assumption is wrong. Adds `mode: strict` (default, denies) and `mode: advisory` (warns, allows) options plus a configurable `required_prefix` option. Ships with 30 unit tests (96.92% file coverage). **Disabled by default** — enable in `hooks-daemon.yaml` under `pre_tool_use.handlers.ask_user_question_blocker`.
+
+### Changed
+
+- None.
+
+### Fixed
+
+- None.
+
+### Removed
+
+- None.
+
+### Security
+
+- None.
+
 ## [3.13.1] - 2026-05-14
 
 This is a **patch release** that ships seven bug fixes: three field-reported "niggles" (boot-race false alarm, health-check handler count, CWD-relative log paths), Plan 00101 Phases 9 + 10 (Stop hook hard-block + asyncio readline buffer), and the plan-folder close-out reconciliation. No new features, no breaking changes. All seven commits are bug fixes against v3.13.0.
