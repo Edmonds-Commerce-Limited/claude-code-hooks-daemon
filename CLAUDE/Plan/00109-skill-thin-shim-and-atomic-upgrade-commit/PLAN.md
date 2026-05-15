@@ -1,6 +1,6 @@
 # Plan 00109: Skill thin-shim + atomic upgrade commit
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-05-15
 **Owner**: joseph
 **Priority**: High
@@ -141,27 +141,31 @@ upgrade ran where.
 
 ### Phase 2: Thin-shim skill upgrade.sh (TDD)
 
-- [ ] ⬜ **Task 2.1**: Write failing test
+- [x] ✅ **Task 2.1**: Write failing test
   `tests/acceptance/test_skill_upgrade_shim.py` — invokes
   `src/.../skills/hooks-daemon/scripts/upgrade.sh` against a fixture,
-  with `HOOKS_DAEMON_BOOTSTRAP_BASE_URL` pointed at a local fixture
-  serving a known `scripts/upgrade.sh`. Asserts the shim fetches and
-  execs the fixture script (sees fixture-specific marker in output).
-- [ ] ⬜ **Task 2.2**: Replace skill `scripts/upgrade.sh` body with
-  the thin shim. ~20 lines: parse `--help`, fetch
-  `$RAW_URL/main/scripts/upgrade.sh` (overridable for tests), abort
-  loudly on curl failure, `chmod +x`, `exec bash /tmp/upgrade.sh --project-root "$PROJECT_ROOT" "$@"`. Project-root detection stays
-  in the shim because the canonical script needs it as an argument
-  — keep that one piece because it's the only thing the shim knows
-  that the canonical script doesn't (the client's actual working
-  directory at invocation time).
-- [ ] ⬜ **Task 2.3**: Move the Python-version pre-check and
-  `uv.lock` cleanup currently in the skill script into the canonical
-  in-repo `scripts/upgrade.sh` (so they're hot-patchable). Confirm
-  no duplication with the existing `find_compatible_python` /
-  uv.lock-removal logic already there. If duplicate, drop the skill
-  copy; if novel, port forward.
-- [ ] ⬜ **Task 2.4**: Run QA + restart daemon.
+  with `HOOKS_DAEMON_UPGRADE_BASE_URL` pointed at a local file://
+  fixture serving a known `scripts/upgrade.sh`. Asserts the shim
+  fetches and execs the fixture script (sees fixture-specific marker
+  in output), and aborts non-zero on fetch failure.
+- [x] ✅ **Task 2.2**: Replaced skill `scripts/upgrade.sh` body with
+  the thin shim (~23 logic lines). Parses `--help`, walks for
+  `.claude/hooks-daemon.yaml` to detect PROJECT_ROOT, fetches
+  `$BASE_URL/$REF/scripts/upgrade.sh` (env-overridable for tests),
+  aborts loudly on curl failure, `chmod +x`, `exec bash /tmp/upgrade.sh --project-root "$PROJECT_ROOT" "$@"`.
+- [x] ✅ **Task 2.3**: Python pre-check already lives upstream as
+  `find_compatible_python` in `scripts/upgrade.sh` — no migration
+  needed. `uv.lock` cleanup migrated upstream as a git-aware block
+  (only removes untracked uv.lock; preserves tracked one in
+  self-install mode). Retired the old skill-side
+  `tests/integration/test_skill_*.py` files (6 files) since the
+  thin shim has none of the behaviours they exercised; re-pointed
+  `_extract_bootstrap_stanza()` in `test_diagnostic_scripts.py`
+  at `daemon-cli.sh` which still carries the stanza per Non-Goals.
+  Added two small coverage tests in `test_upgrade_compatibility.py`
+  to restore the 95% threshold after retiring the obsolete tests.
+- [x] ✅ **Task 2.4**: QA: 13/13 passed (coverage 95.0%). Daemon
+  restart verified RUNNING.
 
 ### Phase 3: Atomic commit instruction in skill upgrade.md
 

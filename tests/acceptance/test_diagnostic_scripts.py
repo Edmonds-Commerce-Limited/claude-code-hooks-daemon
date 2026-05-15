@@ -280,11 +280,17 @@ _END_MARKER = "# === SELF-BOOTSTRAP END ==="
 
 
 def _extract_bootstrap_stanza() -> str:
-    text = SKILL_UPGRADE_SH.read_text(encoding="utf-8")
+    # Plan 00109 Phase 2.2 collapsed the skill upgrade.sh to a thin
+    # curl-and-exec shim — it no longer carries the bootstrap stanza. The
+    # three sibling diagnostic scripts (daemon-cli.sh, health-check.sh,
+    # init-handlers.sh) still embed the parameterised stanza verbatim per
+    # Plan 00105 Phase 4 Decision 3.B, so daemon-cli.sh is the canonical
+    # source for these acceptance fixtures going forward.
+    text = DAEMON_CLI_SH.read_text(encoding="utf-8")
     start = text.find(_BEGIN_MARKER)
     end = text.find(_END_MARKER)
-    assert start != -1, f"could not find {_BEGIN_MARKER!r} in {SKILL_UPGRADE_SH}"
-    assert end != -1, f"could not find {_END_MARKER!r} in {SKILL_UPGRADE_SH}"
+    assert start != -1, f"could not find {_BEGIN_MARKER!r} in {DAEMON_CLI_SH}"
+    assert end != -1, f"could not find {_END_MARKER!r} in {DAEMON_CLI_SH}"
     return text[start : end + len(_END_MARKER)]
 
 
@@ -303,95 +309,15 @@ def _sha256_hex(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def test_skill_upgrade_self_bootstrap_produces_latest(tmp_path: Path) -> None:
-    """Case 4: stale skill ``upgrade.sh`` MUST self-bootstrap to the fresh release.
-
-    Wraps the same scenario as ``test_skill_upgrade_self_bootstraps`` but at
-    the acceptance layer so the gating is duplicated against the live skill
-    stanza. Stages a stale wrapper (echoes ``STALE_BODY_RAN``) and a fresh
-    wrapper (echoes ``FRESH_BODY_RAN``) served via ``file://``, plus a
-    matching ``bootstrap-checksums.txt``. The stale wrapper detects its
-    sha256 mismatch, downloads the fresh script, re-execs with
-    ``--already-bootstrapped``, and the fresh body runs.
-    """
-    fresh_dir = tmp_path / "release-mock"
-    fresh_dir.mkdir()
-    fresh_script_path = fresh_dir / "upgrade.sh"
-    fresh_script_path.write_text(_wrap_stanza("FRESH_BODY_RAN"), encoding="utf-8")
-    fresh_script_path.chmod(fresh_script_path.stat().st_mode | stat.S_IEXEC)
-
-    fresh_sha = _sha256_hex(fresh_script_path.read_bytes())
-    checksums_path = fresh_dir / "bootstrap-checksums.txt"
-    checksums_path.write_text(f"{fresh_sha}  upgrade.sh\n", encoding="utf-8")
-
-    install_dir = tmp_path / "stale-skill"
-    install_dir.mkdir()
-    stale_script_path = install_dir / "upgrade.sh"
-    stale_script_path.write_text(_wrap_stanza("STALE_BODY_RAN"), encoding="utf-8")
-    stale_script_path.chmod(stale_script_path.stat().st_mode | stat.S_IEXEC)
-
-    env = os.environ.copy()
-    env["HOOKS_DAEMON_BOOTSTRAP_BASE_URL"] = f"file://{fresh_dir}"
-
-    result = subprocess.run(
-        [str(stale_script_path)],
-        capture_output=True,
-        text=True,
-        env=env,
-        check=False,
-    )
-
-    assert result.returncode == 0, (
-        f"self-bootstrap must succeed end-to-end. "
-        f"stdout={result.stdout!r} stderr={result.stderr!r}"
-    )
-    assert "FRESH_BODY_RAN" in result.stdout, (
-        f"the fresh script body MUST execute after self-bootstrap. " f"stdout={result.stdout!r}"
-    )
-    assert "STALE_BODY_RAN" not in result.stdout, (
-        f"the stale script body MUST NOT execute — it was bypassed by the "
-        f"re-exec. stdout={result.stdout!r}"
-    )
-
-
-def test_skill_upgrade_aborts_on_network_failure_with_directive(tmp_path: Path) -> None:
-    """Case 5: network unreachable MUST abort loudly — never silent fallback.
-
-    The 2026-05-01 field report critical lesson: silent fallback hides
-    regressions. The bootstrap stanza MUST exit non-zero with a clear
-    operator-facing directive when the manifest URL cannot be reached,
-    rather than continuing on with the stale local script.
-    """
-    install_dir = tmp_path / "stale-skill"
-    install_dir.mkdir()
-    stale_script_path = install_dir / "upgrade.sh"
-    stale_script_path.write_text(_wrap_stanza("STALE_BODY_RAN"), encoding="utf-8")
-    stale_script_path.chmod(stale_script_path.stat().st_mode | stat.S_IEXEC)
-
-    unreachable_dir = tmp_path / "does-not-exist"
-    env = os.environ.copy()
-    env["HOOKS_DAEMON_BOOTSTRAP_BASE_URL"] = f"file://{unreachable_dir}"
-
-    result = subprocess.run(
-        [str(stale_script_path)],
-        capture_output=True,
-        text=True,
-        env=env,
-        check=False,
-    )
-
-    assert result.returncode != 0, (
-        f"self-bootstrap MUST exit non-zero when the bootstrap source is "
-        f"unreachable. stdout={result.stdout!r} stderr={result.stderr!r}"
-    )
-    assert "STALE_BODY_RAN" not in result.stdout, (
-        f"the stale body MUST NOT run after a failed bootstrap — that would "
-        f"be the silent-fallback antipattern. stdout={result.stdout!r}"
-    )
-    assert "failed to download" in result.stderr.lower(), (
-        f"failure message MUST direct the operator at the network problem. "
-        f"stderr={result.stderr!r}"
-    )
+# Plan 00109 Phase 2.2: the former upgrade.sh-specific bootstrap acceptance
+# tests (test_skill_upgrade_self_bootstrap_produces_latest and
+# test_skill_upgrade_aborts_on_network_failure_with_directive) were retired
+# here. The skill upgrade.sh is now a thin curl+exec shim that delegates to
+# the canonical scripts/upgrade.sh on a configurable git ref; the equivalent
+# end-to-end coverage now lives in tests/acceptance/test_skill_upgrade_shim.py.
+# The sibling-script parametrised cases below continue to exercise the
+# self-bootstrap contract for daemon-cli.sh / health-check.sh / init-handlers.sh
+# which retain the stanza per Plan 00109 Non-Goals.
 
 
 # Plan 00105 Phase 4 — Decision 3.B activated. The bootstrap stanza is now
@@ -509,7 +435,7 @@ def test_diagnostic_script_aborts_on_network_failure(tmp_path: Path, basename: s
     )
 
 
-@pytest.mark.parametrize("basename", _BOOTSTRAPPED_BASENAMES + ["upgrade.sh"])
+@pytest.mark.parametrize("basename", _BOOTSTRAPPED_BASENAMES)
 def test_bootstrap_cache_marker_short_circuits_network_round_trip(
     tmp_path: Path, basename: str
 ) -> None:

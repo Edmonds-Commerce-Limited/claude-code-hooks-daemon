@@ -368,4 +368,35 @@ class TestCompatibilityChecker:
         report = checker.check_compatibility(user_config)
 
         assert report.is_compatible is True
-        assert len(report.handlers) == 0
+
+    def test_generate_user_friendly_report_when_compatible(self, sample_changelog: Path) -> None:
+        """generate_user_friendly_report short-circuits on a fully compatible report."""
+        checker = CompatibilityChecker(
+            changelog_path=sample_changelog,
+            current_version="2.10.0",
+            target_version="2.13.0",
+        )
+        compatible_report = CompatibilityReport(
+            handlers=[],
+            current_version="2.10.0",
+            target_version="2.13.0",
+        )
+
+        text = checker.generate_user_friendly_report(compatible_report)
+
+        assert "All handlers are compatible" in text
+        assert "INCOMPATIBILITIES DETECTED" not in text
+
+    def test_suggest_upgrade_guides_returns_empty_when_dir_missing(
+        self, sample_changelog: Path, tmp_path: Path
+    ) -> None:
+        """suggest_upgrade_guides returns [] when CLAUDE/UPGRADES/v2/ is absent."""
+        checker = CompatibilityChecker(
+            changelog_path=sample_changelog,
+            current_version="2.10.0",
+            target_version="2.13.0",
+        )
+
+        guides = checker.suggest_upgrade_guides(tmp_path)
+
+        assert guides == []

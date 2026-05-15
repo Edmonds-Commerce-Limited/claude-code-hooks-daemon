@@ -400,6 +400,21 @@ git -C "$DAEMON_DIR" rev-parse "$TARGET_VERSION" &>/dev/null || \
     _fail "Version $TARGET_VERSION not found"
 _ok "Target version: $TARGET_VERSION"
 
+# Plan 00109 Phase 2.3: clean up stray untracked uv.lock before checkout.
+# Migrated from the old skill upgrade.sh (Plan 00104 Issue #3 fix). The
+# upstream copy is git-aware: only removes uv.lock when it is UNTRACKED in
+# $DAEMON_DIR. In self-install mode uv.lock is tracked and must be left
+# alone (the new tag's checkout will overwrite it cleanly). In a client
+# install a prior `uv sync` may have left an untracked uv.lock that
+# would otherwise block `git checkout` with
+# "untracked working tree files would be overwritten by checkout".
+if [ -f "$DAEMON_DIR/uv.lock" ]; then
+    if ! git -C "$DAEMON_DIR" ls-files --error-unmatch uv.lock > /dev/null 2> /dev/null; then
+        rm -f "$DAEMON_DIR/uv.lock"
+        _ok "Removed untracked uv.lock from $DAEMON_DIR (would block checkout)"
+    fi
+fi
+
 # Step 6: Checkout target version FIRST (before looking for Layer 2)
 _info "Checking out $TARGET_VERSION..."
 git -C "$DAEMON_DIR" checkout "$TARGET_VERSION" --quiet
