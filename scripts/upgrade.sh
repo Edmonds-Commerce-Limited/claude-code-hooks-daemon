@@ -325,6 +325,18 @@ fi
 [ -d "$DAEMON_DIR/.git" ] || _fail "Daemon directory is not a git repository: $DAEMON_DIR"
 _ok "Daemon directory: $DAEMON_DIR"
 
+# Step 3b: Capture FROM_VERSION before checkout overwrites pyproject.toml.
+# Plan 00109 Phase 1.3: emit UPGRADE_METADATA after Layer 2 returns. The
+# from_version field is the version we are upgrading FROM, so it must be read
+# from the daemon's current pyproject.toml BEFORE Step 6 checks out a new tag.
+FROM_VERSION=""
+if [ -f "$DAEMON_DIR/pyproject.toml" ]; then
+    FROM_VERSION="$(awk -F'"' '/^version[[:space:]]*=/ {print $2; exit}' "$DAEMON_DIR/pyproject.toml")"
+    if [ -n "$FROM_VERSION" ] && [[ ! "$FROM_VERSION" =~ ^v ]]; then
+        FROM_VERSION="v$FROM_VERSION"
+    fi
+fi
+
 # Step 4: Best-effort daemon stop (before checkout)
 # Plan 00100 Task 2.5: PID-kill only. The previous implementation resolved a
 # venv python just to invoke `daemon.cli stop`, reintroducing the very
@@ -408,13 +420,108 @@ if [ "$SELF_INSTALL" != "true" ]; then
 fi
 
 # Step 8: Delegate to Layer 2 (now available after checkout)
+#
+# Plan 00109 Phase 1.3: invoke Layer 2 as a child process (NOT exec), capture
+# its exit code, and on success emit a sentinel-wrapped UPGRADE_METADATA
+# block on stdout. The block is the contract between this script and the
+# project agent that follows up with an atomic `hooks daemon upgrade` commit.
 LAYER2_SCRIPT="$DAEMON_DIR/scripts/upgrade_version.sh"
 
-if [ -f "$LAYER2_SCRIPT" ]; then
-    _info "Delegating to version-specific upgrader..."
-    exec bash "$LAYER2_SCRIPT" "$PROJECT_ROOT" "$DAEMON_DIR" "$TARGET_VERSION"
-else
+if [ ! -f "$LAYER2_SCRIPT" ]; then
     _fail "Layer 2 upgrader not found at: $LAYER2_SCRIPT
 Target version $TARGET_VERSION does not include the upgrade system.
 Use a fresh install instead: see CLAUDE/LLM-INSTALL.md"
 fi
+
+_info "Delegating to version-specific upgrader..."
+# Invoke Layer 2 inside an `if` so set -e does not abort on its (potentially
+# nonzero) exit. Non-zero = abort without emitting metadata.
+if ! bash "$LAYER2_SCRIPT" "$PROJECT_ROOT" "$DAEMON_DIR" "$TARGET_VERSION"; then
+    LAYER2_EXIT=$?
+    exit "$LAYER2_EXIT"
+fi
+
+# ------------------------------------------------------------
+# Emit UPGRADE_METADATA (Plan 00109 Decision 2)
+#
+# Format: sentinel-wrapped key=value block on stdout. Every required field
+# is present; values may be empty for modified_files and config_diff_summary
+# on idempotent upgrades. Parsed by the project agent — see
+# src/claude_code_hooks_daemon/skills/hooks-daemon/upgrade.md.
+# ------------------------------------------------------------
+
+# Resolve the daemon's venv python (fingerprint-keyed; first match wins).
+_metadata_venv_python=""
+for _candidate in "$DAEMON_DIR"/untracked/venv-py*/bin/python; do
+    if [ -x "$_candidate" ]; then
+        _metadata_venv_python="$_candidate"
+        break
+    fi
+done
+
+_metadata_python_version=""
+_metadata_python_path=""
+_metadata_venv_path=""
+if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
+    if _pv_out="$("$_metadata_venv_python" -c 'import sys; print(".".join(str(x) for x in sys.version_info[:3]))' 2>/dev/null)"; then
+        _metadata_python_version="$_pv_out"
+    fi
+    _metadata_python_path="$_metadata_venv_python"
+    _metadata_venv_path="$(dirname "$(dirname "$_metadata_venv_python")")"
+fi
+
+# Host: prefer $HOSTNAME (set by container runtimes and test fixtures), fall
+# back to hostname(1) for bare-metal hosts that don't export it.
+_metadata_host="${HOSTNAME:-}"
+if [ -z "$_metadata_host" ]; then
+    if _hn_out="$(hostname 2>/dev/null)"; then
+        _metadata_host="$_hn_out"
+    else
+        _metadata_host="unknown"
+    fi
+fi
+
+# modified_files: comma-separated relative paths in $PROJECT_ROOT that are
+# currently dirty (vs HEAD). Informational — the project agent filters by
+# daemon-owned prefixes before staging.
+_metadata_modified_files=""
+if [ -d "$PROJECT_ROOT/.git" ]; then
+    if _status_out="$(cd "$PROJECT_ROOT" && git status --porcelain 2>/dev/null | awk '{print $NF}' | tr '\n' ',')"; then
+        _metadata_modified_files="${_status_out%,}"
+    fi
+fi
+
+# config_diff_summary: human-readable summary of hooks-daemon.yaml changes.
+# Layer 2's installer writes hooks-daemon.yaml.backup before applying config
+# migration. Absent backup = no config changes this run.
+_metadata_config_summary="no config changes"
+_metadata_config_file="$PROJECT_ROOT/.claude/hooks-daemon.yaml"
+_metadata_config_backup="$PROJECT_ROOT/.claude/hooks-daemon.yaml.backup"
+if [ -f "$_metadata_config_backup" ] && [ -f "$_metadata_config_file" ]; then
+    # Capture diff output via `if cmd=$(...); then`. diff returns 0 when
+    # files are identical, 1 when they differ. awk counts diff markers and
+    # always exits 0 (even with zero matches via END {print c+0}).
+    if _diff_text="$(diff "$_metadata_config_backup" "$_metadata_config_file" 2>/dev/null)"; then
+        : # files identical — keep "no config changes"
+    else
+        _diff_count="$(printf '%s\n' "$_diff_text" | awk '/^[<>]/ {c++} END {print c+0}')"
+        _metadata_config_summary="${_diff_count} lines changed"
+    fi
+fi
+
+# Emit the sentinel-wrapped block. Leading newline ensures the open sentinel
+# starts on its own line even if Layer 2's last output had no trailing \n.
+printf '\n<<<UPGRADE_METADATA\n'
+printf 'from_version=%s\n' "$FROM_VERSION"
+printf 'to_version=%s\n' "$TARGET_VERSION"
+printf 'python_version=%s\n' "$_metadata_python_version"
+printf 'python_path=%s\n' "$_metadata_python_path"
+printf 'venv_path=%s\n' "$_metadata_venv_path"
+printf 'host=%s\n' "$_metadata_host"
+printf 'daemon_dir=%s\n' "$DAEMON_DIR"
+printf 'project_root=%s\n' "$PROJECT_ROOT"
+printf 'modified_files=%s\n' "$_metadata_modified_files"
+printf 'config_diff_summary=%s\n' "$_metadata_config_summary"
+printf 'UPGRADE_METADATA>>>\n'
+
+exit 0

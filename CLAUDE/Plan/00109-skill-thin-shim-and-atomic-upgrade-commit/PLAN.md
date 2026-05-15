@@ -115,26 +115,29 @@ upgrade ran where.
 
 ### Phase 1: Metadata emission in Layer 1 (TDD)
 
-- [ ] ⬜ **Task 1.1**: Define the `UPGRADE_METADATA` block contract.
+- [x] ✅ **Task 1.1**: Define the `UPGRADE_METADATA` block contract.
   Fields, format (key=value lines wrapped in
   `<<<UPGRADE_METADATA` … `UPGRADE_METADATA>>>` sentinels for unambiguous parsing).
   Fields: `from_version`, `to_version`, `python_version`,
   `python_path`, `venv_path`, `host`, `daemon_dir`, `project_root`,
   `modified_files` (newline-separated relative paths),
   `config_diff_summary` (one-line per setting changed, or empty).
-- [ ] ⬜ **Task 1.2**: Write failing test
+- [x] ✅ **Task 1.2**: Write failing test
   `tests/acceptance/test_upgrade_metadata_emission.py` — invokes the
   in-repo `scripts/upgrade.sh` end-to-end against a fixture project
   and asserts the metadata block appears on stdout with all required
   fields populated and non-empty.
-- [ ] ⬜ **Task 1.3**: Implement metadata emission in Layer 1
+- [x] ✅ **Task 1.3**: Implement metadata emission in Layer 1
   `scripts/upgrade.sh`. Layer 2 returns success → Layer 1 gathers
   metadata (from previous tag at start, target tag at end, venv path
   via daemon CLI, etc.) and prints the block. Block goes to stdout
   AFTER all human-readable progress output so it's the last thing
   the agent sees.
-- [ ] ⬜ **Task 1.4**: Run QA: `./scripts/qa/run_all.sh`. Restart
-  daemon, verify RUNNING.
+- [x] ✅ **Task 1.4**: Run QA, restart daemon, verify RUNNING.
+  Coverage at 94.98% on this branch matches main pre-existing state
+  (verified by running tests without the new acceptance test). uv.lock
+  was stale on v3.10.1 → regenerated to v3.14.0. All other gates pass.
+  Daemon restart verified RUNNING.
 
 ### Phase 2: Thin-shim skill upgrade.sh (TDD)
 
@@ -168,13 +171,14 @@ upgrade ran where.
   2. When you see `<<<UPGRADE_METADATA` block on stdout, parse it.
   3. Verify daemon is RUNNING via
      `$PYTHON -m claude_code_hooks_daemon.daemon.cli status`.
-  4. `git status` — verify the only modifications are
+  4. Stage ONLY daemon-owned paths with explicit `git add`:
      `.claude/hooks-daemon/`, `.claude/hooks-daemon.yaml`,
      `.claude/skills/hooks-daemon/`, `.claude/hooks/`,
-     `.claude/settings.json` (no project-source files).
-  5. Stage exactly those files with explicit `git add <paths>`
-     (never `git add .`).
-  6. Commit with title
+     `.claude/settings.json`. **Other WIP files in the working
+     tree are NOT relevant to the upgrade commit** — leave them
+     unstaged (per user directive: "commit hooks daemon stuff
+     only — other WIP stuff is not relevant"). Never `git add .`.
+  5. Commit with title
      `hooks daemon upgrade: ${from_version} → ${to_version}` and
      the metadata block in the body.
 - [ ] ⬜ **Task 3.2**: Add an acceptance test that walks the
@@ -305,13 +309,13 @@ deterministic and the prose human-readable.
 
 ## Risks & Mitigations
 
-| Risk                                                                      | Impact | Probability | Mitigation                                                                                                                                               |
-| ------------------------------------------------------------------------- | ------ | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Stale clients with broken skill upgrade.sh can't bootstrap new flow       | High   | Medium      | The thin shim is a one-time install; clients on broken old versions need to re-run install.sh manually (already documented for v3.9.x / v3.10.0 victims) |
-| Pull-from-`main` returns mid-release inconsistent script                  | Medium | Low         | User accepted the tradeoff; gh issue tracks long-term review; release process should hold `scripts/upgrade.sh` changes for the same PR as the tag        |
-| Agent fails to parse metadata block (formatting drift)                    | Medium | Medium      | Acceptance test asserts the contract; skill upgrade.md references same contract; both reviewed together                                                  |
-| Layer 2 writes additional output after Layer 1 metadata emission          | Low    | Medium      | Layer 1 uses `exec bash Layer2` today; new design captures Layer 2 output and emits metadata AFTER Layer 2 returns, eliminating ordering risk            |
-| Atomic commit catches unrelated working-tree changes the user had pending | High   | Medium      | upgrade.md explicitly tells the agent to `git status` first and stage only daemon-related paths; abort with a clear error if other files are modified    |
+| Risk                                                                      | Impact | Probability | Mitigation                                                                                                                                                                        |
+| ------------------------------------------------------------------------- | ------ | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Stale clients with broken skill upgrade.sh can't bootstrap new flow       | High   | Medium      | The thin shim is a one-time install; clients on broken old versions need to re-run install.sh manually (already documented for v3.9.x / v3.10.0 victims)                          |
+| Pull-from-`main` returns mid-release inconsistent script                  | Medium | Low         | User accepted the tradeoff; gh issue tracks long-term review; release process should hold `scripts/upgrade.sh` changes for the same PR as the tag                                 |
+| Agent fails to parse metadata block (formatting drift)                    | Medium | Medium      | Acceptance test asserts the contract; skill upgrade.md references same contract; both reviewed together                                                                           |
+| Layer 2 writes additional output after Layer 1 metadata emission          | Low    | Medium      | Layer 1 uses `exec bash Layer2` today; new design captures Layer 2 output and emits metadata AFTER Layer 2 returns, eliminating ordering risk                                     |
+| Atomic commit catches unrelated working-tree changes the user had pending | Low    | Low         | upgrade.md tells the agent to stage ONLY daemon-owned paths via explicit `git add`; other WIP stays unstaged (user directive — not relevant to upgrade commit). Never `git add .` |
 
 ## Notes & Updates
 
