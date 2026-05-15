@@ -1,12 +1,16 @@
-"""Tests for AskUserQuestionBlockerHandler.
+"""Tests for AskUserQuestionBlockerHandler — nuanced prefix-positive policy.
 
-Optional handler that blocks AskUserQuestion to prevent progress-blocking
-user prompts during unattended/batch workflows. Disabled by default.
+Plan 00108: The handler allows AskUserQuestion only when every question
+carries the `ASKING BECAUSE:` prefix (mirrors the Stop handler's
+`STOPPING BECAUSE:` convention). Without that prefix, the call is denied
+with guidance to state the assumed-correct answer and proceed.
 """
 
 import pytest
 
-from claude_code_hooks_daemon.core import HookResult
+from claude_code_hooks_daemon.core import Decision, HookResult
+
+REQUIRED_PREFIX = "ASKING BECAUSE:"
 
 
 class TestAskUserQuestionBlockerHandler:
@@ -14,29 +18,40 @@ class TestAskUserQuestionBlockerHandler:
 
     @pytest.fixture
     def handler(self):
-        """Create handler instance."""
+        """Create handler instance with strict mode default."""
         from claude_code_hooks_daemon.handlers.pre_tool_use.ask_user_question_blocker import (
             AskUserQuestionBlockerHandler,
         )
 
         return AskUserQuestionBlockerHandler()
 
-    # Initialization Tests
+    @pytest.fixture
+    def advisory_handler(self):
+        """Create handler instance in advisory mode."""
+        from claude_code_hooks_daemon.handlers.pre_tool_use.ask_user_question_blocker import (
+            AskUserQuestionBlockerHandler,
+        )
+
+        instance = AskUserQuestionBlockerHandler()
+        instance._mode = "advisory"
+        return instance
+
+    # ------------------------------------------------------------------
+    # Initialisation
+    # ------------------------------------------------------------------
     def test_init_sets_correct_name(self, handler):
-        """Handler name should be 'block-ask-user-question'."""
         assert handler.name == "block-ask-user-question"
 
     def test_init_sets_correct_priority(self, handler):
-        """Handler priority should be 10 (safety range)."""
         assert handler.priority == 10
 
     def test_init_is_terminal(self, handler):
-        """Handler should be terminal to stop dispatch chain."""
         assert handler.terminal is True
 
-    # matches() - Positive Cases
+    # ------------------------------------------------------------------
+    # matches()
+    # ------------------------------------------------------------------
     def test_matches_ask_user_question(self, handler):
-        """Should match AskUserQuestion tool calls."""
         hook_input = {
             "hook_event_name": "PreToolUse",
             "tool_name": "AskUserQuestion",
@@ -44,9 +59,7 @@ class TestAskUserQuestionBlockerHandler:
         }
         assert handler.matches(hook_input) is True
 
-    # matches() - Negative Cases
     def test_matches_bash_returns_false(self, handler):
-        """Should NOT match Bash tool calls."""
         hook_input = {
             "hook_event_name": "PreToolUse",
             "tool_name": "Bash",
@@ -55,52 +68,250 @@ class TestAskUserQuestionBlockerHandler:
         assert handler.matches(hook_input) is False
 
     def test_matches_missing_tool_name_returns_false(self, handler):
-        """Should not match when tool_name is missing."""
-        hook_input = {"hook_event_name": "PreToolUse"}
-        assert handler.matches(hook_input) is False
+        assert handler.matches({"hook_event_name": "PreToolUse"}) is False
 
     def test_matches_none_tool_name_returns_false(self, handler):
-        """Should not match when tool_name is None."""
-        hook_input = {"hook_event_name": "PreToolUse", "tool_name": None}
-        assert handler.matches(hook_input) is False
+        assert handler.matches({"tool_name": None}) is False
 
-    # handle() Tests
-    def test_handle_returns_deny(self, handler):
-        """handle() should return deny decision."""
+    # ------------------------------------------------------------------
+    # handle() — ALLOW path (prefix on every question)
+    # ------------------------------------------------------------------
+    def test_handle_allows_when_single_question_has_prefix(self, handler):
         hook_input = {
-            "hook_event_name": "PreToolUse",
             "tool_name": "AskUserQuestion",
-            "tool_input": {"questions": [{"question": "Which approach?"}]},
+            "tool_input": {
+                "questions": [
+                    {
+                        "question": (
+                            f"{REQUIRED_PREFIX} the user has not specified "
+                            "which database driver they want and both are "
+                            "supported equally. Postgres or MySQL?"
+                        )
+                    }
+                ]
+            },
         }
         result = handler.handle(hook_input)
-        assert result.decision == "deny"
+        assert result.decision == Decision.ALLOW
 
-    def test_handle_reason_says_blocked(self, handler):
-        """handle() reason should say BLOCKED."""
+    def test_handle_allows_when_all_questions_have_prefix(self, handler):
         hook_input = {
-            "hook_event_name": "PreToolUse",
             "tool_name": "AskUserQuestion",
-            "tool_input": {"questions": [{"question": "Which?"}]},
+            "tool_input": {
+                "questions": [
+                    {"question": f"{REQUIRED_PREFIX} reason 1. Q1?"},
+                    {"question": f"{REQUIRED_PREFIX} reason 2. Q2?"},
+                ]
+            },
         }
         result = handler.handle(hook_input)
-        assert "BLOCKED" in result.reason
+        assert result.decision == Decision.ALLOW
 
-    def test_handle_reason_mentions_autonomously(self, handler):
-        """handle() reason should tell Claude to decide autonomously."""
+    def test_handle_allows_with_leading_whitespace_before_prefix(self, handler):
         hook_input = {
-            "hook_event_name": "PreToolUse",
             "tool_name": "AskUserQuestion",
-            "tool_input": {"questions": [{"question": "Which?"}]},
+            "tool_input": {"questions": [{"question": f"   {REQUIRED_PREFIX} reason. Q?"}]},
         }
         result = handler.handle(hook_input)
-        assert "autonomously" in result.reason.lower()
+        assert result.decision == Decision.ALLOW
+
+    # ------------------------------------------------------------------
+    # handle() — DENY path (prefix missing on any question)
+    # ------------------------------------------------------------------
+    def test_handle_denies_when_question_has_no_prefix(self, handler):
+        hook_input = {
+            "tool_name": "AskUserQuestion",
+            "tool_input": {"questions": [{"question": "Should I continue?"}]},
+        }
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+
+    def test_handle_denies_when_mixed_prefix_state(self, handler):
+        hook_input = {
+            "tool_name": "AskUserQuestion",
+            "tool_input": {
+                "questions": [
+                    {"question": f"{REQUIRED_PREFIX} reason. Q1?"},
+                    {"question": "Q2 without prefix"},
+                ]
+            },
+        }
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+
+    def test_handle_denies_with_lowercase_prefix(self, handler):
+        hook_input = {
+            "tool_name": "AskUserQuestion",
+            "tool_input": {"questions": [{"question": "asking because: reason. Q?"}]},
+        }
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+
+    def test_handle_denies_when_prefix_appears_mid_string(self, handler):
+        hook_input = {
+            "tool_name": "AskUserQuestion",
+            "tool_input": {
+                "questions": [
+                    {
+                        "question": (
+                            f"Should I do X? {REQUIRED_PREFIX} actually I " "want this allowed"
+                        )
+                    }
+                ]
+            },
+        }
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+
+    def test_handle_denies_when_questions_array_empty(self, handler):
+        hook_input = {
+            "tool_name": "AskUserQuestion",
+            "tool_input": {"questions": []},
+        }
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+
+    def test_handle_denies_when_tool_input_missing(self, handler):
+        hook_input = {"tool_name": "AskUserQuestion"}
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+
+    def test_handle_denies_when_questions_key_missing(self, handler):
+        hook_input = {"tool_name": "AskUserQuestion", "tool_input": {}}
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+
+    def test_handle_denies_when_question_text_missing(self, handler):
+        hook_input = {
+            "tool_name": "AskUserQuestion",
+            "tool_input": {"questions": [{"header": "no question key"}]},
+        }
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+
+    # ------------------------------------------------------------------
+    # handle() — DENY reason content
+    # ------------------------------------------------------------------
+    def test_deny_reason_mentions_prefix(self, handler):
+        result = handler.handle(
+            {
+                "tool_name": "AskUserQuestion",
+                "tool_input": {"questions": [{"question": "Should I continue?"}]},
+            }
+        )
+        assert REQUIRED_PREFIX in result.reason
+
+    def test_deny_reason_instructs_state_assumption(self, handler):
+        result = handler.handle(
+            {
+                "tool_name": "AskUserQuestion",
+                "tool_input": {"questions": [{"question": "Should I continue?"}]},
+            }
+        )
+        assert "assum" in result.reason.lower()
+
+    def test_deny_reason_mentions_user_will_interrupt(self, handler):
+        result = handler.handle(
+            {
+                "tool_name": "AskUserQuestion",
+                "tool_input": {"questions": [{"question": "Should I continue?"}]},
+            }
+        )
+        assert "interrupt" in result.reason.lower() or "watching" in result.reason.lower()
+
+    def test_deny_reason_lists_tautological_examples(self, handler):
+        """Reason should call out good-vs-bad question patterns explicitly."""
+        result = handler.handle(
+            {
+                "tool_name": "AskUserQuestion",
+                "tool_input": {"questions": [{"question": "Should I bodge it?"}]},
+            }
+        )
+        reason_lower = result.reason.lower()
+        assert "best practice" in reason_lower
+        assert "delivering" in reason_lower
+        assert "quality" in reason_lower
+
+    def test_claude_md_lists_tautological_examples(self, handler):
+        """get_claude_md should also include the good-vs-bad guidance."""
+        guidance = handler.get_claude_md()
+        assert guidance is not None
+        lower = guidance.lower()
+        assert "best practice" in lower
+        assert "bodge" in lower
 
     def test_handle_returns_hook_result(self, handler):
-        """handle() should return HookResult instance."""
-        hook_input = {
-            "hook_event_name": "PreToolUse",
-            "tool_name": "AskUserQuestion",
-            "tool_input": {"questions": [{"question": "Which?"}]},
-        }
-        result = handler.handle(hook_input)
+        result = handler.handle(
+            {
+                "tool_name": "AskUserQuestion",
+                "tool_input": {"questions": [{"question": "Q?"}]},
+            }
+        )
         assert isinstance(result, HookResult)
+
+    # ------------------------------------------------------------------
+    # handle() — advisory mode (warn-only)
+    # ------------------------------------------------------------------
+    def test_advisory_mode_allows_unjustified_question(self, advisory_handler):
+        result = advisory_handler.handle(
+            {
+                "tool_name": "AskUserQuestion",
+                "tool_input": {"questions": [{"question": "Should I continue?"}]},
+            }
+        )
+        assert result.decision == Decision.ALLOW
+
+    def test_advisory_mode_attaches_context_warning(self, advisory_handler):
+        result = advisory_handler.handle(
+            {
+                "tool_name": "AskUserQuestion",
+                "tool_input": {"questions": [{"question": "Should I continue?"}]},
+            }
+        )
+        # Warning text should mention the missing prefix
+        joined = " ".join(result.context or []) + (result.guidance or "")
+        assert REQUIRED_PREFIX in joined
+
+    def test_advisory_mode_allows_justified_question_silently(self, advisory_handler):
+        result = advisory_handler.handle(
+            {
+                "tool_name": "AskUserQuestion",
+                "tool_input": {"questions": [{"question": f"{REQUIRED_PREFIX} reason. Q?"}]},
+            }
+        )
+        assert result.decision == Decision.ALLOW
+        # No warning needed when the call is properly justified
+        assert not result.context
+
+    # ------------------------------------------------------------------
+    # handle() — custom required_prefix override
+    # ------------------------------------------------------------------
+    def test_custom_required_prefix_override(self, handler):
+        handler._required_prefix = "JUSTIFICATION:"
+        result_allow = handler.handle(
+            {
+                "tool_name": "AskUserQuestion",
+                "tool_input": {"questions": [{"question": "JUSTIFICATION: reason. Q?"}]},
+            }
+        )
+        result_deny = handler.handle(
+            {
+                "tool_name": "AskUserQuestion",
+                "tool_input": {"questions": [{"question": f"{REQUIRED_PREFIX} reason. Q?"}]},
+            }
+        )
+        assert result_allow.decision == Decision.ALLOW
+        assert result_deny.decision == Decision.DENY
+
+    # ------------------------------------------------------------------
+    # get_claude_md()
+    # ------------------------------------------------------------------
+    def test_get_claude_md_returns_guidance(self, handler):
+        guidance = handler.get_claude_md()
+        assert guidance is not None
+        assert REQUIRED_PREFIX in guidance
+
+    def test_get_claude_md_mentions_assumption_audit_pattern(self, handler):
+        guidance = handler.get_claude_md()
+        assert guidance is not None
+        assert "assum" in guidance.lower()

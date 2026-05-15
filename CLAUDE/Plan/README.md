@@ -4,6 +4,14 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+### Handler UX Adjustments
+
+- [00108: Nuanced AskUserQuestion Blocker](00108-question-blocker-nuanced/PLAN.md) - Not Started
+
+  - Replace always-deny `ask_user_question_blocker` with prefix-positive `ASKING BECAUSE:` policy mirroring the Stop handler's `STOPPING BECAUSE:` convention
+  - DENY path instructs agent to state assumed-correct answer and proceed (audit log for the watching user)
+  - Ships `enabled: false`; flip to default-on in follow-up after dogfooding
+
 ### Stop-Quality Stack (dependency chain)
 
 - [00085: Reminder Pseudo-Event System with Adaptive Triggers](00085-reminder-pseudo-event-system/PLAN.md) - In Progress

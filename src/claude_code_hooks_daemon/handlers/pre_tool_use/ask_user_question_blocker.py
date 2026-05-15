@@ -1,12 +1,30 @@
-"""AskUserQuestionBlockerHandler - prevent progress-blocking user questions.
+"""AskUserQuestionBlockerHandler — nuanced prefix-positive policy.
 
-When enabled, blocks AskUserQuestion tool calls so Claude continues working
-autonomously without stopping to ask the user for input. Useful for fully
-unattended or batch workflows where user interaction is not desired.
+Plan 00108. The handler mirrors the Stop handler's `STOPPING BECAUSE:`
+convention: questions are only allowed through to the user when the agent
+explicitly declares why it cannot decide autonomously, by prefixing each
+`question` string with `ASKING BECAUSE:`. Without that prefix the call is
+denied with guidance to state the assumed answer in plain text and proceed,
+leaving an audit trail for the watching user to interrupt if the assumption
+is wrong.
 
-Disabled by default — enable in hooks-daemon.yaml when you want uninterrupted
-autonomous operation.
+Two modes:
+  * ``strict`` (default): DENY when any question lacks the prefix.
+  * ``advisory``: ALLOW with a context warning so projects can dogfood the
+    convention before turning on hard blocking.
+
+Disabled by default. Enable in ``hooks-daemon.yaml``::
+
+    pre_tool_use:
+      handlers:
+        ask_user_question_blocker:
+          enabled: true
+          options:
+            mode: strict             # or "advisory"
+            required_prefix: "ASKING BECAUSE:"
 """
+
+from __future__ import annotations
 
 from typing import Any
 
@@ -14,25 +32,59 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputF
 from claude_code_hooks_daemon.constants.tools import ToolName
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 
+# Defaults / option keys — no magic strings
+DEFAULT_REQUIRED_PREFIX = "ASKING BECAUSE:"
+MODE_STRICT = "strict"
+MODE_ADVISORY = "advisory"
+
+_DENY_REASON_TEMPLATE = (
+    "BLOCKED: AskUserQuestion without `{prefix}` prefix.\n\n"
+    "This handler enforces a prefix-positive policy mirroring the Stop "
+    "handler's `STOPPING BECAUSE:` convention. Asking the user pauses the "
+    "session; the daemon will only let a question through when you have "
+    "declared why you cannot decide autonomously.\n\n"
+    "TAUTOLOGICAL QUESTIONS (do NOT ask — when one option is obviously the "
+    "good one, pick it):\n"
+    "- Best practice vs. quick bodge → best practice\n"
+    "- Increasing code quality vs. decreasing → increasing\n"
+    "- Delivering the requirement vs. not delivering → delivering\n"
+    "- Fixing the failing test vs. leaving it broken → fixing\n"
+    "- Following project conventions vs. inventing your own → following\n"
+    "If the question reduces to good-vs-bad, you already know the answer.\n\n"
+    "WHAT TO DO INSTEAD:\n"
+    "1. State the question and your assumed-correct answer in your output "
+    "text, then proceed with that assumption. The user is watching and will "
+    "interrupt if the assumption is wrong — this gives them the same control "
+    "they would have had via the question, without pausing the session for "
+    "an obvious answer.\n"
+    "2. If the question really does have equally-valid options that you "
+    "cannot resolve from context, retry the AskUserQuestion call with every "
+    "`question` text prefixed `{prefix} <one-line reason you cannot decide>`."
+    "\n\nExample retry:\n"
+    '  "{prefix} the project README does not specify the database driver '
+    'and both Postgres and MySQL are equally supported. Which should I use?"'
+)
+
+_ADVISORY_GUIDANCE_TEMPLATE = (
+    "WARNING: AskUserQuestion without `{prefix}` prefix\n\n"
+    "Asking pauses the session. State your assumed-correct answer in plain "
+    "output text and proceed — the user will interrupt if the assumption is "
+    "wrong. If the question is genuinely undecidable, prefix every question "
+    "with `{prefix} <reason>` so future strict-mode rollout will not block "
+    "it."
+)
+
 
 class AskUserQuestionBlockerHandler(Handler):
-    """Block AskUserQuestion to prevent progress-blocking user prompts.
+    """Allow AskUserQuestion only when every question is prefix-justified.
 
-    When enabled, prevents Claude from stopping to ask the user questions.
-    Instead, Claude should make reasonable decisions autonomously and
-    continue working without interruption.
-
-    This is useful for:
-    - Fully unattended/batch workflows
-    - Long-running tasks where stopping for questions wastes time
-    - Situations where the user prefers autonomous decision-making
-
-    Disabled by default. Enable in config when uninterrupted operation
-    is desired.
+    Strict mode (default): denies the call when any ``question`` lacks the
+    required prefix, returning guidance to state the assumed answer instead.
+    Advisory mode: allows the call through but attaches a context warning so
+    teams can observe the convention before turning on hard blocking.
     """
 
     def __init__(self) -> None:
-        """Initialise handler."""
         super().__init__(
             handler_id=HandlerID.ASK_USER_QUESTION_BLOCKER,
             priority=Priority.ASK_USER_QUESTION_BLOCKER,
@@ -40,59 +92,160 @@ class AskUserQuestionBlockerHandler(Handler):
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """Check if this is an AskUserQuestion tool call.
-
-        Args:
-            hook_input: Hook input dictionary from Claude Code
-
-        Returns:
-            True if tool_name is AskUserQuestion
-        """
-        tool_name = hook_input.get(HookInputField.TOOL_NAME)
-        return tool_name == ToolName.ASK_USER_QUESTION
+        """Return True only for AskUserQuestion tool calls."""
+        return hook_input.get(HookInputField.TOOL_NAME) == ToolName.ASK_USER_QUESTION
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
-        """Block the question and instruct Claude to decide autonomously.
+        """Allow if every question carries the required prefix; otherwise act per mode."""
+        prefix = getattr(self, "_required_prefix", DEFAULT_REQUIRED_PREFIX)
+        mode = getattr(self, "_mode", MODE_STRICT)
 
-        Args:
-            hook_input: Hook input dictionary from Claude Code
+        all_justified = self._all_questions_justified(hook_input, prefix)
 
-        Returns:
-            HookResult with deny decision and guidance
-        """
+        if all_justified:
+            return HookResult(decision=Decision.ALLOW)
+
+        if mode == MODE_ADVISORY:
+            advisory_text = _ADVISORY_GUIDANCE_TEMPLATE.format(prefix=prefix)
+            return HookResult(
+                decision=Decision.ALLOW,
+                context=[
+                    f"WARNING: AskUserQuestion without `{prefix}` prefix",
+                    "State your assumed-correct answer in output text instead",
+                    "User is watching and will interrupt if the assumption is wrong",
+                ],
+                guidance=advisory_text,
+            )
+
         return HookResult(
             decision=Decision.DENY,
-            reason=(
-                "BLOCKED: User questions are disabled in this session.\n\n"
-                "The user does not want you to stop and ask questions.\n"
-                "Make a reasonable decision autonomously and continue working.\n"
-                "If you need to communicate choices you made, mention them\n"
-                "in your output text instead of blocking progress."
-            ),
+            reason=_DENY_REASON_TEMPLATE.format(prefix=prefix),
         )
 
+    @staticmethod
+    def _all_questions_justified(hook_input: dict[str, Any], prefix: str) -> bool:
+        """Return True iff tool_input.questions is non-empty and every question begins with prefix.
+
+        FAIL FAST on schema violations (missing tool_input, missing questions,
+        empty array, missing question text) — return False so the DENY path
+        emits the guidance message. We never silently allow on malformed
+        input.
+        """
+        tool_input = hook_input.get(HookInputField.TOOL_INPUT)
+        if not isinstance(tool_input, dict):
+            return False
+
+        questions = tool_input.get("questions")
+        if not isinstance(questions, list) or not questions:
+            return False
+
+        for entry in questions:
+            if not isinstance(entry, dict):
+                return False
+            text = entry.get("question")
+            if not isinstance(text, str):
+                return False
+            if not text.lstrip().startswith(prefix):
+                return False
+
+        return True
+
     def get_claude_md(self) -> str | None:
-        return None
+        prefix = getattr(self, "_required_prefix", DEFAULT_REQUIRED_PREFIX)
+        return (
+            "## ask_user_question_blocker — questions need `"
+            f"{prefix}` justification\n\n"
+            "AskUserQuestion calls are only allowed when every `question` "
+            f"string begins with `{prefix}` (case-sensitive, leading "
+            "whitespace OK). The convention mirrors the Stop handler's "
+            "`STOPPING BECAUSE:` pattern — explicit declared intent gates "
+            "the privilege of pausing the session.\n\n"
+            "**Before asking, evaluate critically**:\n"
+            "- Tautological/rhetorical questions with one obvious answer "
+            '("Should I continue?", "Would you like me to proceed?") — '
+            "do NOT ask. State the question and your assumed-correct answer "
+            "in plain output text and proceed. The user is watching and will "
+            "interrupt if the assumption is wrong.\n"
+            "- Questions whose options reduce to **good vs. bad** are "
+            "tautological — the answer is always the good option. Examples: "
+            "best practice vs. bodge, increasing vs. decreasing code "
+            "quality, delivering the requirement vs. not delivering it, "
+            "fixing the failing test vs. leaving it broken, following "
+            "project conventions vs. inventing your own. Do NOT ask; pick "
+            "the good option and proceed.\n"
+            '- Errors with a clear recovery path ("Should I fix the failing '
+            'test?") — do NOT ask. Fix it.\n'
+            "- Genuine choice questions where you cannot resolve the answer "
+            "from context — these are the legitimate use case. Prefix every "
+            f"question text with `{prefix} <one-line reason you cannot "
+            "decide>` so the daemon allows the call through.\n\n"
+            "**Audit log pattern** (preferred for tautological questions):\n"
+            "```\n"
+            "I would normally ask: <question>.\n"
+            "Assumed answer: <your assumption>.\n"
+            "Proceeding on that basis; the user will interrupt if wrong.\n"
+            "```\n\n"
+            f"**Escape hatch** (genuine ambiguity): prefix every question "
+            f"text with `{prefix} <reason>`. Mixing prefixed and "
+            "non-prefixed questions in one call still triggers a block — "
+            "prefix all or none."
+        )
 
     def get_acceptance_tests(self) -> list[Any]:
-        """Return acceptance tests for AskUserQuestion Blocker."""
         from claude_code_hooks_daemon.core import (
             AcceptanceTest,
-            Decision,
             RecommendedModel,
             TestType,
         )
 
+        prefix = DEFAULT_REQUIRED_PREFIX
         return [
             AcceptanceTest(
-                title="Block AskUserQuestion for unattended operation",
-                command="AskUserQuestion tool call",
+                title="Deny AskUserQuestion without prefix",
+                command="AskUserQuestion tool call without `ASKING BECAUSE:` prefix",
                 description=(
-                    "Blocks AskUserQuestion so Claude works autonomously "
-                    "without stopping for user input"
+                    "Tautological / unjustified questions are denied; agent "
+                    "is instructed to state the assumed answer and proceed."
                 ),
                 expected_decision=Decision.DENY,
-                expected_message_patterns=[r"BLOCKED", r"autonomously"],
+                expected_message_patterns=[r"BLOCKED", prefix, r"(?i)assum"],
+                safety_notes="Only active when explicitly enabled in config",
+                test_type=TestType.BLOCKING,
+                requires_event="PreToolUse for AskUserQuestion",
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=True,
+            ),
+            AcceptanceTest(
+                title="Allow AskUserQuestion when every question is prefix-justified",
+                command=(
+                    "AskUserQuestion call where every `question` begins with "
+                    "`ASKING BECAUSE: <reason>`"
+                ),
+                description=(
+                    "Genuinely-justified questions reach the user. The "
+                    "prefix declares why the agent could not decide "
+                    "autonomously."
+                ),
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[],
+                safety_notes="Only active when explicitly enabled in config",
+                test_type=TestType.BLOCKING,
+                requires_event="PreToolUse for AskUserQuestion",
+                recommended_model=RecommendedModel.SONNET,
+                requires_main_thread=True,
+            ),
+            AcceptanceTest(
+                title="Deny mixed AskUserQuestion (some prefixed, some not)",
+                command=(
+                    "AskUserQuestion call where one question has the prefix " "and another lacks it"
+                ),
+                description=(
+                    "Mixed calls are denied to close the prefix-laundering "
+                    "loophole (one justified question carrying N "
+                    "tautological ones into the user's lap)."
+                ),
+                expected_decision=Decision.DENY,
+                expected_message_patterns=[r"BLOCKED", prefix],
                 safety_notes="Only active when explicitly enabled in config",
                 test_type=TestType.BLOCKING,
                 requires_event="PreToolUse for AskUserQuestion",

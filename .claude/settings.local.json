@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(untracked/venv/bin/python:*)"
+      "Bash(untracked/venv/bin/python:*)",
+      "Bash(printf '\\\\n')",
+      "Read(//tmp/**)",
+      "Bash(echo \"SUB_DIFF=$?\")"
     ]
   }
 }
