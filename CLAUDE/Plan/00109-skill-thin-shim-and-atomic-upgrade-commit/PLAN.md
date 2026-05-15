@@ -195,23 +195,40 @@ upgrade ran where.
 
 ### Phase 4: Release artifact handling
 
-- [ ] ⬜ **Task 4.1**: Decide whether to keep publishing
-  `upgrade.sh` and `bootstrap-checksums.txt` as release artifacts.
-  Recommendation: KEEP — the three sibling scripts still
-  self-bootstrap against the manifest, and removing `upgrade.sh`
-  from the manifest would break their lookup contract. Document
-  the decision in PLAN.md "Technical Decisions" section.
-- [ ] ⬜ **Task 4.2**: If Task 4.1 says KEEP, update
-  `CLAUDE/development/RELEASING.md` Step 14 to note that the
-  published `upgrade.sh` is no longer the script that runs on
-  clients (it's the in-repo `scripts/upgrade.sh` from `main`
-  HEAD), and the artifact exists only to satisfy the manifest
-  cross-check used by the other three bootstrapped scripts.
-- [ ] ⬜ **Task 4.3**: Make sure the H-1 deterministic gate
-  `tests/acceptance/test_install_sh_end_to_end.py` still exercises
-  the install path. Add a sibling
-  `tests/acceptance/test_skill_upgrade_end_to_end.py` that
-  exercises the new shim end-to-end against a fixture.
+- [x] ✅ **Task 4.1**: KEEP decision documented in Decision 4
+  below. Rationale: sibling scripts (`daemon-cli.sh`,
+  `health-check.sh`, `init-handlers.sh`) still self-bootstrap
+  from the manifest via `awk -v name="…"` lookup; removing
+  `upgrade.sh` from the manifest would only force a
+  RELEASING.md churn for no client-visible gain. Once the
+  follow-up plan thins the three siblings, all four artifacts
+  can be dropped together in a single release-process change.
+- [x] ✅ **Task 4.2**: Added "Note on `upgrade.sh` (Plan 00109)"
+  paragraph after Step 14 in `CLAUDE/development/RELEASING.md`
+  explaining the published `upgrade.sh` artifact is now inert
+  dead-weight (clients run the canonical `scripts/upgrade.sh`
+  from `main` HEAD via the thin shim) but kept in the manifest
+  for cross-symmetry with the three sibling self-bootstrap
+  scripts.
+- [x] ✅ **Task 4.3**: Added
+  `tests/acceptance/test_skill_upgrade_end_to_end.py` —
+  full pipeline gate: shim → real Layer 1 → metadata against
+  an installed daemon. Sets up fixture project, clones daemon
+  into `.claude/hooks-daemon/`, runs `install_version.sh`,
+  builds `file://` fixture tree mirroring GitHub's raw-content
+  layout (`<base>/main/scripts/upgrade.sh`) seeded from the
+  cloned daemon dir (hermetic, not from test-host REPO_ROOT).
+  Sets `HOOKS_DAEMON_UPGRADE_BASE_URL`,
+  `HOOKS_DAEMON_UPGRADE_REF=main`, `HOOKS_DAEMON_PYTHON`,
+  invokes the shim, asserts exit 0, both sentinels on stdout,
+  all 10 required metadata fields populated,
+  `metadata["project_root"] == str(project_root)` (proves the
+  shim's PROJECT_ROOT detection forwarded correctly to Layer 1),
+  and `python_path` is not `/usr/bin/`. Decorated
+  `@pytest.mark.slow`. Closes the integration gap between the
+  Phase 1 metadata test (bypasses the shim) and the Phase 2
+  shim test (uses a stand-in script). PASSED 6.96s on first
+  run. H-1 gate still green: 2/2 in 11.57s.
 
 ### Phase 5: gh issue + release
 
@@ -293,6 +310,45 @@ commit message body using the metadata. Script never runs `git commit` itself. R
 work (which files to stage, what to highlight in the body) and
 the agent has full context the script doesn't. Keeps the script
 deterministic and the prose human-readable.
+
+**Date**: 2026-05-15
+
+### Decision 4: Keep `upgrade.sh` in the release manifest
+
+**Context**: With the thin-shim design, the published
+`upgrade.sh` release artifact is no longer the script that runs
+on clients — the shim fetches `scripts/upgrade.sh` from `main`
+HEAD instead. Question: should `upgrade.sh` still be published
+in `bootstrap-checksums.txt` and as a release asset?
+
+**Options Considered**:
+
+1. **Remove `upgrade.sh` from manifest + release assets.** Each
+   of the three sibling scripts (`daemon-cli.sh`,
+   `health-check.sh`, `init-handlers.sh`) looks up its own
+   basename via `awk -v name="$_HOOKS_DAEMON_BOOTSTRAP_SCRIPT_NAME"`
+   — they don't reference `upgrade.sh`. Removing it would not
+   break their self-bootstrap. BUT `RELEASING.md` Step 14 iterates
+   `for script in upgrade.sh daemon-cli.sh health-check.sh init-handlers.sh`
+   and aborts the release if any is missing from the manifest;
+   that loop would need updating.
+2. **Keep `upgrade.sh` in manifest + release assets.** Zero
+   release-process change. The published artifact becomes inert
+   (no client ever runs it), but it costs nothing and matches the
+   established symmetry across all four entry-point scripts.
+   Future plan to thin the three siblings (mentioned in Non-Goals)
+   will revisit this once they too become shims.
+
+**Decision**: Option 2 — KEEP. The published `upgrade.sh` artifact
+is now dead weight (clients run the canonical `scripts/upgrade.sh`
+from `main` HEAD via the thin shim, not the published asset), but
+removing it has no upside and adds churn to the release process.
+Once the sibling-script thinning plan lands, all four artifacts
+can be dropped together in a single release-process change.
+
+**Documented in**: `CLAUDE/development/RELEASING.md` Step 14 — the
+existing artifact-build commands stay; a note explains the
+published `upgrade.sh` is no longer functionally consumed.
 
 **Date**: 2026-05-15
 

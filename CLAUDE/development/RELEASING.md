@@ -351,6 +351,17 @@ of these four artifacts ships a release that every existing installation
 refuses to run for that script — every diagnostic invocation aborts loudly
 with `Error: bootstrap-checksums.txt has no entry for <basename>`.
 
+**Note on `upgrade.sh` (Plan 00109)**: As of v3.15.0 the skill-pushed
+`upgrade.sh` is a thin shim that fetches `scripts/upgrade.sh` from
+`main` HEAD and execs it — it no longer carries a self-bootstrap stanza
+and clients never run the published `upgrade.sh` artifact. The artifact
+is still bundled here for cross-symmetry with the three sibling scripts
+that DO still self-bootstrap against the manifest. Plan 00109 Decision 4
+captures the rationale: removing `upgrade.sh` from the manifest would
+require touching this loop and the manifest builder, with no upside
+until the sibling-script thinning plan lands. Once the siblings are
+thinned too, all four artifacts can be dropped together.
+
 ```bash
 # Build the bootstrap manifest. List every artifact every self-bootstrap
 # stanza may verify against — all four skill scripts.
