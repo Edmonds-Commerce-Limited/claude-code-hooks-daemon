@@ -232,11 +232,14 @@ upgrade ran where.
 
 ### Phase 5: gh issue + release
 
-- [ ] ⬜ **Task 5.1**: Open gh issue
-  `Review pull-from-HEAD pattern for skill upgrade flow` — captures
-  the longer-term question of whether `raw/main` is the right
-  source (vs `releases/latest/download` with sha256, vs a pinned
-  tag). Out of scope for this plan; tracked for future review.
+- [x] ✅ **Task 5.1**: Opened gh issue #31
+  `Review pull-from-HEAD pattern for skill upgrade flow`
+  (<https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/issues/31>)
+  — captures the longer-term question of whether `raw/main` is
+  the right source (vs `releases/latest/download` with sha256,
+  vs a pinned tag). Documents the two decision triggers (sibling
+  thinning plan landing; mid-release inconsistency biting a user)
+  and lists alternatives. Out of scope for this plan.
 - [ ] ⬜ **Task 5.2**: Update CHANGELOG.md / RELEASES/ via
   `/release` skill. This is MINOR (breaking change for any client
   that scripted against the old skill upgrade.sh internals — none
