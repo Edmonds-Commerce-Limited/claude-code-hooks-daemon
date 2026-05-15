@@ -1,89 +1,56 @@
 # Upgrade Hooks Daemon
 
-Upgrade your Claude Code Hooks Daemon to a new version with automatic safety checks and rollback.
+Upgrade the Claude Code Hooks Daemon and commit the result atomically.
 
-## Quick Upgrade
+## Agent Workflow
 
-```bash
-/hooks-daemon upgrade
-```
+1. **Run the upgrade**:
 
-This auto-detects the latest version and upgrades safely.
+   ```bash
+   /hooks-daemon upgrade           # latest
+   /hooks-daemon upgrade 3.14.0    # specific version
+   /hooks-daemon upgrade --force   # reinstall current
+   ```
 
-## Upgrade to Specific Version
+2. **Parse the metadata block** emitted on stdout between the
+   `<<<UPGRADE_METADATA` and `UPGRADE_METADATA>>>` sentinels. Fields:
+   `from_version`, `to_version`, `python_version`, `python_path`,
+   `venv_path`, `host`, `daemon_dir`, `project_root`, `modified_files`,
+   `config_diff_summary`.
 
-```bash
-/hooks-daemon upgrade 2.14.0
-```
+3. **Verify daemon RUNNING**:
 
-Specify an exact version number to upgrade to.
+   ```bash
+   $PYTHON -m claude_code_hooks_daemon.daemon.cli status
+   ```
 
-## Force Reinstall Current Version
+4. **Stage daemon-owned paths ONLY** with explicit `git add` — other
+   working-tree changes are not part of this commit. Never `git add .`:
 
-```bash
-/hooks-daemon upgrade --force
-```
+   ```bash
+   git add .claude/hooks-daemon/ .claude/hooks-daemon.yaml \
+           .claude/skills/hooks-daemon/ .claude/hooks/ \
+           .claude/settings.json
+   ```
 
-Reinstall the current version (useful for repairing broken installations).
+5. **Commit** with the metadata block in the body:
 
-## What Happens During Upgrade
+   ```
+   hooks daemon upgrade: ${from_version} → ${to_version}
 
-The upgrade process includes multiple safety checks:
+   <<<UPGRADE_METADATA
+   from_version=...
+   to_version=...
+   python_version=...
+   python_path=...
+   venv_path=...
+   host=...
+   daemon_dir=...
+   project_root=...
+   modified_files=...
+   config_diff_summary=...
+   UPGRADE_METADATA>>>
+   ```
 
-1. **Validates current daemon** - Ensures daemon can restart before upgrading
-2. **Backs up configuration** - Saves current config to `.backup` file
-3. **Downloads new version** - Fetches the specified or latest version
-4. **Verifies installation** - Ensures new daemon starts successfully
-5. **Tests functionality** - Runs basic smoke tests
-6. **Rolls back on failure** - Automatically reverts if any step fails
-
-## Upgrade Safety Features
-
-- **Automatic backup** - Config files backed up before changes
-- **Rollback protection** - Failed upgrades automatically revert
-- **Version validation** - Checks version exists before downloading
-- **Daemon verification** - New version must start successfully
-- **Skill refresh** - Updates skill files to match daemon version
-
-## After Upgrade
-
-The upgrade process will:
-
-- Restart the daemon with the new version
-- Refresh skill files in `.claude/skills/hooks-daemon/`
-- Display changelog highlights for the new version
-
-## If Upgrade Fails
-
-If the upgrade fails, the system automatically:
-
-1. Stops the new daemon
-2. Restores backed-up configuration
-3. Restarts the previous daemon version
-4. Reports the failure reason
-
-See [references/troubleshooting.md](references/troubleshooting.md#upgrade-failures) for common upgrade issues.
-
-## Manual Upgrade
-
-If you need to upgrade manually:
-
-```bash
-# 1. Stop daemon
-$PYTHON -m claude_code_hooks_daemon.daemon.cli stop
-
-# 2. Download upgrade script (never pipe curl to shell)
-curl -sSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/scripts/upgrade.sh -o /tmp/hooks-daemon-upgrade.sh
-bash /tmp/hooks-daemon-upgrade.sh
-
-# 3. Verify new version
-$PYTHON -m claude_code_hooks_daemon.daemon.cli status
-```
-
-## Version History
-
-To see what's new in each version, check:
-
-- `CHANGELOG.md` in the daemon repository
-- `RELEASES/` directory for detailed release notes
-- GitHub releases page
+If the daemon is not RUNNING after upgrade, do NOT commit — investigate
+first (`$PYTHON -m claude_code_hooks_daemon.daemon.cli logs`).
