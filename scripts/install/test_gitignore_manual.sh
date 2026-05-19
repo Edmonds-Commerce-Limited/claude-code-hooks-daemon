@@ -95,15 +95,65 @@ if create_daemon_untracked_gitignore "$TEST_DIR/test_daemon"; then
 
     if [ -f "$TEST_DIR/test_daemon/untracked/.gitignore" ]; then
         print_success "untracked/.gitignore created"
-        if grep -q "/untracked/" "$TEST_DIR/test_daemon/untracked/.gitignore"; then
-            print_success "Contains self-exclusion entry"
+        # Layer 2 protection: must self-exclude (ignore all, keep .gitignore itself)
+        if grep -qxF "*" "$TEST_DIR/test_daemon/untracked/.gitignore" \
+            && grep -qxF "!.gitignore" "$TEST_DIR/test_daemon/untracked/.gitignore"; then
+            print_success "Contains self-exclusion lines"
         else
-            print_error "Missing self-exclusion entry"
+            print_error "Missing self-exclusion lines"
+            cat "$TEST_DIR/test_daemon/untracked/.gitignore"
+            rm -rf "$TEST_DIR" "$TEST_DIR2"
+            exit 1
+        fi
+        # Must NOT contain the parent-dir entry — that's a no-op nested path
+        if grep -qxF "/untracked/" "$TEST_DIR/test_daemon/untracked/.gitignore"; then
+            print_error "Inner .gitignore wrongly contains parent-dir entry '/untracked/'"
             rm -rf "$TEST_DIR" "$TEST_DIR2"
             exit 1
         fi
     else
         print_error "untracked/.gitignore not created"
+        rm -rf "$TEST_DIR" "$TEST_DIR2"
+        exit 1
+    fi
+else
+    print_error "create_daemon_untracked_gitignore() failed"
+    rm -rf "$TEST_DIR" "$TEST_DIR2"
+    exit 1
+fi
+
+# Test 4b: idempotent — second call must not clobber correct content
+print_header "Test 4b: create_daemon_untracked_gitignore() - idempotent"
+# Mark the file via a custom extra line, then check it survives a re-write
+# only when content is wrong; here content is correct so file mtime should
+# be unchanged or content identical.
+GITIGNORE_BEFORE="$(cat "$TEST_DIR/test_daemon/untracked/.gitignore")"
+if create_daemon_untracked_gitignore "$TEST_DIR/test_daemon"; then
+    GITIGNORE_AFTER="$(cat "$TEST_DIR/test_daemon/untracked/.gitignore")"
+    if [ "$GITIGNORE_BEFORE" = "$GITIGNORE_AFTER" ]; then
+        print_success "create_daemon_untracked_gitignore() is idempotent"
+    else
+        print_error "create_daemon_untracked_gitignore() rewrote correct file"
+        rm -rf "$TEST_DIR" "$TEST_DIR2"
+        exit 1
+    fi
+else
+    print_error "create_daemon_untracked_gitignore() failed on second call"
+    rm -rf "$TEST_DIR" "$TEST_DIR2"
+    exit 1
+fi
+
+# Test 4c: heals wrong content (regression for clobber-then-corrupt bug)
+print_header "Test 4c: create_daemon_untracked_gitignore() - heals wrong content"
+# Simulate the v3.x bug: inner .gitignore contains parent-dir entry
+echo "/untracked/" > "$TEST_DIR/test_daemon/untracked/.gitignore"
+if create_daemon_untracked_gitignore "$TEST_DIR/test_daemon"; then
+    if grep -qxF "*" "$TEST_DIR/test_daemon/untracked/.gitignore" \
+        && grep -qxF "!.gitignore" "$TEST_DIR/test_daemon/untracked/.gitignore"; then
+        print_success "Healed wrong content to self-exclusion"
+    else
+        print_error "Failed to heal wrong content"
+        cat "$TEST_DIR/test_daemon/untracked/.gitignore"
         rm -rf "$TEST_DIR" "$TEST_DIR2"
         exit 1
     fi

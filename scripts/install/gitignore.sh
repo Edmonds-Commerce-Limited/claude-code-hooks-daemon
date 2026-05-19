@@ -20,6 +20,11 @@ fi
 # Expected .gitignore entries
 readonly DAEMON_GITIGNORE_ENTRY=".claude/hooks-daemon/"
 readonly UNTRACKED_GITIGNORE_ENTRY="/untracked/"
+# Self-exclusion pattern lines for an inner .gitignore that ignores
+# everything in its own directory except itself. Layer 2 of double protection
+# (Layer 1 is the parent dir entry in the project's root .gitignore).
+readonly UNTRACKED_SELF_EXCLUDE_LINE_ALL="*"
+readonly UNTRACKED_SELF_EXCLUDE_LINE_KEEP="!.gitignore"
 # Backup file created by ClaudeMdInjector before modifying CLAUDE.md
 readonly INJECT_BACKUP_GITIGNORE_ENTRY=".CLAUDE.md.pre-inject"
 
@@ -153,7 +158,15 @@ verify_claude_gitignore() {
 #
 # create_daemon_untracked_gitignore() - Create self-excluding .gitignore in daemon untracked dir
 #
-# Creates untracked/.gitignore with "/untracked/" entry to prevent git tracking.
+# Layer 2 of double protection: writes a self-excluding .gitignore inside the
+# untracked dir so everything in it is ignored except the .gitignore itself.
+# Layer 1 is the parent-dir entry in the project's root .gitignore, written
+# by ensure_root_gitignore(). The inner .gitignore must NOT contain the
+# parent-dir entry (e.g. "/untracked/") — that would be a no-op nested path
+# inside its own directory.
+#
+# Idempotent: only rewrites the file when content is missing or wrong, so
+# repeated upgrades never clobber a correct file.
 #
 # Args:
 #   $1 - daemon_dir: Path to daemon installation directory
@@ -177,10 +190,20 @@ create_daemon_untracked_gitignore() {
         mkdir -p "$untracked_dir"
     fi
 
-    # Create self-excluding .gitignore
-    echo "$UNTRACKED_GITIGNORE_ENTRY" > "$untracked_gitignore"
+    # Idempotent write: skip if the file already self-excludes correctly
+    if [ -f "$untracked_gitignore" ] \
+        && grep -qxF "$UNTRACKED_SELF_EXCLUDE_LINE_ALL" "$untracked_gitignore" \
+        && grep -qxF "$UNTRACKED_SELF_EXCLUDE_LINE_KEEP" "$untracked_gitignore"; then
+        print_verbose "untracked/.gitignore already self-excluding"
+        return 0
+    fi
 
-    print_verbose "Created untracked/.gitignore"
+    printf '%s\n%s\n' \
+        "$UNTRACKED_SELF_EXCLUDE_LINE_ALL" \
+        "$UNTRACKED_SELF_EXCLUDE_LINE_KEEP" \
+        > "$untracked_gitignore"
+
+    print_verbose "Wrote self-excluding untracked/.gitignore"
     return 0
 }
 
@@ -343,13 +366,14 @@ verify_gitignore_complete() {
         fi
     fi
 
-    # Check daemon untracked/.gitignore
+    # Check daemon untracked/.gitignore — must self-exclude (Layer 2 protection)
     local daemon_untracked_gitignore="$daemon_dir/untracked/.gitignore"
     if [ ! -f "$daemon_untracked_gitignore" ]; then
         print_warning "Daemon untracked/.gitignore not found"
         all_ok=false
-    elif ! grep -qF "$UNTRACKED_GITIGNORE_ENTRY" "$daemon_untracked_gitignore"; then
-        print_warning "Daemon untracked/.gitignore missing self-exclusion"
+    elif ! grep -qxF "$UNTRACKED_SELF_EXCLUDE_LINE_ALL" "$daemon_untracked_gitignore" \
+        || ! grep -qxF "$UNTRACKED_SELF_EXCLUDE_LINE_KEEP" "$daemon_untracked_gitignore"; then
+        print_warning "Daemon untracked/.gitignore missing self-exclusion lines"
         all_ok=false
     else
         print_verbose "Daemon untracked/.gitignore OK"

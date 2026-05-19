@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.15.1] - 2026-05-19
+
+This is a **patch release** that fixes a long-standing bug in `scripts/install/gitignore.sh`: `create_daemon_untracked_gitignore()` wrote the wrong content into the inner `untracked/.gitignore` and unconditionally clobbered the file on every install/upgrade. The function now writes a proper self-excluding `.gitignore` and is idempotent.
+
+### Fixed
+
+- **`create_daemon_untracked_gitignore()` writes correct content and is idempotent (Layer 2 of double `.gitignore` protection)** — The inner `untracked/.gitignore` is meant to be a **self-excluding** `.gitignore` (`*` to ignore everything, `!.gitignore` to keep itself tracked). The function instead wrote the literal string `/untracked/` — the root-level entry meant for the project's top-level `.gitignore`. Inside `untracked/.gitignore` that line resolves to a nested `untracked/untracked/` path that doesn't exist, so the inner file silently provided **zero** protection. Compounding this, the write used `echo > file` so every install or upgrade unconditionally clobbered whatever was there — any user who fixed it manually saw their fix overwritten on the next `/hooks-daemon upgrade`. Fix: write the two-line self-exclusion pair (`*` + `!.gitignore`), and only rewrite the file when either line is missing. `verify_gitignore_complete()` updated to assert the new shape. Field report: surfaced by a user dogfooding the daemon in `client-a-infra` whose self-excluding `untracked/.gitignore` was reverted to `/untracked/` after a routine `/hooks-daemon upgrade`. Affects every install/upgrade since the function was introduced; rerunning the upgrade after this release restores correct content.
+
+### Changed
+
+- **Manual test suite for `scripts/install/gitignore.sh` extended with idempotency + heal-corruption coverage** — `scripts/install/test_gitignore_manual.sh` Test 4 now asserts both self-exclusion lines (`*` and `!.gitignore`) are present AND that the parent-dir entry (`/untracked/`) is absent. Added Test 4b (idempotent re-call leaves a correct file byte-identical) and Test 4c (a corrupted-via-prior-bug `/untracked/`-content file is healed back to the self-excluding form on next invocation). Two new module-level constants (`UNTRACKED_SELF_EXCLUDE_LINE_ALL`, `UNTRACKED_SELF_EXCLUDE_LINE_KEEP`) eliminate the magic strings.
+
+### Security
+
+- None.
+
 ## [3.15.0] - 2026-05-15
 
 This is a **minor release** that ships Plan 00109 — the skill-pushed `scripts/upgrade.sh` becomes a thin curl-and-exec shim that fetches the canonical upgrade script from `main` HEAD, and Layer 1 `scripts/upgrade.sh` emits a machine-parseable `UPGRADE_METADATA` block on success so the project agent can write one atomic `hooks daemon upgrade` commit recording the version transition. Backwards-compatible: clients invoke `/hooks-daemon upgrade` exactly as before.
