@@ -658,12 +658,15 @@ def can_inline_bootstrap(daemon_dir: Path) -> BootstrapDecision:
         missing.append(_BOOTSTRAP_MISSING_UV_LOCK)
         reasons.append(f"{_UV_LOCK_FILENAME} missing at {daemon_dir}")
 
-    candidate = _find_compatible_python_on_path()
+    # Plan 00110 Task 4.4: delegate discovery to the canonical glob-and-sort
+    # helper. The (3, 11) floor reflects the daemon's hard minimum; the
+    # post-check below enforces project-specific ``requires-python`` on top
+    # so the existing detailed failure message (which test_bootstrap_decision
+    # asserts against by string) is preserved.
+    candidate = find_latest_python((3, 11))
     if candidate is None:
         missing.append(_BOOTSTRAP_MISSING_PYTHON)
-        reasons.append(
-            "no compatible python on PATH " f"(tried {list(_COMPATIBLE_PYTHON_CANDIDATES)})"
-        )
+        reasons.append("no compatible python on PATH (glob-and-sort discovery found nothing >=3.11)")
     elif pyproject_data is not None:
         requires = pyproject_data.get("project", {}).get("requires-python")
         if isinstance(requires, str):

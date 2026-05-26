@@ -67,8 +67,8 @@ class TestAllGreen:
         import sys
 
         monkeypatch.setattr(
-            "claude_code_hooks_daemon.daemon.paths._find_compatible_python_on_path",
-            lambda: Path(sys.executable),
+            "claude_code_hooks_daemon.daemon.paths.find_latest_python",
+            lambda *_args, **_kwargs: Path(sys.executable),
         )
 
         decision = can_inline_bootstrap(daemon_dir)
@@ -89,8 +89,8 @@ class TestMissingPreconditions:
             lambda name: "/usr/bin/uv" if name == "uv" else None,
         )
         monkeypatch.setattr(
-            "claude_code_hooks_daemon.daemon.paths._find_compatible_python_on_path",
-            lambda: Path(sys.executable),
+            "claude_code_hooks_daemon.daemon.paths.find_latest_python",
+            lambda *_args, **_kwargs: Path(sys.executable),
         )
 
     def test_uv_not_on_path(self, daemon_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -137,8 +137,8 @@ class TestMissingPreconditions:
     def test_no_compatible_python(self, daemon_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         self._patch_all_good(monkeypatch)
         monkeypatch.setattr(
-            "claude_code_hooks_daemon.daemon.paths._find_compatible_python_on_path",
-            lambda: None,
+            "claude_code_hooks_daemon.daemon.paths.find_latest_python",
+            lambda *_args, **_kwargs: None,
         )
 
         decision = can_inline_bootstrap(daemon_dir)
@@ -227,8 +227,8 @@ class TestMultipleMissing:
             lambda name: None,
         )
         monkeypatch.setattr(
-            "claude_code_hooks_daemon.daemon.paths._find_compatible_python_on_path",
-            lambda: None,
+            "claude_code_hooks_daemon.daemon.paths.find_latest_python",
+            lambda *_args, **_kwargs: None,
         )
         (daemon_dir / "pyproject.toml").unlink()
         (daemon_dir / "uv.lock").unlink()
