@@ -119,13 +119,31 @@ _rv_pick_python() {
     done
     # Fresh-clone bootstrap: no venv exists yet, but paths.py only needs
     # the stdlib (incl. tomllib for 3.11+) to compute the creation target.
-    # Caller MUST be passing --fallback-target. ``command -v`` writes the
-    # resolved path to stdout when found and exits non-zero when not — we
-    # discard stdout and let stderr surface (mirrors the existing
-    # error_hiding-clean pattern in scripts/install/venv_resolver.sh).
-    if [ "$allow_python3" = "--fallback-target" ] && command -v python3 > /dev/null; then
-        echo "python3"
-        return 0
+    # Caller MUST be passing --fallback-target. Plan 00110 Task 4.5:
+    # delegate to the canonical glob-and-sort helper so the host-a trap
+    # (default ``python3`` is 3.9 even when 3.13/3.14 are installed under
+    # versioned ``python3.13``/``python3.14`` names) is closed here too.
+    # The helper is sibling to this file under scripts/lib/ in all three
+    # layouts (self-install repo, downstream .claude/hooks-daemon/ clone,
+    # skill bundle). Sourced lazily so a missing helper only impacts the
+    # fallback path, not the steady-state cache-hit path.
+    if [ "$allow_python3" = "--fallback-target" ]; then
+        local discovery_lib="${_RV_LIB_DIR}/python_discovery.sh"
+        if [ ! -f "$discovery_lib" ]; then
+            echo "resolve_venv: python_discovery.sh missing at $discovery_lib" >&2
+            echo "  Reinstall the daemon so the canonical discovery helper is present." >&2
+            return 1
+        fi
+        # shellcheck source=/dev/null
+        . "$discovery_lib"
+        local pyproject="${_RV_PROJECT_ROOT}/pyproject.toml"
+        local discovered
+        if discovered="$(find_latest_python "3.11" "$pyproject")"; then
+            echo "$discovered"
+            return 0
+        fi
+        # find_latest_python already wrote an observed-interpreter
+        # diagnostic to stderr — no second-guessing here.
     fi
     return 1
 }
