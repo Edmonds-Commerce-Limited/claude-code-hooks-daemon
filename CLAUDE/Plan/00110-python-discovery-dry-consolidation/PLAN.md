@@ -100,7 +100,7 @@ The root problem is **WET, not buggy**. Every site reinvents discovery with slig
 
 Each migration is its own commit so we can bisect if any caller regresses.
 
-- [ ] **Task 4.1**: `scripts/upgrade.sh` — replace `find_compatible_python()` and `_is_python_at_least_311()` (lines 77-278) with `source scripts/lib/python_discovery.sh; find_latest_python "$(parse_min_python "$pyproject")"`
+- [x] ✅ **Task 4.1**: `scripts/upgrade.sh` — replaced `find_compatible_python()` and `_is_python_at_least_311()` (200 lines) with a 25-line thin wrapper that sources `scripts/lib/python_discovery.sh` and calls `find_latest_python 3.11 "$pyproject"`. Two obsolete extraction-pattern integration tests (`test_bootstrap_explicit_probe.py`, `test_bootstrap_requires_python_cross_check.py`) deleted — sourced functions no longer exist; behaviours covered by 13 tests in `tests/acceptance/test_python_discovery_bash.py`. Sweep of 49 bootstrap/upgrade tests passes.
 - [ ] **Task 4.2**: `scripts/install/prerequisites.sh` — replace duplicate `_is_python_at_least_311()` and candidate loop (lines 40-164) with same call
 - [ ] **Task 4.3**: `src/.../skills/hooks-daemon/scripts/install.sh` (lines 47-72) — **the host-a fix**. Replace single-`python3`-probe with `find_latest_python "$min" --require-pyproject /tmp/fetched-pyproject.toml`. Error message must use stderr output from the helper (which names a real interpreter).
 - [ ] **Task 4.4**: `src/.../daemon/paths.py::can_inline_bootstrap()` — replace `_find_compatible_python_on_path()` call with `find_latest_python()`. `BootstrapDecision` missing-id stays `"compatible-python"` for backward compat.
