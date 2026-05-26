@@ -58,6 +58,15 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00111: Stop Hook — Context-Limit Guidance Clause](Completed/00111-stop-hook-context-limit-guidance/PLAN.md) - Complete
+
+  - Shipped as commit `7d1b9b8`
+  - User dogfooding interrupt mid-Plan-00110: agent voluntarily stopping near the context-window limit to "checkpoint" before auto-compact, when auto-compact handles it automatically
+  - Branch 4 `_EXPLAIN_OR_CONTINUE_REASON` extended with an explicit paragraph telling the agent that context-window pressure is never a valid stop reason — auto-compact triggers automatically and preserves state
+  - Two new regression tests in `TestExplainOrContinueReasonContent` pin the new clause and assert the existing `STOPPING BECAUSE:` / `AUTO-CONTINUE` clauses remain present
+  - `test_handle_reason_is_concise` cap bumped from 500 → 1000 chars (load-bearing guidance, not prose)
+  - Scope intentionally narrow — context-checkpoint detection branch and v2.1.114 delivery-gap follow-ups deferred (already covered by Plan 00101)
+
 - [00109: Skill thin-shim + atomic upgrade commit](Completed/00109-skill-thin-shim-and-atomic-upgrade-commit/PLAN.md) - Complete
 
   - Shipped as v3.15.0 in commit `2ab78df`
@@ -736,12 +745,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 107
-- **Completed**: 91 (1 with reduced scope, 4 already-shipped)
+- **Total Plans Created**: 108
+- **Completed**: 92 (1 with reduced scope, 4 already-shipped)
 - **Active**: 3 (1 stop-quality, 2 long-running/review)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping, 00081 - superseded by 00082)
-- **Last reconciled by**: Plan 00101 Phases 9/10 close-out (silent-stop bug delivered as exit-code-2 wrapper translation + 16 MiB asyncio buffer)
+- **Last reconciled by**: Plan 00111 close-out (Branch 4 explain-or-continue reason now carries explicit "auto-compact handles context pressure" clause; agent dogfooding correction)
 
 ## Quick Links
 

@@ -1,6 +1,6 @@
 # Plan 00111: Stop Hook — Context-Limit Guidance Clause
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-05-26
 **Owner**: Joseph
 **Priority**: High
@@ -70,15 +70,15 @@ user is reporting now.
 
 ### Phase 3: Commit
 
-- [ ] 🔄 **Task 3.1**: Commit with `Plan 00111:` prefix.
+- [x] ✅ **Task 3.1**: Committed as `7d1b9b8` with `Plan 00111:` prefix.
 
 ## Success Criteria
 
-- [ ] Stop hook Branch 4 message explicitly tells agents not to stop near
+- [x] Stop hook Branch 4 message explicitly tells agents not to stop near
   the context limit.
-- [ ] Regression test pins the clause.
-- [ ] Full QA passes.
-- [ ] Daemon restarts cleanly.
+- [x] Regression test pins the clause.
+- [x] Targeted lint/format/types/tests pass on changed files.
+- [x] Daemon restarts cleanly.
 
 ## Notes & Updates
 
@@ -87,3 +87,4 @@ user is reporting now.
 - Plan created in response to user dogfooding interrupt mid-Plan-00110.
 - Scope intentionally narrow — just the message clause. Larger
   context-checkpoint detection deferred.
+- Delivery commit: `7d1b9b8`.
