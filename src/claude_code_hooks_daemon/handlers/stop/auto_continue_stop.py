@@ -66,7 +66,13 @@ _EXPLAIN_OR_CONTINUE_REASON = (
     "1. Prefix your stop message with STOPPING BECAUSE: followed by a clear reason "
     "(e.g. 'STOPPING BECAUSE: all tasks complete and QA passes'), or\n"
     "2. Use AUTO-CONTINUE to keep working without asking.\n"
-    "Do not stop without a reason — continue working or explain why you stopped."
+    "Do not stop without a reason — continue working or explain why you stopped.\n\n"
+    "DO NOT STOP because the context window is getting full. Claude Code's "
+    "auto-compact triggers automatically when the context-usage threshold is "
+    "crossed and preserves the conversation state for you. Voluntarily stopping "
+    "to 'checkpoint' before compaction wastes a turn and delays the user's work. "
+    "If you are tempted to stop because context is high, keep working instead — "
+    "auto-compact will handle context pressure on its own."
 )
 
 _TOOL_ERROR_RECOVERY_REASON = (

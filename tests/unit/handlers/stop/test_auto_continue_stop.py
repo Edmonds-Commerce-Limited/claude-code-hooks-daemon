@@ -516,12 +516,18 @@ class TestAutoContinueStopHandlerHandle:
         assert result.guidance is None
 
     def test_handle_reason_is_concise(self, handler: AutoContinueStopHandler) -> None:
-        """Reason should be concise and clear (not overly verbose)."""
+        """Reason should be concise and clear (not overly verbose).
+
+        The cap is generous (1000 chars) because the Branch 4 reason carries
+        load-bearing guidance: STOPPING BECAUSE/AUTO-CONTINUE escape hatches
+        plus the context-limit clause (Plan 00111) that tells the agent
+        auto-compact handles context pressure. Anything beyond ~1000 chars
+        would mean the reason has drifted into prose.
+        """
         hook_input: dict[str, Any] = {}
         result = handler.handle(hook_input)
         assert result.reason is not None
-        # Reason should be under 500 characters
-        assert len(result.reason) < 500
+        assert len(result.reason) < 1000
 
     def test_handle_reason_is_actionable(self, handler: AutoContinueStopHandler) -> None:
         """Reason should be actionable and tell Claude what to do."""
@@ -2280,3 +2286,45 @@ class TestAutoContinueStopAfterToolUseError:
             "Case C must NOT trigger the tool-error recovery branch — "
             f"is_error was False. Got reason: {result.reason!r}"
         )
+
+
+class TestExplainOrContinueReasonContent:
+    """Pin the wording of the Branch 4 explain-or-continue reason (Plan 00111).
+
+    The user reported a dogfooding failure: the agent voluntarily stops near
+    the context-window limit, believing it needs to "checkpoint" before
+    auto-compact. Claude Code's auto-compact triggers automatically — the
+    correct behaviour is to keep working. The Branch 4 message must say so
+    explicitly so the agent self-corrects on the re-entry turn.
+    """
+
+    def test_reason_contains_explicit_context_limit_guidance(self) -> None:
+        """The Branch 4 reason must explicitly forbid context-limit stops."""
+        from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
+            _EXPLAIN_OR_CONTINUE_REASON,
+        )
+
+        reason_lower = _EXPLAIN_OR_CONTINUE_REASON.lower()
+        assert "auto-compact" in reason_lower or "auto compact" in reason_lower, (
+            "Branch 4 reason must mention auto-compact so the agent knows "
+            "Claude Code handles context pressure automatically. "
+            f"Got: {_EXPLAIN_OR_CONTINUE_REASON!r}"
+        )
+        assert "context" in reason_lower, (
+            "Branch 4 reason must mention the context window/limit so the "
+            "context-checkpoint failure mode is addressed by name. "
+            f"Got: {_EXPLAIN_OR_CONTINUE_REASON!r}"
+        )
+
+    def test_reason_retains_existing_explain_or_continue_clauses(self) -> None:
+        """Existing STOPPING BECAUSE / AUTO-CONTINUE guidance must remain."""
+        from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
+            _EXPLAIN_OR_CONTINUE_REASON,
+        )
+
+        assert (
+            "STOPPING BECAUSE:" in _EXPLAIN_OR_CONTINUE_REASON
+        ), "Branch 4 reason must keep the STOPPING BECAUSE: prefix guidance."
+        assert (
+            "AUTO-CONTINUE" in _EXPLAIN_OR_CONTINUE_REASON
+        ), "Branch 4 reason must keep the AUTO-CONTINUE escape hatch."
