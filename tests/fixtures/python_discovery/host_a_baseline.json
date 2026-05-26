@@ -1,0 +1,15 @@
+{
+  "name": "host-a-baseline",
+  "description": "The host-a field-report reproduction. Default python3 is too old (3.9) but python3.13 and python3.14 are installed alongside as explicit minor binaries. Both discovery implementations MUST select python3.14 (highest minor meeting the floor).",
+  "interpreters": [
+    {"name": "python3", "version": "3.9.21"},
+    {"name": "python3.9", "version": "3.9.21"},
+    {"name": "python3.13", "version": "3.13.11"},
+    {"name": "python3.14", "version": "3.14.0"}
+  ],
+  "floor": [3, 11],
+  "expected": {
+    "outcome": "selected",
+    "interpreter_name": "python3.14"
+  }
+}

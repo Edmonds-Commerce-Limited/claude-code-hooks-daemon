@@ -309,9 +309,7 @@ def _probe_python_version(candidate: Path) -> ProbeResult | None:
             minor = int(parts[1])
         except ValueError:
             return None
-        return ProbeResult(
-            path=candidate, version_full=version_full, major_minor=(major, minor)
-        )
+        return ProbeResult(path=candidate, version_full=version_full, major_minor=(major, minor))
     return None
 
 
@@ -626,7 +624,9 @@ def can_inline_bootstrap(daemon_dir: Path) -> BootstrapDecision:
     candidate = find_latest_python(_MIN_COMPATIBLE_PYTHON)
     if candidate is None:
         missing.append(_BOOTSTRAP_MISSING_PYTHON)
-        reasons.append("no compatible python on PATH (glob-and-sort discovery found nothing >=3.11)")
+        reasons.append(
+            "no compatible python on PATH (glob-and-sort discovery found nothing >=3.11)"
+        )
     elif pyproject_data is not None:
         requires = pyproject_data.get("project", {}).get("requires-python")
         if isinstance(requires, str):
@@ -869,9 +869,7 @@ def resolve_existing_venv_python_with_diagnostics(
             else:
                 floor_str = ".".join(str(n) for n in _MIN_COMPATIBLE_PYTHON)
                 if probes:
-                    observed = ", ".join(
-                        f"{p.path.name} ({p.version_full})" for p in probes
-                    )
+                    observed = ", ".join(f"{p.path.name} ({p.version_full})" for p in probes)
                     steps.append(
                         f"step 2 recovery: no compatible alternative — "
                         f"observed on PATH: {observed} — all below floor {floor_str}. "

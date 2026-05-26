@@ -41,7 +41,6 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.daemon.paths import (
-    ProbeResult,
     find_latest_python,
     find_latest_python_or_explain,
 )
@@ -76,9 +75,7 @@ def _isolate_env(monkeypatch: pytest.MonkeyPatch, path_dir: Path) -> None:
 # ----- discovery (rung 2: glob $PATH) -----
 
 
-def test_empty_path_returns_none(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_empty_path_returns_none(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """No interpreters anywhere → returns None."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -86,9 +83,7 @@ def test_empty_path_returns_none(
     assert find_latest_python((3, 11)) is None
 
 
-def test_picks_highest_minor_above_floor(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_picks_highest_minor_above_floor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """python3.9, python3.13, python3.14 on PATH, floor 3.11 → picks 3.14."""
     bin_dir = tmp_path / "bin"
     _make_fake_python(bin_dir, "python3.9", "3.9.21")
@@ -98,14 +93,10 @@ def test_picks_highest_minor_above_floor(
 
     result = find_latest_python((3, 11))
 
-    assert result == expected, (
-        f"expected python3.14 (highest minor above floor), got {result!r}"
-    )
+    assert result == expected, f"expected python3.14 (highest minor above floor), got {result!r}"
 
 
-def test_below_floor_returns_none(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_below_floor_returns_none(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Only python3.9 present, floor 3.11 → None (no qualifying interpreter)."""
     bin_dir = tmp_path / "bin"
     _make_fake_python(bin_dir, "python3.9", "3.9.21")
@@ -126,14 +117,10 @@ def test_picks_double_digit_minor_correctly(
 
     result = find_latest_python((3, 0))
 
-    assert result == expected, (
-        f"numeric sort must rank 3.13 > 3.9, got {result!r}"
-    )
+    assert result == expected, f"numeric sort must rank 3.13 > 3.9, got {result!r}"
 
 
-def test_non_executable_skipped(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_non_executable_skipped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A python3.13 file with no exec bit must be ignored (not crash)."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -145,9 +132,9 @@ def test_non_executable_skipped(
 
     result = find_latest_python((3, 11))
 
-    assert result == expected, (
-        f"non-exec python3.13 must be skipped; expected python3.14, got {result!r}"
-    )
+    assert (
+        result == expected
+    ), f"non-exec python3.13 must be skipped; expected python3.14, got {result!r}"
 
 
 def test_glob_does_not_match_python3_config(
@@ -164,14 +151,10 @@ def test_glob_does_not_match_python3_config(
 
     result = find_latest_python((3, 11))
 
-    assert result == expected, (
-        f"glob must only match python3.<digits>, got {result!r}"
-    )
+    assert result == expected, f"glob must only match python3.<digits>, got {result!r}"
 
 
-def test_bare_python3_excluded_by_glob(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_bare_python3_excluded_by_glob(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Bare ``python3`` (no minor in the name) is the 'diceroll' case the
     existing prerequisites.sh warns about — must NOT be matched by the glob.
     """
@@ -182,14 +165,10 @@ def test_bare_python3_excluded_by_glob(
 
     result = find_latest_python((3, 11))
 
-    assert result == expected, (
-        f"bare 'python3' must not match; expected python3.13, got {result!r}"
-    )
+    assert result == expected, f"bare 'python3' must not match; expected python3.13, got {result!r}"
 
 
-def test_host_a_scenario_exactly(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_host_a_scenario_exactly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Replay the exact host-a host layout:
     default python3 → 3.9.21, python3.13 → 3.13.11, python3.14 → 3.14.0,
     plus the python3.11-config and python3.14-x86_64-config noise.
@@ -208,9 +187,7 @@ def test_host_a_scenario_exactly(
 
     result = find_latest_python((3, 11))
 
-    assert result == expected, (
-        f"host-a replay must auto-select python3.14, got {result!r}"
-    )
+    assert result == expected, f"host-a replay must auto-select python3.14, got {result!r}"
 
 
 # ----- HOOKS_DAEMON_PYTHON precedence (rung 1) -----
@@ -228,9 +205,7 @@ def test_env_override_wins_when_satisfies_floor(
 
     result = find_latest_python((3, 11))
 
-    assert result == p13, (
-        f"HOOKS_DAEMON_PYTHON must outrank glob discovery, got {result!r}"
-    )
+    assert result == p13, f"HOOKS_DAEMON_PYTHON must outrank glob discovery, got {result!r}"
 
 
 def test_env_override_violating_floor_fails_fast(
@@ -254,9 +229,7 @@ def test_env_override_violating_floor_fails_fast(
     )
 
 
-def test_env_override_unusable_fails_fast(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_env_override_unusable_fails_fast(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """HOOKS_DAEMON_PYTHON pointing at a nonexistent path must fail fast,
     not silently fall back to PATH discovery.
     """
@@ -286,16 +259,12 @@ def test_pyproject_requires_python_overrides_lower_floor(
     _make_fake_python(bin_dir, "python3.11", "3.11.5")
     expected = _make_fake_python(bin_dir, "python3.13", "3.13.11")
     pyproject = tmp_path / "pyproject.toml"
-    pyproject.write_text(
-        '[project]\nname = "test"\nrequires-python = ">=3.13"\n'
-    )
+    pyproject.write_text('[project]\nname = "test"\nrequires-python = ">=3.13"\n')
     _isolate_env(monkeypatch, bin_dir)
 
     result = find_latest_python((3, 11), require_pyproject=pyproject)
 
-    assert result == expected, (
-        f"pyproject must lift floor 3.11 → 3.13, got {result!r}"
-    )
+    assert result == expected, f"pyproject must lift floor 3.11 → 3.13, got {result!r}"
 
 
 def test_pyproject_requires_python_never_lowers_floor(
@@ -308,17 +277,15 @@ def test_pyproject_requires_python_never_lowers_floor(
     _make_fake_python(bin_dir, "python3.11", "3.11.5")
     _make_fake_python(bin_dir, "python3.13", "3.13.11")
     pyproject = tmp_path / "pyproject.toml"
-    pyproject.write_text(
-        '[project]\nname = "test"\nrequires-python = ">=3.10"\n'
-    )
+    pyproject.write_text('[project]\nname = "test"\nrequires-python = ">=3.10"\n')
     _isolate_env(monkeypatch, bin_dir)
 
     result = find_latest_python((3, 13), require_pyproject=pyproject)
 
     assert result is not None
-    assert result.name == "python3.13", (
-        f"caller floor 3.13 must hold even when pyproject says 3.10; got {result!r}"
-    )
+    assert (
+        result.name == "python3.13"
+    ), f"caller floor 3.13 must hold even when pyproject says 3.10; got {result!r}"
 
 
 # ----- find_latest_python_or_explain (diagnostics) -----
@@ -362,9 +329,10 @@ def test_explain_returns_chosen_with_probes_on_success(
 
     assert chosen == expected
     versions_seen = sorted(p.version_full for p in probes)
-    assert versions_seen == ["3.13.11", "3.9.21"], (
-        f"probes must record every observed interpreter, got {versions_seen!r}"
-    )
+    assert versions_seen == [
+        "3.13.11",
+        "3.9.21",
+    ], f"probes must record every observed interpreter, got {versions_seen!r}"
 
 
 def test_probe_result_carries_interpreter_path_and_version(
@@ -389,9 +357,7 @@ def test_probe_result_carries_interpreter_path_and_version(
 # ----- PATHEXT / pathsep handling -----
 
 
-def test_walks_multiple_path_entries(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_walks_multiple_path_entries(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Helper must traverse every entry in PATH, not just the first."""
     bin_a = tmp_path / "a" / "bin"
     bin_b = tmp_path / "b" / "bin"
@@ -402,9 +368,7 @@ def test_walks_multiple_path_entries(
 
     result = find_latest_python((3, 11))
 
-    assert result == expected, (
-        f"helper must scan all PATH entries, got {result!r}"
-    )
+    assert result == expected, f"helper must scan all PATH entries, got {result!r}"
 
 
 def test_deduplicates_same_binary_on_multiple_path_entries(
@@ -420,6 +384,4 @@ def test_deduplicates_same_binary_on_multiple_path_entries(
 
     _, probes = find_latest_python_or_explain((3, 11))
 
-    assert len(probes) == 1, (
-        f"duplicate PATH entries must dedupe to one probe, got {probes!r}"
-    )
+    assert len(probes) == 1, f"duplicate PATH entries must dedupe to one probe, got {probes!r}"

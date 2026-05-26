@@ -1,0 +1,12 @@
+{
+  "name": "single-match-at-floor",
+  "description": "Only python3.11 present, floor 3.11 (exact match). Both implementations MUST pick python3.11 — equal-to-floor is meeting-the-floor, not below it.",
+  "interpreters": [
+    {"name": "python3.11", "version": "3.11.7"}
+  ],
+  "floor": [3, 11],
+  "expected": {
+    "outcome": "selected",
+    "interpreter_name": "python3.11"
+  }
+}

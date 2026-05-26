@@ -106,12 +106,14 @@ def test_empty_path_fails_with_clear_message(tmp_path: Path) -> None:
     empty_bin = tmp_path / "empty_bin"
     empty_bin.mkdir()
     result = _invoke_helper("3.11", path_dir=empty_bin)
-    assert result.returncode == 1, f"Expected exit 1, got {result.returncode}. Stdout: {result.stdout!r} Stderr: {result.stderr!r}"
+    assert (
+        result.returncode == 1
+    ), f"Expected exit 1, got {result.returncode}. Stdout: {result.stdout!r} Stderr: {result.stderr!r}"
     assert result.stdout.strip() == "", "stdout must be empty on failure"
     combined = result.stderr.lower()
-    assert "no" in combined and ("python" in combined or "interpreter" in combined), (
-        f"stderr must explain no interpreters found, got: {result.stderr!r}"
-    )
+    assert "no" in combined and (
+        "python" in combined or "interpreter" in combined
+    ), f"stderr must explain no interpreters found, got: {result.stderr!r}"
 
 
 def test_only_below_floor_fails_naming_observed(tmp_path: Path) -> None:
@@ -122,9 +124,9 @@ def test_only_below_floor_fails_naming_observed(tmp_path: Path) -> None:
     _make_fake_python(bin_dir, "python3.9", "3.9.21")
     result = _invoke_helper("3.11", path_dir=bin_dir)
     assert result.returncode == 1
-    assert "3.9" in result.stderr, (
-        f"stderr must name the observed python3.9 interpreter, got: {result.stderr!r}"
-    )
+    assert (
+        "3.9" in result.stderr
+    ), f"stderr must name the observed python3.9 interpreter, got: {result.stderr!r}"
 
 
 def test_picks_highest_minor_above_floor(tmp_path: Path) -> None:
@@ -134,13 +136,13 @@ def test_picks_highest_minor_above_floor(tmp_path: Path) -> None:
     _make_fake_python(bin_dir, "python3.13", "3.13.11")
     _make_fake_python(bin_dir, "python3.14", "3.14.0")
     result = _invoke_helper("3.11", path_dir=bin_dir)
-    assert result.returncode == 0, (
-        f"Expected exit 0, got {result.returncode}. Stderr: {result.stderr!r}"
-    )
+    assert (
+        result.returncode == 0
+    ), f"Expected exit 0, got {result.returncode}. Stderr: {result.stderr!r}"
     chosen = result.stdout.strip()
-    assert chosen.endswith("/python3.14"), (
-        f"Expected python3.14 (highest minor above floor), got: {chosen!r}"
-    )
+    assert chosen.endswith(
+        "/python3.14"
+    ), f"Expected python3.14 (highest minor above floor), got: {chosen!r}"
 
 
 def test_env_override_wins_when_satisfies_floor(tmp_path: Path) -> None:
@@ -155,9 +157,7 @@ def test_env_override_wins_when_satisfies_floor(tmp_path: Path) -> None:
     )
     assert result.returncode == 0, f"Stderr: {result.stderr!r}"
     chosen = result.stdout.strip()
-    assert chosen == str(p13), (
-        f"Expected env override to win with {p13}, got: {chosen!r}"
-    )
+    assert chosen == str(p13), f"Expected env override to win with {p13}, got: {chosen!r}"
 
 
 def test_env_override_violating_floor_fails_fast(tmp_path: Path) -> None:
@@ -170,12 +170,12 @@ def test_env_override_violating_floor_fails_fast(tmp_path: Path) -> None:
         path_dir=bin_dir,
         extra_env={"HOOKS_DAEMON_PYTHON": str(p9)},
     )
-    assert result.returncode == 1, (
-        "env override below floor MUST fail fast, not silently fall back to PATH"
-    )
-    assert "HOOKS_DAEMON_PYTHON" in result.stderr, (
-        f"stderr must reference the broken env var, got: {result.stderr!r}"
-    )
+    assert (
+        result.returncode == 1
+    ), "env override below floor MUST fail fast, not silently fall back to PATH"
+    assert (
+        "HOOKS_DAEMON_PYTHON" in result.stderr
+    ), f"stderr must reference the broken env var, got: {result.stderr!r}"
 
 
 def test_pyproject_requires_python_overrides_lower_floor(tmp_path: Path) -> None:
@@ -188,15 +188,13 @@ def test_pyproject_requires_python_overrides_lower_floor(tmp_path: Path) -> None
     _make_fake_python(bin_dir, "python3.11", "3.11.5")
     _make_fake_python(bin_dir, "python3.13", "3.13.11")
     pyproject = tmp_path / "pyproject.toml"
-    pyproject.write_text(
-        '[project]\nname = "test"\nrequires-python = ">=3.13"\n'
-    )
+    pyproject.write_text('[project]\nname = "test"\nrequires-python = ">=3.13"\n')
     result = _invoke_helper("3.11", str(pyproject), path_dir=bin_dir)
     assert result.returncode == 0, f"Stderr: {result.stderr!r}"
     chosen = result.stdout.strip()
-    assert chosen.endswith("/python3.13"), (
-        f"pyproject requires-python = '>=3.13' must override 3.11 arg, got: {chosen!r}"
-    )
+    assert chosen.endswith(
+        "/python3.13"
+    ), f"pyproject requires-python = '>=3.13' must override 3.11 arg, got: {chosen!r}"
 
 
 def test_non_executable_skipped(tmp_path: Path) -> None:
@@ -210,9 +208,9 @@ def test_non_executable_skipped(tmp_path: Path) -> None:
     result = _invoke_helper("3.11", path_dir=bin_dir)
     assert result.returncode == 0, f"Stderr: {result.stderr!r}"
     chosen = result.stdout.strip()
-    assert chosen.endswith("/python3.14"), (
-        f"non-exec python3.13 must be skipped; expected python3.14, got: {chosen!r}"
-    )
+    assert chosen.endswith(
+        "/python3.14"
+    ), f"non-exec python3.13 must be skipped; expected python3.14, got: {chosen!r}"
 
 
 def test_glob_does_not_match_python3_config(tmp_path: Path) -> None:
@@ -226,9 +224,7 @@ def test_glob_does_not_match_python3_config(tmp_path: Path) -> None:
     result = _invoke_helper("3.11", path_dir=bin_dir)
     assert result.returncode == 0, f"Stderr: {result.stderr!r}"
     chosen = result.stdout.strip()
-    assert chosen.endswith("/python3.13"), (
-        f"glob must only match interpreters, got: {chosen!r}"
-    )
+    assert chosen.endswith("/python3.13"), f"glob must only match interpreters, got: {chosen!r}"
 
 
 def test_single_digit_python_excluded_by_glob(tmp_path: Path) -> None:
@@ -243,8 +239,7 @@ def test_single_digit_python_excluded_by_glob(tmp_path: Path) -> None:
     assert result.returncode == 0
     chosen = result.stdout.strip()
     assert chosen.endswith("/python3.13"), (
-        "glob must skip bare 'python3' (no minor); expected python3.13, "
-        f"got: {chosen!r}"
+        "glob must skip bare 'python3' (no minor); expected python3.13, " f"got: {chosen!r}"
     )
 
 
@@ -271,9 +266,7 @@ def test_helper_safe_to_source_with_set_u(tmp_path: Path) -> None:
     """
     bin_dir = tmp_path / "bin"
     _make_fake_python(bin_dir, "python3.13", "3.13.11")
-    script = (
-        f'set -eu; . "{HELPER}"; find_latest_python 3.11'
-    )
+    script = f'set -eu; . "{HELPER}"; find_latest_python 3.11'
     result = subprocess.run(
         [BASH, "-c", script],
         env={"PATH": str(bin_dir), "HOME": os.environ.get("HOME", "/tmp")},
@@ -281,9 +274,9 @@ def test_helper_safe_to_source_with_set_u(tmp_path: Path) -> None:
         text=True,
         check=False,
     )
-    assert result.returncode == 0, (
-        f"helper must run cleanly under set -eu. stderr: {result.stderr!r}"
-    )
+    assert (
+        result.returncode == 0
+    ), f"helper must run cleanly under set -eu. stderr: {result.stderr!r}"
 
 
 def test_host_a_scenario_exactly(tmp_path: Path) -> None:
@@ -304,13 +297,12 @@ def test_host_a_scenario_exactly(tmp_path: Path) -> None:
     _make_fake_python(bin_dir, "python3.14-x86_64-config", "3.14.0")
     result = _invoke_helper("3.11", path_dir=bin_dir)
     assert result.returncode == 0, (
-        f"host-a replay must succeed without HOOKS_DAEMON_PYTHON. "
-        f"stderr: {result.stderr!r}"
+        f"host-a replay must succeed without HOOKS_DAEMON_PYTHON. " f"stderr: {result.stderr!r}"
     )
     chosen = result.stdout.strip()
-    assert chosen.endswith("/python3.14"), (
-        f"host-a replay must auto-select python3.14 (highest), got: {chosen!r}"
-    )
+    assert chosen.endswith(
+        "/python3.14"
+    ), f"host-a replay must auto-select python3.14 (highest), got: {chosen!r}"
 
 
 if __name__ == "__main__":

@@ -1,0 +1,14 @@
+{
+  "name": "floor-excludes-some",
+  "description": "python3.10 + python3.11 + python3.12 present, floor 3.12. Both implementations MUST pick python3.12 — the 3.10 and 3.11 candidates are below the floor and ineligible.",
+  "interpreters": [
+    {"name": "python3.10", "version": "3.10.14"},
+    {"name": "python3.11", "version": "3.11.7"},
+    {"name": "python3.12", "version": "3.12.4"}
+  ],
+  "floor": [3, 12],
+  "expected": {
+    "outcome": "selected",
+    "interpreter_name": "python3.12"
+  }
+}

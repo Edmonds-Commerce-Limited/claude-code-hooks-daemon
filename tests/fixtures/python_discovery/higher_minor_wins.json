@@ -1,0 +1,14 @@
+{
+  "name": "higher-minor-wins",
+  "description": "python3.11, python3.12, python3.13 all present and meeting the floor. Both implementations MUST pick python3.13 (highest minor). Guards against any future first-match regression.",
+  "interpreters": [
+    {"name": "python3.11", "version": "3.11.7"},
+    {"name": "python3.12", "version": "3.12.4"},
+    {"name": "python3.13", "version": "3.13.11"}
+  ],
+  "floor": [3, 11],
+  "expected": {
+    "outcome": "selected",
+    "interpreter_name": "python3.13"
+  }
+}

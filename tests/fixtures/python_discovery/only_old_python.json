@@ -1,0 +1,11 @@
+{
+  "name": "only-old-python",
+  "description": "Only python3.9 (3.9.21) present, floor 3.11. Both implementations MUST fail — and the helper's failure diagnostic MUST name the observed python3.9 interpreter (the host-a trap closer), not a hardcoded suggestion of a version that may not exist on the host.",
+  "interpreters": [
+    {"name": "python3.9", "version": "3.9.21"}
+  ],
+  "floor": [3, 11],
+  "expected": {
+    "outcome": "failed"
+  }
+}

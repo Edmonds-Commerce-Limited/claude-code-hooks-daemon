@@ -53,6 +53,8 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INSTALL_SH = (
     REPO_ROOT
@@ -210,7 +212,7 @@ def _invoke_install_sh(
         capture_output=True,
         text=True,
         check=False,
-        timeout=30,
+        timeout=Timeout.DAEMON_STARTUP,
     )
 
 
@@ -264,15 +266,15 @@ def test_host_a_scenario_selects_highest_minor_not_lowest(tmp_path: Path) -> Non
 
     result = _invoke_install_sh(project_root=project, bin_dir=bin_dir)
 
-    assert result.returncode == 0, (
-        f"Expected exit 0, got {result.returncode}. stderr:\n{result.stderr}"
-    )
-    assert f"Using Python: {bin_dir}/python3.14" in result.stdout, (
-        f"Must pick python3.14 (highest), not python3.13.\nstdout:\n{result.stdout}"
-    )
-    assert f"Using Python: {bin_dir}/python3.13" not in result.stdout, (
-        "Must NOT pick python3.13 when python3.14 is available"
-    )
+    assert (
+        result.returncode == 0
+    ), f"Expected exit 0, got {result.returncode}. stderr:\n{result.stderr}"
+    assert (
+        f"Using Python: {bin_dir}/python3.14" in result.stdout
+    ), f"Must pick python3.14 (highest), not python3.13.\nstdout:\n{result.stdout}"
+    assert (
+        f"Using Python: {bin_dir}/python3.13" not in result.stdout
+    ), "Must NOT pick python3.13 when python3.14 is available"
 
 
 # ----- negative: no compatible interpreter -----
@@ -313,9 +315,9 @@ def test_only_python_39_aborts_naming_observed(tmp_path: Path) -> None:
         f"that is the host-a trap closer. Combined output:\n{combined}"
     )
     # And it must reference the floor explicitly.
-    assert "3.11" in combined, (
-        f"Diagnostic MUST reference the required floor (3.11). Combined output:\n{combined}"
-    )
+    assert (
+        "3.11" in combined
+    ), f"Diagnostic MUST reference the required floor (3.11). Combined output:\n{combined}"
 
 
 def test_no_python3_nn_on_path_aborts_with_clear_message(tmp_path: Path) -> None:
@@ -332,12 +334,10 @@ def test_no_python3_nn_on_path_aborts_with_clear_message(tmp_path: Path) -> None
 
     result = _invoke_install_sh(project_root=project, bin_dir=bin_dir)
 
-    assert result.returncode == 1, (
-        f"Expected exit 1, got {result.returncode}.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    )
-    assert "Aborting install" in result.stdout, (
-        f"Must abort.\nstdout:\n{result.stdout}"
-    )
+    assert (
+        result.returncode == 1
+    ), f"Expected exit 1, got {result.returncode}.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    assert "Aborting install" in result.stdout, f"Must abort.\nstdout:\n{result.stdout}"
     combined = result.stdout + result.stderr
     assert "No python3.NN" in combined or "no python3.NN" in combined.lower(), (
         f"Diagnostic must explain that no python3.NN interpreter was found.\n"

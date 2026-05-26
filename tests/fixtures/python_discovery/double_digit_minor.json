@@ -1,0 +1,15 @@
+{
+  "name": "double-digit-minor",
+  "description": "python3.15 + python3.20 + python3.9 + python3.99 present (extreme double-digit minor span). Both implementations MUST pick python3.99 — guards against accidental string-sort instead of numeric-sort regression (string-sort would pick python3.9 over python3.99).",
+  "interpreters": [
+    {"name": "python3.9", "version": "3.9.21"},
+    {"name": "python3.15", "version": "3.15.0"},
+    {"name": "python3.20", "version": "3.20.0"},
+    {"name": "python3.99", "version": "3.99.0"}
+  ],
+  "floor": [3, 11],
+  "expected": {
+    "outcome": "selected",
+    "interpreter_name": "python3.99"
+  }
+}

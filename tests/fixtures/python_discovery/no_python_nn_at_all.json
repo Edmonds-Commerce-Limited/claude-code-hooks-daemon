@@ -1,0 +1,11 @@
+{
+  "name": "no-python-nn-at-all",
+  "description": "Only plain python3 (no .NN suffix) on PATH. Both globs (python3.[0-9] and python3.[1-9][0-9]) REQUIRE a digit-suffix, so neither implementation should consider plain python3 a candidate. Both MUST fail; failure diagnostic is the empty-observed branch (no candidates seen).",
+  "interpreters": [
+    {"name": "python3", "version": "3.9.21"}
+  ],
+  "floor": [3, 11],
+  "expected": {
+    "outcome": "failed"
+  }
+}
