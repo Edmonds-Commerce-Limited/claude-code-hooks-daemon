@@ -112,6 +112,18 @@
     },
     {
       "file": "daemon/paths.py",
+      "function": "_probe_python_version",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00110 Phase 3 canonical discovery probe. Returns None when a glob-discovered python3.NN candidate is broken — missing exec bit, subprocess crash/hang within the bounded timeout, or unparseable version output. Callers (find_latest_python / find_latest_python_or_explain) iterate every candidate and skip None results — one broken interpreter on PATH must not abort discovery of the others."
+    },
+    {
+      "file": "daemon/paths.py",
+      "function": "_read_requires_python_floor",
+      "rule": "return-none-on-error",
+      "reason": "Plan 00110 Phase 3 best-effort pyproject.toml floor reader. Returns None when the file is unreadable (OSError) — pyproject may legitimately be absent (bootstrap from fresh clone, downstream install without project pyproject). Callers fall back to the hard-coded _MIN_COMPATIBLE_PYTHON floor when None is returned. Uses regex instead of tomllib so the helper works under any host interpreter during bootstrap."
+    },
+    {
+      "file": "daemon/paths.py",
       "function": "cleanup_socket",
       "rule": "log-and-continue",
       "reason": "Stale socket/PID file cleanup routine: log-and-continue is correct. Cleanup failing for one stale file should not prevent cleanup of others or block daemon startup. Already logged at warning level."
