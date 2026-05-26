@@ -95,12 +95,29 @@ _fail() { _err "$1"; exit 1; }
 #   0 - compatible Python found (HOOKS_DAEMON_PYTHON exported)
 #   1 - no compatible Python found (exits via _fail)
 #
-_PYTHON_DISCOVERY_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python_discovery.sh"
-if [ ! -f "$_PYTHON_DISCOVERY_LIB" ]; then
-    _fail "Canonical python discovery helper missing: $_PYTHON_DISCOVERY_LIB"
-fi
-# shellcheck source=lib/python_discovery.sh
-. "$_PYTHON_DISCOVERY_LIB"
+# Plan 00110 Phase 6: defer sourcing python_discovery.sh until after the
+# daemon_dir is known. The script may be curl-fetched into /tmp (the
+# canonical "review-before-running" pattern) or exec'd from /tmp by the
+# skill thin-shim — in both cases ``$(dirname "${BASH_SOURCE[0]}")/lib/``
+# is empty. Resolving from the installed daemon dir first is the only
+# layout that works for all three call sites:
+#   - self-install (script sibling)
+#   - downstream install (daemon dir = $PROJECT_ROOT/.claude/hooks-daemon)
+#   - skill shim exec from /tmp (script sibling absent → daemon dir wins)
+_resolve_python_discovery_lib() {
+    local daemon_dir="${1:-}"
+    if [ -n "$daemon_dir" ] && [ -f "$daemon_dir/scripts/lib/python_discovery.sh" ]; then
+        printf '%s\n' "$daemon_dir/scripts/lib/python_discovery.sh"
+        return 0
+    fi
+    local sibling
+    sibling="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python_discovery.sh"
+    if [ -f "$sibling" ]; then
+        printf '%s\n' "$sibling"
+        return 0
+    fi
+    return 1
+}
 
 find_compatible_python() {
     local daemon_dir="${1:-}"
@@ -108,6 +125,13 @@ find_compatible_python() {
     if [ -n "$daemon_dir" ] && [ -f "$daemon_dir/pyproject.toml" ]; then
         pyproject="$daemon_dir/pyproject.toml"
     fi
+
+    local discovery_lib
+    if ! discovery_lib="$(_resolve_python_discovery_lib "$daemon_dir")"; then
+        _fail "Canonical python discovery helper missing: searched ${daemon_dir:+$daemon_dir/scripts/lib/python_discovery.sh and }$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python_discovery.sh"
+    fi
+    # shellcheck source=lib/python_discovery.sh
+    . "$discovery_lib"
 
     local found
     if ! found="$(find_latest_python 3.11 "$pyproject")"; then
