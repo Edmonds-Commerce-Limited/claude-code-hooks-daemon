@@ -272,6 +272,226 @@ def _find_compatible_python_on_path() -> Path | None:
     return None
 
 
+# Plan 00110 Phase 3: canonical glob-and-sort Python discovery.
+#
+# Replaces the hardcoded enumeration in ``_find_compatible_python_on_path``
+# (and its bash counterparts) with a version-agnostic glob → probe → sort
+# pipeline. New CPython releases (3.14, 3.15, ...) become discoverable the
+# day they ship — no daemon update required.
+#
+# Companion bash implementation lives in ``scripts/lib/python_discovery.sh``;
+# Plan 00110 Decision 3 documents why parity is enforced by shared tests
+# rather than by having bash shell out to python (the skill bootstrap runs
+# before any python is guaranteed to exist).
+_PYTHON_INTERPRETER_GLOBS = ("python3.[0-9]", "python3.[1-9][0-9]")
+_PYTHON_VERSION_PROBE_TIMEOUT_SECS = 3.0
+_PYTHON_VERSION_OUTPUT_PREFIX = "Python "
+
+
+@dataclass(frozen=True)
+class ProbeResult:
+    """Record of one ``python --version`` probe during discovery.
+
+    Carries the absolute path of the probed binary plus the version it
+    reported. Callers use these to build diagnostic messages that name
+    *real interpreters present on the host* — the host-a trap closer.
+
+    Attributes:
+        path: Absolute path of the probed interpreter.
+        version_full: ``"X.Y.Z"`` string as reported by ``--version``.
+        major_minor: ``(X, Y)`` tuple parsed from ``version_full`` for
+            comparison against the floor.
+    """
+
+    path: Path
+    version_full: str
+    major_minor: tuple[int, int]
+
+
+def _probe_python_version(candidate: Path) -> ProbeResult | None:
+    """Run ``candidate --version`` and parse ``Python X.Y.Z`` from output.
+
+    Returns ``None`` if the candidate isn't a usable Python interpreter
+    (missing exec bit, crash on startup, unparseable output). Probes are
+    bounded by ``_PYTHON_VERSION_PROBE_TIMEOUT_SECS`` so a hung binary
+    can't stall discovery.
+
+    CPython 3.4+ writes ``Python X.Y.Z`` to stdout; older interpreters
+    used stderr. The probe merges both streams so parsing works uniformly.
+    """
+    import subprocess  # nosec B404 — trusted: probing a PATH-resolved python
+
+    if not candidate.is_file() or not os.access(candidate, os.X_OK):
+        return None
+    try:
+        result = subprocess.run(  # nosec B603 — fixed argv, no shell
+            [str(candidate), "--version"],
+            capture_output=True,
+            text=True,
+            timeout=_PYTHON_VERSION_PROBE_TIMEOUT_SECS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    combined = (result.stdout or "") + (result.stderr or "")
+    for line in combined.splitlines():
+        line = line.strip()
+        if not line.startswith(_PYTHON_VERSION_OUTPUT_PREFIX):
+            continue
+        version_full = line[len(_PYTHON_VERSION_OUTPUT_PREFIX) :].strip()
+        parts = version_full.split(".")
+        if len(parts) < 2:
+            return None
+        try:
+            major = int(parts[0])
+            minor = int(parts[1])
+        except ValueError:
+            return None
+        return ProbeResult(
+            path=candidate, version_full=version_full, major_minor=(major, minor)
+        )
+    return None
+
+
+def _glob_python_interpreter_candidates() -> list[Path]:
+    """Walk ``$PATH`` and return absolute paths to every executable matching
+    the interpreter form ``python3.<digits>`` (single- or double-digit minor).
+
+    Deduplicated by resolved absolute path so the same binary reached via
+    different PATH entries appears once. Two globs are required to cover
+    BOTH ``python3.9`` (single-digit) and ``python3.13`` (double-digit)
+    WITHOUT also matching ``python3.13-config`` or ``python3.14-x86_64-config``
+    (anchored char class rejects anything after the digits).
+    """
+    candidates: list[Path] = []
+    seen: set[Path] = set()
+    raw_path = os.environ.get("PATH", "")
+    if not raw_path:
+        return candidates
+    for entry in raw_path.split(os.pathsep):
+        if not entry:
+            continue
+        dir_path = Path(entry)
+        if not dir_path.is_dir():
+            continue
+        for pattern in _PYTHON_INTERPRETER_GLOBS:
+            for hit in dir_path.glob(pattern):
+                # Resolve symlinks/relatives so /usr/local/bin/python3.13
+                # and a duplicate path entry pointing at the same place
+                # are not double-probed.
+                resolved = hit if hit.is_absolute() else hit.resolve()
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                candidates.append(hit)
+    return candidates
+
+
+def _read_requires_python_floor(pyproject: Path) -> tuple[int, int] | None:
+    """Best-effort regex extraction of ``requires-python = ">=X.Y"`` from a
+    pyproject.toml.
+
+    Returns ``None`` when the file is unreadable, has no ``requires-python``
+    key, or the value isn't a parseable lower bound. Avoids ``tomllib``
+    (Python 3.11+ stdlib) so the helper works under any host interpreter
+    during bootstrap.
+    """
+    try:
+        text = pyproject.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if not stripped.startswith("requires-python"):
+            continue
+        if "=" not in stripped:
+            continue
+        _, value = stripped.split("=", 1)
+        value = value.strip().strip("\"'")
+        parsed = _parse_requires_python_min(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def find_latest_python_or_explain(
+    min_version: tuple[int, int],
+    *,
+    require_pyproject: Path | None = None,
+) -> tuple[Path | None, list[ProbeResult]]:
+    """Find the highest-minor CPython on ``$PATH`` meeting ``min_version``.
+
+    Returns ``(chosen, probes)`` — ``chosen`` is the selected interpreter
+    (or ``None`` when none qualifies), ``probes`` enumerates EVERY
+    interpreter observed during discovery (whether selected or rejected)
+    so callers can build diagnostics that name real binaries instead of
+    suggesting hardcoded versions that may not exist (the host-a trap).
+
+    Precedence ladder:
+
+      1. ``HOOKS_DAEMON_PYTHON`` env var. Validated against the floor;
+         FAIL FAST (return ``(None, [probe])``) when set but invalid —
+         never silently falls back to PATH discovery (that would mask a
+         broken operator configuration).
+      2. Glob ``$PATH`` for ``python3.<digits>``, probe each, filter to
+         those meeting the floor, return the highest minor.
+
+    When ``require_pyproject`` is set and that file contains a parseable
+    ``requires-python = ">=X.Y"``, the floor is RAISED to that bound
+    (never lowered). The caller's ``min_version`` is always honoured as
+    the minimum.
+    """
+    floor = min_version
+    if require_pyproject is not None:
+        pyproject_floor = _read_requires_python_floor(require_pyproject)
+        if pyproject_floor is not None and pyproject_floor > floor:
+            floor = pyproject_floor
+
+    override = os.environ.get("HOOKS_DAEMON_PYTHON", "").strip()
+    if override:
+        override_path = Path(override)
+        if not override_path.is_absolute():
+            resolved = shutil.which(override)
+            if resolved is not None:
+                override_path = Path(resolved)
+        probe = _probe_python_version(override_path)
+        if probe is None:
+            return None, []
+        if probe.major_minor < floor:
+            return None, [probe]
+        return probe.path, [probe]
+
+    probes: list[ProbeResult] = []
+    for candidate in _glob_python_interpreter_candidates():
+        probe = _probe_python_version(candidate)
+        if probe is None:
+            continue
+        probes.append(probe)
+
+    qualifying = [p for p in probes if p.major_minor >= floor]
+    if not qualifying:
+        return None, probes
+    best = max(qualifying, key=lambda p: p.major_minor)
+    return best.path, probes
+
+
+def find_latest_python(
+    min_version: tuple[int, int],
+    *,
+    require_pyproject: Path | None = None,
+) -> Path | None:
+    """Thin wrapper around :func:`find_latest_python_or_explain` for callers
+    that only need the chosen interpreter and don't want to construct
+    diagnostics from the probe list.
+    """
+    chosen, _probes = find_latest_python_or_explain(
+        min_version, require_pyproject=require_pyproject
+    )
+    return chosen
+
+
 def _is_legacy_stamp_only(venv_dir: Path) -> bool:
     """Return True iff ``venv_dir`` is a Plan-00099-era legacy leftover.
 
