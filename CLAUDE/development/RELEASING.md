@@ -269,12 +269,13 @@ end-to-end against a fresh fixture project. Together they catch:
   `write-venv-metadata` → daemon-start that produces a non-running daemon.
 
 ```bash
-$PYTHON -m pytest tests/acceptance/test_diagnostic_scripts.py tests/acceptance/test_install_sh_end_to_end.py tests/acceptance/test_tool_use_error_recovery.py tests/acceptance/test_stop_hook_hard_block.py -v
-# Expected: tests/acceptance/test_diagnostic_scripts.py — 15 passed
+$PYTHON -m pytest tests/acceptance/test_diagnostic_scripts.py tests/acceptance/test_install_sh_end_to_end.py tests/acceptance/test_tool_use_error_recovery.py tests/acceptance/test_stop_hook_hard_block.py tests/acceptance/test_skill_install_python_discovery.py -v
+# Expected: tests/acceptance/test_diagnostic_scripts.py — 12 passed
 #           tests/acceptance/test_install_sh_end_to_end.py — 2 passed
 #           tests/acceptance/test_tool_use_error_recovery.py — 2 passed
 #           tests/acceptance/test_stop_hook_hard_block.py — 3 passed
-#           combined: 22 passed, 0 failed
+#           tests/acceptance/test_skill_install_python_discovery.py — 4 passed
+#           combined: 23 passed, 0 failed
 ```
 
 ANY failure in any file = ABORT release. The 2026-05-01 field report
@@ -294,7 +295,16 @@ The Plan 00101 Phase 9 suggestion-level-downgrade regression class
 and asserts the exit-2 + stderr contract that v2.1.114 honours for hard
 re-entry. The test skips cleanly when no daemon is running locally; under
 H-1 the daemon is always started before this step, so a skip there is
-itself an abort condition.
+itself an abort condition. The Plan 00110 host-a field-report regression
+class (host has `python3` → 3.9 alongside `python3.13` / `python3.14`, but
+pre-Plan-00110 install.sh aborted with a hardcoded `python3.11` suggestion
+that the host did not have) is closed by adding
+`test_skill_install_python_discovery.py` — invokes the production
+`src/.../skills/hooks-daemon/scripts/install.sh` against synthesised PATH
+layouts and asserts (a) the host-a scenario auto-selects `python3.14`
+without operator help, and (b) the failure diagnostic NAMES the observed
+`python3.9 (3.9.21)` interpreter instead of a hardcoded suggestion that
+may not exist on the host.
 
 **Step 12.1**: Restart daemon, verify RUNNING.
 

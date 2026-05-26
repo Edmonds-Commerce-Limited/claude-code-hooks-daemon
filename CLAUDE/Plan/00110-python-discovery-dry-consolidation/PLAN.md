@@ -114,12 +114,13 @@ Each migration is its own commit so we can bisect if any caller regresses.
 
 ### Phase 5: host-a Field-Report Closure
 
-- [ ] **Task 5.1**: Replay the host-a scenario as a deterministic acceptance test in `tests/acceptance/test_skill_install_python_discovery.py`
-  - [ ] Fixture: `$PATH` contains `/usr/bin/python3` → 3.9.21, `/usr/bin/python3.13` → 3.13.11, `/usr/bin/python3.14` → 3.14.0
-  - [ ] Invoke production `src/.../skills/hooks-daemon/scripts/install.sh` against a mocked release
-  - [ ] Assert: install proceeds using `python3.14`, no `HOOKS_DAEMON_PYTHON` required, no abort
-  - [ ] Assert: if `python3.13` and `python3.14` are removed and only `python3` (3.9) remains, the abort message reads `"available interpreters on PATH: python3 (3.9.21) — all below floor 3.11. Install python3.11 or newer."` — NOT a hardcoded `python3.11` suggestion
-- [ ] **Task 5.2**: Add this test to RELEASING.md Step 12.0 H-1 acceptance gate (alongside the existing 19 tests). Update memory note `H-1 gate test count` from 19 to 20.
+- [x] ✅ **Task 5.1**: `tests/acceptance/test_skill_install_python_discovery.py` written — 4 tests, all green. Fixture builds fake `python3.NN` interpreters as POSIX shell scripts that print `Python X.Y.Z` to `--version` (same pattern as `test_python_discovery_bash.py`); shims `curl` in PATH so install.sh's two GitHub fetches (pyproject.toml, python_discovery.sh) are served from local repo files; symlinks minimal coreutils into the test's bin_dir so `PATH=$bin_dir` ALONE — preventing host `/usr/bin/python3.NN` interpreters from leaking into the discovery glob and corrupting the fixture (the first test draft hit exactly this trap). Tests:
+  - `test_host_a_scenario_selects_python_314` — the host-a reproduction: `python3` (3.9), `python3.9`, `python3.13`, `python3.14` coexist → install.sh prints `Using Python: $bin/python3.14` and proceeds with no abort
+  - `test_host_a_scenario_selects_highest_minor_not_lowest` — sibling guard: discovery picks HIGHEST not first-match (3.14 over 3.13)
+  - `test_only_python_39_aborts_naming_observed` — the host-a trap closer: only `python3` + `python3.9` (both 3.9.21) → exit 1, diagnostic contains literal `"python3.9 (3.9.21)"` and references floor `3.11`
+  - `test_no_python3_nn_on_path_aborts_with_clear_message` — only plain `python3` (which the python3.NN glob does NOT match) → exit 1, diagnostic contains `"No python3.NN"`
+  - **Deviation from plan text**: PLAN.md predicted the negative-case message would read `"available interpreters on PATH: python3 (3.9.21) — all below floor 3.11..."`. The actual `find_latest_python` diagnostic format (verified in `scripts/lib/python_discovery.sh:269-279`) is `"Observed candidates (all below floor):\n  python3.9 (3.9.21)\n"` — the test asserts what the code actually emits. Also: plain `python3` (no `.N` suffix) is intentionally NOT matched by the glob (`python3.[0-9]` / `python3.[1-9][0-9]`), so the fixture uses `python3.9` (explicit suffix) for the "observed below floor" branch.
+- [x] ✅ **Task 5.2**: `CLAUDE/development/RELEASING.md` Step 12.0 updated — pytest invocation appends `tests/acceptance/test_skill_install_python_discovery.py`, expected-count comment block extended with `"test_skill_install_python_discovery.py — 4 passed"`, combined total updated `22 → 23`. New paragraph appended explaining the host-a regression class this test closes (consistent with the prior four test-file paragraphs). Note: RELEASING.md's previous `"22 passed"` count was stale (memory note already flagged it; actual count was 19). Corrected to `12 passed` for `test_diagnostic_scripts.py` (vs claimed 15) in the same edit to keep the file self-consistent. Memory note `H-1 gate test count` to be updated from 19 → 23.
 
 ### Phase 6: Parity & Regression
 
