@@ -714,7 +714,10 @@ class TestMissingPersistedPythonRecovery:
         import claude_code_hooks_daemon.daemon.paths as paths_mod
 
         monkeypatch.setattr(
-            paths_mod, "_find_compatible_python_on_path", lambda: alternative, raising=False
+            paths_mod,
+            "find_latest_python_or_explain",
+            lambda *_args, **_kwargs: (alternative, []),
+            raising=False,
         )
 
         resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
@@ -749,7 +752,10 @@ class TestMissingPersistedPythonRecovery:
         import claude_code_hooks_daemon.daemon.paths as paths_mod
 
         monkeypatch.setattr(
-            paths_mod, "_find_compatible_python_on_path", lambda: None, raising=False
+            paths_mod,
+            "find_latest_python_or_explain",
+            lambda *_args, **_kwargs: (None, []),
+            raising=False,
         )
 
         resolved, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
@@ -780,7 +786,10 @@ class TestMissingPersistedPythonRecovery:
         import claude_code_hooks_daemon.daemon.paths as paths_mod
 
         monkeypatch.setattr(
-            paths_mod, "_find_compatible_python_on_path", lambda: None, raising=False
+            paths_mod,
+            "find_latest_python_or_explain",
+            lambda *_args, **_kwargs: (None, []),
+            raising=False,
         )
 
         _, steps = resolve_existing_venv_python_with_diagnostics(daemon_dir)
@@ -789,13 +798,19 @@ class TestMissingPersistedPythonRecovery:
             lost_path in joined
         ), f"expected lost python_path {lost_path} named in diagnostics; got: {joined}"
 
-    def test_find_compatible_python_on_path_returns_none_when_empty_path(
+    def test_find_latest_python_returns_none_when_empty_path(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The stdlib helper must itself return None when no Python candidates
-        are resolvable on PATH. This is the hook used by the resolver."""
+        """The canonical discovery helper returns None when no candidates
+        are resolvable on PATH. This is the hook used by the resolver after
+        Plan 00110 Task 4.6 collapsed the WET ``_find_compatible_python_on_path``
+        onto ``find_latest_python_or_explain``.
+        """
         monkeypatch.setenv("PATH", "/nonexistent-dir-xyz-abc")
+        monkeypatch.delenv("HOOKS_DAEMON_PYTHON", raising=False)
 
-        from claude_code_hooks_daemon.daemon.paths import _find_compatible_python_on_path
+        from claude_code_hooks_daemon.daemon.paths import find_latest_python_or_explain
 
-        assert _find_compatible_python_on_path() is None
+        chosen, probes = find_latest_python_or_explain((3, 11))
+        assert chosen is None
+        assert probes == []

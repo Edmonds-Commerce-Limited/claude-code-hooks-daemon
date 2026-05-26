@@ -221,55 +221,15 @@ def _read_venv_metadata_stdlib(venv_dir: Path) -> dict[str, str] | None:
     return data
 
 
-# Plan 00100 Task 3.6: recovery candidates when ``metadata.python_path`` is
-# gone. Order mirrors ``scripts/upgrade.sh::find_compatible_python`` so both
-# resolvers agree on which interpreter an upgrade would pick. Keep these
-# stdlib-only: this function runs under the host ``python3`` at install time.
-_COMPATIBLE_PYTHON_CANDIDATES = ("python3", "python3.13", "python3.12", "python3.11")
+# Plan 00100 Task 3.6 / Plan 00110 Task 4.6: hard minimum interpreter floor
+# the daemon supports. The bash counterpart lives in
+# ``scripts/lib/python_discovery.sh`` (passed as the first arg to
+# ``find_latest_python``). The legacy hardcoded candidate enumeration
+# (``_COMPATIBLE_PYTHON_CANDIDATES`` / ``_find_compatible_python_on_path``)
+# was removed when Task 4.6 collapsed the two callers onto
+# ``find_latest_python_or_explain`` — the glob-and-sort discovery handles
+# arbitrary minors (3.14, 3.15, ...) without code changes.
 _MIN_COMPATIBLE_PYTHON = (3, 11)
-_PYTHON_VERSION_PROBE = (
-    "import sys; v=sys.version_info; " f"exit(0 if v >= {_MIN_COMPATIBLE_PYTHON!r} else 1)"
-)
-# Subprocess version probe ceiling — an unreachable Python shouldn't block
-# the resolver for more than a couple of seconds. Upstream install flows
-# have their own longer timeouts for actual venv creation.
-_COMPATIBLE_PYTHON_PROBE_TIMEOUT_SECS = 3.0
-
-
-def _find_compatible_python_on_path() -> Path | None:
-    """Return the first Python 3.11+ interpreter resolvable on ``PATH``.
-
-    Mirrors ``scripts/upgrade.sh::find_compatible_python`` so the Python and
-    bash resolvers pick the same interpreter under identical environments.
-
-    Used by :func:`resolve_existing_venv_python_with_diagnostics` when
-    ``metadata.python_path`` matches the current ``lock_hash`` but no longer
-    exists on disk — the resolver surfaces either "rebuild possible with X"
-    or "install Python 3.11+" so upgrades fail loudly rather than silently.
-
-    Stdlib-only by design: called at install time before the venv exists.
-    Returns ``None`` when no candidate is both resolvable and >= 3.11 — the
-    caller converts that into an actionable diagnostic.
-    """
-    import shutil
-    import subprocess  # nosec B404 — trusted: only probes PATH-resolved python candidates
-
-    for candidate in _COMPATIBLE_PYTHON_CANDIDATES:
-        resolved = shutil.which(candidate)
-        if resolved is None:
-            continue
-        try:
-            result = subprocess.run(  # nosec B603 — fixed argv, no shell
-                [resolved, "-c", _PYTHON_VERSION_PROBE],
-                check=False,
-                capture_output=True,
-                timeout=_COMPATIBLE_PYTHON_PROBE_TIMEOUT_SECS,
-            )
-        except (OSError, subprocess.SubprocessError):
-            continue
-        if result.returncode == 0:
-            return Path(resolved)
-    return None
 
 
 # Plan 00110 Phase 3: canonical glob-and-sort Python discovery.
@@ -598,7 +558,7 @@ def _probe_python_major_minor(python: Path) -> tuple[int, int]:
         check=True,
         capture_output=True,
         text=True,
-        timeout=_COMPATIBLE_PYTHON_PROBE_TIMEOUT_SECS,
+        timeout=_PYTHON_VERSION_PROBE_TIMEOUT_SECS,
     )
     major_str, minor_str = result.stdout.strip().split(".", 1)
     return (int(major_str), int(minor_str))
@@ -658,12 +618,12 @@ def can_inline_bootstrap(daemon_dir: Path) -> BootstrapDecision:
         missing.append(_BOOTSTRAP_MISSING_UV_LOCK)
         reasons.append(f"{_UV_LOCK_FILENAME} missing at {daemon_dir}")
 
-    # Plan 00110 Task 4.4: delegate discovery to the canonical glob-and-sort
-    # helper. The (3, 11) floor reflects the daemon's hard minimum; the
-    # post-check below enforces project-specific ``requires-python`` on top
-    # so the existing detailed failure message (which test_bootstrap_decision
-    # asserts against by string) is preserved.
-    candidate = find_latest_python((3, 11))
+    # Plan 00110 Task 4.4 / 4.6: delegate discovery to the canonical
+    # glob-and-sort helper. ``_MIN_COMPATIBLE_PYTHON`` is the daemon's hard
+    # minimum; the post-check below enforces project-specific
+    # ``requires-python`` on top so the existing detailed failure message
+    # (which test_bootstrap_decision asserts against by string) is preserved.
+    candidate = find_latest_python(_MIN_COMPATIBLE_PYTHON)
     if candidate is None:
         missing.append(_BOOTSTRAP_MISSING_PYTHON)
         reasons.append("no compatible python on PATH (glob-and-sort discovery found nothing >=3.11)")
@@ -895,19 +855,34 @@ def resolve_existing_venv_python_with_diagnostics(
                 f"matches current lock_hash but python_path={python_path} "
                 "is missing or not executable"
             )
-            alternative = _find_compatible_python_on_path()
+            # Plan 00110 Task 4.6: glob-and-sort discovery (returns observed
+            # probes alongside the chosen candidate so the no-alternative
+            # branch can name interpreters ACTUALLY observed on the host
+            # instead of a hardcoded enumeration that may not exist —
+            # the host-a trap closer).
+            alternative, probes = find_latest_python_or_explain(_MIN_COMPATIBLE_PYTHON)
             if alternative is not None:
                 steps.append(
                     f"step 2 recovery: compatible alternative found — {alternative} "
                     f"(rebuild of {candidate_dir} with this interpreter will unblock the daemon)"
                 )
             else:
-                steps.append(
-                    "step 2 recovery: no compatible alternative — "
-                    f"no Python {'.'.join(str(n) for n in _MIN_COMPATIBLE_PYTHON)}+ "
-                    f"found on PATH among {list(_COMPATIBLE_PYTHON_CANDIDATES)}. "
-                    "Install Python 3.11+ before retrying the upgrade."
-                )
+                floor_str = ".".join(str(n) for n in _MIN_COMPATIBLE_PYTHON)
+                if probes:
+                    observed = ", ".join(
+                        f"{p.path.name} ({p.version_full})" for p in probes
+                    )
+                    steps.append(
+                        f"step 2 recovery: no compatible alternative — "
+                        f"observed on PATH: {observed} — all below floor {floor_str}. "
+                        f"Install Python {floor_str}+ before retrying the upgrade."
+                    )
+                else:
+                    steps.append(
+                        f"step 2 recovery: no compatible alternative — "
+                        f"no python3.NN interpreter found on PATH at all. "
+                        f"Install Python {floor_str}+ before retrying the upgrade."
+                    )
             matched = True
             break
         if not matched:
