@@ -18,6 +18,11 @@ INSTALL_URL="https://raw.githubusercontent.com/${GITHUB_ORG}/${GITHUB_REPO}/main
 # for minimum Python. Fetched from the repo's pyproject.toml below and used
 # to pre-check the active python3 BEFORE the installer runs.
 PYPROJECT_URL="https://raw.githubusercontent.com/${GITHUB_ORG}/${GITHUB_REPO}/main/pyproject.toml"
+# Plan 00110 Task 4.3: canonical glob-and-sort interpreter discovery helper.
+# Fetched alongside pyproject.toml so the skill bootstrap can pick the latest
+# compatible python3.NN on $PATH — no hardcoded version list, no host-a
+# "suggests python3.11 even though python3.13/3.14 are installed" trap.
+PYTHON_DISCOVERY_URL="https://raw.githubusercontent.com/${GITHUB_ORG}/${GITHUB_REPO}/main/scripts/lib/python_discovery.sh"
 
 # Detect project root by searching upward for .claude/
 PROJECT_ROOT="$(pwd)"
@@ -44,32 +49,52 @@ echo ""
 echo "Project: $PROJECT_ROOT"
 echo ""
 
-# Plan 00100 Task 0.3: Python version pre-check BEFORE download & install.
-# Fetch the daemon's pyproject.toml to parse requires-python (single source
-# of truth). If the active python3 is too old, emit an actionable
-# HOOKS_DAEMON_PYTHON hint and exit WITHOUT downloading the installer.
+# Plan 00100 Task 0.3 + Plan 00110 Task 4.3: Python pre-check BEFORE download.
+# Fetch two artifacts from main: (1) pyproject.toml for requires-python (the
+# floor), (2) scripts/lib/python_discovery.sh — the canonical glob-and-sort
+# interpreter discovery helper. The helper walks $PATH for python3.NN, picks
+# the latest meeting the floor, and on failure emits a diagnostic naming
+# interpreters ACTUALLY observed on this host (never a hardcoded suggestion
+# that may not exist — the host-a trap that Plan 00110 closes).
 PYPROJECT_TMP="/tmp/hooks-daemon-precheck-pyproject.toml.$$"
-if curl -sSL "$PYPROJECT_URL" -o "$PYPROJECT_TMP" && [ -s "$PYPROJECT_TMP" ]; then
-    REQ_LINE="$(grep -E '^requires-python\s*=' "$PYPROJECT_TMP" || echo '')"
-    if [ -n "$REQ_LINE" ]; then
-        MIN_PY="$(echo "$REQ_LINE" | grep -oE '[0-9]+\.[0-9]+' | head -n 1)"
-        ACTIVE_PY_CMD="${HOOKS_DAEMON_PYTHON:-python3}"
-        if [ -n "$MIN_PY" ] && command -v "$ACTIVE_PY_CMD" >/dev/null; then
-            ACTIVE_PY_VER="$("$ACTIVE_PY_CMD" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
-            MIN_MAJOR="${MIN_PY%.*}"; MIN_MINOR="${MIN_PY#*.}"
-            ACT_MAJOR="${ACTIVE_PY_VER%.*}"; ACT_MINOR="${ACTIVE_PY_VER#*.}"
-            if [ "$ACT_MAJOR" -lt "$MIN_MAJOR" ] || { [ "$ACT_MAJOR" -eq "$MIN_MAJOR" ] && [ "$ACT_MINOR" -lt "$MIN_MINOR" ]; }; then
-                echo "Error: Active python3 is $ACTIVE_PY_VER but daemon requires >=$MIN_PY (from pyproject.toml:requires-python)"
-                echo ""
-                echo "Retry with a compatible interpreter:"
-                echo "  HOOKS_DAEMON_PYTHON=python${MIN_PY} /hooks-daemon install"
-                rm -f "$PYPROJECT_TMP"
-                exit 1
-            fi
-        fi
-    fi
-    rm -f "$PYPROJECT_TMP"
+DISCOVERY_TMP="/tmp/hooks-daemon-precheck-python-discovery.sh.$$"
+trap 'rm -f "$PYPROJECT_TMP" "$DISCOVERY_TMP"' EXIT
+
+if ! curl -sSL "$PYPROJECT_URL" -o "$PYPROJECT_TMP" || [ ! -s "$PYPROJECT_TMP" ]; then
+    echo "Error: Failed to fetch pyproject.toml from $PYPROJECT_URL"
+    echo "Check your network connection and try again."
+    exit 1
 fi
+if ! curl -sSL "$PYTHON_DISCOVERY_URL" -o "$DISCOVERY_TMP" || [ ! -s "$DISCOVERY_TMP" ]; then
+    echo "Error: Failed to fetch python_discovery.sh from $PYTHON_DISCOVERY_URL"
+    echo "Check your network connection and try again."
+    exit 1
+fi
+
+MIN_PY="$(grep -E '^requires-python[[:space:]]*=' "$PYPROJECT_TMP" | grep -oE '[0-9]+\.[0-9]+' | head -n 1)"
+if [ -z "$MIN_PY" ]; then
+    echo "Error: Could not parse requires-python from pyproject.toml"
+    exit 1
+fi
+
+# shellcheck source=/dev/null
+. "$DISCOVERY_TMP"
+if ! FOUND_PY="$(find_latest_python "$MIN_PY" "$PYPROJECT_TMP")"; then
+    # Helper already wrote a remediation hint to stderr enumerating every
+    # interpreter observed during the glob. Add a one-line summary line and
+    # exit — no second guessing of the helper's diagnostic.
+    echo ""
+    echo "Aborting install: no compatible Python (>=$MIN_PY) found on \$PATH."
+    exit 1
+fi
+
+# Export so the inner installer (downloaded below) reuses the discovered
+# interpreter without re-running discovery on its own. The downstream
+# scripts/install/prerequisites.sh also honours HOOKS_DAEMON_PYTHON via
+# the same helper (Plan 00110 Task 4.2).
+export HOOKS_DAEMON_PYTHON="$FOUND_PY"
+echo "Using Python: $FOUND_PY"
+echo ""
 
 # Check if already installed
 if [ -d "$DAEMON_DIR" ] && [ "$FORCE_FLAG" != "--force" ]; then
