@@ -6,7 +6,6 @@ Advisory only - warns loudly but does not block.
 """
 
 import logging
-import subprocess  # nosec B404 - subprocess used for git commands only (trusted system tool)
 from pathlib import Path
 from typing import Any
 
@@ -15,17 +14,16 @@ from claude_code_hooks_daemon.constants import (
     HandlerTag,
     HookInputField,
     Priority,
-    Timeout,
 )
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.utils.git_repo import GitRepo
 
 logger = logging.getLogger(__name__)
 
 # Named constants (no magic strings)
 _GIT_CONFIG_KEY = "core.fileMode"
 _FILEMODE_FALSE = "false"
-_GIT_COMMAND = "git"
 _RESUME_TRANSCRIPT_MIN_BYTES = 100
 
 
@@ -79,33 +77,13 @@ class GitFilemodeCheckerHandler(Handler):
             "true", "false", or None if not in a git repo or error
         """
         try:
-            project_root: Path | None = ProjectContext.project_root()
+            root: Path = ProjectContext.project_root()
         except RuntimeError:
             # ProjectContext not initialized (e.g. running without daemon) - use cwd fallback
             logger.debug("ProjectContext not initialized, using cwd for git fileMode check")
-            project_root = None
+            root = Path.cwd()
 
-        try:
-            # SECURITY: This subprocess call is safe because:
-            # - Command is hardcoded: "git"
-            # - All arguments are hardcoded (no user input)
-            # - No shell=True (prevents command injection)
-            # - Timeout prevents hanging
-            # - cwd from ProjectContext (authoritative project root)
-            result = subprocess.run(  # nosec B603 B607
-                [_GIT_COMMAND, "config", "--local", _GIT_CONFIG_KEY],
-                capture_output=True,
-                text=True,
-                timeout=Timeout.VERSION_CHECK,
-                cwd=str(project_root) if project_root else None,
-                check=False,
-            )
-            if result.returncode != 0:
-                return None
-            return result.stdout.strip()
-        except (subprocess.TimeoutExpired, OSError, ValueError) as exc:
-            logger.debug("Failed to check git fileMode: %s", exc)
-            return None
+        return GitRepo(root).read_config(_GIT_CONFIG_KEY)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Only match on new sessions (not resumes).

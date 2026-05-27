@@ -17,10 +17,9 @@ Two layers:
 """
 
 import re
-import subprocess  # nosec B404 — trusted: only ever runs the system ``git`` binary
 from pathlib import Path
 
-from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.utils.git_repo import GitRepo
 
 # git config key holding the per-repo plan high-water mark (highest number
 # ever allocated). Section names are case-insensitive in git; stored lowercased.
@@ -113,47 +112,25 @@ def highest_plan_number(plan_folder: Path) -> int:
     return highest_number
 
 
-def _git_output(repo_root: Path, *args: str) -> str | None:
-    """Run ``git -C <repo_root> <args>`` and return stripped stdout.
-
-    Returns ``None`` when git is unavailable, the command exits non-zero, or
-    stdout is empty. Bounded by ``Timeout.GIT_CONTEXT`` so a wedged git cannot
-    stall hook dispatch.
-    """
-    try:
-        result = subprocess.run(  # nosec B603 B607 — fixed argv, git is trusted, no shell
-            ["git", "-C", str(repo_root), *args],
-            capture_output=True,
-            text=True,
-            timeout=Timeout.GIT_CONTEXT,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if result.returncode != 0:
-        return None
-    out = result.stdout.strip()
-    return out or None
-
-
 def resolve_plan_repo_root(target_path: Path) -> Path | None:
     """Return the toplevel of the nearest git repo enclosing ``target_path``.
 
-    ``target_path`` is the file/dir about to be created, so it may not exist
-    yet — walk up to the first existing ancestor before asking git. Returns
-    ``None`` when no enclosing git repo is found (caller falls back to the
-    daemon's global project root).
+    Thin plan-facing wrapper over :meth:`GitRepo.resolve_for`. Returns ``None``
+    when no enclosing git repo is found (caller falls back to the daemon's
+    global project root).
     """
-    start = target_path if target_path.is_dir() else target_path.parent
-    while not start.exists() and start != start.parent:
-        start = start.parent
-    top = _git_output(start, "rev-parse", "--show-toplevel")
-    return Path(top) if top else None
+    repo = GitRepo.resolve_for(target_path)
+    return repo.root if repo is not None else None
 
 
 def read_plan_counter(repo_root: Path) -> int | None:
-    """Read the per-repo plan high-water mark, or ``None`` when unset/invalid."""
-    raw = _git_output(repo_root, "config", "--local", "--get", _PLAN_COUNTER_CONFIG_KEY)
+    """Read the per-repo plan high-water mark, or ``None`` when unset/invalid.
+
+    Plan-specific typed facade over :meth:`GitRepo.read_config`: parses the
+    raw config string to ``int``. ``None`` (unset or non-integer) is the
+    documented 'no counter yet' signal that triggers bootstrap-from-scan.
+    """
+    raw = GitRepo(repo_root).read_config(_PLAN_COUNTER_CONFIG_KEY)
     if raw is None:
         return None
     try:
@@ -163,19 +140,13 @@ def read_plan_counter(repo_root: Path) -> int | None:
 
 
 def write_plan_counter(repo_root: Path, value: int) -> None:
-    """Write the per-repo plan high-water mark via ``git config --local``.
+    """Write the per-repo plan high-water mark via :meth:`GitRepo.write_config`.
 
-    FAIL FAST: raises ``CalledProcessError`` if git rejects the write so the
-    caller (a handler with its own error handling) surfaces the failure rather
-    than silently losing the counter.
+    FAIL FAST: propagates ``CalledProcessError`` if git rejects the write so
+    the caller (a handler with its own error handling) surfaces the failure
+    rather than silently losing the counter.
     """
-    subprocess.run(  # nosec B603 B607 — fixed argv, git is trusted, no shell
-        ["git", "-C", str(repo_root), "config", "--local", _PLAN_COUNTER_CONFIG_KEY, str(value)],
-        capture_output=True,
-        text=True,
-        timeout=Timeout.GIT_CONTEXT,
-        check=True,
-    )
+    GitRepo(repo_root).write_config(_PLAN_COUNTER_CONFIG_KEY, str(value))
 
 
 def next_plan_number_for_target(

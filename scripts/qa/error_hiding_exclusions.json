@@ -237,12 +237,6 @@
       "reason": "Session cleanup handler: logs OSError at debug level and continues. Cleanup is best-effort; session end must not be blocked by a failed temp file removal. The error is now visible in debug logs."
     },
     {
-      "file": "handlers/session_start/git_filemode_checker.py",
-      "function": "_get_filemode_setting",
-      "rule": "return-none-on-error",
-      "reason": "Git filemode checker: returns None when ProjectContext not initialized or not in a git repo or git config query fails. Caller handles None explicitly. Advisory handler \u2014 failure should not break session start."
-    },
-    {
       "file": "handlers/session_start/hook_registration_checker.py",
       "function": "_get_project_root",
       "rule": "return-none-on-error",
@@ -393,10 +387,10 @@
       "reason": "Optional container confidence indicator checks: nested try/except/pass for filesystem and OS queries (uid, socket existence, project root). These are optional scoring signals \u2014 if unavailable, skip without logging (noisy). The outer function catches and logs broader failures."
     },
     {
-      "file": "handlers/utils/plan_numbering.py",
+      "file": "utils/git_repo.py",
       "function": "_git_output",
       "rule": "return-none-on-error",
-      "reason": "Git probe helper: returns None when git is unavailable (OSError/SubprocessError) or the command exits non-zero (e.g. not a git repo, config key absent). Same explicitly-non-fatal pattern as project_context._get_git_toplevel \u2014 callers (resolve_plan_repo_root, read_plan_counter) check for None and fall back to a filesystem scan against the project root. Not hiding an error: 'not a repo' / 'key absent' IS the answer."
+      "reason": "Bounded git subprocess wrapper for GitRepo: returns None when git is unavailable (OSError/SubprocessError) or the command exits non-zero (e.g. not a git repo, config key absent). Same explicitly-non-fatal contract as project_context._get_git_toplevel \u2014 'not a repo' / 'key absent' IS the answer, consumed as feature-detection by resolve_for/read_config."
     },
     {
       "file": "handlers/utils/plan_numbering.py",
