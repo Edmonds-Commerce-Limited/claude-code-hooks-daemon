@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 import pytest
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use.validate_plan_number import (
     ValidatePlanNumberHandler,
@@ -35,7 +36,12 @@ def mock_project_context():
 
 def _git_init(repo_root: Path) -> Path:
     repo_root.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", str(repo_root)], capture_output=True, check=True, timeout=10)
+    subprocess.run(
+        ["git", "init", str(repo_root)],
+        capture_output=True,
+        check=True,
+        timeout=Timeout.GIT_CONTEXT,
+    )
     return repo_root
 
 

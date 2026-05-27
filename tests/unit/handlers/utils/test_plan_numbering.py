@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.handlers.utils.plan_numbering import (
     get_next_plan_number,
     next_plan_number_for_target,
@@ -26,7 +27,7 @@ def _git_init(repo_root: Path) -> Path:
         ["git", "init", str(repo_root)],
         capture_output=True,
         check=True,
-        timeout=10,
+        timeout=Timeout.GIT_CONTEXT,
     )
     return repo_root
 
@@ -309,7 +310,7 @@ class TestPlanCounterReadWrite:
             ["git", "-C", str(repo), "config", "--local", "hooksdaemon.latestPlanNumber", "abc"],
             capture_output=True,
             check=True,
-            timeout=10,
+            timeout=Timeout.GIT_CONTEXT,
         )
         assert read_plan_counter(repo) is None
 
@@ -337,23 +338,26 @@ class TestPlanCounterReadWrite:
             ["git", "-C", str(repo), "config", "user.email", "t@t"],
             capture_output=True,
             check=True,
-            timeout=10,
+            timeout=Timeout.GIT_CONTEXT,
         )
         subprocess.run(
             ["git", "-C", str(repo), "config", "user.name", "t"],
             capture_output=True,
             check=True,
-            timeout=10,
+            timeout=Timeout.GIT_CONTEXT,
         )
         (repo / "f.txt").write_text("x")
         subprocess.run(
-            ["git", "-C", str(repo), "add", "f.txt"], capture_output=True, check=True, timeout=10
+            ["git", "-C", str(repo), "add", "f.txt"],
+            capture_output=True,
+            check=True,
+            timeout=Timeout.GIT_CONTEXT,
         )
         subprocess.run(
             ["git", "-C", str(repo), "commit", "-m", "init"],
             capture_output=True,
             check=True,
-            timeout=10,
+            timeout=Timeout.GIT_CONTEXT,
         )
         write_plan_counter(repo, 110)
 
@@ -361,7 +365,7 @@ class TestPlanCounterReadWrite:
             ["git", "-C", str(repo), "checkout", "-b", "feature"],
             capture_output=True,
             check=True,
-            timeout=10,
+            timeout=Timeout.GIT_CONTEXT,
         )
 
         assert read_plan_counter(repo) == 110, "counter must be branch-independent"

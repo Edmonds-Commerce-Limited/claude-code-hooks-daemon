@@ -178,8 +178,19 @@ See: {plan_dir}/CLAUDE.md for full instructions
             return HookResult(decision=Decision.ALLOW, context=[error_message])
 
         # Valid number — advance the per-repo high-water mark to record the
-        # creation so the next plan reads ``counter + 1``. Counter-write
-        # failures must not block the (advisory) creation, so log and continue.
+        # creation so the next plan reads ``counter + 1``.
+        self._record_allocation(target, plan_number)
+
+        return HookResult(decision=Decision.ALLOW)
+
+    def _record_allocation(self, target: Path, plan_number: int) -> None:
+        """Advance the per-repo plan high-water mark, tolerating git failures.
+
+        This handler is advisory: a counter-write failure must not block the
+        plan creation. The failure is logged with a full traceback and
+        execution continues — the next read re-bootstraps from a filesystem
+        scan, so the counter self-heals rather than silently going stale.
+        """
         try:
             record_plan_allocation(target, plan_number)
         except Exception:
@@ -188,8 +199,6 @@ See: {plan_dir}/CLAUDE.md for full instructions
                 target,
                 exc_info=True,
             )
-
-        return HookResult(decision=Decision.ALLOW)
 
     def _resolve_target(self, plan_path: str) -> Path:
         """Absolute path to the plan folder, for repo resolution.
