@@ -1,10 +1,34 @@
 """Tests for plan numbering utility."""
 
+import subprocess
 from pathlib import Path
 
 import pytest
 
-from claude_code_hooks_daemon.handlers.utils.plan_numbering import get_next_plan_number
+from claude_code_hooks_daemon.handlers.utils.plan_numbering import (
+    get_next_plan_number,
+    next_plan_number_for_target,
+    read_plan_counter,
+    record_plan_allocation,
+    resolve_plan_repo_root,
+    write_plan_counter,
+)
+
+
+def _git_init(repo_root: Path) -> Path:
+    """Initialise a git repo at ``repo_root`` and return it.
+
+    Plain ``git init`` is enough — the plan counter lives in ``.git/config``
+    via ``git config --local`` and needs no user identity or commits.
+    """
+    repo_root.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["git", "init", str(repo_root)],
+        capture_output=True,
+        check=True,
+        timeout=10,
+    )
+    return repo_root
 
 
 class TestGetNextPlanNumber:
@@ -209,3 +233,299 @@ class TestGetNextPlanNumber:
 
         result = get_next_plan_number(temp_plan_dir)
         assert result == "00006"
+
+
+class TestResolvePlanRepoRoot:
+    """Resolve the nearest enclosing git repo for a target path."""
+
+    def test_resolves_repo_root_for_path_inside_repo(self, tmp_path: Path) -> None:
+        repo = _git_init(tmp_path / "proj")
+        target = repo / "CLAUDE" / "Plan" / "00001-x" / "PLAN.md"
+
+        resolved = resolve_plan_repo_root(target)
+
+        assert resolved is not None
+        assert resolved.resolve() == repo.resolve()
+
+    def test_resolves_for_target_that_does_not_exist_yet(self, tmp_path: Path) -> None:
+        """The plan folder is being CREATED, so the target path is absent — the
+        resolver must walk up to an existing ancestor still inside the repo.
+        """
+        repo = _git_init(tmp_path / "proj")
+        (repo / "CLAUDE" / "Plan").mkdir(parents=True)
+        target = repo / "CLAUDE" / "Plan" / "00042-not-created-yet" / "PLAN.md"
+
+        resolved = resolve_plan_repo_root(target)
+
+        assert resolved is not None
+        assert resolved.resolve() == repo.resolve()
+
+    def test_resolves_nested_repo_not_outer_repo(self, tmp_path: Path) -> None:
+        """A vendor lib with its OWN .git must resolve to the inner repo, not
+        the outer project — this is the vendor-subdir fix.
+        """
+        outer = _git_init(tmp_path / "outer")
+        inner = _git_init(outer / "vendor" / "acme-lib")
+        target = inner / "CLAUDE" / "Plan" / "00001-x" / "PLAN.md"
+
+        resolved = resolve_plan_repo_root(target)
+
+        assert resolved is not None
+        assert resolved.resolve() == inner.resolve()
+        assert resolved.resolve() != outer.resolve()
+
+    def test_returns_none_when_not_in_a_git_repo(self, tmp_path: Path) -> None:
+        plain = tmp_path / "no-repo-here"
+        plain.mkdir()
+        target = plain / "CLAUDE" / "Plan" / "00001-x" / "PLAN.md"
+
+        assert resolve_plan_repo_root(target) is None
+
+
+class TestPlanCounterReadWrite:
+    """Read/write the per-repo plan counter via git config --local."""
+
+    def test_read_returns_none_when_counter_absent(self, tmp_path: Path) -> None:
+        repo = _git_init(tmp_path / "proj")
+        assert read_plan_counter(repo) is None
+
+    def test_write_then_read_roundtrips(self, tmp_path: Path) -> None:
+        repo = _git_init(tmp_path / "proj")
+        write_plan_counter(repo, 110)
+        assert read_plan_counter(repo) == 110
+
+    def test_write_overwrites_previous_value(self, tmp_path: Path) -> None:
+        repo = _git_init(tmp_path / "proj")
+        write_plan_counter(repo, 110)
+        write_plan_counter(repo, 111)
+        assert read_plan_counter(repo) == 111
+
+    def test_read_returns_none_when_counter_value_not_an_integer(self, tmp_path: Path) -> None:
+        """A corrupt/non-integer counter value must read as None (then the
+        caller re-bootstraps) rather than crashing.
+        """
+        repo = _git_init(tmp_path / "proj")
+        subprocess.run(
+            ["git", "-C", str(repo), "config", "--local", "hooksdaemon.latestPlanNumber", "abc"],
+            capture_output=True,
+            check=True,
+            timeout=10,
+        )
+        assert read_plan_counter(repo) is None
+
+    def test_read_returns_none_when_git_unavailable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """If invoking git raises OSError (e.g. binary missing), the read must
+        degrade to None, not propagate.
+        """
+        repo = _git_init(tmp_path / "proj")
+
+        def _raise_oserror(*_args: object, **_kwargs: object) -> None:
+            raise OSError("git not found")
+
+        monkeypatch.setattr(subprocess, "run", _raise_oserror)
+        assert read_plan_counter(repo) is None
+
+    def test_counter_survives_branch_switch(self, tmp_path: Path) -> None:
+        """The whole point: the counter lives in .git/config (not tracked), so
+        it is identical regardless of the checked-out branch.
+        """
+        repo = _git_init(tmp_path / "proj")
+        # An initial commit is required before branches can be created.
+        subprocess.run(
+            ["git", "-C", str(repo), "config", "user.email", "t@t"],
+            capture_output=True,
+            check=True,
+            timeout=10,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo), "config", "user.name", "t"],
+            capture_output=True,
+            check=True,
+            timeout=10,
+        )
+        (repo / "f.txt").write_text("x")
+        subprocess.run(
+            ["git", "-C", str(repo), "add", "f.txt"], capture_output=True, check=True, timeout=10
+        )
+        subprocess.run(
+            ["git", "-C", str(repo), "commit", "-m", "init"],
+            capture_output=True,
+            check=True,
+            timeout=10,
+        )
+        write_plan_counter(repo, 110)
+
+        subprocess.run(
+            ["git", "-C", str(repo), "checkout", "-b", "feature"],
+            capture_output=True,
+            check=True,
+            timeout=10,
+        )
+
+        assert read_plan_counter(repo) == 110, "counter must be branch-independent"
+
+
+class TestNextPlanNumberForTarget:
+    """Next-number resolution: trust the counter, bootstrap from scan when absent."""
+
+    def test_trusts_counter_when_present(self, tmp_path: Path) -> None:
+        """Counter present → counter + 1, WITHOUT consulting the filesystem.
+
+        Proof it ignores the scan: the on-disk plans only go up to 00003, but
+        the counter says 110, so the answer must be 00111 (counter-driven), not
+        00004 (scan-driven).
+        """
+        repo = _git_init(tmp_path / "proj")
+        plan_dir = repo / "CLAUDE" / "Plan"
+        plan_dir.mkdir(parents=True)
+        (plan_dir / "00001-a").mkdir()
+        (plan_dir / "00003-c").mkdir()
+        write_plan_counter(repo, 110)
+        target = plan_dir / "00111-new" / "PLAN.md"
+
+        result = next_plan_number_for_target(target, "CLAUDE/Plan", repo)
+
+        assert result == "00111"
+
+    def test_bootstraps_from_scan_when_counter_absent(self, tmp_path: Path) -> None:
+        """No counter yet → scan the folder, return scan_max + 1, and SEED the
+        counter so subsequent reads are counter-driven.
+        """
+        repo = _git_init(tmp_path / "proj")
+        plan_dir = repo / "CLAUDE" / "Plan"
+        plan_dir.mkdir(parents=True)
+        (plan_dir / "00005-a").mkdir()
+        target = plan_dir / "00006-new" / "PLAN.md"
+
+        result = next_plan_number_for_target(target, "CLAUDE/Plan", repo)
+
+        assert result == "00006"
+        # Counter seeded to the high-water mark (highest existing = 5).
+        assert read_plan_counter(repo) == 5
+
+    def test_bootstrap_seed_then_trust(self, tmp_path: Path) -> None:
+        """After bootstrap, a second call is counter-driven (counter + 1)."""
+        repo = _git_init(tmp_path / "proj")
+        plan_dir = repo / "CLAUDE" / "Plan"
+        plan_dir.mkdir(parents=True)
+        (plan_dir / "00005-a").mkdir()
+        target = plan_dir / "x" / "PLAN.md"
+
+        first = next_plan_number_for_target(target, "CLAUDE/Plan", repo)
+        second = next_plan_number_for_target(target, "CLAUDE/Plan", repo)
+
+        assert first == "00006"
+        # Counter was seeded to 5; trust path gives 5 + 1 = 6 again (advisory
+        # read does not advance — only real creation does).
+        assert second == "00006"
+
+    def test_bootstrap_empty_repo_gives_00001(self, tmp_path: Path) -> None:
+        repo = _git_init(tmp_path / "proj")
+        (repo / "CLAUDE" / "Plan").mkdir(parents=True)
+        target = repo / "CLAUDE" / "Plan" / "x" / "PLAN.md"
+
+        assert next_plan_number_for_target(target, "CLAUDE/Plan", repo) == "00001"
+        assert read_plan_counter(repo) == 0
+
+    def test_bootstrap_scans_completed_subfolder(self, tmp_path: Path) -> None:
+        """Bootstrap must scan Completed/ too (archived plans count)."""
+        repo = _git_init(tmp_path / "proj")
+        plan_dir = repo / "CLAUDE" / "Plan"
+        completed = plan_dir / "Completed"
+        completed.mkdir(parents=True)
+        (plan_dir / "00007-active").mkdir()
+        (completed / "00009-archived").mkdir()
+        target = plan_dir / "x" / "PLAN.md"
+
+        assert next_plan_number_for_target(target, "CLAUDE/Plan", repo) == "00010"
+        assert read_plan_counter(repo) == 9
+
+    def test_nested_repo_uses_own_counter(self, tmp_path: Path) -> None:
+        """Vendor lib with its own repo gets its own counter, independent of
+        the outer project's counter.
+        """
+        outer = _git_init(tmp_path / "outer")
+        write_plan_counter(outer, 110)
+        inner = _git_init(outer / "vendor" / "acme-lib")
+        write_plan_counter(inner, 6)
+        target = inner / "CLAUDE" / "Plan" / "00007-x" / "PLAN.md"
+
+        result = next_plan_number_for_target(target, "CLAUDE/Plan", outer)
+
+        assert result == "00007", "must use inner repo's counter (6+1), not outer's (110+1)"
+
+    def test_non_git_target_falls_back_to_scan_against_fallback_root(self, tmp_path: Path) -> None:
+        """No enclosing git repo → scan the fallback root's plan folder."""
+        plain = tmp_path / "no-repo"
+        plan_dir = plain / "CLAUDE" / "Plan"
+        plan_dir.mkdir(parents=True)
+        (plan_dir / "00004-a").mkdir()
+        target = plan_dir / "x" / "PLAN.md"
+
+        assert next_plan_number_for_target(target, "CLAUDE/Plan", plain) == "00005"
+
+    def test_non_git_empty_fallback_gives_00001(self, tmp_path: Path) -> None:
+        plain = tmp_path / "no-repo"
+        plain.mkdir()
+        target = plain / "CLAUDE" / "Plan" / "x" / "PLAN.md"
+
+        assert next_plan_number_for_target(target, "CLAUDE/Plan", plain) == "00001"
+
+
+class TestRecordPlanAllocation:
+    """High-water-mark write on real plan creation."""
+
+    def test_advances_counter_to_created_number(self, tmp_path: Path) -> None:
+        repo = _git_init(tmp_path / "proj")
+        write_plan_counter(repo, 110)
+        target = repo / "CLAUDE" / "Plan" / "00111-new" / "PLAN.md"
+
+        record_plan_allocation(target, 111)
+
+        assert read_plan_counter(repo) == 111
+
+    def test_never_lowers_counter(self, tmp_path: Path) -> None:
+        """Creating a lower-numbered plan must NOT regress the high-water mark."""
+        repo = _git_init(tmp_path / "proj")
+        write_plan_counter(repo, 110)
+        target = repo / "CLAUDE" / "Plan" / "00050-old" / "PLAN.md"
+
+        record_plan_allocation(target, 50)
+
+        assert read_plan_counter(repo) == 110
+
+    def test_seeds_counter_when_absent(self, tmp_path: Path) -> None:
+        repo = _git_init(tmp_path / "proj")
+        target = repo / "CLAUDE" / "Plan" / "00007-new" / "PLAN.md"
+
+        record_plan_allocation(target, 7)
+
+        assert read_plan_counter(repo) == 7
+
+    def test_self_heals_drift_above_counter(self, tmp_path: Path) -> None:
+        """If a higher-numbered plan is created than the counter knew about, the
+        counter advances to it — so the NEXT read (counter+1) won't collide.
+        """
+        repo = _git_init(tmp_path / "proj")
+        write_plan_counter(repo, 110)
+        target = repo / "CLAUDE" / "Plan" / "00120-jumped" / "PLAN.md"
+
+        record_plan_allocation(target, 120)
+        next_num = next_plan_number_for_target(
+            repo / "CLAUDE" / "Plan" / "x" / "PLAN.md", "CLAUDE/Plan", repo
+        )
+
+        assert read_plan_counter(repo) == 120
+        assert next_num == "00121"
+
+    def test_no_op_when_target_not_in_git_repo(self, tmp_path: Path) -> None:
+        """Recording against a non-git target is a silent no-op (nothing to
+        write the counter to) — must not raise.
+        """
+        plain = tmp_path / "no-repo"
+        plain.mkdir()
+        target = plain / "CLAUDE" / "Plan" / "00007-x" / "PLAN.md"
+
+        record_plan_allocation(target, 7)  # must not raise
