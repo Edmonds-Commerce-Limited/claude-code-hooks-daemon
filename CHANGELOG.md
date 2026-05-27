@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.16.0] - 2026-05-27
+
+This is a **minor release** delivering four plans: git-anchored plan numbering persisted in `git config` (Plan 00112), a first-class reusable `GitRepo` utility (Plan 00113), canonical Python interpreter discovery helpers eliminating WET call sites across install/upgrade scripts (Plan 00110), and context-limit guidance in the Stop hook's Branch 4 reason (Plan 00111).
+
+### Added
+
+- **Git-anchored plan numbering via `git config --local hooksdaemon.latestPlanNumber` (Plan 00112)** — The latest plan number is now persisted per-repository in `git config --local hooksdaemon.latestPlanNumber`. The counter lives in `.git/config` (stable across branch switches) and is resolved from the target path, so plans created inside nested or vendor sub-repos use that repo's own counter instead of the parent project's. Read = counter+1; bootstrap from a filesystem scan only when the counter is absent; writes are a monotonic high-water mark that self-heals drift. Wired into the `validate_plan_number`, `plan_number_helper`, and `markdown_organization` handlers.
+- **First-class reusable `GitRepo` utility (Plan 00113)** — New SOLID value object at `src/claude_code_hooks_daemon/utils/git_repo.py` providing enclosing-repo resolution and `git config --local` read/write, with a single bounded git-subprocess wrapper. Eliminates scattered ad-hoc `git config` subprocess calls and provides a shared, tested abstraction for all handlers that need git-repo context.
+
+### Changed
+
+- **Consolidated duplicated Python-version-discovery logic into canonical helpers (Plan 00110)** — A shared bash `python_discovery.sh` and Python `find_latest_python` in `paths.py` replace six WET call sites across `scripts/upgrade.sh`, `prerequisites.sh`, skill `install.sh`, `can_inline_bootstrap`, and `resolve_venv.sh`. All six sites now delegate to the canonical helper.
+- **`plan_numbering` and `git_filemode_checker` migrated to use `GitRepo` utility (Plan 00113)** — Both handlers previously contained inline git-subprocess logic; they now depend on the `GitRepo` value object, removing duplication and benefiting from its test coverage.
+- **Stop hook `auto_continue_stop` Branch 4 now includes context-limit guidance (Plan 00111)** — When the Stop hook fires with a context-limit signal, the Branch 4 reason string now contains actionable guidance on how to proceed, reducing agent confusion at the context ceiling.
+
+### Fixed
+
+- **Python interpreter discovery on hosts without the expected version (Plan 00110, host-a field report)** — `install.sh` previously aborted with a hardcoded `python3.11` suggestion on hosts that only had `python3` (3.9) alongside `python3.13`/`python3.14`. The script now auto-selects the latest available `python3.X` interpreter, and on genuine failure names the actually-observed interpreter (e.g. `python3.9 (3.9.21)`) instead of a fixed suggestion that may not exist on the host.
+
+### Removed
+
+- None.
+
 ## [3.15.1] - 2026-05-19
 
 This is a **patch release** that fixes a long-standing bug in `scripts/install/gitignore.sh`: `create_daemon_untracked_gitignore()` wrote the wrong content into the inner `untracked/.gitignore` and unconditionally clobbered the file on every install/upgrade. The function now writes a proper self-excluding `.gitignore` and is idempotent.
