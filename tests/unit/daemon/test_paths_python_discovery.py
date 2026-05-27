@@ -385,3 +385,229 @@ def test_deduplicates_same_binary_on_multiple_path_entries(
     _, probes = find_latest_python_or_explain((3, 11))
 
     assert len(probes) == 1, f"duplicate PATH entries must dedupe to one probe, got {probes!r}"
+
+
+# ----- _probe_python_version edge branches -----
+
+
+def test_probe_returns_none_on_nonzero_exit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Interpreter probe that exits non-zero (e.g. broken install) must
+    return None rather than yielding a partial ProbeResult — the discovery
+    loop then treats it as 'not a usable interpreter' and moves on.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake = bin_dir / "python3.13"
+    fake.write_text("#!/bin/sh\nexit 1\n")
+    fake.chmod(0o755)
+    _isolate_env(monkeypatch, bin_dir)
+
+    assert find_latest_python((3, 11)) is None
+
+
+def test_probe_returns_none_when_output_lacks_python_prefix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Probe output that never emits a ``Python X.Y`` prefix line must
+    yield None — covers the trailing ``return None`` after the for-loop.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake = bin_dir / "python3.13"
+    fake.write_text("#!/bin/sh\necho 'definitely not a python version line'\n")
+    fake.chmod(0o755)
+    _isolate_env(monkeypatch, bin_dir)
+
+    assert find_latest_python((3, 11)) is None
+
+
+def test_probe_returns_none_when_version_has_no_minor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``Python 3`` with no minor component (single-part version) must be
+    rejected — len(parts) < 2 branch.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake = bin_dir / "python3.13"
+    fake.write_text("#!/bin/sh\necho 'Python 3'\n")
+    fake.chmod(0o755)
+    _isolate_env(monkeypatch, bin_dir)
+
+    assert find_latest_python((3, 11)) is None
+
+
+def test_probe_returns_none_when_version_parts_non_integer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``Python three.thirteen`` (non-integer major/minor) must be rejected
+    — ValueError branch.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake = bin_dir / "python3.13"
+    fake.write_text("#!/bin/sh\necho 'Python three.thirteen'\n")
+    fake.chmod(0o755)
+    _isolate_env(monkeypatch, bin_dir)
+
+    assert find_latest_python((3, 11)) is None
+
+
+def test_probe_returns_none_on_oserror(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """If subprocess.run raises OSError (e.g. ENOENT, EPERM), the probe
+    must catch it and return None rather than propagating.
+    """
+    import subprocess
+
+    def _raise_oserror(*_args: object, **_kwargs: object) -> None:
+        raise OSError("simulated probe failure")
+
+    monkeypatch.setattr(subprocess, "run", _raise_oserror)
+
+    bin_dir = tmp_path / "bin"
+    _make_fake_python(bin_dir, "python3.13", "3.13.11")
+    _isolate_env(monkeypatch, bin_dir)
+
+    assert find_latest_python((3, 11)) is None
+
+
+# ----- _glob_python_interpreter_candidates edge branches -----
+
+
+def test_empty_path_environment_returns_no_candidates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Empty ``$PATH`` returns no candidates — covers the raw_path guard."""
+    monkeypatch.setenv("PATH", "")
+    monkeypatch.delenv("HOOKS_DAEMON_PYTHON", raising=False)
+
+    assert find_latest_python((3, 11)) is None
+
+
+def test_empty_path_entry_skipped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A double-colon in PATH (``/usr/bin::/usr/local/bin``) produces an
+    empty entry that must be skipped, not treated as cwd.
+    """
+    bin_dir = tmp_path / "bin"
+    expected = _make_fake_python(bin_dir, "python3.13", "3.13.11")
+    monkeypatch.setenv("PATH", os.pathsep + str(bin_dir))
+    monkeypatch.delenv("HOOKS_DAEMON_PYTHON", raising=False)
+
+    result = find_latest_python((3, 11))
+
+    assert result == expected, f"empty PATH entry must be skipped, got {result!r}"
+
+
+# ----- _read_requires_python_floor edge branches -----
+
+
+def test_pyproject_unreadable_yields_no_floor_lift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When ``require_pyproject`` points at a nonexistent file the floor
+    must NOT be lifted — covers the OSError branch.
+    """
+    bin_dir = tmp_path / "bin"
+    expected = _make_fake_python(bin_dir, "python3.11", "3.11.5")
+    _isolate_env(monkeypatch, bin_dir)
+
+    missing = tmp_path / "does_not_exist.toml"
+    result = find_latest_python((3, 11), require_pyproject=missing)
+
+    assert result == expected, f"unreadable pyproject must leave floor at 3.11; got {result!r}"
+
+
+def test_pyproject_requires_python_without_equals_ignored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A ``requires-python`` line missing ``=`` cannot be a TOML assignment
+    — must be ignored without crashing.
+    """
+    bin_dir = tmp_path / "bin"
+    expected = _make_fake_python(bin_dir, "python3.11", "3.11.5")
+    _isolate_env(monkeypatch, bin_dir)
+
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text('[project]\nrequires-python\nname = "test"\n')
+
+    result = find_latest_python((3, 11), require_pyproject=pyproject)
+
+    assert result == expected
+
+
+def test_pyproject_requires_python_unparseable_value_ignored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A ``requires-python`` line whose value is unparseable (no lower
+    bound) must be ignored — covers the ``parsed is None`` branch where
+    the loop continues to the next line.
+    """
+    bin_dir = tmp_path / "bin"
+    expected = _make_fake_python(bin_dir, "python3.11", "3.11.5")
+    _isolate_env(monkeypatch, bin_dir)
+
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text('[project]\nrequires-python = "nonsense-no-bound"\nname = "test"\n')
+
+    result = find_latest_python((3, 11), require_pyproject=pyproject)
+
+    assert result == expected
+
+
+def test_pyproject_without_requires_python_yields_no_floor_lift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pyproject with no ``requires-python`` key must leave the floor
+    unchanged — covers the trailing ``return None`` after the loop.
+    """
+    bin_dir = tmp_path / "bin"
+    expected = _make_fake_python(bin_dir, "python3.11", "3.11.5")
+    _isolate_env(monkeypatch, bin_dir)
+
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text('[project]\nname = "test"\nversion = "0.1"\n')
+
+    result = find_latest_python((3, 11), require_pyproject=pyproject)
+
+    assert result == expected
+
+
+# ----- HOOKS_DAEMON_PYTHON: non-absolute path resolved via PATH -----
+
+
+def test_env_override_relative_resolved_via_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``HOOKS_DAEMON_PYTHON=python3.13`` (a bare command, not a path) must
+    be resolved via shutil.which so the env-override branch still works
+    when operators set the command name instead of the absolute path.
+    """
+    bin_dir = tmp_path / "bin"
+    p13 = _make_fake_python(bin_dir, "python3.13", "3.13.11")
+    monkeypatch.setenv("PATH", str(bin_dir))
+    monkeypatch.setenv("HOOKS_DAEMON_PYTHON", "python3.13")
+
+    result = find_latest_python((3, 11))
+
+    assert result == p13, f"bare HOOKS_DAEMON_PYTHON command must resolve via PATH, got {result!r}"
+
+
+def test_env_override_relative_unresolvable_fails_fast(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bare ``HOOKS_DAEMON_PYTHON`` command not on PATH must fail fast,
+    not silently fall back — covers the branch where shutil.which returns
+    None and the subsequent probe of a non-existent path fails.
+    """
+    bin_dir = tmp_path / "bin"
+    _make_fake_python(bin_dir, "python3.13", "3.13.11")
+    monkeypatch.setenv("PATH", str(bin_dir))
+    monkeypatch.setenv("HOOKS_DAEMON_PYTHON", "python3.99-does-not-exist")
+
+    result = find_latest_python((3, 11))
+
+    assert (
+        result is None
+    ), f"unresolvable bare HOOKS_DAEMON_PYTHON must NOT fall back to PATH, got {result!r}"
