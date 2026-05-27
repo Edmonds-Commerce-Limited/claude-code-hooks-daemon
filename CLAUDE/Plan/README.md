@@ -58,6 +58,15 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00112: Git-Anchored Plan Numbering](Completed/00112-git-anchored-plan-numbering/PLAN.md) - Complete
+
+  - Delivered in commits `2da5013`, `69fbb21`, `8853f1e`, `87f21db` (not yet released — release deferred by user)
+  - Persists the latest plan number per-repository in `git config --local hooksdaemon.latestPlanNumber`, trusted on read (`counter + 1`), bootstrapped from a filesystem scan only when absent — stable across branch switches (fixes the branch-traversal problem)
+  - Resolves the nearest enclosing git repo of the target path (`git -C <dir> rev-parse --show-toplevel`), so a plan created inside a nested/vendor repo uses THAT repo's counter and `CLAUDE/Plan/` (fixes vendor-subdir interception)
+  - High-water-mark write on real plan creation (`max(counter, N)`) — self-heals drift without ever lowering the next number; non-git targets fall back to the project-root scan
+  - Consolidated the duplicate scan in `validate_plan_number` onto the shared `highest_plan_number` primitive
+  - New canonical helpers in `handlers/utils/plan_numbering.py`; dogfood-verified live (daemon seeded counter=112 to `.git/config`, answered next=00113)
+
 - [00111: Stop Hook — Context-Limit Guidance Clause](Completed/00111-stop-hook-context-limit-guidance/PLAN.md) - Complete
 
   - Shipped as commit `7d1b9b8`
@@ -745,12 +754,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 108
-- **Completed**: 92 (1 with reduced scope, 4 already-shipped)
+- **Total Plans Created**: 109
+- **Completed**: 93 (1 with reduced scope, 4 already-shipped)
 - **Active**: 3 (1 stop-quality, 2 long-running/review)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping, 00081 - superseded by 00082)
-- **Last reconciled by**: Plan 00111 close-out (Branch 4 explain-or-continue reason now carries explicit "auto-compact handles context pressure" clause; agent dogfooding correction)
+- **Last reconciled by**: Plan 00112 close-out (git-anchored plan numbering — per-repo `git config` counter, nearest-enclosing-repo resolution; not yet released)
 
 ## Quick Links
 

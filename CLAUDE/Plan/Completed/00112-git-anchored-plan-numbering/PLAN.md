@@ -1,6 +1,6 @@
 # Plan 00112: Git-Anchored Plan Numbering
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-05-27
 **Owner**: Claude (Opus 4.7)
 **Priority**: Medium
@@ -173,39 +173,39 @@ git repo (keeps non-git tests/behaviour stable).
 - [x] **Task 1.1**: Map existing call sites and scan primitive
 - [x] **Task 1.2**: Confirm git config + `git -C` resolution behaviour
 - [x] **Task 1.3**: Confirm counter semantics with user (trust counter; nearest repo)
-- [ ] **Task 1.4**: Author this PLAN.md
+- [x] **Task 1.4**: Author this PLAN.md
 
 ### Phase 2: TDD canonical git-anchored helpers
 
-- [ ] **Task 2.1**: RED — tests in `tests/unit/handlers/utils/test_plan_numbering.py` for:
+- [x] **Task 2.1**: RED — tests in `tests/unit/handlers/utils/test_plan_numbering.py` for:
   - `resolve_plan_repo_root(target)` → toplevel of nearest repo; `None` when not in a repo
   - `read_plan_counter(repo)` → int when set, `None` when absent
   - `write_plan_counter(repo, value)` → round-trips via `read_plan_counter`
   - `next_plan_number_for_target(...)`: present-counter → `counter+1`; absent → scan+seed
   - `record_plan_allocation(...)`: `max(counter, N)`; never lowers
   - vendor scenario: a nested repo gets its own counter independent of the outer repo
-- [ ] **Task 2.2**: GREEN — implement the helpers; keep `get_next_plan_number` as the
+- [x] **Task 2.2**: GREEN — implement the helpers; keep `get_next_plan_number` as the
   pure scan primitive used for bootstrap
-- [ ] **Task 2.3**: REFACTOR + 95% coverage on the new code
+- [x] **Task 2.3**: REFACTOR + 95% coverage on the new code
 
 ### Phase 3: Wire handlers + consolidate duplicate
 
-- [ ] **Task 3.1**: `plan_number_helper` — resolve repo from the bash command's plan path
+- [x] **Task 3.1**: `plan_number_helper` — resolve repo from the bash command's plan path
   (fall back to global root), read counter+1 / bootstrap; update tests
-- [ ] **Task 3.2**: `validate_plan_number` — resolve repo from `file_path`/mkdir target;
+- [x] **Task 3.2**: `validate_plan_number` — resolve repo from `file_path`/mkdir target;
   delete `_get_highest_plan_number` duplicate, use the shared scan for bootstrap;
   call `record_plan_allocation` on real creation; update tests
-- [ ] **Task 3.3**: `markdown_organization` — `_handle_plan_write` resolves repo from the
+- [x] **Task 3.3**: `markdown_organization` — `_handle_plan_write` resolves repo from the
   redirect target, uses git-anchored next number; update tests
-- [ ] **Task 3.4**: Verify all three honour the non-git fallback to project root
+- [x] **Task 3.4**: Verify all three honour the non-git fallback to project root
 
 ### Phase 4: QA + dogfood + close
 
-- [ ] **Task 4.1**: `./scripts/qa/llm_qa.py all` — 13/13, coverage ≥ 95%
-- [ ] **Task 4.2**: Restart daemon, verify RUNNING; check logs for errors
-- [ ] **Task 4.3**: Dogfood — broken plan-discovery command returns git-anchored number;
+- [x] **Task 4.1**: `./scripts/qa/llm_qa.py all` — 13/13, coverage ≥ 95%
+- [x] **Task 4.2**: Restart daemon, verify RUNNING; check logs for errors
+- [x] **Task 4.3**: Dogfood — broken plan-discovery command returns git-anchored number;
   confirm `hooksdaemon.latestPlanNumber` written to `.git/config`
-- [ ] **Task 4.4**: Mark PLAN.md complete with delivery commit hashes; move to `Completed/`
+- [x] **Task 4.4**: Mark PLAN.md complete with delivery commit hashes; move to `Completed/`
 
 ## Dependencies
 
@@ -213,15 +213,15 @@ git repo (keeps non-git tests/behaviour stable).
 
 ## Success Criteria
 
-- [ ] Next plan number is read from `git config --local hooksdaemon.latestPlanNumber`
+- [x] Next plan number is read from `git config --local hooksdaemon.latestPlanNumber`
   when present (trusted, `counter + 1`), independent of current branch.
-- [ ] When the counter is absent, it is bootstrapped from a filesystem scan and seeded.
-- [ ] On real plan creation, the counter advances to `max(counter, N)` (self-heal, never lowers).
-- [ ] A plan created under a nested git repo (vendor lib) uses THAT repo's counter and
+- [x] When the counter is absent, it is bootstrapped from a filesystem scan and seeded.
+- [x] On real plan creation, the counter advances to `max(counter, N)` (self-heal, never lowers).
+- [x] A plan created under a nested git repo (vendor lib) uses THAT repo's counter and
   `CLAUDE/Plan/`, not the outer project's.
-- [ ] Non-git targets fall back to `ProjectContext.project_root()` (no behaviour change).
-- [ ] `validate_plan_number`'s duplicate scan is removed; one canonical scan primitive remains.
-- [ ] All QA checks pass (13/13), coverage ≥ 95%, daemon restarts RUNNING.
+- [x] Non-git targets fall back to `ProjectContext.project_root()` (no behaviour change).
+- [x] `validate_plan_number`'s duplicate scan is removed; one canonical scan primitive remains.
+- [x] All QA checks pass (13/13), coverage ≥ 95%, daemon restarts RUNNING.
 
 ## Risks & Mitigations
 
@@ -239,3 +239,17 @@ git repo (keeps non-git tests/behaviour stable).
 - Plan created. Design confirmed with user: trust the git-stored counter on read
   (scan only to bootstrap); resolve the nearest enclosing repo of the target path
   for vendor-subdir support.
+- **Delivered** (not yet released — release deferred by user):
+  - `2da5013` — plan document
+  - `69fbb21` — Phase 2: git-anchored counter helpers in `plan_numbering.py`
+    (`resolve_plan_repo_root`, `read`/`write_plan_counter`,
+    `next_plan_number_for_target`, `record_plan_allocation`; `highest_plan_number`
+    extracted as the shared scan primitive)
+  - `8853f1e` — Phase 3: wired `plan_number_helper`, `validate_plan_number`,
+    `markdown_organization` to the git-anchored functions; removed the duplicate
+    scan in `validate_plan_number`
+  - `87f21db` — Phase 4: QA fixes (Timeout constants in tests, justified
+    error_hiding exclusions)
+- QA 13/13 green, coverage 95.1%. Daemon restarted RUNNING. Dogfood: the live
+  daemon answered "next plan 00113" and seeded `hooksdaemon.latestPlanNumber=112`
+  into `.git/config` — branch-stable, git-anchored numbering confirmed end-to-end.
