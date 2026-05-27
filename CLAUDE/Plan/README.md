@@ -58,6 +58,14 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00113: First-Class GitRepo Utility](Completed/00113-git-repo-utility/PLAN.md) - Complete
+
+  - Delivered in commits `59b06f1`, `9acf120` (not yet released — release deferred by user)
+  - Extracts the git-config access introduced in Plan 00112 into a reusable SOLID `GitRepo` value object (`utils/git_repo.py`): `resolve_for(path)`, `read_config(key)`, `write_config(key, value)` over one bounded subprocess wrapper — single home for git repository access (SRP/OCP/DIP)
+  - Migrated both present-day config consumers onto it: `plan_numbering` (deleted its private `_git_output`; the three delegators now call `GitRepo`) and `git_filemode_checker._get_filemode_setting` (own subprocess block → `GitRepo.read_config`)
+  - Pure refactor — no behavioural change; 14 new `GitRepo` tests (100% module coverage), 283 consumer tests green, QA 13/13, daemon RUNNING
+  - Scope deliberately narrow: other git subprocess sites (`project_context`, `git_context_injector`, `git_branch`) keep their existing helpers — they can adopt `GitRepo` later if it earns more methods (YAGNI)
+
 - [00112: Git-Anchored Plan Numbering](Completed/00112-git-anchored-plan-numbering/PLAN.md) - Complete
 
   - Delivered in commits `2da5013`, `69fbb21`, `8853f1e`, `87f21db` (not yet released — release deferred by user)
@@ -754,12 +762,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 109
-- **Completed**: 93 (1 with reduced scope, 4 already-shipped)
+- **Total Plans Created**: 110
+- **Completed**: 94 (1 with reduced scope, 4 already-shipped)
 - **Active**: 3 (1 stop-quality, 2 long-running/review)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping, 00081 - superseded by 00082)
-- **Last reconciled by**: Plan 00112 close-out (git-anchored plan numbering — per-repo `git config` counter, nearest-enclosing-repo resolution; not yet released)
+- **Last reconciled by**: Plan 00113 close-out (extracted first-class `GitRepo` utility; migrated `plan_numbering` + `git_filemode_checker`; not yet released)
 
 ## Quick Links
 

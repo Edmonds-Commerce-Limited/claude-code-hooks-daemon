@@ -1,6 +1,6 @@
 # Plan 00113: First-Class GitRepo Utility
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-05-27
 **Owner**: Claude (Opus 4.7)
 **Priority**: Medium
@@ -99,39 +99,39 @@ class GitRepo:
 
 ### Phase 1: Plan
 
-- [ ] **Task 1.1**: Confirm the two config consumers + scope (done in review)
-- [ ] **Task 1.2**: Author this PLAN.md
+- [x] **Task 1.1**: Confirm the two config consumers + scope (done in review)
+- [x] **Task 1.2**: Author this PLAN.md
 
 ### Phase 2: TDD GitRepo
 
-- [ ] **Task 2.1**: RED — `tests/unit/utils/test_git_repo.py`: resolve_for
+- [x] **Task 2.1**: RED — `tests/unit/utils/test_git_repo.py`: resolve_for
   (inside repo, nested/vendor repo, non-git, not-yet-existing target),
   read_config (absent → None, roundtrip, branch-independence, non-int passthrough),
   write_config (roundtrip, overwrite, raises on bad repo), git-unavailable → None
-- [ ] **Task 2.2**: GREEN — implement `utils/git_repo.py`
-- [ ] **Task 2.3**: 100% coverage on the new module
+- [x] **Task 2.2**: GREEN — implement `utils/git_repo.py`
+- [x] **Task 2.3**: 100% coverage on the new module
 
 ### Phase 3: Migrate consumers
 
-- [ ] **Task 3.1**: `plan_numbering` delegates to `GitRepo`; delete its `_git_output`
-- [ ] **Task 3.2**: `git_filemode_checker._get_filemode_setting` uses `GitRepo.read_config`
-- [ ] **Task 3.3**: Update `error_hiding_exclusions.json` (move `_git_output` entry to
+- [x] **Task 3.1**: `plan_numbering` delegates to `GitRepo`; delete its `_git_output`
+- [x] **Task 3.2**: `git_filemode_checker._get_filemode_setting` uses `GitRepo.read_config`
+- [x] **Task 3.3**: Update `error_hiding_exclusions.json` (move `_git_output` entry to
   `utils/git_repo.py`; drop entries that no longer apply)
-- [ ] **Task 3.4**: Keep all existing tests green (update mocks/patch targets)
+- [x] **Task 3.4**: Keep all existing tests green (update mocks/patch targets)
 
 ### Phase 4: QA + close
 
-- [ ] **Task 4.1**: `./scripts/qa/llm_qa.py all` — 13/13, coverage ≥ 95%
-- [ ] **Task 4.2**: Restart daemon, verify RUNNING
-- [ ] **Task 4.3**: Mark complete with commit hashes, archive to `Completed/`, update README
+- [x] **Task 4.1**: `./scripts/qa/llm_qa.py all` — 13/13, coverage ≥ 95%
+- [x] **Task 4.2**: Restart daemon, verify RUNNING
+- [x] **Task 4.3**: Mark complete with commit hashes, archive to `Completed/`, update README
 
 ## Success Criteria
 
-- [ ] `GitRepo` is the single home for resolve / read_config / write_config.
-- [ ] `plan_numbering` and `git_filemode_checker` both delegate to it; neither
+- [x] `GitRepo` is the single home for resolve / read_config / write_config.
+- [x] `plan_numbering` and `git_filemode_checker` both delegate to it; neither
   hand-rolls a `git config` subprocess any more.
-- [ ] No behavioural change — all existing plan-number and filemode tests pass.
-- [ ] QA 13/13, coverage ≥ 95%, daemon restarts RUNNING.
+- [x] No behavioural change — all existing plan-number and filemode tests pass.
+- [x] QA 13/13, coverage ≥ 95%, daemon restarts RUNNING.
 
 ## Risks & Mitigations
 
@@ -149,3 +149,14 @@ class GitRepo:
   access was a first-class service or coupled to plan numbering — it was
   coupled; this extracts it properly (SOLID) with the two present-day consumers
   as the justification (not speculative reuse).
+- **Delivered** (not yet released — release deferred by user):
+  - `59b06f1` — plan document
+  - `9acf120` — `utils/git_repo.py` (`GitRepo` value object: `resolve_for`,
+    `read_config`, `write_config`; private `_git_output` bounded wrapper);
+    migrated `plan_numbering` (deleted its `_git_output`; the three delegators
+    now call `GitRepo`) and `git_filemode_checker._get_filemode_setting`;
+    relocated the `_git_output` error-hiding exclusion, dropped the obsolete
+    `git_filemode` one
+- 14 new `GitRepo` tests (100% module coverage); 283 consumer tests green; QA
+  13/13, coverage 95.1%; daemon restarted RUNNING with no import errors. Pure
+  refactor — no behavioural change.
