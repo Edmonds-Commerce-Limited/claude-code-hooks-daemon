@@ -1,6 +1,8 @@
 """ValidatePlanNumberHandler - validates plan folder numbering BEFORE directory creation."""
 
+import logging
 import re
+from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.constants import (
@@ -13,6 +15,12 @@ from claude_code_hooks_daemon.constants import (
 )
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult, ProjectContext
 from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_path
+from claude_code_hooks_daemon.handlers.utils.plan_numbering import (
+    next_plan_number_for_target,
+    record_plan_allocation,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class ValidatePlanNumberHandler(Handler):
@@ -109,59 +117,52 @@ class ValidatePlanNumberHandler(Handler):
         return bool(re.search(r'<<\s*["\']?\w+["\']?', command))
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
-        """Validate plan number is sequential."""
+        """Validate plan number is sequential (git-anchored, per-repo)."""
         tool_name = hook_input.get(HookInputField.TOOL_NAME)
-        plan_number = None
-        plan_name = None
+        plan_path: str | None = None
+        plan_number: int | None = None
+        plan_name: str | None = None
 
-        # Extract plan number and name
+        # Extract the full plan-folder path, number and name.
         if tool_name == ToolName.WRITE:
             file_path = get_file_path(hook_input)
             if file_path:
-                match = re.search(r"CLAUDE/Plans?/(\d+)-([^/]+)/", file_path)
+                match = re.search(r"(.*CLAUDE/Plans?/(\d+)-([^/]+))/", file_path)
                 if match:
-                    plan_number = int(match.group(1))
-                    plan_name = match.group(2)
+                    plan_path = match.group(1)
+                    plan_number = int(match.group(2))
+                    plan_name = match.group(3)
 
         elif tool_name == ToolName.BASH:
             command = get_bash_command(hook_input)
             if command:
-                match = re.search(r"mkdir[^&;]*CLAUDE/Plans?/(\d+)-([^\s/]+)", command)
+                match = re.search(r"mkdir[^&;]*?(\S*CLAUDE/Plans?/(\d+)-([^\s/]+))", command)
                 if match:
-                    plan_number = int(match.group(1))
-                    plan_name = match.group(2)
+                    plan_path = match.group(1)
+                    plan_number = int(match.group(2))
+                    plan_name = match.group(3)
 
-        if not plan_number:
+        if plan_number is None or plan_path is None:
             return HookResult(decision=Decision.ALLOW)
 
-        # Get highest existing plan number
-        highest = self._get_highest_plan_number()
-        expected_number = highest + 1
-
-        # Validate number
-        # Allow plan_number == highest (TOCTOU: mkdir already created the dir
-        # before Write fires, so the new dir is already counted as "highest")
-        # Allow plan_number == highest + 1 (normal case: dir not yet created)
         plan_dir = self._track_plans_in_project or ProjectPath.PLAN_DIR
-        if plan_number != expected_number and plan_number != highest:
+        target = self._resolve_target(plan_path)
+        expected_number = int(next_plan_number_for_target(target, plan_dir, self.workspace_root))
+
+        # Allow ``expected`` (normal: dir not yet created) and ``expected - 1``
+        # (TOCTOU: mkdir already created the dir, so a bootstrap scan counted it
+        # as the high-water mark and expected jumped one ahead).
+        if plan_number not in (expected_number, expected_number - 1):
             error_message = f"""
 PLAN NUMBER INCORRECT
 
 You are creating: {plan_dir}/{plan_number}-{plan_name}/
-Highest existing plan: {highest}
 Expected next number: {expected_number}
 
-BOTH active plans ({plan_dir}/) AND completed plans ({plan_dir}/Completed/) were checked.
-
-HOW TO FIND CORRECT NUMBER:
-
-Run this command BEFORE creating a plan:
-```bash
-find {plan_dir} -maxdepth 2 -type d -name '[0-9]*' | grep -oP '/\\K\\d+(?=-)' | sort -n | tail -1
-```
-
-This searches BOTH directories and returns the highest number.
-Next plan number = highest + 1
+The next plan number is tracked per-repository in git config
+(`hooksdaemon.latestPlanNumber`), so it is stable across branches and
+correct even inside nested/vendor repos. You do NOT need to scan the
+filesystem — use the expected number directly.
 
 YOU MUST FIX THIS NOW:
 
@@ -174,56 +175,33 @@ mkdir -p {plan_dir}/{expected_number}-{plan_name}
 
 See: {plan_dir}/CLAUDE.md for full instructions
 """
-
             return HookResult(decision=Decision.ALLOW, context=[error_message])
 
-        # Number is correct
+        # Valid number — advance the per-repo high-water mark to record the
+        # creation so the next plan reads ``counter + 1``. Counter-write
+        # failures must not block the (advisory) creation, so log and continue.
+        try:
+            record_plan_allocation(target, plan_number)
+        except Exception:
+            logger.warning(
+                "validate_plan_number: failed to record plan allocation for %s",
+                target,
+                exc_info=True,
+            )
+
         return HookResult(decision=Decision.ALLOW)
 
-    def _get_highest_plan_number(self) -> int:
-        """Find highest plan number from all plan locations.
+    def _resolve_target(self, plan_path: str) -> Path:
+        """Absolute path to the plan folder, for repo resolution.
 
-        Scans direct children of the plan root AND all non-numbered
-        organizational subfolders (Completed/, Archive/, Backlog/, etc.).
-        Any subfolder whose name does not start with a number
-        is treated as organizational and its children are scanned.
+        Bash ``mkdir`` paths may be relative to the project root; Write
+        ``file_path`` values are absolute (enforced by the absolute_path
+        handler). Relative paths are anchored to the workspace root.
         """
-        plan_dir = self._track_plans_in_project or ProjectPath.PLAN_DIR
-        plan_root = self.workspace_root / plan_dir
-
-        if not plan_root.exists():
-            return 0
-
-        plan_dirs: list[str] = []
-        # Require a letter after hyphen to exclude date-formatted dirs
-        # like "2026-01-12" while matching plan dirs like "00032-svc-feature".
-        _numbered_dir_re = re.compile(r"^(\d{1,5})-[a-zA-Z]")
-
-        for item in plan_root.iterdir():
-            if not item.is_dir():
-                continue
-
-            if _numbered_dir_re.match(item.name):
-                # Direct numbered plan (e.g. CLAUDE/Plan/023-feature/)
-                plan_dirs.append(item.name)
-            else:
-                # Organizational subfolder (e.g. Completed/, Archive/)
-                # Scan its children for numbered plan folders
-                for child in item.iterdir():
-                    if child.is_dir() and _numbered_dir_re.match(child.name):
-                        plan_dirs.append(child.name)
-
-        if not plan_dirs:
-            return 0
-
-        # Extract numbers and find highest
-        numbers = []
-        for dirname in plan_dirs:
-            match = _numbered_dir_re.match(dirname)
-            if match:
-                numbers.append(int(match.group(1)))
-
-        return max(numbers) if numbers else 0
+        path = Path(plan_path)
+        if not path.is_absolute():
+            path = self.workspace_root / path
+        return path
 
     def get_claude_md(self) -> str | None:
         return None

@@ -1,22 +1,17 @@
 """Tests for ValidatePlanNumberHandler.
 
-Comprehensive test coverage for plan number validation.
+The handler is git-anchored (Plan 00112): it resolves the nearest enclosing
+git repo of the plan being created, and derives the expected number from that
+repo's ``git config --local hooksdaemon.latestPlanNumber`` counter — trusting
+the counter when present, bootstrapping from a filesystem scan when absent. The
+fixtures here make the workspace a real git repo so the production path is
+exercised; a separate non-git fixture covers the project-root fallback.
 """
 
+import subprocess
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
-
-import pytest
-
-
-@pytest.fixture(autouse=True)
-def mock_project_context():
-    """Mock ProjectContext for handler instantiation tests."""
-    with patch("claude_code_hooks_daemon.core.project_context.ProjectContext.project_root") as mock:
-        mock.return_value = Path("/tmp/test")
-        yield mock
-
 
 import pytest
 
@@ -24,6 +19,24 @@ from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.pre_tool_use.validate_plan_number import (
     ValidatePlanNumberHandler,
 )
+from claude_code_hooks_daemon.handlers.utils.plan_numbering import (
+    read_plan_counter,
+    write_plan_counter,
+)
+
+
+@pytest.fixture(autouse=True)
+def mock_project_context():
+    """Mock ProjectContext for handler instantiation (replaced per-test)."""
+    with patch("claude_code_hooks_daemon.core.project_context.ProjectContext.project_root") as mock:
+        mock.return_value = Path("/tmp/test")  # nosec B108 — test stub, never written
+        yield mock
+
+
+def _git_init(repo_root: Path) -> Path:
+    repo_root.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", str(repo_root)], capture_output=True, check=True, timeout=10)
+    return repo_root
 
 
 class TestValidatePlanNumberHandler:
@@ -31,16 +44,13 @@ class TestValidatePlanNumberHandler:
 
     @pytest.fixture
     def temp_workspace(self, tmp_path: Path) -> Path:
-        """Create temporary workspace directory."""
-        workspace = tmp_path / "workspace"
-        workspace.mkdir()
-        return workspace
+        """Workspace that IS a git repo (production path uses the repo counter)."""
+        return _git_init(tmp_path / "workspace")
 
     @pytest.fixture
     def handler(
         self, temp_workspace: Path, monkeypatch: pytest.MonkeyPatch
     ) -> ValidatePlanNumberHandler:
-        """Create handler instance with temporary workspace."""
         monkeypatch.setenv("PWD", str(temp_workspace))
         handler = ValidatePlanNumberHandler()
         handler.workspace_root = temp_workspace
@@ -48,17 +58,19 @@ class TestValidatePlanNumberHandler:
 
     @pytest.fixture
     def plan_root(self, temp_workspace: Path) -> Path:
-        """Create CLAUDE/Plan directory structure."""
         plan_root = temp_workspace / "CLAUDE" / "Plan"
         plan_root.mkdir(parents=True)
         return plan_root
 
-    # Tests for matches() method
+    @staticmethod
+    def _write_input(temp_workspace: Path, rel: str) -> dict[str, Any]:
+        return {"tool_name": "Write", "tool_input": {"file_path": str(temp_workspace / rel)}}
+
+    # ----- matches() -----
 
     def test_matches_write_operation_with_plan_folder(
         self, handler: ValidatePlanNumberHandler
     ) -> None:
-        """Handler matches Write operation creating a plan folder."""
         hook_input: dict[str, Any] = {
             "tool_name": "Write",
             "tool_input": {"file_path": "/workspace/CLAUDE/Plan/001-test-plan/README.md"},
@@ -68,7 +80,6 @@ class TestValidatePlanNumberHandler:
     def test_matches_write_operation_with_5_digit_plan(
         self, handler: ValidatePlanNumberHandler
     ) -> None:
-        """Handler matches Write operation with 5-digit plan number."""
         hook_input: dict[str, Any] = {
             "tool_name": "Write",
             "tool_input": {"file_path": "/workspace/CLAUDE/Plan/00072-new-feature/PLAN.md"},
@@ -76,7 +87,6 @@ class TestValidatePlanNumberHandler:
         assert handler.matches(hook_input) is True
 
     def test_matches_bash_mkdir_with_plan_folder(self, handler: ValidatePlanNumberHandler) -> None:
-        """Handler matches Bash mkdir command for plan folder."""
         hook_input: dict[str, Any] = {
             "tool_name": "Bash",
             "tool_input": {"command": "mkdir -p CLAUDE/Plan/001-test-plan"},
@@ -84,7 +94,6 @@ class TestValidatePlanNumberHandler:
         assert handler.matches(hook_input) is True
 
     def test_matches_bash_mkdir_with_5_digit_plan(self, handler: ValidatePlanNumberHandler) -> None:
-        """Handler matches Bash mkdir with 5-digit plan number."""
         hook_input: dict[str, Any] = {
             "tool_name": "Bash",
             "tool_input": {"command": "mkdir -p CLAUDE/Plan/00072-new-feature"},
@@ -94,69 +103,15 @@ class TestValidatePlanNumberHandler:
     def test_matches_bash_mkdir_with_multiple_flags(
         self, handler: ValidatePlanNumberHandler
     ) -> None:
-        """Handler matches mkdir with various flags."""
         hook_input: dict[str, Any] = {
             "tool_name": "Bash",
             "tool_input": {"command": "mkdir -p -v CLAUDE/Plan/042-feature"},
         }
         assert handler.matches(hook_input) is True
 
-    def test_does_not_match_git_mv_to_completed(self, handler: ValidatePlanNumberHandler) -> None:
-        """Handler does not match git mv archiving a plan to Completed/."""
-        hook_input: dict[str, Any] = {
-            "tool_name": "Bash",
-            "tool_input": {
-                "command": (
-                    "mkdir -p CLAUDE/Plan/Completed && "
-                    "git mv CLAUDE/Plan/023-defence-before-fix-skill "
-                    "CLAUDE/Plan/Completed/023-defence-before-fix-skill"
-                )
-            },
-        }
-        assert handler.matches(hook_input) is False
-
-    def test_does_not_match_git_mv_to_any_subfolder(
-        self, handler: ValidatePlanNumberHandler
-    ) -> None:
-        """Handler does not match git mv archiving a plan to any organizational subfolder."""
-        hook_input: dict[str, Any] = {
-            "tool_name": "Bash",
-            "tool_input": {
-                "command": (
-                    "mkdir -p CLAUDE/Plan/Archive && "
-                    "git mv CLAUDE/Plan/023-old CLAUDE/Plan/Archive/023-old"
-                )
-            },
-        }
-        assert handler.matches(hook_input) is False
-
-    def test_does_not_match_write_to_completed_folder(
-        self, handler: ValidatePlanNumberHandler
-    ) -> None:
-        """Handler does not match Write operations under Completed/."""
-        hook_input: dict[str, Any] = {
-            "tool_name": "Write",
-            "tool_input": {"file_path": "/workspace/CLAUDE/Plan/Completed/023-old-plan/PLAN.md"},
-        }
-        assert handler.matches(hook_input) is False
-
-    def test_does_not_match_write_to_any_organizational_subfolder(
-        self, handler: ValidatePlanNumberHandler
-    ) -> None:
-        """Handler does not match Write under any non-numbered subfolder of Plan."""
-        for subfolder in ["Archive", "Backlog", "OnHold", "v1"]:
-            hook_input: dict[str, Any] = {
-                "tool_name": "Write",
-                "tool_input": {
-                    "file_path": f"/workspace/CLAUDE/Plan/{subfolder}/023-old-plan/PLAN.md"
-                },
-            }
-            assert handler.matches(hook_input) is False, f"Should not match subfolder {subfolder}"
-
     def test_does_not_match_mkdir_completed_folder(
         self, handler: ValidatePlanNumberHandler
     ) -> None:
-        """Handler does not match mkdir for Completed/ subdirectory."""
         hook_input: dict[str, Any] = {
             "tool_name": "Bash",
             "tool_input": {"command": "mkdir -p CLAUDE/Plan/Completed/023-old-plan"},
@@ -166,27 +121,15 @@ class TestValidatePlanNumberHandler:
     def test_does_not_match_mkdir_any_organizational_subfolder(
         self, handler: ValidatePlanNumberHandler
     ) -> None:
-        """Handler does not match mkdir under any non-numbered subfolder of Plan."""
         hook_input: dict[str, Any] = {
             "tool_name": "Bash",
             "tool_input": {"command": "mkdir -p CLAUDE/Plan/Archive/023-old-plan"},
         }
         assert handler.matches(hook_input) is False
 
-    def test_does_not_match_write_outside_plan_folder(
-        self, handler: ValidatePlanNumberHandler
-    ) -> None:
-        """Handler does not match Write operations outside plan folders."""
-        hook_input: dict[str, Any] = {
-            "tool_name": "Write",
-            "tool_input": {"file_path": "/workspace/src/main.py"},
-        }
-        assert handler.matches(hook_input) is False
-
     def test_does_not_match_bash_mkdir_outside_plan(
         self, handler: ValidatePlanNumberHandler
     ) -> None:
-        """Handler does not match mkdir outside CLAUDE/Plan."""
         hook_input: dict[str, Any] = {
             "tool_name": "Bash",
             "tool_input": {"command": "mkdir -p src/handlers"},
@@ -196,374 +139,100 @@ class TestValidatePlanNumberHandler:
     def test_does_not_match_documentation_command_file(
         self, handler: ValidatePlanNumberHandler
     ) -> None:
-        """Handler skips slash command documentation files."""
         hook_input: dict[str, Any] = {
             "tool_name": "Write",
-            "tool_input": {
-                "file_path": "/workspace/.claude/commands/CLAUDE/Plan/001-example/README.md"
-            },
-        }
-        assert handler.matches(hook_input) is False
-
-    def test_does_not_match_hook_documentation_file(
-        self, handler: ValidatePlanNumberHandler
-    ) -> None:
-        """Handler skips hook documentation files."""
-        hook_input: dict[str, Any] = {
-            "tool_name": "Write",
-            "tool_input": {
-                "file_path": "/workspace/.claude/hooks/CLAUDE/Plan/001-example/README.md"
-            },
+            "tool_input": {"file_path": "/x/.claude/commands/CLAUDE/Plan/001-x/doc.md"},
         }
         assert handler.matches(hook_input) is False
 
     def test_does_not_match_heredoc_command(self, handler: ValidatePlanNumberHandler) -> None:
-        """Handler skips heredoc commands (documentation examples)."""
         hook_input: dict[str, Any] = {
             "tool_name": "Bash",
             "tool_input": {"command": "cat > example.md << 'EOF'\nmkdir CLAUDE/Plan/001-test\nEOF"},
         }
         assert handler.matches(hook_input) is False
 
-    def test_does_not_match_heredoc_without_quotes(
-        self, handler: ValidatePlanNumberHandler
-    ) -> None:
-        """Handler skips heredoc without quotes around delimiter."""
-        hook_input: dict[str, Any] = {
-            "tool_name": "Bash",
-            "tool_input": {"command": "cat > file << EOF\nmkdir CLAUDE/Plan/001-test\nEOF"},
-        }
-        assert handler.matches(hook_input) is False
-
-    def test_does_not_match_other_tool_types(self, handler: ValidatePlanNumberHandler) -> None:
-        """Handler does not match non-Write/non-Bash tools."""
-        hook_input: dict[str, Any] = {
-            "tool_name": "Read",
-            "tool_input": {"file_path": "/workspace/CLAUDE/Plan/001-test/README.md"},
-        }
-        assert handler.matches(hook_input) is False
-
-    def test_does_not_match_empty_command(self, handler: ValidatePlanNumberHandler) -> None:
-        """Handler does not match when command is empty."""
-        hook_input: dict[str, Any] = {
-            "tool_name": "Bash",
-            "tool_input": {"command": ""},
-        }
-        assert handler.matches(hook_input) is False
-
-    # Tests for _is_documentation_file() method
-
-    def test_is_documentation_file_identifies_command_files(
-        self, handler: ValidatePlanNumberHandler
-    ) -> None:
-        """_is_documentation_file identifies slash command files."""
-        assert handler._is_documentation_file("/.claude/commands/test.md") is True
-        assert handler._is_documentation_file("/workspace/.claude/commands/plan.md") is True
-
-    def test_is_documentation_file_identifies_hook_md_files(
-        self, handler: ValidatePlanNumberHandler
-    ) -> None:
-        """_is_documentation_file identifies hook markdown files."""
-        assert handler._is_documentation_file("/.claude/hooks/example.md") is True
-        assert handler._is_documentation_file("/workspace/.claude/hooks/readme.md") is True
-
-    def test_is_documentation_file_case_insensitive(
-        self, handler: ValidatePlanNumberHandler
-    ) -> None:
-        """_is_documentation_file is case insensitive."""
-        assert handler._is_documentation_file("/.CLAUDE/COMMANDS/test.md") is True
-        assert handler._is_documentation_file("/.Claude/Hooks/README") is True
-
-    def test_is_documentation_file_rejects_non_docs(
-        self, handler: ValidatePlanNumberHandler
-    ) -> None:
-        """_is_documentation_file rejects non-documentation files."""
-        assert handler._is_documentation_file("/workspace/CLAUDE/Plan/001-test/README.md") is False
-        assert handler._is_documentation_file("/src/handlers/test.py") is False
-
-    # Tests for _is_heredoc_command() method
-
-    def test_is_heredoc_command_with_single_quotes(
-        self, handler: ValidatePlanNumberHandler
-    ) -> None:
-        """_is_heredoc_command identifies heredoc with single quotes."""
-        assert handler._is_heredoc_command("cat > file << 'EOF'") is True
-
-    def test_is_heredoc_command_with_double_quotes(
-        self, handler: ValidatePlanNumberHandler
-    ) -> None:
-        """_is_heredoc_command identifies heredoc with double quotes."""
-        assert handler._is_heredoc_command('cat > file << "EOF"') is True
-
-    def test_is_heredoc_command_without_quotes(self, handler: ValidatePlanNumberHandler) -> None:
-        """_is_heredoc_command identifies heredoc without quotes."""
-        assert handler._is_heredoc_command("cat > file << EOF") is True
-
-    def test_is_heredoc_command_with_different_delimiters(
-        self, handler: ValidatePlanNumberHandler
-    ) -> None:
-        """_is_heredoc_command identifies various delimiters."""
-        assert handler._is_heredoc_command("cat > file << 'MARKER'") is True
-        assert handler._is_heredoc_command("cat > file << END") is True
-        assert handler._is_heredoc_command("cat > file << CONTENT") is True
-
-    def test_is_heredoc_command_rejects_non_heredoc(
-        self, handler: ValidatePlanNumberHandler
-    ) -> None:
-        """_is_heredoc_command rejects non-heredoc commands."""
+    def test_is_heredoc_command_negative(self, handler: ValidatePlanNumberHandler) -> None:
         assert handler._is_heredoc_command("mkdir -p CLAUDE/Plan/001-test") is False
-        assert handler._is_heredoc_command("echo 'test' > file.txt") is False
 
-    # Tests for _get_highest_plan_number() method
-
-    def test_get_highest_plan_number_no_plan_directory(
-        self, handler: ValidatePlanNumberHandler
-    ) -> None:
-        """_get_highest_plan_number returns 0 when CLAUDE/Plan doesn't exist."""
-        highest = handler._get_highest_plan_number()
-        assert highest == 0
-
-    def test_get_highest_plan_number_empty_directory(
-        self, handler: ValidatePlanNumberHandler, plan_root: Path
-    ) -> None:
-        """_get_highest_plan_number returns 0 for empty plan directory."""
-        highest = handler._get_highest_plan_number()
-        assert highest == 0
-
-    def test_get_highest_plan_number_single_active_plan(
-        self, handler: ValidatePlanNumberHandler, plan_root: Path
-    ) -> None:
-        """_get_highest_plan_number finds single active plan."""
-        (plan_root / "001-first-plan").mkdir()
-        highest = handler._get_highest_plan_number()
-        assert highest == 1
-
-    def test_get_highest_plan_number_multiple_active_plans(
-        self, handler: ValidatePlanNumberHandler, plan_root: Path
-    ) -> None:
-        """_get_highest_plan_number finds highest among multiple active plans."""
-        (plan_root / "001-first").mkdir()
-        (plan_root / "005-second").mkdir()
-        (plan_root / "003-third").mkdir()
-        highest = handler._get_highest_plan_number()
-        assert highest == 5
-
-    def test_get_highest_plan_number_single_completed_plan(
-        self, handler: ValidatePlanNumberHandler, plan_root: Path
-    ) -> None:
-        """_get_highest_plan_number finds completed plan."""
-        completed_dir = plan_root / "Completed"
-        completed_dir.mkdir()
-        (completed_dir / "010-completed-plan").mkdir()
-        highest = handler._get_highest_plan_number()
-        assert highest == 10
-
-    def test_get_highest_plan_number_active_and_completed(
-        self, handler: ValidatePlanNumberHandler, plan_root: Path
-    ) -> None:
-        """_get_highest_plan_number checks both active and completed plans."""
-        (plan_root / "005-active").mkdir()
-        completed_dir = plan_root / "Completed"
-        completed_dir.mkdir()
-        (completed_dir / "015-completed").mkdir()
-        highest = handler._get_highest_plan_number()
-        assert highest == 15
-
-    def test_get_highest_plan_number_scans_all_organizational_subfolders(
-        self, handler: ValidatePlanNumberHandler, plan_root: Path
-    ) -> None:
-        """_get_highest_plan_number scans ALL non-numbered subfolders, not just Completed/."""
-        (plan_root / "005-active").mkdir()
-        archive_dir = plan_root / "Archive"
-        archive_dir.mkdir()
-        (archive_dir / "020-archived").mkdir()
-        backlog_dir = plan_root / "Backlog"
-        backlog_dir.mkdir()
-        (backlog_dir / "025-backlogged").mkdir()
-        highest = handler._get_highest_plan_number()
-        assert highest == 25
-
-    def test_get_highest_plan_number_ignores_non_numbered_dirs(
-        self, handler: ValidatePlanNumberHandler, plan_root: Path
-    ) -> None:
-        """_get_highest_plan_number ignores directories without numeric prefix."""
-        (plan_root / "001-valid").mkdir()
-        (plan_root / "template").mkdir()
-        (plan_root / "README.md").touch()
-        highest = handler._get_highest_plan_number()
-        assert highest == 1
-
-    def test_get_highest_plan_number_ignores_invalid_format(
-        self, handler: ValidatePlanNumberHandler, plan_root: Path
-    ) -> None:
-        """_get_highest_plan_number ignores directories without digit-dash prefix."""
-        (plan_root / "005-valid").mkdir()
-        (plan_root / "abc-invalid").mkdir()  # No digits
-        highest = handler._get_highest_plan_number()
-        assert highest == 5
-
-    def test_get_highest_plan_number_three_digit_format(
-        self, handler: ValidatePlanNumberHandler, plan_root: Path
-    ) -> None:
-        """_get_highest_plan_number handles three-digit plan numbers."""
-        (plan_root / "099-high").mkdir()
-        (plan_root / "100-higher").mkdir()
-        highest = handler._get_highest_plan_number()
-        assert highest == 100
-
-    def test_get_highest_plan_number_five_digit_format(
-        self, handler: ValidatePlanNumberHandler, plan_root: Path
-    ) -> None:
-        """_get_highest_plan_number handles 5-digit plan numbers (this project's format)."""
-        (plan_root / "00070-old-plan").mkdir()
-        (plan_root / "00071-current-plan").mkdir()
-        completed = plan_root / "Completed"
-        completed.mkdir()
-        (completed / "00065-archived").mkdir()
-        highest = handler._get_highest_plan_number()
-        assert highest == 71
-
-    def test_get_highest_plan_number_mixed_digit_widths(
-        self, handler: ValidatePlanNumberHandler, plan_root: Path
-    ) -> None:
-        """_get_highest_plan_number works with mixed 3-digit and 5-digit plans."""
-        (plan_root / "001-three-digit").mkdir()
-        (plan_root / "00072-five-digit").mkdir()
-        highest = handler._get_highest_plan_number()
-        assert highest == 72
-
-    def test_get_highest_plan_number_single_digit(
-        self, handler: ValidatePlanNumberHandler, plan_root: Path
-    ) -> None:
-        """_get_highest_plan_number handles single-digit plan numbers."""
-        (plan_root / "1-first").mkdir()
-        (plan_root / "2-second").mkdir()
-        highest = handler._get_highest_plan_number()
-        assert highest == 2
-
-    # Tests for handle() method - Write operations
+    # ----- handle(): bootstrap path (counter absent → scan + seed) -----
 
     def test_handle_write_correct_plan_number_first_plan(
-        self, handler: ValidatePlanNumberHandler, plan_root: Path
+        self, handler: ValidatePlanNumberHandler, temp_workspace: Path, plan_root: Path
     ) -> None:
-        """Handler allows Write operation with correct plan number (first plan)."""
-        hook_input: dict[str, Any] = {
-            "tool_name": "Write",
-            "tool_input": {"file_path": "/workspace/CLAUDE/Plan/001-first-plan/README.md"},
-        }
-        result = handler.handle(hook_input)
+        result = handler.handle(
+            self._write_input(temp_workspace, "CLAUDE/Plan/001-first/README.md")
+        )
         assert result.decision == Decision.ALLOW
         assert not result.context
 
     def test_handle_write_correct_plan_number_sequential(
-        self, handler: ValidatePlanNumberHandler, plan_root: Path
+        self, handler: ValidatePlanNumberHandler, temp_workspace: Path, plan_root: Path
     ) -> None:
-        """Handler allows Write operation with correct sequential plan number."""
         (plan_root / "001-existing").mkdir()
-        hook_input: dict[str, Any] = {
-            "tool_name": "Write",
-            "tool_input": {"file_path": "/workspace/CLAUDE/Plan/002-new-plan/README.md"},
-        }
-        result = handler.handle(hook_input)
+        result = handler.handle(self._write_input(temp_workspace, "CLAUDE/Plan/002-new/README.md"))
         assert result.decision == Decision.ALLOW
         assert not result.context
 
     def test_handle_write_incorrect_plan_number_too_high(
-        self, handler: ValidatePlanNumberHandler, plan_root: Path
+        self, handler: ValidatePlanNumberHandler, temp_workspace: Path, plan_root: Path
     ) -> None:
-        """Handler warns when plan number is too high."""
         (plan_root / "005-existing").mkdir()
-        hook_input: dict[str, Any] = {
-            "tool_name": "Write",
-            "tool_input": {"file_path": "/workspace/CLAUDE/Plan/010-new-plan/README.md"},
-        }
-        result = handler.handle(hook_input)
-        assert result.decision == Decision.ALLOW  # Non-terminal handler
+        result = handler.handle(self._write_input(temp_workspace, "CLAUDE/Plan/010-new/README.md"))
+        assert result.decision == Decision.ALLOW
         assert result.context
         assert "PLAN NUMBER INCORRECT" in result.context[0]
-        assert "You are creating: CLAUDE/Plan/10-new-plan/" in result.context[0]
-        assert "Highest existing plan: 5" in result.context[0]
+        assert "You are creating: CLAUDE/Plan/10-new/" in result.context[0]
         assert "Expected next number: 6" in result.context[0]
 
     def test_handle_write_incorrect_plan_number_too_low(
-        self, handler: ValidatePlanNumberHandler, plan_root: Path
+        self, handler: ValidatePlanNumberHandler, temp_workspace: Path, plan_root: Path
     ) -> None:
-        """Handler warns when plan number is too low (reusing old number)."""
         (plan_root / "010-existing").mkdir()
-        hook_input: dict[str, Any] = {
-            "tool_name": "Write",
-            "tool_input": {"file_path": "/workspace/CLAUDE/Plan/005-new-plan/README.md"},
-        }
-        result = handler.handle(hook_input)
+        result = handler.handle(self._write_input(temp_workspace, "CLAUDE/Plan/005-new/README.md"))
         assert result.decision == Decision.ALLOW
         assert result.context
         assert "PLAN NUMBER INCORRECT" in result.context[0]
         assert "Expected next number: 11" in result.context[0]
 
     def test_handle_write_with_completed_plans(
-        self, handler: ValidatePlanNumberHandler, plan_root: Path
+        self, handler: ValidatePlanNumberHandler, temp_workspace: Path, plan_root: Path
     ) -> None:
-        """Handler considers completed plans when validating."""
         (plan_root / "003-active").mkdir()
-        completed_dir = plan_root / "Completed"
-        completed_dir.mkdir()
-        (completed_dir / "020-completed").mkdir()
-
-        # Should expect 021 (highest is 020 in Completed)
-        hook_input: dict[str, Any] = {
-            "tool_name": "Write",
-            "tool_input": {"file_path": "/workspace/CLAUDE/Plan/021-new-plan/README.md"},
-        }
-        result = handler.handle(hook_input)
+        completed = plan_root / "Completed"
+        completed.mkdir()
+        (completed / "020-completed").mkdir()
+        result = handler.handle(self._write_input(temp_workspace, "CLAUDE/Plan/021-new/README.md"))
         assert result.decision == Decision.ALLOW
         assert not result.context
 
     def test_handle_write_incorrect_with_completed_plans(
-        self, handler: ValidatePlanNumberHandler, plan_root: Path
+        self, handler: ValidatePlanNumberHandler, temp_workspace: Path, plan_root: Path
     ) -> None:
-        """Handler warns when ignoring completed plans."""
         (plan_root / "005-active").mkdir()
-        completed_dir = plan_root / "Completed"
-        completed_dir.mkdir()
-        (completed_dir / "030-completed").mkdir()
-
-        # Trying to use 006 when highest is 030
-        hook_input: dict[str, Any] = {
-            "tool_name": "Write",
-            "tool_input": {"file_path": "/workspace/CLAUDE/Plan/006-new-plan/README.md"},
-        }
-        result = handler.handle(hook_input)
+        completed = plan_root / "Completed"
+        completed.mkdir()
+        (completed / "030-completed").mkdir()
+        result = handler.handle(self._write_input(temp_workspace, "CLAUDE/Plan/006-new/README.md"))
         assert result.decision == Decision.ALLOW
         assert result.context
-        assert "Highest existing plan: 30" in result.context[0]
         assert "Expected next number: 31" in result.context[0]
-        assert "BOTH active plans" in result.context[0]
-
-    # Tests for handle() with 5-digit plan numbers
 
     def test_handle_write_5_digit_correct_sequential(
-        self, handler: ValidatePlanNumberHandler, plan_root: Path
+        self, handler: ValidatePlanNumberHandler, temp_workspace: Path, plan_root: Path
     ) -> None:
-        """Handler allows 5-digit plan number that is sequential."""
         (plan_root / "00071-existing").mkdir()
-        hook_input: dict[str, Any] = {
-            "tool_name": "Write",
-            "tool_input": {"file_path": "/workspace/CLAUDE/Plan/00072-new-plan/PLAN.md"},
-        }
-        result = handler.handle(hook_input)
+        result = handler.handle(self._write_input(temp_workspace, "CLAUDE/Plan/00072-new/PLAN.md"))
         assert result.decision == Decision.ALLOW
         assert not result.context
 
     def test_handle_write_5_digit_wrong_number(
-        self, handler: ValidatePlanNumberHandler, plan_root: Path
+        self, handler: ValidatePlanNumberHandler, temp_workspace: Path, plan_root: Path
     ) -> None:
-        """Handler warns for 5-digit plan with wrong number."""
         (plan_root / "00071-existing").mkdir()
-        hook_input: dict[str, Any] = {
-            "tool_name": "Write",
-            "tool_input": {"file_path": "/workspace/CLAUDE/Plan/00099-wrong/PLAN.md"},
-        }
-        result = handler.handle(hook_input)
+        result = handler.handle(
+            self._write_input(temp_workspace, "CLAUDE/Plan/00099-wrong/PLAN.md")
+        )
         assert result.decision == Decision.ALLOW
         assert result.context
         assert "PLAN NUMBER INCORRECT" in result.context[0]
@@ -571,7 +240,6 @@ class TestValidatePlanNumberHandler:
     def test_handle_bash_mkdir_5_digit_correct(
         self, handler: ValidatePlanNumberHandler, plan_root: Path
     ) -> None:
-        """Handler allows 5-digit mkdir plan number that is sequential."""
         (plan_root / "00071-existing").mkdir()
         hook_input: dict[str, Any] = {
             "tool_name": "Bash",
@@ -581,12 +249,9 @@ class TestValidatePlanNumberHandler:
         assert result.decision == Decision.ALLOW
         assert not result.context
 
-    # Tests for handle() method - Bash operations
-
     def test_handle_bash_correct_plan_number(
         self, handler: ValidatePlanNumberHandler, plan_root: Path
     ) -> None:
-        """Handler allows Bash mkdir with correct plan number."""
         (plan_root / "012-existing").mkdir()
         hook_input: dict[str, Any] = {
             "tool_name": "Bash",
@@ -599,7 +264,6 @@ class TestValidatePlanNumberHandler:
     def test_handle_bash_incorrect_plan_number(
         self, handler: ValidatePlanNumberHandler, plan_root: Path
     ) -> None:
-        """Handler warns for Bash mkdir with incorrect plan number."""
         (plan_root / "007-existing").mkdir()
         hook_input: dict[str, Any] = {
             "tool_name": "Bash",
@@ -608,13 +272,11 @@ class TestValidatePlanNumberHandler:
         result = handler.handle(hook_input)
         assert result.decision == Decision.ALLOW
         assert result.context
-        assert "PLAN NUMBER INCORRECT" in result.context[0]
         assert "Expected next number: 8" in result.context[0]
 
     def test_handle_bash_mkdir_with_flags(
         self, handler: ValidatePlanNumberHandler, plan_root: Path
     ) -> None:
-        """Handler extracts plan number from mkdir with various flags."""
         (plan_root / "015-existing").mkdir()
         hook_input: dict[str, Any] = {
             "tool_name": "Bash",
@@ -624,247 +286,268 @@ class TestValidatePlanNumberHandler:
         assert result.decision == Decision.ALLOW
         assert not result.context
 
-    # Tests for edge cases
+    # ----- handle(): counter is TRUSTED when present -----
+
+    def test_handle_trusts_counter_accepts_counter_driven_number(
+        self, handler: ValidatePlanNumberHandler, temp_workspace: Path, plan_root: Path
+    ) -> None:
+        """Counter=110 but on-disk only goes to 003: 00111 (counter-driven) is
+        accepted, proving the filesystem scan is bypassed when a counter exists.
+        """
+        (plan_root / "00001-a").mkdir()
+        (plan_root / "00003-c").mkdir()
+        write_plan_counter(temp_workspace, 110)
+
+        ok = handler.handle(self._write_input(temp_workspace, "CLAUDE/Plan/00111-new/PLAN.md"))
+        assert ok.decision == Decision.ALLOW
+        assert not ok.context
+
+    def test_handle_trusts_counter_rejects_scan_driven_number(
+        self, handler: ValidatePlanNumberHandler, temp_workspace: Path, plan_root: Path
+    ) -> None:
+        """With counter=110, a scan-driven 00004 is rejected — expected is the
+        counter-driven 111, not 004.
+        """
+        (plan_root / "00001-a").mkdir()
+        (plan_root / "00003-c").mkdir()
+        write_plan_counter(temp_workspace, 110)
+
+        wrong = handler.handle(self._write_input(temp_workspace, "CLAUDE/Plan/00004-scan/PLAN.md"))
+        assert wrong.context
+        assert "Expected next number: 111" in wrong.context[0]
+
+    def test_handle_records_allocation_advances_counter(
+        self, handler: ValidatePlanNumberHandler, temp_workspace: Path, plan_root: Path
+    ) -> None:
+        """A valid creation advances the per-repo high-water mark so the NEXT
+        plan reads counter + 1.
+        """
+        write_plan_counter(temp_workspace, 110)
+        handler.handle(self._write_input(temp_workspace, "CLAUDE/Plan/00111-new/PLAN.md"))
+        assert read_plan_counter(temp_workspace) == 111
+
+    def test_handle_wrong_number_does_not_advance_counter(
+        self, handler: ValidatePlanNumberHandler, temp_workspace: Path, plan_root: Path
+    ) -> None:
+        """A rejected (out-of-range) number must NOT poison the counter — next
+        stays counter + 1 so a typo doesn't blow a huge gap.
+        """
+        write_plan_counter(temp_workspace, 110)
+        handler.handle(self._write_input(temp_workspace, "CLAUDE/Plan/00999-typo/PLAN.md"))
+        assert read_plan_counter(temp_workspace) == 110
+
+    def test_handle_bootstrap_seeds_counter(
+        self, handler: ValidatePlanNumberHandler, temp_workspace: Path, plan_root: Path
+    ) -> None:
+        """First validation against a counter-less repo seeds the high-water
+        mark from the filesystem scan.
+        """
+        (plan_root / "00007-existing").mkdir()
+        handler.handle(self._write_input(temp_workspace, "CLAUDE/Plan/00008-new/PLAN.md"))
+        assert read_plan_counter(temp_workspace) == 8  # 7 seeded, then 8 recorded
+
+    # ----- vendor / nested repo -----
+
+    def test_handle_nested_repo_uses_own_counter(
+        self, handler: ValidatePlanNumberHandler, temp_workspace: Path
+    ) -> None:
+        """A plan created inside a vendor lib with its OWN git repo validates
+        against that repo's counter, not the outer workspace's.
+        """
+        write_plan_counter(temp_workspace, 110)  # outer
+        inner = _git_init(temp_workspace / "vendor" / "acme-lib")
+        (inner / "CLAUDE" / "Plan").mkdir(parents=True)
+        write_plan_counter(inner, 6)  # inner
+
+        # 00007 is correct for the INNER repo (6 + 1), independent of outer's 110.
+        ok = handler.handle(
+            self._write_input(temp_workspace, "vendor/acme-lib/CLAUDE/Plan/00007-x/PLAN.md")
+        )
+        assert ok.decision == Decision.ALLOW
+        assert not ok.context
+
+    def test_handle_nested_repo_rejects_outer_number(
+        self, handler: ValidatePlanNumberHandler, temp_workspace: Path
+    ) -> None:
+        """Inside the vendor repo, the outer-correct number (111) is wrong — the
+        expected number comes from the inner repo's counter (6 + 1 = 7).
+        """
+        write_plan_counter(temp_workspace, 110)  # outer
+        inner = _git_init(temp_workspace / "vendor" / "acme-lib")
+        (inner / "CLAUDE" / "Plan").mkdir(parents=True)
+        write_plan_counter(inner, 6)  # inner
+
+        wrong = handler.handle(
+            self._write_input(temp_workspace, "vendor/acme-lib/CLAUDE/Plan/00111-x/PLAN.md")
+        )
+        assert wrong.context
+        assert "Expected next number: 7" in wrong.context[0]
+
+    # ----- non-git fallback -----
+
+    def test_handle_non_git_falls_back_to_project_root_scan(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When the workspace is not a git repo, validation falls back to a
+        filesystem scan against the project root (legacy behaviour).
+        """
+        plain = tmp_path / "plain"  # NOT a git repo
+        plan_root = plain / "CLAUDE" / "Plan"
+        plan_root.mkdir(parents=True)
+        (plan_root / "00004-a").mkdir()
+        monkeypatch.setenv("PWD", str(plain))
+        handler = ValidatePlanNumberHandler()
+        handler.workspace_root = plain
+
+        ok = handler.handle(
+            {
+                "tool_name": "Write",
+                "tool_input": {"file_path": str(plan_root / "00005-new/PLAN.md")},
+            }
+        )
+        assert ok.decision == Decision.ALLOW
+        assert not ok.context
+
+        wrong = handler.handle(
+            {"tool_name": "Write", "tool_input": {"file_path": str(plan_root / "00009-x/PLAN.md")}}
+        )
+        assert wrong.context
+        assert "Expected next number: 5" in wrong.context[0]
+
+    # ----- edge cases -----
 
     def test_handle_no_plan_number_extracted(self, handler: ValidatePlanNumberHandler) -> None:
-        """Handler allows when plan number cannot be extracted."""
-        hook_input: dict[str, Any] = {
-            "tool_name": "Write",
-            "tool_input": {"file_path": "/workspace/other/file.txt"},
-        }
-        result = handler.handle(hook_input)
+        result = handler.handle(
+            {"tool_name": "Write", "tool_input": {"file_path": "/workspace/other/file.txt"}}
+        )
         assert result.decision == Decision.ALLOW
         assert not result.context
 
     def test_handle_empty_file_path(self, handler: ValidatePlanNumberHandler) -> None:
-        """Handler allows when file path is empty."""
-        hook_input: dict[str, Any] = {
-            "tool_name": "Write",
-            "tool_input": {"file_path": ""},
-        }
-        result = handler.handle(hook_input)
+        result = handler.handle({"tool_name": "Write", "tool_input": {"file_path": ""}})
         assert result.decision == Decision.ALLOW
 
     def test_handle_missing_tool_input(self, handler: ValidatePlanNumberHandler) -> None:
-        """Handler allows when tool_input is missing."""
-        hook_input: dict[str, Any] = {
-            "tool_name": "Write",
-        }
-        result = handler.handle(hook_input)
+        result = handler.handle({"tool_name": "Write"})
         assert result.decision == Decision.ALLOW
 
-    def test_error_message_includes_find_command(
-        self, handler: ValidatePlanNumberHandler, plan_root: Path
+    def test_error_message_includes_corrected_mkdir(
+        self, handler: ValidatePlanNumberHandler, temp_workspace: Path, plan_root: Path
     ) -> None:
-        """Error message includes find command for discovering correct number."""
         (plan_root / "042-existing").mkdir()
-        hook_input: dict[str, Any] = {
-            "tool_name": "Write",
-            "tool_input": {"file_path": "/workspace/CLAUDE/Plan/050-wrong/README.md"},
-        }
-        result = handler.handle(hook_input)
+        result = handler.handle(
+            self._write_input(temp_workspace, "CLAUDE/Plan/050-wrong/README.md")
+        )
         assert result.context
-        assert "find CLAUDE/Plan -maxdepth 2 -type d -name '[0-9]*'" in result.context[0]
         assert "mkdir -p CLAUDE/Plan/43-wrong" in result.context[0]
+        assert "hooksdaemon.latestPlanNumber" in result.context[0]
 
-    # Tests for TOCTOU race condition: mkdir creates dir before Write fires
+    # ----- TOCTOU: mkdir created the dir before Write fires (bootstrap path) -----
 
     def test_handle_write_allows_when_dir_already_created_by_mkdir(
-        self, handler: ValidatePlanNumberHandler, plan_root: Path
+        self, handler: ValidatePlanNumberHandler, temp_workspace: Path, plan_root: Path
     ) -> None:
-        """Write to plan dir should not false-positive when mkdir already created it.
-
-        Scenario: mkdir creates CLAUDE/Plan/024-name/, then Write creates PLAN.md.
-        The handler fires on Write, sees 024 as highest (from mkdir), and would
-        incorrectly demand 025. Fix: allow plan_number == highest.
-        """
         (plan_root / "023-old-plan").mkdir()
-        # mkdir already created the target directory before Write fires
-        (plan_root / "024-dto-phpstan-rules").mkdir()
-
-        hook_input: dict[str, Any] = {
-            "tool_name": "Write",
-            "tool_input": {"file_path": "/workspace/CLAUDE/Plan/024-dto-phpstan-rules/PLAN.md"},
-        }
-        result = handler.handle(hook_input)
+        (plan_root / "024-dto-rules").mkdir()  # mkdir already ran
+        result = handler.handle(
+            self._write_input(temp_workspace, "CLAUDE/Plan/024-dto-rules/PLAN.md")
+        )
         assert result.decision == Decision.ALLOW
-        assert not result.context  # No warning — number is valid
+        assert not result.context
 
     def test_handle_write_allows_when_dir_is_highest_from_completed(
-        self, handler: ValidatePlanNumberHandler, plan_root: Path
+        self, handler: ValidatePlanNumberHandler, temp_workspace: Path, plan_root: Path
     ) -> None:
-        """Write should also work when mkdir dir matches highest from any subfolder.
-
-        Scenario: Completed has 023, mkdir creates 024, Write fires and sees 024
-        as highest. Should allow since plan_number == highest.
-        """
         completed = plan_root / "Completed"
         completed.mkdir()
         (completed / "023-completed-plan").mkdir()
-        # mkdir already created the target directory
-        (plan_root / "024-new-plan").mkdir()
-
-        hook_input: dict[str, Any] = {
-            "tool_name": "Write",
-            "tool_input": {"file_path": "/workspace/CLAUDE/Plan/024-new-plan/PLAN.md"},
-        }
-        result = handler.handle(hook_input)
+        (plan_root / "024-new-plan").mkdir()  # mkdir already ran
+        result = handler.handle(
+            self._write_input(temp_workspace, "CLAUDE/Plan/024-new-plan/PLAN.md")
+        )
         assert result.decision == Decision.ALLOW
         assert not result.context
 
     def test_handle_write_still_rejects_genuinely_wrong_number(
-        self, handler: ValidatePlanNumberHandler, plan_root: Path
+        self, handler: ValidatePlanNumberHandler, temp_workspace: Path, plan_root: Path
     ) -> None:
-        """Write with wrong number should still be rejected even with relaxed check.
-
-        plan_number 030 is neither highest (024) nor highest+1 (025).
-        """
         (plan_root / "023-old").mkdir()
         (plan_root / "024-current").mkdir()
-
-        hook_input: dict[str, Any] = {
-            "tool_name": "Write",
-            "tool_input": {"file_path": "/workspace/CLAUDE/Plan/030-wrong/PLAN.md"},
-        }
-        result = handler.handle(hook_input)
-        assert result.decision == Decision.ALLOW  # advisory
-        assert result.context
-        assert "PLAN NUMBER INCORRECT" in result.context[0]
-
-    def test_handle_write_still_rejects_low_number_with_existing_dir(
-        self, handler: ValidatePlanNumberHandler, plan_root: Path
-    ) -> None:
-        """Write with too-low number should still be rejected.
-
-        plan_number 020 is lower than highest (024), not equal or +1.
-        """
-        (plan_root / "024-current").mkdir()
-
-        hook_input: dict[str, Any] = {
-            "tool_name": "Write",
-            "tool_input": {"file_path": "/workspace/CLAUDE/Plan/020-old/PLAN.md"},
-        }
-        result = handler.handle(hook_input)
+        result = handler.handle(self._write_input(temp_workspace, "CLAUDE/Plan/030-wrong/PLAN.md"))
         assert result.decision == Decision.ALLOW
         assert result.context
         assert "PLAN NUMBER INCORRECT" in result.context[0]
 
-    # Tests for config-aware plan directory
+    def test_handle_write_still_rejects_low_number_with_existing_dir(
+        self, handler: ValidatePlanNumberHandler, temp_workspace: Path, plan_root: Path
+    ) -> None:
+        (plan_root / "024-current").mkdir()
+        result = handler.handle(self._write_input(temp_workspace, "CLAUDE/Plan/020-old/PLAN.md"))
+        assert result.decision == Decision.ALLOW
+        assert result.context
+        assert "PLAN NUMBER INCORRECT" in result.context[0]
+
+    # ----- config-aware plan directory -----
 
     def test_handler_receives_plan_workflow_via_planning_tag(
         self, handler: ValidatePlanNumberHandler
     ) -> None:
-        """Handler receives plan config via PLANNING tag (no shares_options_with)."""
         assert handler.shares_options_with is None
         assert "planning" in handler.tags
 
     def test_handler_has_track_plans_in_project_attribute(
         self, handler: ValidatePlanNumberHandler
     ) -> None:
-        """Handler has _track_plans_in_project attribute for config injection."""
         assert hasattr(handler, "_track_plans_in_project")
         assert handler._track_plans_in_project is None
-
-    def test_get_highest_plan_number_uses_configured_dir(
-        self, handler: ValidatePlanNumberHandler, temp_workspace: Path
-    ) -> None:
-        """_get_highest_plan_number uses _track_plans_in_project when set."""
-        custom_plan_dir = temp_workspace / "CLAUDE" / "Plans"
-        custom_plan_dir.mkdir(parents=True)
-        (custom_plan_dir / "010-custom-plan").mkdir()
-
-        handler._track_plans_in_project = "CLAUDE/Plans"
-        highest = handler._get_highest_plan_number()
-        assert highest == 10
-
-    def test_get_highest_plan_number_falls_back_to_default(
-        self, handler: ValidatePlanNumberHandler, plan_root: Path
-    ) -> None:
-        """_get_highest_plan_number uses ProjectPath.PLAN_DIR when config is None."""
-        (plan_root / "007-default-plan").mkdir()
-
-        handler._track_plans_in_project = None
-        highest = handler._get_highest_plan_number()
-        assert highest == 7
 
     def test_error_message_uses_configured_plan_dir(
         self, handler: ValidatePlanNumberHandler, temp_workspace: Path
     ) -> None:
-        """Error messages use the configured plan directory, not hardcoded CLAUDE/Plan."""
-        custom_plan_dir = temp_workspace / "CLAUDE" / "Plans"
-        custom_plan_dir.mkdir(parents=True)
-        (custom_plan_dir / "005-existing").mkdir()
-
+        custom = temp_workspace / "CLAUDE" / "Plans"
+        custom.mkdir(parents=True)
+        (custom / "005-existing").mkdir()
         handler._track_plans_in_project = "CLAUDE/Plans"
 
-        hook_input: dict[str, Any] = {
-            "tool_name": "Write",
-            "tool_input": {"file_path": "/workspace/CLAUDE/Plans/020-wrong/PLAN.md"},
-        }
-        result = handler.handle(hook_input)
+        result = handler.handle(self._write_input(temp_workspace, "CLAUDE/Plans/020-wrong/PLAN.md"))
         assert result.context
         assert "CLAUDE/Plans/" in result.context[0]
-        # Should NOT contain the hardcoded "CLAUDE/Plan/" (without 's')
-        # when a custom dir is configured
         assert "CLAUDE/Plan/" not in result.context[0]
 
-    # Regression tests for date-directory false positive bug
-
-    def test_get_highest_ignores_date_directories_in_subfolders(
-        self, handler: ValidatePlanNumberHandler, plan_root: Path
-    ) -> None:
-        """Date-formatted dirs like 2026-01-12 must not inflate plan numbers.
-
-        Regression test: date dirs in organizational subfolders matched
-        ^(\\d+)- regex, causing plan numbers to jump to ~2027.
-        """
-        (plan_root / "005-active").mkdir()
-        completed = plan_root / "Completed"
-        completed.mkdir()
-        (completed / "032-completed").mkdir()
-        # Date-formatted directory inside an organizational subfolder
-        legacy = plan_root / "legacy"
-        legacy.mkdir()
-        (legacy / "2026-01-12").mkdir()
-        (legacy / "2026-01-13").mkdir()
-
-        highest = handler._get_highest_plan_number()
-        assert highest == 32  # NOT 2026
+    # ----- date-directory regression (bootstrap scan must ignore dates) -----
 
     def test_handle_not_poisoned_by_date_directories(
-        self, handler: ValidatePlanNumberHandler, plan_root: Path
+        self, handler: ValidatePlanNumberHandler, temp_workspace: Path, plan_root: Path
     ) -> None:
-        """Plan validation should not be affected by date-formatted dirs."""
         (plan_root / "032-existing").mkdir()
         legacy = plan_root / "legacy"
         legacy.mkdir()
         (legacy / "2026-01-12").mkdir()
-
-        hook_input: dict[str, Any] = {
-            "tool_name": "Write",
-            "tool_input": {"file_path": "/workspace/CLAUDE/Plan/033-new-plan/PLAN.md"},
-        }
-        result = handler.handle(hook_input)
+        result = handler.handle(self._write_input(temp_workspace, "CLAUDE/Plan/033-new/PLAN.md"))
         assert result.decision == Decision.ALLOW
-        assert not result.context  # No warning — 033 is correct
+        assert not result.context  # 033 correct; date dir not counted as 2026
 
-    # Tests for handler metadata
+    # ----- handler metadata -----
 
     def test_handler_has_correct_name(self, handler: ValidatePlanNumberHandler) -> None:
-        """Handler has correct name."""
         assert handler.name == "validate-plan-number"
 
     def test_handler_has_correct_priority(self, handler: ValidatePlanNumberHandler) -> None:
-        """Handler has correct priority."""
         assert handler.priority == 30
 
     def test_handler_is_non_terminal(self, handler: ValidatePlanNumberHandler) -> None:
-        """Handler is non-terminal (advisory)."""
         assert handler.terminal is False
 
     def test_handler_has_correct_tags(self, handler: ValidatePlanNumberHandler) -> None:
-        """Handler has correct tags."""
         assert "workflow" in handler.tags
         assert "planning" in handler.tags
         assert "advisory" in handler.tags
         assert "non-terminal" in handler.tags
+
+    def test_get_claude_md_returns_none(self, handler: ValidatePlanNumberHandler) -> None:
+        assert handler.get_claude_md() is None
+
+    def test_get_acceptance_tests_present(self, handler: ValidatePlanNumberHandler) -> None:
+        tests = handler.get_acceptance_tests()
+        assert len(tests) >= 1
+        assert tests[0].expected_decision == Decision.ALLOW

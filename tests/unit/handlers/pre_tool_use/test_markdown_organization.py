@@ -690,7 +690,7 @@ class TestPlanningModeIntegration:
     # ── handle() Write tool — Plan folder creation (ALLOW flat file, Plan 00086) ──
 
     @patch(
-        "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
+        "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.next_plan_number_for_target"
     )
     def test_handle_write_creates_plan_folder_and_returns_allow(
         self,
@@ -723,7 +723,7 @@ class TestPlanningModeIntegration:
         assert "# My Awesome Plan" in content
 
     @patch(
-        "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
+        "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.next_plan_number_for_target"
     )
     def test_handle_write_does_not_create_stub_redirect(
         self,
@@ -749,7 +749,7 @@ class TestPlanningModeIntegration:
             assert "redirect" not in stub_content.lower()
 
     @patch(
-        "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
+        "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.next_plan_number_for_target"
     )
     def test_handle_write_sanitizes_plan_folder_name(
         self,
@@ -776,7 +776,7 @@ class TestPlanningModeIntegration:
         assert created_folder.exists()
 
     @patch(
-        "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
+        "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.next_plan_number_for_target"
     )
     def test_handle_write_returns_allow_with_folder_location_in_context(
         self,
@@ -801,7 +801,7 @@ class TestPlanningModeIntegration:
         assert "CLAUDE/Plan/" in context_text
 
     @patch(
-        "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
+        "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.next_plan_number_for_target"
     )
     def test_handle_write_handles_folder_collision_with_suffix(
         self,
@@ -828,7 +828,7 @@ class TestPlanningModeIntegration:
         assert result.decision == Decision.ALLOW
 
     @patch(
-        "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
+        "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.next_plan_number_for_target"
     )
     def test_handle_write_fails_gracefully_on_missing_directory(
         self,
@@ -1010,7 +1010,7 @@ class TestPlanningModeIntegration:
     # ── Error handling paths ──
 
     @patch(
-        "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
+        "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.next_plan_number_for_target"
     )
     def test_handle_write_permission_error_returns_allow(
         self,
@@ -1030,7 +1030,7 @@ class TestPlanningModeIntegration:
         assert "permission" in context_text.lower()
 
     @patch(
-        "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
+        "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.next_plan_number_for_target"
     )
     def test_handle_write_generic_error_returns_allow(
         self,
@@ -1052,7 +1052,7 @@ class TestPlanningModeIntegration:
     # ── Workflow docs reference ──
 
     @patch(
-        "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
+        "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.next_plan_number_for_target"
     )
     def test_handle_write_includes_workflow_docs_when_exists(
         self,
@@ -1674,7 +1674,7 @@ class TestPlanWriteAllowBehaviour:
         return handler
 
     @patch(
-        "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
+        "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.next_plan_number_for_target"
     )
     def test_plan_write_returns_allow(
         self,
@@ -1698,7 +1698,7 @@ class TestPlanWriteAllowBehaviour:
         assert result.decision == Decision.ALLOW
 
     @patch(
-        "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
+        "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.next_plan_number_for_target"
     )
     def test_plan_write_context_includes_created_path(
         self,
@@ -1725,7 +1725,7 @@ class TestPlanWriteAllowBehaviour:
         assert "PLAN.md" in context_text
 
     @patch(
-        "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
+        "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.next_plan_number_for_target"
     )
     def test_plan_write_context_instructs_post_approval_rename(
         self,
@@ -1753,7 +1753,7 @@ class TestPlanWriteAllowBehaviour:
         assert "delete the flat file" in context_text or "rm " in context_text
 
     @patch(
-        "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.get_next_plan_number"
+        "claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization.next_plan_number_for_target"
     )
     def test_plan_write_still_creates_numbered_folder(
         self,

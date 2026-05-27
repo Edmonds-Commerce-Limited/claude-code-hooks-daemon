@@ -15,7 +15,10 @@ from claude_code_hooks_daemon.constants import (
 )
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult, ProjectContext
 from claude_code_hooks_daemon.core.utils import get_file_path
-from claude_code_hooks_daemon.handlers.utils.plan_numbering import get_next_plan_number
+from claude_code_hooks_daemon.handlers.utils.plan_numbering import (
+    next_plan_number_for_target,
+    record_plan_allocation,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -500,7 +503,8 @@ class MarkdownOrganizationHandler(Handler):
         """
         content = hook_input.get(HookInputField.TOOL_INPUT, {}).get("content", "")
 
-        next_number = get_next_plan_number(plan_base)
+        plan_subdir = self._track_plans_in_project or str(plan_base.name)
+        next_number = next_plan_number_for_target(plan_base, plan_subdir, self._workspace_root)
         original_filename = Path(file_path).name
         sanitized_name = self.sanitize_folder_name(original_filename)
         folder_name = self.get_unique_folder_name(plan_base, next_number, sanitized_name)
@@ -511,6 +515,9 @@ class MarkdownOrganizationHandler(Handler):
 
         plan_file = plan_folder / "PLAN.md"
         plan_file.write_text(content, encoding="utf-8")
+
+        # Advance the per-repo high-water mark so the next plan reads counter + 1.
+        record_plan_allocation(plan_folder, int(next_number))
 
         plan_relative = f"{self._track_plans_in_project}/{folder_name}/PLAN.md"
         logger.info(f"Plan folder created: {plan_relative}")

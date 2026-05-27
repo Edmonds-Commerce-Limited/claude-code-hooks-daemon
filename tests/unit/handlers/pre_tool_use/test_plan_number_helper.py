@@ -199,7 +199,9 @@ class TestPlanNumberHelperHandler:
 
         assert not handler_enabled.matches(hook_input)
 
-    @patch("claude_code_hooks_daemon.handlers.pre_tool_use.plan_number_helper.get_next_plan_number")
+    @patch(
+        "claude_code_hooks_daemon.handlers.pre_tool_use.plan_number_helper.next_plan_number_for_target"
+    )
     def test_blocks_and_provides_correct_next_plan_number(
         self, mock_get_next: any, handler_enabled: PlanNumberHelperHandler, tmp_path: Path
     ) -> None:
@@ -230,7 +232,9 @@ class TestPlanNumberHelperHandler:
         call_args = mock_get_next.call_args[0][0]
         assert call_args == tmp_path / "CLAUDE/Plan"
 
-    @patch("claude_code_hooks_daemon.handlers.pre_tool_use.plan_number_helper.get_next_plan_number")
+    @patch(
+        "claude_code_hooks_daemon.handlers.pre_tool_use.plan_number_helper.next_plan_number_for_target"
+    )
     def test_provides_helpful_reason_message(
         self, mock_get_next: any, handler_enabled: PlanNumberHelperHandler
     ) -> None:
@@ -280,7 +284,9 @@ class TestPlanNumberHelperHandler:
         # Should match based on configured plan directory
         assert handler.matches(hook_input)
 
-    @patch("claude_code_hooks_daemon.handlers.pre_tool_use.plan_number_helper.get_next_plan_number")
+    @patch(
+        "claude_code_hooks_daemon.handlers.pre_tool_use.plan_number_helper.next_plan_number_for_target"
+    )
     def test_handles_get_next_plan_number_errors(
         self, mock_get_next: any, handler_enabled: PlanNumberHelperHandler
     ) -> None:
@@ -302,7 +308,9 @@ class TestPlanNumberHelperHandler:
         # Should provide error info in reason
         assert "could not determine" in result.reason.lower() or "00001" in result.reason
 
-    @patch("claude_code_hooks_daemon.handlers.pre_tool_use.plan_number_helper.get_next_plan_number")
+    @patch(
+        "claude_code_hooks_daemon.handlers.pre_tool_use.plan_number_helper.next_plan_number_for_target"
+    )
     def test_includes_workflow_docs_when_configured(
         self, mock_get_next: any, handler_with_workflow_docs: PlanNumberHelperHandler
     ) -> None:
@@ -326,7 +334,9 @@ class TestPlanNumberHelperHandler:
         assert "CLAUDE/PlanWorkflow.md" in result.reason
         assert "plan structure" in result.reason.lower() or "conventions" in result.reason.lower()
 
-    @patch("claude_code_hooks_daemon.handlers.pre_tool_use.plan_number_helper.get_next_plan_number")
+    @patch(
+        "claude_code_hooks_daemon.handlers.pre_tool_use.plan_number_helper.next_plan_number_for_target"
+    )
     def test_omits_workflow_docs_when_file_missing(
         self, mock_get_next: any, tmp_path: Path
     ) -> None:
@@ -355,7 +365,9 @@ class TestPlanNumberHelperHandler:
         # Should NOT include workflow docs reference (file doesn't exist)
         assert "PlanWorkflow.md" not in result.reason
 
-    @patch("claude_code_hooks_daemon.handlers.pre_tool_use.plan_number_helper.get_next_plan_number")
+    @patch(
+        "claude_code_hooks_daemon.handlers.pre_tool_use.plan_number_helper.next_plan_number_for_target"
+    )
     def test_works_without_workflow_docs_config(
         self, mock_get_next: any, handler_enabled: PlanNumberHelperHandler
     ) -> None:

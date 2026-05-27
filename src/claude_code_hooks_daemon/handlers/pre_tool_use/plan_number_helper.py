@@ -23,7 +23,7 @@ from claude_code_hooks_daemon.constants import (
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
-from claude_code_hooks_daemon.handlers.utils.plan_numbering import get_next_plan_number
+from claude_code_hooks_daemon.handlers.utils.plan_numbering import next_plan_number_for_target
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -134,10 +134,13 @@ class PlanNumberHelperHandler(Handler):
         # Precondition: matches() ensures _track_plans_in_project is not None
         assert self._track_plans_in_project is not None, "Handler called without matches check"
 
-        # Get next plan number
+        # Get next plan number (git-anchored: per-repo counter, trusted when
+        # present, bootstrapped from a filesystem scan when absent).
         try:
             plan_base = self._workspace_root / self._track_plans_in_project
-            next_number = get_next_plan_number(plan_base)
+            next_number = next_plan_number_for_target(
+                plan_base, self._track_plans_in_project, self._workspace_root
+            )
 
             reason_message = (
                 f"🚫 BLOCKED: This command won't find all plans (misses subdirectories like Completed/).\n\n"
