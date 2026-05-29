@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from claude_code_hooks_daemon.core.worktree_paths import (
     WORKTREE_DIR_PATTERNS,
     effective_project_relative_path,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_patterns_cover_both_worktree_locations() -> None:
@@ -16,29 +19,18 @@ def test_patterns_cover_both_worktree_locations() -> None:
 
 
 def test_dot_claude_worktree_path_rerooted_to_worktree(tmp_path: Path) -> None:
-    abs_path = str(
-        tmp_path / ".claude/worktrees/agent-X/CLAUDE/LLM-UPDATE.md"
-    )
-    assert (
-        effective_project_relative_path(abs_path, tmp_path) == "CLAUDE/LLM-UPDATE.md"
-    )
+    abs_path = str(tmp_path / ".claude/worktrees/agent-X/CLAUDE/LLM-UPDATE.md")
+    assert effective_project_relative_path(abs_path, tmp_path) == "CLAUDE/LLM-UPDATE.md"
 
 
 def test_untracked_worktree_path_rerooted_to_worktree(tmp_path: Path) -> None:
-    abs_path = str(
-        tmp_path / "untracked/worktrees/agent-Y/CLAUDE/Plan/00001-foo/PLAN.md"
-    )
-    assert (
-        effective_project_relative_path(abs_path, tmp_path)
-        == "CLAUDE/Plan/00001-foo/PLAN.md"
-    )
+    abs_path = str(tmp_path / "untracked/worktrees/agent-Y/CLAUDE/Plan/00001-foo/PLAN.md")
+    assert effective_project_relative_path(abs_path, tmp_path) == "CLAUDE/Plan/00001-foo/PLAN.md"
 
 
 def test_non_worktree_path_relative_to_project_root(tmp_path: Path) -> None:
     abs_path = str(tmp_path / "CLAUDE/LLM-UPDATE.md")
-    assert (
-        effective_project_relative_path(abs_path, tmp_path) == "CLAUDE/LLM-UPDATE.md"
-    )
+    assert effective_project_relative_path(abs_path, tmp_path) == "CLAUDE/LLM-UPDATE.md"
 
 
 def test_disallowed_worktree_path_still_rerooted_not_bypassed(tmp_path: Path) -> None:
