@@ -115,6 +115,52 @@ _fail() { _err "$1"; exit 1; }
 #   - self-install (script sibling)
 #   - downstream install (daemon dir = $PROJECT_ROOT/.claude/hooks-daemon)
 #   - skill shim exec from /tmp (script sibling absent → daemon dir wins)
+# Plan 00114 F2: when Layer 1 is curl-fetched into /tmp (the documented
+# "review-before-running" flow) AND the installed daemon predates
+# python_discovery.sh, BOTH local lookups miss and the upgrade aborts with
+# "Canonical python discovery helper missing" — the documented escape hatch is
+# itself broken. As a last resort, self-fetch the helper from the same
+# ref/base-URL the skill thin-shim uses. Writes to a temp file cleaned by an
+# EXIT trap. curl's exit code is captured EXPLICITLY (not via an inline
+# `if curl && [ -s ]`) so a transient curl failure is distinguishable from an
+# empty download.
+_PYTHON_DISCOVERY_FETCHED_TMP=""
+_cleanup_fetched_discovery_lib() {
+    if [ -n "$_PYTHON_DISCOVERY_FETCHED_TMP" ] && [ -f "$_PYTHON_DISCOVERY_FETCHED_TMP" ]; then
+        rm -f "$_PYTHON_DISCOVERY_FETCHED_TMP"
+    fi
+}
+trap _cleanup_fetched_discovery_lib EXIT
+
+_fetch_python_discovery_lib() {
+    local ref base_url url tmp rc
+    ref="${HOOKS_DAEMON_UPGRADE_REF:-main}"
+    base_url="${HOOKS_DAEMON_UPGRADE_BASE_URL:-https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon}"
+    url="$base_url/$ref/scripts/lib/python_discovery.sh"
+
+    # Presence check: capture `command -v` output into a variable instead of
+    # redirecting, so nothing is discarded (no error-hiding redirect).
+    local curl_path
+    if ! curl_path="$(command -v curl)"; then
+        return 1
+    fi
+    if [ -z "$curl_path" ]; then
+        return 1
+    fi
+    if ! tmp="$(mktemp)"; then
+        return 1
+    fi
+    rc=0
+    curl -fsSL --max-time 30 -o "$tmp" "$url" || rc=$?
+    if [ "$rc" -eq 0 ] && [ -s "$tmp" ]; then
+        _PYTHON_DISCOVERY_FETCHED_TMP="$tmp"
+        printf '%s\n' "$tmp"
+        return 0
+    fi
+    rm -f "$tmp"
+    return 1
+}
+
 _resolve_python_discovery_lib() {
     local daemon_dir="${1:-}"
     if [ -n "$daemon_dir" ] && [ -f "$daemon_dir/scripts/lib/python_discovery.sh" ]; then
@@ -125,6 +171,12 @@ _resolve_python_discovery_lib() {
     sibling="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python_discovery.sh"
     if [ -f "$sibling" ]; then
         printf '%s\n' "$sibling"
+        return 0
+    fi
+    # Plan 00114 F2: last-resort network self-fetch for the /tmp call site.
+    local fetched
+    if fetched="$(_fetch_python_discovery_lib)"; then
+        printf '%s\n' "$fetched"
         return 0
     fi
     return 1
