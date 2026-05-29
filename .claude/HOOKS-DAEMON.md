@@ -1,10 +1,10 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-05-12 (v3.12.0) by `generate-docs`. Regenerate: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-docs`
+> Generated on 2026-05-29 (v3.16.0) by `generate-docs`. Regenerate: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-docs`
 
 ## Active Handlers
 
-### PreToolUse (33 handlers)
+### PreToolUse (34 handlers)
 
 | Priority | Handler | Behavior | Description |
 |----------|---------|----------|-------------|
@@ -22,6 +22,7 @@
 | 20 | lock_file_edit_blocker | TERMINAL | Block direct editing of package manager lock files |
 | 21 | pip_break_system | TERMINAL | Block pip install --break-system-packages commands |
 | 22 | sudo_pip | TERMINAL | Block sudo pip install commands |
+| 23 | ask_user_question_blocker | TERMINAL | Allow AskUserQuestion only when every question is prefix-justified |
 | 23 | daemon_restart_verifier | ADVISORY | Verify daemon can restart before allowing git commits |
 | 30 | qa_suppression | BLOCKING | Block QA suppression comments across all supported languages |
 | 33 | plan_number_helper | ADVISORY | Detect bash commands attempting to discover plan numbers and provide correct answer |
@@ -132,7 +133,7 @@
 | 10 | model_context | NON-TERMINAL | Format model name with effort level and color-coded context percentage |
 | 12 | thinking_mode | NON-TERMINAL | Display thinking mode and effort level in status line |
 | 14 | current_time | NON-TERMINAL | Display current local time in status line (24-hour format, no seconds) |
-| 20 | git_branch | NON-TERMINAL | Show current git branch if in a git repo |
+| 20 | git_branch | NON-TERMINAL | Show current git branch with magicmonty-style status icons if in a git repo |
 | 25 | git_repo_name | NON-TERMINAL | Show git repository name at start of status line |
 | 25 | working_directory | NON-TERMINAL | Display working directory when it differs from project root |
 | 28 | startup_cleanup | NON-TERMINAL | Show 🧹 briefly after daemon startup to indicate stale-file cleanup ran |
