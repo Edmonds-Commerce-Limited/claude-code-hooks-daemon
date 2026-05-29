@@ -22,7 +22,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 # Pointer suffix injected into terse reminders so agents can fetch full detail.
-_EXPLAIN_SUFFIX = "Full detail: /hooks-daemon rule-explain {rule_id}"
+# Phrased without slash-command syntax: a literal "/hooks-daemon ..." in an
+# agent-facing string is interpreted by Claude as a bash command (skill_refs QA).
+_EXPLAIN_SUFFIX = "Full detail: run the hooks-daemon skill with args 'rule-explain {rule_id}'"
 
 
 @dataclass(frozen=True, slots=True)
