@@ -6,15 +6,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Infrastructure / Bootstrap
 
-- [00114: Fully Robust Upgrade System](00114-robust-upgrade-system/PLAN.md) - In Progress
-
-  - Field report `untracked/hooks-daemon-upgrade-broken.md`: a client several versions behind saw BOTH documented upgrade paths fail; only `HOOKS_DAEMON_SKIP_BOOTSTRAP=1` worked
-  - **F1** — Layer 1 `scripts/upgrade.sh` rejects `--already-bootstrapped`, breaking every pre-v3.15 skill shim still in the wild (bootstrap deadlock: the fix ships *via* the upgrade the broken shim blocks). Fix: accept-and-ignore legacy bootstrap flags
-  - **F2** — documented curl-to-`/tmp` flow can't run: Layer 1 sources sibling `lib/python_discovery.sh` never fetched. Fix: self-contained Layer 1 + corrected docs
-  - **F3** — uv hardlink warning noise on every overlay-fs/container install. Fix: proactive fs detection → copy mode (no failed attempt, no warning)
-  - **F4** — `HOOKS_DAEMON_SKIP_BOOTSTRAP=1` escape hatch undiscoverable. Fix: surface in error messages
-  - New regression tests for F1-F4 wired into RELEASING.md Step 12.0 H-1 gate
-
 - [00110: Python Interpreter Discovery — DRY Consolidation & Latest-Always Policy](00110-python-discovery-dry-consolidation/PLAN.md) - Not Started
 
   - Field report from host host-a (`untracked/hooks-daemon-upgrade-python-version.md`): skill `install.sh` aborted on default `python3` (3.9.21) and suggested hardcoded `python3.11` despite `python3.13`/`python3.14` being on PATH
@@ -66,6 +57,23 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00115: Parallel-Batch Cancellation Footgun Mitigation](Completed/00115-parallel-batch-cancellation-footgun/PLAN.md) - Complete
+
+  - Delivered in commits `e7b02c2` (G1+G3) and `11d5eeb` (CLAUDE.md warning); not yet released
+  - Root cause (dogfooding gold): when a daemon PreToolUse hook denies one tool call in a turn, Claude Code cancels every sibling tool call — batched Edit/Write/commit are silently lost; the lagged cancellations read like harness flakiness
+  - **G1+G3**: every PreToolUse DENY now appends a warning that batched siblings were cancelled and must be re-issued separately (`core/hook_result.py` `_DENY_CONTINUATION_SUFFIX`), replacing the old "do not stop working" text that framed a block as consequence-free; live-proven
+  - **G4**: brief permanent footgun warning added to hand-authored `CLAUDE.md`; the generated-`<hooksdaemon>`-clause variant deferred to Plan 00116's single meta-rule to avoid re-bloat
+  - **G2 SKIPPED** by maintainer decision: the static suffix is accurate without a transcript-derived sibling count, which would add hot-path I/O
+
+- [00114: Fully Robust Upgrade System](Completed/00114-robust-upgrade-system/PLAN.md) - Complete
+
+  - Field report `untracked/hooks-daemon-upgrade-broken.md`: a client several versions behind saw BOTH documented upgrade paths fail; only `HOOKS_DAEMON_SKIP_BOOTSTRAP=1` worked. Merged to main (not yet released)
+  - **F1** — Layer 1 `scripts/upgrade.sh` now accepts-and-ignores `--already-bootstrapped` (heals pre-v3.15 skill shims; breaks the bootstrap deadlock)
+  - **F2** — Layer 1 self-contained: fetches `python_discovery.sh` when no installed/`/tmp` copy exists (fixes documented curl-to-`/tmp` flow)
+  - **F3** — `scripts/install/venv.sh` detects overlay-fs/NFS up front and chooses copy mode proactively (no failed hardlink attempt, no warning) while keeping hardlink speed on real disks
+  - **F4** — recovery hints (`HOOKS_DAEMON_SKIP_BOOTSTRAP=1` + manual fallback) surfaced in the abort messages; `CLAUDE/LLM-UPDATE.md` stuck-client troubleshooting subsection added
+  - Regression tests for F1-F4; H-1 acceptance gate count bumped 23→24 in RELEASING.md; QA 13/13
 
 - [00113: First-Class GitRepo Utility](Completed/00113-git-repo-utility/PLAN.md) - Complete
 
@@ -771,12 +779,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 111
-- **Completed**: 94 (1 with reduced scope, 4 already-shipped)
-- **Active**: 4 (1 bootstrap/upgrade, 1 stop-quality, 2 long-running/review)
+- **Total Plans Created**: 116
+- **Completed**: 96 (1 with reduced scope, 4 already-shipped)
+- **Active**: 5 (1 python-discovery, 1 question-blocker, 1 stop-quality, 2 long-running/review) + 1 in-progress build (00116 CLAUDE.md compression)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping, 00081 - superseded by 00082)
-- **Last reconciled by**: Plan 00113 close-out (extracted first-class `GitRepo` utility; migrated `plan_numbering` + `git_filemode_checker`; not yet released)
+- **Last reconciled by**: Plans 00114 (robust upgrade) + 00115 (batch-cancellation footgun) close-out; Plan 00116 (CLAUDE.md token compression) finalised and in build (not yet released)
 
 ## Quick Links
 

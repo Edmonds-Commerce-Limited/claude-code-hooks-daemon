@@ -1000,6 +1000,45 @@ rm /tmp/upgrade.sh
 
 The upgrade script actively cleans up nested install artifacts and rebuilds the venv from scratch.
 
+### Upgrade Aborts on an Old Client (Stuck-Client Recovery)
+
+Clients more than ~2 versions behind can hit a bootstrap/packaging abort _before_ the real
+deploy runs. As of v3.16.0+ the canonical `scripts/upgrade.sh` is backward-tolerant and
+self-documenting, but if you are running an **older** client shim the escape hatches below
+break the deadlock. Try them in order.
+
+**Symptoms** (all occur before the Layer 2 deploy):
+
+- `Unknown option: --already-bootstrapped` — a pre-v3.15 skill shim passes a flag an older
+  fetched script rejected. (The canonical script now accepts-and-ignores it.)
+- `Canonical python discovery helper missing` — the curl-to-`/tmp` flow ran a script whose
+  installed daemon predates `python_discovery.sh`. (The canonical script now fetches its
+  own helper.)
+
+**Recovery, in order:**
+
+```bash
+# 1. Run the canonical Layer-1 script straight from main — it bypasses the old skill shim
+#    entirely, tolerates legacy flags, and fetches its own helpers:
+curl -fsSL https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/main/scripts/upgrade.sh -o /tmp/upgrade.sh
+bash /tmp/upgrade.sh --project-root /path/to/your/project
+
+# 2. If Python discovery still fails, point it at a known-good interpreter (3.11+):
+HOOKS_DAEMON_PYTHON=/usr/bin/python3 bash /tmp/upgrade.sh --project-root /path/to/your/project
+
+# 3. To pull the canonical script from a specific ref instead of main:
+HOOKS_DAEMON_UPGRADE_REF=v3.16.0 bash /tmp/upgrade.sh --project-root /path/to/your/project
+
+# 4. Last resort — skip the self-bootstrap verification of the local skill shim (only if
+#    1-3 are unavailable and you trust the on-disk script):
+HOOKS_DAEMON_SKIP_BOOTSTRAP=1 bash "$PROJECT_ROOT/.claude/skills/hooks-daemon/scripts/upgrade.sh" --project-root "$PROJECT_ROOT"
+
+rm -f /tmp/upgrade.sh
+```
+
+Once any path succeeds it installs the current backward-tolerant shim, so the next upgrade
+self-heals — you should not need these hatches again.
+
 ### `.claude/` Directory Inside Daemon Repo (Not a Nested Install)
 
 The daemon repository contains a `.claude/` directory with project-level handler templates and example configurations. This is **intentional** and is NOT a nested installation. The nested installation detector specifically checks for `.claude/hooks-daemon/.claude/hooks-daemon` (double-nested), not `.claude/hooks-daemon/.claude/`.

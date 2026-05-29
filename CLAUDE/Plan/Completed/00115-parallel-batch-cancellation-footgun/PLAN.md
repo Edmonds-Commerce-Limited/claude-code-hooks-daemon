@@ -1,11 +1,19 @@
 # Plan 00115: Parallel-Batch Cancellation Footgun Mitigation
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-05-29
 **Owner**: Claude (Opus) + user (joseph)
 **Priority**: High
 **Recommended Executor**: Opus
 **Execution Strategy**: Single-threaded, strict one-mutation-per-turn (dogfooding the fix)
+
+**Outcome (maintainer-finalised)**: G1 + G3 shipped in `core/hook_result.py` (commit
+e7b02c2) and live-proven (a blocked `sed`/pipe now returns the cancellation warning). G4
+delivered as a brief permanent warning in hand-authored `CLAUDE.md` (commit 11d5eeb) — the
+generated-`<hooksdaemon>`-clause variant is deferred to Plan 00116's single meta-rule to
+avoid re-bloating the injected block. **G2 SKIPPED** by maintainer decision: the static
+suffix is accurate without a transcript-derived sibling count, and counting adds hot-path
+I/O; revisit only if a precise count proves necessary.
 
 ## Overview
 

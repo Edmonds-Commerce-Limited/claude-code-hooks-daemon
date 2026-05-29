@@ -1,11 +1,20 @@
 # Plan 00114: Fully Robust Upgrade System
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-05-29
 **Owner**: Claude (Opus) + user (joseph)
 **Priority**: High
 **Recommended Executor**: Opus
 **Execution Strategy**: Sub-Agent Orchestration (TDD per failure mode)
+
+**Outcome**: F1–F4 implemented in an isolated worktree and merged to main (merge commit
+on top of v3.16.0); QA 13/13 green. F1 (`--already-bootstrapped` tolerance) + F2
+(self-contained python-discovery fetch) in `scripts/upgrade.sh`; F3 (overlay-fs proactive
+copy mode) in `scripts/install/venv.sh`; F4 (recovery hints) in both Layer-1 and the skill
+`upgrade.sh`. Regression tests added (legacy-shim e2e, recovery-hint, legacy-flag
+tolerance, tmp self-contained, overlay-fs proactive copy); H-1 gate count bumped 23→24 in
+RELEASING.md. G6 documentation closeout (LLM-UPDATE.md stuck-client troubleshooting) is the
+only remaining tail item.
 
 ## Overview
 
