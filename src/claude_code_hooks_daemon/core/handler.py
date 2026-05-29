@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.constants.handlers import HandlerIDMeta
     from claude_code_hooks_daemon.core.hook_result import HookResult
+    from claude_code_hooks_daemon.core.rule import Rule
 
 
 class Handler(ABC):
@@ -203,3 +204,23 @@ class Handler(ABC):
                 ]
         """
         ...
+
+    def get_rules(self) -> list[Rule]:
+        """Return the Rule objects that define this handler's blocking behaviour.
+
+        Plan 00116, Phase 2 (Task 2.2).  Used to generate:
+          - The always-on CLAUDE.md rule-ID table (one row per rule).
+          - Terse reminders for repeat block fires.
+          - Verbose first-fire block messages.
+
+        Override this in blocking handlers to declare their rules using
+        ``RuleID`` constants (from ``constants.rule_ids``).  The base
+        implementation returns an empty list so legacy handlers that have not
+        yet been migrated continue to work without modification (graceful
+        degradation — Decision B of the design).
+
+        Returns:
+            List of ``Rule`` objects; empty list if the handler has not yet
+            declared rules (legacy / non-blocking handlers).
+        """
+        return []
