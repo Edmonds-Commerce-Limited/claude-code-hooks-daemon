@@ -1,6 +1,10 @@
 """Comprehensive tests for HookResult."""
 
-from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
+from claude_code_hooks_daemon.core.hook_result import (
+    _DENY_CONTINUATION_SUFFIX,
+    Decision,
+    HookResult,
+)
 
 
 class TestHookResultInit:
@@ -97,7 +101,7 @@ class TestToJsonDenyDecision:
         assert output["hookSpecificOutput"]["permissionDecision"] == Decision.DENY
         reason = output["hookSpecificOutput"]["permissionDecisionReason"]
         assert reason.startswith("Operation blocked")
-        assert "Do not stop working" in reason
+        assert "CANCELLED" in reason
 
     def test_to_json_deny_with_reason_and_context(self):
         """Deny with reason and context should include all fields."""
@@ -107,7 +111,7 @@ class TestToJsonDenyDecision:
         assert output["hookSpecificOutput"]["permissionDecision"] == Decision.DENY
         reason = output["hookSpecificOutput"]["permissionDecisionReason"]
         assert reason.startswith("Blocked")
-        assert "Do not stop working" in reason
+        assert "CANCELLED" in reason
         assert output["hookSpecificOutput"]["additionalContext"] == "Extra info"
 
     def test_to_json_deny_with_guidance(self):
@@ -126,7 +130,7 @@ class TestToJsonDenyDecision:
 
         output_reason = output["hookSpecificOutput"]["permissionDecisionReason"]
         assert output_reason.startswith(reason)
-        assert "Do not stop working" in output_reason
+        assert "CANCELLED" in output_reason
 
     def test_to_json_deny_continuation_suffix_not_on_ask(self):
         """ASK decisions should NOT get the continuation suffix."""
@@ -134,7 +138,20 @@ class TestToJsonDenyDecision:
         output = result.to_json("PreToolUse")
 
         assert output["hookSpecificOutput"]["permissionDecisionReason"] == "Confirm this"
-        assert "Do not stop working" not in output["hookSpecificOutput"]["permissionDecisionReason"]
+        assert "CANCELLED" not in output["hookSpecificOutput"]["permissionDecisionReason"]
+
+    def test_to_json_deny_suffix_warns_about_cancelled_batched_calls(self):
+        """Plan 00115 G1/G3: the DENY suffix must warn that tool calls batched with the
+        blocked one were cancelled and must be re-issued (not just 'modify and continue')."""
+        result = HookResult(decision=Decision.DENY, reason="Blocked")
+        reason = result.to_json("PreToolUse")["hookSpecificOutput"]["permissionDecisionReason"]
+        # Names the failure mode and the recovery action.
+        assert "CANCELLED" in reason
+        assert "re-issue" in reason.lower()
+        # Still tells the agent not to abandon the task.
+        assert "continue" in reason.lower()
+        # Stays terse — appended to every DENY, so guard against bloat regression.
+        assert len(_DENY_CONTINUATION_SUFFIX) < 250
 
 
 class TestToJsonAskDecision:

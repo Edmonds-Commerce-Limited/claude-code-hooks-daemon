@@ -23,7 +23,8 @@ class Decision(StrEnum):
 # Agents sometimes interpret a blocked tool as a signal to stop working.
 # This suffix makes the expected behaviour explicit: adapt and continue.
 _DENY_CONTINUATION_SUFFIX = (
-    "\n\nDo not stop working. Modify your approach using the guidance above and continue."
+    "\n\n⚠️ Any tool calls batched with this one were CANCELLED — re-issue any Edit/Write/commit "
+    "separately, and don't batch them with blockable commands. Then adapt and continue."
 )
 
 
