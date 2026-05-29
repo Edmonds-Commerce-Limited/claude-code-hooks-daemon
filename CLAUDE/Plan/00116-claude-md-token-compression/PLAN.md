@@ -25,11 +25,12 @@ guidance *just-in-time* so the full rationale is **never in always-on context**:
    no verbose rationale. This is the only daemon content auto-injected.
 
 2. **At block time — STATEFUL progressive disclosure with disclosure tracking**:
+
    - **First time a given rule fires in a session** → emit the **verbose block**
      (full rationale, safe alternatives, the teaching content currently living in
      CLAUDE.md). The verbose text is delivered exactly when it is relevant.
    - **Subsequent fires of the same rule** → emit only the **terse reminder keyed
-     by rule ID** ("BLOCKED [R-GIT-RESET-HARD]: ask the user / git stash first").
+     by rule ID** ("BLOCKED \[R-GIT-RESET-HARD\]: ask the user / git stash first").
    - **Disclosure state resets on context loss** (PreCompact + clear / new
      session) so the first post-compact fire is verbose again — re-teaching the
      agent after its memory of the verbose block was compacted away.
@@ -89,17 +90,17 @@ This plan is research + design + implementation-roadmap only.
 
 ### Measured baseline (ground truth, 2026-05-29)
 
-| Artifact | Size | Notes |
-|----------|------|-------|
-| `CLAUDE.md` total | 47,886 B / 986 lines (~12k tok) | host project file |
-| `<hooksdaemon>` injected block | 22,041 B / 407 lines | **46% of CLAUDE.md**; auto-generated |
-| `@CLAUDE/PlanWorkflow.md` | 25.5 KB | always auto-expanded |
-| `@CLAUDE/development/RELEASING.md` | 20.2 KB | always auto-expanded |
-| `@CLAUDE/CodeLifecycle/Features.md` | 10 KB | always auto-expanded |
-| `@CLAUDE/CodeLifecycle/Bugs.md` | 8.5 KB | always auto-expanded |
-| `@CLAUDE/CodeLifecycle/General.md` | 8.5 KB | always auto-expanded |
-| `@.claude/HOOKS-DAEMON.md` | 10.6 KB | always auto-expanded |
-| **Always-on instruction tree** | **≈131 KB ≈ 33k tokens** | Claude Code warns ~47k tokens |
+| Artifact                            | Size                            | Notes                                |
+| ----------------------------------- | ------------------------------- | ------------------------------------ |
+| `CLAUDE.md` total                   | 47,886 B / 986 lines (~12k tok) | host project file                    |
+| `<hooksdaemon>` injected block      | 22,041 B / 407 lines            | **46% of CLAUDE.md**; auto-generated |
+| `@CLAUDE/PlanWorkflow.md`           | 25.5 KB                         | always auto-expanded                 |
+| `@CLAUDE/development/RELEASING.md`  | 20.2 KB                         | always auto-expanded                 |
+| `@CLAUDE/CodeLifecycle/Features.md` | 10 KB                           | always auto-expanded                 |
+| `@CLAUDE/CodeLifecycle/Bugs.md`     | 8.5 KB                          | always auto-expanded                 |
+| `@CLAUDE/CodeLifecycle/General.md`  | 8.5 KB                          | always auto-expanded                 |
+| `@.claude/HOOKS-DAEMON.md`          | 10.6 KB                         | always auto-expanded                 |
+| **Always-on instruction tree**      | **≈131 KB ≈ 33k tokens**        | Claude Code warns ~47k tokens        |
 
 ### Architecture (grounded in source read 2026-05-29)
 
@@ -173,41 +174,72 @@ marker and per-rule deny counting since the last boundary, OR a dedicated
 lightweight state file in the daemon untracked dir keyed by session. Either way
 the verbose-vs-terse decision is: `verbose if not tracker.was_disclosed(id) else terse`.
 
-## Design Decisions (defaults chosen; OPEN ones need maintainer confirmation)
+## Design Decisions (maintainer-confirmed)
 
-### Decision A — ID source: **Handler-owned `get_rules()`** (recommended). OPEN.
+### Decision A — ID source: **Handler-owned `get_rules()`**. APPROVED.
+
 Strongest DRY; table + reminders + verbose all generated from the handler's rules.
 
-### Decision B — ID granularity: **Per-rule** (recommended). OPEN.
+### Decision B — ID granularity: **Per-rule**. APPROVED.
+
 `destructive_git` → 9 IDs matching its 9 existing specific reasons; precise reminders.
 
-### Decision C — Table scope: **Blocking only** (recommended). OPEN.
+### Decision C — Table scope: **Blocking only**. APPROVED.
+
 Only BLOCKING/TERMINAL rules get table rows + the disclosure ladder; advisory
 handlers keep a lighter entry, to keep the hard-rule signal undiluted.
 
 ### Decision D — ID stability
+
 Rule IDs are a **public contract** (appear in user CLAUDE.md + block messages).
 Named constants (`constants/rule_ids.py`, NO MAGIC); renames = breaking change,
 documented in the upgrade guide.
 
 ### Decision E — Reset boundaries: **PreCompact AND clear/new session**
+
 PreCompact handler calls `tracker.reset()` (verbose content the agent saw is about
 to be compacted away). A SessionStart/clear path also resets (fresh session = no
 memory). Confirm whether clear is distinguishable from normal SessionStart in the
 hook input; if not, reset on every SessionStart (cheap — worst case one extra
 verbose block per session start).
 
-### Decision F — Drill-down delivery: **skill `/hooks-daemon rule-explain <ID>`
-+ CLI `explain-rule <ID>`**. The skill is the LLM-facing path the maintainer
-asked for; the CLI is the headless/testable backend the skill wraps. Both also
-support `explain-handler <name>`. The table header + every terse reminder point
-at the skill.
+### Decision F — Drill-down delivery: \*\*skill `/hooks-daemon rule-explain <ID>`
 
-### Decision G — Tracker storage: extend `History` vs dedicated state file. OPEN.
-Lean to a dedicated session-scoped state file (clean separation; `History` stays
-the permanent audit log). Confirm in Phase 2.
+- CLI `explain-rule <ID>`\*\*. The skill is the LLM-facing path the maintainer
+  asked for; the CLI is the headless/testable backend the skill wraps. Both also
+  support `explain-handler <name>`. The table header + every terse reminder point
+  at the skill.
+
+### Decision G — Tracker storage: **in-memory in the daemon process, keyed by `session_id`**. RESOLVED — state file REJECTED.
+
+A state file invites out-of-sync corruption (maintainer call). The daemon is already
+long-lived and per-project, so an in-process dict is the natural home; a daemon
+restart simply re-verboses (acceptable — worst case one extra verbose block).
+
+**CRITICAL concurrency requirement (maintainer-raised):** one daemon serves MANY
+concurrent agents for a single project (main session + Task sub-agents + parallel
+Claude Code sessions). A globally-keyed tracker would hand agent B a *terse* reminder
+for a rule B has never seen verbose, because agent A disclosed it. The tracker MUST be
+keyed by a per-agent identifier, NEVER global.
+
+**Gated on a BLOCKING Phase-2 spike (Task 2.0)** — capture real `hook_input` across
+(a) main session, (b) a Task sub-agent, (c) two concurrent sessions, and confirm:
+
+1. `session_id` is present and DISTINCT per concurrent agent (incl. sub-agents);
+2. PreCompact + SessionStart carry that same `session_id`, so reset targets one
+   agent without wiping the others.
+
+- **If confirmed** → in-memory `dict[session_id, set[rule_id]]`; reset that session's
+  entry on its PreCompact/SessionStart. Preferred: no file, no transcript I/O.
+- **If `session_id` is NOT reliably per-agent** → fall back to **transcript-grep**:
+  read the agent's `transcript_path`, scan only messages AFTER the last compaction
+  marker, treat a rule as disclosed iff its verbose block appears there. Per-agent and
+  compaction-correct by construction, at the cost of transcript I/O on the hot path.
+
+The spike MUST run and decide before any tracker code is written.
 
 ### Decision H — REJECT automated/lossy compression for normative text.
+
 Rationale + citations in `RESEARCH.md`.
 
 ## Tasks
@@ -215,85 +247,90 @@ Rationale + citations in `RESEARCH.md`.
 ### Phase 1: Measurement harness & no-loss contract (TDD)
 
 - [ ] ⬜ **Task 1.1**: `scripts/qa/measure_instruction_footprint.py` — byte/line/
-      approx-token counts for the injected block, each `get_claude_md()`, the full
-      always-on tree. Snapshot as regression baseline. (RED: snapshot test; GREEN.)
+  approx-token counts for the injected block, each `get_claude_md()`, the full
+  always-on tree. Snapshot as regression baseline. (RED: snapshot test; GREEN.)
 - [ ] ⬜ **Task 1.2**: Term-set test — every blocked literal + prescribed fix per
-      handler recorded; the no-semantic-loss contract for later phases.
+  handler recorded; the no-semantic-loss contract for later phases.
 
 ### Phase 2: `Rule` model, `RuleID` constants, `DisclosureTracker` (TDD)
 
+- [ ] ⬜ **Task 2.0 (BLOCKING spike — Decision G)**: Capture real `hook_input` across
+  (a) main session, (b) a Task sub-agent, (c) two concurrent sessions. Confirm
+  `session_id` is present + DISTINCT per agent, and that PreCompact/SessionStart carry
+  it. Decide tracker storage: in-memory `dict[session_id, set[rule_id]]` if confirmed,
+  else transcript-grep fallback. MUST resolve before any tracker code (Tasks 2.1–2.3).
 - [ ] ⬜ **Task 2.1**: `Rule` dataclass (`core/rule.py`) + `RuleID` constants
-      (`constants/rule_ids.py`). `RuleFormatter` rendering table row / terse / verbose
-      from one `Rule`. (RED: all three contain the ID + literal; GREEN.)
+  (`constants/rule_ids.py`). `RuleFormatter` rendering table row / terse / verbose
+  from one `Rule`. (RED: all three contain the ID + literal; GREEN.)
 - [ ] ⬜ **Task 2.2**: `Handler.get_rules() -> list[Rule]` (default `[]`) + protocol
-      updates; legacy handlers degrade gracefully.
+  updates; legacy handlers degrade gracefully.
 - [ ] ⬜ **Task 2.3**: `DisclosureTracker` (`core/disclosure_tracker.py`) with
-      `was_disclosed`/`mark_disclosed`/`reset`, session-scoped, per-rule. Decide
-      storage (Decision G). (RED: first→verbose, repeat→terse, reset→verbose; GREEN.)
+  `was_disclosed`/`mark_disclosed`/`reset`, session-scoped, per-rule. Decide
+  storage (Decision G). (RED: first→verbose, repeat→terse, reset→verbose; GREEN.)
 
 ### Phase 3: Stateful disclosure in handlers (TDD, parallelisable)
 
 - [ ] ⬜ **Task 3.1**: For each BLOCKING handler, declare `get_rules()` and refactor
-      `handle()` to: identify the matched rule, then emit verbose (if
-      `not tracker.was_disclosed(id)` → `mark_disclosed`) else terse, via
-      `RuleFormatter`. Preserve existing verbose content as `Rule.verbose`.
-      *(One sub-agent per handler file, Edit tool only — never sed; never batch a
-      mutating Edit with a blockable Bash call; verify each landed.)*
+  `handle()` to: identify the matched rule, then emit verbose (if
+  `not tracker.was_disclosed(id)` → `mark_disclosed`) else terse, via
+  `RuleFormatter`. Preserve existing verbose content as `Rule.verbose`.
+  *(One sub-agent per handler file, Edit tool only — never sed; never batch a
+  mutating Edit with a blockable Bash call; verify each landed.)*
 - [ ] ⬜ **Task 3.2**: `destructive_git` first (invert its existing ladder into the
-      verbose-first/terse-after model — its `_get_block_count` logic becomes
-      `tracker.was_disclosed`), then `markdown_organization`, `tdd_enforcement`,
-      `git_stash`, `sed_blocker`, security/qa-suppression/lint strategy handlers.
+  verbose-first/terse-after model — its `_get_block_count` logic becomes
+  `tracker.was_disclosed`), then `markdown_organization`, `tdd_enforcement`,
+  `git_stash`, `sed_blocker`, security/qa-suppression/lint strategy handlers.
 
 ### Phase 4: Reset wiring (TDD)
 
 - [ ] ⬜ **Task 4.1**: PreCompact handler calls `tracker.reset()`. (RED: disclosure
-      cleared after PreCompact; GREEN.) Co-locate with existing pre_compact handlers.
+  cleared after PreCompact; GREEN.) Co-locate with existing pre_compact handlers.
 - [ ] ⬜ **Task 4.2**: SessionStart/clear path resets the tracker (Decision E).
-      (RED: fresh session → next fire verbose.)
+  (RED: fresh session → next fire verbose.)
 
 ### Phase 5: Injector emits the rule table only (TDD)
 
 - [ ] ⬜ **Task 5.1**: `_collect_sections`/`_build_section` render a single generated
-      rule-ID table (blocking rules) + the single shared meta-rule + a header pointer
-      ("Full detail: `/hooks-daemon rule-explain <ID>`"). Drop per-handler prose.
-      (RED: block is a RuleID-keyed table, meta-rule once, pointer present; GREEN.)
+  rule-ID table (blocking rules) + the single shared meta-rule + a header pointer
+  ("Full detail: `/hooks-daemon rule-explain <ID>`"). Drop per-handler prose.
+  (RED: block is a RuleID-keyed table, meta-rule once, pointer present; GREEN.)
 - [ ] ⬜ **Task 5.2**: Advisory handlers — lighter section per Decision C.
 - [ ] ⬜ **Task 5.3**: Re-measure (Phase 1): injected block ≤50% of baseline (G1).
 
 ### Phase 6: On-demand detail — CLI + skill (TDD)
 
 - [ ] ⬜ **Task 6.1**: `explain-rule <ID>` / `explain-handler <name>` subcommands in
-      `daemon/cli.py` printing `Rule.verbose` verbatim. (RED: output has every
-      Phase 1.2 term for that rule; GREEN.)
+  `daemon/cli.py` printing `Rule.verbose` verbatim. (RED: output has every
+  Phase 1.2 term for that rule; GREEN.)
 - [ ] ⬜ **Task 6.2**: Skill `/hooks-daemon rule-explain <ID>` under
-      `src/.../skills/hooks-daemon/` wrapping the CLI. Follow existing skill-script
-      conventions (self-bootstrap/manifest if applicable — see RELEASING Step 14).
+  `src/.../skills/hooks-daemon/` wrapping the CLI. Follow existing skill-script
+  conventions (self-bootstrap/manifest if applicable — see RELEASING Step 14).
 
 ### Phase 7: Parity + integrity tests (anti-drift guarantee, TDD)
 
 - [ ] ⬜ **Task 7.1**: Every table `RuleID` is emitted by some handler deny path.
 - [ ] ⬜ **Task 7.2**: Every handler terse/verbose message leads with a `RuleID`
-      present in the table.
+  present in the table.
 - [ ] ⬜ **Task 7.3**: No duplicate RuleIDs across handlers.
 
 ### Phase 8: De-`@` the heavy imports (TDD where testable)
 
 - [ ] ⬜ **Task 8.1**: Convert CLAUDE.md `@`-imports (PlanWorkflow, RELEASING,
-      Features, Bugs, General, HOOKS-DAEMON) to plain references + a one-line trigger
-      pointer each. Edit only the user-content region; verify the injector's
-      content-preservation check + `validate_instruction_content` still pass.
-      (Doc/lint test: referenced but not `@`-expanded; pointer present.)
+  Features, Bugs, General, HOOKS-DAEMON) to plain references + a one-line trigger
+  pointer each. Edit only the user-content region; verify the injector's
+  content-preservation check + `validate_instruction_content` still pass.
+  (Doc/lint test: referenced but not `@`-expanded; pointer present.)
 - [ ] ⬜ **Task 8.2**: Installer / CLAUDE.md template for fresh installs emits the
-      de-`@`'d form + rule-table block (search `src/.../install/`).
+  de-`@`'d form + rule-table block (search `src/.../install/`).
 
 ### Phase 9: Verification, QA, dogfood (executor runs in MAIN repo)
 
 - [ ] ⬜ **Task 9.1**: Full QA (`./scripts/qa/run_all.sh` or `llm_qa.py all`).
 - [ ] ⬜ **Task 9.2**: Restart daemon in the **main repo** (NOT a worktree), verify
-      RUNNING, confirm regenerated block is the rule table and ≤50%.
+  RUNNING, confirm regenerated block is the rule table and ≤50%.
 - [ ] ⬜ **Task 9.3**: Live-verify the disclosure ladder: trip `destructive_git`
-      once → verbose with `R-GIT-RESET-HARD`; trip again → terse; trigger a compact
-      → next trip verbose again; run `/hooks-daemon rule-explain R-GIT-RESET-HARD`.
+  once → verbose with `R-GIT-RESET-HARD`; trip again → terse; trigger a compact
+  → next trip verbose again; run `/hooks-daemon rule-explain R-GIT-RESET-HARD`.
 - [ ] ⬜ **Task 9.4**: Re-measure full always-on tree; record before/after.
 
 ## Dependencies
@@ -310,32 +347,33 @@ Rationale + citations in `RESEARCH.md`.
 
 - [ ] Injected block ≤ 11,000 B / ≤ 200 lines (≥50%), now a rule table.
 - [ ] First fire of a rule → verbose; repeat → terse keyed by ID; PreCompact /
-      clear resets → next fire verbose again (live + unit verified).
+  clear resets → next fire verbose again (live + unit verified).
 - [ ] Skill `/hooks-daemon rule-explain <ID>` and CLI `explain-rule <ID>` return
-      full verbatim detail; parity tests green.
+  full verbatim detail; parity tests green.
 - [ ] `@`-imports converted to on-demand (≈83 KB removed from every-session load),
-      trigger pointers retained.
+  trigger pointers retained.
 - [ ] Term-set test passes (no blocked literal or fix lost).
 - [ ] No matching-behaviour change; all tests pass; 95%+ coverage; full QA green;
-      daemon restarts RUNNING. Before/after tokens recorded.
+  daemon restarts RUNNING. Before/after tokens recorded.
 
 ## Risks & Mitigations
 
-| Risk | Impact | Probability | Mitigation |
-|------|--------|-------------|------------|
-| Agent compacts away verbose block, then only gets terse → loses the rule | High | Med | reset() on PreCompact restores verbose on next fire — the core mechanism; live-test it (Task 9.3) |
-| Disclosure state desyncs from real context (reset missed) | High | Med | Reset on BOTH PreCompact and SessionStart; default to verbose when state unknown (fail toward more info) |
-| Table row / terse / verbose drift | High | Low | All generated from one `Rule` via `RuleFormatter`; parity tests (Phase 7) |
-| Rule lost a load-bearing literal (`-D` vs `-d`) | High | Med | Phase 1.2 term-set test; literals stored verbatim in `Rule.blocked`/`verbose` |
-| Rule IDs are a public contract; renames break user scripts | Med | Med | Named constants; renames = breaking; upgrade-guide note |
-| Tracker storage adds per-block I/O latency | Med | Low | In-memory session state, lazy persist; daemon is long-lived |
-| De-`@`'d docs ignored when needed (release steps) | High | Med | One-line always-on trigger pointers at decision points |
-| CLAUDE.md edit collides with injector auto-commit / validate_instruction_content | Med | Med | Edit only user-content region; existing preservation check; run in main repo |
-| Bulk per-handler edits trip blockers (sed/pipe/batch-cancellation) | Med | Med | One Edit/turn/agent; never sed; never pipe head/tail; verify each landed |
+| Risk                                                                             | Impact | Probability | Mitigation                                                                                               |
+| -------------------------------------------------------------------------------- | ------ | ----------- | -------------------------------------------------------------------------------------------------------- |
+| Agent compacts away verbose block, then only gets terse → loses the rule         | High   | Med         | reset() on PreCompact restores verbose on next fire — the core mechanism; live-test it (Task 9.3)        |
+| Disclosure state desyncs from real context (reset missed)                        | High   | Med         | Reset on BOTH PreCompact and SessionStart; default to verbose when state unknown (fail toward more info) |
+| Table row / terse / verbose drift                                                | High   | Low         | All generated from one `Rule` via `RuleFormatter`; parity tests (Phase 7)                                |
+| Rule lost a load-bearing literal (`-D` vs `-d`)                                  | High   | Med         | Phase 1.2 term-set test; literals stored verbatim in `Rule.blocked`/`verbose`                            |
+| Rule IDs are a public contract; renames break user scripts                       | Med    | Med         | Named constants; renames = breaking; upgrade-guide note                                                  |
+| Tracker storage adds per-block I/O latency                                       | Med    | Low         | In-memory session state, lazy persist; daemon is long-lived                                              |
+| De-`@`'d docs ignored when needed (release steps)                                | High   | Med         | One-line always-on trigger pointers at decision points                                                   |
+| CLAUDE.md edit collides with injector auto-commit / validate_instruction_content | Med    | Med         | Edit only user-content region; existing preservation check; run in main repo                             |
+| Bulk per-handler edits trip blockers (sed/pipe/batch-cancellation)               | Med    | Med         | One Edit/turn/agent; never sed; never pipe head/tail; verify each landed                                 |
 
 ## Notes & Updates
 
 ### 2026-05-29
+
 - Revised twice per maintainer direction. Final design = **stateful progressive
   disclosure with disclosure tracking**: CLAUDE.md holds only a compact rule-ID
   table; a rule's FIRST fire per session emits the verbose block, later fires emit
