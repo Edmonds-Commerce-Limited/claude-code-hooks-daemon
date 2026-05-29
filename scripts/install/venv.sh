@@ -456,13 +456,13 @@ create_venv_at_path() {
     # warn-then-retry path incurred on EVERY container install. On normal
     # disks we keep hardlink-first. An explicit UV_LINK_MODE from the
     # environment is honoured (we no longer blanket-unset it — that erased an
-    # operator's deliberate choice). link_mode_env holds the UV_LINK_MODE
-    # assignment passed to the first sync's `env`, or stays empty (an empty
-    # element is not added to argv, so hardlink-first runs with UV_LINK_MODE
-    # unset).
-    local link_mode_env=()
+    # operator's deliberate choice). We export UV_LINK_MODE=copy for the first
+    # sync when copy is wanted, and unset it otherwise so uv uses its
+    # hardlink-first default. The first `uv sync` invocation below is left
+    # unchanged from the historical form (no `env` wrapper).
     if [ -n "${UV_LINK_MODE:-}" ]; then
-        link_mode_env=("UV_LINK_MODE=$UV_LINK_MODE")
+        # Honour an explicit operator override verbatim.
+        export UV_LINK_MODE
     else
         local target_fs="" probe_dir="$venv_path"
         # Probe the nearest existing ancestor (the venv leaf does not exist yet).
@@ -471,20 +471,20 @@ create_venv_at_path() {
         done
         if [ -n "$probe_dir" ]; then
             local stat_out
-            if stat_out="$(stat -f -c %T "$probe_dir" 2>&1)"; then
+            if stat_out="$(command stat -f -c %T "$probe_dir")"; then
                 target_fs="$stat_out"
             fi
         fi
         case "$target_fs" in
             overlay* | nfs*)
                 print_info "Detected hardlink-hostile filesystem ($target_fs) at $venv_path — using UV_LINK_MODE=copy."
-                link_mode_env=("UV_LINK_MODE=copy")
+                export UV_LINK_MODE=copy
                 ;;
             *)
                 # Normal disk (or detection inconclusive): hardlink-first. The
                 # warn-then-retry fallback below still catches genuine hardlink
                 # failures the detection did not anticipate.
-                link_mode_env=()
+                unset UV_LINK_MODE
                 ;;
         esac
     fi
