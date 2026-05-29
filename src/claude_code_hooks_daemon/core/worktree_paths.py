@@ -56,11 +56,12 @@ def effective_project_relative_path(abs_path: str, project_root: Path) -> str | 
     Returns ``None`` when ``abs_path`` is not inside ``project_root`` at all, or
     when it is a worktree marker path with no in-worktree subpath.
     """
-    try:
-        absolute = Path(abs_path).resolve()
-        relative = absolute.relative_to(project_root.resolve())
-    except ValueError:
+    absolute = Path(abs_path).resolve()
+    root = project_root.resolve()
+    if not absolute.is_relative_to(root):
+        # Path is outside the project entirely — not a classification target.
         return None
+    relative = absolute.relative_to(root)
 
     parts = relative.parts
     subpath_start = _worktree_subpath_start(parts)
