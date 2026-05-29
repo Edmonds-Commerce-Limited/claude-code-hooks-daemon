@@ -783,6 +783,25 @@ pip install --user <package>
 
 Even in a container running as root, `sudo` adds nothing — drop it and use a venv.
 
+## ask_user_question_blocker — questions need `ASKING BECAUSE:` justification
+
+AskUserQuestion calls are only allowed when every `question` string begins with `ASKING BECAUSE:` (case-sensitive, leading whitespace OK). The convention mirrors the Stop handler's `STOPPING BECAUSE:` pattern — explicit declared intent gates the privilege of pausing the session.
+
+**Before asking, evaluate critically**:
+- Tautological/rhetorical questions with one obvious answer ("Should I continue?", "Would you like me to proceed?") — do NOT ask. State the question and your assumed-correct answer in plain output text and proceed. The user is watching and will interrupt if the assumption is wrong.
+- Questions whose options reduce to **good vs. bad** are tautological — the answer is always the good option. Examples: best practice vs. bodge, increasing vs. decreasing code quality, delivering the requirement vs. not delivering it, fixing the failing test vs. leaving it broken, following project conventions vs. inventing your own. Do NOT ask; pick the good option and proceed.
+- Errors with a clear recovery path ("Should I fix the failing test?") — do NOT ask. Fix it.
+- Genuine choice questions where you cannot resolve the answer from context — these are the legitimate use case. Prefix every question text with `ASKING BECAUSE: <one-line reason you cannot decide>` so the daemon allows the call through.
+
+**Audit log pattern** (preferred for tautological questions):
+```
+I would normally ask: <question>.
+Assumed answer: <your assumption>.
+Proceeding on that basis; the user will interrupt if wrong.
+```
+
+**Escape hatch** (genuine ambiguity): prefix every question text with `ASKING BECAUSE: <reason>`. Mixing prefixed and non-prefixed questions in one call still triggers a block — prefix all or none.
+
 ## daemon_restart_verifier — restart the daemon before committing
 
 Before making a `git commit` in the hooks daemon repository, this handler advises verifying that the daemon can restart successfully with the current code changes. This is advisory — it adds context but does not block the commit.
