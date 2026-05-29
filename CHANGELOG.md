@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.17.0] - 2026-05-29
+
+### Added
+
+- **Rule/RuleID/DisclosureTracker core infrastructure (Plan 00116, Phases 1-2)** — New `Rule` model, `RuleID` constants, and `DisclosureTracker` at `src/claude_code_hooks_daemon/core/rule.py` and `constants/rule_ids.py`, plus a stateful progressive-disclosure measurement harness. Handlers can now declare their blocking rules via `get_rules()` (default returns `[]` for graceful degradation). Infrastructure for per-block terse reminders, first-fire verbose messages, and a CLAUDE.md rule-ID table is in place — wiring to live handlers is deferred to Phase 3+.
+- **`get_rules()` method on `Handler` base class (Plan 00116, Phase 2)** — Non-abstract method with default `return []` body added to `Handler` ABC. Existing handlers continue to work without modification; blocking handlers can override to declare `Rule` objects for the progressive-disclosure system.
+- **`worktree-aware effective_project_relative_path` helper (Plan 00115 / worktree fix)** — New utility function `effective_project_relative_path` that classifies files relative to their enclosing worktree root rather than the main repo root, enabling correct path resolution for files opened inside `untracked/worktrees/` branches.
+- **`scheduled_tasks.lock` gitignore enforcement (standalone)** — `gitignore_safety_checker` now verifies that `.claude/scheduled_tasks.lock` is present in `.gitignore`. The runtime lock file is ephemeral and must not be committed.
+
+### Changed
+
+- **`markdown_organization` handler classifies worktree files relative to worktree root (Plan 00115 worktree fix)** — Files inside `untracked/worktrees/<branch>/` were incorrectly evaluated against the main project root, causing false blocks on valid markdown paths. The handler now delegates to `effective_project_relative_path` so each worktree branch is treated as its own root.
+- **Upgrade shim (Layer 1) accepts `--already-bootstrapped` flag for legacy compatibility (Plan 00114, F1)** — Old-format upgrade shims that pass `--already-bootstrapped` to Layer 1 now work correctly instead of failing with an unrecognised argument error.
+- **Layer 1 self-fetches `python_discovery.sh` for `/tmp`-based installs (Plan 00114, F2)** — When running from `/tmp`, Layer 1 now fetches the canonical `python_discovery.sh` from the release rather than relying on a local copy that may not exist.
+- **Proactive copy mode on overlay-fs, no spurious hardlink warning (Plan 00114, F3)** — `UV_LINK_MODE=copy` is now exported proactively when an overlay filesystem is detected, preventing uv's hardlink-failure warning from appearing during venv creation.
+- **Upgrade failure messages surface recovery hints (Plan 00114, F4)** — When the upgrade shim detects a failure, recovery hint messages are now emitted in a single `printf` block within the 30-line output cap.
+- **`ask_user_question_blocker` enabled in project dogfood config (Plan 00117)** — The handler is now active in this project's own `.claude/hooks-daemon.yaml`, enforcing the `ASKING BECAUSE:` prefix policy in the daemon repo itself.
+- **DENY-suffix appended to block decision IDs to signal batch-cancellation risk (Plan 00115, G1/G3)** — Block responses now append a `-DENY` suffix to their decision identifier. This visible marker warns agents that sibling tool calls in the same turn were cancelled alongside the blocked call, prompting them to re-issue any lost writes separately.
+- **Plan 00116 `SkillCommand` constant extracted for rule-explain command name** — The `/hooks-daemon:rule-explain` command name is now a named constant in `SkillCommand` rather than a magic string in `rule.py`.
+
+### Fixed
+
+- **`worktree_paths` helper no longer returns `None` on error (worktree fix)** — The helper previously could return `None` when an error occurred during path resolution, causing downstream `NoneType` errors. It now returns an empty result consistently.
+- **`rule.py` `_EXPLAIN_SUFFIX` dropped slash-command syntax (Plan 00116, skill_refs QA)** — The suffix string contained a leading `/` that caused the skill-references QA check to flag it as a broken skill reference. Fixed to use the plain command name.
+- **Pre-inject `satisfied` test updated for `scheduled_tasks.lock` gitignore pattern** — The `gitignore_safety_checker` unit test's pre-inject satisfied scenario was updated to include the new `scheduled_tasks.lock` pattern so it continues to pass after the enforcement addition.
+
+### Removed
+
+- **Workflow-state-across-compaction subsystem** — Removed the `workflow_state_pre_compact` (PreCompact) and `workflow_state_restoration` (SessionStart) handlers, their tests, config registrations, the `STATE_MANAGEMENT` handler tag, the `docs/WORKFLOWS.md` document, and the release skill's dead workflow-state stage. The SessionStart restoration context was not reliably consumed, so workflow-state files accumulated as stale cruft with no value. **Backwards-compatible**: the registry discovers handlers by directory scan and silently ignores unknown config keys, so existing installs that still list these handlers in `.claude/hooks-daemon.yaml` continue to load — you may delete those two config blocks at your convenience.
+
 ## [3.16.0] - 2026-05-27
 
 This is a **minor release** delivering four plans: git-anchored plan numbering persisted in `git config` (Plan 00112), a first-class reusable `GitRepo` utility (Plan 00113), canonical Python interpreter discovery helpers eliminating WET call sites across install/upgrade scripts (Plan 00110), and context-limit guidance in the Stop hook's Branch 4 reason (Plan 00111).
