@@ -6,6 +6,15 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Infrastructure / Bootstrap
 
+- [00114: Fully Robust Upgrade System](00114-robust-upgrade-system/PLAN.md) - In Progress
+
+  - Field report `untracked/hooks-daemon-upgrade-broken.md`: a client several versions behind saw BOTH documented upgrade paths fail; only `HOOKS_DAEMON_SKIP_BOOTSTRAP=1` worked
+  - **F1** — Layer 1 `scripts/upgrade.sh` rejects `--already-bootstrapped`, breaking every pre-v3.15 skill shim still in the wild (bootstrap deadlock: the fix ships *via* the upgrade the broken shim blocks). Fix: accept-and-ignore legacy bootstrap flags
+  - **F2** — documented curl-to-`/tmp` flow can't run: Layer 1 sources sibling `lib/python_discovery.sh` never fetched. Fix: self-contained Layer 1 + corrected docs
+  - **F3** — uv hardlink warning noise on every overlay-fs/container install. Fix: proactive fs detection → copy mode (no failed attempt, no warning)
+  - **F4** — `HOOKS_DAEMON_SKIP_BOOTSTRAP=1` escape hatch undiscoverable. Fix: surface in error messages
+  - New regression tests for F1-F4 wired into RELEASING.md Step 12.0 H-1 gate
+
 - [00110: Python Interpreter Discovery — DRY Consolidation & Latest-Always Policy](00110-python-discovery-dry-consolidation/PLAN.md) - Not Started
 
   - Field report from host host-a (`untracked/hooks-daemon-upgrade-python-version.md`): skill `install.sh` aborted on default `python3` (3.9.21) and suggested hardcoded `python3.11` despite `python3.13`/`python3.14` being on PATH
