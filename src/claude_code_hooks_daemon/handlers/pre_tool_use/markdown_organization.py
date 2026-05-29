@@ -15,6 +15,7 @@ from claude_code_hooks_daemon.constants import (
 )
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult, ProjectContext
 from claude_code_hooks_daemon.core.utils import get_file_path
+from claude_code_hooks_daemon.core.worktree_paths import effective_project_relative_path
 from claude_code_hooks_daemon.handlers.utils.plan_numbering import (
     next_plan_number_for_target,
     record_plan_allocation,
@@ -621,6 +622,17 @@ class MarkdownOrganizationHandler(Handler):
             except ValueError:
                 # File is outside project root - allow it (don't match)
                 return False
+
+            # Worktree-aware re-rooting: a file inside a git worktree subtree
+            # (.claude/worktrees/<name>/ or untracked/worktrees/<name>/) must be
+            # classified relative to the WORKTREE root, not the main project
+            # root — otherwise an allowed location like CLAUDE/LLM-UPDATE.md is
+            # seen as .claude/worktrees/<name>/CLAUDE/LLM-UPDATE.md and wrongly
+            # blocked. Re-root to a worktree-relative path for all downstream
+            # classification (standard-root, normalize, monorepo, adhoc checks).
+            effective_relative = effective_project_relative_path(file_path, project_root)
+            if effective_relative is not None:
+                file_path = effective_relative
 
         # Standard repo-root files allowed at the project root only.
         # Compute project-relative path accurately:

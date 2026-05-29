@@ -540,6 +540,41 @@ class TestMarkdownOrganizationHandler:
         write_input["tool_input"]["file_path"] = "/tmp/test/test.md"
         assert handler.matches(write_input) is True
 
+    def test_matches_false_for_allowed_claude_file_in_dot_claude_worktree(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """A file at the allowed CLAUDE/ location inside a .claude worktree is
+        classified relative to the worktree root (allowed, not matched).
+
+        Regression: worktree paths were relativised to the main project root,
+        so CLAUDE/LLM-UPDATE.md became .claude/worktrees/<name>/CLAUDE/... and
+        was wrongly blocked. Project root is /tmp/test (autouse fixture).
+        """
+        write_input["tool_input"][
+            "file_path"
+        ] = "/tmp/test/.claude/worktrees/agent-X/CLAUDE/LLM-UPDATE.md"
+        assert handler.matches(write_input) is False
+
+    def test_matches_false_for_plan_file_in_untracked_worktree(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """A plan file inside an untracked worktree is classified relative to the
+        worktree root (allowed, not matched)."""
+        write_input["tool_input"][
+            "file_path"
+        ] = "/tmp/test/untracked/worktrees/agent-Y/CLAUDE/Plan/00001-foo/PLAN.md"
+        assert handler.matches(write_input) is False
+
+    def test_matches_true_for_disallowed_file_in_worktree(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Re-rooting is not a blanket bypass: a junk location inside a worktree
+        is still blocked (matched)."""
+        write_input["tool_input"][
+            "file_path"
+        ] = "/tmp/test/.claude/worktrees/agent-Z/random/notes.md"
+        assert handler.matches(write_input) is True
+
 
 class TestPlanningModeIntegration:
     """Tests for planning mode write interception.
