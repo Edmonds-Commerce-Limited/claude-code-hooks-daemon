@@ -157,6 +157,9 @@ untracked/
 # Claude Code managed worktrees (path not configurable, must be gitignored)
 .claude/worktrees/
 
+# Scheduled-tasks runtime lock (ScheduleWakeup/cron mechanism)
+.claude/scheduled_tasks.lock
+
 # Acceptance test results
 CLAUDE/AcceptanceTests/results/*
 !CLAUDE/AcceptanceTests/results/.gitkeep
