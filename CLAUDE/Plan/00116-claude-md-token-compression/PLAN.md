@@ -210,7 +210,7 @@ verbose block per session start).
   support `explain-handler <name>`. The table header + every terse reminder point
   at the skill.
 
-### Decision G — Tracker storage: **in-memory in the daemon process, keyed by `session_id`**. RESOLVED — state file REJECTED.
+### Decision G — Tracker storage: **in-memory in the daemon, keyed by `transcript_path`**. RESOLVED (spike complete) — state file REJECTED.
 
 A state file invites out-of-sync corruption (maintainer call). The daemon is already
 long-lived and per-project, so an in-process dict is the natural home; a daemon
@@ -222,21 +222,25 @@ Claude Code sessions). A globally-keyed tracker would hand agent B a *terse* rem
 for a rule B has never seen verbose, because agent A disclosed it. The tracker MUST be
 keyed by a per-agent identifier, NEVER global.
 
-**Gated on a BLOCKING Phase-2 spike (Task 2.0)** — capture real `hook_input` across
-(a) main session, (b) a Task sub-agent, (c) two concurrent sessions, and confirm:
+**Task 2.0 spike — RESOLVED.** Findings (verified against the live daemon + this
+session's transcripts):
 
-1. `session_id` is present and DISTINCT per concurrent agent (incl. sub-agents);
-2. PreCompact + SessionStart carry that same `session_id`, so reset targets one
-   agent without wiping the others.
+1. `session_id` is **NOT** per-agent — a Task sub-agent shares the parent's `session_id`
+   (440/440 sidechain transcript entries carried the main session's id with
+   `isSidechain:true`). Keying by `session_id` is REJECTED — a sub-agent would inherit
+   the parent's disclosure state and get terse reminders for rules it never saw verbose.
+2. `transcript_path` **is** carried in every hook payload (`core/input_schemas.py`,
+   `core/event.py` `transcriptPath` alias; consumed today by the Stop handlers via
+   `utils/stop_hook_helpers.py`) and **is per-agent** — each agent/sidechain has its own
+   transcript file. It is the correct discriminator.
+3. The daemon reads `transcript_path` already; the tracker just keys on it.
 
-- **If confirmed** → in-memory `dict[session_id, set[rule_id]]`; reset that session's
-  entry on its PreCompact/SessionStart. Preferred: no file, no transcript I/O.
-- **If `session_id` is NOT reliably per-agent** → fall back to **transcript-grep**:
-  read the agent's `transcript_path`, scan only messages AFTER the last compaction
-  marker, treat a rule as disclosed iff its verbose block appears there. Per-agent and
-  compaction-correct by construction, at the cost of transcript I/O on the hot path.
-
-The spike MUST run and decide before any tracker code is written.
+**Decision: in-memory `dict[transcript_path, set[rule_id]]`.** Per-agent by construction,
+no state file, and — crucially — **no transcript parsing/grep**: we key on the path, we
+never read the file. Reset an agent's entry on its PreCompact/SessionStart (both carry
+`transcript_path`). The transcript-grep fallback from the pre-spike draft is dropped as
+unnecessary. Edge case: if a `transcript_path` rotates mid-session the worst case is one
+extra verbose block — acceptable, the same failure mode as a daemon restart.
 
 ### Decision H — REJECT automated/lossy compression for normative text.
 
