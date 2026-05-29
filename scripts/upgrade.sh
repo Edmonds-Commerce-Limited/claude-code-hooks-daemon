@@ -124,23 +124,21 @@ _fail() { _err "$1"; exit 1; }
 # EXIT trap. curl's exit code is captured EXPLICITLY (not via an inline
 # `if curl && [ -s ]`) so a transient curl failure is distinguishable from an
 # empty download.
+# EXIT-time cleanup of the self-fetched temp file. The trap runs a direct
+# `rm -f` (not a wrapper function) so shellcheck does not flag an
+# only-invoked-via-trap helper as unreachable (SC2317). `rm -f ""` on an
+# unset path is a harmless no-op that returns 0.
 _PYTHON_DISCOVERY_FETCHED_TMP=""
-_cleanup_fetched_discovery_lib() {
-    if [ -n "$_PYTHON_DISCOVERY_FETCHED_TMP" ] && [ -f "$_PYTHON_DISCOVERY_FETCHED_TMP" ]; then
-        rm -f "$_PYTHON_DISCOVERY_FETCHED_TMP"
-    fi
-}
-trap _cleanup_fetched_discovery_lib EXIT
+trap 'rm -f "$_PYTHON_DISCOVERY_FETCHED_TMP"' EXIT
 
 _fetch_python_discovery_lib() {
-    local ref base_url url tmp rc
+    local ref base_url url tmp curl_path
     ref="${HOOKS_DAEMON_UPGRADE_REF:-main}"
     base_url="${HOOKS_DAEMON_UPGRADE_BASE_URL:-https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon}"
     url="$base_url/$ref/scripts/lib/python_discovery.sh"
 
     # Presence check: capture `command -v` output into a variable instead of
-    # redirecting, so nothing is discarded (no error-hiding redirect).
-    local curl_path
+    # redirecting to a null sink, so nothing is discarded (no error-hiding).
     if ! curl_path="$(command -v curl)"; then
         return 1
     fi
@@ -150,9 +148,10 @@ _fetch_python_discovery_lib() {
     if ! tmp="$(mktemp)"; then
         return 1
     fi
-    rc=0
-    curl -fsSL --max-time 30 -o "$tmp" "$url" || rc=$?
-    if [ "$rc" -eq 0 ] && [ -s "$tmp" ]; then
+    # curl's exit status is consumed directly by the `if` (success only when
+    # curl returns 0 AND the download is non-empty), so a transient fetch
+    # failure is never swallowed — it falls through to the failure path.
+    if curl -fsSL --max-time 30 -o "$tmp" "$url" && [ -s "$tmp" ]; then
         _PYTHON_DISCOVERY_FETCHED_TMP="$tmp"
         printf '%s\n' "$tmp"
         return 0
