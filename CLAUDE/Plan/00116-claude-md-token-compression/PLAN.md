@@ -1,4 +1,4 @@
-# Plan 00116: CLAUDE.md Token Compression (Injected Block + @-Imports)
+# Plan 00116: CLAUDE.md Token Compression via Rule-ID Table + Keyed Block Reminders
 
 **Status**: Not Started
 **Created**: 2026-05-29
@@ -9,59 +9,73 @@
 
 ## Overview
 
-The daemon's instruction footprint has grown to the point where it measurably
-degrades adherence to its own guidance. The always-on instruction tree loaded
-into every Claude Code session is ~131 KB ≈ 33k tokens — within range of Claude
-Code's ~47k-token warning, and large enough to trigger the well-documented
-"lost in the middle" failure mode (see `RESEARCH.md`). The single largest
-contributor is the daemon-injected `<hooksdaemon>` block in the host project's
-`CLAUDE.md`: 22,041 bytes / 407 lines = **46% of CLAUDE.md**, auto-generated on
-every daemon restart by `core/claude_md_injector.py` from each handler's
-`get_claude_md()`.
+The daemon's instruction footprint measurably degrades adherence to its own
+guidance. The always-on instruction tree loaded into every Claude Code session
+is ~131 KB ≈ 33k tokens — within range of Claude Code's ~47k-token warning, and
+large enough to trigger the well-documented "lost in the middle" failure mode
+(see `RESEARCH.md`). The single largest contributor is the daemon-injected
+`<hooksdaemon>` block in the host `CLAUDE.md`: 22,041 bytes / 407 lines =
+**46% of CLAUDE.md**, auto-generated on every daemon restart by
+`core/claude_md_injector.py` from each handler's `get_claude_md()`.
 
-This plan converts the injected block and the heavy `@`-imports from an
-**always-on, fully-detailed** model to a **two-tier progressive-disclosure**
-model: a terse, high-signal always-on summary plus full detail fetched on
-demand via a CLI drill-down command. Crucially, because daemon guidance is
-**normative** (a blocked-command list cannot be lossily paraphrased), this plan
-explicitly **rejects** automated/lossy prompt compression (LLMLingua et al.) in
-favour of **manual information-density editing** and **deferred loading** —
-both lossless-by-construction and verifiable (see `RESEARCH.md`).
+**Design (revised per maintainer direction)**: keep per-block reminders — they
+are valuable — but stop duplicating the full rationale in always-on context.
+Instead:
+
+1. **Always-on**: CLAUDE.md carries a single compact **table of rules**, one row
+   per rule, each with a stable **rule ID** (e.g. `R-GIT-RESET-HARD`), a terse
+   "what's blocked", and the one-line fix. No per-handler prose sections.
+2. **At block time**: each handler's deny message **leads with the rule ID** and
+   the same terse reminder ("BLOCKED [R-GIT-RESET-HARD]: `git reset --hard`
+   destroys uncommitted changes — ask the user to run it manually"), with the
+   richer rationale appended (the existing verbosity ladder) and a pointer to the
+   on-demand drill-down for full detail.
+3. **On demand**: a CLI command (`explain-rule <ID>` / `explain-handler <name>`)
+   returns the full, verbatim guidance.
+
+The table row, the deny message, and the drill-down are all **generated from one
+source of truth** — `Rule` objects declared by each handler — so the per-block
+reminder and the always-on table can never drift.
+
+Because daemon guidance is **normative** (a blocked-command list cannot be lossily
+paraphrased), this plan **rejects** automated/lossy prompt compression
+(LLMLingua et al.) in favour of structural deduplication (one row + one keyed
+message instead of full prose everywhere). Both are lossless-by-construction and
+verifiable (see `RESEARCH.md`).
 
 This plan is research + design + implementation-roadmap only. It does **not**
-itself implement the compression.
+itself implement the change.
 
 ## Goals
 
-- **G1 — Shrink the always-on injected block by ≥50%** (target: ≤11,000 bytes /
-  ≤200 lines from the 22,041 / 407 baseline) with **zero loss of normative
-  content** (every blocked pattern and every prescribed fix still discoverable).
-- **G2 — Two-tier model**: each handler exposes a *terse* always-on summary AND
-  a *detailed* drill-down. The injected block carries only summaries; full
-  detail is fetched on demand.
-- **G3 — On-demand drill-down path**: a CLI command
-  (`explain-handler <name>` / `explain-handlers`) and/or skill that returns the
-  full, verbatim guidance for one or all handlers, so no fidelity is lost.
-- **G4 — De-`@` the heavy imports**: convert the five always-expanded `@`-imports
-  in `CLAUDE.md` to plain on-demand references, with a one-line always-on
-  trigger pointer left in place for each.
-- **G5 — Verifiable no-loss**: an automated test asserts each handler's terse
-  summary still names what it blocks and the prescribed fix, and a token-count
-  measurement proves before/after reduction.
+- **G1 — Shrink the always-on injected block by ≥50%** (target: ≤11,000 B /
+  ≤200 lines from 22,041 B / 407 lines) by replacing per-handler prose with a
+  single rule-ID table, with **zero loss of normative content**.
+- **G2 — Keep per-block reminders, keyed by rule ID**: every deny message leads
+  with its rule ID and terse reminder; the ID matches the always-on table row.
+- **G3 — Single source of truth**: rule ID + terse text + fix live once, in code
+  (`Rule` objects). The CLAUDE.md table AND the deny message are generated from
+  them — they cannot drift.
+- **G4 — On-demand drill-down**: `explain-rule <ID>` and `explain-handler <name>`
+  return full verbatim guidance, so no fidelity is lost.
+- **G5 — De-`@` the heavy imports**: convert the always-expanded `@`-imports in
+  CLAUDE.md to plain on-demand references with a one-line trigger pointer each.
+- **G6 — Verifiable no-loss**: tests assert (a) every rule ID in the table has a
+  handler that emits it in a deny message, (b) every handler deny path references
+  a real table ID, (c) every blocked literal + fix survives, (d) before/after
+  token counts hit target.
 
 ## Non-Goals
 
-- **NG1** — No automated/runtime prompt compression (LLMLingua / soft prompt /
-  abstractive). Rejected for normative instructions; see `RESEARCH.md`.
-- **NG2** — No change to handler *behaviour* (matches/handle logic). This plan
-  touches only `get_claude_md()` output, the injector, the CLI, and CLAUDE.md
-  imports.
-- **NG3** — No deletion of any guidance content. Detailed text is *relocated to
-  on-demand*, never removed.
-- **NG4** — Not implementing the compression in this plan; this is the roadmap.
-- **NG5** — No daemon restart from a worktree (would kill the main session's
-  daemon under single-process enforcement). Implementation phases that require a
-  restart are flagged for the executor to run in the main repo.
+- **NG1** — No automated/runtime prompt compression (LLMLingua / abstractive).
+  Rejected for normative instructions; see `RESEARCH.md`.
+- **NG2** — No change to handler matching *behaviour* (what gets blocked). Only
+  the *shape* of the reminder/guidance changes.
+- **NG3** — No deletion of guidance content. Rationale is relocated to the deny
+  message + on-demand drill-down, never removed.
+- **NG4** — Not implementing the change in this plan; this is the roadmap.
+- **NG5** — No daemon restart from a worktree (single-process enforcement would
+  kill the main session's daemon). Restart-requiring steps run in the main repo.
 
 ## Context & Background
 
@@ -81,231 +95,238 @@ itself implement the compression.
 
 ### Architecture (grounded in source read 2026-05-29)
 
-- `core/claude_md_injector.py` — `ClaudeMdInjector.inject()` collects
-  `get_claude_md()` from all active handlers (`_collect_sections`), wraps them in
-  `_build_section` between `<hooksdaemon>`/`</hooksdaemon>` with `_SECTION_INTRO`
-  (which *already* states the meta-rule "when blocked, don't stop, read the
-  reason, continue" — currently **re-stated** inside many handler blocks), and
-  `_replace_or_append_section` writes them into `CLAUDE.md`. It auto-commits the
-  result. There is a content-preservation safety check on user content outside
-  the block.
-- Per-handler `get_claude_md()` returns a free-form markdown string. Example
-  (`destructive_git`): ~18 lines / ~1.2 KB — a good command→reason **table**
-  plus prose that **duplicates** information already present in the handler's
-  `handle()` reason ladder (`_terse_reason`/`_standard_reason`/`_verbose_reason`)
-  and its `get_acceptance_tests()`. Example (`hook_registration_checker`): ~33
-  lines of Policy + Remediation prose — heavy, almost entirely drill-down-tier
-  material.
-- CLI (`daemon/cli.py`) uses argparse subparsers (`generate-docs`,
-  `generate-playbook`, `handlers`, etc.) — a natural home for a new
-  `explain-handler` subcommand. `cmd_generate_docs` already iterates handlers and
-  reads their metadata, so the machinery to enumerate handlers + pull
-  `get_claude_md()` exists.
+- `core/handler.py` — `Handler(ABC)` exposes `get_claude_md() -> str | None`
+  (default None) and `get_acceptance_tests() -> list`. Clean base; adding a
+  `get_rules() -> list[Rule]` method (default `[]`) is the natural extension.
+- `core/claude_md_injector.py` — `inject()` collects `get_claude_md()` from all
+  active handlers (`_collect_sections`), wraps them between `<hooksdaemon>` tags
+  with `_SECTION_INTRO` (which **already** states the meta-rule "when blocked,
+  don't stop, read the reason, continue" — currently re-stated inside many
+  handler blocks), writes into CLAUDE.md, and auto-commits. Has a
+  content-preservation safety check.
+- `handlers/pre_tool_use/destructive_git.py` — already a strong model for the new
+  design: it has **9 distinct patterns**, each mapped in `handle()` to a
+  **specific reason string** (e.g. "git reset --hard destroys all uncommitted
+  changes permanently"), plus a 3-level verbosity ladder
+  (`_terse_reason`/`_standard_reason`/`_verbose_reason`) and a command→reason
+  **table** in `get_claude_md()`. These specific reasons map 1:1 to rule IDs;
+  the table in `get_claude_md()` becomes the generated rule table.
+- `handlers/session_start/hook_registration_checker.py` — ~33-line Policy +
+  Remediation prose block: mostly drill-down-tier material; the always-on table
+  row should be one line, the rest moved to detail.
+- `daemon/cli.py` — argparse subparsers (`generate-docs`, `generate-playbook`,
+  `handlers`, ...). `cmd_generate_docs` already enumerates handlers + metadata —
+  the machinery for `explain-rule` / `explain-handler` already exists.
 
 ### Research conclusion (full detail + citations in `RESEARCH.md`)
 
 For **normative** instructions: REJECT automated/lossy compression; ADOPT
-(a) manual information-density editing (tables, telegraphic style, dedup),
-(b) two-tier progressive disclosure with on-demand drill-down, and
-(c) de-`@`-importing. All three are lossless-by-construction and match
-Anthropic's 2025 context-engineering / Agent Skills guidance ("smallest set of
-high-signal tokens", "just-in-time" loading, name+description-first progressive
-disclosure) and the Lost-in-the-Middle / context-rot evidence.
+structural deduplication + two-tier progressive disclosure + de-`@`-importing.
+The rule-ID table + keyed block reminder is a concrete instance of "smallest set
+of high-signal tokens" (Anthropic) + the Agent Skills pattern (a short
+always-on index, full detail loaded on demand).
+
+## Proposed Data Model
+
+```python
+@dataclass(frozen=True)
+class Rule:
+    id: str            # stable, e.g. "R-GIT-RESET-HARD" (NO MAGIC: from a RuleID enum/constants)
+    blocked: str       # terse "what is blocked", e.g. "`git reset --hard`"
+    why: str           # one-line consequence, e.g. "destroys uncommitted changes permanently"
+    fix: str           # one-line fix, e.g. "ask the user to run it manually; or git stash first"
+    detail: str | None = None   # optional verbatim long-form for the drill-down
+```
+
+- **CLAUDE.md table row** (generated): `| R-GIT-RESET-HARD | `git reset --hard` | destroys uncommitted changes permanently | ask the user / git stash first |`
+- **Deny message** (generated leader): `BLOCKED [R-GIT-RESET-HARD]: git reset --hard destroys uncommitted changes permanently. Fix: ask the user / git stash first. Full detail: <cli> explain-rule R-GIT-RESET-HARD`
+- A shared `RuleFormatter` builds both from the same `Rule`, guaranteeing parity.
+
+## Design Decisions (defaults chosen; confirm with maintainer)
+
+These three were posed to the maintainer; as a subagent I cannot ask
+interactively, so I record recommended defaults and flag them OPEN.
+
+### Decision A — ID source: **Handler-owned** (recommended)
+Each handler declares its `Rule`(s) in code via `get_rules()`. The table and the
+deny message are both generated from them. Strongest DRY; block reminder and
+table provably cannot drift. (Alternatives: central registry — readable in one
+place but sync burden; table-only — least code but silent drift. Rejected.)
+**Status**: OPEN — confirm with maintainer.
+
+### Decision B — ID granularity: **Per-rule** (recommended)
+One ID per distinct blocked thing (so `destructive_git` → `R-GIT-RESET-HARD`,
+`R-GIT-FORCE-PUSH`, ... — 9 IDs). Matches the handler's existing 9 specific
+reasons 1:1; gives precise reminders. Table is longer but each row is one line.
+(Alternative: per-handler — smaller table, less precise.) **Status**: OPEN.
+
+### Decision C — Table scope: **Blocking only** (recommended)
+Only BLOCKING/TERMINAL handlers get table rows + IDs (the hard "these will STOP
+you" rules). Advisory handlers keep a lighter one-line entry or a separate
+section, to avoid diluting the hard-rule signal. (Alternative: all handlers —
+more complete, longer, dilutes.) **Status**: OPEN.
+
+### Decision D — ID stability & registry
+Rule IDs are a **public contract** (they appear in user CLAUDE.md and in block
+messages users may script against). Define them as named constants
+(`constants/rule_ids.py`, NO MAGIC) and treat renames as breaking changes.
+**Date**: 2026-05-29
+
+### Decision E — Drill-down delivery: CLI subcommand
+`explain-rule <ID>` and `explain-handler <name>` mirror existing
+`generate-docs`/`handlers`/`generate-playbook`; headless + CI-testable. The
+CLAUDE.md table header and every deny message point at `explain-rule`.
+**Date**: 2026-05-29
+
+### Decision F — REJECT automated/lossy compression for normative text
+LLMLingua-2 etc. are SOTA but probabilistic; a dropped negation or paraphrased
+literal (`-D` vs `-d`, the `--staged` exception) is a correctness bug. Use the
+rule-ID dedup + deferral instead. Rationale + citations: `RESEARCH.md`.
+**Date**: 2026-05-29
 
 ## Tasks
 
-### Phase 1: Measurement harness & baseline lock-in (TDD)
+### Phase 1: Measurement harness & no-loss contract (TDD)
 
-- [ ] ⬜ **Task 1.1**: Write a measurement utility/test that computes byte+line
-      counts (and an approximate token count) for: the injected block, each
-      handler's `get_claude_md()`, and the full always-on tree (block +
-      `@`-imports). Record current numbers as the regression baseline.
-  - [ ] ⬜ RED: test asserts a baseline JSON snapshot exists and matches
-        measured values (will fail until written).
-  - [ ] ⬜ GREEN: implement `scripts/qa/measure_instruction_footprint.py`
-        (or a unit-test helper) that emits the metrics.
-- [ ] ⬜ **Task 1.2**: Add a test that records the **set of load-bearing terms**
-      per handler (every blocked literal, e.g. `git reset --hard`, `-D`,
-      `--staged`; every prescribed fix command). This term-set is the
-      no-semantic-loss contract for later phases.
-
-### Phase 2: Two-tier `get_claude_md()` contract (TDD)
-
-- [ ] ⬜ **Task 2.1**: Decide and document the two-tier API shape (Technical
-      Decision 1 below). Options: (a) split into `get_claude_md_summary()` +
-      `get_claude_md_detail()`; (b) keep `get_claude_md()` as detail, add
-      `get_claude_md_summary()` and have the injector use summary; (c) a single
-      structured return (title, summary, detail). Land on one before coding.
-  - [ ] ⬜ RED: protocol/contract test in `tests/unit/core/` asserting the
-        chosen method(s) exist on the `HasClaudeMd` protocol and return the
-        expected shape.
-- [ ] ⬜ **Task 2.2**: Update `HasClaudeMd` protocol + `Handler` base default so
-      existing handlers degrade gracefully (a handler with only the legacy
-      `get_claude_md()` still produces *something* — e.g. summary falls back to
-      the first paragraph/title line).
-- [ ] ⬜ **Task 2.3**: Test the fallback path end-to-end (legacy handler → summary
-      derivation).
-
-### Phase 3: Injector emits terse always-on block (TDD)
-
-- [ ] ⬜ **Task 3.1**: Update `_collect_sections` / `_build_section` to emit the
-      **summary tier** only, plus a single drill-down pointer line at the top of
-      the block (e.g. "Full guidance for any handler:
-      `$PYTHON -m ...cli explain-handler <name>`").
-  - [ ] ⬜ RED: injector test asserts the built block contains summaries, the
-        drill-down pointer, and the single shared meta-rule (NOT repeated
-        per-handler).
+- [ ] ⬜ **Task 1.1**: `scripts/qa/measure_instruction_footprint.py` — byte+line+
+      approx-token counts for the injected block, each `get_claude_md()`, and the
+      full always-on tree (block + `@`-imports). Snapshot as regression baseline.
+  - [ ] ⬜ RED: test asserts baseline snapshot matches measured values.
   - [ ] ⬜ GREEN: implement.
-- [ ] ⬜ **Task 3.2**: Remove the per-handler restatement of the "when blocked,
-      don't stop" meta-rule (it lives once in `_SECTION_INTRO`). Verify no
-      handler summary re-states it (dedup test).
-- [ ] ⬜ **Task 3.3**: Re-measure (Phase 1 harness): assert injected block ≤50%
-      of baseline (G1 success gate).
+- [ ] ⬜ **Task 1.2**: Term-set test — record every blocked literal (`git reset
+      --hard`, `-D`, `--staged`, ...) and every prescribed fix per handler. This
+      is the no-semantic-loss contract for later phases.
 
-### Phase 4: On-demand drill-down CLI (TDD)
+### Phase 2: `Rule` model + `RuleID` constants (TDD)
 
-- [ ] ⬜ **Task 4.1**: Add `explain-handler <name>` and `explain-handlers`
-      subcommands to `daemon/cli.py` that print the **detail tier** verbatim for
-      one / all handlers.
-  - [ ] ⬜ RED: CLI test invokes the subcommand for `destructive_git` and asserts
-        every load-bearing term from Task 1.2 appears in the output.
-  - [ ] ⬜ GREEN: implement, reusing `cmd_generate_docs`'s handler enumeration.
-- [ ] ⬜ **Task 4.2**: Wire the drill-down pointer text (Phase 3) to the actual
-      command name so it is copy-pasteable and correct.
+- [ ] ⬜ **Task 2.1**: Add `Rule` dataclass (`core/rule.py`) + `RuleID` constants
+      (`constants/rule_ids.py`, NO MAGIC). Unit-test the dataclass + a
+      `RuleFormatter` that renders (a) a table row and (b) a deny-message leader
+      from one `Rule`.
+  - [ ] ⬜ RED: formatter tests assert table row and deny leader both contain the
+        ID, blocked literal, why, and fix — from the same `Rule`.
+- [ ] ⬜ **Task 2.2**: Add `Handler.get_rules() -> list[Rule]` (default `[]`) to
+      the base class + `HasClaudeMd`/protocol updates. Legacy handlers (no rules)
+      degrade gracefully.
 
-### Phase 5: Author terse summaries per handler (TDD-guarded)
+### Phase 3: Migrate handlers to declare rules (TDD, parallelisable)
 
-- [ ] ⬜ **Task 5.1**: For each handler with `get_claude_md()`, author a terse
-      summary (target: 1–4 lines; tables collapsed to the essential literals).
-      Move the long rationale/remediation into the detail tier.
-      *(Parallelisable: one sub-agent per handler file, each using the Edit tool
-      — never sed; never batch a mutating edit with a blockable Bash call.)*
-  - [ ] ⬜ For every handler, the Phase 1.2 term-set test must still pass against
-        the **summary + detail combined**, and the *summary alone* must still
-        name what is blocked + the one-token escape/fix.
-- [ ] ⬜ **Task 5.2**: Spot-check the highest-bloat handlers first
-      (`hook_registration_checker`, `markdown_organization`, `tdd_enforcement`,
-      `git_stash`, the lint/security/qa-suppression strategy-backed ones).
+- [ ] ⬜ **Task 3.1**: For each BLOCKING/TERMINAL handler, declare `get_rules()`
+      with per-rule IDs, and refactor `handle()` to build its deny message via
+      `RuleFormatter` (leading with the ID), preserving the existing verbosity
+      ladder as the appended detail.
+      *(One sub-agent per handler file, Edit tool only — never sed; never batch a
+      mutating Edit with a blockable Bash call; verify each edit landed.)*
+  - [ ] ⬜ Per handler: Phase 1.2 term-set test still passes; deny message now
+        leads with a valid `RuleID`.
+- [ ] ⬜ **Task 3.2**: Start with `destructive_git` (9 rules — the reference
+      implementation), then `markdown_organization`, `tdd_enforcement`,
+      `git_stash`, `sed_blocker`, and the strategy-backed
+      security/qa-suppression/lint handlers.
 
-### Phase 6: De-`@` the heavy imports (TDD where testable)
+### Phase 4: Injector emits the rule table (TDD)
 
-- [ ] ⬜ **Task 6.1**: In `CLAUDE.md`, convert the `@`-imports (PlanWorkflow,
+- [ ] ⬜ **Task 4.1**: Update `_collect_sections`/`_build_section` to render a
+      single generated **rule-ID table** (blocking rules) from all handlers'
+      `get_rules()`, plus the single shared meta-rule (from `_SECTION_INTRO`) and
+      a header pointer ("Full detail for any rule: `<cli> explain-rule <ID>`").
+      Drop per-handler prose sections.
+  - [ ] ⬜ RED: injector test asserts the block is a table keyed by RuleID, the
+        meta-rule appears once (not per-handler), and the pointer is present.
+- [ ] ⬜ **Task 4.2**: Advisory handlers — render a lighter section per Decision C
+      (confirm scope first).
+- [ ] ⬜ **Task 4.3**: Re-measure (Phase 1): injected block ≤50% of baseline (G1).
+
+### Phase 5: On-demand drill-down CLI (TDD)
+
+- [ ] ⬜ **Task 5.1**: Add `explain-rule <ID>` and `explain-handler <name>` to
+      `daemon/cli.py`, printing the verbatim `Rule.detail` (and the handler's
+      full guidance). Reuse `cmd_generate_docs` enumeration.
+  - [ ] ⬜ RED: `explain-rule R-GIT-RESET-HARD` output contains every Phase 1.2
+        term for that rule.
+
+### Phase 6: Parity + integrity tests (TDD — the anti-drift guarantee)
+
+- [ ] ⬜ **Task 6.1**: Test: every `RuleID` rendered in the CLAUDE.md table is
+      emitted by some handler's deny path (no orphan table rows).
+- [ ] ⬜ **Task 6.2**: Test: every handler deny message leads with a `RuleID`
+      that exists in the table (no dangling references).
+- [ ] ⬜ **Task 6.3**: Test: no duplicate RuleIDs across handlers.
+
+### Phase 7: De-`@` the heavy imports (TDD where testable)
+
+- [ ] ⬜ **Task 7.1**: In CLAUDE.md, convert the `@`-imports (PlanWorkflow,
       RELEASING, Features, Bugs, General, HOOKS-DAEMON) to plain references, each
-      preceded by a one-line always-on trigger pointer (e.g. "Before any release,
-      READ `CLAUDE/development/RELEASING.md`").
-      **NOTE**: `CLAUDE.md` is partly machine-managed (injected block) and is
-      subject to `validate_instruction_content`; the executor must edit only the
-      user-content region and verify the injector's content-preservation check
-      still passes.
-  - [ ] ⬜ Add a doc/lint test (or extend an existing CLAUDE.md test) asserting
-        the heavy docs are referenced but NOT `@`-expanded, and that a trigger
-        pointer exists for each.
-- [ ] ⬜ **Task 6.2**: Confirm the installer / any template that *writes*
-      `CLAUDE.md` for fresh installs emits the de-`@`'d form (so new installs get
-      the lean version, not just this repo). Search `src/.../install/` and any
-      `CLAUDE.md` templates.
+      with a one-line always-on trigger pointer. Edit only the user-content
+      region; verify the injector's content-preservation check still passes and
+      `validate_instruction_content` is satisfied.
+  - [ ] ⬜ Doc/lint test: heavy docs referenced but NOT `@`-expanded; trigger
+        pointer present for each.
+- [ ] ⬜ **Task 7.2**: Confirm the installer / CLAUDE.md template for fresh
+      installs emits the de-`@`'d form and the rule-table block (search
+      `src/.../install/`).
 
-### Phase 7: Verification, QA, dogfood (executor runs in MAIN repo)
+### Phase 8: Verification, QA, dogfood (executor runs in MAIN repo)
 
-- [ ] ⬜ **Task 7.1**: Run full QA: `./scripts/qa/run_all.sh` (or `llm_qa.py all`).
-- [ ] ⬜ **Task 7.2**: Restart daemon in the **main repo** (NOT a worktree),
-      verify RUNNING, and confirm the regenerated `<hooksdaemon>` block is the
-      terse form and ≤50% of baseline.
-- [ ] ⬜ **Task 7.3**: Live-verify drill-down: `explain-handler destructive_git`
-      returns the full table verbatim.
-- [ ] ⬜ **Task 7.4**: Re-measure full always-on tree; record before/after in
-      Notes. Confirm targets met.
-- [ ] ⬜ **Task 7.5**: Update `.claude/HOOKS-DAEMON.md` generation if its size is
-      now a relevant on-demand artifact; ensure `generate-docs` still works.
+- [ ] ⬜ **Task 8.1**: Full QA (`./scripts/qa/run_all.sh` or `llm_qa.py all`).
+- [ ] ⬜ **Task 8.2**: Restart daemon in the **main repo** (NOT a worktree),
+      verify RUNNING, confirm the regenerated block is the rule table and ≤50%.
+- [ ] ⬜ **Task 8.3**: Live-verify: trip `destructive_git`, confirm the deny
+      message leads with `R-GIT-RESET-HARD`; run `explain-rule R-GIT-RESET-HARD`.
+- [ ] ⬜ **Task 8.4**: Re-measure full always-on tree; record before/after.
 
 ## Dependencies
 
-- Related: Plan 00114 (upgrade system) and 00115 (parallel-batch footgun) touch
-  adjacent surfaces (skills, CLAUDE.md content) — coordinate ordering so CLAUDE.md
-  edits do not collide. No hard blocker either way.
-- Touches `core/claude_md_injector.py`, `core/handler.py` (protocol/base),
-  `daemon/cli.py`, every `handlers/**/*.py` with `get_claude_md()`, and
-  `CLAUDE.md` + install templates.
-
-## Technical Decisions
-
-### Decision 1: Two-tier API shape
-**Context**: Need a terse summary for always-on injection and a verbatim detail
-for on-demand drill-down, without breaking existing handlers.
-**Options**:
-1. Add `get_claude_md_summary()`; keep `get_claude_md()` as the detail tier.
-   Pro: minimal churn, legacy handlers keep working (detail = current output);
-   injector switches to summary. Con: two methods to maintain.
-2. Structured return from one method (e.g. a dataclass `ClaudeMdGuidance(title,
-   summary, detail)`). Pro: single source per handler, hard to desync. Con:
-   larger refactor; every handler must migrate at once.
-3. Split into summary + detail, deprecate the old name. Con: breaking for any
-   project-handler that implements `get_claude_md()`.
-**Recommendation**: **Option 1** for the first landing (lowest risk, graceful
-fallback for project-handlers), with Option 2 as a possible follow-up once all
-built-in handlers are migrated. *Final choice to be confirmed in Phase 2.1.*
-**Date**: 2026-05-29
-
-### Decision 2: Drill-down delivery — CLI vs skill vs both
-**Context**: The detail tier must be reachable on demand.
-**Options**: (a) CLI subcommand `explain-handler`; (b) a skill; (c) both.
-**Recommendation**: **CLI subcommand** as the canonical path (mirrors existing
-`generate-docs`/`handlers`/`generate-playbook`; works headless; testable in CI).
-A skill can wrap it later if desired. The injected block's pointer references the
-CLI command.
-**Date**: 2026-05-29
-
-### Decision 3: REJECT automated/lossy compression for normative text
-**Context**: LLMLingua-2 etc. are SOTA for token reduction.
-**Decision**: Do not use them on the injected block. Daemon guidance is
-normative — a dropped negation or paraphrased command literal is a correctness
-bug. Use manual density editing + deferral, both verifiable. Full rationale and
-citations: `RESEARCH.md`.
-**Date**: 2026-05-29
+- Related: Plans 00114 (upgrade), 00115 (parallel-batch footgun) touch CLAUDE.md
+  / skills — sequence CLAUDE.md edits to avoid collisions. No hard blocker.
+- Touches `core/handler.py`, `core/rule.py` (new), `core/claude_md_injector.py`,
+  `constants/rule_ids.py` (new), `daemon/cli.py`, every BLOCKING handler with a
+  deny path, and CLAUDE.md + install templates.
 
 ## Success Criteria
 
-- [ ] Injected `<hooksdaemon>` block ≤ 11,000 B / ≤ 200 lines (≥50% reduction).
-- [ ] Always-on tree reduced: `@`-imports converted to on-demand (≈83 KB of
-      auto-expanded docs removed from every-session load), with trigger pointers
-      retained.
-- [ ] `explain-handler <name>` returns the full, verbatim detail tier for every
-      handler.
-- [ ] Term-set test (Phase 1.2) passes: every blocked literal and prescribed fix
-      is still present somewhere reachable, and each handler's *summary alone*
-      still names what it blocks + the escape/fix.
-- [ ] No handler behaviour change; all existing tests pass; 95%+ coverage.
-- [ ] Full QA passes; daemon restarts RUNNING in main repo with the terse block.
-- [ ] Before/after token measurement recorded.
+- [ ] Injected block ≤ 11,000 B / ≤ 200 lines (≥50% reduction), now a rule table.
+- [ ] Every deny message leads with a rule ID matching a table row (parity tests
+      green); `explain-rule <ID>` returns full verbatim detail.
+- [ ] `@`-imports converted to on-demand (≈83 KB removed from every-session load)
+      with trigger pointers retained.
+- [ ] Term-set test passes (no blocked literal or fix lost).
+- [ ] No matching-behaviour change; all tests pass; 95%+ coverage; full QA green;
+      daemon restarts RUNNING in main repo. Before/after tokens recorded.
 
 ## Risks & Mitigations
 
 | Risk | Impact | Probability | Mitigation |
 |------|--------|-------------|------------|
-| Summary drops a load-bearing literal (e.g. `-D` vs `-d`) | High (silent correctness loss) | Med | Phase 1.2 term-set test gates every summary; summary must contain blocked literals verbatim |
-| Agent never runs the drill-down, so detail is effectively lost | Med | Med | Summary is self-sufficient for the common case (names block + fix); drill-down only for edge detail; pointer always present |
-| De-`@`'d docs get ignored when actually needed (e.g. release steps) | High | Med | Leave always-on one-line trigger pointers at the decision points; release skill/RELEASING reference stays explicit |
-| Editing CLAUDE.md collides with injector auto-commit / `validate_instruction_content` | Med | Med | Edit only user-content region; rely on injector's existing content-preservation check; run in main repo with daemon control |
-| Project-handlers implementing legacy `get_claude_md()` break | Med | Low | Option-1 API keeps legacy method working; summary derived via fallback |
-| Bulk per-handler edits via parallel agents trip blockers (sed / pipe / batched-mutation cancellation) | Med | Med | One Edit per turn per agent; never sed; never pipe to head/tail; verify each edit landed |
+| Table row / deny message drift | High | Low | Both generated from one `Rule` via `RuleFormatter`; parity tests (Phase 6) |
+| Rule ID lost a load-bearing literal (`-D` vs `-d`) | High | Med | Phase 1.2 term-set test gates every rule; literals stored verbatim in `Rule.blocked` |
+| Rule IDs are a public contract; renames break user scripts | Med | Med | IDs as named constants; treat renames as breaking; document in upgrade guide |
+| Agent ignores the table / never drills down | Med | Med | Deny message is self-sufficient (ID + why + fix inline); drill-down only for edge detail |
+| De-`@`'d docs ignored when needed (release steps) | High | Med | One-line always-on trigger pointers at decision points |
+| Editing CLAUDE.md collides with injector auto-commit / validate_instruction_content | Med | Med | Edit only user-content region; rely on existing preservation check; run in main repo |
+| Bulk per-handler edits trip blockers (sed/pipe/batch-cancellation) | Med | Med | One Edit per turn per agent; never sed; never pipe head/tail; verify each landed |
 
 ## Notes & Updates
 
 ### 2026-05-29
-- Plan authored from a worktree (no daemon restart performed here — single-process
-  enforcement protects the main session's daemon). Web research completed with
-  citations; see sibling `RESEARCH.md`.
-- Architecture grounded by reading `core/claude_md_injector.py`,
-  `handlers/pre_tool_use/destructive_git.py` (table-style block + reason ladder +
-  acceptance tests), `handlers/session_start/hook_registration_checker.py`
-  (prose-heavy ~33-line block — prime drill-down candidate), and `daemon/cli.py`
-  subparser layout (`explain-handler` fits the existing pattern).
-- Key finding: the injector's `_SECTION_INTRO` already states the "when blocked,
-  don't stop" meta-rule once — per-handler restatements are pure redundancy and
-  are the cheapest first win.
-- Working note: writing this `.md` directly into the worktree plan folder was
-  blocked by `markdown_organization` (it resolves project root to the main repo,
-  so the worktree path `.claude/worktrees/.../CLAUDE/Plan/` fails its allowed-path
-  regex). Worked around by writing a `.txt` draft to `untracked/` and `mv`-ing it
-  to the `.md` target — a worktree-path edge case worth noting for future agents.
+- Revised per maintainer direction: KEEP per-block reminders, but key them by
+  stable **rule IDs** and replace the per-handler prose in CLAUDE.md with a
+  single generated **rule-ID table**. Table row + deny message + drill-down all
+  generated from one `Rule` source of truth → cannot drift.
+- Three design questions (ID source / granularity / table scope) were posed to
+  the maintainer. As a subagent I cannot ask interactively, so recommended
+  defaults are recorded (Decisions A/B/C) and marked OPEN for confirmation:
+  Handler-owned rules, per-rule IDs, blocking-only table.
+- Architecture grounded by reading `core/handler.py` (clean base, `get_rules()`
+  fits), `handlers/pre_tool_use/destructive_git.py` (9 patterns → 9 specific
+  reasons → 9 rule IDs; already has the verbosity ladder + a table),
+  `handlers/session_start/hook_registration_checker.py` (prose-heavy, prime
+  drill-down candidate), `daemon/cli.py` subparser layout.
+- The injector's `_SECTION_INTRO` already states the "when blocked, don't stop"
+  meta-rule once — per-handler restatements are pure redundancy (cheap first win).
+- Working note: writing `.md` directly into the worktree plan folder is blocked
+  by `markdown_organization` (it resolves project root to the main repo, so the
+  worktree path `.claude/worktrees/.../CLAUDE/Plan/` fails its allowed-path
+  regex). Worked around via `.txt` draft in `untracked/` then `mv` to `.md` —
+  a worktree-path edge case worth fixing upstream.
 - Delivery commit hash(es): _to be recorded on completion._
