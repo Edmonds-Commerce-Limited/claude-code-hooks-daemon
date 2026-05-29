@@ -10,8 +10,6 @@ Design contract (Decision D from PLAN.md):
 
 from __future__ import annotations
 
-import pytest
-
 from claude_code_hooks_daemon.constants.rule_ids import RuleID
 
 
@@ -98,9 +96,9 @@ class TestRuleIDConstants:
             for name, value in vars(RuleID).items()
             if not name.startswith("_") and isinstance(value, str)
         ]
-        assert len(all_ids) == len(set(all_ids)), (
-            f"Duplicate RuleID values found: {sorted(all_ids)}"
-        )
+        assert len(all_ids) == len(
+            set(all_ids)
+        ), f"Duplicate RuleID values found: {sorted(all_ids)}"
 
     def test_all_ids_are_strings(self) -> None:
         """All RuleID constants are strings."""
@@ -126,9 +124,9 @@ class TestRuleIDConstants:
                 continue
             # IDs should be non-empty and contain only uppercase letters, digits, hyphens
             assert len(value) > 0, f"RuleID.{name} is empty"
-            assert all(c.isupper() or c.isdigit() or c == "-" for c in value), (
-                f"RuleID.{name} value {value!r} contains unexpected characters"
-            )
+            assert all(
+                c.isupper() or c.isdigit() or c == "-" for c in value
+            ), f"RuleID.{name} value {value!r} contains unexpected characters"
 
     def test_ids_start_with_prefix(self) -> None:
         """All RuleID values start with 'R-' prefix for clarity in block messages."""
@@ -139,9 +137,7 @@ class TestRuleIDConstants:
                 continue
             if not isinstance(value, str):
                 continue
-            assert value.startswith("R-"), (
-                f"RuleID.{name} value {value!r} does not start with 'R-'"
-            )
+            assert value.startswith("R-"), f"RuleID.{name} value {value!r} does not start with 'R-'"
 
     # --- sed_blocker ---
 

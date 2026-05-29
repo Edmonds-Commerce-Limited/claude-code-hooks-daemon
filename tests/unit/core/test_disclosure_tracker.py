@@ -17,7 +17,6 @@ import pytest
 
 from claude_code_hooks_daemon.core.disclosure_tracker import DisclosureTracker
 
-
 # ---------------------------------------------------------------------------
 # Constants for tests
 # ---------------------------------------------------------------------------
@@ -65,9 +64,7 @@ class TestDisclosureTrackerBasicBehaviour:
         tracker.mark_disclosed(_PATH_A, _RULE_1)
         assert tracker.was_disclosed(_PATH_A, _RULE_1) is True
 
-    def test_disclosed_rule_does_not_affect_other_rules(
-        self, tracker: DisclosureTracker
-    ) -> None:
+    def test_disclosed_rule_does_not_affect_other_rules(self, tracker: DisclosureTracker) -> None:
         """Marking one rule disclosed does not affect others for the same path."""
         tracker.mark_disclosed(_PATH_A, _RULE_1)
         assert tracker.was_disclosed(_PATH_A, _RULE_2) is False
@@ -121,16 +118,12 @@ class TestDisclosureTrackerMultiAgentIsolation:
         """Fresh DisclosureTracker for each test."""
         return DisclosureTracker()
 
-    def test_path_a_disclosed_does_not_affect_path_b(
-        self, tracker: DisclosureTracker
-    ) -> None:
+    def test_path_a_disclosed_does_not_affect_path_b(self, tracker: DisclosureTracker) -> None:
         """Disclosing a rule for path A does not affect path B."""
         tracker.mark_disclosed(_PATH_A, _RULE_1)
         assert tracker.was_disclosed(_PATH_B, _RULE_1) is False
 
-    def test_path_b_disclosed_does_not_affect_path_a(
-        self, tracker: DisclosureTracker
-    ) -> None:
+    def test_path_b_disclosed_does_not_affect_path_a(self, tracker: DisclosureTracker) -> None:
         """Disclosing a rule for path B does not affect path A."""
         tracker.mark_disclosed(_PATH_B, _RULE_1)
         assert tracker.was_disclosed(_PATH_A, _RULE_1) is False
@@ -196,9 +189,7 @@ class TestDisclosureTrackerStateManagement:
         assert tracker.was_disclosed(_PATH_A, _RULE_1) is False
         assert tracker.was_disclosed(_PATH_B, _RULE_2) is False
 
-    def test_tracker_accumulates_multiple_disclosures(
-        self, tracker: DisclosureTracker
-    ) -> None:
+    def test_tracker_accumulates_multiple_disclosures(self, tracker: DisclosureTracker) -> None:
         """Tracker correctly accumulates many mark_disclosed calls."""
         rules = [_RULE_1, _RULE_2, _RULE_3]
         for rule in rules:

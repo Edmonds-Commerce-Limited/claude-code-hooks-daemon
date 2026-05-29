@@ -18,7 +18,6 @@ import pytest
 
 from claude_code_hooks_daemon.core.rule import Rule, RuleFormatter
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -65,7 +64,7 @@ class TestRuleDataclass:
     def test_rule_is_frozen(self, sample_rule: Rule) -> None:
         """Rule is immutable (frozen dataclass)."""
         with pytest.raises((dataclasses.FrozenInstanceError, AttributeError)):
-            setattr(sample_rule, "rule_id", "CHANGED")
+            sample_rule.rule_id = "CHANGED"
 
     def test_rule_is_dataclass(self, sample_rule: Rule) -> None:
         """Rule is a dataclass."""
@@ -155,9 +154,7 @@ class TestRuleFormatterTableRow:
         row = formatter.table_row(sample_rule)
         assert isinstance(row, str)
 
-    def test_table_row_contains_rule_id(
-        self, formatter: RuleFormatter, sample_rule: Rule
-    ) -> None:
+    def test_table_row_contains_rule_id(self, formatter: RuleFormatter, sample_rule: Rule) -> None:
         """table_row() contains the rule_id."""
         row = formatter.table_row(sample_rule)
         assert sample_rule.rule_id in row
@@ -181,9 +178,7 @@ class TestRuleFormatterTableRow:
         row = formatter.table_row(sample_rule)
         assert "stash" in row.lower()
 
-    def test_table_row_is_pipe_delimited(
-        self, formatter: RuleFormatter, sample_rule: Rule
-    ) -> None:
+    def test_table_row_is_pipe_delimited(self, formatter: RuleFormatter, sample_rule: Rule) -> None:
         """table_row() uses pipe characters as column delimiters."""
         row = formatter.table_row(sample_rule)
         assert "|" in row
@@ -217,9 +212,7 @@ class TestRuleFormatterTerse:
         msg = formatter.terse(sample_rule)
         assert "git reset --hard" in msg
 
-    def test_terse_contains_fix_pointer(
-        self, formatter: RuleFormatter, sample_rule: Rule
-    ) -> None:
+    def test_terse_contains_fix_pointer(self, formatter: RuleFormatter, sample_rule: Rule) -> None:
         """terse() contains the fix or a pointer to the rule-explain command."""
         msg = formatter.terse(sample_rule)
         # Either fix text or rule-explain pointer must be present
@@ -227,9 +220,7 @@ class TestRuleFormatterTerse:
         has_explain = "rule-explain" in msg.lower() or "explain" in msg.lower()
         assert has_fix or has_explain, f"terse() missing fix/explain pointer: {msg!r}"
 
-    def test_terse_contains_blocked_word(
-        self, formatter: RuleFormatter, sample_rule: Rule
-    ) -> None:
+    def test_terse_contains_blocked_word(self, formatter: RuleFormatter, sample_rule: Rule) -> None:
         """terse() signals the action is blocked."""
         msg = formatter.terse(sample_rule)
         assert "BLOCKED" in msg or "blocked" in msg.lower()

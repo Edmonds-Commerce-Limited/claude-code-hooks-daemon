@@ -17,7 +17,7 @@ import logging
 import pkgutil
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
@@ -41,9 +41,8 @@ def _import_measure() -> Any:
 
 def _load_all_handler_instances() -> list[Any]:
     """Return instantiated Handler objects from the production handler package."""
-    from claude_code_hooks_daemon.core.handler import Handler
-
     import claude_code_hooks_daemon.handlers as handlers_pkg
+    from claude_code_hooks_daemon.core.handler import Handler
 
     # Initialise ProjectContext so handlers that call project_root() during __init__
     # do not raise RuntimeError in the bare test environment.
@@ -289,7 +288,7 @@ class TestTermSetContract:
     # All terms must appear (case-insensitively) in that handler's get_claude_md().
     # Handler name fragments match against the handler's display name (e.g.
     # "prevent-destructive-git", "block-sed-command") not the config key.
-    _REQUIRED_TERMS: list[tuple[str, list[str]]] = [
+    _REQUIRED_TERMS: ClassVar[list[tuple[str, list[str]]]] = [
         # destructive_git handler — display name "prevent-destructive-git"
         (
             "prevent-destructive-git",
@@ -428,6 +427,4 @@ class TestTermSetContract:
         ]
         md_lower = md.lower()
         for cmd in commands:
-            assert cmd.lower() in md_lower, (
-                f"Command {cmd!r} missing from destructive_git guidance"
-            )
+            assert cmd.lower() in md_lower, f"Command {cmd!r} missing from destructive_git guidance"

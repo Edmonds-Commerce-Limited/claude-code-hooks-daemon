@@ -17,7 +17,6 @@ from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 from claude_code_hooks_daemon.core.rule import Rule
 
-
 # ---------------------------------------------------------------------------
 # Concrete test handlers
 # ---------------------------------------------------------------------------
@@ -102,9 +101,7 @@ class TestHandlerGetRulesDefault:
         """Legacy handler (no override) has get_rules attribute."""
         assert hasattr(legacy_handler, "get_rules")
 
-    def test_legacy_handler_get_rules_returns_list(
-        self, legacy_handler: _LegacyHandler
-    ) -> None:
+    def test_legacy_handler_get_rules_returns_list(self, legacy_handler: _LegacyHandler) -> None:
         """Legacy handler's get_rules() returns a list."""
         result = legacy_handler.get_rules()
         assert isinstance(result, list)
@@ -158,9 +155,7 @@ class TestHandlerGetRulesOverride:
             assert isinstance(rule.rule_id, str)
             assert len(rule.rule_id) > 0
 
-    def test_override_returns_correct_rules(
-        self, rule_aware_handler: _RuleAwareHandler
-    ) -> None:
+    def test_override_returns_correct_rules(self, rule_aware_handler: _RuleAwareHandler) -> None:
         """The rules returned match what was configured."""
         rules = rule_aware_handler.get_rules()
         rule_ids = {r.rule_id for r in rules}
@@ -202,6 +197,6 @@ class TestHandlerGetRulesTypeAnnotation:
 
         # The return annotation should mention 'Rule' or 'list'
         return_hint = str(hints.get("return", ""))
-        assert "Rule" in return_hint or "list" in return_hint, (
-            f"get_rules() return annotation does not mention Rule or list: {return_hint!r}"
-        )
+        assert (
+            "Rule" in return_hint or "list" in return_hint
+        ), f"get_rules() return annotation does not mention Rule or list: {return_hint!r}"

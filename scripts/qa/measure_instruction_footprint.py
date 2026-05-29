@@ -123,8 +123,8 @@ def _load_all_handler_instances() -> list[Any]:
         sys.path.insert(0, src_path)
 
     try:
-        from claude_code_hooks_daemon.core.handler import Handler
         import claude_code_hooks_daemon.handlers as handlers_pkg
+        from claude_code_hooks_daemon.core.handler import Handler
     except ImportError as exc:
         logger.warning("Could not import handler package: %s", exc)
         return []
@@ -240,9 +240,7 @@ def measure() -> dict[str, Any]:
 
     always_on = _measure_text(total_text)
     # Also record which @-imported files were found
-    always_on["at_imported_docs"] = len(
-        [p for p in _AT_IMPORTED_DOCS if p.exists()]
-    )
+    always_on["at_imported_docs"] = len([p for p in _AT_IMPORTED_DOCS if p.exists()])
     snapshot["always_on_tree"] = always_on
 
     return snapshot
@@ -300,12 +298,12 @@ def _main() -> None:
     print("=" * 60)
     print("Instruction Footprint Report")
     print("=" * 60)
-    print(f"\nInjected <hooksdaemon> block:")
+    print("\nInjected <hooksdaemon> block:")
     print(f"  Bytes:        {injected['bytes']:>8,}")
     print(f"  Lines:        {injected['lines']:>8,}")
     print(f"  Approx tokens:{injected['approx_tokens']:>8,}")
 
-    print(f"\nAlways-on instruction tree (CLAUDE.md + @-imports):")
+    print("\nAlways-on instruction tree (CLAUDE.md + @-imports):")
     print(f"  Bytes:        {tree['bytes']:>8,}")
     print(f"  Lines:        {tree.get('lines', '?'):>8}")
     print(f"  Approx tokens:{tree['approx_tokens']:>8,}")
