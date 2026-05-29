@@ -448,13 +448,55 @@ create_venv_at_path() {
     #   /srv/example-app/front). If uv emits the "Failed to hardlink"
     #   warning, retry once with UV_LINK_MODE=copy — preserving Plan 00047's
     #   container-safety behaviour as a fallback, not the default.
-    unset UV_LINK_MODE  # start from default (hardlink)
+    #
+    # Plan 00114 F3 (Decision 3): proactively detect hardlink-hostile
+    # filesystems (overlay-fs / NFS — the common container case) BEFORE the
+    # first sync and pick copy mode up front. This removes both the scary
+    # "uv hardlink failed" warning AND the wasted first attempt that the
+    # warn-then-retry path incurred on EVERY container install. On normal
+    # disks we keep hardlink-first. An explicit UV_LINK_MODE from the
+    # environment is honoured (we no longer blanket-unset it — that erased an
+    # operator's deliberate choice). link_mode_env holds the UV_LINK_MODE
+    # assignment passed to the first sync's `env`, or stays empty (an empty
+    # element is not added to argv, so hardlink-first runs with UV_LINK_MODE
+    # unset).
+    local link_mode_env=()
+    if [ -n "${UV_LINK_MODE:-}" ]; then
+        link_mode_env=("UV_LINK_MODE=$UV_LINK_MODE")
+    else
+        local target_fs="" probe_dir="$venv_path"
+        # Probe the nearest existing ancestor (the venv leaf does not exist yet).
+        while [ -n "$probe_dir" ] && [ ! -e "$probe_dir" ]; do
+            probe_dir="$(dirname "$probe_dir")"
+        done
+        if [ -n "$probe_dir" ]; then
+            local stat_out
+            if stat_out="$(stat -f -c %T "$probe_dir" 2>&1)"; then
+                target_fs="$stat_out"
+            fi
+        fi
+        case "$target_fs" in
+            overlay* | nfs*)
+                print_info "Detected hardlink-hostile filesystem ($target_fs) at $venv_path — using UV_LINK_MODE=copy."
+                link_mode_env=("UV_LINK_MODE=copy")
+                ;;
+            *)
+                # Normal disk (or detection inconclusive): hardlink-first. The
+                # warn-then-retry fallback below still catches genuine hardlink
+                # failures the detection did not anticipate.
+                link_mode_env=()
+                ;;
+        esac
+    fi
 
     local uv_output="/tmp/uv_sync_output.$$.txt"
     local uv_rc=0
 
-    # First attempt: default link mode (hardlink on most filesystems)
-    if UV_PROJECT_ENVIRONMENT="$venv_path" uv sync --project "$daemon_dir" "${python_args[@]}" \
+    # First attempt: proactively-chosen link mode (copy on overlay/NFS or when
+    # the operator set UV_LINK_MODE; hardlink-first otherwise). `env` with no
+    # link_mode_env element leaves UV_LINK_MODE unset for hardlink-first.
+    if env "${link_mode_env[@]}" UV_PROJECT_ENVIRONMENT="$venv_path" \
+            uv sync --project "$daemon_dir" "${python_args[@]}" \
             > "$uv_output" 2>&1; then
         uv_rc=0
     else
