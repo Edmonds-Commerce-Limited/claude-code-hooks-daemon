@@ -762,9 +762,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 110
+- **Total Plans Created**: 111
 - **Completed**: 94 (1 with reduced scope, 4 already-shipped)
-- **Active**: 3 (1 stop-quality, 2 long-running/review)
+- **Active**: 4 (1 bootstrap/upgrade, 1 stop-quality, 2 long-running/review)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping, 00081 - superseded by 00082)
 - **Last reconciled by**: Plan 00113 close-out (extracted first-class `GitRepo` utility; migrated `plan_numbering` + `git_filemode_checker`; not yet released)
