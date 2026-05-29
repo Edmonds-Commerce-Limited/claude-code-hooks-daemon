@@ -187,11 +187,7 @@ Blocking handlers match patterns in the full Bash command string, including git 
 
 **Footgun**: Claude Code runs a turn's tool calls together; if a hook **denies** one, it **cancels every sibling call** in that turn — batched `Edit`/`Write`/commits are silently lost, not retried. Never batch a mutating `Edit`/`Write`/`git commit` in the same turn as a `Bash` command a hook might block (`sed`, pipe to `head`/`tail`, etc.). Issue mutating calls one per turn and verify each landed; if a block warns that siblings were cancelled, re-issue them separately.
 
-## Plans vs Workflows (CRITICAL DISTINCTION)
-
-**These are TWO COMPLETELY SEPARATE concepts:**
-
-### Plans (Development Work Tracking)
+## Plans (Development Work Tracking)
 
 **Purpose**: Track development work in numbered folders (`CLAUDE/Plan/00001-`, `00002-`, etc.)
 
@@ -207,25 +203,6 @@ Blocking handlers match patterns in the full Bash command string, including git 
 - `plan_completion_advisor` - Reminds to move completed plans to Completed/
 
 **When to Use**: Work taking > 2 hours, multi-phase implementation, architectural decisions
-
-### Workflows (Repeatable Processes)
-
-**Purpose**: Repeatable processes that survive conversation compaction (release, QA, etc.)
-
-**Documentation**: [docs/WORKFLOWS.md](../docs/WORKFLOWS.md)
-
-**Structure**: State files in `./untracked/workflow-state/{workflow-name}/` with phase tracking
-
-**Lifecycle**: Start → Phase transitions → Complete (delete state file)
-
-**Required Handlers**:
-
-- `workflow_state_pre_compact` - Preserves workflow state before compaction
-- `workflow_state_restoration` - Restores workflow state after compaction with required reading
-
-**When to Use**: Formal multi-phase processes that need to survive compaction (releases, complex orchestrations)
-
-**Key Difference**: Plans are for tracking development work. Workflows are for repeatable processes like releases that must survive compaction.
 
 ---
 
