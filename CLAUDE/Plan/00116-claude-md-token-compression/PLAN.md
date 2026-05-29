@@ -1,6 +1,6 @@
 # Plan 00116: CLAUDE.md Token Compression via Stateful Progressive Disclosure
 
-**Status**: Not Started
+**Status**: In Progress (Phases 1–2 complete and merged; Phase 3 pending tracker-wiring decision)
 **Created**: 2026-05-29
 **Owner**: Claude (research + planning agent)
 **Priority**: High
@@ -250,27 +250,26 @@ Rationale + citations in `RESEARCH.md`.
 
 ### Phase 1: Measurement harness & no-loss contract (TDD)
 
-- [ ] ⬜ **Task 1.1**: `scripts/qa/measure_instruction_footprint.py` — byte/line/
+- [x] ✅ **Task 1.1**: `scripts/qa/measure_instruction_footprint.py` — byte/line/
   approx-token counts for the injected block, each `get_claude_md()`, the full
   always-on tree. Snapshot as regression baseline. (RED: snapshot test; GREEN.)
-- [ ] ⬜ **Task 1.2**: Term-set test — every blocked literal + prescribed fix per
+- [x] ✅ **Task 1.2**: Term-set test — every blocked literal + prescribed fix per
   handler recorded; the no-semantic-loss contract for later phases.
 
 ### Phase 2: `Rule` model, `RuleID` constants, `DisclosureTracker` (TDD)
 
-- [ ] ⬜ **Task 2.0 (BLOCKING spike — Decision G)**: Capture real `hook_input` across
-  (a) main session, (b) a Task sub-agent, (c) two concurrent sessions. Confirm
-  `session_id` is present + DISTINCT per agent, and that PreCompact/SessionStart carry
-  it. Decide tracker storage: in-memory `dict[session_id, set[rule_id]]` if confirmed,
-  else transcript-grep fallback. MUST resolve before any tracker code (Tasks 2.1–2.3).
-- [ ] ⬜ **Task 2.1**: `Rule` dataclass (`core/rule.py`) + `RuleID` constants
+- [x] ✅ **Task 2.0 (BLOCKING spike — Decision G)**: RESOLVED — `session_id` is NOT
+  per-agent (Task sub-agents share the parent's), `transcript_path` IS per-agent and is
+  in every hook payload. Tracker keyed by `transcript_path`; transcript-grep fallback
+  dropped. See Decision G.
+- [x] ✅ **Task 2.1**: `Rule` dataclass (`core/rule.py`) + `RuleID` constants
   (`constants/rule_ids.py`). `RuleFormatter` rendering table row / terse / verbose
   from one `Rule`. (RED: all three contain the ID + literal; GREEN.)
-- [ ] ⬜ **Task 2.2**: `Handler.get_rules() -> list[Rule]` (default `[]`) + protocol
+- [x] ✅ **Task 2.2**: `Handler.get_rules() -> list[Rule]` (default `[]`) + protocol
   updates; legacy handlers degrade gracefully.
-- [ ] ⬜ **Task 2.3**: `DisclosureTracker` (`core/disclosure_tracker.py`) with
-  `was_disclosed`/`mark_disclosed`/`reset`, session-scoped, per-rule. Decide
-  storage (Decision G). (RED: first→verbose, repeat→terse, reset→verbose; GREEN.)
+- [x] ✅ **Task 2.3**: `DisclosureTracker` (`core/disclosure_tracker.py`) with
+  `was_disclosed`/`mark_disclosed`/`reset`, keyed by `transcript_path` (Decision G).
+  (RED: first→verbose, repeat→terse, reset→verbose; GREEN.)
 
 ### Phase 3: Stateful disclosure in handlers (TDD, parallelisable)
 
