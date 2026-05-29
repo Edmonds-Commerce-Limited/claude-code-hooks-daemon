@@ -195,24 +195,6 @@
       "reason": "Transcript archiver: logs OSError at debug level and continues. Archiving is best-effort; compaction must proceed even if the archive write fails. The error is now visible in debug logs."
     },
     {
-      "file": "handlers/pre_compact/workflow_state_pre_compact.py",
-      "function": "handle",
-      "rule": "log-and-continue",
-      "reason": "Workflow state file reading: log-and-continue. One unreadable state file should not prevent processing of other state files. PreCompact handler must not crash the compaction process. Already logged."
-    },
-    {
-      "file": "handlers/pre_compact/workflow_state_pre_compact.py",
-      "function": "_detect_workflow",
-      "rule": "log-and-continue",
-      "reason": "Workflow state file reading: log-and-continue. One unreadable state file should not prevent processing of other state files. PreCompact handler must not crash the compaction process. Already logged."
-    },
-    {
-      "file": "handlers/pre_compact/workflow_state_pre_compact.py",
-      "function": "_extract_workflow_state",
-      "rule": "log-and-continue",
-      "reason": "Workflow state file reading: log-and-continue. One unreadable state file should not prevent processing of other state files. PreCompact handler must not crash the compaction process. Already logged."
-    },
-    {
       "file": "handlers/project_loader.py",
       "function": "load_handler_from_file",
       "rule": "log-and-continue",

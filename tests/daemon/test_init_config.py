@@ -348,9 +348,6 @@ class TestConfigHandlerCoverage:
         "auto_approve_reads",
         # Git context injector - optional
         "git_context_injector",
-        # Workflow restoration - optional
-        "workflow_state_restoration",
-        "workflow_state_pre_compact",
         # YOLO container detection - auto-detects
         "yolo_container_detection",
         # Reminder handlers - optional

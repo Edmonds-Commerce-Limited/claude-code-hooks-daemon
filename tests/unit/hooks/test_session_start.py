@@ -18,13 +18,7 @@ class TestGetBuiltinHandlers:
         handlers = get_builtin_handlers()
 
         assert isinstance(handlers, dict)
-        assert len(handlers) == 2  # workflow_state_restoration, yolo_container_detection
-
-    def test_contains_workflow_state_restoration_handler(self) -> None:
-        """Workflow state restoration handler is present."""
-        handlers = get_builtin_handlers()
-
-        assert "workflow_state_restoration" in handlers
+        assert len(handlers) == 1  # yolo_container_detection
 
     def test_contains_yolo_container_detection_handler(self) -> None:
         """YOLO container detection handler is present."""
@@ -36,14 +30,10 @@ class TestGetBuiltinHandlers:
         """Handler classes can be instantiated."""
         handlers = get_builtin_handlers()
 
-        from claude_code_hooks_daemon.handlers.session_start.workflow_state_restoration import (
-            WorkflowStateRestorationHandler,
-        )
         from claude_code_hooks_daemon.handlers.session_start.yolo_container_detection import (
             YoloContainerDetectionHandler,
         )
 
-        assert handlers["workflow_state_restoration"] == WorkflowStateRestorationHandler
         assert handlers["yolo_container_detection"] == YoloContainerDetectionHandler
 
 
@@ -173,7 +163,6 @@ class TestMainFunction:
         config = {
             "handlers": {
                 "session_start": {
-                    "workflow_state_restoration": {"enabled": False},  # Disable to test only YOLO
                     "yolo_container_detection": {"enabled": True, "priority": 99},
                 }
             },
@@ -287,7 +276,6 @@ class TestMainFunction:
         config = {
             "handlers": {
                 "session_start": {
-                    "workflow_state_restoration": {"enabled": False},
                     "yolo_container_detection": {"enabled": False},
                 }
             },
@@ -378,7 +366,6 @@ class TestMainFunction:
         config = {
             "handlers": {
                 "session_start": {
-                    "workflow_state_restoration": {"enabled": False},  # Disable to test only YOLO
                     "yolo_container_detection": {
                         "enabled": True,
                         "min_confidence_score": 5,
@@ -422,7 +409,6 @@ class TestMainFunction:
         config = {
             "handlers": {
                 "session_start": {
-                    "workflow_state_restoration": {"enabled": False},  # Disable to test only YOLO
                     "yolo_container_detection": {"enabled": True},
                 }
             },

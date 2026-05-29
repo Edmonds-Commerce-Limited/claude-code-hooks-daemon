@@ -26,9 +26,6 @@ from claude_code_hooks_daemon.handlers.pre_compact.hello_world import (
 from claude_code_hooks_daemon.handlers.pre_compact.transcript_archiver import (
     TranscriptArchiverHandler,
 )
-from claude_code_hooks_daemon.handlers.pre_compact.workflow_state_pre_compact import (
-    WorkflowStatePreCompactHandler,
-)
 
 
 def get_builtin_handlers() -> dict[str, type]:
@@ -39,7 +36,6 @@ def get_builtin_handlers() -> dict[str, type]:
     """
     return {
         "transcript_archiver": TranscriptArchiverHandler,
-        "workflow_state_pre_compact": WorkflowStatePreCompactHandler,
     }
 
 

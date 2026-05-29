@@ -23,9 +23,6 @@ from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.handlers.session_start.hello_world import (
     HelloWorldSessionStartHandler,
 )
-from claude_code_hooks_daemon.handlers.session_start.workflow_state_restoration import (
-    WorkflowStateRestorationHandler,
-)
 from claude_code_hooks_daemon.handlers.session_start.yolo_container_detection import (
     YoloContainerDetectionHandler,
 )
@@ -38,7 +35,6 @@ def get_builtin_handlers() -> dict[str, type]:
         Dictionary mapping handler names to handler classes
     """
     return {
-        "workflow_state_restoration": WorkflowStateRestorationHandler,
         "yolo_container_detection": YoloContainerDetectionHandler,
     }
 

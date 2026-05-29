@@ -1076,29 +1076,6 @@ handlers:
 
 ---
 
-#### workflow_state_restoration
-
-| Property       | Value                        |
-| -------------- | ---------------------------- |
-| **Config key** | `workflow_state_restoration` |
-| **Priority**   | 60                           |
-| **Type**       | Advisory                     |
-| **Event**      | SessionStart                 |
-
-**Description:** Restores workflow state after conversation compaction. Reads saved workflow state from timestamped files and provides guidance to force re-reading of workflow documentation, ensuring continuity across compacted sessions.
-
-**Config example:**
-
-```yaml
-handlers:
-  session_start:
-    workflow_state_restoration:
-      enabled: true
-      priority: 60
-```
-
----
-
 ## PreCompact Handlers
 
 These handlers run before Claude Code compacts (summarises) the conversation to save context window space.
@@ -1122,29 +1099,6 @@ handlers:
     transcript_archiver:
       enabled: true
       priority: 10
-```
-
----
-
-#### workflow_state_pre_compact
-
-| Property       | Value                        |
-| -------------- | ---------------------------- |
-| **Config key** | `workflow_state_pre_compact` |
-| **Priority**   | 20                           |
-| **Type**       | Advisory                     |
-| **Event**      | PreCompact                   |
-
-**Description:** Detects active formal workflows and saves their state to a timestamped file before compaction. Works with `workflow_state_restoration` to maintain workflow continuity across compacted sessions.
-
-**Config example:**
-
-```yaml
-handlers:
-  pre_compact:
-    workflow_state_pre_compact:
-      enabled: true
-      priority: 20
 ```
 
 ---
@@ -1540,9 +1494,7 @@ These handlers generate the terminal status line displayed by Claude Code. They 
 | `git_filemode_checker`       | SessionStart     | 53       | Warns when core.fileMode=false         |
 | `suggest_status_line`        | SessionStart     | 55       | Suggests status line setup             |
 | `version_check`              | SessionStart     | 56       | Checks for daemon updates              |
-| `workflow_state_restoration` | SessionStart     | 60       | Restores workflow state                |
 | `transcript_archiver`        | PreCompact       | 10       | Archives transcripts                   |
-| `workflow_state_pre_compact` | PreCompact       | 20       | Saves workflow state                   |
 | `cleanup`                    | SessionEnd       | 10       | Cleans up temp files                   |
 | `task_completion_checker`    | Stop             | 20       | Reminds about task completion          |
 | `hedging_language_detector`  | Stop             | 30       | Detects guessing language              |

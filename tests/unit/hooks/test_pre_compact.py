@@ -18,7 +18,7 @@ class TestGetBuiltinHandlers:
         handlers = get_builtin_handlers()
 
         assert isinstance(handlers, dict)
-        assert len(handlers) == 2  # transcript_archiver and workflow_state_pre_compact
+        assert len(handlers) == 1  # transcript_archiver
 
     def test_contains_all_expected_handlers(self) -> None:
         """All expected handler names are present."""
@@ -26,7 +26,6 @@ class TestGetBuiltinHandlers:
 
         expected = [
             "transcript_archiver",
-            "workflow_state_pre_compact",
         ]
 
         for handler_name in expected:
@@ -39,12 +38,8 @@ class TestGetBuiltinHandlers:
         from claude_code_hooks_daemon.handlers.pre_compact.transcript_archiver import (
             TranscriptArchiverHandler,
         )
-        from claude_code_hooks_daemon.handlers.pre_compact.workflow_state_pre_compact import (
-            WorkflowStatePreCompactHandler,
-        )
 
         assert handlers["transcript_archiver"] == TranscriptArchiverHandler
-        assert handlers["workflow_state_pre_compact"] == WorkflowStatePreCompactHandler
 
 
 class TestLoadConfigSafe:
@@ -109,7 +104,6 @@ class TestMainFunction:
             "handlers": {
                 "pre_compact": {
                     "transcript_archiver": {"enabled": True, "priority": 50},
-                    "workflow_state_pre_compact": {"enabled": False},
                 }
             },
             "daemon": {},
@@ -120,7 +114,7 @@ class TestMainFunction:
 
         main()
 
-        # Should register transcript_archiver but not workflow_state_pre_compact
+        # Should register transcript_archiver
         register_calls = mock_fc_instance.register.call_args_list
         assert len(register_calls) >= 1
 
@@ -199,36 +193,6 @@ class TestMainFunction:
         register_calls = mock_fc_instance.register.call_args_list
         handler_types = [type(call[0][0]) for call in register_calls]
         assert HelloWorldPreCompactHandler in handler_types
-
-    @patch("claude_code_hooks_daemon.hooks.pre_compact.FrontController")
-    @patch("claude_code_hooks_daemon.hooks.pre_compact.load_config_safe")
-    def test_multiple_handlers_registered(
-        self, mock_load_config: Mock, mock_fc_class: Mock
-    ) -> None:
-        """Multiple enabled handlers are all registered."""
-        config = {
-            "handlers": {
-                "pre_compact": {
-                    "transcript_archiver": {"enabled": True, "priority": 10},
-                    "workflow_state_pre_compact": {"enabled": True, "priority": 20},
-                }
-            },
-            "daemon": {},
-        }
-        mock_load_config.return_value = config
-        mock_fc_instance = Mock()
-        mock_fc_class.return_value = mock_fc_instance
-
-        main()
-
-        register_calls = mock_fc_instance.register.call_args_list
-        assert len(register_calls) == 2
-
-        registered_handlers = [call[0][0] for call in register_calls]
-        priorities = {type(h).__name__: h.priority for h in registered_handlers}
-
-        assert priorities["TranscriptArchiverHandler"] == 10
-        assert priorities["WorkflowStatePreCompactHandler"] == 20
 
     @patch("claude_code_hooks_daemon.hooks.pre_compact.FrontController")
     @patch("claude_code_hooks_daemon.hooks.pre_compact.load_config_safe")

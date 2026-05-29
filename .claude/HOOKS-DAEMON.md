@@ -1,6 +1,6 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-05-29 (v3.16.0) by `generate-docs`. Regenerate: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-docs`
+> Generated on 2026-05-29 (v3.17.0) by `generate-docs`. Regenerate: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-docs`
 
 ## Active Handlers
 
@@ -53,7 +53,7 @@
 | 25 | lint_on_edit | NON-TERMINAL | Run language-aware lint validation on files after Write/Edit |
 | 26 | markdown_table_formatter | NON-TERMINAL | Auto-format markdown tables after Write/Edit of .md files |
 
-### SessionStart (9 handlers)
+### SessionStart (8 handlers)
 
 | Priority | Handler | Behavior | Description |
 |----------|---------|----------|-------------|
@@ -65,7 +65,6 @@
 | 54 | gitignore_safety_checker | ADVISORY | Warn when required .claude/ paths are absent from .gitignore |
 | 55 | suggest_status_line | ADVISORY | Suggest setting up daemon-based statusline on session start |
 | 56 | version_check | ADVISORY | Check daemon version against latest GitHub release on new sessions |
-| 60 | workflow_state_restoration | ADVISORY | Restore workflow state after compaction |
 
 ### SessionEnd (2 handlers)
 
@@ -74,13 +73,12 @@
 | 5 | hello_world_session_end | NON-TERMINAL | Simple test handler that confirms SessionEnd hook is working |
 | 10 | cleanup | NON-TERMINAL | Clean up temporary files when session ends |
 
-### PreCompact (3 handlers)
+### PreCompact (2 handlers)
 
 | Priority | Handler | Behavior | Description |
 |----------|---------|----------|-------------|
 | 5 | hello_world_pre_compact | NON-TERMINAL | Simple test handler that confirms PreCompact hook is working |
 | 10 | transcript_archiver | NON-TERMINAL | Archive conversation transcript before compaction |
-| 20 | workflow_state_pre_compact | NON-TERMINAL | Detect and preserve workflow state before compaction |
 
 ### UserPromptSubmit (4 handlers)
 

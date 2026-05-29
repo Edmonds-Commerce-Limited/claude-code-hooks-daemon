@@ -132,11 +132,6 @@ class Priority:
     WORKING_DIRECTORY = 25
     STARTUP_CLEANUP = 28  # Between working_directory (25) and daemon_stats (30)
 
-    # Special handlers (no fixed priority in catalog)
-    # These handlers set priority dynamically or don't use the standard system
-    WORKFLOW_STATE_RESTORATION = 50  # Reasonable default
-    WORKFLOW_STATE_PRE_COMPACT = 50  # Reasonable default
-
 
 # Priority range constants (for validation and documentation)
 class PriorityRange:

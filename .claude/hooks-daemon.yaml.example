@@ -252,19 +252,11 @@ handlers:
       enabled: true  # Notifies on new sessions if updates available (24h cache)
       priority: 56
 
-    workflow_state_restoration:  # Restores workflow state after compaction
-      enabled: false             # Enable for workflow state management
-      priority: 60
-
   # PreCompact handlers (run before conversation compaction)
   pre_compact:
     transcript_archiver:  # Archives transcripts before compaction
       enabled: false      # Enable to save conversation history
       priority: 10
-
-    workflow_state_pre_compact:  # Saves workflow state before compaction
-      enabled: false             # Enable for workflow state management
-      priority: 20
 
   # SessionEnd handlers (run when session ends)
   session_end:

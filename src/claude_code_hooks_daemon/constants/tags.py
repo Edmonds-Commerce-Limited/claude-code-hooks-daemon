@@ -38,7 +38,7 @@ class HandlerTag:
         - Domains: git, file-ops, content-quality, npm, nodejs, github, markdown
         - System: status, display, health, logging, cleanup
         - Project: ec-specific, ec-preference, project-specific
-        - Other: planning, environment, yolo-mode, state-management, context-injection
+        - Other: planning, environment, yolo-mode, context-injection
     """
 
     # Language tags
@@ -98,7 +98,6 @@ class HandlerTag:
     PLANNING = "planning"
     ENVIRONMENT = "environment"
     YOLO_MODE = "yolo-mode"
-    STATE_MANAGEMENT = "state-management"
     CONTEXT_INJECTION = "context-injection"
 
 
@@ -154,7 +153,6 @@ TagLiteral = Literal[
     "planning",
     "environment",
     "yolo-mode",
-    "state-management",
     "context-injection",
 ]
 

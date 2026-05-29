@@ -393,18 +393,6 @@ class HandlerID:
         display_name="status-usage-tracking",
     )
 
-    # Workflow state handlers (no fixed priority)
-    WORKFLOW_STATE_RESTORATION = HandlerIDMeta(
-        class_name="WorkflowStateRestorationHandler",
-        config_key="workflow_state_restoration",
-        display_name="workflow-state-restoration",
-    )
-    WORKFLOW_STATE_PRE_COMPACT = HandlerIDMeta(
-        class_name="WorkflowStatePreCompactHandler",
-        config_key="workflow_state_pre_compact",
-        display_name="workflow-state-precompact",
-    )
-
     # Thinking mode status (status line)
     THINKING_MODE = HandlerIDMeta(
         class_name="ThinkingModeHandler",
@@ -577,9 +565,6 @@ HandlerKey = Literal[
     "usage_tracking",
     "working_directory",
     "startup_cleanup",
-    # Workflow state handlers
-    "workflow_state_restoration",
-    "workflow_state_pre_compact",
     # Hook registration checker
     "hook_registration_checker",
 ]

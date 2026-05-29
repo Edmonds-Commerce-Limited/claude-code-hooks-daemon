@@ -69,7 +69,6 @@ class TestHandlerTagConstants:
         assert HandlerTag.PLANNING == "planning"
         assert HandlerTag.ENVIRONMENT == "environment"
         assert HandlerTag.YOLO_MODE == "yolo-mode"
-        assert HandlerTag.STATE_MANAGEMENT == "state-management"
         assert HandlerTag.CONTEXT_INJECTION == "context-injection"
 
 
@@ -92,8 +91,8 @@ class TestTagLiteralType:
     def test_tag_literal_count(self) -> None:
         """Test that TagLiteral has expected number of values."""
         tag_literal_values = get_args(TagLiteral)
-        # Should have 44 tags (all HandlerTag constants)
-        assert len(tag_literal_values) == 44
+        # Should have 43 tags (all HandlerTag constants)
+        assert len(tag_literal_values) == 43
 
 
 class TestTagUsage:
