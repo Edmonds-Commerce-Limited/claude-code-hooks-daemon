@@ -511,9 +511,10 @@ Handler options (e.g. `blocking_mode`, `mode`): See **[docs/guides/HANDLER_REFER
 
 **How it works**:
 
-- **In containers** (YOLO mode, Docker, Podman): Kills ALL other daemon processes system-wide on startup
+- **In containers** (YOLO mode, Docker, Podman): Kills other daemon processes **serving the same project root** on startup. Daemons serving a different project root are never touched — this is critical when PID namespaces are shared between a container and its host (or between containers sharing a bind-mounted `untracked/`), where a system-wide kill would otherwise terminate an unrelated project's daemon.
 - **Outside containers**: Only cleans up stale PID files (safe for multi-project environments)
 - **Auto-detection**: Configuration generation auto-enables this setting in container environments
+- **Project scoping**: A candidate daemon's project root is derived from its `--project-root` flag or the venv path embedded in its interpreter. A daemon whose project root cannot be positively determined is left running (fail-safe against cross-project termination).
 
 **Configuration**:
 
@@ -530,7 +531,7 @@ daemon:
 
 **Behavior**:
 
-- Container: Terminates all other `hooks-daemon` processes (SIGTERM → SIGKILL)
+- Container: Terminates other `hooks-daemon` processes serving the same project root (SIGTERM → SIGKILL); leaves other projects' daemons alone
 - Non-container: Only removes stale PID files for current project
 - 2-second timeout for graceful shutdown before force kill
 
