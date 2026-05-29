@@ -31,6 +31,11 @@ _REQUIRED_GITIGNORE_PATTERNS: tuple[tuple[str, str, str], ...] = (
         "",
         ".CLAUDE.md.pre-inject (ClaudeMdInjector backup — session artifact, never commit)",
     ),
+    (
+        ".claude/scheduled_tasks.lock",
+        "scheduled_tasks.lock",
+        ".claude/scheduled_tasks.lock (ScheduleWakeup/cron runtime lock — never commit)",
+    ),
 )
 
 _GITIGNORE_FILE = ".gitignore"

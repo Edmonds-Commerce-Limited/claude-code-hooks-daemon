@@ -122,6 +122,27 @@ class TestFindMissingEntries:
         missing = handler._find_missing_entries(tmp_path)
         assert missing == []
 
+    def test_scheduled_tasks_lock_pattern_is_required(
+        self, handler: GitignoreSafetyCheckerHandler, tmp_path: Path
+    ) -> None:
+        """Regression: .claude/scheduled_tasks.lock must be in required patterns."""
+        # Only worktrees + pre-inject covered, scheduled_tasks.lock missing
+        gitignore = tmp_path / ".gitignore"
+        gitignore.write_text(".claude/worktrees/\n.CLAUDE.md.pre-inject\n")
+        missing = handler._find_missing_entries(tmp_path)
+        assert any("scheduled_tasks.lock" in m for m in missing)
+
+    def test_scheduled_tasks_lock_satisfied_in_root_gitignore(
+        self, handler: GitignoreSafetyCheckerHandler, tmp_path: Path
+    ) -> None:
+        """scheduled_tasks.lock entry in root .gitignore satisfies requirement."""
+        gitignore = tmp_path / ".gitignore"
+        gitignore.write_text(
+            ".claude/worktrees/\n.CLAUDE.md.pre-inject\n.claude/scheduled_tasks.lock\n"
+        )
+        missing = handler._find_missing_entries(tmp_path)
+        assert missing == []
+
     def test_ignores_commented_lines(
         self, handler: GitignoreSafetyCheckerHandler, tmp_path: Path
     ) -> None:
