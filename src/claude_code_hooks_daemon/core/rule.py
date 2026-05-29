@@ -83,9 +83,7 @@ class RuleFormatter:
         Returns:
             A pipe-delimited markdown table row string (no trailing newline).
         """
-        return (
-            f"| {rule.rule_id} | {rule.blocked} | {rule.why} | {rule.fix} |"
-        )
+        return f"| {rule.rule_id} | {rule.blocked} | {rule.why} | {rule.fix} |"
 
     def terse(self, rule: Rule) -> str:
         """Render a terse reminder for repeat block fires.
@@ -117,7 +115,4 @@ class RuleFormatter:
         Returns:
             The complete first-fire block message string.
         """
-        return (
-            f"BLOCKED [{rule.rule_id}]: {rule.blocked}\n\n"
-            f"{rule.verbose}"
-        )
+        return f"BLOCKED [{rule.rule_id}]: {rule.blocked}\n\n" f"{rule.verbose}"
