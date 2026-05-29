@@ -42,6 +42,13 @@ URL="$BASE_URL/$REF/scripts/upgrade.sh"
 TMP="$(mktemp)"
 if ! curl -fsSL --max-time 30 -o "$TMP" "$URL"; then
     echo "Error: failed to fetch upgrade.sh from $URL" >&2
+    # Plan 00114 F4: make the offline/network failure actionable instead of a
+    # dead end. The installed daemon already ships a working Layer 1 upgrade.sh.
+    echo "Recovery options:" >&2
+    echo "  1. Run the INSTALLED daemon's upgrade.sh directly (no network fetch):" >&2
+    echo "       bash \"$PROJECT_ROOT/.claude/hooks-daemon/scripts/upgrade.sh\" --project-root \"$PROJECT_ROOT\"" >&2
+    echo "  2. Pin a different ref if 'main' is unreachable (e.g. a release tag):" >&2
+    echo "       HOOKS_DAEMON_UPGRADE_REF=v3.16.0 bash \"$0\"" >&2
     rm -f "$TMP"
     exit 1
 fi

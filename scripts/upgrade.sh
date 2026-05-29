@@ -191,7 +191,18 @@ find_compatible_python() {
 
     local discovery_lib
     if ! discovery_lib="$(_resolve_python_discovery_lib "$daemon_dir")"; then
-        _fail "Canonical python discovery helper missing: searched ${daemon_dir:+$daemon_dir/scripts/lib/python_discovery.sh and }$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python_discovery.sh"
+        # Plan 00114 F4: this only fires when the daemon dir lacks the helper,
+        # the script has no sibling lib/, AND the F2 network self-fetch failed
+        # (offline / behind a proxy). Surface actionable recovery — never leave
+        # the user hard-stuck guessing the internal escape hatch.
+        _fail "Canonical python discovery helper missing: searched ${daemon_dir:+$daemon_dir/scripts/lib/python_discovery.sh and }$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python_discovery.sh, and the network self-fetch also failed.
+Recovery options:
+  1. Run upgrade.sh from the INSTALLED daemon dir (it ships the helper):
+       bash \"\$PROJECT_ROOT/.claude/hooks-daemon/scripts/upgrade.sh\" --project-root \"\$PROJECT_ROOT\"
+  2. Set HOOKS_DAEMON_PYTHON to an absolute Python 3.11+ path to skip discovery:
+       HOOKS_DAEMON_PYTHON=/path/to/python3 bash $0 --project-root \"\$PROJECT_ROOT\"
+  3. If a stale skill shim re-execs with a legacy flag, bypass its bootstrap:
+       HOOKS_DAEMON_SKIP_BOOTSTRAP=1 bash \"\$PROJECT_ROOT/.claude/skills/hooks-daemon/scripts/upgrade.sh\""
     fi
     # shellcheck source=lib/python_discovery.sh
     . "$discovery_lib"
