@@ -319,7 +319,7 @@ def cmd_start(args: argparse.Namespace) -> int:
     # Enforce single daemon process (if enabled)
     from claude_code_hooks_daemon.daemon.enforcement import enforce_single_daemon
 
-    enforce_single_daemon(config=config, pid_path=pid_path)
+    enforce_single_daemon(config=config, pid_path=pid_path, project_root=project_path)
 
     # Check if already running
     pid = read_pid_file(str(pid_path))

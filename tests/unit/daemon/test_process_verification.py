@@ -175,6 +175,159 @@ class TestFindAllDaemonProcesses:
         return mock_proc
 
 
+class TestFindAllDaemonProcessesProjectRootFilter:
+    """Tests for project-root scoping of find_all_daemon_processes().
+
+    Regression for the cross-project daemon-kill outage: a container daemon's
+    single-process enforcement must NEVER kill a daemon serving a DIFFERENT
+    project root, even when PID namespaces are shared and the other project's
+    daemon is visible. Scoping the search to our own project root prevents that.
+    """
+
+    @staticmethod
+    def _proc(pid: int, cmdline: list[str], name: str = "python") -> MagicMock:
+        mock_proc = MagicMock(spec=psutil.Process)
+        mock_proc.pid = pid
+        mock_proc.name.return_value = name
+        mock_proc.cmdline.return_value = cmdline
+        return mock_proc
+
+    def test_filter_excludes_other_project_daemon_by_venv_path(self) -> None:
+        """Daemons whose venv path is under a different project root are excluded."""
+        ours = self._proc(
+            pid=100,
+            cmdline=[
+                "/workspace/untracked/venv-py311-28fb230b/bin/python",
+                "-m",
+                "claude_code_hooks_daemon.daemon.cli",
+                "start",
+            ],
+        )
+        other = self._proc(
+            pid=200,
+            cmdline=[
+                "/home/user/project/.claude/hooks-daemon/untracked/"
+                "venv-py314-fefc85e6/bin/python",
+                "-m",
+                "claude_code_hooks_daemon.daemon.cli",
+                "restart",
+            ],
+        )
+
+        with patch("psutil.process_iter", return_value=[ours, other]):
+            result = find_all_daemon_processes(project_root="/workspace")
+
+        assert result == [100]
+
+    def test_filter_excludes_other_project_normal_install(self) -> None:
+        """A normal-install daemon's project root is derived before .claude/."""
+        other = self._proc(
+            pid=300,
+            cmdline=[
+                "/home/user/project/.claude/hooks-daemon/untracked/"
+                "venv-py314-fefc85e6/bin/python",
+                "-m",
+                "claude_code_hooks_daemon.daemon.cli",
+                "start",
+            ],
+        )
+
+        with patch("psutil.process_iter", return_value=[other]):
+            ours = find_all_daemon_processes(project_root="/home/user/project")
+            stranger = find_all_daemon_processes(project_root="/workspace")
+
+        assert ours == [300]
+        assert stranger == []
+
+    def test_filter_matches_via_project_root_flag(self) -> None:
+        """The --project-root cmdline flag identifies the daemon's project."""
+        proc = self._proc(
+            pid=400,
+            cmdline=[
+                "python",
+                "-m",
+                "claude_code_hooks_daemon.daemon.cli",
+                "--project-root",
+                "/workspace",
+                "start",
+            ],
+        )
+
+        with patch("psutil.process_iter", return_value=[proc]):
+            assert find_all_daemon_processes(project_root="/workspace") == [400]
+            assert find_all_daemon_processes(project_root="/other") == []
+
+    def test_filter_matches_via_project_root_flag_equals_form(self) -> None:
+        """The --project-root=PATH form is also recognised."""
+        proc = self._proc(
+            pid=500,
+            cmdline=[
+                "python",
+                "-m",
+                "claude_code_hooks_daemon.daemon.cli",
+                "--project-root=/workspace",
+                "start",
+            ],
+        )
+
+        with patch("psutil.process_iter", return_value=[proc]):
+            assert find_all_daemon_processes(project_root="/workspace") == [500]
+
+    def test_filter_excludes_daemon_with_undeterminable_root(self) -> None:
+        """When a daemon's project root cannot be determined, it is NOT killed.
+
+        Conservative default: never terminate a daemon we cannot positively
+        attribute to our own project.
+        """
+        proc = self._proc(
+            pid=600,
+            cmdline=["python", "-m", "claude_code_hooks_daemon.daemon.server"],
+        )
+
+        with patch("psutil.process_iter", return_value=[proc]):
+            assert find_all_daemon_processes(project_root="/workspace") == []
+
+    def test_filter_normalizes_trailing_slash(self) -> None:
+        """Trailing-slash differences in the project root still match."""
+        proc = self._proc(
+            pid=700,
+            cmdline=[
+                "/workspace/untracked/venv-py311-28fb230b/bin/python",
+                "-m",
+                "claude_code_hooks_daemon.daemon.cli",
+                "start",
+            ],
+        )
+
+        with patch("psutil.process_iter", return_value=[proc]):
+            assert find_all_daemon_processes(project_root="/workspace/") == [700]
+
+    def test_no_filter_returns_all_daemons(self) -> None:
+        """Passing no project_root preserves the legacy system-wide behaviour."""
+        ours = self._proc(
+            pid=100,
+            cmdline=[
+                "/workspace/untracked/venv-py311-28fb230b/bin/python",
+                "-m",
+                "claude_code_hooks_daemon.daemon.cli",
+                "start",
+            ],
+        )
+        other = self._proc(
+            pid=200,
+            cmdline=[
+                "/home/user/project/.claude/hooks-daemon/untracked/"
+                "venv-py314-fefc85e6/bin/python",
+                "-m",
+                "claude_code_hooks_daemon.daemon.cli",
+                "start",
+            ],
+        )
+
+        with patch("psutil.process_iter", return_value=[ours, other]):
+            assert sorted(find_all_daemon_processes()) == [100, 200]
+
+
 class TestKillDaemonProcess:
     """Tests for kill_daemon_process()."""
 

@@ -150,6 +150,38 @@ class TestEnforceSingleDaemon:
         mock_kill.assert_not_called()
 
 
+class TestEnforceSingleDaemonProjectScoping:
+    """Enforcement must scope its process search to our own project root.
+
+    Regression for the cross-project daemon-kill outage (H2): a container
+    daemon must not SIGTERM a daemon serving a different project root.
+    """
+
+    def test_project_root_passed_to_process_search(self) -> None:
+        """enforce_single_daemon forwards project_root to find_all_daemon_processes."""
+        mock_config = MagicMock()
+        mock_config.daemon.enforce_single_daemon_process = True
+
+        with (
+            patch(
+                "claude_code_hooks_daemon.daemon.enforcement.is_container_environment",
+                return_value=True,
+            ),
+            patch(
+                "claude_code_hooks_daemon.daemon.enforcement.find_all_daemon_processes",
+                return_value=[],
+            ) as mock_find,
+            patch("claude_code_hooks_daemon.daemon.enforcement.kill_daemon_process"),
+        ):
+            enforce_single_daemon(
+                config=mock_config,
+                pid_path=Path("/workspace/untracked/daemon-x.pid"),
+                project_root=Path("/workspace"),
+            )
+
+        mock_find.assert_called_once_with(project_root=Path("/workspace"))
+
+
 class TestEnforceSingleDaemonKillFailure:
     """Test kill failure branch (line 63)."""
 
