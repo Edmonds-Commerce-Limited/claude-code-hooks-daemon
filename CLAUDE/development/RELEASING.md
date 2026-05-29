@@ -40,6 +40,18 @@
 
 Agents cannot spawn nested agents. Main Claude orchestrates by invoking agents sequentially.
 
+## 🚨 Absolute Paths Only (NON-NEGOTIABLE)
+
+**Every command in the release flow MUST use absolute paths. NEVER `cd` into a subdirectory.**
+
+The Bash tool's working directory **persists between calls**. A single `cd` (e.g. into `untracked/release-artifacts/` for a checksum loop) silently breaks every later relative-path command — `git tag -F RELEASES/vX.Y.Z.md`, `git push origin vX.Y.Z`, and `gh release create ... untracked/release-artifacts/*.sh` all resolve against the wrong cwd and fail with `could not open ...`, `src refspec does not match any`, or `no matches found`. This shipped a half-broken release attempt in v3.17.0 (main pushed, tag + GitHub release silently skipped) before it was caught.
+
+Rules:
+
+- Use `/workspace/...` absolute paths for ALL file arguments: `git tag -a vX.Y.Z -F /workspace/RELEASES/vX.Y.Z.md`, `gh release create ... /workspace/untracked/release-artifacts/upgrade.sh`, etc.
+- If a step needs a different directory, prefer `git -C /workspace ...` or absolute paths over `cd`. If you must `cd`, immediately `cd /workspace` afterwards in the SAME command, and verify `pwd` before the next git/gh step.
+- After tag + release creation, VERIFY with ground-truth checks (`git tag -l vX.Y.Z`, `git ls-remote --tags origin vX.Y.Z`, `gh release view vX.Y.Z`) — non-zero exit or empty result = the step failed; do not trust scrollback.
+
 ---
 
 ## Steps 1-5: Agent-Automated
