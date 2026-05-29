@@ -42,6 +42,17 @@ while [ $# -gt 0 ]; do
             echo "  VERSION              Git tag to upgrade to (default: latest)"
             exit 0
             ;;
+        --already-bootstrapped)
+            # Plan 00114 F1: backward-compat allowlist for historical bootstrap
+            # flags. Pre-v3.15 skill shims (still in the wild) self-bootstrap by
+            # re-exec'ing this script with --already-bootstrapped. This script no
+            # longer uses that flag, but REJECTING it created a bootstrap deadlock
+            # (the fix is delivered BY the upgrade the broken shim blocks). Accept
+            # and ignore it. Genuinely-unknown flags are still rejected below
+            # (typo protection — see the -* case).
+            echo "WARN Ignoring legacy bootstrap flag (no longer required): $1" >&2
+            shift
+            ;;
         -*)
             echo "ERR Unknown option: $1" >&2
             echo "Usage: upgrade.sh --project-root PATH [VERSION]" >&2
