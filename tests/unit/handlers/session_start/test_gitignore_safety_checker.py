@@ -118,7 +118,9 @@ class TestFindMissingEntries:
     ) -> None:
         """pre-inject entry in root .gitignore satisfies requirement."""
         gitignore = tmp_path / ".gitignore"
-        gitignore.write_text(".claude/worktrees/\n.CLAUDE.md.pre-inject\n")
+        gitignore.write_text(
+            ".claude/worktrees/\n.CLAUDE.md.pre-inject\n.claude/scheduled_tasks.lock\n"
+        )
         missing = handler._find_missing_entries(tmp_path)
         assert missing == []
 
