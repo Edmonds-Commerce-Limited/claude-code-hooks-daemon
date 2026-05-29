@@ -13,6 +13,8 @@ from typing import Any
 
 import pytest
 
+from claude_code_hooks_daemon.constants.handlers import HandlerID
+from claude_code_hooks_daemon.constants.priority import Priority
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 from claude_code_hooks_daemon.core.rule import Rule
@@ -26,7 +28,7 @@ class _LegacyHandler(Handler):
     """Handler that does NOT override get_rules() — simulates legacy handlers."""
 
     def __init__(self) -> None:
-        super().__init__(name="legacy-handler", priority=50)
+        super().__init__(handler_id=HandlerID.HELLO_WORLD_PRE_TOOL_USE, priority=Priority.HELLO_WORLD)
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         return False
@@ -45,7 +47,7 @@ class _RuleAwareHandler(Handler):
     """Handler that overrides get_rules() with actual Rule objects."""
 
     def __init__(self) -> None:
-        super().__init__(name="rule-aware-handler", priority=50)
+        super().__init__(handler_id=HandlerID.HELLO_WORLD_SESSION_START, priority=Priority.HELLO_WORLD)
         self._rules = [
             Rule(
                 rule_id="R-TEST-RULE-ONE",
