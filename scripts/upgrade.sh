@@ -42,6 +42,17 @@ while [ $# -gt 0 ]; do
             echo "  VERSION              Git tag to upgrade to (default: latest)"
             exit 0
             ;;
+        --already-bootstrapped)
+            # Plan 00114 F1: backward-compat allowlist for historical bootstrap
+            # flags. Pre-v3.15 skill shims (still in the wild) self-bootstrap by
+            # re-exec'ing this script with --already-bootstrapped. This script no
+            # longer uses that flag, but REJECTING it created a bootstrap deadlock
+            # (the fix is delivered BY the upgrade the broken shim blocks). Accept
+            # and ignore it. Genuinely-unknown flags are still rejected below
+            # (typo protection — see the -* case).
+            echo "WARN Ignoring legacy bootstrap flag (no longer required): $1" >&2
+            shift
+            ;;
         -*)
             echo "ERR Unknown option: $1" >&2
             echo "Usage: upgrade.sh --project-root PATH [VERSION]" >&2
@@ -104,6 +115,51 @@ _fail() { _err "$1"; exit 1; }
 #   - self-install (script sibling)
 #   - downstream install (daemon dir = $PROJECT_ROOT/.claude/hooks-daemon)
 #   - skill shim exec from /tmp (script sibling absent → daemon dir wins)
+# Plan 00114 F2: when Layer 1 is curl-fetched into /tmp (the documented
+# "review-before-running" flow) AND the installed daemon predates
+# python_discovery.sh, BOTH local lookups miss and the upgrade aborts with
+# "Canonical python discovery helper missing" — the documented escape hatch is
+# itself broken. As a last resort, self-fetch the helper from the same
+# ref/base-URL the skill thin-shim uses. Writes to a temp file cleaned by an
+# EXIT trap. curl's exit code is captured EXPLICITLY (not via an inline
+# `if curl && [ -s ]`) so a transient curl failure is distinguishable from an
+# empty download.
+# EXIT-time cleanup of the self-fetched temp file. The trap runs a direct
+# `rm -f` (not a wrapper function) so shellcheck does not flag an
+# only-invoked-via-trap helper as unreachable (SC2317). `rm -f ""` on an
+# unset path is a harmless no-op that returns 0.
+_PYTHON_DISCOVERY_FETCHED_TMP=""
+trap 'rm -f "$_PYTHON_DISCOVERY_FETCHED_TMP"' EXIT
+
+_fetch_python_discovery_lib() {
+    local ref base_url url tmp curl_path
+    ref="${HOOKS_DAEMON_UPGRADE_REF:-main}"
+    base_url="${HOOKS_DAEMON_UPGRADE_BASE_URL:-https://raw.githubusercontent.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon}"
+    url="$base_url/$ref/scripts/lib/python_discovery.sh"
+
+    # Presence check: capture `command -v` output into a variable instead of
+    # redirecting to a null sink, so nothing is discarded (no error-hiding).
+    if ! curl_path="$(command -v curl)"; then
+        return 1
+    fi
+    if [ -z "$curl_path" ]; then
+        return 1
+    fi
+    if ! tmp="$(mktemp)"; then
+        return 1
+    fi
+    # curl's exit status is consumed directly by the `if` (success only when
+    # curl returns 0 AND the download is non-empty), so a transient fetch
+    # failure is never swallowed — it falls through to the failure path.
+    if curl -fsSL --max-time 30 -o "$tmp" "$url" && [ -s "$tmp" ]; then
+        _PYTHON_DISCOVERY_FETCHED_TMP="$tmp"
+        printf '%s\n' "$tmp"
+        return 0
+    fi
+    rm -f "$tmp"
+    return 1
+}
+
 _resolve_python_discovery_lib() {
     local daemon_dir="${1:-}"
     if [ -n "$daemon_dir" ] && [ -f "$daemon_dir/scripts/lib/python_discovery.sh" ]; then
@@ -114,6 +170,12 @@ _resolve_python_discovery_lib() {
     sibling="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python_discovery.sh"
     if [ -f "$sibling" ]; then
         printf '%s\n' "$sibling"
+        return 0
+    fi
+    # Plan 00114 F2: last-resort network self-fetch for the /tmp call site.
+    local fetched
+    if fetched="$(_fetch_python_discovery_lib)"; then
+        printf '%s\n' "$fetched"
         return 0
     fi
     return 1
@@ -128,7 +190,18 @@ find_compatible_python() {
 
     local discovery_lib
     if ! discovery_lib="$(_resolve_python_discovery_lib "$daemon_dir")"; then
-        _fail "Canonical python discovery helper missing: searched ${daemon_dir:+$daemon_dir/scripts/lib/python_discovery.sh and }$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python_discovery.sh"
+        # Plan 00114 F4: this only fires when the daemon dir lacks the helper,
+        # the script has no sibling lib/, AND the F2 network self-fetch failed
+        # (offline / behind a proxy). Surface actionable recovery — never leave
+        # the user hard-stuck guessing the internal escape hatch.
+        _fail "Canonical python discovery helper missing: searched ${daemon_dir:+$daemon_dir/scripts/lib/python_discovery.sh and }$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python_discovery.sh, and the network self-fetch also failed.
+Recovery options:
+  1. Run upgrade.sh from the INSTALLED daemon dir (it ships the helper):
+       bash \"\$PROJECT_ROOT/.claude/hooks-daemon/scripts/upgrade.sh\" --project-root \"\$PROJECT_ROOT\"
+  2. Set HOOKS_DAEMON_PYTHON to an absolute Python 3.11+ path to skip discovery:
+       HOOKS_DAEMON_PYTHON=/path/to/python3 bash $0 --project-root \"\$PROJECT_ROOT\"
+  3. If a stale skill shim re-execs with a legacy flag, bypass its bootstrap:
+       HOOKS_DAEMON_SKIP_BOOTSTRAP=1 bash \"\$PROJECT_ROOT/.claude/skills/hooks-daemon/scripts/upgrade.sh\""
     fi
     # shellcheck source=lib/python_discovery.sh
     . "$discovery_lib"
