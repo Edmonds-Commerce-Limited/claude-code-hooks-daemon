@@ -94,8 +94,8 @@ handlers:
       enabled: true
       priority: 22
 
-    ask_user_question_blocker: # Blocks AskUserQuestion so Claude works autonomously (for unattended workflows)
-      enabled: false
+    ask_user_question_blocker: # Prefix-positive: blocks AskUserQuestion unless every question begins with `ASKING BECAUSE:`
+      enabled: true
       priority: 23
 
     daemon_restart_verifier: # Verifies daemon restart after code changes
