@@ -36,7 +36,7 @@ class TestFindAllDaemonProcesses:
             self._create_mock_process(
                 pid=200,
                 name="python",
-                cmdline=["python", "-m", "claude_code_hooks_daemon.daemon.server"],
+                cmdline=["python", "-m", "claude_code_hooks_daemon.daemon.cli", "start"],
             ),
             self._create_mock_process(pid=300, name="bash", cmdline=["bash"]),
         ]
@@ -47,74 +47,78 @@ class TestFindAllDaemonProcesses:
         assert result == [200]
 
     def test_multiple_daemon_processes_exist(self) -> None:
-        """Returns all PIDs when multiple daemon processes found."""
+        """Returns all server PIDs; transient CLI helpers are excluded."""
         mock_processes = [
             self._create_mock_process(
                 pid=100,
                 name="python",
-                cmdline=["python", "-m", "claude_code_hooks_daemon.daemon.server"],
+                cmdline=["python", "-m", "claude_code_hooks_daemon.daemon.cli", "start"],
             ),
             self._create_mock_process(pid=200, name="bash", cmdline=["bash"]),
             self._create_mock_process(
                 pid=300,
                 name="python",
-                cmdline=["/usr/bin/python3", "-m", "claude_code_hooks_daemon.daemon.cli"],
+                cmdline=[
+                    "/usr/bin/python3",
+                    "-m",
+                    "claude_code_hooks_daemon.daemon.cli",
+                    "restart",
+                ],
             ),
+            # Transient CLI helper — NOT a daemon server, must be excluded.
             self._create_mock_process(
                 pid=400,
-                name="claude_code_hooks_daemon",
-                cmdline=["claude_code_hooks_daemon"],
+                name="python",
+                cmdline=["python", "-m", "claude_code_hooks_daemon.daemon.cli", "status"],
             ),
         ]
 
         with patch("psutil.process_iter", return_value=mock_processes):
             result = find_all_daemon_processes()
 
-        assert sorted(result) == [100, 300, 400]
+        assert sorted(result) == [100, 300]
 
-    def test_process_name_matching_works_correctly(self) -> None:
-        """Matches daemon processes by name and cmdline correctly."""
+    def test_broad_substring_matches_are_rejected(self) -> None:
+        """The old name/substring matching is gone: only a cli module + launch
+        subcommand cmdline counts as a daemon server."""
         mock_processes = [
-            # Should match: daemon in process name
+            # NOT a server: package string only in the process name.
             self._create_mock_process(pid=100, name="claude_code_hooks_daemon", cmdline=["daemon"]),
-            # Should match: daemon in cmdline
-            self._create_mock_process(
-                pid=200,
-                name="python3",
-                cmdline=["python3", "-m", "claude_code_hooks_daemon.daemon.server"],
-            ),
-            # Should NOT match: similar but not exact name
-            self._create_mock_process(pid=300, name="daemon", cmdline=["daemon", "start"]),
-            # Should match: daemon name in filename (substring matching)
+            # NOT a server: package string only as a wrapper-script substring.
             self._create_mock_process(
                 pid=400,
                 name="python",
                 cmdline=["python", "my_claude_code_hooks_daemon_wrapper.py"],
             ),
-            # Should match: exact module name in cmdline
+            # NOT a server: bare package module, no .daemon.cli, no subcommand.
             self._create_mock_process(
                 pid=500,
                 name="python",
                 cmdline=["python", "-m", "claude_code_hooks_daemon"],
+            ),
+            # The only real server in the set.
+            self._create_mock_process(
+                pid=600,
+                name="python",
+                cmdline=["python", "-m", "claude_code_hooks_daemon.daemon.cli", "start"],
             ),
         ]
 
         with patch("psutil.process_iter", return_value=mock_processes):
             result = find_all_daemon_processes()
 
-        # PIDs 100, 200, 400, 500 should match ("claude_code_hooks_daemon" substring present)
-        assert sorted(result) == [100, 200, 400, 500]
+        assert result == [600]
 
     def test_handles_permission_errors_gracefully(self) -> None:
-        """Ignores processes that raise AccessDenied errors."""
+        """Ignores processes whose cmdline() raises AccessDenied."""
         mock_process_ok = self._create_mock_process(
             pid=100,
             name="python",
-            cmdline=["python", "-m", "claude_code_hooks_daemon.daemon.server"],
+            cmdline=["python", "-m", "claude_code_hooks_daemon.daemon.cli", "start"],
         )
         mock_process_denied = MagicMock(spec=psutil.Process)
         mock_process_denied.pid = 200
-        mock_process_denied.name.side_effect = psutil.AccessDenied(pid=200)
+        mock_process_denied.cmdline.side_effect = psutil.AccessDenied(pid=200)
 
         mock_processes = [mock_process_ok, mock_process_denied]
 
@@ -129,11 +133,11 @@ class TestFindAllDaemonProcesses:
         mock_process_ok = self._create_mock_process(
             pid=100,
             name="python",
-            cmdline=["python", "-m", "claude_code_hooks_daemon.daemon.server"],
+            cmdline=["python", "-m", "claude_code_hooks_daemon.daemon.cli", "start"],
         )
         mock_process_gone = MagicMock(spec=psutil.Process)
         mock_process_gone.pid = 200
-        mock_process_gone.name.side_effect = psutil.NoSuchProcess(pid=200)
+        mock_process_gone.cmdline.side_effect = psutil.NoSuchProcess(pid=200)
 
         mock_processes = [mock_process_ok, mock_process_gone]
 
@@ -150,12 +154,12 @@ class TestFindAllDaemonProcesses:
             self._create_mock_process(
                 pid=current_pid,
                 name="python",
-                cmdline=["python", "-m", "claude_code_hooks_daemon.daemon.cli"],
+                cmdline=["python", "-m", "claude_code_hooks_daemon.daemon.cli", "start"],
             ),
             self._create_mock_process(
                 pid=current_pid + 1,
                 name="python",
-                cmdline=["python", "-m", "claude_code_hooks_daemon.daemon.server"],
+                cmdline=["python", "-m", "claude_code_hooks_daemon.daemon.cli", "start"],
             ),
         ]
 
@@ -279,9 +283,11 @@ class TestFindAllDaemonProcessesProjectRootFilter:
         Conservative default: never terminate a daemon we cannot positively
         attribute to our own project.
         """
+        # A real server cmdline (bare "python", no venv path, no --project-root)
+        # whose project root cannot be determined → conservatively NOT killed.
         proc = self._proc(
             pid=600,
-            cmdline=["python", "-m", "claude_code_hooks_daemon.daemon.server"],
+            cmdline=["python", "-m", "claude_code_hooks_daemon.daemon.cli", "start"],
         )
 
         with patch("psutil.process_iter", return_value=[proc]):
@@ -326,6 +332,92 @@ class TestFindAllDaemonProcessesProjectRootFilter:
 
         with patch("psutil.process_iter", return_value=[ours, other]):
             assert sorted(find_all_daemon_processes()) == [100, 200]
+
+
+class TestDaemonServerMatching:
+    """find_all_daemon_processes must match ONLY genuine daemon SERVER
+    processes — those launched via ``cli start`` / ``cli restart`` — and never
+    transient CLI helpers (status/stop/logs/...) or hook forwarders. Plan 00119.
+
+    Verified in daemon/cli.py: daemonization (os.fork/os.setsid/HooksDaemon/
+    asyncio.run) happens only in cmd_start, reachable only from the ``start``
+    subcommand and from cmd_restart (the ``restart`` subcommand). os.fork does
+    not rewrite argv, so the detached daemon's cmdline carries ``start`` or
+    ``restart``.
+    """
+
+    _MODULE = "claude_code_hooks_daemon.daemon.cli"
+
+    @staticmethod
+    def _proc(pid: int, cmdline: list[str], name: str = "python") -> MagicMock:
+        mock_proc = MagicMock(spec=psutil.Process)
+        mock_proc.pid = pid
+        mock_proc.name.return_value = name
+        mock_proc.cmdline.return_value = cmdline
+        return mock_proc
+
+    def test_start_launched_daemon_matches(self) -> None:
+        proc = self._proc(700, ["python", "-m", self._MODULE, "start"])
+        with patch("psutil.process_iter", return_value=[proc]):
+            assert find_all_daemon_processes() == [700]
+
+    def test_restart_launched_daemon_matches(self) -> None:
+        proc = self._proc(701, ["python", "-m", self._MODULE, "restart"])
+        with patch("psutil.process_iter", return_value=[proc]):
+            assert find_all_daemon_processes() == [701]
+
+    def test_start_with_global_project_root_flag_matches(self) -> None:
+        proc = self._proc(
+            702, ["python", "-m", self._MODULE, "--project-root", "/workspace", "start"]
+        )
+        with patch("psutil.process_iter", return_value=[proc]):
+            assert find_all_daemon_processes() == [702]
+
+    def test_transient_cli_helpers_not_matched(self) -> None:
+        transient = [
+            "status",
+            "stop",
+            "logs",
+            "health",
+            "repair",
+            "check-truth-changes",
+            "generate-docs",
+        ]
+        procs = [
+            self._proc(800 + i, ["python", "-m", self._MODULE, sub])
+            for i, sub in enumerate(transient)
+        ]
+        with patch("psutil.process_iter", return_value=procs):
+            assert find_all_daemon_processes() == []
+
+    def test_hook_forwarder_not_matched(self) -> None:
+        proc = self._proc(900, ["python", "-m", "claude_code_hooks_daemon.hooks.pre_tool_use"])
+        with patch("psutil.process_iter", return_value=[proc]):
+            assert find_all_daemon_processes() == []
+
+    def test_bare_cli_without_subcommand_not_matched(self) -> None:
+        proc = self._proc(901, ["python", "-m", self._MODULE])
+        with patch("psutil.process_iter", return_value=[proc]):
+            assert find_all_daemon_processes() == []
+
+    def test_name_substring_alone_not_matched(self) -> None:
+        proc = self._proc(
+            902,
+            ["python", "my_claude_code_hooks_daemon_wrapper.py"],
+            name="claude_code_hooks_daemon",
+        )
+        with patch("psutil.process_iter", return_value=[proc]):
+            assert find_all_daemon_processes() == []
+
+    def test_launch_subcommands_allowlist_is_exactly_start_and_restart(self) -> None:
+        """Guard: the allowlist is provably complete (only start/restart reach
+        cmd_start). If a future subcommand daemonizes, add it here AND update
+        this guard — do not silently widen the match."""
+        from claude_code_hooks_daemon.daemon.process_verification import (
+            _DAEMON_LAUNCH_SUBCOMMANDS,
+        )
+
+        assert _DAEMON_LAUNCH_SUBCOMMANDS == ("start", "restart")
 
 
 class TestKillDaemonProcess:

@@ -14,8 +14,21 @@ from claude_code_hooks_daemon.constants import Timeout
 
 logger = logging.getLogger(__name__)
 
-# Process name pattern to search for
-DAEMON_PROCESS_NAME = "claude_code_hooks_daemon"
+# The CLI module that, given a launch subcommand, becomes the daemon server.
+# Matching requires this exact module token PLUS a launch subcommand (below) so
+# that transient CLI helpers (status/stop/logs/...) and hook forwarders
+# (claude_code_hooks_daemon.hooks.*) are never mistaken for a daemon server.
+_DAEMON_CLI_MODULE = "claude_code_hooks_daemon.daemon.cli"
+
+# The ONLY subcommands that daemonize. Daemonization (os.fork ×2, os.setsid,
+# HooksDaemon(...), asyncio.run(daemon.start())) lives solely in cmd_start,
+# reachable only from the ``start`` subcommand and from cmd_restart (the
+# ``restart`` subcommand), which calls cmd_start. os.fork does not rewrite argv,
+# so a start-launched daemon's cmdline carries ``start`` and a restart-launched
+# one carries ``restart``. This allowlist is therefore provably complete — every
+# real daemon server is matched (zero false negatives). If a future subcommand
+# daemonizes, add it here; a unit test guards this tuple.
+_DAEMON_LAUNCH_SUBCOMMANDS = ("start", "restart")
 
 # Command-line flag that explicitly names a daemon's project root.
 _PROJECT_ROOT_FLAG = "--project-root"
@@ -61,15 +74,17 @@ def find_all_daemon_processes(project_root: str | Path | None = None) -> list[in
     for proc in psutil.process_iter():
         try:
             pid = proc.pid
-            name = proc.name()
-            cmdline = proc.cmdline()
 
             # Skip current process
             if pid == current_pid:
                 continue
 
-            # Check if daemon name appears in process name or cmdline
-            if not _is_daemon_process(name, cmdline):
+            # Matching is cmdline-only: a daemon server is identified by the cli
+            # module token plus a launch subcommand. cmdline() also raises
+            # NoSuchProcess/AccessDenied for inaccessible processes, which the
+            # except below skips.
+            cmdline = proc.cmdline()
+            if not _is_daemon_server_process(cmdline):
                 continue
 
             # Scope to our own project root when requested. A daemon whose root
@@ -211,28 +226,45 @@ def is_process_running(pid: int) -> bool:
         return False
 
 
-def _is_daemon_process(name: str | None, cmdline: list[str] | None) -> bool:
-    """Check if process name or cmdline indicates a daemon process.
+def _is_daemon_server_process(cmdline: list[str] | None) -> bool:
+    """Check if a command line identifies a daemon SERVER process.
+
+    A daemon server is launched via ``python -m {cli module} [global flags]
+    {start|restart}``. We require BOTH the cli module token AND a launch
+    subcommand appearing after it. This deliberately excludes:
+
+    - transient CLI helpers (``status``, ``stop``, ``logs``, ``health``,
+      ``repair``, ``check-truth-changes``, ``generate-docs``, ``validate-*``, …)
+    - hook forwarders (``claude_code_hooks_daemon.hooks.*``)
+    - a bare ``cli`` invocation with no subcommand
+
+    none of which are daemon servers and so must never be terminated by
+    single-daemon enforcement.
 
     Args:
-        name: Process name from psutil
-        cmdline: Command line arguments from psutil
+        cmdline: Command line arguments from psutil.
 
     Returns:
-        True if process appears to be a daemon process, False otherwise.
+        True only if the cmdline is a daemon server invocation.
 
     Note:
-        - Case-sensitive exact substring match for 'claude_code_hooks_daemon'
-        - Checks both process name and command line arguments
+        Case-sensitive matching. See ``_DAEMON_LAUNCH_SUBCOMMANDS`` for why the
+        allowlist is provably complete (zero false negatives).
     """
-    # Check process name
-    if name and DAEMON_PROCESS_NAME in name:
-        return True
+    if not cmdline:
+        return False
 
-    # Check command line
-    if cmdline:
-        cmdline_str = " ".join(cmdline)
-        if DAEMON_PROCESS_NAME in cmdline_str:
+    module_index: int | None = None
+    for index, token in enumerate(cmdline):
+        if _DAEMON_CLI_MODULE in token:
+            module_index = index
+            break
+    if module_index is None:
+        return False
+
+    # A launch subcommand must appear AFTER the module token (global flags such
+    # as ``--project-root PATH`` may sit between the module and the subcommand).
+    for token in cmdline[module_index + 1 :]:
+        if token in _DAEMON_LAUNCH_SUBCOMMANDS:
             return True
-
     return False

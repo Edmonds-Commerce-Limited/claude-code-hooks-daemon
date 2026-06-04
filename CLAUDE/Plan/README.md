@@ -64,6 +64,13 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00119: Scope Single-Daemon Enforcement to Actual Daemon Server Processes](Completed/00119-enforcement-scope-to-daemon-server/PLAN.md) - Complete
+
+  - Root-cause follow-up to the v3.18.2 "exit 143" upgrade false-failure: `find_all_daemon_processes` matched **any** `claude_code_hooks_daemon` cmdline, so single-daemon enforcement could SIGTERM transient CLI helpers (`status`/`stop`/`logs`/…) and hook forwarders
+  - Now matches only daemon **server** cmdlines (cli module + `start`/`restart` launch subcommand) via `_is_daemon_server_process`; broad name/substring match + `DAEMON_PROCESS_NAME` removed
+  - Allowlist proven complete (os.fork/os.setsid/HooksDaemon/asyncio.run live only in cmd_start, reachable only via start/restart) → zero false negatives; guarded by a unit test. Project-root scoping preserved
+  - QA 13/13 (8470 tests, 95.0%); daemon restart RUNNING with no enforcement errors
+
 - [00118: Truth-Changes — Project Doc Reconciliation on Upgrade](Completed/00118-docs-upgrade-guidance-mechanism/PLAN.md) - Complete
 
   - Per-version `was → now` truth-changes list (`now: ~` = remove all reference); the project LLM reconciles its own docs against it at upgrade time
@@ -792,12 +799,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 118
-- **Completed**: 97 (1 with reduced scope, 4 already-shipped)
+- **Total Plans Created**: 119
+- **Completed**: 98 (1 with reduced scope, 4 already-shipped)
 - **Active**: 5 (1 python-discovery, 1 question-blocker, 1 stop-quality, 2 long-running/review) + 1 in-progress build (00116 CLAUDE.md compression)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping, 00081 - superseded by 00082)
-- **Last reconciled by**: Plan 00118 (truth-changes doc reconciliation on upgrade) close-out; Plan 00116 (CLAUDE.md token compression) finalised and in build (not yet released)
+- **Last reconciled by**: Plan 00119 (scope single-daemon enforcement to actual daemon server processes) close-out
 
 ## Quick Links
 
