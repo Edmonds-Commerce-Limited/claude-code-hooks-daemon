@@ -42,3 +42,23 @@ class TestGetCliAcceptanceTests:
         tests = get_cli_acceptance_tests()
         for test in tests:
             assert len(test.expected_stdout_patterns) > 0, f"Test '{test.title}' has no patterns"
+
+    def test_check_truth_changes_test_exists(self) -> None:
+        """check-truth-changes acceptance test is included (Plan 00118)."""
+        tests = get_cli_acceptance_tests()
+        truth_tests = [t for t in tests if "truth-change" in t.title.lower()]
+        assert len(truth_tests) >= 1
+
+    def test_check_truth_changes_surfaces_plan_number_entry(self) -> None:
+        """The plan-number truth-change surfaces for a range spanning v3.16.0."""
+        tests = get_cli_acceptance_tests()
+        truth_tests = [t for t in tests if "truth-change" in t.title.lower()]
+        assert truth_tests, "no truth-changes CLI acceptance test registered"
+
+        test = truth_tests[0]
+        # Exercises the real command with a --from before v3.16.0
+        assert "check-truth-changes" in test.command
+        assert "--from 3.11.0" in test.command
+        # Expects the plan-number git-counter truth to be printed
+        joined = " ".join(test.expected_stdout_patterns)
+        assert "hooksdaemon.latestPlanNumber" in joined

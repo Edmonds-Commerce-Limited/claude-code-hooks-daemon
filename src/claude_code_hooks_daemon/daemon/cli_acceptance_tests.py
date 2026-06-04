@@ -22,7 +22,28 @@ def get_cli_acceptance_tests() -> list[CliAcceptanceTest]:
     return [
         _restart_mode_advisory_non_default(),
         _restart_mode_advisory_default(),
+        _check_truth_changes_plan_number(),
     ]
+
+
+def _check_truth_changes_plan_number() -> CliAcceptanceTest:
+    """Test: check-truth-changes surfaces the plan-number truth (Plan 00118)."""
+    return CliAcceptanceTest(
+        title="check-truth-changes surfaces the plan-number truth-change",
+        description=(
+            "Running check-truth-changes over a range that spans v3.16.0 (where the "
+            "next-plan-number truth moved from a folder scan to the git counter) must "
+            "print the was → now reconciliation entry naming the git config key."
+        ),
+        command=f"{_CLI_PREFIX} check-truth-changes --from 3.11.0 --to 3.17.0",
+        expected_stdout_patterns=[
+            "Truth-Changes to reconcile",
+            "hooksdaemon.latestPlanNumber",
+            "CLAUDE/Plan",
+        ],
+        expected_exit_code=1,
+        safety_notes="Safe: read-only; prints guidance from shipped truth-changes files.",
+    )
 
 
 def _restart_mode_advisory_non_default() -> CliAcceptanceTest:

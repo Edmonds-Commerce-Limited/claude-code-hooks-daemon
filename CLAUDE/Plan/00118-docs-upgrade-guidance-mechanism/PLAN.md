@@ -147,13 +147,14 @@ project's docs (not a regex). `now` is the replacement, or null/empty to mean
 
 ### Phase 3: Re-discovery CLI (small)
 
-- [ ] ⬜ **Task 3.1**: `check-truth-changes` command (TDD)
-  - [ ] ⬜ Failing tests for `--from/--to/--format text|json`, exit codes 0 (no
-    changes) / 1 (changes present) / 2 (error)
-  - [ ] ⬜ Implement by cloning the `config_migrations.py` range loader; print the
-    aggregated `was → now` list for the range
-  - [ ] ⬜ `CliAcceptanceTest`: the plan-number entry surfaces for `--from 3.11.0`
-- [ ] ⬜ **Task 3.2**: QA + daemon restart verification
+- [x] ✅ **Task 3.1**: `check-truth-changes` command (TDD)
+  - [x] ✅ Tests for `--from/--to/--format text|json`, exit codes 0 (no changes) /
+    1 (changes present) / 2 (error) — `tests/unit/install/test_truth_changes.py`
+  - [x] ✅ Implemented `install/truth_changes.py` by cloning the
+    `config_migrations.py` range loader (minus user-config compare); prints the
+    aggregated `was → now` list. CLI `cmd_check_truth_changes` registered.
+  - [x] ✅ `CliAcceptanceTest`: plan-number entry surfaces for `--from 3.11.0 --to 3.17.0` (verified live; exit 1)
+- [x] ✅ **Task 3.2**: QA + daemon restart verification (RUNNING)
 
 ### Phase 4: Governance (light)
 

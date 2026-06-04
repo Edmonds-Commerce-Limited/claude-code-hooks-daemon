@@ -1788,6 +1788,51 @@ def cmd_check_config_migrations(args: argparse.Namespace) -> int:
     return 1 if has_issues else 0
 
 
+def cmd_check_truth_changes(args: argparse.Namespace) -> int:
+    """Show truth-changes (was → now) to reconcile across a version range.
+
+    Loads truth-changes manifests in (from, to] and prints the aggregated
+    was → now reconciliation list. Unlike check-config-migrations, this takes
+    no user config — truth-changes are guidance, not compared against anything.
+
+    Args:
+        args: Parsed CLI arguments with from_version, to_version, format,
+              and optional truth_changes_dir.
+
+    Returns:
+        0 if no truth-changes in range, 1 if changes present, 2 on error.
+    """
+    from claude_code_hooks_daemon.install.truth_changes import (
+        list_known_truth_change_versions,
+        run_check_truth_changes,
+    )
+
+    truth_changes_dir: Path | None = (
+        Path(args.truth_changes_dir) if getattr(args, "truth_changes_dir", None) else None
+    )
+
+    try:
+        result = run_check_truth_changes(
+            from_version=args.from_version,
+            to_version=args.to_version,
+            output_format=args.format,
+            truth_changes_dir=truth_changes_dir,
+        )
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        known = list_known_truth_change_versions(truth_changes_dir=truth_changes_dir)
+        if known:
+            print(f"Known versions: {', '.join(known)}", file=sys.stderr)
+        return 2
+
+    if args.format == "json":
+        print(json.dumps(result, indent=2))
+    else:
+        print(result.get("text", ""))
+
+    return 1 if result["has_changes"] else 0
+
+
 def cmd_init_project_handlers(args: argparse.Namespace) -> int:
     """Scaffold project-handlers directory structure.
 
@@ -2959,6 +3004,40 @@ def main() -> int:
         help="Override manifest directory (for testing)",
     )
     parser_check_migrations.set_defaults(func=cmd_check_config_migrations)
+
+    # check-truth-changes command
+    parser_check_truth = subparsers.add_parser(
+        "check-truth-changes",
+        help="Show doc truth-changes (was -> now) to reconcile since your previous version",
+    )
+    parser_check_truth.add_argument(
+        "--from",
+        dest="from_version",
+        required=True,
+        metavar="VERSION",
+        help="Version you are upgrading from (e.g. 3.15.0)",
+    )
+    parser_check_truth.add_argument(
+        "--to",
+        dest="to_version",
+        required=True,
+        metavar="VERSION",
+        help="Version you are upgrading to (e.g. 3.18.0)",
+    )
+    parser_check_truth.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format: text (default) or json",
+    )
+    parser_check_truth.add_argument(
+        "--truth-changes-dir",
+        dest="truth_changes_dir",
+        metavar="PATH",
+        default=None,
+        help="Override truth-changes directory (for testing)",
+    )
+    parser_check_truth.set_defaults(func=cmd_check_truth_changes)
 
     # init-project-handlers command
     parser_init_ph = subparsers.add_parser(
