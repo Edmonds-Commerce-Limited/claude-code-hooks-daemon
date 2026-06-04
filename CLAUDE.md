@@ -804,6 +804,22 @@ Writing QA suppression directives into source files is blocked across all suppor
 
 **Required action**: Fix the code so QA passes without suppression. If a suppression is genuinely necessary, ask the user to add it manually — this signals a conscious decision rather than a shortcut.
 
+## plan_number_helper — the git counter is the source of truth for plan numbers
+
+The next plan number is authoritative in git config, NOT in the folder listing.
+
+**To get the next plan number:**
+
+```
+git config --local hooksdaemon.latestPlanNumber
+```
+
+Add 1 to that value — that is the next plan number (zero-pad to 5 digits, e.g. counter `117` → next plan `00118`). The daemon updates this counter automatically whenever a plan is created, so it stays correct across branches.
+
+**Do NOT** scan `CLAUDE/Plan/` with `ls`/`find`/glob pipelines to discover the next number. Folder scans miss plans in `Completed/` and other subdirectories, and disagree across branches. The folder scan is only a fallback used to bootstrap the counter when the git key is unset.
+
+If the counter key is missing (unset), it is safe to bootstrap once from the highest `NNNNN-` prefix under `CLAUDE/Plan/` (including `Completed/`); the daemon persists it back to git config for subsequent reads.
+
 ## tdd_enforcement — test file must exist before source file
 
 Creating a production source file is blocked until a corresponding test file exists.
