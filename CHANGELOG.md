@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.18.2] - 2026-06-04
+
+### Fixed
+
+- **`restart_daemon_verified` defers start/no-start decision to status poll, not starter exit code** — Under single-daemon enforcement (container mode), a concurrent daemon start (e.g. a live hook-triggered auto-start during an upgrade) SIGTERMs the in-flight `cli start` parent process, causing it to exit 143. The old code treated the starter's exit code as authoritative for "did the daemon start", so it reported "Daemon failed to start (exit code 143)" even when the winning daemon came up healthy. `start_daemon_safe` now exposes its result via `DAEMON_START_EXIT_CODE` / `DAEMON_START_OUTPUT` and accepts a quiet mode; `restart_daemon_verified` records the starter result for diagnostics but always defers the start/no-start decision to its authoritative status poll, reporting failure only when the poll confirms no daemon is running (surfacing the captured starter output then). Field-observed twice across consecutive upgrade runs.
+
 ## [3.18.1] - 2026-06-04
 
 ### Fixed
