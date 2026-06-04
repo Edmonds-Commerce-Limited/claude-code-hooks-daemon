@@ -69,7 +69,8 @@ class TruthChange:
     @property
     def is_removal(self) -> bool:
         """Return True when this entry retires a truth with no replacement."""
-        return self.now is None or (isinstance(self.now, str) and not self.now.strip())
+        # now is str | None; an empty/whitespace-only string also means removal.
+        return self.now is None or not self.now.strip()
 
 
 @dataclass
@@ -100,8 +101,7 @@ class TruthChangeManifest:
         version = data[_FIELD_VERSION]
         entries = data.get(_FIELD_TRUTH_CHANGES) or []
         changes = [
-            TruthChange(was=entry[_FIELD_WAS], now=entry.get(_FIELD_NOW))
-            for entry in entries
+            TruthChange(was=entry[_FIELD_WAS], now=entry.get(_FIELD_NOW)) for entry in entries
         ]
         return cls(version=str(version), changes=changes)
 

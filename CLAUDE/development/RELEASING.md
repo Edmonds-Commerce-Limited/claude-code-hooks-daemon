@@ -153,6 +153,27 @@ After upgrading, review `CLAUDE/UPGRADES/v{MAJOR}/v{PREV}-to-v{NEW}/post-upgrade
 
 **ABORT condition**: any `NN-*.md` file remains in `UNRELEASED/post-upgrade-tasks/` when moving to the next step.
 
+### Move UNRELEASED truth-changes
+
+Truth-changes (Plan 00118) record statements that **were true** about working in a project but became false this release (a `was → now` doc-reconciliation list consumed by `upgrade.md` and `check-truth-changes`). Any staged in `UNRELEASED/truth-changes/` belong to **this** release and must move into the flat live directory, keeping their version-named filenames:
+
+```bash
+# Move each staged truth-changes manifest into the live directory
+for f in CLAUDE/UPGRADES/UNRELEASED/truth-changes/v*.yaml; do
+    [ -e "$f" ] || continue          # nothing staged this cycle
+    git mv "$f" CLAUDE/UPGRADES/truth-changes/
+done
+```
+
+Verify only `README.md` remains under `UNRELEASED/truth-changes/`:
+
+```bash
+ls CLAUDE/UPGRADES/UNRELEASED/truth-changes/
+# Expected: README.md  (nothing else)
+```
+
+**ABORT condition**: any `v*.yaml` file remains in `UNRELEASED/truth-changes/` when moving to the next step.
+
 ---
 
 ## Step 7: Opus Documentation Review
@@ -168,6 +189,7 @@ Opus reviews **documentation only** (not code/QA):
 - `UNRELEASED/post-upgrade-tasks/` contains only `README.md` (all tasks moved in Step 6)
 - Moved tasks have populated the versioned guide's `post-upgrade-tasks/README.md` task index
 - Release notes reference post-upgrade tasks if any are `critical` or `recommended`
+- **Did this release change a documented truth?** (a workflow, command, or convention a project's own docs are likely to assert) — if so, a `truth-changes/v{X.Y.Z}.yaml` entry exists (`was → now`, or `now: ~` to retire it) and `UNRELEASED/truth-changes/` contains only `README.md`
 
 Approved -> proceed. Issues found -> agent fixes docs, re-submit until approved.
 

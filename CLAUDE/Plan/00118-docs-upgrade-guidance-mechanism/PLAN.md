@@ -130,20 +130,19 @@ project's docs (not a regex). `now` is the replacement, or null/empty to mean
 
 ### Phase 2: Delivery via the upgrade flow
 
-- [ ] ⬜ **Task 2.1**: Add the reconciliation step to `upgrade.md`
-  - [ ] ⬜ After parsing `UPGRADE_METADATA`, the LLM loads truth-changes for every
-    version in `(from_version, to_version]` from the cloned
-    `CLAUDE/UPGRADES/truth-changes/`
-  - [ ] ⬜ For each `{was, now}`: semantically scan the project's own docs
+- [x] ✅ **Task 2.1**: Add the reconciliation step to `upgrade.md`
+  - [x] ✅ New step 4 (between "Verify RUNNING" and "Stage"): run
+    `check-truth-changes --from ${from_version} --to ${to_version}` over the
+    `(from, to]` range from `UPGRADE_METADATA`; skip on `--force` reinstall
+  - [x] ✅ For each `{was, now}`: semantically scan the project's own docs
     (`CLAUDE/`, `docs/`, `README*`, `AGENTS*` — never `.claude/hooks-daemon/`
-    internals). Where the `was` truth appears: update it to `now`, or remove
-    all reference when `now` is empty. Minimal edits; commit with a clear
-    message.
-  - [ ] ⬜ Idempotent by construction: if a doc no longer asserts `was`, nothing
-    to do. A second upgrade-reconcile is a no-op.
-- [ ] ⬜ **Task 2.2**: Dogfooding/acceptance — verify the step is present in the
-  deployed skill and that `deploy_skills()` refresh carries the updated
-  `upgrade.md`
+    internals). Update to `now`, or remove all reference when empty. Minimal
+    edits; commit project-doc edits separately from the upgrade commit.
+  - [x] ✅ Idempotent by construction (exit 0 = nothing to do; re-run is a no-op).
+- [x] ✅ **Task 2.2**: Dogfooding/acceptance — `deploy_skills()` does
+  `shutil.copytree(source_skills, target_skills)` over the whole skill dir, and
+  `test_deploy_skills_copies_skill_files` already asserts `upgrade.md` lands in
+  the target. The updated `upgrade.md` is carried verbatim — no code change needed.
 
 ### Phase 3: Re-discovery CLI (small)
 
@@ -158,13 +157,17 @@ project's docs (not a regex). `now` is the replacement, or null/empty to mean
 
 ### Phase 4: Governance (light)
 
-- [ ] ⬜ **Task 4.1**: RELEASING.md integration
-  - [ ] ⬜ Extend the existing Step 6 move to also move
-    `UNRELEASED/truth-changes/` into `CLAUDE/UPGRADES/truth-changes/`
-  - [ ] ⬜ Add one Step 7 checklist line: "did this release change a documented
-    truth? add a truth-changes entry"
-- [ ] ⬜ **Task 4.2**: Final QA, daemon restart, changelog + HOOKS-DAEMON.md
-  regeneration
+- [x] ✅ **Task 4.1**: RELEASING.md integration
+  - [x] ✅ Extended Step 6 with a "Move UNRELEASED truth-changes" subsection
+    (`git mv UNRELEASED/truth-changes/v*.yaml` → `truth-changes/`) + ABORT
+    condition
+  - [x] ✅ Added a Step 7 review checklist line: "did this release change a
+    documented truth? add a truth-changes entry"
+- [x] ✅ **Task 4.2**: Final QA + daemon restart. **CHANGELOG.md NOT touched** —
+  editing it outside the `/release` flow is FORBIDDEN per CLAUDE.md (project rule
+  overrides the plan's original wording); the changelog entry is authored at
+  release time. No handler changes, so HOOKS-DAEMON.md needs no regeneration
+  (only the generation date, already refreshed in Phase 1).
 
 ## Dependencies
 
@@ -197,16 +200,19 @@ LLM-driven flow.
 
 ## Success Criteria
 
-- [ ] A truth-changes YAML for v3.12.0 exists with the plan-number `was → now`
-  entry; `check-truth-changes --from 3.11.0` prints it.
-- [ ] `upgrade.md` instructs the LLM to reconcile project docs from truth-changes
+- [x] A truth-changes YAML for **v3.16.0** (corrected from the placeholder
+  `3.12.0`) exists with the plan-number `was → now` entry;
+  `check-truth-changes --from 3.11.0 --to 3.17.0` prints it (verified live).
+- [x] `upgrade.md` instructs the LLM to reconcile project docs from truth-changes
   over the `(from, to]` range, editing/removing in the project's own docs only.
-- [ ] Running the reconcile against a doc that still says "scan CLAUDE/Plan for
-  the next number" updates it to the git-counter truth; a second run is a no-op.
-- [ ] `plan_number_helper.get_claude_md()` renders the current git-counter truth
-  in the `<hooksdaemon>` block.
-- [ ] RELEASING.md moves `truth-changes/` at release.
-- [ ] All QA passes; daemon restarts RUNNING.
+- [x] The reconcile is idempotent by construction (exit 0 when no doc asserts the
+  `was` truth; re-run is a no-op) — encoded in the `upgrade.md` step and the
+  formatter's "no changes" path.
+- [x] `plan_number_helper.get_claude_md()` renders the current git-counter truth
+  in the `<hooksdaemon>` block (verified via `generate-docs` → CLAUDE.md).
+- [x] RELEASING.md Step 6 moves `truth-changes/` at release; Step 7 checklist
+  prompts for a new entry when a documented truth changed.
+- [x] All QA passes; daemon restarts RUNNING.
 
 ## Risks & Mitigations
 

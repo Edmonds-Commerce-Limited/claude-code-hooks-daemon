@@ -100,9 +100,7 @@ class TestTruthChangeManifestParsing:
 
     def test_from_dict_missing_was_raises(self) -> None:
         with pytest.raises(KeyError):
-            TruthChangeManifest.from_dict(
-                {"version": "3.16.0", "truth_changes": [{"now": "y"}]}
-            )
+            TruthChangeManifest.from_dict({"version": "3.16.0", "truth_changes": [{"now": "y"}]})
 
 
 # ---------------------------------------------------------------------------
