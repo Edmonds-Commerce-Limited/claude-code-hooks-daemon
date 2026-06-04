@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.18.3] - 2026-06-04
+
+### Fixed
+
+- **Single-daemon enforcement now targets only genuine daemon server processes** — `find_all_daemon_processes` / `_is_daemon_process` previously matched ANY process whose cmdline contained `claude_code_hooks_daemon`, including transient CLI helpers (`status`, `stop`, `logs`, `health`, `repair`, `check-truth-changes`, `generate-docs`), hook forwarders (`claude_code_hooks_daemon.hooks.*`), and the short-lived start/restart parent. Under container single-daemon enforcement these were SIGTERMed — which is what allowed a concurrent `start` to terminate an in-flight starter process (the root cause that produced the v3.18.2 exit-143 symptom). Fix introduces `_is_daemon_server_process`, which matches ONLY genuine daemon server cmdlines: the `claude_code_hooks_daemon.daemon.cli` module token PLUS a `start` or `restart` subcommand appearing after it. The broad name/substring match and the `DAEMON_PROCESS_NAME` constant are removed. The `{start, restart}` allowlist is provably complete — daemonization (`os.fork` / `os.setsid` / `HooksDaemon` / `asyncio.run`) lives only in `cmd_start`, reachable only from the `start` subcommand and from `cmd_restart` which calls `cmd_start`; `os.fork` preserves argv — giving zero false negatives, guarded by a dedicated unit test. Project-root scoping is preserved.
+
 ## [3.18.2] - 2026-06-04
 
 ### Fixed
