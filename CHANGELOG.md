@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.18.0] - 2026-06-04
+
+This is a **minor release** delivering the truth-changes project-doc reconciliation mechanism (Plan 00118) — a per-version `was → now` list that drives downstream projects to update their own docs when the daemon changes a documented truth — plus a container-mode single-daemon enforcement scoping fix and supporting governance/docs.
+
+### Added
+
+- **Truth-changes project-doc reconciliation mechanism (Plan 00118)** — New per-version `CLAUDE/UPGRADES/truth-changes/v{X.Y.Z}.yaml` files record statements that **were true** about working in a project but became false: a two-key `was`/`now` list, where `now: ~` retires a truth with no replacement. A new `install/truth_changes.py` range loader (mirroring `config_migrations`) and a `check-truth-changes --from --to` CLI command surface the aggregated list for any version range (exit `0` = none, `1` = changes present, `2` = error). The `upgrade.md` skill flow gains a reconciliation step that feeds the project LLM the truth-changes for the `(from, to]` range it crossed and instructs it to update the project's own docs (`CLAUDE/`, `docs/`, `README*`, `AGENTS*` — never `.claude/hooks-daemon/` internals).
+- **`plan_number_helper.get_claude_md()` now returns the git-counter current-truth (Plan 00118)** — The handler previously returned `None`, so the daemon injected no always-on guidance about plan numbering. It now renders a `<hooksdaemon>` section stating the next plan number comes from `git config --local hooksdaemon.latestPlanNumber` (folder scan only as an unset-bootstrap), matching the handler's own block message.
+- **Backfilled truth-changes for v3.12.0, v3.16.0, v3.17.0 (Plan 00118)** — Reviewed v3.10.0..v3.17.0 (12 releases) and authored the three genuine downstream-facing truth-changes: plan-completion dates → commit hashes (v3.12.0), plan-number folder-scan → git counter (v3.16.0), and the removal of the workflow-state-across-compaction subsystem + `docs/WORKFLOWS.md` (v3.17.0, `now: ~`). Most releases are internal and yield none.
+- **`plan_time_estimates.get_claude_md()` always-on guidance (release guidance audit)** — The `plan_time_estimates` handler hard-blocks time estimates in `CLAUDE/Plan/*.md` but previously returned `None`, so agents hit the block unwarned. It now renders a `<hooksdaemon>` section ("plans describe WHAT, not WHEN") listing the blocked estimate kinds (effort, per-phase durations, target dates, ETA/deadline) and noting that technical durations like cache TTLs are allowed.
+
+### Changed
+
+- **`RELEASING.md` Step 6/7 governance for truth-changes (Plan 00118)** — Step 6 now moves `UNRELEASED/truth-changes/v*.yaml` into the live `truth-changes/` directory at release (with an ABORT condition if any remain); Step 7's Opus documentation-review checklist prompts for a new truth-changes entry whenever a release changes a documented truth.
+- **Release flow mandates absolute paths (RELEASING.md)** — Every command in the release flow must use `/workspace/...` absolute paths and never `cd` into a subdirectory, after a v3.17.0 release attempt silently skipped tag + GitHub-release creation when a stray `cd` broke later relative-path commands.
+
+### Fixed
+
+- **Single-daemon enforcement scoped to the project root (container PID-namespace safety)** — In container mode, `enforce_single_daemon()` previously SIGTERM'd ALL `claude_code_hooks_daemon` processes regardless of which project they served. When a container shares PID-namespace visibility with its host or another container (e.g. a bind-mounted `untracked/`), the startup sweep could kill a daemon serving a completely different project, dropping that project's session mid-flight. `find_all_daemon_processes()` now takes an optional project-root filter — each candidate's root is derived from its `--project-root` flag or the venv path in its interpreter, and only same-project daemons are terminated. A daemon whose root cannot be positively determined is left running (fail-safe). Legacy system-wide behaviour is preserved when no filter is passed.
+- **Reconciled the daemon's own docs against the backfilled truth-changes (Plan 00118 dogfood)** — Removed a stale "Workflow state persistence" feature claim from `README.md`, two broken `docs/WORKFLOWS.md` links and the removed-subsystem description from `docs/PLAN_SYSTEM.md`, a dated-completion example, and a dead acceptance-test scenario + fixture for the removed Workflow State Restoration handler.
+
 ## [3.17.0] - 2026-05-29
 
 ### Added
