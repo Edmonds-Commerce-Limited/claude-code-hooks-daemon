@@ -139,15 +139,6 @@ handlers:
         decision: allow
         reason_contains: ["git status", "context"]
 
-  workflow-state:
-    event_type: SessionStart
-    priority: null
-    terminal: false
-    tests:
-      - pattern: "session start"
-        decision: allow
-        reason_contains: ["workflow", "state"]
-
   bash-error-detector:
     event_type: PostToolUse
     priority: null

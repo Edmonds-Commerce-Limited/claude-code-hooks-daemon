@@ -104,7 +104,6 @@ The daemon ships with 73 production handlers across 13 event types, covering the
 
 - **YOLO container detection** — Identifies container environments with confidence scoring
 - **Version checker** — Alerts when the daemon is out of date
-- **Workflow state persistence** — Saves and restores workflow state across conversation compaction
 
 ---
 

@@ -8,14 +8,9 @@ A structured planning methodology for organizing development work through number
 
 ---
 
-## Important Distinction
+## Scope
 
-**Plans vs Workflows** - These are two completely separate concepts:
-
-- **Plans** (this document): Numbered folders (`00001-`, `00002-`, etc.) for tracking development work. Each plan has a `PLAN.md` with tasks, goals, and status.
-- **Workflows** (see [WORKFLOWS.md](WORKFLOWS.md)): Repeatable processes (like `page-orchestration`, `qa-skill`, `release`) that survive conversation compaction through state files.
-
-This document covers **Plans only**. For workflow documentation, see [WORKFLOWS.md](WORKFLOWS.md).
+**Plans** are numbered folders (`00001-`, `00002-`, etc.) for tracking development work. Each plan has a `PLAN.md` with tasks, goals, and status. This document covers the Plan system only.
 
 ---
 
@@ -247,7 +242,7 @@ project-root/
 - [00043: Bug Fix Y](00043-bug-fix-y/PLAN.md) - Not Started
 
 ## Completed Plans
-- [00041: Refactoring Z](Completed/00041-refactoring-z/PLAN.md) - Complete (2026-02-15)
+- [00041: Refactoring Z](Completed/00041-refactoring-z/PLAN.md) - Complete (commit a1b2c3d)
 
 ## Plan Statistics
 - **Total Plans Created**: 43

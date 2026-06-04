@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Test workflow handlers
-# Tests: Planning, Git context injection, Workflow state restoration
+# Tests: Planning, Git context injection
 
 set -euo pipefail
 
@@ -36,18 +36,6 @@ log_info "Expected: Handler adds git status to context (non-blocking)"
 
 log_info "Test 2.2: Git context should include branch and status"
 log_info "Expected: Context includes current branch and working tree status"
-
-echo ""
-
-# Test 3: Workflow State Restoration Handler
-echo "Test 3: Workflow State Restoration Handler"
-echo "-------------------------------------------"
-
-log_info "Test 3.1: Session start should restore workflow state"
-log_info "Expected: Handler restores previous workflow context (non-blocking)"
-
-log_info "Test 3.2: State restoration should include plan context"
-log_info "Expected: If in plan mode, context restored"
 
 echo ""
 echo "========================================"
