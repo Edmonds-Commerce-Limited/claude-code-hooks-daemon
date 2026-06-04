@@ -4,16 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-### Docs / Upgrade Experience
-
-- [00118: Truth-Changes — Project Doc Reconciliation on Upgrade](00118-docs-upgrade-guidance-mechanism/PLAN.md) - Not Started
-
-  - Simple per-version `was true → now true` list (empty `now` = remove all reference); the project LLM reconciles its own docs against it
-  - Delivered **through the existing upgrade flow** (`upgrade.md` + `UPGRADE_METADATA` already carries `from→to`) — **no marker, no staleness detection, no SessionStart push** (deliberately simplified from an over-engineered first draft; see PLAN design-history note + `archive/design1/`)
-  - Small `check-truth-changes --from --to` CLI for re-discovery; proof entry = plan-number folder-scan → git-counter; + fix `plan_number_helper.get_claude_md()` (returns `None` today)
-  - Related: issue #32 (reframe SessionStart messages as human-only — LLM ignores them)
-  - Exploration history (research, 4× ideation, triage) archived under `archive/design1/`
-
 ### Infrastructure / Bootstrap
 
 - [00110: Python Interpreter Discovery — DRY Consolidation & Latest-Always Policy](00110-python-discovery-dry-consolidation/PLAN.md) - Not Started
@@ -73,6 +63,13 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00118: Truth-Changes — Project Doc Reconciliation on Upgrade](Completed/00118-docs-upgrade-guidance-mechanism/PLAN.md) - Complete
+
+  - Per-version `was → now` truth-changes list (`now: ~` = remove all reference); the project LLM reconciles its own docs against it at upgrade time
+  - Delivered through the existing upgrade flow (`upgrade.md` step reads `check-truth-changes` over the `(from, to]` range from `UPGRADE_METADATA`) — no marker, no staleness detection, no SessionStart push (deliberately simplified)
+  - `install/truth_changes.py` range loader + `check-truth-changes` CLI; proof entry = v3.16.0 plan-number folder-scan → git-counter; fixed `plan_number_helper.get_claude_md()` (was `None`); RELEASING.md Step 6/7 governance
+  - Delivered in commits `7aed50e`, `14f77c9`, `a4e49c0`, `090d47f`; exploration history archived under `Completed/00118-docs-upgrade-guidance-mechanism/archive/design1/`
 
 - [00115: Parallel-Batch Cancellation Footgun Mitigation](Completed/00115-parallel-batch-cancellation-footgun/PLAN.md) - Complete
 
@@ -796,11 +793,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 118
-- **Completed**: 96 (1 with reduced scope, 4 already-shipped)
-- **Active**: 6 (1 docs-upgrade-guidance, 1 python-discovery, 1 question-blocker, 1 stop-quality, 2 long-running/review) + 1 in-progress build (00116 CLAUDE.md compression)
+- **Completed**: 97 (1 with reduced scope, 4 already-shipped)
+- **Active**: 5 (1 python-discovery, 1 question-blocker, 1 stop-quality, 2 long-running/review) + 1 in-progress build (00116 CLAUDE.md compression)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping, 00081 - superseded by 00082)
-- **Last reconciled by**: Plans 00114 (robust upgrade) + 00115 (batch-cancellation footgun) close-out; Plan 00116 (CLAUDE.md token compression) finalised and in build (not yet released)
+- **Last reconciled by**: Plan 00118 (truth-changes doc reconciliation on upgrade) close-out; Plan 00116 (CLAUDE.md token compression) finalised and in build (not yet released)
 
 ## Quick Links
 

@@ -1,6 +1,6 @@
 # Plan 00118: Truth-Changes — Project Doc Reconciliation on Upgrade
 
-**Status**: Not Started
+**Status**: Complete
 **Created**: 2026-06-04
 **Owner**: Claude (Opus)
 **Priority**: Medium
@@ -234,4 +234,15 @@ LLM-driven flow.
 - Filed issue #32 (reframe SessionStart messages as human-only) — informs the
   "deliver via upgrade flow, not session message" decision here.
 - Next plan number reserved via git counter `hooksdaemon.latestPlanNumber` (118).
-- Delivery commit hash(es) to be recorded here on completion.
+- **Delivered** across four commits on `main`:
+  - `7aed50e` — plan created (simplified design + archived exploration)
+  - `14f77c9` — Phase 1: truth-changes format + v3.16.0 plan-number entry +
+    `plan_number_helper.get_claude_md()` current-truth fix
+  - `a4e49c0` — Phase 3: `check-truth-changes` CLI + `install/truth_changes.py`
+  - `090d47f` — Phases 2+4: `upgrade.md` reconciliation step + RELEASING.md
+    governance + CLI coverage tests
+- Placement correction recorded in-plan: the plan-number truth changed in
+  **v3.16.0** (Plan 00112), not the PLAN's `3.12.0` placeholder; the entry is a
+  backfill living in the live `truth-changes/` dir, not UNRELEASED staging.
+- QA 13/13 throughout; coverage held at ≥95% (95.04%); daemon RUNNING after each
+  change.
