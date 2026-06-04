@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.18.1] - 2026-06-04
+
+### Fixed
+
+- **`scripts/upgrade.sh` now runs `check-truth-changes` and prints a reconciliation summary** — After a successful upgrade, the bare script (not the `upgrade.md` skill flow) now calls `check-truth-changes --from <from> --to <to>` and prints a prominent "Project-doc reconciliation" summary block before the `UPGRADE_METADATA` output. Agents running the script directly rather than following `upgrade.md` step 4 therefore still see which project docs need reconciling. No daemon package code changed; this patch only touches the canonical `scripts/upgrade.sh` (delivered via the thin-shim from main HEAD) and its acceptance test (`tests/acceptance/test_upgrade_metadata_emission.py`).
+
 ## [3.18.0] - 2026-06-04
 
 This is a **minor release** delivering the truth-changes project-doc reconciliation mechanism (Plan 00118) — a per-version `was → now` list that drives downstream projects to update their own docs when the daemon changes a documented truth — plus a container-mode single-daemon enforcement scoping fix and supporting governance/docs.
