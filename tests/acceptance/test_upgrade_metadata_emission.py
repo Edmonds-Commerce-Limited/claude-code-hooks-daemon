@@ -314,3 +314,116 @@ def test_layer1_upgrade_sh_emits_metadata_block(tmp_path: Path) -> None:
         if venv_python is not None:
             _stop_test_daemon(venv_python, project_root, env)
         _remove_daemon_clone(daemon_dir)
+
+
+@pytest.mark.slow
+def test_layer1_upgrade_sh_prints_truth_changes_summary(tmp_path: Path) -> None:
+    """Layer 1 ``scripts/upgrade.sh`` must print a project-doc reconciliation summary.
+
+    After a successful upgrade the bare script must run
+    ``check-truth-changes --from <from> --to <to>`` and surface the result
+    under a prominent, stable header so an agent running the bare script
+    (not following upgrade.md step 4) still SEES that project docs may need
+    reconciling. We assert on the unique header marker string the
+    implementation prints; the rest of the summary content is lenient.
+    """
+    if not INSTALL_VERSION_SH.is_file():
+        pytest.skip(f"install_version.sh missing at {INSTALL_VERSION_SH}")
+    if not LAYER1_UPGRADE_SH.is_file():
+        pytest.skip(f"Layer 1 upgrade.sh missing at {LAYER1_UPGRADE_SH}")
+    if shutil.which("uv") is None:
+        pytest.skip("uv not installed in this environment")
+
+    project_root = tmp_path / "fresh-project"
+    project_root.mkdir()
+    (project_root / ".claude").mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=project_root, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin", "https://example.invalid/fake.git"],
+        cwd=project_root,
+        check=True,
+        capture_output=True,
+    )
+
+    daemon_dir = project_root / ".claude" / "hooks-daemon"
+    _create_daemon_clone(daemon_dir)
+    venv_python: Path | None = None
+    env = os.environ.copy()
+
+    try:
+        env["HOSTNAME"] = _make_test_hostname()
+        env.pop("CI", None)
+        env.pop("HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP", None)
+        env["NO_COLOR"] = "1"
+
+        install_result = subprocess.run(
+            [BASH, str(INSTALL_VERSION_SH), str(project_root), str(daemon_dir)],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+            timeout=_INSTALL_TIMEOUT_SECONDS,
+            cwd=project_root,
+        )
+        if install_result.returncode != 0:
+            pytest.fail(
+                "Pre-upgrade install must exit 0 to set up the fixture.\n"
+                f"returncode={install_result.returncode}\n"
+                f"stdout:\n{install_result.stdout}\n"
+                f"stderr:\n{install_result.stderr}"
+            )
+
+        venv_candidates = sorted((daemon_dir / "untracked").glob("venv-py*"))
+        assert venv_candidates, (
+            f"Install must produce a fingerprint-keyed venv under " f"{daemon_dir}/untracked/."
+        )
+        venv_python = venv_candidates[0] / "bin" / "python"
+        assert venv_python.is_file(), f"venv Python must exist: {venv_python}"
+
+        tag_proc = subprocess.run(
+            ["git", "-C", str(daemon_dir), "describe", "--tags", "--abbrev=0"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        target_tag = tag_proc.stdout.strip()
+        assert target_tag, f"Could not resolve a tag in {daemon_dir}"
+
+        env["HOOKS_DAEMON_PYTHON"] = str(venv_python)
+        upgrade_result = subprocess.run(
+            [
+                BASH,
+                str(LAYER1_UPGRADE_SH),
+                "--project-root",
+                str(project_root),
+                target_tag,
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+            timeout=_UPGRADE_TIMEOUT_SECONDS,
+            cwd=project_root,
+        )
+
+        if upgrade_result.returncode != 0:
+            pytest.fail(
+                "Layer 1 upgrade.sh must exit 0 against an idempotent target tag.\n"
+                f"returncode={upgrade_result.returncode}\n"
+                f"--- stdout ---\n{upgrade_result.stdout}\n"
+                f"--- stderr ---\n{upgrade_result.stderr}"
+            )
+
+        # The bare script must surface the truth-changes reconciliation
+        # summary under this stable, unique header marker on stdout.
+        assert "Project-doc reconciliation" in upgrade_result.stdout, (
+            "Layer 1 upgrade.sh must print a 'Project-doc reconciliation' summary "
+            "(from check-truth-changes) on stdout so agents running the bare script "
+            "see that project docs may need reconciling.\n"
+            f"--- stdout (last 3000 chars) ---\n{upgrade_result.stdout[-3000:]}"
+        )
+
+    finally:
+        if venv_python is not None:
+            _stop_test_daemon(venv_python, project_root, env)
+        _remove_daemon_clone(daemon_dir)

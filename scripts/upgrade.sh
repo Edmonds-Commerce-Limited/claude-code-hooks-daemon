@@ -463,6 +463,46 @@ if [ -f "$_metadata_config_backup" ] && [ -f "$_metadata_config_file" ]; then
     fi
 fi
 
+# ------------------------------------------------------------
+# Project-doc reconciliation summary (truth-changes)
+# ------------------------------------------------------------
+# Run `check-truth-changes` and surface the result with a prominent header
+# so an agent running the bare script (not following upgrade.md step 4)
+# still SEES that project docs may need reconciling. Printed to stdout
+# BEFORE the UPGRADE_METADATA sentinel so it never pollutes the
+# machine-parsed block.
+#
+# FROM_VERSION/TARGET_VERSION both carry a leading `v`; the CLI's
+# _parse_version does NOT strip it, so we pass the `#v`-stripped values.
+if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
+    # check-truth-changes exits 1 when changes exist (normal!), 0 when none,
+    # 2 on error. `set -euo pipefail` is active, so capture rc via the
+    # `if cmd; then ... else _rc=$?` idiom: the command substitution runs
+    # inside the `if` condition where a non-zero exit does NOT trip errexit,
+    # and we record the exact rc in the else branch.
+    _truth_rc=0
+    if _truth_out="$("$_metadata_venv_python" -m claude_code_hooks_daemon.daemon.cli \
+        check-truth-changes \
+        --from "${FROM_VERSION#v}" \
+        --to "${TARGET_VERSION#v}" 2>&1)"; then
+        _truth_rc=0
+    else
+        _truth_rc=$?
+    fi
+
+    if [ "$_truth_rc" -eq 1 ]; then
+        echo ""
+        _info "${_BOLD}Project-doc reconciliation needed${_NC}"
+        echo "$_truth_out"
+        _info "Reconcile your project's own docs per upgrade.md step 4."
+        _info "Re-run manually: \"$_metadata_venv_python\" -m claude_code_hooks_daemon.daemon.cli check-truth-changes --from ${FROM_VERSION#v} --to ${TARGET_VERSION#v}"
+    elif [ "$_truth_rc" -eq 0 ]; then
+        _ok "Project-doc reconciliation: no changes needed for this upgrade."
+    else
+        _warn "Project-doc reconciliation summary unavailable (check-truth-changes exit $_truth_rc; older target?)."
+    fi
+fi
+
 # Emit the sentinel-wrapped block. Leading newline ensures the open sentinel
 # starts on its own line even if Layer 2's last output had no trailing \n.
 printf '\n<<<UPGRADE_METADATA\n'
