@@ -1,0 +1,7 @@
+version: "3.17.0"
+truth_changes:
+  - was: >
+      After context compaction the daemon restores prior workflow state (the
+      workflow_state_pre_compact / workflow_state_restoration handlers), and
+      workflow conventions are documented in docs/WORKFLOWS.md.
+    now: ~   # removed in v3.17.0 — delete references to workflow-state restoration and to docs/WORKFLOWS.md; there is no replacement

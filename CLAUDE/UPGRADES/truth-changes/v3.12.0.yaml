@@ -1,0 +1,12 @@
+version: "3.12.0"
+truth_changes:
+  - was: >
+      When a plan is completed, record its completion date in the plan index
+      (e.g. CLAUDE/Plan/README.md) and in the plan's status header — dated entries
+      such as "Completed: 2026-02-10".
+    now: >
+      Do not record completion dates in plan indexes or in instruction files. Cite
+      the delivery commit hash(es) in the plan's "Notes & Updates" section instead —
+      git history is the authoritative source for "when". The
+      validate_instruction_content handler blocks ephemeral ISO-date content in
+      CLAUDE.md / README.md.
