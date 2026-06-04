@@ -874,6 +874,19 @@ If using `--json`, include `comments` in the field list instead of adding `--com
 
 If using `--json`, include `comments` in the field list instead of adding `--comments`.
 
+## plan_time_estimates — plans describe WHAT, not WHEN
+
+Writing time estimates into a `CLAUDE/Plan/*.md` file is blocked. Plans capture the work to be done, not how long it will take.
+
+**Blocked in plan documents:**
+
+- Effort estimates — `**Estimated Effort**: 4 hours`, `Total Estimated Time: 2 days`
+- Per-phase durations — `Phase 1: ... (3 days)`, `takes 8-12 hours`
+- Target/completion dates — `**Target Completion**: 2026-06-30`, `Completion: 2026-06-30`
+- `ETA:`, `timeline:`, `deadline:`, `due date:` lines
+
+**Instead:** break work into concrete tasks and implementation steps, and let the user decide scheduling. Technical durations that describe a feature (cache TTL, session timeout, retention window) are allowed — only work/effort estimates are blocked.
+
 ## npm_command — use llm: prefixed npm commands
 
 Direct `npm run` and `npx` commands are blocked or advised against. Projects with `llm:` prefixed scripts in `package.json` should use those instead.
