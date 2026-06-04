@@ -457,3 +457,24 @@ class TestPlanTimeEstimatesHandler:
             },
         }
         assert handler.matches(hook_input) is True
+
+    def test_get_claude_md_warns_about_time_estimates(
+        self, handler: PlanTimeEstimatesHandler
+    ) -> None:
+        """get_claude_md() must give always-on guidance, not None.
+
+        This is a blocking handler (handle() returns DENY), so without
+        always-on guidance an agent authoring a plan with an effort/timeline
+        line is hard-blocked with no forewarning.
+        """
+        guidance = handler.get_claude_md()
+
+        assert guidance is not None, "blocking handler must not return None"
+        assert guidance.lstrip().startswith("#")
+        # Names the rule: plans describe WHAT, not WHEN
+        lowered = guidance.lower()
+        assert "what" in lowered and "when" in lowered
+        # References the plan-file scope so the agent recognises the topic
+        assert "Plan/" in guidance or "plan document" in lowered
+        # Mentions the forbidden estimate kinds
+        assert "hour" in lowered or "estimate" in lowered

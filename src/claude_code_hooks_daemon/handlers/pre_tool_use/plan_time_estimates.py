@@ -124,7 +124,21 @@ class PlanTimeEstimatesHandler(Handler):
         )
 
     def get_claude_md(self) -> str | None:
-        return None
+        return (
+            "## plan_time_estimates — plans describe WHAT, not WHEN\n\n"
+            "Writing time estimates into a `CLAUDE/Plan/*.md` file is blocked. Plans "
+            "capture the work to be done, not how long it will take.\n\n"
+            "**Blocked in plan documents:**\n\n"
+            "- Effort estimates — `**Estimated Effort**: 4 hours`, `Total Estimated Time: 2 days`\n"
+            "- Per-phase durations — `Phase 1: ... (3 days)`, `takes 8-12 hours`\n"
+            "- Target/completion dates — `**Target Completion**: 2026-06-30`, "
+            "`Completion: 2026-06-30`\n"
+            "- `ETA:`, `timeline:`, `deadline:`, `due date:` lines\n\n"
+            "**Instead:** break work into concrete tasks and implementation steps, and "
+            "let the user decide scheduling. Technical durations that describe a feature "
+            "(cache TTL, session timeout, retention window) are allowed — only work/effort "
+            "estimates are blocked."
+        )
 
     def get_acceptance_tests(self) -> list[Any]:
         """Return acceptance tests for Plan Time Estimates."""
