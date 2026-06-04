@@ -60,8 +60,18 @@ stop_daemon_safe() {
 # prints the daemon's error output so users see actionable messages
 # (e.g., "No git remote 'origin' configured").
 #
+# The starter's exit code and captured output are ALWAYS exposed via the
+# globals DAEMON_START_EXIT_CODE and DAEMON_START_OUTPUT so callers that trust
+# the daemon's actual RUNNING status over the starter's exit code (e.g.
+# restart_daemon_verified, which must tolerate single-daemon enforcement
+# SIGTERMing a superseded starter — exit 143) can defer the decision.
+#
 # Args:
 #   $1 - venv_python: Path to venv Python binary
+#   $2 - quiet_on_failure (optional, default: false)
+#        When "true", suppresses the hard-failure print so the caller can
+#        decide whether the start truly failed (used by restart_daemon_verified
+#        which consults the authoritative status poll instead).
 #
 # Returns:
 #   Exit code 0 if started successfully
@@ -69,6 +79,7 @@ stop_daemon_safe() {
 #
 start_daemon_safe() {
     local venv_python="$1"
+    local quiet_on_failure="${2:-false}"
 
     if [ -z "$venv_python" ]; then
         print_warning "start_daemon_safe: venv_python parameter required"
@@ -88,15 +99,21 @@ start_daemon_safe() {
     local exit_code
     daemon_output=$("$venv_python" -m claude_code_hooks_daemon.daemon.cli start 2>&1) && exit_code=0 || exit_code=$?
 
+    # Expose the starter result for callers that defer to the status poll.
+    DAEMON_START_EXIT_CODE="$exit_code"
+    DAEMON_START_OUTPUT="$daemon_output"
+
     if [ "$exit_code" -eq 0 ]; then
         print_verbose "Daemon started"
         return 0
     else
-        print_error "Daemon failed to start (exit code $exit_code)"
-        if [ -n "$daemon_output" ]; then
-            echo ""
-            echo "$daemon_output"
-            echo ""
+        if [ "$quiet_on_failure" != "true" ]; then
+            print_error "Daemon failed to start (exit code $exit_code)"
+            if [ -n "$daemon_output" ]; then
+                echo ""
+                echo "$daemon_output"
+                echo ""
+            fi
         fi
         return 1
     fi
@@ -203,11 +220,18 @@ restart_daemon_verified() {
     stop_daemon_safe "$venv_python"
     sleep 1
 
-    # Step 2: Start daemon
-    if ! start_daemon_safe "$venv_python"; then
-        print_error "Failed to start daemon"
-        return 1
-    fi
+    # Step 2: Start daemon — but do NOT treat the starter's exit code as
+    # authoritative. Under single-daemon enforcement a concurrent start
+    # (e.g. a live hook-triggered auto-start during an upgrade) can SIGTERM
+    # this starter (exit 143) while still bringing a daemon up. The source of
+    # truth for "did the daemon start" is the status poll below ("is a daemon
+    # RUNNING and serving?"), so we run the starter in quiet mode, record its
+    # result for diagnostics, and ALWAYS proceed to the poll.
+    DAEMON_START_EXIT_CODE=0
+    DAEMON_START_OUTPUT=""
+    if start_daemon_safe "$venv_python" "true"; then :; fi
+    local start_exit_code="${DAEMON_START_EXIT_CODE:-0}"
+    local start_output="${DAEMON_START_OUTPUT:-}"
 
     # Step 3: Poll for daemon RUNNING status — up to 15s.
     # Plan 00100 Task 0.2: extended timeout (from implicit 2s) with
@@ -250,6 +274,17 @@ restart_daemon_verified() {
     # Clean up polling stderr log (contents logged only if failure below).
     if [ "$daemon_running" -eq 0 ]; then
         print_error "Daemon is not running after restart"
+        # Surface the starter diagnostics ONLY now that the authoritative poll
+        # has confirmed no daemon is running — a non-zero starter exit on its
+        # own (e.g. 143 from enforcement supersession) is not a failure.
+        if [ "$start_exit_code" -ne 0 ]; then
+            print_error "Daemon start command exited with code ${start_exit_code}"
+            if [ -n "$start_output" ]; then
+                echo ""
+                echo "$start_output"
+                echo ""
+            fi
+        fi
         echo ""
         echo "Status output:"
         echo "$status_output"
