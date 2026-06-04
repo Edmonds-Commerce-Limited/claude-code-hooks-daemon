@@ -390,3 +390,35 @@ class TestPlanNumberHelperHandler:
 
         # Should NOT crash or include workflow docs
         assert "PlanWorkflow.md" not in result.reason
+
+    def test_get_claude_md_states_git_counter_is_authoritative(self) -> None:
+        """get_claude_md() must return the current-truth guidance, not None.
+
+        The handler only fires reactively (blocking a broken discovery command);
+        without always-on guidance the agent never learns the git-counter is the
+        source of truth. This is the motivating gap for Plan 00118: the injected
+        <hooksdaemon> block and the handler's block message must tell the same
+        story.
+        """
+        handler = PlanNumberHelperHandler()
+
+        guidance = handler.get_claude_md()
+
+        assert guidance is not None, "get_claude_md() must not return None"
+        # Names the authoritative git config key
+        assert "hooksdaemon.latestPlanNumber" in guidance
+        # Frames the git counter as the source of truth
+        assert "git config" in guidance.lower()
+        # Folder scan is explicitly the fallback, not the primary method
+        assert "fallback" in guidance.lower() or "only if" in guidance.lower()
+        # References the plan directory so the agent recognises the topic
+        assert "CLAUDE/Plan" in guidance
+
+    def test_get_claude_md_renders_a_markdown_heading(self) -> None:
+        """The guidance should be a markdown section (renders in <hooksdaemon>)."""
+        handler = PlanNumberHelperHandler()
+
+        guidance = handler.get_claude_md()
+
+        assert guidance is not None
+        assert guidance.lstrip().startswith("#")

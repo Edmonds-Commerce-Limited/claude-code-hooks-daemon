@@ -113,18 +113,20 @@ project's docs (not a regex). `now` is the replacement, or null/empty to mean
 
 ### Phase 1: Format, first entry, current-truth fix
 
-- [ ] ⬜ **Task 1.1**: Define the truth-changes format + staging convention
-  - [ ] ⬜ Document the `{version, truth_changes:[{was, now}]}` schema and the
-    empty-`now`-means-remove rule (a short `truth-changes/README.md`)
-  - [ ] ⬜ Create `CLAUDE/UPGRADES/UNRELEASED/truth-changes/` staging dir
-- [ ] ⬜ **Task 1.2**: Author the plan-number truth-change (proof entry)
-  - [ ] ⬜ Write the v3.12.0 entry (the worked example above), staged for the
-    next release move
-- [ ] ⬜ **Task 1.3**: Fix `plan_number_helper.get_claude_md()` (TDD)
-  - [ ] ⬜ Failing test: returns markdown stating the git-counter is authoritative
+- [x] ✅ **Task 1.1**: Define the truth-changes format + staging convention
+  - [x] ✅ Document the `{version, truth_changes:[{was, now}]}` schema and the
+    empty-`now`-means-remove rule (`CLAUDE/UPGRADES/truth-changes/README.md`)
+  - [x] ✅ Create `CLAUDE/UPGRADES/UNRELEASED/truth-changes/` staging dir (+ README)
+- [x] ✅ **Task 1.2**: Author the plan-number truth-change (proof entry)
+  - [x] ✅ Wrote the **v3.16.0** entry — corrected from the PLAN's `3.12.0`
+    placeholder: the git counter (Plan 00112) actually shipped in v3.16.0 per
+    `RELEASES/v3.16.0.md`. Staged at `UNRELEASED/truth-changes/v3.16.0.yaml`.
+- [x] ✅ **Task 1.3**: Fix `plan_number_helper.get_claude_md()` (TDD)
+  - [x] ✅ Failing test: returns markdown stating the git-counter is authoritative
     (folder-scan only as unset-bootstrap)
-  - [ ] ⬜ Implement; verify it renders in the `<hooksdaemon>` block on restart
-- [ ] ⬜ **Task 1.4**: QA + daemon restart verification
+  - [x] ✅ Implemented; renders in the `<hooksdaemon>` block (verified via
+    `generate-docs` → CLAUDE.md)
+- [x] ✅ **Task 1.4**: QA + daemon restart verification (13/13 PASSED, RUNNING)
 
 ### Phase 2: Delivery via the upgrade flow
 

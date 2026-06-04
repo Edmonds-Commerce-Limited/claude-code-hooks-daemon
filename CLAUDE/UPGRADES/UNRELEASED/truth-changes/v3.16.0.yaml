@@ -1,0 +1,11 @@
+version: "3.16.0"
+truth_changes:
+  - was: >
+      To find the next plan number, scan the CLAUDE/Plan/ folder for the highest
+      NNNNN- prefix (e.g. with ls / find / a glob pipeline) and add one.
+    now: >
+      Get the next plan number from `git config --local hooksdaemon.latestPlanNumber`
+      and add one (zero-padded to 5 digits). The daemon persists this counter
+      per-repository in .git/config and updates it automatically when a plan is
+      created, so it is stable across branches. Fall back to scanning CLAUDE/Plan/
+      (including Completed/) only when the git key is unset, to bootstrap the counter.
