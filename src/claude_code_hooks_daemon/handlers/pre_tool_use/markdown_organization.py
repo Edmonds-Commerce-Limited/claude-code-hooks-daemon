@@ -123,7 +123,7 @@ class MarkdownOrganizationHandler(Handler):
         return normalized
 
     def is_adhoc_instruction_file(self, file_path: str) -> bool:
-        """Check if this is CLAUDE.md, README.md, CHANGELOG.md, SKILL.md, agent file, or command file (allowed anywhere)."""
+        """Check if this is CLAUDE.md, README.md, CHANGELOG.md, SKILL.md, agent, command, or rules file (allowed anywhere)."""
         filename = Path(file_path).name.lower()
 
         # CLAUDE.md, README.md, and CHANGELOG.md allowed anywhere
@@ -139,7 +139,11 @@ class MarkdownOrganizationHandler(Handler):
 
         # Agent definitions in .claude/agents/ are allowed
         # Slash command definitions in .claude/commands/ are allowed
+        # Rules files in .claude/rules/ are allowed
         if ".claude/commands/" in normalized and file_path.endswith(".md"):
+            return True
+
+        if ".claude/rules/" in normalized and file_path.endswith(".md"):
             return True
 
         return bool(".claude/agents/" in normalized and file_path.endswith(".md"))
@@ -816,7 +820,8 @@ class MarkdownOrganizationHandler(Handler):
                 "3. ./eslint-rules/ - ESLint rule documentation\n"
                 "4. ./untracked/ - Ad-hoc temporary docs\n"
                 "5. ./RELEASES/ - Release notes\n"
-                "6. ./.claude/commands/ - Slash command definitions\n"
+                "6. ./.claude/commands/, ./.claude/agents/, ./.claude/rules/ - "
+                "Claude Code command/agent/rules definitions\n"
                 "7. ./vendor/, ./node_modules/ - Third-party dependencies\n"
                 "8. Standard repo-root files (exact root only): README.md, CHANGELOG.md,\n"
                 "   CONTRIBUTING.md, LICENSE.md, SECURITY.md, CODE_OF_CONDUCT.md,\n"
@@ -827,7 +832,8 @@ class MarkdownOrganizationHandler(Handler):
                 "- Is this temporary/ad-hoc? -> untracked/\n"
                 "- Is this for humans? -> docs/\n"
                 "- Is this a release note? -> RELEASES/\n"
-                "- Is this a slash command? -> .claude/commands/\n\n"
+                "- Is this a slash command? -> .claude/commands/\n"
+                "- Is this a Claude Code rules file? -> .claude/rules/\n\n"
                 "NEED A DIFFERENT LOCATION? Configure in .claude/hooks-daemon.yaml:\n"
                 "- allowed_markdown_paths: add regex patterns for extra allowed paths\n"
                 "- monorepo_subproject_patterns: for sub-projects with their own "

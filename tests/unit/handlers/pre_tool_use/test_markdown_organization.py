@@ -120,6 +120,22 @@ class TestMarkdownOrganizationHandler:
         assert handler.is_adhoc_instruction_file(".claude/commands/test.md") is True
         assert handler.is_adhoc_instruction_file("/workspace/.claude/commands/deploy.md") is True
 
+    def test_is_adhoc_instruction_file_returns_true_for_rules_files(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        """Rules definition files in .claude/rules/ are recognized (allowed anywhere)."""
+        assert handler.is_adhoc_instruction_file(".claude/rules/test.md") is True
+        assert handler.is_adhoc_instruction_file("/workspace/.claude/rules/style.md") is True
+        assert (
+            handler.is_adhoc_instruction_file("/workspace/.claude/rules/nested/python.md") is True
+        )
+
+    def test_is_adhoc_instruction_file_returns_false_for_rules_outside_claude(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        """A rules .md outside .claude/rules/ is not auto-allowed by this rule."""
+        assert handler.is_adhoc_instruction_file("docs/rules/test.md") is False
+
     def test_is_page_colocated_file_returns_true_for_research_files(
         self, handler: MarkdownOrganizationHandler
     ) -> None:
