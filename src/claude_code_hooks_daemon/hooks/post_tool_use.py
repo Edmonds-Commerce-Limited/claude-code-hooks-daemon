@@ -23,6 +23,9 @@ from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.handlers.post_tool_use.bash_error_detector import (
     BashErrorDetectorHandler,
 )
+from claude_code_hooks_daemon.handlers.post_tool_use.git_hooks_executable_fixer import (
+    GitHooksExecutableFixerHandler,
+)
 from claude_code_hooks_daemon.handlers.post_tool_use.hello_world import (
     HelloWorldPostToolUseHandler,
 )
@@ -45,6 +48,7 @@ def get_builtin_handlers() -> dict[str, type]:
     """
     return {
         "bash_error_detector": BashErrorDetectorHandler,
+        "git_hooks_executable_fixer": GitHooksExecutableFixerHandler,
         "lint_on_edit": LintOnEditHandler,
         "markdown_table_formatter": MarkdownTableFormatterHandler,
         "validate_eslint_on_write": ValidateEslintOnWriteHandler,

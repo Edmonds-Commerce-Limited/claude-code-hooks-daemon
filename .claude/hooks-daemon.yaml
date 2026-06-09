@@ -261,6 +261,10 @@ handlers:
       enabled: true
       priority: 26
 
+    git_hooks_executable_fixer:  # Auto-chmod +x git hooks git skipped as non-executable
+      enabled: true
+      priority: 27
+
   # SessionStart handlers (run when session starts)
   session_start:
     yolo_container_detection:  # Detects YOLO development environments (Docker, etc)

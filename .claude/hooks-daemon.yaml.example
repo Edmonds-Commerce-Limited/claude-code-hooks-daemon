@@ -218,6 +218,10 @@ handlers:
       enabled: false           # Enable for automatic markdown table alignment
       priority: 26
 
+    git_hooks_executable_fixer:  # Auto-chmod +x git hooks git skipped as non-executable
+      enabled: true
+      priority: 27
+
     validate_eslint_on_write:  # Runs ESLint after file writes
       enabled: false           # Enable for automatic ESLint validation
       priority: 20

@@ -72,6 +72,9 @@ class Priority:
     # Markdown table formatter (Priority: 26 - adjacent to lint_on_edit)
     MARKDOWN_TABLE_FORMATTER = 26
 
+    # Git hooks executable fixer (Priority: 27 - adjacent to other PostToolUse fixers)
+    GIT_HOOKS_EXECUTABLE_FIXER = 27
+
     # QA enforcement handlers (Priority: 30-35)
     QA_SUPPRESSION = 30
     VALIDATE_PLAN_NUMBER = 30

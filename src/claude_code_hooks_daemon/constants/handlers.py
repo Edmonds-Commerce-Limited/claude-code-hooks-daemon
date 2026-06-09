@@ -316,6 +316,11 @@ class HandlerID:
         config_key="bash_error_detector",
         display_name="bash-error-detector",
     )
+    GIT_HOOKS_EXECUTABLE_FIXER = HandlerIDMeta(
+        class_name="GitHooksExecutableFixerHandler",
+        config_key="git_hooks_executable_fixer",
+        display_name="git-hooks-executable-fixer",
+    )
     WEB_SEARCH_YEAR = HandlerIDMeta(
         class_name="WebSearchYearHandler",
         config_key="web_search_year",

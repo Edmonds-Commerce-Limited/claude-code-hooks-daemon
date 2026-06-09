@@ -64,6 +64,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00120: Git Hooks Executable Fixer Handler](Completed/00120-git-hooks-executable-fixer/PLAN.md) - Complete
+
+  - New `GitHooksExecutableFixerHandler` (PostToolUse, priority 27, non-terminal): detects git's `hint: The '...' hook was ignored because it's not set as executable` in Bash output and auto-remediates it
+  - Resolves the active hooks dir via `git rev-parse --git-path hooks` (worktree/`core.hooksPath` safe) and `os.chmod`s every non-`.sample`, non-executable hook with least-privilege exec bits (execute only where read is already granted); `.sample` and already-executable hooks untouched
+  - 23 unit tests, 100% handler-file coverage; full QA 13/13; live socket test verified 644 → 755 on a real pre-push hook through the running daemon
+
 - [00119: Scope Single-Daemon Enforcement to Actual Daemon Server Processes](Completed/00119-enforcement-scope-to-daemon-server/PLAN.md) - Complete
 
   - Root-cause follow-up to the v3.18.2 "exit 143" upgrade false-failure: `find_all_daemon_processes` matched **any** `claude_code_hooks_daemon` cmdline, so single-daemon enforcement could SIGTERM transient CLI helpers (`status`/`stop`/`logs`/…) and hook forwarders
@@ -799,12 +805,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 119
-- **Completed**: 98 (1 with reduced scope, 4 already-shipped)
+- **Total Plans Created**: 120
+- **Completed**: 99 (1 with reduced scope, 4 already-shipped)
 - **Active**: 5 (1 python-discovery, 1 question-blocker, 1 stop-quality, 2 long-running/review) + 1 in-progress build (00116 CLAUDE.md compression)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping, 00081 - superseded by 00082)
-- **Last reconciled by**: Plan 00119 (scope single-daemon enforcement to actual daemon server processes) close-out
+- **Last reconciled by**: Plan 00120 (git hooks executable fixer handler) close-out
 
 ## Quick Links
 
