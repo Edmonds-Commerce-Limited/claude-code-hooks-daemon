@@ -85,9 +85,9 @@ This file's lower half should list the tasks currently in this directory, so an 
 
 <!-- BEGIN TASK INDEX — regenerate when adding/removing tasks -->
 
-| File                      | Type            | Severity    | Applies to | One-line summary                                                                                                            |
-| ------------------------- | --------------- | ----------- | ---------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `01-prune-legacy-venv.md` | workflow-change | recommended | pre-v3.7.0 | Verify the legacy `untracked/venv/` was auto-removed on upgrade; use `prune-venvs --legacy` to clean it up manually if not. |
+| File                                               | Type             | Severity    | Applies to                    | One-line summary                                                                                                                            |
+| -------------------------------------------------- | ---------------- | ----------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `01-migrate-allowed-markdown-paths-to-additive.md` | config-migration | recommended | sets `allowed_markdown_paths` | Migrate the markdown_organization full override to the additive `extra_allowed_markdown_paths` so upstream defaults are kept automatically. |
 
 <!-- END TASK INDEX -->
 
