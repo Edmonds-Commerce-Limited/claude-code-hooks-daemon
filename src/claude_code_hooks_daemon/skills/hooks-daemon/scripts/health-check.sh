@@ -112,6 +112,21 @@ else
 fi
 # === SELF-BOOTSTRAP END ===
 
+# Plan 00122 BUG 4: make any non-zero exit honest. Under `set -euo pipefail` an
+# unguarded failure (e.g. sourcing _resolve-venv.sh when venv resolution dies)
+# would otherwise terminate the script with NO output, leaving the operator
+# nothing to act on (observed on macOS). This trap prints the script, exit
+# code, and failing line on a non-zero exit; it stays silent on success.
+_health_check_exit_trap() {
+    local rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo "" >&2
+        echo "❌ health-check.sh aborted (exit $rc) at line ${BASH_LINENO[0]:-unknown}." >&2
+        echo "   Re-run with 'bash -x \"$0\"' for a full trace, or check the daemon logs." >&2
+    fi
+}
+trap _health_check_exit_trap EXIT
+
 # Detect project root
 PROJECT_ROOT="$(pwd)"
 while [ "$PROJECT_ROOT" != "/" ]; do

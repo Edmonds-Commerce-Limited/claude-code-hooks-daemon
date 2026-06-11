@@ -20,18 +20,22 @@ from pathlib import Path
 class DebugInfoGenerator:
     """Generate debug information for daemon troubleshooting."""
 
-    def __init__(self, output_file: str | None = None):
+    def __init__(self, output_file: str | None = None, project_root: Path | None = None):
         """Initialize generator.
 
         Args:
             output_file: Optional file path to write output (None = stdout)
+            project_root: Optional explicit project root (testability seam).
+                When omitted it is detected via :meth:`_detect_project_root`.
         """
         self.output_file = output_file
         self.output_lines: list[str] = []
 
-        # Detect project root
-        script_dir = Path(__file__).parent
-        self.project_root = script_dir.parent
+        # Plan 00122 BUG 4: detect the CLIENT project root, not the daemon's own
+        # clone. Previously this was Path(__file__).parent.parent which, in a
+        # client install, points at {client}/.claude/hooks-daemon — the clone —
+        # so every path below resolved against the wrong directory.
+        self.project_root = project_root if project_root is not None else self._detect_project_root()
 
         # Colors (disabled if writing to file)
         if output_file:
@@ -72,6 +76,84 @@ class DebugInfoGenerator:
             return e.stdout + e.stderr, e.returncode
         except Exception as e:
             return f"ERROR: {e}", 1
+
+    def _detect_project_root(self) -> Path:
+        """Locate the CLIENT project root: the nearest ancestor containing
+        ``.claude/hooks-daemon.yaml``.
+
+        Searches up from the cwd first (the operator runs this from their
+        project), then from the script's own location, and finally falls back
+        to the script's grandparent (legacy behaviour) so the tool still
+        produces something even in an unconfigured tree.
+        """
+        marker = Path(".claude") / "hooks-daemon.yaml"
+        for start in (Path.cwd(), Path(__file__).resolve().parent):
+            current = start
+            while True:
+                if (current / marker).is_file():
+                    return current
+                if current.parent == current:
+                    break
+                current = current.parent
+        return Path(__file__).resolve().parent.parent
+
+    def _untracked_dir(self) -> Path:
+        """Daemon runtime dir for ``self.project_root``.
+
+        Mirrors ``daemon.paths._get_untracked_dir``: ``{root}/untracked`` in
+        self-install mode, else ``{root}/.claude/hooks-daemon/untracked``.
+        """
+        if (self.project_root / "src" / "claude_code_hooks_daemon").is_dir():
+            return self.project_root / "untracked"
+        return self.project_root / ".claude" / "hooks-daemon" / "untracked"
+
+    def _emit_degraded_diagnostics(self) -> None:
+        """Dump init.sh-independent state when path detection fails.
+
+        These are exactly the things needed to diagnose the macOS socket bug
+        (Plan 00122 BUG 1): runtime files (mismatched suffixes are the tell),
+        venv state, and live daemon processes. Previously the report stopped at
+        a single error line and emitted none of this.
+        """
+        untracked = self._untracked_dir()
+
+        self.output(f"{self.BOLD}## Runtime Files (degraded){self.RESET}")
+        self.output()
+        self.output("```")
+        self.output(f"Untracked dir: {untracked}")
+        if untracked.is_dir():
+            entries = sorted(p.name for p in untracked.iterdir() if p.name.startswith("daemon-"))
+            self.output("\n".join(entries) if entries else "(no daemon-* runtime files)")
+        else:
+            self.output("(untracked dir does not exist)")
+        self.output("```")
+        self.output()
+
+        self.output(f"{self.BOLD}## Virtualenv State (degraded){self.RESET}")
+        self.output()
+        self.output("```")
+        if untracked.is_dir():
+            venvs = sorted(
+                p.name for p in untracked.iterdir() if p.is_dir() and p.name.startswith("venv")
+            )
+            self.output("\n".join(venvs) if venvs else "(no venv-* directories)")
+        else:
+            self.output("(untracked dir does not exist)")
+        self.output("```")
+        self.output()
+
+        self.output(f"{self.BOLD}## Process State (degraded){self.RESET}")
+        self.output()
+        self.output("```")
+        ps_out, _ = self.run_command(["ps", "aux"])
+        daemon_procs = [
+            line
+            for line in ps_out.splitlines()
+            if "claude_code_hooks_daemon" in line and "grep" not in line
+        ]
+        self.output("\n".join(daemon_procs) if daemon_procs else "No daemon processes found")
+        self.output("```")
+        self.output()
 
     def get_daemon_paths(self) -> dict[str, str] | None:
         """Get daemon paths by sourcing init.sh."""
@@ -133,10 +215,17 @@ class DebugInfoGenerator:
 
         paths = self.get_daemon_paths()
         if not paths:
+            # Plan 00122 BUG 4: degrade gracefully instead of bailing. The
+            # init.sh-independent diagnostics below (runtime files, venv state,
+            # daemon processes) are precisely what's needed to diagnose the
+            # macOS socket bug — emit them rather than a bare error line.
             self.output(
-                f"{self.RED}ERROR: Could not detect daemon paths (.claude/init.sh missing or failed){self.RESET}"
+                f"{self.YELLOW}NOTE: Could not detect daemon paths "
+                f"(.claude/init.sh missing or failed). Emitting degraded "
+                f"diagnostics below.{self.RESET}"
             )
             self.output()
+            self._emit_degraded_diagnostics()
             self.flush_output()
             return
 

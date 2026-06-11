@@ -102,10 +102,12 @@ NFS disambiguation — so it stays a direct env check (must NOT resolve via
 
 ### Phase 4: BUG 4 — honest diagnostics (MEDIUM)
 
-- [ ] **Task 4.1**: `health-check.sh` emits failure reason on non-zero exit
-- [ ] **Task 4.2**: `debug_info.py` resolves client project root + degrades
-  gracefully (still dumps processes/runtime files/venv state)
-- [ ] **Task 4.3**: QA + commit
+- [x] **Task 4.1**: `health-check.sh` EXIT trap emits script/exit-code/line on
+  any non-zero exit (silent set-e death made honest)
+- [x] **Task 4.2**: `debug_info.py` detects client root via `.claude/hooks-daemon.yaml`
+  (not the clone dir) + degrades gracefully (dumps runtime files/venv/processes)
+- [x] **Task 4.3**: 16 tests (debug_info 3, health-check 1, diagnostic H-1 12)
+  pass; shellcheck clean; commit
 
 ### Phase 5: BUG 5 / BUG 6 — docs + bash portability (LOW)
 
