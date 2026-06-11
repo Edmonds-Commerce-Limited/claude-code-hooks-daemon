@@ -260,12 +260,14 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli restart
 
 **Multi-Environment Support**: Each unique hostname gets isolated daemon runtime files, preventing conflicts when running multiple instances (containers, machines, etc.).
 
-**How It Works**: Uses `HOSTNAME` environment variable directly as suffix - simple, transparent, debuggable.
+**How It Works**: Resolves a STABLE hostname in series — `HOSTNAME` env var, then the OS hostname (`socket.gethostname()` / the `hostname` command), then the constant `localhost` — and uses it directly as the suffix. The Python daemon (`daemon/paths.py:resolve_hostname`) and the bash forwarder (`init.sh:_get_hostname_suffix`) use the same series so they always agree on the socket/PID path.
+
+**Why not the env var alone**: `HOSTNAME` is a bash-on-Linux convenience variable. It is unset on macOS (zsh) and many minimal containers / CI images. Falling back to the OS hostname (never a time-based hash) keeps the suffix deterministic so `start`, `status`, and `stop` all compute the same path.
 
 **Path Pattern**:
 
-- With hostname: `.claude/hooks-daemon/untracked/daemon-{hostname}.{sock,pid,log}`
-- No hostname: `.claude/hooks-daemon/untracked/daemon-{time-hash}.{sock,pid,log}`
+- With hostname (env or OS): `.claude/hooks-daemon/untracked/daemon-{hostname}.{sock,pid,log}`
+- No hostname at all (OS hostname empty): `…/daemon-localhost.{sock,pid,log}`
 
 **Sanitization**: Hostname is lowercased and spaces replaced with hyphens for filesystem safety.
 
@@ -280,8 +282,8 @@ HOSTNAME=506355bfbc76 → daemon-506355bfbc76.sock
 HOSTNAME=prod-server-01 → daemon-prod-server-01.sock
 HOSTNAME="My Server" → daemon-my-server.sock (sanitized)
 
-# No hostname = MD5(timestamp) for uniqueness
-unset HOSTNAME → daemon-a1b2c3d4.sock
+# No HOSTNAME (e.g. macOS): falls back to the OS hostname, deterministically
+unset HOSTNAME → daemon-work.local.sock   # from socket.gethostname() / `hostname`
 ```
 
 ## Engineering Principles
