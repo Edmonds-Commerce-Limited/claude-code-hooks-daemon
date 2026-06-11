@@ -64,6 +64,14 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00121: Additive extra_allowed_markdown_paths](Completed/00121-additive-markdown-paths/PLAN.md) - Complete
+
+  - New `extra_allowed_markdown_paths` option for `markdown_organization`: additive allowed-location patterns layered on top of the built-in defaults (and over the legacy `allowed_markdown_paths` override), so projects declare only their extras instead of redeclaring the whole default set
+  - Generalised `is_adhoc_instruction_file` to allow all markdown inside `.claude/skills/` (not just `SKILL.md`); `.claude/rules/` already covered (commit 38d7d5d)
+  - Dogfooded by migrating this repo's own config from a 17-pattern override to a 2-entry additive list; docs (HANDLER_REFERENCE, per-handler doc, get_claude_md, init_config installer comment) updated to prefer additive
+  - Staged a post-upgrade-task + truth-change (anticipated v3.19.0) so upgrading projects migrate override → additive
+  - 13 new unit tests; full QA 13/13 (8508 tests, 95.1%); live daemon probe verified allow/deny behaviour
+
 - [00120: Git Hooks Executable Fixer Handler](Completed/00120-git-hooks-executable-fixer/PLAN.md) - Complete
 
   - New `GitHooksExecutableFixerHandler` (PostToolUse, priority 27, non-terminal): detects git's `hint: The '...' hook was ignored because it's not set as executable` in Bash output and auto-remediates it
@@ -805,12 +813,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 120
-- **Completed**: 99 (1 with reduced scope, 4 already-shipped)
+- **Total Plans Created**: 121
+- **Completed**: 100 (1 with reduced scope, 4 already-shipped)
 - **Active**: 5 (1 python-discovery, 1 question-blocker, 1 stop-quality, 2 long-running/review) + 1 in-progress build (00116 CLAUDE.md compression)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping, 00081 - superseded by 00082)
-- **Last reconciled by**: Plan 00120 (git hooks executable fixer handler) close-out
+- **Last reconciled by**: Plan 00121 (additive extra_allowed_markdown_paths) close-out
 
 ## Quick Links
 
