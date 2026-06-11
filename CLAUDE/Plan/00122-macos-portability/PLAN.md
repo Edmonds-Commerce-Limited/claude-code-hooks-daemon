@@ -93,9 +93,12 @@ NFS disambiguation — so it stays a direct env check (must NOT resolve via
 
 ### Phase 3: BUG 3 — health-aware install guard (MEDIUM)
 
-- [ ] **Task 3.1**: RED — test guard offers repair when venv/package missing
-- [ ] **Task 3.2**: GREEN — verify importability/venv, not just directory
-- [ ] **Task 3.3**: QA + commit
+- [x] **Task 3.1**: RED — extract-and-source tests for `_installation_is_healthy`
+  - static guard-wiring contract test
+- [x] **Task 3.2**: GREEN — `_installation_is_healthy` (venv python imports);
+  unhealthy dir auto-escalates to `--force` repair instead of `exit 0`
+- [x] **Task 3.3**: Updated existing skill-install fixture to a healthy install
+  (+ mktemp on stripped PATH); 33 install/skill/H-1 tests pass; shellcheck clean
 
 ### Phase 4: BUG 4 — honest diagnostics (MEDIUM)
 

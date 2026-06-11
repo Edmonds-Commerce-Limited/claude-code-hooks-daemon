@@ -157,6 +157,9 @@ _REQUIRED_COREUTILS = (
     "[",
     "uname",
     "tee",
+    # Plan 00122 BUG 3: the "already installed" guard now runs a health probe
+    # (_installation_is_healthy) that uses mktemp for a throwaway probe file.
+    "mktemp",
 )
 
 
@@ -178,12 +181,21 @@ def _symlink_coreutils(bin_dir: Path) -> None:
 
 
 def _make_already_installed_project(tmp_path: Path) -> Path:
-    """Build a synthetic project root whose ``.claude/hooks-daemon/``
-    already exists, so ``install.sh`` exits cleanly after the
-    pre-check (printing "Daemon is already installed").
+    """Build a synthetic project root with a HEALTHY existing install so
+    ``install.sh`` exits cleanly after the pre-check (printing "Daemon is
+    already installed").
+
+    Plan 00122 BUG 3: the guard now requires a *healthy* install — a venv
+    python that imports ``claude_code_hooks_daemon`` — not just the directory.
+    A bare ``.claude/hooks-daemon/`` is now (correctly) treated as broken and
+    would trigger a repair, so the fixture provisions a fake venv python whose
+    ``-c`` invocation exits 0 (import "succeeds").
     """
     project = tmp_path / "project"
-    (project / ".claude" / "hooks-daemon").mkdir(parents=True)
+    daemon_dir = project / ".claude" / "hooks-daemon"
+    daemon_dir.mkdir(parents=True)
+    venv_bin = daemon_dir / "untracked" / "venv-py311-test" / "bin"
+    _make_fake_python(venv_bin, "python", "3.11.0")
     return project
 
 

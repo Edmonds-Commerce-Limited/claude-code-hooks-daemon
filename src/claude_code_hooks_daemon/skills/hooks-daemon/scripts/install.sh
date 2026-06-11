@@ -96,16 +96,44 @@ export HOOKS_DAEMON_PYTHON="$FOUND_PY"
 echo "Using Python: $FOUND_PY"
 echo ""
 
+# Plan 00122 BUG 3: an install counts as "already installed" only if it is
+# HEALTHY — a venv python exists AND the daemon package imports. A bare
+# directory check treated a broken/partial install (dir present, no working
+# venv) as complete, so the documented `/hooks-daemon install` could not repair
+# it (only `--force` could, which re-clones from scratch). Returns 0 when
+# healthy, non-zero otherwise. Probe output goes to a temp file (never
+# /dev/null) so failures stay inspectable.
+_installation_is_healthy() {
+    local dir="$1"
+    local py probe_out
+    probe_out="$(mktemp)"
+    for py in "$dir"/untracked/venv-*/bin/python "$dir"/untracked/venv/bin/python; do
+        if [ -x "$py" ] && "$py" -c "import claude_code_hooks_daemon" > "$probe_out" 2> "$probe_out"; then
+            rm -f "$probe_out"
+            return 0
+        fi
+    done
+    rm -f "$probe_out"
+    return 1
+}
+
 # Check if already installed
 if [ -d "$DAEMON_DIR" ] && [ "$FORCE_FLAG" != "--force" ]; then
-    echo "Daemon is already installed at: $DAEMON_DIR"
+    if _installation_is_healthy "$DAEMON_DIR"; then
+        echo "Daemon is already installed at: $DAEMON_DIR"
+        echo ""
+        echo "To upgrade to a new version:"
+        echo "  /hooks-daemon upgrade"
+        echo ""
+        echo "To force reinstall:"
+        echo "  /hooks-daemon install --force"
+        exit 0
+    fi
+    echo "Daemon directory exists at: $DAEMON_DIR"
+    echo "but the installation looks broken (venv missing or package not importable)."
+    echo "Repairing now (equivalent to --force)..."
     echo ""
-    echo "To upgrade to a new version:"
-    echo "  /hooks-daemon upgrade"
-    echo ""
-    echo "To force reinstall:"
-    echo "  /hooks-daemon install --force"
-    exit 0
+    FORCE_FLAG="--force"
 fi
 
 # Download installer to temp file (never pipe curl to shell — we block that pattern)
