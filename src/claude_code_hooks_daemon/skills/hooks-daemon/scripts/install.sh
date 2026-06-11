@@ -107,6 +107,10 @@ _installation_is_healthy() {
     local dir="$1"
     local py probe_out
     probe_out="$(mktemp)"
+    # canonical-resolver-exempt: this is the skill bootstrap, which runs
+    # standalone in a client project BEFORE the daemon source tree (and
+    # scripts/lib/resolve_venv.sh) exists. This is a lightweight health probe,
+    # not venv resolution for use, so it globs directly.
     for py in "$dir"/untracked/venv-*/bin/python "$dir"/untracked/venv/bin/python; do
         if [ -x "$py" ] && "$py" -c "import claude_code_hooks_daemon" > "$probe_out" 2> "$probe_out"; then
             rm -f "$probe_out"
