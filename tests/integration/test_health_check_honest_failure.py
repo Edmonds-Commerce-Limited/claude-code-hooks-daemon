@@ -75,7 +75,7 @@ def test_non_zero_exit_emits_reason(tmp_path: Path) -> None:
         "a reason on failure."
     )
     # The trap should name the failure (script + exit code).
-    assert "health-check" in combined.lower(), (
-        f"failure message should identify the script.\noutput:\n{combined}"
-    )
+    assert (
+        "health-check" in combined.lower()
+    ), f"failure message should identify the script.\noutput:\n{combined}"
     assert "3" in combined, f"failure message should surface the exit code.\noutput:\n{combined}"

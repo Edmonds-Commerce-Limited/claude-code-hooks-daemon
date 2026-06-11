@@ -47,36 +47,26 @@ def _write_stubs(tmp_path: Path, uname_value: str, stat_marker: Path) -> Path:
     stub_dir.mkdir()
 
     uname_stub = stub_dir / "uname"
-    uname_stub.write_text(
-        textwrap.dedent(
-            f"""\
+    uname_stub.write_text(textwrap.dedent(f"""\
             #!/bin/bash
             printf '%s\\n' "{uname_value}"
             exit 0
-            """
-        )
-    )
+            """))
     uname_stub.chmod(0o755)
 
     stat_stub = stub_dir / "stat"
-    stat_stub.write_text(
-        textwrap.dedent(
-            f"""\
+    stat_stub.write_text(textwrap.dedent(f"""\
             #!/bin/bash
             # Mimic BSD/macOS stat called with GNU flags: record invocation,
             # emit the BSD error, fail.
             : > "{stat_marker}"
             echo "stat: %T: stat: No such file or directory" >&2
             exit 1
-            """
-        )
-    )
+            """))
     stat_stub.chmod(0o755)
 
     uv_stub = stub_dir / "uv"
-    uv_stub.write_text(
-        textwrap.dedent(
-            """\
+    uv_stub.write_text(textwrap.dedent("""\
             #!/bin/bash
             if [ -n "${UV_PROJECT_ENVIRONMENT:-}" ]; then
                 mkdir -p "$UV_PROJECT_ENVIRONMENT/bin"
@@ -84,9 +74,7 @@ def _write_stubs(tmp_path: Path, uname_value: str, stat_marker: Path) -> Path:
                 chmod +x "$UV_PROJECT_ENVIRONMENT/bin/python"
             fi
             exit 0
-            """
-        )
-    )
+            """))
     uv_stub.chmod(0o755)
 
     return stub_dir
@@ -103,14 +91,12 @@ def _run_create_venv(
     stat_marker = tmp_path / "stat_was_called"
     stub_dir = _write_stubs(tmp_path, uname_value, stat_marker)
 
-    harness = textwrap.dedent(
-        f"""\
+    harness = textwrap.dedent(f"""\
         set -euo pipefail
         export PATH="{stub_dir}:$PATH"
         . "{VENV_SH}"
         create_venv_at_path "{daemon_dir}" "{venv_path}"
-        """
-    )
+        """)
 
     env = os.environ.copy()
     env["NO_COLOR"] = "1"
@@ -141,12 +127,10 @@ def test_darwin_skips_gnu_stat_probe_no_error(tmp_path: Path) -> None:
         "BSD stat error leaked into output.\n"
         f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
     )
-    assert not stat_called, (
-        "BUG 2: `stat` was invoked on Darwin; the probe must be Linux-gated."
-    )
-    assert _DETECTED_COPY_FRAGMENT not in combined, (
-        "On Darwin detection is inconclusive; the run stays hardlink-first."
-    )
+    assert not stat_called, "BUG 2: `stat` was invoked on Darwin; the probe must be Linux-gated."
+    assert (
+        _DETECTED_COPY_FRAGMENT not in combined
+    ), "On Darwin detection is inconclusive; the run stays hardlink-first."
 
 
 def test_linux_still_runs_stat_probe(tmp_path: Path) -> None:

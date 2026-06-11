@@ -60,8 +60,7 @@ def test_detects_client_project_root_not_daemon_clone(
     gen = debug_info_module.DebugInfoGenerator(output_file=str(tmp_path / "out.md"))
 
     assert gen.project_root == project, (
-        f"project root must be the client project ({project}), "
-        f"not {gen.project_root}"
+        f"project root must be the client project ({project}), " f"not {gen.project_root}"
     )
 
 
@@ -74,9 +73,7 @@ def test_explicit_project_root_override(debug_info_module, tmp_path: Path) -> No
     assert gen.project_root == project
 
 
-def test_degrades_gracefully_when_init_sh_missing(
-    debug_info_module, tmp_path: Path
-) -> None:
+def test_degrades_gracefully_when_init_sh_missing(debug_info_module, tmp_path: Path) -> None:
     """When init.sh path-detection fails, still emit runtime/venv/process state.
 
     Pre-fix: a single 'Could not detect daemon paths' line then return.

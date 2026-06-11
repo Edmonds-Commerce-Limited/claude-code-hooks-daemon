@@ -27,7 +27,15 @@ import subprocess
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-INSTALL_SH = REPO_ROOT / "src" / "claude_code_hooks_daemon" / "skills" / "hooks-daemon" / "scripts" / "install.sh"
+INSTALL_SH = (
+    REPO_ROOT
+    / "src"
+    / "claude_code_hooks_daemon"
+    / "skills"
+    / "hooks-daemon"
+    / "scripts"
+    / "install.sh"
+)
 _TIMEOUT_SECONDS = 30
 
 
@@ -106,4 +114,6 @@ def test_guard_auto_escalates_to_force_on_broken_install() -> None:
     guard_start = text.index('if [ -d "$DAEMON_DIR" ]')
     guard_region = text[guard_start : guard_start + 800]
     assert "_installation_is_healthy" in guard_region, "guard block must use the health check"
-    assert 'FORCE_FLAG="--force"' in guard_region, "unhealthy install must escalate to forced repair"
+    assert (
+        'FORCE_FLAG="--force"' in guard_region
+    ), "unhealthy install must escalate to forced repair"
