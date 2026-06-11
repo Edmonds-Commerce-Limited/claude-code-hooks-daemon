@@ -65,6 +65,7 @@ from claude_code_hooks_daemon.daemon.paths import (
     get_venv_path,
     python_venv_fingerprint,
     read_pid_file,
+    resolve_hostname,
     write_cleanup_status,
 )
 from claude_code_hooks_daemon.daemon.validation import (
@@ -2454,7 +2455,7 @@ def cmd_bug_report(args: argparse.Namespace) -> int:
     sections.append(f"- **OS:** {platform.system()} {platform.release()}")
     sections.append(f"- **Architecture:** {platform.machine()}")
     sections.append(f"- **Python:** {platform.python_version()}")
-    sections.append(f"- **Hostname:** {os.environ.get('HOSTNAME', platform.node())}\n")
+    sections.append(f"- **Hostname:** {resolve_hostname()}\n")
     health_checks.append(("System info collected", True))
 
     # --- Daemon Status ---

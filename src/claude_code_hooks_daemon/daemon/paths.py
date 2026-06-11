@@ -10,6 +10,7 @@ not /tmp, to prevent security vulnerabilities.
 
 import argparse
 import contextlib
+import functools
 import hashlib
 import json
 import logging
@@ -17,6 +18,7 @@ import os
 import platform
 import re
 import shutil
+import socket
 import sys
 import time
 from dataclasses import dataclass, field
@@ -30,34 +32,79 @@ logger = logging.getLogger(__name__)
 _UNIX_SOCKET_PATH_LIMIT = 104
 
 
+# Stable last-resort hostname used when neither $HOSTNAME nor the OS hostname
+# is available. "localhost" degrades runtime-file isolation to the same
+# behaviour as a single unsuffixed daemon — which is correct for a host that
+# cannot identify itself — while remaining DETERMINISTIC across calls/processes.
+_HOSTNAME_FALLBACK = "localhost"
+
+
+@functools.cache
+def _resolve_hostname_from_env(env_hostname: str) -> str:
+    """Resolve a STABLE hostname, trying sources in series.
+
+    Order:
+      1. ``env_hostname`` — the caller-provided ``$HOSTNAME`` value, stripped.
+      2. ``socket.gethostname()`` — the OS hostname. ``$HOSTNAME`` is a
+         bash-on-Linux convenience variable that is unset on macOS (zsh) and
+         many minimal containers / CI images; the OS hostname is available
+         there and is what the bash forwarder's ``hostname`` command also
+         returns, so the two agree.
+      3. ``_HOSTNAME_FALLBACK`` — a stable constant, only if both above are
+         empty.
+
+    Memoised on ``env_hostname`` so every runtime-file path (socket, PID, log,
+    discovery) computed within one process agrees. This is the fix for the
+    macOS bug where a ``time.time()`` fallback produced a DIFFERENT suffix on
+    every call, so ``start``/``status``/``stop`` each looked for a different
+    socket. Pure function of its argument (plus the process-stable OS
+    hostname), so caching is safe; tests clear it via ``cache_clear()``.
+    """
+    candidate = env_hostname.strip()
+    if candidate:
+        return candidate
+    with contextlib.suppress(OSError):
+        os_hostname = socket.gethostname().strip()
+        if os_hostname:
+            return os_hostname
+    return _HOSTNAME_FALLBACK
+
+
+def resolve_hostname() -> str:
+    """Return the stable hostname for this environment (single DRY entry point).
+
+    Every site that needs "what host am I" — runtime-file suffix, bug-report
+    diagnostics, etc. — MUST call this so the Python daemon and the bash
+    forwarders (``init.sh``) compute the SAME value. See
+    :func:`_resolve_hostname_from_env` for the resolution order.
+
+    NOTE: the multi-host NFS fail-fast in :func:`_cli_resolve_venv` deliberately
+    does NOT use this helper — it asks the different question "did the operator
+    EXPLICITLY pin ``$HOSTNAME``" and must see the raw env var, not a resolved
+    fallback.
+    """
+    return _resolve_hostname_from_env(os.environ.get("HOSTNAME", ""))
+
+
 def _get_hostname_suffix() -> str:
     """
     Get hostname-based suffix for runtime files.
 
-    Uses HOSTNAME environment variable directly to isolate daemon runtime
-    files across different environments (containers, machines).
+    Resolves a STABLE hostname via :func:`resolve_hostname` (``$HOSTNAME`` →
+    OS hostname → constant) and returns it as a filesystem-safe suffix. Never
+    uses a time-based hash — see :func:`_resolve_hostname_from_env`.
 
     Returns:
-        "-{sanitized-hostname}" or "-{time-hash}" if no hostname
+        "-{sanitized-hostname}"
 
     Example:
         HOSTNAME="laptop" -> "-laptop"
         HOSTNAME="506355bfbc76" -> "-506355bfbc76"
         HOSTNAME="My-Server" -> "-my-server"
-        No HOSTNAME -> "-a1b2c3d4" (MD5 of timestamp)
+        No HOSTNAME -> "-{os-hostname}" (e.g. "-work.local"), or "-localhost"
     """
-    hostname = os.environ.get("HOSTNAME", "")
-
-    # No hostname? Use MD5 of current time for uniqueness
-    if not hostname:
-        import time
-
-        timestamp = str(time.time())
-        hash_obj = hashlib.md5(timestamp.encode("utf-8"), usedforsecurity=False)
-        return f"-{hash_obj.hexdigest()[:8]}"
-
     # Sanitize hostname for filesystem safety: lowercase, no spaces
-    sanitized = hostname.lower().replace(" ", "-")
+    sanitized = resolve_hostname().lower().replace(" ", "-")
     return f"-{sanitized}"
 
 

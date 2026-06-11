@@ -10,7 +10,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from claude_code_hooks_daemon.daemon.paths import (
+    _HOSTNAME_FALLBACK,
     _UNIX_SOCKET_PATH_LIMIT,
+    _resolve_hostname_from_env,
     cleanup_pid_file,
     cleanup_socket,
     cleanup_socket_discovery_file,
@@ -21,6 +23,7 @@ from claude_code_hooks_daemon.daemon.paths import (
     get_socket_path,
     is_pid_alive,
     read_pid_file,
+    resolve_hostname,
     write_pid_file,
     write_socket_discovery_file,
 )
@@ -551,9 +554,14 @@ class TestHostnameIsolation(unittest.TestCase):
         """Mock Path.mkdir to prevent filesystem side effects in path generation tests."""
         self.mkdir_patcher = patch.object(Path, "mkdir")
         self.mkdir_patcher.start()
+        # The hostname resolver is memoised on the $HOSTNAME value; clear it
+        # between tests so a value cached under one test does not leak into the
+        # next (notably the unset-HOSTNAME tests that mock socket.gethostname).
+        _resolve_hostname_from_env.cache_clear()
 
     def tearDown(self):
         self.mkdir_patcher.stop()
+        _resolve_hostname_from_env.cache_clear()
 
     def test_socket_path_uses_raw_hostname(self):
         """Test socket path uses raw hostname as suffix."""
@@ -615,14 +623,81 @@ class TestHostnameIsolation(unittest.TestCase):
             socket_path = get_socket_path("/workspace")
             self.assertTrue(str(socket_path).endswith("daemon-production.sock"))
 
-    def test_empty_hostname_gets_time_hash(self):
-        """Test empty hostname gets time-based hash suffix."""
-        with patch.dict(os.environ, {}, clear=True):
-            # Remove HOSTNAME if it exists
-            os.environ.pop("HOSTNAME", None)
+    def test_empty_hostname_uses_os_hostname(self):
+        """Empty HOSTNAME falls back to the STABLE OS hostname, not a time hash.
+
+        Regression for the macOS bug: $HOSTNAME is unset on macOS/zsh and many
+        minimal containers. The previous time.time()-based fallback produced a
+        DIFFERENT suffix on every call so start/status/stop never agreed.
+        """
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch(
+                "claude_code_hooks_daemon.daemon.paths.socket.gethostname",
+                return_value="work.local",
+            ),
+        ):
             socket_path = get_socket_path("/workspace")
-            # Should get a time-based hash suffix (8 hex chars)
-            self.assertRegex(str(socket_path), r"daemon-[a-f0-9]{8}\.sock")
+            self.assertTrue(str(socket_path).endswith("daemon-work.local.sock"))
+
+    def test_empty_hostname_suffix_is_deterministic(self):
+        """Two consecutive calls with HOSTNAME unset return the SAME path.
+
+        This is the core invariant the macOS bug violated: the daemon's
+        ``start`` and a later ``status``/``stop`` must compute an identical
+        socket path or the daemon becomes unmanageable.
+        """
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch(
+                "claude_code_hooks_daemon.daemon.paths.socket.gethostname",
+                return_value="host-abc",
+            ),
+        ):
+            first = get_socket_path("/workspace")
+            second = get_socket_path("/workspace")
+            self.assertEqual(first, second)
+            # And no 8-hex time-hash style suffix.
+            self.assertNotRegex(str(first), r"daemon-[a-f0-9]{8}\.sock")
+
+    def test_blank_hostname_treated_as_unset(self):
+        """A whitespace-only HOSTNAME is treated as unset (falls back to OS)."""
+        with (
+            patch.dict(os.environ, {"HOSTNAME": "   "}),
+            patch(
+                "claude_code_hooks_daemon.daemon.paths.socket.gethostname",
+                return_value="osname",
+            ),
+        ):
+            socket_path = get_socket_path("/workspace")
+            self.assertTrue(str(socket_path).endswith("daemon-osname.sock"))
+
+    def test_hostname_constant_fallback_when_all_sources_empty(self):
+        """When HOSTNAME is unset AND the OS hostname is empty, use the constant.
+
+        Degrades isolation to the unsuffixed-equivalent default rather than a
+        non-deterministic value — still stable across calls/processes.
+        """
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch(
+                "claude_code_hooks_daemon.daemon.paths.socket.gethostname",
+                return_value="",
+            ),
+        ):
+            socket_path = get_socket_path("/workspace")
+            self.assertTrue(str(socket_path).endswith(f"daemon-{_HOSTNAME_FALLBACK}.sock"))
+
+    def test_resolve_hostname_prefers_env_over_os(self):
+        """resolve_hostname() returns $HOSTNAME verbatim when set, ignoring OS."""
+        with (
+            patch.dict(os.environ, {"HOSTNAME": "envhost"}),
+            patch(
+                "claude_code_hooks_daemon.daemon.paths.socket.gethostname",
+                return_value="oshost",
+            ),
+        ):
+            self.assertEqual(resolve_hostname(), "envhost")
 
     def test_suffix_consistency_same_hostname(self):
         """Test same hostname produces same suffix."""
