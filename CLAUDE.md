@@ -907,7 +907,7 @@ Writing a new `.md` file to an unrecognised location is blocked. Markdown files 
 
 **Plan file redirection**: when `track_plans_in_project` is enabled, Claude Code planning mode writes are automatically redirected to the project's `CLAUDE/Plan/` directory. Plan folders must follow the `NNNN-description/` naming convention.
 
-If you need a markdown file in a new location, add a pattern to `allowed_markdown_paths` in `.claude/hooks-daemon.yaml`.
+If you need a markdown file in a new location, add a pattern to `extra_allowed_markdown_paths` in `.claude/hooks-daemon.yaml`. This is ADDITIVE — it layers your patterns on top of the built-in defaults, so you keep `CLAUDE/`, `docs/`, `RELEASES/`, etc. without redeclaring them. The older `allowed_markdown_paths` option REPLACES all built-in locations and is discouraged for simple additions.
 
 If your project has sub-projects with their own `docs/`, `CLAUDE/`, etc., configure `monorepo_subproject_patterns` in `.claude/hooks-daemon.yaml` so normal rules apply within each sub-project.
 
