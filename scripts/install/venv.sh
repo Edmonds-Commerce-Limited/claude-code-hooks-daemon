@@ -469,7 +469,15 @@ create_venv_at_path() {
         while [ -n "$probe_dir" ] && [ ! -e "$probe_dir" ]; do
             probe_dir="$(dirname "$probe_dir")"
         done
-        if [ -n "$probe_dir" ]; then
+        # Filesystem-type probe for the overlay/NFS hardlink-hostile check.
+        # `stat -f -c %T` is GNU coreutils only (`-f`=filesystem, `-c`=format);
+        # on BSD/macOS `-f` is the format-string flag, so the call errors
+        # (`stat: %T: stat: No such file or directory`) mid-install. overlayfs
+        # — the main hardlink-hostile case — is Linux-only, so probe only under
+        # GNU stat (Linux); elsewhere leave detection inconclusive and let the
+        # warn-then-retry fallback below catch genuine hardlink failures
+        # (Plan 00122 BUG 2).
+        if [ -n "$probe_dir" ] && [ "$(uname -s)" = "Linux" ]; then
             local stat_out
             if stat_out="$(command stat -f -c %T "$probe_dir")"; then
                 target_fs="$stat_out"

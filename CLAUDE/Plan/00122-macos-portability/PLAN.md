@@ -86,10 +86,10 @@ NFS disambiguation — so it stays a direct env check (must NOT resolve via
 
 ### Phase 2: BUG 2 — portable filesystem-type probe in venv.sh (HIGH)
 
-- [ ] **Task 2.1**: RED — test that on Darwin the `stat -c` probe is skipped
+- [x] **Task 2.1**: RED — test that on Darwin the `stat -c` probe is skipped
   (no stray error, hardlink-first), Linux branch unchanged
-- [ ] **Task 2.2**: GREEN — branch the fs probe on `uname -s`
-- [ ] **Task 2.3**: QA + commit
+- [x] **Task 2.2**: GREEN — gated the fs probe on `uname -s` = Linux
+- [x] **Task 2.3**: QA (12 venv.sh tests pass; shellcheck clean) + commit
 
 ### Phase 3: BUG 3 — health-aware install guard (MEDIUM)
 
