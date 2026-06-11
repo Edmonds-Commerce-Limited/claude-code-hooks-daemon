@@ -1542,6 +1542,151 @@ class TestAllowedMarkdownPaths:
         assert handler.matches(write_input) is True
 
 
+class TestExtraAllowedMarkdownPaths:
+    """Tests for `extra_allowed_markdown_paths` — additive allowed locations.
+
+    Unlike `allowed_markdown_paths` (which REPLACES all built-in path logic),
+    `extra_allowed_markdown_paths` is ADDITIVE: it rescues a path the base check
+    would block, layered on top of EITHER the built-in defaults OR the legacy
+    override. Mirrors `pipe_blocker`'s `extra_whitelist`.
+    """
+
+    @pytest.fixture
+    def handler(self, tmp_path: Path) -> MarkdownOrganizationHandler:
+        """Create handler with mocked workspace."""
+        handler = MarkdownOrganizationHandler()
+        handler._workspace_root = tmp_path
+        return handler
+
+    @pytest.fixture
+    def write_input(self) -> dict[str, Any]:
+        """Create sample Write hook input."""
+        return {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "", "content": "Test content"},
+        }
+
+    # ── Config attribute default ──
+
+    def test_default_extra_allowed_markdown_paths_is_none(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        """Default `_extra_allowed_markdown_paths` is None (no extra locations)."""
+        assert handler._extra_allowed_markdown_paths is None
+
+    # ── Additive over built-in defaults ──
+
+    def test_extra_paths_rescue_blocked_builtin_location(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """A path blocked by built-ins is allowed when it matches an extra pattern."""
+        handler._extra_allowed_markdown_paths = [r"^\.github/.*\.md$"]
+        write_input["tool_input"]["file_path"] = ".github/ISSUE_TEMPLATE/bug.md"
+        assert handler.matches(write_input) is False  # Allowed via extra
+
+    def test_extra_paths_do_not_break_builtin_allowances(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Built-in allowed locations (CLAUDE/, docs/) still pass when extra is set."""
+        handler._extra_allowed_markdown_paths = [r"^\.github/.*\.md$"]
+        write_input["tool_input"]["file_path"] = "docs/guide.md"
+        assert handler.matches(write_input) is False  # Still allowed by built-in
+
+    def test_extra_paths_non_matching_still_blocked(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """A path matching neither built-ins nor extra patterns is still blocked."""
+        handler._extra_allowed_markdown_paths = [r"^\.github/.*\.md$"]
+        write_input["tool_input"]["file_path"] = "src/random.md"
+        assert handler.matches(write_input) is True  # Blocked
+
+    # ── Additive over the legacy override ──
+
+    def test_extra_paths_rescue_over_override(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """When the legacy override is set, extra patterns still rescue blocked paths."""
+        handler._allowed_markdown_paths = [r"^content/.*\.md$"]
+        handler._extra_allowed_markdown_paths = [r"^\.github/.*\.md$"]
+        # .github is NOT in the override list, but IS in extra → allowed
+        write_input["tool_input"]["file_path"] = ".github/PULL_REQUEST_TEMPLATE.md"
+        assert handler.matches(write_input) is False
+
+    def test_override_still_blocks_when_no_extra_match(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Override + extra: a path in neither is still blocked."""
+        handler._allowed_markdown_paths = [r"^content/.*\.md$"]
+        handler._extra_allowed_markdown_paths = [r"^\.github/.*\.md$"]
+        write_input["tool_input"]["file_path"] = "docs/guide.md"
+        assert handler.matches(write_input) is True
+
+    # ── Multiple extra patterns ──
+
+    def test_multiple_extra_patterns_any_match_allows(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Any matching extra pattern allows the write."""
+        handler._extra_allowed_markdown_paths = [r"^\.github/.*\.md$", r"^wiki/.*\.md$"]
+        write_input["tool_input"]["file_path"] = "wiki/home.md"
+        assert handler.matches(write_input) is False
+
+    def test_empty_extra_paths_leaves_builtin_unchanged(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """An empty extra list does not rescue anything (built-ins still apply)."""
+        handler._extra_allowed_markdown_paths = []
+        write_input["tool_input"]["file_path"] = ".github/bug.md"
+        assert handler.matches(write_input) is True  # Still blocked
+
+
+class TestSkillsDirectoryMarkdown:
+    """Tests for allowing all `.md` inside `.claude/skills/`, not just SKILL.md."""
+
+    @pytest.fixture
+    def handler(self, tmp_path: Path) -> MarkdownOrganizationHandler:
+        """Create handler with mocked workspace."""
+        handler = MarkdownOrganizationHandler()
+        handler._workspace_root = tmp_path
+        return handler
+
+    @pytest.fixture
+    def write_input(self) -> dict[str, Any]:
+        """Create sample Write hook input."""
+        return {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "", "content": "Test content"},
+        }
+
+    def test_skill_md_still_allowed(self, handler: MarkdownOrganizationHandler) -> None:
+        """SKILL.md inside .claude/skills/ remains allowed (backward compat)."""
+        assert handler.is_adhoc_instruction_file(".claude/skills/test/SKILL.md") is True
+
+    def test_non_skill_markdown_in_skills_allowed(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        """Reference/supporting markdown inside a skill directory is allowed anywhere."""
+        assert handler.is_adhoc_instruction_file(".claude/skills/test/reference.md") is True
+        assert handler.is_adhoc_instruction_file(".claude/skills/test/docs/usage.md") is True
+        assert (
+            handler.is_adhoc_instruction_file("/workspace/.claude/skills/test/reference.md") is True
+        )
+
+    def test_skills_markdown_blocked_when_override_set(
+        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+    ) -> None:
+        """Skills markdown is allowed via adhoc short-circuit even under override."""
+        handler._allowed_markdown_paths = [r"^content/.*\.md$"]
+        write_input["tool_input"]["file_path"] = ".claude/skills/test/reference.md"
+        assert handler.matches(write_input) is False  # adhoc short-circuit wins
+
+    def test_markdown_outside_skills_unaffected(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        """Markdown in a non-skills directory is not auto-allowed by the skills rule."""
+        assert handler.is_adhoc_instruction_file("docs/skills/reference.md") is False
+
+
 class TestClaudeCodeSyncEnforcement:
     """Tests for _check_claude_code_sync() — Phase 3 of Plan 86.
 

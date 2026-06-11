@@ -89,6 +89,8 @@ class MarkdownOrganizationHandler(Handler):
             None  # Regex patterns for sub-projects
         )
         self._allowed_markdown_paths: list[str] | None = None  # Regex patterns for allowed paths
+        # Additive allowed paths: layered ON TOP of built-ins OR the legacy override
+        self._extra_allowed_markdown_paths: list[str] | None = None
 
     def normalize_path(self, file_path: str) -> str:
         """Normalize file path to project-relative format.
@@ -133,8 +135,9 @@ class MarkdownOrganizationHandler(Handler):
         # Use centralized normalization
         normalized = self.normalize_path(file_path)
 
-        # SKILL.md files in .claude/skills/*/ are allowed
-        if filename == "skill.md" and ".claude/skills/" in normalized:
+        # All markdown inside .claude/skills/ is allowed (SKILL.md plus any
+        # supporting reference/usage docs a skill ships alongside it)
+        if ".claude/skills/" in normalized and file_path.endswith(".md"):
             return True
 
         # Agent definitions in .claude/agents/ are allowed
@@ -696,6 +699,11 @@ class MarkdownOrganizationHandler(Handler):
         OVERRIDE all built-in path checks. Any path matching at least one
         pattern is allowed; everything else is blocked.
 
+        When _extra_allowed_markdown_paths is configured, those regex patterns
+        are ADDITIVE: a path the base check (built-in OR override) would block is
+        rescued (allowed) if it matches at least one extra pattern. This lets a
+        project add locations without redeclaring the entire default set.
+
         Args:
             normalized: Project-relative normalized path
 
@@ -704,9 +712,29 @@ class MarkdownOrganizationHandler(Handler):
         """
         # When custom allowed paths are configured, they override ALL built-in logic
         if self._allowed_markdown_paths is not None:
-            return self._check_custom_paths(normalized)
+            base_invalid = self._check_custom_paths(normalized)
+        else:
+            base_invalid = self._check_builtin_paths(normalized)
 
-        return self._check_builtin_paths(normalized)
+        # Additive extra paths rescue a blocked location (layered on top of base)
+        if base_invalid and self._matches_extra_allowed(normalized):
+            return False  # Allowed via extra_allowed_markdown_paths
+
+        return base_invalid
+
+    def _matches_extra_allowed(self, normalized: str) -> bool:
+        """Check path against additive extra_allowed_markdown_paths regex patterns.
+
+        Args:
+            normalized: Project-relative normalized path
+
+        Returns:
+            True if the path matches at least one extra pattern (should be allowed)
+        """
+        for pattern in self._extra_allowed_markdown_paths or []:
+            if re.match(pattern, normalized, re.IGNORECASE):
+                return True
+        return False
 
     def _check_custom_paths(self, normalized: str) -> bool:
         """Check path against custom allowed_markdown_paths regex patterns.
