@@ -111,9 +111,15 @@ NFS disambiguation — so it stays a direct env check (must NOT resolve via
 
 ### Phase 5: BUG 5 / BUG 6 — docs + bash portability (LOW)
 
-- [ ] **Task 5.1**: Reconcile `CLAUDE.md` Hostname-Based Isolation section
-- [ ] **Task 5.2**: bash-version preflight / sweep for bash-4 constructs
-- [ ] **Task 5.3**: QA + commit
+- [x] **Task 5.1**: Reconciled `CLAUDE.md` Hostname-Based Isolation section +
+  `init.sh`/`paths.py` docstrings (done in Phase 1)
+- [x] **Task 5.2**: Swept user-facing scripts — already bash-3.2 clean; the only
+  bash-4 construct was `mapfile` in the dev-only `run_shell_check.sh`, now a
+  portable while-read loop. Added a regression-guard test scanning all repo
+  shell scripts for bash-4-only syntax. (No preflight — it would wrongly reject
+  bash 3.2, which the scripts already support.)
+- [x] **Task 5.3**: bash32 test + shellcheck clean; run_shell_check.sh still
+  finds 56 scripts and passes; commit
 
 ## Success Criteria
 
@@ -129,3 +135,12 @@ NFS disambiguation — so it stays a direct env check (must NOT resolve via
 - Plan created from downstream macOS bug report; all six bugs reproduced.
 - User explicitly confirmed BUG 1 fix direction: use `$(hostname)` /
   `socket.gethostname()` when `HOSTNAME` is unset.
+- Delivery commits: Phase 1 `8d72594` (BUG 1, + BUG 5 doc), Phase 2 `e71df0c`
+  (BUG 2), Phase 3 `28745d2` (BUG 3), Phase 4 `ec27240` (BUG 4). BUG 1 CLAUDE.md
+  doc landed via the daemon's auto-regen commit `8802b08`.
+- Antipattern sweep (user directive): the time-as-identity abuse existed only at
+  the two hostname fallbacks (`paths.py` + `init.sh`); both fixed. All other
+  `time.time()`/`random` uses are legitimate.
+- DRY: single memoised `resolve_hostname()` is the SSOT on the Python side
+  (routed: `_get_hostname_suffix`, `cmd_bug_report`); `init.sh` mirrors it for
+  bash. The `_cli_resolve_venv` multi-host check stays a raw env check by design.

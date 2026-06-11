@@ -39,8 +39,13 @@ ENDJSON
     exit 1
 fi
 
-# Collect all shell scripts under scripts/ and src/
-mapfile -t SHELL_SCRIPTS < <(find "${PROJECT_ROOT}/scripts" "${PROJECT_ROOT}/src" -name "*.sh" -o -name "*.bash" | sort)
+# Collect all shell scripts under scripts/ and src/.
+# Plan 00122 BUG 6: use a while-read loop instead of `mapfile` (bash 4+ only)
+# so this script — like the rest of the repo — runs under macOS /bin/bash 3.2.
+SHELL_SCRIPTS=()
+while IFS= read -r _shell_script; do
+    SHELL_SCRIPTS+=("${_shell_script}")
+done < <(find "${PROJECT_ROOT}/scripts" "${PROJECT_ROOT}/src" -name "*.sh" -o -name "*.bash" | sort)
 
 FILE_COUNT="${#SHELL_SCRIPTS[@]}"
 echo "Found ${FILE_COUNT} shell scripts"
