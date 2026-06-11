@@ -64,6 +64,16 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00122: macOS Portability Fixes](Completed/00122-macos-portability/PLAN.md) - Complete
+
+  - Downstream macOS field report (`untracked/mac-issues/`): the daemon was non-functional on macOS; six bugs reproduced and fixed (not yet released)
+  - **BUG 1 (critical)** — when `$HOSTNAME` is unset (default on macOS/zsh, minimal containers), BOTH the Python daemon (`paths.py`) and the bash forwarder (`init.sh`) derived the runtime-file suffix from a `time.time()` hash that changed on every call, so `start`/`status`/`stop` each looked for a different socket. New DRY memoised `resolve_hostname()` (series: `$HOSTNAME` → `socket.gethostname()` → `localhost`) is the Python SSOT (routed through `_get_hostname_suffix` + `cmd_bug_report`); `init.sh` mirrors it via the `hostname` command so bash and Python agree. Antipattern sweep confirmed these two were the only time-as-identity abuses
+  - **BUG 2** — `venv.sh` `stat -f -c %T` fs probe is GNU-only; now gated on `uname -s = Linux` (overlayfs is Linux-only), no stray BSD error
+  - **BUG 3** — skill `install.sh` "already installed" guard now health-checks (venv python imports) and auto-escalates a broken dir to `--force` repair instead of bailing
+  - **BUG 4** — `health-check.sh` EXIT trap makes silent non-zero exits honest; `debug_info.py` detects the client project root (not the daemon clone) and degrades gracefully (dumps runtime files/venv/processes) when init.sh detection fails
+  - **BUG 5/6** — docs reconciled (CLAUDE.md Hostname-Based Isolation); user-facing scripts confirmed bash-3.2 clean (lone `mapfile` in dev-only `run_shell_check.sh` de-bash-4'd), with a regression-guard test scanning all repo shell scripts
+  - bash↔Python suffix parity test pins the end-to-end fix; QA 13/13 (8527 tests, 95.1%); daemon RUNNING. Delivery commits `8d72594`, `e71df0c`, `28745d2`, `ec27240`, `a48dcb0`
+
 - [00121: Additive extra_allowed_markdown_paths](Completed/00121-additive-markdown-paths/PLAN.md) - Complete
 
   - New `extra_allowed_markdown_paths` option for `markdown_organization`: additive allowed-location patterns layered on top of the built-in defaults (and over the legacy `allowed_markdown_paths` override), so projects declare only their extras instead of redeclaring the whole default set
@@ -813,12 +823,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 121
-- **Completed**: 100 (1 with reduced scope, 4 already-shipped)
+- **Total Plans Created**: 122
+- **Completed**: 101 (1 with reduced scope, 4 already-shipped)
 - **Active**: 5 (1 python-discovery, 1 question-blocker, 1 stop-quality, 2 long-running/review) + 1 in-progress build (00116 CLAUDE.md compression)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping, 00081 - superseded by 00082)
-- **Last reconciled by**: Plan 00121 (additive extra_allowed_markdown_paths) close-out
+- **Last reconciled by**: Plan 00122 (macOS portability fixes) close-out
 
 ## Quick Links
 

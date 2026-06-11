@@ -1,6 +1,6 @@
 # Plan 00122: macOS Portability Fixes
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-06-11
 **Owner**: Claude (Opus)
 **Priority**: High
@@ -123,10 +123,11 @@ NFS disambiguation — so it stays a direct env check (must NOT resolve via
 
 ## Success Criteria
 
-- [ ] All new + existing tests pass; coverage ≥ 95%
-- [ ] `./scripts/qa/run_all.sh` (or `llm_qa.py all`) passes
-- [ ] Daemon restarts to RUNNING after each phase
-- [ ] Two consecutive `get_socket_path()` calls with `HOSTNAME` unset are equal
+- [x] All new + existing tests pass; coverage ≥ 95% (8527 passed, 0 failed, 95.1%)
+- [x] `llm_qa.py all` passes (13/13)
+- [x] Daemon restarts to RUNNING after each phase
+- [x] Two consecutive `get_socket_path()` calls with `HOSTNAME` unset are equal
+  (pinned by `test_empty_hostname_suffix_is_deterministic`)
 
 ## Notes & Updates
 
