@@ -821,7 +821,7 @@ handlers:
 
 **Full documentation:** [`docs/guides/handlers/markdown_organization.md`](handlers/markdown_organization.md)
 
-Enforces markdown file organization rules, plan tracking, custom allowed paths, and monorepo support. See per-handler docs for all options, monorepo interaction, and examples.
+Enforces markdown file organization rules, plan tracking, allowed paths, and monorepo support. To allow extra locations, prefer the additive `extra_allowed_markdown_paths` option over the legacy `allowed_markdown_paths` full override. See per-handler docs for all options, monorepo interaction, and examples.
 
 ---
 

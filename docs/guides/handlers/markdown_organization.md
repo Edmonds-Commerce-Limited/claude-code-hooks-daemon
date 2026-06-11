@@ -20,18 +20,20 @@ handlers:
       options:
         track_plans_in_project: "CLAUDE/Plan"
         plan_workflow_docs: "CLAUDE/PlanWorkflow.md"
-        # allowed_markdown_paths: [...]
+        # extra_allowed_markdown_paths: [...]   # additive over built-ins (preferred)
+        # allowed_markdown_paths: [...]         # full override (legacy)
         # monorepo_subproject_patterns: [...]
 ```
 
 ## Options
 
-| Option                         | Type                   | Default | Description                                                                      |
-| ------------------------------ | ---------------------- | ------- | -------------------------------------------------------------------------------- |
-| `track_plans_in_project`       | `string \| null`       | `null`  | Path to plan folder (e.g. `"CLAUDE/Plan"`). Enables planning mode redirect.      |
-| `plan_workflow_docs`           | `string \| null`       | `null`  | Path to workflow doc referenced in redirect context.                             |
-| `allowed_markdown_paths`       | `list[string] \| null` | `null`  | Regex patterns for allowed locations. **Overrides ALL built-in paths when set.** |
-| `monorepo_subproject_patterns` | `list[string] \| null` | `null`  | Regex patterns matching sub-project root directories.                            |
+| Option                         | Type                   | Default | Description                                                                                                                                                              |
+| ------------------------------ | ---------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `track_plans_in_project`       | `string \| null`       | `null`  | Path to plan folder (e.g. `"CLAUDE/Plan"`). Enables planning mode redirect.                                                                                              |
+| `plan_workflow_docs`           | `string \| null`       | `null`  | Path to workflow doc referenced in redirect context.                                                                                                                     |
+| `extra_allowed_markdown_paths` | `list[string] \| null` | `null`  | Regex patterns ADDED to the allowed locations. **Additive** — layered on top of the built-in defaults (or the override, if set). Preferred way to allow extra locations. |
+| `allowed_markdown_paths`       | `list[string] \| null` | `null`  | Regex patterns for allowed locations. **Overrides ALL built-in paths when set.** Legacy; prefer `extra_allowed_markdown_paths` for simple additions.                     |
+| `monorepo_subproject_patterns` | `list[string] \| null` | `null`  | Regex patterns matching sub-project root directories.                                                                                                                    |
 
 ## Built-in Allowed Paths
 
@@ -49,9 +51,23 @@ When `allowed_markdown_paths` is **not set** (default), the handler uses these b
 These files are **always allowed** regardless of any config:
 
 - `CLAUDE.md`, `README.md`, `CHANGELOG.md` (anywhere in project)
-- `.claude/agents/*.md`, `.claude/commands/*.md`, `.claude/skills/*/SKILL.md`
+- `.claude/agents/*.md`, `.claude/commands/*.md`, `.claude/rules/**/*.md`
+- `.claude/skills/**/*.md` (all markdown inside a skill directory, not just `SKILL.md`)
 
-## Custom Allowed Paths
+## Extra Allowed Paths (additive — preferred)
+
+Set `extra_allowed_markdown_paths` to **add** locations on top of the built-in defaults. Your patterns are layered on the base check: a path the base would block is rescued if it matches at least one extra pattern. You keep all the built-in locations (`CLAUDE/`, `docs/`, `RELEASES/`, …) without redeclaring them.
+
+```yaml
+options:
+  extra_allowed_markdown_paths:
+    - "^\\.github/.*\\.md$"      # GitHub templates/workflows docs
+    - "^content/blog/.*\\.md$"  # Blog content (project-specific)
+```
+
+This is additive over **both** the built-in defaults and a legacy `allowed_markdown_paths` override (if one is set). It is the recommended way to extend allowed locations.
+
+## Custom Allowed Paths (override — legacy)
 
 Set `allowed_markdown_paths` to **completely replace** all built-in rules with your own regex patterns. Each pattern is matched against the project-relative file path.
 
@@ -66,6 +82,8 @@ options:
 Only paths matching at least one pattern are allowed; everything else is blocked.
 
 **Empty list blocks everything** (except always-allowed files like CLAUDE.md).
+
+> **Prefer `extra_allowed_markdown_paths`.** A full override must be kept in sync with upstream defaults forever — every new built-in location (e.g. `.claude/skills/`) silently fails to apply until you copy it in. If you only need to *add* a location, use the additive option instead.
 
 ## Monorepo Support
 

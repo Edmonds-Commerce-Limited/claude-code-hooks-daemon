@@ -199,27 +199,16 @@ handlers:
       # Plan tracking options (track_plans_in_project, plan_workflow_docs)
       # are now in top-level plan_workflow: section.
       options:
-        # allowed_markdown_paths: OVERRIDES all built-in path rules with custom regex.
-        # In monorepos, patterns match AFTER prefix stripping. See HANDLER_REFERENCE.md.
-        allowed_markdown_paths:
-          - "^CLAUDE/.*\\.md$"
-          - "^docs/.*\\.md$"
-          - "^untracked/.*\\.md$"
-          - "^RELEASES/.*\\.md$"
-          - "^eslint-rules/.*\\.md$"
-          - "^src/claude_code_hooks_daemon/guides/.*\\.md$"
-          - "^src/claude_code_hooks_daemon/skills/.*\\.md$"
-          - "^\\.github/.*\\.md$"
-          # Standard repo-root files (exact root-level only)
-          - "^README\\.md$"
-          - "^CHANGELOG\\.md$"
-          - "^CONTRIBUTING\\.md$"
-          - "^LICENSE\\.md$"
-          - "^SECURITY\\.md$"
-          - "^CODE_OF_CONDUCT\\.md$"
-          - "^AUTHORS\\.md$"
-          - "^NOTICE\\.md$"
-          - "^MAINTAINERS\\.md$"
+        # extra_allowed_markdown_paths: ADDITIVE on top of the built-in defaults.
+        # The built-ins already cover CLAUDE/, docs/, untracked/, RELEASES/,
+        # eslint-rules/, src/.../guides/, src/.../skills/, README/CHANGELOG/CLAUDE.md
+        # anywhere, the standard repo-root files (CONTRIBUTING, LICENSE, ...), and
+        # .claude/{agents,commands,rules,skills}. We only declare the EXTRAS here —
+        # no need to redeclare the defaults. See HANDLER_REFERENCE.md.
+        # (Migrated from the legacy allowed_markdown_paths override in Plan 00121.)
+        extra_allowed_markdown_paths:
+          - "^\\.github/.*\\.md$"      # GitHub issue/PR templates, workflow docs
+          - "^BUG_REPORTING\\.md$"     # Project root doc (not a standard repo file)
 
     # TOOL USAGE HANDLERS (Priority 50-60)
     web_search_year:       # Fixes year in web search queries (uses current year)

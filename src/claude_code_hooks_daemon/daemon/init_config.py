@@ -146,11 +146,11 @@ class ConfigTemplate:
             "      options:\n"
             '        track_plans_in_project: "CLAUDE/Plan"           # Path to plan folder\n'
             '        plan_workflow_docs: "CLAUDE/PlanWorkflow.md"    # Path to workflow doc\n'
-            "        # allowed_markdown_paths: OVERRIDES built-in path rules. See HANDLER_REFERENCE.md.\n"
+            "        # extra_allowed_markdown_paths: ADDS locations on top of built-ins (preferred).\n"
+            '        #   - "^\\\\.github/.*\\\\.md$"\n'
+            "        # allowed_markdown_paths: OVERRIDES built-in path rules (legacy). See HANDLER_REFERENCE.md.\n"
             '        #   - "^CLAUDE/.*\\\\.md$"\n'
             '        #   - "^docs/.*\\\\.md$"\n'
-            '        #   - "^untracked/.*\\\\.md$"\n'
-            '        #   - "^RELEASES/.*\\\\.md$"\n'
             "\n"
             "    lsp_enforcement: {enabled: false, priority: 38}  # Steer toward LSP tools instead of Grep\n"
             "\n"
