@@ -1680,9 +1680,7 @@ class TestSkillsDirectoryMarkdown:
         write_input["tool_input"]["file_path"] = ".claude/skills/test/reference.md"
         assert handler.matches(write_input) is False  # adhoc short-circuit wins
 
-    def test_markdown_outside_skills_unaffected(
-        self, handler: MarkdownOrganizationHandler
-    ) -> None:
+    def test_markdown_outside_skills_unaffected(self, handler: MarkdownOrganizationHandler) -> None:
         """Markdown in a non-skills directory is not auto-allowed by the skills rule."""
         assert handler.is_adhoc_instruction_file("docs/skills/reference.md") is False
 
