@@ -79,6 +79,21 @@ _RV_PATHS_SCRIPT="${_RV_PROJECT_ROOT}/src/claude_code_hooks_daemon/daemon/paths.
 
 # _rv_pick_python <daemon_dir> [--fallback-target]
 #
+# ------------------------------------------------------------
+# _rv_dir_mtime <path> — portable directory-mtime in epoch seconds.
+# ------------------------------------------------------------
+# Plan 00123 BUG 2 (HIGH): the hot-path cache (sourced by init.sh on every
+# hook event) computed the untracked/ mtime with `stat -c %Y`, which is GNU
+# coreutils only. On macOS/BSD `stat` rejects `-c`, so the call returned empty
+# and the cache NEVER hit — every hook fell through to a 50-100ms Python
+# fingerprint spawn. Mirror the init.sh exec-bit-selfheal pattern: try GNU
+# `stat -c %Y`, then BSD `stat -f %m`. Echoes the mtime (empty on total
+# failure, which callers already treat as a cache miss).
+_rv_dir_mtime() {
+    local path="$1"
+    stat -c %Y "$path" 2>/dev/null || stat -f %m "$path" 2>/dev/null
+}
+
 # Echoes ONE usable interpreter to invoke paths.py with, following the
 # precedence above. Returns 0 on success, 1 on miss (caller decides
 # whether to error or use --fallback-target's bare-python3 path).
@@ -188,7 +203,7 @@ _rv_resolve_python_impl() {
         && [ -f "$cache_file" ]; then
         local cached_mtime cached_path current_mtime
         if read -r cached_mtime cached_path < "$cache_file" \
-            && current_mtime="$(stat -c %Y "$untracked_dir" 2>/dev/null)" \
+            && current_mtime="$(_rv_dir_mtime "$untracked_dir")" \
             && [ -n "$cached_mtime" ] \
             && [ "$cached_mtime" = "$current_mtime" ] \
             && [ -n "$cached_path" ] \
@@ -230,7 +245,7 @@ _rv_resolve_python_impl() {
         if [ "$fallback_flag" != "--fallback-target" ] && [ -d "$untracked_dir" ]; then
             local cache_mtime
             : > "$cache_file"
-            cache_mtime="$(stat -c %Y "$untracked_dir" 2>/dev/null)"
+            cache_mtime="$(_rv_dir_mtime "$untracked_dir")"
             if [ -n "$cache_mtime" ]; then
                 printf '%s %s\n' "$cache_mtime" "$resolved" > "$cache_file"
             fi

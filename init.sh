@@ -386,7 +386,6 @@ _exec_bit_selfheal() {
 # Pattern: {project}/.claude/hooks-daemon/untracked/daemon.{sock|pid}
 # Container: {project}/.claude/hooks-daemon/untracked/daemon-{hash}.{sock|pid}
 # Must match Python paths module: claude_code_hooks_daemon.daemon.paths
-_abs_project_path=$(realpath "$PROJECT_PATH")
 
 # Determine untracked directory path
 # Must match ProjectContext.daemon_untracked_dir() logic
