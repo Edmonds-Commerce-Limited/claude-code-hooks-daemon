@@ -64,6 +64,15 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00123: macOS Portability Follow-ups](Completed/00123-macos-portability-followups/PLAN.md) - Complete
+
+  - Discovered during v3.19.0 release prep by a dedicated macOS-gotcha hunt agent — four further BSD/bash-3.2 incompatibilities Plan 00122 did not cover
+  - **BUG 1 (critical)** — `init.sh` ran `_abs_project_path=$(realpath "$PROJECT_PATH")` under `set -euo pipefail` on every hook; `realpath` is absent on macOS < 12.3 so the substitution aborted every hook. The variable was dead → deleted
+  - **BUG 2 (high)** — `resolve_venv.sh` hot-path cache used GNU `stat -c %Y` (sourced by init.sh per hook); returned empty on macOS so the cache never hit → 50-100ms Python fingerprint spawn every hook. New `_rv_dir_mtime` helper falls back to BSD `stat -f %m`
+  - **BUG 3 (medium)** — `daemon_control.sh` used GNU BRE `\|` alternation in `pgrep -f` AND `grep -qi`; BSD treats it literally so neither matched on macOS. Extracted `_daemon_process_exists` (two pgreps) + switched the grep to ERE `-E` (the second site was a bonus catch the hunt missed)
+  - **BUG 4 (medium)** — `hooks_deploy.sh` self-install short-circuit used `readlink -f` (no `-f` on BSD) → never fired on macOS; replaced with bash `-ef` (same-inode) operator
+  - Repo-wide sweep confirmed no other executable `\|`, `readlink -f`, unguarded `stat -c`, `date -d`, `base64 -w`, `grep -P`, or `sed -i` in shell scripts. 11 new regression tests; QA 13/13 (8538 tests, 95.1%); daemon RUNNING. Delivery commits `a5bd807`, `182be0f`, `039fe69`
+
 - [00122: macOS Portability Fixes](Completed/00122-macos-portability/PLAN.md) - Complete
 
   - Downstream macOS field report (`untracked/mac-issues/`): the daemon was non-functional on macOS; six bugs reproduced and fixed (not yet released)
@@ -823,12 +832,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 122
-- **Completed**: 101 (1 with reduced scope, 4 already-shipped)
+- **Total Plans Created**: 123
+- **Completed**: 102 (1 with reduced scope, 4 already-shipped)
 - **Active**: 5 (1 python-discovery, 1 question-blocker, 1 stop-quality, 2 long-running/review) + 1 in-progress build (00116 CLAUDE.md compression)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping, 00081 - superseded by 00082)
-- **Last reconciled by**: Plan 00122 (macOS portability fixes) close-out
+- **Last reconciled by**: Plan 00123 (macOS portability follow-ups) close-out
 
 ## Quick Links
 

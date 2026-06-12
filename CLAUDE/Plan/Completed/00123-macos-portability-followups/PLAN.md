@@ -1,6 +1,6 @@
 # Plan 00123: macOS Portability Follow-ups
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-06-12
 **Owner**: Claude (Opus)
 **Priority**: High
@@ -58,30 +58,42 @@ against source before fixing):
 
 ### Phase 1: HIGH/CRITICAL hot-path fixes
 
-- [ ] **Task 1.1**: Extract a portable `_rv_dir_mtime` helper in resolve_venv.sh
+- [x] **Task 1.1**: Extract a portable `_rv_dir_mtime` helper in resolve_venv.sh
   (`stat -c %Y` → `stat -f %m` fallback); use at both call sites. TDD with
   a BSD-stat stub asserting cache hit.
-- [ ] **Task 1.2**: Delete dead `_abs_project_path` realpath line from init.sh.
+- [x] **Task 1.2**: Delete dead `_abs_project_path` realpath line from init.sh.
   Regression test: init.sh contains no unguarded `realpath`.
 
 ### Phase 2: MEDIUM install/restart-path fixes
 
-- [ ] **Task 2.1**: Fix `daemon_control.sh` pgrep alternation. Test stub pgrep.
-- [ ] **Task 2.2**: Fix `hooks_deploy.sh` readlink -f → portable resolver.
+- [x] **Task 2.1**: Fix `daemon_control.sh` pgrep alternation. Test stub pgrep.
+  (Also caught and fixed a bonus `grep -qi "...\|..."` BRE alternation at
+  line 324 → switched to ERE `-E`.)
+- [x] **Task 2.2**: Fix `hooks_deploy.sh` readlink -f → bash `-ef` operator.
 
 ### Phase 3: Verify
 
-- [ ] **Task 3.1**: shellcheck + full QA (`./scripts/qa/llm_qa.py all`).
-- [ ] **Task 3.2**: Daemon restart RUNNING.
+- [x] **Task 3.1**: shellcheck + full QA (`./scripts/qa/llm_qa.py all`) — 13/13.
+- [x] **Task 3.2**: Daemon restart RUNNING.
 
 ## Success Criteria
 
-- [ ] All four constructs are portable on bash 3.2 / BSD coreutils.
-- [ ] New regression tests pass; existing suite green; QA 13/13.
-- [ ] Daemon restarts cleanly.
+- [x] All four constructs are portable on bash 3.2 / BSD coreutils.
+- [x] New regression tests pass; existing suite green; QA 13/13.
+- [x] Daemon restarts cleanly.
 
 ## Notes & Updates
 
 ### 2026-06-12
 
 - Created during v3.19.0 release prep from macOS-gotcha hunt findings.
+- Delivered in commits: `a5bd807` (Phase 1 — resolve_venv stat helper + init.sh
+  dead-realpath removal), `182be0f` (Phase 2 — pgrep/grep ERE + readlink `-ef`),
+  `039fe69` (Phase 3 — black-format new tests). 11 new regression tests across
+  4 files; QA 13/13 (8538 tests, 95.1% coverage); daemon RUNNING.
+- The Phase 2 structural guard surfaced an additional, hunt-missed
+  `grep -qi "...\|..."` GNU-BRE alternation at `daemon_control.sh:324` — fixed
+  in the same commit. A repo-wide sweep confirmed no other executable `\|`,
+  `readlink -f`, `stat -c` (unguarded), `date -d`, `base64 -w`, `grep -P`, or
+  `sed -i` remain in shell scripts. Deferred (LOW, Non-Goal): `sort -V` in
+  `upgrade_version.sh` (works on all macOS since 2017, release-time path).
