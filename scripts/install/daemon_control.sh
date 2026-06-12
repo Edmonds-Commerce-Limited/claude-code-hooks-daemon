@@ -20,6 +20,25 @@ if [ -z "${OUTPUT_SH_LOADED+x}" ]; then
 fi
 
 #
+# _daemon_process_exists() - Portable check for a live daemon process.
+#
+# Plan 00123 BUG 3 (MEDIUM): the previous check used
+# `pgrep -f "claude-hooks-daemon\|claude_code_hooks_daemon"`. The `\|`
+# alternation is a GNU regex extension; BSD `pgrep` (macOS) treats it
+# literally and never matches a real daemon, so the restart recovery retry
+# silently no-ops on macOS. Use two separate `pgrep -f` invocations instead —
+# portable across GNU and BSD.
+#
+# Returns:
+#   0 if a daemon process is found, 1 otherwise
+#
+_daemon_process_exists() {
+    pgrep -f "claude-hooks-daemon" > /dev/null && return 0
+    pgrep -f "claude_code_hooks_daemon" > /dev/null && return 0
+    return 1
+}
+
+#
 # stop_daemon_safe() - Safely stop the daemon
 #
 # Stops daemon without failing if it's not running.
@@ -256,7 +275,7 @@ restart_daemon_verified() {
     # Step 4: pgrep fallback — if status poll timed out but the daemon
     # process exists, retry status for another 5s before declaring failure.
     if [ "$daemon_running" -eq 0 ]; then
-        if pgrep -f "claude-hooks-daemon\|claude_code_hooks_daemon" > /dev/null; then
+        if _daemon_process_exists; then
             print_verbose "daemon process exists but not yet responsive — retrying status check for 5 more seconds"
             local retry_elapsed=0
             while [ "$retry_elapsed" -lt 5 ]; do
@@ -302,7 +321,9 @@ restart_daemon_verified() {
 
     # Step 5: Check for config validation errors (if requested)
     if [ "$verify_config" = "true" ]; then
-        if echo "$status_output" | grep -qi "config.*error\|validation.*failed\|invalid.*config"; then
+        # Plan 00123 BUG 3 (MEDIUM): use ERE `-E` with plain `|` — BRE `\|`
+        # alternation is a GNU extension and matches literally on BSD/macOS grep.
+        if echo "$status_output" | grep -qiE "config.*error|validation.*failed|invalid.*config"; then
             print_warning "Daemon started but config validation may have issues"
             echo ""
             echo "Status output:"

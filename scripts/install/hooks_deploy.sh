@@ -118,8 +118,12 @@ deploy_init_script() {
 
     # CRITICAL: In self-install mode, check if source and target are the same
     if [ "$install_mode" = "self-install" ]; then
-        # If init.sh is already at target location, skip
-        if [ -f "$target_init" ] && [ "$(readlink -f "$source_init" 2>/dev/null || echo "$source_init")" = "$(readlink -f "$target_init" 2>/dev/null || echo "$target_init")" ]; then
+        # If init.sh is already at target location, skip. Use bash's `-ef`
+        # operator (same device + inode, resolves symlinks) — Plan 00123 BUG 4
+        # (MEDIUM): the previous `readlink -f` compare is GNU-only; BSD/macOS
+        # readlink has no -f, so both sides fell back to differing literal
+        # paths and the short-circuit never fired on macOS.
+        if [ -f "$target_init" ] && [ "$source_init" -ef "$target_init" ]; then
             print_verbose "Self-install mode: init.sh already in place, skipping deployment"
             return 0
         fi
