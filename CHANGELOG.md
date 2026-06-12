@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.19.0] - 2026-06-12
+
+This is a **minor release** delivering a new PostToolUse handler (`git_hooks_executable_fixer`), additive markdown path configuration (`extra_allowed_markdown_paths`), broadened built-in markdown allowances for `.claude/skills/` and `.claude/rules/`, and 10 macOS/BSD portability fixes across the installer and diagnostic scripts.
+
+### Added
+
+- **`git_hooks_executable_fixer` PostToolUse handler (Plan 00120, priority 27)** — New non-terminal handler that detects git's "The '...' hook was ignored because it's not set as executable" hint in Bash command output and automatically `chmod +x`s every non-`.sample` file in the repository's hooks directory. Socket path is resolved via `git rev-parse --git-path hooks` so worktrees and `core.hooksPath` are handled correctly. Execute bits are added with least privilege (only where read is already granted). Reports which hooks it fixed via advisory context; never blocks the command; `.sample` files and already-executable hooks are left untouched.
+
+### Changed
+
+- **`markdown_organization` now accepts `extra_allowed_markdown_paths` — additive config option (Plan 00121)** — Projects can now declare additional allowed markdown locations as an additive list layered on top of built-in defaults, rather than replacing them entirely with `allowed_markdown_paths`. Using `extra_allowed_markdown_paths`, a project declares only its genuine extras and automatically inherits all upstream built-in locations (including any new ones added in future releases). The existing `allowed_markdown_paths` full-override option remains fully supported for the deliberate case where a project wants to FORBID a built-in location.
+- **`markdown_organization` now allows all markdown inside `.claude/skills/` (Plan 00121)** — Previously only `SKILL.md` at the top of a skill directory was allowed; all other markdown a skill ships (reference docs, usage guides, changelogs) was blocked. The built-in allowance is now broadened to cover all `.md` files anywhere inside `.claude/skills/`, so skills can ship supporting documentation alongside their `SKILL.md` without requiring per-project config overrides. This loosens a blocking handler — existing projects with a narrower `allowed_markdown_paths` override are unaffected; projects relying on built-in defaults now permit more paths.
+- **`markdown_organization` now allows all markdown inside `.claude/rules/` (Plan 00121)** — `.claude/rules/` is a newly recognised first-class location alongside `.claude/agents/`, `.claude/commands/`, and `.claude/skills/`. All `.md` files under `.claude/rules/` are now allowed by the built-in defaults without any config change required.
+
+### Fixed
+
+- **Deterministic hostname suffix — macOS/zsh portability (Plan 00122, BUG 1)** — `init.sh` and `daemon/paths.py` now resolve the hostname suffix via a stable series: `$HOSTNAME` env var → `socket.gethostname()` / `hostname` command → `localhost` constant. `HOSTNAME` is unset on macOS/zsh and many CI images; the old code hashed a timestamp fallback, producing a different socket path on every invocation so `start`, `status`, and `stop` could never agree. A shared `_get_hostname_suffix()` helper in `init.sh` and `resolve_hostname()` in `daemon/paths.py` ensure both sides always compute the same path.
+- **BSD-vs-GNU `stat` filesystem probe gating (Plan 00122, BUG 2)** — `venv.sh`'s pre-`uv sync` hardlink-hostile-filesystem probe used the GNU-only `stat -f -c %T` flag combination; on BSD/macOS `stat` rejects it and emitted a stray `stat: %T` error mid-install. The probe is now gated to Linux (`uname -s`), where the overlayfs case it detects actually occurs; other platforms fall back to the existing hardlink-first-then-retry path.
+- **Health-aware install guard (Plan 00122, BUG 3)** — `install.sh` now checks daemon health (not merely running state) before declaring a prior installation valid and skipping reinstall. A daemon that is running but unhealthy (e.g. socket exists, PID stale) was previously treated as a successful install, masking the degraded state.
+- **Honest install diagnostics (Plan 00122, BUG 4)** — Install failure messages now report the actual Python interpreter path and version observed, rather than a hardcoded suggestion that may not exist on the host. This matches the fix applied to `skill_install_python_discovery` acceptance tests in Plan 00110.
+- **Bash 3.2 portability guard (Plan 00122, BUG 6)** — Shell scripts that used `[[` with `=~` regex and capture-group references (`${BASH_REMATCH[1]}`) now guard against Bash 3.2 (macOS default before Homebrew) where named groups and some extended regex features are absent. Affected scripts fall back to POSIX-compatible `expr` / `grep` alternatives.
+- **`init.sh` dead `realpath` call removed (Plan 00123, CRITICAL)** — `init.sh` runs under `set -euo pipefail` and assigned `_abs_project_path=$(realpath "$PROJECT_PATH")` on every hook. `realpath` is absent on macOS before 12.3 / base BSD, so the command substitution failed and `set -e` aborted the entire script — breaking every hook forwarder on those hosts. The variable was never referenced anywhere (dead code), so the line was simply deleted.
+- **`resolve_venv.sh` hot-path `stat` fallback (Plan 00123, HIGH)** — The per-hook cache (sourced by `init.sh` on every event) computed the `untracked/` directory mtime with GNU `stat -c %Y`. On macOS this returned empty, so the cache-mtime compare always failed and every hook fell through to a 50-100ms Python fingerprint spawn. A new `_rv_dir_mtime` helper falls back to BSD `stat -f %m` at both call sites.
+- **`daemon_control.sh` `pgrep` portability — GNU ERE alternation removed (Plan 00123, MEDIUM)** — `pgrep -f "pattern1\|pattern2"` uses GNU ERE syntax not supported by BSD `pgrep` on macOS. Replaced with two separate `pgrep` invocations whose results are combined, maintaining the same match semantics on both platforms.
+- **`hooks_deploy.sh` `readlink -f` replaced with bash `-ef` test (Plan 00123, MEDIUM)** — `readlink -f` (GNU) is absent on macOS BSD `readlink`. The symlink-resolution logic in `hooks_deploy.sh` now uses `[ file1 -ef file2 ]` (POSIX) for same-inode detection, removing the hard dependency on GNU coreutils.
+
 ## [3.18.3] - 2026-06-04
 
 ### Fixed
