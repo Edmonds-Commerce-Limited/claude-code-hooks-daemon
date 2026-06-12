@@ -79,9 +79,9 @@ def test_detects_daemon_on_bsd_pgrep(tmp_path: Path) -> None:
 def test_reports_missing_when_no_daemon(tmp_path: Path) -> None:
     """No daemon process → helper reports missing (exit non-zero)."""
     result = _run_exists(tmp_path, process_present=False)
-    assert "MISSING" in result.stdout, (
-        f"Expected MISSING when no daemon present.\n--- stdout ---\n{result.stdout}"
-    )
+    assert (
+        "MISSING" in result.stdout
+    ), f"Expected MISSING when no daemon present.\n--- stdout ---\n{result.stdout}"
 
 
 def test_no_gnu_alternation_in_pgrep() -> None:

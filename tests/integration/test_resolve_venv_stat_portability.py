@@ -104,9 +104,9 @@ def test_no_bare_gnu_stat_remains_on_hot_path() -> None:
     # is immediately followed by a `stat -f %m` fallback. Assert the bare GNU
     # call never appears outside the helper by requiring every `stat -c %Y` to
     # be paired with a `stat -f %m` somewhere in the file.
-    assert "stat -f %m" in source, (
-        "BUG 2: resolve_venv.sh must contain a BSD `stat -f %m` fallback."
-    )
+    assert (
+        "stat -f %m" in source
+    ), "BUG 2: resolve_venv.sh must contain a BSD `stat -f %m` fallback."
     # Cache call sites must delegate to the helper, not inline `stat -c`.
     assert source.count("_rv_dir_mtime") >= 3, (
         "BUG 2: both hot-path cache call sites must use _rv_dir_mtime "

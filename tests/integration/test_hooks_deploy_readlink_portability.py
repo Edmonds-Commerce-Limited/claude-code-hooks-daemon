@@ -78,9 +78,9 @@ def _run_deploy(tmp_path: Path, *, symlinked: bool) -> subprocess.CompletedProce
 def test_symlinked_target_recognised_without_readlink_f(tmp_path: Path) -> None:
     """Symlinked target is detected as already-in-place even when readlink lacks -f."""
     result = _run_deploy(tmp_path, symlinked=True)
-    assert result.returncode == 0, (
-        f"deploy_init_script must succeed.\n--- stderr ---\n{result.stderr}"
-    )
+    assert (
+        result.returncode == 0
+    ), f"deploy_init_script must succeed.\n--- stderr ---\n{result.stderr}"
     assert _ALREADY_IN_PLACE in result.stdout, (
         "BUG 4: a symlinked init.sh must be recognised as already-in-place via "
         "the `-ef` operator — BSD readlink lacks -f, so the old path-string "
@@ -106,7 +106,6 @@ def test_no_readlink_f_remains() -> None:
             continue
         if "readlink -f" in line:
             offenders.append(f"{lineno}: {line.strip()}")
-    assert not offenders, (
-        "BUG 4: `readlink -f` is GNU-only; use the `-ef` test operator:\n"
-        + "\n".join(offenders)
-    )
+    assert (
+        not offenders
+    ), "BUG 4: `readlink -f` is GNU-only; use the `-ef` test operator:\n" + "\n".join(offenders)
