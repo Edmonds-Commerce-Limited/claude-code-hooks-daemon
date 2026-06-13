@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.19.1] - 2026-06-13
+
+This is a **patch release** fixing a venv-isolation bug that caused a desktop-level Claude Code session and a containerised session sharing the same bind-mounted project to collide on a single Python virtual environment instead of each getting their own.
+
+### Fixed
+
+- **`ensure_venv` dropped the project-path slug, collapsing host/container venv isolation (Plan 00124)** — `ensure_venv` (`scripts/install/venv.sh`) computed the venv fingerprint via `python_venv_fingerprint` without passing its `daemon_dir`, so the virtual environment was keyed by the bare, slug-less `venv-py{MM}-{hash}` instead of the intended slugged `venv-{slug}-py{MM}-{hash}`. The project-path slug (added in Plan 00100) is the discriminator that keeps a desktop host view (e.g. `/home/user/project`) and a container view (`/workspace`) of the *same* bind-mounted project on separate venvs. With the slug absent, a host and a container that share the same Python (identical `sys.version` / `sys.base_prefix` / architecture) computed an identical venv key and — because the project's `untracked/` directory is bind-mounted into the container — collided on one shared venv and fought over it. The fix passes `$daemon_dir` through to the fingerprint so the slug is always keyed in, matching the Python resolver's keyed lookup. Existing installs rebuild into their own slugged venv automatically on the next daemon start (the old slug-less venv is harmlessly orphaned). The venv-discovery glob in `scripts/upgrade.sh` was broadened from `venv-py*` to `venv-*py3*` to match both slugged and legacy bare names.
+
 ## [3.19.0] - 2026-06-12
 
 This is a **minor release** delivering a new PostToolUse handler (`git_hooks_executable_fixer`), additive markdown path configuration (`extra_allowed_markdown_paths`), broadened built-in markdown allowances for `.claude/skills/` and `.claude/rules/`, and 10 macOS/BSD portability fixes across the installer and diagnostic scripts.

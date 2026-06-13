@@ -1,0 +1,15 @@
+version: "3.19.1"
+truth_changes:
+  - was: >
+      The daemon's fingerprint-keyed virtual environment lives at
+      `untracked/venv-py{MM}-{fingerprint}/`, where the fingerprint is
+      md5(sys.version | sys.base_prefix | platform.machine())[:8].
+    now: >
+      The venv directory is keyed by a project-path slug PLUS the fingerprint:
+      `untracked/venv-{slug}-py{MM}-{fingerprint}/`. The slug (derived from the
+      project root path) keeps a desktop-host view and a container view of the
+      same bind-mounted project on separate venvs even when their Python
+      fingerprint is identical. Any script or doc that globs `venv-py*` to find
+      the venv should match `venv-*py3*` instead. The pre-3.19.1 slug-less
+      `venv-py{MM}-{hash}` directory is orphaned on the next daemon start and
+      may be deleted.
