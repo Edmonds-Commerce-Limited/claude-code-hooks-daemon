@@ -64,6 +64,13 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00125: Auto-detect containers → uv copy mode](Completed/00125-uv-container-copy-mode/PLAN.md) - Complete
+
+  - Follow-up to v3.19.1: container installs/upgrades printed the `uv hardlink failed (likely overlay-fs) — retrying with UV_LINK_MODE=copy` warning on every run
+  - Root cause: `create_venv_at_path`'s proactive copy-mode detection probed only the TARGET fs type (`overlay`/`nfs`); in a container the target is bind-mounted from the host (a normal fs) while uv's cache is on the container overlay fs — cross-device, so hardlink fails but the type probe could not see it
+  - Fix: added `_uv_in_container` helper (signals: `container` env var, `/run/.containerenv`, `/.dockerenv`; marker paths overridable for tests) and wired it into the `first_link_mode` decision — containers now pick copy mode up front. Explicit `UV_LINK_MODE` and normal-disk hardlink-first behaviour unchanged
+  - 4 new tests; QA 13/13 (8543 tests, 95.1%); live-verified detection in the Podman dev container
+
 - [00124: ensure_venv missing project-path slug](Completed/00124-ensure-venv-missing-slug/PLAN.md) - Complete
 
   - Hotfix: `ensure_venv` (`scripts/install/venv.sh`) computed the venv fingerprint without passing its `daemon_dir`, so the venv was keyed by the bare slug-less `venv-py{MM}-{hash}` instead of the slugged `venv-{slug}-py{MM}-{hash}`
@@ -839,12 +846,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 124
-- **Completed**: 103 (1 with reduced scope, 4 already-shipped)
+- **Total Plans Created**: 125
+- **Completed**: 104 (1 with reduced scope, 4 already-shipped)
 - **Active**: 5 (1 python-discovery, 1 question-blocker, 1 stop-quality, 2 long-running/review) + 1 in-progress build (00116 CLAUDE.md compression)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping, 00081 - superseded by 00082)
-- **Last reconciled by**: Plan 00124 (ensure_venv missing project-path slug) close-out
+- **Last reconciled by**: Plan 00125 (uv container copy mode) close-out
 
 ## Quick Links
 

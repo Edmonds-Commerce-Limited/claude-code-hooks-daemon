@@ -412,6 +412,38 @@ ensure_venv() {
 }
 
 #
+# _uv_in_container() - Best-effort container detection for the install path.
+#
+# Plan 00125: in a container the project (and its untracked/ dir) is typically
+# bind-mounted from the host, so the venv target sits on the host fs while uv's
+# cache lives on the container's overlay fs — cross-device, so `uv` hardlink
+# fails even when the TARGET fs type is not overlay/nfs (which the fs-type probe
+# in create_venv_at_path cannot see). Detecting the container lets us pick copy
+# mode up front and skip the failed attempt + warning.
+#
+# Signals: the `container` env var (Podman/systemd set `container=podman`),
+# Podman's /run/.containerenv, and Docker's /.dockerenv. The marker paths are
+# overridable via HOOKS_DAEMON_CONTAINERENV_PATH / HOOKS_DAEMON_DOCKERENV_PATH
+# so the negative case is testable from inside a real container.
+#
+# Returns: 0 if a container is detected, 1 otherwise.
+#
+_uv_in_container() {
+    case "${container:-}" in
+        podman | docker | oci | crio)
+            return 0
+            ;;
+    esac
+    if [ -f "${HOOKS_DAEMON_CONTAINERENV_PATH:-/run/.containerenv}" ]; then
+        return 0
+    fi
+    if [ -f "${HOOKS_DAEMON_DOCKERENV_PATH:-/.dockerenv}" ]; then
+        return 0
+    fi
+    return 1
+}
+
+#
 # create_venv_at_path() - Create venv at an explicit path (fingerprint-keyed)
 #
 # Thin wrapper around `uv sync` that lets callers specify the venv location
@@ -501,6 +533,17 @@ create_venv_at_path() {
                 first_link_mode=""
                 ;;
         esac
+        # Plan 00125: the fs-type probe above only sees the TARGET filesystem.
+        # In a container the target is usually bind-mounted from the host (a
+        # normal fs) while uv's cache is on the container's overlay fs — so the
+        # probe reports a normal fs yet hardlink still fails cross-device. When
+        # the probe did not already pick copy, fall back to container detection
+        # and choose copy up front. This removes the hardlink warning + wasted
+        # first attempt on EVERY container install/upgrade.
+        if [ -z "$first_link_mode" ] && _uv_in_container; then
+            print_info "Detected container environment — using UV_LINK_MODE=copy for venv creation (uv cache and bind-mounted target are typically cross-device, so hardlink would fail)."
+            first_link_mode="copy"
+        fi
     fi
 
     local uv_output="/tmp/uv_sync_output.$$.txt"
