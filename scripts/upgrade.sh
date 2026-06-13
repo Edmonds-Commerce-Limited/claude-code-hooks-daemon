@@ -405,8 +405,18 @@ fi
 # ------------------------------------------------------------
 
 # Resolve the daemon's venv python (fingerprint-keyed; first match wins).
+# Plan 00124: the venv is keyed WITH the project-path slug
+# (venv-{slug}-py{MM}-{hash}), so the slug precedes the py3 marker. Glob for
+# the embedded py3 fingerprint rather than a leading 'venv-py' so both slugged
+# and legacy slug-less names match.
+#
+# canonical-resolver-exempt: metadata emission runs at the tail of an upgrade
+# while DAEMON_DIR is on an arbitrary checked-out target tag; it must stay
+# dependency-light and non-fatal (no sourcing scripts/lib/resolve_venv.sh, no
+# paths.py spawn) — a best-effort glob is intentional here, matching the
+# pre-Plan-00124 behaviour that used a bare 'venv-py*' glob for the same reason.
 _metadata_venv_python=""
-for _candidate in "$DAEMON_DIR"/untracked/venv-py*/bin/python; do
+for _candidate in "$DAEMON_DIR"/untracked/venv-*py3*/bin/python; do
     if [ -x "$_candidate" ]; then
         _metadata_venv_python="$_candidate"
         break

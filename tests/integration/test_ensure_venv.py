@@ -79,7 +79,7 @@ class TestEnsureVenvCreatesWhenMissing:
         daemon_dir.mkdir()
         _minimal_daemon_dir(daemon_dir)
 
-        fp_result = _run_bash(f'python_venv_fingerprint "{sys.executable}"')
+        fp_result = _run_bash(f'python_venv_fingerprint "{sys.executable}" "{daemon_dir}"')
         assert fp_result.returncode == 0
         fingerprint = fp_result.stdout.strip()
         expected_venv = daemon_dir / "untracked" / f"venv-{fingerprint}"
@@ -105,7 +105,7 @@ class TestEnsureVenvNoOpWhenMatching:
         daemon_dir.mkdir()
         _minimal_daemon_dir(daemon_dir)
 
-        fp_result = _run_bash(f'python_venv_fingerprint "{sys.executable}"')
+        fp_result = _run_bash(f'python_venv_fingerprint "{sys.executable}" "{daemon_dir}"')
         fingerprint = fp_result.stdout.strip()
         fake_venv = daemon_dir / "untracked" / f"venv-{fingerprint}"
         (fake_venv / "bin").mkdir(parents=True)
@@ -129,7 +129,7 @@ class TestEnsureVenvRecreatesOnStampMismatch:
         daemon_dir.mkdir()
         _minimal_daemon_dir(daemon_dir)
 
-        fp_result = _run_bash(f'python_venv_fingerprint "{sys.executable}"')
+        fp_result = _run_bash(f'python_venv_fingerprint "{sys.executable}" "{daemon_dir}"')
         fingerprint = fp_result.stdout.strip()
         stale_venv = daemon_dir / "untracked" / f"venv-{fingerprint}"
         (stale_venv / "bin").mkdir(parents=True)
@@ -160,7 +160,7 @@ class TestEnsureVenvDowngradeSafety:
         daemon_dir.mkdir()
         _minimal_daemon_dir(daemon_dir)
 
-        fp_result = _run_bash(f'python_venv_fingerprint "{sys.executable}"')
+        fp_result = _run_bash(f'python_venv_fingerprint "{sys.executable}" "{daemon_dir}"')
         fingerprint = fp_result.stdout.strip()
         venv_dir = daemon_dir / "untracked" / f"venv-{fingerprint}"
         (venv_dir / "bin").mkdir(parents=True)
@@ -198,7 +198,7 @@ class TestEnsureVenvDowngradeSafety:
         daemon_dir.mkdir()
         _minimal_daemon_dir(daemon_dir)
 
-        fp_result = _run_bash(f'python_venv_fingerprint "{sys.executable}"')
+        fp_result = _run_bash(f'python_venv_fingerprint "{sys.executable}" "{daemon_dir}"')
         fingerprint = fp_result.stdout.strip()
         stale_venv = daemon_dir / "untracked" / f"venv-{fingerprint}"
         (stale_venv / "bin").mkdir(parents=True)
@@ -231,3 +231,52 @@ class TestEnsureVenvCIGate:
         assert not (daemon_dir / "untracked").exists() or not any(
             (daemon_dir / "untracked").glob("venv-*")
         ), "HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP=1 must skip bootstrap"
+
+
+class TestEnsureVenvSlugIsolation:
+    """Plan 00124: ensure_venv must key the venv by the project-path slug.
+
+    The slug (Plan 00100 Task 3.0.5) is the discriminator that keeps a host
+    view (e.g. ``/home/dev/proj``) and a container view (``/workspace``) of the
+    *same* bind-mounted project on separate venvs inside a shared ``untracked/``
+    — even when their Python fingerprint (``sys.version | sys.base_prefix |
+    arch``) is identical.
+
+    Regression: ``ensure_venv`` called ``python_venv_fingerprint "$python_bin"``
+    WITHOUT passing its ``daemon_dir`` ($1) as the slug root, so the venv was
+    created with the bare slug-less key ``venv-py{MM}-{hash}``. A desktop host
+    and a container sharing the same Python then collided on one venv. This test
+    pins the slug into the created venv's name and fails on the bare key.
+    """
+
+    @pytest.mark.slow
+    def test_created_venv_name_includes_project_slug(self, tmp_path: Path) -> None:
+        daemon_dir = tmp_path / "project"
+        daemon_dir.mkdir()
+        _minimal_daemon_dir(daemon_dir)
+
+        bare_fp = _run_bash(f'python_venv_fingerprint "{sys.executable}"').stdout.strip()
+        slugged_result = _run_bash(f'python_venv_fingerprint "{sys.executable}" "{daemon_dir}"')
+        assert slugged_result.returncode == 0, slugged_result.stderr
+        slugged_fp = slugged_result.stdout.strip()
+
+        # The slug must actually change the key, otherwise the test is vacuous.
+        assert (
+            slugged_fp != bare_fp
+        ), f"slug did not alter the fingerprint (bare={bare_fp}, slugged={slugged_fp})"
+
+        result = _run_bash(f'ensure_venv "{daemon_dir}" "v99.0.0" "{sys.executable}"')
+        assert result.returncode == 0, f"ensure_venv failed: {result.stderr}"
+
+        slugged_venv = daemon_dir / "untracked" / f"venv-{slugged_fp}"
+        bare_venv = daemon_dir / "untracked" / f"venv-{bare_fp}"
+
+        created = sorted(p.name for p in (daemon_dir / "untracked").glob("venv-*"))
+        assert slugged_venv.exists(), (
+            f"ensure_venv must create the slugged venv {slugged_venv.name!r}; "
+            f"created instead: {created}"
+        )
+        assert not bare_venv.exists(), (
+            "ensure_venv must NOT create a slug-less venv — that is the "
+            f"host/container collision bug. created: {created}"
+        )

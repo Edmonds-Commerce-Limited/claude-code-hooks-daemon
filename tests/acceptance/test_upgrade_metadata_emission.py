@@ -204,7 +204,7 @@ def test_layer1_upgrade_sh_emits_metadata_block(tmp_path: Path) -> None:
                 f"stderr:\n{install_result.stderr}"
             )
 
-        venv_candidates = sorted((daemon_dir / "untracked").glob("venv-py*"))
+        venv_candidates = sorted((daemon_dir / "untracked").glob("venv-*py3*"))
         assert venv_candidates, (
             f"Install must produce a fingerprint-keyed venv under " f"{daemon_dir}/untracked/."
         )
@@ -296,15 +296,31 @@ def test_layer1_upgrade_sh_emits_metadata_block(tmp_path: Path) -> None:
             value = metadata[field]
             assert version_pattern.match(value), f"{field} must look like vX.Y.Z, got: {value!r}"
 
-        # Assertion (e): python_path points at the venv we installed,
-        # NOT a system /usr/bin/. This is the v3.9.x field-bug class —
-        # if metadata emission resolves python the wrong way, future
-        # upgrade-commit metadata would be misleading.
-        assert metadata["python_path"] == str(venv_python), (
-            f"python_path must match the daemon's venv python.\n"
-            f"expected={str(venv_python)!r}\n"
+        # Assertion (e): python_path points at a fingerprint-keyed venv under
+        # the daemon's untracked/, NOT a system /usr/bin/. This is the v3.9.x
+        # field-bug class — if metadata emission resolves python the wrong way,
+        # future upgrade-commit metadata would be misleading.
+        #
+        # We deliberately do NOT pin the exact venv directory. Plan 00124 added
+        # the project-path slug to ensure_venv's venv key. A cross-version
+        # upgrade whose target tag predates that fix installs a slug-less
+        # ``venv-py{MM}-{hash}`` while the post-fix installer produces a slugged
+        # ``venv-{slug}-py{MM}-{hash}`` — both legitimate fingerprint venvs may
+        # sit side by side during the transition. The contract this assertion
+        # guards is "a real venv interpreter under untracked/, never the system
+        # python", which is exactly the v3.9.x regression surface.
+        reported_python = Path(metadata["python_path"])
+        untracked_dir = daemon_dir / "untracked"
+        assert (
+            untracked_dir in reported_python.parents
+        ), f"python_path must live under {untracked_dir}, got={metadata['python_path']!r}"
+        assert reported_python.match("venv-*py3*/bin/python"), (
+            f"python_path must be a fingerprint-keyed venv python, "
             f"got={metadata['python_path']!r}"
         )
+        assert (
+            reported_python.is_file()
+        ), f"python_path must point at a real interpreter, got={metadata['python_path']!r}"
         assert "/usr/bin/" not in metadata["python_path"], (
             f"python_path must never be a system /usr/bin/ path.\n"
             f"got={metadata['python_path']!r}"
@@ -373,7 +389,7 @@ def test_layer1_upgrade_sh_prints_truth_changes_summary(tmp_path: Path) -> None:
                 f"stderr:\n{install_result.stderr}"
             )
 
-        venv_candidates = sorted((daemon_dir / "untracked").glob("venv-py*"))
+        venv_candidates = sorted((daemon_dir / "untracked").glob("venv-*py3*"))
         assert venv_candidates, (
             f"Install must produce a fingerprint-keyed venv under " f"{daemon_dir}/untracked/."
         )

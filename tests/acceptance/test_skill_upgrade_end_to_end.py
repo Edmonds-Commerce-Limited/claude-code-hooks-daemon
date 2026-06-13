@@ -193,7 +193,7 @@ def test_skill_upgrade_shim_end_to_end_emits_metadata(tmp_path: Path) -> None:
                 f"stderr:\n{install_result.stderr}"
             )
 
-        venv_candidates = sorted((daemon_dir / "untracked").glob("venv-py*"))
+        venv_candidates = sorted((daemon_dir / "untracked").glob("venv-*py3*"))
         assert venv_candidates, f"Install must produce venv under {daemon_dir}/untracked/"
         venv_python = venv_candidates[0] / "bin" / "python"
         assert venv_python.is_file(), f"venv Python must exist: {venv_python}"

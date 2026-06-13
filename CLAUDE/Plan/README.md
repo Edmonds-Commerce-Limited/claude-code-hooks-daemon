@@ -64,6 +64,13 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00124: ensure_venv missing project-path slug](Completed/00124-ensure-venv-missing-slug/PLAN.md) - Complete
+
+  - Hotfix: `ensure_venv` (`scripts/install/venv.sh`) computed the venv fingerprint without passing its `daemon_dir`, so the venv was keyed by the bare slug-less `venv-py{MM}-{hash}` instead of the slugged `venv-{slug}-py{MM}-{hash}`
+  - A desktop host and a containerised session sharing a bind-mounted project + the same Python (same `sys.version`/`base_prefix`/arch) collided on one venv and fought over it — the project-path slug (Plan 00100 Task 3.0.5) is the discriminator and it was being dropped
+  - Fix: pass `$daemon_dir` to `python_venv_fingerprint`; broadened the venv-discovery glob in `scripts/upgrade.sh` and four acceptance tests from `venv-py*` to `venv-*py3*` (matches both slugged and legacy bare); added a canonical-resolver-exempt marker for the dependency-light metadata glob
+  - 1 new isolation test in `test_ensure_venv.py`; QA 13/13 (8539 tests, 95.1%); daemon RUNNING
+
 - [00123: macOS Portability Follow-ups](Completed/00123-macos-portability-followups/PLAN.md) - Complete
 
   - Discovered during v3.19.0 release prep by a dedicated macOS-gotcha hunt agent — four further BSD/bash-3.2 incompatibilities Plan 00122 did not cover
@@ -832,12 +839,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 123
-- **Completed**: 102 (1 with reduced scope, 4 already-shipped)
+- **Total Plans Created**: 124
+- **Completed**: 103 (1 with reduced scope, 4 already-shipped)
 - **Active**: 5 (1 python-discovery, 1 question-blocker, 1 stop-quality, 2 long-running/review) + 1 in-progress build (00116 CLAUDE.md compression)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping, 00081 - superseded by 00082)
-- **Last reconciled by**: Plan 00123 (macOS portability follow-ups) close-out
+- **Last reconciled by**: Plan 00124 (ensure_venv missing project-path slug) close-out
 
 ## Quick Links
 

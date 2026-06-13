@@ -304,10 +304,13 @@ def test_install_sh_end_to_end_produces_running_daemon(tmp_path: Path) -> None:
         # is computed from the system Python's (version|base_prefix|machine)
         # tuple — we do not need to recompute it; we just glob for the
         # single venv-* directory under the worktree's untracked/.
-        venv_candidates = sorted((daemon_dir / "untracked").glob("venv-py*"))
+        # Plan 00124: the venv is keyed WITH the project-path slug
+        # (venv-{slug}-py{MM}-{hash}), so glob for the embedded py3 fingerprint
+        # marker rather than a leading 'venv-py' — the slug now precedes it.
+        venv_candidates = sorted((daemon_dir / "untracked").glob("venv-*py3*"))
         assert venv_candidates, (
             f"install_version.sh must produce a fingerprint-keyed venv under "
-            f"{daemon_dir}/untracked/. Found nothing matching 'venv-py*'. "
+            f"{daemon_dir}/untracked/. Found nothing matching 'venv-*py3*'. "
             f"Worktree untracked/ contents: "
             f"{list((daemon_dir / 'untracked').iterdir()) if (daemon_dir / 'untracked').exists() else '(missing)'}"
         )
@@ -434,10 +437,13 @@ def test_upgrade_version_sh_end_to_end_produces_running_daemon(tmp_path: Path) -
                 f"--- stderr ---\n{install_result.stderr}"
             )
 
-        venv_candidates = sorted((daemon_dir / "untracked").glob("venv-py*"))
+        # Plan 00124: the venv is keyed WITH the project-path slug
+        # (venv-{slug}-py{MM}-{hash}), so glob for the embedded py3 fingerprint
+        # marker rather than a leading 'venv-py' — the slug now precedes it.
+        venv_candidates = sorted((daemon_dir / "untracked").glob("venv-*py3*"))
         assert venv_candidates, (
             f"Pre-upgrade install must produce a fingerprint-keyed venv under "
-            f"{daemon_dir}/untracked/. Got nothing matching 'venv-py*'."
+            f"{daemon_dir}/untracked/. Got nothing matching 'venv-*py3*'."
         )
         venv_path = venv_candidates[0]
         venv_python = venv_path / "bin" / "python"

@@ -349,8 +349,14 @@ ensure_venv() {
         return 1
     fi
 
+    # Plan 00124: pass daemon_dir as the slug root so the venv is keyed by the
+    # project-path slug (venv-{slug}-py{MM}-{hash}), matching the Python
+    # resolver's keyed lookup (paths.py get_venv_path / resolve_existing_venv).
+    # Without the root the bare slug-less key collides between a host view and a
+    # container view of the same bind-mounted project that share a Python
+    # fingerprint — they would then fight over one shared venv.
     local fingerprint
-    if ! fingerprint=$(python_venv_fingerprint "$python_bin"); then
+    if ! fingerprint=$(python_venv_fingerprint "$python_bin" "$daemon_dir"); then
         print_error "ensure_venv: failed to compute fingerprint for $python_bin"
         return 1
     fi
