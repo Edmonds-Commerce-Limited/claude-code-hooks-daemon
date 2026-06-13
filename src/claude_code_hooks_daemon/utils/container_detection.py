@@ -1,8 +1,26 @@
-"""
-Container detection utility.
+"""Environment detection utilities.
 
-Reusable container environment detection logic with confidence scoring.
-Extracted from yolo_container_detection handler for wider use.
+This module separates THREE orthogonal facts that an earlier "container
+confidence score" wrongly conflated under a single label:
+
+1. **Running under Claude Code** (:func:`running_under_claude_code`) — signalled
+   by ``CLAUDECODE`` / ``CLAUDE_CODE_ENTRYPOINT``. This daemon ONLY ever runs as
+   a Claude Code hook, so these are ~always true in production. They are NOT
+   evidence of a container and must never be scored as such.
+
+2. **YOLO / sandbox mode** (:func:`is_yolo_sandbox`) — an auto-approve sandbox
+   (``IS_SANDBOX`` / ``DEVCONTAINER`` / ``/workspace`` + ``.claude/``). Distinct
+   from "container".
+
+3. **Actually inside a container** (:func:`detect_container_runtime` /
+   :func:`in_container`) — determined ONLY from honest OS-level container
+   markers (the ``container`` env var, ``/.dockerenv``, ``/run/.containerenv``,
+   ``/proc/1/cgroup``), mirroring the ``_uv_in_container`` bash helper in
+   ``scripts/install/venv.sh``.
+
+The previous confidence scorer awarded ``CLAUDECODE=1`` three points against a
+threshold of three, so every Claude Code session — desktop included — was
+mis-classified as a container. That conflation is removed here.
 """
 
 import logging
@@ -13,151 +31,157 @@ from claude_code_hooks_daemon.core import ProjectContext
 
 logger = logging.getLogger(__name__)
 
-# Default confidence threshold for container detection
-DEFAULT_CONFIDENCE_THRESHOLD = 3
+# --- "Running under Claude Code" signals (NOT container evidence) -----------
+_ENV_CLAUDECODE = "CLAUDECODE"
+_CLAUDECODE_TRUE = "1"
+_ENV_CLAUDE_ENTRYPOINT = "CLAUDE_CODE_ENTRYPOINT"
+_CLAUDE_ENTRYPOINT_CLI = "cli"
+
+# --- Honest container-runtime signals ---------------------------------------
+_ENV_CONTAINER = "container"
+_RUNTIME_DOCKER = "docker"
+_RUNTIME_PODMAN = "podman"
+_RUNTIME_GENERIC = "generic"
+# Values the `container` env var may carry, mapped to a runtime label.
+_CONTAINER_ENV_RUNTIMES: dict[str, str] = {
+    "podman": _RUNTIME_PODMAN,
+    "docker": _RUNTIME_DOCKER,
+    "oci": _RUNTIME_GENERIC,
+    "crio": _RUNTIME_GENERIC,
+}
+
+# Marker-file paths. Defaults match Docker (`/.dockerenv`) and Podman
+# (`/run/.containerenv`); overridable via env vars (same names as the
+# Plan 00125 `_uv_in_container` bash helper) so tests can run hermetically from
+# inside a real container.
+_ENV_DOCKERENV_PATH = "HOOKS_DAEMON_DOCKERENV_PATH"
+_DEFAULT_DOCKERENV_PATH = "/.dockerenv"
+_ENV_CONTAINERENV_PATH = "HOOKS_DAEMON_CONTAINERENV_PATH"
+_DEFAULT_CONTAINERENV_PATH = "/run/.containerenv"
+_ENV_CGROUP_PATH = "HOOKS_DAEMON_CGROUP_PATH"
+_DEFAULT_CGROUP_PATH = "/proc/1/cgroup"
+
+# cgroup substring tokens → runtime label, checked in this order (most specific
+# first). ``docker`` before the podman tokens before the generic tokens.
+_CGROUP_TOKENS: tuple[tuple[str, str], ...] = (
+    ("docker", _RUNTIME_DOCKER),
+    ("libpod", _RUNTIME_PODMAN),
+    ("podman", _RUNTIME_PODMAN),
+    ("containerd", _RUNTIME_GENERIC),
+    ("lxc", _RUNTIME_GENERIC),
+    ("kubepods", _RUNTIME_GENERIC),
+)
+
+# --- YOLO / sandbox signals -------------------------------------------------
+_ENV_IS_SANDBOX = "IS_SANDBOX"
+_IS_SANDBOX_TRUE = "1"
+_ENV_DEVCONTAINER = "DEVCONTAINER"
+_DEVCONTAINER_TRUE = "true"
+_WORKSPACE_ROOT = Path("/workspace")
 
 
-def get_container_confidence_score() -> int:
+def running_under_claude_code() -> bool:
+    """Return True when executing under the Claude Code CLI.
+
+    Signalled by ``CLAUDECODE=1`` or ``CLAUDE_CODE_ENTRYPOINT=cli``.
+
+    NOTE: this daemon only ever runs as a Claude Code hook, so this is ~always
+    True in production. It is exposed for observability/honesty and must NEVER
+    be treated as evidence of a container or a sandbox.
     """
-    Calculate confidence score based on detected container indicators.
+    return (
+        os.environ.get(_ENV_CLAUDECODE) == _CLAUDECODE_TRUE
+        or os.environ.get(_ENV_CLAUDE_ENTRYPOINT) == _CLAUDE_ENTRYPOINT_CLI
+    )
 
-    Uses a multi-tier confidence scoring system:
-    - Primary indicators (3 points each): Strong signals of YOLO environment
-    - Secondary indicators (2 points each): Container-related signals
-    - Tertiary indicators (1 point each): Weak signals
 
-    Returns:
-        Confidence score (0-12 possible range)
-    """
-    score = 0
-
+def _marker_exists(path: str) -> bool:
+    """Return whether a container marker file exists, treating a probe error as
+    "absent" with an explicit debug log (never silently swallowed)."""
     try:
-        # Primary indicators (3 points each)
-        if os.environ.get("CLAUDECODE") == "1":
-            score += 3
-
-        if os.environ.get("CLAUDE_CODE_ENTRYPOINT") == "cli":
-            score += 3
-
-        # Check for /workspace + .claude/ directory
-        try:
-            if ProjectContext.project_root() == Path("/workspace"):
-                if ProjectContext.config_dir().exists():
-                    score += 3
-        except (OSError, RuntimeError):
-            # Filesystem errors - skip this check
-            pass
-
-        # Secondary indicators (2 points each)
-        if os.environ.get("DEVCONTAINER") == "true":
-            score += 2
-
-        if os.environ.get("IS_SANDBOX") == "1":
-            score += 2
-
-        container_env = os.environ.get("container", "")
-        if container_env in ["podman", "docker"]:
-            score += 2
-
-        # Tertiary indicators (1 point each)
-        try:
-            socket_path = Path(".claude/hooks-daemon/untracked/venv/socket")
-            if socket_path.exists():
-                score += 1
-        except (OSError, RuntimeError):
-            # Filesystem errors - skip this check
-            pass
-
-        try:
-            if os.getuid() == 0:
-                score += 1
-        except AttributeError:
-            # os.getuid() not available on Windows - skip
-            pass
-
-    except (OSError, RuntimeError, AttributeError) as e:
-        logger.debug("Confidence score calculation failed: %s", e)
-        return 0
-    except Exception as e:
-        logger.error("Unexpected error in confidence score: %s", e, exc_info=True)
-        return 0
-
-    return score
+        return Path(path).exists()
+    except OSError as exc:
+        logger.debug("container marker probe failed for %s: %s", path, exc)
+        return False
 
 
-def is_container_environment(threshold: int = DEFAULT_CONFIDENCE_THRESHOLD) -> bool:
+def _runtime_from_cgroup() -> str | None:
+    """Parse the cgroup file for a container-runtime token.
+
+    A missing/unreadable cgroup file (e.g. on macOS) is a legitimate "no signal"
+    outcome on the host — logged at debug level and reported as None, not hidden.
     """
-    Check if running in a container environment.
-
-    Uses confidence scoring to determine if the current environment
-    is a container (threshold: score >= 3).
-
-    Args:
-        threshold: Minimum confidence score to consider as container (default 3)
-
-    Returns:
-        True if confidence score >= threshold, False otherwise
-    """
-    score = get_container_confidence_score()
-    return score >= threshold
-
-
-def get_detected_indicators() -> list[str]:
-    """
-    Get list of detected container indicators with descriptions.
-
-    Returns:
-        List of detected indicator descriptions (empty if none detected)
-    """
-    indicators: list[str] = []
-
+    cgroup_path = os.environ.get(_ENV_CGROUP_PATH, _DEFAULT_CGROUP_PATH)
     try:
-        # Primary indicators
-        if os.environ.get("CLAUDECODE") == "1":
-            indicators.append("CLAUDECODE=1 environment variable")
+        content = Path(cgroup_path).read_text(encoding="utf-8", errors="replace").lower()
+    except OSError as exc:
+        logger.debug("cgroup probe failed for %s: %s", cgroup_path, exc)
+        return None
+    for token, runtime in _CGROUP_TOKENS:
+        if token in content:
+            return runtime
+    return None
 
-        if os.environ.get("CLAUDE_CODE_ENTRYPOINT") == "cli":
-            indicators.append("CLAUDE_CODE_ENTRYPOINT=cli environment variable")
 
-        try:
-            if (
-                ProjectContext.project_root() == Path("/workspace")
-                and ProjectContext.config_dir().exists()
-            ):
-                indicators.append("Project root is /workspace with .claude/ present")
-        except (OSError, RuntimeError):
-            pass
+def detect_container_runtime() -> str | None:
+    """Return the container runtime this process runs in, or None on the host.
 
-        # Secondary indicators
-        if os.environ.get("DEVCONTAINER") == "true":
-            indicators.append("DEVCONTAINER=true environment variable")
+    Returns one of ``"docker"``, ``"podman"``, ``"generic"`` (an unrecognised
+    OCI/containerd/LXC runtime), or ``None`` (not in a container). Uses ONLY
+    honest container markers, checked in order:
 
-        if os.environ.get("IS_SANDBOX") == "1":
-            indicators.append("IS_SANDBOX=1 environment variable")
+    1. the ``container`` env var (Podman/systemd set ``container=podman``),
+    2. the Docker marker file ``/.dockerenv``,
+    3. the Podman marker file ``/run/.containerenv``,
+    4. a container token in ``/proc/1/cgroup``.
 
-        container_env = os.environ.get("container", "")
-        if container_env in ["podman", "docker"]:
-            indicators.append(f"container={container_env} environment variable")
+    Never raises — any filesystem error degrades to "no signal" for that check.
+    """
+    env_value = os.environ.get(_ENV_CONTAINER, "").strip().lower()
+    if env_value in _CONTAINER_ENV_RUNTIMES:
+        return _CONTAINER_ENV_RUNTIMES[env_value]
 
-        # Tertiary indicators
-        try:
-            socket_path = Path(".claude/hooks-daemon/untracked/venv/socket")
-            if socket_path.exists():
-                indicators.append("Hooks daemon Unix socket present")
-        except (OSError, RuntimeError):
-            pass
+    if _marker_exists(os.environ.get(_ENV_DOCKERENV_PATH, _DEFAULT_DOCKERENV_PATH)):
+        return _RUNTIME_DOCKER
 
-        try:
-            if os.getuid() == 0:
-                indicators.append("Running as root user (UID 0)")
-        except AttributeError:
-            pass
+    if _marker_exists(os.environ.get(_ENV_CONTAINERENV_PATH, _DEFAULT_CONTAINERENV_PATH)):
+        return _RUNTIME_PODMAN
 
-    except (OSError, RuntimeError, AttributeError) as e:
-        logger.debug("Indicator detection failed: %s", e)
-        return []
-    except Exception as e:
-        logger.error("Unexpected error detecting indicators: %s", e, exc_info=True)
-        return []
+    return _runtime_from_cgroup()
 
-    return indicators
+
+def in_container() -> bool:
+    """Return True iff a container runtime is detected (honest markers only)."""
+    return detect_container_runtime() is not None
+
+
+def is_container_environment() -> bool:
+    """Precise container check — alias for :func:`in_container`.
+
+    Retained under its historical name because ``daemon/enforcement.py`` and
+    ``daemon/init_config.py`` import it and genuinely want "are we in a real
+    container". It no longer uses the tautological confidence score.
+    """
+    return in_container()
+
+
+def is_yolo_sandbox() -> bool:
+    """Return True in a YOLO / auto-approve sandbox environment.
+
+    Signals: ``IS_SANDBOX=1``, ``DEVCONTAINER=true``, or project root
+    ``/workspace`` with a ``.claude/`` directory present. This is orthogonal to
+    both "running under Claude Code" and "in a container" — notably it is NOT
+    triggered by ``CLAUDECODE`` / ``CLAUDE_CODE_ENTRYPOINT``. Fail-safe (False).
+    """
+    if os.environ.get(_ENV_IS_SANDBOX) == _IS_SANDBOX_TRUE:
+        return True
+    if os.environ.get(_ENV_DEVCONTAINER) == _DEVCONTAINER_TRUE:
+        return True
+    try:
+        in_workspace = ProjectContext.project_root() == _WORKSPACE_ROOT
+        if in_workspace and ProjectContext.config_dir().exists():
+            return True
+    except (OSError, RuntimeError) as exc:
+        logger.debug("is_yolo_sandbox ProjectContext probe failed: %s", exc)
+        return False
+    return False
