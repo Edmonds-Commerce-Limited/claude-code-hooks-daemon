@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.20.0] - 2026-06-13
+
+This is a **minor release** delivering a new `environment_indicator` status-line handler, a ground-up rewrite of container detection around honest OS-level markers, and a shared memoised settings reader that eliminates duplicate per-render parsing.
+
+### Added
+
+- **`environment_indicator` status-line handler (Plan 00126, priority 11)** — New non-terminal Status handler that shows the current execution environment in the status line: 💻 for a desktop/host session, 🐳 for Docker, or 📦 for Podman. The environment fact is read from `ProjectContext` (cached once at daemon startup) so there is no per-render probing. The handler appears between `model_context` (priority 10) and `thinking_mode` (priority 12).
+- **Honest, separated environment predicates in `utils/container_detection.py` (Plan 00126)** — Three precise, independently-testable predicates replace the old confidence scorer: `running_under_claude_code()` (checks `CLAUDECODE` / `CLAUDE_CODE_ENTRYPOINT`), `is_yolo_sandbox()` (checks `IS_SANDBOX=1` / `DEVCONTAINER=true` / project root `/workspace` with a `.claude/` directory), and `detect_container_runtime()` / `in_container()` (checks ONLY honest OS markers: the `container` env var, `/.dockerenv`, `/run/.containerenv`, `/proc/1/cgroup` content). `is_container_environment()` is retained as a precise alias for `in_container()` so existing call sites in `daemon/enforcement.py` and `daemon/init_config.py` are unchanged.
+- **Shared mtime-cached settings reader `handlers/status_line/settings_reader.py` (Plan 00126)** — A single `~/.claude/settings.json` parse is now shared across the `model_context` and `thinking_mode` status-line handlers via an mtime-keyed cache. Previously each handler re-parsed the file independently on every status-line render.
+
+### Changed
+
+- **Container detection now uses honest OS markers only — no tautological Claude Code signals (Plan 00126)** — The old `get_container_confidence_score` / `get_detected_indicators` scorer included `CLAUDECODE=1` and `CLAUDE_CODE_ENTRYPOINT=cli` as positive container evidence. Because the daemon runs exclusively under Claude Code, these environment variables are *always* set, making them tautological rather than informative. They caused every desktop Claude Code session to accumulate container-confidence points and, in some configurations, be misclassified as a container. The scorer and its tautological signals are removed; container classification now uses only OS-level markers that are genuinely absent on a desktop host.
+- **`session_start/yolo_container_detection.py` refactored to use precise detection (Plan 00126)** — The YOLO container detection handler now delegates to `is_yolo_sandbox()` and `in_container()` from the rewritten module. The handler no longer fires on desktop Claude Code sessions.
+- **`model_context` and `thinking_mode` status-line handlers share one settings parse per render (Plan 00126)** — Both handlers now call `settings_reader.read_claude_settings()` instead of opening and parsing `~/.claude/settings.json` independently. The mtime-cached reader returns a cached result if the file has not changed since the last read.
+
+### Fixed
+
+- **Desktop Claude Code sessions were misclassified as containers (Plan 00126)** — The tautological `CLAUDECODE=1` / `CLAUDE_CODE_ENTRYPOINT=cli` signals in the old confidence scorer caused single-daemon enforcement to activate by default on desktop sessions (because `is_container_environment()` returned `True`), and the advisory `yolo_container_detection` handler fired on every desktop session start. Both are corrected: enforcement and the advisory now activate only when genuine OS-level container markers are present.
+
 ## [3.19.2] - 2026-06-13
 
 This is a **patch release** that silences the noisy `uv hardlink failed` warning emitted on every daemon install/upgrade inside a container.
