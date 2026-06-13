@@ -52,7 +52,6 @@ Adding a new tier (e.g. 2000k) is just adding two new options. Models whose
 context_window_size exceeds all configured tiers use the largest tier.
 """
 
-import json
 import logging
 import re
 from pathlib import Path
@@ -60,6 +59,9 @@ from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.handlers.status_line.settings_reader import (
+    read_claude_settings,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -211,15 +213,7 @@ class ModelContextHandler(Handler):
         Returns:
             Effort level string (low/medium/high) or None if not applicable
         """
-        settings: dict[str, Any] = {}
-        try:
-            settings_path = self._get_settings_path()
-            if settings_path.exists():
-                raw = settings_path.read_text()
-                settings = json.loads(raw)
-        except (json.JSONDecodeError, OSError) as exc:
-            logger.warning("Cannot read effort level from settings: %s", exc)
-            # settings stays empty — fall through to default logic below
+        settings = read_claude_settings(self._get_settings_path())
 
         level = settings.get("effortLevel")
         if level is not None:

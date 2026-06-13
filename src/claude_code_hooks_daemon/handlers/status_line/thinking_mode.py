@@ -7,13 +7,15 @@ Uses alwaysThinkingEnabled key (same as PowerShell reference implementation).
 Effort level display is handled by ModelContextHandler (shown next to model name).
 """
 
-import json
 import logging
 from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.handlers.status_line.settings_reader import (
+    read_claude_settings,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,22 +67,12 @@ class ThinkingModeHandler(Handler):
             return HookResult(context=[])
 
     def _read_settings(self) -> dict[str, Any]:
-        """Read Claude settings file.
+        """Read Claude settings file via the shared mtime-cached reader.
 
         Returns:
             Parsed settings dict, or empty dict on failure
         """
-        settings_path = self._get_settings_path()
-
-        if not settings_path.exists():
-            return {}
-
-        try:
-            raw = settings_path.read_text()
-            result: dict[str, Any] = json.loads(raw)
-            return result
-        except (json.JSONDecodeError, OSError):
-            return {}
+        return read_claude_settings(self._get_settings_path())
 
     def _get_settings_path(self) -> Path:
         """Get path to Claude settings file.
