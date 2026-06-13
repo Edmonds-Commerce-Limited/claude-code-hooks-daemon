@@ -1,11 +1,16 @@
-"""
-YOLO Container Detection Handler.
+"""YOLO Container Detection Handler.
 
-Detects YOLO container environments (Claude Code CLI in containers) and provides
-informational context to Claude during SessionStart events.
+Detects when Claude Code is running inside a real container (Docker, Podman, or
+generic OCI) and injects informational context about the container environment
+during SessionStart events.
 
-This handler is non-terminal and advisory - it never blocks execution, only
-provides helpful context about the runtime environment.
+This handler is non-terminal and advisory — it never blocks execution, only
+provides helpful context about the runtime environment.  It fires ONLY when an
+honest container marker is present (``/.dockerenv``, ``/run/.containerenv``,
+``/proc/1/cgroup`` token, or the ``container`` env var).  It does NOT fire on
+desktop sessions, even when ``CLAUDECODE=1`` / ``CLAUDE_CODE_ENTRYPOINT=cli``
+are set — those signals indicate "running under Claude Code", not "in a
+container".
 """
 
 import logging
@@ -14,22 +19,52 @@ from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
-from claude_code_hooks_daemon.core import Handler, HookResult, ProjectContext
+from claude_code_hooks_daemon.core import Handler, HookResult
 from claude_code_hooks_daemon.core.hook_result import Decision
+from claude_code_hooks_daemon.utils.container_detection import (
+    detect_container_runtime,
+    in_container,
+)
 
 logger = logging.getLogger(__name__)
 
+# Container-runtime icon mapping (no magic strings: keys match util return values)
+_RUNTIME_DOCKER = "docker"
+_ICON_DOCKER = "🐳"
+_ICON_CONTAINER = "📦"  # podman + generic
+
+# Transcript size threshold: files larger than this are treated as resume sessions
+_RESUME_TRANSCRIPT_MIN_BYTES = 100
+
+# Config key names (no magic strings)
+_CFG_SHOW_DETAILED_INDICATORS = "show_detailed_indicators"
+_CFG_SHOW_WORKFLOW_TIPS = "show_workflow_tips"
+
+# Default config values
+_DEFAULT_SHOW_DETAILED_INDICATORS = True
+_DEFAULT_SHOW_WORKFLOW_TIPS = True
+
+# Session event name constant (avoids magic string)
+_EVENT_SESSION_START = "SessionStart"
+
+# Fallback label when detect_container_runtime() returns None inside handle()
+_FALLBACK_RUNTIME_LABEL = "container"
+
+
+def _runtime_icon(runtime: str) -> str:
+    """Return the display icon for a container runtime string."""
+    if runtime == _RUNTIME_DOCKER:
+        return _ICON_DOCKER
+    return _ICON_CONTAINER
+
 
 class YoloContainerDetectionHandler(Handler):
-    """
-    Detects YOLO container environments using multi-tier confidence scoring.
+    """Detects YOLO container environments using precise OS-level container markers.
 
-    Uses a confidence scoring system to detect YOLO containers:
-    - Primary indicators (3 points each): Strong signals of YOLO environment
-    - Secondary indicators (2 points each): Container-related signals
-    - Tertiary indicators (1 point each): Weak signals
-
-    Threshold: Score >= 3 triggers detection (prevents false positives)
+    Fires only when ``in_container()`` returns True (honest container markers:
+    ``/.dockerenv``, ``/run/.containerenv``, ``/proc/1/cgroup`` token, or the
+    ``container`` env var).  Never fires on desktop Claude Code sessions where
+    those markers are absent.
     """
 
     def __init__(self) -> None:
@@ -46,147 +81,25 @@ class YoloContainerDetectionHandler(Handler):
             ],
         )
 
-        # Default configuration
+        # Default configuration — only the two display-control keys are meaningful.
+        # Unknown keys passed via configure() are stored but ignored (tolerated).
         self.config: dict[str, Any] = {
-            "min_confidence_score": 3,
-            "show_detailed_indicators": True,
-            "show_workflow_tips": True,
+            _CFG_SHOW_DETAILED_INDICATORS: _DEFAULT_SHOW_DETAILED_INDICATORS,
+            _CFG_SHOW_WORKFLOW_TIPS: _DEFAULT_SHOW_WORKFLOW_TIPS,
         }
 
     def configure(self, config: dict[str, Any]) -> None:
-        """
-        Apply configuration overrides.
+        """Apply configuration overrides.
 
         Args:
             config: Configuration dict with optional keys:
-                - min_confidence_score: Threshold for detection (default 3)
                 - show_detailed_indicators: Include indicator list (default True)
                 - show_workflow_tips: Include workflow implications (default True)
+
+        Unknown keys are stored but ignored — the handler never crashes on
+        unrecognised options (backward-compatible tolerance).
         """
-        # Merge with defaults (config overrides defaults)
         self.config.update(config)
-
-    def _calculate_confidence_score(self) -> int:
-        """
-        Calculate confidence score based on detected indicators.
-
-        Returns:
-            Confidence score (0-12 possible range)
-        """
-        score = 0
-
-        try:
-            # Primary indicators (3 points each)
-            if os.environ.get("CLAUDECODE") == "1":
-                score += 3
-
-            if os.environ.get("CLAUDE_CODE_ENTRYPOINT") == "cli":
-                score += 3
-
-            # Check for /workspace + .claude/ directory
-            try:
-                if ProjectContext.project_root() == Path("/workspace"):
-                    if ProjectContext.config_dir().exists():
-                        score += 3
-            except (OSError, RuntimeError):
-                # Filesystem errors - skip this check
-                pass
-
-            # Secondary indicators (2 points each)
-            if os.environ.get("DEVCONTAINER") == "true":
-                score += 2
-
-            if os.environ.get("IS_SANDBOX") == "1":
-                score += 2
-
-            container_env = os.environ.get("container", "")
-            if container_env in ["podman", "docker"]:
-                score += 2
-
-            # Tertiary indicators (1 point each)
-            try:
-                socket_path = Path(".claude/hooks-daemon/untracked/venv/socket")
-                if socket_path.exists():
-                    score += 1
-            except (OSError, RuntimeError):
-                # Filesystem errors - skip this check
-                pass
-
-            try:
-                if os.getuid() == 0:
-                    score += 1
-            except AttributeError:
-                # os.getuid() not available on Windows - skip
-                pass
-
-        except (OSError, RuntimeError, AttributeError) as e:
-            logger.debug("Confidence score calculation failed: %s", e)
-            return 0
-        except Exception as e:
-            logger.error("Unexpected error in confidence score: %s", e, exc_info=True)
-            return 0
-
-        return score
-
-    def _get_detected_indicators(self) -> list[str]:
-        """
-        Get list of detected indicators with descriptions.
-
-        Returns:
-            List of detected indicator descriptions
-        """
-        indicators: list[str] = []
-
-        try:
-            # Primary indicators
-            if os.environ.get("CLAUDECODE") == "1":
-                indicators.append("CLAUDECODE=1 environment variable")
-
-            if os.environ.get("CLAUDE_CODE_ENTRYPOINT") == "cli":
-                indicators.append("CLAUDE_CODE_ENTRYPOINT=cli environment variable")
-
-            try:
-                if (
-                    ProjectContext.project_root() == Path("/workspace")
-                    and ProjectContext.config_dir().exists()
-                ):
-                    indicators.append("Project root is /workspace with .claude/ present")
-            except (OSError, RuntimeError):
-                pass
-
-            # Secondary indicators
-            if os.environ.get("DEVCONTAINER") == "true":
-                indicators.append("DEVCONTAINER=true environment variable")
-
-            if os.environ.get("IS_SANDBOX") == "1":
-                indicators.append("IS_SANDBOX=1 environment variable")
-
-            container_env = os.environ.get("container", "")
-            if container_env in ["podman", "docker"]:
-                indicators.append(f"container={container_env} environment variable")
-
-            # Tertiary indicators
-            try:
-                socket_path = Path(".claude/hooks-daemon/untracked/venv/socket")
-                if socket_path.exists():
-                    indicators.append("Hooks daemon Unix socket present")
-            except (OSError, RuntimeError):
-                pass
-
-            try:
-                if os.getuid() == 0:
-                    indicators.append("Running as root user (UID 0)")
-            except AttributeError:
-                pass
-
-        except (OSError, RuntimeError, AttributeError) as e:
-            logger.debug("Indicator detection failed: %s", e)
-            return []
-        except Exception as e:
-            logger.error("Unexpected error detecting indicators: %s", e, exc_info=True)
-            return []
-
-        return indicators
 
     def _is_resume_session(self, hook_input: dict[str, Any]) -> bool:
         """Check if this is a resumed session (transcript exists with content).
@@ -205,22 +118,48 @@ class YoloContainerDetectionHandler(Handler):
             path = Path(transcript_path)
             if not path.exists():
                 return False
-
-            # If file exists and has content (>100 bytes), it's a resume
-            return path.stat().st_size > 100
-
+            return path.stat().st_size > _RESUME_TRANSCRIPT_MIN_BYTES
         except (OSError, ValueError):
             return False
 
-    def matches(self, hook_input: dict[str, Any] | None) -> bool:
-        """
-        Check if this handler should run.
+    def _build_indicators(self, runtime: str) -> list[str]:
+        """Build the list of honest container indicators.
 
         Args:
-            hook_input: Hook input data
+            runtime: Detected container runtime label.
 
         Returns:
-            True if SessionStart event and confidence score >= threshold
+            List of human-readable indicator strings.
+        """
+        indicators: list[str] = [f"Container runtime: {runtime}"]
+
+        try:
+            from claude_code_hooks_daemon.utils.container_detection import is_yolo_sandbox
+
+            if is_yolo_sandbox():
+                indicators.append("YOLO/auto-approve sandbox detected (IS_SANDBOX or DEVCONTAINER)")
+        except (OSError, RuntimeError, ImportError) as exc:
+            logger.debug("is_yolo_sandbox check failed: %s", exc)
+
+        try:
+            if os.getuid() == 0:
+                indicators.append("Running as root user (UID 0)")
+        except AttributeError:
+            # os.getuid() not available on Windows
+            pass
+
+        return indicators
+
+    def matches(self, hook_input: dict[str, Any] | None) -> bool:
+        """Return True only for SessionStart events running inside a container.
+
+        Args:
+            hook_input: Hook input data (must be a non-None dict with
+                ``hook_event_name == "SessionStart"`` and an honest container
+                marker present).
+
+        Returns:
+            True iff the event is SessionStart AND ``in_container()`` is True.
         """
         if hook_input is None:
             return False
@@ -228,80 +167,71 @@ class YoloContainerDetectionHandler(Handler):
         if not isinstance(hook_input, dict):
             return False
 
-        # Only match SessionStart events
         event_name = hook_input.get(HookInputField.HOOK_EVENT_NAME)
-        if event_name != "SessionStart":
+        if event_name != _EVENT_SESSION_START:
             return False
 
-        # Check confidence score
         try:
-            score = self._calculate_confidence_score()
-            threshold = int(self.config.get("min_confidence_score", 3))
-            return score >= threshold
-        except (ValueError, TypeError, AttributeError) as e:
-            logger.debug("YOLO match check failed: %s", e)
-            return False
-        except Exception as e:
-            logger.error("Unexpected error in YOLO matches(): %s", e, exc_info=True)
+            return in_container()
+        except (OSError, RuntimeError) as exc:
+            logger.debug("YOLO container check failed: %s", exc)
             return False
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
-        """
-        Handle YOLO container detection.
+        """Handle YOLO container detection.
+
+        Builds an informational advisory message describing the container
+        runtime (docker / podman / generic), optionally including detected
+        indicators and workflow tips.
 
         Args:
             hook_input: Hook input data
 
         Returns:
             HookResult with ALLOW decision and informational context
+
+        Raises:
+            Never — all exceptions are caught and converted to an ALLOW
+            (for expected OS/runtime errors) or DENY (for unexpected errors).
         """
         try:
-            # Check if this is a resume - if so, be brief
             is_resume = self._is_resume_session(hook_input)
 
-            # Build context messages
+            runtime = detect_container_runtime() or _FALLBACK_RUNTIME_LABEL
+            icon = _runtime_icon(runtime)
+
             context: list[str] = []
 
             if is_resume:
-                # Brief message for resume - context already loaded
-                context.append("🐳 YOLO container (Claude Code CLI in sandbox)")
+                context.append(f"{icon} Running in a {runtime} container (Claude Code CLI sandbox)")
             else:
-                # Detailed message for new sessions
-                # Main detection message
-                context.append(
-                    "🐳 Running in YOLO container environment (Claude Code CLI in sandbox)"
-                )
+                context.append(f"{icon} Running in a {runtime} container (Claude Code CLI sandbox)")
 
-                # Add detailed indicators if enabled
-                if self.config.get("show_detailed_indicators", True):
-                    indicators = self._get_detected_indicators()
+                if self.config.get(
+                    _CFG_SHOW_DETAILED_INDICATORS, _DEFAULT_SHOW_DETAILED_INDICATORS
+                ):
+                    indicators = self._build_indicators(runtime)
                     if indicators:
                         context.append("Detected indicators:")
                         for indicator in indicators:
                             context.append(f"  • {indicator}")
 
-                # Add workflow tips if enabled
-                if self.config.get("show_workflow_tips", True):
+                if self.config.get(_CFG_SHOW_WORKFLOW_TIPS, _DEFAULT_SHOW_WORKFLOW_TIPS):
                     context.append("")
                     context.append("Container workflow implications:")
                     context.append("  • Full development environment available (git, gh, npm, pip)")
-                    context.append("  • Storage is ephemeral - commit and push work to persist")
-                    context.append("  • Running as root - install packages freely (apt, npm, pip)")
+                    context.append("  • Storage is ephemeral — commit and push work to persist")
+                    context.append("  • Running as root — install packages freely (apt, npm, pip)")
                     context.append("  • Fast iteration enabled (YOLO mode, no permission prompts)")
 
             return HookResult(decision=Decision.ALLOW, reason=None, context=context)
 
-        except (OSError, RuntimeError, AttributeError) as e:
-            logger.warning("YOLO container detection failed: %s", e, exc_info=True)
+        except (OSError, RuntimeError, AttributeError) as exc:
+            logger.warning("YOLO container detection failed: %s", exc, exc_info=True)
             return HookResult(
-                decision=Decision.ALLOW, reason=None, context=[f"⚠️  YOLO detection failed: {e}"]
-            )
-        except Exception as e:
-            logger.error("YOLO handler encountered unexpected error: %s", e, exc_info=True)
-            return HookResult(
-                decision=Decision.DENY,
-                reason=f"YOLO handler error: {e}",
-                context=["Contact support if this persists."],
+                decision=Decision.ALLOW,
+                reason=None,
+                context=[f"⚠️  YOLO detection failed: {exc}"],
             )
 
     def get_claude_md(self) -> str | None:
@@ -320,10 +250,16 @@ class YoloContainerDetectionHandler(Handler):
             AcceptanceTest(
                 title="yolo container detection handler test",
                 command='echo "test"',
-                description="Tests yolo container detection handler functionality",
+                description=(
+                    "Tests yolo container detection handler functionality "
+                    "in a container environment"
+                ),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r".*"],
-                safety_notes="Context/utility handler - minimal testing required",
+                safety_notes=(
+                    "Context/utility handler — only fires when honest container "
+                    "markers are present"
+                ),
                 test_type=TestType.CONTEXT,
                 requires_event="SessionStart event",
                 recommended_model=RecommendedModel.SONNET,

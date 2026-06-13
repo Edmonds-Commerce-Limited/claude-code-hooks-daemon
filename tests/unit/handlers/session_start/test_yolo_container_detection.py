@@ -1,946 +1,668 @@
-"""
-Unit tests for YoloContainerDetectionHandler.
+"""Unit tests for YoloContainerDetectionHandler.
 
-Tests the YOLO container detection handler that provides informational context
-about running in a YOLO container environment during SessionStart.
+Tests cover the refactored handler that uses ``in_container()`` /
+``detect_container_runtime()`` from the precise container-detection utility
+instead of the removed tautological confidence scorer.
+
+Key regression: desktop Claude Code sessions (CLAUDECODE=1,
+CLAUDE_CODE_ENTRYPOINT=cli, but NO container markers) must NOT fire.
 """
 
 import json
+import os
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from typing import Any
+from unittest.mock import patch
 
-import pytest
-
-from claude_code_hooks_daemon.core import HookResult
-
-# We'll implement the handler next, so import will fail initially
-try:
-    from claude_code_hooks_daemon.handlers.session_start.yolo_container_detection import (
-        YoloContainerDetectionHandler,
-    )
-except ImportError:
-    YoloContainerDetectionHandler = None
-
-
-pytestmark = pytest.mark.skipif(
-    YoloContainerDetectionHandler is None,
-    reason="YoloContainerDetectionHandler not yet implemented",
+from claude_code_hooks_daemon.handlers.session_start.yolo_container_detection import (
+    _CFG_SHOW_DETAILED_INDICATORS,
+    _CFG_SHOW_WORKFLOW_TIPS,
+    _ICON_CONTAINER,
+    _ICON_DOCKER,
+    _RUNTIME_DOCKER,
+    YoloContainerDetectionHandler,
 )
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
-class TestYoloContainerDetectionHandler:
-    """Test handler initialization and configuration."""
+# Env vars that point to overridable container marker paths (from util)
+_ENV_DOCKERENV_PATH = "HOOKS_DAEMON_DOCKERENV_PATH"
+_ENV_CONTAINERENV_PATH = "HOOKS_DAEMON_CONTAINERENV_PATH"
+_ENV_CGROUP_PATH = "HOOKS_DAEMON_CGROUP_PATH"
 
-    def test_handler_initialization_defaults(self):
-        """Test handler initializes with correct defaults."""
+# A SessionStart hook_input with no transcript (new session)
+_SESSION_START_NEW: dict[str, Any] = {"hook_event_name": "SessionStart"}
+
+
+def _absent_path(tmp_path: Path, name: str) -> str:
+    """Return a path string to a non-existent file inside tmp_path."""
+    return str(tmp_path / name)
+
+
+def _present_path(tmp_path: Path, name: str, content: str = "x") -> str:
+    """Create a file in tmp_path and return its path string."""
+    p = tmp_path / name
+    p.write_text(content, encoding="utf-8")
+    return str(p)
+
+
+def _container_env(tmp_path: Path, *, runtime: str = "docker") -> dict[str, str]:
+    """Build an env override that simulates a container via a marker file.
+
+    For docker → points HOOKS_DAEMON_DOCKERENV_PATH at a real file.
+    For podman → points HOOKS_DAEMON_CONTAINERENV_PATH at a real file.
+    Both also redirect the other markers and cgroup to absent paths so only
+    the intended signal fires.
+    """
+    dockerenv = (
+        _present_path(tmp_path, ".dockerenv")
+        if runtime == "docker"
+        else _absent_path(tmp_path, ".dockerenv")
+    )
+    containerenv = (
+        _present_path(tmp_path, ".containerenv")
+        if runtime == "podman"
+        else _absent_path(tmp_path, ".containerenv")
+    )
+    cgroup = _absent_path(tmp_path, "cgroup")  # no cgroup signal
+    return {
+        _ENV_DOCKERENV_PATH: dockerenv,
+        _ENV_CONTAINERENV_PATH: containerenv,
+        _ENV_CGROUP_PATH: cgroup,
+        # Ensure the `container` env var does not accidentally signal
+        "container": "",
+    }
+
+
+def _desktop_env(tmp_path: Path) -> dict[str, str]:
+    """Build an env override that looks like desktop Claude Code (no container markers)."""
+    return {
+        "CLAUDECODE": "1",
+        "CLAUDE_CODE_ENTRYPOINT": "cli",
+        _ENV_DOCKERENV_PATH: _absent_path(tmp_path, ".dockerenv"),
+        _ENV_CONTAINERENV_PATH: _absent_path(tmp_path, ".containerenv"),
+        _ENV_CGROUP_PATH: _absent_path(tmp_path, "cgroup"),
+        "container": "",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Initialization
+# ---------------------------------------------------------------------------
+
+
+class TestInitialization:
+    """Handler initialises with correct defaults."""
+
+    def test_handler_name(self) -> None:
         handler = YoloContainerDetectionHandler()
-
         assert handler.name == "yolo-container-detection"
+
+    def test_handler_priority(self) -> None:
+        handler = YoloContainerDetectionHandler()
         assert handler.priority == 40
+
+    def test_handler_is_non_terminal(self) -> None:
+        handler = YoloContainerDetectionHandler()
         assert handler.terminal is False
 
-    def test_handler_with_custom_config(self):
-        """Test handler accepts custom configuration."""
-        config = {
-            "min_confidence_score": 5,
-            "show_detailed_indicators": False,
-            "show_workflow_tips": False,
-        }
-
+    def test_default_show_detailed_indicators(self) -> None:
         handler = YoloContainerDetectionHandler()
-        handler.configure(config)
+        assert handler.config[_CFG_SHOW_DETAILED_INDICATORS] is True
 
-        # Verify config is stored (implementation will use these)
-        assert hasattr(handler, "config")
-        assert handler.config["min_confidence_score"] == 5
-        assert handler.config["show_detailed_indicators"] is False
-        assert handler.config["show_workflow_tips"] is False
+    def test_default_show_workflow_tips(self) -> None:
+        handler = YoloContainerDetectionHandler()
+        assert handler.config[_CFG_SHOW_WORKFLOW_TIPS] is True
 
-    def test_handler_config_defaults_applied(self):
-        """Test default config values are applied when not specified."""
+
+# ---------------------------------------------------------------------------
+# configure()
+# ---------------------------------------------------------------------------
+
+
+class TestConfigure:
+    """configure() merges options and tolerates unknown keys."""
+
+    def test_override_show_detailed_indicators(self) -> None:
+        handler = YoloContainerDetectionHandler()
+        handler.configure({_CFG_SHOW_DETAILED_INDICATORS: False})
+        assert handler.config[_CFG_SHOW_DETAILED_INDICATORS] is False
+
+    def test_override_show_workflow_tips(self) -> None:
+        handler = YoloContainerDetectionHandler()
+        handler.configure({_CFG_SHOW_WORKFLOW_TIPS: False})
+        assert handler.config[_CFG_SHOW_WORKFLOW_TIPS] is False
+
+    def test_empty_config_preserves_defaults(self) -> None:
         handler = YoloContainerDetectionHandler()
         handler.configure({})
+        assert handler.config[_CFG_SHOW_DETAILED_INDICATORS] is True
+        assert handler.config[_CFG_SHOW_WORKFLOW_TIPS] is True
 
-        assert handler.config["min_confidence_score"] == 3
-        assert handler.config["show_detailed_indicators"] is True
-        assert handler.config["show_workflow_tips"] is True
-
-
-class TestYoloContainerDetectionConfidenceScoring:
-    """Test confidence scoring logic with various indicator combinations."""
-
-    def test_primary_indicator_claudecode_env(self, monkeypatch):
-        """Test CLAUDECODE=1 gives 3 points (primary)."""
-        monkeypatch.setenv("CLAUDECODE", "1")
-
+    def test_unknown_key_is_tolerated(self) -> None:
+        """Legacy min_confidence_score key must not crash the handler."""
         handler = YoloContainerDetectionHandler()
-        score = handler._calculate_confidence_score()
+        handler.configure({"min_confidence_score": 5})
+        # Stored but ignored — no crash
+        assert handler.config.get("min_confidence_score") == 5
 
-        assert score >= 3  # At least 3 from this indicator
-
-    def test_primary_indicator_claude_code_entrypoint(self, monkeypatch):
-        """Test CLAUDE_CODE_ENTRYPOINT=cli gives 3 points (primary)."""
-        monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", "cli")
-
+    def test_partial_override_keeps_other_defaults(self) -> None:
         handler = YoloContainerDetectionHandler()
-        score = handler._calculate_confidence_score()
+        handler.configure({_CFG_SHOW_WORKFLOW_TIPS: False})
+        assert handler.config[_CFG_SHOW_DETAILED_INDICATORS] is True  # unchanged
 
-        assert score >= 3
 
-    def test_primary_indicator_workspace_with_claude_dir(self, monkeypatch):
-        """Test /workspace + .claude/ gives 3 points (primary)."""
-        with patch("pathlib.Path.cwd", return_value=Path("/workspace")):
-            with patch("pathlib.Path.exists", return_value=True):
-                handler = YoloContainerDetectionHandler()
-                score = handler._calculate_confidence_score()
+# ---------------------------------------------------------------------------
+# REGRESSION: desktop Claude Code session must NOT fire
+# ---------------------------------------------------------------------------
 
-                assert score >= 3
 
-    def test_secondary_indicator_devcontainer(self, monkeypatch):
-        """Test DEVCONTAINER=true gives 2 points (secondary)."""
-        monkeypatch.setenv("DEVCONTAINER", "true")
+class TestDesktopDoesNotFire:
+    """Regression: CLAUDECODE=1 + CLAUDE_CODE_ENTRYPOINT=cli, no container markers → False."""
 
-        handler = YoloContainerDetectionHandler()
-        score = handler._calculate_confidence_score()
-
-        assert score >= 2
-
-    def test_secondary_indicator_is_sandbox(self, monkeypatch):
-        """Test IS_SANDBOX=1 gives 2 points (secondary)."""
-        monkeypatch.setenv("IS_SANDBOX", "1")
-
-        handler = YoloContainerDetectionHandler()
-        score = handler._calculate_confidence_score()
-
-        assert score >= 2
-
-    def test_secondary_indicator_container_podman(self, monkeypatch):
-        """Test container=podman gives 2 points (secondary)."""
-        monkeypatch.setenv("container", "podman")
-
-        handler = YoloContainerDetectionHandler()
-        score = handler._calculate_confidence_score()
-
-        assert score >= 2
-
-    def test_secondary_indicator_container_docker(self, monkeypatch):
-        """Test container=docker gives 2 points (secondary)."""
-        monkeypatch.setenv("container", "docker")
-
-        handler = YoloContainerDetectionHandler()
-        score = handler._calculate_confidence_score()
-
-        assert score >= 2
-
-    def test_tertiary_indicator_socket_exists(self):
-        """Test socket file existence gives 1 point (tertiary)."""
-        with patch("pathlib.Path.exists", return_value=True):
+    def test_desktop_session_matches_false(self, tmp_path: Path) -> None:
+        """Core regression: desktop Claude Code must never trigger this handler."""
+        env = _desktop_env(tmp_path)
+        with patch.dict(os.environ, env, clear=False):
             handler = YoloContainerDetectionHandler()
-            score = handler._calculate_confidence_score()
+            assert handler.matches(_SESSION_START_NEW) is False
 
-            # Socket alone won't trigger detection, but adds to score
-            assert score >= 1
-
-    def test_tertiary_indicator_root_user(self):
-        """Test running as root (UID 0) gives 1 point (tertiary)."""
-        with patch("os.getuid", return_value=0):
+    def test_claudecode_env_alone_not_sufficient(self, tmp_path: Path) -> None:
+        """CLAUDECODE=1 alone is not a container signal."""
+        env = {
+            "CLAUDECODE": "1",
+            _ENV_DOCKERENV_PATH: _absent_path(tmp_path, ".dockerenv"),
+            _ENV_CONTAINERENV_PATH: _absent_path(tmp_path, ".containerenv"),
+            _ENV_CGROUP_PATH: _absent_path(tmp_path, "cgroup"),
+            "container": "",
+        }
+        with patch.dict(os.environ, env, clear=False):
             handler = YoloContainerDetectionHandler()
-            score = handler._calculate_confidence_score()
+            assert handler.matches(_SESSION_START_NEW) is False
 
-            assert score >= 1
-
-    def test_multiple_primary_indicators(self, monkeypatch):
-        """Test multiple primary indicators accumulate points."""
-        monkeypatch.setenv("CLAUDECODE", "1")
-        monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", "cli")
-
-        handler = YoloContainerDetectionHandler()
-        score = handler._calculate_confidence_score()
-
-        # Two primary indicators = 6 points minimum
-        assert score >= 6
-
-    def test_mixed_indicators(self, monkeypatch):
-        """Test combination of primary, secondary, and tertiary indicators."""
-        monkeypatch.setenv("CLAUDECODE", "1")  # Primary: 3
-        monkeypatch.setenv("IS_SANDBOX", "1")  # Secondary: 2
-        # Total: 5 points
-
-        with patch("os.getuid", return_value=0):  # Tertiary: 1, Total: 6
+    def test_entrypoint_cli_alone_not_sufficient(self, tmp_path: Path) -> None:
+        """CLAUDE_CODE_ENTRYPOINT=cli alone is not a container signal."""
+        env = {
+            "CLAUDE_CODE_ENTRYPOINT": "cli",
+            _ENV_DOCKERENV_PATH: _absent_path(tmp_path, ".dockerenv"),
+            _ENV_CONTAINERENV_PATH: _absent_path(tmp_path, ".containerenv"),
+            _ENV_CGROUP_PATH: _absent_path(tmp_path, "cgroup"),
+            "container": "",
+        }
+        with patch.dict(os.environ, env, clear=False):
             handler = YoloContainerDetectionHandler()
-            score = handler._calculate_confidence_score()
-
-            assert score >= 6
-
-    def test_no_indicators_zero_score(self, monkeypatch):
-        """Test no indicators results in zero score."""
-        # Clear all environment variables
-        for key in [
-            "CLAUDECODE",
-            "CLAUDE_CODE_ENTRYPOINT",
-            "DEVCONTAINER",
-            "IS_SANDBOX",
-            "container",
-        ]:
-            monkeypatch.delenv(key, raising=False)
-
-        with patch("pathlib.Path.cwd", return_value=Path("/home/user")):
-            with patch("pathlib.Path.exists", return_value=False):
-                with patch("os.getuid", return_value=1000):
-                    handler = YoloContainerDetectionHandler()
-                    score = handler._calculate_confidence_score()
-
-                    assert score == 0
-
-    def test_threshold_exactly_met(self, monkeypatch):
-        """Test score exactly meeting threshold (3 points)."""
-        # Clear all YOLO indicators first
-        for key in [
-            "CLAUDECODE",
-            "CLAUDE_CODE_ENTRYPOINT",
-            "DEVCONTAINER",
-            "IS_SANDBOX",
-            "container",
-        ]:
-            monkeypatch.delenv(key, raising=False)
-
-        # Set exactly one primary indicator (3 points)
-        monkeypatch.setenv("CLAUDECODE", "1")
-
-        with patch("pathlib.Path.cwd", return_value=Path("/home/user")):
-            with patch("pathlib.Path.exists", return_value=False):
-                with patch("os.getuid", return_value=1000):
-                    handler = YoloContainerDetectionHandler()
-                    score = handler._calculate_confidence_score()
-
-                    assert score == 3
-
-    def test_threshold_not_met(self, monkeypatch):
-        """Test score below threshold (< 3 points)."""
-        # Clear all YOLO indicators first
-        for key in [
-            "CLAUDECODE",
-            "CLAUDE_CODE_ENTRYPOINT",
-            "DEVCONTAINER",
-            "IS_SANDBOX",
-            "container",
-        ]:
-            monkeypatch.delenv(key, raising=False)
-
-        # Set exactly one secondary indicator (2 points)
-        monkeypatch.setenv("IS_SANDBOX", "1")
-
-        with patch("pathlib.Path.cwd", return_value=Path("/home/user")):
-            with patch("pathlib.Path.exists", return_value=False):
-                with patch("os.getuid", return_value=1000):
-                    handler = YoloContainerDetectionHandler()
-                    score = handler._calculate_confidence_score()
-
-                    assert score == 2
-                    assert score < 3  # Below threshold
+            assert handler.matches(_SESSION_START_NEW) is False
 
 
-class TestYoloContainerDetectionGetDetectedIndicators:
-    """Test indicator detection and reporting."""
+# ---------------------------------------------------------------------------
+# matches()
+# ---------------------------------------------------------------------------
 
-    def test_get_detected_indicators_primary(self, monkeypatch):
-        """Test primary indicators are correctly identified."""
-        monkeypatch.setenv("CLAUDECODE", "1")
 
+class TestMatches:
+    """matches() logic."""
+
+    def test_matches_true_in_docker_container(self, tmp_path: Path) -> None:
+        env = _container_env(tmp_path, runtime="docker")
+        with patch.dict(os.environ, env, clear=False):
+            handler = YoloContainerDetectionHandler()
+            assert handler.matches(_SESSION_START_NEW) is True
+
+    def test_matches_true_in_podman_container(self, tmp_path: Path) -> None:
+        env = _container_env(tmp_path, runtime="podman")
+        with patch.dict(os.environ, env, clear=False):
+            handler = YoloContainerDetectionHandler()
+            assert handler.matches(_SESSION_START_NEW) is True
+
+    def test_matches_false_for_non_session_start_event(self, tmp_path: Path) -> None:
+        """Even inside a container, non-SessionStart events are ignored."""
+        env = _container_env(tmp_path, runtime="docker")
+        with patch.dict(os.environ, env, clear=False):
+            handler = YoloContainerDetectionHandler()
+            assert handler.matches({"hook_event_name": "PreToolUse"}) is False
+
+    def test_matches_false_for_post_tool_use(self, tmp_path: Path) -> None:
+        env = _container_env(tmp_path, runtime="docker")
+        with patch.dict(os.environ, env, clear=False):
+            handler = YoloContainerDetectionHandler()
+            assert handler.matches({"hook_event_name": "PostToolUse"}) is False
+
+    def test_matches_false_for_stop_event(self, tmp_path: Path) -> None:
+        env = _container_env(tmp_path, runtime="docker")
+        with patch.dict(os.environ, env, clear=False):
+            handler = YoloContainerDetectionHandler()
+            assert handler.matches({"hook_event_name": "Stop"}) is False
+
+    def test_matches_false_when_hook_input_is_none(self) -> None:
         handler = YoloContainerDetectionHandler()
-        indicators = handler._get_detected_indicators()
-
-        assert "CLAUDECODE=1 environment variable" in indicators
-
-    def test_get_detected_indicators_multiple(self, monkeypatch):
-        """Test multiple indicators are all reported."""
-        monkeypatch.setenv("CLAUDECODE", "1")
-        monkeypatch.setenv("IS_SANDBOX", "1")
-
-        handler = YoloContainerDetectionHandler()
-        indicators = handler._get_detected_indicators()
-
-        assert len(indicators) >= 2
-        assert any("CLAUDECODE" in ind for ind in indicators)
-        assert any("IS_SANDBOX" in ind for ind in indicators)
-
-    def test_get_detected_indicators_empty(self, monkeypatch):
-        """Test no indicators results in empty list."""
-        for key in [
-            "CLAUDECODE",
-            "CLAUDE_CODE_ENTRYPOINT",
-            "DEVCONTAINER",
-            "IS_SANDBOX",
-            "container",
-        ]:
-            monkeypatch.delenv(key, raising=False)
-
-        with patch("pathlib.Path.exists", return_value=False):
-            with patch("os.getuid", return_value=1000):
-                handler = YoloContainerDetectionHandler()
-                indicators = handler._get_detected_indicators()
-
-                assert indicators == []
-
-
-class TestYoloContainerDetectionMatches:
-    """Test matches() method logic."""
-
-    def test_matches_session_start_with_sufficient_confidence(self, monkeypatch):
-        """Test handler matches SessionStart with score >= threshold."""
-        monkeypatch.setenv("CLAUDECODE", "1")  # 3 points
-
-        handler = YoloContainerDetectionHandler()
-        hook_input = {"hook_event_name": "SessionStart"}
-
-        assert handler.matches(hook_input) is True
-
-    def test_matches_session_start_insufficient_confidence(self, monkeypatch):
-        """Test handler doesn't match SessionStart with score < threshold."""
-        # Clear all YOLO indicators first
-        for key in [
-            "CLAUDECODE",
-            "CLAUDE_CODE_ENTRYPOINT",
-            "DEVCONTAINER",
-            "IS_SANDBOX",
-            "container",
-        ]:
-            monkeypatch.delenv(key, raising=False)
-
-        # Set exactly one secondary indicator (2 points, below threshold of 3)
-        monkeypatch.setenv("IS_SANDBOX", "1")
-
-        with patch("pathlib.Path.cwd", return_value=Path("/home/user")):
-            with patch("pathlib.Path.exists", return_value=False):
-                with patch("os.getuid", return_value=1000):
-                    handler = YoloContainerDetectionHandler()
-                    hook_input = {"hook_event_name": "SessionStart"}
-
-                    assert handler.matches(hook_input) is False
-
-    def test_matches_wrong_event_type(self, monkeypatch):
-        """Test handler doesn't match non-SessionStart events."""
-        monkeypatch.setenv("CLAUDECODE", "1")  # Sufficient confidence
-
-        handler = YoloContainerDetectionHandler()
-        hook_input = {"hook_event_name": "PreToolUse"}
-
-        assert handler.matches(hook_input) is False
-
-    def test_matches_respects_custom_threshold(self, monkeypatch):
-        """Test handler respects custom min_confidence_score config."""
-        # Clear all YOLO indicators first
-        for key in [
-            "CLAUDECODE",
-            "CLAUDE_CODE_ENTRYPOINT",
-            "DEVCONTAINER",
-            "IS_SANDBOX",
-            "container",
-        ]:
-            monkeypatch.delenv(key, raising=False)
-
-        # Set exactly one primary indicator (3 points)
-        monkeypatch.setenv("CLAUDECODE", "1")
-
-        with patch("pathlib.Path.cwd", return_value=Path("/home/user")):
-            with patch("pathlib.Path.exists", return_value=False):
-                with patch("os.getuid", return_value=1000):
-                    handler = YoloContainerDetectionHandler()
-                    handler.configure({"min_confidence_score": 5})  # Require 5 points
-
-                    hook_input = {"hook_event_name": "SessionStart"}
-
-                    # 3 points < 5 required, should not match
-                    assert handler.matches(hook_input) is False
-
-    def test_matches_missing_hook_event_name(self):
-        """Test handler handles missing hook_event_name gracefully."""
-        handler = YoloContainerDetectionHandler()
-        hook_input = {}
-
-        # Should not crash, should return False
-        assert handler.matches(hook_input) is False
-
-    def test_matches_none_hook_input(self):
-        """Test handler handles None hook_input gracefully."""
-        handler = YoloContainerDetectionHandler()
-
-        # Should not crash, should return False
         assert handler.matches(None) is False
 
-
-class TestYoloContainerDetectionHandle:
-    """Test handle() method output and behavior."""
-
-    def test_handle_returns_allow_decision(self, monkeypatch):
-        """Test handler always returns ALLOW decision."""
-        monkeypatch.setenv("CLAUDECODE", "1")
-
+    def test_matches_false_when_hook_input_is_non_dict_string(self) -> None:
         handler = YoloContainerDetectionHandler()
-        hook_input = {"hook_event_name": "SessionStart"}
+        bad_input: Any = "SessionStart"
+        assert handler.matches(bad_input) is False
 
-        result = handler.handle(hook_input)
+    def test_matches_false_when_hook_input_is_list(self) -> None:
+        handler = YoloContainerDetectionHandler()
+        bad_input: Any = ["SessionStart"]
+        assert handler.matches(bad_input) is False
 
-        assert isinstance(result, HookResult)
+    def test_matches_false_when_hook_input_is_int(self) -> None:
+        handler = YoloContainerDetectionHandler()
+        bad_input: Any = 12345
+        assert handler.matches(bad_input) is False
+
+    def test_matches_false_missing_hook_event_name_key(self, tmp_path: Path) -> None:
+        env = _container_env(tmp_path, runtime="docker")
+        with patch.dict(os.environ, env, clear=False):
+            handler = YoloContainerDetectionHandler()
+            assert handler.matches({}) is False
+
+    def test_matches_false_hook_event_name_is_none(self, tmp_path: Path) -> None:
+        env = _container_env(tmp_path, runtime="docker")
+        with patch.dict(os.environ, env, clear=False):
+            handler = YoloContainerDetectionHandler()
+            assert handler.matches({"hook_event_name": None}) is False
+
+    def test_matches_false_hook_event_name_wrong_type(self, tmp_path: Path) -> None:
+        env = _container_env(tmp_path, runtime="docker")
+        with patch.dict(os.environ, env, clear=False):
+            handler = YoloContainerDetectionHandler()
+            assert handler.matches({"hook_event_name": 12345}) is False
+
+    def test_matches_uses_container_env_var(self, tmp_path: Path) -> None:
+        """The `container` env var alone (e.g. podman sets container=podman) is sufficient."""
+        env = {
+            "container": "podman",
+            _ENV_DOCKERENV_PATH: _absent_path(tmp_path, ".dockerenv"),
+            _ENV_CONTAINERENV_PATH: _absent_path(tmp_path, ".containerenv"),
+            _ENV_CGROUP_PATH: _absent_path(tmp_path, "cgroup"),
+        }
+        with patch.dict(os.environ, env, clear=False):
+            handler = YoloContainerDetectionHandler()
+            assert handler.matches(_SESSION_START_NEW) is True
+
+    def test_matches_returns_false_on_oserror_from_in_container(self, tmp_path: Path) -> None:
+        """OSError from in_container() is caught — returns False (fail safe)."""
+        env = _desktop_env(tmp_path)
+        with patch.dict(os.environ, env, clear=False):
+            handler = YoloContainerDetectionHandler()
+            with patch(
+                "claude_code_hooks_daemon.handlers.session_start.yolo_container_detection.in_container",
+                side_effect=OSError("probe failed"),
+            ):
+                assert handler.matches(_SESSION_START_NEW) is False
+
+    def test_matches_returns_false_on_runtime_error_from_in_container(self, tmp_path: Path) -> None:
+        env = _desktop_env(tmp_path)
+        with patch.dict(os.environ, env, clear=False):
+            handler = YoloContainerDetectionHandler()
+            with patch(
+                "claude_code_hooks_daemon.handlers.session_start.yolo_container_detection.in_container",
+                side_effect=RuntimeError("unexpected"),
+            ):
+                assert handler.matches(_SESSION_START_NEW) is False
+
+
+# ---------------------------------------------------------------------------
+# handle() — icon and runtime label
+# ---------------------------------------------------------------------------
+
+
+class TestHandleRuntimeIcon:
+    """handle() picks the correct icon and includes the runtime label."""
+
+    def test_docker_container_shows_whale_icon(self, tmp_path: Path) -> None:
+        env = _container_env(tmp_path, runtime="docker")
+        with patch.dict(os.environ, env, clear=False):
+            handler = YoloContainerDetectionHandler()
+            result = handler.handle(_SESSION_START_NEW)
+        assert result.decision == "allow"
+        assert any(_ICON_DOCKER in line for line in result.context)
+        assert any("docker" in line for line in result.context)
+
+    def test_podman_container_shows_box_icon(self, tmp_path: Path) -> None:
+        env = _container_env(tmp_path, runtime="podman")
+        with patch.dict(os.environ, env, clear=False):
+            handler = YoloContainerDetectionHandler()
+            result = handler.handle(_SESSION_START_NEW)
+        assert result.decision == "allow"
+        assert any(_ICON_CONTAINER in line for line in result.context)
+        assert any("podman" in line for line in result.context)
+
+    def test_generic_container_shows_box_icon(self, tmp_path: Path) -> None:
+        """A `container=oci` env var maps to 'generic' → 📦 icon."""
+        env = {
+            "container": "oci",
+            _ENV_DOCKERENV_PATH: _absent_path(tmp_path, ".dockerenv"),
+            _ENV_CONTAINERENV_PATH: _absent_path(tmp_path, ".containerenv"),
+            _ENV_CGROUP_PATH: _absent_path(tmp_path, "cgroup"),
+        }
+        with patch.dict(os.environ, env, clear=False):
+            handler = YoloContainerDetectionHandler()
+            result = handler.handle(_SESSION_START_NEW)
+        assert result.decision == "allow"
+        assert any(_ICON_CONTAINER in line for line in result.context)
+
+
+# ---------------------------------------------------------------------------
+# handle() — decision and structure
+# ---------------------------------------------------------------------------
+
+
+class TestHandleDecisionAndStructure:
+    """handle() always returns ALLOW with list context and no reason."""
+
+    def test_decision_is_allow(self, tmp_path: Path) -> None:
+        env = _container_env(tmp_path, runtime="docker")
+        with patch.dict(os.environ, env, clear=False):
+            handler = YoloContainerDetectionHandler()
+            result = handler.handle(_SESSION_START_NEW)
         assert result.decision == "allow"
 
-    def test_handle_context_is_list(self, monkeypatch):
-        """Test context is a list, not a string."""
-        monkeypatch.setenv("CLAUDECODE", "1")
-
-        handler = YoloContainerDetectionHandler()
-        hook_input = {"hook_event_name": "SessionStart"}
-
-        result = handler.handle(hook_input)
-
+    def test_context_is_list(self, tmp_path: Path) -> None:
+        env = _container_env(tmp_path, runtime="docker")
+        with patch.dict(os.environ, env, clear=False):
+            handler = YoloContainerDetectionHandler()
+            result = handler.handle(_SESSION_START_NEW)
         assert isinstance(result.context, list)
         assert len(result.context) > 0
 
-    def test_handle_context_includes_detection_message(self, monkeypatch):
-        """Test context includes YOLO detection message."""
-        monkeypatch.setenv("CLAUDECODE", "1")
-
-        handler = YoloContainerDetectionHandler()
-        hook_input = {"hook_event_name": "SessionStart"}
-
-        result = handler.handle(hook_input)
-
-        # Join context items to search for message
-        context_text = " ".join(result.context)
-        assert "YOLO" in context_text or "container" in context_text.lower()
-
-    def test_handle_context_includes_indicators_when_enabled(self, monkeypatch):
-        """Test context includes indicator list when show_detailed_indicators=True."""
-        monkeypatch.setenv("CLAUDECODE", "1")
-
-        handler = YoloContainerDetectionHandler()
-        handler.configure({"show_detailed_indicators": True})
-
-        hook_input = {"hook_event_name": "SessionStart"}
-        result = handler.handle(hook_input)
-
-        context_text = " ".join(result.context)
-        assert "CLAUDECODE" in context_text or "indicator" in context_text.lower()
-
-    def test_handle_context_excludes_indicators_when_disabled(self, monkeypatch):
-        """Test context excludes indicator list when show_detailed_indicators=False."""
-        monkeypatch.setenv("CLAUDECODE", "1")
-
-        handler = YoloContainerDetectionHandler()
-        handler.configure({"show_detailed_indicators": False})
-
-        hook_input = {"hook_event_name": "SessionStart"}
-        result = handler.handle(hook_input)
-
-        # Should still have basic message, but not detailed indicators
-        assert len(result.context) > 0
-        # This is harder to test precisely without knowing exact format
-
-    def test_handle_context_includes_workflow_tips_when_enabled(self, monkeypatch):
-        """Test context includes workflow tips when show_workflow_tips=True."""
-        monkeypatch.setenv("CLAUDECODE", "1")
-
-        handler = YoloContainerDetectionHandler()
-        handler.configure({"show_workflow_tips": True})
-
-        hook_input = {"hook_event_name": "SessionStart"}
-        result = handler.handle(hook_input)
-
-        context_text = " ".join(result.context)
-        # Look for workflow-related keywords
-        assert any(
-            keyword in context_text.lower()
-            for keyword in ["workflow", "tip", "ephemeral", "container"]
-        )
-
-    def test_handle_context_excludes_workflow_tips_when_disabled(self, monkeypatch):
-        """Test context is minimal when show_workflow_tips=False."""
-        monkeypatch.setenv("CLAUDECODE", "1")
-
-        handler = YoloContainerDetectionHandler()
-        handler.configure({"show_workflow_tips": False})
-
-        hook_input = {"hook_event_name": "SessionStart"}
-        result = handler.handle(hook_input)
-
-        # Should have shorter context without tips
-        assert len(result.context) >= 1
-
-    def test_handle_no_reason_provided(self, monkeypatch):
-        """Test handler doesn't provide reason (informational, not blocking)."""
-        monkeypatch.setenv("CLAUDECODE", "1")
-
-        handler = YoloContainerDetectionHandler()
-        hook_input = {"hook_event_name": "SessionStart"}
-
-        result = handler.handle(hook_input)
-
-        # Reason should be None or empty for non-blocking handlers
-        assert result.reason is None or result.reason == ""
-
-
-class TestYoloContainerDetectionEdgeCases:
-    """Test error handling and edge cases."""
-
-    def test_handle_with_exception_in_scoring_fails_open(self, monkeypatch):
-        """Test handler fails open (returns ALLOW) if scoring throws exception."""
-        handler = YoloContainerDetectionHandler()
-
-        # Patch _calculate_confidence_score to raise exception
-        with patch.object(
-            handler, "_calculate_confidence_score", side_effect=Exception("Test error")
-        ):
-            hook_input = {"hook_event_name": "SessionStart"}
-
-            # Should not crash, should return ALLOW with no context
-            result = handler.handle(hook_input)
-
-            assert result.decision == "allow"
-            # Context might be empty or have error message
-            assert isinstance(result.context, list)
-
-    def test_handle_with_unexpected_exception_returns_deny(self, monkeypatch):
-        """Test handler returns DENY for unexpected exceptions (FAIL FAST)."""
-        monkeypatch.setenv("CLAUDECODE", "1")  # Ensure matches() returns True
-
-        handler = YoloContainerDetectionHandler()
-
-        # Patch _get_detected_indicators to raise unexpected exception
-        with patch.object(handler, "_get_detected_indicators", side_effect=Exception("Test error")):
-            hook_input = {"hook_event_name": "SessionStart"}
-
-            # Should not crash, should return DENY for unexpected error
-            result = handler.handle(hook_input)
-
-            assert result.decision == "deny"
-            assert "YOLO handler error" in result.reason
-
-    def test_filesystem_error_during_cwd_check(self):
-        """Test handler handles filesystem errors gracefully."""
-        with patch("pathlib.Path.cwd", side_effect=OSError("Permission denied")):
+    def test_reason_is_none(self, tmp_path: Path) -> None:
+        env = _container_env(tmp_path, runtime="docker")
+        with patch.dict(os.environ, env, clear=False):
             handler = YoloContainerDetectionHandler()
+            result = handler.handle(_SESSION_START_NEW)
+        assert result.reason is None
 
-            # Should not crash, should return 0 or partial score
-            try:
-                score = handler._calculate_confidence_score()
-                assert score >= 0  # Should succeed with reduced score
-            except Exception:
-                pytest.fail("Handler should not raise exception on filesystem error")
-
-    def test_filesystem_error_during_exists_check(self):
-        """Test handler handles exists() errors gracefully."""
-        with patch("pathlib.Path.exists", side_effect=OSError("Permission denied")):
+    def test_result_is_json_serialisable(self, tmp_path: Path) -> None:
+        env = _container_env(tmp_path, runtime="docker")
+        with patch.dict(os.environ, env, clear=False):
             handler = YoloContainerDetectionHandler()
-
-            # Should not crash
-            try:
-                score = handler._calculate_confidence_score()
-                assert score >= 0
-            except Exception:
-                pytest.fail("Handler should not raise exception on exists() error")
-
-    def test_malformed_hook_input(self, monkeypatch):
-        """Test handler handles malformed hook_input gracefully."""
-        monkeypatch.setenv("CLAUDECODE", "1")
-
-        handler = YoloContainerDetectionHandler()
-
-        # Various malformed inputs
-        malformed_inputs = [
-            {"hook_event_name": 12345},  # Wrong type
-            {"hook_event_name": None},  # None value
-            {"wrong_key": "SessionStart"},  # Wrong key
-            [],  # List instead of dict
-            "SessionStart",  # String instead of dict
-        ]
-
-        for hook_input in malformed_inputs:
-            result = handler.matches(hook_input)
-            # Should not crash, should return False
-            assert result is False
-
-
-class TestYoloContainerDetectionIntegration:
-    """End-to-end integration tests."""
-
-    def test_full_workflow_yolo_detected(self, monkeypatch):
-        """Test complete workflow: matches → handle → result."""
-        # Set up YOLO environment
-        monkeypatch.setenv("CLAUDECODE", "1")
-        monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", "cli")
-
-        handler = YoloContainerDetectionHandler()
-        hook_input = {"hook_event_name": "SessionStart", "source": "new"}
-
-        # Step 1: Check if handler matches
-        assert handler.matches(hook_input) is True
-
-        # Step 2: Handle the event
-        result = handler.handle(hook_input)
-
-        # Step 3: Verify result is correct
-        assert result.decision == "allow"
-        assert isinstance(result.context, list)
-        assert len(result.context) > 0
-
-    def test_full_workflow_yolo_not_detected(self, monkeypatch):
-        """Test complete workflow when YOLO not detected."""
-        # Clear environment
-        for key in [
-            "CLAUDECODE",
-            "CLAUDE_CODE_ENTRYPOINT",
-            "DEVCONTAINER",
-            "IS_SANDBOX",
-            "container",
-        ]:
-            monkeypatch.delenv(key, raising=False)
-
-        with patch("pathlib.Path.cwd", return_value=Path("/home/user")):
-            with patch("pathlib.Path.exists", return_value=False):
-                with patch("os.getuid", return_value=1000):
-                    handler = YoloContainerDetectionHandler()
-                    hook_input = {"hook_event_name": "SessionStart"}
-
-                    # Handler should not match
-                    assert handler.matches(hook_input) is False
-
-                    # If we call handle anyway, should still return ALLOW (fail open)
-                    result = handler.handle(hook_input)
-                    assert result.decision == "allow"
-
-    def test_json_serialization_of_result(self, monkeypatch):
-        """Test that HookResult can be serialized to JSON."""
-        monkeypatch.setenv("CLAUDECODE", "1")
-
-        handler = YoloContainerDetectionHandler()
-        hook_input = {"hook_event_name": "SessionStart"}
-
-        result = handler.handle(hook_input)
-
-        # Convert to dict and serialize
-        result_dict = {
+            result = handler.handle(_SESSION_START_NEW)
+        payload = {
             "decision": result.decision,
             "reason": result.reason,
             "context": result.context,
         }
-
-        # Should not raise exception
-        json_str = json.dumps(result_dict)
-        assert isinstance(json_str, str)
-
-        # Should be parseable
-        parsed = json.loads(json_str)
+        serialised = json.dumps(payload)
+        parsed = json.loads(serialised)
         assert parsed["decision"] == "allow"
 
-    def test_handler_is_non_terminal(self, monkeypatch):
-        """Test handler is non-terminal (allows dispatch to continue)."""
-        handler = YoloContainerDetectionHandler()
 
-        assert handler.terminal is False
+# ---------------------------------------------------------------------------
+# handle() — show_detailed_indicators
+# ---------------------------------------------------------------------------
 
-    def test_handler_priority_is_workflow_range(self):
-        """Test handler priority is in workflow range (36-55)."""
-        handler = YoloContainerDetectionHandler()
 
-        assert 36 <= handler.priority <= 55
+class TestHandleDetailedIndicators:
+    """show_detailed_indicators controls the indicator block."""
 
-    def test_getuid_not_available_on_windows(self):
-        """Test handler handles missing os.getuid gracefully (Windows)."""
-        # Simulate Windows environment where os.getuid doesn't exist
-        with patch("os.getuid", side_effect=AttributeError("no getuid")):
+    def test_indicators_shown_by_default(self, tmp_path: Path) -> None:
+        env = _container_env(tmp_path, runtime="docker")
+        with patch.dict(os.environ, env, clear=False):
             handler = YoloContainerDetectionHandler()
-            score = handler._calculate_confidence_score()
-            # Should not crash, should return score >= 0
-            assert score >= 0
+            result = handler.handle(_SESSION_START_NEW)
+        context_text = "\n".join(result.context)
+        assert "Detected indicators:" in context_text
 
-    def test_unexpected_exception_in_calculate_confidence_score(self):
-        """Test handler returns 0 on unexpected exceptions in scoring."""
-        handler = YoloContainerDetectionHandler()
-
-        # Patch os.environ.get to raise unexpected exception
-        with patch("os.environ.get", side_effect=RuntimeError("Unexpected error")):
-            score = handler._calculate_confidence_score()
-            # Should fail open with 0 score
-            assert score == 0
-
-    def test_unexpected_exception_in_get_detected_indicators(self):
-        """Test handler returns empty list on unexpected exceptions."""
-        handler = YoloContainerDetectionHandler()
-
-        # Patch os.environ.get to raise unexpected exception
-        with patch("os.environ.get", side_effect=RuntimeError("Unexpected error")):
-            indicators = handler._get_detected_indicators()
-            # Should fail open with empty list
-            assert indicators == []
-
-    def test_matches_with_invalid_hook_input_type(self):
-        """Test matches handles non-dict hook_input types."""
-        handler = YoloContainerDetectionHandler()
-
-        # Test with string instead of dict
-        result = handler.matches("SessionStart")
-        assert result is False
-
-        # Test with list instead of dict
-        result = handler.matches(["SessionStart"])
-        assert result is False
-
-        # Test with int instead of dict
-        result = handler.matches(12345)
-        assert result is False
-
-    def test_matches_exception_in_threshold_check(self, monkeypatch):
-        """Test matches fails open (returns False) on threshold check exception."""
-        monkeypatch.setenv("CLAUDECODE", "1")
-
-        handler = YoloContainerDetectionHandler()
-
-        # Patch _calculate_confidence_score to raise exception during matches
-        with patch.object(
-            handler, "_calculate_confidence_score", side_effect=RuntimeError("Test error")
-        ):
-            hook_input = {"hook_event_name": "SessionStart"}
-            result = handler.matches(hook_input)
-            # Should fail open (not match)
-            assert result is False
-
-    def test_matches_generic_exception_returns_false(self, monkeypatch):
-        """Test matches returns False on generic Exception in confidence calc."""
-        monkeypatch.setenv("CLAUDECODE", "1")
-
-        handler = YoloContainerDetectionHandler()
-
-        with patch.object(
-            handler, "_calculate_confidence_score", side_effect=Exception("Unexpected")
-        ):
-            hook_input = {"hook_event_name": "SessionStart"}
-            result = handler.matches(hook_input)
-            assert result is False
-
-
-class TestYoloContainerDetectionConfidenceConfigDir:
-    """Test confidence scoring with config_dir existing."""
-
-    def test_confidence_score_with_workspace_and_config_dir(self):
-        """Test /workspace root + config_dir existing gives 3 points."""
-        mock_config_dir_path = MagicMock(spec=Path)
-        mock_config_dir_path.exists.return_value = True
-
-        with (
-            patch(
-                "claude_code_hooks_daemon.handlers.session_start.yolo_container_detection.ProjectContext.project_root",
-                return_value=Path("/workspace"),
-            ),
-            patch(
-                "claude_code_hooks_daemon.handlers.session_start.yolo_container_detection.ProjectContext.config_dir",
-                return_value=mock_config_dir_path,
-            ),
-            patch("os.getuid", return_value=1000),
-        ):
+    def test_indicators_suppressed_when_disabled(self, tmp_path: Path) -> None:
+        env = _container_env(tmp_path, runtime="docker")
+        with patch.dict(os.environ, env, clear=False):
             handler = YoloContainerDetectionHandler()
-            score = handler._calculate_confidence_score()
-            assert score >= 3
+            handler.configure({_CFG_SHOW_DETAILED_INDICATORS: False})
+            result = handler.handle(_SESSION_START_NEW)
+        context_text = "\n".join(result.context)
+        assert "Detected indicators:" not in context_text
 
-    def test_confidence_generic_exception_returns_zero(self):
-        """Test generic Exception in confidence scoring returns 0."""
-        handler = YoloContainerDetectionHandler()
-
-        with patch("os.environ.get", side_effect=Exception("Totally unexpected")):
-            score = handler._calculate_confidence_score()
-            assert score == 0
-
-
-class TestYoloContainerDetectionIndicatorEdgeCases:
-    """Test indicator detection edge cases."""
-
-    def test_indicators_with_workspace_root_and_claude_dir(self):
-        """Test indicators include /workspace with .claude/ present."""
-        mock_config_dir_path = MagicMock(spec=Path)
-        mock_config_dir_path.exists.return_value = True
-
-        with (
-            patch(
-                "claude_code_hooks_daemon.handlers.session_start.yolo_container_detection.ProjectContext.project_root",
-                return_value=Path("/workspace"),
-            ),
-            patch(
-                "claude_code_hooks_daemon.handlers.session_start.yolo_container_detection.ProjectContext.config_dir",
-                return_value=mock_config_dir_path,
-            ),
-            patch("os.getuid", return_value=1000),
-        ):
+    def test_indicator_includes_runtime_label(self, tmp_path: Path) -> None:
+        env = _container_env(tmp_path, runtime="docker")
+        with patch.dict(os.environ, env, clear=False):
             handler = YoloContainerDetectionHandler()
-            indicators = handler._get_detected_indicators()
-            assert any("/workspace" in ind for ind in indicators)
+            handler.configure({_CFG_SHOW_DETAILED_INDICATORS: True})
+            result = handler.handle(_SESSION_START_NEW)
+        context_text = "\n".join(result.context)
+        assert "Container runtime:" in context_text
+        assert _RUNTIME_DOCKER in context_text
 
-    def test_indicators_with_socket_path_existing(self):
-        """Test indicators include socket path when it exists."""
-        handler = YoloContainerDetectionHandler()
-
-        original_exists = Path.exists
-
-        def selective_exists(self_path: Path) -> bool:
-            if "hooks-daemon/untracked/venv/socket" in str(self_path):
-                return True
-            return original_exists(self_path)
-
-        with (
-            patch.object(Path, "exists", selective_exists),
-            patch("os.getuid", return_value=1000),
-        ):
-            indicators = handler._get_detected_indicators()
-            assert any("socket" in ind.lower() for ind in indicators)
-
-    def test_indicators_socket_path_oserror(self):
-        """Test indicators handle OSError when checking socket path."""
-        handler = YoloContainerDetectionHandler()
-
-        original_exists = Path.exists
-
-        def exists_raises_for_socket(self_path: Path) -> bool:
-            if "hooks-daemon" in str(self_path):
-                raise OSError("Permission denied")
-            return original_exists(self_path)
-
-        with (
-            patch.object(Path, "exists", exists_raises_for_socket),
-            patch("os.getuid", return_value=1000),
-        ):
-            indicators = handler._get_detected_indicators()
-            # Should not crash, should skip socket indicator
-            assert isinstance(indicators, list)
-            assert not any("socket" in ind.lower() for ind in indicators)
-
-    def test_indicators_with_root_user_uid_zero(self):
-        """Test indicators include root user when uid=0."""
-        handler = YoloContainerDetectionHandler()
-
-        with patch("os.getuid", return_value=0):
-            indicators = handler._get_detected_indicators()
-            assert any("root" in ind.lower() or "UID 0" in ind for ind in indicators)
-
-    def test_indicators_getuid_attribute_error(self):
-        """Test indicators handle missing os.getuid (Windows)."""
-        handler = YoloContainerDetectionHandler()
-
-        with patch("os.getuid", side_effect=AttributeError("no getuid")):
-            indicators = handler._get_detected_indicators()
-            assert isinstance(indicators, list)
-            assert not any("root" in ind.lower() for ind in indicators)
-
-    def test_indicators_generic_exception_returns_empty(self):
-        """Test indicators return empty list on generic Exception."""
-        handler = YoloContainerDetectionHandler()
-
-        with patch("os.environ.get", side_effect=Exception("Totally unexpected")):
-            indicators = handler._get_detected_indicators()
-            assert indicators == []
-
-
-class TestYoloContainerDetectionIsResumeSession:
-    """Test _is_resume_session method."""
-
-    def test_is_resume_session_with_large_file(self, tmp_path):
-        """Test _is_resume_session returns True for file >100 bytes."""
-        handler = YoloContainerDetectionHandler()
-        transcript = tmp_path / "transcript.jsonl"
-        transcript.write_text("x" * 200)
-
-        hook_input = {"transcript_path": str(transcript)}
-        assert handler._is_resume_session(hook_input) is True
-
-    def test_is_resume_session_nonexistent_file(self, tmp_path):
-        """Test _is_resume_session returns False for non-existent file."""
-        handler = YoloContainerDetectionHandler()
-        hook_input = {"transcript_path": str(tmp_path / "nonexistent.jsonl")}
-        assert handler._is_resume_session(hook_input) is False
-
-    def test_is_resume_session_oserror(self, tmp_path):
-        """Test _is_resume_session returns False on OSError."""
-        handler = YoloContainerDetectionHandler()
-        transcript = tmp_path / "transcript.jsonl"
-        transcript.write_text("x" * 200)
-
-        hook_input = {"transcript_path": str(transcript)}
-        with patch("pathlib.Path.stat", side_effect=OSError("Permission denied")):
-            assert handler._is_resume_session(hook_input) is False
-
-
-class TestYoloContainerDetectionHandleEdgeCases:
-    """Test handle() edge cases."""
-
-    def test_handle_with_workflow_tips_disabled(self, monkeypatch):
-        """Test handle excludes workflow tips when disabled."""
-        monkeypatch.setenv("CLAUDECODE", "1")
-
-        handler = YoloContainerDetectionHandler()
-        handler.configure({"show_workflow_tips": False})
-
-        hook_input = {"hook_event_name": "SessionStart"}
-        result = handler.handle(hook_input)
-
-        context_text = " ".join(result.context)
-        assert "Container workflow implications" not in context_text
-
-    def test_handle_generic_exception_returns_deny(self, monkeypatch):
-        """Test handle returns DENY on generic Exception."""
-        monkeypatch.setenv("CLAUDECODE", "1")
-
-        handler = YoloContainerDetectionHandler()
-
-        with patch.object(handler, "_is_resume_session", side_effect=Exception("Unexpected error")):
-            hook_input = {"hook_event_name": "SessionStart"}
-            result = handler.handle(hook_input)
-            assert result.decision == "deny"
-            assert "YOLO handler error" in result.reason
-
-    def test_handle_oserror_returns_allow_with_warning(self, monkeypatch):
-        """Test handle returns ALLOW with warning on OSError."""
-        monkeypatch.setenv("CLAUDECODE", "1")
-
-        handler = YoloContainerDetectionHandler()
-
-        with patch.object(handler, "_is_resume_session", side_effect=OSError("File system error")):
-            hook_input = {"hook_event_name": "SessionStart"}
-            result = handler.handle(hook_input)
-            assert result.decision == "allow"
-            assert any("detection failed" in c for c in result.context)
-
-    def test_handle_resume_session_brief_message(self, monkeypatch, tmp_path):
-        """Test handle returns brief message for resume sessions."""
-        monkeypatch.setenv("CLAUDECODE", "1")
-
-        handler = YoloContainerDetectionHandler()
-
-        # Create a large transcript file to simulate resume
-        transcript = tmp_path / "transcript.jsonl"
-        transcript.write_text("x" * 200)
-
-        hook_input = {
-            "hook_event_name": "SessionStart",
-            "transcript_path": str(transcript),
+    def test_indicator_does_not_list_claudecode_env(self, tmp_path: Path) -> None:
+        """CLAUDECODE / CLAUDE_CODE_ENTRYPOINT must NOT appear as container indicators."""
+        env = {
+            **_container_env(tmp_path, runtime="docker"),
+            "CLAUDECODE": "1",
+            "CLAUDE_CODE_ENTRYPOINT": "cli",
         }
-        result = handler.handle(hook_input)
+        with patch.dict(os.environ, env, clear=False):
+            handler = YoloContainerDetectionHandler()
+            handler.configure({_CFG_SHOW_DETAILED_INDICATORS: True})
+            result = handler.handle(_SESSION_START_NEW)
+        context_text = "\n".join(result.context)
+        assert "CLAUDECODE" not in context_text
+        assert "CLAUDE_CODE_ENTRYPOINT" not in context_text
+
+    def test_root_uid_shown_in_indicators_when_uid_zero(self, tmp_path: Path) -> None:
+        env = _container_env(tmp_path, runtime="docker")
+        with patch.dict(os.environ, env, clear=False):
+            with patch("os.getuid", return_value=0):
+                handler = YoloContainerDetectionHandler()
+                handler.configure({_CFG_SHOW_DETAILED_INDICATORS: True})
+                result = handler.handle(_SESSION_START_NEW)
+        context_text = "\n".join(result.context)
+        assert "root" in context_text.lower() or "UID 0" in context_text
+
+    def test_root_uid_not_shown_when_non_zero(self, tmp_path: Path) -> None:
+        env = _container_env(tmp_path, runtime="docker")
+        with patch.dict(os.environ, env, clear=False):
+            with patch("os.getuid", return_value=1000):
+                handler = YoloContainerDetectionHandler()
+                handler.configure({_CFG_SHOW_DETAILED_INDICATORS: True})
+                result = handler.handle(_SESSION_START_NEW)
+        context_text = "\n".join(result.context)
+        assert "UID 0" not in context_text
+
+    def test_getuid_attribute_error_does_not_crash(self, tmp_path: Path) -> None:
+        """Windows-style missing os.getuid must not crash the handler."""
+        env = _container_env(tmp_path, runtime="docker")
+        with patch.dict(os.environ, env, clear=False):
+            with patch("os.getuid", side_effect=AttributeError("no getuid")):
+                handler = YoloContainerDetectionHandler()
+                result = handler.handle(_SESSION_START_NEW)
         assert result.decision == "allow"
-        # Resume gets brief message without workflow tips
-        context_text = " ".join(result.context)
-        assert "YOLO container" in context_text
-        assert "Container workflow implications" not in context_text
 
-    def test_matches_value_error_in_threshold_config(self, monkeypatch):
-        """Test matches returns False when config threshold is non-numeric."""
-        monkeypatch.setenv("CLAUDECODE", "1")
 
+# ---------------------------------------------------------------------------
+# handle() — show_workflow_tips
+# ---------------------------------------------------------------------------
+
+
+class TestHandleWorkflowTips:
+    """show_workflow_tips controls the workflow-implications block."""
+
+    def test_workflow_tips_shown_by_default(self, tmp_path: Path) -> None:
+        env = _container_env(tmp_path, runtime="docker")
+        with patch.dict(os.environ, env, clear=False):
+            handler = YoloContainerDetectionHandler()
+            result = handler.handle(_SESSION_START_NEW)
+        context_text = "\n".join(result.context)
+        assert "Container workflow implications:" in context_text
+
+    def test_workflow_tips_suppressed_when_disabled(self, tmp_path: Path) -> None:
+        env = _container_env(tmp_path, runtime="docker")
+        with patch.dict(os.environ, env, clear=False):
+            handler = YoloContainerDetectionHandler()
+            handler.configure({_CFG_SHOW_WORKFLOW_TIPS: False})
+            result = handler.handle(_SESSION_START_NEW)
+        context_text = "\n".join(result.context)
+        assert "Container workflow implications:" not in context_text
+
+    def test_tips_mention_ephemeral_storage(self, tmp_path: Path) -> None:
+        env = _container_env(tmp_path, runtime="docker")
+        with patch.dict(os.environ, env, clear=False):
+            handler = YoloContainerDetectionHandler()
+            result = handler.handle(_SESSION_START_NEW)
+        context_text = "\n".join(result.context)
+        assert "ephemeral" in context_text.lower()
+
+    def test_tips_mention_root(self, tmp_path: Path) -> None:
+        env = _container_env(tmp_path, runtime="docker")
+        with patch.dict(os.environ, env, clear=False):
+            handler = YoloContainerDetectionHandler()
+            result = handler.handle(_SESSION_START_NEW)
+        context_text = "\n".join(result.context)
+        assert "root" in context_text.lower()
+
+
+# ---------------------------------------------------------------------------
+# handle() — resume detection
+# ---------------------------------------------------------------------------
+
+
+class TestHandleResumeSession:
+    """handle() uses _is_resume_session to shorten message for resumed sessions."""
+
+    def test_resume_session_brief_message(self, tmp_path: Path) -> None:
+        """Resume sessions get a one-liner without the full workflow-tips block."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text("x" * 200, encoding="utf-8")
+
+        env = _container_env(tmp_path, runtime="podman")
+        with patch.dict(os.environ, env, clear=False):
+            handler = YoloContainerDetectionHandler()
+            hook_input: dict[str, Any] = {
+                "hook_event_name": "SessionStart",
+                "transcript_path": str(transcript),
+            }
+            result = handler.handle(hook_input)
+
+        assert result.decision == "allow"
+        context_text = "\n".join(result.context)
+        # Icon and runtime present
+        assert _ICON_CONTAINER in context_text
+        assert "podman" in context_text
+        # No full workflow tips block on resume
+        assert "Container workflow implications:" not in context_text
+
+    def test_new_session_is_not_resume(self, tmp_path: Path) -> None:
+        """A session with no transcript_path is treated as new (full message)."""
+        env = _container_env(tmp_path, runtime="docker")
+        with patch.dict(os.environ, env, clear=False):
+            handler = YoloContainerDetectionHandler()
+            result = handler.handle(_SESSION_START_NEW)
+
+        context_text = "\n".join(result.context)
+        # Should have workflow tips
+        assert "Container workflow implications:" in context_text
+
+    def test_small_transcript_is_not_resume(self, tmp_path: Path) -> None:
+        """A tiny transcript (< 100 bytes) does not count as a resume."""
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text("x" * 50, encoding="utf-8")
+
+        env = _container_env(tmp_path, runtime="docker")
+        with patch.dict(os.environ, env, clear=False):
+            handler = YoloContainerDetectionHandler()
+            hook_input: dict[str, Any] = {
+                "hook_event_name": "SessionStart",
+                "transcript_path": str(transcript),
+            }
+            result = handler.handle(hook_input)
+
+        context_text = "\n".join(result.context)
+        assert "Container workflow implications:" in context_text
+
+
+# ---------------------------------------------------------------------------
+# _is_resume_session()
+# ---------------------------------------------------------------------------
+
+
+class TestIsResumeSession:
+    """_is_resume_session internal method."""
+
+    def test_returns_true_for_large_transcript(self, tmp_path: Path) -> None:
         handler = YoloContainerDetectionHandler()
-        handler.configure({"min_confidence_score": "not_a_number"})
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text("x" * 200, encoding="utf-8")
+        assert handler._is_resume_session({"transcript_path": str(transcript)}) is True
 
-        hook_input = {"hook_event_name": "SessionStart"}
-        result = handler.matches(hook_input)
-        assert result is False
+    def test_returns_false_for_nonexistent_transcript(self, tmp_path: Path) -> None:
+        handler = YoloContainerDetectionHandler()
+        assert (
+            handler._is_resume_session({"transcript_path": str(tmp_path / "missing.jsonl")})
+            is False
+        )
 
-    def test_get_acceptance_tests(self):
-        """Test get_acceptance_tests returns list of tests."""
+    def test_returns_false_for_empty_transcript_path(self) -> None:
+        handler = YoloContainerDetectionHandler()
+        assert handler._is_resume_session({"transcript_path": ""}) is False
+
+    def test_returns_false_for_missing_transcript_key(self) -> None:
+        handler = YoloContainerDetectionHandler()
+        assert handler._is_resume_session({}) is False
+
+    def test_returns_false_on_oserror_from_stat(self, tmp_path: Path) -> None:
+        handler = YoloContainerDetectionHandler()
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text("x" * 200, encoding="utf-8")
+        with patch("pathlib.Path.stat", side_effect=OSError("Permission denied")):
+            assert handler._is_resume_session({"transcript_path": str(transcript)}) is False
+
+
+# ---------------------------------------------------------------------------
+# handle() — error handling
+# ---------------------------------------------------------------------------
+
+
+class TestHandleErrorHandling:
+    """handle() converts expected OS/runtime errors to ALLOW-with-warning."""
+
+    def test_oserror_in_is_resume_returns_allow_with_warning(self, tmp_path: Path) -> None:
+        env = _container_env(tmp_path, runtime="docker")
+        with patch.dict(os.environ, env, clear=False):
+            handler = YoloContainerDetectionHandler()
+            with patch.object(
+                handler, "_is_resume_session", side_effect=OSError("File system error")
+            ):
+                result = handler.handle(_SESSION_START_NEW)
+        assert result.decision == "allow"
+        assert any("detection failed" in c for c in result.context)
+
+    def test_runtime_error_in_is_resume_returns_allow_with_warning(self, tmp_path: Path) -> None:
+        env = _container_env(tmp_path, runtime="docker")
+        with patch.dict(os.environ, env, clear=False):
+            handler = YoloContainerDetectionHandler()
+            with patch.object(handler, "_is_resume_session", side_effect=RuntimeError("bad state")):
+                result = handler.handle(_SESSION_START_NEW)
+        assert result.decision == "allow"
+        assert any("detection failed" in c for c in result.context)
+
+
+# ---------------------------------------------------------------------------
+# Metadata
+# ---------------------------------------------------------------------------
+
+
+class TestMetadata:
+    """Handler metadata methods."""
+
+    def test_get_claude_md_returns_none(self) -> None:
+        handler = YoloContainerDetectionHandler()
+        assert handler.get_claude_md() is None
+
+    def test_get_acceptance_tests_returns_non_empty_list(self) -> None:
         handler = YoloContainerDetectionHandler()
         tests = handler.get_acceptance_tests()
         assert isinstance(tests, list)
         assert len(tests) > 0
+
+    def test_priority_in_workflow_range(self) -> None:
+        handler = YoloContainerDetectionHandler()
+        assert 36 <= handler.priority <= 55
+
+    def test_acceptance_test_description_does_not_reference_confidence(self) -> None:
+        """Acceptance test description must not mention the removed confidence scorer."""
+        handler = YoloContainerDetectionHandler()
+        for test in handler.get_acceptance_tests():
+            assert "confidence" not in test.description.lower()
