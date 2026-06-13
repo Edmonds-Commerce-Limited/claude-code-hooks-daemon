@@ -10,6 +10,9 @@ from claude_code_hooks_daemon.handlers.status_line.account_display import (
 )
 from claude_code_hooks_daemon.handlers.status_line.current_time import CurrentTimeHandler
 from claude_code_hooks_daemon.handlers.status_line.daemon_stats import DaemonStatsHandler
+from claude_code_hooks_daemon.handlers.status_line.environment_indicator import (
+    EnvironmentIndicatorHandler,
+)
 from claude_code_hooks_daemon.handlers.status_line.git_branch import GitBranchHandler
 from claude_code_hooks_daemon.handlers.status_line.git_repo_name import GitRepoNameHandler
 from claude_code_hooks_daemon.handlers.status_line.model_context import ModelContextHandler
@@ -24,6 +27,7 @@ __all__ = [
     "AccountDisplayHandler",
     "CurrentTimeHandler",
     "DaemonStatsHandler",
+    "EnvironmentIndicatorHandler",
     "GitBranchHandler",
     "GitRepoNameHandler",
     "ModelContextHandler",

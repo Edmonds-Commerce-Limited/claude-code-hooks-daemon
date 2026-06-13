@@ -9,11 +9,8 @@ API.
 """
 
 import os
-import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from claude_code_hooks_daemon.utils.container_detection import (
     detect_container_runtime,
@@ -488,8 +485,7 @@ class TestIsYoloSandbox:
         """ProjectContext raising OSError → fail-safe False, no exception."""
         with patch.dict(os.environ, {}, clear=True):
             with patch(
-                "claude_code_hooks_daemon.utils.container_detection.ProjectContext"
-                ".project_root",
+                "claude_code_hooks_daemon.utils.container_detection.ProjectContext" ".project_root",
                 side_effect=OSError("filesystem error"),
             ):
                 result = is_yolo_sandbox()
@@ -499,8 +495,7 @@ class TestIsYoloSandbox:
         """ProjectContext raising RuntimeError → fail-safe False, no exception."""
         with patch.dict(os.environ, {}, clear=True):
             with patch(
-                "claude_code_hooks_daemon.utils.container_detection.ProjectContext"
-                ".project_root",
+                "claude_code_hooks_daemon.utils.container_detection.ProjectContext" ".project_root",
                 side_effect=RuntimeError("context error"),
             ):
                 result = is_yolo_sandbox()

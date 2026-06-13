@@ -127,6 +127,7 @@ class Priority:
 
     # Status line handlers (varied priorities)
     GIT_REPO_NAME = 3
+    ENVIRONMENT_INDICATOR = 4  # After repo name, before account display
     ACCOUNT_DISPLAY = 5
     MODEL_CONTEXT = 10
     THINKING_MODE = 12

@@ -332,3 +332,44 @@ class TestGitRepoNameParsing:
             result = ProjectContext._get_git_toplevel(tmp_path)
 
         assert result is None
+
+
+class TestProjectContextContainerRuntime:
+    """The container runtime is detected ONCE at startup and cached (Plan 00126)."""
+
+    def teardown_method(self) -> None:
+        ProjectContext.reset()
+
+    def _init(self, tmp_path: Path, env: dict[str, str]) -> None:
+        project_root = tmp_path / "project"
+        claude_dir = project_root / ".claude"
+        claude_dir.mkdir(parents=True)
+        config_path = claude_dir / "hooks-daemon.yaml"
+        config_path.write_text("version: 1.0\n")
+        with patch.dict("os.environ", env, clear=True):
+            with patch("subprocess.run") as mock_run:
+                mock_run.side_effect = [
+                    MagicMock(returncode=0, stdout=b"/tmp/project\n"),
+                    MagicMock(returncode=0, stdout=b"git@github.com:user/test-repo.git\n"),
+                    MagicMock(returncode=0, stdout=b"/tmp/project\n"),
+                ]
+                ProjectContext.initialize(config_path)
+
+    def test_container_runtime_cached_from_env(self, tmp_path: Path) -> None:
+        """A `container=podman` env at startup is cached as the runtime."""
+        self._init(tmp_path, {"container": "podman"})
+        assert ProjectContext.container_runtime() == "podman"
+        assert ProjectContext.in_container() is True
+
+    def test_host_has_no_runtime(self, tmp_path: Path) -> None:
+        """With every container marker neutralised, runtime is None (host)."""
+        self._init(
+            tmp_path,
+            {
+                "HOOKS_DAEMON_DOCKERENV_PATH": "/tmp/_absent_docker_pc",
+                "HOOKS_DAEMON_CONTAINERENV_PATH": "/tmp/_absent_containerenv_pc",
+                "HOOKS_DAEMON_CGROUP_PATH": "/tmp/_absent_cgroup_pc",
+            },
+        )
+        assert ProjectContext.container_runtime() is None
+        assert ProjectContext.in_container() is False

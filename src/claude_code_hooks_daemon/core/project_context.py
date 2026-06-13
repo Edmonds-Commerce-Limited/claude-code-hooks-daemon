@@ -42,6 +42,9 @@ class _ProjectContextData:
         daemon_untracked_dir: Path to daemon's untracked directory for runtime files
             - Normal mode: {project}/.claude/hooks-daemon/untracked
             - Self-install mode: {project}/untracked
+        container_runtime: Detected container runtime ("docker"/"podman"/"generic")
+            or None on the host. Computed once at startup (the environment is
+            invariant for the daemon's lifetime) so the status line never re-probes.
     """
 
     project_root: Path
@@ -51,6 +54,7 @@ class _ProjectContextData:
     git_repo_name: str
     git_toplevel: Path
     daemon_untracked_dir: Path
+    container_runtime: str | None
 
 
 class ProjectContext:
@@ -151,6 +155,17 @@ class ProjectContext:
 
         logger.info("ProjectContext: Daemon untracked dir: %s", daemon_untracked_dir)
 
+        # Detect the container runtime ONCE at startup. The environment a daemon
+        # runs in does not change during its lifetime, so the status line (which
+        # re-renders on every Claude Code refresh) must read this cached value
+        # rather than re-probe the filesystem/env each time. Imported here, not
+        # at module scope, because container_detection imports ProjectContext
+        # (avoids a circular import).
+        from claude_code_hooks_daemon.utils.container_detection import detect_container_runtime
+
+        container_runtime = detect_container_runtime()
+        logger.info("ProjectContext: Container runtime: %s", container_runtime or "none (host)")
+
         # Store instance
         cls._instance = _ProjectContextData(
             project_root=project_root,
@@ -160,6 +175,7 @@ class ProjectContext:
             git_repo_name=git_repo_name,
             git_toplevel=git_toplevel,
             daemon_untracked_dir=daemon_untracked_dir,
+            container_runtime=container_runtime,
         )
         cls._initialized = True
 
@@ -394,6 +410,23 @@ class ProjectContext:
         cls._ensure_initialized()
         assert cls._instance is not None
         return cls._instance.daemon_untracked_dir
+
+    @classmethod
+    def container_runtime(cls) -> str | None:
+        """Return the detected container runtime, or None on the host.
+
+        One of ``"docker"``, ``"podman"``, ``"generic"``, or ``None``. Computed
+        once at startup (see :meth:`initialize`) — cheap to read per status-line
+        render.
+        """
+        cls._ensure_initialized()
+        assert cls._instance is not None
+        return cls._instance.container_runtime
+
+    @classmethod
+    def in_container(cls) -> bool:
+        """Return True iff the daemon is running inside a container."""
+        return cls.container_runtime() is not None
 
     @classmethod
     def reset(cls) -> None:

@@ -374,6 +374,10 @@ handlers:
       #   1000k_orange_pct: 30   # default: 30 (1M context models)
       #   1000k_red_pct: 40      # default: 40
 
+    environment_indicator:  # Shows 💻 desktop / 🐳 docker / 📦 podman (cached at startup)
+      enabled: true
+      priority: 11
+
     git_branch:     # Shows current git branch if in repo
       enabled: true
       priority: 20

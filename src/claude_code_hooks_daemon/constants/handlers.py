@@ -206,6 +206,11 @@ class HandlerID:
         config_key="git_branch",
         display_name="status-git-branch",
     )
+    ENVIRONMENT_INDICATOR = HandlerIDMeta(
+        class_name="EnvironmentIndicatorHandler",
+        config_key="environment_indicator",
+        display_name="status-environment-indicator",
+    )
     CURRENT_TIME = HandlerIDMeta(
         class_name="CurrentTimeHandler",
         config_key="current_time",
