@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.19.2] - 2026-06-13
+
+This is a **patch release** that silences the noisy `uv hardlink failed` warning emitted on every daemon install/upgrade inside a container.
+
+### Fixed
+
+- **Container installs now choose `uv` copy mode up front — no more hardlink warning (Plan 00125)** — `create_venv_at_path` (`scripts/install/venv.sh`) already detected hardlink-hostile filesystems proactively, but only by probing the **target** filesystem type (`overlay`/`nfs`). In a typical container the project (and its `untracked/` directory) is bind-mounted from the host, so the venv target sits on the host filesystem (ext4/xfs/btrfs) while `uv`'s cache lives on the container's overlay filesystem. The two are **cross-device**, so `uv` hardlink fails even though the target filesystem type is not overlay/nfs — the type probe could not see this, and the warn-then-retry fallback (`⚠ uv hardlink failed (likely overlay-fs) — retrying with UV_LINK_MODE=copy`) fired on every container install/upgrade. A new `_uv_in_container` helper now detects the container environment (via the `container` env var, `/run/.containerenv`, and `/.dockerenv`) and selects `UV_LINK_MODE=copy` before the first sync — one clean copy-mode sync, no failed attempt, no warning. An explicit `UV_LINK_MODE` from the environment still wins, and normal-disk hardlink-first behaviour is unchanged.
+
 ## [3.19.1] - 2026-06-13
 
 This is a **patch release** fixing a venv-isolation bug that caused a desktop-level Claude Code session and a containerised session sharing the same bind-mounted project to collide on a single Python virtual environment instead of each getting their own.
