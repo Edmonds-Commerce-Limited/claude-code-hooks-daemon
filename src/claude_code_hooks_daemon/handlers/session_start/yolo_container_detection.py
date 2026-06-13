@@ -196,12 +196,11 @@ class YoloContainerDetectionHandler(Handler):
             icon = _runtime_icon(runtime)
 
             context: list[str] = []
+            context.append(f"{icon} Running in a {runtime} container (Claude Code CLI sandbox)")
 
-            if is_resume:
-                context.append(f"{icon} Running in a {runtime} container (Claude Code CLI sandbox)")
-            else:
-                context.append(f"{icon} Running in a {runtime} container (Claude Code CLI sandbox)")
-
+            # Resume sessions get only the one-line banner; fresh sessions get
+            # the detailed indicators and workflow tips below.
+            if not is_resume:
                 if self.config.get(
                     _CFG_SHOW_DETAILED_INDICATORS, _DEFAULT_SHOW_DETAILED_INDICATORS
                 ):
