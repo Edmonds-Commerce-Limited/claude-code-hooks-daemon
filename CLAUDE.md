@@ -213,10 +213,10 @@ Blocking handlers match patterns in the full Bash command string, including git 
 ### Key Paths (Different from Normal Installs)
 
 ```bash
-# Python command (fingerprint-keyed venv from v3.7.0)
-# Resolve dynamically via init.sh / venv-include.bash — the fingerprint
-# depends on Python version, base_prefix, and arch of the active env.
-PYTHON=/workspace/untracked/venv-py{MM}-{fingerprint}/bin/python
+# Python command (fingerprint-keyed venv from v3.7.0; project-path slug from v3.19.1)
+# Resolve dynamically via init.sh / venv-include.bash — the venv dir is keyed by a
+# project-path slug plus a fingerprint of the Python version, base_prefix, and arch.
+PYTHON=/workspace/untracked/venv-{slug}-py{MM}-{fingerprint}/bin/python
 
 # Legacy (pre-v3.7.0) — still works as fallback if present
 PYTHON=/workspace/untracked/venv/bin/python
@@ -230,11 +230,15 @@ SRC=/workspace/src/claude_code_hooks_daemon/
 
 ### Why This Matters
 
-- Venv is fingerprint-keyed: `/workspace/untracked/venv-py{MM}-{fingerprint}/`
-  where `{fingerprint} = md5(sys.version | sys.base_prefix | platform.machine())[:8]`.
-  This lets concurrent containers sharing the same image reuse one venv while
-  a desktop host with a different Python gets its own — no more cross-env
-  corruption when the same project is opened in both contexts.
+- Venv is keyed by a project-path slug plus a fingerprint:
+  `/workspace/untracked/venv-{slug}-py{MM}-{fingerprint}/`
+  where `{fingerprint} = md5(sys.version | sys.base_prefix | platform.machine())[:8]`
+  and `{slug}` is derived from the project root path. The fingerprint lets
+  concurrent containers from the same image reuse one venv; the slug keeps a
+  desktop host view (e.g. `/home/user/project`) and a container view
+  (`/workspace`) of the SAME bind-mounted project on separate venvs — so two
+  sessions sharing an `untracked/` directory never collide on one venv even
+  when their Python fingerprints are identical (fixed in v3.19.1).
 - Source at `/workspace/src/` (NOT installed package)
 - Config has `self_install_mode: true`
 - `.claude/hooks-daemon.env` sets `HOOKS_DAEMON_ROOT_DIR="$PROJECT_PATH"`
