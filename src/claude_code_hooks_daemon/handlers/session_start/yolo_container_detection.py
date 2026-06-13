@@ -24,6 +24,7 @@ from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.utils.container_detection import (
     detect_container_runtime,
     in_container,
+    is_yolo_sandbox,
 )
 
 logger = logging.getLogger(__name__)
@@ -133,20 +134,14 @@ class YoloContainerDetectionHandler(Handler):
         """
         indicators: list[str] = [f"Container runtime: {runtime}"]
 
-        try:
-            from claude_code_hooks_daemon.utils.container_detection import is_yolo_sandbox
+        # is_yolo_sandbox() is itself fail-safe (returns False, logging internally).
+        if is_yolo_sandbox():
+            indicators.append("YOLO/auto-approve sandbox detected (IS_SANDBOX or DEVCONTAINER)")
 
-            if is_yolo_sandbox():
-                indicators.append("YOLO/auto-approve sandbox detected (IS_SANDBOX or DEVCONTAINER)")
-        except (OSError, RuntimeError, ImportError) as exc:
-            logger.debug("is_yolo_sandbox check failed: %s", exc)
-
-        try:
-            if os.getuid() == 0:
-                indicators.append("Running as root user (UID 0)")
-        except AttributeError:
-            # os.getuid() not available on Windows
-            pass
+        # os.getuid() is absent on Windows; guard with hasattr rather than
+        # catching AttributeError so no exception is silently discarded.
+        if hasattr(os, "getuid") and os.getuid() == 0:
+            indicators.append("Running as root user (UID 0)")
 
         return indicators
 

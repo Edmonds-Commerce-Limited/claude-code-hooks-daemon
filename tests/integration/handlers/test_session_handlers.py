@@ -49,22 +49,30 @@ class TestYoloContainerDetectionHandler:
         }
         assert handler.matches(hook_input) is False
 
-    def test_does_not_match_non_yolo(self, handler: Any) -> None:
+    def test_does_not_match_on_desktop_host(self, handler: Any) -> None:
+        """A desktop (non-container) SessionStart must NOT match.
+
+        The handler now keys off honest container markers only — never the
+        tautological ``CLAUDECODE`` / ``CLAUDE_CODE_ENTRYPOINT`` signals. This
+        test runs hermetically even from inside a real container by pointing
+        the marker-path overrides at absent paths and clearing the ``container``
+        env var, simulating a desktop host.
+        """
         hook_input = {
             "hook_event_name": "SessionStart",
             "source": "user",
         }
-        # Clear YOLO indicators to ensure low confidence score
+        # Simulate a desktop host: Claude Code signals present (always true in
+        # production) but ZERO honest container markers.
         env_overrides = {
-            "CLAUDECODE": "",
-            "CLAUDE_CODE_ENTRYPOINT": "",
-            "DEVCONTAINER": "",
-            "IS_SANDBOX": "",
+            "CLAUDECODE": "1",
+            "CLAUDE_CODE_ENTRYPOINT": "cli",
             "container": "",
+            "HOOKS_DAEMON_DOCKERENV_PATH": "/nonexistent/.dockerenv",
+            "HOOKS_DAEMON_CONTAINERENV_PATH": "/nonexistent/.containerenv",
+            "HOOKS_DAEMON_CGROUP_PATH": "/nonexistent/cgroup",
         }
         with patch.dict("os.environ", env_overrides, clear=False):
-            # With low confidence score, should not match
-            handler.config["min_confidence_score"] = 100
             assert handler.matches(hook_input) is False
 
     def test_handler_is_non_terminal(self, handler: Any) -> None:

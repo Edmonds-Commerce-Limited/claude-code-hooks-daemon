@@ -115,8 +115,11 @@ def _runtime_from_cgroup() -> str | None:
     try:
         content = Path(cgroup_path).read_text(encoding="utf-8", errors="replace").lower()
     except OSError as exc:
+        # A missing/unreadable cgroup file (e.g. on macOS) is a legitimate
+        # "no signal" outcome: log it and treat content as empty so the loop
+        # below finds no token and the function reports None via its normal path.
         logger.debug("cgroup probe failed for %s: %s", cgroup_path, exc)
-        return None
+        content = ""
     for token, runtime in _CGROUP_TOKENS:
         if token in content:
             return runtime

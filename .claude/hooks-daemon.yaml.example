@@ -322,6 +322,10 @@ handlers:
       enabled: true
       priority: 10
 
+    environment_indicator:  # Shows 💻 desktop / 🐳 docker / 📦 podman (cached at startup)
+      enabled: true
+      priority: 11
+
     git_branch:     # Shows current git branch if in repo
       enabled: true
       priority: 20

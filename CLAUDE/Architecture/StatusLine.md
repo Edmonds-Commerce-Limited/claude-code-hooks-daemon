@@ -73,13 +73,14 @@ All status line handlers are **non-terminal** (`terminal=False`). They all retur
 
 ### Handler Execution Order
 
-| Priority | Handler                 | Config Key        | Output Example                                     | Data Source                                     |
-| -------- | ----------------------- | ----------------- | -------------------------------------------------- | ----------------------------------------------- |
-| 5        | `AccountDisplayHandler` | `account_display` | `username \|`                                      | `~/.claude/.last-launch.conf`                   |
-| 10       | `ModelContextHandler`   | `model_context`   | `Claude Opus 4.5 \| Ctx: [colored]12.3%[/colored]` | `hook_input.model`, `hook_input.context_window` |
-| 15       | `UsageTrackingHandler`  | `usage_tracking`  | `\| daily: 45.2% \| weekly: 23.1%`                 | `~/.claude/stats-cache.json` (DISABLED)         |
-| 20       | `GitBranchHandler`      | `git_branch`      | `\| main`                                          | `git branch --show-current` subprocess          |
-| 30       | `DaemonStatsHandler`    | `daemon_stats`    | `\| hook-icon 5.2m 34MB \| INFO`                   | `DaemonController.get_stats()`, `psutil`        |
+| Priority | Handler                       | Config Key              | Output Example                                     | Data Source                                              |
+| -------- | ----------------------------- | ----------------------- | -------------------------------------------------- | -------------------------------------------------------- |
+| 5        | `AccountDisplayHandler`       | `account_display`       | `username \|`                                      | `~/.claude/.last-launch.conf`                            |
+| 10       | `ModelContextHandler`         | `model_context`         | `Claude Opus 4.5 \| Ctx: [colored]12.3%[/colored]` | `hook_input.model`, `hook_input.context_window`          |
+| 11       | `EnvironmentIndicatorHandler` | `environment_indicator` | `\| 💻 desktop` / `\| 🐳 docker` / `\| 📦 podman`  | `ProjectContext.container_runtime()` (cached at startup) |
+| 15       | `UsageTrackingHandler`        | `usage_tracking`        | `\| daily: 45.2% \| weekly: 23.1%`                 | `~/.claude/stats-cache.json` (DISABLED)                  |
+| 20       | `GitBranchHandler`            | `git_branch`            | `\| main`                                          | `git branch --show-current` subprocess                   |
+| 30       | `DaemonStatsHandler`          | `daemon_stats`          | `\| hook-icon 5.2m 34MB \| INFO`                   | `DaemonController.get_stats()`, `psutil`                 |
 
 ### Handler Details
 
@@ -101,6 +102,15 @@ All status line handlers are **non-terminal** (`terminal=False`). They all retur
   - 61-80%: Orange background, black text
   - 81-100%: Red background, white text
 - **Failure mode**: Defaults to "Claude" model name, 0% usage
+- **Settings access**: reads `~/.claude/settings.json` via the shared `settings_reader.read_claude_settings()` (mtime-cached), so it does not re-parse the file each render or duplicate `ThinkingModeHandler`'s read
+
+#### EnvironmentIndicatorHandler (Priority 11)
+
+- **Purpose**: Confirms at a glance whether the session runs at desktop (host) level or inside a container
+- **Data source**: `ProjectContext.container_runtime()` — the container runtime is detected ONCE at daemon startup (honest OS-level markers only: `container` env var, `/.dockerenv`, `/run/.containerenv`, `/proc/1/cgroup`) and cached on the frozen `ProjectContext` singleton. The handler does NO per-render probing.
+- **Output format**: `| 💻 desktop` (host) / `| 🐳 docker` / `| 📦 podman` / `| 📦 container` (generic runtime)
+- **Honesty note**: detection NEVER counts the tautological `CLAUDECODE` / `CLAUDE_CODE_ENTRYPOINT` signals — those mean "running under Claude Code" (always true for this daemon), not "in a container"
+- **Failure mode**: `container_runtime()` is `None` on a host → shows the desktop icon
 
 #### UsageTrackingHandler (Priority 15) -- CURRENTLY DISABLED
 
