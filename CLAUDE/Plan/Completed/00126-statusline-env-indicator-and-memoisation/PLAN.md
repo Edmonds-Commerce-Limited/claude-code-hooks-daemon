@@ -1,6 +1,6 @@
 # Plan 00126: Fix container-detection conflation + status-line env indicator + memoisation audit
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-06-13
 **Owner**: Claude (Opus)
 **Priority**: High (root cause is a correctness smell entangled with daemon enforcement)
@@ -95,16 +95,16 @@ This is directly entangled with the v3.18.x–v3.19.x daemon-isolation work.
 
 ## Phase 1: Investigation (parallel sub-agents → reports in THIS folder)
 
-- [ ] **Agent A — status-line per-render cost audit** → `status-line-audit.md`
+- [x] **Agent A — status-line per-render cost audit** → `status-line-audit.md`
   For every status_line handler: what work does `handle()` do per render
   (subprocess / file I/O / network / heavy compute)? Cached or recomputed?
   Classify each OK / should-memoise / expensive. Quote `file:line`.
-- [ ] **Agent B — caching infrastructure & status dispatch frequency** → `caching-infra-review.md`
+- [x] **Agent B — caching infrastructure & status dispatch frequency** → `caching-infra-review.md`
   How is the Status event dispatched and how often does Claude Code call the
   statusline command? What caching primitives exist (`ProjectContext`
   startup cache, `functools.lru_cache`, `stats_cache_reader`, TTL caches)?
   Recommend the standard memoisation pattern for daemon-lifetime invariants.
-- [ ] **Agent C — container-detection conflation: full call-site + redesign** → `container-detection-review.md`
+- [x] **Agent C — container-detection conflation: full call-site + redesign** → `container-detection-review.md`
   Map every use of `get_container_confidence_score` / `is_container_environment`
   / `get_detected_indicators` / `yolo_container_detection`. For each, what
   fact does the caller ACTUALLY need (Claude Code? YOLO? container?)? Design
@@ -166,24 +166,45 @@ This is directly entangled with the v3.18.x–v3.19.x daemon-isolation work.
     Re-point `init_config.py` + `enforcement.py` at `in_container()`. Keep the
     `yolo_container_detection` config key stable for backward compat.
 - **D3 Icon mapping:** desktop 💻 · docker 🐳 · podman 📦 · generic container 📦.
-- **D4 Scope/sequencing:** PENDING USER DECISION (see below) — split the
-  safety-critical root fix from the status-icon + perf polish, or do it all in
-  one plan.
+- **D4 Scope/sequencing:** RESOLVED — user chose **all in one plan/release**.
+  Root fix + status icon + memoisation ship together.
+- **D5 git_branch is NOT memoisable:** the audit flagged its ~4 subprocesses as
+  "expensive", but the git state it reads genuinely changes per render, and the
+  `git rev-parse --show-toplevel` call is a **per-cwd repo gate** (the status
+  line's `current_dir` can be a subdirectory or a different repo than the
+  daemon's startup project root), so it CANNOT be replaced with
+  `ProjectContext.git_toplevel()` without a correctness regression. The
+  "coalesce behind a TTL" idea was rejected: a stale branch/dirty-state icon is
+  worse than a cheap, always-correct one, and the calls are short-timeout local
+  git reads. Left as-is by design — this is mutable state, not a recomputed
+  invariant. Same reasoning retains `account_display` (`.last-launch.conf` can
+  change on account switch), `daemon_stats` (live RSS + version-check cache),
+  and `stats_cache_reader` (usage stats) as deliberate per-render reads. The
+  ONLY genuine recomputed-invariant problems were the container fact (fixed via
+  `ProjectContext` startup cache) and the `settings.json` double-parse (fixed
+  via the shared mtime-cached reader).
 
 ## Phase 3: TDD Implementation
 
-- [ ] Precise, memoised container-runtime detector (+ tests)
-- [ ] Decouple YOLO/sandbox detection from container detection (+ tests)
-- [ ] Re-point `init_config.py` + `enforcement.py` at precise detection (+ tests proving desktop is NOT treated as container)
-- [ ] `environment_indicator` status-line handler (+ tests)
-- [ ] Register handler (HandlerID, Priority, tag, `__init__`, config)
-- [ ] Apply memoisation fixes the audit flags
+- [x] Precise, memoised container-runtime detector (+ tests) — commit 208be42
+- [x] Decouple YOLO/sandbox detection from container detection (+ tests) — commit 208be42
+- [x] Re-point `init_config.py` + `enforcement.py` at precise detection — they call
+  `is_container_environment()`, which the rewrite redefined as a precise alias of
+  `in_container()` (honest markers only); call sites stay stable and are now correct.
+- [x] `environment_indicator` status-line handler (+ tests) — commit 3797846
+- [x] Register handler (HandlerID, Priority, tag, `__init__`, config) — commit 3797846
+- [x] Apply memoisation fixes the audit flags — container fact via `ProjectContext`
+  startup cache (commit 3797846); `settings.json` double-parse via shared
+  mtime-cached reader (commit 6432aa2). git_branch / account_display / daemon_stats
+  deliberately left per-render (see D5 — mutable state, not invariants).
 
 ## Phase 4: Verify
 
-- [ ] Full QA `./scripts/qa/llm_qa.py all`
-- [ ] Daemon restart RUNNING; icon correct in live status line
-- [ ] Confirm enforcement/init no longer treat a desktop session as a container
+- [x] Full QA `./scripts/qa/llm_qa.py all`
+- [x] Daemon restart RUNNING; icon correct in live status line (verified: renders
+  `📦 podman` in this container)
+- [x] Confirm enforcement/init no longer treat a desktop session as a container
+  (desktop regression test `test_desktop_claude_code_session_not_in_container`)
 
 ## Success Criteria
 
@@ -203,3 +224,10 @@ This is directly entangled with the v3.18.x–v3.19.x daemon-isolation work.
   nonsensical for a Claude-Code-only daemon, and demanded the plan tackle this
   root smell — not just the status icon. Empirical proof captured above.
 - Memoisation is a hard constraint: no per-render work in the status line.
+- Delivery commits: 1ae2413 (investigation), 208be42 (Phase 1 precise detector +
+  concept split), a2ca0de (Phase 2 yolo handler precise), 3797846 (Phase 3
+  env indicator + ProjectContext container cache), 6432aa2 (Phase 3.5 shared
+  mtime-cached settings reader).
+- Scope landed in full per D4 (all-in-one). D5 records why git_branch and the
+  other mutable-state readers were deliberately left per-render rather than
+  cached — caching them would trade correctness for negligible cost savings.

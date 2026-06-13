@@ -64,6 +64,14 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00126: Container-detection conflation fix + status-line env indicator + memoisation](Completed/00126-statusline-env-indicator-and-memoisation/PLAN.md) - Complete
+
+  - Root cause: container detection scored the tautological `CLAUDECODE=1` / `CLAUDE_CODE_ENTRYPOINT=cli` signals as container evidence — but this daemon ONLY runs under Claude Code, so those are always true and classified every desktop session as a container
+  - Rewrote `container_detection` around three honest, separated predicates: `running_under_claude_code()`, `is_yolo_sandbox()`, and `detect_container_runtime()` / `in_container()` (honest OS markers only: `container` env, `/.dockerenv`, `/run/.containerenv`, `/proc/1/cgroup`). `is_container_environment()` kept as a precise alias so `enforcement.py` / `init_config.py` call sites stay correct
+  - New `EnvironmentIndicatorHandler` (status priority 11) shows 💻 desktop / 🐳 docker / 📦 podman, reading the runtime cached ONCE on `ProjectContext` at daemon startup — no per-render probing
+  - Memoisation: container fact via `ProjectContext` startup cache; new shared `settings_reader` (mtime-cached) ends the `model_context` + `thinking_mode` double-parse of `~/.claude/settings.json`. git_branch / account_display / daemon_stats deliberately left per-render (mutable state, not invariants — see PLAN D5)
+  - QA 13/13 (8561 tests, 95.1%); daemon restarts RUNNING; live status line renders `📦 podman`
+
 - [00125: Auto-detect containers → uv copy mode](Completed/00125-uv-container-copy-mode/PLAN.md) - Complete
 
   - Follow-up to v3.19.1: container installs/upgrades printed the `uv hardlink failed (likely overlay-fs) — retrying with UV_LINK_MODE=copy` warning on every run
@@ -846,12 +854,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 125
-- **Completed**: 104 (1 with reduced scope, 4 already-shipped)
+- **Total Plans Created**: 126
+- **Completed**: 105 (1 with reduced scope, 4 already-shipped)
 - **Active**: 5 (1 python-discovery, 1 question-blocker, 1 stop-quality, 2 long-running/review) + 1 in-progress build (00116 CLAUDE.md compression)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping, 00081 - superseded by 00082)
-- **Last reconciled by**: Plan 00125 (uv container copy mode) close-out
+- **Last reconciled by**: Plan 00126 (container-detection conflation + status-line env indicator) close-out
 
 ## Quick Links
 
