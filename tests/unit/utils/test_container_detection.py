@@ -29,11 +29,17 @@ from claude_code_hooks_daemon.utils.container_detection import (
 _ABSENT_DOCKER = "/tmp/_test_nonexistent_dockerenv_99999"
 _ABSENT_CONTAINERENV = "/tmp/_test_nonexistent_containerenv_99999"
 _ABSENT_CGROUP = "/tmp/_test_nonexistent_cgroup_99999"
+_ABSENT_SYSTEMD_CONTAINER = "/tmp/_test_nonexistent_systemd_container_99999"
+_ABSENT_LXD_SOCK = "/tmp/_test_nonexistent_lxd_sock_99999"
+_ABSENT_LXC_DEV = "/tmp/_test_nonexistent_lxc_dev_99999"
 
 _NEUTRAL_ENV_OVERRIDES = {
     "HOOKS_DAEMON_DOCKERENV_PATH": _ABSENT_DOCKER,
     "HOOKS_DAEMON_CONTAINERENV_PATH": _ABSENT_CONTAINERENV,
     "HOOKS_DAEMON_CGROUP_PATH": _ABSENT_CGROUP,
+    "HOOKS_DAEMON_SYSTEMD_CONTAINER_PATH": _ABSENT_SYSTEMD_CONTAINER,
+    "HOOKS_DAEMON_LXD_SOCK_PATH": _ABSENT_LXD_SOCK,
+    "HOOKS_DAEMON_LXC_DEV_PATH": _ABSENT_LXC_DEV,
 }
 
 
@@ -76,6 +82,23 @@ class TestDesktopClaudeCodeSessionIsNotAContainer:
         This is the primary regression test.  Before the fix every Claude Code
         session (desktop included) was mis-classified as a container because
         CLAUDECODE=1 alone scored 3 points and the threshold was also 3.
+        """
+        env = _clean_env(
+            CLAUDECODE="1",
+            CLAUDE_CODE_ENTRYPOINT="cli",
+        )
+        with patch.dict(os.environ, env, clear=True):
+            assert detect_container_runtime() is None
+            assert in_container() is False
+            assert is_container_environment() is False
+
+    def test_desktop_host_is_not_lxc(self) -> None:
+        """Desktop/host with NO LXC signals must not be classified as LXC.
+
+        Plan 00127 Phase 4: the new /run/systemd/container reader and the
+        LXD/LXC dev markers must all be absent on a host, so detection stays
+        negative. The _clean_env helper points every LXC-related marker at a
+        nonexistent path and clears the `container` env var.
         """
         env = _clean_env(
             CLAUDECODE="1",
@@ -192,6 +215,131 @@ class TestDetectContainerRuntimeEnvVar:
         with patch.dict(os.environ, env, clear=True):
             assert detect_container_runtime() == "podman"
 
+    def test_container_lxc_returns_lxc(self) -> None:
+        """container=lxc → 'lxc' (systemd-nspawn / LXC env-var form)."""
+        env = _clean_env(container="lxc")
+        with patch.dict(os.environ, env, clear=True):
+            assert detect_container_runtime() == "lxc"
+
+    def test_container_lxc_libvirt_returns_lxc(self) -> None:
+        """container=lxc-libvirt → 'lxc'."""
+        env = _clean_env(container="lxc-libvirt")
+        with patch.dict(os.environ, env, clear=True):
+            assert detect_container_runtime() == "lxc"
+
+
+# ---------------------------------------------------------------------------
+# detect_container_runtime() — /run/systemd/container reader (LXC)
+# ---------------------------------------------------------------------------
+
+
+class TestDetectContainerRuntimeSystemdContainer:
+    """Tests for the /run/systemd/container LXC reader (PRIMARY LXC signal).
+
+    Mirrors the real unprivileged-LXC capture (host-a): the `container` env
+    var is unset, no marker files exist, cgroup v2 carries no token, but
+    /run/systemd/container contains 'lxc'.
+    """
+
+    def _write_systemd_container(self, tmp_path: Path, content: str) -> str:
+        f = tmp_path / "systemd-container"
+        f.write_text(content, encoding="utf-8")
+        return str(f)
+
+    def test_systemd_container_file_lxc_returns_lxc(self, tmp_path: Path) -> None:
+        """/run/systemd/container content 'lxc' → 'lxc' (and is a container)."""
+        marker = self._write_systemd_container(tmp_path, "lxc")
+        env = _clean_env(HOOKS_DAEMON_SYSTEMD_CONTAINER_PATH=marker)
+        with patch.dict(os.environ, env, clear=True):
+            assert detect_container_runtime() == "lxc"
+            assert in_container() is True
+            assert is_container_environment() is True
+
+    def test_systemd_container_file_lxc_libvirt_returns_lxc(self, tmp_path: Path) -> None:
+        """Content 'lxc-libvirt' → 'lxc'."""
+        marker = self._write_systemd_container(tmp_path, "lxc-libvirt")
+        env = _clean_env(HOOKS_DAEMON_SYSTEMD_CONTAINER_PATH=marker)
+        with patch.dict(os.environ, env, clear=True):
+            assert detect_container_runtime() == "lxc"
+
+    def test_systemd_container_file_strips_and_lowercases(self, tmp_path: Path) -> None:
+        """Content '  LXC\\n' is stripped + lowercased → 'lxc'."""
+        marker = self._write_systemd_container(tmp_path, "  LXC\n")
+        env = _clean_env(HOOKS_DAEMON_SYSTEMD_CONTAINER_PATH=marker)
+        with patch.dict(os.environ, env, clear=True):
+            assert detect_container_runtime() == "lxc"
+
+    def test_systemd_container_file_other_value_returns_none(self, tmp_path: Path) -> None:
+        """A non-LXC value (e.g. 'systemd-nspawn') is LXC-only-helper → falls to None."""
+        marker = self._write_systemd_container(tmp_path, "systemd-nspawn")
+        env = _clean_env(HOOKS_DAEMON_SYSTEMD_CONTAINER_PATH=marker)
+        with patch.dict(os.environ, env, clear=True):
+            assert detect_container_runtime() is None
+
+    def test_systemd_container_file_absent_returns_none(self) -> None:
+        """Nonexistent /run/systemd/container path → OSError → fail-safe None."""
+        env = _clean_env(HOOKS_DAEMON_SYSTEMD_CONTAINER_PATH=_ABSENT_SYSTEMD_CONTAINER)
+        with patch.dict(os.environ, env, clear=True):
+            assert detect_container_runtime() is None
+
+    def test_systemd_container_file_empty_returns_none(self, tmp_path: Path) -> None:
+        """Empty file → stripped to '' → None."""
+        marker = self._write_systemd_container(tmp_path, "")
+        env = _clean_env(HOOKS_DAEMON_SYSTEMD_CONTAINER_PATH=marker)
+        with patch.dict(os.environ, env, clear=True):
+            assert detect_container_runtime() is None
+
+
+# ---------------------------------------------------------------------------
+# detect_container_runtime() — LXD/LXC dev markers
+# ---------------------------------------------------------------------------
+
+
+class TestDetectContainerRuntimeLxdMarkers:
+    """Tests for the /dev/lxd/sock and /dev/.lxc dev-marker checks (last)."""
+
+    def test_lxd_sock_marker_returns_lxc(self, tmp_path: Path) -> None:
+        """/dev/lxd/sock present (all other markers absent) → 'lxc'."""
+        sock = tmp_path / "lxd-sock"
+        sock.touch()
+        env = _clean_env(HOOKS_DAEMON_LXD_SOCK_PATH=str(sock))
+        with patch.dict(os.environ, env, clear=True):
+            assert detect_container_runtime() == "lxc"
+
+    def test_lxc_dev_marker_returns_lxc(self, tmp_path: Path) -> None:
+        """/dev/.lxc present (all other markers absent) → 'lxc'."""
+        dev = tmp_path / "lxc-dev"
+        dev.touch()
+        env = _clean_env(HOOKS_DAEMON_LXC_DEV_PATH=str(dev))
+        with patch.dict(os.environ, env, clear=True):
+            assert detect_container_runtime() == "lxc"
+
+
+# ---------------------------------------------------------------------------
+# detect_container_runtime() — check ORDER
+# ---------------------------------------------------------------------------
+
+
+class TestDetectionOrder:
+    """Tests that confirm the documented check order."""
+
+    def test_systemd_container_checked_before_docker_marker(self, tmp_path: Path) -> None:
+        """/run/systemd/container='lxc' AND /.dockerenv present → 'lxc' wins.
+
+        The captured real-LXC case is systemd-based; the systemd-container
+        reader must run before the Docker marker probe.
+        """
+        systemd = tmp_path / "systemd-container"
+        systemd.write_text("lxc", encoding="utf-8")
+        docker = tmp_path / ".dockerenv"
+        docker.touch()
+        env = _clean_env(
+            HOOKS_DAEMON_SYSTEMD_CONTAINER_PATH=str(systemd),
+            HOOKS_DAEMON_DOCKERENV_PATH=str(docker),
+        )
+        with patch.dict(os.environ, env, clear=True):
+            assert detect_container_runtime() == "lxc"
+
 
 # ---------------------------------------------------------------------------
 # detect_container_runtime() — marker file branches
@@ -295,12 +443,12 @@ class TestDetectContainerRuntimeCgroup:
         with patch.dict(os.environ, env, clear=True):
             assert detect_container_runtime() == "generic"
 
-    def test_cgroup_containing_lxc_returns_generic(self, tmp_path: Path) -> None:
-        """cgroup with 'lxc' → 'generic'."""
+    def test_cgroup_containing_lxc_returns_lxc(self, tmp_path: Path) -> None:
+        """cgroup-v1 with 'lxc' token → 'lxc' (Plan 00127 Phase 4 remap)."""
         cgroup = self._write_cgroup(tmp_path, "12:devices:/lxc/abc123\n")
         env = _clean_env(HOOKS_DAEMON_CGROUP_PATH=str(cgroup))
         with patch.dict(os.environ, env, clear=True):
-            assert detect_container_runtime() == "generic"
+            assert detect_container_runtime() == "lxc"
 
     def test_cgroup_containing_kubepods_returns_generic(self, tmp_path: Path) -> None:
         """cgroup with 'kubepods' → 'generic'."""

@@ -19,8 +19,11 @@ from claude_code_hooks_daemon.handlers.session_start.yolo_container_detection im
     _CFG_SHOW_WORKFLOW_TIPS,
     _ICON_CONTAINER,
     _ICON_DOCKER,
+    _ICON_LXC,
     _RUNTIME_DOCKER,
+    _RUNTIME_LXC,
     YoloContainerDetectionHandler,
+    _runtime_icon,
 )
 
 # ---------------------------------------------------------------------------
@@ -345,6 +348,27 @@ class TestHandleRuntimeIcon:
             result = handler.handle(_SESSION_START_NEW)
         assert result.decision == "allow"
         assert any(_ICON_CONTAINER in line for line in result.context)
+
+
+class TestRuntimeIconLxc:
+    """Plan 00127 Phase 4: LXC gets its own distinct icon."""
+
+    def test_runtime_icon_lxc_returns_ice_cube(self) -> None:
+        assert _runtime_icon(_RUNTIME_LXC) == _ICON_LXC
+        assert _ICON_LXC == "🧊"
+
+    def test_handle_lxc_banner(self) -> None:
+        """In an LXC container the banner reads '🧊 Running in a lxc container...'."""
+        module = "claude_code_hooks_daemon.handlers.session_start.yolo_container_detection"
+        with (
+            patch(f"{module}.in_container", return_value=True),
+            patch(f"{module}.detect_container_runtime", return_value="lxc"),
+        ):
+            handler = YoloContainerDetectionHandler()
+            assert handler.matches(_SESSION_START_NEW) is True
+            result = handler.handle(_SESSION_START_NEW)
+        assert result.decision == "allow"
+        assert result.context[0].startswith("🧊 Running in a lxc container")
 
 
 # ---------------------------------------------------------------------------

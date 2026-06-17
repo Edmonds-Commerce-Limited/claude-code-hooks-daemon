@@ -415,9 +415,9 @@ class ProjectContext:
     def container_runtime(cls) -> str | None:
         """Return the detected container runtime, or None on the host.
 
-        One of ``"docker"``, ``"podman"``, ``"generic"``, or ``None``. Computed
-        once at startup (see :meth:`initialize`) — cheap to read per status-line
-        render.
+        One of ``"docker"``, ``"podman"``, ``"generic"``, ``"lxc"``, or
+        ``None``. Computed once at startup (see :meth:`initialize`) — cheap to
+        read per status-line render.
         """
         cls._ensure_initialized()
         assert cls._instance is not None

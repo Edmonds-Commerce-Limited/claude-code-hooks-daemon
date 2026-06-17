@@ -1,8 +1,8 @@
 """YOLO Container Detection Handler.
 
-Detects when Claude Code is running inside a real container (Docker, Podman, or
-generic OCI) and injects informational context about the container environment
-during SessionStart events.
+Detects when Claude Code is running inside a real container (Docker, Podman,
+generic OCI, or LXC/LXD) and injects informational context about the container
+environment during SessionStart events.
 
 This handler is non-terminal and advisory — it never blocks execution, only
 provides helpful context about the runtime environment.  It fires ONLY when an
@@ -31,7 +31,9 @@ logger = logging.getLogger(__name__)
 
 # Container-runtime icon mapping (no magic strings: keys match util return values)
 _RUNTIME_DOCKER = "docker"
+_RUNTIME_LXC = "lxc"
 _ICON_DOCKER = "🐳"
+_ICON_LXC = "🧊"
 _ICON_CONTAINER = "📦"  # podman + generic
 
 # Transcript size threshold: files larger than this are treated as resume sessions
@@ -56,6 +58,8 @@ def _runtime_icon(runtime: str) -> str:
     """Return the display icon for a container runtime string."""
     if runtime == _RUNTIME_DOCKER:
         return _ICON_DOCKER
+    if runtime == _RUNTIME_LXC:
+        return _ICON_LXC
     return _ICON_CONTAINER
 
 

@@ -59,6 +59,12 @@ class TestEnvironmentIndicatorRendering:
         segment = self._segment("generic")
         assert "📦" in segment
 
+    def test_handle_renders_lxc_icon(self) -> None:
+        # Plan 00127 Phase 4: an 'lxc' runtime renders the distinct ice-cube glyph.
+        segment = self._segment("lxc")
+        assert segment == "| 🧊 lxc"
+        assert "🐳" not in segment and "📦" not in segment and "💻" not in segment
+
     def test_segment_has_separator_prefix(self) -> None:
         # Not the leftmost segment (git_repo_name is priority 3) — must carry the
         # "| " separator convention used by the other non-first segments.

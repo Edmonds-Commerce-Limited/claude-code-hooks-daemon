@@ -19,13 +19,14 @@ _RUNTIME_DISPLAY: dict[str, tuple[str, str]] = {
     "docker": ("🐳", "docker"),
     "podman": ("📦", "podman"),
     "generic": ("📦", "container"),
+    "lxc": ("🧊", "lxc"),
 }
 # Fallback for an unexpected non-empty runtime label (forward-compatible).
 _UNKNOWN_RUNTIME_ICON = "📦"
 
 
 class EnvironmentIndicatorHandler(Handler):
-    """Show 💻 (desktop/host) or a container icon (🐳 docker / 📦 podman)."""
+    """Show 💻 (desktop/host) or a container icon (🐳 docker / 📦 podman / 🧊 lxc)."""
 
     def __init__(self) -> None:
         super().__init__(

@@ -34,6 +34,23 @@ class TestGetEnforcementLine:
         assert "enforce_single_daemon_process: true" in line
         assert not line.startswith("  #")
 
+    def test_enforcement_line_autoenabled_when_lxc_detected(self) -> None:
+        """Plan 00127 Phase 4: LXC now drives is_container_environment() True.
+
+        Patches the real detection chain (detect_container_runtime → 'lxc')
+        rather than mocking is_container_environment directly, proving an LXC
+        host auto-enables single-daemon enforcement at config-generation time.
+        """
+        with patch(
+            "claude_code_hooks_daemon.utils.container_detection.detect_container_runtime",
+            return_value="lxc",
+        ):
+            line = _get_enforcement_line()
+
+        assert (
+            line == "  enforce_single_daemon_process: true   # Auto-enabled (container detected)\n"
+        )
+
 
 class TestConfigTemplate:
     """Tests for ConfigTemplate.generate_minimal and generate_full."""
