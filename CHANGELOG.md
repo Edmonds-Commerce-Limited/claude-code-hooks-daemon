@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.21.0] - 2026-06-17
+
+This is a **minor release** delivering parallel-session socket-liveness reuse (parallel Claude Code sessions sharing one hostname + project root no longer fight over the daemon socket) and LXC/LXD container detection with a new 🧊 status-line icon.
+
+### Added
+
+- **LXC/LXD container detection (Plan 00127, Phase 4)** — `detect_container_runtime()` now recognises LXC via `/run/systemd/container` (primary), `container=lxc` / `container=lxc-libvirt` environment variables, cgroup-v1 `lxc` token, and `/dev/lxd/sock` / `/dev/.lxc` device probes (no subprocess). New `_RUNTIME_LXC` constant. The `environment_indicator` status-line handler renders 🧊 for LXC sessions; `yolo_container_detection` recognises LXC as a container environment. LXC now auto-enables `enforce_single_daemon_process` for new container installs (safe — socket-liveness reuse runs before enforcement so a healthy incumbent is never terminated).
+
+### Fixed
+
+- **Parallel Claude Code sessions no longer fight over the daemon socket (Plan 00127, Phases 2+3)** — Previously a second `start` (e.g. a parallel agent session sharing the same hostname + project root inside an LXC container) unconditionally unlinked the live socket and clobbered the PID file, orphaning the first daemon. One session's hooks worked; the other's silently did not. The fix introduces socket-liveness probing: a second start connects to the incumbent socket, sends a lightweight health probe, and — if the response is healthy — exits 0 leaving the incumbent untouched. A live socket is never unlinked. An exclusive `flock` serialises the probe→bind critical section so near-simultaneous starts cannot orphan each other. `enforce_single_daemon_process` is updated to spare a healthy incumbent. New constant `Timeout.SOCKET_LIVENESS_PROBE_SEC`.
+
 ## [3.20.0] - 2026-06-13
 
 This is a **minor release** delivering a new `environment_indicator` status-line handler, a ground-up rewrite of container detection around honest OS-level markers, and a shared memoised settings reader that eliminates duplicate per-render parsing.
