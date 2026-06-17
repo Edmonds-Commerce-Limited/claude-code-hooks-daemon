@@ -64,6 +64,13 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00128: Lean SessionStart — silent-when-healthy + verbose `check` command](Completed/00128-lean-session-start/PLAN.md) - Complete
+
+  - SessionStart printed ~80 lines every session (40-line dogfooding reminder, container banner, "all good" status lines). Made the advisories silent-when-healthy so they only speak when action is needed — matching the already-correct `version_check` / `gitignore_safety_checker` model
+  - `git_filemode_checker` + `hook_registration_checker` now emit only on problems; `optimal_config_checker` suppresses its 6-setting audit at session start (keeps silent settings-sync); `yolo_container_detection` gains `show_on_session_start` (default off); the `dogfooding_reminder` plugin trimmed ~40 lines → one line. Kept `hello_world` handlers (dogfooding liveness — explicit user decision)
+  - New `cli check` subcommand + `/hooks-daemon check` skill sub-command surface the full verbose env/config audit (output tokens, bash working dir, container runtime, git fileMode, hook registration) on demand, reusing the handlers' own check logic (single source of truth)
+  - A fresh in-container SessionStart dropped from ~80 lines to 2. QA 13/13 (8628 tests, 95.1%); daemon RUNNING; live-verified both directions. Commits `4344d46` (Phase 1), `5490f24` (Phase 2), `a8fe650` (format)
+
 - [00127: Parallel-Session Daemon Isolation & Reuse (+ LXC detection)](Completed/00127-parallel-session-daemon-isolation/PLAN.md) - Complete
 
   - Fixed the parallel-session bug (user report): multiple Claude Code processes sharing one `(hostname, project root)` — e.g. several agents in a single LXC container — fought over the daemon socket because a second start unconditionally unlinked the live socket and clobbered the PID file (one session's hooks worked, the other's silently did not); reproduced live in-container (two daemon servers, one PID file)
