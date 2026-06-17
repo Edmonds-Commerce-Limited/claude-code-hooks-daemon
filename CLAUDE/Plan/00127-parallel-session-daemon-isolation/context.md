@@ -145,6 +145,43 @@ against signals gathered from a real LXC/LXD container — see the debug command
 in PLAN.md Phase 4. Marker paths must be env-overridable (mirroring the existing
 `HOOKS_DAEMON_*_PATH` pattern) so tests run hermetically.
 
+### Real LXC signals captured (host-a, 2026-06-17)
+
+Run on a genuine **unprivileged LXC/LXD container, cgroup v2** (a UK web server
+running Claude Code), as a **non-root** user (`balli`):
+
+| Signal                                                            | Result                                 | Usable            |
+| ----------------------------------------------------------------- | -------------------------------------- | ----------------- |
+| `container` env var (shell)                                       | `UNSET`                                | ✗                 |
+| `/proc/1/environ`                                                 | Permission denied (non-root)           | ✗ root-only       |
+| `/.dockerenv`, `/run/.containerenv`, `/dev/lxd/sock`, `/dev/.lxc` | none exist                             | ✗                 |
+| `/proc/1/cgroup`                                                  | `0::/init.scope` (cgroup v2, no token) | ✗                 |
+| `stat -fc %T /sys/fs/cgroup`                                      | `cgroup2fs` (confirms v2)              | —                 |
+| **`systemd-detect-virt --container`**                             | **`lxc`**                              | ✅ works non-root |
+
+**Conclusion**: NONE of the daemon's current honest markers fire for LXC on a
+modern host. The only working signal here is `systemd-detect-virt --container`,
+which returned `lxc` without root — strongly implying it read a world-readable
+file (most likely `/run/systemd/container`) rather than `/proc/1/environ`.
+
+**Detection design (pending confirmation of `/run/systemd/container`)**, in
+priority order, cheapest first:
+
+1. `container` env var mapped via `_CONTAINER_ENV_RUNTIMES` (add `lxc`,
+   `lxc-libvirt`) — fires when systemd/LXD exports it to our process.
+2. **`/run/systemd/container`** world-readable file (env-overridable) — contains
+   `lxc` on systemd hosts; cheap, no subprocess, matches the existing
+   marker-file pattern. **The preferred LXC check if confirmed present.**
+3. Existing Docker/Podman marker files + cgroup token (cgroup v1).
+4. **`systemd-detect-virt --container`** subprocess as authoritative fallback —
+   a trusted system tool, invoked with list args (no `shell=True`), exit 0 +
+   stdout token when a container is detected, non-zero `none` otherwise. Used
+   only when the cheap checks above find nothing, so the per-detection cost is
+   paid only on hosts where file markers are absent.
+
+`/proc/1/environ` is deliberately NOT relied upon (root-only here). All new
+marker paths must be env-overridable for hermetic tests.
+
 ## Why this matters
 
 Parallel sessions are a first-class workflow now (multiple agents, multiple

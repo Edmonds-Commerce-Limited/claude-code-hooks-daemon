@@ -107,22 +107,32 @@ references, live evidence, and the 2026-05-29 prior incident
 
 ### Phase 4: LXC / LXD detection (TDD)
 
-**We are NOT in an LXC container here — design against signals gathered from a
-real one.** Debug commands for the user to run inside an LXC/LXD container are in
-the "LXC debug commands" section below; fold the results into the detector.
+**Real signals captured on host-a (unprivileged LXC, cgroup v2):** only
+`systemd-detect-virt --container` → `lxc` worked; the `container` env var was
+unset, `/proc/1/environ` was root-only, no marker files existed, and
+`/proc/1/cgroup` was `0::/init.scope` (no token). See `context.md` "Real LXC
+signals captured" for the full table and the resulting priority-ordered design.
 
 - [ ] ⬜ **Task 4.1**: Add `lxc` and `lxc-libvirt` to `_CONTAINER_ENV_RUNTIMES`
-  (mapped to a new `_RUNTIME_LXC` label or `generic`, decide in a Technical
-  Decision).
-- [ ] ⬜ **Task 4.2**: RED+GREEN — detect LXD via `/dev/lxd/sock` and LXC via
-  `/dev/.lxc`, both env-overridable (`HOOKS_DAEMON_LXD_SOCK_PATH`,
-  `HOOKS_DAEMON_LXC_MARKER_PATH`) mirroring the existing pattern.
-- [ ] ⬜ **Task 4.3**: RED+GREEN — read `/proc/1/environ` (overridable) for a
-  `container=lxc` token as a cgroup-v2 fallback. Handle unreadable file
-  (non-root / hardened) as "no signal", logged at debug (no silent swallow).
-- [ ] ⬜ **Task 4.4**: Keep the existing `lxc` cgroup token for cgroup-v1 hosts.
-- [ ] ⬜ **Task 4.5**: Ensure `environment_indicator` status handler renders an
+  (decide `_RUNTIME_LXC` vs `generic` in a Technical Decision). Cheapest check.
+- [ ] ⬜ **Task 4.2**: RED+GREEN — read **`/run/systemd/container`**
+  (env-overridable `HOOKS_DAEMON_SYSTEMD_CONTAINER_PATH`), the world-readable
+  systemd file that contains `lxc`. **Pending confirmation it exists on host-a**
+  — if confirmed, this is the preferred LXC check (cheap, no subprocess, matches
+  the existing marker-file pattern).
+- [ ] ⬜ **Task 4.3**: RED+GREEN — `systemd-detect-virt --container` subprocess as
+  the **authoritative fallback** when cheap checks find nothing. Trusted system
+  tool, list args, no `shell=True` (per the project subprocess security rules);
+  exit 0 + stdout token = container, non-zero/`none` = host. Confirmed to return
+  `lxc` non-root on host-a.
+- [ ] ⬜ **Task 4.4**: Optionally probe LXD via `/dev/lxd/sock` / `/dev/.lxc`
+  (absent on host-a but present on some LXD setups), env-overridable.
+- [ ] ⬜ **Task 4.5**: Keep the existing `lxc` cgroup token for cgroup-v1 hosts.
+- [ ] ⬜ **Task 4.6**: Ensure `environment_indicator` status handler renders an
   LXC icon, and `yolo_container_detection` recognises LXC.
+- [ ] ⬜ **Task 4.7**: Reassess whether LXC should auto-enable
+  `enforce_single_daemon_process` — only AFTER Phases 2-3 land, since enabling it
+  before the reuse/fail-fast fix would re-expose Mechanism A.
 
 ### Phase 5: Orphan / stale-runtime janitor (TDD)
 
