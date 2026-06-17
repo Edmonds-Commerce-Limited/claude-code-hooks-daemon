@@ -16,6 +16,7 @@ from unittest.mock import patch
 
 from claude_code_hooks_daemon.handlers.session_start.yolo_container_detection import (
     _CFG_SHOW_DETAILED_INDICATORS,
+    _CFG_SHOW_ON_SESSION_START,
     _CFG_SHOW_WORKFLOW_TIPS,
     _ICON_CONTAINER,
     _ICON_DOCKER,
@@ -119,6 +120,11 @@ class TestInitialization:
         handler = YoloContainerDetectionHandler()
         assert handler.config[_CFG_SHOW_WORKFLOW_TIPS] is True
 
+    def test_default_show_on_session_start_is_false(self) -> None:
+        """Plan 00128: the session-start banner is OFF by default."""
+        handler = YoloContainerDetectionHandler()
+        assert handler.config[_CFG_SHOW_ON_SESSION_START] is False
+
 
 # ---------------------------------------------------------------------------
 # configure()
@@ -207,16 +213,26 @@ class TestDesktopDoesNotFire:
 class TestMatches:
     """matches() logic."""
 
-    def test_matches_true_in_docker_container(self, tmp_path: Path) -> None:
+    def test_matches_false_in_container_by_default(self, tmp_path: Path) -> None:
+        """Lean SessionStart (Plan 00128): the banner is OFF by default, so even
+        inside a container the handler does not fire unless opted in."""
         env = _container_env(tmp_path, runtime="docker")
         with patch.dict(os.environ, env, clear=False):
             handler = YoloContainerDetectionHandler()
+            assert handler.matches(_SESSION_START_NEW) is False
+
+    def test_matches_true_in_docker_container_when_opted_in(self, tmp_path: Path) -> None:
+        env = _container_env(tmp_path, runtime="docker")
+        with patch.dict(os.environ, env, clear=False):
+            handler = YoloContainerDetectionHandler()
+            handler.configure({_CFG_SHOW_ON_SESSION_START: True})
             assert handler.matches(_SESSION_START_NEW) is True
 
-    def test_matches_true_in_podman_container(self, tmp_path: Path) -> None:
+    def test_matches_true_in_podman_container_when_opted_in(self, tmp_path: Path) -> None:
         env = _container_env(tmp_path, runtime="podman")
         with patch.dict(os.environ, env, clear=False):
             handler = YoloContainerDetectionHandler()
+            handler.configure({_CFG_SHOW_ON_SESSION_START: True})
             assert handler.matches(_SESSION_START_NEW) is True
 
     def test_matches_false_for_non_session_start_event(self, tmp_path: Path) -> None:
@@ -285,6 +301,7 @@ class TestMatches:
         }
         with patch.dict(os.environ, env, clear=False):
             handler = YoloContainerDetectionHandler()
+            handler.configure({_CFG_SHOW_ON_SESSION_START: True})
             assert handler.matches(_SESSION_START_NEW) is True
 
     def test_matches_returns_false_on_oserror_from_in_container(self, tmp_path: Path) -> None:
@@ -365,6 +382,7 @@ class TestRuntimeIconLxc:
             patch(f"{module}.detect_container_runtime", return_value="lxc"),
         ):
             handler = YoloContainerDetectionHandler()
+            handler.configure({_CFG_SHOW_ON_SESSION_START: True})
             assert handler.matches(_SESSION_START_NEW) is True
             result = handler.handle(_SESSION_START_NEW)
         assert result.decision == "allow"

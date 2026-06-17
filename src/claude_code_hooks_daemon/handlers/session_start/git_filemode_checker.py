@@ -109,6 +109,10 @@ class GitFilemodeCheckerHandler(Handler):
 
         lines: list[str] = []
 
+        # Lean SessionStart (Plan 00128): only speak when there is something to
+        # act on. core.fileMode=false is the sole actionable state — every other
+        # value (true, unset, not-a-repo, unknown) is healthy/irrelevant and
+        # stays silent.
         if filemode == _FILEMODE_FALSE:
             lines.append(
                 "WARNING: git core.fileMode=false detected - "
@@ -129,11 +133,6 @@ class GitFilemodeCheckerHandler(Handler):
                 "force the executable bit in the index, but this does not help if "
                 "core.fileMode=false strips it on checkout."
             )
-        elif filemode is None:
-            # Not in a git repo or error - silently pass
-            lines.append("GIT FILEMODE: Not in a git repository or unable to check")
-        else:
-            lines.append(f"GIT FILEMODE: core.fileMode={filemode} (OK)")
 
         return HookResult(decision=Decision.ALLOW, context=lines)
 

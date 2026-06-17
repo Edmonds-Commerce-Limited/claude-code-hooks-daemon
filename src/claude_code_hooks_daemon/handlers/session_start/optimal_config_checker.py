@@ -330,39 +330,17 @@ class OptimalConfigCheckerHandler(Handler):
         Returns:
             HookResult with ALLOW decision and config check results
         """
-        # Enforce settings sync BEFORE running checks
+        # Lean SessionStart (Plan 00128): do NOT emit the full config audit here.
+        # It is verbose and rarely actionable on every session; the full
+        # per-setting report now lives in the `cli check` command (which reuses
+        # `_run_checks()` below). We still enforce critical settings silently and
+        # announce ONLY an actual settings write — a real, one-time change the
+        # user should know about.
         enforced = self._enforce_settings_sync()
 
-        checks = self._run_checks()
-        failures = [c for c in checks if not c["passed"]]
-        passes = [c for c in checks if c["passed"]]
-
         lines: list[str] = []
-
         if enforced:
             lines.append(f"CONFIG SYNC: Auto-set {', '.join(enforced)} in ~/.claude/settings.json")
-            lines.append("")
-
-        if not failures:
-            lines.append(
-                f"CONFIG CHECK: All {len(checks)} checks passed - configuration is optimal."
-            )
-        else:
-            lines.append(f"CONFIG CHECK: {len(failures)}/{len(checks)} settings need attention")
-            lines.append("")
-
-            for check in failures:
-                lines.append(f"  MISSING: {check['name']}")
-                lines.append(f"    Current: {check['current']}")
-                lines.append(f"    Why: {check['why']}")
-                lines.append(f"    Fix: {check['fix']}")
-                lines.append(f"    Where: {check['where']}")
-                lines.append(f"    Docs: {check['docs']}")
-                lines.append("")
-
-            if passes:
-                pass_names = ", ".join(c["name"] for c in passes)
-                lines.append(f"  OK: {pass_names}")
 
         return HookResult(decision=Decision.ALLOW, context=lines)
 

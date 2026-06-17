@@ -85,57 +85,14 @@ class DogfoodingReminderHandler(Handler):
             HookResult with ALLOW decision and dogfooding workflow context
         """
         try:
-            context: list[str] = []
-
-            # Main dogfooding notice
-            context.append("⚠️  DOGFOODING PROJECT: You are working in the hooks daemon repository")
-            context.append("")
-
-            # Bug handling protocol
-            context.append("🐛 Bug Handling Protocol:")
-            context.append("")
-            context.append("If you discover ANY bug in handlers or daemon code:")
-            context.append("")
-            context.append("  1. **STOP current work immediately**")
-            context.append("  2. **Write TDD reproduction test** that demonstrates the bug")
-            context.append("  3. **Choose fix approach:**")
-            context.append("")
-            context.append("     **Small/Medium bugs:**")
-            context.append("     • Dispatch sub-agent to fix with TDD")
-            context.append("     • Sub-agent writes failing test → implements fix → verifies QA")
-            context.append(
-                "     • Example: `Task(subagent_type='general-purpose', prompt='Fix false positive...')`"
-            )
-            context.append("")
-            context.append("     **Large/Complex bugs:**")
-            context.append("     • Dispatch sub-agent to create Plan Workflow plan")
-            context.append("     • Capture all context from discovery thread")
-            context.append("     • Plan documents: root cause, approach, tasks, testing strategy")
-            context.append("     • Execute plan separately with proper TDD lifecycle")
-            context.append("")
-            context.append(
-                "  4. **Never skip TDD reproduction** - without failing test, bug can return"
-            )
-            context.append("  5. **Always run full QA** after fix: `./scripts/qa/run_all.sh`")
-            context.append(
-                "  6. **Always restart daemon** to verify: `$PYTHON -m claude_code_hooks_daemon.daemon.cli restart`"
-            )
-            context.append("")
-
-            # Why this matters
-            context.append("📊 Why This Matters:")
-            context.append("  • This project uses its own hooks for protection")
-            context.append("  • Bugs in handlers affect our own development workflow")
-            context.append("  • False positives block legitimate work")
-            context.append("  • False negatives allow dangerous operations")
-            context.append("  • TDD ensures bugs never return")
-            context.append("")
-
-            # Quick reference
-            context.append("🔗 Quick Reference:")
-            context.append("  • Bug lifecycle: @CLAUDE/CodeLifecycle/Bugs.md")
-            context.append("  • Plan workflow: @CLAUDE/PlanWorkflow.md")
-            context.append("  • Handler development: @CLAUDE/HANDLER_DEVELOPMENT.md")
+            # Lean SessionStart (Plan 00128): one concise nudge. The full bug
+            # protocol lives permanently in CLAUDE.md / @CLAUDE/CodeLifecycle/Bugs.md
+            # (always in context) — no need to restate ~40 lines every session.
+            context: list[str] = [
+                "⚠️  Dogfooding the hooks daemon repo — if you hit ANY handler/daemon "
+                "bug, STOP and fix it with a TDD reproduction test before continuing "
+                "(see @CLAUDE/CodeLifecycle/Bugs.md)."
+            ]
 
             return HookResult(decision=Decision.ALLOW, reason=None, context=context)
 

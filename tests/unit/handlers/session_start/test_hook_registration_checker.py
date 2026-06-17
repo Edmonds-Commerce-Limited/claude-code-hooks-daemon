@@ -108,10 +108,32 @@ class TestHookRegistrationCheckerHandle:
     def test_all_hooks_present_no_duplicates(
         self, handler: HookRegistrationCheckerHandler, tmp_path: Path
     ) -> None:
-        """All hooks registered, no local duplicates -> clean result."""
+        """All hooks registered, no local duplicates -> silent (no context).
+
+        Lean SessionStart (Plan 00128): a clean hook configuration is not
+        actionable, so the handler emits nothing. Commands are already in the
+        modern ``bash <path>`` form so no migration notice fires either.
+        """
+        from claude_code_hooks_daemon.utils.hook_registration import HOOK_EVENTS_IN_SETTINGS
+
+        hooks: dict[str, Any] = {
+            json_key: [
+                {
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": f'bash "$CLAUDE_PROJECT_DIR"/.claude/hooks/{bash_key}',
+                            "timeout": 60,
+                        }
+                    ]
+                }
+            ]
+            for json_key, bash_key in HOOK_EVENTS_IN_SETTINGS.items()
+        }
+
         settings_path = tmp_path / ".claude" / "settings.json"
         settings_path.parent.mkdir(parents=True)
-        settings_path.write_text(json.dumps(_build_valid_settings()))
+        settings_path.write_text(json.dumps({"hooks": hooks}))
 
         local_path = tmp_path / ".claude" / "settings.local.json"
         local_path.write_text(json.dumps({"permissions": {}}))
@@ -120,9 +142,7 @@ class TestHookRegistrationCheckerHandle:
             result = handler.handle(_session_start_input())
 
         assert result.decision.value == "allow"
-        # Should have a "passed" message in context
-        context_text = "\n".join(result.context)
-        assert "passed" in context_text.lower() or "ok" in context_text.lower()
+        assert result.context == []
 
     def test_missing_hooks_reported(
         self, handler: HookRegistrationCheckerHandler, tmp_path: Path

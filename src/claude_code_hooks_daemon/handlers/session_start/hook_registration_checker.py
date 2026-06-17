@@ -195,9 +195,10 @@ class HookRegistrationCheckerHandler(Handler):
                 "(see Plan 00102)."
             )
             lines.append("")
-        if not all_issues:
-            lines.append("HOOK REGISTRATION: All checks passed")
-        else:
+        # Lean SessionStart (Plan 00128): stay silent when the configuration is
+        # clean — only speak when there are issues to fix (a migration notice,
+        # emitted above, also counts as actionable output).
+        if all_issues:
             lines.append(f"HOOK REGISTRATION: {len(all_issues)} issue(s) found")
             lines.append("")
             for issue in all_issues:

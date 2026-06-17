@@ -42,10 +42,16 @@ _RESUME_TRANSCRIPT_MIN_BYTES = 100
 # Config key names (no magic strings)
 _CFG_SHOW_DETAILED_INDICATORS = "show_detailed_indicators"
 _CFG_SHOW_WORKFLOW_TIPS = "show_workflow_tips"
+_CFG_SHOW_ON_SESSION_START = "show_on_session_start"
 
 # Default config values
 _DEFAULT_SHOW_DETAILED_INDICATORS = True
 _DEFAULT_SHOW_WORKFLOW_TIPS = True
+# Lean SessionStart (Plan 00128): the container banner is OFF by default. The
+# container is already shown by the status-line environment icon and is
+# available on demand via `cli check`. Downstream installs that want the
+# session-start banner can opt in via show_on_session_start: true.
+_DEFAULT_SHOW_ON_SESSION_START = False
 
 # Session event name constant (avoids magic string)
 _EVENT_SESSION_START = "SessionStart"
@@ -91,6 +97,7 @@ class YoloContainerDetectionHandler(Handler):
         self.config: dict[str, Any] = {
             _CFG_SHOW_DETAILED_INDICATORS: _DEFAULT_SHOW_DETAILED_INDICATORS,
             _CFG_SHOW_WORKFLOW_TIPS: _DEFAULT_SHOW_WORKFLOW_TIPS,
+            _CFG_SHOW_ON_SESSION_START: _DEFAULT_SHOW_ON_SESSION_START,
         }
 
     def configure(self, config: dict[str, Any]) -> None:
@@ -171,10 +178,18 @@ class YoloContainerDetectionHandler(Handler):
             return False
 
         try:
-            return in_container()
+            if not in_container():
+                return False
         except (OSError, RuntimeError) as exc:
             logger.debug("YOLO container check failed: %s", exc)
             return False
+
+        # In a container — but only advertise it at session start when the user
+        # has opted in. Default is OFF (Plan 00128): the container is already
+        # surfaced by the status-line icon and via `cli check`.
+        return bool(
+            self.config.get(_CFG_SHOW_ON_SESSION_START, _DEFAULT_SHOW_ON_SESSION_START)
+        )
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Handle YOLO container detection.

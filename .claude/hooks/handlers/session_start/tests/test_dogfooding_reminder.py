@@ -91,13 +91,12 @@ class TestDogfoodingReminderHandler:
     def test_handle_includes_bug_workflow(
         self, handler: DogfoodingReminderHandler, session_start_input: dict[str, Any]
     ) -> None:
-        """Test handler explains bug workflow."""
+        """The one-line reminder still names the TDD-reproduction bug workflow."""
         result = handler.handle(session_start_input)
 
         context = "\n".join(result.context)
         assert "TDD" in context
         assert "reproduction" in context.lower()
-        assert "sub-agent" in context.lower() or "sub agent" in context.lower()
 
     def test_handle_includes_stop_and_fix_directive(
         self, handler: DogfoodingReminderHandler, session_start_input: dict[str, Any]
@@ -109,15 +108,14 @@ class TestDogfoodingReminderHandler:
         assert "STOP" in context.upper() or "stop" in context.lower()
         assert "bug" in context.lower()
 
-    def test_handle_includes_plan_workflow_for_big_bugs(
+    def test_handle_is_a_single_line(
         self, handler: DogfoodingReminderHandler, session_start_input: dict[str, Any]
     ) -> None:
-        """Test handler mentions plan workflow for bigger bugs."""
+        """Lean SessionStart (Plan 00128): the reminder is one concise line, not a
+        ~40-line protocol dump — the full protocol lives in CLAUDE.md."""
         result = handler.handle(session_start_input)
-
-        context = "\n".join(result.context)
-        assert "plan" in context.lower()
-        assert "bigger" in context.lower() or "complex" in context.lower()
+        non_empty = [line for line in result.context if line.strip()]
+        assert len(non_empty) == 1
 
     def test_handler_is_non_terminal(self, handler: DogfoodingReminderHandler) -> None:
         """Test handler is non-terminal (never blocks)."""

@@ -333,67 +333,30 @@ class TestHandleOutput:
         result = handler.handle(_session_start_input())
         assert result.decision == Decision.ALLOW
 
-    def test_all_pass_shows_optimal(self, handler: Any) -> None:
-        """When all checks pass, context should say optimal."""
-        with (
-            patch.dict(
-                os.environ,
-                {
-                    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
-                    "CLAUDE_CODE_EFFORT_LEVEL": "high",
-                    "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "64000",
-                    "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1",
-                },
-            ),
-            patch.object(
-                handler,
-                "_read_global_settings",
-                return_value={"alwaysThinkingEnabled": True},
-            ),
-        ):
-            env = os.environ.copy()
-            env.pop("CLAUDE_CODE_DISABLE_AUTO_MEMORY", None)
-            with patch.dict(os.environ, env, clear=True):
-                # Re-set the values since clear=True wiped them
-                with patch.dict(
-                    os.environ,
-                    {
-                        "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
-                        "CLAUDE_CODE_EFFORT_LEVEL": "high",
-                        "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "64000",
-                        "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1",
-                    },
-                ):
-                    result = handler.handle(_session_start_input())
-                    context = "\n".join(result.context)
-                    assert "optimal" in context.lower() or "all checks passed" in context.lower()
+    def test_all_pass_is_silent(self, handler: Any) -> None:
+        """Lean SessionStart (Plan 00128): the config audit is NOT reported at
+        session start. With nothing enforced, the handler emits no context.
 
-    def test_failure_includes_how_to_fix(self, handler: Any) -> None:
-        """Failed checks should include fix instructions."""
+        The verbose audit (optimal/fix/docs content) now lives in the
+        ``cli check`` command, tested in tests/unit/daemon/test_cli_check.py.
+        """
+        with patch.object(handler, "_enforce_settings_sync", return_value=[]):
+            result = handler.handle(_session_start_input())
+        assert result.decision == Decision.ALLOW
+        assert result.context == []
+
+    def test_failures_are_silent_at_session_start(self, handler: Any) -> None:
+        """Even when checks would fail, the handler stays silent at session start
+        (the report moved to the ``cli check`` command)."""
         env = os.environ.copy()
         env.pop("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", None)
         with (
             patch.dict(os.environ, env, clear=True),
             patch.object(handler, "_read_global_settings", return_value={}),
+            patch.object(handler, "_enforce_settings_sync", return_value=[]),
         ):
             result = handler.handle(_session_start_input())
-            context = "\n".join(result.context)
-            # Should include fix instructions
-            assert (
-                "fix" in context.lower() or "set" in context.lower() or "enable" in context.lower()
-            )
-
-    def test_failure_includes_docs_link(self, handler: Any) -> None:
-        """Failed checks should include link to docs."""
-        env = os.environ.copy()
-        env.pop("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", None)
-        with (
-            patch.dict(os.environ, env, clear=True),
-            patch.object(handler, "_read_global_settings", return_value={}),
-        ):
-            result = handler.handle(_session_start_input())
-            context = "\n".join(result.context)
-            assert "code.claude.com" in context or "docs" in context.lower()
+        assert result.context == []
 
 
 class TestIsResumeSessionEdgeCases:
@@ -492,35 +455,6 @@ class TestHandleMixedResults:
 
         return OptimalConfigCheckerHandler()
 
-    def test_mixed_pass_fail_shows_ok_line(self, handler: Any) -> None:
-        """When some checks pass and some fail, output includes OK line."""
-        # Set some passing, some failing
-        with (
-            patch.dict(
-                os.environ,
-                {
-                    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
-                    "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1",
-                },
-            ),
-            patch.object(handler, "_read_global_settings", return_value={}),
-        ):
-            # Agent Teams and Bash Working Dir pass, others fail
-            env = os.environ.copy()
-            env.pop("CLAUDE_CODE_EFFORT_LEVEL", None)
-            env.pop("CLAUDE_CODE_MAX_OUTPUT_TOKENS", None)
-            with patch.dict(os.environ, env, clear=True):
-                with patch.dict(
-                    os.environ,
-                    {
-                        "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
-                        "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1",
-                    },
-                ):
-                    result = handler.handle(_session_start_input())
-                    context = "\n".join(result.context)
-                    assert "OK:" in context
-                    assert "Agent Teams" in context or "Bash Working Directory" in context
 
 
 class TestWriteGlobalSettings:

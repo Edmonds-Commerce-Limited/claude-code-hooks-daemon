@@ -188,8 +188,12 @@ class TestGitFilemodeCheckerHandle:
         assert "hook" in context_str
         assert "executable" in context_str
 
-    def test_filemode_true_no_warning(self, handler: Any) -> None:
-        """When core.fileMode=true, handler returns OK context without warning."""
+    def test_filemode_true_is_silent(self, handler: Any) -> None:
+        """When core.fileMode=true (healthy), handler emits NO context.
+
+        Lean SessionStart (Plan 00128): advisories stay silent unless something
+        needs action. A healthy fileMode is not actionable, so no output.
+        """
         with (
             patch(
                 "claude_code_hooks_daemon.handlers.session_start.git_filemode_checker.ProjectContext.project_root",
@@ -199,12 +203,10 @@ class TestGitFilemodeCheckerHandle:
         ):
             result = handler.handle(_session_start_input())
         assert result.decision == Decision.ALLOW
-        context_str = "\n".join(result.context)
-        assert "WARNING" not in context_str
-        assert "OK" in context_str
+        assert result.context == []
 
-    def test_not_git_repo_no_error(self, handler: Any) -> None:
-        """When not in a git repo, handler handles gracefully."""
+    def test_not_git_repo_is_silent(self, handler: Any) -> None:
+        """When not in a git repo, handler handles gracefully and stays silent."""
         with (
             patch(
                 "claude_code_hooks_daemon.handlers.session_start.git_filemode_checker.ProjectContext.project_root",
@@ -214,6 +216,7 @@ class TestGitFilemodeCheckerHandle:
         ):
             result = handler.handle(_session_start_input())
         assert result.decision == Decision.ALLOW
+        assert result.context == []
 
     def test_subprocess_timeout_handled(self, handler: Any) -> None:
         """When git command times out, handler handles gracefully."""
@@ -250,9 +253,8 @@ class TestGitFilemodeCheckerHandle:
         ):
             result = handler.handle(_session_start_input())
         assert result.decision == Decision.ALLOW
-        # Should not contain a WARNING about fileMode=false
-        context_str = "\n".join(result.context)
-        assert "WARNING" not in context_str
+        # Healthy/unknown fileMode is not actionable — stay silent.
+        assert result.context == []
 
 
 class TestGitFilemodeCheckerAcceptanceTests:
