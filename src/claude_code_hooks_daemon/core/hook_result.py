@@ -27,6 +27,13 @@ _DENY_CONTINUATION_SUFFIX = (
     "separately, and don't batch them with blockable commands. Then adapt and continue."
 )
 
+# Separator between top-level status-line segments. Each segment historically
+# self-embeds this on its leading or trailing edge; the Status renderer
+# normalises those away and re-joins so segment ORDER can never drop a boundary.
+_STATUS_SEGMENT_SEPARATOR = "|"
+# Fallback text when no status segment produced any content.
+_STATUS_DEFAULT_TEXT = "Claude"
+
 
 class HookResult(BaseModel):
     """Standardised hook result with decision, reason, and context.
@@ -151,8 +158,25 @@ class HookResult(BaseModel):
         """
         # Special case: Status event returns plain text
         if event_name == "Status":
-            # Join all context fragments with spaces
-            text = " ".join(self.context) if self.context else "Claude"
+            # Join status segments with a single ' | ' separator. Segments
+            # self-embed a leading OR trailing '|'; whichever side they chose
+            # used to decide whether a boundary got a separator, so a
+            # config-driven REORDER could place two same-side segments adjacent
+            # and drop the '|' between them (e.g. '📦 podman 👤 user'). Strip
+            # each fragment's OUTER separator/whitespace and re-join so every
+            # boundary is consistent regardless of order; a fragment's INTERNAL
+            # '|' (e.g. model_context's '🤖 Opus | ◔ 5%') is preserved.
+            sep = _STATUS_SEGMENT_SEPARATOR
+            parts: list[str] = []
+            for fragment in self.context:
+                normalised = fragment.strip()
+                if normalised.startswith(sep):
+                    normalised = normalised[len(sep) :].strip()
+                if normalised.endswith(sep):
+                    normalised = normalised[: -len(sep)].strip()
+                if normalised:
+                    parts.append(normalised)
+            text = f" {sep} ".join(parts) if parts else _STATUS_DEFAULT_TEXT
             return {"text": text}
 
         # Silent allow with no context - valid for all events

@@ -731,11 +731,32 @@ class TestHookResultStatusFormat:
         assert output["text"] == "Model: Sonnet"
 
     def test_status_multiple_context_items(self):
-        """Status event with multiple context items joined with spaces."""
+        """Status event with multiple context items joined with a ' | ' separator."""
         result = HookResult(decision=Decision.ALLOW, context=["Part 1", "Part 2", "Part 3"])
         output = result.to_json("Status")
 
-        assert output["text"] == "Part 1 Part 2 Part 3"
+        assert output["text"] == "Part 1 | Part 2 | Part 3"
+
+    def test_status_normalizes_mixed_segment_separators(self):
+        """Segments that self-embed a leading OR trailing '|' must still be separated
+        by exactly one ' | ' regardless of order (Plan 00127 niggle: a leading-pipe
+        segment '| 📦 podman' adjacent to a trailing-pipe segment '👤 user |' rendered
+        as '📦 podman 👤 user' with no separator)."""
+        result = HookResult(
+            decision=Decision.ALLOW,
+            context=["📁 repo", "| 📦 podman", "👤 user |", "🤖 Opus | ◔ 5%"],
+        )
+        output = result.to_json("Status")
+
+        # Every boundary separated; model_context's INTERNAL '|' preserved.
+        assert output["text"] == "📁 repo | 📦 podman | 👤 user | 🤖 Opus | ◔ 5%"
+
+    def test_status_drops_empty_and_separator_only_fragments(self):
+        """Blank or separator-only fragments collapse out rather than doubling ' | '."""
+        result = HookResult(decision=Decision.ALLOW, context=["📁 repo", "", "|", "👤 user"])
+        output = result.to_json("Status")
+
+        assert output["text"] == "📁 repo | 👤 user"
 
     def test_status_ignores_decision_field(self):
         """Status event should not include decision field."""
