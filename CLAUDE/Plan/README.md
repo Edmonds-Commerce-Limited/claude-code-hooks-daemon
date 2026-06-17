@@ -6,6 +6,14 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Infrastructure / Bootstrap
 
+- [00127: Parallel-Session Daemon Isolation & Reuse (+ LXC detection)](00127-parallel-session-daemon-isolation/PLAN.md) - In Progress
+
+  - User report: two Claude Code sessions on the same codebase — one had the hooks daemon working, the other did not
+  - Opus review + **live evidence in this container** (two daemon servers, PIDs 272/274, same project root, one PID file) confirmed two compounding failure modes: Mechanism B "socket theft / PID clobber" (always active — `server.py` unconditionally unlinks an existing socket and overwrites the PID file) and Mechanism A `enforce_single_daemon` killing a healthy same-root incumbent (`cmd_start` enforces before the "already running" check)
+  - Root cause: when two sessions share `(hostname, project root)` the daemon treats the incumbent as a competitor to displace/kill instead of a shared daemon to reuse
+  - Also closes the LXC/LXD detection gap (cgroup-v2 misses LXC; `container=lxc` not mapped; no `/dev/lxd/sock` probe) — see `context.md` and PLAN.md Phase 4 debug commands
+  - Investigation written (`context.md`); fixes not yet implemented — awaiting user direction on reuse-vs-fail-fast and LXC debug output
+
 - [00110: Python Interpreter Discovery — DRY Consolidation & Latest-Always Policy](00110-python-discovery-dry-consolidation/PLAN.md) - Not Started
 
   - Field report from host host-a (`untracked/hooks-daemon-upgrade-python-version.md`): skill `install.sh` aborted on default `python3` (3.9.21) and suggested hardcoded `python3.11` despite `python3.13`/`python3.14` being on PATH
