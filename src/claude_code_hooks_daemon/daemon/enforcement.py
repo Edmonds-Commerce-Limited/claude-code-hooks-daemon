@@ -15,12 +15,18 @@ from claude_code_hooks_daemon.daemon.process_verification import (
     is_process_running,
     kill_daemon_process,
 )
+from claude_code_hooks_daemon.daemon.server import _socket_is_live
 from claude_code_hooks_daemon.utils.container_detection import is_container_environment
 
 logger = logging.getLogger(__name__)
 
 
-def enforce_single_daemon(config: Config, pid_path: Path, project_root: Path | None = None) -> None:
+def enforce_single_daemon(
+    config: Config,
+    pid_path: Path,
+    project_root: Path | None = None,
+    socket_path: Path | None = None,
+) -> None:
     """Enforce single daemon process constraint.
 
     In containers: Kills other daemon processes serving THIS project root
@@ -31,12 +37,22 @@ def enforce_single_daemon(config: Config, pid_path: Path, project_root: Path | N
 
     Outside containers: Only cleans up stale PID files (conservative).
 
+    Defence-in-depth (Plan 00127, Decision 1 — REUSE): the daemon that owns a
+    LIVE ``socket_path`` is a healthy shared incumbent we intend to reuse, never
+    a process to kill. When ``socket_path`` is live and its PID-file PID is
+    among the other daemons, that PID is excluded from the kill list. (In the
+    common case ``cmd_start`` short-circuits to reuse BEFORE this runs, so this
+    is a backstop.)
+
     Args:
         config: Daemon configuration
         pid_path: Path to PID file
         project_root: This daemon's project root, used to scope the search so a
             daemon serving a different project is never terminated. When
             ``None`` the search is system-wide (legacy behaviour).
+        socket_path: This start's socket path. When the socket is live, its
+            PID-file owner is spared from termination. ``None`` disables the
+            spare (legacy behaviour).
     """
     # Check if enforcement is enabled
     if not config.daemon.enforce_single_daemon_process:
@@ -56,6 +72,15 @@ def enforce_single_daemon(config: Config, pid_path: Path, project_root: Path | N
 
     # Remove current process from list
     other_daemons = [pid for pid in daemon_pids if pid != current_pid]
+
+    # Spare the live incumbent that owns our socket (Plan 00127). If the socket
+    # is live and its PID-file owner is among the peers, exclude it — it is the
+    # healthy shared daemon we will reuse, not an orphan to reap.
+    if socket_path is not None and _socket_is_live(socket_path):
+        incumbent_pid = read_pid_file(str(pid_path))
+        if incumbent_pid is not None and incumbent_pid in other_daemons:
+            logger.info(f"Sparing live socket owner (PID {incumbent_pid}) from enforcement")
+            other_daemons = [pid for pid in other_daemons if pid != incumbent_pid]
 
     logger.debug(f"Found {len(other_daemons)} other daemon process(es)")
 

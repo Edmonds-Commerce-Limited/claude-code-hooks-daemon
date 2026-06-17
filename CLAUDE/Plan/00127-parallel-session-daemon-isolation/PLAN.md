@@ -284,3 +284,32 @@ What we expect to learn:
   `container=` but is root-only.
 - Next implementation step: Phase 2 (socket-liveness reuse) under TDD, then
   Phase 4 LXC detection led by `/run/systemd/container`.
+
+### 2026-06-17 (Phases 2+3+5 delivered — lifecycle reuse fix)
+
+Implemented via an ultracode workflow (spec → TDD implement → QA → 3-lens
+adversarial review → fix) plus a second adversarial re-review of the fix diff.
+
+- **Phase 2 (Mechanism B) + Phase 3 (Mechanism A) DONE.** Socket-liveness REUSE
+  across all four layers: `init.sh` no longer unconditionally `rm -f`s a live
+  socket; `cli.cmd_start` runs a THREE-STATE liveness gate (LIVE / NOT_LIVE /
+  INDETERMINATE) FIRST and reuses a live-or-busy incumbent (exit 0) before
+  `enforce_single_daemon`; `server.start()` probes liveness under an exclusive
+  `flock` critical section and raises `DaemonAlreadyRunningError` instead of
+  stealing a live socket; `_write_pid_file` made async. New constant
+  `Timeout.SOCKET_LIVENESS_PROBE_SEC`.
+- **Phase 5 (orphan janitor) DROPPED as redundant** (cleanup audit, YAGNI/DRY):
+  the reuse fix removes the only paths that create the "two PIDs, one PID file"
+  state, and existing PID-liveness + age-based cleanup already cover the rest.
+- **Adversarial review caught 5 real bugs** (all fixed at root cause): unlinking
+  a live socket on INDETERMINATE probe (→ 3-state enum + both-stale gate);
+  reuse-race child deleting the shared discovery file (→ ownership flag);
+  probe→bind TOCTOU (→ flock); inert PID gate (→ async); and the re-review
+  found the parent `cmd_start` still stealing a busy-but-live socket (→ parent
+  3-state gate + 2 new tests). Docstrings corrected to match the actual gates.
+- **Verified**: QA 13/13 (8601 tests, coverage 95.1%); daemon restarted RUNNING
+  on new code; LIVE parallel-start test — two `start` attempts against the
+  running daemon both reused it (exit 0, PID file unchanged, exactly ONE
+  process, socket still answers). Original two-daemon bug empirically eliminated.
+- **Remaining**: Phase 4 (LXC detection), Phase 6 (docs/truth-changes), then
+  release.

@@ -15,6 +15,7 @@ from unittest.mock import patch
 import pytest
 
 from claude_code_hooks_daemon.daemon.paths import get_pid_path, get_socket_path
+from claude_code_hooks_daemon.daemon.server import _SocketLiveness
 
 
 @pytest.fixture(autouse=True)
@@ -156,8 +157,15 @@ class TestCmdStartUsesEnvPaths:
             # Import after mocking
             from claude_code_hooks_daemon.daemon.cli import cmd_start
 
-            # Mock read_pid_file to simulate daemon already running
-            with patch("claude_code_hooks_daemon.daemon.cli.read_pid_file") as mock_rpf:
+            # Mock read_pid_file + socket-liveness to simulate a live, healthy
+            # daemon already running (Plan 00127: reuse needs BOTH).
+            with (
+                patch("claude_code_hooks_daemon.daemon.cli.read_pid_file") as mock_rpf,
+                patch(
+                    "claude_code_hooks_daemon.daemon.cli._socket_liveness_sync",
+                    return_value=_SocketLiveness.LIVE,
+                ),
+            ):
                 mock_rpf.return_value = 12345  # "already running"
 
                 args = argparse.Namespace(project_root=None)
@@ -454,8 +462,14 @@ class TestCmdStartWithCliFlags:
 
         with patch("claude_code_hooks_daemon.daemon.cli.get_project_path") as mock_gpp:
             mock_gpp.return_value = tmp_path
-            with patch("claude_code_hooks_daemon.daemon.cli.read_pid_file") as mock_rpf:
-                mock_rpf.return_value = 12345  # Already running
+            with (
+                patch("claude_code_hooks_daemon.daemon.cli.read_pid_file") as mock_rpf,
+                patch(
+                    "claude_code_hooks_daemon.daemon.cli._socket_liveness_sync",
+                    return_value=_SocketLiveness.LIVE,
+                ),
+            ):
+                mock_rpf.return_value = 12345  # Already running (live socket too)
 
                 with patch("builtins.print"):
                     result = cmd_start(args)

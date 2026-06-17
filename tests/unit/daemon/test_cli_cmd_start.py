@@ -12,13 +12,17 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from claude_code_hooks_daemon.daemon.cli import cmd_start
+from claude_code_hooks_daemon.daemon.server import _SocketLiveness
 
 
 class TestCmdStartAlreadyRunning:
     """Tests for cmd_start when daemon is already running."""
 
     def test_already_running_returns_zero(self, tmp_path: Path) -> None:
-        """cmd_start returns 0 if daemon already running (PID file exists)."""
+        """cmd_start returns 0 if a live, healthy daemon is already running.
+
+        Plan 00127: reuse requires BOTH a live PID file AND a live socket.
+        """
         args = argparse.Namespace(project_root=tmp_path)
 
         with (
@@ -29,6 +33,10 @@ class TestCmdStartAlreadyRunning:
             patch(
                 "claude_code_hooks_daemon.daemon.cli.read_pid_file",
                 return_value=9999,
+            ),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli._socket_liveness_sync",
+                return_value=_SocketLiveness.LIVE,
             ),
             patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
             patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
@@ -56,6 +64,10 @@ class TestCmdStartParentProcess:
             patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
             patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli._socket_liveness_sync",
+                return_value=_SocketLiveness.NOT_LIVE,
+            ),
             patch("os.fork", return_value=100),  # Parent gets child PID
             patch("time.sleep"),
         ):
@@ -78,6 +90,10 @@ class TestCmdStartParentProcess:
             patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
             patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli._socket_liveness_sync",
+                return_value=_SocketLiveness.NOT_LIVE,
+            ),
             patch("os.fork", return_value=100),
             patch("time.sleep"),
         ):
@@ -100,6 +116,10 @@ class TestCmdStartParentProcess:
             patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
             patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli._socket_liveness_sync",
+                return_value=_SocketLiveness.NOT_LIVE,
+            ),
             patch("os.fork", side_effect=OSError("fork failed")),
         ):
             result = cmd_start(args)
@@ -125,6 +145,10 @@ class TestCmdStartChildProcess:
             patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
             patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli._socket_liveness_sync",
+                return_value=_SocketLiveness.NOT_LIVE,
+            ),
             patch("os.fork", side_effect=[0, 200]),  # First fork: child, second fork: parent
             patch("os.chdir"),
             patch("os.setsid"),
@@ -150,6 +174,10 @@ class TestCmdStartChildProcess:
             patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
             patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli._socket_liveness_sync",
+                return_value=_SocketLiveness.NOT_LIVE,
+            ),
             patch("os.fork", side_effect=[0, OSError("second fork failed")]),
             patch("os.chdir"),
             patch("os.setsid"),
@@ -201,6 +229,10 @@ class TestCmdStartChildProcess:
             patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
             patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli._socket_liveness_sync",
+                return_value=_SocketLiveness.NOT_LIVE,
+            ),
             patch("os.fork", side_effect=[0, 0]),  # Both forks return 0 (child)
             patch("os.chdir"),
             patch("os.setsid"),
@@ -266,6 +298,10 @@ class TestCmdStartChildProcess:
             patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
             patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli._socket_liveness_sync",
+                return_value=_SocketLiveness.NOT_LIVE,
+            ),
             patch("os.fork", side_effect=[0, 0]),
             patch("os.chdir"),
             patch("os.setsid"),
@@ -339,6 +375,10 @@ class TestCmdStartChildProcess:
             patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
             patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli._socket_liveness_sync",
+                return_value=_SocketLiveness.NOT_LIVE,
+            ),
             patch("os.fork", side_effect=[0, 0]),
             patch("os.chdir"),
             patch("os.setsid"),
@@ -411,6 +451,10 @@ class TestCmdStartChildProcess:
             patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
             patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
             patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli._socket_liveness_sync",
+                return_value=_SocketLiveness.NOT_LIVE,
+            ),
             patch("os.fork", side_effect=[0, 0]),
             patch("os.chdir"),
             patch("os.setsid"),

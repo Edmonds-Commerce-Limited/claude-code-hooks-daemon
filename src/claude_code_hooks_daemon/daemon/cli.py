@@ -51,6 +51,7 @@ from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.constants.modes import DaemonMode
 from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.daemon.enforcement import enforce_single_daemon
 from claude_code_hooks_daemon.daemon.metadata import (
     DaemonVenvMetadata,
     compute_project_lock_hash,
@@ -67,6 +68,11 @@ from claude_code_hooks_daemon.daemon.paths import (
     read_pid_file,
     resolve_hostname,
     write_cleanup_status,
+)
+from claude_code_hooks_daemon.daemon.server import (
+    DaemonAlreadyRunningError,
+    _socket_liveness_sync,
+    _SocketLiveness,
 )
 from claude_code_hooks_daemon.daemon.validation import (
     check_for_nested_installation,
@@ -317,18 +323,63 @@ def cmd_start(args: argparse.Namespace) -> int:
     except FileNotFoundError:
         config = Config()  # Use defaults if no config file
 
-    # Enforce single daemon process (if enabled)
-    from claude_code_hooks_daemon.daemon.enforcement import enforce_single_daemon
-
-    enforce_single_daemon(config=config, pid_path=pid_path, project_root=project_path)
-
-    # Check if already running
+    # REUSE gate (Plan 00127, Decision 1): if a LIVE, HEALTHY same-root daemon
+    # already owns our socket, reuse it — return 0 and leave the incumbent
+    # untouched. This runs FIRST, before enforce_single_daemon, so a healthy
+    # shared daemon is never killed. A THREE-STATE probe is used (not a boolean):
+    # collapsing INDETERMINATE (timeout against a busy-but-live daemon, or a
+    # transient fd-exhaustion OSError in THIS process) to "not live" would make
+    # the parent unlink a live incumbent's socket downstream (re-review Finding).
     pid = read_pid_file(str(pid_path))
-    if pid is not None:
+    liveness = _socket_liveness_sync(Path(socket_path))
+    socket_live = liveness is _SocketLiveness.LIVE
+    socket_indeterminate = liveness is _SocketLiveness.INDETERMINATE
+
+    # Reuse a healthy incumbent (LIVE) or a healthy-but-busy one (INDETERMINATE
+    # with a live PID): in both cases a daemon owns the socket and must not be
+    # disturbed. Requires the live PID so a leftover socket inode cannot be
+    # mistaken for a healthy incumbent.
+    if pid is not None and (socket_live or socket_indeterminate):
         print(f"Daemon already running (PID: {pid})")
         return 0
 
-    # Clean up stale socket
+    # Degenerate contention: a LIVE socket whose owner is not our PID file
+    # (foreign listener / no matching alive PID). Do NOT unlink a live socket —
+    # fail fast per Decision 1's unhealthy/contended safety net.
+    if socket_live:
+        print(
+            "ERROR: A live daemon owns the socket but is not ours "
+            f"(socket: {socket_path}); refusing to steal it",
+            file=sys.stderr,
+        )
+        return 1
+
+    # INDETERMINATE with no live PID: the socket cannot be PROVEN dead (a dead
+    # daemon leaves a ConnectionRefused = NOT_LIVE socket, not an indeterminate
+    # one), so unlinking it risks stealing a live socket. Fail fast rather than
+    # steal; a genuinely stale socket file can be removed manually.
+    if socket_indeterminate:
+        print(
+            "ERROR: socket exists but its liveness is indeterminate and no live "
+            f"PID is recorded (socket: {socket_path}); refusing to unlink a "
+            "possibly-live socket. Retry, or remove the stale socket file if no "
+            "daemon is running.",
+            file=sys.stderr,
+        )
+        return 1
+
+    # No live incumbent on our socket — now enforce single daemon (if enabled).
+    # (Runs AFTER the reuse gate so a healthy shared daemon is never killed.)
+    enforce_single_daemon(
+        config=config,
+        pid_path=pid_path,
+        project_root=project_path,
+        socket_path=Path(socket_path),
+    )
+
+    # Clean up the socket before binding. Only a DEFINITIVE NOT_LIVE outcome
+    # reaches here (LIVE/INDETERMINATE returned above), so the socket is
+    # provably stale (ConnectionRefused/absent) and safe to unlink.
     cleanup_socket(str(socket_path))
 
     # Remove stale runtime files from dead containers (age-based, not hostname-based)
@@ -450,16 +501,41 @@ def cmd_start(args: argparse.Namespace) -> int:
 
     write_socket_discovery_file(project_path, daemon_config.socket_path)
 
+    # Plan 00127 (Finding 2): the socket-discovery file is SHARED between the
+    # incumbent and any losing same-root start (deterministic per untracked dir
+    # + hostname). It must be deleted ONLY by the process that actually OWNED
+    # the daemon, never by a reuse-race loser — on long-path (fallback-socket)
+    # setups init.sh relies on this file to find the live incumbent's socket,
+    # and the incumbent only writes it once at its own startup. Deleting it in a
+    # blanket `finally` would silently break the incumbent's hook forwarding.
+    i_owned_the_daemon = False
     try:
         asyncio.run(daemon.start())
+        # start() returned normally => this process owned and then shut the
+        # daemon down cleanly. Its discovery file is now stale and ours to clear.
+        i_owned_the_daemon = True
+    except DaemonAlreadyRunningError as e:
+        # A live incumbent won the race. This is a benign REUSE, NOT a crash —
+        # the winning daemon already wrote the PID file the parent polls for, so
+        # overall start is a clean exit 0 with exactly one daemon. We did NOT own
+        # the daemon, so we must NOT delete the incumbent's discovery file.
+        print(
+            f"Daemon already running on {daemon_config.socket_path}; "
+            f"reusing existing instance: {e}"
+        )
+        sys.exit(0)
     except Exception as e:
+        # A genuine crash AFTER we bound and published our own discovery file:
+        # we owned it, so clear it on the way out.
+        i_owned_the_daemon = True
         print(f"ERROR: Daemon crashed: {e}", file=sys.stderr)
         import traceback
 
         traceback.print_exc()
         sys.exit(1)
     finally:
-        cleanup_socket_discovery_file(project_path)
+        if i_owned_the_daemon:
+            cleanup_socket_discovery_file(project_path)
 
     sys.exit(0)
 

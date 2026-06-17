@@ -11,6 +11,8 @@ Logging:
 
 import asyncio
 import contextlib
+import enum
+import fcntl
 import json
 import logging
 import os
@@ -18,8 +20,10 @@ import signal
 import sys
 import time
 from functools import partial
+from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+from claude_code_hooks_daemon.constants import Timeout
 from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
 from claude_code_hooks_daemon.constants.protocol import SocketLimit
 from claude_code_hooks_daemon.core.hook_result import HookResult
@@ -32,6 +36,173 @@ from claude_code_hooks_daemon.utils.strict_mode import handle_tier2_error
 _memory_log_handler: MemoryLogHandler | None = None
 
 logger = logging.getLogger(__name__)
+
+
+# Log/exception messages (Plan 00127). Named to avoid magic strings.
+_LOG_LIVE_SOCKET_REUSE = (
+    "Socket %s is owned by a live daemon; refusing to unlink (reuse existing instance)"
+)
+_LOG_UNLINK_STALE_SOCKET = "Removing stale socket: %s"
+_LOG_LIVE_PID_REUSE = (
+    "Daemon already running with PID %d on a live socket; refusing to overwrite PID file"
+)
+_ERR_DAEMON_ALREADY_RUNNING = (
+    "A live daemon already owns socket {socket}; reusing existing instance"
+)
+_LOG_PROBE_INDETERMINATE = (
+    "Liveness probe of socket %s was indeterminate (%s); treating incumbent as "
+    "LIVE and refusing to unlink (Plan 00127 fail-safe)"
+)
+# Suffix appended to the socket path to form the start-serialisation lock file
+# (Plan 00127, Finding 3). The lock makes the probe->unlink->bind critical
+# section atomic so near-simultaneous same-root starts cannot both observe a
+# socket as not-live and race to unlink a freshly-bound peer.
+_START_LOCK_SUFFIX = ".start.lock"
+
+
+class _SocketLiveness(enum.Enum):
+    """Three-state outcome of a Unix-socket liveness probe (Plan 00127).
+
+    Collapsing every failure to a boolean ``not-live`` was unsafe: a transient
+    ``OSError`` (e.g. EMFILE/EACCES from the *client* socket fd, before any
+    connect) or a probe timeout against a momentarily-busy-but-healthy daemon
+    would be read as ``stale, safe to unlink`` and steal a live socket. We
+    therefore distinguish a DEFINITIVE not-listening signal from an
+    INDETERMINATE one and never unlink on the latter.
+    """
+
+    LIVE = "live"
+    """A listener accepted the probe connection — a daemon definitively owns it."""
+
+    NOT_LIVE = "not_live"
+    """Definitive proof nobody is listening: ConnectionRefusedError / FileNotFoundError."""
+
+    INDETERMINATE = "indeterminate"
+    """Probe could not decide (timeout, fd exhaustion, EACCES, ENOTSOCK, …).
+
+    Treated as LIVE for safety: the caller must NOT unlink on this outcome.
+    """
+
+
+class DaemonAlreadyRunningError(Exception):
+    """Raised when start would steal a live incumbent daemon's socket/PID.
+
+    Plan 00127 (Decision 1 — REUSE): a second start that finds a LIVE, HEALTHY
+    same-root daemon must reuse it rather than unlink its socket or clobber its
+    PID file. The forked-daemon child treats this as a benign reuse (exit 0).
+    """
+
+
+async def _probe_socket_liveness(path: Path) -> _SocketLiveness:
+    """Probe whether a daemon is actively listening on ``path`` (Plan 00127).
+
+    Connects to the Unix socket and immediately closes — a pure liveness check
+    with no side effects on the incumbent (an empty/closed connection makes the
+    server's _handle_client read b'' and return without dispatch).
+
+    Returns a three-state outcome so the caller can require a DEFINITIVE
+    not-live signal before unlinking:
+      - ``NOT_LIVE``  — ConnectionRefusedError (socket file exists, nobody
+        listening — classic orphaned socket of a dead daemon) or
+        FileNotFoundError (path does not exist). Safe to unlink.
+      - ``LIVE``      — a listener accepted the connection.
+      - ``INDETERMINATE`` — TimeoutError (a listener may exist but did not
+        accept within the budget — could be a healthy-but-busy daemon whose
+        event loop is mid-dispatch on a large request) OR any other ``OSError``
+        (EMFILE/ENFILE from the *client* socket fd under fd exhaustion *before*
+        any connect, EACCES, ENOTSOCK, ECONNRESET, …). The caller MUST NOT
+        unlink on this outcome — doing so would steal a live socket.
+    """
+    try:
+        _reader, writer = await asyncio.wait_for(
+            asyncio.open_unix_connection(path=str(path)),
+            timeout=Timeout.SOCKET_LIVENESS_PROBE_SEC,
+        )
+    except (ConnectionRefusedError, FileNotFoundError):
+        return _SocketLiveness.NOT_LIVE
+    except (TimeoutError, OSError):
+        # Not a definitive not-listening signal — could be a busy-but-live
+        # daemon or transient resource exhaustion in THIS process. Fail safe.
+        return _SocketLiveness.INDETERMINATE
+    else:
+        writer.close()
+        with contextlib.suppress(Exception):
+            await writer.wait_closed()
+        return _SocketLiveness.LIVE
+
+
+async def _probe_socket_live(path: Path) -> bool:
+    """Boolean liveness convenience wrapper over :func:`_probe_socket_liveness`.
+
+    Returns True only for a DEFINITIVE ``LIVE`` outcome. Callers that must make
+    an unlink decision should use :func:`_probe_socket_liveness` directly and
+    require a ``NOT_LIVE`` (not merely ``not LIVE``) result before unlinking.
+    """
+    return await _probe_socket_liveness(path) is _SocketLiveness.LIVE
+
+
+def _socket_is_live(path: Path) -> bool:
+    """Synchronous wrapper over :func:`_probe_socket_live`.
+
+    For callers OUTSIDE the daemon's event loop (cli.cmd_start parent process,
+    enforcement). When invoked from WITHIN a running event loop, the socket has
+    already been liveness-gated by the caller (``HooksDaemon.start`` probes and
+    short-circuits a live socket before ``_write_pid_file`` runs), so this
+    returns False rather than raising ``RuntimeError`` from a nested
+    ``asyncio.run``.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        # No running loop — safe to drive a fresh event loop for the probe.
+        return asyncio.run(_probe_socket_live(path))
+    # A loop is already running: the socket was gated upstream as not-live.
+    return False
+
+
+def _socket_liveness_sync(path: Path) -> _SocketLiveness:
+    """Synchronous THREE-STATE probe for callers OUTSIDE the event loop.
+
+    The parent ``cli.cmd_start`` process must distinguish a DEFINITIVE
+    ``NOT_LIVE`` (safe to unlink) from an ``INDETERMINATE`` outcome (timeout
+    against a healthy-but-busy incumbent, or transient fd exhaustion in THIS
+    process) — the boolean :func:`_socket_is_live` collapses both to False and
+    would let the parent unlink a live-but-busy daemon's socket (Plan 00127
+    Finding, re-review). Inside a running loop the socket has already been
+    liveness-gated upstream, so report ``INDETERMINATE`` (never unlink).
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        # No running loop — safe to drive a fresh event loop for the probe.
+        return asyncio.run(_probe_socket_liveness(path))
+    return _SocketLiveness.INDETERMINATE
+
+
+def _pid_file_points_at_live_process(pid_file_path: Path | None) -> bool:
+    """Return True iff ``pid_file_path`` exists and names a live process.
+
+    The PID-alive half of Plan 00127's both-stale unlink gate (PLAN.md line
+    218): only when the PID file is absent/unreadable/dead AND the socket probe
+    is a DEFINITIVE not-live may a socket be unlinked. A missing or malformed
+    PID file is treated as "no live incumbent" (False).
+    """
+    if pid_file_path is None or not pid_file_path.exists():
+        return False
+    try:
+        pid = int(pid_file_path.read_text().strip())
+    except (ValueError, OSError):
+        return False
+    try:
+        os.kill(pid, 0)  # Signal 0 checks existence without delivering a signal.
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # Process exists but is owned by another user — it IS alive.
+        return True
+    except OSError:
+        return False
+    return True
 
 
 @runtime_checkable
@@ -336,36 +507,13 @@ class HooksDaemon:
         socket_path = self.config.socket_path_obj
         logger.info("Starting hooks daemon on %s", socket_path)
 
-        # Write PID file
-        if self.config.pid_file_path_obj:
-            self._write_pid_file()
-
-        # Remove stale socket if exists
-        if socket_path and socket_path.exists():
-            logger.warning("Removing stale socket: %s", socket_path)
-            socket_path.unlink()
-
-        # Start Unix socket server. Override asyncio's 64KiB readline buffer
-        # default — a single PostToolUse Edit on a large file (e.g. cli.py at
-        # 102KB) sends a JSON request larger than that and readline() raises
-        # LimitOverrunError, which the caller turns into a silent
-        # {"error":"Separator is found..."} response. See SocketLimit docstring
-        # for full context (Plan 00101 Phase 10).
-        try:
-            self.server = await asyncio.start_unix_server(
-                self._handle_client,
-                path=str(socket_path),
-                limit=SocketLimit.REQUEST_BUFFER_BYTES,
-            )
-        except OSError as e:
-            # AF_UNIX socket path too long or other socket creation failure
-            logger.error(
-                "Failed to create Unix socket at %s (length=%d): %s",
-                socket_path,
-                len(str(socket_path)),
-                e,
-            )
-            raise
+        # Acquire the socket atomically across the probe->unlink->bind critical
+        # section (Plan 00127, Finding 3). Without serialisation two fresh
+        # same-root starts can both observe the socket as not-live and race to
+        # unlink a freshly-bound peer. An exclusive flock on a sibling lock file
+        # serialises them: the loser re-runs the probe inside the lock, finds
+        # the winner LIVE, and reuses (raises DaemonAlreadyRunningError).
+        await self._acquire_socket_and_bind(socket_path)
 
         # Set socket permissions (owner read/write, group read, world none)
         if socket_path:
@@ -397,6 +545,137 @@ class HooksDaemon:
             await touch_task
 
         logger.info("Daemon shutdown complete")
+
+    @staticmethod
+    def _start_lock_path(socket_path: Path) -> Path:
+        """Sibling lock-file path used to serialise concurrent same-root starts."""
+        return socket_path.with_name(socket_path.name + _START_LOCK_SUFFIX)
+
+    async def _acquire_socket_and_bind(self, socket_path: Path | None) -> None:
+        """Atomically reuse-or-acquire ``socket_path`` and bind the server.
+
+        Plan 00127 (Findings 1 + 3). Holds an exclusive ``flock`` over a sibling
+        lock file across the entire probe -> PID-write -> unlink -> bind
+        critical section so near-simultaneous same-root starts serialise: the
+        winner binds, the loser re-probes inside the lock, finds the winner LIVE
+        and reuses (raises :class:`DaemonAlreadyRunningError`).
+
+        Invariants:
+          - A LIVE socket is NEVER unlinked (Decision 1).
+          - A socket is unlinked ONLY on a DEFINITIVE ``NOT_LIVE`` probe
+            (ConnectionRefused / absent = provably nobody listening, safe to
+            unlink regardless of PID state).
+          - An ``INDETERMINATE`` probe (timeout against a busy-but-live daemon,
+            or a transient OSError such as fd exhaustion in THIS process) is
+            treated as LIVE and never unlinked: with a live PID it is a
+            healthy-but-busy incumbent (reuse); even with no live PID the socket
+            cannot be proven dead, so it is still not unlinked (reuse/fail-safe).
+        """
+        if socket_path is None:
+            # No socket configured — nothing to gate. Bind directly.
+            await self._bind_unix_server(socket_path)
+            return
+
+        lock_path = self._start_lock_path(socket_path)
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        # Open (create) the lock file; the fd is held for the whole critical
+        # section. flock is advisory but every daemon start takes the same lock,
+        # so they serialise against each other.
+        # NOTE: on a filesystem where flock is a no-op (older NFS without lockd,
+        # some 9p configs) mutual exclusion is lost, but correctness still
+        # degrades SAFELY — two racing winners both reach start_unix_server and
+        # the loser fails loudly (OSError -> exit 1) rather than silently
+        # orphaning a daemon. The supported shared-untracked deployment is a
+        # normal-disk bind mount (ext4) where flock works across PID namespaces.
+        lock_fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            # flock(LOCK_EX) is a BLOCKING syscall. Acquire it in a thread so a
+            # competing in-process start (and, more importantly, the event loop
+            # itself) is never blocked while another holder finishes its
+            # critical section. In production each daemon is its own process, but
+            # offloading keeps the loop responsive and avoids a single-loop
+            # deadlock where the waiter starves the holder.
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, fcntl.flock, lock_fd, fcntl.LOCK_EX)
+            await self._reuse_or_clear_socket(socket_path)
+
+            # Write PID file only once we hold the lock and have cleared any
+            # stale socket — guarantees the PID we publish matches the daemon
+            # that is about to own the socket.
+            if self.config.pid_file_path_obj:
+                await self._write_pid_file()
+
+            await self._bind_unix_server(socket_path)
+        finally:
+            # Releasing the flock and closing the fd AFTER bind makes the
+            # publish atomic: a competing start cannot observe the half-bound
+            # state. The on-disk lock file is intentionally left in place
+            # (cheap, reused by the next start).
+            with contextlib.suppress(OSError):
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            os.close(lock_fd)
+
+    async def _reuse_or_clear_socket(self, socket_path: Path) -> None:
+        """Probe ``socket_path`` and either reuse a live incumbent or clear a stale one.
+
+        Must be called while holding the start lock. Raises
+        :class:`DaemonAlreadyRunningError` on any non-NOT_LIVE outcome (LIVE, or
+        INDETERMINATE with or without a live PID — never steal a possibly-live
+        socket); unlinks ONLY on a definitive ``NOT_LIVE`` probe.
+        """
+        if not socket_path.exists():
+            return  # Nothing on disk — fresh bind.
+
+        liveness = await _probe_socket_liveness(socket_path)
+        if liveness is _SocketLiveness.LIVE:
+            logger.info(_LOG_LIVE_SOCKET_REUSE, socket_path)
+            raise DaemonAlreadyRunningError(_ERR_DAEMON_ALREADY_RUNNING.format(socket=socket_path))
+
+        if liveness is _SocketLiveness.INDETERMINATE:
+            # Not a definitive not-listening signal. If the PID file still names
+            # a live process, treat the incumbent as a healthy-but-busy daemon
+            # and reuse rather than risk unlinking a live socket (Finding 1).
+            if _pid_file_points_at_live_process(self.config.pid_file_path_obj):
+                logger.info(_LOG_PROBE_INDETERMINATE, socket_path, "live PID present")
+                raise DaemonAlreadyRunningError(
+                    _ERR_DAEMON_ALREADY_RUNNING.format(socket=socket_path)
+                )
+            # Indeterminate probe AND no live PID: the socket cannot be proven
+            # stale. Fail safe — do NOT unlink. A genuinely dead daemon leaves a
+            # ConnectionRefused (NOT_LIVE) socket, not an indeterminate one.
+            logger.info(_LOG_PROBE_INDETERMINATE, socket_path, "no live PID")
+            raise DaemonAlreadyRunningError(_ERR_DAEMON_ALREADY_RUNNING.format(socket=socket_path))
+
+        # Definitive NOT_LIVE: a ConnectionRefused/absent socket is provably
+        # dead (nobody is listening) regardless of PID state, so unlinking is
+        # safe and lets a fresh start replace it. A wedged daemon with a live
+        # PID but a refused socket is also correctly replaced here — its socket
+        # is dead either way.
+        logger.warning(_LOG_UNLINK_STALE_SOCKET, socket_path)
+        socket_path.unlink()
+
+    async def _bind_unix_server(self, socket_path: Path | None) -> None:
+        """Bind the asyncio Unix-socket server at ``socket_path``."""
+        # Override asyncio's 64KiB readline buffer default — a single PostToolUse
+        # Edit on a large file (e.g. cli.py at 102KB) sends a JSON request larger
+        # than that and readline() raises LimitOverrunError, which the caller
+        # turns into a silent {"error":"Separator is found..."} response. See
+        # SocketLimit docstring for full context (Plan 00101 Phase 10).
+        try:
+            self.server = await asyncio.start_unix_server(
+                self._handle_client,
+                path=str(socket_path),
+                limit=SocketLimit.REQUEST_BUFFER_BYTES,
+            )
+        except OSError as e:
+            # AF_UNIX socket path too long or other socket creation failure
+            logger.error(
+                "Failed to create Unix socket at %s (length=%d): %s",
+                socket_path,
+                len(str(socket_path)),
+                e,
+            )
+            raise
 
     def _signal_handler(self, sig: signal.Signals) -> None:
         """Handle shutdown signals.
@@ -737,10 +1016,26 @@ class HooksDaemon:
             response["request_id"] = request_id
         return response
 
-    def _write_pid_file(self) -> None:
-        """Write current process PID to PID file.
+    async def _write_pid_file(self) -> None:
+        """Write current process PID to PID file (Plan 00127 — async).
 
-        Handles stale PID files (process no longer exists).
+        REDUNDANT backstop over the authoritative socket gate in
+        :meth:`_reuse_or_clear_socket`. In the production flow this method is
+        called from :meth:`_acquire_socket_and_bind` only AFTER
+        ``_reuse_or_clear_socket`` has returned — by which point the socket file
+        is absent (it either never existed or was unlinked as NOT_LIVE), so the
+        ``_probe_socket_live`` check below resolves to NOT_LIVE and the reuse
+        branch does not fire. The effective live-incumbent reuse decision is made
+        upstream in ``_reuse_or_clear_socket``; this guard is retained as
+        defence-in-depth for any caller that invokes ``_write_pid_file`` outside
+        that sequence (e.g. direct unit tests).
+
+        It awaits the real :func:`_probe_socket_liveness` rather than the SYNC
+        ``_socket_is_live`` (which returns False unconditionally inside a running
+        loop), so the guard is at least correct where it is reachable. A live
+        incumbent PID that ALSO owns a live socket -> raise
+        :class:`DaemonAlreadyRunningError` (reuse); a live PID with a dead socket
+        is wedged/half-dead -> overwrite.
         """
         pid_file_path = self.config.pid_file_path_obj
         if not pid_file_path:
@@ -755,11 +1050,15 @@ class HooksDaemon:
                 # Check if process exists
                 try:
                     os.kill(old_pid, 0)  # Signal 0 checks existence
-                    logger.warning(
-                        "Daemon already running with PID %d, overwriting with PID %d",
-                        old_pid,
-                        pid,
-                    )
+                    # A live incumbent PID whose socket is ALSO live is a healthy
+                    # shared daemon — never clobber its PID file. A live PID with
+                    # a dead socket is wedged/half-dead: fall through to overwrite.
+                    socket_path = self.config.socket_path_obj
+                    if socket_path is not None and await _probe_socket_live(socket_path):
+                        logger.info(_LOG_LIVE_PID_REUSE, old_pid)
+                        raise DaemonAlreadyRunningError(
+                            _ERR_DAEMON_ALREADY_RUNNING.format(socket=socket_path)
+                        )
                 except ProcessLookupError:
                     logger.info("Stale PID file detected (PID %d not running)", old_pid)
             except (ValueError, OSError) as e:

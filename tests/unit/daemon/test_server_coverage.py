@@ -270,10 +270,15 @@ class TestHandleSystemRequestLegacy:
 class TestWritePidFileNoPidPath:
     """Tests for _write_pid_file when pid_file_path is None."""
 
-    def test_write_pid_file_no_path_returns_early(self) -> None:
-        """Line 624: early return when no pid_file_path configured."""
+    @pytest.mark.anyio
+    async def test_write_pid_file_no_path_returns_early(self) -> None:
+        """Line 624: early return when no pid_file_path configured.
+
+        _write_pid_file is async as of Plan 00127 (Finding 4) so the live-socket
+        gate can await the real liveness probe; the early-return path is awaited.
+        """
         config = _make_config(pid_file_path=None)
         daemon = HooksDaemon(config=config, controller=FakeController())
 
         # Should not raise - just returns early
-        daemon._write_pid_file()
+        await daemon._write_pid_file()
