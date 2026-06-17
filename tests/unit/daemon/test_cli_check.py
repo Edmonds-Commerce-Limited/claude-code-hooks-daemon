@@ -110,26 +110,20 @@ class TestCmdCheck:
         assert "fileMode" in out
         assert "OK" in out
 
-    def test_reports_filemode_false_warning(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_reports_filemode_false_warning(self, capsys: pytest.CaptureFixture[str]) -> None:
         with self._enter(_patches(filemode="false")):
             cmd_check(_args())
         out = capsys.readouterr().out
         assert "WARNING" in out
         assert "core.fileMode true" in out
 
-    def test_reports_hook_registration_ok(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_reports_hook_registration_ok(self, capsys: pytest.CaptureFixture[str]) -> None:
         with self._enter(_patches(warnings=[])):
             cmd_check(_args())
         out = capsys.readouterr().out
         assert "Hook registration" in out
 
-    def test_reports_hook_registration_issues(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_reports_hook_registration_issues(self, capsys: pytest.CaptureFixture[str]) -> None:
         with self._enter(_patches(warnings=["settings.local.json has a hooks entry"])):
             cmd_check(_args())
         out = capsys.readouterr().out

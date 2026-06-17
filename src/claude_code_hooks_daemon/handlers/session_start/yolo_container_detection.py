@@ -187,9 +187,7 @@ class YoloContainerDetectionHandler(Handler):
         # In a container — but only advertise it at session start when the user
         # has opted in. Default is OFF (Plan 00128): the container is already
         # surfaced by the status-line icon and via `cli check`.
-        return bool(
-            self.config.get(_CFG_SHOW_ON_SESSION_START, _DEFAULT_SHOW_ON_SESSION_START)
-        )
+        return bool(self.config.get(_CFG_SHOW_ON_SESSION_START, _DEFAULT_SHOW_ON_SESSION_START))
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Handle YOLO container detection.

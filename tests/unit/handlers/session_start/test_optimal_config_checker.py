@@ -456,7 +456,6 @@ class TestHandleMixedResults:
         return OptimalConfigCheckerHandler()
 
 
-
 class TestWriteGlobalSettings:
     """Test _write_global_settings method."""
 
