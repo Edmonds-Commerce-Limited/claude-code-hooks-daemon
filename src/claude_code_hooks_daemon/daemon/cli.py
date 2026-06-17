@@ -846,6 +846,83 @@ def cmd_health(args: argparse.Namespace) -> int:
     return 0 if status == "healthy" else 1
 
 
+def cmd_check(args: argparse.Namespace) -> int:
+    """Run a verbose environment & configuration audit on demand (Plan 00128).
+
+    SessionStart deliberately stays quiet about healthy state — it only speaks
+    when something needs action. This command surfaces the FULL report on
+    demand: Claude Code optimal-config settings (max output tokens, bash working
+    directory, effort level, etc.), the container runtime, git ``core.fileMode``,
+    and hook-registration drift. It reuses the SessionStart handlers' own check
+    logic so there is a single source of truth.
+
+    Args:
+        args: Command-line arguments.
+
+    Returns:
+        0 always — this is an advisory report and never fails the shell.
+    """
+    from claude_code_hooks_daemon.handlers.session_start.git_filemode_checker import (
+        GitFilemodeCheckerHandler,
+    )
+    from claude_code_hooks_daemon.handlers.session_start.optimal_config_checker import (
+        OptimalConfigCheckerHandler,
+    )
+    from claude_code_hooks_daemon.utils import container_detection
+
+    project_path = get_project_path(getattr(args, "project_root", None))
+
+    print("Hooks Daemon — Environment Check\n")
+
+    # 1. Claude Code optimal configuration (the verbose report SessionStart hides)
+    checks = OptimalConfigCheckerHandler()._run_checks()
+    passed = [c for c in checks if c["passed"]]
+    print(f"Claude Code configuration: {len(passed)}/{len(checks)} optimal")
+    for check in checks:
+        marker = "OK  " if check["passed"] else "MISS"
+        print(f"  [{marker}] {check['name']}: {check['current']}")
+        if not check["passed"]:
+            print(f"         Why:   {check['why']}")
+            print(f"         Fix:   {check['fix']}")
+            print(f"         Where: {check['where']}")
+            print(f"         Docs:  {check['docs']}")
+
+    # 2. Container runtime (shown by the status-line icon; spelled out here)
+    print("\nContainer runtime:")
+    runtime = container_detection.detect_container_runtime()
+    if runtime:
+        print(f"  In a {runtime} container")
+    elif container_detection.in_container():
+        print("  In a container (runtime unknown)")
+    else:
+        print("  Not in a container (desktop/host)")
+
+    # 3. Git core.fileMode
+    print("\nGit core.fileMode:")
+    filemode = GitFilemodeCheckerHandler()._get_filemode_setting()
+    if filemode is None:
+        print("  Not in a git repository or unable to check")
+    elif filemode == "false":
+        print(
+            "  false — WARNING: hooks may lose executable permissions. "
+            "Fix: git config core.fileMode true"
+        )
+    else:
+        print(f"  {filemode} (OK)")
+
+    # 4. Hook-registration drift
+    print("\nHook registration:")
+    warnings = check_hook_registration_warnings(project_path)
+    if not warnings:
+        print("  OK — all hooks registered correctly in settings.json")
+    else:
+        print(f"  {len(warnings)} issue(s):")
+        for warning in warnings:
+            print(f"  ⚠️  {warning}")
+
+    return 0
+
+
 def cmd_get_mode(args: argparse.Namespace) -> int:
     """Get current daemon mode.
 
@@ -2825,6 +2902,14 @@ def main() -> int:
     # health command
     parser_health = subparsers.add_parser("health", help="Check daemon health")
     parser_health.set_defaults(func=cmd_health)
+
+    # check command — verbose env/config audit (the report SessionStart hides)
+    parser_check = subparsers.add_parser(
+        "check",
+        help="Verbose environment & configuration audit (Claude Code settings, "
+        "container runtime, git fileMode, hook registration)",
+    )
+    parser_check.set_defaults(func=cmd_check)
 
     # get-mode command
     parser_get_mode = subparsers.add_parser("get-mode", help="Get current daemon mode")

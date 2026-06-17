@@ -76,14 +76,13 @@ Already correct (the model): `version_check`, `gitignore_safety_checker`,
 
 ### Phase 2: Verbose `check` command + skill sub-command (TDD)
 
-- [ ] ⬜ **Task 2.1**: New `cli check` subcommand that aggregates a verbose
+- [x] ✅ **Task 2.1**: New `cli check` subcommand that aggregates a verbose
   env/config audit by reusing handler check logic: optimal-config (all 6 with
-  why/fix/where/docs), container runtime, git filemode, hook registration,
-  gitignore safety, version status. Single-source — call into existing handler
-  methods/utils, do not re-implement checks.
-- [ ] ⬜ **Task 2.2**: Wire `check` into the `/hooks-daemon` skill — add a `check`
-  route (forward via `daemon-cli.sh check`), a `check.md` doc, update SKILL.md
-  help text + `argument-hint` frontmatter.
+  why/fix/where/docs), container runtime, git filemode, hook registration.
+  Single-source — calls existing handler methods/utils, no re-implemented checks.
+- [x] ✅ **Task 2.2**: Wired `check` into the `/hooks-daemon` skill — added the
+  `check` route (forwards via `daemon-cli.sh check`), a `check.md` doc, updated
+  SKILL.md help text + `argument-hint` frontmatter.
 
 ### Phase 3: Integration & verification
 
