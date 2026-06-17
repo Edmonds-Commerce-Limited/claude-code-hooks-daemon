@@ -1,6 +1,6 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-06-13 (v3.19.2) by `generate-docs`. Regenerate: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-docs`
+> Generated on 2026-06-17 (v3.20.0) by `generate-docs`. Regenerate: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-docs`
 
 ## Active Handlers
 
@@ -130,7 +130,7 @@
 | Priority | Handler | Behavior | Description |
 |----------|---------|----------|-------------|
 | 10 | model_context | NON-TERMINAL | Format model name with effort level and color-coded context percentage |
-| 11 | environment_indicator | NON-TERMINAL | Show 💻 (desktop/host) or a container icon (🐳 docker / 📦 podman) |
+| 11 | environment_indicator | NON-TERMINAL | Show 💻 (desktop/host) or a container icon (🐳 docker / 📦 podman / 🧊 lxc) |
 | 12 | thinking_mode | NON-TERMINAL | Display thinking mode and effort level in status line |
 | 14 | current_time | NON-TERMINAL | Display current local time in status line (24-hour format, no seconds) |
 | 20 | git_branch | NON-TERMINAL | Show current git branch with magicmonty-style status icons if in a git repo |

@@ -1,6 +1,6 @@
 # Plan 00127: Parallel-Session Daemon Isolation & Reuse (+ LXC detection)
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-06-17
 **Owner**: Claude (Opus)
 **Priority**: High
@@ -313,3 +313,29 @@ adversarial review → fix) plus a second adversarial re-review of the fix diff.
   process, socket still answers). Original two-daemon bug empirically eliminated.
 - **Remaining**: Phase 4 (LXC detection), Phase 6 (docs/truth-changes), then
   release.
+
+### 2026-06-17 (Phase 4 + Phase 6 delivered — plan COMPLETE)
+
+- **Phase 4 (LXC/LXD detection) DONE** via a second ultracode workflow (spec →
+  TDD → QA → 2-lens review, 0 blocking). `container_detection.py` gained
+  `_RUNTIME_LXC`, a `container=lxc`/`lxc-libvirt` env mapping, the confirmed
+  `/run/systemd/container` reader (env-overridable, no subprocess → bandit-clean),
+  cgroup-v1 `lxc` token remap, and `/dev/lxd/sock` + `/dev/.lxc` probes; check
+  order is cheapest-first. `environment_indicator` renders 🧊 for LXC;
+  `yolo_container_detection` recognises it. Decision 2 (distinct `_RUNTIME_LXC`)
+  and Decision 3 (`/run/systemd/container` primary) implemented. Task 4.7:
+  LXC now auto-enables `enforce_single_daemon_process` for new installs — SAFE
+  because the Phase 2/3 reuse fix runs before enforcement and spares the
+  incumbent.
+- **Live-verified detection**: `/run/systemd/container=lxc` (container env unset)
+  → `lxc`; `container=lxc`/`lxc-libvirt` → `lxc`; real podman → `podman` (no
+  regression); bare host → `None` (Plan 00126 invariant holds).
+- **Phase 6 DONE**: CLAUDE.md "Single Daemon Process Enforcement" documents
+  shared-daemon reuse + the `CLAUDE_HOOKS_*_PATH` isolation opt-out + LXC;
+  `HOOKS-DAEMON.md` regenerated. No truth-changes entry: the lifecycle change is
+  a bug fix (no documented project workflow/command/convention became false) and
+  LXC detection + the 🧊 icon are purely additive.
+- **Delivery commits**: investigation `fde5cd8`/`8683052`/`2757d55`; lifecycle
+  reuse fix `0176767`; LXC detection `75c755c`; docs + completion (this commit).
+  Final QA 13/13 (8617 tests, 95.1%). Daemon restarted RUNNING after each phase.
+- **Next**: `/release` (MINOR — bug fix + LXC-detection feature).

@@ -6,14 +6,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Infrastructure / Bootstrap
 
-- [00127: Parallel-Session Daemon Isolation & Reuse (+ LXC detection)](00127-parallel-session-daemon-isolation/PLAN.md) - In Progress
-
-  - User report: two Claude Code sessions on the same codebase — one had the hooks daemon working, the other did not
-  - Opus review + **live evidence in this container** (two daemon servers, PIDs 272/274, same project root, one PID file) confirmed two compounding failure modes: Mechanism B "socket theft / PID clobber" (always active — `server.py` unconditionally unlinks an existing socket and overwrites the PID file) and Mechanism A `enforce_single_daemon` killing a healthy same-root incumbent (`cmd_start` enforces before the "already running" check)
-  - Root cause: when two sessions share `(hostname, project root)` the daemon treats the incumbent as a competitor to displace/kill instead of a shared daemon to reuse
-  - Also closes the LXC/LXD detection gap (cgroup-v2 misses LXC; `container=lxc` not mapped; no `/dev/lxd/sock` probe) — see `context.md` and PLAN.md Phase 4 debug commands
-  - Investigation written (`context.md`); fixes not yet implemented — awaiting user direction on reuse-vs-fail-fast and LXC debug output
-
 - [00110: Python Interpreter Discovery — DRY Consolidation & Latest-Always Policy](00110-python-discovery-dry-consolidation/PLAN.md) - Not Started
 
   - Field report from host host-a (`untracked/hooks-daemon-upgrade-python-version.md`): skill `install.sh` aborted on default `python3` (3.9.21) and suggested hardcoded `python3.11` despite `python3.13`/`python3.14` being on PATH
@@ -71,6 +63,13 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00127: Parallel-Session Daemon Isolation & Reuse (+ LXC detection)](Completed/00127-parallel-session-daemon-isolation/PLAN.md) - Complete
+
+  - Fixed the parallel-session bug (user report): multiple Claude Code processes sharing one `(hostname, project root)` — e.g. several agents in a single LXC container — fought over the daemon socket because a second start unconditionally unlinked the live socket and clobbered the PID file (one session's hooks worked, the other's silently did not); reproduced live in-container (two daemon servers, one PID file)
+  - REUSE fix (Decision 1) across all layers: `init.sh` stops removing a live socket; `cli.cmd_start` runs a three-state liveness gate (LIVE/NOT_LIVE/INDETERMINATE) FIRST and reuses a live-or-busy incumbent before `enforce_single_daemon`; `server.start()` probes under an exclusive `flock` and raises `DaemonAlreadyRunningError` instead of stealing a live socket. Phase 5 orphan janitor dropped as redundant (YAGNI/DRY)
+  - LXC/LXD detection (Phase 4): cgroup-v2-safe via `/run/systemd/container` + `container=lxc` env + cgroup-v1 token + `/dev/lxd/sock` (no subprocess); 🧊 status icon; desktop invariant (Plan 00126) preserved
+  - Two ultracode workflows (spec → TDD → QA → adversarial review); review caught 5 real bugs, all fixed. QA 13/13 (8617 tests, 95.1%); daemon restart + live parallel-start test verified. Commits `0176767` (lifecycle), `75c755c` (LXC)
 
 - [00126: Container-detection conflation fix + status-line env indicator + memoisation](Completed/00126-statusline-env-indicator-and-memoisation/PLAN.md) - Complete
 
@@ -862,12 +861,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 126
-- **Completed**: 105 (1 with reduced scope, 4 already-shipped)
+- **Total Plans Created**: 127
+- **Completed**: 106 (1 with reduced scope, 4 already-shipped)
 - **Active**: 5 (1 python-discovery, 1 question-blocker, 1 stop-quality, 2 long-running/review) + 1 in-progress build (00116 CLAUDE.md compression)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping, 00081 - superseded by 00082)
-- **Last reconciled by**: Plan 00126 (container-detection conflation + status-line env indicator) close-out
+- **Last reconciled by**: Plan 00127 (parallel-session daemon reuse + LXC detection) close-out
 
 ## Quick Links
 
