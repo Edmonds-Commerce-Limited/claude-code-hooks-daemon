@@ -175,15 +175,30 @@ signals captured" for the full table and the resulting priority-ordered design.
 2. **Fail-fast** — second start exits non-zero, forwarder reports clearly.
 3. **Per-session sockets** — isolate by default.
 
-**Leaning**: (1) reuse as the default (it is the desired shared-daemon outcome),
-with (2) fail-fast as the safety net when the socket is ambiguous, and (3)
-remaining an opt-in via `CLAUDE_HOOKS_*_PATH`. **Decision: TBD — confirm with user.**
+**Decision (2026-06-17, user-confirmed): Option 1 — REUSE.** A second start that
+finds a *live, healthy* same-root daemon detects it and reuses it (exit 0); both
+sessions' forwarders talk to the one shared daemon. Fail-fast (Option 2) is the
+safety net ONLY when the incumbent is unhealthy/wedged. Per-session isolation
+(Option 3) stays an opt-in via `CLAUDE_HOOKS_*_PATH`. Concretely the fix is:
+**never unlink a live socket; health-check the incumbent and reuse it.**
 
 ### Decision 2: LXC runtime label
 
 **Context**: Add a distinct `_RUNTIME_LXC = "lxc"` vs. folding into `generic`.
-**Leaning**: distinct label for an accurate status-line icon and clearer logs.
-**Decision: TBD.**
+**Decision (2026-06-17): distinct `_RUNTIME_LXC = "lxc"`** for an accurate
+status-line icon and clearer logs/enforcement reasoning.
+
+### Decision 3: Primary LXC check — CONFIRMED `/run/systemd/container`
+
+**Context**: host-a needed a non-root, cheap LXC signal.
+**Decision (2026-06-17, confirmed on host-a)**: `/run/systemd/container`
+contains `lxc` and is world-readable (`cat` succeeded as non-root). This is the
+**primary** LXC check — a plain file read, env-overridable
+(`HOOKS_DAEMON_SYSTEMD_CONTAINER_PATH`), no subprocess. `systemd-detect-virt --container` (also returned `lxc`, rc=0) is the authoritative **fallback** when
+the file is absent. `/proc/1/environ` does carry `container=` (sudo grep matched)
+but is root-only, so it is NOT relied upon. Check order: `container` env var →
+`/run/systemd/container` → Docker/Podman marker files → cgroup token (v1) →
+`systemd-detect-virt` subprocess (last, cost paid only when all cheap checks miss).
 
 ## Success Criteria
 
@@ -251,3 +266,21 @@ What we expect to learn:
   (cgroup-v2 misses LXC; `container=lxc` not mapped; no LXD marker probe).
 - Fixes NOT yet implemented — awaiting user direction on Decision 1 (reuse vs.
   fail-fast) and LXC debug output.
+
+### 2026-06-17 (update)
+
+- **Scenario confirmed by user**: multiple Claude Code processes running in
+  parallel **inside a single LXC container** (host-a). All share that LXC's
+  hostname + project root → one `daemon-{hostname}.{sock,pid}` → contention.
+- Because LXC is currently NOT detected as a container, `enforce_single_daemon`
+  is NOT auto-enabled there, so on host-a the failure is **purely Mechanism B**
+  (always-active socket theft / PID clobber). Mechanism A is not in play in the
+  reported environment. The fix that matters most for the user is Phase 2 (reuse
+  the live daemon, never unlink a live socket).
+- **Decision 1 resolved: REUSE** (see Technical Decisions). Decision 2: distinct
+  `_RUNTIME_LXC`. Decision 3: primary LXC check `/run/systemd/container`
+  CONFIRMED present and world-readable on host-a (`cat` → `lxc` as non-root);
+  `systemd-detect-virt --container` → `lxc`, rc=0; `/proc/1/environ` carries
+  `container=` but is root-only.
+- Next implementation step: Phase 2 (socket-liveness reuse) under TDD, then
+  Phase 4 LXC detection led by `/run/systemd/container`.
