@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.22.0] - 2026-06-18
+
+This is a **minor release** delivering a leaner SessionStart (advisories now stay silent when everything is healthy) and a new on-demand `cli check` environment audit command, plus a status-line separator consistency fix.
+
+### Added
+
+- **`cli check` environment audit command + `/hooks-daemon` skill `check` subcommand (Plan 00128, Phase 2)** — A new on-demand `$PYTHON -m claude_code_hooks_daemon.daemon.cli check` aggregates the full verbose audit that used to print at every SessionStart: the Claude Code optimal-config checks (max output tokens, bash working directory, effort, thinking, agent teams, auto memory), container runtime, git `core.fileMode`, and hook-registration drift. It reuses the SessionStart handlers' own check logic (single source of truth), is advisory, and always exits 0. Exposed through the `/hooks-daemon` skill as `check` (forwarding to `daemon-cli.sh`) with `check.md` docs and help text.
+- **`show_on_session_start` option on `yolo_container_detection` (Plan 00128, Phase 1; default off)** — The container is already surfaced by the status-line environment icon, so the SessionStart banner is suppressed by default; set the option to re-enable it.
+
+### Changed
+
+- **Lean SessionStart advisories — silent when healthy (Plan 00128, Phase 1)** — SessionStart previously printed a wall of "all good" text on every session (~80 lines). The advisories are now silent-when-healthy and speak only when action is needed:
+  - `git_filemode_checker` emits only when `core.fileMode=false` (previously always printed the OK / "not a repo" status).
+  - `hook_registration_checker` drops the "All checks passed" line; it speaks only on issues (the migration notice is still emitted).
+  - `optimal_config_checker` suppresses the 6-setting audit at session start; silent settings-sync enforcement and a one-line notice on an actual write are retained. The verbose audit moved to `cli check`.
+  - `yolo_container_detection` no longer prints its banner by default (see `show_on_session_start` above).
+  - The `dogfooding_reminder` plugin reminder was trimmed to one concise nudge.
+  - A fresh SessionStart now emits ~2 lines instead of ~80.
+
+### Fixed
+
+- **Consistent status-line segment separators regardless of segment order** — Status segments self-embedded a leading *or* trailing `|` separator, so a config-driven reorder could place two same-side segments adjacent and drop the `|` between them (observed: `📦 podman 👤 client_user_b` with no separator between the environment indicator and the account name). The Status renderer (`hook_result.to_json`) now strips each fragment's outer separator/whitespace and re-joins with `|` so every boundary is consistent regardless of segment order; a fragment's internal `|` (e.g. `🤖 Opus | ◔ 0.0%`) is preserved.
+
 ## [3.21.0] - 2026-06-17
 
 This is a **minor release** delivering parallel-session socket-liveness reuse (parallel Claude Code sessions sharing one hostname + project root no longer fight over the daemon socket) and LXC/LXD container detection with a new 🧊 status-line icon.

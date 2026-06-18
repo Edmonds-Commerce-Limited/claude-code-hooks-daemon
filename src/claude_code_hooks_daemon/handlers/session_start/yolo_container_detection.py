@@ -165,7 +165,8 @@ class YoloContainerDetectionHandler(Handler):
                 marker present).
 
         Returns:
-            True iff the event is SessionStart AND ``in_container()`` is True.
+            True iff the event is SessionStart AND ``in_container()`` is True
+            AND ``show_on_session_start`` is enabled (default off).
         """
         if hook_input is None:
             return False
