@@ -4,6 +4,16 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+### Tooling / Dependencies
+
+- [00129: Wire llm-friendly-qa-wrappers in as a Major Dependency](00129-llm-qa-wrappers-integration/PLAN.md) - Not Started
+
+  - GitHub Issue [#33](https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/issues/33)
+  - Adopt [`edmondscommerce/llm-friendly-qa-wrappers`](https://github.com/edmondscommerce/llm-friendly-qa-wrappers) (terse-terminal + JSON-to-tempfile wrappers around ESLint/PHPStan/Ruff/etc.) as a major dependency; build PreToolUse handlers that redirect raw QA tool calls → wrapper version and guide the agent to parse JSON with `jq` (generalises the `npm_command` interception pattern)
+  - Single schema-validated `raw command → wrapper invocation` SSOT via Strategy + Registry (no hardcoded if/elif)
+  - Secondary strand: global `--json` mode on [`lts/php-qa-ci`](https://github.com/LongTermSupport/php-qa-ci) (`bin/qa` Bash pipeline) so the whole PHP pipeline emits one machine-readable result, vs. wrapping each PHP tool individually
+  - Reference repos cloned to `untracked/repos/`; wrapper repo audit captured in `AUDIT-llm-friendly-qa-wrappers.md`; adoption gated on the audit verdict
+
 ### Infrastructure / Bootstrap
 
 - [00110: Python Interpreter Discovery — DRY Consolidation & Latest-Always Policy](00110-python-discovery-dry-consolidation/PLAN.md) - Not Started
@@ -868,9 +878,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 127
+- **Total Plans Created**: 128
 - **Completed**: 106 (1 with reduced scope, 4 already-shipped)
-- **Active**: 5 (1 python-discovery, 1 question-blocker, 1 stop-quality, 2 long-running/review) + 1 in-progress build (00116 CLAUDE.md compression)
+- **Active**: 6 (1 tooling/dependencies, 1 python-discovery, 1 question-blocker, 1 stop-quality, 2 long-running/review) + 1 in-progress build (00116 CLAUDE.md compression)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping, 00081 - superseded by 00082)
 - **Last reconciled by**: Plan 00127 (parallel-session daemon reuse + LXC detection) close-out
