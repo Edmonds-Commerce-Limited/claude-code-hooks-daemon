@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.23.0] - 2026-06-19
+
+This is a **minor release** delivering two opt-in features: a distributed, git-anchored plan-scaffolding script (`mkplan.bash`) shipped into client projects, and an `allow_untracked_claude_memory` policy that lets a project forbid untracked Claude auto-memory and have the daemon enforce it by blocking the writes — steering durable knowledge into tracked project docs via progressive disclosure.
+
+### Added
+
+- **`allow_untracked_claude_memory` option on `markdown_organization` (Plan 00131; default `true`)** — A project can now forbid untracked Claude auto-memory. With the option `false`, `Write`/`Edit` (and bash `>`/`>>`/`tee` redirect side-doors) targeting `~/.claude/projects/*/memory/*.md` are **denied at the daemon layer** with a specialist message that routes durable knowledge into tracked project docs using progressive disclosure (lean `CLAUDE.md`, `.claude/rules/*.md` with `paths:` globs, thin skills, plain links, single-source-of-truth, no `@`-imports). **Reading memory is always allowed** so existing memory can be migrated. Enforcement is the deterministic block — not a fragile attempt to disable Claude's own memory engine. Default `true` preserves today's behaviour exactly.
+- **Distributed `mkplan.bash` plan-scaffolding script (Plan 00130)** — The audited, git-anchored plan-numbering script is now bundled with the daemon and deployed into client projects' plan directory by the installer (wheel `package-data`). It takes a lock, reads the authoritative `hooksdaemon.latestPlanNumber` git counter, allocates the next number atomically, scaffolds `NNNNN-name/PLAN.md`, and advances the counter — so concurrent runs never collide. `plan_number_helper` guidance now names `CLAUDE/Plan/mkplan.bash "name"` as the canonical way to create a plan.
+
+### Changed
+
+- **`optimal_config_checker` reconciled with the memory policy (Plan 00131)** — When `allow_untracked_claude_memory: false` is active, the SessionStart auto-memory check no longer nags to re-enable memory (it reads the policy from config as the single source of truth, fails safe, and frames disabling memory as an optional best-effort step) — so the advisory never contradicts the block. Delivered via TDD with 19 new unit tests; suite at 8,657 passing, 95.1% coverage.
+
 ## [3.22.0] - 2026-06-18
 
 This is a **minor release** delivering a leaner SessionStart (advisories now stay silent when everything is healthy) and a new on-demand `cli check` environment audit command, plus a status-line separator consistency fix.

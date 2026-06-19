@@ -1,0 +1,15 @@
+version: "3.23.0"
+truth_changes:
+  - was: >
+      To create a new plan, read the authoritative git counter
+      `hooksdaemon.latestPlanNumber` and add 1 (zero-padded to 5 digits), then
+      create the `NNNNN-name/` folder and `PLAN.md` yourself. There is no
+      bundled scaffolding script.
+    now: >
+      To create a new plan, run the deployed scaffolding script
+      `CLAUDE/Plan/mkplan.bash "descriptive-kebab-name"` (use your configured plan
+      directory if not `CLAUDE/Plan/`). It is distributed by the installer, takes a
+      lock, reads the same `hooksdaemon.latestPlanNumber` git counter, allocates the
+      next number atomically, scaffolds `NNNNN-name/PLAN.md`, and advances the
+      counter — so concurrent runs never collide. Reading the counter and adding 1
+      remains the fallback when you only need the number, not a folder.
