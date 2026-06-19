@@ -81,11 +81,13 @@ script refined iteration-by-iteration and committed on each pass.
   reverse-symlink scaffolds plans in the wrong directory.
 - [x] ✅ **Task 2.6**: `AUDIT-v1.md` written (1 CRITICAL, 3 HIGH, 4 MEDIUM, 4 LOW + passed list); committed.
 
-### Phase 3: Refinement Iterations
+### Phase 3: Refinement Iterations — `AUDIT-v2.md`
 
-- [ ] ⬜ **Task 3.1**: Apply fixes for the highest-severity findings; commit the revised script + an
-  `AUDIT-vN.md` recording what changed and why. Repeat until no High/Medium findings remain.
-- [ ] ⬜ **Task 3.2**: Re-run shellcheck + manual re-audit after each refinement (regression sweep).
+- [x] ✅ **Task 3.1**: v2 applied — C1 portable `mkdir` lock, H1 `MKPLAN_PLAN_DIR` override + contract
+  docs, M2 high-water-mark counter, M3 friendly `mkdir` die, L4 softened drift wording. `AUDIT-v2.md`
+  records the before/after. All script-side High/Medium findings closed.
+- [x] ✅ **Task 3.2**: Re-ran full suite — **12-way concurrency now yields 12 distinct numbers**
+  (was five `00001-*`); shellcheck clean; all v1 guards regression-pass.
 
 ### Phase 4: Distribution & Integration Design (proposal audit)
 
