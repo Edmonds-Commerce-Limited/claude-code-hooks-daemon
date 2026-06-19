@@ -89,24 +89,47 @@ script refined iteration-by-iteration and committed on each pass.
 - [x] ✅ **Task 3.2**: Re-ran full suite — **12-way concurrency now yields 12 distinct numbers**
   (was five `00001-*`); shellcheck clean; all v1 guards regression-pass.
 
-### Phase 4: Distribution & Integration Design (proposal audit)
+### Phase 4: Distribution & Integration Design (proposal audit) — `PROPOSAL-AUDIT.md`
 
-- [ ] ⬜ **Task 4.1**: Decide counter ownership contract (script vs daemon) and document it.
-- [ ] ⬜ **Task 4.2**: Decide distribution mechanism (installer/upgrade deploy target, idempotency, exec bit).
-- [ ] ⬜ **Task 4.3**: Decide agent-guidance surface (handler `get_claude_md()` text, docs) — without bloat.
-- [ ] ⬜ **Task 4.4**: Record decisions in this PLAN under "Technical Decisions"; identify follow-up plans.
+- [x] ✅ **Task 4.1**: Counter-ownership contract documented — script mirrors the Python SSOT
+  (`plan_numbering.py`); writes via bash so the daemon never double-increments; stricter drift guard.
+- [x] ✅ **Task 4.2**: Distribution decided — deploy in `install/plan_workflow.py::bootstrap_plan_workflow`,
+  overwrite-on-upgrade + exec bit; surfaced pre-existing hardcoded-`CLAUDE/Plan` SSOT bug to fix.
+- [x] ✅ **Task 4.3**: Guidance decided — update `plan_number_helper.get_claude_md()` to name the script
+  as canonical, counter-read as number-only fallback; no new handler; README left to the agent.
+- [x] ✅ **Task 4.4**: Decisions recorded below + in `PROPOSAL-AUDIT.md`; follow-up implementation plan identified.
 
 ## Technical Decisions
 
-<!-- Populated as the audit reaches conclusions. -->
+### Decision 1: Counter ownership (script vs daemon)
+
+**Context**: both the script and the daemon can advance `hooksdaemon.latestPlanNumber`; a double-increment
+would skip numbers. **Decision**: the script writes the folder + `PLAN.md` with bash (`mkdir`/`cat`), NOT
+the Write tool, so the daemon's plan-numbering path never fires — no double-increment (verified live: a
+Write-tool `PLAN.md` bumped 129→130; the script's bash writes do not). The script mirrors the Python SSOT
+in `handlers/utils/plan_numbering.py` exactly, with one safer divergence: it **refuses** on counter-behind-disk
+drift where the daemon would blindly hand out `counter+1`.
+
+### Decision 2: Distribution mechanism
+
+**Decision**: deploy `mkplan.bash` from `install/plan_workflow.py::bootstrap_plan_workflow()` (the existing,
+idempotent client-plan-dir bootstrap). Policy: **overwrite on every upgrade** + exec bit (daemon-owned tooling,
+unlike skip-if-exists README/CLAUDE.md), so audit fixes reach existing installs. **Blocking sub-fix**: that
+bootstrap hardcodes `CLAUDE/Plan` and must be threaded to honour `track_plans_in_project` (pre-existing SSOT bug).
+
+### Decision 3: Agent guidance surface
+
+**Decision**: one coherent message — update `plan_number_helper.get_claude_md()` so running the deployed
+`mkplan.bash` is the canonical create-a-plan action and "read the counter + 1" is the number-only fallback;
+no `ls`/scan, no second method, no new handler. README index updates stay with the agent (Edit tool), not the script.
 
 ## Success Criteria
 
-- [ ] Candidate script captured as baseline and audited adversarially across all five lenses.
-- [ ] All High/Medium audit findings either fixed in the script or explicitly accepted with rationale.
-- [ ] A clear, evidence-backed recommendation on distribution + daemon-counter ownership.
-- [ ] Every audit iteration committed (`AUDIT-vN.md` + script revision) for traceability.
-- [ ] Script remains dual-audience (human-legible, agent-deterministic) after refinement.
+- [x] ✅ Candidate script captured as baseline and audited adversarially across all five lenses.
+- [x] ✅ All High/Medium audit findings either fixed in the script (C1, H1, M2, M3) or accepted with rationale (H2, H3, M1, M4, L1–L4).
+- [x] ✅ A clear, evidence-backed recommendation on distribution + daemon-counter ownership (`PROPOSAL-AUDIT.md`).
+- [x] ✅ Every audit iteration committed (`AUDIT-vN.md` + script revision) for traceability.
+- [x] ✅ Script remains dual-audience (human-legible reminders/usage, agent-deterministic exit codes + stdout path).
 
 ## Risks & Mitigations
 
@@ -122,4 +145,21 @@ script refined iteration-by-iteration and committed on each pass.
 ### 2026-06-19
 
 - Plan scaffolded. Candidate `mkplan.bash` copied in verbatim as the audit baseline.
-- Next: Phase 2 hostile audit → `AUDIT-v1.md`.
+- **Phase 2 (`AUDIT-v1.md`)**: hostile audit found 1 CRITICAL (concurrent runs → duplicate
+  numbers, proven), 3 HIGH (reverse-symlink mis-location; no README update; unspecified
+  distribution), 4 MEDIUM, 4 LOW. Name validation / drift / bootstrap / portability all robust.
+- **Phase 3 (`AUDIT-v2.md`)**: refined to v2 — portable atomic-`mkdir` lock (C1), `MKPLAN_PLAN_DIR`
+  override + contract docs (H1), high-water-mark counter (M2), friendly `mkdir` die (M3). Re-ran
+  the suite: 12 concurrent runs → `00001`–`00012`, all distinct (was five `00001-*`); shellcheck clean.
+- **Phase 4 (`PROPOSAL-AUDIT.md`)**: distribution/guidance decisions grounded in the real code —
+  deploy via `bootstrap_plan_workflow` (overwrite-on-upgrade), fix its hardcoded-`CLAUDE/Plan` SSOT
+  bug, name the script canonical in `plan_number_helper` guidance, leave README to the agent.
+- **Audit remit COMPLETE.** The script is sound to distribute. Implementation (installer deploy +
+  exec-bit + idempotency tests, guidance-text change, `track_plans_in_project` SSOT fix) is a
+  separate TDD plan — see "Next steps" below.
+
+### Next steps (follow-up implementation plan)
+
+- Wire deploy into `install/plan_workflow.py` (overwrite + `0o755`) honouring `track_plans_in_project`.
+- Update `plan_number_helper.get_claude_md()` + regenerate the `<hooksdaemon>` block.
+- TDD: installer deploy/idempotency test; handler guidance-text regression test; H-1/QA pass; release.
