@@ -88,19 +88,23 @@ everything else loads on demand.
 
 ## Tasks
 
-### Phase 0: Verification (BLOCKING)
+### Phase 0: Verification (BLOCKING) — ✅ COMPLETE
 
-- [ ] ⬜ **Task 0.1**: Read `markdown_organization`'s current Claude-memory allow-rule and the
-  exact path patterns it matches; confirm the precise insertion point for the new bool and the
-  specialist-message branch.
-- [ ] ⬜ **Task 0.2**: Confirm the full set of **memory file path patterns** to cover
-  (user-level `~/.claude/projects/*/memory/*.md`, ccy variant `.claude/ccy/.../memory/*.md`,
-  any project-level memory) and that they all surface as `.md` `Write`/`Edit` calls. Scope
-  precisely to Claude-meta memory locations — no false positives on project files that merely
-  live under some `memory/` directory.
-- [ ] ⬜ **Task 0.3**: Decide the config home + "policy active" SSoT consumed by both
-  `markdown_organization` (the block) and `optimal_config_checker` (the reconciliation), so the
-  two never give contradictory advice.
+- [x] ✅ **Task 0.1**: Found the exact inversion point. `markdown_organization.matches()`
+  (line ~617) currently does `if "/.claude/projects/" in file_path and "/memory/" in file_path: return False` (allow). Under the policy this becomes `return True` (intercept). `handle()`
+  (line ~824) is where the specialist-message branch is added, keyed on the same predicate.
+- [x] ✅ **Task 0.2**: The SSoT path predicate is the **raw-path** match
+  `"/.claude/projects/" in file_path and "/memory/" in file_path`, checked BEFORE `resolve()`
+  (a comment at the call site notes resolve() maps ccy-symlinked paths back into the project and
+  would mis-handle them). The real write path Claude uses — `~/.claude/projects/<slug>/memory/*.md`
+  (e.g. `/root/.claude/projects/-workspace/memory/MEMORY.md`) — matches it; writes are `.md`
+  `Write`/`Edit` calls (already interceptable). Precise to Claude-meta memory; no false positives
+  on arbitrary project `memory/` dirs.
+- [x] ✅ **Task 0.3**: Config home = a new `allow_untracked_claude_memory: bool = True` option on
+  `markdown_organization` (registry sets handler instance attributes from options after
+  instantiation, exactly like `_extra_allowed_markdown_paths`). That single attribute is the
+  "policy active" SSoT; `optimal_config_checker` reads the same policy to suppress its
+  re-enable-memory advice (Phase 3). No new handler, no parallel config.
 
 ### Phase 1: `allow_untracked_claude_memory` option + block (TDD)
 
