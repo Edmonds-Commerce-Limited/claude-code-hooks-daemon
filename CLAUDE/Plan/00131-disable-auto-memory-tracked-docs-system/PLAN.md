@@ -1,6 +1,6 @@
 # Plan 00131: Block Untracked Claude Memory + Tracked-Docs Progressive Disclosure
 
-**Status**: In Progress (Phases 1–4 implemented; integration/release in flight)
+**Status**: Shipped v3.23.0 (Phases 1–5 complete; Phase 4 scaffolding-skill + Phase 6 dogfood deferred to follow-ups). Delivery commits: dbcac37 (impl), 9285093 (release). Tag v3.23.0 = 9ed4a5f.
 **Created**: 2026-06-19
 **Owner**: joseph
 **Priority**: High
@@ -145,13 +145,16 @@ everything else loads on demand.
   auto-build rules/skills) is a focused FOLLOW-UP plan, not this one — the block + guidance ship
   first so the feature release stays tight (Risk-row mitigation honoured).
 
-### Phase 5: Integration, QA, docs, release
+### Phase 5: Integration, QA, docs, release — ✅ COMPLETE
 
-- [ ] ⬜ **Task 5.1**: Register/confirm config in `.claude/hooks-daemon.yaml`, restart daemon
-  (RUNNING), regenerate `.claude/HOOKS-DAEMON.md` + `<hooksdaemon>` block.
-- [ ] ⬜ **Task 5.2**: Full QA 13/13, daemon-load verification, H-1 acceptance gate, acceptance
-  tests (block vs allow, specialist vs generic message).
-- [ ] ⬜ **Task 5.3**: Release (may bundle with the Plan 00130 mkplan work already on `main`).
+- [x] ✅ **Task 5.1**: Config left at default (`allow_untracked_claude_memory` absent ⇒ `true`) so
+  this repo's behaviour is unchanged; daemon restarted RUNNING with new code; docs regenerated.
+- [x] ✅ **Task 5.2**: Full QA 13/13 (8657 tests, 95.1%); daemon-load verified; H-1 acceptance gate
+  23/23; live verification — temporarily enabled the policy in config, restarted, probed the live
+  socket (memory Write→DENY specialist, bash redirect→DENY, bash read→ALLOW), then reverted config
+  - restart (default ALLOW restored). Opus doc review APPROVE; code-reviewer APPROVE (0 blocking).
+- [x] ✅ **Task 5.3**: Released as **v3.23.0** bundled with the Plan 00130 `mkplan.bash` work
+  (release commit 9285093, tag 9ed4a5f). truth-changes/v3.23.0.yaml records the mkplan change.
 
 ### Phase 6: Dogfood (decide during the plan) — DEFERRED (follow-up)
 

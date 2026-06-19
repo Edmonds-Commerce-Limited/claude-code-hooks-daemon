@@ -6,15 +6,21 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Memory / Documentation Policy
 
-- [00131: Disable Auto-Memory + Tracked-Docs Progressive Disclosure](00131-disable-auto-memory-tracked-docs-system/PLAN.md) - In Progress
+- [00132: PostToolUse Progressive-Disclosure Reminder on Project-Doc Markdown Writes](00132-progressive-disclosure-md-write-reminder/PLAN.md) - Not Started (awaiting sign-off)
 
-  - Opt-in policy by which a project declares Claude Code **auto-memory disabled**; the daemon enforces it — auto-remediates the verified disable flag, **blocks writes** to Claude memory files (reads always allowed, so existing memory can be migrated), and steers durable knowledge into **tracked repo docs** (rules + skills + plain links), never untracked Claude meta files
-  - Grounded in the progressive-disclosure reference gist (belt-and-braces: `.claude/rules/*.md` with `paths:` globs + thin skills, SSoT, no `@`-imports) and a first pass over the daemon source (`optimal_config_checker` keys on `CLAUDE_CODE_DISABLE_MEMORY` and currently treats disabling as sub-optimal — must reconcile; `markdown_organization` already allows memory writes — precedence point)
-  - Phase 0 verification + design sign-off is the gate before any handler code (disable mechanism, memory paths, A-only vs A+B scope, dogfood-now decisions)
+  - Complements 00131's *block* with a *positive nudge*: a PostToolUse advisory that, after a project-doc `.md` write, re-hints the progressive-disclosure rules and asks "is this in the right place / is it the single source of truth?"
+  - Scoped to `CLAUDE.md` + the `CLAUDE/` doc tree, **excluding** `CLAUDE/Plan/` and `CLAUDE/Journal/` (explicit locations); rate-limited by an in-memory cooldown counter mirroring `critical_thinking_advisory` so it never spams
+  - Awaiting sign-off on Decision 1 (trigger path-set; `docs/`+`README` in or out) and the default cooldown size
+
+- [00131: Block Untracked Claude Memory + Tracked-Docs Progressive Disclosure](00131-disable-auto-memory-tracked-docs-system/PLAN.md) - Shipped v3.23.0 (Phases 1–4; Phase 4 scaffolding-skill + Phase 6 dogfood deferred to follow-ups)
+
+  - Shipped: `allow_untracked_claude_memory` option (default `true`) on `markdown_organization` — when `false`, **blocks** Write/Edit + bash redirect/tee writes to Claude memory files (reads always allowed) with a specialist tracked-docs / progressive-disclosure message; `optimal_config_checker` reconciled so it no longer nags to re-enable memory under the policy
+  - User-directed design: enforce by **blocking at the daemon layer**, not by disabling Claude's own (unreliable) memory engine
+  - Deferred follow-ups: a scaffolding skill (inventory docs, `@`-import audit, auto-build rules/skills) and dogfooding the policy in this repo (migrate `MEMORY.md` into tracked docs)
 
 ### Tooling / Dependencies
 
-- [00130: Plan-Scaffolding Script Distribution (`mkplan.bash`)](00130-plan-scaffolding-script-distribution/PLAN.md) - In Progress
+- [00130: Plan-Scaffolding Script Distribution (`mkplan.bash`)](00130-plan-scaffolding-script-distribution/PLAN.md) - Shipped v3.23.0
 
   - Candidate `mkplan.bash` proposed for distribution into client plan folders: scaffolds the next numbered plan folder + skeleton `PLAN.md`, resolving the number from the git-anchored `hooksdaemon.latestPlanNumber` counter (Plan 00112) so humans and agents stop hand-rolling names / scanning `ls` for the next number
   - Three legs: distribute the script, configure hooks so script + daemon agree on counter ownership (no double-increment), guide agents toward it
