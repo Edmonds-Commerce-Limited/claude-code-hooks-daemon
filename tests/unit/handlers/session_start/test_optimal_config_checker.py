@@ -289,6 +289,56 @@ class TestAutoMemoryCheck:
             assert memory[0]["passed"] is True
 
 
+class TestAutoMemoryUnderTrackedDocsPolicy:
+    """Auto-memory check reconciled with allow_untracked_claude_memory: false (Plan 00131).
+
+    When a project forbids untracked Claude memory, the daemon BLOCKS the writes —
+    so optimal_config_checker must NOT also nag the user to re-enable memory.
+    """
+
+    @pytest.fixture
+    def handler(self) -> Any:
+        from claude_code_hooks_daemon.handlers.session_start.optimal_config_checker import (
+            OptimalConfigCheckerHandler,
+        )
+
+        return OptimalConfigCheckerHandler()
+
+    def test_policy_active_memory_enabled_does_not_nag(self, handler: Any) -> None:
+        """Under policy, memory ENABLED must still pass (no contradictory advice)."""
+        env = os.environ.copy()
+        env.pop("CLAUDE_CODE_DISABLE_AUTO_MEMORY", None)
+        with patch.object(handler, "_untracked_memory_forbidden", return_value=True):
+            with patch.dict(os.environ, env, clear=True):
+                check = handler._check_auto_memory()
+        assert check["passed"] is True
+        # Must NOT advise re-enabling memory under the policy
+        assert "Remove or unset" not in check["fix"]
+        assert "tracked" in check["why"].lower()
+
+    def test_policy_active_memory_disabled_passes(self, handler: Any) -> None:
+        """Under policy, memory DISABLED is fine — still passes, no nag."""
+        with patch.object(handler, "_untracked_memory_forbidden", return_value=True):
+            with patch.dict(os.environ, {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}):
+                check = handler._check_auto_memory()
+        assert check["passed"] is True
+
+    def test_policy_active_mentions_block(self, handler: Any) -> None:
+        """Under policy, the check explains the daemon block / tracked-docs policy."""
+        with patch.object(handler, "_untracked_memory_forbidden", return_value=True):
+            with patch.dict(os.environ, {}, clear=True):
+                check = handler._check_auto_memory()
+        assert "allow_untracked_claude_memory" in check["why"]
+
+    def test_policy_inactive_preserves_default_nag(self, handler: Any) -> None:
+        """Without the policy, default behaviour is unchanged (disabled => fails)."""
+        with patch.object(handler, "_untracked_memory_forbidden", return_value=False):
+            with patch.dict(os.environ, {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}):
+                check = handler._check_auto_memory()
+        assert check["passed"] is False
+        assert "Remove or unset" in check["fix"]
+
+
 class TestBashMaintainWorkingDirCheck:
     """Test bash maintain working dir check."""
 

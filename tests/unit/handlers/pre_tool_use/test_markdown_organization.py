@@ -1974,3 +1974,131 @@ class TestPlanWriteAllowBehaviour:
         plan_file = created_folder / "PLAN.md"
         assert plan_file.exists()
         assert "# My Feature Plan" in plan_file.read_text()
+
+
+class TestUntrackedClaudeMemoryPolicy:
+    """Tests for the allow_untracked_claude_memory policy (Plan 00131).
+
+    Default (True) preserves today's behaviour: Claude auto-memory writes are
+    allowed. When set False, Write/Edit (and bash redirects) to Claude-memory
+    paths are BLOCKED with a specialist tracked-docs message; reads are allowed.
+    """
+
+    MEMORY_PATH = "/root/.claude/projects/-workspace/memory/MEMORY.md"
+    MEMORY_FACT_PATH = "/home/u/.claude/projects/my-proj/memory/some-fact.md"
+
+    @pytest.fixture
+    def handler(self) -> MarkdownOrganizationHandler:
+        return MarkdownOrganizationHandler()
+
+    @pytest.fixture
+    def policy_handler(self) -> MarkdownOrganizationHandler:
+        """Handler with the forbid-untracked-memory policy ACTIVE."""
+        h = MarkdownOrganizationHandler()
+        h._allow_untracked_claude_memory = False
+        return h
+
+    def _write(self, file_path: str) -> dict[str, Any]:
+        return {"tool_name": "Write", "tool_input": {"file_path": file_path, "content": "x"}}
+
+    def _edit(self, file_path: str) -> dict[str, Any]:
+        return {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": file_path, "old_string": "a", "new_string": "b"},
+        }
+
+    def _bash(self, command: str) -> dict[str, Any]:
+        return {"tool_name": "Bash", "tool_input": {"command": command}}
+
+    # --- default behaviour preserved (allow_untracked_claude_memory=True) ---
+
+    def test_default_allows_memory_write(self, handler: MarkdownOrganizationHandler) -> None:
+        assert handler._allow_untracked_claude_memory is True
+        assert handler.matches(self._write(self.MEMORY_PATH)) is False
+
+    def test_default_ignores_bash_redirect_to_memory(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        assert handler.matches(self._bash(f"cat foo > {self.MEMORY_PATH}")) is False
+
+    # --- policy active: tool writes blocked ---
+
+    def test_policy_blocks_memory_write(self, policy_handler: MarkdownOrganizationHandler) -> None:
+        assert policy_handler.matches(self._write(self.MEMORY_PATH)) is True
+
+    def test_policy_blocks_memory_fact_write(
+        self, policy_handler: MarkdownOrganizationHandler
+    ) -> None:
+        assert policy_handler.matches(self._write(self.MEMORY_FACT_PATH)) is True
+
+    def test_policy_blocks_memory_edit(self, policy_handler: MarkdownOrganizationHandler) -> None:
+        assert policy_handler.matches(self._edit(self.MEMORY_PATH)) is True
+
+    def test_policy_handle_emits_specialist_message(
+        self, policy_handler: MarkdownOrganizationHandler
+    ) -> None:
+        result = policy_handler.handle(self._write(self.MEMORY_PATH))
+        assert result.decision == Decision.DENY
+        # Specialist message — NOT the generic wrong-location one
+        assert "WRONG LOCATION" not in result.reason
+        assert "UNTRACKED CLAUDE MEMORY" in result.reason
+        assert self.MEMORY_PATH in result.reason
+        # Points at tracked docs + progressive disclosure
+        assert ".claude/rules/" in result.reason
+        assert "tracked" in result.reason.lower()
+
+    # --- policy active: bash redirect side-door closed ---
+
+    def test_policy_blocks_bash_redirect_to_memory(
+        self, policy_handler: MarkdownOrganizationHandler
+    ) -> None:
+        assert policy_handler.matches(self._bash(f"echo x > {self.MEMORY_PATH}")) is True
+
+    def test_policy_blocks_bash_append_to_memory(
+        self, policy_handler: MarkdownOrganizationHandler
+    ) -> None:
+        assert policy_handler.matches(self._bash(f"echo x >> {self.MEMORY_PATH}")) is True
+
+    def test_policy_blocks_bash_tee_to_memory(
+        self, policy_handler: MarkdownOrganizationHandler
+    ) -> None:
+        assert policy_handler.matches(self._bash(f"echo x | tee {self.MEMORY_PATH}")) is True
+
+    def test_policy_handle_specialist_message_for_bash(
+        self, policy_handler: MarkdownOrganizationHandler
+    ) -> None:
+        result = policy_handler.handle(self._bash(f"echo x > {self.MEMORY_PATH}"))
+        assert result.decision == Decision.DENY
+        assert "UNTRACKED CLAUDE MEMORY" in result.reason
+
+    # --- reads are always allowed ---
+
+    def test_policy_allows_bash_read_of_memory(
+        self, policy_handler: MarkdownOrganizationHandler
+    ) -> None:
+        assert policy_handler.matches(self._bash(f"cat {self.MEMORY_PATH}")) is False
+
+    def test_policy_allows_bash_grep_of_memory(
+        self, policy_handler: MarkdownOrganizationHandler
+    ) -> None:
+        assert policy_handler.matches(self._bash(f"grep foo {self.MEMORY_PATH}")) is False
+
+    def test_policy_ignores_non_memory_bash_redirect(
+        self, policy_handler: MarkdownOrganizationHandler
+    ) -> None:
+        assert policy_handler.matches(self._bash("echo x > /tmp/notes.md")) is False
+
+    # --- regression: generic markdown blocking unaffected by the policy ---
+
+    def test_policy_generic_wrong_location_still_generic(
+        self, policy_handler: MarkdownOrganizationHandler
+    ) -> None:
+        result = policy_handler.handle(self._write("/tmp/test/src/invalid.md"))
+        assert result.decision == Decision.DENY
+        assert "WRONG LOCATION" in result.reason
+        assert "UNTRACKED CLAUDE MEMORY" not in result.reason
+
+    def test_policy_off_generic_location_still_blocks(
+        self, policy_handler: MarkdownOrganizationHandler
+    ) -> None:
+        assert policy_handler.matches(self._write("/tmp/test/src/invalid.md")) is True

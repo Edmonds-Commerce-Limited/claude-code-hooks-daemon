@@ -14,7 +14,7 @@ from claude_code_hooks_daemon.constants import (
     ToolName,
 )
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult, ProjectContext
-from claude_code_hooks_daemon.core.utils import get_file_path
+from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_path
 from claude_code_hooks_daemon.core.worktree_paths import effective_project_relative_path
 from claude_code_hooks_daemon.handlers.utils.plan_numbering import (
     next_plan_number_for_target,
@@ -33,6 +33,21 @@ _PLAN_ROOT_EXCLUDED_FILES: Final[frozenset[str]] = frozenset({"readme"})
 # Each top-level package inside these is treated as a sub-project —
 # normal markdown organization rules apply within each package root.
 _DEPENDENCY_DIRECTORIES: Final[tuple[str, ...]] = ("vendor/", "node_modules/")
+
+# Config option (policy SSoT) that forbids untracked Claude auto-memory writes.
+# When False, Claude-memory .md writes are blocked at the daemon layer and durable
+# knowledge must live in tracked project docs (progressive disclosure). Plan 00131.
+ALLOW_UNTRACKED_CLAUDE_MEMORY_OPTION: Final[str] = "allow_untracked_claude_memory"
+
+# Path markers identifying a Claude Code auto-memory file
+# (e.g. ~/.claude/projects/<slug>/memory/MEMORY.md and per-fact files).
+_CLAUDE_MEMORY_PATH_MARKERS: Final[tuple[str, str]] = ("/.claude/projects/", "/memory/")
+
+# Shell write-to-file patterns used to close the bash side-door to memory paths.
+# Redirect (> / >>) and tee targets are WRITES; reads (cat/grep/less path) have no
+# such operator and are intentionally NOT matched (reads stay allowed for migration).
+_BASH_REDIRECT_TARGET_RE: Final[re.Pattern[str]] = re.compile(r">>?\s*([^\s|&;<>]+)")
+_BASH_TEE_TARGET_RE: Final[re.Pattern[str]] = re.compile(r"\btee\b(?:\s+-[^\s]+)*\s+([^\s|&;<>]+)")
 
 # Industry-standard markdown files that live at the project root.
 # These are exact filenames (no path components) — subdirectory copies are blocked.
@@ -91,6 +106,9 @@ class MarkdownOrganizationHandler(Handler):
         self._allowed_markdown_paths: list[str] | None = None  # Regex patterns for allowed paths
         # Additive allowed paths: layered ON TOP of built-ins OR the legacy override
         self._extra_allowed_markdown_paths: list[str] | None = None
+        # Policy: when False, untracked Claude auto-memory writes are BLOCKED at the
+        # daemon layer (default True preserves today's allow behaviour). Plan 00131.
+        self._allow_untracked_claude_memory: bool = True
 
     def normalize_path(self, file_path: str) -> str:
         """Normalize file path to project-relative format.
@@ -591,6 +609,48 @@ class MarkdownOrganizationHandler(Handler):
 
         return HookResult(decision=Decision.ALLOW)
 
+    @staticmethod
+    def _is_claude_memory_path(file_path: str) -> bool:
+        """True if file_path is a Claude Code auto-memory file.
+
+        Matches ~/.claude/projects/<slug>/memory/*.md (MEMORY.md index and
+        per-fact files). Checked on the RAW path (before resolve()) because a
+        ccy symlink (~/.claude -> project/.claude/ccy) can map these back into
+        the project root and defeat a resolved-path check.
+        """
+        marker_projects, marker_memory = _CLAUDE_MEMORY_PATH_MARKERS
+        return marker_projects in file_path and marker_memory in file_path
+
+    def _bash_memory_write_target(self, hook_input: dict[str, Any]) -> str | None:
+        """Return a Claude-memory path being WRITTEN by a bash command, else None.
+
+        Closes the `cat > ~/.claude/projects/x/memory/y.md` side-door: detects
+        redirect (`>`/`>>`) and `tee` targets that point at a memory path. Reads
+        (cat/grep/less with no write operator) are intentionally not matched.
+        """
+        command = get_bash_command(hook_input)
+        if not command:
+            return None
+        for pattern in (_BASH_REDIRECT_TARGET_RE, _BASH_TEE_TARGET_RE):
+            for match in pattern.finditer(command):
+                target = match.group(1).strip("'\"")
+                if self._is_claude_memory_path(target):
+                    return target
+        return None
+
+    def _claude_memory_block_target(self, hook_input: dict[str, Any]) -> str | None:
+        """Return the Claude-memory path this call would WRITE, else None.
+
+        Single source of truth shared by matches() and handle() so the block
+        decision and the specialist message stay in lock-step. Covers Write/Edit
+        tool writes and bash redirect/tee side-doors. Only meaningful when the
+        forbid-untracked-memory policy is active (caller gates on the flag).
+        """
+        file_path = get_file_path(hook_input)
+        if file_path and self._is_claude_memory_path(file_path):
+            return file_path
+        return self._bash_memory_write_target(hook_input)
+
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if writing markdown to wrong location.
 
@@ -598,6 +658,12 @@ class MarkdownOrganizationHandler(Handler):
 
         Additionally intercepts planning mode writes when feature is enabled.
         """
+        # Policy: forbid untracked Claude memory. Close the bash redirect/tee
+        # side-door to memory paths BEFORE the Write/Edit tool gate. Only active
+        # when the project has opted in (allow_untracked_claude_memory: false).
+        if not self._allow_untracked_claude_memory and self._bash_memory_write_target(hook_input):
+            return True
+
         tool_name = hook_input.get(HookInputField.TOOL_NAME)
         if tool_name not in [ToolName.WRITE, ToolName.EDIT]:
             return False
@@ -611,11 +677,14 @@ class MarkdownOrganizationHandler(Handler):
         if self._track_plans_in_project and self.is_planning_mode_write(file_path):
             return True  # Intercept to redirect
 
-        # Allow Claude Code auto-memory writes (e.g. ~/.claude/projects/*/memory/*.md)
+        # Claude Code auto-memory writes (e.g. ~/.claude/projects/*/memory/*.md).
         # Check the raw path BEFORE resolve() because symlinks (e.g. ~/.claude -> project/.claude/ccy)
         # can cause resolve() to map these paths back into the project root, falsely blocking them.
-        if "/.claude/projects/" in file_path and "/memory/" in file_path:
-            return False
+        # Default policy ALLOWS these (return False). When the project forbids untracked Claude
+        # memory (allow_untracked_claude_memory: false), INTERCEPT so handle() can deny with the
+        # specialist tracked-docs message. Plan 00131.
+        if self._is_claude_memory_path(file_path):
+            return not self._allow_untracked_claude_memory
 
         # CRITICAL: Only enforce rules for files WITHIN the project root
         # Files outside project root (like Claude Code auto memory) should be allowed
@@ -827,6 +896,14 @@ class MarkdownOrganizationHandler(Handler):
         Planning mode writes are redirected to project structure.
         Other invalid locations are denied with guidance.
         """
+        # Policy: forbid untracked Claude memory. Emit the SPECIALIST tracked-docs
+        # message (distinct from the generic wrong-location one) for any memory
+        # write — Write/Edit tool OR bash redirect/tee side-door. Plan 00131.
+        if not self._allow_untracked_claude_memory:
+            memory_target = self._claude_memory_block_target(hook_input)
+            if memory_target is not None:
+                return self._deny_untracked_memory(memory_target)
+
         file_path = get_file_path(hook_input)
         if not file_path:
             return HookResult(decision=Decision.ALLOW)
@@ -869,7 +946,64 @@ class MarkdownOrganizationHandler(Handler):
             ),
         )
 
+    def _deny_untracked_memory(self, target: str) -> HookResult:
+        """Specialist DENY for the forbid-untracked-memory policy.
+
+        Distinct from the generic wrong-location message: it explains the policy,
+        confirms reads stay allowed (for migration), and routes durable knowledge
+        into tracked project docs using progressive disclosure. Plan 00131.
+        """
+        return HookResult(
+            decision=Decision.DENY,
+            reason=(
+                "UNTRACKED CLAUDE MEMORY IS DISABLED FOR THIS PROJECT\n\n"
+                "This project does not keep durable knowledge in untracked Claude memory\n"
+                "files (~/.claude/projects/*/memory/). That knowledge is per-checkout,\n"
+                "un-reviewed, and invisible to teammates — it drifts from the repo and\n"
+                "bypasses code review.\n\n"
+                f"Blocked write: {target}\n\n"
+                "READING memory is still allowed — so you can migrate any existing memory\n"
+                "into tracked project docs.\n\n"
+                "DOCUMENT IT IN TRACKED PROJECT DOCS INSTEAD (progressive disclosure):\n"
+                "- Durable, always-relevant facts -> CLAUDE.md (keep it lean; it is\n"
+                "  resident context loaded every session)\n"
+                "- Contextual, path-specific guidance -> .claude/rules/*.md with `paths:`\n"
+                "  glob frontmatter (loaded on demand only when matching files are touched)\n"
+                "- Intent-triggered procedures -> a thin skill under .claude/skills/ that\n"
+                "  points at a single-source-of-truth doc body\n"
+                "- Reference material humans also read -> docs/\n"
+                "- Link between docs with plain markdown links (zero token cost until\n"
+                "  followed); AVOID @-imports (they re-inline eagerly rather than defer)\n\n"
+                "Keep ONE source of truth per fact and link to it. Put the knowledge where\n"
+                "the repo tracks it, not in untracked Claude meta files.\n\n"
+                "(Policy: `allow_untracked_claude_memory: false` under markdown_organization\n"
+                "in .claude/hooks-daemon.yaml. Set it true to restore default memory writes.)"
+            ),
+        )
+
     def get_claude_md(self) -> str | None:
+        if not self._allow_untracked_claude_memory:
+            return (
+                "## markdown_organization — tracked-docs policy (untracked Claude memory BLOCKED)\n\n"
+                "This project sets `allow_untracked_claude_memory: false`. Writing to Claude\n"
+                "auto-memory files (`~/.claude/projects/*/memory/*.md`) is **blocked** — via the\n"
+                "Write/Edit tools AND via bash redirect/`tee` side-doors. **Reading memory is\n"
+                "still allowed** so existing memory can be migrated out.\n\n"
+                "**Put durable knowledge in TRACKED project docs (progressive disclosure):**\n\n"
+                "- Always-relevant facts → `CLAUDE.md` (keep lean; resident every session)\n"
+                "- Path-specific guidance → `.claude/rules/*.md` with `paths:` glob frontmatter "
+                "(loads on demand only when matching files are touched)\n"
+                "- Intent-triggered procedures → a thin skill under `.claude/skills/` pointing "
+                "at a single-source-of-truth doc body\n"
+                "- Human-facing reference → `docs/`\n"
+                "- Link docs with plain markdown links (zero token cost until followed); "
+                "**avoid `@`-imports** (they re-inline eagerly rather than defer)\n\n"
+                "Keep ONE source of truth per fact and link to it. Normal markdown-location "
+                "rules (below) still apply to every other `.md` file.\n\n"
+                "**Allowed locations**: `CLAUDE/`, `docs/`, `RELEASES/`, `CLAUDE/Plan/`, "
+                "root-level `README.md`, `.claude/rules/`, or any `extra_allowed_markdown_paths` "
+                "pattern."
+            )
         return (
             "## markdown_organization — markdown files must go in allowed locations\n\n"
             "Writing a new `.md` file to an unrecognised location is blocked. "

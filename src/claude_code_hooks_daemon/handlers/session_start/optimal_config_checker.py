@@ -205,10 +205,63 @@ class OptimalConfigCheckerHandler(Handler):
             "docs": DOCS_URL,
         }
 
+    def _untracked_memory_forbidden(self) -> bool:
+        """True if markdown_organization.allow_untracked_claude_memory is false.
+
+        Reads the daemon config (single source of truth for the policy) so this
+        SessionStart advisory does not contradict the PreToolUse block. Fail-safe:
+        any read/parse problem means 'policy not active', so default auto-memory
+        advice still applies. Plan 00131.
+        """
+        try:
+            from claude_code_hooks_daemon.config.models import Config
+            from claude_code_hooks_daemon.core import ProjectContext
+            from claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization import (
+                ALLOW_UNTRACKED_CLAUDE_MEMORY_OPTION,
+            )
+
+            config = Config.load_or_default(ProjectContext.config_path())
+            md_org = config.handlers.pre_tool_use.get("markdown_organization", {})
+            if isinstance(md_org, dict):
+                options = md_org.get("options", {})
+            else:
+                options = getattr(md_org, "options", {})
+            return options.get(ALLOW_UNTRACKED_CLAUDE_MEMORY_OPTION, True) is False
+        except (RuntimeError, OSError, ValueError, AttributeError) as e:
+            logger.debug("Could not determine untracked-memory policy: %s", e)
+            return False
+
     def _check_auto_memory(self) -> dict[str, Any]:
-        """Check if auto-memory is NOT disabled."""
+        """Check auto-memory state, reconciled with the tracked-docs policy.
+
+        When allow_untracked_claude_memory: false is active, the daemon BLOCKS
+        memory writes — so this check must never nag to re-enable memory (it
+        always passes and frames disabling as an optional best-effort step).
+        """
         value = os.environ.get("CLAUDE_CODE_DISABLE_AUTO_MEMORY", "")
         disabled = value == "1"
+
+        if self._untracked_memory_forbidden():
+            state = (
+                "DISABLED (CLAUDE_CODE_DISABLE_AUTO_MEMORY=1)" if disabled else "Enabled (default)"
+            )
+            return {
+                "name": "Auto Memory",
+                "passed": True,
+                "current": (
+                    f"{state} — untracked Claude memory is BLOCKED by the daemon "
+                    "(allow_untracked_claude_memory: false)"
+                ),
+                "why": (
+                    "This project forbids untracked Claude memory "
+                    "(allow_untracked_claude_memory: false): the daemon blocks memory "
+                    "writes and durable knowledge lives in tracked project docs. The "
+                    "auto-memory env var no longer matters — the block is the enforcement."
+                ),
+                "fix": "Optional: disable auto-memory too — export CLAUDE_CODE_DISABLE_AUTO_MEMORY=1",
+                "where": "~/.bashrc, ~/.zshrc, or settings.json env section",
+                "docs": DOCS_URL,
+            }
 
         return {
             "name": "Auto Memory",

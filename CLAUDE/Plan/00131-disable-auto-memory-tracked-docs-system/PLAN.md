@@ -1,6 +1,6 @@
 # Plan 00131: Block Untracked Claude Memory + Tracked-Docs Progressive Disclosure
 
-**Status**: In Progress (Phase 0 — verification, then implement)
+**Status**: In Progress (Phases 1–4 implemented; integration/release in flight)
 **Created**: 2026-06-19
 **Owner**: joseph
 **Priority**: High
@@ -106,37 +106,44 @@ everything else loads on demand.
   "policy active" SSoT; `optimal_config_checker` reads the same policy to suppress its
   re-enable-memory advice (Phase 3). No new handler, no parallel config.
 
-### Phase 1: `allow_untracked_claude_memory` option + block (TDD)
+### Phase 1: `allow_untracked_claude_memory` option + block (TDD) — ✅ COMPLETE
 
-- [ ] ⬜ **Task 1.1**: Add the `allow_untracked_claude_memory: bool = True` option to
-  `markdown_organization` config (schema-validated; default preserves current behaviour).
-- [ ] ⬜ **Task 1.2**: RED/GREEN — when the option is `false`, `Write`/`Edit` to a Claude-memory
-  `.md` path is **denied**; when `true`, it is allowed exactly as today. Reads unaffected.
-- [ ] ⬜ **Task 1.3**: RED/GREEN — bash redirects writing to those paths are also denied under
-  the policy (close the `cat > .../memory/x.md` side door), consistent with the tool-write block.
+- [x] ✅ **Task 1.1**: Added `allow_untracked_claude_memory: bool = True` instance attribute on
+  `MarkdownOrganizationHandler` (option key constant `ALLOW_UNTRACKED_CLAUDE_MEMORY_OPTION`);
+  registry injects it generically via `setattr(instance, f"_{option_key}", ...)`. Default
+  preserves current behaviour.
+- [x] ✅ **Task 1.2**: RED→GREEN — when `false`, `Write`/`Edit` to a Claude-memory `.md` path
+  is **denied** (matches() inverts the allow-rule via `_is_claude_memory_path`); when `true`,
+  allowed exactly as today. Reads unaffected (handler only matches Write/Edit/bash-write).
+- [x] ✅ **Task 1.3**: RED→GREEN — bash redirects (`>`/`>>`) and `tee` into memory paths are
+  denied under the policy (`_bash_memory_write_target`); reads (`cat`/`grep` path) are NOT
+  matched. Non-memory redirects unaffected.
 
-### Phase 2: Specialist message + progressive-disclosure guidance (TDD)
+### Phase 2: Specialist message + progressive-disclosure guidance (TDD) — ✅ COMPLETE
 
-- [ ] ⬜ **Task 2.1**: RED/GREEN — the Claude-memory block emits the **specialist message**
-  (document in tracked project docs; here is the progressive-disclosure approach), distinct
-  from the generic disallowed-location message.
-- [ ] ⬜ **Task 2.2**: Update `markdown_organization.get_claude_md()` (and the generated
-  `<hooksdaemon>` block) so that, under the policy, the guidance names the tracked-docs target
-  model: belt-and-braces `.claude/rules/*.md` (`paths:` globs) + thin skills + plain links, SSoT,
-  **no `@`-imports**, reads-allowed-for-migration.
+- [x] ✅ **Task 2.1**: RED→GREEN — `_deny_untracked_memory()` emits the **specialist message**
+  (UNTRACKED CLAUDE MEMORY IS DISABLED … document in tracked project docs; progressive
+  disclosure), distinct from the generic wrong-location message. Used by both the Write/Edit
+  and bash side-door paths via the shared `_claude_memory_block_target()` SSoT.
+- [x] ✅ **Task 2.2**: `get_claude_md()` now branches on the policy — under the policy it names
+  the tracked-docs target model: belt-and-braces `.claude/rules/*.md` (`paths:` globs) + thin
+  skills + plain links, SSoT, **no `@`-imports**, reads-allowed-for-migration. (Default repo
+  keeps the original guidance, so the `<hooksdaemon>` block is unchanged here.)
 
-### Phase 3: Reconcile optimal_config_checker (TDD)
+### Phase 3: Reconcile optimal_config_checker (TDD) — ✅ COMPLETE
 
-- [ ] ⬜ **Task 3.1**: When the policy is active, `optimal_config_checker` must NOT advise
-  re-enabling memory (suppress/invert `_check_memory()`), so the agent never sees contradictory
-  guidance ("disable it" vs "you disabled it, re-enable").
+- [x] ✅ **Task 3.1**: RED→GREEN — `_untracked_memory_forbidden()` reads the policy from the
+  daemon config (SSoT, fail-safe). When active, `_check_auto_memory()` always passes and frames
+  disabling memory as optional best-effort — no contradictory "re-enable memory" nag.
 
-### Phase 4: Progressive disclosure as a first-class thing (scope per Phase 0.3)
+### Phase 4: Progressive disclosure as a first-class thing (scope per Phase 0.3) — ✅ COMPLETE (guidance)
 
-- [ ] ⬜ **Task 4.1**: Establish the progressive-disclosure target model as durable daemon
-  guidance/docs (the belt-and-braces model + migration path), referenced by the specialist
-  message. Whether this also ships a *scaffolding skill* (inventory docs, `@`-import audit, build
-  rules/skills) in THIS plan or a focused follow-up is decided here based on size.
+- [x] ✅ **Task 4.1**: The progressive-disclosure target model (belt-and-braces rules + thin
+  skills + plain links, SSoT, no `@`-imports, reads-allowed-for-migration) is established as
+  durable daemon guidance in BOTH the specialist block message and the policy-active
+  `get_claude_md()`. **Decision**: the *scaffolding skill* (inventory docs, `@`-import audit,
+  auto-build rules/skills) is a focused FOLLOW-UP plan, not this one — the block + guidance ship
+  first so the feature release stays tight (Risk-row mitigation honoured).
 
 ### Phase 5: Integration, QA, docs, release
 
@@ -146,11 +153,13 @@ everything else loads on demand.
   tests (block vs allow, specialist vs generic message).
 - [ ] ⬜ **Task 5.3**: Release (may bundle with the Plan 00130 mkplan work already on `main`).
 
-### Phase 6: Dogfood (decide during the plan)
+### Phase 6: Dogfood (decide during the plan) — DEFERRED (follow-up)
 
-- [ ] ⬜ **Task 6.1**: Optionally activate `allow_untracked_claude_memory: false` in THIS repo
-  and migrate the existing rich `MEMORY.md` content into tracked docs (rules/docs/CLAUDE). Larger
-  body of work; may be a follow-up so the feature release stays tight.
+- [ ] ⬜ **Task 6.1**: **Decision**: do NOT activate `allow_untracked_claude_memory: false` in
+  THIS repo in this plan. Activating it requires migrating the existing rich `MEMORY.md` content
+  into tracked docs (rules/docs/CLAUDE) — a larger body of work that would bloat the feature
+  release. Deferred to a focused follow-up so the feature ships tight (default `true` here keeps
+  current behaviour and an unchanged `<hooksdaemon>` block).
 
 ## Technical Decisions
 
@@ -216,3 +225,18 @@ when a project opts in by setting it `false`.
   `optimal_config_checker` keys on `CLAUDE_CODE_DISABLE_MEMORY` and must be reconciled.
 - Next: Phase 0 verification (read the allow-rule + memory path patterns), then TDD the option +
   block + specialist message.
+
+### 2026-06-19 — Phases 1–4 implemented (TDD)
+
+- **markdown_organization**: added `_allow_untracked_claude_memory` (default True), option-key
+  constant `ALLOW_UNTRACKED_CLAUDE_MEMORY_OPTION`, helpers `_is_claude_memory_path`,
+  `_bash_memory_write_target` (redirect/`tee` only — reads pass), `_claude_memory_block_target`
+  (shared by matches()+handle()), and specialist `_deny_untracked_memory()`. `matches()` inverts
+  the memory allow-rule + closes the bash side-door; `get_claude_md()` branches on the policy.
+- **optimal_config_checker**: `_untracked_memory_forbidden()` reads the policy from the daemon
+  config (fail-safe); `_check_auto_memory()` no longer nags to re-enable memory under the policy.
+- Tests: +15 markdown policy tests, +4 optimal-config policy tests (all RED→GREEN). Full
+  markdown+optimal suites: 220 passed. Daemon restart: RUNNING with new code.
+- **Decisions**: Phase 4 scaffolding skill → follow-up plan (guidance ships now). Phase 6 dogfood
+  (activate in THIS repo + migrate MEMORY.md) → deferred follow-up; this repo stays default `true`.
+- Ships bundled with the Plan 00130 `mkplan.bash` work already on `main`.
