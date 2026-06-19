@@ -4,6 +4,14 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+### Memory / Documentation Policy
+
+- [00131: Disable Auto-Memory + Tracked-Docs Progressive Disclosure](00131-disable-auto-memory-tracked-docs-system/PLAN.md) - In Progress
+
+  - Opt-in policy by which a project declares Claude Code **auto-memory disabled**; the daemon enforces it — auto-remediates the verified disable flag, **blocks writes** to Claude memory files (reads always allowed, so existing memory can be migrated), and steers durable knowledge into **tracked repo docs** (rules + skills + plain links), never untracked Claude meta files
+  - Grounded in the progressive-disclosure reference gist (belt-and-braces: `.claude/rules/*.md` with `paths:` globs + thin skills, SSoT, no `@`-imports) and a first pass over the daemon source (`optimal_config_checker` keys on `CLAUDE_CODE_DISABLE_MEMORY` and currently treats disabling as sub-optimal — must reconcile; `markdown_organization` already allows memory writes — precedence point)
+  - Phase 0 verification + design sign-off is the gate before any handler code (disable mechanism, memory paths, A-only vs A+B scope, dogfood-now decisions)
+
 ### Tooling / Dependencies
 
 - [00130: Plan-Scaffolding Script Distribution (`mkplan.bash`)](00130-plan-scaffolding-script-distribution/PLAN.md) - In Progress
