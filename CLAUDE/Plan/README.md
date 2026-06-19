@@ -6,6 +6,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Tooling / Dependencies
 
+- [00130: Plan-Scaffolding Script Distribution (`mkplan.bash`)](00130-plan-scaffolding-script-distribution/PLAN.md) - In Progress
+
+  - Candidate `mkplan.bash` proposed for distribution into client plan folders: scaffolds the next numbered plan folder + skeleton `PLAN.md`, resolving the number from the git-anchored `hooksdaemon.latestPlanNumber` counter (Plan 00112) so humans and agents stop hand-rolling names / scanning `ls` for the next number
+  - Three legs: distribute the script, configure hooks so script + daemon agree on counter ownership (no double-increment), guide agents toward it
+  - First deliverable is a **full hostile audit** (correctness, portability, security, daemon-integration, distribution) tracked as versioned `AUDIT-vN.md` docs with the script refined + committed each iteration — not a rubber stamp
+
 - [00129: Wire llm-friendly-qa-wrappers in as a Major Dependency](00129-llm-qa-wrappers-integration/PLAN.md) - Not Started
 
   - GitHub Issue [#33](https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/issues/33)
