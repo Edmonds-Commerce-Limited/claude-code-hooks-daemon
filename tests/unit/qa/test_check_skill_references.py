@@ -182,6 +182,19 @@ class TestExclusions:
         data = _run_checker("--path", str(tmp_path))
         assert data["summary"]["passed"]
 
+    def test_excludes_ccy_runtime_tree(self, tmp_path: Path) -> None:
+        """The claude-yolo `ccy` runtime/memory tree is gitignored state, not
+        agent-facing project source — it must be excluded like `untracked/`.
+
+        Regression: transient auto-memory under `.claude/ccy/.../memory/MEMORY.md`
+        mentioning `/hooks-daemon` was failing QA even though it is not tracked.
+        """
+        memory = tmp_path / ".claude" / "ccy" / "projects" / "-workspace" / "memory"
+        memory.mkdir(parents=True)
+        (memory / "MEMORY.md").write_text("- wired into /hooks-daemon skill as `check`\n")
+        data = _run_checker("--path", str(tmp_path))
+        assert data["summary"]["passed"]
+
 
 class TestJsonOutput:
     """Verify JSON output format matches QA conventions."""

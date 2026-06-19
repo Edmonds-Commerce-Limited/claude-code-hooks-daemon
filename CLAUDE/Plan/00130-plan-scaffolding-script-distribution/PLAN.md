@@ -99,6 +99,24 @@ script refined iteration-by-iteration and committed on each pass.
   as canonical, counter-read as number-only fallback; no new handler; README left to the agent.
 - [x] ✅ **Task 4.4**: Decisions recorded below + in `PROPOSAL-AUDIT.md`; follow-up implementation plan identified.
 
+### Phase 5: Implementation (TDD)
+
+- [x] ✅ **Task 5.1**: Bundle canonical `mkplan.bash` (audited v2, byte-identical) as package data at
+  `src/claude_code_hooks_daemon/install/templates/mkplan.bash` (single source of truth); add
+  `[tool.setuptools.package-data]` so wheel builds include it. shellcheck clean.
+- [x] ✅ **Task 5.2**: RED — failing tests for installer deploy (`TestMkplanDeployment`: bundled-template
+  exists, deploys, byte-identical, `0o755` exec bit, overwrite-on-upgrade, result flag, custom plan dir,
+  idempotent) + handler guidance regression (`test_get_claude_md_names_mkplan_as_canonical`).
+- [x] ✅ **Task 5.3**: GREEN — `bootstrap_plan_workflow(project_root, plan_dir_name="CLAUDE/Plan")` deploys
+  `mkplan.bash` (overwrite + exec bit) and honours the configured plan dir (fixes the hardcoded-`CLAUDE/Plan`
+  SSOT bug); `mkplan_template_path()` + `MKPLAN_SCRIPT_NAME` exported; `deployed_mkplan` result flag.
+- [x] ✅ **Task 5.4**: GREEN — `plan_number_helper.get_claude_md()` names `mkplan.bash` canonical, counter-read
+  demoted to number-only fallback; `<hooksdaemon>` block + `.claude/HOOKS-DAEMON.md` regenerated.
+- [x] ✅ **Task 5.5**: Wire `install_version.sh` step 14 to pass `config.plan_workflow.directory`.
+- [x] ✅ **Task 5.6**: Dogfood — `mkplan.bash` deployed to this repo's `CLAUDE/Plan/` via the real bootstrap.
+- [x] ✅ **Task 5.7**: Live smoke test — deployed script scaffolds 00001/00002 in a throwaway repo, counter
+  advances, spaces normalised, `PLAN.md` rendered. Daemon restart RUNNING. QA + release.
+
 ## Technical Decisions
 
 ### Decision 1: Counter ownership (script vs daemon)

@@ -419,9 +419,16 @@ if [ "${PLAN_WORKFLOW:-}" = "yes" ]; then
 
     if "$VENV_PYTHON" -c "
 from pathlib import Path
+from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.install.plan_workflow import bootstrap_plan_workflow
 
-result = bootstrap_plan_workflow(Path('$PROJECT_ROOT'))
+# Honour the configured plan directory (track_plans_in_project) rather than
+# assuming CLAUDE/Plan, so the structure + mkplan.bash land where the project
+# actually tracks plans. Falls back to the model default if config is absent.
+config = Config.load_or_default(Path('$TARGET_CONFIG'))
+plan_dir_name = config.plan_workflow.directory
+
+result = bootstrap_plan_workflow(Path('$PROJECT_ROOT'), plan_dir_name)
 for msg in result.messages:
     print(f'  -> {msg}')
 if result.success:

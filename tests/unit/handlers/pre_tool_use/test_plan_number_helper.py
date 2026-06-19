@@ -422,3 +422,22 @@ class TestPlanNumberHelperHandler:
 
         assert guidance is not None
         assert guidance.lstrip().startswith("#")
+
+    def test_get_claude_md_names_mkplan_as_canonical(self) -> None:
+        """Guidance must name mkplan.bash as the canonical create-a-plan action.
+
+        Plan 00130: the deployed scaffolding script is the preferred path; reading
+        the counter and adding 1 is demoted to the number-only fallback.
+        """
+        handler = PlanNumberHelperHandler()
+
+        guidance = handler.get_claude_md()
+
+        assert guidance is not None
+        # Names the deployed script
+        assert "mkplan.bash" in guidance
+        # Still anchors on the authoritative counter (single source of truth)
+        assert "hooksdaemon.latestPlanNumber" in guidance
+        # Counter-read is framed as the number-only fallback, not the primary path
+        lower = guidance.lower()
+        assert "fallback" in lower or "only need the number" in lower

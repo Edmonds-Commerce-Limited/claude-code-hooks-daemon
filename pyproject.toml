@@ -66,6 +66,10 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+# Bundle the plan-scaffolding script so wheel installs can deploy it.
+"claude_code_hooks_daemon.install" = ["templates/*.bash"]
+
 [tool.pytest.ini_options]
 minversion = "7.0"
 testpaths = ["tests"]

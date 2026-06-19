@@ -36,6 +36,7 @@ _EXCLUDED_DIRS = {
     "untracked",
     ".venv",
     "venv",
+    "ccy",  # claude-yolo runtime/memory tree (gitignored state, not project source)
     "commands",
     "worktrees",
     "Completed",

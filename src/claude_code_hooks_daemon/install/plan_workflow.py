@@ -12,8 +12,23 @@ from typing import Final
 
 logger = logging.getLogger(__name__)
 
-_PLAN_DIR_NAME: Final[str] = "CLAUDE/Plan"
+_DEFAULT_PLAN_DIR_NAME: Final[str] = "CLAUDE/Plan"
 _COMPLETED_DIR_NAME: Final[str] = "Completed"
+
+_TEMPLATES_DIR_NAME: Final[str] = "templates"
+MKPLAN_SCRIPT_NAME: Final[str] = "mkplan.bash"
+# Owner rwx, group/other rx — least-privilege executable (matches deploy_skills).
+_MKPLAN_MODE: Final[int] = 0o755
+
+
+def mkplan_template_path() -> Path:
+    """Absolute path to the canonical bundled ``mkplan.bash`` template.
+
+    This is the single source of truth for the plan-scaffolding script; the
+    installer copies it into each project's plan directory on install/upgrade.
+    """
+    return Path(__file__).resolve().parent / _TEMPLATES_DIR_NAME / MKPLAN_SCRIPT_NAME
+
 
 _README_TEMPLATE: Final[str] = """\
 # Plans Index
@@ -92,36 +107,48 @@ class BootstrapResult:
     success: bool = True
     skipped_readme: bool = False
     skipped_claude_md: bool = False
+    deployed_mkplan: bool = False
     messages: list[str] = field(default_factory=list)
 
 
-def bootstrap_plan_workflow(project_root: Path) -> BootstrapResult:
-    """Bootstrap the CLAUDE/Plan/ directory structure for a project.
+def bootstrap_plan_workflow(
+    project_root: Path,
+    plan_dir_name: str = _DEFAULT_PLAN_DIR_NAME,
+) -> BootstrapResult:
+    """Bootstrap the plan directory structure for a project.
 
-    Creates:
-    - CLAUDE/Plan/ directory
-    - CLAUDE/Plan/Completed/ directory
-    - CLAUDE/Plan/README.md (plan index template)
-    - CLAUDE/Plan/CLAUDE.md (lifecycle instructions)
+    Creates (under ``plan_dir_name``, default ``CLAUDE/Plan``):
+    - the plan directory
+    - the ``Completed/`` subdirectory
+    - ``README.md`` (plan index template) — skipped if it already exists
+    - ``CLAUDE.md`` (lifecycle instructions) — skipped if it already exists
+    - ``mkplan.bash`` (the next-plan scaffolding script) — daemon-owned tooling,
+      always (re)deployed so audit fixes reach existing installs on upgrade
 
-    Existing files are never overwritten.
+    Client content (README/CLAUDE.md) is never overwritten; the daemon-owned
+    ``mkplan.bash`` is overwritten on every run, matching how skill scripts and
+    hook wrappers are re-deployed.
 
     Args:
         project_root: Absolute path to the project root
+        plan_dir_name: Plan directory relative to project root. Defaults to
+            ``CLAUDE/Plan`` but MUST be passed the configured
+            ``track_plans_in_project`` value so the bootstrap honours a project
+            that tracks plans elsewhere (single source of truth).
 
     Returns:
         BootstrapResult with success status and messages
     """
     result = BootstrapResult()
-    plan_dir = project_root / _PLAN_DIR_NAME
+    plan_dir = project_root / plan_dir_name
     completed_dir = plan_dir / _COMPLETED_DIR_NAME
 
     # Create directories
     plan_dir.mkdir(parents=True, exist_ok=True)
-    result.messages.append(f"Created {_PLAN_DIR_NAME}/")
+    result.messages.append(f"Created {plan_dir_name}/")
 
     completed_dir.mkdir(exist_ok=True)
-    result.messages.append(f"Created {_PLAN_DIR_NAME}/{_COMPLETED_DIR_NAME}/")
+    result.messages.append(f"Created {plan_dir_name}/{_COMPLETED_DIR_NAME}/")
 
     # Create README.md (skip if exists)
     readme_path = plan_dir / "README.md"
@@ -145,4 +172,25 @@ def bootstrap_plan_workflow(project_root: Path) -> BootstrapResult:
         result.messages.append("Created CLAUDE.md (lifecycle instructions)")
         logger.info("Created %s", claude_md_path)
 
+    # Deploy mkplan.bash (daemon-owned: overwrite on every run + exec bit)
+    _deploy_mkplan(plan_dir, result)
+
     return result
+
+
+def _deploy_mkplan(plan_dir: Path, result: BootstrapResult) -> None:
+    """Copy the canonical mkplan.bash into ``plan_dir`` with the execute bit.
+
+    Daemon-owned tooling, so it is overwritten on every upgrade (unlike the
+    skip-if-exists README/CLAUDE.md) to guarantee audit fixes reach the field.
+    """
+    template = mkplan_template_path()
+    if not template.is_file():
+        raise FileNotFoundError(f"Bundled plan-scaffolding script not found: {template}")
+
+    target = plan_dir / MKPLAN_SCRIPT_NAME
+    target.write_text(template.read_text())
+    target.chmod(_MKPLAN_MODE)
+    result.deployed_mkplan = True
+    result.messages.append(f"Deployed {MKPLAN_SCRIPT_NAME} (chmod {_MKPLAN_MODE:o})")
+    logger.info("Deployed %s to %s (mode %o)", MKPLAN_SCRIPT_NAME, target, _MKPLAN_MODE)
