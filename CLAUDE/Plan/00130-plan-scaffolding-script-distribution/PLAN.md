@@ -69,18 +69,17 @@ script refined iteration-by-iteration and committed on each pass.
 - [x] ✅ **Task 1.2**: Copy candidate `mkplan.bash` into the plan folder verbatim (audit baseline).
 - [x] ✅ **Task 1.3**: Write this `PLAN.md` and add the plan to `CLAUDE/Plan/README.md`.
 
-### Phase 2: Hostile Audit (iteration 1)
+### Phase 2: Hostile Audit (iteration 1) — `AUDIT-v1.md`
 
-- [ ] ⬜ **Task 2.1**: Static review — shellcheck the script; run it through the project's own shell QA lens.
-- [ ] ⬜ **Task 2.2**: Adversarial correctness audit — number resolution, drift/collision guards, name
-  normalisation edge cases, `BASH_SOURCE` symlink resolution, nested-repo behaviour.
-- [ ] ⬜ **Task 2.3**: Portability audit — bash 3.2 (macOS), BSD vs GNU coreutils (`date`, `git`, `mkdir`),
-  `set -euo pipefail` interaction with command substitutions.
-- [ ] ⬜ **Task 2.4**: Daemon-integration audit — counter double-increment risk, interaction with
-  `validate_plan_number` / `markdown_organization`, behaviour when run by an agent vs. a human.
-- [ ] ⬜ **Task 2.5**: Security audit — argument injection, here-doc interpolation, path traversal in `name`,
-  writing under an attacker-influenced `BASH_SOURCE`.
-- [ ] ⬜ **Task 2.6**: Capture findings in `AUDIT-v1.md` (severity-ranked) and commit.
+- [x] ✅ **Task 2.1**: Static review — shellcheck **clean**; constructs bash-3.2/BSD-safe.
+- [x] ✅ **Task 2.2**: Adversarial correctness audit — drift/bootstrap/gap guards verified; name
+  normalisation robust. **C1 (CRITICAL)** found: concurrent runs make duplicate numbers.
+- [x] ✅ **Task 2.3**: Portability audit — no `readlink -f` / GNU-only flags; `date +%F` POSIX. Pass.
+- [x] ✅ **Task 2.4**: Daemon-integration audit — script avoids Write-tool double-increment by design;
+  **M1** guidance-collision + **M2** `set`-vs-`max` divergence from Plan 00112 logged.
+- [x] ✅ **Task 2.5**: Security audit — injection/traversal all rejected (no exec). **H1 (HIGH)**:
+  reverse-symlink scaffolds plans in the wrong directory.
+- [x] ✅ **Task 2.6**: `AUDIT-v1.md` written (1 CRITICAL, 3 HIGH, 4 MEDIUM, 4 LOW + passed list); committed.
 
 ### Phase 3: Refinement Iterations
 
