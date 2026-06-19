@@ -909,24 +909,19 @@ Direct `npm run` and `npx` commands are blocked or advised against. Projects wit
 
 If no `llm:` commands exist in `package.json`, the handler operates in advisory mode (warns but does not block).
 
-## markdown_organization — tracked-docs policy (untracked Claude memory BLOCKED)
+## markdown_organization — markdown files must go in allowed locations
 
-This project sets `allow_untracked_claude_memory: false`. Writing to Claude
-auto-memory files (`~/.claude/projects/*/memory/*.md`) is **blocked** — via the
-Write/Edit tools AND via bash redirect/`tee` side-doors. **Reading memory is
-still allowed** so existing memory can be migrated out.
+Writing a new `.md` file to an unrecognised location is blocked. Markdown files must be placed in project-configured allowed paths.
 
-**Put durable knowledge in TRACKED project docs (progressive disclosure):**
+**Common allowed locations**: `CLAUDE/`, `docs/`, `RELEASES/`, `CLAUDE/Plan/`, root-level `README.md`, or any path matching the `allowed_markdown_paths` config.
 
-- Always-relevant facts → `CLAUDE.md` (keep lean; resident every session)
-- Path-specific guidance → `.claude/rules/*.md` with `paths:` glob frontmatter (loads on demand only when matching files are touched)
-- Intent-triggered procedures → a thin skill under `.claude/skills/` pointing at a single-source-of-truth doc body
-- Human-facing reference → `docs/`
-- Link docs with plain markdown links (zero token cost until followed); **avoid `@`-imports** (they re-inline eagerly rather than defer)
+**Dependency directories**: `vendor/` (PHP) and `node_modules/` (JS) are treated as implicit monorepos — each package is a sub-project where normal markdown rules apply (e.g. `vendor/acme/lib/docs/guide.md` is allowed, `vendor/acme/lib/random/notes.md` is blocked).
 
-Keep ONE source of truth per fact and link to it. Normal markdown-location rules (below) still apply to every other `.md` file.
+**Plan file redirection**: when `track_plans_in_project` is enabled, Claude Code planning mode writes are automatically redirected to the project's `CLAUDE/Plan/` directory. Plan folders must follow the `NNNN-description/` naming convention.
 
-**Allowed locations**: `CLAUDE/`, `docs/`, `RELEASES/`, `CLAUDE/Plan/`, root-level `README.md`, `.claude/rules/`, or any `extra_allowed_markdown_paths` pattern.
+If you need a markdown file in a new location, add a pattern to `extra_allowed_markdown_paths` in `.claude/hooks-daemon.yaml`. This is ADDITIVE — it layers your patterns on top of the built-in defaults, so you keep `CLAUDE/`, `docs/`, `RELEASES/`, etc. without redeclaring them. The older `allowed_markdown_paths` option REPLACES all built-in locations and is discouraged for simple additions.
+
+If your project has sub-projects with their own `docs/`, `CLAUDE/`, etc., configure `monorepo_subproject_patterns` in `.claude/hooks-daemon.yaml` so normal rules apply within each sub-project.
 
 ## validate_instruction_content — CLAUDE.md and README.md must have stable content
 
