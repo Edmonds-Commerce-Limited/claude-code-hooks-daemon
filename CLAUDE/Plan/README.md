@@ -4,6 +4,20 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+### Upgrade / Release Experience
+
+- [00133: Suggest Enabling New Features on Upgrade](00133-suggest-enabling-new-features-on-upgrade/PLAN.md) - Not Started
+
+  - Opt-in features (e.g. v3.23.0 memory-disable) ship **dormant** — clients get the code but never the protection because nothing promotes enabling it
+  - Investigation finding: the `config_migrations` mechanism (`config-changes/v{X.Y.Z}.yaml` + `cli check-config-migrations`) already exists for this but is **abandoned** (no v3.x manifests), **unwired** (not called from `upgrade.md`), and **informational-only** (no recommend/enable promotion)
+  - Plan = revive + strengthen (`recommended`/`dormant` flags) + backfill v3.x + wire into `upgrade.md` + add release discipline mirroring truth-changes; see `findings.md` + `context.md`
+
+- [00134: Format CLAUDE.md After Handler-Guidance Injection](00134-format-claude-md-after-injection/PLAN.md) - Not Started
+
+  - `ClaudeMdInjector` writes the `<hooksdaemon>` block into CLAUDE.md **raw**, not through the `mdformat` path that `markdown_table_formatter` runs on every `.md` edit — so the next user edit reformats the injected block and churns a spurious diff (the repeated "Auto: hooks daemon regenerated…" commits)
+  - Fix = format CLAUDE.md via the existing formatter SSOT right after injection so on-disk content is already canonical and idempotent; fail-safe fallback to raw write so daemon startup never crashes
+  - Candidate for the next release alongside 00133
+
 ### Memory / Documentation Policy
 
 - [00132: PostToolUse Progressive-Disclosure Reminder on Project-Doc Markdown Writes](00132-progressive-disclosure-md-write-reminder/PLAN.md) - Not Started (awaiting sign-off)
