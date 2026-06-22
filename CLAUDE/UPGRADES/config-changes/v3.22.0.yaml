@@ -1,0 +1,20 @@
+version: "3.22.0"
+date: "2026-06-18"
+breaking: false
+upgrade_guide: null
+config_changes:
+  added:
+    - key: handlers.session_start.yolo_container_detection.options.show_on_session_start
+      description: >-
+        Show the container-detection banner on SessionStart. Default off — the
+        container is already indicated by the status-line environment icon, so
+        the SessionStart banner is opt-in to keep the session header lean.
+      example_yaml: |
+        yolo_container_detection:
+          options:
+            show_on_session_start: true
+      recommended: false
+      dormant: true
+  renamed: []
+  removed: []
+  changed: []

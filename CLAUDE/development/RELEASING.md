@@ -174,6 +174,27 @@ ls CLAUDE/UPGRADES/UNRELEASED/truth-changes/
 
 **ABORT condition**: any `v*.yaml` file remains in `UNRELEASED/truth-changes/` when moving to the next step.
 
+### Move UNRELEASED config-changes
+
+Config-changes (Plan 00133) is the per-version manifest of `added` / `renamed` / `removed` / `changed` config keys, consumed by `upgrade.md` and `check-config-migrations` to surface new + recommended options on upgrade. Any staged in `UNRELEASED/config-changes/` belong to **this** release and must move into the flat live directory, keeping their version-named filenames:
+
+```bash
+# Move each staged config-changes manifest into the live directory
+for f in CLAUDE/UPGRADES/UNRELEASED/config-changes/v*.yaml; do
+    [ -e "$f" ] || continue          # nothing staged this cycle
+    git mv "$f" CLAUDE/UPGRADES/config-changes/
+done
+```
+
+Verify only `README.md` remains under `UNRELEASED/config-changes/`:
+
+```bash
+ls CLAUDE/UPGRADES/UNRELEASED/config-changes/
+# Expected: README.md  (nothing else)
+```
+
+**ABORT condition**: any `v*.yaml` file remains in `UNRELEASED/config-changes/` when moving to the next step.
+
 ---
 
 ## Step 7: Opus Documentation Review
@@ -190,6 +211,7 @@ Opus reviews **documentation only** (not code/QA):
 - Moved tasks have populated the versioned guide's `post-upgrade-tasks/README.md` task index
 - Release notes reference post-upgrade tasks if any are `critical` or `recommended`
 - **Did this release change a documented truth?** (a workflow, command, or convention a project's own docs are likely to assert) — if so, a `truth-changes/v{X.Y.Z}.yaml` entry exists (`was → now`, or `now: ~` to retire it) and `UNRELEASED/truth-changes/` contains only `README.md`
+- **Did this release add an opt-in feature or flip a default?** (a feature that would otherwise ship dormant in client projects) — if so, a `config-changes/v{X.Y.Z}.yaml` entry exists with `recommended: true` (and `recommended_value:` for a default flip) so the upgrade advisory actively promotes enabling it, and `UNRELEASED/config-changes/` contains only `README.md`
 
 Approved -> proceed. Issues found -> agent fixes docs, re-submit until approved.
 

@@ -1,0 +1,22 @@
+version: "3.19.0"
+date: "2026-06-12"
+breaking: false
+upgrade_guide: null
+config_changes:
+  added:
+    - key: handlers.pre_tool_use.markdown_organization.options.extra_allowed_markdown_paths
+      description: >-
+        Additively allow extra markdown locations on top of the built-in
+        allowed paths (preferred over the legacy allowed_markdown_paths, which
+        REPLACES the built-ins). Useful if your project keeps .md files outside
+        CLAUDE/, docs/, RELEASES/.
+      example_yaml: |
+        markdown_organization:
+          options:
+            extra_allowed_markdown_paths:
+              - "^\\.github/.*\\.md$"
+      recommended: false
+      dormant: false
+  renamed: []
+  removed: []
+  changed: []
