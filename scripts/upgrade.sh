@@ -513,6 +513,43 @@ if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
     fi
 fi
 
+# ------------------------------------------------------------
+# Newly-available / recommended config options (config-changes)
+# ------------------------------------------------------------
+# Mirror of the truth-changes block above (Plan 00133). Surfaces dormant opt-in
+# features and default flips for the crossed range so a feature never ships
+# silently dormant — even when the agent runs the bare script instead of
+# following upgrade.md step 5. Printed to stdout BEFORE the UPGRADE_METADATA
+# sentinel so it never pollutes the machine-parsed block. Config path is passed
+# explicitly so resolution does not depend on cwd.
+if [ -n "$_metadata_venv_python" ] && [ -x "$_metadata_venv_python" ]; then
+    # check-config-migrations exits 1 when there are suggestions (normal!),
+    # 0 when none, 2 on error. Same `if cmd; then ... else _rc=$?` idiom as
+    # above so `set -euo pipefail` does not trip on the expected non-zero rc.
+    _cfg_rc=0
+    if _cfg_out="$("$_metadata_venv_python" -m claude_code_hooks_daemon.daemon.cli \
+        check-config-migrations \
+        --from "${FROM_VERSION#v}" \
+        --to "${TARGET_VERSION#v}" \
+        --config "$PROJECT_ROOT/.claude/hooks-daemon.yaml" 2>&1)"; then
+        _cfg_rc=0
+    else
+        _cfg_rc=$?
+    fi
+
+    if [ "$_cfg_rc" -eq 1 ]; then
+        echo ""
+        _info "${_BOLD}Newly-available / recommended config options${_NC}"
+        echo "$_cfg_out"
+        _info "Review per upgrade.md step 5. Enabling is your choice; the daemon never edits your config."
+        _info "Re-run manually: \"$_metadata_venv_python\" -m claude_code_hooks_daemon.daemon.cli check-config-migrations --from ${FROM_VERSION#v} --to ${TARGET_VERSION#v}"
+    elif [ "$_cfg_rc" -eq 0 ]; then
+        _ok "Config options: nothing new to enable for this upgrade."
+    else
+        _warn "Config-options summary unavailable (check-config-migrations exit $_cfg_rc; older target?)."
+    fi
+fi
+
 # Emit the sentinel-wrapped block. Leading newline ensures the open sentinel
 # starts on its own line even if Layer 2's last output had no trailing \n.
 printf '\n<<<UPGRADE_METADATA\n'

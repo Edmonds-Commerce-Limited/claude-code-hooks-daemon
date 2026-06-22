@@ -388,6 +388,12 @@ $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli check-config-migrations \
 
 - **Exit code 0**: Config is up to date — no new options to review
 - **Exit code 1**: New options available — review and add what's relevant
+- Options under **🆕 Recommended — enable these** are dormant features (new
+  opt-in protections, or a flipped default) the daemon actively recommends
+  turning on. The line shows the recommended value and your current value; set
+  the key in your config to adopt it. If a recommendation carries a migration
+  **Note**, perform that migration first.
+- Options under **💡 New Options Available** are informational — adopt if useful.
 
 Example output:
 
