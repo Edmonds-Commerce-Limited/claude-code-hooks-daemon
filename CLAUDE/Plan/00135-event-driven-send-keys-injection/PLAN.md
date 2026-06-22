@@ -7,14 +7,28 @@
 **Recommended Executor**: Opus
 **Execution Strategy**: Sub-Agent Teams
 
-> ⛔ **BLOCKED by `HOSTILE-REVIEW-1.md` (2026-06-22).** Five-lens hostile review
-> found two SHIP-BLOCKER architectural flaws: (1) `$TMUX_PANE` is lost at the
-> daemon socket boundary — a daemon handler physically cannot know the target
-> pane; (2) idle detection has no reliable signal in the data the plan uses. Plus
-> a product brand-inversion concern (the daemon's job is to *block*, not *type*).
-> The safety/security rails are sound. Do NOT build on this plan as written —
-> awaiting user decision: (a) re-architect around a pane-resident producer +
-> user-launched script, (b) ship as a separate companion repo, or (c) shelve.
+> 🔁 **Iterated twice. See `BRAINSTORM-SYNTHESIS.md` (launcher-controlled
+> redesign) and `HOSTILE-REVIEW-2.md` (NO-GO on that redesign as written).**
+>
+> - **Review #1** blocked the daemon-handler design: `$TMUX_PANE` lost at the
+>   socket boundary; no idle signal.
+> - **Brainstorm redesign** (launcher + dedicated 1:1 observe-only daemon +
+>   single injector) **dissolved the pane-identity sub-problem by construction.**
+> - **Review #2** returned **NO-GO as written**, but most blockers are *fixable
+>   technical* issues, and the brand objection is **down-weighted by user
+>   decision** (see `context.md` follow-up). The two that matter:
+>   - **SB-1 (coexistence):** shared daemon reaps the dedicated daemon on restart
+>     (`enforce_single_daemon` matches project-root, not socket). The user made
+>     concurrent coexistence a **hard requirement** → must be solved properly
+>     (socket-aware enforcement / distinct root / do-not-reap registry), not the
+>     one-directional `--no-enforce-single` hack.
+>   - **SB-2 (FATAL-2):** "is the user typing?" has **no reliable tmux signal**
+>     (`client_activity` likely measures redraw). The only design that answers it
+>     *by construction* is **ARCH-B (a launcher-owned PTY supervisor)** that sees
+>     raw input bytes — at the cost of TUI-fidelity risk.
+> - **Status:** awaiting user decision on the architecture fork — ARCH-A
+>   (conservative heuristic idle, fix all SBs) vs ARCH-B (PTY supervisor, solves
+>   FATAL-2 by construction). Coexistence (SB-1) is solvable either way.
 
 > Source research: `research-note.md` (do not edit). Scene-setting + the user's
 > framing: `context.md`. **This plan is written to survive a hostile multi-lens
