@@ -122,6 +122,16 @@ class LspEnforcementHandler(Handler):
             tags=[HandlerTag.WORKFLOW, HandlerTag.BLOCKING, HandlerTag.TERMINAL],
         )
 
+    def get_default_enabled(self) -> bool:
+        """Opt-in handler — off by default (Plan 00133).
+
+        LSP enforcement steers agents toward LSP tools instead of Grep, but
+        many projects have no LSP configured, so it ships disabled and clients
+        opt in. Must stay consistent with the ``enabled: false`` flag in the
+        config template (enforced by ``test_default_enabled_template_consistency``).
+        """
+        return False
+
     def _get_mode(self) -> str:
         """Get configured mode (set by registry via setattr)."""
         return getattr(self, "_mode", LspEnforcementMode.BLOCK_ONCE)

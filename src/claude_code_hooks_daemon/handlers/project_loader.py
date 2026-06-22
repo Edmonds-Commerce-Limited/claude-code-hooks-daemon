@@ -37,6 +37,11 @@ _ABSTRACT_METHOD_VERSIONS: dict[str, str] = {
     "get_claude_md": "2.30.0",
 }
 
+# NOTE: `get_default_enabled()` was added to the Handler base in v3.24.0
+# (Plan 00133) as a CONCRETE method (default True), deliberately NOT abstract —
+# so it does not appear above. Project handlers need not implement it; they
+# inherit the opt-out default and override only to declare themselves opt-in.
+
 
 def _get_missing_abstract_method_versions(cls: type) -> list[tuple[str, str]]:
     """Return (method_name, introduced_version) for abstract methods not implemented in cls.

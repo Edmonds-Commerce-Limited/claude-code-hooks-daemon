@@ -215,6 +215,24 @@ Make `changed:` advisory-actionable via value comparison so a default flip
 surfaces for clients holding the old value. Migrated memory is left **inert**
 (never auto-deleted). **Date**: 2026-06-22 (user: "rest — recommended is fine")
 
+### Decision 5: SSoT-by-verification, not full template derivation (Task 1.3)
+
+**Context**: The review's Task 1.3 proposed refactoring
+`ConfigTemplate.generate_full` to *derive* every `enabled:` flag from handler
+instances. The template is a single curated YAML string carrying inline
+comments, grouped priorities, and nested `options:` blocks (e.g.
+`markdown_organization`, `tdd_enforcement`). A full data-driven rewrite would
+destroy that curation and risk breaking every fresh `init` — high risk for a
+cosmetic SSoT win, against the user's "avoid busywork".
+**Decision**: Keep the curated template string; make `get_default_enabled()`
+the **code-level SSoT for the semantic default** and add a drift-guard test
+(`test_default_enabled_template_consistency.py`) asserting the set of
+`enabled: false` handlers in `generate_full()` is identical to the set of
+handler classes declaring `get_default_enabled() -> False`. The two sources
+therefore cannot drift; adding an opt-in handler forces both to be updated.
+The advisory (Phase 2) consumes `get_default_enabled()` directly, so it is not
+dead code. **Date**: 2026-06-22
+
 ## Success Criteria
 
 - [ ] `cli check-config-migrations --from <prev> --to 3.23.0` against a config

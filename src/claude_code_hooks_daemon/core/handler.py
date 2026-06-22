@@ -224,3 +224,23 @@ class Handler(ABC):
             declared rules (legacy / non-blocking handlers).
         """
         return []
+
+    def get_default_enabled(self) -> bool:
+        """Whether this handler is enabled by default in a fresh config.
+
+        Plan 00133. Single source of truth for a handler's default enabled
+        state, consumed by config-template generation so the template no longer
+        hand-maintains a ``{enabled: true/false}`` literal per handler.
+
+        ``True``  = opt-out  (on unless the client explicitly disables it).
+        ``False`` = opt-in   (off unless the client explicitly enables it).
+
+        Concrete (NOT abstract) with a sensible universal default: the vast
+        majority of handlers are opt-out. Opt-in handlers override this to
+        return ``False``. Keeping it concrete means existing built-in handlers
+        and project-level handlers are never forced to implement it.
+
+        Returns:
+            ``True`` if the handler should be enabled by default, else ``False``.
+        """
+        return True
