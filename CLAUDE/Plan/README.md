@@ -4,6 +4,15 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+### Self-Driving / Automation
+
+- [00135: Event-Driven `send-keys` Injection](00135-event-driven-send-keys-injection/PLAN.md) - Not Started (plan drafted; hostile multi-lens review pending)
+
+  - Hooks run as children of Claude Code and inherit `$TMUX_PANE`, so any daemon hook event (or a context-threshold watchdog) can `tmux send-keys` a **slash command / prompt** back into the live, watchable session — flagship use case: auto-`/compact` at a custom threshold; also PostCompact re-orientation, `/fix` on failing tests, session bootstrap
+  - Architecture: status-line handler writes a pct/idle sidecar (reuses the payload the daemon already receives), a single `tmux_inject` choke-point utility, and a user-launched watchdog in its own observable pane; handlers enqueue intents, never type directly
+  - Safety-first / opt-in (`get_default_enabled()` → False): exact-payload allowlist, loop-guard sentinel, idle-gating, cooldown + per-session cap, tmux-presence no-op, no Stop-handler collision; see `research-note.md` + `context.md`
+  - **High-stakes**: potential game-changer done well, reputation risk done badly — hostile multi-lens review required before build
+
 ### Upgrade / Release Experience
 
 - [00133: Suggest Enabling New Features on Upgrade](00133-suggest-enabling-new-features-on-upgrade/PLAN.md) - Not Started
