@@ -11,6 +11,34 @@
 > the serious game changer that really makes this library super useful, but done
 > badly it could have the opposite effect"
 
+### Follow-up direction (2026-06-22, after HOSTILE-REVIEW-1 + brainstorm)
+
+> "i think we might be over valuing 'the brand'. its a hooks daemon — it
+> supercharges hooks functionality. there's nothing that says its read only — in
+> fact it very much gets involved in blocking and guiding claude in a highly
+> active way, we are just adding another dimension to that really and i don't
+> personally think its hugely dissimilar."
+
+> "one goal here though is that this stuff is very much opt in, and can be used at
+> will — we should be able to mix this tmux type stuff alongside normal claude
+> sessions even on the same project."
+
+**Decisions this locks in:**
+
+1. **The "brand inversion" product objection is DOWN-WEIGHTED by user decision.**
+   The daemon already acts on Claude (blocks, guides) — active injection is
+   another dimension of that, not a betrayal of identity. The *technical*
+   objections (mis-injection into human input, runaway cost, pane identity) stand
+   on their own merits and are unaffected by this. Do NOT use "it hurts the brand"
+   as a reason to cut scope; use concrete safety/correctness reasons only.
+2. **HARD REQUIREMENT — concurrent coexistence.** A tmux-injection session and one
+   or more normal Claude sessions MUST be able to run on the **same project at the
+   same time**, opt-in and used at will. This promotes the dedicated-daemon-
+   alongside-shared-daemon question from a spike (S-ENF) to a **must-solve
+   correctness requirement**: neither daemon may reap the other, both serve the
+   same project root concurrently, and a normal session must NEVER inherit the
+   injection capability (the dedicated-daemon gate is what guarantees this).
+
 These three statements set the scope and the temperament of this plan:
 
 1. **Slash-command injection is the PRIMARY use case.** Not Stop auto-continue
