@@ -1,11 +1,20 @@
 # Plan 00135: Event-Driven `send-keys` Injection
 
-**Status**: Not Started
+**Status**: Blocked — pending user direction (hostile review found 2 fatal flaws)
 **Created**: 2026-06-22
 **Owner**: joseph
 **Priority**: High
 **Recommended Executor**: Opus
 **Execution Strategy**: Sub-Agent Teams
+
+> ⛔ **BLOCKED by `HOSTILE-REVIEW-1.md` (2026-06-22).** Five-lens hostile review
+> found two SHIP-BLOCKER architectural flaws: (1) `$TMUX_PANE` is lost at the
+> daemon socket boundary — a daemon handler physically cannot know the target
+> pane; (2) idle detection has no reliable signal in the data the plan uses. Plus
+> a product brand-inversion concern (the daemon's job is to *block*, not *type*).
+> The safety/security rails are sound. Do NOT build on this plan as written —
+> awaiting user decision: (a) re-architect around a pane-resident producer +
+> user-launched script, (b) ship as a separate companion repo, or (c) shelve.
 
 > Source research: `research-note.md` (do not edit). Scene-setting + the user's
 > framing: `context.md`. **This plan is written to survive a hostile multi-lens
