@@ -228,9 +228,13 @@ class Handler(ABC):
     def get_default_enabled(self) -> bool:
         """Whether this handler is enabled by default in a fresh config.
 
-        Plan 00133. Single source of truth for a handler's default enabled
-        state, consumed by config-template generation so the template no longer
-        hand-maintains a ``{enabled: true/false}`` literal per handler.
+        Plan 00133. Single source of truth for a handler's *semantic* default
+        enabled state. The config template still carries a curated
+        ``{enabled: true/false}`` literal per handler (Decision 5); a drift-guard
+        test (``test_default_enabled_template_consistency``) asserts the
+        template's disabled set equals the set of handlers declaring
+        ``get_default_enabled() -> False``, so the two can never diverge. The
+        config-changes upgrade advisory consumes this method directly.
 
         ``True``  = opt-out  (on unless the client explicitly disables it).
         ``False`` = opt-in   (off unless the client explicitly enables it).

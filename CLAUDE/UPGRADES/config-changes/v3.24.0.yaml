@@ -1,5 +1,5 @@
 version: "3.24.0"
-date: "2026-06-22"
+date: "2026-06-23"
 breaking: false
 upgrade_guide: "CLAUDE/UPGRADES/v3/v3.23.0-to-v3.24.0/"
 config_changes:

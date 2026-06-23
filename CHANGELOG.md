@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.24.0] - 2026-06-23
+
+This is a **minor release** that makes upgrades actively promote dormant opt-in features, and — using that mechanism — flips the `allow_untracked_claude_memory` default so untracked Claude auto-memory is **blocked by default**, steering durable knowledge into tracked, reviewed project docs. It also removes the CLAUDE.md formatter churn the daemon's own injector used to cause.
+
+### Changed
+
+- **`allow_untracked_claude_memory` now defaults to `false` (Plan 00133)** — The daemon now BLOCKS untracked Claude auto-memory writes (`~/.claude/projects/*/memory/*.md`, via `Write`/`Edit` and bash `>`/`>>`/`tee`) **by default**, routing durable knowledge into tracked project docs (`CLAUDE.md`, `.claude/rules/*.md`, thin skills, `docs/`). **Reads are always allowed** so existing memory can be migrated. This is a behaviour change for projects that relied on the old default — it is **opt-out**: set `allow_untracked_claude_memory: true` under `markdown_organization.options` to restore the previous always-allow behaviour. A `critical` post-upgrade task (`migrate-untracked-claude-memory`) guides migration; existing memory files are never modified or deleted by the daemon. A single source-of-truth constant (`DEFAULT_ALLOW_UNTRACKED_CLAUDE_MEMORY`) backs both the handler default and the `optimal_config_checker` reconciliation so the SessionStart advisory never contradicts the block.
+- **Upgrades now actively recommend enabling dormant opt-in features (Plan 00133)** — The previously-abandoned config-changes advisory is revived, strengthened, and wired into the upgrade flow. Per-version manifests (`CLAUDE/UPGRADES/config-changes/v{X.Y.Z}.yaml`) gain `recommended` / `dormant` / `recommended_value` fields; a `changed` entry now compares the client's actual value against `recommended_value` and surfaces a recommendation-grade `🆕 Recommended — enable these` section (distinct from the quiet `💡 New Options Available` list). `check-config-migrations` is invoked from `skills/hooks-daemon/upgrade.md` (and `scripts/upgrade.sh`, so a bare upgrade run surfaces it too). v3.x manifests are backfilled, and an `UNRELEASED/config-changes/` staging directory plus RELEASING.md governance keeps manifests from rotting again.
+
+### Added
+
+- **`Handler.get_default_enabled()` — code-level opt-in/opt-out SSoT (Plan 00133)** — A concrete base method (default `True` = opt-out) that models whether a handler ships enabled. Opt-in handlers (e.g. `lsp_enforcement`) override to `False`. A drift-guard test asserts the template's `enabled: false` set equals the set of handlers declaring `get_default_enabled() -> False`, so the two can never diverge.
+
+### Fixed
+
+- **No more CLAUDE.md formatter churn from the daemon injector (Plan 00134)** — The mdformat+gfm transform behind `markdown_table_formatter` and `format-markdown` is extracted into one shared `format_markdown_text` (single source of truth), and the CLAUDE.md injector now formats the file after writing its `<hooksdaemon>` block (fail-safe; the content-loss guard runs on the pre-format result). The on-disk block is already formatter-canonical, so the next `Write`/`Edit` to CLAUDE.md no longer produces a spurious reformat diff.
+- **`version_check` upgrade notice points to the skill, agent-safely** — The SessionStart "update available" notice now instructs using the hooks-daemon upgrade skill (`Skill tool: skill=hooks-daemon, args=upgrade`) instead of the old manual curl/less/bash steps, phrased so an agent will not try to run a bare slash command as bash.
+
 ## [3.23.0] - 2026-06-19
 
 This is a **minor release** delivering two opt-in features: a distributed, git-anchored plan-scaffolding script (`mkplan.bash`) shipped into client projects, and an `allow_untracked_claude_memory` policy that lets a project forbid untracked Claude auto-memory and have the daemon enforce it by blocking the writes — steering durable knowledge into tracked project docs via progressive disclosure.
