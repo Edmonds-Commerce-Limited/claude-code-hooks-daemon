@@ -6,6 +6,8 @@ from typing import Any
 
 import yaml
 
+from claude_code_hooks_daemon.constants import ConfigKey
+
 
 class ConfigLoader:
     """Load and parse hook daemon configuration files.
@@ -83,22 +85,29 @@ class ConfigLoader:
     def get_default_config() -> dict[str, Any]:
         """Get default configuration values.
 
+        Single source of truth: the defaults are derived from the Pydantic
+        ``Config`` model (``config.models``), so the loader fallback can never
+        drift from the model defaults or fail the project's own
+        ``ConfigValidator`` (Finding #29). The returned dict therefore carries a
+        ``daemon`` section (with ``idle_timeout_seconds`` + ``log_level``), the
+        full handlers section, and a schema ``version`` matching the model.
+
+        The optional ``plugins`` section is omitted: the default ships no
+        plugins, ``ConfigValidator`` treats ``plugins`` as optional, and leaving
+        it absent lets every legacy consumer that reads ``config.get("plugins",
+        [])`` fall back to an empty list instead of mis-iterating an object.
+
         Returns:
             Dictionary containing default configuration
         """
-        return {
-            "version": "1.0",
-            "settings": {
-                "logging_level": "INFO",
-                "log_file": ".claude/hooks/daemon.log",
-            },
-            "handlers": {
-                "pre_tool_use": {},
-                "post_tool_use": {},
-                "session_start": {},
-            },
-            "plugins": [],
-        }
+        # Imported here to avoid a module-level import cycle (models imports
+        # constants; keeping this local mirrors the lazy imports elsewhere in
+        # the config package).
+        from claude_code_hooks_daemon.config.models import Config
+
+        default: dict[str, Any] = Config().model_dump(mode="json", exclude_none=True)
+        default.pop(ConfigKey.PLUGINS, None)
+        return default
 
     @staticmethod
     def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:

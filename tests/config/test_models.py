@@ -165,6 +165,22 @@ class TestHandlersConfig:
         assert config.notification == {}
         assert config.stop == {}
         assert config.subagent_stop == {}
+        # Finding #30: status_line must be a declared event-type field (DRY-SSoT).
+        assert config.status_line == {}
+
+    def test_status_line_field_accepts_handler_configs(self) -> None:
+        """status_line event type coerces handler configs like other event types."""
+        config = HandlersConfig.model_validate(
+            {
+                EventID.STATUS_LINE.config_key: {
+                    "git_branch": {"enabled": True, "priority": 20},
+                }
+            }
+        )
+        handler_config = config.status_line["git_branch"]
+        assert isinstance(handler_config, HandlerConfig)
+        assert handler_config.enabled is True
+        assert handler_config.priority == 20
 
     def test_coerce_handler_configs_preserves_tag_filters(self) -> None:
         """Validator preserves enable_tags and disable_tags."""
@@ -1146,6 +1162,23 @@ class TestValidateHandlerDependencies:
             handlers_config,
             "pre_tool_use",
             {"destructive_git": True},
+        )
+        result = handlers_config.validate_handler_dependencies()
+        assert result is handlers_config
+
+    def test_status_line_included_in_dependency_loop(self) -> None:
+        """Finding #30: status_line is iterated by the dependency validator.
+
+        The dependency loop must cover every declared event-type field
+        (DRY-SSoT). A status_line config that is a dict must be visited, not
+        silently skipped, so shares_options_with dependencies are enforced
+        there too.
+        """
+        handlers_config = HandlersConfig()
+        object.__setattr__(
+            handlers_config,
+            EventID.STATUS_LINE.config_key,
+            {"git_branch": {"enabled": True}},
         )
         result = handlers_config.validate_handler_dependencies()
         assert result is handlers_config

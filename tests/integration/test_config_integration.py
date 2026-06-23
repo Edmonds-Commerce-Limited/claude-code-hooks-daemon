@@ -81,12 +81,12 @@ class TestConfigDiscoveryAndLoading:
             ConfigLoader.find_config(str(tmp_path))
 
         # But merging empty config with defaults should work
-        minimal_config: dict[str, Any] = {"version": "1.0"}
+        minimal_config: dict[str, Any] = {"version": "2.0"}
         merged = ConfigLoader.merge_with_defaults(minimal_config)
 
-        # Should have default values
-        assert "settings" in merged
-        assert "logging_level" in merged["settings"]
+        # Should have default values (Finding #29: defaults carry a daemon section)
+        assert "daemon" in merged
+        assert "log_level" in merged["daemon"]
 
     def test_load_validate_and_extract_handler_settings(self, tmp_path: Path) -> None:
         """Should load config and extract specific handler settings."""
@@ -212,9 +212,9 @@ class TestConfigMergingIntegration:
         assert merged["settings"]["log_file"] == "/custom/path.log"
 
     def test_defaults_fill_missing_values(self, tmp_path: Path) -> None:
-        """Should add default values for missing settings."""
+        """Should add default values for missing sections."""
         config_file = tmp_path / "partial_config.yaml"
-        config_data = {"version": "1.0", "handlers": {}}
+        config_data = {"version": "2.0", "handlers": {}}
 
         with config_file.open("w") as f:
             yaml.dump(config_data, f)
@@ -222,10 +222,10 @@ class TestConfigMergingIntegration:
         config = ConfigLoader.load(config_file)
         merged = ConfigLoader.merge_with_defaults(config)
 
-        # Should have default settings added
-        assert "settings" in merged
-        assert "logging_level" in merged["settings"]
-        assert "log_file" in merged["settings"]
+        # Should have default daemon section added (Finding #29)
+        assert "daemon" in merged
+        assert "log_level" in merged["daemon"]
+        assert "idle_timeout_seconds" in merged["daemon"]
 
     def test_deep_merge_preserves_nested_structure(self, tmp_path: Path) -> None:
         """Should deep merge nested handler configurations."""
@@ -258,12 +258,15 @@ class TestConfigPluginSystem:
     def test_load_config_with_plugins(self, tmp_path: Path) -> None:
         """Should load and validate config with plugin definitions."""
         config_file = tmp_path / "plugin_config.yaml"
+        # Finding #31: plugins is an OBJECT with a 'plugins' list, not a bare array.
         config_data = {
-            "version": "1.0",
-            "plugins": [
-                {"path": ".claude/hooks/custom", "handlers": ["custom_handler"]},
-                {"path": "/absolute/path/plugins"},
-            ],
+            "version": "2.0",
+            "plugins": {
+                "plugins": [
+                    {"path": ".claude/hooks/custom", "handlers": ["custom_handler"]},
+                    {"path": "/absolute/path/plugins"},
+                ],
+            },
         }
 
         with config_file.open("w") as f:
@@ -273,8 +276,8 @@ class TestConfigPluginSystem:
         ConfigSchema.validate_config(config)
 
         assert "plugins" in config
-        assert len(config["plugins"]) == 2
-        assert config["plugins"][0]["path"] == ".claude/hooks/custom"
+        assert len(config["plugins"]["plugins"]) == 2
+        assert config["plugins"]["plugins"][0]["path"] == ".claude/hooks/custom"
 
     def test_plugin_without_required_path_fails(self, tmp_path: Path) -> None:
         """Should fail validation if plugin missing required 'path'."""
@@ -317,8 +320,8 @@ class TestConfigRealWorldScenarios:
         """Should handle comprehensive development configuration."""
         config_file = tmp_path / "dev.yaml"
         config_data = {
-            "version": "1.0",
-            "settings": {"logging_level": "DEBUG", "log_file": "/var/log/hooks.log"},
+            "version": "2.0",
+            "daemon": {"log_level": "DEBUG"},
             "handlers": {
                 "pre_tool_use": {
                     "destructive_git": {"enabled": True, "priority": 10},
@@ -327,7 +330,10 @@ class TestConfigRealWorldScenarios:
                 },
                 "session_start": {"enabled": True},
             },
-            "plugins": [{"path": ".claude/hooks/dev_plugins", "handlers": ["debug_handler"]}],
+            # Finding #31: plugins is an OBJECT with a 'plugins' list.
+            "plugins": {
+                "plugins": [{"path": ".claude/hooks/dev_plugins", "handlers": ["debug_handler"]}],
+            },
         }
 
         with config_file.open("w") as f:
@@ -339,9 +345,9 @@ class TestConfigRealWorldScenarios:
         merged = ConfigLoader.merge_with_defaults(config)
 
         # Verify all sections loaded correctly
-        assert merged["settings"]["logging_level"] == "DEBUG"
+        assert merged["daemon"]["log_level"] == "DEBUG"
         assert len(merged["handlers"]["pre_tool_use"]) >= 3
-        assert len(merged["plugins"]) == 1
+        assert len(merged["plugins"]["plugins"]) == 1
 
     def test_team_shared_config(self, tmp_path: Path) -> None:
         """Should handle team-shared base configuration."""

@@ -29,7 +29,8 @@ handlers:
     enabled: true
 
 plugins:
-  - path: .claude/hooks/custom
-    handlers:
-      - custom_handler_one
-      - custom_handler_two
+  plugins:
+    - path: .claude/hooks/custom
+      handlers:
+        - custom_handler_one
+        - custom_handler_two

@@ -108,31 +108,50 @@ class TestConfigSchemaValidation:
         with pytest.raises(ValueError, match="Invalid configuration"):
             ConfigSchema.validate_config(config)
 
-    def test_plugins_must_be_array(self) -> None:
-        """Should fail if plugins is not an array."""
+    def test_plugins_must_be_object(self) -> None:
+        """Should fail if plugins is not an object.
+
+        Finding #31: the live plugin contract (PluginsConfig +
+        ConfigValidator._validate_plugins) treats ``plugins`` as a dict/object
+        with ``paths`` and ``plugins`` keys, NOT a bare array. ConfigSchema must
+        agree with the live validators rather than contradict them.
+        """
         config: dict[str, Any] = {"version": "1.0", "plugins": "invalid"}
 
         with pytest.raises(ValueError, match="Invalid configuration"):
             ConfigSchema.validate_config(config)
 
-    def test_plugin_must_have_path(self) -> None:
-        """Should fail if plugin entry missing required 'path' field."""
+    def test_plugins_array_rejected(self) -> None:
+        """Should reject a bare array for ``plugins`` (legacy/contradictory shape)."""
         config: dict[str, Any] = {
             "version": "1.0",
-            "plugins": [{"handlers": ["custom"]}],  # Missing 'path'
+            "plugins": [{"path": ".claude/hooks/custom"}],
+        }
+
+        with pytest.raises(ValueError, match="Invalid configuration"):
+            ConfigSchema.validate_config(config)
+
+    def test_plugin_entry_must_have_path(self) -> None:
+        """Should fail if a plugin entry in ``plugins.plugins`` lacks 'path'."""
+        config: dict[str, Any] = {
+            "version": "1.0",
+            "plugins": {"plugins": [{"handlers": ["custom"]}]},  # Missing 'path'
         }
 
         with pytest.raises(ValueError, match="Invalid configuration"):
             ConfigSchema.validate_config(config)
 
     def test_valid_plugin_config_passes(self) -> None:
-        """Should validate correct plugin configuration."""
+        """Should validate correct object-shaped plugin configuration."""
         config: dict[str, Any] = {
             "version": "1.0",
-            "plugins": [
-                {"path": ".claude/hooks/custom", "handlers": ["handler1", "handler2"]},
-                {"path": "/absolute/path/plugins"},
-            ],
+            "plugins": {
+                "paths": [".claude/hooks/custom", "/absolute/path/plugins"],
+                "plugins": [
+                    {"path": ".claude/hooks/custom", "handlers": ["handler1", "handler2"]},
+                    {"path": "/absolute/path/plugins"},
+                ],
+            },
         }
 
         # Should not raise
