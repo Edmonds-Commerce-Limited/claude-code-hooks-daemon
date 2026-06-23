@@ -1031,13 +1031,13 @@ the plan is complete and no resumable work remains, delete this cron
 
 ### Configuration
 
-This handler is **opt-in** (off by default). Enable with:
+This handler is **on by default** (opt-out). Disable with:
 
 ```yaml
 handlers:
   post_tool_use:
     recovery_cron_advisor:
-      enabled: true
+      enabled: false
 ```
 
 ## hook_registration_checker — hooks configuration policy
