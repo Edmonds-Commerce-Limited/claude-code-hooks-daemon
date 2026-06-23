@@ -38,6 +38,10 @@ CLAUDE/Plan/
 - Update task status in `PLAN.md` as you go
 - Run QA before commits: `./scripts/qa/run_all.sh`
 - Reference plan in commits: `Plan NNNNN: Description`
+- **Always commit the plan folder alongside the work it tracks.** `CLAUDE/Plan/*`
+  files are tracked source, not temporary artifacts. Before every commit, check
+  `git status` for untracked plan folders and include them — never let a plan
+  folder linger untracked across commits or through a release.
 
 ### 3. Review & Revise (if needed)
 
@@ -52,11 +56,11 @@ If a plan is reviewed and superseded:
 
 When all tasks are done and QA passes:
 
-1. **Update plan status** to `Complete` with completion date
+1. **Update plan status** to `Complete` (NO completion date — git is the source of truth for "when"; cite the delivery commit hash(es) in the "Notes & Updates" section instead). See @CLAUDE/PlanWorkflow.md "Plan Completion Checklist".
 2. **Move folder** to `CLAUDE/Plan/Completed/NNNNN-description/`
 3. **Update `README.md`**:
    - Remove from **Active Plans**
-   - Add to **Completed Plans** with summary and date
+   - Add to **Completed Plans** with a summary and the delivery commit hash(es) (not a date)
    - Update link to point to `Completed/` path
    - Update plan statistics
 4. **If GitHub issue exists**:

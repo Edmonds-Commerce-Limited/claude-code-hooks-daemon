@@ -88,6 +88,18 @@ MINOR/PATCH is appropriate; MAJOR would wrongly imply a feature was removed.
 Contrast a genuine default flip (e.g. Plan 00133's memory policy), which *does*
 carry an upgrade guide and a post-upgrade task.
 
+## Never weaken a test to match broken code
+
+Tests define the correct behaviour. When a test fails — including during
+acceptance testing — the default assumption is that the **code** is wrong, not
+the test. Fix the code to pass the test; never adjust, weaken, or delete a test
+to accommodate broken code. The only legitimate test edits are when the
+*requirement itself* changed (then the test change is the deliberate spec
+change, reviewed as such) or when a refactor moved a seam the test patched
+(update the target, keep the assertion). If acceptance testing reveals a bug
+(e.g. a handler that doesn't support 5-digit plan numbers), the handler is
+wrong — fix it with TDD, do not relax the test.
+
 ## Working in this repo: expect silent stops after Edits
 
 In `/workspace` (the daemon's own repo) the Stop hook occasionally delivers as

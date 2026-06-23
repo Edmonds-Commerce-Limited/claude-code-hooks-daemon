@@ -78,6 +78,8 @@ Updates version in: `pyproject.toml`, `version.py`, `README.md` (badge), `CLAUDE
 
 Also updates README.md stats: test count badge+body, handler count, event type count from `.claude/HOOKS-DAEMON.md`.
 
+**Re-lock `uv.lock` after the `pyproject.toml` version bump** (self-install mode tracks `uv.lock`): run `uv lock`. The dependency QA check runs `uv lock --check` and will FAIL the Step 8 gate with a lockfile-out-of-date error until the lock is regenerated. Stage `uv.lock` with the release commit.
+
 ### 4. Changelog Generation
 
 [Keep a Changelog](https://keepachangelog.com/) format with Added/Changed/Fixed/Removed sections. Parses commits since last tag, groups by prefix, highlights BREAKING and SECURITY.
