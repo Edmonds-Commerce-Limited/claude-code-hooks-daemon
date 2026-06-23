@@ -96,9 +96,21 @@ _MIN_IDENTIFIER_LENGTH = 8
 # Bash grep/rg command pattern
 _BASH_GREP_PATTERN = re.compile(r"(?:^|\s|&&|\|\||;)\s*(?:grep|rg)\s+")
 
-# Extract the search pattern from a bash grep/rg command
+# Flag-skip group consumed before the search pattern in a grep/rg command.
+# Handles, in priority order:
+#   - long flag with attached value:   --type=py
+#   - long flag with separate value:   --type py   (value skipped, not the symbol)
+#   - clustered/short flag(s):         -rn  -e  -r
+# The negative lookahead on the separate-value branch stops the flag-skip from
+# swallowing a quoted search term as if it were a flag value.
+_FLAG_SKIP = (
+    r"(?:" r"--[A-Za-z][\w-]*=\S+\s+" r"|--[A-Za-z][\w-]*\s+(?![\"'])\S+\s+" r"|-[A-Za-z]+\s+" r")*"
+)
+
+# Extract the search pattern from a bash grep/rg command. Group 1 captures a
+# quoted pattern, group 2 captures an unquoted token.
 _BASH_GREP_EXTRACT = re.compile(
-    r'(?:grep|rg)\s+(?:-[a-zA-Z]*\s+)*["\']([^"\']+)["\']' r"|(?:grep|rg)\s+(?:-[a-zA-Z]*\s+)*(\S+)"
+    rf"(?:grep|rg)\s+{_FLAG_SKIP}[\"']([^\"']+)[\"']" rf"|(?:grep|rg)\s+{_FLAG_SKIP}(\S+)"
 )
 
 # --- LSP operation mapping ---

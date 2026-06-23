@@ -681,3 +681,127 @@ class TestLoadFromPluginsConfig:
         # Should load from first path
         assert len(handlers) == 1
         assert handlers[0].name == "test-custom"
+
+
+class TestModuleNameIsolation:
+    """Regression tests for sys.modules registration of plugin modules."""
+
+    @pytest.fixture(autouse=True)
+    def _restore_sys_modules(self):
+        """Snapshot and restore sys.modules so these tests never leak state.
+
+        These tests deliberately load plugin modules (which register synthetic
+        keys in sys.modules) and pop bare-stem keys; restoring the snapshot
+        keeps them fully isolated from the rest of the suite regardless of
+        run order.
+        """
+        import sys
+
+        snapshot = dict(sys.modules)
+        try:
+            yield
+        finally:
+            for key in set(sys.modules) - set(snapshot):
+                del sys.modules[key]
+            for key, value in snapshot.items():
+                sys.modules[key] = value
+
+    _VALID_HANDLER_BODY = '''"""Test handler module."""
+from typing import Any
+
+from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+
+
+class CustomHandler(Handler):
+    """Valid handler."""
+
+    def __init__(self) -> None:
+        super().__init__(name="iso-test", priority=50)
+
+    def matches(self, hook_input: dict[str, Any]) -> bool:
+        return True
+
+    def handle(self, hook_input: dict[str, Any]) -> HookResult:
+        return HookResult(decision=Decision.ALLOW)
+
+    def get_claude_md(self) -> str | None:
+        return None
+
+    def get_acceptance_tests(self) -> list[Any]:
+        from claude_code_hooks_daemon.core import AcceptanceTest, TestType
+
+        return [
+            AcceptanceTest(
+                title="iso",
+                command="echo 'x'",
+                description="iso test",
+                expected_decision=Decision.ALLOW,
+                expected_message_patterns=[r".*"],
+                test_type=TestType.BLOCKING,
+            )
+        ]
+'''
+
+    def test_does_not_register_bare_stem_in_sys_modules(self, tmp_path: Path) -> None:
+        """Loading a plugin must NOT pollute sys.modules with its bare stem.
+
+        Regression: previously the loader cached the module under its bare
+        filename stem, so a plugin named like a stdlib module (e.g. json.py)
+        would shadow the real module for the whole process.
+        """
+        import sys
+
+        plugin_dir = tmp_path / "plugins"
+        plugin_dir.mkdir()
+        (plugin_dir / "custom_handler.py").write_text(self._VALID_HANDLER_BODY)
+
+        sys.modules.pop("custom_handler", None)
+        handler = PluginLoader.load_handler("custom_handler", plugin_dir)
+
+        assert handler is not None
+        assert "custom_handler" not in sys.modules
+
+    def test_same_filename_in_two_dirs_do_not_collide(self, tmp_path: Path) -> None:
+        """Two plugins with the same filename in different dirs must both load.
+
+        Regression: a shared bare-stem sys.modules key meant the second load
+        reused the first module object instead of executing the new file.
+        """
+        dir_a = tmp_path / "a"
+        dir_b = tmp_path / "b"
+        dir_a.mkdir()
+        dir_b.mkdir()
+
+        body_a = self._VALID_HANDLER_BODY.replace('name="iso-test"', 'name="iso-a"')
+        body_b = self._VALID_HANDLER_BODY.replace('name="iso-test"', 'name="iso-b"')
+        (dir_a / "custom_handler.py").write_text(body_a)
+        (dir_b / "custom_handler.py").write_text(body_b)
+
+        handler_a = PluginLoader.load_handler("custom_handler", dir_a)
+        handler_b = PluginLoader.load_handler("custom_handler", dir_b)
+
+        assert handler_a is not None
+        assert handler_b is not None
+        assert handler_a.name == "iso-a"
+        assert handler_b.name == "iso-b"
+
+    def test_failed_exec_does_not_leave_partial_module_cached(self, tmp_path: Path) -> None:
+        """A failed exec_module must not leave a partial module in sys.modules.
+
+        Regression: the loader registered the module before exec_module and
+        never removed it on failure, leaving a half-initialised module cached.
+        """
+        import sys
+
+        plugin_dir = tmp_path / "plugins"
+        plugin_dir.mkdir()
+        (plugin_dir / "broken.py").write_text("raise RuntimeError('boom on import')\n")
+
+        before = set(sys.modules)
+        handler = PluginLoader.load_handler("broken", plugin_dir)
+        after = set(sys.modules)
+
+        assert handler is None
+        # No new synthetic plugin module key should survive a failed import.
+        new_keys = after - before
+        assert not any(key.startswith("_cchd_plugin_") for key in new_keys)
