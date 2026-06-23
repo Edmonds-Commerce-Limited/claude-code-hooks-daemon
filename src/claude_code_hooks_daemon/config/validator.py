@@ -17,7 +17,8 @@ import pkgutil
 import re
 from typing import Any, ClassVar
 
-from claude_code_hooks_daemon.constants import ConfigKey, EventID
+from claude_code_hooks_daemon.config.models import LogLevel
+from claude_code_hooks_daemon.constants import ConfigKey, EventID, ValidationLimit
 from claude_code_hooks_daemon.utils.strict_mode import handle_tier2_error
 
 logger = logging.getLogger(__name__)
@@ -47,14 +48,15 @@ class ConfigValidator:
         EventID.STATUS_LINE.config_key,
     }
 
-    # Valid log levels
-    VALID_LOG_LEVELS: ClassVar[set[str]] = {"DEBUG", "INFO", "WARNING", "ERROR"}
+    # Valid log levels - derived from the LogLevel enum (single source of truth)
+    # so this set can never drift from the Pydantic schema / ConfigSchema.
+    VALID_LOG_LEVELS: ClassVar[set[str]] = {level.value for level in LogLevel}
 
-    # Priority range (inclusive) - project-specific config constraints
-    # NOTE: These are narrower than ValidationLimit.PRIORITY_MIN/MAX (0-100)
-    # because the project enforces a tighter range for handler priorities
-    MIN_PRIORITY = 5
-    MAX_PRIORITY = 60
+    # Priority range (inclusive) - sourced from ValidationLimit (the real
+    # priority space) so legitimate overrides such as logging handlers at
+    # priority 100 are not wrongly rejected into degraded mode.
+    MIN_PRIORITY = ValidationLimit.PRIORITY_MIN
+    MAX_PRIORITY = ValidationLimit.PRIORITY_MAX
 
     # Handler name pattern (snake_case with optional numbers)
     HANDLER_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")

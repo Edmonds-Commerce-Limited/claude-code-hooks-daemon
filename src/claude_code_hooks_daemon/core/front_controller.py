@@ -70,6 +70,7 @@ class FrontController:
             Catches any exceptions during handler execution and returns error details.
         """
         current_handler: Handler | None = None
+        final_handler: Handler | None = None
         accumulated_context: list[str] = []
         handlers_matched: list[str] = []
         final_result: HookResult | None = None
@@ -102,14 +103,17 @@ class FrontController:
                         # Non-terminal handler - accumulate context and continue
                         accumulated_context.extend(result.context)
                         final_result = result
-                        current_handler = handler  # Track last matching handler
+                        # Track the handler that PRODUCED final_result so the footer
+                        # points at the correct config_key even if a later handler
+                        # does not match (mirrors router.py handlers_executed[-1]).
+                        final_handler = handler
 
             # No terminal handler matched - return last non-terminal result or default allow
             if final_result:
                 # Merge accumulated context
                 if accumulated_context:
                     final_result.context = accumulated_context
-                self._inject_config_key_footer(final_result, current_handler)
+                self._inject_config_key_footer(final_result, final_handler)
                 return final_result
             else:
                 # No handlers matched at all

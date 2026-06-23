@@ -41,17 +41,20 @@ class TestConfigValidatorConstants:
         assert "status_line" in ConfigValidator.VALID_EVENT_TYPES
 
     def test_valid_log_levels(self) -> None:
-        """VALID_LOG_LEVELS should contain standard log levels."""
-        assert len(ConfigValidator.VALID_LOG_LEVELS) == 4
-        assert "DEBUG" in ConfigValidator.VALID_LOG_LEVELS
-        assert "INFO" in ConfigValidator.VALID_LOG_LEVELS
-        assert "WARNING" in ConfigValidator.VALID_LOG_LEVELS
-        assert "ERROR" in ConfigValidator.VALID_LOG_LEVELS
+        """VALID_LOG_LEVELS should be derived from the LogLevel enum."""
+        from claude_code_hooks_daemon.config.models import LogLevel
+
+        expected = {level.value for level in LogLevel}
+        assert ConfigValidator.VALID_LOG_LEVELS == expected
+        # CRITICAL must be accepted (it is part of the LogLevel enum/schema).
+        assert "CRITICAL" in ConfigValidator.VALID_LOG_LEVELS
 
     def test_priority_range(self) -> None:
-        """Priority range should be 5-60."""
-        assert ConfigValidator.MIN_PRIORITY == 5
-        assert ConfigValidator.MAX_PRIORITY == 60
+        """Priority range should match the real priority space (ValidationLimit)."""
+        from claude_code_hooks_daemon.constants import ValidationLimit
+
+        assert ConfigValidator.MIN_PRIORITY == ValidationLimit.PRIORITY_MIN
+        assert ConfigValidator.MAX_PRIORITY == ValidationLimit.PRIORITY_MAX
 
     def test_handler_name_pattern(self) -> None:
         """HANDLER_NAME_PATTERN should match valid snake_case names."""
@@ -358,11 +361,13 @@ class TestValidateHandlers:
         assert "str" in errors[0]
 
     def test_priority_too_low(self) -> None:
-        """priority below minimum should return error."""
+        """priority below minimum (ValidationLimit.PRIORITY_MIN) should return error."""
+        from claude_code_hooks_daemon.constants import ValidationLimit
+
         config = {
             "handlers": {
                 "pre_tool_use": {
-                    "my_handler": {"priority": 1},
+                    "my_handler": {"priority": ValidationLimit.PRIORITY_MIN - 1},
                 }
             }
         }
@@ -370,14 +375,16 @@ class TestValidateHandlers:
         assert len(errors) == 1
         assert "priority" in errors[0]
         assert "must be in range" in errors[0]
-        assert "5-60" in errors[0]
+        assert f"{ValidationLimit.PRIORITY_MIN}-{ValidationLimit.PRIORITY_MAX}" in errors[0]
 
     def test_priority_too_high(self) -> None:
-        """priority above maximum should return error."""
+        """priority above maximum (ValidationLimit.PRIORITY_MAX) should return error."""
+        from claude_code_hooks_daemon.constants import ValidationLimit
+
         config = {
             "handlers": {
                 "pre_tool_use": {
-                    "my_handler": {"priority": 100},
+                    "my_handler": {"priority": ValidationLimit.PRIORITY_MAX + 1},
                 }
             }
         }
@@ -385,6 +392,22 @@ class TestValidateHandlers:
         assert len(errors) == 1
         assert "priority" in errors[0]
         assert "must be in range" in errors[0]
+
+    def test_logging_priority_100_is_valid(self) -> None:
+        """Legitimate logging-handler priority 100 must NOT be rejected.
+
+        Regression: MIN_PRIORITY=5/MAX_PRIORITY=60 wrongly rejected the
+        priority space used by real logging handlers (priority 100).
+        """
+        config = {
+            "handlers": {
+                "stop": {
+                    "subagent_completion_logger": {"priority": 100},
+                }
+            }
+        }
+        errors = ConfigValidator._validate_handlers(config, validate_handler_names=False)
+        assert errors == []
 
     def test_duplicate_priorities(self) -> None:
         """Duplicate priorities should log warning but NOT return error."""
@@ -606,11 +629,13 @@ class TestEdgeCases:
     """Tests for edge cases and boundary conditions."""
 
     def test_minimum_valid_priority(self) -> None:
-        """Priority of 5 (minimum) should be valid."""
+        """Priority at ValidationLimit.PRIORITY_MIN (minimum) should be valid."""
+        from claude_code_hooks_daemon.constants import ValidationLimit
+
         config = {
             "handlers": {
                 "pre_tool_use": {
-                    "my_handler": {"priority": 5},
+                    "my_handler": {"priority": ValidationLimit.PRIORITY_MIN},
                 }
             }
         }
@@ -618,11 +643,13 @@ class TestEdgeCases:
         assert errors == []
 
     def test_maximum_valid_priority(self) -> None:
-        """Priority of 60 (maximum) should be valid."""
+        """Priority at ValidationLimit.PRIORITY_MAX (maximum) should be valid."""
+        from claude_code_hooks_daemon.constants import ValidationLimit
+
         config = {
             "handlers": {
                 "pre_tool_use": {
-                    "my_handler": {"priority": 60},
+                    "my_handler": {"priority": ValidationLimit.PRIORITY_MAX},
                 }
             }
         }
@@ -630,8 +657,10 @@ class TestEdgeCases:
         assert errors == []
 
     def test_all_log_levels_valid(self) -> None:
-        """All valid log levels should pass validation."""
-        for log_level in ["DEBUG", "INFO", "WARNING", "ERROR"]:
+        """All LogLevel enum values (including CRITICAL) should pass validation."""
+        from claude_code_hooks_daemon.config.models import LogLevel
+
+        for log_level in (level.value for level in LogLevel):
             config = {"daemon": {"idle_timeout_seconds": 600, "log_level": log_level}}
             errors = ConfigValidator._validate_daemon(config)
             assert errors == []

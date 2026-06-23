@@ -96,8 +96,11 @@ class TestConfigValidator:
         assert any("log_level" in err.lower() for err in errors)
 
     def test_valid_log_levels(self):
-        """Test that all valid log levels are accepted."""
-        valid_levels = ["DEBUG", "INFO", "WARNING", "ERROR"]
+        """Test that every LogLevel enum value (incl. CRITICAL) is accepted."""
+        from claude_code_hooks_daemon.config.models import LogLevel
+
+        valid_levels = [level.value for level in LogLevel]
+        assert "CRITICAL" in valid_levels
 
         for level in valid_levels:
             config = {
@@ -161,36 +164,63 @@ class TestConfigValidator:
         assert any("enabled" in err.lower() and "boolean" in err.lower() for err in errors)
 
     def test_priority_out_of_range_low(self):
-        """Test that priority < 5 fails validation."""
+        """Test that priority below ValidationLimit.PRIORITY_MIN fails validation."""
+        from claude_code_hooks_daemon.constants import ValidationLimit
+
+        expected_range = f"{ValidationLimit.PRIORITY_MIN}-{ValidationLimit.PRIORITY_MAX}"
         config = {
             "version": "1.0",
             "daemon": {"idle_timeout_seconds": 600, "log_level": "INFO"},
             "handlers": {
                 "pre_tool_use": {
-                    "destructive_git": {"enabled": True, "priority": 3},
+                    "destructive_git": {
+                        "enabled": True,
+                        "priority": ValidationLimit.PRIORITY_MIN - 1,
+                    },
                 },
             },
         }
 
         errors = ConfigValidator.validate(config, validate_handler_names=False)
         assert len(errors) > 0
-        assert any("priority" in err.lower() and "5-60" in err for err in errors)
+        assert any("priority" in err.lower() and expected_range in err for err in errors)
 
     def test_priority_out_of_range_high(self):
-        """Test that priority > 60 fails validation."""
+        """Test that priority above ValidationLimit.PRIORITY_MAX fails validation."""
+        from claude_code_hooks_daemon.constants import ValidationLimit
+
+        expected_range = f"{ValidationLimit.PRIORITY_MIN}-{ValidationLimit.PRIORITY_MAX}"
         config = {
             "version": "1.0",
             "daemon": {"idle_timeout_seconds": 600, "log_level": "INFO"},
             "handlers": {
                 "pre_tool_use": {
-                    "destructive_git": {"enabled": True, "priority": 65},
+                    "destructive_git": {
+                        "enabled": True,
+                        "priority": ValidationLimit.PRIORITY_MAX + 1,
+                    },
                 },
             },
         }
 
         errors = ConfigValidator.validate(config, validate_handler_names=False)
         assert len(errors) > 0
-        assert any("priority" in err.lower() and "5-60" in err for err in errors)
+        assert any("priority" in err.lower() and expected_range in err for err in errors)
+
+    def test_logging_priority_100_is_valid(self):
+        """Regression: legitimate logging-handler priority 100 must NOT fail."""
+        config = {
+            "version": "1.0",
+            "daemon": {"idle_timeout_seconds": 600, "log_level": "INFO"},
+            "handlers": {
+                "stop": {
+                    "subagent_completion_logger": {"enabled": True, "priority": 100},
+                },
+            },
+        }
+
+        errors = ConfigValidator.validate(config, validate_handler_names=False)
+        assert not any("priority" in err.lower() for err in errors)
 
     def test_priority_wrong_type(self):
         """Test that string priority fails validation."""
@@ -416,12 +446,17 @@ class TestConfigValidator:
 
     def test_validation_error_includes_context(self):
         """Test that validation errors include helpful context."""
+        from claude_code_hooks_daemon.constants import ValidationLimit
+
         config = {
             "version": "1.0",
             "daemon": {"idle_timeout_seconds": 600, "log_level": "INFO"},
             "handlers": {
                 "pre_tool_use": {
-                    "destructive_git": {"enabled": True, "priority": 100},
+                    "destructive_git": {
+                        "enabled": True,
+                        "priority": ValidationLimit.PRIORITY_MAX + 1,
+                    },
                 },
             },
         }

@@ -370,6 +370,39 @@ class TestNonTerminalHandlerDispatch:
         # Last handler result returned
         assert result.decision == Decision.ALLOW
 
+    def test_non_terminal_deny_footer_uses_producing_handler(self, front_controller):
+        """Footer must reference the handler that PRODUCED the DENY result.
+
+        Regression: a non-matching handler iterated AFTER the producing
+        non-terminal handler used to overwrite current_handler, so the
+        disable footer pointed at the wrong handler's config_key.
+        """
+        producing = MagicMock(spec=Handler)
+        producing.priority = 10
+        producing.terminal = False
+        producing.matches.return_value = True
+        producing.handle.return_value = HookResult(
+            decision=Decision.DENY, reason="Blocked by producing handler"
+        )
+        producing.config_key = "producing_handler"
+
+        # A later handler that does NOT match - must not become the footer target.
+        later_non_matching = MagicMock(spec=Handler)
+        later_non_matching.priority = 20
+        later_non_matching.terminal = False
+        later_non_matching.matches.return_value = False
+        later_non_matching.config_key = "wrong_handler"
+
+        front_controller.register(producing)
+        front_controller.register(later_non_matching)
+
+        result = front_controller.dispatch({"tool_name": "Bash"})
+
+        assert result.decision == Decision.DENY
+        # Footer must name the producing handler, never the non-matching one.
+        assert "producing_handler" in result.reason
+        assert "wrong_handler" not in result.reason
+
 
 # Context Accumulation Tests
 
