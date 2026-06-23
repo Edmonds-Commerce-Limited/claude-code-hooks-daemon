@@ -87,6 +87,16 @@ class TestCriticalThinkingAdvisoryHandler:
         }
         assert handler.matches(hook_input) is True
 
+    def test_matches_returns_false_for_none_prompt(self, handler):
+        """Should not raise (and not match) when prompt is explicitly None."""
+        hook_input = {"prompt": None}
+        assert handler.matches(hook_input) is False
+
+    def test_matches_returns_false_for_non_str_prompt(self, handler):
+        """Should not match when prompt is a non-string type (e.g. a list)."""
+        hook_input = {"prompt": ["a"] * 100}
+        assert handler.matches(hook_input) is False
+
     # --- handle() Tests: Random gate ---
 
     @patch(

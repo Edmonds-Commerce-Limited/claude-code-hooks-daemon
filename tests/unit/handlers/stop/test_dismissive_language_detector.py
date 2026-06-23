@@ -412,6 +412,11 @@ class TestDismissiveLanguageDetectorMatches:
         )
         assert handler.matches({HookInputField.TRANSCRIPT_PATH: path}) is True
 
+    def test_matches_pausing_here(self, handler: Any) -> None:
+        """Detect bare 'pausing here' — get_claude_md documents it as flagged."""
+        path = _make_transcript([_assistant_message("I'll be pausing here for now.")])
+        assert handler.matches({HookInputField.TRANSCRIPT_PATH: path}) is True
+
     # --- Case insensitivity ---
 
     def test_matches_case_insensitive(self, handler: Any) -> None:
