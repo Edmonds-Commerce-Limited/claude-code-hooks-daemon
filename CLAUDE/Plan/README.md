@@ -6,7 +6,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Self-Driving / Automation
 
-- [00135: Event-Driven `send-keys` Injection](00135-event-driven-send-keys-injection/PLAN.md) - **In design** (2 hostile-review rounds; launcher redesign dissolved pane-identity; awaiting ARCH-A-vs-ARCH-B decision + coexistence fix)
+- [00135: Event-Driven `send-keys` Injection](00135-event-driven-send-keys-injection/PLAN.md) - **In Progress (ARCH-A, buildable)** — on `feature/00135-tmux-send-keys-injection` (NOT main); spikes resolved the architecture fork (S-KEYTABLE+S-SIG GREEN → ARCH-A, no PTY supervisor); v2 plan maps all 9 hostile-review ship-blockers to phases; merge to main gated on a final hostile review of the built code
 
   - Hooks run as children of Claude Code and inherit `$TMUX_PANE`, so any daemon hook event (or a context-threshold watchdog) can `tmux send-keys` a **slash command / prompt** back into the live, watchable session — flagship use case: auto-`/compact` at a custom threshold; also PostCompact re-orientation, `/fix` on failing tests, session bootstrap
   - Architecture: status-line handler writes a pct/idle sidecar (reuses the payload the daemon already receives), a single `tmux_inject` choke-point utility, and a user-launched watchdog in its own observable pane; handlers enqueue intents, never type directly
