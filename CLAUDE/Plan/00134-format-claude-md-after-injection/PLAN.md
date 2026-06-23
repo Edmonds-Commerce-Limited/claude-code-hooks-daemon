@@ -1,6 +1,6 @@
 # Plan 00134: Format CLAUDE.md After Handler-Guidance Injection
 
-**Status**: Not Started
+**Status**: Complete
 **Created**: 2026-06-22
 **Owner**: joseph
 **Priority**: Medium
@@ -120,3 +120,14 @@ already formatter-canonical and stays consistent with what
   spurious churn. Fix = format via the existing formatter SSOT right after
   injection so on-disk content is already canonical.
 - Candidate for the next release alongside Plan 00133.
+
+### Delivery
+
+- Delivered in commit `08e25d3`. Extracted the mdformat+gfm transform into
+  `utils/markdown_format.format_markdown_text` (SSoT) and pointed the
+  `markdown_table_formatter` handler, the `format-markdown` CLI, and the
+  `ClaudeMdInjector` at it (removed two duplicate copies). The injector now
+  formats CLAUDE.md after writing the block (fail-safe; content-loss guard runs
+  on the pre-format replace result). Dogfooded via daemon restart: the first
+  restart applied a one-time canonical reformat of this repo's CLAUDE.md
+  (commit `2643214`); subsequent restarts are stable.

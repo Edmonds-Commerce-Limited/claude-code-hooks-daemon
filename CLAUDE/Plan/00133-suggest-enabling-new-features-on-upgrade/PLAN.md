@@ -264,3 +264,27 @@ dead code. **Date**: 2026-06-22
   (not called from `upgrade.md`), and informational-only (no recommend/enable
   promotion). Plan reframes the work as revive + strengthen + backfill + wire,
   not build-new.
+
+### Delivery
+
+- Phases 1–5 (mechanism, schema, wiring, backfill, anti-rot staging) delivered
+  in prior-session commits.
+- Phase 6 (dogfood) — commit `da96da8`: enabled `allow_untracked_claude_memory: false` in this repo, migrated durable lessons to `CLAUDE/development/LESSONS.md`
+  (linked from CLAUDE.md). Live-verified on the running daemon: memory Write →
+  DENY, bash redirect/tee → DENY, bash read → ALLOW. Source memory left inert.
+  Friction captured: once the policy is live the agent can no longer write its
+  own MEMORY.md — the release record must go into tracked docs (this is the
+  intended outcome and shaped the post-upgrade task wording).
+- Phase 7 (default flip) — commit `549e600`: `markdown_organization` default
+  `allow_untracked_claude_memory` flipped True→False via a new SSoT constant
+  `DEFAULT_ALLOW_UNTRACKED_CLAUDE_MEMORY`; `optimal_config_checker` fallback now
+  reads that constant (fixed a drift bug where an unset option would have been
+  read as the old default and nagged). Staged: config-changes v3.24.0 manifest
+  (recommended/recommended_value), `critical` post-upgrade task
+  `01-migrate-untracked-claude-memory.md`, truth-changes v3.24.0
+  (memory-allowed-by-default → blocked-by-default). The non-breaking release's
+  upgrade guide is the `post-upgrade-tasks/` dir assembled by RELEASING.md
+  Step 6 (v3.18.3→v3.19.0 precedent — no separate guide README).
+- version_check upgrade notice reworded to agent-safe skill phrasing (commit
+  `ff752ac`) — skill_refs QA gate.
+- Phase 8 (verify & release) in progress.
