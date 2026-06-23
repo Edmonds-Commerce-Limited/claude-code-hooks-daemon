@@ -1,158 +1,168 @@
 # Plan 00139: Failsafe Recovery Cron
 
-**Status**: Not Started (design — awaiting user decisions on open questions)
+**Status**: Not Started (design agreed — ready to implement)
 **Created**: 2026-06-23
 **Owner**: Claude (Opus)
 **Priority**: Medium
-**Recommended Executor**: Sonnet (single new advisory handler + tests)
+**Recommended Executor**: Sonnet (advisory handler(s) + tests)
 **Execution Strategy**: Sub-Agent Orchestration
 
 ## Overview
 
-Promote a workflow where, **once a plan is created**, the agent sets up an
-**hourly failsafe recovery cron** — a safety net that resumes work stalled by
-external factors (API failures, rate limits, 5-hour usage limits), but which is
-explicitly **not** a heartbeat and must never be waited upon.
+While a plan is **being executed**, a **non-durable hourly failsafe recovery
+cron** runs as a safety net: if work stalls on an *external* factor (Claude API
+overload, rate limits, 5-hour usage limits, network failure) the cron fires
+(only while the REPL is idle) and tells the agent to resume. It is explicitly
+**not** a heartbeat — the agent must never wait for it; work proceeds at full
+speed until something external actually blocks it.
 
 The daemon cannot create crons (`CronCreate` is an agent-side tool), so its role
-is **advisory**: a new PostToolUse handler detects plan creation and injects
-guidance instructing the agent to create the recovery cron idempotently. The
-guidance — and the cron prompt itself — both carry the "do NOT treat this as a
-heartbeat; keep working until externally blocked" rule.
+is **advisory across the plan lifecycle**:
+
+1. **Plan creation** → advise/enforce that recovery-cron setup is part of the
+   plan itself, and prompt the agent to create the cron.
+2. **Plan progress-update** → ensure a recovery cron is actually running while
+   the plan executes (re-prompt if missing) — the real "while executing" signal.
+3. **Plan completion** → prompt the agent to tear the cron down (`CronDelete`).
+
+A **reminder-tracking / cooldown** mechanism prevents the advisory from spamming
+context on every progress edit.
 
 See `context.md` for the problem statement, today's trigger, and the cron
 introspection findings.
 
+## Decisions (resolved with user 2026-06-23)
+
+- **D1 — Durability: NON-durable (session-only).** User experience is that
+  durable crons are unreliable and arguably undesirable. The handler's whole
+  purpose is to ensure a cron is *running during execution* and *cleaned up on
+  completion*; a durable cron would both defeat the need for the handler and
+  risk stale firing in unrelated later sessions. Crons are **created
+  non-durable**. The daemon MAY still read a durable one if present (to avoid
+  double-prompting), but the supported/created mode is non-durable.
+- **D2 — Dedup: in-session reminder tracking, not disk introspection.** Because
+  created crons are non-durable they are invisible on disk, so dedup is about
+  **not spamming the reminder**: track that we have advised (per plan / with a
+  cooldown) and stay quiet until the cooldown lapses or the cron is known gone.
+  The agent uses `CronList` to confirm a recovery cron exists before creating a
+  duplicate.
+- **D3 — Set one up now: YES (done).** Live non-durable hourly cron
+  `e243f234` (at :23) created this session as a dogfood against today's flaky
+  API. The agent will NOT wait for it.
+- **D4 — Trigger: new PostToolUse handler(s) on the plan lifecycle**, not an
+  extension of the PreToolUse `plan_workflow` handler. Triggers on plan
+  creation, progress-update, and completion (see Overview).
+
 ## Goals
 
-- Detect plan creation and advise the agent to create one hourly failsafe
-  recovery cron per project (idempotent — never spam one-per-plan).
-- Provide a single canonical recovery-cron prompt that (a) resumes externally
-  paused work, (b) is a no-op when work is already proceeding, (c) waits when
-  the only blocker is human input, (d) never acts as a heartbeat.
-- Make the daemon dedup-aware: do not re-advise if a recovery cron already
-  exists (introspection via `.claude/scheduled_tasks.json` for durable crons).
-- Encode the "must not wait for the cron" rule so the agent keeps working apace.
+- Ensure a non-durable hourly recovery cron is running **for the duration of an
+  active plan**, and is **removed on completion**.
+- On plan creation, advise/enforce that cron setup is captured **as part of the
+  plan** (an explicit execution-protocol element), and prompt cron creation.
+- On plan progress-update, verify a recovery cron is running; re-prompt if not.
+- Canonical recovery-cron prompt that (a) resumes externally-paused work, (b) is
+  a no-op when work is already proceeding, (c) waits only on human-input blocks,
+  (d) never acts as a heartbeat, (e) self-deletes when the plan is done.
+- Reminder cooldown/tracking so progress edits don't spam context.
 
 ## Non-Goals
 
 - The daemon will **not** create, list, or delete crons itself (agent-side only).
 - **Not** a heartbeat / pacing / progress-ping mechanism.
-- **Not** a process supervisor — it cannot relaunch a fully-exited Claude
-  process; it recovers an idle-but-alive session (and, if durable, re-arms on
-  the next session start).
+- **Not** durable cron creation, and **not** a process supervisor — it recovers
+  an idle-but-alive session, it cannot relaunch a fully-exited Claude process.
 - No new external dependencies.
 
 ## Context & Background
 
 Key facts (full detail in `context.md`):
 
-- `CronCreate(durable:true)` → `.claude/scheduled_tasks.json` (gitignored);
-  `durable:false` (default) → in-memory only.
-- Recurring crons auto-expire after 7 days.
-- Crons fire only while the REPL is idle → cannot interrupt active work.
-- Daemon can read durable crons from disk; cannot see in-memory crons except via
-  observing `CronCreate`/`CronList`/`CronDelete` hook events.
+- `CronCreate(durable:false)` (the chosen mode) → in-memory only, dies with the
+  session; `durable:true` → `.claude/scheduled_tasks.json` (gitignored).
+- Recurring crons auto-expire after 7 days (fire once more, then delete).
+- Crons fire only while the REPL is idle → they cannot interrupt active work.
+- Daemon cannot see in-memory crons on disk; the agent checks via `CronList`.
 
-## Open Decisions (need user input — questions raised alongside this plan)
+## Architecture
 
-### D1: Cron durability — durable vs session-only
+### Trigger detection (PostToolUse, plan-dir scoped)
 
-- **A (recommended): `durable: true`** — survives full session restart; daemon
-  can introspect/dedup across sessions via `scheduled_tasks.json`. Cost: a
-  persistent gitignored file; risk of a *stale* recovery cron firing in a later
-  session after the work is done (mitigation: recovery prompt self-checks "is
-  there resumable work? if not, no-op and consider CronDelete").
-- **B: session-only (default)** — simplest, no stale crons, dies with session.
-  Still recovers the common case (API flake / limit while session stays alive &
-  idle). Cost: no cross-session dedup; daemon cannot introspect it.
+Detect the three lifecycle moments from Write/Edit (and `mkplan.bash` Bash) to
+`PLAN.md` under the configured plan directory:
 
-### D2: Daemon dedup via `scheduled_tasks.json`
+- **Creation**: new `PLAN.md` written, or `mkplan.bash` invoked.
+- **Progress-update**: edit to an existing `PLAN.md` that touches task status
+  (`⬜`/`🔄`/`✅`) or the `## Notes & Updates` section.
+- **Completion**: `**Status**: Complete` written, or a `git mv` of the plan
+  folder into `Completed/`.
 
-- **A (recommended):** handler reads `scheduled_tasks.json`; if a recovery cron
-  (matched by a stable marker token in its prompt) is present, stay silent.
-  Only valuable if D1=A (durable).
-- **B:** no daemon dedup; always advise, rely on the agent's own judgement +
-  the advisory text ("create one if you haven't already").
+Open implementation choice: **one handler with three branches** vs **a small
+handler per moment**. Lean: one cohesive `recovery_cron_advisor` handler keyed
+by detected lifecycle phase (single SRP = "manage the recovery-cron advisory
+across a plan's life"), with phase detection in a tested helper.
 
-### D3: Set up a recovery cron NOW for this live session
+### Reminder tracking / cooldown
 
-- Given today's flaky API and ongoing large work, optionally create the recovery
-  cron immediately as a live dogfood, independent of building the handler.
-- **A:** yes, create it now. **B:** no, build the feature first.
+- Per-plan, in-memory cooldown counter (mirrors `critical_thinking_advisory`):
+  after advising, suppress further cron reminders for that plan for N
+  progress-updates (configurable), unless a completion is detected.
+- Note: the shared daemon serves multiple sessions; key tracking by plan
+  identity (folder/number) so the cooldown is meaningful and not cross-session
+  leaky. Fail-safe: if unsure, advise (a redundant reminder is cheaper than a
+  missing cron).
 
-### D4: Trigger surface
+### Guidance injected
 
-- **A (recommended):** new PostToolUse handler matching BOTH (i) Write/Edit to
-  `CLAUDE/Plan/NNNNN*/PLAN.md` and (ii) Bash invoking `mkplan.bash`, deduped to
-  one advisory per session.
-- **B:** extend the existing `plan_workflow` (PreToolUse) handler instead.
-  Rejected unless preferred — PreToolUse fires *before* creation, and mixing
-  cron-advice into a different-SRP handler dilutes it.
+- **Creation**: "Recovery-cron setup is part of executing this plan. Create a
+  non-durable hourly recovery cron now (CronCreate, durable:false, off-:00
+  minute), and record it in the plan. Do NOT wait for the cron — keep working."
+- **Progress-update**: "Confirm your failsafe recovery cron is still running
+  (CronList). If it isn't, recreate it. Keep working."
+- **Completion**: "This plan is complete — delete its recovery cron
+  (CronDelete) so it doesn't fire in unrelated future work."
 
-## Recommended Architecture (pending D1–D4)
-
-A new advisory PostToolUse handler `recovery_cron_advisor`:
-
-- **matches()**: a plan was just created (Write/Edit to a `PLAN.md` under the
-  configured plan dir, or a `mkplan.bash` Bash call). Opt-in via
-  `get_default_enabled()` per project policy.
-- **handle()**: if dedup enabled and a recovery cron already exists (durable
-  store read), return no-op context. Otherwise inject guidance:
-  - Instruct the agent to call `CronCreate` with the canonical hourly recovery
-    prompt and recommended schedule (an **off-:00 minute**, e.g. `17 * * * *`,
-    per CronCreate guidance to avoid fleet-wide :00 pileups).
-  - Carry the **"do not wait for this cron; keep working until externally
-    blocked"** rule prominently.
-- **get_claude_md()**: document the handler, the recovery-vs-heartbeat
-  distinction, and the canonical cron prompt.
-
-### Canonical recovery-cron prompt (draft)
+### Canonical recovery-cron prompt (as deployed live this session)
 
 > **FAILSAFE RECOVERY CHECK (automated hourly safety net — NOT a heartbeat).**
-> If active work was interrupted by an *external* factor (API error/overload,
-> rate limit, usage/5-hour limit, network failure) and is now resumable, resume
-> it immediately and carry it to completion. If you are blocked **only** on
-> human input, do nothing and keep waiting. If work is already proceeding
-> normally, this is a **no-op** — do not interrupt, restart, or duplicate
-> anything. Never treat this check as a heartbeat or pacing signal: between
-> these checks you must continue working at full speed until an external factor
-> stops you. (Recurring crons auto-expire after 7 days — if you are still mid-
-> project, re-arm this cron.)
+> If your most recent work on the active plan/task was interrupted by an
+> *external* factor (Claude API error/overload, rate limit, 5-hour usage limit,
+> network failure) and is now resumable, resume it immediately and carry it to
+> completion. If you are blocked **only** on human input, do nothing and keep
+> waiting. If work is already proceeding normally, this is a **no-op** — do not
+> interrupt, restart, or duplicate anything in flight. Never treat this as a
+> heartbeat or pacing signal: between checks, continue at full speed until an
+> external factor actually stops you — waiting for the cron is an own goal. When
+> the plan is complete and no resumable work remains, delete this cron
+> (CronDelete).
 
 ## Tasks
 
-### Phase 0: Decisions
+### Phase 1: TDD — lifecycle detection
 
-- [ ] ⬜ Resolve D1–D4 with the user.
-- [ ] ⬜ (If D3=A) create the live recovery cron for the current session.
+- [ ] ⬜ Tests: detect creation vs progress-update vs completion from
+  Write/Edit/Bash inputs against the plan dir (positive + negative).
+- [ ] ⬜ Implement the phase-detection helper to green.
 
-### Phase 1: TDD — handler
+### Phase 2: TDD — advisory handler
 
-- [ ] ⬜ Write failing tests: `matches()` positive (PLAN.md write, mkplan.bash
-  bash) and negative (non-plan writes, plan edits that are not creation).
-- [ ] ⬜ Write failing tests: `handle()` injects the canonical guidance; dedup
-  path returns no-op when a recovery cron is present (if D2=A).
-- [ ] ⬜ Implement `recovery_cron_advisor` to green.
-- [ ] ⬜ `get_claude_md()` + acceptance tests via `get_acceptance_tests()`.
-
-### Phase 2: Dedup / introspection (if D1=A & D2=A)
-
-- [ ] ⬜ Utility to read `.claude/scheduled_tasks.json` and detect a recovery
-  cron by stable marker token (fail-safe: absent/malformed file → advise).
-- [ ] ⬜ Tests for present / absent / malformed store.
+- [ ] ⬜ Tests: each phase injects the correct guidance; cooldown suppresses
+  repeat reminders; completion always advises teardown.
+- [ ] ⬜ Implement `recovery_cron_advisor` (PostToolUse, advisory, opt-in via
+  `get_default_enabled()`).
+- [ ] ⬜ `get_claude_md()` documents recovery-vs-heartbeat + the canonical prompt.
+- [ ] ⬜ `get_acceptance_tests()` covers the three phases.
 
 ### Phase 3: Config + docs
 
-- [ ] ⬜ Register handler; decide opt-in default; add config-changes manifest
-  entry (opt-in feature → `recommended: true`) for the next release.
-- [ ] ⬜ Update PlanWorkflow.md / CLAUDE.md guidance on the recovery cron and
-  the "never wait for it" rule.
+- [ ] ⬜ Register handler; choose opt-in default + cooldown option; add a
+  config-changes manifest entry (`recommended: true`) for the next release.
+- [ ] ⬜ Update PlanWorkflow.md: recovery cron is part of plan execution; the
+  "never wait for the cron" rule.
 
 ### Phase 4: Verify
 
-- [ ] ⬜ Daemon restart RUNNING; live probe of the advisory.
-- [ ] ⬜ Full QA `./scripts/qa/llm_qa.py all` 13/13.
+- [ ] ⬜ Daemon restart RUNNING; live probe of each lifecycle advisory.
+- [ ] ⬜ Full QA `./scripts/qa/llm_qa.py all` → 13/13.
 
 ## Dependencies
 
@@ -161,24 +171,30 @@ A new advisory PostToolUse handler `recovery_cron_advisor`:
 
 ## Success Criteria
 
-- [ ] Creating a plan reliably surfaces the recovery-cron advisory (deduped).
-- [ ] Canonical cron prompt enforces recover-not-heartbeat semantics.
-- [ ] Daemon introspects durable crons for dedup (if D1/D2=A).
+- [ ] Plan creation surfaces cron-setup-as-part-of-plan guidance + prompts cron
+  creation (non-durable, hourly).
+- [ ] Plan progress-update ensures the cron is running, without context spam.
+- [ ] Plan completion prompts cron teardown.
+- [ ] Canonical cron prompt enforces recover-not-heartbeat + self-teardown.
 - [ ] 13/13 QA; daemon restart verified; acceptance tests pass.
 
 ## Risks & Mitigations
 
-| Risk                                          | Impact | Probability | Mitigation                                                                      |
-| --------------------------------------------- | ------ | ----------- | ------------------------------------------------------------------------------- |
-| Agent treats cron as heartbeat (waits for it) | High   | Med         | Rule stated in BOTH advisory text and cron prompt; reinforce in PlanWorkflow.md |
-| Stale durable cron fires after work done      | Med    | Med         | Recovery prompt self-checks for resumable work; no-op + optional CronDelete     |
-| 7-day expiry on long projects                 | Med    | Med         | Cron prompt instructs re-arming; re-advised on later plan activity              |
-| Advisory spam (one per plan)                  | Low    | Med         | Dedup to one-per-project/session                                                |
+| Risk                                          | Impact | Probability | Mitigation                                                                                               |
+| --------------------------------------------- | ------ | ----------- | -------------------------------------------------------------------------------------------------------- |
+| Agent treats cron as heartbeat (waits for it) | High   | Med         | Rule in BOTH advisory text and cron prompt; reinforce in PlanWorkflow.md                                 |
+| Reminder spam on every progress edit          | Med    | High        | Per-plan cooldown counter (mirrors critical_thinking_advisory)                                           |
+| Cron left running after plan done             | Med    | Med         | Completion trigger advises CronDelete; cron prompt self-deletes when no work remains                     |
+| Cross-session cooldown leak (shared daemon)   | Low    | Med         | Key tracking by plan identity; fail-safe to advise when unsure                                           |
+| Non-durable cron lost on full session crash   | Med    | Med         | Accepted per D1; recovers the common idle-but-alive case; new session re-advised on next progress-update |
 
 ## Notes & Updates
 
 ### 2026-06-23
 
-- Plan created. Introspection findings recorded in `context.md`. Architecture
-  recommended (advisory PostToolUse handler + optional durable-cron dedup).
-  Open decisions D1–D4 raised with the user before implementation.
+- Plan created; introspection findings in `context.md`.
+- Decisions D1–D4 resolved with the user: non-durable crons; in-session reminder
+  tracking (not disk dedup); live cron created now; new PostToolUse lifecycle
+  handler. Refined from one-shot-on-creation to a three-moment lifecycle
+  (create → ensure-while-executing → teardown-on-complete).
+- Live dogfood cron `e243f234` (hourly at :23, non-durable) created this session.

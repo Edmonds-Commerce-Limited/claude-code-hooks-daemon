@@ -78,6 +78,13 @@ tool calls as hook events within a session. Therefore daemon-side dedup
 ("don't advise creating a recovery cron if one already exists") is only
 reliable when the recovery cron is **durable**.
 
+**Decision (2026-06-23):** despite the above, the user's direction is to create
+crons **non-durable** — durable crons are experienced as unreliable and would
+defeat the handler's purpose (ensure a cron runs *during execution* and is
+*cleaned up on completion*). So we do NOT rely on disk dedup; instead the
+handler tracks reminders in-session (cooldown) to avoid context spam, and the
+agent uses `CronList` to avoid creating duplicates. See `PLAN.md` → Decisions.
+
 ## Mechanism constraint
 
 The daemon **cannot create a cron itself** — `CronCreate` is an agent-side
