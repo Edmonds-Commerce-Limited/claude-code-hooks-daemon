@@ -821,7 +821,7 @@ Writing QA suppression directives into source files is blocked across all suppor
 - PHP: `phpstan-ignore`, `psalm-suppress` annotations
 - Java/Kotlin: `@SuppressWarnings`, `@Suppress` annotations
 - C#: `pragma warning disable` directives
-- Rust: `allow(clippy::...)` attributes on type-level items
+- Rust: `allow(...)` attributes anywhere in the file (item-level `#[allow(...)]` and crate-level `#![allow(...)]`)
 
 **Required action**: Fix the code so QA passes without suppression. If a suppression is genuinely necessary, ask the user to add it manually — this signals a conscious decision rather than a shortcut.
 
