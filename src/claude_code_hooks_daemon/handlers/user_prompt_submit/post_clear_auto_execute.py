@@ -49,7 +49,6 @@ class PostClearAutoExecuteHandler(Handler):
             tags=[HandlerTag.ADVISORY, HandlerTag.NON_TERMINAL],
         )
         self._last_session_id: str | None = None
-        self._fired_for_session: bool = False
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Match only the first prompt of a new session.
@@ -83,7 +82,6 @@ class PostClearAutoExecuteHandler(Handler):
         """
         session_id = hook_input.get("session_id", "")
         self._last_session_id = session_id
-        self._fired_for_session = True
 
         return HookResult(
             decision=Decision.ALLOW,

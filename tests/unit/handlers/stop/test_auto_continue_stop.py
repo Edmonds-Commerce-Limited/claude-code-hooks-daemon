@@ -704,6 +704,17 @@ class TestAutoContinueStopContinueOnErrors:
         """Default value of continue_on_errors should be True."""
         assert getattr(handler, "_continue_on_errors", True) is True
 
+    def test_config_attributes_declared_in_init(self, handler: AutoContinueStopHandler) -> None:
+        """Config flags must be real initialised instance attributes, not getattr defaults.
+
+        Type-safety / fail-fast: a typo in a config setter must surface as a
+        normal attribute rather than silently falling back to a getattr default.
+        """
+        assert "_continue_on_errors" in vars(handler)
+        assert "_force_explanation" in vars(handler)
+        assert handler._continue_on_errors is True
+        assert handler._force_explanation is True
+
     def test_continue_on_errors_matches_error_with_confirmation(
         self, handler: AutoContinueStopHandler, mock_transcript_path: Path
     ) -> None:

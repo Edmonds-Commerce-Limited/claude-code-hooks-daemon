@@ -33,7 +33,15 @@ class TestPostClearAutoExecuteInit:
 
         handler = PostClearAutoExecuteHandler()
         assert handler._last_session_id is None
-        assert handler._fired_for_session is False
+
+    def test_no_dead_fired_for_session_attribute(self) -> None:
+        """The unused _fired_for_session flag must not exist (dead state removed)."""
+        from claude_code_hooks_daemon.handlers.user_prompt_submit.post_clear_auto_execute import (
+            PostClearAutoExecuteHandler,
+        )
+
+        handler = PostClearAutoExecuteHandler()
+        assert not hasattr(handler, "_fired_for_session")
 
 
 class TestPostClearAutoExecuteMatches:
@@ -137,7 +145,6 @@ class TestPostClearAutoExecuteHandle:
         hook_input = {"session_id": "session-001", "prompt": "execute plan 85"}
         handler.handle(hook_input)
         assert handler._last_session_id == "session-001"
-        assert handler._fired_for_session is True
 
     def test_resets_tracking_on_new_session(self) -> None:
         from claude_code_hooks_daemon.handlers.user_prompt_submit.post_clear_auto_execute import (

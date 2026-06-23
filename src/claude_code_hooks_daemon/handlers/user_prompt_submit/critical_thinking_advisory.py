@@ -2,7 +2,8 @@
 
 Injects advisory context on UserPromptSubmit events, encouraging the agent to
 critically evaluate user requests before blindly complying. Uses a multi-gate
-filter (length + random + cooldown) to avoid flooding the context window.
+filter to avoid flooding the context window. Gates are numbered by execution
+order: Gate 1 (length), Gate 2 (cooldown), Gate 3 (random).
 """
 
 import random
@@ -14,11 +15,11 @@ from claude_code_hooks_daemon.core import Decision, Handler, HookResult, get_dat
 # Gate 1: Minimum prompt length to skip trivial prompts ("yes", "carry on", etc.)
 _MIN_PROMPT_LENGTH: Final[int] = 80
 
-# Gate 2: Probability of firing on an eligible prompt (1-in-5 = 20%)
-_FIRE_PROBABILITY: Final[float] = 0.2
-
-# Gate 3: Minimum handler events between firings to prevent clustering
+# Gate 2: Minimum handler events between firings to prevent clustering
 _COOLDOWN_EVENTS: Final[int] = 3
+
+# Gate 3: Probability of firing on an eligible prompt (1-in-5 = 20%)
+_FIRE_PROBABILITY: Final[float] = 0.2
 
 # Initial cooldown offset - negative to allow first fire without waiting
 _INITIAL_COOLDOWN_OFFSET: Final[int] = -10
@@ -40,10 +41,11 @@ _ADVISORY_MESSAGES: Final[tuple[str, ...]] = (
 class CriticalThinkingAdvisoryHandler(Handler):
     """Periodically inject advisory context encouraging critical evaluation.
 
-    Uses a multi-gate filter to minimise context waste:
+    Uses a multi-gate filter to minimise context waste (gates numbered by
+    execution order):
     - Gate 1 (Length): Skip trivial prompts (< 80 chars)
-    - Gate 2 (Random): 1-in-5 chance on eligible prompts
-    - Gate 3 (Cooldown): Skip if fired within last 3 handler events
+    - Gate 2 (Cooldown): Skip if fired within last 3 handler events
+    - Gate 3 (Random): 1-in-5 chance on eligible prompts
 
     Expected firing rate: ~1 in 15-20 prompts during normal work.
     """
@@ -67,8 +69,11 @@ class CriticalThinkingAdvisoryHandler(Handler):
 
         Returns:
             True if prompt length >= _MIN_PROMPT_LENGTH, False otherwise.
+            A missing, null, or non-string prompt never matches.
         """
-        prompt = hook_input.get("prompt", "")
+        prompt = hook_input.get("prompt")
+        if not isinstance(prompt, str):
+            return False
         return len(prompt) >= _MIN_PROMPT_LENGTH
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
@@ -86,11 +91,11 @@ class CriticalThinkingAdvisoryHandler(Handler):
         dl = get_data_layer()
         current_count = dl.history.total_count
 
-        # Gate 3: Cooldown - skip if fired too recently
+        # Gate 2: Cooldown - skip if fired too recently
         if current_count - self._last_fired_count < _COOLDOWN_EVENTS:
             return HookResult(decision=Decision.ALLOW)
 
-        # Gate 2: Random sampling - skip most of the time
+        # Gate 3: Random sampling - skip most of the time
         if self._rng.random() > _FIRE_PROBABILITY:
             return HookResult(decision=Decision.ALLOW)
 

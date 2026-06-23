@@ -11,8 +11,9 @@ Detected patterns:
 - Someone else's job: "not our responsibility", "different task entirely"
 - Defer/ignore: "can be addressed later", "not worth fixing", "best left alone"
 - Premature stop: "natural checkpoint", "logical stopping point", "clean break",
-  "good pausing point", "ready to continue on your cue" — used to quit partway
-  through a multi-step plan when an auto-continue / proceed directive is active
+  "good pausing point", "pausing here", "ready to continue on your cue" — used to
+  quit partway through a multi-step plan when an auto-continue / proceed directive
+  is active
 """
 
 import logging
@@ -106,6 +107,7 @@ class DismissiveLanguageDetectorHandler(Handler):
         r"\blogical (?:checkpoint|stopping point|pause|pausing point|break)\b",
         r"\bclean (?:checkpoint|break)\b",
         r"\bgood (?:pausing point|place to pause|stopping point|time to stop)\b",
+        r"\bpausing here\b",
         r"\bready to continue (?:on your cue|when you'?re ready|at your signal)\b",
         r"\bawait(?:ing)? (?:your|further) (?:instruction|direction|signal|cue|go-?ahead)\b",
     ]

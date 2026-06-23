@@ -194,6 +194,11 @@ class AutoContinueStopHandler(Handler):
                 HandlerTag.TERMINAL,
             ],
         )
+        # Config flags — declared and initialised here so mypy can verify them
+        # and a typo in a config setter surfaces as a normal attribute rather
+        # than silently falling back to a getattr default (fail-fast).
+        self._continue_on_errors: bool = True
+        self._force_explanation: bool = True
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Return True for all Stop events unless re-entry or AskUserQuestion.
@@ -293,7 +298,7 @@ class AutoContinueStopHandler(Handler):
         if reader:
             last_message = reader.get_last_assistant_text()
             if last_message:
-                continue_on_errors = getattr(self, "_continue_on_errors", True)
+                continue_on_errors = self._continue_on_errors
                 has_error = self._contains_error_pattern(last_message)
 
                 is_confirmation = False
@@ -311,7 +316,7 @@ class AutoContinueStopHandler(Handler):
                     return result
 
         # Branch 4: Default - require explanation or force continue
-        force_explanation = getattr(self, "_force_explanation", True)
+        force_explanation = self._force_explanation
         if force_explanation:
             logger.info("No stop explanation provided - requiring STOPPING BECAUSE: or continue")
             result = HookResult(decision=Decision.DENY, reason=_EXPLAIN_OR_CONTINUE_REASON)
