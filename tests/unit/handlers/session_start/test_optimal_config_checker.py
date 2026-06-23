@@ -764,3 +764,41 @@ class TestAcceptanceTests:
         handler = OptimalConfigCheckerHandler()
         tests = handler.get_acceptance_tests()
         assert len(tests) > 0
+
+    def test_acceptance_pattern_matches_real_output(self, tmp_path: Any) -> None:
+        """The acceptance pattern must match the string handle() actually emits.
+
+        handle() only ever emits 'CONFIG SYNC: ...' (never 'CONFIG CHECK') and
+        only when settings are written. The acceptance expected_message_pattern
+        must match that real output.
+        """
+        import json
+        import re
+
+        from claude_code_hooks_daemon.handlers.session_start.optimal_config_checker import (
+            OptimalConfigCheckerHandler,
+        )
+
+        handler = OptimalConfigCheckerHandler()
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(json.dumps({"model": "opus"}))
+
+        with (
+            patch.object(handler, "_get_settings_path", return_value=settings_path),
+            patch.dict(
+                os.environ,
+                {
+                    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+                    "CLAUDE_CODE_EFFORT_LEVEL": "high",
+                    "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "64000",
+                    "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1",
+                },
+            ),
+        ):
+            result = handler.handle(_session_start_input())
+
+        rendered = "\n".join(result.context)
+        patterns = handler.get_acceptance_tests()[0].expected_message_patterns
+        assert patterns
+        assert all(re.search(pattern, rendered) for pattern in patterns)

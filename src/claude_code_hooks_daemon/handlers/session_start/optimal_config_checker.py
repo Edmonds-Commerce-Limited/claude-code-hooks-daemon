@@ -1,10 +1,12 @@
 """OptimalConfigCheckerHandler - Checks Claude Code config for optimal settings.
 
-Runs on SessionStart to audit environment variables and settings.json
-for optimal Claude Code configuration. Reports issues with explanations,
-benefits, and how-to-fix instructions with links to docs.
+Runs on SessionStart. As of the lean-SessionStart rework (Plan 00128) handle()
+no longer emits the full per-setting audit — that report now lives in the
+`cli check` command (which reuses ``_run_checks()``). On a session start the
+handler only silently enforces critical settings and announces an actual
+settings write via a single ``CONFIG SYNC: ...`` line.
 
-Checks:
+The full audit (``_run_checks()``) covers:
 1. Agent Teams env var (CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1)
 2. Effort Level (should be "high")
 3. Extended Thinking (alwaysThinkingEnabled)
@@ -30,9 +32,10 @@ DOCS_URL = "https://code.claude.com/docs/en/settings"
 class OptimalConfigCheckerHandler(Handler):
     """Check Claude Code environment for optimal configuration on session start.
 
-    Advisory handler that runs on new sessions only (not resumes).
-    Reports which settings are optimal and which need attention,
-    with clear fix instructions and documentation links.
+    Advisory handler that runs on new sessions only (not resumes). On session
+    start it silently enforces critical settings and announces an actual
+    settings write via a single ``CONFIG SYNC: ...`` line; the full per-setting
+    audit (with fix instructions and doc links) is exposed via ``cli check``.
     """
 
     def __init__(self) -> None:
@@ -419,15 +422,17 @@ class OptimalConfigCheckerHandler(Handler):
 
         return [
             AcceptanceTest(
-                title="optimal config checker - reports configuration issues",
+                title="optimal config checker - announces settings sync",
                 command='echo "test"',
                 description=(
-                    "Tests that the handler checks Claude Code environment for optimal "
-                    "configuration (agent teams, effort level, thinking, max tokens, "
-                    "auto memory, bash working dir) and reports issues with fix instructions."
+                    "Tests that the handler silently enforces critical settings "
+                    "(effort level, extended thinking) on a new session and announces "
+                    "an actual settings.json write via a 'CONFIG SYNC' line."
                 ),
                 expected_decision=Decision.ALLOW,
-                expected_message_patterns=[r"CONFIG CHECK"],
+                # handle() only emits 'CONFIG SYNC: ...' and only on first run /
+                # unset settings (when it actually writes settings.json).
+                expected_message_patterns=[r"CONFIG SYNC"],
                 safety_notes="Advisory handler - reports but does not block",
                 test_type=TestType.CONTEXT,
                 requires_event="SessionStart event (new session only)",

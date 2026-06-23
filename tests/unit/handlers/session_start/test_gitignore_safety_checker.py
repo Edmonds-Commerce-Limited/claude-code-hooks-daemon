@@ -163,6 +163,52 @@ class TestFindMissingEntries:
         missing = handler._find_missing_entries(tmp_path)
         assert isinstance(missing, list)
 
+    def test_negation_line_does_not_satisfy_requirement(
+        self, handler: GitignoreSafetyCheckerHandler, tmp_path: Path
+    ) -> None:
+        """A '!'-negation line containing the pattern must NOT mark it covered.
+
+        '!.claude/worktrees' un-ignores the path, so the requirement is unmet —
+        substring matching wrongly treated it as satisfied.
+        """
+        worktrees_desc = _REQUIRED_GITIGNORE_PATTERNS[0][2]
+        gitignore = tmp_path / ".gitignore"
+        gitignore.write_text(
+            "!.claude/worktrees\n.CLAUDE.md.pre-inject\n.claude/scheduled_tasks.lock\n"
+        )
+        missing = handler._find_missing_entries(tmp_path)
+        assert worktrees_desc in missing
+
+    def test_unrelated_substring_line_does_not_satisfy_requirement(
+        self, handler: GitignoreSafetyCheckerHandler, tmp_path: Path
+    ) -> None:
+        """An unrelated line that merely contains the pattern as a substring is not coverage.
+
+        '.claude/worktrees-archive/' does not ignore '.claude/worktrees', so the
+        worktrees requirement must still be reported missing.
+        """
+        worktrees_desc = _REQUIRED_GITIGNORE_PATTERNS[0][2]
+        gitignore = tmp_path / ".gitignore"
+        gitignore.write_text(
+            ".claude/worktrees-archive/\n.CLAUDE.md.pre-inject\n.claude/scheduled_tasks.lock\n"
+        )
+        missing = handler._find_missing_entries(tmp_path)
+        assert worktrees_desc in missing
+
+    def test_directory_prefix_entry_covers_nested_pattern(
+        self, handler: GitignoreSafetyCheckerHandler, tmp_path: Path
+    ) -> None:
+        """An ancestor-directory ignore entry covers a nested required path.
+
+        '.claude/' ignores everything under .claude including the worktrees path,
+        so the worktrees requirement is satisfied by the directory entry.
+        """
+        worktrees_desc = _REQUIRED_GITIGNORE_PATTERNS[0][2]
+        gitignore = tmp_path / ".gitignore"
+        gitignore.write_text(".claude/\n.CLAUDE.md.pre-inject\n.claude/scheduled_tasks.lock\n")
+        missing = handler._find_missing_entries(tmp_path)
+        assert worktrees_desc not in missing
+
 
 class TestComputeGitignoreHash:
     """_compute_gitignore_hash() tests."""

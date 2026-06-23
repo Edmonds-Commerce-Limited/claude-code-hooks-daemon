@@ -325,3 +325,18 @@ class TestUsageTrackingHandler:
         # Should have orange color
         assert "\033[48;5;208m" in result  # Orange background
         assert "70.0%" in result
+
+    def test_colorize_boundary_matches_model_context_handler(
+        self, handler: UsageTrackingHandler
+    ) -> None:
+        """Boundary semantics must match ModelContextHandler (exclusive bounds).
+
+        ModelContextHandler colours 25.0% as yellow (green band is `used < 25`),
+        not green. usage_tracking's docstring claims 'same as ModelContextHandler',
+        so 25.0% here must NOT be green — it must be yellow.
+        """
+        green_bg = "\033[42m"
+        yellow_bg = "\033[43m"
+        result = handler._colorize_percentage(25.0)
+        assert green_bg not in result
+        assert yellow_bg in result

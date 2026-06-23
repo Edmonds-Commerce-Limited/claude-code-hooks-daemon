@@ -343,16 +343,18 @@ class TestGitBranchColorCoding:
     def test_default_branch_detection_cached(
         self, handler: GitBranchHandler, tmp_path: Path
     ) -> None:
-        """Default branch detection runs only once across multiple handle() calls.
+        """Default branch detection runs only once per repo across multiple handle() calls.
 
         Call sequence per handle(): rev-parse, branch --show-current, [symbolic-ref
         on first call only], git status --porcelain=v2, git stash list.
         """
         hook_input = {"workspace": {"current_dir": str(tmp_path)}}
+        toplevel_stdout = str(tmp_path).encode() + b"\n"
 
         def make_mocks(branch_name: str, include_symbolic_ref: bool) -> list[MagicMock]:
             mock_toplevel = MagicMock()
             mock_toplevel.returncode = 0
+            mock_toplevel.stdout = toplevel_stdout
             mock_branch = MagicMock()
             mock_branch.stdout = branch_name.encode() + b"\n"
             mocks = [mock_toplevel, mock_branch]
@@ -378,12 +380,57 @@ class TestGitBranchColorCoding:
             first_call_count = mock_run.call_count
         assert first_call_count == 5
 
-        # Second call: 4 subprocess invocations (no symbolic-ref — cached)
+        # Second call (same repo): 4 subprocess invocations (no symbolic-ref — cached)
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = make_mocks("feature/x", include_symbolic_ref=False)
             handler.handle(hook_input)
             second_call_count = mock_run.call_count
         assert second_call_count == 4
+
+    def test_default_branch_cached_per_repo(
+        self, handler: GitBranchHandler, tmp_path: Path
+    ) -> None:
+        """Each repo gets its own default-branch detection, keyed by repo toplevel.
+
+        Repo A's default is 'master'; repo B's default is 'main'. After detecting
+        repo A, switching to repo B must re-detect (not reuse A's 'master'), so a
+        'main' checkout in repo B is coloured green (default), not orange.
+        """
+        repo_a = tmp_path / "repo_a"
+        repo_b = tmp_path / "repo_b"
+        repo_a.mkdir()
+        repo_b.mkdir()
+
+        def make_mocks(
+            *, toplevel: Path, branch: str, symbolic_ref_default: str
+        ) -> list[MagicMock]:
+            mock_toplevel = MagicMock(returncode=0, stdout=str(toplevel).encode() + b"\n")
+            mock_branch = MagicMock(stdout=branch.encode() + b"\n")
+            mock_symbolic_ref = MagicMock(
+                returncode=0,
+                stdout=f"refs/remotes/origin/{symbolic_ref_default}\n".encode(),
+            )
+            mock_status = MagicMock(returncode=0, stdout=b"")
+            mock_stash = MagicMock(returncode=0, stdout=b"")
+            return [mock_toplevel, mock_branch, mock_symbolic_ref, mock_status, mock_stash]
+
+        # Repo A: default master, currently on master -> green
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = make_mocks(
+                toplevel=repo_a, branch="master", symbolic_ref_default="master"
+            )
+            result_a = handler.handle({"workspace": {"current_dir": str(repo_a)}})
+        assert self._GREEN in result_a.context[0]
+
+        # Repo B: default main, currently on main -> must be green (re-detected),
+        # NOT orange from reusing repo A's 'master' default.
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = make_mocks(
+                toplevel=repo_b, branch="main", symbolic_ref_default="main"
+            )
+            result_b = handler.handle({"workspace": {"current_dir": str(repo_b)}})
+        assert self._GREEN in result_b.context[0]
+        assert self._ORANGE not in result_b.context[0]
 
 
 class TestGitStatusIcons:

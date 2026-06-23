@@ -315,6 +315,20 @@ class TestModelContextHandler:
         # Must NOT show dim bar (that would be medium or low)
         assert "\033[2;37m▌" not in result.context[0]
 
+    def test_effort_suffix_docstring_matches_default(self, handler: ModelContextHandler) -> None:
+        """_get_effort_suffix docstring must state the real default ('high'), not 'medium'.
+
+        Doc-vs-code drift: the code defaults to _EFFORT_DEFAULT == 'high', so the
+        docstring must not claim 'medium' for unset effort on Claude 4+.
+        """
+        from claude_code_hooks_daemon.handlers.status_line import model_context
+
+        doc = handler._get_effort_suffix.__doc__
+        assert doc is not None
+        assert model_context._EFFORT_DEFAULT == "high"
+        assert 'defaults to "high"' in doc
+        assert 'defaults to "medium"' not in doc
+
     def test_read_effort_level_falls_back_to_default_on_oserror(
         self, handler: ModelContextHandler, tmp_path: Path
     ) -> None:

@@ -176,7 +176,7 @@ class ModelContextHandler(Handler):
         """Get effort level signal bars for Claude 4+ models.
 
         Shows three signal bars (▌▌▌) where active bars are orange, inactive dim grey.
-        Reads effortLevel from settings; defaults to "medium" for Claude 4+ when unset.
+        Reads effortLevel from settings; defaults to "high" for Claude 4+ when unset.
 
         Args:
             model_id: Model ID string (e.g. "claude-sonnet-4-6")
