@@ -166,11 +166,23 @@ across a plan's life"), with phase detection in a tested helper.
   (creation/completion fire correctly; non-plan write is a clean no-op).
 - [x] ✅ Full QA `./scripts/qa/llm_qa.py all` → 13/13 on main.
 
-### Phase 5: Deep-review polish (via Plan 00140)
+### Phase 5: Deep-review polish (via Plan 00140) — MUST-FIX this session
 
-- [ ] ⬜ Address any real defects the deep-review surfaces in
-  `recovery_cron_advisor.py` (e.g. the `_TASK_STATUS_ICON_RE` mixed character
-  class incl. `⚠️`, and the redundant `[&&]` class in `_NOTES_SECTION_RE`).
+- [ ] ⬜ **Cooldown unit mismatch (confirmed live dogfood bug, HIGH):** the
+  progress cooldown compares `get_data_layer().history.total_count` against
+  `_PROGRESS_COOLDOWN_EVENTS = 20`, but `controller.py:635` records ONE history
+  entry per *matched handler per event*, so `total_count` grows by several per
+  tool call. Effective cooldown ≈ 2–4 PLAN.md edits, not 20 → the progress
+  advisory re-fires almost every edit (observed firing twice within ~3 tool
+  calls while editing this very plan). This is the context-spam the cooldown was
+  meant to prevent. **Fix:** replace the global-`total_count` cooldown with a
+  deterministic per-plan progress counter owned by the handler (advise on the
+  1st progress event for a plan, then every Nth), with TDD. The
+  `critical_thinking_advisory` `total_count` pattern does NOT transfer to a
+  PostToolUse handler that fires on consecutive edits.
+- [ ] ⬜ `_TASK_STATUS_ICON_RE` mixed character class (includes `⚠️`, which is
+  not a task-status icon, and stuffs multi-codepoint emoji into a `[]` class).
+- [ ] ⬜ Redundant `[&&]` character class in `_NOTES_SECTION_RE` (should be `&`).
 
 ## Dependencies
 
