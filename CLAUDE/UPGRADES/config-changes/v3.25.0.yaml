@@ -1,0 +1,25 @@
+version: "3.25.0"
+date: "2026-06-23"
+breaking: false
+config_changes:
+  added: []
+  renamed: []
+  removed: []
+  changed:
+    - key: plan_workflow.enabled
+      description: >-
+        This top-level config field is now the SINGLE source of truth for whether
+        the plan workflow deploys. When true (its default), install AND upgrade now
+        deploy the CLAUDE/Plan/ scaffold + the mkplan.bash plan-scaffolding script
+        (previously a fresh install required PLAN_WORKFLOW=yes and the upgrade path
+        never deployed it at all). The install-time PLAN_WORKFLOW=yes env var that
+        used to gate this has been removed entirely — set plan_workflow.enabled in
+        .claude/hooks-daemon.yaml instead. Set it to false to opt out of the
+        CLAUDE/Plan/ scaffold + mkplan.bash deployment.
+      migration_note: >-
+        If you do NOT use the plan workflow and do not want CLAUDE/Plan/ created on
+        upgrade, add a top-level `plan_workflow:` block with `enabled: false` to
+        .claude/hooks-daemon.yaml before upgrading. The scaffold is non-destructive
+        (README.md/CLAUDE.md are only created if absent); the daemon-owned
+        mkplan.bash is overwritten on every run. A follow-up release (Plan 00137)
+        will make the shipped default opt-in to match the opt-in plan handlers.

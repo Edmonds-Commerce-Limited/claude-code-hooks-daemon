@@ -1,0 +1,18 @@
+version: "3.25.0"
+truth_changes:
+  - was: >
+      To create a new plan, run the deployed scaffolding script
+      `CLAUDE/Plan/mkplan.bash "descriptive-kebab-name"`. It is distributed by the
+      installer (only). Set `PLAN_WORKFLOW=yes` at install time to bootstrap the
+      `CLAUDE/Plan/` structure and the script.
+    now: >
+      To create a new plan, run the deployed scaffolding script
+      `CLAUDE/Plan/mkplan.bash "descriptive-kebab-name"` (use your configured plan
+      directory if not `CLAUDE/Plan/`). It is now deployed from the config single
+      source of truth — whenever `plan_workflow.enabled` is true (its default) —
+      on BOTH install AND upgrade, so existing installations receive it (and its
+      fixes) on the next upgrade. The `PLAN_WORKFLOW=yes` install-time env var that
+      previously gated deployment has been removed entirely; control the deploy via
+      `plan_workflow.enabled` in `.claude/hooks-daemon.yaml` instead. Reading the
+      `hooksdaemon.latestPlanNumber` git counter and adding 1 remains the fallback
+      when you only need the number, not a folder.

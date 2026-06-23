@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.25.0] - 2026-06-23
+
+This is a **minor release** that fixes a v3.24.0-and-earlier field bug — the `mkplan.bash` plan-scaffolding script was never deployed on upgrade (and was opt-in-gated on install) even though the daemon's own `plan_number_helper` guidance told agents to run it — by deriving deployment from the config single source of truth and deleting the orthogonal `PLAN_WORKFLOW` env var. It also colour-codes the status-line environment indicator.
+
+### Fixed
+
+- **`mkplan.bash` is now deployed on upgrade, driven by config (Plan 00136)** — The plan-scaffolding script (Plan 00130) was only ever written by `install_version.sh` behind the opt-in `PLAN_WORKFLOW=yes` env var, and was **never deployed by the upgrade path at all** — so any project that upgraded was told by `plan_number_helper` to run `CLAUDE/Plan/mkplan.bash`, a file that did not exist. Deployment is now derived from the config the daemon actually reads (`config.plan_workflow.enabled`) via a single `deploy_plan_workflow_if_enabled` entrypoint, called identically by `install_version.sh` and **both** `upgrade_version.sh` paths (full + idempotent fast path). Two end-to-end acceptance gates now assert `mkplan.bash` is present and executable after a real shell install and upgrade. Reported by downstream client `client-a-infra` (v3.22.0 → v3.24.0).
+
+### Changed
+
+- **`PLAN_WORKFLOW` env var removed entirely — config is the single source of truth (Plan 00136)** — The install-time `PLAN_WORKFLOW=yes` switch was a second, orthogonal source of truth for "is the plan workflow on" that never agreed with the config and never ran on upgrade. It is deleted outright (gate, install-summary line, and customisation hint). Whether the plan scaffold + `mkplan.bash` deploy is now decided solely by `config.plan_workflow.enabled`. **Behaviour change**: because that field defaults `true`, install and upgrade now deploy the `CLAUDE/Plan/` scaffold + `mkplan.bash` by default; a project that does not want it sets `plan_workflow.enabled: false` under the top-level `plan_workflow` config. (A follow-up release, Plan 00137, will reconcile the shipped example-config default with the opt-in plan handlers so deployment becomes opt-in.)
+
+### Added
+
+- **Colour-coded environment indicator in the status line** — The `environment_indicator` segment now renders each runtime in a distinct colour for at-a-glance identification: 💻 desktop = red, 🐳 docker = blue (Docker brand), 📦 podman = bright magenta/purple (Podman brand, lightened for legibility on black terminals), 🧊 lxc = cyan, generic/unknown container = grey. Brand-relevant where a brand colour exists, non-semantic and distinct otherwise; every segment colour-resets.
+
 ## [3.24.0] - 2026-06-23
 
 This is a **minor release** that makes upgrades actively promote dormant opt-in features, and — using that mechanism — flips the `allow_untracked_claude_memory` default so untracked Claude auto-memory is **blocked by default**, steering durable knowledge into tracked, reviewed project docs. It also removes the CLAUDE.md formatter churn the daemon's own injector used to cause.
