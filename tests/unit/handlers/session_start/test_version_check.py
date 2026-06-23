@@ -235,7 +235,7 @@ def test_upgrade_notice_points_to_skill_not_manual_steps(
     new_session_input: dict,
     tmp_path: Path,
 ) -> None:
-    """The upgrade notice instructs using the /hooks-daemon upgrade skill, not manual curl/bash."""
+    """The upgrade notice instructs using the hooks-daemon upgrade skill, not manual curl/bash."""
     mock_run.return_value = MagicMock(
         returncode=0,
         stdout="abc123\trefs/tags/v2.7.0\n",
@@ -246,8 +246,10 @@ def test_upgrade_notice_points_to_skill_not_manual_steps(
 
     assert result.context is not None
     body = "\n".join(result.context)
-    # Points to the skill
-    assert "/hooks-daemon upgrade" in body
+    # Points to the skill using the agent-safe phrasing (no bare /hooks-daemon
+    # slash token, which Claude would try to run as bash — enforced by skill_refs QA).
+    assert "Skill tool: skill=hooks-daemon, args=upgrade" in body
+    assert "/hooks-daemon" not in body
     # Does NOT tell the user to run the old manual steps
     assert "/tmp/upgrade.sh" not in body
     assert "raw.githubusercontent.com" not in body

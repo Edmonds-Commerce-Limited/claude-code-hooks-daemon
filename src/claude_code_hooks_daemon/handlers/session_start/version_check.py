@@ -238,10 +238,8 @@ class VersionCheckHandler(Handler):
             context = [
                 f"📦 Hooks daemon update available: v{current} → v{latest_version}",
                 "",
-                "To upgrade, run the skill:",
-                "",
-                "    /hooks-daemon upgrade",
-                "",
+                "To upgrade, use the hooks-daemon skill to upgrade "
+                "(Skill tool: skill=hooks-daemon, args=upgrade).",
                 "It fetches the latest upgrade script, runs it, reconciles project",
                 "docs, and commits the result atomically — no manual steps needed.",
                 "",
