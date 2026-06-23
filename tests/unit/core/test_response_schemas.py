@@ -33,6 +33,7 @@ class TestSchemaRegistry:
             "PreCompact",
             "UserPromptSubmit",
             "Notification",
+            "Status",
         ]
 
         for event in expected_events:
@@ -381,6 +382,45 @@ class TestNotificationSchema:
         """Valid response with systemMessage (NOT hookSpecificOutput)."""
         response = {"systemMessage": "Notification logged"}
         response_validator.assert_valid("Notification", response)
+
+
+class TestStatusSchema:
+    """Tests for Status hook response schema.
+
+    Status events emit a plain-text response {"text": "..."} (see
+    HookResult.to_json). The registry must carry a schema so validation
+    paths handed a Status response do not crash with 'Unknown hook event'.
+    """
+
+    def test_status_event_has_schema(self):
+        """Status event should be registered in RESPONSE_SCHEMAS."""
+        assert "Status" in RESPONSE_SCHEMAS
+
+    def test_get_response_schema_status_does_not_raise(self):
+        """get_response_schema('Status') should return a schema, not raise."""
+        schema = get_response_schema("Status")
+        assert isinstance(schema, dict)
+        assert schema["type"] == "object"
+
+    def test_valid_text_response(self, response_validator):
+        """A Status response with a text field should validate."""
+        response = {"text": "🤖 Opus | ◔ 5%"}
+        response_validator.assert_valid("Status", response)
+
+    def test_invalid_missing_text(self, response_validator):
+        """Status response without the required text field should fail."""
+        response = {}
+        response_validator.assert_invalid("Status", response)
+
+    def test_invalid_extra_fields(self, response_validator):
+        """Status response with extra fields should fail."""
+        response = {"text": "Claude", "decision": "block"}
+        response_validator.assert_invalid("Status", response)
+
+    def test_invalid_non_string_text(self, response_validator):
+        """Status response with non-string text should fail."""
+        response = {"text": 5}
+        response_validator.assert_invalid("Status", response)
 
 
 class TestValidationHelpers:

@@ -195,6 +195,21 @@ NOTIFICATION_SCHEMA: Final[dict[str, Any]] = {
 }
 
 # =============================================================================
+# Status Hook Response Schema
+# CRITICAL: Status emits a plain-text payload {"text": "..."} (see
+# HookResult.to_json), NOT hookSpecificOutput or a decision field.
+# =============================================================================
+
+STATUS_SCHEMA: Final[dict[str, Any]] = {
+    "type": "object",
+    "properties": {
+        "text": {"type": "string"},
+    },
+    "required": ["text"],
+    "additionalProperties": False,
+}
+
+# =============================================================================
 # Schema Registry - Map event names to schemas
 # =============================================================================
 
@@ -209,6 +224,7 @@ RESPONSE_SCHEMAS: Final[dict[str, dict[str, Any]]] = {
     "PreCompact": PRE_COMPACT_SCHEMA,
     "UserPromptSubmit": USER_PROMPT_SUBMIT_SCHEMA,
     "Notification": NOTIFICATION_SCHEMA,
+    "Status": STATUS_SCHEMA,
 }
 
 

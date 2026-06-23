@@ -22,6 +22,39 @@ _DISABLE_FOOTER_TEMPLATE = (
 )
 
 
+def inject_config_key_footer(
+    result: HookResult,
+    event_config_key: str,
+    handler: "Handler | None",
+) -> None:
+    """Append the config-path disable footer to a DENY/ASK result in-place.
+
+    Single source of truth for footer injection shared by EventRouter and the
+    legacy FrontController so the two cannot drift. The caller is responsible
+    for resolving the producing handler and the event config key; this helper
+    only formats and appends.
+
+    Args:
+        result: HookResult to potentially modify (mutated in-place)
+        event_config_key: Config key for the event (e.g. "pre_tool_use")
+        handler: Handler that produced the result; None disables injection
+    """
+    if result.decision not in (Decision.DENY, Decision.ASK):
+        return
+    if handler is None:
+        return
+
+    footer = _DISABLE_FOOTER_TEMPLATE.format(
+        event_config_key=event_config_key,
+        handler_config_key=handler.config_key,
+    )
+
+    if result.reason is None:
+        result.reason = footer.lstrip("\n")
+    else:
+        result.reason = result.reason + footer
+
+
 class EventRouter:
     """Routes hook events to appropriate handler chains.
 
@@ -155,22 +188,11 @@ class EventRouter:
                 return
 
         handler = chain.get(handler_name)
-        if handler is None:
-            return
 
         # event_type.name is SCREAMING_SNAKE_CASE (e.g. PRE_TOOL_USE)
         # .lower() gives the config key format (e.g. pre_tool_use)
         event_config_key = event_type.name.lower()
-        footer = _DISABLE_FOOTER_TEMPLATE.format(
-            event_config_key=event_config_key,
-            handler_config_key=handler.config_key,
-        )
-
-        # Append footer to reason (handle None reason)
-        if result.reason is None:
-            result.reason = footer.lstrip("\n")
-        else:
-            result.reason = result.reason + footer
+        inject_config_key_footer(result, event_config_key, handler)
 
     def route_by_string(self, event_type_str: str, hook_input: dict[str, Any]) -> HookResult:
         """Route with string event type.

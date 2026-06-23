@@ -767,3 +767,38 @@ class TestHookResultStatusFormat:
         assert "text" in output
         assert "decision" not in output
         assert "reason" not in output
+
+
+class TestHookResultToResponseDict:
+    """Tests for to_response_dict and its docstring/signature consistency."""
+
+    def test_docstring_documents_real_parameter_name(self):
+        """The docstring must reference the actual parameter name.
+
+        Regression for Plan 00140 finding #33: the docstring documented an
+        'event_name' Arg while the real parameter is '_event_name', so the
+        docstring lied about the signature.
+        """
+        import inspect
+
+        params = inspect.signature(HookResult.to_response_dict).parameters
+        assert "_event_name" in params
+        assert "event_name" not in params
+
+        doc = inspect.getdoc(HookResult.to_response_dict) or ""
+        assert "_event_name:" in doc
+        # The bare 'event_name' arg-name must not appear (would be the lie).
+        assert "\n            event_name:" not in doc
+
+    def test_to_response_dict_shape(self):
+        """to_response_dict returns the PRD 3.2.2 response structure."""
+        result = HookResult(decision=Decision.DENY, reason="blocked", context=["ctx"])
+        output = result.to_response_dict("ignored", 12.345)
+
+        assert output["result"] == {
+            "decision": "deny",
+            "reason": "blocked",
+            "context": ["ctx"],
+        }
+        assert output["timing_ms"] == 12.35
+        assert output["handlers_matched"] == []
