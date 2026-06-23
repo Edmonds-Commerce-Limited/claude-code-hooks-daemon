@@ -20,6 +20,11 @@ from claude_code_hooks_daemon.constants.tools import ToolName
 
 logger = logging.getLogger(__name__)
 
+# Byte offset representing the start of a file — no realignment needed here.
+_FILE_START_OFFSET = 0
+# Newline byte used to realign a mid-line seek to the next full JSONL record.
+_NEWLINE_BYTE = b"\n"
+
 
 @dataclass(frozen=True, slots=True)
 class ContentBlock:
@@ -303,7 +308,24 @@ class TranscriptReader:
 
         try:
             with path.open("rb") as f:
-                f.seek(byte_offset)
+                # A non-zero offset may land mid-line (the stored value is a
+                # byte position, not necessarily a record boundary). Decide
+                # whether realignment is needed by inspecting the byte directly
+                # before the offset: if it is a newline (or the offset is the
+                # file start) the offset already sits on a record boundary and
+                # no fragment must be discarded. Otherwise we are mid-line, so
+                # advance past the partial fragment to the next newline and
+                # parse only complete JSONL records from there.
+                if byte_offset != _FILE_START_OFFSET:
+                    f.seek(byte_offset - 1)
+                    preceding_byte = f.read(1)
+                    if preceding_byte != _NEWLINE_BYTE:
+                        # Mid-line: discard the partial fragment up to and
+                        # including the next newline. readline() leaves the
+                        # cursor at the start of the following complete record.
+                        f.readline()
+                else:
+                    f.seek(byte_offset)
 
                 for raw_line in f:
                     line = raw_line.decode("utf-8", errors="replace").strip()
@@ -560,14 +582,64 @@ class TranscriptReader:
                             return " ".join(text for text in texts if text)
         return ""
 
-    def last_tool_result_was_error(self) -> bool:
-        """Return True if the most recent tool_result block has is_error=true.
+    def get_tool_result_text_by_id(self, tool_use_id: str) -> str | None:
+        """Return the text of the tool_result whose tool_use_id matches.
 
-        Scans backwards for the most recent user/human message containing a
-        tool_result block and returns the value of its ``is_error`` field
-        (default False). Used by AutoContinueStopHandler to detect the
-        Edit-on-unread-file recovery pattern: tool_use Edit → tool_result
-        is_error=true → silent stop → specific recovery instruction.
+        Scans backwards for a user/human message containing a tool_result block
+        whose ``tool_use_id`` equals the given id, and returns its text content
+        (string or joined text blocks). Returns None when no matching
+        tool_result exists. Pairing by id (rather than "the most recent
+        tool_result of any tool") ensures a tool_use is matched to ITS OWN
+        result even when an unrelated tool ran afterwards.
+
+        Args:
+            tool_use_id: The id of the tool_use whose result is wanted
+
+        Returns:
+            The matching tool_result's text, or None if not found
+        """
+        if not tool_use_id:
+            return None
+        for msg in reversed(self._messages):
+            if msg.role not in ("user", "human"):
+                continue
+            raw_message = msg.raw.get("message", {})
+            if not isinstance(raw_message, dict):
+                continue
+            raw_content = raw_message.get("content", [])
+            if not isinstance(raw_content, list):
+                continue
+            for block in raw_content:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") != "tool_result":
+                    continue
+                if block.get("tool_use_id") != tool_use_id:
+                    continue
+                content = block.get("content", "")
+                if isinstance(content, str):
+                    return content
+                if isinstance(content, list):
+                    texts = [
+                        item.get("text", "")
+                        for item in content
+                        if isinstance(item, dict) and item.get("type") == "text"
+                    ]
+                    return " ".join(text for text in texts if text)
+                return ""
+        return None
+
+    def last_tool_result_was_error(self) -> bool:
+        """Return True if ANY tool_result block in the latest user message errored.
+
+        Scans backwards for the most recent user/human message containing one
+        or more tool_result blocks. Returns True if ANY of those blocks has a
+        truthy ``is_error`` field. A turn may batch multiple tool_results (one
+        per tool_use); inspecting only the last block would silently miss a
+        failing block that is not last, skipping the Edit-on-unread-file
+        recovery path. Used by AutoContinueStopHandler to detect the recovery
+        pattern: tool_use Edit → tool_result is_error=true → silent stop →
+        specific recovery instruction.
         """
         for msg in reversed(self._messages):
             if msg.role not in ("user", "human"):
@@ -578,11 +650,16 @@ class TranscriptReader:
             raw_content = raw_message.get("content", [])
             if not isinstance(raw_content, list):
                 continue
-            for block in reversed(raw_content):
-                if not isinstance(block, dict):
-                    continue
-                if block.get("type") == "tool_result":
-                    return bool(block.get("is_error", False))
+            tool_result_blocks = [
+                block
+                for block in raw_content
+                if isinstance(block, dict) and block.get("type") == "tool_result"
+            ]
+            if not tool_result_blocks:
+                continue
+            # Latest user message with tool_results found — decide from ALL of
+            # its blocks, then stop scanning older messages.
+            return any(bool(block.get("is_error", False)) for block in tool_result_blocks)
         return False
 
     def get_last_bash_tool_use(self) -> ContentBlock | None:

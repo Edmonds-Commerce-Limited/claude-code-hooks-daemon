@@ -1470,3 +1470,251 @@ class TestGetLastToolUseInMessageEdgeCases:
         reader.load(str(transcript))
         result = reader.get_last_tool_use_in_message()
         assert result is None
+
+
+class TestGetToolResultTextById:
+    """Tests for get_tool_result_text_by_id() pairing by tool_use_id."""
+
+    def _write(self, path: Path, entries: list[dict[str, object]]) -> None:
+        with path.open("w") as f:
+            for entry in entries:
+                f.write(json.dumps(entry) + "\n")
+
+    def test_matches_result_by_id_even_when_later_tool_ran(self, tmp_path: Path) -> None:
+        """The matching result is returned despite a later unrelated tool_result."""
+        transcript = tmp_path / "t.jsonl"
+        self._write(
+            transcript,
+            [
+                {
+                    "type": "message",
+                    "message": {
+                        "role": "user",
+                        "content": [
+                            {"type": "tool_result", "tool_use_id": "tu_qa", "content": "QA OUTPUT"}
+                        ],
+                    },
+                },
+                {
+                    "type": "message",
+                    "message": {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": "tu_read",
+                                "content": "READ OUTPUT",
+                            }
+                        ],
+                    },
+                },
+            ],
+        )
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        assert reader.get_tool_result_text_by_id("tu_qa") == "QA OUTPUT"
+
+    def test_returns_none_when_id_not_found(self, tmp_path: Path) -> None:
+        """An unknown id returns None."""
+        transcript = tmp_path / "t.jsonl"
+        self._write(
+            transcript,
+            [
+                {
+                    "type": "message",
+                    "message": {
+                        "role": "user",
+                        "content": [{"type": "tool_result", "tool_use_id": "tu_a", "content": "x"}],
+                    },
+                }
+            ],
+        )
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        assert reader.get_tool_result_text_by_id("tu_missing") is None
+
+    def test_returns_none_for_empty_id(self, tmp_path: Path) -> None:
+        """An empty id returns None without scanning."""
+        transcript = tmp_path / "t.jsonl"
+        self._write(transcript, [])
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        assert reader.get_tool_result_text_by_id("") is None
+
+    def test_joins_structured_text_blocks(self, tmp_path: Path) -> None:
+        """Structured list content is joined into a single text string."""
+        transcript = tmp_path / "t.jsonl"
+        self._write(
+            transcript,
+            [
+                {
+                    "type": "message",
+                    "message": {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": "tu_q",
+                                "content": [
+                                    {"type": "text", "text": "part1"},
+                                    {"type": "text", "text": "part2"},
+                                ],
+                            }
+                        ],
+                    },
+                }
+            ],
+        )
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        assert reader.get_tool_result_text_by_id("tu_q") == "part1 part2"
+
+
+class TestLastToolResultWasError:
+    """Tests for last_tool_result_was_error() across batched tool_results."""
+
+    def _write_user_tool_results(self, path: Path, blocks: list[dict[str, object]]) -> None:
+        """Write a single user message whose content is the given block list."""
+        entry = {
+            "type": "message",
+            "message": {"role": "user", "content": blocks},
+        }
+        path.write_text(json.dumps(entry) + "\n")
+
+    def test_returns_true_when_only_block_is_error(self, tmp_path: Path) -> None:
+        """Single tool_result with is_error=true → True."""
+        transcript = tmp_path / "t.jsonl"
+        self._write_user_tool_results(
+            transcript,
+            [{"type": "tool_result", "tool_use_id": "a", "is_error": True, "content": "boom"}],
+        )
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        assert reader.last_tool_result_was_error() is True
+
+    def test_returns_false_when_only_block_is_not_error(self, tmp_path: Path) -> None:
+        """Single tool_result with is_error=false → False."""
+        transcript = tmp_path / "t.jsonl"
+        self._write_user_tool_results(
+            transcript,
+            [{"type": "tool_result", "tool_use_id": "a", "is_error": False, "content": "ok"}],
+        )
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        assert reader.last_tool_result_was_error() is False
+
+    def test_returns_true_when_failing_block_is_not_last(self, tmp_path: Path) -> None:
+        """A batched turn whose FAILING tool_result is not last must still return True.
+
+        Regression: the old implementation only inspected the LAST tool_result
+        block, so a failing block earlier in a batched turn was silently
+        ignored and the Edit-on-unread-file recovery path was skipped.
+        """
+        transcript = tmp_path / "t.jsonl"
+        self._write_user_tool_results(
+            transcript,
+            [
+                {"type": "tool_result", "tool_use_id": "a", "is_error": True, "content": "boom"},
+                {"type": "tool_result", "tool_use_id": "b", "is_error": False, "content": "ok"},
+            ],
+        )
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        assert reader.last_tool_result_was_error() is True
+
+    def test_returns_false_when_no_block_is_error(self, tmp_path: Path) -> None:
+        """Batched turn with all successful tool_results → False."""
+        transcript = tmp_path / "t.jsonl"
+        self._write_user_tool_results(
+            transcript,
+            [
+                {"type": "tool_result", "tool_use_id": "a", "is_error": False, "content": "ok1"},
+                {"type": "tool_result", "tool_use_id": "b", "is_error": False, "content": "ok2"},
+            ],
+        )
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        assert reader.last_tool_result_was_error() is False
+
+    def test_returns_false_when_no_tool_result_blocks(self, tmp_path: Path) -> None:
+        """A user message with no tool_result blocks → False."""
+        transcript = tmp_path / "t.jsonl"
+        self._write_user_tool_results(
+            transcript,
+            [{"type": "text", "text": "just text"}],
+        )
+        reader = TranscriptReader()
+        reader.load(str(transcript))
+        assert reader.last_tool_result_was_error() is False
+
+
+class TestReadIncrementalLineBoundary:
+    """Tests that read_incremental realigns to a line boundary after seeking."""
+
+    def test_offset_mid_line_discards_coincidentally_valid_fragment(self, tmp_path: Path) -> None:
+        """An offset landing mid-line must discard the partial fragment.
+
+        Regression: seeking to a byte offset inside a line left a leading
+        fragment that was fed to json.loads. When that fragment happens to be
+        coincidentally valid JSON (e.g. the seek lands exactly at the start of
+        an embedded object within the line) it was mis-parsed into a bogus
+        message. The fix realigns to the next newline before parsing, so only
+        complete lines are ever parsed. Here the tail of line1 IS a standalone
+        valid message object that MUST NOT be returned.
+        """
+        transcript = tmp_path / "t.jsonl"
+        ghost_obj = json.dumps(
+            {"type": "assistant", "message": {"role": "assistant", "content": "GHOST"}}
+        )
+        # line1 = "PADDING" + a full newline-free valid object; seeking to the
+        # object's start would make the fragment coincidentally parseable.
+        padding = "PADDINGPADDING"
+        line1 = padding + ghost_obj
+        line2 = json.dumps(
+            {"type": "assistant", "message": {"role": "assistant", "content": "Second"}}
+        )
+        transcript.write_text(line1 + "\n" + line2 + "\n")
+
+        # Seek to exactly the start of the embedded GHOST object within line1.
+        mid_line_offset = len(padding.encode("utf-8"))
+        reader = TranscriptReader()
+        messages, _offset = reader.read_incremental(str(transcript), mid_line_offset)
+
+        contents = [m.content for m in messages]
+        # The mis-aligned fragment must be discarded; only the next full line.
+        assert "GHOST" not in contents
+        assert "Second" in contents
+
+    def test_offset_at_line_boundary_reads_following_message(self, tmp_path: Path) -> None:
+        """An offset exactly at a newline boundary reads the next message intact."""
+        transcript = tmp_path / "t.jsonl"
+        line1 = json.dumps(
+            {"type": "assistant", "message": {"role": "assistant", "content": "First"}}
+        )
+        line2 = json.dumps(
+            {"type": "assistant", "message": {"role": "assistant", "content": "Second"}}
+        )
+        transcript.write_text(line1 + "\n" + line2 + "\n")
+
+        boundary_offset = len(line1.encode("utf-8")) + 1  # just past the newline
+        reader = TranscriptReader()
+        messages, _offset = reader.read_incremental(str(transcript), boundary_offset)
+
+        contents = [m.content for m in messages]
+        assert contents == ["Second"]
+
+    def test_offset_zero_reads_all_messages(self, tmp_path: Path) -> None:
+        """offset==0 must preserve existing behaviour and read from the start."""
+        transcript = tmp_path / "t.jsonl"
+        line1 = json.dumps(
+            {"type": "assistant", "message": {"role": "assistant", "content": "First"}}
+        )
+        line2 = json.dumps(
+            {"type": "assistant", "message": {"role": "assistant", "content": "Second"}}
+        )
+        transcript.write_text(line1 + "\n" + line2 + "\n")
+
+        reader = TranscriptReader()
+        messages, _offset = reader.read_incremental(str(transcript), 0)
+        contents = [m.content for m in messages]
+        assert contents == ["First", "Second"]
