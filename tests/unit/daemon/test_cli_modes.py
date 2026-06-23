@@ -343,6 +343,39 @@ class TestPrintModeAdvisory:
 class TestCmdRestartModeAdvisory:
     """Tests for cmd_restart mode advisory integration."""
 
+    def test_restart_aborts_when_stop_fails(self) -> None:
+        """cmd_restart must NOT start a new daemon when stop fails.
+
+        Regression: cmd_restart ignored cmd_stop's return code. If stop
+        failed, the old daemon stayed alive, cmd_start hit the REUSE gate and
+        printed 'Daemon already running' returning 0 — so restart reported
+        success while the OLD code kept running. The fix aborts with the
+        stop return code and never calls cmd_start.
+        """
+        from claude_code_hooks_daemon.daemon.cli import cmd_restart
+
+        args = Mock()
+        args.project_root = None
+
+        stop_failure_code = 1
+        with (
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.cmd_stop",
+                return_value=stop_failure_code,
+            ) as mock_stop,
+            patch("claude_code_hooks_daemon.daemon.cli.cmd_start") as mock_start,
+            patch("claude_code_hooks_daemon.daemon.cli.time.sleep"),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli._get_current_mode",
+                return_value=None,
+            ),
+        ):
+            result = cmd_restart(args)
+
+        assert result == stop_failure_code
+        mock_stop.assert_called_once_with(args)
+        mock_start.assert_not_called()
+
     def test_restart_prints_advisory_when_non_default_mode(
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -353,7 +386,7 @@ class TestCmdRestartModeAdvisory:
         args.project_root = None
 
         with (
-            patch("claude_code_hooks_daemon.daemon.cli.cmd_stop") as mock_stop,
+            patch("claude_code_hooks_daemon.daemon.cli.cmd_stop", return_value=0) as mock_stop,
             patch("claude_code_hooks_daemon.daemon.cli.cmd_start", return_value=0) as mock_start,
             patch("claude_code_hooks_daemon.daemon.cli.time.sleep"),
             patch(
@@ -382,7 +415,7 @@ class TestCmdRestartModeAdvisory:
         args.project_root = None
 
         with (
-            patch("claude_code_hooks_daemon.daemon.cli.cmd_stop"),
+            patch("claude_code_hooks_daemon.daemon.cli.cmd_stop", return_value=0),
             patch("claude_code_hooks_daemon.daemon.cli.cmd_start", return_value=0),
             patch("claude_code_hooks_daemon.daemon.cli.time.sleep"),
             patch(
@@ -409,7 +442,7 @@ class TestCmdRestartModeAdvisory:
         args.project_root = None
 
         with (
-            patch("claude_code_hooks_daemon.daemon.cli.cmd_stop"),
+            patch("claude_code_hooks_daemon.daemon.cli.cmd_stop", return_value=0),
             patch("claude_code_hooks_daemon.daemon.cli.cmd_start", return_value=0),
             patch("claude_code_hooks_daemon.daemon.cli.time.sleep"),
             patch("claude_code_hooks_daemon.daemon.cli._get_current_mode", return_value=None),
@@ -428,7 +461,7 @@ class TestCmdRestartModeAdvisory:
         args.project_root = None
 
         with (
-            patch("claude_code_hooks_daemon.daemon.cli.cmd_stop"),
+            patch("claude_code_hooks_daemon.daemon.cli.cmd_stop", return_value=0),
             patch("claude_code_hooks_daemon.daemon.cli.cmd_start", return_value=1),
             patch("claude_code_hooks_daemon.daemon.cli.time.sleep"),
             patch(

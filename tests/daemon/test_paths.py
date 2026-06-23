@@ -7,7 +7,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from claude_code_hooks_daemon.daemon.paths import (
     _HOSTNAME_FALLBACK,
@@ -21,6 +21,7 @@ from claude_code_hooks_daemon.daemon.paths import (
     get_project_hash,
     get_project_name,
     get_socket_path,
+    is_daemon_pid,
     is_pid_alive,
     read_pid_file,
     resolve_hostname,
@@ -404,6 +405,68 @@ class TestPIDFileOperations(unittest.TestCase):
             result = read_pid_file(str(pid_path))
 
             self.assertEqual(result, current_pid)
+
+    def test_read_pid_file_verify_daemon_rejects_non_daemon_process(self):
+        """read_pid_file(verify_daemon=True) returns None when the live PID is
+        NOT a daemon server process.
+
+        Regression: after reboot/PID-reuse a stale PID file can point at an
+        unrelated live process; cmd_status then reported RUNNING and cmd_stop
+        would SIGTERM it. Cross-checking the PID's cmdline closes this.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pid_path = Path(tmpdir) / "test.pid"
+            current_pid = os.getpid()  # Alive, but NOT a daemon server.
+            write_pid_file(pid_path, current_pid)
+
+            # Without verification the alive PID is returned (legacy behaviour).
+            self.assertEqual(read_pid_file(pid_path), current_pid)
+
+            # With verification, a non-daemon live PID is rejected.
+            with patch(
+                "claude_code_hooks_daemon.daemon.paths.is_daemon_pid",
+                return_value=False,
+            ):
+                self.assertIsNone(read_pid_file(pid_path, verify_daemon=True))
+
+    def test_read_pid_file_verify_daemon_accepts_daemon_process(self):
+        """read_pid_file(verify_daemon=True) returns the PID when it IS a daemon."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pid_path = Path(tmpdir) / "test.pid"
+            current_pid = os.getpid()
+            write_pid_file(pid_path, current_pid)
+
+            with patch(
+                "claude_code_hooks_daemon.daemon.paths.is_daemon_pid",
+                return_value=True,
+            ):
+                self.assertEqual(read_pid_file(pid_path, verify_daemon=True), current_pid)
+
+    def test_is_daemon_pid_false_for_non_daemon_process(self):
+        """is_daemon_pid returns False for a live non-daemon process."""
+        # The pytest process itself is alive but is not a daemon server.
+        self.assertFalse(is_daemon_pid(os.getpid()))
+
+    def test_is_daemon_pid_true_when_cmdline_is_daemon(self):
+        """is_daemon_pid returns True when the PID's cmdline is a daemon server."""
+        fake_proc = MagicMock()
+        fake_proc.cmdline.return_value = [
+            "/usr/bin/python",
+            "-m",
+            "claude_code_hooks_daemon.daemon.cli",
+            "start",
+        ]
+        # psutil is imported lazily inside is_daemon_pid, so patch the global
+        # psutil module rather than a paths.psutil attribute.
+        with patch("psutil.Process", return_value=fake_proc):
+            self.assertTrue(is_daemon_pid(12345))
+
+    def test_is_daemon_pid_false_when_process_gone(self):
+        """is_daemon_pid returns False when the process no longer exists."""
+        import psutil
+
+        with patch("psutil.Process", side_effect=psutil.NoSuchProcess(12345)):
+            self.assertFalse(is_daemon_pid(12345))
 
     def test_is_pid_alive_returns_true_for_current_process(self):
         """Test is_pid_alive returns True for current process."""

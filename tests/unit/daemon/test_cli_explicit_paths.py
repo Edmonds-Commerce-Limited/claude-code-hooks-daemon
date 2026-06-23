@@ -196,8 +196,9 @@ class TestCmdStartUsesEnvPaths:
 
                 # Should report not running
                 assert result == 1
-                # Verify the PID path used was our custom one
-                mock_rpf.assert_called_once_with(str(custom_pid))
+                # Verify the PID path used was our custom one. verify_daemon
+                # guards against stale PID files after reboot / PID reuse.
+                mock_rpf.assert_called_once_with(str(custom_pid), verify_daemon=True)
 
 
 class TestCmdStopUsesEnvPaths:
@@ -222,7 +223,7 @@ class TestCmdStopUsesEnvPaths:
                 result = cmd_stop(args)
 
                 assert result == 0
-                mock_rpf.assert_called_once_with(str(custom_pid))
+                mock_rpf.assert_called_once_with(str(custom_pid), verify_daemon=True)
 
 
 class TestInitShPassesEnvVars:
@@ -379,10 +380,14 @@ class TestCmdStatusWithCliFlags:
 
         with patch("claude_code_hooks_daemon.daemon.cli.get_project_path") as mock_gpp:
             mock_gpp.return_value = tmp_path
-            with patch("claude_code_hooks_daemon.daemon.paths.is_pid_alive") as mock_alive:
-                mock_alive.return_value = True
-                with patch("builtins.print"):
-                    result = cmd_status(args)
+            with (
+                patch("claude_code_hooks_daemon.daemon.paths.is_pid_alive", return_value=True),
+                # verify_daemon cross-checks the PID's cmdline; the synthetic
+                # PID here is not a real daemon, so stub the daemon check.
+                patch("claude_code_hooks_daemon.daemon.paths.is_daemon_pid", return_value=True),
+                patch("builtins.print"),
+            ):
+                result = cmd_status(args)
 
                 # Should report running using our custom paths
                 assert result == 0
