@@ -176,9 +176,7 @@ class TestChangedValuePromotion:
         advisory = generate_migration_advisory(
             "3.23.0", "3.24.0", user_cfg, manifests_dir=manifests_dir
         )
-        assert not any(
-            "allow_untracked_claude_memory" in s.key for s in advisory.suggestions
-        )
+        assert not any("allow_untracked_claude_memory" in s.key for s in advisory.suggestions)
 
 
 # ---------------------------------------------------------------------------

@@ -16,11 +16,8 @@ Applies three mitigations to constrain mdformat's default behaviour:
    SKILL.md files and any other frontmatter-bearing markdown document.
 """
 
-import re
 from pathlib import Path
 from typing import Any
-
-import mdformat
 
 from claude_code_hooks_daemon.constants import (
     HandlerID,
@@ -31,32 +28,10 @@ from claude_code_hooks_daemon.constants import (
 )
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_file_path
+from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
 
 # Extensions treated as markdown (lowercase match).
 _MARKDOWN_EXTENSIONS: tuple[str, ...] = (".md", ".markdown")
-
-# mdformat options: preserve consecutive ordered-list numbering so 1. 2. 3.
-# doesn't get renumbered to 1. 1. 1. Without this the default renumbers
-# every item to 1.
-_MDFORMAT_OPTIONS: dict[str, Any] = {"number": True}
-
-# mdformat extensions: enable GFM tables, strikethrough, task lists, autolinks.
-_MDFORMAT_EXTENSIONS: set[str] = {"gfm"}
-
-# mdformat hardcodes thematic breaks as 70 underscores. Post-process to
-# convert them back to the more common `---` form.
-_THEMATIC_BREAK_UNDERSCORES = "_" * 70
-_THEMATIC_BREAK_DASHES = "---"
-
-# YAML frontmatter: a `---` delimiter on the very first line, YAML body,
-# then a closing `---` delimiter on its own line. Captures the full block
-# (delimiters included) in group 1 and the remainder of the document in
-# group 2. Non-greedy match on the body so nested `---` thematic breaks
-# in the document body are never swallowed.
-_FRONTMATTER_RE = re.compile(
-    r"\A(---\r?\n.*?\r?\n---\r?\n)(.*)\Z",
-    re.DOTALL,
-)
 
 
 class MarkdownTableFormatterHandler(Handler):
@@ -108,19 +83,7 @@ class MarkdownTableFormatterHandler(Handler):
 
         try:
             before = path.read_text(encoding="utf-8")
-            frontmatter, body = self._split_frontmatter(before)
-            formatted_body = mdformat.text(
-                body,
-                extensions=_MDFORMAT_EXTENSIONS,
-                options=_MDFORMAT_OPTIONS,
-            )
-            formatted_body = self._restore_thematic_breaks(formatted_body)
-            # Ensure a blank line separates frontmatter from body — mdformat
-            # strips leading whitespace, so without this the `---` closing
-            # delimiter would butt directly against the first body line.
-            if frontmatter and formatted_body and not formatted_body.startswith("\n"):
-                formatted_body = "\n" + formatted_body
-            formatted = frontmatter + formatted_body
+            formatted = format_markdown_text(before)
         except Exception as exc:
             # FAIL SAFE: mdformat can raise many parser/IO/unicode errors.
             # Never crash the PostToolUse dispatch chain — surface the error
@@ -140,34 +103,6 @@ class MarkdownTableFormatterHandler(Handler):
             decision=Decision.ALLOW,
             context=[f"Reformatted markdown tables in {path.name}"],
         )
-
-    @staticmethod
-    def _restore_thematic_breaks(content: str) -> str:
-        """Replace mdformat's 70-underscore thematic break with `---`."""
-        return "\n".join(
-            _THEMATIC_BREAK_DASHES if line == _THEMATIC_BREAK_UNDERSCORES else line
-            for line in content.split("\n")
-        )
-
-    @staticmethod
-    def _split_frontmatter(content: str) -> tuple[str, str]:
-        """Split off YAML frontmatter (if any) for lossless round-tripping.
-
-        mdformat does not understand YAML frontmatter — it treats the leading
-        ``---`` as a thematic break and collapses the YAML key/value lines
-        into a heading. To preserve frontmatter byte-for-byte we strip it
-        before invoking mdformat and re-attach the original string afterwards.
-
-        Returns:
-            A tuple of ``(frontmatter, body)``. ``frontmatter`` is the empty
-            string when the document has none; otherwise it includes both
-            delimiters and the trailing newline so it can be concatenated
-            with the formatted body directly.
-        """
-        match = _FRONTMATTER_RE.match(content)
-        if match is None:
-            return "", content
-        return match.group(1), match.group(2)
 
     def get_claude_md(self) -> str | None:
         return (

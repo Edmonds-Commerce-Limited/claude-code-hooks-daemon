@@ -246,7 +246,7 @@ class TestHandle:
         }
         with patch(
             "claude_code_hooks_daemon.handlers.post_tool_use."
-            "markdown_table_formatter.mdformat.text",
+            "markdown_table_formatter.format_markdown_text",
             side_effect=RuntimeError("boom"),
         ):
             result = handler.handle(hook_input)

@@ -65,9 +65,12 @@ def _handler_opt_in_config_keys() -> set[str]:
 
 class TestDefaultEnabledTemplateConsistency:
     def test_lsp_enforcement_is_opt_in(self) -> None:
-        assert LspEnforcementHandler.get_default_enabled(
-            LspEnforcementHandler.__new__(LspEnforcementHandler)
-        ) is False
+        assert (
+            LspEnforcementHandler.get_default_enabled(
+                LspEnforcementHandler.__new__(LspEnforcementHandler)
+            )
+            is False
+        )
 
     def test_template_marks_only_expected_handlers_disabled(self) -> None:
         assert _template_disabled_config_keys() == _EXPECTED_OPT_IN_CONFIG_KEYS

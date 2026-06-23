@@ -136,7 +136,7 @@ class TestCmdFormatMarkdownMdformatErrors:
         args = argparse.Namespace(path=test_file, check=False)
 
         with patch(
-            "claude_code_hooks_daemon.daemon.cli.mdformat.text",
+            "claude_code_hooks_daemon.daemon.cli.format_markdown_text",
             side_effect=RuntimeError("boom"),
         ):
             result = cmd_format_markdown(args)
@@ -152,7 +152,7 @@ class TestCmdFormatMarkdownMdformatErrors:
         args = argparse.Namespace(path=tmp_path, check=False)
 
         with patch(
-            "claude_code_hooks_daemon.daemon.cli.mdformat.text",
+            "claude_code_hooks_daemon.daemon.cli.format_markdown_text",
             side_effect=RuntimeError("kaboom"),
         ):
             result = cmd_format_markdown(args)

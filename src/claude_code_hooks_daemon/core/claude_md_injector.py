@@ -15,6 +15,8 @@ import subprocess  # nosec B404 - subprocess used for git commands only (trusted
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
+
 logger = logging.getLogger(__name__)
 
 # Section delimiters — must match exactly when reading/replacing
@@ -146,11 +148,16 @@ class ClaudeMdInjector:
             backup_path = self._workspace_root / self._BACKUP_FILENAME
             backup_path.write_text(original, encoding="utf-8")
 
-            claude_md_path.write_text(updated, encoding="utf-8")
+            # Canonicalise via the markdown formatter AFTER the content-loss
+            # guard above (which validates the block replacement on the
+            # pre-format text). Writing the formatter-canonical form here means
+            # a later Write/Edit that triggers the PostToolUse
+            # markdown_table_formatter produces no churn diff on our block.
+            claude_md_path.write_text(self._format_fail_safe(updated), encoding="utf-8")
         else:
             # No existing file — create from scratch (no backup needed)
             updated = generated + "\n"
-            claude_md_path.write_text(updated, encoding="utf-8")
+            claude_md_path.write_text(self._format_fail_safe(updated), encoding="utf-8")
 
         logger.info(
             "ClaudeMdInjector: updated %s with guidance from %d handler(s)",
@@ -159,6 +166,24 @@ class ClaudeMdInjector:
         )
 
         ClaudeMdInjector._auto_commit_if_dirty(claude_md_path)
+
+    @staticmethod
+    def _format_fail_safe(content: str) -> str:
+        """Return content reformatted via the shared markdown formatter.
+
+        Fail-safe: if mdformat raises (parser/unicode/IO error), the original
+        unformatted content is returned so injection still completes and no
+        content is lost. Daemon startup must never fail on a formatting error.
+        """
+        try:
+            return format_markdown_text(content)
+        except Exception as exc:  # nosec B110 - fail-safe: never crash daemon startup
+            logger.warning(
+                "ClaudeMdInjector: markdown formatting failed — writing unformatted "
+                "content (advisory): %s",
+                exc,
+            )
+            return content
 
     @staticmethod
     def _auto_commit_if_dirty(claude_md_path: Path) -> None:

@@ -504,3 +504,88 @@ class TestClaudeMdInjectorAutoCommit:
         # CLAUDE.md should still be updated even if commit failed
         content = (tmp_path / "CLAUDE.md").read_text()
         assert _OPEN_TAG in content
+
+
+class TestClaudeMdInjectorFormatting:
+    """Plan 00134: the injector formats CLAUDE.md after writing the block.
+
+    The on-disk result must already be in the markdown formatter's canonical
+    form, so a later Write/Edit that triggers the PostToolUse
+    markdown_table_formatter produces no churn diff on the injected block.
+    """
+
+    def test_written_file_is_formatter_canonical(self, tmp_path: Path) -> None:
+        """After inject(), the file equals format_markdown_text(file) — no churn."""
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+        from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
+
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# My Project\n\nSome content.\n")
+
+        # Guidance containing an UNaligned GFM table (what the formatter fixes).
+        handler = _StubHandler(
+            "tbl",
+            "## Table\n\n| Name | Value |\n|---|---|\n| Short | x |\n| Very Long Name | y |\n",
+        )
+        injector = ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler])
+        injector.inject()
+
+        on_disk = claude_md.read_text()
+        # The PostToolUse formatter would be a no-op → no churn diff.
+        assert format_markdown_text(on_disk) == on_disk
+
+    def test_unaligned_table_in_guidance_is_aligned_on_disk(self, tmp_path: Path) -> None:
+        """An unaligned table in handler guidance lands aligned in CLAUDE.md."""
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# P\n")
+
+        handler = _StubHandler(
+            "tbl",
+            "## Table\n\n| A | Bee |\n|---|---|\n| 1 | 2 |\n| longvalue | 3 |\n",
+        )
+        injector = ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler])
+        injector.inject()
+
+        on_disk = claude_md.read_text()
+        table_rows = [line for line in on_disk.splitlines() if line.strip().startswith("|")]
+        pipe_positions = {tuple(i for i, c in enumerate(r) if c == "|") for r in table_rows}
+        assert len(pipe_positions) == 1, f"table pipes not aligned: {table_rows}"
+
+    def test_formatting_failure_is_fail_safe(self, tmp_path: Path) -> None:
+        """If formatting raises, inject still writes the block and does not crash."""
+        from unittest.mock import patch
+
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# My Project\n\nSome content.\n")
+
+        handler = _StubHandler("h", "## H\n\nContent.")
+        injector = ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler])
+
+        with patch(
+            "claude_code_hooks_daemon.core.claude_md_injector.format_markdown_text",
+            side_effect=RuntimeError("boom"),
+        ):
+            injector.inject()  # Must not raise
+
+        content = claude_md.read_text()
+        assert _OPEN_TAG in content  # block still written despite formatting failure
+        assert "# My Project" in content  # user content preserved
+
+    def test_user_content_outside_block_preserved_through_formatting(self, tmp_path: Path) -> None:
+        """Formatting must not lose the user's prose outside the block."""
+        from claude_code_hooks_daemon.core.claude_md_injector import ClaudeMdInjector
+
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# My Project\n\nImportant instruction text.\n")
+
+        handler = _StubHandler("h", "## H\n\nGuidance.")
+        injector = ClaudeMdInjector(workspace_root=tmp_path, handlers=[handler])
+        injector.inject()
+
+        content = claude_md.read_text()
+        assert "Important instruction text." in content
+        assert "# My Project" in content

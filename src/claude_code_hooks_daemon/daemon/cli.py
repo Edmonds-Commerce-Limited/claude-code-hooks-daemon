@@ -30,7 +30,6 @@ import json
 import logging
 import os
 import platform
-import re
 import shutil
 import signal
 import socket
@@ -39,8 +38,6 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Literal, cast
-
-import mdformat
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +83,7 @@ from claude_code_hooks_daemon.utils.hook_registration import (
     validate_hook_commands,
     validate_settings_hooks,
 )
+from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
 
 from .init_config import generate_config
 
@@ -2400,40 +2398,6 @@ def cmd_test_project_handlers(args: argparse.Namespace) -> int:
 
 
 _MARKDOWN_EXTENSIONS: tuple[str, ...] = (".md", ".markdown")
-_MDFORMAT_EXTENSIONS: set[str] = {"gfm"}
-_MDFORMAT_OPTIONS: dict[str, Any] = {"number": True}
-_THEMATIC_BREAK_UNDERSCORES = "_" * 70
-_THEMATIC_BREAK_DASHES = "---"
-
-# YAML frontmatter: ``---`` on line 1, YAML body, then a closing ``---``
-# on its own line. mdformat does not understand frontmatter and would
-# mangle it into a thematic break + heading, so we strip it before
-# formatting and re-attach it byte-for-byte afterwards.
-_FRONTMATTER_RE = re.compile(
-    r"\A(---\r?\n.*?\r?\n---\r?\n)(.*)\Z",
-    re.DOTALL,
-)
-
-
-def _restore_thematic_breaks(content: str) -> str:
-    """Replace mdformat's 70-underscore thematic break with ``---``."""
-    return "\n".join(
-        _THEMATIC_BREAK_DASHES if line == _THEMATIC_BREAK_UNDERSCORES else line
-        for line in content.split("\n")
-    )
-
-
-def _split_frontmatter(content: str) -> tuple[str, str]:
-    """Split leading YAML frontmatter from the document body.
-
-    Returns ``("", content)`` when there is no frontmatter, otherwise
-    ``(frontmatter_block, body)`` where ``frontmatter_block`` includes
-    both ``---`` delimiters and the trailing newline.
-    """
-    match = _FRONTMATTER_RE.match(content)
-    if match is None:
-        return "", content
-    return match.group(1), match.group(2)
 
 
 def _format_single_markdown_file(path: Path, check: bool) -> tuple[bool, bool]:
@@ -2451,19 +2415,7 @@ def _format_single_markdown_file(path: Path, check: bool) -> tuple[bool, bool]:
     """
     try:
         before = path.read_text(encoding="utf-8")
-        frontmatter, body = _split_frontmatter(before)
-        formatted_body = mdformat.text(
-            body,
-            extensions=_MDFORMAT_EXTENSIONS,
-            options=_MDFORMAT_OPTIONS,
-        )
-        formatted_body = _restore_thematic_breaks(formatted_body)
-        # Ensure a blank line separates frontmatter from body — mdformat
-        # strips leading whitespace, so without this the closing ``---``
-        # delimiter would butt directly against the first body line.
-        if frontmatter and formatted_body and not formatted_body.startswith("\n"):
-            formatted_body = "\n" + formatted_body
-        formatted = frontmatter + formatted_body
+        formatted = format_markdown_text(before)
     except Exception as exc:
         # FAIL SAFE: Surface the failure but do not crash the whole run
         # when processing a directory of many files.

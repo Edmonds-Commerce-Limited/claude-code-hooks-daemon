@@ -72,9 +72,9 @@ class _Unset:
     client's ``key: null`` is never confused with "no value provided".
     """
 
-    _instance: "_Unset | None" = None
+    _instance: _Unset | None = None
 
-    def __new__(cls) -> "_Unset":
+    def __new__(cls) -> _Unset:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
@@ -122,7 +122,7 @@ class ConfigChangeEntry:
     recommended_value: Any = UNSET
 
 
-def _change_entry_from_dict(e: dict[str, Any]) -> "ConfigChangeEntry":
+def _change_entry_from_dict(e: dict[str, Any]) -> ConfigChangeEntry:
     """Build a ConfigChangeEntry from a manifest entry dict (DRY parser).
 
     ``recommended_value`` defaults to the UNSET sentinel when the field is
@@ -215,9 +215,7 @@ class ConfigMigrationManifest:
 
         changes_data: dict[str, Any] = data.get(_FIELD_CONFIG_CHANGES) or {}
 
-        added = [
-            _change_entry_from_dict(e) for e in (changes_data.get(_FIELD_ADDED) or [])
-        ]
+        added = [_change_entry_from_dict(e) for e in (changes_data.get(_FIELD_ADDED) or [])]
         renamed = [
             RenamedEntry(
                 old_key=e[_FIELD_OLD_KEY],
@@ -226,12 +224,8 @@ class ConfigMigrationManifest:
             )
             for e in (changes_data.get(_FIELD_RENAMED) or [])
         ]
-        removed = [
-            _change_entry_from_dict(e) for e in (changes_data.get(_FIELD_REMOVED) or [])
-        ]
-        changed = [
-            _change_entry_from_dict(e) for e in (changes_data.get(_FIELD_CHANGED) or [])
-        ]
+        removed = [_change_entry_from_dict(e) for e in (changes_data.get(_FIELD_REMOVED) or [])]
+        changed = [_change_entry_from_dict(e) for e in (changes_data.get(_FIELD_CHANGED) or [])]
 
         config_changes = ConfigChanges(
             added=added,
