@@ -27,6 +27,8 @@ import re
 from pathlib import Path
 from typing import Final
 
+import yaml
+
 logger = logging.getLogger(__name__)
 
 # Handler names to enable for each profile (cumulative).
@@ -87,6 +89,42 @@ def get_profile_names() -> list[str]:
     return sorted(PROFILES.keys())
 
 
+def all_profile_handler_names() -> set[str]:
+    """Return every handler name referenced by any profile.
+
+    ``strict`` is the superset of ``recommended`` plus the strict-only set, so
+    its membership covers all profiles. Used to validate the hardcoded profile
+    lists against the handler names the shipped config actually declares
+    (F-PROFLIST): a renamed/typo'd handler that exists in no config would
+    otherwise silently no-op.
+    """
+    return set(PROFILES["strict"])
+
+
+def config_handler_names(content: str) -> set[str]:
+    """Return the set of handler names declared anywhere in a config yaml.
+
+    Handlers live under ``handlers.<event_type>.<handler_name>``. Parsed
+    structurally (comments ignored) so profile entries can be checked against
+    the names the config actually declares. Returns an empty set if the content
+    is not parseable as the expected mapping shape.
+    """
+    try:
+        data = yaml.safe_load(content)
+    except yaml.YAMLError:
+        return set()
+    if not isinstance(data, dict):
+        return set()
+    handlers = data.get("handlers")
+    if not isinstance(handlers, dict):
+        return set()
+    names: set[str] = set()
+    for event_handlers in handlers.values():
+        if isinstance(event_handlers, dict):
+            names.update(event_handlers.keys())
+    return names
+
+
 def apply_profile(config_path: Path, profile: str) -> int:
     """Apply a handler profile to a hooks-daemon.yaml file.
 
@@ -113,6 +151,21 @@ def apply_profile(config_path: Path, profile: str) -> int:
         return 0
 
     content = config_path.read_text()
+
+    # F-PROFLIST: warn (non-fatal) about profile handlers the config does not
+    # declare. A partial config may legitimately omit handlers, but a name that
+    # exists in NO config is a profile-list typo/rename — surfaced loudly here
+    # and guarded against the shipped example by the test suite.
+    known = config_handler_names(content)
+    for handler_name in handlers_to_enable:
+        if handler_name not in known:
+            logger.warning(
+                "Profile %r references handler %r not present in %s; skipping it",
+                profile,
+                handler_name,
+                config_path,
+            )
+
     count = 0
 
     for handler_name in handlers_to_enable:

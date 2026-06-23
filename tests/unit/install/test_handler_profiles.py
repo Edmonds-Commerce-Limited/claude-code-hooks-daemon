@@ -10,9 +10,14 @@ from claude_code_hooks_daemon.install.config_differ import ConfigDiffer
 from claude_code_hooks_daemon.install.config_merger import ConfigMerger
 from claude_code_hooks_daemon.install.handler_profiles import (
     PROFILES,
+    all_profile_handler_names,
     apply_profile,
+    config_handler_names,
     get_profile_names,
 )
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+SHIPPED_EXAMPLE_CONFIG = REPO_ROOT / ".claude" / "hooks-daemon.yaml.example"
 
 
 class TestProfileDefinitions:
@@ -233,3 +238,65 @@ class TestProfileSeedSurvivesUpgrade:
         pre_changes = diff.changed_options.get("pre_tool_use", {})
         assert "qa_suppression" in pre_changes
         assert "tdd_enforcement" in pre_changes
+
+
+class TestProfileHandlerListIntegrity:
+    """F-PROFLIST: the hardcoded profile lists must stay in sync with config.
+
+    A handler name that exists in NO config silently no-ops (regex never
+    matches), so a rename/typo would quietly drop a handler from a profile.
+    """
+
+    def test_every_profile_handler_exists_in_shipped_example(self) -> None:
+        """Each profile handler name MUST be a key in the shipped example config."""
+        assert SHIPPED_EXAMPLE_CONFIG.is_file(), (
+            f"shipped example config missing: {SHIPPED_EXAMPLE_CONFIG}"
+        )
+        declared = config_handler_names(SHIPPED_EXAMPLE_CONFIG.read_text())
+        unknown = sorted(all_profile_handler_names() - declared)
+        assert not unknown, (
+            "profile lists reference handlers absent from the shipped example "
+            f"config (rename/typo?): {unknown}"
+        )
+
+    def test_config_handler_names_extracts_keys(self) -> None:
+        """config_handler_names returns handler keys across event types."""
+        content = textwrap.dedent("""\
+            handlers:
+              pre_tool_use:
+                destructive_git:
+                  enabled: true
+              stop:
+                task_completion_checker:
+                  enabled: false
+        """)
+        assert config_handler_names(content) == {
+            "destructive_git",
+            "task_completion_checker",
+        }
+
+    def test_config_handler_names_handles_malformed(self) -> None:
+        """Non-mapping / handler-less content yields an empty set, not a crash."""
+        assert config_handler_names("- just\n- a\n- list\n") == set()
+        assert config_handler_names("daemon:\n  log_level: INFO\n") == set()
+
+    def test_apply_profile_warns_on_handler_absent_from_config(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A profile handler not declared in the config logs a warning naming it."""
+        content = textwrap.dedent("""\
+            handlers:
+              pre_tool_use:
+                qa_suppression:
+                  enabled: false
+        """)
+        config_path = tmp_path / "hooks-daemon.yaml"
+        config_path.write_text(content)
+
+        with caplog.at_level("WARNING"):
+            apply_profile(config_path, "recommended")
+
+        # tdd_enforcement is in 'recommended' but absent from this config.
+        assert any(
+            "tdd_enforcement" in rec.message for rec in caplog.records
+        ), f"expected a warning naming the absent handler, got: {caplog.records!r}"
