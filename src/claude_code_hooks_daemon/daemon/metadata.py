@@ -104,7 +104,17 @@ def read_daemon_metadata(venv_dir: Path | str) -> DaemonVenvMetadata | None:
     candidate = Path(venv_dir) / _DAEMON_METADATA_FILENAME
     if not candidate.is_file():
         return None
-    raw = candidate.read_text()
+    try:
+        raw = candidate.read_text()
+    except OSError as exc:
+        # A present-but-unreadable file (permission / I/O error) is still an
+        # "unusable metadata" condition, not a fatal one. Returning None keeps
+        # the documented contract ("never raises for ordinary no-metadata
+        # conditions") and matches the byte-for-byte stdlib mirror
+        # ``_read_venv_metadata_stdlib`` in paths.py, which also guards
+        # ``read_text`` with ``except OSError: return None``.
+        logger.debug("metadata at %s could not be read: %s", candidate, exc)
+        return None
     if not raw.strip():
         return None
     try:
@@ -127,6 +137,11 @@ def compute_project_lock_hash(project_root: Path | str) -> str:
     sentinel marker stands in for the missing file so a freshly-generated
     ``uv.lock`` always flips the hash even if ``pyproject.toml`` is
     unchanged.
+
+    NOTE: this algorithm is a byte-for-byte mirror of
+    ``paths._compute_project_lock_hash_stdlib``. The two MUST stay identical —
+    ``ensure_venv`` writes the lock_hash via this function and reads/compares it
+    via the stdlib mirror, so any change here must be applied there too.
 
     Raises:
         FileNotFoundError: if ``pyproject.toml`` does not exist.

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from pydantic import ValidationError
@@ -171,3 +172,20 @@ class TestReadDaemonMetadata:
             json.dumps({"python_path": "/x", "fingerprint": "y"})  # missing fields
         )
         assert read_daemon_metadata(tmp_path) is None
+
+    def test_returns_none_when_file_exists_but_unreadable(self, tmp_path: Path) -> None:
+        """A present-but-unreadable file (I/O / permission error) must not raise.
+
+        Finding #36: the docstring promises ``read_daemon_metadata`` never
+        raises for ordinary no-metadata conditions, but an existing yet
+        unreadable file made ``read_text()`` raise ``OSError`` — diverging
+        from the byte-for-byte stdlib mirror in ``paths.py`` which guards it.
+        """
+        candidate = tmp_path / ".daemon-metadata.json"
+        candidate.write_text(json.dumps({"unused": True}))
+
+        def _raise_oserror(*_args: object, **_kwargs: object) -> str:
+            raise OSError("simulated unreadable metadata file")
+
+        with patch.object(Path, "read_text", _raise_oserror):
+            assert read_daemon_metadata(tmp_path) is None
