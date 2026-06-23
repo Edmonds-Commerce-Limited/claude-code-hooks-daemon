@@ -979,6 +979,66 @@ After every `Write` or `Edit` of a `.md` or `.markdown` file, the content is re-
 $PYTHON -m claude_code_hooks_daemon.daemon.cli format-markdown <path>
 ```
 
+## recovery_cron_advisor — failsafe recovery cron lifecycle advisory
+
+An advisory PostToolUse handler that fires across a plan's lifecycle and
+injects guidance telling the agent to manage a non-durable hourly failsafe
+recovery cron.
+
+### What it does
+
+Three lifecycle phases are detected from Write/Edit to `CLAUDE/Plan/<digits>-<name>/PLAN.md`
+(never from files inside `Completed/`) and from `mkplan.bash` Bash invocations:
+
+| Phase          | Trigger                                                                               | Guidance injected                                                                                                      |
+| -------------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| **Creation**   | New PLAN.md written, or `mkplan.bash` invoked                                         | Create a non-durable hourly cron now (CronCreate, durable:false); record the ID in the plan; do NOT wait for the cron. |
+| **Progress**   | Edit to PLAN.md touching task-status icons (⬜/🔄/✅) or `## Notes & Updates` section | Confirm the recovery cron is still running (CronList); recreate if missing; keep working.                              |
+| **Completion** | `**Status**: Complete[d]` written/edited                                              | Plan complete — delete the recovery cron (CronDelete).                                                                 |
+
+Progress reminders are rate-limited by a per-plan in-memory cooldown so they
+do not spam context on every edit. Completion always advises (bypasses cooldown).
+
+### CRITICAL: recovery cron is NOT a heartbeat
+
+The recovery cron is a **failsafe safety net**, not a pacing mechanism:
+
+- The agent **must never** wait for the cron between units of work.
+- Work proceeds at **full speed** until an external factor (Claude API error,
+  rate limit, 5-hour usage limit, network failure) actually stalls it.
+- The cron fires only while the REPL is idle; it cannot interrupt active work.
+- Treating the cron as a heartbeat is an **own goal** — it would convert a
+  safety net into an artificial hourly throttle.
+
+### Canonical recovery-cron prompt
+
+Use this verbatim as the CronCreate prompt:
+
+```
+**FAILSAFE RECOVERY CHECK (automated hourly safety net — NOT a heartbeat).**
+If your most recent work on the active plan/task was interrupted by an
+*external* factor (Claude API error/overload, rate limit, 5-hour usage limit,
+network failure) and is now resumable, resume it immediately and carry it to
+completion. If you are blocked **only** on human input, do nothing and keep
+waiting. If work is already proceeding normally, this is a **no-op** — do not
+interrupt, restart, or duplicate anything in flight. Never treat this as a
+heartbeat or pacing signal: between checks, continue at full speed until an
+external factor actually stops you — waiting for the cron is an own goal. When
+the plan is complete and no resumable work remains, delete this cron
+(CronDelete).
+```
+
+### Configuration
+
+This handler is **opt-in** (off by default). Enable with:
+
+```yaml
+handlers:
+  post_tool_use:
+    recovery_cron_advisor:
+      enabled: true
+```
+
 ## hook_registration_checker — hooks configuration policy
 
 On every new session this handler audits hook configuration across `.claude/settings.json` and `.claude/settings.local.json`. When it reports issues, fix them — do not ignore the warning.
