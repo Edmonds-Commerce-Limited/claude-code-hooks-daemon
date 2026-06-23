@@ -20,9 +20,10 @@ external factor (API error, rate limit, usage limit) actually stalls it.
 Decision D1 (PLAN.md): crons are created non-durable (durable:false) so they
 are session-only and cleaned up naturally on session exit.
 
-Decision D2 (PLAN.md): dedup is via an in-session per-plan cooldown counter
-(mirrors critical_thinking_advisory). The agent uses CronList to avoid
-duplicate creates.
+Decision D2 (PLAN.md): dedup is via an in-session per-plan PROGRESS edit
+counter owned by the handler.  The handler advises on every Nth progress
+edit for a given plan (independent of global daemon traffic).  The agent
+uses CronList to avoid duplicate creates.
 
 Decision D4 (PLAN.md): this is a PostToolUse handler, not an extension of the
 PreToolUse plan_workflow handler.
@@ -39,7 +40,7 @@ from claude_code_hooks_daemon.constants import (
     Priority,
     ToolName,
 )
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult, get_data_layer
+from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_path
 
 # ─── Lifecycle phase ──────────────────────────────────────────────────────────
@@ -66,17 +67,22 @@ _COMPLETED_SEGMENT: Final[str] = "/Completed/"
 
 # ─── Content patterns ─────────────────────────────────────────────────────────
 
-# Matches: **Status**: Complete[d] (case-insensitive)
+# Matches a **Status** line whose VALUE is exactly Complete/Completed.
+# Anchored to the end of the line (re.MULTILINE) so prose such as
+# "**Status**: Complete the migration before merging" or "Completion pending"
+# does NOT trigger the completion teardown advisory on an active plan.
+# re.IGNORECASE keeps the match case-insensitive consistently (e.g. lowercase
+# "**status**:" still matches) as the docstring promises.
 _STATUS_COMPLETE_RE: Final[re.Pattern[str]] = re.compile(
-    r"\*\*Status\*\*:\s*[Cc][Oo][Mm][Pp][Ll][Ee][Tt][Ee]",
-    re.MULTILINE,
+    r"\*\*Status\*\*:\s*Complete[d]?\s*$",
+    re.MULTILINE | re.IGNORECASE,
 )
 
-# Matches task-status icons used in PLAN.md task lists
-_TASK_STATUS_ICON_RE: Final[re.Pattern[str]] = re.compile(
-    r"[✅⚠️\U0001f504]|⬜|✅|🔄",
-    re.UNICODE,
-)
+# Matches task-status icons used in PLAN.md task lists: the documented set is
+# ⬜ (not started), ✅ (completed), and 🔄 (in progress).  A single deduped
+# character class — ⚠️ (warning) is NOT a documented task icon and must not be
+# misclassified as PROGRESS.
+_TASK_STATUS_ICON_RE: Final[re.Pattern[str]] = re.compile(r"[⬜✅\U0001f504]")
 
 # Matches the Notes & Updates section heading
 _NOTES_SECTION_RE: Final[re.Pattern[str]] = re.compile(
@@ -91,12 +97,22 @@ _MKPLAN_BASH_RE: Final[re.Pattern[str]] = re.compile(
 
 # ─── Cooldown configuration ───────────────────────────────────────────────────
 
-# Number of daemon history events that must pass before re-advising a progress
-# reminder for the same plan.  Mirrors critical_thinking_advisory's approach.
-_PROGRESS_COOLDOWN_EVENTS: Final[int] = 20
+# Advise on the 1st progress edit for a plan, then once every Nth progress edit
+# thereafter.  The counter is a per-plan PROGRESS edit count owned by the
+# handler — it is incremented only on a PROGRESS-classified edit for that plan,
+# so the cadence is independent of global daemon traffic (unlike the old
+# total_count approach, which was exhausted in a handful of unrelated tool
+# calls and re-fired on practically every PLAN.md edit).
+_PROGRESS_ADVISE_INTERVAL: Final[int] = 5
 
-# Initial sentinel value ensuring the first advice fires without waiting.
-_INITIAL_COOLDOWN_OFFSET: Final[int] = -(_PROGRESS_COOLDOWN_EVENTS + 1)
+# First progress edit per plan is recorded at this count and always advises.
+_PROGRESS_COUNT_START: Final[int] = 1
+
+# Maximum number of plan folders tracked in the per-plan progress-count map.
+# Bounds memory on the daemon-lifetime singleton: when exceeded, the oldest
+# inserted entry is evicted (insertion-ordered dict).  A plan re-entering after
+# eviction simply restarts its progress count — harmless for an advisory.
+_MAX_TRACKED_PLANS: Final[int] = 256
 
 # ─── Canonical recovery-cron prompt ──────────────────────────────────────────
 
@@ -165,9 +181,46 @@ def _is_plan_path(file_path: str) -> tuple[bool, str]:
     return True, m.group(1)
 
 
+# Matches a bare Complete/Completed VALUE occupying its own line (no
+# **Status**: prefix).  Used to recognise a partial-line completion edit whose
+# new_string replaces only the status value (e.g. old line "**Status**: In
+# Progress" → new_string "Complete").
+_BARE_COMPLETE_VALUE_RE: Final[re.Pattern[str]] = re.compile(
+    r"^\s*Complete[d]?\s*$",
+    re.IGNORECASE,
+)
+
+# Matches the **Status**: prefix anywhere in a string (value-agnostic).  Used to
+# detect that an Edit's old_string targeted the status line.
+_STATUS_PREFIX_RE: Final[re.Pattern[str]] = re.compile(
+    r"\*\*Status\*\*:",
+    re.IGNORECASE,
+)
+
+
 def _text_has_progress_markers(text: str) -> bool:
     """Return True if text contains task-status icons or Notes & Updates heading."""
     return bool(_TASK_STATUS_ICON_RE.search(text)) or bool(_NOTES_SECTION_RE.search(text))
+
+
+def _edit_results_in_status_complete(new_string: str, old_string: str) -> bool:
+    """Return True if applying this Edit yields a ``**Status**: Complete[d]`` line.
+
+    Robustly detects completion for partial-line edits that PROGRESS would
+    otherwise mis-classify.  Two cases:
+
+    1. ``new_string`` itself contains a complete, anchored ``**Status**:
+       Complete[d]`` line (full-line replacement).
+    2. ``old_string`` targeted the status line (it contains the ``**Status**:``
+       prefix) and ``new_string`` is the bare ``Complete[d]`` value replacing
+       only the old value — so the resulting line reads ``**Status**: Complete``
+       even though ``new_string`` alone lacks the prefix.
+    """
+    if _STATUS_COMPLETE_RE.search(new_string):
+        return True
+    if _STATUS_PREFIX_RE.search(old_string) and _BARE_COMPLETE_VALUE_RE.search(new_string):
+        return True
+    return False
 
 
 def _detect_lifecycle_phase(hook_input: dict[str, Any]) -> LifecyclePhase | None:
@@ -217,7 +270,7 @@ def _detect_lifecycle_phase(hook_input: dict[str, Any]) -> LifecyclePhase | None
     old_string: str = tool_input.get("old_string", "")
     combined = new_string + "\n" + old_string
 
-    if _STATUS_COMPLETE_RE.search(new_string):
+    if _edit_results_in_status_complete(new_string, old_string):
         return LifecyclePhase.COMPLETION
 
     if _text_has_progress_markers(combined):
@@ -241,9 +294,12 @@ class RecoveryCronAdvisorHandler(Handler):
     agent must never pace itself to the cron; work must continue at full speed
     until an external factor actually blocks progress.
 
-    A per-plan cooldown counter (keyed by plan folder name) prevents spamming
-    the progress reminder on every single PLAN.md edit.  Completion advisories
-    always fire regardless of cooldown.
+    A per-plan PROGRESS edit counter (keyed by plan folder name) advises only on
+    every Nth progress edit, preventing spam on every single PLAN.md edit while
+    staying independent of unrelated daemon traffic.  Completion advisories
+    always fire regardless of the counter.  The counter map is bounded
+    (_MAX_TRACKED_PLANS) so it cannot grow without limit on the daemon-lifetime
+    singleton.
 
     Opt-in: get_default_enabled() returns False.  Projects dogfooding this repo
     set enabled: true explicitly in .claude/hooks-daemon.yaml.
@@ -261,8 +317,14 @@ class RecoveryCronAdvisorHandler(Handler):
                 HandlerTag.NON_TERMINAL,
             ],
         )
-        # Per-plan last-fired event count: {plan_folder: event_count_when_last_fired}
-        self._last_fired: dict[str, int] = {}
+        # Per-plan PROGRESS edit count: {plan_folder: number_of_progress_edits}.
+        # Insertion-ordered so the oldest entry can be evicted once the map
+        # exceeds _MAX_TRACKED_PLANS.
+        self._progress_counts: dict[str, int] = {}
+        # Phase computed in matches() and reused in handle() (avoids running the
+        # detection twice per event).  Set per-call; never relied on across
+        # events.
+        self._cached_phase: LifecyclePhase | None = None
 
     def get_default_enabled(self) -> bool:
         """Opt-in handler — off by default (Plan 00139, Decision D4).
@@ -277,9 +339,43 @@ class RecoveryCronAdvisorHandler(Handler):
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Return True if this event represents a plan lifecycle moment.
 
-        Matches when _detect_lifecycle_phase returns a non-None phase.
+        Matches when _detect_lifecycle_phase returns a non-None phase.  The
+        detected phase is cached on the instance and reused by handle() for the
+        same event, so detection runs once per event rather than twice.
         """
-        return _detect_lifecycle_phase(hook_input) is not None
+        self._cached_phase = _detect_lifecycle_phase(hook_input)
+        return self._cached_phase is not None
+
+    def _resolve_phase(self, hook_input: dict[str, Any]) -> LifecyclePhase | None:
+        """Return the phase for this event, reusing the matches() cache if set.
+
+        Consumes the cache (resets it to None) so a stale value from a prior
+        event can never leak into a later handle() call invoked without a
+        preceding matches().
+        """
+        cached = self._cached_phase
+        self._cached_phase = None
+        if cached is not None:
+            return cached
+        return _detect_lifecycle_phase(hook_input)
+
+    def _should_advise_progress(self, plan_folder: str) -> bool:
+        """Record a progress edit for plan_folder and return whether to advise.
+
+        Advises on the 1st progress edit and every _PROGRESS_ADVISE_INTERVAL-th
+        edit thereafter.  Bounds the tracking map at _MAX_TRACKED_PLANS by
+        evicting the oldest inserted entry when a new plan would overflow it.
+        """
+        count = self._progress_counts.get(plan_folder)
+        if count is None:
+            if len(self._progress_counts) >= _MAX_TRACKED_PLANS:
+                oldest_key = next(iter(self._progress_counts))
+                del self._progress_counts[oldest_key]
+            count = _PROGRESS_COUNT_START
+        else:
+            count += 1
+        self._progress_counts[plan_folder] = count
+        return (count - _PROGRESS_COUNT_START) % _PROGRESS_ADVISE_INTERVAL == 0
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Inject advisory context appropriate for the detected lifecycle phase.
@@ -287,40 +383,32 @@ class RecoveryCronAdvisorHandler(Handler):
         Phase routing:
         - CREATION   → always advise (cron setup is part of plan execution).
         - COMPLETION → always advise (teardown the cron).
-        - PROGRESS   → advise only when outside the per-plan cooldown window.
+        - PROGRESS   → advise on every Nth progress edit per plan.
 
         Returns:
             HookResult with ALLOW decision, and context[] when advising.
         """
-        phase = _detect_lifecycle_phase(hook_input)
+        phase = self._resolve_phase(hook_input)
         if phase is None:
             return HookResult(decision=Decision.ALLOW)
-
-        # Determine plan folder for per-plan cooldown keying
-        file_path = get_file_path(hook_input) or ""
-        _, plan_folder = _is_plan_path(file_path)
-        # For Bash (mkplan.bash) there is no file_path; use a sentinel key
-        if not plan_folder:
-            plan_folder = "__mkplan__"
 
         if phase == LifecyclePhase.CREATION:
             return HookResult(decision=Decision.ALLOW, context=[_CREATION_GUIDANCE])
 
         if phase == LifecyclePhase.COMPLETION:
-            # Completion always fires — bypass cooldown
+            # Completion always fires — bypass the progress interval.
             return HookResult(decision=Decision.ALLOW, context=[_COMPLETION_GUIDANCE])
 
-        # PROGRESS — check per-plan cooldown
-        dl = get_data_layer()
-        current_count = dl.history.total_count
-        last_fired = self._last_fired.get(plan_folder, _INITIAL_COOLDOWN_OFFSET)
+        # PROGRESS — advise on every Nth progress edit for this plan.
+        file_path = get_file_path(hook_input) or ""
+        _, plan_folder = _is_plan_path(file_path)
+        # For Bash (mkplan.bash) there is no file_path; use a sentinel key.
+        if not plan_folder:
+            plan_folder = "__mkplan__"
 
-        if current_count - last_fired < _PROGRESS_COOLDOWN_EVENTS:
-            # Within cooldown — stay silent
+        if not self._should_advise_progress(plan_folder):
             return HookResult(decision=Decision.ALLOW)
 
-        # Outside cooldown — advise and record
-        self._last_fired[plan_folder] = current_count
         return HookResult(decision=Decision.ALLOW, context=[_PROGRESS_GUIDANCE])
 
     def get_claude_md(self) -> str | None:
@@ -342,8 +430,9 @@ class RecoveryCronAdvisorHandler(Handler):
             "| **Creation** | New PLAN.md written, or `mkplan.bash` invoked | Create a non-durable hourly cron now (CronCreate, durable:false); record the ID in the plan; do NOT wait for the cron. |\n"
             "| **Progress** | Edit to PLAN.md touching task-status icons (⬜/🔄/✅) or `## Notes & Updates` section | Confirm the recovery cron is still running (CronList); recreate if missing; keep working. |\n"
             "| **Completion** | `**Status**: Complete[d]` written/edited | Plan complete — delete the recovery cron (CronDelete). |\n\n"
-            "Progress reminders are rate-limited by a per-plan in-memory cooldown so they\n"
-            "do not spam context on every edit.  Completion always advises (bypasses cooldown).\n\n"
+            "Progress reminders are rate-limited per plan: the handler advises on the first\n"
+            "progress edit and then once every few progress edits for that plan, so it does\n"
+            "not spam context on every edit.  Completion always advises (bypasses the interval).\n\n"
             "### CRITICAL: recovery cron is NOT a heartbeat\n\n"
             "The recovery cron is a **failsafe safety net**, not a pacing mechanism:\n\n"
             "- The agent **must never** wait for the cron between units of work.\n"

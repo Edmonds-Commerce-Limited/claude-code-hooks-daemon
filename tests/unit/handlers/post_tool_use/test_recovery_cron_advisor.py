@@ -6,12 +6,13 @@ and Completed/ directory exclusion.
 """
 
 from typing import Any
-from unittest.mock import patch
 
 import pytest
 
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.handlers.post_tool_use.recovery_cron_advisor import (
+    _MAX_TRACKED_PLANS,
+    _PROGRESS_ADVISE_INTERVAL,
     LifecyclePhase,
     RecoveryCronAdvisorHandler,
     _detect_lifecycle_phase,
@@ -132,6 +133,59 @@ class TestDetectLifecyclePhase:
             old_string="**Status**: In Progress",
         )
         assert _detect_lifecycle_phase(hook_input) == LifecyclePhase.COMPLETION
+
+    def test_completion_on_lowercase_status_complete_write(self) -> None:
+        """Lowercase '**status**: complete' is detected (IGNORECASE consistency)."""
+        hook_input = _write_input(
+            "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md",
+            "**status**: complete\n",
+        )
+        assert _detect_lifecycle_phase(hook_input) == LifecyclePhase.COMPLETION
+
+    def test_completion_on_partial_line_value_edit(self) -> None:
+        """Edit replacing only the status VALUE (no prefix in new_string) is COMPLETION.
+
+        Regression: a partial-line completion edit whose new_string is just the
+        bare value 'Complete' (old_string carries the '**Status**:' prefix) was
+        mis-classified as PROGRESS, so the teardown advisory never showed.
+        """
+        hook_input = _edit_input(
+            "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md",
+            new_string="Complete",
+            old_string="**Status**: In Progress",
+        )
+        assert _detect_lifecycle_phase(hook_input) == LifecyclePhase.COMPLETION
+
+    def test_status_complete_in_prose_is_not_completion(self) -> None:
+        """'**Status**: Complete the migration ...' must NOT be COMPLETION.
+
+        Regression: the unanchored pattern matched prose continuing past the
+        word 'Complete', firing the teardown advisory on an active plan.  Such
+        an edit carries no progress markers either, so it should be ignored.
+        """
+        hook_input = _edit_input(
+            "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md",
+            new_string="**Status**: Complete the migration before merging",
+            old_string="**Status**: planning",
+        )
+        assert _detect_lifecycle_phase(hook_input) != LifecyclePhase.COMPLETION
+
+    def test_completion_pending_prose_is_not_completion(self) -> None:
+        """'Completion pending' prose must NOT be classified as COMPLETION."""
+        hook_input = _write_input(
+            "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md",
+            "# Plan\n\nCompletion pending review.\n",
+        )
+        assert _detect_lifecycle_phase(hook_input) != LifecyclePhase.COMPLETION
+
+    def test_warning_emoji_alone_is_not_progress(self) -> None:
+        """A warning emoji (⚠️) is NOT a documented task icon — not PROGRESS."""
+        hook_input = _edit_input(
+            "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md",
+            new_string="⚠️ Heads up: review the API change.",
+            old_string="A plain note with no markers.",
+        )
+        assert _detect_lifecycle_phase(hook_input) is None
 
     # --- Progress-update phase ---
 
@@ -263,7 +317,14 @@ class TestMatches:
 
 # ─── handle() — per-phase guidance ───────────────────────────────────────────
 
-_GDL_PATH = "claude_code_hooks_daemon.handlers.post_tool_use.recovery_cron_advisor.get_data_layer"
+
+def _progress_edit(plan_folder_path: str) -> dict[str, Any]:
+    """Build a PROGRESS-classified Edit hook input for the given PLAN.md path."""
+    return _edit_input(
+        plan_folder_path,
+        new_string="- [x] ✅ Task done",
+        old_string="- [ ] ⬜ Task not done",
+    )
 
 
 class TestHandleCreation:
@@ -275,9 +336,7 @@ class TestHandleCreation:
             "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md",
             "# Plan\n\n**Status**: Not Started\n",
         )
-        with patch(_GDL_PATH) as mock_gdl:
-            mock_gdl.return_value.history.total_count = 0
-            result = handler.handle(hook_input)
+        result = handler.handle(hook_input)
         assert result.decision == Decision.ALLOW
 
     def test_creation_context_mentions_cron_create(
@@ -288,9 +347,7 @@ class TestHandleCreation:
             "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md",
             "# Plan\n\n**Status**: Not Started\n",
         )
-        with patch(_GDL_PATH) as mock_gdl:
-            mock_gdl.return_value.history.total_count = 0
-            result = handler.handle(hook_input)
+        result = handler.handle(hook_input)
         assert result.context
         text = " ".join(result.context)
         assert "CronCreate" in text
@@ -303,9 +360,7 @@ class TestHandleCreation:
             "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md",
             "# Plan\n\n**Status**: Not Started\n",
         )
-        with patch(_GDL_PATH) as mock_gdl:
-            mock_gdl.return_value.history.total_count = 0
-            result = handler.handle(hook_input)
+        result = handler.handle(hook_input)
         text = " ".join(result.context)
         assert "durable" in text.lower()
 
@@ -315,9 +370,7 @@ class TestHandleCreation:
             "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md",
             "# Plan\n\n**Status**: Not Started\n",
         )
-        with patch(_GDL_PATH) as mock_gdl:
-            mock_gdl.return_value.history.total_count = 0
-            result = handler.handle(hook_input)
+        result = handler.handle(hook_input)
         text = " ".join(result.context).lower()
         # Must say something about not waiting
         assert "not wait" in text or "do not wait" in text or "never wait" in text
@@ -330,9 +383,7 @@ class TestHandleCreation:
             "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md",
             "# Plan\n\n**Status**: Not Started\n",
         )
-        with patch(_GDL_PATH) as mock_gdl:
-            mock_gdl.return_value.history.total_count = 0
-            result = handler.handle(hook_input)
+        result = handler.handle(hook_input)
         text = " ".join(result.context)
         # The canonical prompt contains "FAILSAFE RECOVERY"
         assert "FAILSAFE RECOVERY" in text
@@ -345,9 +396,7 @@ class TestHandleCreation:
             "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md",
             "# Plan\n\n**Status**: Not Started\n",
         )
-        with patch(_GDL_PATH) as mock_gdl:
-            mock_gdl.return_value.history.total_count = 0
-            result = handler.handle(hook_input)
+        result = handler.handle(hook_input)
         text = " ".join(result.context).lower()
         assert "heartbeat" in text
 
@@ -357,26 +406,14 @@ class TestHandleProgress:
 
     def test_progress_returns_allow(self, handler: RecoveryCronAdvisorHandler) -> None:
         """Progress advisory returns ALLOW."""
-        hook_input = _edit_input(
-            "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md",
-            new_string="- [x] ✅ Done",
-            old_string="- [ ] ⬜ Not done",
-        )
-        with patch(_GDL_PATH) as mock_gdl:
-            mock_gdl.return_value.history.total_count = 100
-            result = handler.handle(hook_input)
+        hook_input = _progress_edit("/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md")
+        result = handler.handle(hook_input)
         assert result.decision == Decision.ALLOW
 
     def test_progress_context_mentions_cronlist(self, handler: RecoveryCronAdvisorHandler) -> None:
         """Progress guidance mentions CronList to verify cron is running."""
-        hook_input = _edit_input(
-            "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md",
-            new_string="- [x] ✅ Done",
-            old_string="- [ ] ⬜ Not done",
-        )
-        with patch(_GDL_PATH) as mock_gdl:
-            mock_gdl.return_value.history.total_count = 100
-            result = handler.handle(hook_input)
+        hook_input = _progress_edit("/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md")
+        result = handler.handle(hook_input)
         assert result.context
         text = " ".join(result.context)
         assert "CronList" in text
@@ -385,14 +422,8 @@ class TestHandleProgress:
         self, handler: RecoveryCronAdvisorHandler
     ) -> None:
         """Progress guidance says recreate cron if missing."""
-        hook_input = _edit_input(
-            "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md",
-            new_string="- [x] ✅ Done",
-            old_string="- [ ] ⬜ Not done",
-        )
-        with patch(_GDL_PATH) as mock_gdl:
-            mock_gdl.return_value.history.total_count = 100
-            result = handler.handle(hook_input)
+        hook_input = _progress_edit("/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md")
+        result = handler.handle(hook_input)
         text = " ".join(result.context).lower()
         assert "recreat" in text or "create" in text
 
@@ -406,9 +437,7 @@ class TestHandleCompletion:
             "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md",
             "**Status**: Complete\n",
         )
-        with patch(_GDL_PATH) as mock_gdl:
-            mock_gdl.return_value.history.total_count = 100
-            result = handler.handle(hook_input)
+        result = handler.handle(hook_input)
         assert result.decision == Decision.ALLOW
 
     def test_completion_context_mentions_cron_delete(
@@ -419,120 +448,131 @@ class TestHandleCompletion:
             "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md",
             "**Status**: Complete\n",
         )
-        with patch(_GDL_PATH) as mock_gdl:
-            mock_gdl.return_value.history.total_count = 100
-            result = handler.handle(hook_input)
+        result = handler.handle(hook_input)
         assert result.context
         text = " ".join(result.context)
         assert "CronDelete" in text
 
 
-# ─── Cooldown logic ───────────────────────────────────────────────────────────
+# ─── Progress-interval logic ───────────────────────────────────────────────────
 
 
-class TestCooldown:
-    """Cooldown suppresses repeated progress reminders per plan."""
+class TestProgressInterval:
+    """Per-plan progress-edit counter advises only every Nth progress edit.
 
-    def test_progress_fires_on_first_event(self, handler: RecoveryCronAdvisorHandler) -> None:
+    The cadence is owned by the handler and independent of global daemon
+    traffic (regression for the total_count unit mismatch that re-fired the
+    progress reminder on practically every PLAN.md edit).
+    """
+
+    def test_progress_fires_on_first_edit(self, handler: RecoveryCronAdvisorHandler) -> None:
         """First progress-update for a plan produces advisory context."""
-        hook_input = _edit_input(
-            "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md",
-            new_string="- [x] ✅ Task done",
-            old_string="- [ ] ⬜ Task not done",
-        )
-        with patch(_GDL_PATH) as mock_gdl:
-            mock_gdl.return_value.history.total_count = 10
-            result = handler.handle(hook_input)
-        # First fire: should have context
+        result = handler.handle(_progress_edit("/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md"))
         assert result.context
 
-    def test_progress_suppressed_within_cooldown(self, handler: RecoveryCronAdvisorHandler) -> None:
-        """Repeated progress-updates within cooldown window return no context."""
-        hook_input = _edit_input(
-            "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md",
-            new_string="- [x] ✅ Task done",
-            old_string="- [ ] ⬜ Task not done",
-        )
+    def test_progress_suppressed_within_interval(self, handler: RecoveryCronAdvisorHandler) -> None:
+        """Progress edits between advisories return no context (no per-edit spam)."""
+        path = "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md"
+        handler.handle(_progress_edit(path))  # 1st edit advises
+        # The next (_PROGRESS_ADVISE_INTERVAL - 1) edits stay silent.
+        for _ in range(_PROGRESS_ADVISE_INTERVAL - 1):
+            result = handler.handle(_progress_edit(path))
+            assert not result.context
 
-        # First invocation — fires and records the event count
-        with patch(_GDL_PATH) as mock_gdl:
-            mock_gdl.return_value.history.total_count = 10
-            handler.handle(hook_input)
+    def test_progress_fires_again_after_interval(self, handler: RecoveryCronAdvisorHandler) -> None:
+        """Progress advisory fires again once the interval elapses."""
+        path = "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md"
+        # 1st edit advises; the following interval-worth of edits land us back
+        # on an advise boundary.
+        for _ in range(_PROGRESS_ADVISE_INTERVAL):
+            handler.handle(_progress_edit(path))
+        # This is the (1 + _PROGRESS_ADVISE_INTERVAL)-th edit — advises again.
+        result = handler.handle(_progress_edit(path))
+        assert result.context
 
-        # Second invocation inside cooldown (count barely moved)
-        with patch(_GDL_PATH) as mock_gdl:
-            mock_gdl.return_value.history.total_count = 11
-            result = handler.handle(hook_input)
-        assert not result.context
-
-    def test_progress_fires_again_after_cooldown_expires(
+    def test_progress_independent_of_global_traffic(
         self, handler: RecoveryCronAdvisorHandler
     ) -> None:
-        """Progress-update fires again after enough events have passed."""
-        hook_input = _edit_input(
-            "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md",
-            new_string="- [x] ✅ Task done",
-            old_string="- [ ] ⬜ Task not done",
-        )
+        """Edits to OTHER plans between two edits of one plan don't reset its cadence.
 
-        # Fire at count=10
-        with patch(_GDL_PATH) as mock_gdl:
-            mock_gdl.return_value.history.total_count = 10
-            handler.handle(hook_input)
+        Interleaving unrelated plan edits must not push the tracked plan past
+        its interval — the count is strictly per-plan progress edits.
+        """
+        tracked = "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md"
+        other = "/workspace/CLAUDE/Plan/00099-other/PLAN.md"
+        handler.handle(_progress_edit(tracked))  # 1st tracked edit advises
+        # Many unrelated edits to a different plan.
+        for _ in range(_PROGRESS_ADVISE_INTERVAL * 3):
+            handler.handle(_progress_edit(other))
+        # The 2nd tracked edit is still inside the tracked plan's interval.
+        result = handler.handle(_progress_edit(tracked))
+        assert not result.context
 
-        # Well past cooldown
-        with patch(_GDL_PATH) as mock_gdl:
-            mock_gdl.return_value.history.total_count = 200
-            result = handler.handle(hook_input)
-        assert result.context
-
-    def test_completion_bypasses_cooldown(self, handler: RecoveryCronAdvisorHandler) -> None:
+    def test_completion_bypasses_interval(self, handler: RecoveryCronAdvisorHandler) -> None:
         """Completion phase always fires even immediately after a progress advisory."""
-        progress_input = _edit_input(
-            "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md",
-            new_string="- [x] ✅ Task done",
-            old_string="- [ ] ⬜ Task not done",
-        )
-        completion_input = _write_input(
-            "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md",
-            "**Status**: Complete\n",
-        )
-
-        # First fire progress at count=10
-        with patch(_GDL_PATH) as mock_gdl:
-            mock_gdl.return_value.history.total_count = 10
-            handler.handle(progress_input)
-
-        # Immediately after (count=11), completion should still fire
-        with patch(_GDL_PATH) as mock_gdl:
-            mock_gdl.return_value.history.total_count = 11
-            result = handler.handle(completion_input)
+        path = "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md"
+        handler.handle(_progress_edit(path))  # 1st progress edit advises
+        completion_input = _write_input(path, "**Status**: Complete\n")
+        result = handler.handle(completion_input)
         assert result.context
         assert "CronDelete" in " ".join(result.context)
 
-    def test_cooldown_is_per_plan(self, handler: RecoveryCronAdvisorHandler) -> None:
-        """Cooldown is tracked per plan folder, not globally."""
-        plan_a = _edit_input(
-            "/workspace/CLAUDE/Plan/00042-plan-a/PLAN.md",
-            new_string="- [x] ✅ A done",
-            old_string="- [ ] ⬜ A not done",
-        )
-        plan_b = _edit_input(
-            "/workspace/CLAUDE/Plan/00043-plan-b/PLAN.md",
-            new_string="- [x] ✅ B done",
-            old_string="- [ ] ⬜ B not done",
-        )
+    def test_interval_is_per_plan(self, handler: RecoveryCronAdvisorHandler) -> None:
+        """Each plan folder gets its own first-edit advisory."""
+        result_a = handler.handle(_progress_edit("/workspace/CLAUDE/Plan/00042-plan-a/PLAN.md"))
+        result_b = handler.handle(_progress_edit("/workspace/CLAUDE/Plan/00043-plan-b/PLAN.md"))
+        assert result_a.context
+        assert result_b.context
 
-        # Fire plan_a at count=10 — uses cooldown for plan_a
-        with patch(_GDL_PATH) as mock_gdl:
-            mock_gdl.return_value.history.total_count = 10
-            handler.handle(plan_a)
+    def test_progress_count_map_is_bounded(self, handler: RecoveryCronAdvisorHandler) -> None:
+        """The per-plan progress-count map never exceeds _MAX_TRACKED_PLANS entries."""
+        for i in range(_MAX_TRACKED_PLANS + 50):
+            handler.handle(_progress_edit(f"/workspace/CLAUDE/Plan/{i:05d}-plan/PLAN.md"))
+        # Access the bounded map via the public behaviour: it must be capped.
+        assert len(handler._progress_counts) <= _MAX_TRACKED_PLANS
 
-        # plan_b should still fire (different plan key)
-        with patch(_GDL_PATH) as mock_gdl:
-            mock_gdl.return_value.history.total_count = 11
-            result = handler.handle(plan_b)
+
+class TestPhaseCacheContract:
+    """matches() caches the phase; handle() reuses it without re-detecting."""
+
+    def test_matches_then_handle_uses_cached_phase(
+        self, handler: RecoveryCronAdvisorHandler
+    ) -> None:
+        """A matches()->handle() pair on a creation event advises correctly."""
+        hook_input = _write_input(
+            "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md",
+            "# Plan\n\n**Status**: Not Started\n",
+        )
+        assert handler.matches(hook_input) is True
+        result = handler.handle(hook_input)
         assert result.context
+        assert "CronCreate" in " ".join(result.context)
+
+    def test_handle_without_matches_still_detects(
+        self, handler: RecoveryCronAdvisorHandler
+    ) -> None:
+        """handle() called directly (no prior matches) re-detects the phase."""
+        hook_input = _write_input(
+            "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md",
+            "**Status**: Complete\n",
+        )
+        result = handler.handle(hook_input)
+        assert "CronDelete" in " ".join(result.context)
+
+    def test_stale_cache_not_reused_across_events(
+        self, handler: RecoveryCronAdvisorHandler
+    ) -> None:
+        """A non-matching event after a matching one is not mis-handled via stale cache."""
+        completion = _write_input(
+            "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md",
+            "**Status**: Complete\n",
+        )
+        non_plan = _write_input("/workspace/src/main.py", "code")
+        assert handler.matches(completion) is True
+        # matches() returned False for the non-plan event -> cache cleared.
+        assert handler.matches(non_plan) is False
+        result = handler.handle(non_plan)
+        assert not result.context
 
 
 # ─── get_claude_md() ─────────────────────────────────────────────────────────
