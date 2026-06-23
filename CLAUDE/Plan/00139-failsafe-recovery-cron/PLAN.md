@@ -1,6 +1,6 @@
 # Plan 00139: Failsafe Recovery Cron
 
-**Status**: Not Started (design agreed — ready to implement)
+**Status**: In Progress (handler shipped & live-verified; awaiting deep-review polish via Plan 00140)
 **Created**: 2026-06-23
 **Owner**: Claude (Opus)
 **Priority**: Medium
@@ -139,30 +139,38 @@ across a plan's life"), with phase detection in a tested helper.
 
 ### Phase 1: TDD — lifecycle detection
 
-- [ ] ⬜ Tests: detect creation vs progress-update vs completion from
+- [x] ✅ Tests: detect creation vs progress-update vs completion from
   Write/Edit/Bash inputs against the plan dir (positive + negative).
-- [ ] ⬜ Implement the phase-detection helper to green.
+- [x] ✅ Implement the phase-detection helper to green.
 
 ### Phase 2: TDD — advisory handler
 
-- [ ] ⬜ Tests: each phase injects the correct guidance; cooldown suppresses
-  repeat reminders; completion always advises teardown.
-- [ ] ⬜ Implement `recovery_cron_advisor` (PostToolUse, advisory, opt-in via
+- [x] ✅ Tests: each phase injects the correct guidance; cooldown suppresses
+  repeat reminders; completion always advises teardown. (49 unit tests)
+- [x] ✅ Implement `recovery_cron_advisor` (PostToolUse, advisory, opt-in via
   `get_default_enabled()`).
-- [ ] ⬜ `get_claude_md()` documents recovery-vs-heartbeat + the canonical prompt.
-- [ ] ⬜ `get_acceptance_tests()` covers the three phases.
+- [x] ✅ `get_claude_md()` documents recovery-vs-heartbeat + the canonical prompt.
+- [x] ✅ `get_acceptance_tests()` covers the three phases.
 
 ### Phase 3: Config + docs
 
-- [ ] ⬜ Register handler; choose opt-in default + cooldown option; add a
-  config-changes manifest entry (`recommended: true`) for the next release.
-- [ ] ⬜ Update PlanWorkflow.md: recovery cron is part of plan execution; the
+- [x] ✅ Register handler (init_config.py, handler_profiles.py, hooks-daemon.yaml
+  dogfooded enabled, yaml.example opt-in); config-changes manifest staged
+  (`UNRELEASED/config-changes/v3.27.0.yaml`, `recommended: true`).
+- [x] ✅ Update PlanWorkflow.md: recovery cron is part of plan execution; the
   "never wait for the cron" rule.
 
 ### Phase 4: Verify
 
-- [ ] ⬜ Daemon restart RUNNING; live probe of each lifecycle advisory.
-- [ ] ⬜ Full QA `./scripts/qa/llm_qa.py all` → 13/13.
+- [x] ✅ Daemon restart RUNNING; live probe of all three lifecycle advisories
+  (creation/completion fire correctly; non-plan write is a clean no-op).
+- [x] ✅ Full QA `./scripts/qa/llm_qa.py all` → 13/13 on main.
+
+### Phase 5: Deep-review polish (via Plan 00140)
+
+- [ ] ⬜ Address any real defects the deep-review surfaces in
+  `recovery_cron_advisor.py` (e.g. the `_TASK_STATUS_ICON_RE` mixed character
+  class incl. `⚠️`, and the redundant `[&&]` class in `_NOTES_SECTION_RE`).
 
 ## Dependencies
 
@@ -198,3 +206,12 @@ across a plan's life"), with phase detection in a tested helper.
   handler. Refined from one-shot-on-creation to a three-moment lifecycle
   (create → ensure-while-executing → teardown-on-complete).
 - Live dogfood cron `e243f234` (hourly at :23, non-durable) created this session.
+- Handler built by sub-agent on worktree, merged to main (commit `09bc085`,
+  fast-forward), daemon restarted RUNNING, QA 13/13 on main, all three lifecycle
+  advisories live-probed OK, pushed. Daemon auto-regenerated CLAUDE.md handler
+  guidance (`d58f05e`).
+- **Live dogfood confirmation**: editing this PLAN.md (marking tasks ✅) tripped
+  the handler's PROGRESS-update advisory in production, which correctly reminded
+  to confirm the recovery cron is running. `CronList` confirmed `e243f234` still
+  active; continued working without waiting (recover-not-heartbeat upheld).
+- Residual polish (regex smells) deferred to the Plan 00140 deep-review pass.

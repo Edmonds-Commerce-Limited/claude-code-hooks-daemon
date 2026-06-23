@@ -396,6 +396,25 @@ When new work is identified:
 6. **Run QA before each commit**
 7. Commit work with reference to plan: `Plan 001: Implement destructive git handler`
 
+### Failsafe Recovery Cron (while executing)
+
+For long, multi-hour plan executions, set up a **non-durable hourly failsafe
+recovery cron** at the start of execution (the `recovery_cron_advisor` handler
+prompts this on plan creation/progress when enabled). It is a safety net that
+resumes work stalled by **external** factors — Claude API overload, rate limits,
+5-hour usage limits, network failures — by firing only while the REPL is idle.
+
+**This is NOT a heartbeat.** You must **never** pace yourself to the cron or wait
+for it between units of work — that is an own goal that turns a recovery net into
+an artificial throttle. Work proceeds at full speed until an external factor
+actually stops you; the cron only matters once something has already gone wrong.
+
+- Create it non-durable (`CronCreate` `durable:false`, `recurring:true`, an
+  off-:00 minute) and record the cron ID in the plan's Notes & Updates.
+- If you are blocked **only** on human input, the cron is a no-op — keep waiting.
+- On plan completion, delete the cron (`CronDelete`) so it cannot fire in
+  unrelated future work.
+
 ### Step 6: Complete
 
 1. **Verify all QA checks pass**

@@ -1,0 +1,35 @@
+version: "3.27.0"
+date: "UNRELEASED"
+breaking: false
+config_changes:
+  added:
+    - key: handlers.post_tool_use.recovery_cron_advisor
+      description: >-
+        New opt-in PostToolUse advisory handler. Across a plan's lifecycle it
+        prompts the agent to run a NON-DURABLE hourly "failsafe recovery cron"
+        while the plan is being executed: on plan creation it advises creating
+        the cron (CronCreate, durable:false, recurring:true, off-:00 minute) and
+        records the canonical recovery prompt; on progress updates it reminds the
+        agent to confirm the cron is still running (rate-limited by a per-plan
+        cooldown so it never spams context); on completion it advises tearing the
+        cron down (CronDelete). The cron is a FAILSAFE RECOVERY net — it resumes
+        work stalled by EXTERNAL factors (Claude API overload, rate limits,
+        5-hour usage limits, network failure) — and is explicitly NOT a
+        heartbeat: the agent must never pace itself to it.
+      example_yaml: |
+        recovery_cron_advisor:
+          enabled: true
+          priority: 30
+      recommended: true
+      dormant: true
+      recommended_value: true
+      migration_note: >-
+        Enable on projects that run long, multi-hour plan executions and want
+        automatic recovery after external stalls. Add
+        handlers.post_tool_use.recovery_cron_advisor.enabled: true to
+        .claude/hooks-daemon.yaml. The handler only advises (the agent creates
+        the cron via the agent-side CronCreate tool); the daemon never schedules
+        crons itself. Leaving it disabled changes nothing.
+  renamed: []
+  removed: []
+  changed: []
