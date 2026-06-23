@@ -229,7 +229,9 @@ validate_project_structure "$PROJECT_ROOT" "true"
 # ============================================================
 
 log_step "2" "Checking prerequisites"
-check_all_prerequisites "true"
+# Pass the daemon pyproject so the Python floor derives from its
+# requires-python SSoT (F-PYFLOOR), not the bare 3.11 literal.
+check_all_prerequisites "true" "$DAEMON_DIR/pyproject.toml"
 
 # ============================================================
 # Step 3: Virtual environment

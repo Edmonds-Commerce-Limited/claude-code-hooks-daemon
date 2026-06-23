@@ -49,25 +49,44 @@ fi
 source "$_PREREQ_PYTHON_DISCOVERY_LIB"
 
 #
-# check_python3() - Verify a Python 3.11+ interpreter is available
+# check_python3() - Verify a compatible Python interpreter is available
 #
-# Delegates discovery to the canonical helper. Sets and exports
-# HOOKS_DAEMON_PYTHON to the chosen absolute path on success, or fails fast
-# with the helper's stderr (which names interpreters actually observed on
-# this host — never a hardcoded version that may not be installed).
+# Delegates discovery to the canonical helper. The minimum version is the
+# SSoT in pyproject.toml's `requires-python`; pass that pyproject path as $1
+# so the floor is raised from it. The bare 3.11 literal is only the
+# floor-of-last-resort when no pyproject is supplied. The "(X.Y+)" diagnostic
+# text is derived from the effective (parsed) floor, never hardcoded.
+#
+# Sets and exports HOOKS_DAEMON_PYTHON to the chosen absolute path on success,
+# or fails fast with the helper's stderr (which names interpreters actually
+# observed on this host — never a hardcoded version that may not be installed).
+#
+# Args:
+#   $1 - pyproject_path (optional). When given and parseable, raises the floor
+#        to its `requires-python` value.
 #
 # Returns:
 #   0 - compatible Python found (HOOKS_DAEMON_PYTHON exported)
 #   1 - no compatible Python found (also exits via fail_fast)
 #
 check_python3() {
+    local pyproject="${1:-}"
+    local floor="3.11"
+    # Raise the displayed/enforced floor from the pyproject SSoT when supplied,
+    # so the diagnostic text and find_latest_python agree on the real minimum.
+    if [ -n "$pyproject" ]; then
+        local pp_floor
+        if pp_floor="$(_pd_parse_pyproject_floor "$pyproject")"; then
+            floor="$pp_floor"
+        fi
+    fi
     local found
-    if ! found="$(find_latest_python 3.11)"; then
-        fail_fast "No compatible Python (3.11+) found. See the diagnostic above for the interpreters discovered on this host.
+    if ! found="$(find_latest_python "$floor" "$pyproject")"; then
+        fail_fast "No compatible Python (${floor}+) found. See the diagnostic above for the interpreters discovered on this host.
 
 Either:
-  - Install Python 3.11 or newer (e.g. python3.11, python3.12, python3.13) and ensure it is on \$PATH, or
-  - Set HOOKS_DAEMON_PYTHON to the absolute path of a 3.11+ interpreter."
+  - Install Python ${floor} or newer and ensure it is on \$PATH, or
+  - Set HOOKS_DAEMON_PYTHON to the absolute path of a ${floor}+ interpreter."
     fi
     HOOKS_DAEMON_PYTHON="$found"
     export HOOKS_DAEMON_PYTHON
@@ -165,6 +184,9 @@ Example:
 # Args:
 #   $1 - auto_install_uv (optional, default: true)
 #        Passed to check_uv()
+#   $2 - pyproject_path (optional)
+#        Forwarded to check_python3() so the Python floor is raised from the
+#        pyproject `requires-python` SSoT rather than the bare 3.11 literal.
 #
 # Returns:
 #   0 - all prerequisites met
@@ -172,12 +194,13 @@ Example:
 #
 check_all_prerequisites() {
     local auto_install_uv="${1:-true}"
+    local pyproject="${2:-}"
 
     print_info "Checking prerequisites..."
 
     check_git
     check_git_remote_origin
-    check_python3
+    check_python3 "$pyproject"
     check_uv "$auto_install_uv"
 
     print_success "All prerequisites met"
