@@ -1,6 +1,6 @@
 # Plan 00136: mkplan deployment driven by config SSoT
 
-**Status**: Implementation complete (Phases 1–3 shipped; release-prep Task 4.3 pending)
+**Status**: Complete — shipped in v3.25.0 (release commit `a6f0717`, tag `v3.25.0`)
 **Created**: 2026-06-23
 **Owner**: joseph
 **Priority**: High
@@ -233,3 +233,9 @@ the deploy fires; the disabled-config case is covered by the Phase 1 unit test.
   - example config), rather than rushed here.
 - Spawned the **Opus SSoT/KISS audit** the user requested → findings tracked in
   Plan 00137 (F-FASTPATH and F-SUMMARY were already fixed by this plan's Phase 2).
+- **Shipped in v3.25.0** (release commit `a6f0717`, tag `v3.25.0`) as a hotfix
+  release alongside the colour-coded environment indicator. Full release pipeline
+  passed: Opus doc review, QA 13/13, code review, H-1 gates 23/23, targeted live
+  acceptance, all 4 bootstrap artifacts sha-verified. Task 4.3 (config-changes +
+  truth-changes manifests for the deploy-default behaviour change) delivered as
+  part of the release. Plan 00137 carries the remaining audit findings.

@@ -35,11 +35,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - 8 findings catalogued (2 already fixed by 00136). Flagship remaining: **F-PROFILE** — `HANDLER_PROFILE` is an install-only env gate (twin of `PLAN_WORKFLOW`), never re-applied on upgrade, with no config field. Plus `plan_workflow.enabled` default-vs-shipped-handler drift, hardcoded Python floor, duplicated plan dir, profile-list duplication, stale venv-path summary
   - Principle: config (`.claude/hooks-daemon.yaml`) is the single source of truth; deployment derives from it. F-PROFILE needs a user decision (seed-only vs config-stored) before build
 
-- [00136: mkplan deployment driven by config SSoT](00136-mkplan-deploy-config-ssot/PLAN.md) - In Progress
-
-  - Fixes a v3.24.0 field bug (`untracked/hooks-daemon-plan-script.md`, client `client-a-infra`): `mkplan.bash` (Plan 00130) is only deployed by `install_version.sh` behind the opt-in `PLAN_WORKFLOW=yes`; the upgrade path never deploys it on either path — so every upgraded project is told by `plan_number_helper` to run a script that does not exist
-  - Root cause is structural: deployment is gated by an env var orthogonal to the config SSoT (`config.plan_workflow.enabled`/`.directory`). Fix derives deployment from config via one testable Python entrypoint (`deploy_plan_workflow_if_enabled`) called identically by install + both upgrade paths, plus a deterministic acceptance gate
-
 - [00130: Plan-Scaffolding Script Distribution (`mkplan.bash`)](00130-plan-scaffolding-script-distribution/PLAN.md) - Shipped v3.23.0
 
   - Candidate `mkplan.bash` proposed for distribution into client plan folders: scaffolds the next numbered plan folder + skeleton `PLAN.md`, resolving the number from the git-anchored `hooksdaemon.latestPlanNumber` counter (Plan 00112) so humans and agents stop hand-rolling names / scanning `ls` for the next number
@@ -113,6 +108,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00136: mkplan deployment driven by config SSoT](Completed/00136-mkplan-deploy-config-ssot/PLAN.md) - Complete
+
+  - Fixed a v3.24.0 field bug (client `client-a-infra`): `mkplan.bash` (Plan 00130) was only deployed by `install_version.sh` behind the opt-in `PLAN_WORKFLOW=yes` and never deployed on upgrade, while `plan_number_helper` guidance told agents to run it. Deployment now derives from the config SSoT (`config.plan_workflow.enabled`) via one `deploy_plan_workflow_if_enabled` entrypoint called by install + both upgrade paths; the `PLAN_WORKFLOW` env var was removed entirely (KISS); two end-to-end acceptance gates prove the script deploys on real install + upgrade
+  - Shipped in **v3.25.0** (release commit `a6f0717`, tag `v3.25.0`). Spawned the Opus SSoT/KISS audit → remaining findings tracked in Plan 00137
 
 - [00134: Format CLAUDE.md After Handler-Guidance Injection](Completed/00134-format-claude-md-after-injection/PLAN.md) - Complete
 
@@ -929,9 +929,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 135
-- **Completed**: 108 (1 with reduced scope, 4 already-shipped)
-- **Active**: 6 (1 tooling/dependencies, 1 python-discovery, 1 question-blocker, 1 stop-quality, 2 long-running/review) + 1 in-progress build (00116 CLAUDE.md compression)
+- **Total Plans Created**: 137
+- **Completed**: 109 (1 with reduced scope, 4 already-shipped)
+- **Active**: 6 (1 SSoT/KISS audit [00137], 1 python-discovery, 1 question-blocker, 1 stop-quality, 2 long-running/review) + 1 in-progress build (00116 CLAUDE.md compression)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping, 00081 - superseded by 00082)
 - **Last reconciled by**: Plans 00133 + 00134 close-out (shipped v3.24.0)
