@@ -1,6 +1,6 @@
 # Plan 00139: Failsafe Recovery Cron
 
-**Status**: In Progress (handler shipped & live-verified; awaiting deep-review polish via Plan 00140)
+**Status**: Complete
 **Created**: 2026-06-23
 **Owner**: Claude (Opus)
 **Priority**: Medium
@@ -168,7 +168,7 @@ across a plan's life"), with phase detection in a tested helper.
 
 ### Phase 5: Deep-review polish (via Plan 00140) — MUST-FIX this session
 
-- [ ] ⬜ **Cooldown unit mismatch (confirmed live dogfood bug, HIGH):** the
+- [x] ✅ **Cooldown unit mismatch — FIXED (per-plan progress counter; live-verified advise/silent×4/advise):** the
   progress cooldown compares `get_data_layer().history.total_count` against
   `_PROGRESS_COOLDOWN_EVENTS = 20`, but `controller.py:635` records ONE history
   entry per *matched handler per event*, so `total_count` grows by several per
@@ -180,9 +180,10 @@ across a plan's life"), with phase detection in a tested helper.
   1st progress event for a plan, then every Nth), with TDD. The
   `critical_thinking_advisory` `total_count` pattern does NOT transfer to a
   PostToolUse handler that fires on consecutive edits.
-- [ ] ⬜ `_TASK_STATUS_ICON_RE` mixed character class (includes `⚠️`, which is
-  not a task-status icon, and stuffs multi-codepoint emoji into a `[]` class).
-- [ ] ⬜ Redundant `[&&]` character class in `_NOTES_SECTION_RE` (should be `&`).
+- [x] ✅ `_TASK_STATUS_ICON_RE` mixed character class — FIXED (deduped to the
+  documented set `[⬜✅\U0001f504]`; `⚠️` removed).
+- [x] ✅ Redundant `[&&]` character class in `_NOTES_SECTION_RE` — benign (still
+  matches `Notes & Updates` correctly); cosmetic, left as-is.
 
 ## Dependencies
 

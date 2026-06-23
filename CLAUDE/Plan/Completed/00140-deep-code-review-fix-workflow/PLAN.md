@@ -1,6 +1,6 @@
 # Plan 00140: Deep Code Review & Fix (Workflow-Orchestrated)
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-06-23
 **Owner**: Claude (Opus)
 **Priority**: Medium
@@ -73,15 +73,17 @@ introspect** the cron to confirm it behaves as a recovery net (not a heartbeat).
 ### Phase 3: Remediate
 
 - [x] ✅ Batch 1 (critical+high+medium, 28 findings incl. cron): 7 Opus fixers (worktree, TDD). Merged to main, QA 13/13, daemon restart RUNNING, 4 safety bypasses live-probed closed, pushed (`0cdf4a6`).
-- [ ] 🔄 Batch 2 (49 lows + new destructive_git cross-separator finding): Opus fixers in waves.
-- [ ] ⬜ Final merge of batch 2 with QA 13/13 + daemon restart.
+- [x] ✅ Batch 2 (49 lows + new destructive_git cross-separator finding): 8 Opus fixers in 3 waves; all qa_passed. Merged to main (`7fe2cb6`), QA 13/13 (8947 tests), daemon restart RUNNING, destructive_git false-positive fix live-probed (compound non-push `--force` now allowed; real force-push still denied), pushed (`b063be5`).
+- [x] ✅ Final merge of both batches with QA 13/13 + daemon restart verified.
 
 ### Phase 4: Cron dogfood & introspection
 
-- [ ] ⬜ Confirm cron `e243f234` present throughout (CronList).
-- [ ] ⬜ Observe/confirm recovery semantics: if any external stall occurs, the
-  cron resumes work; confirm it is NOT waited upon (work continues apace).
-- [ ] ⬜ Record findings on the cron's real-world behaviour to feed Plan 00139.
+- [x] ✅ Confirmed cron `e243f234` present throughout (multiple CronList checks).
+- [x] ✅ Recovery semantics confirmed: cron fired several times at :23 and was
+  correctly NO-OP'd while work was in flight; never waited upon. AND a genuine
+  external stall occurred (Claude API rate-limit killed 6/7 batch-1 fixers) —
+  the interrupted work was resumed per the recover-not-heartbeat contract.
+- [x] ✅ Real-world behaviour recorded in Plan 00139 Notes.
 
 ## Dependencies
 
@@ -90,10 +92,10 @@ introspect** the cron to confirm it behaves as a recovery net (not a heartbeat).
 
 ## Success Criteria
 
-- [ ] Every confirmed finding fixed (or explicitly deferred with reason) — no
-  silent drops; truncation/scope limits logged.
-- [ ] Full QA 13/13 + daemon restart RUNNING after each merge.
-- [ ] Cron introspection confirms recover-not-heartbeat behaviour, recorded for
+- [x] Every confirmed finding fixed (78 total: 77 confirmed + 1 new), TDD, no
+  silent drops.
+- [x] Full QA 13/13 + daemon restart RUNNING after each batch merge.
+- [x] Cron introspection confirms recover-not-heartbeat behaviour, recorded for
   Plan 00139.
 
 ## Notes & Updates
@@ -117,3 +119,12 @@ introspect** the cron to confirm it behaves as a recovery net (not a heartbeat).
   correctly NO-OP'd (work in flight) — recover-not-heartbeat confirmed end-to-end.
 - **New finding (not in the 77)**: `destructive_git` matches `git push … --force`
   ACROSS `;`/separators, so a benign `git push origin main; …; git worktree remove … --force` is falsely blocked. Folded into batch 2 (destructive_git).
+- **Batch 2 complete** (`b063be5`): 8 worktree Opus fixers (3 waves) fixed all 49
+  lows + the new destructive_git finding. Merged, QA 13/13 (8947 tests), daemon
+  restart RUNNING. destructive_git fix live-probed: compound non-push `--force`
+  now allowed, real force-push still denied.
+- **Plan complete**: 78 findings remediated end-to-end via dynamic Workflows +
+  Opus sub-agents. Delivery commits: review `75a9dc9`; batch 1 `0cdf4a6`; batch 2
+  `7fe2cb6`/`b063be5`. Completing THIS plan was itself dogfooded — writing
+  "Status: Complete" tripped recovery_cron_advisor's COMPLETION advisory, which
+  correctly prompted the cron teardown.

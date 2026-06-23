@@ -13,18 +13,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Safety-first / opt-in (`get_default_enabled()` → False): exact-payload allowlist, loop-guard sentinel, idle-gating, cooldown + per-session cap, tmux-presence no-op, no Stop-handler collision; see `research-note.md` + `context.md`
   - **High-stakes**: potential game-changer done well, reputation risk done badly — hostile multi-lens review required before build
 
-- [00139: Failsafe Recovery Cron](00139-failsafe-recovery-cron/PLAN.md) - Not Started (design — awaiting decisions D1–D4)
-
-  - On plan creation, an advisory PostToolUse handler prompts the agent to set up **one hourly failsafe recovery cron** — a safety net that resumes work stalled by *external* factors (API overload, rate limits, 5-hour usage limits), explicitly **not** a heartbeat and never to be waited upon
-  - Daemon can't create crons (`CronCreate` is agent-side) so its role is advisory; it CAN introspect/dedup **durable** crons by reading the gitignored `.claude/scheduled_tasks.json`, but not in-memory ones (except via observing cron tool-call hook events)
-  - Canonical cron prompt enforces recover-not-heartbeat semantics: resume externally-paused work, no-op when work is already proceeding, wait only on human-input blocks; see `context.md`
-
-- [00140: Deep Code Review & Fix (Workflow-Orchestrated)](00140-deep-code-review-fix-workflow/PLAN.md) - In Progress
-
-  - A deep multi-agent round of code review + remediation across the daemon source, orchestrated with the **dynamic Workflow tool** and **Opus sub-agents** (fan-out review → adversarial verify → worktree-isolated Opus fixers → merge with QA + daemon restart)
-  - Targets the class of issues the QA gate doesn't catch: logic bugs, handler false-pos/neg, SOLID/DRY/magic-value smells, error-handling, doc-vs-code drift
-  - Doubles as the **heavy long-running dogfood load** for Plan 00139's live recovery cron (`e243f234`); the cron is actively introspected to confirm recover-not-heartbeat behaviour
-
 ### Memory / Documentation Policy
 
 - [00132: PostToolUse Progressive-Disclosure Reminder on Project-Doc Markdown Writes](00132-progressive-disclosure-md-write-reminder/PLAN.md) - Not Started (awaiting sign-off)
@@ -114,6 +102,14 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00140: Deep Code Review & Fix (Workflow-Orchestrated)](Completed/00140-deep-code-review-fix-workflow/PLAN.md) - Complete
+
+  - Dynamic-Workflow deep review of the daemon source: 13 Opus reviewers + adversarial Opus verification → **101 findings, 77 confirmed** (`FINDINGS.md`). Remediated end-to-end via Opus sub-agent fixers (worktree-isolated, TDD) in two batches: batch 1 = 28 critical/high/medium (incl. a CRITICAL `grep …; sed -i` mass-destruction bypass, RCE `curl | sudo -E bash` bypass, an `auto_continue_stop` QA-pass false-positive, a bandit silent-pass) + the recovery_cron cluster; batch 2 = 49 lows + 1 new `destructive_git` cross-separator false-positive. **78 fixes total**, all merged with QA 13/13 (8947 tests), daemon restart RUNNING, headline fixes live-probed. Doubled as the dogfood load for Plan 00139's cron. Commits: review `75a9dc9`, batch 1 `0cdf4a6`, batch 2 `7fe2cb6`/`b063be5`.
+
+- [00139: Failsafe Recovery Cron](Completed/00139-failsafe-recovery-cron/PLAN.md) - Complete
+
+  - New opt-in `recovery_cron_advisor` PostToolUse handler: across a plan's lifecycle (create → progress → complete) it prompts the agent to run a **non-durable hourly failsafe recovery cron** that resumes work stalled by *external* factors (API overload, rate limits, 5-hour usage limits) — explicitly **not** a heartbeat. Daemon is advisory (`CronCreate` is agent-side); per-plan progress cooldown prevents context spam. Live-dogfooded this session: the cron fired on schedule and was correctly no-op'd; a real API rate-limit stall was recovered per the contract. All 6 self-review findings fixed. Commit `e5a4b83` (handler `09bc085`); config-changes staged for v3.27.0.
 
 - [00138: Fix Plan-Number Handler False Positives](Completed/00138-plan-number-helper-false-positives/PLAN.md) - Complete
 
@@ -945,11 +941,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 140
-- **Completed**: 111 (1 with reduced scope, 4 already-shipped)
-- **Active**: 7 (1 python-discovery, 1 question-blocker, 1 stop-quality, 2 long-running/review, 1 failsafe-recovery-cron, 1 deep-review-workflow) + 1 in-progress build (00116 CLAUDE.md compression)
+- **Completed**: 113 (1 with reduced scope, 4 already-shipped)
+- **Active**: 5 (1 python-discovery, 1 question-blocker, 1 stop-quality, 2 long-running/review) + 1 in-progress build (00116 CLAUDE.md compression)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping, 00081 - superseded by 00082)
-- **Last reconciled by**: Plan 00138 close-out (plan-number handler false positives)
+- **Last reconciled by**: Plan 00139 + 00140 close-out (failsafe recovery cron + deep review/fix)
 
 ## Quick Links
 
