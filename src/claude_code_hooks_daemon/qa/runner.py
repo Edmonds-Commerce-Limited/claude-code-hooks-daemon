@@ -14,6 +14,12 @@ from typing import Any
 
 from claude_code_hooks_daemon.constants import Timeout
 
+# Bandit JSON output keys
+_BANDIT_RESULTS_KEY = "results"
+
+# Return code that indicates a successful, complete bandit run with no findings
+_PROCESS_SUCCESS_RETURNCODE = 0
+
 
 class QAExecutionError(Exception):
     """Exception raised when QA execution fails."""
@@ -328,12 +334,21 @@ class QARunner:
                 duration_ms=int((time.time() - start) * 1000),
             )
 
-        error_count = self._parse_bandit_output(stdout)
+        parsed_ok, error_count = self._parse_bandit_results(stdout)
         duration_ms = int((time.time() - start) * 1000)
+
+        # Pass ONLY when bandit ran to completion (return code 0) with zero
+        # findings, OR when its JSON parsed cleanly with zero findings. A
+        # non-zero return code whose output is unparseable (crash/non-JSON)
+        # is ALWAYS a failure — never let a fallback count of 0 mask it.
+        if returncode == _PROCESS_SUCCESS_RETURNCODE:
+            passed = error_count == 0
+        else:
+            passed = parsed_ok and error_count == 0
 
         return ToolResult(
             tool_name="bandit",
-            passed=returncode == 0 or error_count == 0,
+            passed=passed,
             error_count=error_count,
             warning_count=0,
             output=stdout + stderr,
@@ -465,6 +480,34 @@ class QARunner:
         return 0
 
     @staticmethod
+    def _parse_bandit_results(output: str) -> tuple[bool, int]:
+        """Parse bandit JSON output, reporting whether the JSON parsed cleanly.
+
+        Unlike _parse_bandit_output (which silently falls back to a regex count
+        and so cannot distinguish a clean empty scan from a crash), this returns
+        an explicit parse-success flag so callers can FAIL FAST on unparseable
+        output rather than treating a fallback count of 0 as a passing scan.
+
+        Args:
+            output: bandit command output (expected JSON)
+
+        Returns:
+            Tuple of (json_parsed_successfully, issue_count). When parsing
+            fails, issue_count is the regex fallback count purely for reporting.
+        """
+        try:
+            data = json.loads(output)
+        except json.JSONDecodeError:
+            # Fallback count is for reporting only — parsed_ok is False so the
+            # caller will not treat a non-zero exit as a pass.
+            return False, len(re.findall(r"Issue:", output))
+
+        if not isinstance(data, dict):
+            return False, 0
+        results = data.get(_BANDIT_RESULTS_KEY, [])
+        return True, len(results)
+
+    @staticmethod
     def _parse_bandit_output(output: str) -> int:
         """Parse bandit JSON output to count security issues.
 
@@ -474,13 +517,8 @@ class QARunner:
         Returns:
             Issue count
         """
-        try:
-            data = json.loads(output)
-            results = data.get("results", [])
-            return len(results)
-        except json.JSONDecodeError:
-            # Fallback: count issue references
-            return len(re.findall(r"Issue:", output))
+        _parsed_ok, count = QARunner._parse_bandit_results(output)
+        return count
 
     def generate_summary(
         self,

@@ -600,6 +600,50 @@ class TestBanditRunner:
         assert result.passed is False
         assert result.error_count == -1
 
+    @patch("subprocess.run")
+    def test_run_bandit_nonzero_exit_with_non_json_output_fails(self, mock_run: MagicMock) -> None:
+        """Bandit crash (non-zero exit + non-JSON stdout) must NOT silently pass.
+
+        Regression: previously passed = (returncode == 0 or error_count == 0).
+        On a crash, _parse_bandit_output fell back to 0, so passed became True
+        despite a non-zero exit — a security scan silently 'passing' on failure.
+        """
+        mock_run.return_value = MagicMock(
+            returncode=2,
+            stdout="Traceback (most recent call last): RuntimeError boom",
+            stderr="bandit exploded",
+        )
+
+        runner = QARunner(project_root="/workspace")
+        result = runner.run_bandit()
+
+        assert result.tool_name == "bandit"
+        assert result.passed is False
+
+    @patch("subprocess.run")
+    def test_run_bandit_nonzero_exit_with_clean_empty_results_passes(
+        self, mock_run: MagicMock
+    ) -> None:
+        """Non-zero exit but cleanly-parsed empty results still passes.
+
+        Per the fix contract: a non-zero return code is a failure UNLESS the
+        JSON parsed successfully with zero findings. This guards against
+        over-correcting the crash fix into rejecting valid empty scans.
+        """
+        bandit_json = json.dumps({"errors": [], "results": []})
+        mock_run.return_value = MagicMock(
+            returncode=1,
+            stdout=bandit_json,
+            stderr="",
+        )
+
+        runner = QARunner(project_root="/workspace")
+        result = runner.run_bandit()
+
+        assert result.tool_name == "bandit"
+        assert result.passed is True
+        assert result.error_count == 0
+
 
 class TestRunAll:
     """Test run_all method combining all tools."""

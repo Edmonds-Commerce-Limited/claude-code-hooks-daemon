@@ -159,20 +159,26 @@ class AutoContinueStopHandler(Handler):
         "./gradlew test",
     )
 
-    # Failure indicators found in QA tool output
-    _QA_FAILURE_INDICATORS: ClassVar[tuple[str, ...]] = (
-        "FAILED",
-        "failed",
-        "ERROR",
-        "error:",
-        "ERRORS",
-        "error[",
-        "FAIL",
-        " fail",
-        "failing",
-        "failure",
-        "passed=0",
-        "no tests ran",
+    # Anchored / structured failure signals in QA tool output.
+    #
+    # Each entry is a regex matched (case-sensitive unless the pattern says
+    # otherwise) against the QA tool's OWN result text. Bare substrings like
+    # "failure"/"failing"/" fail" are deliberately NOT used: verbose passing
+    # output routinely contains them (e.g. a passing test named
+    # "test_failure_recovery PASSED" contains "failure"), which previously
+    # misclassified a fully-passing run as a failure and DENY-looped the agent.
+    # We only match structured signals that genuinely denote failure.
+    _QA_FAILURE_PATTERNS: ClassVar[tuple[str, ...]] = (
+        r"\b[1-9]\d* failed\b",  # pytest "N failed" (N >= 1)
+        r"\b[1-9]\d* errors?\b",  # mypy/ruff "N error(s)" (N >= 1)
+        r"==+ FAILURES ==+",  # pytest failures banner
+        r"==+ ERRORS ==+",  # pytest errors banner
+        r"^FAILED\b",  # pytest per-test FAILED line (line-anchored)
+        r"^ERROR\b",  # pytest per-test ERROR line (line-anchored)
+        r":\s*FAILED\b",  # QA summary "Check : FAILED"
+        r"Overall Status\s*:\s*FAILED",  # run_all.sh overall status
+        r"\bno tests ran\b",  # pytest collected nothing
+        r"\bpassed=0\b",  # zero tests passed
     )
 
     def __init__(self) -> None:
@@ -319,13 +325,19 @@ class AutoContinueStopHandler(Handler):
         return result
 
     def _is_qa_failure(self, reader: TranscriptReader) -> bool:
-        """Return True if last Bash was a QA tool and output indicates failure.
+        """Return True if the last QA Bash command's OWN result indicates failure.
+
+        The Bash tool_use is paired with ITS tool_result by tool_use_id so a
+        non-Bash tool that ran afterwards cannot cause QA detection to inspect
+        an unrelated result. Failure is decided by anchored/structured signals
+        (see _QA_FAILURE_PATTERNS), never by bare substrings that also appear
+        in passing verbose output.
 
         Args:
             reader: Loaded transcript reader
 
         Returns:
-            True if a QA tool ran and its output contains failure indicators
+            True if a QA tool ran and its own result contains a failure signal
         """
         bash_use: ContentBlock | None = reader.get_last_bash_tool_use()
         if bash_use is None:
@@ -334,8 +346,29 @@ class AutoContinueStopHandler(Handler):
         command = tool_input.get("command", "")
         if not any(pat in command for pat in self._QA_TOOL_PATTERNS):
             return False
-        result_text = reader.get_last_tool_result_text()
-        return any(ind in result_text for ind in self._QA_FAILURE_INDICATORS)
+
+        # Pair the Bash tool_use with its OWN result by id. Fall back to the
+        # latest tool_result only when the tool_use carries no id (legacy
+        # transcripts) — pairing by id is the correct, unambiguous path.
+        tool_use_id = bash_use.raw.get("id", "") if bash_use.raw else ""
+        result_text: str | None = reader.get_tool_result_text_by_id(tool_use_id)
+        if result_text is None:
+            result_text = reader.get_last_tool_result_text()
+
+        return self._result_indicates_failure(result_text)
+
+    def _result_indicates_failure(self, result_text: str) -> bool:
+        """Return True if QA result text matches any structured failure signal.
+
+        Args:
+            result_text: The QA tool's own result text
+
+        Returns:
+            True if any anchored failure pattern matches
+        """
+        return any(
+            re.search(pattern, result_text, re.MULTILINE) for pattern in self._QA_FAILURE_PATTERNS
+        )
 
     def _has_stop_explanation(self, reader: TranscriptReader) -> bool:
         """Return True if any line in last assistant message starts with 'STOPPING BECAUSE:'.

@@ -1230,6 +1230,168 @@ class TestAutoContinueStopHandlerExplainerBehaviours:
         assert result.reason is not None
         assert "qa fail" not in result.reason.lower()
 
+    def test_handle_passing_verbose_pytest_does_not_trigger_qa_branch(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """Verbose pytest output naming a passing test must NOT be a QA failure.
+
+        Regression: substring indicators like 'failure'/'failing'/' fail'
+        matched SUCCESSFUL verbose output (a passing test named
+        'test_failure_recovery PASSED' contains 'failure'), causing a fully
+        passing run to be misclassified as a failure and DENY-looped.
+        """
+        path = tmp_path / "t.jsonl"
+        verbose_output = (
+            "tests/test_recovery.py::test_failure_recovery PASSED\n"
+            "tests/test_qa.py::test_handle_qa_failing_path PASSED\n"
+            "tests/test_x.py::test_fail_fast_behaviour PASSED\n"
+            "============================== 3 passed in 0.42s ==============================\n"
+        )
+        self._write_bash_and_result(path, "pytest tests/ -v", verbose_output)
+        hook_input = {"transcript_path": str(path), "stop_hook_active": False}
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "qa fail" not in result.reason.lower()
+
+    def test_handle_real_failure_count_triggers_qa_branch(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """An anchored 'N failed' count → QA failure branch."""
+        path = tmp_path / "t.jsonl"
+        output = (
+            "tests/test_x.py::test_failure_recovery PASSED\n"
+            "============================== 1 failed, 2 passed in 0.5s ===================\n"
+        )
+        self._write_bash_and_result(path, "pytest tests/ -v", output)
+        hook_input = {"transcript_path": str(path), "stop_hook_active": False}
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "qa fail" in result.reason.lower()  # the QA-failure reason fired
+
+    def test_handle_pytest_failures_banner_triggers_qa_branch(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """pytest '=== FAILURES ===' banner → QA failure branch."""
+        path = tmp_path / "t.jsonl"
+        output = (
+            "=================================== FAILURES ===================================\n"
+            "____ test_bar ____\n"
+            "1 failed in 0.3s\n"
+        )
+        self._write_bash_and_result(path, "pytest tests/ -v", output)
+        hook_input = {"transcript_path": str(path), "stop_hook_active": False}
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "fix" in result.reason.lower() or "fail" in result.reason.lower()
+
+    def _write_qa_bash_then_other_tool(
+        self, path: Path, command: str, qa_output: str, other_output: str
+    ) -> None:
+        """Write a QA Bash + its result, then an UNRELATED non-Bash tool + result.
+
+        The most recent tool_result belongs to the non-Bash tool, so naive
+        'last tool_result of any tool' pairing would match QA detection against
+        the wrong output.
+        """
+        messages = [
+            {
+                "type": "message",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "tu_qa",
+                            "name": "Bash",
+                            "input": {"command": command},
+                        }
+                    ],
+                },
+            },
+            {
+                "type": "message",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {"type": "tool_result", "tool_use_id": "tu_qa", "content": qa_output}
+                    ],
+                },
+            },
+            {
+                "type": "message",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "tu_read",
+                            "name": "Read",
+                            "input": {"file_path": "/workspace/x.py"},
+                        }
+                    ],
+                },
+            },
+            {
+                "type": "message",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {"type": "tool_result", "tool_use_id": "tu_read", "content": other_output}
+                    ],
+                },
+            },
+        ]
+        with path.open("w") as f:
+            for msg in messages:
+                f.write(json.dumps(msg) + "\n")
+
+    def test_handle_qa_paired_by_id_ignores_unrelated_later_result(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """QA detection must pair the Bash result by id, not the latest result.
+
+        Regression: pairing the last Bash tool_use with the most recent
+        tool_result of ANY tool meant a later non-Bash tool_result (here a Read
+        whose content coincidentally contains 'FAILED') was checked instead of
+        the QA output. QA passed, so this must NOT be a QA failure.
+        """
+        path = tmp_path / "t.jsonl"
+        self._write_qa_bash_then_other_tool(
+            path,
+            command="pytest tests/ -v",
+            qa_output="5 passed in 0.5s",
+            other_output="def test_thing():\n    # FAILED earlier, now fixed\n    pass\n",
+        )
+        hook_input = {"transcript_path": str(path), "stop_hook_active": False}
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "qa fail" not in result.reason.lower()
+
+    def test_handle_qa_paired_by_id_detects_real_failure(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """When the QA result (by id) really failed, detect it despite a later tool.
+
+        The QA Bash output genuinely failed; a later successful Read tool_result
+        must not mask the failure. Pairing by id surfaces the real QA failure.
+        """
+        path = tmp_path / "t.jsonl"
+        self._write_qa_bash_then_other_tool(
+            path,
+            command="pytest tests/ -v",
+            qa_output="1 failed, 4 passed in 0.5s",
+            other_output="file contents, all good",
+        )
+        hook_input = {"transcript_path": str(path), "stop_hook_active": False}
+        result = handler.handle(hook_input)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "fix" in result.reason.lower() or "fail" in result.reason.lower()
+
     # ── handle() branch: STOPPING BECAUSE ───────────────────────────────────
 
     def test_handle_stopping_because_prefix_returns_allow(
