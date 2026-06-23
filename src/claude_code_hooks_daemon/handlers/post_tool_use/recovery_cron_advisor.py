@@ -301,8 +301,8 @@ class RecoveryCronAdvisorHandler(Handler):
     (_MAX_TRACKED_PLANS) so it cannot grow without limit on the daemon-lifetime
     singleton.
 
-    Opt-in: get_default_enabled() returns False.  Projects dogfooding this repo
-    set enabled: true explicitly in .claude/hooks-daemon.yaml.
+    Opt-out: get_default_enabled() returns True (advisory-only, safe + useful, so
+    on by default).  Projects that do not want it set enabled: false.
     """
 
     def __init__(self) -> None:
@@ -327,14 +327,16 @@ class RecoveryCronAdvisorHandler(Handler):
         self._cached_phase: LifecyclePhase | None = None
 
     def get_default_enabled(self) -> bool:
-        """Opt-in handler — off by default (Plan 00139, Decision D4).
+        """Opt-OUT handler — ON by default (Plan 00139 follow-up).
 
-        Projects that want recovery-cron advisory must explicitly set
-        enabled: true in their .claude/hooks-daemon.yaml.  Must stay
-        consistent with the ``enabled: false`` flag in the config template
-        (enforced by test_default_enabled_template_consistency).
+        The handler is advisory-only (never blocks; only fires on plan-lifecycle
+        PLAN.md writes), so it is safe and useful enough to ship enabled by
+        default. Projects that do not want it set enabled: false in their
+        .claude/hooks-daemon.yaml. Must stay consistent with the template, which
+        does NOT mark this handler ``enabled: false`` (enforced by
+        test_default_enabled_template_consistency).
         """
-        return False
+        return True
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Return True if this event represents a plan lifecycle moment.
@@ -445,12 +447,12 @@ class RecoveryCronAdvisorHandler(Handler):
             "Use this verbatim as the CronCreate prompt:\n\n"
             f"```\n{_CANONICAL_CRON_PROMPT}\n```\n\n"
             "### Configuration\n\n"
-            "This handler is **opt-in** (off by default).  Enable with:\n\n"
+            "This handler is **on by default** (opt-out).  Disable with:\n\n"
             "```yaml\n"
             "handlers:\n"
             "  post_tool_use:\n"
             "    recovery_cron_advisor:\n"
-            "      enabled: true\n"
+            "      enabled: false\n"
             "```\n"
         )
 

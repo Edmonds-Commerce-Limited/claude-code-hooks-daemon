@@ -224,9 +224,8 @@ handlers:
       priority: 27
 
     recovery_cron_advisor:  # Advises on failsafe recovery cron lifecycle (creation, progress, completion)
-      enabled: false        # Enable to get advised to create/verify/delete a non-durable hourly recovery cron
+      enabled: true         # On by default (opt-out); advisory-only, fires only on CLAUDE/Plan/*/PLAN.md writes. Set false to disable.
       priority: 30
-      # progress_cooldown_events: 20  # Events between repeat progress reminders (default: 20)
 
     validate_eslint_on_write:  # Runs ESLint after file writes
       enabled: false           # Enable for automatic ESLint validation

@@ -76,9 +76,9 @@ class TestInit:
         """Handler should be non-terminal (advisory)."""
         assert handler.terminal is False
 
-    def test_default_enabled_is_false(self, handler: RecoveryCronAdvisorHandler) -> None:
-        """Handler is opt-in — get_default_enabled() must return False."""
-        assert handler.get_default_enabled() is False
+    def test_default_enabled_is_true(self, handler: RecoveryCronAdvisorHandler) -> None:
+        """Handler is opt-out (advisory-only) — get_default_enabled() returns True."""
+        assert handler.get_default_enabled() is True
 
 
 # ─── _detect_lifecycle_phase helper ─────────────────────────────────────────

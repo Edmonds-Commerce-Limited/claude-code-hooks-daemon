@@ -5,31 +5,31 @@ config_changes:
   added:
     - key: handlers.post_tool_use.recovery_cron_advisor
       description: >-
-        New opt-in PostToolUse advisory handler. Across a plan's lifecycle it
-        prompts the agent to run a NON-DURABLE hourly "failsafe recovery cron"
-        while the plan is being executed: on plan creation it advises creating
-        the cron (CronCreate, durable:false, recurring:true, off-:00 minute) and
-        records the canonical recovery prompt; on progress updates it reminds the
-        agent to confirm the cron is still running (rate-limited by a per-plan
-        cooldown so it never spams context); on completion it advises tearing the
-        cron down (CronDelete). The cron is a FAILSAFE RECOVERY net — it resumes
-        work stalled by EXTERNAL factors (Claude API overload, rate limits,
-        5-hour usage limits, network failure) — and is explicitly NOT a
-        heartbeat: the agent must never pace itself to it.
+        New PostToolUse advisory handler, shipped ENABLED BY DEFAULT (opt-out).
+        Across a plan's lifecycle it prompts the agent to run a NON-DURABLE
+        hourly "failsafe recovery cron" while the plan is being executed: on plan
+        creation it advises creating the cron (CronCreate, durable:false,
+        recurring:true, off-:00 minute) and records the canonical recovery
+        prompt; on progress updates it reminds the agent to confirm the cron is
+        still running (rate-limited by a per-plan cooldown so it never spams
+        context); on completion it advises tearing the cron down (CronDelete).
+        The cron is a FAILSAFE RECOVERY net — it resumes work stalled by EXTERNAL
+        factors (Claude API overload, rate limits, 5-hour usage limits, network
+        failure) — and is explicitly NOT a heartbeat. The handler is
+        advisory-only (never blocks; only fires on plan-lifecycle PLAN.md
+        writes), so it is safe to ship on by default; projects that do not use
+        the plan workflow never see it fire.
       example_yaml: |
+        # On by default — no action needed. To DISABLE:
         recovery_cron_advisor:
-          enabled: true
-          priority: 30
-      recommended: true
-      dormant: true
-      recommended_value: true
+          enabled: false
       migration_note: >-
-        Enable on projects that run long, multi-hour plan executions and want
-        automatic recovery after external stalls. Add
-        handlers.post_tool_use.recovery_cron_advisor.enabled: true to
-        .claude/hooks-daemon.yaml. The handler only advises (the agent creates
-        the cron via the agent-side CronCreate tool); the daemon never schedules
-        crons itself. Leaving it disabled changes nothing.
+        No action required — the handler is active automatically after upgrade
+        and only fires on writes to CLAUDE/Plan/*/PLAN.md. The daemon never
+        schedules crons itself (CronCreate is an agent-side tool); it only
+        injects advisory guidance. To opt out, set
+        handlers.post_tool_use.recovery_cron_advisor.enabled: false in
+        .claude/hooks-daemon.yaml.
   renamed: []
   removed: []
   changed: []

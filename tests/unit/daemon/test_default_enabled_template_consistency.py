@@ -9,10 +9,10 @@ locks the two together so they can never silently drift:
   - The set of handlers the template marks ``enabled: false`` must equal the
     set of handlers whose class declares ``get_default_enabled() -> False``.
 
-Currently the opt-in handlers are ``lsp_enforcement`` and
-``recovery_cron_advisor``. When a new opt-in handler is added, BOTH the
-template entry and the handler override must be updated, and this test enforces
-that they agree.
+Currently the only opt-in handler is ``lsp_enforcement``
+(``recovery_cron_advisor`` is opt-OUT / on by default). When a new opt-in
+handler is added, BOTH the template entry and the handler override must be
+updated, and this test enforces that they agree.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ from claude_code_hooks_daemon.handlers.registry import HandlerRegistry, _get_con
 # The known opt-in (off-by-default) handlers, by config_key. Update this set
 # (and the corresponding handler override + template entry) when adding a new
 # opt-in handler.
-_EXPECTED_OPT_IN_CONFIG_KEYS = {"lsp_enforcement", "recovery_cron_advisor"}
+_EXPECTED_OPT_IN_CONFIG_KEYS = {"lsp_enforcement"}
 
 
 def _template_disabled_config_keys() -> set[str]:
