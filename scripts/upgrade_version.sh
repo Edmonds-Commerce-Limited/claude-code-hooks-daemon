@@ -246,6 +246,21 @@ except Exception as e:
     exit(1)
 "
 
+    # Plan 00136: deploy plan workflow (config-driven SSoT) on the idempotent
+    # fast path too, so already-at-target re-runs also deliver mkplan.bash.
+    if "$VENV_PYTHON" -c "
+from pathlib import Path
+from claude_code_hooks_daemon.install.plan_workflow import deploy_plan_workflow_if_enabled
+
+result = deploy_plan_workflow_if_enabled(Path('$PROJECT_ROOT'), Path('$TARGET_CONFIG'))
+for msg in result.messages:
+    print(f'  -> {msg}')
+"; then
+        print_success "Plan workflow deployment complete"
+    else
+        print_warning "Plan workflow deployment had issues (non-fatal)"
+    fi
+
     if ! restart_daemon_verified "$VENV_PYTHON"; then
         fail_fast "Daemon failed to start after idempotent upgrade"
     fi
@@ -679,10 +694,34 @@ except Exception as e:
 "
 
 # ============================================================
-# Step 14: Restart daemon and verify
+# Step 14: Deploy plan workflow (config-driven SSoT — Plan 00136)
+# ============================================================
+#
+# Runs AFTER config merge (Step 10) so config.plan_workflow.enabled reflects
+# the upgraded config. Deployment is derived from that config (the SSoT the
+# daemon reads), exactly as hooks/slash-commands/skills are redeployed every
+# run. This closes the bug where mkplan.bash was never delivered on upgrade.
+
+log_step "14" "Deploying plan workflow (if enabled in config)"
+
+if "$VENV_PYTHON" -c "
+from pathlib import Path
+from claude_code_hooks_daemon.install.plan_workflow import deploy_plan_workflow_if_enabled
+
+result = deploy_plan_workflow_if_enabled(Path('$PROJECT_ROOT'), Path('$TARGET_CONFIG'))
+for msg in result.messages:
+    print(f'  -> {msg}')
+"; then
+    print_success "Plan workflow deployment complete"
+else
+    print_warning "Plan workflow deployment had issues (non-fatal)"
+fi
+
+# ============================================================
+# Step 15: Restart daemon and verify
 # ============================================================
 
-log_step "14" "Restarting daemon"
+log_step "15" "Restarting daemon"
 
 if ! restart_daemon_verified "$VENV_PYTHON"; then
     print_error "Daemon failed to start after upgrade"
@@ -713,10 +752,10 @@ rm -f "$DAEMON_DIR/untracked/version_check_cache.json"
 eager_cleanup_stale_venvs "$DAEMON_DIR" "$VENV_PATH"
 
 # ============================================================
-# Step 15: Post-upgrade validation
+# Step 16: Post-upgrade validation
 # ============================================================
 
-log_step "15" "Running post-upgrade validation"
+log_step "16" "Running post-upgrade validation"
 if ! run_post_install_checks "$PROJECT_ROOT" "$VENV_PYTHON" "$DAEMON_DIR" "false"; then
     print_error "Post-upgrade validation failed"
     print_info "The daemon may not be fully functional. Review the errors above."
@@ -734,10 +773,10 @@ if ! run_post_install_checks "$PROJECT_ROOT" "$VENV_PYTHON" "$DAEMON_DIR" "false
 fi
 
 # ============================================================
-# Step 16: Cleanup old snapshots
+# Step 17: Cleanup old snapshots
 # ============================================================
 
-log_step "16" "Cleanup"
+log_step "17" "Cleanup"
 cleanup_old_snapshots "$DAEMON_DIR" 3
 
 # Get new version

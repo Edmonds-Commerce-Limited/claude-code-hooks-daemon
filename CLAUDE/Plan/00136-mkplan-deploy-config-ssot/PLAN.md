@@ -47,8 +47,8 @@ redeployed on every install and upgrade.
   (full + idempotent fast path) — derived from config, not from an env var.
 - Put the deploy decision in **one testable Python function** (SSoT, DRY) that all
   three shell sites call identically, so deployment can never drift from config.
-- Retire `PLAN_WORKFLOW=yes` as the deployment **gate** (config is authoritative);
-  if kept at all, only as a greenfield config seed, never a second source of truth.
+- **Remove the `PLAN_WORKFLOW` env var entirely** (user-directed KISS): config is
+  the only authority; no install-time switch that can disagree with it.
 - Add a **deterministic acceptance gate** that fails if a simulated upgrade of a
   config-enabled fixture project does not leave `mkplan.bash` present + executable.
 - Reconcile the now-true-once-wired docstring and stage a `truth-changes` /
@@ -101,14 +101,23 @@ delegates to the existing `bootstrap_plan_workflow(project_root, config.plan_wor
 All three shell sites call it with one identical `$VENV_PYTHON -c` invocation (or a
 tiny CLI shim). One decision site → cannot drift.
 
-### Decision B: Config is the gate; env var demoted
+### Decision B: Config is the only gate; `PLAN_WORKFLOW` env var removed entirely (KISS)
 
-**Decision**: the deploy step runs unconditionally on every install/upgrade and
-lets the Python function decide from config. `install_version.sh` no longer gates
-the deploy on `PLAN_WORKFLOW=yes`. The env var is retained only as an optional
-greenfield seed (write `plan_workflow.enabled: true` into a brand-new config) — it
-is never read as the deployment authority. Default config already has
-`plan_workflow.enabled: true`, so the common path deploys by default.
+**Decision** (user-directed, 2026-06-23 — "this PLAN_WORKFLOW env var is really
+stupid… we need clear SSoT and general KISS"): the deploy step runs
+unconditionally on every install/upgrade and lets the Python function decide from
+config (`config.plan_workflow.enabled`). The `PLAN_WORKFLOW` env var is **deleted
+outright** — not demoted, not kept as a seed — so there is exactly ONE source of
+truth (the config the daemon reads). No second, install-time-only switch that can
+disagree with config. `config.plan_workflow.enabled` defaults `true`, so a stock
+install deploys the scaffold by default; a project that does not want it sets
+`plan_workflow.enabled: false`.
+
+**Behaviour change**: fresh installs (and existing upgrades) now deploy the plan
+scaffold + `mkplan.bash` by default, where previously a fresh install required
+`PLAN_WORKFLOW=yes`. This matches the config SSoT (`enabled` defaults true) and
+the field-bug report (which lists "default fresh installs" as wrongly NOT getting
+the script). Recorded as a `config-changes` note at release.
 
 ### Decision C: Acceptance gate mirrors the existing install/diagnostic gates
 

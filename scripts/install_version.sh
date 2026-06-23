@@ -411,36 +411,27 @@ else
 fi
 
 # ============================================================
-# Step 14: Plan workflow setup (optional, via PLAN_WORKFLOW=yes)
+# Step 14: Plan workflow deployment (config-driven SSoT — Plan 00136)
 # ============================================================
+#
+# Deployment is derived from the config the daemon actually reads
+# (config.plan_workflow.enabled), NOT from a separate install-time switch.
+# The legacy PLAN_WORKFLOW=yes env var was a second, orthogonal source of
+# truth that never ran on upgrade — removed entirely for one clear SSoT.
 
-if [ "${PLAN_WORKFLOW:-}" = "yes" ]; then
-    log_step "14" "Setting up plan workflow"
+log_step "14" "Deploying plan workflow (if enabled in config)"
 
-    if "$VENV_PYTHON" -c "
+if "$VENV_PYTHON" -c "
 from pathlib import Path
-from claude_code_hooks_daemon.config.models import Config
-from claude_code_hooks_daemon.install.plan_workflow import bootstrap_plan_workflow
+from claude_code_hooks_daemon.install.plan_workflow import deploy_plan_workflow_if_enabled
 
-# Honour the configured plan directory (track_plans_in_project) rather than
-# assuming CLAUDE/Plan, so the structure + mkplan.bash land where the project
-# actually tracks plans. Falls back to the model default if config is absent.
-config = Config.load_or_default(Path('$TARGET_CONFIG'))
-plan_dir_name = config.plan_workflow.directory
-
-result = bootstrap_plan_workflow(Path('$PROJECT_ROOT'), plan_dir_name)
+result = deploy_plan_workflow_if_enabled(Path('$PROJECT_ROOT'), Path('$TARGET_CONFIG'))
 for msg in result.messages:
     print(f'  -> {msg}')
-if result.success:
-    print('Plan workflow bootstrapped')
 "; then
-        print_success "Plan workflow ready"
-    else
-        print_warning "Plan workflow setup had issues (non-fatal)"
-    fi
+    print_success "Plan workflow deployment complete"
 else
-    log_step "14" "Plan workflow setup (skipped)"
-    print_info "Set PLAN_WORKFLOW=yes to bootstrap CLAUDE/Plan/ structure"
+    print_warning "Plan workflow deployment had issues (non-fatal)"
 fi
 
 # ============================================================
@@ -497,9 +488,6 @@ echo ""
 if [ "$HANDLER_PROFILE" != "minimal" ]; then
 echo "  Profile:  $HANDLER_PROFILE"
 fi
-if [ "${PLAN_WORKFLOW:-}" = "yes" ]; then
-echo "  Plans:    $PROJECT_ROOT/CLAUDE/Plan/"
-fi
 echo ""
 echo "Next steps:"
 echo "  1. Review config:   vim $TARGET_CONFIG"
@@ -509,7 +497,7 @@ echo ""
 echo "Customisation (re-run installer or edit config):"
 echo "  Profiles:  HANDLER_PROFILE=recommended  (safety + quality + plans)"
 echo "             HANDLER_PROFILE=strict        (all handlers enabled)"
-echo "  Plans:     PLAN_WORKFLOW=yes             (bootstrap CLAUDE/Plan/)"
+echo "  Plans:     edit plan_workflow.enabled in $TARGET_CONFIG (deployed when enabled)"
 echo ""
 echo "Daemon management:"
 echo "  Status:   $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli status"
