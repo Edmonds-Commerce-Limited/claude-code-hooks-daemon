@@ -19,6 +19,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Daemon can't create crons (`CronCreate` is agent-side) so its role is advisory; it CAN introspect/dedup **durable** crons by reading the gitignored `.claude/scheduled_tasks.json`, but not in-memory ones (except via observing cron tool-call hook events)
   - Canonical cron prompt enforces recover-not-heartbeat semantics: resume externally-paused work, no-op when work is already proceeding, wait only on human-input blocks; see `context.md`
 
+- [00140: Deep Code Review & Fix (Workflow-Orchestrated)](00140-deep-code-review-fix-workflow/PLAN.md) - In Progress
+
+  - A deep multi-agent round of code review + remediation across the daemon source, orchestrated with the **dynamic Workflow tool** and **Opus sub-agents** (fan-out review → adversarial verify → worktree-isolated Opus fixers → merge with QA + daemon restart)
+  - Targets the class of issues the QA gate doesn't catch: logic bugs, handler false-pos/neg, SOLID/DRY/magic-value smells, error-handling, doc-vs-code drift
+  - Doubles as the **heavy long-running dogfood load** for Plan 00139's live recovery cron (`e243f234`); the cron is actively introspected to confirm recover-not-heartbeat behaviour
+
 ### Memory / Documentation Policy
 
 - [00132: PostToolUse Progressive-Disclosure Reminder on Project-Doc Markdown Writes](00132-progressive-disclosure-md-write-reminder/PLAN.md) - Not Started (awaiting sign-off)
@@ -938,9 +944,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 139
+- **Total Plans Created**: 140
 - **Completed**: 111 (1 with reduced scope, 4 already-shipped)
-- **Active**: 6 (1 python-discovery, 1 question-blocker, 1 stop-quality, 2 long-running/review, 1 failsafe-recovery-cron design) + 1 in-progress build (00116 CLAUDE.md compression)
+- **Active**: 7 (1 python-discovery, 1 question-blocker, 1 stop-quality, 2 long-running/review, 1 failsafe-recovery-cron, 1 deep-review-workflow) + 1 in-progress build (00116 CLAUDE.md compression)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping, 00081 - superseded by 00082)
 - **Last reconciled by**: Plan 00138 close-out (plan-number handler false positives)
