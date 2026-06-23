@@ -13,6 +13,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Safety-first / opt-in (`get_default_enabled()` → False): exact-payload allowlist, loop-guard sentinel, idle-gating, cooldown + per-session cap, tmux-presence no-op, no Stop-handler collision; see `research-note.md` + `context.md`
   - **High-stakes**: potential game-changer done well, reputation risk done badly — hostile multi-lens review required before build
 
+- [00139: Failsafe Recovery Cron](00139-failsafe-recovery-cron/PLAN.md) - Not Started (design — awaiting decisions D1–D4)
+
+  - On plan creation, an advisory PostToolUse handler prompts the agent to set up **one hourly failsafe recovery cron** — a safety net that resumes work stalled by *external* factors (API overload, rate limits, 5-hour usage limits), explicitly **not** a heartbeat and never to be waited upon
+  - Daemon can't create crons (`CronCreate` is agent-side) so its role is advisory; it CAN introspect/dedup **durable** crons by reading the gitignored `.claude/scheduled_tasks.json`, but not in-memory ones (except via observing cron tool-call hook events)
+  - Canonical cron prompt enforces recover-not-heartbeat semantics: resume externally-paused work, no-op when work is already proceeding, wait only on human-input blocks; see `context.md`
+
 ### Memory / Documentation Policy
 
 - [00132: PostToolUse Progressive-Disclosure Reminder on Project-Doc Markdown Writes](00132-progressive-disclosure-md-write-reminder/PLAN.md) - Not Started (awaiting sign-off)
@@ -932,9 +938,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 138
+- **Total Plans Created**: 139
 - **Completed**: 111 (1 with reduced scope, 4 already-shipped)
-- **Active**: 5 (1 python-discovery, 1 question-blocker, 1 stop-quality, 2 long-running/review) + 1 in-progress build (00116 CLAUDE.md compression)
+- **Active**: 6 (1 python-discovery, 1 question-blocker, 1 stop-quality, 2 long-running/review, 1 failsafe-recovery-cron design) + 1 in-progress build (00116 CLAUDE.md compression)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping, 00081 - superseded by 00082)
 - **Last reconciled by**: Plan 00138 close-out (plan-number handler false positives)
