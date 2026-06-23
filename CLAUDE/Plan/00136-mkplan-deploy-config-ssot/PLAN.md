@@ -1,6 +1,6 @@
 # Plan 00136: mkplan deployment driven by config SSoT
 
-**Status**: In Progress
+**Status**: Implementation complete (Phases 1–3 shipped; release-prep Task 4.3 pending)
 **Created**: 2026-06-23
 **Owner**: joseph
 **Priority**: High
@@ -119,13 +119,18 @@ scaffold + `mkplan.bash` by default, where previously a fresh install required
 the field-bug report (which lists "default fresh installs" as wrongly NOT getting
 the script). Recorded as a `config-changes` note at release.
 
-### Decision C: Acceptance gate mirrors the existing install/diagnostic gates
+### Decision C: Fold the acceptance gate into the existing end-to-end tests (DRY)
 
-**Decision**: add `tests/acceptance/test_plan_workflow_deploy.py` driving the real
-Python entrypoint (and, where feasible, the production shell deploy step) against a
-fixture project whose config enables the plan workflow but which lacks
-`mkplan.bash`; assert the file exists and is mode-`0o755` afterwards, and that a
-disabled-config fixture leaves it absent. Wire into RELEASING.md Step 12.0.
+**Decision (as built)**: rather than a new `test_plan_workflow_deploy.py` that
+would duplicate the slow daemon-spinning harness, the gate was folded into the two
+existing end-to-end tests in `tests/acceptance/test_install_sh_end_to_end.py`
+(already in RELEASING.md Step 12.0). A shared `_assert_mkplan_deployed` helper
+asserts `CLAUDE/Plan/mkplan.bash` is present + mode `0o755` after the real
+`install_version.sh` AND `upgrade_version.sh` (fast path) runs. This proves the
+actual shell WIRING calls the deploy — non-redundant with the Phase 1 unit tests
+(which already cover the Python entrypoint's enabled/disabled/custom-dir logic).
+The example config the fixtures use has `plan_workflow.enabled` defaulting True, so
+the deploy fires; the disabled-config case is covered by the Phase 1 unit test.
 
 ## Tasks
 
@@ -207,3 +212,24 @@ disabled-config fixture leaves it absent. Wire into RELEASING.md Step 12.0.
   single env-gated caller (`install_version.sh`); `upgrade_version.sh` never
   deploys mkplan on either path. Config SSoT (`PlanWorkflowConfig.enabled`)
   already exists — the fix derives deployment from it.
+- **Phases 1–3 delivered** (all tasks done):
+  - Phase 1 (`db41fed`): `deploy_plan_workflow_if_enabled` entrypoint + 6 unit
+    tests; module coverage 97.3%; docstrings reconciled.
+  - Phase 2 (`753e9ed`): wired the config-driven deploy into `install_version.sh`
+    Step 14 and BOTH `upgrade_version.sh` paths (full new Step 14 + idempotent
+    fast path); **`PLAN_WORKFLOW` env var removed entirely** (gate + summary +
+    customisation hints) per user KISS direction; steps renumbered.
+  - Phase 3 (`79ba0d6`): the two end-to-end acceptance gates now assert
+    `CLAUDE/Plan/mkplan.bash` present + mode 0o755 after a real shell install AND
+    upgrade. Both PASS — bug fixed and proven end-to-end. Files already in
+    RELEASING.md Step 12.0, so Task 3.2 satisfied.
+  - Phase 4: full QA 13/13 PASSED (8703 tests, 95.1% cov); daemon restarts
+    RUNNING. Task 4.3 (config-changes/truth-changes note for the deploy-by-default
+    behaviour change) is a `/release`-time activity.
+- **Gate decision (KISS, user-directed)**: deploy is gated on the single config
+  SSoT `config.plan_workflow.enabled`. The default-True-vs-shipped-disabled-handler
+  nuance (deploy-by-default on stock installs) is catalogued as finding F-PLANDEF
+  in Plan 00137 for deliberate reconciliation (it touches the migration validator
+  - example config), rather than rushed here.
+- Spawned the **Opus SSoT/KISS audit** the user requested → findings tracked in
+  Plan 00137 (F-FASTPATH and F-SUMMARY were already fixed by this plan's Phase 2).
