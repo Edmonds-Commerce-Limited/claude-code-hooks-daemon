@@ -361,7 +361,9 @@ class HookResult(BaseModel):
         """Convert to full daemon response format (PRD 3.2.2).
 
         Args:
-            event_name: Hook event type
+            _event_name: Hook event type. Accepted for call-site symmetry with
+                ``to_json`` but unused: the PRD 3.2.2 response shape is the same
+                for every event, so the value does not affect the output.
             timing_ms: Processing time in milliseconds
 
         Returns:

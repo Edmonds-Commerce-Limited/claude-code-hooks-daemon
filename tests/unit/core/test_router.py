@@ -374,3 +374,111 @@ class TestEventRouter:
 
         # Result reason should be unchanged (no footer appended due to missing handler)
         assert fake_result.result.reason == "Test denial"
+
+
+class _StubFooterHandler(Handler):
+    """Minimal handler exposing a config_key for footer tests."""
+
+    def __init__(
+        self,
+        config_key_value: str,
+        result: HookResult | None = None,
+        priority: int = 50,
+    ) -> None:
+        super().__init__(name=config_key_value.replace("_", "-"), priority=priority, terminal=True)
+        self._result = result or HookResult.allow()
+
+    def matches(self, hook_input: dict) -> bool:
+        return True
+
+    def handle(self, hook_input: dict) -> HookResult:
+        return self._result
+
+    def get_claude_md(self) -> str | None:
+        return None
+
+    def get_acceptance_tests(self) -> list:
+        """Stub - no acceptance tests needed for footer helper tests."""
+        return []
+
+
+class TestSharedFooterHelper:
+    """Tests for the shared inject_config_key_footer helper (Plan 00140 #32).
+
+    FrontController and EventRouter previously carried two near-identical
+    footer-injection implementations. They now delegate to a single shared
+    helper so the behaviour cannot drift.
+    """
+
+    def test_helper_appends_footer_to_deny_reason(self) -> None:
+        from claude_code_hooks_daemon.core.router import inject_config_key_footer
+
+        result = HookResult.deny(reason="Blocked")
+        handler = _StubFooterHandler("my_handler")
+
+        inject_config_key_footer(result, "pre_tool_use", handler)
+
+        assert result.reason is not None
+        assert "To disable: handlers.pre_tool_use.my_handler" in result.reason
+
+    def test_helper_fills_none_reason_without_leading_blank_lines(self) -> None:
+        from claude_code_hooks_daemon.core.router import inject_config_key_footer
+
+        result = HookResult(decision=Decision.ASK)
+        handler = _StubFooterHandler("my_handler")
+
+        inject_config_key_footer(result, "stop", handler)
+
+        assert result.reason is not None
+        assert result.reason.startswith("To disable: handlers.stop.my_handler")
+
+    def test_helper_skips_allow(self) -> None:
+        from claude_code_hooks_daemon.core.router import inject_config_key_footer
+
+        result = HookResult.allow()
+        handler = _StubFooterHandler("my_handler")
+
+        inject_config_key_footer(result, "pre_tool_use", handler)
+
+        assert result.reason is None
+
+    def test_helper_skips_none_handler(self) -> None:
+        from claude_code_hooks_daemon.core.router import inject_config_key_footer
+
+        result = HookResult.deny(reason="Blocked")
+
+        inject_config_key_footer(result, "pre_tool_use", None)
+
+        assert result.reason == "Blocked"
+
+    def test_router_and_front_controller_delegate_to_helper(self) -> None:
+        """Both call sites must route through the single shared helper."""
+        import claude_code_hooks_daemon.core.front_controller as fc_module
+        import claude_code_hooks_daemon.core.router as router_module
+
+        calls: list[tuple[str, str]] = []
+        original = router_module.inject_config_key_footer
+
+        def spy(result: HookResult, event_config_key: str, handler: object) -> None:
+            handler_key = getattr(handler, "config_key", None)
+            calls.append((event_config_key, str(handler_key)))
+            original(result, event_config_key, handler)
+
+        router_module.inject_config_key_footer = spy
+        fc_module.inject_config_key_footer = spy
+        try:
+            handler = _StubFooterHandler("my_handler", result=HookResult.deny(reason="r"))
+            router = EventRouter()
+            router.register(EventType.PRE_TOOL_USE, handler)
+            router.route(EventType.PRE_TOOL_USE, {})
+
+            controller = fc_module.FrontController("PreToolUse")
+            fc_handler = _StubFooterHandler("fc_handler", result=HookResult.deny(reason="r"))
+            controller.register(fc_handler)
+            controller.dispatch({})
+        finally:
+            router_module.inject_config_key_footer = original
+            fc_module.inject_config_key_footer = original
+
+        assert ("pre_tool_use", "my_handler") in calls
+        assert ("pre_tool_use", "fc_handler") in calls

@@ -13,8 +13,8 @@ from typing import Any
 
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler import Handler
-from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
-from claude_code_hooks_daemon.core.router import _DISABLE_FOOTER_TEMPLATE
+from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.core.router import inject_config_key_footer
 from claude_code_hooks_daemon.core.utils import get_workspace_root
 
 
@@ -136,18 +136,15 @@ class FrontController:
     def _inject_config_key_footer(self, result: HookResult, handler: Handler | None) -> None:
         """Append config path footer to DENY/ASK results.
 
-        Modifies the result in-place to include the fully-qualified config
-        path so users can easily disable the handler that blocked them.
+        Resolves the event config key from this controller's event_name and
+        delegates the actual formatting/appending to the shared
+        ``inject_config_key_footer`` helper (single source of truth shared with
+        EventRouter), so the two cannot drift.
 
         Args:
             result: HookResult to potentially modify
             handler: Handler that produced the result (for config_key lookup)
         """
-        if result.decision not in (Decision.DENY, Decision.ASK):
-            return
-        if handler is None:
-            return
-
         # Convert event_name (e.g. "PreToolUse") to config key (e.g. "pre_tool_use")
         try:
             event_type = EventType.from_string(self.event_name)
@@ -156,15 +153,7 @@ class FrontController:
             # Unknown event type - skip injection rather than crash
             return
 
-        footer = _DISABLE_FOOTER_TEMPLATE.format(
-            event_config_key=event_config_key,
-            handler_config_key=handler.config_key,
-        )
-
-        if result.reason is None:
-            result.reason = footer.lstrip("\n")
-        else:
-            result.reason = result.reason + footer
+        inject_config_key_footer(result, event_config_key, handler)
 
     def run(self) -> None:
         """Main entry point - read stdin, dispatch, write output."""
