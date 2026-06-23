@@ -7,6 +7,19 @@ Profiles:
 - minimal: Safety handlers only (default — config as-is from yaml.example)
 - recommended: Safety + code quality + plan workflow + linting
 - strict: All handlers enabled
+
+Profiles are a ONE-SHOT SEED of the user's config at fresh-install time only.
+Once ``apply_profile`` has flipped the chosen handlers to ``enabled: true`` in
+``.claude/hooks-daemon.yaml``, that file is the single source of truth for which
+handlers run — the profile name is not stored and is never re-applied. The
+upgrade path deliberately carries zero profile references: the config-merge
+preserves a seeded ``enabled: true`` as a user customisation, so the seed
+survives upgrades even though the new version's example default still ships the
+handler disabled (regression-guarded by
+``tests/unit/install/test_handler_profiles.py::TestProfileSeedSurvivesUpgrade``).
+To change handlers after install, edit the yaml directly — do not expect
+re-running the installer with a different ``HANDLER_PROFILE`` to be the
+authority.
 """
 
 import logging

@@ -469,7 +469,7 @@ except ValueError as e:
     fi
 else
     log_step "15" "Handler profile: minimal (default)"
-    print_info "Set HANDLER_PROFILE=recommended or HANDLER_PROFILE=strict for more handlers"
+    print_info "HANDLER_PROFILE=recommended|strict seeds more handlers at install time"
 fi
 
 # ============================================================
@@ -483,7 +483,7 @@ echo ""
 echo "  Project:  $PROJECT_ROOT"
 echo "  Daemon:   $DAEMON_DIR"
 echo "  Config:   $TARGET_CONFIG"
-echo "  Venv:     $DAEMON_DIR/untracked/venv/"
+echo "  Venv:     $VENV_PATH"
 echo ""
 if [ "$HANDLER_PROFILE" != "minimal" ]; then
 echo "  Profile:  $HANDLER_PROFILE"
@@ -494,9 +494,9 @@ echo "  1. Review config:   vim $TARGET_CONFIG"
 echo "  2. Commit hooks:    git add .claude/hooks/ .claude/settings.json .claude/hooks-daemon.yaml"
 echo "  3. Hooks activate automatically on next tool use"
 echo ""
-echo "Customisation (re-run installer or edit config):"
-echo "  Profiles:  HANDLER_PROFILE=recommended  (safety + quality + plans)"
-echo "             HANDLER_PROFILE=strict        (all handlers enabled)"
+echo "Customisation (edit $TARGET_CONFIG — it is the single source of truth):"
+echo "  Profiles:  HANDLER_PROFILE=recommended|strict seeds extra handlers at"
+echo "             FRESH-INSTALL time only; afterwards edit enabled: flags in config"
 echo "  Plans:     edit plan_workflow.enabled in $TARGET_CONFIG (deployed when enabled)"
 echo ""
 echo "Daemon management:"

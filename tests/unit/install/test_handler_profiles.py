@@ -4,7 +4,10 @@ import textwrap
 from pathlib import Path
 
 import pytest
+import yaml
 
+from claude_code_hooks_daemon.install.config_differ import ConfigDiffer
+from claude_code_hooks_daemon.install.config_merger import ConfigMerger
 from claude_code_hooks_daemon.install.handler_profiles import (
     PROFILES,
     apply_profile,
@@ -153,3 +156,80 @@ class TestApplyProfile:
         # qa_suppression, tdd_enforcement, plan_number_helper, lint_on_edit,
         # task_completion_checker = 5 handlers toggled in sample
         assert count >= 4
+
+
+class TestProfileSeedSurvivesUpgrade:
+    """A profile is a one-shot SEED of the user's config at fresh-install time.
+
+    After ``apply_profile`` flips ``enabled: false`` to ``enabled: true`` in the
+    yaml, that yaml is the single source of truth thereafter. Profiles are NOT
+    re-applied on upgrade (the upgrade path has zero profile references by
+    design). These tests prove the seed survives the production upgrade
+    config-merge: a profile-enabled handler stays enabled even though the new
+    version's example default still ships it ``enabled: false``.
+    """
+
+    @pytest.fixture
+    def seeded_yaml(self, tmp_path: Path) -> Path:
+        """A yaml seeded by the 'recommended' profile at install time."""
+        content = textwrap.dedent("""\
+            handlers:
+              pre_tool_use:
+                qa_suppression:        # Blocks QA suppression comments
+                  enabled: false       # Enable for strict code quality
+                  priority: 30
+                tdd_enforcement:       # Enforces test-first development
+                  enabled: false       # Enable for strict TDD
+                  priority: 35
+        """)
+        config_path = tmp_path / "hooks-daemon.yaml"
+        config_path.write_text(content)
+        apply_profile(config_path, "recommended")
+        return config_path
+
+    def test_seeded_handlers_preserved_through_upgrade_merge(
+        self, seeded_yaml: Path
+    ) -> None:
+        """Profile-seeded enabled:true survives upgrade against a disabled default.
+
+        Simulates the upgrade path: diff the user's seeded config against the
+        NEW version's default (which still ships the handler disabled), then
+        merge. The seed must win — the merged config keeps enabled:true.
+        """
+        user_config = yaml.safe_load(seeded_yaml.read_text())
+
+        # Next version's example default still ships these handlers disabled
+        # (the example never carries a profile's choices).
+        new_default_config = {
+            "handlers": {
+                "pre_tool_use": {
+                    "qa_suppression": {"enabled": False, "priority": 30},
+                    "tdd_enforcement": {"enabled": False, "priority": 35},
+                }
+            }
+        }
+
+        diff = ConfigDiffer().diff(user_config, new_default_config)
+        result = ConfigMerger().merge(new_default_config, diff)
+
+        merged_pre = result.merged_config["handlers"]["pre_tool_use"]
+        assert merged_pre["qa_suppression"]["enabled"] is True
+        assert merged_pre["tdd_enforcement"]["enabled"] is True
+
+    def test_seed_is_detected_as_user_customization(self, seeded_yaml: Path) -> None:
+        """The seed registers as a changed_option so the merge preserves it."""
+        user_config = yaml.safe_load(seeded_yaml.read_text())
+        new_default_config = {
+            "handlers": {
+                "pre_tool_use": {
+                    "qa_suppression": {"enabled": False, "priority": 30},
+                    "tdd_enforcement": {"enabled": False, "priority": 35},
+                }
+            }
+        }
+
+        diff = ConfigDiffer().diff(user_config, new_default_config)
+
+        pre_changes = diff.changed_options.get("pre_tool_use", {})
+        assert "qa_suppression" in pre_changes
+        assert "tdd_enforcement" in pre_changes
