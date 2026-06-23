@@ -15,7 +15,11 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from claude_code_hooks_daemon.constants import Timeout
-from claude_code_hooks_daemon.daemon.cli import _UV_SYNC_TIMEOUT_SECONDS, cmd_repair
+from claude_code_hooks_daemon.daemon.cli import (
+    _UV_SYNC_TIMEOUT_SECONDS,
+    _VERIFY_IMPORT_TIMEOUT_SECONDS,
+    cmd_repair,
+)
 
 
 class TestCmdRepair:
@@ -60,6 +64,66 @@ class TestCmdRepair:
         assert passed_timeout == _UV_SYNC_TIMEOUT_SECONDS
         assert passed_timeout == Timeout.BASH_DEFAULT // 1000
         assert passed_timeout != Timeout.BASH_DEFAULT
+
+    def test_verification_subprocess_has_explicit_timeout(self, tmp_path: Path) -> None:
+        """Finding #35: the post-repair import verification subprocess must be
+        bounded by an explicit timeout (seconds), like the ``uv sync`` call.
+
+        Without it, an interpreter that hangs on import made ``repair`` hang
+        forever with no recovery.
+        """
+        args = self._make_args(tmp_path)
+
+        mock_sync = MagicMock()
+        mock_sync.returncode = 0
+        mock_sync.stderr = ""
+
+        mock_verify = MagicMock()
+        mock_verify.returncode = 0
+        mock_verify.stdout = "OK\n"
+
+        with (
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_project_path",
+                return_value=tmp_path,
+            ),
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=None),
+            patch("subprocess.run", side_effect=[mock_sync, mock_verify]) as mock_run,
+        ):
+            result = cmd_repair(args)
+
+        assert result == 0
+        verify_call = mock_run.call_args_list[1]
+        assert verify_call.kwargs["timeout"] == _VERIFY_IMPORT_TIMEOUT_SECONDS
+        assert _VERIFY_IMPORT_TIMEOUT_SECONDS > 0
+
+    def test_verification_timeout_returns_failure(self, tmp_path: Path) -> None:
+        """Finding #35: a hung verification import (TimeoutExpired) is a repair
+        failure, returning 1 rather than crashing with an uncaught exception.
+        """
+        args = self._make_args(tmp_path)
+
+        mock_sync = MagicMock()
+        mock_sync.returncode = 0
+        mock_sync.stderr = ""
+
+        with (
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_project_path",
+                return_value=tmp_path,
+            ),
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=None),
+            patch(
+                "subprocess.run",
+                side_effect=[
+                    mock_sync,
+                    subprocess.TimeoutExpired("python", _VERIFY_IMPORT_TIMEOUT_SECONDS),
+                ],
+            ),
+        ):
+            result = cmd_repair(args)
+
+        assert result == 1
 
     def test_successful_repair(self, tmp_path: Path) -> None:
         """cmd_repair returns 0 on successful uv sync + verification."""

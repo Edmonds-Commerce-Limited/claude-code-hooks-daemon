@@ -97,6 +97,11 @@ _MILLISECONDS_PER_SECOND = 1000
 # while honouring subprocess.run's seconds unit.
 _UV_SYNC_TIMEOUT_SECONDS = Timeout.BASH_DEFAULT // _MILLISECONDS_PER_SECOND
 
+# Post-repair import-verification timeout for ``cmd_repair``, in SECONDS. The
+# import is a cheap sanity check, but a deadlocked C-extension or NFS stall
+# could make it hang forever — bound it so ``repair`` always terminates.
+_VERIFY_IMPORT_TIMEOUT_SECONDS = Timeout.BASH_DEFAULT // _MILLISECONDS_PER_SECOND
+
 
 def get_project_path(override_path: Path | None = None) -> Path:
     """Detect project path from current working directory.
@@ -1314,6 +1319,7 @@ def cmd_repair(args: argparse.Namespace) -> int:
             [str(venv_python), "-c", "import claude_code_hooks_daemon; print('OK')"],
             capture_output=True,
             text=True,
+            timeout=_VERIFY_IMPORT_TIMEOUT_SECONDS,
         )
         if verify.returncode == 0:
             print("Verification: import claude_code_hooks_daemon OK")
@@ -1329,8 +1335,12 @@ def cmd_repair(args: argparse.Namespace) -> int:
             "ERROR: 'uv' not found. Install with: curl -LsSf https://astral.sh/uv/install.sh | sh"
         )
         return 1
-    except subprocess.TimeoutExpired:
-        print(f"ERROR: uv sync timed out after {_UV_SYNC_TIMEOUT_SECONDS} seconds")
+    except subprocess.TimeoutExpired as exc:
+        # The same handler covers both bounded subprocesses (uv sync and the
+        # import verification). Name the timed-out command rather than always
+        # blaming uv sync.
+        timed_out = exc.cmd if isinstance(exc.cmd, str) else " ".join(map(str, exc.cmd))
+        print(f"ERROR: command timed out after {exc.timeout} seconds: {timed_out}")
         return 1
 
 

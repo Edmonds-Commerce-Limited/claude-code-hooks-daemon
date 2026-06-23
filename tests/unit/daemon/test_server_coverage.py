@@ -161,6 +161,30 @@ class TestHandleClientException:
         writer.close.assert_called_once()
         writer.wait_closed.assert_awaited_once()
 
+    @pytest.mark.anyio
+    async def test_dead_peer_during_error_write_does_not_escape(self) -> None:
+        """Finding #48: if writing the error response itself fails (dead peer),
+        the exception must NOT escape _handle_client — the connection is still
+        closed cleanly in finally.
+        """
+        config = _make_config()
+        daemon = HooksDaemon(config=config, controller=FakeController())
+
+        reader = AsyncMock(spec=asyncio.StreamReader)
+        writer = AsyncMock(spec=asyncio.StreamWriter)
+        reader.readline.return_value = b'{"event":"PreToolUse","hook_input":{}}\n'
+
+        # write() is synchronous on a real StreamWriter; raise a dead-peer error
+        # specifically while reporting the original failure.
+        writer.write.side_effect = BrokenPipeError("peer is gone")
+
+        with patch.object(HooksDaemon, "_process_request", side_effect=RuntimeError("boom")):
+            # Must not raise despite the error-path write failing.
+            await daemon._handle_client(reader, writer)
+
+        writer.close.assert_called_once()
+        writer.wait_closed.assert_awaited_once()
+
 
 class TestProcessRequestNewController:
     """Tests for _process_request with new Controller protocol."""
@@ -265,6 +289,103 @@ class TestHandleSystemRequestLegacy:
         result = daemon._handle_system_request({"action": "handlers"}, None)
 
         assert "PreToolUse" in result["result"]["handlers"]
+
+
+class TestGetMemoryLogsLevelFiltering:
+    """Tests for get_memory_logs level filtering (Findings #46, #47)."""
+
+    def _install_records(self, levels_and_messages: list[tuple[int, str]]) -> None:
+        """Replace the module memory handler with one carrying given records."""
+        import logging
+
+        from claude_code_hooks_daemon.daemon import server
+        from claude_code_hooks_daemon.daemon.memory_log_handler import MemoryLogHandler
+
+        handler = MemoryLogHandler(max_records=100)
+        handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+        for levelno, message in levels_and_messages:
+            record = logging.LogRecord(
+                name="test",
+                level=levelno,
+                pathname=__file__,
+                lineno=1,
+                msg=message,
+                args=(),
+                exc_info=None,
+            )
+            handler.emit(record)
+        server._memory_log_handler = handler
+
+    def test_message_containing_bracketed_level_token_is_not_misclassified(self) -> None:
+        """Finding #46: a low-level record whose MESSAGE contains '[ERROR]'
+        must NOT pass an ERROR-level filter — the filter keys off the record's
+        real level, not a substring of the rendered line.
+        """
+        import logging
+
+        from claude_code_hooks_daemon.daemon import server
+        from claude_code_hooks_daemon.daemon.server import get_memory_logs
+
+        original = server._memory_log_handler
+        try:
+            self._install_records(
+                [
+                    (logging.DEBUG, "BLOCKING RESPONSE: {'level': '[ERROR]'}"),
+                    (logging.ERROR, "genuine failure occurred"),
+                ]
+            )
+            logs = get_memory_logs(level="ERROR")
+            joined = "\n".join(logs)
+            assert "genuine failure occurred" in joined
+            assert "BLOCKING RESPONSE" not in joined
+        finally:
+            server._memory_log_handler = original
+
+    def test_minimum_level_includes_higher_levels_only(self) -> None:
+        """WARNING filter returns WARNING/ERROR/CRITICAL but not DEBUG/INFO."""
+        import logging
+
+        from claude_code_hooks_daemon.daemon import server
+        from claude_code_hooks_daemon.daemon.server import get_memory_logs
+
+        original = server._memory_log_handler
+        try:
+            self._install_records(
+                [
+                    (logging.DEBUG, "debug-line"),
+                    (logging.INFO, "info-line"),
+                    (logging.WARNING, "warning-line"),
+                    (logging.ERROR, "error-line"),
+                ]
+            )
+            logs = get_memory_logs(level="WARNING")
+            joined = "\n".join(logs)
+            assert "warning-line" in joined
+            assert "error-line" in joined
+            assert "debug-line" not in joined
+            assert "info-line" not in joined
+        finally:
+            server._memory_log_handler = original
+
+    def test_invalid_level_returns_explicit_error_not_uncaught_valueerror(self) -> None:
+        """Finding #47: an out-of-range level string from the socket boundary
+        must yield a clear rejection, not an uncaught ValueError from
+        list.index().
+        """
+        import logging
+
+        from claude_code_hooks_daemon.daemon import server
+        from claude_code_hooks_daemon.daemon.server import get_memory_logs
+
+        original = server._memory_log_handler
+        try:
+            self._install_records([(logging.INFO, "info-line")])
+            logs = get_memory_logs(level="TRACE")
+            assert len(logs) == 1
+            assert "Invalid log level" in logs[0]
+            assert "TRACE" in logs[0]
+        finally:
+            server._memory_log_handler = original
 
 
 class TestWritePidFileNoPidPath:

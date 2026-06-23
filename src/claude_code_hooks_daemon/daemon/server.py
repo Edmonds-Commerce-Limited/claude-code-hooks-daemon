@@ -37,6 +37,20 @@ _memory_log_handler: MemoryLogHandler | None = None
 
 logger = logging.getLogger(__name__)
 
+# Log-query level filtering (Findings #46/#47). The numeric level is the single
+# source of truth — filtering keys off LogRecord.levelno, never a substring of
+# the rendered line. Names are validated at the socket boundary against this map.
+_LOG_LEVEL_NUMBERS: dict[str, int] = {
+    "DEBUG": logging.DEBUG,
+    "INFO": logging.INFO,
+    "WARNING": logging.WARNING,
+    "ERROR": logging.ERROR,
+    "CRITICAL": logging.CRITICAL,
+}
+_VALID_LOG_LEVEL_NAMES = frozenset(_LOG_LEVEL_NUMBERS)
+_LOG_NO_LOGS_AVAILABLE = "No logs available - daemon not initialised"
+_LOG_INVALID_LEVEL_PREFIX = "Invalid log level: "
+
 
 # Log/exception messages (Plan 00127). Named to avoid magic strings.
 _LOG_LIVE_SOCKET_REUSE = (
@@ -250,17 +264,27 @@ def get_memory_logs(count: int | None = None, level: str | None = None) -> list[
         List of formatted log strings
     """
     if _memory_log_handler is None:
-        return ["No logs available - daemon not initialised"]
+        return [_LOG_NO_LOGS_AVAILABLE]
 
-    logs = _memory_log_handler.get_logs(count)
+    # Filter by level if specified. Key off each record's REAL level
+    # (record.levelno) rather than substring-scanning the rendered line —
+    # otherwise a record whose MESSAGE happens to contain a bracketed level
+    # token (e.g. a debug dump of "[ERROR]") would be misclassified
+    # (Finding #46).
+    if level is not None:
+        normalised = level.upper()
+        if normalised not in _VALID_LOG_LEVEL_NAMES:
+            # Validate at this boundary rather than letting an unknown level
+            # crash a socket request with an opaque ValueError (Finding #47).
+            return [f"{_LOG_INVALID_LEVEL_PREFIX}{level!r}"]
+        threshold = _LOG_LEVEL_NUMBERS[normalised]
+        records = list(_memory_log_handler.records)
+        if count is not None:
+            records = records[-count:]
+        matching = [record for record in records if record.levelno >= threshold]
+        return [_memory_log_handler.format(record) for record in matching]
 
-    # Filter by level if specified
-    if level:
-        level_names = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
-        allowed_levels = level_names[level_names.index(level.upper()) :]
-        logs = [log for log in logs if any(f"[{lvl}]" in log for lvl in allowed_levels)]
-
-    return logs
+    return _memory_log_handler.get_logs(count)
 
 
 def get_log_count() -> int:
@@ -822,8 +846,14 @@ class HooksDaemon:
         except Exception as e:
             logger.exception("Error handling client: %s", e)
             error_response = {"error": str(e)}
-            writer.write((json.dumps(error_response) + "\n").encode())
-            await writer.drain()
+            # Reaching this branch is often itself caused by a dead peer, so the
+            # error-report write/drain can fail (BrokenPipeError /
+            # ConnectionResetError). Contain that second failure so it cannot
+            # escape the handler as an unretrieved task exception (Finding #48);
+            # the connection is still closed cleanly in finally.
+            with contextlib.suppress(OSError):
+                writer.write((json.dumps(error_response) + "\n").encode())
+                await writer.drain()
 
         finally:
             self._active_requests -= 1
