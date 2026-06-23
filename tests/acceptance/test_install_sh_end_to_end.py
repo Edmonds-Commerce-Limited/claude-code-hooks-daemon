@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import stat
 import subprocess
 import time
 from pathlib import Path
@@ -37,6 +38,7 @@ from pathlib import Path
 import pytest
 
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.install.plan_workflow import MKPLAN_SCRIPT_NAME
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INSTALL_VERSION_SH = REPO_ROOT / "scripts" / "install_version.sh"
@@ -205,6 +207,28 @@ def _wait_for_daemon_status(
     )
 
 
+def _assert_mkplan_deployed(project_root: Path, phase: str) -> None:
+    """Plan 00136 acceptance gate — the deploy step must deliver mkplan.bash.
+
+    The example config (copied in by install/upgrade) carries no top-level
+    ``plan_workflow`` block, so ``config.plan_workflow.enabled`` defaults True
+    and the config-driven deploy step MUST write an executable
+    ``CLAUDE/Plan/mkplan.bash`` into the project. This is the regression gate
+    for the v3.24.0 field bug where the upgrade path never deployed the script
+    that ``plan_number_helper`` guidance tells agents to run (Plan 00136).
+    """
+    mkplan = project_root / "CLAUDE" / "Plan" / MKPLAN_SCRIPT_NAME
+    assert mkplan.is_file(), (
+        f"{phase}: config.plan_workflow.enabled defaults True, so the deploy "
+        f"step must produce {mkplan}. The plan dir contents: "
+        f"{list((project_root / 'CLAUDE' / 'Plan').iterdir()) if (project_root / 'CLAUDE' / 'Plan').exists() else '(no CLAUDE/Plan dir)'}. "
+        "If absent, the install/upgrade script did not call "
+        "deploy_plan_workflow_if_enabled — the v3.24.0 bug class recurring."
+    )
+    mode = stat.S_IMODE(mkplan.stat().st_mode)
+    assert mode == 0o755, f"{phase}: deployed mkplan.bash must be mode 0o755, got {mode:o}"
+
+
 @pytest.mark.slow
 def test_install_sh_end_to_end_produces_running_daemon(tmp_path: Path) -> None:
     """Plan 00105 Phase 1 Task 1.1 — the canonical install end-to-end gate.
@@ -350,6 +374,9 @@ def test_install_sh_end_to_end_produces_running_daemon(tmp_path: Path) -> None:
             f"--- install stdout (tail) ---\n{result.stdout[-2000:]}\n"
             f"--- install stderr (tail) ---\n{result.stderr[-2000:]}"
         )
+
+        # Plan 00136: the install must have deployed mkplan.bash (config SSoT).
+        _assert_mkplan_deployed(project_root, "install")
 
     finally:
         if venv_python is not None:
@@ -519,6 +546,11 @@ def test_upgrade_version_sh_end_to_end_produces_running_daemon(tmp_path: Path) -
             f"--- upgrade stdout (tail) ---\n{upgrade_result.stdout[-2000:]}\n"
             f"--- upgrade stderr (tail) ---\n{upgrade_result.stderr[-2000:]}"
         )
+
+        # Plan 00136 regression gate: the upgrade fast path MUST deploy
+        # mkplan.bash. This is the exact v3.24.0 field bug — the upgrade path
+        # previously never delivered the script plan_number_helper references.
+        _assert_mkplan_deployed(project_root, "upgrade")
 
     finally:
         if venv_python is not None:
