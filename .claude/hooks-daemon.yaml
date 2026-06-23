@@ -199,6 +199,13 @@ handlers:
       # Plan tracking options (track_plans_in_project, plan_workflow_docs)
       # are now in top-level plan_workflow: section.
       options:
+        # Dogfood the forbid-untracked-memory policy (Plan 00131/00133). This
+        # repo keeps durable knowledge in tracked docs (CLAUDE/, .claude/rules/),
+        # not in untracked ~/.claude/projects/*/memory/ files. Reads stay allowed
+        # (for migration); Write/Edit + bash redirect/tee writes to memory are
+        # blocked. From v3.24.0 this is also the shipped default — set here
+        # explicitly so the intent is visible in config.
+        allow_untracked_claude_memory: false
         # extra_allowed_markdown_paths: ADDITIVE on top of the built-in defaults.
         # The built-ins already cover CLAUDE/, docs/, untracked/, RELEASES/,
         # eslint-rules/, src/.../guides/, src/.../skills/, README/CHANGELOG/CLAUDE.md
