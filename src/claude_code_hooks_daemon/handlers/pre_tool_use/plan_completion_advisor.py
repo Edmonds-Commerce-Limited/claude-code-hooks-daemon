@@ -20,10 +20,15 @@ from claude_code_hooks_daemon.core.utils import get_file_path
 # Pattern to match CLAUDE/Plan/<digits>-<name>/PLAN.md (NOT in Completed/)
 _PLAN_PATH_PATTERN = re.compile(r"CLAUDE/Plan/(\d+-[^/]+)/PLAN\.md$", re.IGNORECASE)
 
-# Pattern to match **Status**: followed by "complete" (case-insensitive)
+# Pattern to match a **Status**: line whose value is exactly Complete/Completed
+# (case-insensitive), optionally followed by a date/parenthetical suffix.
 # Matches: **Status**: Complete, **Status**: Completed, **Status**: Complete (2026-02-06)
+# The trailing word boundary anchors to the whole word so prose values that
+# merely begin with "Complete..." (e.g. "Completely blocked", "Completing
+# review") do NOT fire the move-to-Completed advisory. re.MULTILINE keeps the
+# scan line-oriented when content spans multiple lines.
 _STATUS_COMPLETE_PATTERN = re.compile(
-    r"\*\*Status\*\*:\s*[Cc][Oo][Mm][Pp][Ll][Ee][Tt][Ee]", re.MULTILINE
+    r"\*\*Status\*\*:\s*complete[d]?\b", re.IGNORECASE | re.MULTILINE
 )
 
 

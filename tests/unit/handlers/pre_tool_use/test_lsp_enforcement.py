@@ -434,8 +434,8 @@ class TestLspEnforcementMatchesNegative:
 class TestLspEnforcementBlockCount:
     """Test _get_block_count exception handling."""
 
-    def test_block_count_returns_zero_on_exception(self) -> None:
-        """_get_block_count returns 0 when data layer raises."""
+    def test_block_count_returns_zero_on_data_layer_unavailable(self) -> None:
+        """_get_block_count returns 0 when the data layer is unavailable (RuntimeError)."""
         from claude_code_hooks_daemon.handlers.pre_tool_use.lsp_enforcement import (
             LspEnforcementHandler,
         )
@@ -446,6 +446,48 @@ class TestLspEnforcementBlockCount:
         ) as mock_dl:
             mock_dl.side_effect = RuntimeError("no data layer")
             assert handler._get_block_count() == 0
+
+    def test_block_count_logs_warning_on_data_layer_unavailable(self) -> None:
+        """A swallowed data-layer failure must be logged, not silently hidden.
+
+        Regression for finding #58: the bare `except Exception: return 0`
+        suppressed all errors with zero visibility. The narrowed handler must
+        emit a warning so a corrupt/unavailable history is observable.
+        """
+        from claude_code_hooks_daemon.handlers.pre_tool_use.lsp_enforcement import (
+            LspEnforcementHandler,
+        )
+
+        handler = LspEnforcementHandler()
+        with (
+            patch(
+                "claude_code_hooks_daemon.handlers.pre_tool_use.lsp_enforcement.get_data_layer"
+            ) as mock_dl,
+            patch(
+                "claude_code_hooks_daemon.handlers.pre_tool_use.lsp_enforcement.logger"
+            ) as mock_logger,
+        ):
+            mock_dl.side_effect = RuntimeError("no data layer")
+            assert handler._get_block_count() == 0
+            mock_logger.warning.assert_called_once()
+
+    def test_block_count_does_not_swallow_unexpected_errors(self) -> None:
+        """Unexpected (non data-layer) errors must propagate, not be hidden.
+
+        Finding #58 / FAIL-FAST: a programming error such as AttributeError
+        must surface rather than silently degrade the handler to count 0.
+        """
+        from claude_code_hooks_daemon.handlers.pre_tool_use.lsp_enforcement import (
+            LspEnforcementHandler,
+        )
+
+        handler = LspEnforcementHandler()
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.lsp_enforcement.get_data_layer"
+        ) as mock_dl:
+            mock_dl.side_effect = AttributeError("unexpected bug")
+            with pytest.raises(AttributeError):
+                handler._get_block_count()
 
 
 class TestLspEnforcementHandleBlockOnce:

@@ -174,6 +174,55 @@ class TestPlanCompletionAdvisorHandler:
         }
         assert handler.matches(hook_input) is False
 
+    def test_does_not_match_status_completely_prose(
+        self, handler: PlanCompletionAdvisorHandler
+    ) -> None:
+        """Handler does NOT trigger when status value merely begins with 'Complete...'.
+
+        Regression for finding #62: the unanchored pattern matched
+        '**Status**: Completely blocked' (a non-complete status) as a prefix,
+        firing the move-to-Completed advisory on an active plan.
+        """
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/workspace/CLAUDE/Plan/00014-eliminate-cwd/PLAN.md",
+                "content": "# Plan 00014\n\n**Status**: Completely blocked\n\n## Overview\n",
+            },
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_does_not_match_status_completing_review(
+        self, handler: PlanCompletionAdvisorHandler
+    ) -> None:
+        """Handler does NOT trigger for '**Status**: Completing review' prose."""
+        hook_input: dict[str, Any] = {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": "/workspace/CLAUDE/Plan/00014-eliminate-cwd/PLAN.md",
+                "old_string": "**Status**: In Progress",
+                "new_string": "**Status**: Completing review before merging",
+            },
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_matches_status_complete_followed_by_text_on_other_lines(
+        self, handler: PlanCompletionAdvisorHandler
+    ) -> None:
+        """Anchoring to the line value still allows a bare 'Complete' status line.
+
+        The status line ends after 'Complete' (with optional trailing date/space)
+        even though later lines contain other prose.
+        """
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/workspace/CLAUDE/Plan/00014-eliminate-cwd/PLAN.md",
+                "content": "# Plan 00014\n\n**Status**: Complete\n\nCompletely done now.\n",
+            },
+        }
+        assert handler.matches(hook_input) is True
+
     def test_does_not_match_complete_in_body_only(
         self, handler: PlanCompletionAdvisorHandler
     ) -> None:

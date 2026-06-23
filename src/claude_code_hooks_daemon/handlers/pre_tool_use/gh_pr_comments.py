@@ -10,6 +10,17 @@ from claude_code_hooks_daemon.core import Handler, HookResult
 from claude_code_hooks_daemon.core.hook_result import Decision
 from claude_code_hooks_daemon.core.utils import get_bash_command
 
+# Shell command separators that end the `gh pr view` sub-command. Flags after
+# one of these belong to a DIFFERENT command and must not satisfy the
+# --comments requirement of the gh-pr-view invocation.
+_COMMAND_SEPARATOR_PATTERN = re.compile(r"&&|\|\||;|\|")
+
+# The --comments flag (whole-token match within the gh-pr-view segment only).
+_COMMENTS_FLAG = "--comments"
+
+# The --json flag introducer.
+_JSON_FLAG = "--json"
+
 
 class GhPrCommentsHandler(Handler):
     """Ensure gh pr view commands always include --comments flag.
@@ -32,25 +43,51 @@ class GhPrCommentsHandler(Handler):
             re.IGNORECASE,
         )
 
+    def _extract_gh_pr_view_segment(self, command: str) -> str | None:
+        """Return the `gh pr view` sub-command segment of a (possibly chained) command.
+
+        Scopes flag analysis to the segment that starts at the `gh pr view`
+        match and ends at the next shell command separator (``&&``/``||``/``;``/
+        ``|``). This prevents an incidental ``--comments`` token in an unrelated
+        chained command (e.g. ``gh pr view 5 && echo "--comments"``) from
+        satisfying the requirement of the actual gh-pr-view invocation.
+
+        Args:
+            command: Full bash command string.
+
+        Returns:
+            The gh-pr-view segment, or None if the command is not a gh pr view.
+        """
+        view_match = self._gh_pr_view_pattern.search(command)
+        if not view_match:
+            return None
+
+        remainder = command[view_match.start() :]
+        separator_match = _COMMAND_SEPARATOR_PATTERN.search(remainder)
+        if separator_match:
+            return remainder[: separator_match.start()]
+        return remainder
+
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if this is a gh pr view command without --comments."""
         command = get_bash_command(hook_input)
         if not command:
             return False
 
-        # Must be a gh pr view command
-        if not self._gh_pr_view_pattern.search(command):
+        # Scope all flag checks to the gh-pr-view sub-command segment only.
+        segment = self._extract_gh_pr_view_segment(command)
+        if segment is None:
             return False
 
-        # Already has --comments flag? Allow it through
-        if "--comments" in command:
+        # Already has --comments flag in this segment? Allow it through.
+        if _COMMENTS_FLAG in segment:
             return False
 
-        # Using --json with comments field? That's equivalent to --comments
-        if "--json" in command:
+        # Using --json with comments field? That's equivalent to --comments.
+        if _JSON_FLAG in segment:
             # Extract the fields after --json
             # Pattern: --json <fields> where fields might be quoted or unquoted
-            json_match = re.search(r"--json\s+([^\s|]+)", command)
+            json_match = re.search(r"--json\s+([^\s|]+)", segment)
             if json_match:
                 fields = json_match.group(1)
                 # Check if 'comments' is one of the comma-separated fields

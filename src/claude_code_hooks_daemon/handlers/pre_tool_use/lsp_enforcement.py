@@ -18,6 +18,7 @@ No-LSP modes (when ENABLE_LSP_TOOL env var not set):
     disable: Handler doesn't match when LSP not available
 """
 
+import logging
 import os
 import re
 from typing import Any
@@ -31,6 +32,8 @@ from claude_code_hooks_daemon.constants import (
 )
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult, get_data_layer
 from claude_code_hooks_daemon.core.utils import get_bash_command
+
+logger = logging.getLogger(__name__)
 
 # --- Mode constants ---
 
@@ -90,8 +93,11 @@ _COMMENT_MARKERS = frozenset(
     }
 )
 
-# Minimum length for a standalone lowercase identifier to be considered a symbol
-_MIN_IDENTIFIER_LENGTH = 8
+# Single-segment capitalised identifier (e.g. 'Path', 'HandlerID') used to
+# classify a name imported via 'import X'. Distinct from _PASCAL_CASE, which
+# requires at least two capitalised segments; a one-word capitalised import
+# target (e.g. 'import Path') is still a symbol lookup worth steering to LSP.
+_IMPORTED_SYMBOL = re.compile(r"^[A-Z][a-zA-Z0-9]+$")
 
 # Bash grep/rg command pattern
 _BASH_GREP_PATTERN = re.compile(r"(?:^|\s|&&|\|\||;)\s*(?:grep|rg)\s+")
@@ -157,10 +163,18 @@ class LspEnforcementHandler(Handler):
         return bool(os.environ.get(_LSP_ENV_VAR))
 
     def _get_block_count(self) -> int:
-        """Get number of previous blocks by this handler."""
+        """Get number of previous blocks by this handler.
+
+        Returns 0 when the data layer is unavailable (RuntimeError raised by
+        ProjectContext resolution). The failure is logged rather than silently
+        swallowed so a persistently unavailable/corrupt history is observable.
+        Unexpected exceptions propagate (FAIL FAST) instead of degrading the
+        block_once gate to permanently-allow.
+        """
         try:
             return get_data_layer().history.count_blocks_by_handler(self.name)
-        except Exception:
+        except RuntimeError as exc:
+            logger.warning("LSP enforcement could not read block history: %s", exc)
             return 0
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
@@ -237,8 +251,8 @@ class LspEnforcementHandler(Handler):
                 last_part = parts[-1]
                 if _PASCAL_CASE.match(last_part) or _SNAKE_CASE.match(last_part):
                     return True
-                # Short identifier after import keyword is still a symbol lookup
-                if re.match(r"^[A-Z][a-zA-Z0-9]+$", last_part):
+                # Short single-segment capitalised import target is still a symbol
+                if _IMPORTED_SYMBOL.match(last_part):
                     return True
             return False
 
@@ -254,15 +268,8 @@ class LspEnforcementHandler(Handler):
         if _SNAKE_CASE.match(pattern):
             return True
 
-        # Multi-word space-separated text is not a symbol
-        words = pattern.split()
-        if len(words) > 2:
-            return False
-
-        # Short generic lowercase words are not symbols
-        if pattern.islower() and len(pattern) < _MIN_IDENTIFIER_LENGTH:
-            return False
-
+        # Anything else (multi-word text, bare lowercase words, etc.) is a text
+        # search, not a symbol lookup.
         return False
 
     def _suggest_lsp_operation(self, pattern: str) -> str:
