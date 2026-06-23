@@ -22,6 +22,12 @@ _CHANGE_OLD_KEY = "old"
 _CHANGE_NEW_KEY = "new"
 _CHANGE_RECORD_KEYS = frozenset({_CHANGE_OLD_KEY, _CHANGE_NEW_KEY})
 
+# Conflict type emitted when a handler the user customized exists in the new
+# default config but is not a dict (e.g. YAML shorthand `handler_name: true`),
+# so the priority customization cannot be applied to it and would otherwise be
+# silently dropped.
+_CONFLICT_UNMERGEABLE_HANDLER_SHAPE = "unmergeable_handler_shape"
+
 
 def _is_change_record(value: Any) -> bool:
     """Return True if ``value`` is a simple change descriptor ``{'old': X, 'new': Y}``.
@@ -186,6 +192,26 @@ class ConfigMerger:
                 if handler_name in event_handlers:
                     if isinstance(event_handlers[handler_name], dict):
                         event_handlers[handler_name]["priority"] = priority_change["new"]
+                    else:
+                        # Handler present but not a dict (e.g. `handler: true`
+                        # YAML shorthand). The priority customization cannot be
+                        # applied to a scalar, so surface it as a conflict
+                        # rather than silently dropping the user's value.
+                        conflicts.append(
+                            MergeConflict(
+                                path=f"handlers.{event_type}.{handler_name}",
+                                conflict_type=_CONFLICT_UNMERGEABLE_HANDLER_SHAPE,
+                                description=(
+                                    f"Priority was changed from {priority_change['old']} to "
+                                    f"{priority_change['new']}, but handler '{handler_name}' "
+                                    f"in the new default config is not a mapping "
+                                    f"(got {type(event_handlers[handler_name]).__name__}); "
+                                    f"the priority customization could not be applied"
+                                ),
+                                user_value=priority_change["new"],
+                                default_value=event_handlers[handler_name],
+                            )
+                        )
                 else:
                     conflicts.append(
                         MergeConflict(

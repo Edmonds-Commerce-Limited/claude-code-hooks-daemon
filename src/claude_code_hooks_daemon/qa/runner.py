@@ -8,7 +8,7 @@ import re
 import subprocess  # nosec B404 - subprocess used for QA tools only (ruff, mypy, black, pytest, bandit)
 import time
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -59,7 +59,11 @@ class QAResult:
     def __post_init__(self) -> None:
         """Set default timestamp if not provided."""
         if not self.timestamp:
-            self.timestamp = datetime.utcnow().isoformat() + "Z"
+            # Timezone-aware UTC timestamp. isoformat() emits the explicit
+            # "+00:00" offset, so the value round-trips through
+            # datetime.fromisoformat() and is correctly labelled UTC (unlike
+            # the deprecated naive datetime.utcnow() + literal "Z").
+            self.timestamp = datetime.now(UTC).isoformat()
 
     def to_dict(self) -> dict[str, Any]:
         """Convert result to dictionary."""

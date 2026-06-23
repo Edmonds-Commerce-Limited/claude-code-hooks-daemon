@@ -6,6 +6,7 @@ Test Driven Development: Tests written FIRST, implementation follows.
 import json
 import subprocess
 import tempfile
+from datetime import UTC
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -77,6 +78,22 @@ class TestQAResult:
         result = QAResult(status="passed", tools_run=["ruff"])
         assert result.timestamp != ""
         assert "T" in result.timestamp  # ISO format
+
+    def test_qa_result_default_timestamp_is_timezone_aware_utc(self) -> None:
+        """Default timestamp must be a parseable UTC-aware ISO 8601 value.
+
+        Regression: the previous implementation used datetime.utcnow() (a naive
+        datetime, deprecated since Python 3.12) and appended a literal "Z",
+        mislabelling a naive timestamp as UTC. The generated timestamp must
+        round-trip through datetime.fromisoformat() and carry a UTC offset.
+        """
+        from datetime import datetime
+
+        result = QAResult(status="passed", tools_run=["ruff"])
+
+        parsed = datetime.fromisoformat(result.timestamp)
+        assert parsed.tzinfo is not None
+        assert parsed.utcoffset() == UTC.utcoffset(None)
 
 
 class TestToolResult:

@@ -46,6 +46,20 @@ class TestBootstrapPlanWorkflow:
         bootstrap_plan_workflow(tmp_path)
         assert (tmp_path / "CLAUDE" / "Plan" / "Completed").is_dir()
 
+    def test_claude_md_completion_guidance_uses_commit_hash_not_date(self, tmp_path: Path) -> None:
+        """Deployed CLAUDE.md must align with the no-completion-date doctrine.
+
+        Regression: the template instructed "Update plan status to Complete
+        with date", contradicting PlanWorkflow.md and the plan_time_estimates
+        handler (git history is authoritative for "when"; cite the delivery
+        commit hash, never a date).
+        """
+        bootstrap_plan_workflow(tmp_path)
+        claude_md = tmp_path / "CLAUDE" / "Plan" / "CLAUDE.md"
+        content = claude_md.read_text()
+        assert "Complete` with date" not in content
+        assert "commit hash" in content
+
     def test_result_messages(self, tmp_path: Path) -> None:
         """Result contains descriptive messages."""
         result = bootstrap_plan_workflow(tmp_path)

@@ -223,13 +223,24 @@ def validate_hook_commands(settings: dict[str, object]) -> list[str]:
             )
             continue
 
-        # Extract the command from the single hook entry
+        # Extract the command from the single hook entry. Guard every level
+        # with isinstance checks (mirroring detect_legacy_hook_commands) so a
+        # malformed settings.json is diagnosed rather than crashing the
+        # validator with an AttributeError.
         hook_entry = event_hooks[0]
+        if not isinstance(hook_entry, dict):
+            continue
         inner_hooks = hook_entry.get("hooks", [])
-        if not inner_hooks:
+        if not inner_hooks or not isinstance(inner_hooks, list):
             continue
 
-        command = inner_hooks[0].get("command", "")
+        command_entry = inner_hooks[0]
+        if not isinstance(command_entry, dict):
+            continue
+        command = command_entry.get("command", "")
+        if not isinstance(command, str):
+            continue
+
         # Check that the command ends with the expected script name
         expected_suffix = f"/.claude/hooks/{expected_bash_key}"
         if not command.endswith(expected_suffix):
