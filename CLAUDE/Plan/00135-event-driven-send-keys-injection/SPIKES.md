@@ -192,6 +192,32 @@ event-driven PermissionRequest flag, so screen-scraping is not the sole guard fo
 them. Still: the `❯`/`───` anchors are UI-version-dependent → the detector must be
 config + fail-closed + self-disabling on no-match (degrade to never-inject).
 
+### S-ENF (code analysis, not live-tested) → **SB-1 CONFIRMED; fix shape settled**
+
+Not run live (would risk killing this session's own daemon). Confirmed by reading
+the code:
+
+- `enforce_single_daemon` (enforcement.py:70–82) scopes the kill set via
+  `find_all_daemon_processes(project_root=...)` and spares **only the live owner
+  of *this start's* socket_path**. A peer daemon owning a *different* socket on
+  the same root is **not spared** ⇒ a shared-daemon restart **reaps the dedicated
+  daemon**. SB-1 confirmed.
+- `find_all_daemon_processes` / `_extract_project_root` (process_verification.py:48–149)
+  identify daemons by **cmdline only** (cli module token + launch subcommand;
+  root via `--project-root` flag or venv-interpreter path). **The socket path is
+  NOT in the cmdline** (it comes from env / hostname default), so a candidate's
+  socket is not currently discoverable for a "spare any live socket" rule.
+
+**Fix shape (settled):** give the dedicated daemon a visible identity in its
+cmdline — a `--dedicated` marker (and/or `--socket-path`) — and have
+`find_all_daemon_processes` / the enforcement kill-loop **exclude any candidate
+carrying `--dedicated`**. Run the dedicated daemon itself with
+`enforce_single_daemon=false` (it is a guest; it must never reap the shared
+daemon). This preserves Plan 00127 exactly (same-socket stale daemons are still
+reaped) while letting a shared + dedicated daemon coexist on one project root —
+satisfying the user's hard coexistence requirement. Still needs a live container
+survival test (two throwaway daemons under a throwaway root) before build.
+
 ### Net architecture impact
 
 Both FATAL-2 building blocks are CONFIRMED feasible on a real host without a PTY
