@@ -16,9 +16,30 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Prefix for the synthetic, namespaced module names under which plugins are
+# registered in sys.modules. Using a unique key per plugin file prevents two
+# plugins that share a filename from colliding, and stops a plugin named like a
+# stdlib module (e.g. json.py) from shadowing the real module.
+_PLUGIN_MODULE_NAME_PREFIX = "_cchd_plugin_"
+
 
 class PluginLoader:
     """Load handlers from external plugin paths."""
+
+    @staticmethod
+    def _build_module_name(handler_name: str, module_path: Path) -> str:
+        """Build a unique, namespaced sys.modules key for a plugin module.
+
+        Args:
+            handler_name: Name of the handler module (without .py extension)
+            module_path: Absolute path to the handler module file
+
+        Returns:
+            A collision-resistant module name combining the prefix, handler
+            name, and a hash of the resolved absolute path.
+        """
+        path_token = abs(hash(str(module_path.resolve())))
+        return f"{_PLUGIN_MODULE_NAME_PREFIX}{handler_name}_{path_token}"
 
     @staticmethod
     def snake_to_pascal(name: str) -> str:
@@ -72,16 +93,25 @@ class PluginLoader:
             logger.error(f"Plugin module not found: {module_path}")
             return None
 
-        # Import the module
+        # Import the module under a unique, namespaced key so plugins sharing a
+        # filename never collide and a plugin cannot shadow a stdlib module.
+        module_name = PluginLoader._build_module_name(handler_name, module_path)
+
         try:
-            spec = importlib.util.spec_from_file_location(handler_name, module_path)
+            spec = importlib.util.spec_from_file_location(module_name, module_path)
             if spec is None or spec.loader is None:
                 logger.error(f"Failed to create module spec for: {module_path}")
                 return None
 
             module = importlib.util.module_from_spec(spec)
-            sys.modules[handler_name] = module
-            spec.loader.exec_module(module)
+            sys.modules[module_name] = module
+            try:
+                spec.loader.exec_module(module)
+            except Exception:
+                # A failed exec_module must not leave a partial module cached —
+                # pop it so a later (re)load starts from a clean state.
+                sys.modules.pop(module_name, None)
+                raise
 
         except Exception as e:
             # Try to provide enhanced error message

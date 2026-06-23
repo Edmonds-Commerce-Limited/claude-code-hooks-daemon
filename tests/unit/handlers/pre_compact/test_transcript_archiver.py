@@ -1,14 +1,19 @@
 """Comprehensive tests for TranscriptArchiverHandler."""
 
 import json
-from unittest.mock import MagicMock, mock_open, patch
+from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
+from claude_code_hooks_daemon.constants import HookInputField
 from claude_code_hooks_daemon.core import HookResult
 from claude_code_hooks_daemon.handlers.pre_compact.transcript_archiver import (
     TranscriptArchiverHandler,
 )
+
+_FIXED_TIMESTAMP = "20240120_103000"
+_FIXED_ISOFORMAT = "2024-01-20T10:30:00"
 
 
 class TestTranscriptArchiverHandler:
@@ -20,15 +25,36 @@ class TestTranscriptArchiverHandler:
         return TranscriptArchiverHandler()
 
     @pytest.fixture
+    def archive_dir(self, tmp_path):
+        """Patch ProjectContext.daemon_untracked_dir to a temp directory."""
+        untracked = tmp_path / "untracked"
+        untracked.mkdir()
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_compact.transcript_archiver."
+            "ProjectContext.daemon_untracked_dir",
+            return_value=untracked,
+        ):
+            yield untracked / "transcripts"
+
+    @pytest.fixture
+    def transcript_file(self, tmp_path):
+        """Create a real JSONL transcript fixture file on disk."""
+        path = tmp_path / "session-transcript.jsonl"
+        path.write_text(
+            '{"role": "user", "content": "Hello"}\n'
+            '{"role": "assistant", "content": "Hi there"}\n'
+        )
+        return path
+
+    @pytest.fixture
     def mock_datetime(self):
         """Mock datetime.now() to return fixed timestamp."""
         with patch(
             "claude_code_hooks_daemon.handlers.pre_compact.transcript_archiver.datetime"
         ) as mock_dt:
-            mock_now = MagicMock()
-            mock_now.strftime.return_value = "20240120_103000"
-            mock_now.isoformat.return_value = "2024-01-20T10:30:00"
-            mock_dt.now.return_value = mock_now
+            mock_now = mock_dt.now.return_value
+            mock_now.strftime.return_value = _FIXED_TIMESTAMP
+            mock_now.isoformat.return_value = _FIXED_ISOFORMAT
             yield mock_dt
 
     def test_init_sets_correct_name(self, handler):
@@ -45,87 +71,123 @@ class TestTranscriptArchiverHandler:
 
     def test_matches_always_returns_true(self, handler):
         """Should match all pre-compact events."""
-        hook_input = {"transcript": "Test conversation"}
+        hook_input = {HookInputField.TRANSCRIPT_PATH: "/tmp/whatever.jsonl"}
         assert handler.matches(hook_input) is True
 
-    @patch("pathlib.Path.open", new_callable=mock_open)
-    @patch("pathlib.Path.mkdir")
-    def test_handle_creates_archive_directory(self, mock_mkdir, mock_file, handler, mock_datetime):
+    def test_handle_creates_archive_directory(
+        self, handler, archive_dir, transcript_file, mock_datetime
+    ):
         """Should create archive directory if it doesn't exist."""
-        hook_input = {"transcript": [{"role": "user", "content": "test"}]}
+        hook_input = {HookInputField.TRANSCRIPT_PATH: str(transcript_file)}
         handler.handle(hook_input)
 
-        mock_mkdir.assert_called_once_with(parents=True, exist_ok=True)
+        assert archive_dir.is_dir()
 
-    @patch("pathlib.Path.open", new_callable=mock_open)
-    @patch("pathlib.Path.mkdir")
     def test_handle_saves_transcript_with_timestamp(
-        self, mock_mkdir, mock_file, handler, mock_datetime
+        self, handler, archive_dir, transcript_file, mock_datetime
     ):
         """Should save transcript with timestamp in filename."""
-        hook_input = {"transcript": [{"role": "user", "content": "Hello"}]}
+        hook_input = {HookInputField.TRANSCRIPT_PATH: str(transcript_file)}
 
         handler.handle(hook_input)
 
-        # Check file was opened for writing
-        assert mock_file.called
+        expected = archive_dir / f"transcript_{_FIXED_TIMESTAMP}.json"
+        assert expected.is_file()
 
-    @patch("pathlib.Path.open", new_callable=mock_open)
-    @patch("pathlib.Path.mkdir")
-    def test_handle_saves_transcript_as_json(self, mock_mkdir, mock_file, handler, mock_datetime):
-        """Should save transcript as formatted JSON."""
-        hook_input = {
-            "transcript": [
-                {"role": "user", "content": "Hello"},
-                {"role": "assistant", "content": "Hi there"},
-            ]
-        }
+    def test_handle_embeds_transcript_file_contents(
+        self, handler, archive_dir, transcript_file, mock_datetime
+    ):
+        """Should read the transcript_path file and embed its contents.
+
+        Regression: previously the handler read an inline ``transcript`` key
+        which Claude Code never sends, producing empty archives in production.
+        """
+        hook_input = {HookInputField.TRANSCRIPT_PATH: str(transcript_file)}
 
         handler.handle(hook_input)
 
-        # Check JSON was written with indent
-        handle = mock_file()
-        written_data = "".join(call.args[0] for call in handle.write.call_args_list)
-        parsed = json.loads(written_data)
+        archive_file = archive_dir / f"transcript_{_FIXED_TIMESTAMP}.json"
+        parsed = json.loads(archive_file.read_text())
 
-        assert len(parsed["transcript"]) == 2
-        assert parsed["transcript"][0]["role"] == "user"
+        assert parsed["transcript"] == transcript_file.read_text()
+        assert parsed["transcript"] != ""
+        assert "Hello" in parsed["transcript"]
+        assert "Hi there" in parsed["transcript"]
 
-    @patch("pathlib.Path.open", new_callable=mock_open)
-    @patch("pathlib.Path.mkdir")
-    def test_handle_includes_metadata(self, mock_mkdir, mock_file, handler, mock_datetime):
+    def test_handle_records_source_path(self, handler, archive_dir, transcript_file, mock_datetime):
+        """Should record the originating transcript path in the archive."""
+        hook_input = {HookInputField.TRANSCRIPT_PATH: str(transcript_file)}
+
+        handler.handle(hook_input)
+
+        archive_file = archive_dir / f"transcript_{_FIXED_TIMESTAMP}.json"
+        parsed = json.loads(archive_file.read_text())
+
+        assert parsed["transcript_path"] == str(transcript_file)
+
+    def test_handle_includes_metadata(self, handler, archive_dir, transcript_file, mock_datetime):
         """Should include metadata in saved file."""
-        hook_input = {"transcript": [{"role": "user", "content": "test"}]}
+        hook_input = {HookInputField.TRANSCRIPT_PATH: str(transcript_file)}
 
         handler.handle(hook_input)
 
-        handle = mock_file()
-        written_data = "".join(call.args[0] for call in handle.write.call_args_list)
-        parsed = json.loads(written_data)
+        archive_file = archive_dir / f"transcript_{_FIXED_TIMESTAMP}.json"
+        parsed = json.loads(archive_file.read_text())
 
         assert "archived_at" in parsed
         assert "transcript" in parsed
 
-    @patch("pathlib.Path.open", new_callable=mock_open)
-    @patch("pathlib.Path.mkdir")
-    def test_handle_returns_allow_decision(self, mock_mkdir, mock_file, handler):
+    def test_handle_empty_when_no_transcript_path(self, handler, archive_dir, mock_datetime):
+        """Should write an empty transcript when no path is provided."""
+        hook_input: dict = {}
+
+        handler.handle(hook_input)
+
+        archive_file = archive_dir / f"transcript_{_FIXED_TIMESTAMP}.json"
+        parsed = json.loads(archive_file.read_text())
+
+        assert parsed["transcript"] == ""
+
+    def test_handle_empty_when_transcript_path_missing_file(
+        self, handler, archive_dir, tmp_path, mock_datetime
+    ):
+        """Should write an empty transcript when the file does not exist."""
+        missing = tmp_path / "does-not-exist.jsonl"
+        hook_input = {HookInputField.TRANSCRIPT_PATH: str(missing)}
+
+        handler.handle(hook_input)
+
+        archive_file = archive_dir / f"transcript_{_FIXED_TIMESTAMP}.json"
+        parsed = json.loads(archive_file.read_text())
+
+        assert parsed["transcript"] == ""
+
+    def test_handle_returns_allow_decision(self, handler, archive_dir, transcript_file):
         """Should return allow decision."""
-        hook_input = {"transcript": []}
+        hook_input = {HookInputField.TRANSCRIPT_PATH: str(transcript_file)}
         result = handler.handle(hook_input)
         assert result.decision == "allow"
 
-    @patch("pathlib.Path.open", side_effect=OSError("Write error"))
-    @patch("pathlib.Path.mkdir")
-    def test_handle_gracefully_handles_write_errors(self, mock_mkdir, mock_file, handler):
+    def test_handle_gracefully_handles_write_errors(self, handler, archive_dir, transcript_file):
         """Should handle file write errors gracefully."""
-        hook_input = {"transcript": []}
-        result = handler.handle(hook_input)
+        hook_input = {HookInputField.TRANSCRIPT_PATH: str(transcript_file)}
+        with patch.object(Path, "open", side_effect=OSError("Write error")):
+            result = handler.handle(hook_input)
         assert result.decision == "allow"
 
-    @patch("pathlib.Path.open", new_callable=mock_open)
-    @patch("pathlib.Path.mkdir")
-    def test_handle_returns_hook_result_instance(self, mock_mkdir, mock_file, handler):
+    def test_handle_gracefully_handles_missing_project_context(self, handler):
+        """Should return allow when ProjectContext is not initialised."""
+        hook_input = {HookInputField.TRANSCRIPT_PATH: "/tmp/x.jsonl"}
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_compact.transcript_archiver."
+            "ProjectContext.daemon_untracked_dir",
+            side_effect=RuntimeError("no project context"),
+        ):
+            result = handler.handle(hook_input)
+        assert result.decision == "allow"
+
+    def test_handle_returns_hook_result_instance(self, handler, archive_dir, transcript_file):
         """Should return HookResult instance."""
-        hook_input = {"transcript": []}
+        hook_input = {HookInputField.TRANSCRIPT_PATH: str(transcript_file)}
         result = handler.handle(hook_input)
         assert isinstance(result, HookResult)

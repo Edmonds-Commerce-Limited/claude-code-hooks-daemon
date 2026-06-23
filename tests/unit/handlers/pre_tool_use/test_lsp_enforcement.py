@@ -158,6 +158,54 @@ class TestLspEnforcementMatchesPositive:
         }
         assert handler.matches(hook_input) is True
 
+    def test_matches_bash_rg_long_flag_with_value(self, handler: Any) -> None:
+        """rg --type py Symbol should capture the symbol, not the flag value.
+
+        Regression: the flag-skip group only consumed short flags, so the
+        '--type' long flag and its 'py' value were captured as the pattern.
+        """
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "rg --type py FrontController"},
+        }
+        assert handler.matches(hook_input) is True
+        assert handler._extract_bash_grep_pattern("rg --type py FrontController") == (
+            "FrontController"
+        )
+
+    def test_matches_bash_rg_long_flag_equals_value(self, handler: Any) -> None:
+        """rg --type=py Symbol (flag=value form) should capture the symbol."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "rg --type=py FrontController"},
+        }
+        assert handler.matches(hook_input) is True
+        assert handler._extract_bash_grep_pattern("rg --type=py FrontController") == (
+            "FrontController"
+        )
+
+    def test_matches_bash_grep_rn_snake_case(self, handler: Any) -> None:
+        """grep -rn Symbol should capture the symbol after clustered flags."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "grep -rn get_bash_command src/"},
+        }
+        assert handler.matches(hook_input) is True
+        assert handler._extract_bash_grep_pattern("grep -rn get_bash_command src/") == (
+            "get_bash_command"
+        )
+
+    def test_matches_bash_rg_dash_e_symbol(self, handler: Any) -> None:
+        """rg -e Symbol should capture the symbol following the -e flag."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "rg -e FrontController src/"},
+        }
+        assert handler.matches(hook_input) is True
+        assert handler._extract_bash_grep_pattern("rg -e FrontController src/") == (
+            "FrontController"
+        )
+
 
 class TestLspEnforcementMatchesNegative:
     """Test matches() returns False for non-symbol patterns."""

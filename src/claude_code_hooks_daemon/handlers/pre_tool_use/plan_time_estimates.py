@@ -87,22 +87,36 @@ class PlanTimeEstimatesHandler(Handler):
         if not content:
             return False
 
-        # Check for time estimate patterns
-        has_estimate_pattern = any(
-            re.search(pattern, content, re.IGNORECASE) for pattern in self.ESTIMATE_PATTERNS
-        )
+        # Block if ANY estimate has no co-located technical term on its own line.
+        # Scoping the technical-term exemption to the matched estimate's line
+        # prevents a single technical keyword anywhere in the document from
+        # whitelisting every estimate (a trivial whole-document bypass).
+        return self._has_unexempted_estimate(content)
 
-        if not has_estimate_pattern:
-            return False
+    def _has_unexempted_estimate(self, content: str) -> bool:
+        """Return True if any time-estimate line lacks a co-located technical term.
 
-        # Check if this is a technical term (not a work estimate)
-        # Look for technical keywords near the time unit
-        is_technical = any(
-            re.search(pattern, content, re.IGNORECASE) for pattern in self.TECHNICAL_PATTERNS
-        )
+        Args:
+            content: The text being written to the plan document.
 
-        # If technical keywords found, it's likely a feature description, not a work estimate
-        return not is_technical
+        Returns:
+            True when at least one line contains a blocked estimate pattern and
+            no technical-term exemption on that same line; False otherwise.
+        """
+        for line in content.splitlines():
+            if not self._line_has_estimate(line):
+                continue
+            if not self._line_has_technical_term(line):
+                return True
+        return False
+
+    def _line_has_estimate(self, line: str) -> bool:
+        """Return True if the line matches any blocked estimate pattern."""
+        return any(re.search(pattern, line, re.IGNORECASE) for pattern in self.ESTIMATE_PATTERNS)
+
+    def _line_has_technical_term(self, line: str) -> bool:
+        """Return True if the line contains a technical-term exemption."""
+        return any(re.search(pattern, line, re.IGNORECASE) for pattern in self.TECHNICAL_PATTERNS)
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Block time estimates."""

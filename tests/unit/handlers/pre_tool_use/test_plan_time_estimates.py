@@ -458,6 +458,72 @@ class TestPlanTimeEstimatesHandler:
         }
         assert handler.matches(hook_input) is True
 
+    # Regression tests for whole-document exemption bypass
+
+    def test_bug_technical_term_does_not_whitelist_estimate_on_another_line(
+        self, handler: PlanTimeEstimatesHandler
+    ) -> None:
+        """Regression: a technical term elsewhere must NOT exempt a work estimate.
+
+        Bug: the technical-term exemption scanned the ENTIRE document, so any
+        technical keyword anywhere whitelisted EVERY estimate — a trivial
+        bypass (drop the word "cache" once and all effort estimates pass).
+        The exemption is now scoped to the matched estimate's own line.
+        """
+        content = (
+            "# Plan 001\n\n"
+            "This feature uses a TTL cache for API responses.\n\n"
+            "**Estimated Effort**: 4 hours\n"
+        )
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/workspace/CLAUDE/Plan/001-test/PLAN.md",
+                "content": content,
+            },
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_bug_per_line_exemption_still_allows_same_line_technical_term(
+        self, handler: PlanTimeEstimatesHandler
+    ) -> None:
+        """A genuine technical line is still exempt even alongside work lines.
+
+        The work-estimate line is absent here; only the technical line carries
+        a time unit, and its co-located technical term exempts it.
+        """
+        content = (
+            "# Plan 001\n\n"
+            "Implement a 30 day TTL cache for API responses.\n\n"
+            "Break the work into concrete tasks.\n"
+        )
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/workspace/CLAUDE/Plan/001-test/PLAN.md",
+                "content": content,
+            },
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_bug_mixed_document_blocks_when_one_estimate_unexempted(
+        self, handler: PlanTimeEstimatesHandler
+    ) -> None:
+        """A doc mixing an exempt technical line and a bare work estimate blocks."""
+        content = (
+            "# Plan 001\n\n"
+            "Configure a 30 day retention policy for user data.\n\n"
+            "Phase 1: Implementation (2-3 hours)\n"
+        )
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/workspace/CLAUDE/Plan/001-test/PLAN.md",
+                "content": content,
+            },
+        }
+        assert handler.matches(hook_input) is True
+
     def test_get_claude_md_warns_about_time_estimates(
         self, handler: PlanTimeEstimatesHandler
     ) -> None:
