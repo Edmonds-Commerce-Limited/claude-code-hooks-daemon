@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.26.0] - 2026-06-23
+
+This is a **minor release** that remediates an Opus-run SSoT/KISS audit of the install/upgrade/deployment system (Plan 00137), spawned after the v3.25.0 `mkplan` fix. Its headline is the promised follow-up to v3.25.0: the plan workflow is now **opt-in by default** so the shipped default matches the opt-in plan handlers. The rest collapse duplicated sources of truth (Python floor, plan directory, profile lists) to one authority each.
+
+### Changed
+
+- **`plan_workflow.enabled` now defaults to `false` — the plan workflow is opt-in (Plan 00137, F-PLANDEF)** — v3.25.0 made plan-workflow deployment derive from config but left the model default `true`, so a stock install/upgrade scattered `CLAUDE/Plan/` + `mkplan.bash` even though the consuming plan handlers (`plan_number_helper` et al.) ship disabled (deploy ≠ runtime). The default is now `false`, matching the opt-in handlers. **Behaviour change** (the v3.25.0-announced follow-up): opting in is a single field — `plan_workflow: { enabled: true }` — which turns on BOTH the planning handlers' directory feed AND the `CLAUDE/Plan/` + `mkplan.bash` deploy. Clients who opted in the legacy way (a per-handler `track_plans_in_project` option with no top-level `plan_workflow` block) are **preserved**: the config migration still promotes that into an enabled `plan_workflow`. The deploy is non-destructive — disabling never removes an existing `CLAUDE/Plan/`. Carries `config-changes`/`truth-changes` manifests so the upgrade advisory surfaces the change.
+- **`plan_workflow.directory` is the single source of truth for the plan directory (Plan 00137, F-PLANDIR)** — The registry already injects `track_plans_in_project` into every planning-tagged handler from the top-level `plan_workflow.directory`, overriding per-handler options. The now-dead duplicate `track_plans_in_project` entries (one annotated "Must match markdown_organization setting") were removed from the shipped example config; both handlers now point at the top-level SSoT. An integration guard asserts no example handler carries a per-handler `track_plans_in_project`.
+- **Handler profiles documented as a one-shot install-time seed (Plan 00137, F-PROFILE)** — `HANDLER_PROFILE` seeds the per-handler `enabled:` flags once at fresh-install time; the yaml is the single source of truth thereafter and no upgrade path re-applies a profile. A new regression test proves a profile-seeded `enabled: true` survives the upgrade config-merge (it is preserved as a user customisation even though the new example still ships the handler disabled). The install summary wording no longer implies `HANDLER_PROFILE` is a durable switch.
+- **Python minimum version derives from the `pyproject.toml` SSoT during install (Plan 00137, F-PYFLOOR)** — `prerequisites.sh::check_python3` called `find_latest_python` with a hardcoded `3.11` floor and no pyproject argument, so at the next floor bump it would silently accept a too-old interpreter the daemon cannot run. It now raises the floor from `pyproject.toml`'s `requires-python` and derives the `(X.Y+)` diagnostic from the parsed floor; the bare `3.11` remains only as the floor-of-last-resort.
+
+### Fixed
+
+- **Install summary prints the real venv path (Plan 00137, F-VENVSUM)** — The "Installation Complete" summary hardcoded the deleted legacy `untracked/venv/` path; it now prints the actual fingerprint-keyed `$VENV_PATH` the installer created.
+- **Handler-profile lists are validated against config keys (Plan 00137, F-PROFLIST)** — The hardcoded `_RECOMMENDED_HANDLERS` / `_STRICT_ONLY_HANDLERS` lists toggled handlers by regex; a renamed or mistyped name that exists in no config silently no-opped. `apply_profile` now logs a warning for any profile handler absent from the target config, and a guard test asserts every profile handler name is declared in the shipped example config.
+
 ## [3.25.0] - 2026-06-23
 
 This is a **minor release** that fixes a v3.24.0-and-earlier field bug — the `mkplan.bash` plan-scaffolding script was never deployed on upgrade (and was opt-in-gated on install) even though the daemon's own `plan_number_helper` guidance told agents to run it — by deriving deployment from the config single source of truth and deleting the orthogonal `PLAN_WORKFLOW` env var. It also colour-codes the status-line environment indicator.
