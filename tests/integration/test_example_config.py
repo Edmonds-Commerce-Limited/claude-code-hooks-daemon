@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants import HandlerID
 
 
@@ -72,6 +73,39 @@ def test_example_config_safety_handlers_enabled(example_config: dict) -> None:
         assert (
             pre_tool_use[handler]["enabled"] is True
         ), f"Safety handler {handler} should be enabled by default"
+
+
+def test_example_config_plan_workflow_opt_in_by_default(example_config: dict) -> None:
+    """F-PLANDEF: a stock install from the example must resolve plan_workflow as
+    DISABLED, so it does not deploy CLAUDE/Plan/ + mkplan while the plan handlers
+    ship disabled. The example carries no active top-level plan_workflow block
+    (only a commented opt-in) and no per-handler track_plans_in_project, so the
+    model default (False) governs.
+    """
+    config = Config.model_validate(example_config)
+    assert config.plan_workflow.enabled is False, (
+        "stock example config must leave plan workflow opt-in (disabled) so "
+        "deploy matches the opt-in plan handlers"
+    )
+
+
+def test_example_config_no_per_handler_track_plans(example_config: dict) -> None:
+    """F-PLANDIR: the example must not duplicate the plan directory in per-handler
+    options — plan_workflow.directory is the single source of truth. No handler
+    in the example may carry a track_plans_in_project option.
+    """
+    for event_type, handlers in example_config.get("handlers", {}).items():
+        if not isinstance(handlers, dict):
+            continue
+        for handler_name, handler_cfg in handlers.items():
+            if not isinstance(handler_cfg, dict):
+                continue
+            options = handler_cfg.get("options", {})
+            if isinstance(options, dict):
+                assert "track_plans_in_project" not in options, (
+                    f"{event_type}.{handler_name} still carries a per-handler "
+                    "track_plans_in_project; use top-level plan_workflow.directory"
+                )
 
 
 def test_example_config_workflow_handlers_disabled(example_config: dict) -> None:

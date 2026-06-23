@@ -295,6 +295,9 @@ def test_config_no_handler_options_uses_defaults() -> None:
     }
 
     config = Config.model_validate(config_data)
-    assert config.plan_workflow.enabled is True
+    # F-PLANDEF (Plan 00137): plan_workflow is opt-in by default (False) so the
+    # shipped default matches the opt-in plan handlers. Directory/docs defaults
+    # are unchanged and apply once a user opts in.
+    assert config.plan_workflow.enabled is False
     assert config.plan_workflow.directory == "CLAUDE/Plan"
     assert config.plan_workflow.workflow_docs == "CLAUDE/PlanWorkflow.md"

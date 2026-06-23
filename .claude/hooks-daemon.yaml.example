@@ -116,8 +116,8 @@ handlers:
     plan_number_helper:    # Provides correct next plan number
       enabled: false       # Enable when using CLAUDE/Plan/ structure
       priority: 33
-      options:
-        track_plans_in_project: "CLAUDE/Plan"  # Must match markdown_organization setting
+      # Plan directory is the top-level plan_workflow.directory (single source
+      # of truth) — no per-handler track_plans_in_project needed.
 
     task_tdd_advisor:      # Advises on TDD workflow for tasks
       enabled: false       # Enable for TDD guidance
@@ -164,8 +164,9 @@ handlers:
       priority: 51
       # Docs: docs/guides/handlers/markdown_organization.md
       options:
-        track_plans_in_project: null  # Set to "CLAUDE/Plan" to enable plan tracking
-        plan_workflow_docs: null      # Optional: path to workflow doc
+        # Plan tracking is configured at the top-level plan_workflow: block
+        # (single source of truth). Set plan_workflow.enabled: true there to
+        # enable plan tracking for this handler — no per-handler option needed.
         #
         # Monorepo support: regex patterns matching sub-project root directories.
         # Sub-projects get the same organization rules as the root project.
@@ -369,3 +370,17 @@ handlers:
 #     path: ".claude/hooks/handlers/pre_tool_use/my_handler.py"
 #     class: "MyHandler"
 #     events: ["PreToolUse"]
+
+# Plan workflow (single source of truth for plan tracking).
+# OPT-IN: disabled by default so a stock install does not scatter CLAUDE/Plan/
+# or deploy the mkplan scaffolding script while the plan handlers are off.
+# Uncomment and set enabled: true to turn on plan tracking. Enabling this
+# feeds the plan directory to all planning handlers (plan_number_helper,
+# markdown_organization, validate_plan_number, ...) AND deploys the CLAUDE/Plan/
+# scaffold + mkplan.bash on install/upgrade. The directory here is authoritative
+# — do not duplicate it in per-handler options.
+# plan_workflow:
+#   enabled: true
+#   directory: "CLAUDE/Plan"
+#   workflow_docs: "CLAUDE/PlanWorkflow.md"
+#   enforce_claude_code_sync: false

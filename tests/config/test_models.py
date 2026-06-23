@@ -857,9 +857,15 @@ class TestPlanWorkflowConfig:
     """Tests for PlanWorkflowConfig model."""
 
     def test_defaults(self) -> None:
-        """PlanWorkflowConfig has correct defaults."""
+        """PlanWorkflowConfig has correct defaults.
+
+        F-PLANDEF (Plan 00137): ``enabled`` defaults to False so the shipped
+        default matches the shipped (opt-in) plan handlers — a stock install no
+        longer scatters CLAUDE/Plan/ or deploys mkplan while the consuming
+        handlers (plan_number_helper et al.) ship disabled.
+        """
         config = PlanWorkflowConfig()
-        assert config.enabled is True
+        assert config.enabled is False
         assert config.directory == "CLAUDE/Plan"
         assert config.workflow_docs == "CLAUDE/PlanWorkflow.md"
         assert config.enforce_claude_code_sync is False
@@ -962,6 +968,37 @@ class TestMigratePlanHandlerOptions:
             ),
         )
         # Default plan_workflow remains
+        assert config.plan_workflow.directory == "CLAUDE/Plan"
+
+    def test_stock_config_resolves_plan_workflow_disabled(self) -> None:
+        """F-PLANDEF: a stock config (no top-level block, no legacy track_plans)
+        resolves plan_workflow.enabled to False, so deploy matches the opt-in
+        handler state rather than scattering CLAUDE/Plan/ by default.
+        """
+        config = Config(
+            handlers=HandlersConfig.model_validate(
+                {"pre_tool_use": {"markdown_organization": {"options": {}}}}
+            ),
+        )
+        assert config.plan_workflow.enabled is False
+
+    def test_legacy_track_plans_opt_in_survives_default_flip(self) -> None:
+        """F-PLANDEF/F-PLANDIR coupling: a legacy client that opted in via the
+        per-handler track_plans_in_project (and has no top-level block) still
+        gets plan_workflow.enabled True after the model default flipped to False.
+        """
+        config = Config(
+            handlers=HandlersConfig.model_validate(
+                {
+                    "pre_tool_use": {
+                        "markdown_organization": {
+                            "options": {"track_plans_in_project": "CLAUDE/Plan"},
+                        },
+                    },
+                }
+            ),
+        )
+        assert config.plan_workflow.enabled is True
         assert config.plan_workflow.directory == "CLAUDE/Plan"
 
     def test_no_migration_when_handler_config_not_dict_or_handler_config(self) -> None:

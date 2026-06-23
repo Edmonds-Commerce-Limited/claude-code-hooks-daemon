@@ -209,18 +209,21 @@ class TestDeployPlanWorkflowIfEnabled:
         assert (tmp_path / "docs" / "plans" / MKPLAN_SCRIPT_NAME).is_file()
         assert not (tmp_path / "CLAUDE" / "Plan").exists()
 
-    def test_missing_config_uses_enabled_default(self, tmp_path: Path) -> None:
-        """No config file → model default (enabled) → deploy to CLAUDE/Plan.
+    def test_missing_config_uses_opt_in_default(self, tmp_path: Path) -> None:
+        """No config file → model default (disabled, F-PLANDEF) → no deploy.
 
-        A project with no config on disk still gets the default behaviour, so
-        the upgrade path is robust against a missing/relocated config.
+        Plan 00137 flipped the plan_workflow default to opt-in. A project with
+        no config on disk therefore does NOT get CLAUDE/Plan/ scattered — the
+        deploy matches the opt-in plan handlers. (Pre-00137 this deployed by
+        default; the change is intentional and carries config/truth-change
+        notes.)
         """
         missing = tmp_path / ".claude" / "hooks-daemon.yaml"
 
         result = deploy_plan_workflow_if_enabled(tmp_path, missing)
 
-        assert result.deployed_mkplan is True
-        assert (tmp_path / "CLAUDE" / "Plan" / MKPLAN_SCRIPT_NAME).is_file()
+        assert result.deployed_mkplan is False
+        assert not (tmp_path / "CLAUDE" / "Plan").exists()
 
     def test_migrated_legacy_option_enables_deploy(self, tmp_path: Path) -> None:
         """Legacy track_plans_in_project handler option drives deployment too.

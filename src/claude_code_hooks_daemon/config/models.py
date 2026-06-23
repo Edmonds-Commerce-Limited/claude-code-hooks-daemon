@@ -383,7 +383,14 @@ class PlanWorkflowConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    enabled: bool = Field(default=True, description="Enable plan workflow tracking")
+    # F-PLANDEF (Plan 00137): default False so the shipped default matches the
+    # shipped opt-in plan handlers. A stock install no longer deploys CLAUDE/Plan/
+    # + mkplan while plan_number_helper et al. ship disabled. Legacy clients that
+    # opted in via the per-handler track_plans_in_project option are preserved by
+    # migrate_plan_handler_options (which only runs when no explicit top-level
+    # plan_workflow block is present); opting in is a single field:
+    # `plan_workflow: { enabled: true }`.
+    enabled: bool = Field(default=False, description="Enable plan workflow tracking")
     directory: str = Field(
         default="CLAUDE/Plan",
         description="Path to plan folder relative to workspace root",
