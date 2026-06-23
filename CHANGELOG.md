@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.27.0] - 2026-06-23
+
+This is a **minor release** that ships the `recovery_cron_advisor` PostToolUse handler enabled by default (opt-out) and remediates ~78 confirmed deep-review findings across the codebase (Plan 00139 + Plan 00140).
+
+### Added
+
+- **`recovery_cron_advisor` PostToolUse handler — failsafe recovery cron lifecycle advisory (Plan 00139), shipped ENABLED BY DEFAULT (opt-out)** — An advisory-only, never-blocking handler that fires on writes to `CLAUDE/Plan/*/PLAN.md` (and on `mkplan.bash` invocations) across three lifecycle phases: plan creation (advises `CronCreate durable:false recurring:true`), plan progress (rate-limited per-plan reminder to confirm the cron is still running), and plan completion (advises `CronDelete`). The cron is a **failsafe safety net** — it resumes work stalled by external factors (Claude API overload, rate limits, 5-hour usage limits, network failure) — and is explicitly **NOT a heartbeat**: agents must never pace themselves to the cron between units of work. The canonical recovery-cron prompt is included in the handler's CLAUDE.md guidance. Because the handler only fires on plan-lifecycle `PLAN.md` writes, projects that do not use the plan workflow never see it fire. Carries a `config-changes/v3.27.0.yaml` manifest so the upgrade advisory surfaces the new opt-out.
+
+### Fixed
+
+- **Plan 00140: ~78 confirmed deep code-review findings remediated across the codebase** — A worktree-orchestrated deep review identified and fixed findings in six categories:
+  - **Safety handler bypasses (5 PreToolUse handlers)** — closed cross-separator bypass patterns in safety handlers that could be evaded via path separator tricks
+  - **Daemon repair/restart/socket-race fixes** — corrected repair timeout units, restart abort logic, start socket-race window, and PID-file daemon verification
+  - **Core/config validator drift** — fixed footer handler tracking, status schema mismatches, and `to_response_dict` docstring drift
+  - **Stop/QA detection anchoring** — anchored QA-failure detection patterns, paired by id, hardened bandit fail-fast, and made transcript reads more robust
+  - **Install/upgrade version parsing** — corrected version parsing in upgrade tooling
+  - **Detector scoping fixes (LSP, plan, 7 PreToolUse detectors)** — anchored status detection, scoped gh-pr flag checks, narrowed LSP error surfaces, dropped dead code, fixed regex/dead-code issues across seven PreToolUse detectors
+- **`daemon_location_guard` false-positive on config-file references** — The handler was incorrectly blocking tool calls that merely referenced the string `.claude/hooks-daemon.yaml` (e.g. reading the config file path), even when no `cd` into that directory was being performed.
+- **`plan_number_helper` and `validate_plan_number` false positives (Plan 00138)** — Both handlers were triggering on unrelated commands; fixed pattern anchoring to eliminate false positives.
+- **`recovery_cron_advisor` per-plan progress cadence and anchored status detection** — Fixed a cooldown-unit mismatch dogfooding bug (progress reminders fired too frequently); anchored the plan-status regex so completion detection is not confused by partial matches in notes or task lines.
+
 ## [3.26.0] - 2026-06-23
 
 This is a **minor release** that remediates an Opus-run SSoT/KISS audit of the install/upgrade/deployment system (Plan 00137), spawned after the v3.25.0 `mkplan` fix. Its headline is the promised follow-up to v3.25.0: the plan workflow is now **opt-in by default** so the shipped default matches the opt-in plan handlers. The rest collapse duplicated sources of truth (Python floor, plan directory, profile lists) to one authority each.
