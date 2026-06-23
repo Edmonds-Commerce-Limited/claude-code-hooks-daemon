@@ -1,7 +1,7 @@
 """Thinking mode status handler for status line.
 
 Reads ~/.claude/settings.json to show thinking mode status.
-Format: "thinking: On/Off".
+Format: "💭 On" / "💭 Off".
 
 Uses alwaysThinkingEnabled key (same as PowerShell reference implementation).
 Effort level display is handled by ModelContextHandler (shown next to model name).
@@ -62,8 +62,10 @@ class ThinkingModeHandler(Handler):
                     parts.append(f"💭 {dim}Off{reset}")
 
             return HookResult(context=parts)
-        except Exception:
-            logger.info("Error reading thinking mode settings")
+        except Exception as exc:
+            # Status line must never crash the session; log the detail so a
+            # genuine failure is debuggable rather than a contentless message.
+            logger.debug("Error reading thinking mode settings: %s", exc, exc_info=True)
             return HookResult(context=[])
 
     def _read_settings(self) -> dict[str, Any]:
@@ -99,7 +101,7 @@ class ThinkingModeHandler(Handler):
                 command='echo "test"',
                 description="Displays thinking mode On/Off status",
                 expected_decision=Decision.ALLOW,
-                expected_message_patterns=[r"thinking:"],
+                expected_message_patterns=[r"💭.*(On|Off)"],
                 safety_notes="Context/utility handler - display only",
                 test_type=TestType.CONTEXT,
                 requires_event="StatusLine event",

@@ -54,8 +54,10 @@ class GitBranchHandler(Handler):
             terminal=False,
             tags=[HandlerTag.STATUS, HandlerTag.GIT, HandlerTag.NON_TERMINAL],
         )
-        self._default_branch: str | None = None
-        self._default_branch_detected: bool = False
+        # Default branch cached per repo toplevel — a long-lived daemon serves
+        # many repos, so a single shared cache would mis-colour branches when
+        # the status line re-renders for a different project/worktree.
+        self._default_branch_by_repo: dict[str, str | None] = {}
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Always run for status events."""
@@ -88,6 +90,8 @@ class GitBranchHandler(Handler):
             if result.returncode != 0:
                 return HookResult(context=[])
 
+            repo_toplevel = result.stdout.decode().strip()
+
             result = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
                 ["git", "branch", "--show-current"],
                 cwd=cwd,
@@ -98,12 +102,10 @@ class GitBranchHandler(Handler):
 
             branch = result.stdout.decode().strip()
             if branch:
-                if not self._default_branch_detected:
-                    self._default_branch = self._get_default_branch(cwd)
-                    self._default_branch_detected = True
-                if self._default_branch is None:
+                default_branch = self._resolve_default_branch(repo_toplevel, cwd)
+                if default_branch is None:
                     color = _COLOR_GREY
-                elif branch == self._default_branch:
+                elif branch == default_branch:
                     color = _COLOR_GREEN
                 else:
                     color = _COLOR_ORANGE
@@ -116,6 +118,17 @@ class GitBranchHandler(Handler):
             logger.error("Unexpected error in git branch handler: %s", e, exc_info=True)
 
         return HookResult(context=[])
+
+    def _resolve_default_branch(self, repo_toplevel: str, cwd: str) -> str | None:
+        """Return the cached default branch for a repo, detecting it once per repo.
+
+        The result is keyed by ``repo_toplevel`` so each distinct repository
+        (or worktree) gets its own correct default branch, even though this
+        handler instance is reused across many status-line renders.
+        """
+        if repo_toplevel not in self._default_branch_by_repo:
+            self._default_branch_by_repo[repo_toplevel] = self._get_default_branch(cwd)
+        return self._default_branch_by_repo[repo_toplevel]
 
     def _get_default_branch(self, cwd: str) -> str | None:
         """Detect the default branch for the repo.

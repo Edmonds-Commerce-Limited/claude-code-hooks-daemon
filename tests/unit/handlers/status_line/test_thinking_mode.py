@@ -143,14 +143,42 @@ class TestThinkingModeHandler:
         tests = handler.get_acceptance_tests()
         assert len(tests) > 0
 
+    def test_acceptance_pattern_matches_real_output(
+        self, handler: ThinkingModeHandler, tmp_path: Path
+    ) -> None:
+        """The acceptance pattern must match the string handle() actually emits.
+
+        handle() emits '💭 On'/'💭 Off', never 'thinking:'. The acceptance
+        expected_message_pattern must match that real output.
+        """
+        import re
+
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text('{"alwaysThinkingEnabled": true}')
+        with patch.object(handler, "_get_settings_path", return_value=settings_file):
+            result = handler.handle({})
+
+        rendered = "\n".join(result.context)
+        tests = handler.get_acceptance_tests()
+        patterns = tests[0].expected_message_patterns
+        assert patterns
+        assert all(re.search(pattern, rendered) for pattern in patterns)
+
     def test_handle_returns_empty_on_unexpected_exception(
         self, handler: ThinkingModeHandler
     ) -> None:
-        """Should return empty context and log when an unexpected exception occurs."""
-        with patch.object(handler, "_read_settings", side_effect=RuntimeError("unexpected")):
-            result = handler.handle({})
+        """Should return empty context and log the exception detail when one occurs."""
+        with patch.object(handler, "_read_settings", side_effect=RuntimeError("boom")):
+            with patch(
+                "claude_code_hooks_daemon.handlers.status_line.thinking_mode.logger"
+            ) as mock_logger:
+                result = handler.handle({})
 
         assert result.context == []
+        # The logged message must carry the exception detail, not a contentless string.
+        assert mock_logger.debug.called
+        logged_args = mock_logger.debug.call_args
+        assert any("boom" in str(arg) for arg in logged_args.args)
 
     def test_get_settings_path_returns_claude_settings(self, handler: ThinkingModeHandler) -> None:
         """_get_settings_path should return ~/.claude/settings.json."""

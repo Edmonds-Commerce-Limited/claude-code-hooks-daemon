@@ -42,6 +42,8 @@ _GITIGNORE_FILE = ".gitignore"
 _CLAUDE_GITIGNORE_FILE = ".claude/.gitignore"
 _CACHE_FILE_NAME = "gitignore_safety_cache.json"
 _RESUME_TRANSCRIPT_MIN_BYTES = 100
+# A leading '!' in .gitignore negates (un-ignores) a pattern — never coverage.
+_GITIGNORE_NEGATION_PREFIX = "!"
 
 
 class GitignoreSafetyCheckerHandler(Handler):
@@ -122,13 +124,35 @@ class GitignoreSafetyCheckerHandler(Handler):
                 logger.debug("Could not read %s for gitignore check: %s", path, exc)
         return lines
 
+    @staticmethod
+    def _line_covers_pattern(line: str, pattern: str) -> bool:
+        """Return True if a gitignore ``line`` actually ignores ``pattern``.
+
+        Uses parsed-ignore semantics, not raw substring matching:
+
+        - Negation lines (``!...``) un-ignore a path and never count as coverage.
+        - The entry token (trailing slash stripped) must either equal the required
+          pattern (also slash-normalised) or be a parent directory of it
+          (``pattern`` starts with ``entry + "/"``). This rejects unrelated
+          substring matches like ``.claude/worktrees-archive/`` while still
+          accepting an ancestor directory such as ``.claude/``.
+        """
+        if line.startswith(_GITIGNORE_NEGATION_PREFIX):
+            return False
+        entry = line.rstrip("/")
+        target = pattern.rstrip("/")
+        if not entry or not target:
+            return False
+        return entry == target or target.startswith(entry + "/")
+
     def _find_missing_entries(self, project_root: Path) -> list[str]:
         """Return descriptions of required patterns absent from any gitignore."""
         lines = self._read_gitignore_lines(project_root)
         missing: list[str] = []
         for root_pattern, scoped_pattern, description in _REQUIRED_GITIGNORE_PATTERNS:
-            covered = any(root_pattern in line for line in lines) or (
-                scoped_pattern != "" and any(scoped_pattern in line for line in lines)
+            covered = any(self._line_covers_pattern(line, root_pattern) for line in lines) or (
+                scoped_pattern != ""
+                and any(self._line_covers_pattern(line, scoped_pattern) for line in lines)
             )
             if not covered:
                 missing.append(description)

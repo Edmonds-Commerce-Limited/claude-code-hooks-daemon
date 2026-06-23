@@ -25,6 +25,13 @@ from claude_code_hooks_daemon.handlers.status_line.stats_cache_reader import (
     read_stats_cache,
 )
 
+# Usage-percentage colour band thresholds (exclusive upper bounds), mirroring
+# ModelContextHandler's 200k tier (green < 25, yellow < 51, orange < 76, red else)
+# so the two status-line handlers share the same colour semantics.
+_USAGE_YELLOW_PCT = 25
+_USAGE_ORANGE_PCT = 51
+_USAGE_RED_PCT = 76
+
 
 class UsageTrackingHandler(Handler):
     """Display daily and weekly token usage percentages."""
@@ -111,14 +118,16 @@ class UsageTrackingHandler(Handler):
         Returns:
             Colored percentage string with icon and ANSI codes
         """
-        # Quarter circle icons with color coding (same as ModelContextHandler)
-        if percentage <= 25:
+        # Quarter circle icons with color coding. Boundary semantics mirror
+        # ModelContextHandler's 200k tier: exclusive upper bounds so e.g. 25.0%
+        # is yellow (not green), keeping the two handlers' colour bands aligned.
+        if percentage < _USAGE_YELLOW_PCT:
             icon = "◔"
             color = "\033[42m\033[30m"  # 1/4 filled, green bg
-        elif percentage <= 50:
+        elif percentage < _USAGE_ORANGE_PCT:
             icon = "◑"
             color = "\033[43m\033[30m"  # Right half filled, yellow bg
-        elif percentage <= 75:
+        elif percentage < _USAGE_RED_PCT:
             icon = "◕"
             color = "\033[48;5;208m\033[30m"  # 3/4 filled, orange bg
         else:
