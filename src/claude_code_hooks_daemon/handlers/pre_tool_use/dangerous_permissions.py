@@ -13,6 +13,22 @@ from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import HookResult
 
+# World-writable OCTAL modes: any mode whose "other" (last) digit has the write bit
+# (octal 2) set — digits 2, 3, 6, 7. Covers 666, 777, 757, 002, etc. An optional
+# leading special-bits digit (setuid/setgid/sticky) is allowed (e.g. 1777, 2666).
+_WORLD_WRITABLE_OCTAL = r"[0-7]?[0-7][0-7][2367]"
+
+# World-writable SYMBOLIC modes: granting write to "others" (o+...) or "all" (a+...).
+# Requires '+' so that removals like "go-w" are NOT matched. Matches a+w, o+w, a+rwx,
+# o+rw, etc. (any '+' grant for the o/a class that includes 'w').
+_WORLD_WRITABLE_SYMBOLIC = r"[ao]\+[rwx]*w[rwx]*"
+
+# Combined dangerous-permission pattern, anchored on chmod. Each alternative is
+# wrapped in word boundaries so it matches whole tokens, not substrings of paths.
+_DANGEROUS_PERMISSIONS_PATTERN = (
+    r"\bchmod\b.*\b(?:" + _WORLD_WRITABLE_OCTAL + r"|" + _WORLD_WRITABLE_SYMBOLIC + r")\b"
+)
+
 
 class DangerousPermissionsHandler(Handler):
     """Block chmod 777 and dangerous permission commands.
@@ -42,13 +58,16 @@ class DangerousPermissionsHandler(Handler):
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """Check if command sets dangerous permissions (777 or a+rwx).
+        """Check if command sets world-writable (dangerous) permissions.
 
-        Matches:
-        - chmod 777
-        - chmod -R 777
-        - chmod a+rwx
-        - chmod -R a+rwx
+        Matches any chmod that grants write access to "others"/"all":
+        - world-writable octal modes (last digit has the write bit): 777, 666, 757,
+          002, etc. (optionally with a leading special-bits digit, e.g. 1777)
+        - world-writable symbolic modes: a+w, o+w, a+rwx, o+rw, etc.
+        - the -R recursive flag is irrelevant to matching
+
+        Does NOT match permission REMOVALS (e.g. go-w) or non-world-writable modes
+        (755, 644, 600, u+x).
 
         Case-sensitive for file permissions.
 
@@ -68,11 +87,7 @@ class DangerousPermissionsHandler(Handler):
         if not command:
             return False
 
-        # Pattern: chmod ... (777|a+rwx)
-        # Matches chmod with 777 or a+rwx permissions, optionally with -R flag
-        pattern = r"\bchmod\b.*\b(777|a\+rwx)\b"
-
-        return bool(re.search(pattern, command))
+        return bool(re.search(_DANGEROUS_PERMISSIONS_PATTERN, command))
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Block command and explain why 777 permissions are dangerous.

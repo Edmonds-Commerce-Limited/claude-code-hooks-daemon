@@ -31,32 +31,52 @@ class GhIssueCommentsHandler(Handler):
             re.IGNORECASE,
         )
 
+    def _gh_issue_view_segment(self, command: str) -> str | None:
+        """Return the 'gh issue view ...' sub-command segment, or None if absent.
+
+        The segment runs from 'gh issue view' up to the next shell command separator
+        (;, &&, ||, |). Anchoring the --comments / --json checks to THIS segment stops
+        a flag in an unrelated chained command (e.g. `gh issue view 5 && echo
+        "--comments"`) from spuriously exempting the view.
+        """
+        view_match = self._gh_issue_view_pattern.search(command)
+        if not view_match:
+            return None
+
+        rest = command[view_match.start() :]
+        # End the segment at the first command separator.
+        separator_match = re.search(r"(?:;|&&|\|\||\|)", rest)
+        if separator_match:
+            return rest[: separator_match.start()]
+        return rest
+
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if this is a gh issue view command without --comments."""
         command = get_bash_command(hook_input)
         if not command:
             return False
 
-        # Must be a gh issue view command
-        if not self._gh_issue_view_pattern.search(command):
+        # Must be a gh issue view command; scope all flag checks to its segment so
+        # flags in chained commands cannot bypass the block.
+        segment = self._gh_issue_view_segment(command)
+        if segment is None:
             return False
 
-        # Already has --comments flag? Allow it through
-        if "--comments" in command:
+        # Already has --comments flag in the view segment? Allow it through.
+        if "--comments" in segment:
             return False
 
-        # Using --json with comments field? That's equivalent to --comments
-        if "--json" in command:
-            # Extract the fields after --json
+        # Using --json with comments field in the view segment? Equivalent to --comments.
+        if "--json" in segment:
             # Pattern: --json <fields> where fields might be quoted or unquoted
-            json_match = re.search(r"--json\s+([^\s|]+)", command)
+            json_match = re.search(r"--json\s+([^\s|]+)", segment)
             if json_match:
                 fields = json_match.group(1)
                 # Check if 'comments' is one of the comma-separated fields
                 if re.search(r"\bcomments\b", fields):
                     return False
 
-        # No --comments flag and no --json with comments field
+        # No --comments flag and no --json with comments field in the view segment.
         return True
 
     def _compute_suggested_command(self, command: str) -> str:

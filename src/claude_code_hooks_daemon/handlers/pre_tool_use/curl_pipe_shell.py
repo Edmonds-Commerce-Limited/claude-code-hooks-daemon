@@ -14,6 +14,19 @@ from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import HookResult
 
+# Interpreters that execute piped content as code. Piping network content to any of
+# these is a remote-code-execution risk and must be blocked.
+_PIPED_INTERPRETERS = ("bash", "sh", "zsh", "ksh", "dash", "python", "perl", "ruby")
+
+# Pattern: (curl|wget) ... | [sudo [flags]] <interpreter>
+# - `sudo(\s+-\S+)*\s+` allows arbitrary sudo flags between sudo and the interpreter
+#   (e.g. "sudo -E bash", "sudo -E -H sh"), not just bare "sudo".
+# - the interpreter alternation covers every shell/scripting interpreter in
+#   _PIPED_INTERPRETERS, not just bash/sh.
+_CURL_PIPE_SHELL_PATTERN = (
+    r"\b(curl|wget)\b.*\|\s*(sudo(\s+-\S+)*\s+)?(" + "|".join(_PIPED_INTERPRETERS) + r")\b"
+)
+
 
 class CurlPipeShellHandler(Handler):
     """Block curl/wget piped to shell commands.
@@ -44,15 +57,16 @@ class CurlPipeShellHandler(Handler):
         )
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """Check if command pipes curl/wget to shell.
+        """Check if command pipes curl/wget to a shell or scripting interpreter.
 
-        Matches:
+        Matches piping curl/wget output to any interpreter in _PIPED_INTERPRETERS
+        (bash, sh, zsh, ksh, dash, python, perl, ruby), optionally via sudo with
+        arbitrary flags. Examples:
         - curl ... | bash
-        - curl ... | sh
-        - wget ... | bash
-        - wget ... | sh
+        - wget ... | zsh
+        - curl ... | python
         - curl ... | sudo bash
-        - wget ... | sudo sh
+        - curl ... | sudo -E bash   (flags between sudo and the interpreter)
 
         Case-insensitive matching.
 
@@ -72,11 +86,7 @@ class CurlPipeShellHandler(Handler):
         if not command:
             return False
 
-        # Pattern: (curl|wget) ... | (sudo)? (bash|sh)
-        # Matches piping curl or wget output to bash or sh, optionally with sudo
-        pattern = r"\b(curl|wget)\b.*\|\s*(sudo\s+)?(bash|sh)\b"
-
-        return bool(re.search(pattern, command, re.IGNORECASE))
+        return bool(re.search(_CURL_PIPE_SHELL_PATTERN, command, re.IGNORECASE))
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Block command and explain why piping to shell is dangerous.

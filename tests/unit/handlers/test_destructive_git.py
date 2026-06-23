@@ -29,9 +29,42 @@ class TestDestructiveGitHandler:
         assert handler.terminal is True
 
     def test_init_creates_destructive_patterns_list(self, handler):
-        """Handler should initialize with 9 destructive patterns."""
+        """Handler exposes compiled destructive patterns derived from the single mapping.
+
+        The mapping is now the single source of truth and lists stash drop and stash
+        clear as separate entries, so there are 10 patterns.
+        """
         assert hasattr(handler, "destructive_patterns")
-        assert len(handler.destructive_patterns) == 9
+        assert len(handler.destructive_patterns) == 10
+
+    def test_match_reason_and_matches_agree_for_each_command(self, handler):
+        """matches() and _match_reason() (used by handle()) must agree on every command.
+
+        Guards against the pattern source drifting between matches() and handle(): both
+        now consume the single ordered mapping, so a command blocked by matches() must
+        yield a specific (non-generic) reason via _match_reason, and vice versa.
+        """
+        commands = [
+            "git reset --hard HEAD~1",
+            "git clean -fd",
+            "git checkout .",
+            "git checkout -- file.py",
+            "git restore file.py",
+            "git stash drop",
+            "git stash clear",
+            "git push --force origin main",
+            "git branch -D feature",
+            "git commit --amend",
+        ]
+        for command in commands:
+            hook_input = {"tool_name": "Bash", "tool_input": {"command": command}}
+            assert handler.matches(hook_input) is True
+            assert handler._match_reason(command) is not None
+
+    def test_match_reason_returns_none_for_safe_git(self, handler):
+        """_match_reason() returns None for non-destructive git commands."""
+        assert handler._match_reason("git status") is None
+        assert handler._match_reason("git restore --staged file.py") is None
 
     # matches() - Pattern 1: git reset --hard
     def test_matches_git_reset_hard(self, handler):
@@ -735,10 +768,10 @@ class TestDestructiveGitProgressiveVerbosity:
         assert "PERMANENTLY DESTROYS" in result.reason
         assert "LLM is NOT ALLOWED" in result.reason
 
-    def test_data_layer_error_falls_back_to_terse(self, handler):
-        """If data layer raises exception, should fall back to terse."""
+    def test_data_layer_unavailable_falls_back_to_terse(self, handler):
+        """If data layer/history is unavailable (AttributeError), fall back to terse."""
         mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.side_effect = Exception("Data layer error")
+        mock_dl.history.count_blocks_by_handler.side_effect = AttributeError("no history")
         hook_input = {"tool_name": "Bash", "tool_input": {"command": "git restore file.txt"}}
         with patch(
             "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
@@ -750,3 +783,14 @@ class TestDestructiveGitProgressiveVerbosity:
         # Should fall back to count=0 (terse)
         assert len(result.reason) < 200
         assert "BLOCKED" in result.reason
+
+    def test_block_count_does_not_swallow_unexpected_errors(self, handler):
+        """Unexpected errors from the data layer must propagate (FAIL FAST)."""
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.side_effect = RuntimeError("unexpected")
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.destructive_git.get_data_layer",
+            return_value=mock_dl,
+        ):
+            with pytest.raises(RuntimeError):
+                handler._get_block_count()

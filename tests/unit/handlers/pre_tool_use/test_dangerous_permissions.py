@@ -95,6 +95,55 @@ class TestDangerousPermissionsHandler:
         }
         assert handler.matches(hook_input) is True
 
+    # matches() - Documented world-writable forms (666, a+w, o+w)
+    def test_matches_chmod_666(self, handler):
+        """Should match 'chmod 666' (world-writable, documented as blocked)."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "chmod 666 file.txt"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_chmod_recursive_666(self, handler):
+        """Should match 'chmod -R 666'."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "chmod -R 666 dir/"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_chmod_a_plus_w(self, handler):
+        """Should match 'chmod a+w' (all gain write, documented as blocked)."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "chmod a+w file.txt"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_chmod_o_plus_w(self, handler):
+        """Should match 'chmod o+w' (others gain write, documented as blocked)."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "chmod o+w file.txt"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_chmod_o_plus_rw(self, handler):
+        """Should match 'chmod o+rw' (others gain write)."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "chmod o+rw file.txt"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_chmod_other_world_writable_octal(self, handler):
+        """Should match other world-writable octal modes (e.g. 757, last digit 7)."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "chmod 757 file.txt"},
+        }
+        assert handler.matches(hook_input) is True
+
     # matches() - Negative Cases: Safe chmod commands
     def test_matches_chmod_755_returns_false(self, handler):
         """Should NOT match safe 'chmod 755'."""
