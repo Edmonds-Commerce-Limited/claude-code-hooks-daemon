@@ -196,6 +196,7 @@ class ConfigTemplate:
             "    lint_on_edit: {enabled: true, priority: 25}  # Language-aware lint validation after Write/Edit\n"
             "    markdown_table_formatter: {enabled: true, priority: 26}  # Auto-format markdown tables via mdformat\n"
             "    validate_eslint_on_write: {enabled: true, priority: 10}  # Run ESLint after file writes\n"
+            "    recovery_cron_advisor: {enabled: false, priority: 30}   # Advise on failsafe recovery cron lifecycle\n"
             "\n"
             "  # PermissionRequest - Auto-approve decisions\n"
             "  permission_request:\n"

@@ -346,6 +346,11 @@ class HandlerID:
         config_key="plan_completion_advisor",
         display_name="plan-completion-advisor",
     )
+    RECOVERY_CRON_ADVISOR = HandlerIDMeta(
+        class_name="RecoveryCronAdvisorHandler",
+        config_key="recovery_cron_advisor",
+        display_name="recovery-cron-advisor",
+    )
     GLOBAL_NPM_ADVISOR = HandlerIDMeta(
         class_name="GlobalNpmAdvisorHandler",
         config_key="global_npm_advisor",

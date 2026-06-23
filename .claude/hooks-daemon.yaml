@@ -261,6 +261,11 @@ handlers:
       enabled: true
       priority: 27
 
+    recovery_cron_advisor:  # Advises on failsafe recovery cron lifecycle (creation, progress, completion)
+      enabled: true         # Dogfooding: enabled in this repo; opt-in (false) elsewhere
+      priority: 30
+      # progress_cooldown_events: 20  # Events between repeat progress reminders (default: 20)
+
   # SessionStart handlers (run when session starts)
   session_start:
     yolo_container_detection:  # Detects YOLO development environments (Docker, etc)

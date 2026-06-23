@@ -75,6 +75,9 @@ class Priority:
     # Git hooks executable fixer (Priority: 27 - adjacent to other PostToolUse fixers)
     GIT_HOOKS_EXECUTABLE_FIXER = 27
 
+    # PostToolUse advisory handlers (Priority: 30)
+    RECOVERY_CRON_ADVISOR = 30
+
     # QA enforcement handlers (Priority: 30-35)
     QA_SUPPRESSION = 30
     VALIDATE_PLAN_NUMBER = 30
