@@ -188,7 +188,8 @@ class TestValidatePlanNumberHandler:
         assert result.decision == Decision.ALLOW
         assert result.context
         assert "PLAN NUMBER INCORRECT" in result.context[0]
-        assert "You are creating: CLAUDE/Plan/10-new/" in result.context[0]
+        # Plan 00138: the actual folder name is echoed back verbatim (zero-padding preserved).
+        assert "You are creating: CLAUDE/Plan/010-new/" in result.context[0]
         assert "Expected next number: 6" in result.context[0]
 
     def test_handle_write_incorrect_plan_number_too_low(
@@ -445,7 +446,8 @@ class TestValidatePlanNumberHandler:
             self._write_input(temp_workspace, "CLAUDE/Plan/050-wrong/README.md")
         )
         assert result.context
-        assert "mkdir -p CLAUDE/Plan/43-wrong" in result.context[0]
+        # Plan 00138: corrected example uses the zero-padded plan-number convention.
+        assert "mkdir -p CLAUDE/Plan/00043-wrong" in result.context[0]
         assert "hooksdaemon.latestPlanNumber" in result.context[0]
 
     # ----- TOCTOU: mkdir created the dir before Write fires (bootstrap path) -----
@@ -492,6 +494,79 @@ class TestValidatePlanNumberHandler:
         assert result.decision == Decision.ALLOW
         assert result.context
         assert "PLAN NUMBER INCORRECT" in result.context[0]
+
+    # ----- Plan 00138: do not warn when editing an EXISTING plan folder -----
+
+    def test_does_not_match_write_to_existing_plan_folder(
+        self, handler: ValidatePlanNumberHandler, temp_workspace: Path, plan_root: Path
+    ) -> None:
+        """Regression (Plan 00138): editing a file in an EXISTING plan folder is not creation.
+
+        Field bug: rewriting ``CLAUDE/Plan/00135-event-driven-send-keys-injection/PLAN.md``
+        (an existing plan) triggered "PLAN NUMBER INCORRECT". A Write whose target plan folder
+        already exists on disk is an edit/rewrite, never a new-plan creation — so the handler
+        must NOT fire.
+        """
+        (plan_root / "00135-event-driven-send-keys-injection").mkdir()
+        hook_input = self._write_input(
+            temp_workspace,
+            "CLAUDE/Plan/00135-event-driven-send-keys-injection/PLAN.md",
+        )
+        assert handler.matches(hook_input) is False
+
+    def test_matches_write_to_new_plan_folder(
+        self, handler: ValidatePlanNumberHandler, temp_workspace: Path, plan_root: Path
+    ) -> None:
+        """True positive preserved: a genuinely NEW plan folder (not yet on disk) still matches."""
+        hook_input = self._write_input(temp_workspace, "CLAUDE/Plan/00200-brand-new/PLAN.md")
+        assert handler.matches(hook_input) is True
+
+    def test_does_not_match_mkdir_to_existing_plan_folder(
+        self, handler: ValidatePlanNumberHandler, temp_workspace: Path, plan_root: Path
+    ) -> None:
+        """Regression (Plan 00138): mkdir targeting an already-existing plan folder is a no-op
+        re-create, not a new plan — the handler must not fire."""
+        (plan_root / "00135-existing").mkdir()
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "mkdir -p CLAUDE/Plan/00135-existing"},
+        }
+        assert handler.matches(hook_input) is False
+
+    # ----- Plan 00138: zero-padding must be preserved in the message -----
+
+    def test_warning_preserves_zero_padded_folder_name(
+        self, handler: ValidatePlanNumberHandler, temp_workspace: Path, plan_root: Path
+    ) -> None:
+        """Regression (Plan 00138): a mis-numbered NEW plan with a zero-padded name must be
+        echoed back WITH its leading zeros, not stripped to a bare int.
+
+        Field bug: the message rendered ``00135-...`` as ``135-...`` because ``int()`` dropped
+        the zero-padding. The displayed actual-folder name must match what the user typed.
+        """
+        (plan_root / "00071-existing").mkdir()
+        result = handler.handle(
+            self._write_input(temp_workspace, "CLAUDE/Plan/00099-wrong/PLAN.md")
+        )
+        assert result.context
+        assert "PLAN NUMBER INCORRECT" in result.context[0]
+        # Preserves the zero-padded folder name the user actually typed.
+        assert "00099-wrong" in result.context[0]
+        # Must NOT show the zero-stripped form.
+        assert "/99-wrong" not in result.context[0]
+
+    def test_warning_expected_number_is_zero_padded(
+        self, handler: ValidatePlanNumberHandler, temp_workspace: Path, plan_root: Path
+    ) -> None:
+        """Regression (Plan 00138): the expected next number is shown zero-padded to the plan
+        convention (5 digits), matching the folder naming users must adopt."""
+        (plan_root / "00071-existing").mkdir()
+        result = handler.handle(
+            self._write_input(temp_workspace, "CLAUDE/Plan/00099-wrong/PLAN.md")
+        )
+        assert result.context
+        # Expected next number 72 → displayed as 00072 (zero-padded), in the corrected example.
+        assert "00072-wrong" in result.context[0]
 
     # ----- config-aware plan directory -----
 

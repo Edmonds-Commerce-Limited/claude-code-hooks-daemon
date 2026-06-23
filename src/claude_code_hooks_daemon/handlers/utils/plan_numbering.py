@@ -24,7 +24,7 @@ from claude_code_hooks_daemon.utils.git_repo import GitRepo
 # git config key holding the per-repo plan high-water mark (highest number
 # ever allocated). Section names are case-insensitive in git; stored lowercased.
 _PLAN_COUNTER_CONFIG_KEY = "hooksdaemon.latestPlanNumber"
-_PLAN_NUMBER_WIDTH = 5
+PLAN_NUMBER_WIDTH = 5
 
 
 def get_next_plan_number(plan_folder: Path) -> str:
@@ -67,7 +67,7 @@ def get_next_plan_number(plan_folder: Path) -> str:
 
     # Return next number as 5-digit zero-padded string
     next_number = highest_plan_number(plan_folder) + 1
-    return f"{next_number:0{_PLAN_NUMBER_WIDTH}d}"
+    return f"{next_number:0{PLAN_NUMBER_WIDTH}d}"
 
 
 def highest_plan_number(plan_folder: Path) -> int:
@@ -170,16 +170,16 @@ def next_plan_number_for_target(
     repo_root = resolve_plan_repo_root(target_path)
     if repo_root is None:
         highest = highest_plan_number(fallback_root / plan_subdir)
-        return f"{highest + 1:0{_PLAN_NUMBER_WIDTH}d}"
+        return f"{highest + 1:0{PLAN_NUMBER_WIDTH}d}"
 
     counter = read_plan_counter(repo_root)
     if counter is not None:
-        return f"{counter + 1:0{_PLAN_NUMBER_WIDTH}d}"
+        return f"{counter + 1:0{PLAN_NUMBER_WIDTH}d}"
 
     # Bootstrap: no counter yet — seed it from the filesystem high-water mark.
     highest = highest_plan_number(repo_root / plan_subdir)
     write_plan_counter(repo_root, highest)
-    return f"{highest + 1:0{_PLAN_NUMBER_WIDTH}d}"
+    return f"{highest + 1:0{PLAN_NUMBER_WIDTH}d}"
 
 
 def record_plan_allocation(target_path: Path, plan_number: int) -> None:

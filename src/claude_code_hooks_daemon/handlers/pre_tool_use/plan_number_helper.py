@@ -84,9 +84,13 @@ class PlanNumberHelperHandler(Handler):
             if re.search(pattern, command):
                 return True
 
-        # 2. find commands on plan directory
+        # 2. find commands on the plan directory ITSELF (discovery), NOT a find scoped to a
+        # specific numbered plan folder. The trailing `/?(\s|$)` anchors the path token to
+        # END at the plan dir (optionally with a slash): it matches `find CLAUDE/Plan`,
+        # `find CLAUDE/Plan/ -name ...`, `find CLAUDE/Plan -maxdepth 1`, but NOT
+        # `find CLAUDE/Plan/00135-feature ...` (a find operating on a known plan folder).
         find_patterns = [
-            rf"find\s+{re.escape(plan_dir)}",
+            rf"find\s+{re.escape(plan_dir)}/?(\s|$)",
         ]
 
         for pattern in find_patterns:
@@ -97,9 +101,12 @@ class PlanNumberHelperHandler(Handler):
         # Match patterns like: echo CLAUDE/Plan/0*, echo CLAUDE/Plan/*, echo CLAUDE/Plan/[0-9]*
         # Use [^;&|]* instead of .* to avoid matching across command separators (&&, ||, ;, |)
         # which would cause false positives when echo and CLAUDE/Plan appear in different subcommands.
+        # The referenced path segment MUST contain a real glob metacharacter (*, [, ?) — a bare
+        # digit is NOT enough, otherwise `echo CLAUDE/Plan/00135-feature/PLAN.md` (a reference to
+        # a specific numbered folder) would falsely match as a discovery glob.
         glob_patterns = [
-            rf"echo\s+[^;&|]*{re.escape(plan_dir)}/[0-9\*\[]",  # echo with glob chars
-            rf"printf\s+[^;&|]*{re.escape(plan_dir)}/[0-9\*\[]",  # printf with glob chars
+            rf"echo\s+[^;&|]*{re.escape(plan_dir)}/[^\s;&|]*[\*\[?]",  # echo with glob chars
+            rf"printf\s+[^;&|]*{re.escape(plan_dir)}/[^\s;&|]*[\*\[?]",  # printf with glob chars
         ]
 
         for pattern in glob_patterns:

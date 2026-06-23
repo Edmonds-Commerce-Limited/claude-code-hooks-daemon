@@ -423,6 +423,92 @@ class TestPlanNumberHelperHandler:
         assert guidance is not None
         assert guidance.lstrip().startswith("#")
 
+    def test_ignores_find_on_specific_plan_folder(
+        self, handler_enabled: PlanNumberHelperHandler
+    ) -> None:
+        """Regression (Plan 00138): a find scoped to ONE specific plan folder is NOT discovery.
+
+        Bug: ``find\\s+{plan_dir}`` matched ``find CLAUDE/Plan/<ANY-subpath>``, so a find
+        operating on a known numbered folder (e.g. 00135) was wrongly blocked. The handler
+        must only fire on a find of the plan dir ITSELF, never on a find inside a specific
+        numbered plan folder.
+        """
+        false_positives = [
+            "find CLAUDE/Plan/00135-feature -maxdepth 1 -type d",
+            "find CLAUDE/Plan/00135-feature -name 'PLAN*.md'",
+            "find CLAUDE/Plan/00042-x -type f",
+        ]
+
+        for command in false_positives:
+            hook_input = {
+                "tool_name": "Bash",
+                "tool_input": {"command": command},
+            }
+            assert not handler_enabled.matches(
+                hook_input
+            ), f"Should NOT match (find on specific folder): {command}"
+
+    def test_ignores_echo_printf_referencing_specific_plan_folder(
+        self, handler_enabled: PlanNumberHelperHandler
+    ) -> None:
+        """Regression (Plan 00138): echo/printf naming a specific numbered folder is NOT a glob.
+
+        Bug: the char class ``[0-9\\*\\[]`` matched a BARE DIGIT, so any echo/printf mentioning
+        ``CLAUDE/Plan/0...`` (i.e. any numbered folder like 00135) falsely matched. A real glob
+        metacharacter (``*``, ``[``, ``?``) must be required.
+        """
+        false_positives = [
+            "echo CLAUDE/Plan/00135-feature/PLAN.md",
+            "printf '%s' CLAUDE/Plan/00135-feature",
+            "echo 'writing CLAUDE/Plan/00042-x/notes.md'",
+        ]
+
+        for command in false_positives:
+            hook_input = {
+                "tool_name": "Bash",
+                "tool_input": {"command": command},
+            }
+            assert not handler_enabled.matches(
+                hook_input
+            ), f"Should NOT match (echo/printf of specific folder): {command}"
+
+    def test_ignores_git_mv_within_specific_plan_folder(
+        self, handler_enabled: PlanNumberHelperHandler
+    ) -> None:
+        """Regression (Plan 00138): renaming a file inside a specific plan folder is NOT discovery.
+
+        Bug: this was blocked as collateral when batched in the same Bash call as a matching
+        find/printf, but on its own it must never match — no glob, no find on the plan dir, no
+        sort/tail, no ls|grep-numbers.
+        """
+        command = "git mv CLAUDE/Plan/00135-feature/PLAN.md CLAUDE/Plan/00135-feature/PLAN-v1.md"
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+        }
+        assert not handler_enabled.matches(
+            hook_input
+        ), f"Should NOT match (git mv within specific folder): {command}"
+
+    def test_ignores_ls_specific_folder_grep_non_numeric(
+        self, handler_enabled: PlanNumberHelperHandler
+    ) -> None:
+        """Documents (Plan 00138): ``ls CLAUDE/Plan/ | grep -i 135`` is a content filter.
+
+        Pattern #5 already required a NUMERIC grep pattern (``^[0-9]``, ``[0-9]``); grepping for
+        a literal substring like ``135`` does not satisfy it. This documenting regression test
+        confirms #5 is narrow and was never the cause of the 135 false positive (that was the
+        echo/printf char-class). It also confirms the fix did not widen #5.
+        """
+        command = "ls CLAUDE/Plan/ | grep -i 135"
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+        }
+        assert not handler_enabled.matches(
+            hook_input
+        ), f"Should NOT match (ls plan dir | grep literal substring): {command}"
+
     def test_get_claude_md_names_mkplan_as_canonical(self) -> None:
         """Guidance must name mkplan.bash as the canonical create-a-plan action.
 

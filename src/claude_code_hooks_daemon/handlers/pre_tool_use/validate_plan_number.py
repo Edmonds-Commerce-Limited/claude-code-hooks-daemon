@@ -16,6 +16,7 @@ from claude_code_hooks_daemon.constants import (
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult, ProjectContext
 from claude_code_hooks_daemon.core.utils import get_bash_command, get_file_path
 from claude_code_hooks_daemon.handlers.utils.plan_numbering import (
+    PLAN_NUMBER_WIDTH,
     next_plan_number_for_target,
     record_plan_allocation,
 )
@@ -64,7 +65,13 @@ class ValidatePlanNumberHandler(Handler):
         self._track_plans_in_project: str | None = None
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
-        """Check if creating a plan folder."""
+        """Check if creating a NEW plan folder.
+
+        Only genuinely-new plan folders are number-validated. A Write/Edit to a
+        file inside an ALREADY-EXISTING plan folder (an edit/rewrite of an
+        existing plan), or an ``mkdir`` of a folder that already exists, is NOT
+        a creation — the handler must not fire (Plan 00138).
+        """
         tool_name = hook_input.get(HookInputField.TOOL_NAME)
 
         # Check Write operations
@@ -77,8 +84,10 @@ class ValidatePlanNumberHandler(Handler):
 
                 # Match plan folder creation (direct children of Plan/ only)
                 # CLAUDE/Plan/NNN-name/ matches, CLAUDE/Plan/Subfolder/NNN-name/ does not
-                if re.search(r"CLAUDE/Plans?/(\d+)-([^/]+)/", file_path):
-                    return True
+                match = re.search(r"(.*CLAUDE/Plans?/\d+-[^/]+)/", file_path)
+                if match:
+                    # Editing a file inside an existing plan folder is not creation.
+                    return not self._plan_folder_exists(match.group(1))
 
         # Check Bash mkdir commands
         if tool_name == ToolName.BASH:
@@ -91,10 +100,16 @@ class ValidatePlanNumberHandler(Handler):
                 # Match mkdir for plan folders (direct children of Plan/ only)
                 # Use [^&;]* instead of .*? to prevent spanning across && or ;
                 # command boundaries into unrelated git mv arguments
-                if re.search(r"mkdir[^&;]*CLAUDE/Plans?/(\d+)-([^\s/]+)", command):
-                    return True
+                match = re.search(r"mkdir[^&;]*?(\S*CLAUDE/Plans?/\d+-[^\s/]+)", command)
+                if match:
+                    # mkdir of an already-existing plan folder is a no-op re-create.
+                    return not self._plan_folder_exists(match.group(1))
 
         return False
+
+    def _plan_folder_exists(self, plan_path: str) -> bool:
+        """Whether the plan folder at ``plan_path`` already exists on disk."""
+        return self._resolve_target(plan_path).is_dir()
 
     def _is_documentation_file(self, file_path: str) -> bool:
         """Check if file is documentation (skip validation for these)."""
@@ -121,6 +136,7 @@ class ValidatePlanNumberHandler(Handler):
         tool_name = hook_input.get(HookInputField.TOOL_NAME)
         plan_path: str | None = None
         plan_number: int | None = None
+        plan_number_str: str | None = None  # original digits as typed (zero-padding preserved)
         plan_name: str | None = None
 
         # Extract the full plan-folder path, number and name.
@@ -130,7 +146,8 @@ class ValidatePlanNumberHandler(Handler):
                 match = re.search(r"(.*CLAUDE/Plans?/(\d+)-([^/]+))/", file_path)
                 if match:
                     plan_path = match.group(1)
-                    plan_number = int(match.group(2))
+                    plan_number_str = match.group(2)
+                    plan_number = int(plan_number_str)
                     plan_name = match.group(3)
 
         elif tool_name == ToolName.BASH:
@@ -139,10 +156,11 @@ class ValidatePlanNumberHandler(Handler):
                 match = re.search(r"mkdir[^&;]*?(\S*CLAUDE/Plans?/(\d+)-([^\s/]+))", command)
                 if match:
                     plan_path = match.group(1)
-                    plan_number = int(match.group(2))
+                    plan_number_str = match.group(2)
+                    plan_number = int(plan_number_str)
                     plan_name = match.group(3)
 
-        if plan_number is None or plan_path is None:
+        if plan_number is None or plan_path is None or plan_number_str is None:
             return HookResult(decision=Decision.ALLOW)
 
         plan_dir = self._track_plans_in_project or ProjectPath.PLAN_DIR
@@ -153,10 +171,14 @@ class ValidatePlanNumberHandler(Handler):
         # (TOCTOU: mkdir already created the dir, so a bootstrap scan counted it
         # as the high-water mark and expected jumped one ahead).
         if plan_number not in (expected_number, expected_number - 1):
+            # Echo the actual folder name back VERBATIM (zero-padding preserved):
+            # int() would strip leading zeros, rendering ``00135-x`` as ``135-x``
+            # (Plan 00138). The corrected example uses the zero-padded convention.
+            expected_padded = f"{expected_number:0{PLAN_NUMBER_WIDTH}d}"
             error_message = f"""
 PLAN NUMBER INCORRECT
 
-You are creating: {plan_dir}/{plan_number}-{plan_name}/
+You are creating: {plan_dir}/{plan_number_str}-{plan_name}/
 Expected next number: {expected_number}
 
 The next plan number is tracked per-repository in git config
@@ -170,7 +192,7 @@ Use the correct plan number: {expected_number}
 
 Example:
 ```bash
-mkdir -p {plan_dir}/{expected_number}-{plan_name}
+mkdir -p {plan_dir}/{expected_padded}-{plan_name}
 ```
 
 See: {plan_dir}/CLAUDE.md for full instructions

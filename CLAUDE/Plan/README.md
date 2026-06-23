@@ -103,6 +103,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00138: Fix Plan-Number Handler False Positives](Completed/00138-plan-number-helper-false-positives/PLAN.md) - Complete
+
+  - TWO plan-number handlers wrongly fired on a SPECIFIC, already-known plan folder (same disease). `plan_number_helper` (priority 33, Bash): the `find` pattern matched any subpath and the `echo`/`printf` glob char-class matched a bare digit, so `find`/`echo`/`printf` referencing `CLAUDE/Plan/00135-x` were blocked as discovery. Fix: anchor `find` to the plan dir itself (`/?(\s|$)`) and require a real glob metachar (`*`/`[`/`?`) for echo/printf. `validate_plan_number` (priority 41, Write/Edit + mkdir): warned when editing an EXISTING plan's PLAN.md (no existence check) and zero-stripped the folder name in its message (`00135` → `135`). Fix: skip when the target plan folder already exists on disk; echo the original digit string verbatim and use the zero-padded `PLAN_NUMBER_WIDTH` convention in the corrected example. All pre-existing true positives preserved. 11/13 QA (8720 tests, 95.1% cov); smoke_test deferred to post-merge daemon restart (worktree has no daemon).
+
 - [00137: Install/Upgrade SSoT + KISS Audit & Remediation](Completed/00137-install-upgrade-ssot-kiss-audit/PLAN.md) - Complete
 
   - Remediated all six remaining findings from the Opus SSoT/KISS audit spawned by 00136. **F-PROFILE** (seed-only): handler profiles documented as a one-shot install-time seed; the config-merge preserves the seed on upgrade (no path re-applies a profile). **F-PLANDEF/F-PLANDIR**: flipped `plan_workflow.enabled` model default to False (opt-in, matching the opt-in plan handlers), kept the legacy-opt-in migration, removed the duplicated per-handler `track_plans_in_project` from the example (top-level `plan_workflow.directory` is the runtime SSoT the registry already injects). **F-PYFLOOR**: `check_python3` raises the Python floor from `pyproject.toml` instead of a hardcoded `3.11`. **F-PROFLIST**: profile handler names validated against config keys. **F-VENVSUM**: install summary prints the real `$VENV_PATH`
@@ -928,12 +932,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 137
-- **Completed**: 110 (1 with reduced scope, 4 already-shipped)
+- **Total Plans Created**: 138
+- **Completed**: 111 (1 with reduced scope, 4 already-shipped)
 - **Active**: 5 (1 python-discovery, 1 question-blocker, 1 stop-quality, 2 long-running/review) + 1 in-progress build (00116 CLAUDE.md compression)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping, 00081 - superseded by 00082)
-- **Last reconciled by**: Plan 00137 close-out (SSoT/KISS audit remediation)
+- **Last reconciled by**: Plan 00138 close-out (plan-number handler false positives)
 
 ## Quick Links
 
