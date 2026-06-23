@@ -1,6 +1,6 @@
 # Plan 00137: Install/Upgrade SSoT + KISS Audit & Remediation
 
-**Status**: In Progress (findings catalogued; remediation pending)
+**Status**: Complete
 **Created**: 2026-06-23
 **Owner**: joseph
 **Priority**: High
@@ -52,12 +52,12 @@ unpersisted switch.**
 
 | ID         | Title                                                                 | Class     | Severity | Status                 |
 | ---------- | --------------------------------------------------------------------- | --------- | -------- | ---------------------- |
-| F-PROFILE  | `HANDLER_PROFILE` env gate orthogonal to config, never on upgrade     | env-gate  | High     | ⬜ To do               |
-| F-PLANDEF  | `plan_workflow.enabled` defaults True but handler ships disabled      | deploy≠rt | Medium   | ⬜ To do               |
-| F-PYFLOOR  | Python `3.11` floor hardcoded despite pyproject SSoT + parser         | dup-ssot  | Medium   | ⬜ To do               |
-| F-PLANDIR  | Plan dir duplicated across `directory` + two `track_plans_in_project` | dup-ssot  | Medium   | ⬜ To do               |
-| F-PROFLIST | Profile handler-name lists hardcode names that also live in config    | dup-ssot  | Low      | ⬜ To do               |
-| F-VENVSUM  | Install summary prints the deleted legacy venv path                   | dup/KISS  | Low      | ⬜ To do               |
+| F-PROFILE  | `HANDLER_PROFILE` env gate orthogonal to config, never on upgrade     | env-gate  | High     | ✅ Fixed (defe9fb)     |
+| F-PLANDEF  | `plan_workflow.enabled` defaults True but handler ships disabled      | deploy≠rt | Medium   | ✅ Fixed (18c4a65)     |
+| F-PYFLOOR  | Python `3.11` floor hardcoded despite pyproject SSoT + parser         | dup-ssot  | Medium   | ✅ Fixed (faa53e2)     |
+| F-PLANDIR  | Plan dir duplicated across `directory` + two `track_plans_in_project` | dup-ssot  | Medium   | ✅ Fixed (18c4a65)     |
+| F-PROFLIST | Profile handler-name lists hardcode names that also live in config    | dup-ssot  | Low      | ✅ Fixed (026dde9)     |
+| F-VENVSUM  | Install summary prints the deleted legacy venv path                   | dup/KISS  | Low      | ✅ Fixed (defe9fb)     |
 | F-FASTPATH | Plan deploy missing from upgrade fast path                            | asymmetry | High     | ✅ Fixed in Plan 00136 |
 | F-SUMMARY  | Install summary advertised removed `PLAN_WORKFLOW=yes` switch         | KISS      | Low      | ✅ Fixed in Plan 00136 |
 
@@ -107,22 +107,22 @@ unpersisted switch.**
 
 ### Phase 1: High severity
 
-- [ ] ⬜ **Task 1.1 (F-PROFILE)**: Confirm approach with user (seed-only vs config-stored). Then TDD: add upgrade-merge-preserves-profile test; document profiles as initial seed; remove any implication the env var is a durable switch.
+- [x] ✅ **Task 1.1 (F-PROFILE)**: Approach decided seed-only (config IS the SSoT after the seed; re-applying on upgrade would clobber user handler choices). TDD: added `TestProfileSeedSurvivesUpgrade` (profile-seeded enabled:true survives the production diff+merge); documented profiles as an initial install-time seed in the module docstring + install summary; reworded HANDLER_PROFILE messaging so it no longer reads as a durable switch.
 
 ### Phase 2: Medium severity (design F-PLANDEF + F-PLANDIR together)
 
-- [ ] ⬜ **Task 2.1 (F-PLANDEF + F-PLANDIR)**: Reconcile example config + migration validator + registry so `plan_workflow.{enabled,directory}` is the one SSoT, the example default matches the opt-in handler state, and the legacy `track_plans_in_project` opt-in still works. Revisit 00136's deploy-by-default. TDD across config-model + deploy.
-- [ ] ⬜ **Task 2.2 (F-PYFLOOR)**: Pass pyproject to `find_latest_python` in `prerequisites.sh` / `resolve_venv.sh`; derive diagnostic text from the parsed floor. shellcheck clean.
+- [x] ✅ **Task 2.1 (F-PLANDEF + F-PLANDIR)**: Flipped `PlanWorkflowConfig.enabled` model default to False (matches opt-in handlers); kept `migrate_plan_handler_options` so legacy per-handler opt-in survives; shipped only a COMMENTED top-level `plan_workflow` block in the example (an active one would merge into legacy configs and skip migration); removed the dead per-handler `track_plans_in_project` from the example (registry already derives it from `plan_workflow.directory`). TDD across config-model, example-config integration, and deploy tests.
+- [x] ✅ **Task 2.2 (F-PYFLOOR)**: `check_python3` now takes a pyproject path, raises the floor via `_pd_parse_pyproject_floor`, and derives the `(X.Y+)` diagnostic from the parsed floor; `check_all_prerequisites` forwards it; `install_version.sh` passes `$DAEMON_DIR/pyproject.toml`. `resolve_venv.sh` already passed pyproject (3.11 there is the documented floor-of-last-resort — left as-is). shellcheck clean; isolated-subshell regression test added.
 
 ### Phase 3: Low severity
 
-- [ ] ⬜ **Task 3.1 (F-PROFLIST)**: Validate profile handler names against config keys.
-- [ ] ⬜ **Task 3.2 (F-VENVSUM)**: Print `$VENV_PATH` in the install summary.
+- [x] ✅ **Task 3.1 (F-PROFLIST)**: Added `config_handler_names` + `all_profile_handler_names`; `apply_profile` warns on profile handlers absent from the target config; integration guard asserts every profile handler name exists in the shipped example.
+- [x] ✅ **Task 3.2 (F-VENVSUM)**: Install summary prints `$VENV_PATH` instead of the deleted legacy `untracked/venv/` literal.
 
 ### Phase 4: Close-out
 
-- [ ] ⬜ **Task 4.1**: Full QA (13/13), daemon restart RUNNING after each fix.
-- [ ] ⬜ **Task 4.2**: config-changes / truth-changes notes for any behaviour change at release.
+- [x] ✅ **Task 4.1**: 13/13 QA passing; daemon restarts RUNNING after the changes.
+- [x] ✅ **Task 4.2**: Staged `config-changes/v3.26.0.yaml` (documentation-only `changed` entry for the opt-in flip, with migration note) and `truth-changes/v3.26.0.yaml` in `UNRELEASED/` for the next release.
 
 ## Dependencies
 
@@ -147,3 +147,28 @@ unpersisted switch.**
   recorded as ✅ for completeness. Remediation of the remaining six is pending;
   F-PROFILE needs a user decision on the seed-vs-config-stored approach before
   building.
+
+- All six remaining findings remediated with TDD, one checkpoint commit per
+  finding (F-PROFILE+F-VENVSUM share `install_version.sh`; F-PLANDEF+F-PLANDIR
+  are coupled). Delivery commits:
+
+  - F-PROFILE + F-VENVSUM: `defe9fb`
+  - F-PYFLOOR: `faa53e2`
+  - F-PROFLIST: `026dde9`
+  - F-PLANDEF + F-PLANDIR: `18c4a65`
+  - UNRELEASED config/truth-change manifests: `d5c95cd`
+  - End-to-end deploy gates updated for opt-in default: `a7ef263`
+
+- F-PROFILE resolved as **seed-only**: a profile seeds the per-handler
+  `enabled:` flags once at install; the yaml is the SSoT thereafter and the
+  config-merge preserves the seed on upgrade (so no upgrade path re-applies a
+  profile).
+
+- F-PLANDEF/F-PLANDIR design note: the model default flip (True→False) is the
+  KISS fix. An active example `plan_workflow: {enabled:false}` block was
+  deliberately NOT added — it would merge into legacy client configs on
+  upgrade, cause `migrate_plan_handler_options` to skip, and silently drop the
+  legacy per-handler opt-in. A commented block + the model default avoids that.
+  This is a behaviour change carrying the staged config/truth-change manifests.
+
+- Final state: 13/13 QA, daemon RUNNING.

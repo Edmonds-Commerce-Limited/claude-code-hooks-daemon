@@ -29,12 +29,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Tooling / Dependencies
 
-- [00137: Install/Upgrade SSoT + KISS Audit & Remediation](00137-install-upgrade-ssot-kiss-audit/PLAN.md) - In Progress (findings catalogued)
-
-  - Opus audit (dispatched after the 00136 mkplan fix) scanned the install/upgrade/deployment system for structural twins of the `PLAN_WORKFLOW` bug: env-var gates orthogonal to config, install-vs-upgrade asymmetries, dual sources of truth, deploy decoupled from runtime config
-  - 8 findings catalogued (2 already fixed by 00136). Flagship remaining: **F-PROFILE** — `HANDLER_PROFILE` is an install-only env gate (twin of `PLAN_WORKFLOW`), never re-applied on upgrade, with no config field. Plus `plan_workflow.enabled` default-vs-shipped-handler drift, hardcoded Python floor, duplicated plan dir, profile-list duplication, stale venv-path summary
-  - Principle: config (`.claude/hooks-daemon.yaml`) is the single source of truth; deployment derives from it. F-PROFILE needs a user decision (seed-only vs config-stored) before build
-
 - [00130: Plan-Scaffolding Script Distribution (`mkplan.bash`)](00130-plan-scaffolding-script-distribution/PLAN.md) - Shipped v3.23.0
 
   - Candidate `mkplan.bash` proposed for distribution into client plan folders: scaffolds the next numbered plan folder + skeleton `PLAN.md`, resolving the number from the git-anchored `hooksdaemon.latestPlanNumber` counter (Plan 00112) so humans and agents stop hand-rolling names / scanning `ls` for the next number
@@ -108,6 +102,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00137: Install/Upgrade SSoT + KISS Audit & Remediation](Completed/00137-install-upgrade-ssot-kiss-audit/PLAN.md) - Complete
+
+  - Remediated all six remaining findings from the Opus SSoT/KISS audit spawned by 00136. **F-PROFILE** (seed-only): handler profiles documented as a one-shot install-time seed; the config-merge preserves the seed on upgrade (no path re-applies a profile). **F-PLANDEF/F-PLANDIR**: flipped `plan_workflow.enabled` model default to False (opt-in, matching the opt-in plan handlers), kept the legacy-opt-in migration, removed the duplicated per-handler `track_plans_in_project` from the example (top-level `plan_workflow.directory` is the runtime SSoT the registry already injects). **F-PYFLOOR**: `check_python3` raises the Python floor from `pyproject.toml` instead of a hardcoded `3.11`. **F-PROFLIST**: profile handler names validated against config keys. **F-VENVSUM**: install summary prints the real `$VENV_PATH`
+  - Delivery commits `defe9fb`, `faa53e2`, `026dde9`, `18c4a65`, `d5c95cd`, `a7ef263`. The plan-workflow opt-in flip is a behaviour change — staged `config-changes`/`truth-changes` manifests under `UNRELEASED/` for the next release. 13/13 QA
 
 - [00136: mkplan deployment driven by config SSoT](Completed/00136-mkplan-deploy-config-ssot/PLAN.md) - Complete
 
@@ -930,11 +929,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 137
-- **Completed**: 109 (1 with reduced scope, 4 already-shipped)
-- **Active**: 6 (1 SSoT/KISS audit [00137], 1 python-discovery, 1 question-blocker, 1 stop-quality, 2 long-running/review) + 1 in-progress build (00116 CLAUDE.md compression)
+- **Completed**: 110 (1 with reduced scope, 4 already-shipped)
+- **Active**: 5 (1 python-discovery, 1 question-blocker, 1 stop-quality, 2 long-running/review) + 1 in-progress build (00116 CLAUDE.md compression)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping, 00081 - superseded by 00082)
-- **Last reconciled by**: Plans 00133 + 00134 close-out (shipped v3.24.0)
+- **Last reconciled by**: Plan 00137 close-out (SSoT/KISS audit remediation)
 
 ## Quick Links
 
