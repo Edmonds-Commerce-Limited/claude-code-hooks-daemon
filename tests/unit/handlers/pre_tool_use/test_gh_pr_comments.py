@@ -70,6 +70,32 @@ class TestGhPrCommentsHandler:
         }
         assert handler.matches(hook_input) is True
 
+    def test_matches_when_comments_only_in_unrelated_echo(
+        self, handler: GhPrCommentsHandler
+    ) -> None:
+        """Should match when --comments appears only in an unrelated chained command.
+
+        Regression for finding #56: a whole-command substring test let
+        `gh pr view 5 && echo "add --comments"` bypass the block even though the
+        actual `gh pr view 5` ran without --comments. The flag check must be
+        scoped to the gh-pr-view sub-command segment.
+        """
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": 'gh pr view 5 && echo "add --comments next time"'},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_not_matches_comments_in_same_gh_pr_view_segment(
+        self, handler: GhPrCommentsHandler
+    ) -> None:
+        """Should NOT match when --comments is in the gh pr view segment of a chain."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": 'gh pr view 5 --comments && echo "done"'},
+        }
+        assert handler.matches(hook_input) is False
+
     # ==========================================================================
     # NOT MATCHES TESTS - should allow (has --comments or not gh pr view)
     # ==========================================================================
