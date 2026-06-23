@@ -30,7 +30,12 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         wget \
         gnupg \
         apt-transport-https \
+        tmux \
     && rm -rf /var/lib/apt/lists/*
+
+# tmux: required for Plan 00135 (event-driven send-keys injection) spikes/feature —
+# lets the container drive a real tmux session + Claude TUI for capture-pane/key-table
+# experiments and (eventually) a CI tmux test harness for the injector.
 
 # ================================================================
 # Dart SDK - dart analyze
@@ -49,4 +54,4 @@ ENV PATH="/usr/lib/dart/bin:${PATH}"
 # ================================================================
 # Verify installations
 # ================================================================
-RUN go version && ruby --version && php --version && dart --version
+RUN go version && ruby --version && php --version && dart --version && tmux -V

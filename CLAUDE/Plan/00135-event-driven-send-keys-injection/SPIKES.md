@@ -147,6 +147,61 @@ is required before ARCH-A coexistence works.
 
 ---
 
+## Spike Results — run 2026-06-23, IN THE CCY CONTAINER (tmux 3.3a + claude 2.1.186)
+
+Run by Claude directly (root container; tmux installed, added to ccy Dockerfile).
+Two of the make-or-break spikes are now empirically RESOLVED on a real host.
+
+### S-KEYTABLE → **GREEN (observe-without-consume CONFIRMED)**
+
+Drove a *real* attached client through a Python pty (not `send-keys`, which
+bypasses the key-table) typing `abz`, with `a`/`b` bound in the `root` table to
+`run-shell -b "printf ... >> stamps"` + `send-keys -l <key>`:
+
+- `STAMPS=[ab]` — bound keys **fired on real client input** (the key-table is on
+  the genuine client-input path).
+- `INNER=[abz]` — **every key still reached the application** (forwarded a/b +
+  passthrough z).
+
+⇒ A tmux root-table binding can **observe a keystroke and forward it** — a
+positive "human typing now" signal is mechanically achievable at ARCH-A cost.
+Residual caveats (still real, not yet tested): catching *all* keys needs an `Any`
+/ full enumeration; `run-shell` per keystroke spawns a process per key
+(latency/load under fast typing); faithful re-send of control/escape/paste/mouse
+sequences is the fragile part. **But for the use case we likely don't need
+per-key at all (see S-SIG).**
+
+### S-SIG (core) → **GREEN (empty-box vs typed-box trivially distinguishable)**
+
+Launched a real `claude` TUI in a tmux pane and captured the input box:
+
+- IDLE prompt line: `❯ ` (only whitespace after the glyph)
+- After `send-keys -l 'hello world being composed'` (no Enter): `❯ hello world being composed`
+
+The input box is line-anchored on the `❯ ` prompt glyph, bracketed by `───` rule
+lines, with the daemon status line directly below. ⇒ **"Does the input box
+contain text?" (the user's question) is answered robustly**: capture-pane, find
+the `❯ ` line, non-whitespace after the glyph ⇒ human is composing ⇒ defer. This
+catches the actively-typing AND the paused-mid-compose cases — and makes the
+per-key S-KEYTABLE signal *corroboration*, not a hard dependency.
+
+**S-SIG remainder (NOT yet captured — needs a real logged-in session / desktop):**
+the *streaming/busy* and *permission-dialog* signatures. These are covered
+independently by the dedicated daemon's idle-latch (Stop event) and the
+event-driven PermissionRequest flag, so screen-scraping is not the sole guard for
+them. Still: the `❯`/`───` anchors are UI-version-dependent → the detector must be
+config + fail-closed + self-disabling on no-match (degrade to never-inject).
+
+### Net architecture impact
+
+Both FATAL-2 building blocks are CONFIRMED feasible on a real host without a PTY
+supervisor. **ARCH-A is viable; ARCH-B (S-PTY) is likely NOT needed** and is
+demoted to a contingency only if the streaming/dialog signatures + event flags
+prove insufficient in a fuller desktop capture. Still outstanding: **S-ENF**
+(dedicated-vs-shared daemon coexistence — analysable from code, needs a container
+run) and the S-SIG streaming/dialog capture (desktop, logged-in session — happy
+to have the user run these).
+
 ## After the spikes
 
 - **S-KEYTABLE GREEN + S-SIG GREEN** → ARCH-A is viable; proceed to a buildable
