@@ -74,6 +74,42 @@ class TestCmdStartParentProcess:
             result = cmd_start(args)
             assert result == 0
 
+    def test_parent_does_not_unlink_socket_outside_lock(self, tmp_path: Path) -> None:
+        """cmd_start must NOT unlink the daemon socket in the parent.
+
+        Regression (Plan 00127, Finding 3): the parent took a liveness probe
+        BEFORE the start lock, then unconditionally called cleanup_socket()
+        outside the lock. A peer binding its socket in that probe->fork window
+        had its LIVE socket unlinked, violating 'a LIVE socket is NEVER
+        unlinked'. The child daemon clears stale sockets under the flock; the
+        parent must never unlink.
+        """
+        args = argparse.Namespace(project_root=tmp_path)
+
+        with (
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_project_path",
+                return_value=tmp_path,
+            ),
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.read_pid_file",
+                side_effect=[None, 42],
+            ),
+            patch("claude_code_hooks_daemon.daemon.cli.get_socket_path"),
+            patch("claude_code_hooks_daemon.daemon.cli.get_pid_path"),
+            patch("claude_code_hooks_daemon.daemon.cli.cleanup_socket") as mock_cleanup,
+            patch(
+                "claude_code_hooks_daemon.daemon.cli._socket_liveness_sync",
+                return_value=_SocketLiveness.NOT_LIVE,
+            ),
+            patch("os.fork", return_value=100),
+            patch("time.sleep"),
+        ):
+            result = cmd_start(args)
+
+        assert result == 0
+        mock_cleanup.assert_not_called()
+
     def test_parent_failure_no_pid_file(self, tmp_path: Path) -> None:
         """Parent process returns 1 when no PID file created after fork."""
         args = argparse.Namespace(project_root=tmp_path)

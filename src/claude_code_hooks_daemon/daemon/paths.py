@@ -1303,28 +1303,75 @@ def is_pid_alive(pid: int) -> bool:
         return False
 
 
-def read_pid_file(pid_path: Path | str) -> int | None:
+def is_daemon_pid(pid: int) -> bool:
+    """Return True iff ``pid`` names a live daemon SERVER process.
+
+    ``os.kill(pid, 0)`` (used by :func:`is_pid_alive`) returns True for ANY
+    live process with that PID. After a reboot or PID reuse a stale PID file
+    can point at an unrelated live process — without this cross-check
+    ``cmd_status`` would report RUNNING and ``cmd_stop`` would SIGTERM a
+    process that is not our daemon. We confirm the PID's command line is a
+    daemon-server invocation (``python -m {cli module} {start|restart}``) via
+    the same matcher used by single-daemon enforcement.
+
+    Args:
+        pid: Process ID to verify.
+
+    Returns:
+        True only if the process exists AND its cmdline identifies a daemon
+        server. False if the process is gone, inaccessible, or not a daemon.
+    """
+    # Deferred imports: ``paths.py`` MUST import with stdlib only because it is
+    # loaded by the venv-bootstrap path under the SYSTEM interpreter (which has
+    # no third-party deps). ``psutil`` and ``process_verification`` are only
+    # needed at runtime once the venv is active.
+    import psutil
+
+    from claude_code_hooks_daemon.daemon.process_verification import _is_daemon_server_process
+
+    try:
+        cmdline = psutil.Process(pid).cmdline()
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess) as e:
+        logger.debug("Cannot inspect PID %d cmdline: %s", pid, e)
+        return False
+    return _is_daemon_server_process(cmdline)
+
+
+def read_pid_file(pid_path: Path | str, verify_daemon: bool = False) -> int | None:
     """
     Read PID from file and verify process is alive.
 
     Args:
         pid_path: Path to PID file (Path object or string)
+        verify_daemon: When True, additionally require that the live PID's
+            command line identifies a daemon SERVER process (guards against a
+            stale PID file pointing at an unrelated process after reboot /
+            PID reuse). The stale PID file is cleaned up in that case too.
 
     Returns:
-        PID if file exists and process is alive, None otherwise
+        PID if file exists and process is alive (and, when ``verify_daemon`` is
+        set, is a daemon server), None otherwise
     """
     pid_path = Path(pid_path)
     try:
         with pid_path.open() as f:
             pid = int(f.read().strip())
 
-        if is_pid_alive(pid):
-            return pid
-        else:
+        if not is_pid_alive(pid):
             # Stale PID file, clean it up
             with contextlib.suppress(Exception):
                 pid_path.unlink()
             return None
+
+        if verify_daemon and not is_daemon_pid(pid):
+            # Alive but NOT our daemon (PID reuse / stale file): treat as not
+            # running and remove the misleading PID file.
+            logger.debug("PID %d in %s is alive but is not a daemon server", pid, pid_path)
+            with contextlib.suppress(Exception):
+                pid_path.unlink()
+            return None
+
+        return pid
     except FileNotFoundError:
         return None
     except ValueError as e:

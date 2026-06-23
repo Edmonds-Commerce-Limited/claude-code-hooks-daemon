@@ -88,10 +88,16 @@ class TestCmdStartReuse:
 
 
 class TestCmdStartStaleSocket:
-    """Stale path: no live PID and a dead socket => clean up and proceed."""
+    """Stale path: no live PID and a dead socket => proceed to fork.
 
-    def test_cleans_stale_socket_and_proceeds_to_fork(self, tmp_path: Path) -> None:
-        """read_pid_file None + socket not live => cleanup_socket then fork path."""
+    Plan 00127 Finding 3: the PARENT must NOT unlink the socket — the early
+    liveness probe is taken before the start lock, so unlinking here could
+    destroy a peer's freshly-bound LIVE socket. The child daemon clears a
+    definitively-stale socket under the flock (server._reuse_or_clear_socket).
+    """
+
+    def test_proceeds_to_fork_without_parent_socket_unlink(self, tmp_path: Path) -> None:
+        """read_pid_file None + socket not live => fork WITHOUT a parent unlink."""
         args = argparse.Namespace(project_root=tmp_path)
 
         with (
@@ -119,7 +125,7 @@ class TestCmdStartStaleSocket:
             result = cmd_start(args)
 
         assert result == 0
-        mock_cleanup.assert_called_once()
+        mock_cleanup.assert_not_called()
 
 
 class TestCmdStartContendedSocket:

@@ -87,6 +87,16 @@ from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
 
 from .init_config import generate_config
 
+# Milliseconds in one second. ``Timeout.BASH_DEFAULT`` is expressed in
+# milliseconds (see constants/timeout.py), but ``subprocess.run(timeout=...)``
+# expects SECONDS. Named here so the conversion is not a magic ``/ 1000``.
+_MILLISECONDS_PER_SECOND = 1000
+
+# ``uv sync`` timeout for ``cmd_repair``, in SECONDS — derived from the shared
+# millisecond BASH default so there is a single source of truth for the value
+# while honouring subprocess.run's seconds unit.
+_UV_SYNC_TIMEOUT_SECONDS = Timeout.BASH_DEFAULT // _MILLISECONDS_PER_SECOND
+
 
 def get_project_path(override_path: Path | None = None) -> Path:
     """Detect project path from current working directory.
@@ -375,10 +385,14 @@ def cmd_start(args: argparse.Namespace) -> int:
         socket_path=Path(socket_path),
     )
 
-    # Clean up the socket before binding. Only a DEFINITIVE NOT_LIVE outcome
-    # reaches here (LIVE/INDETERMINATE returned above), so the socket is
-    # provably stale (ConnectionRefused/absent) and safe to unlink.
-    cleanup_socket(str(socket_path))
+    # Stale-socket cleanup is DELIBERATELY NOT done here (Plan 00127, Finding 3).
+    # The liveness probe above was taken BEFORE the start lock is held; a peer
+    # that binds its socket in the probe->fork window would have its LIVE socket
+    # unlinked if we cleaned up here, violating "a LIVE socket is NEVER
+    # unlinked". The child daemon re-probes and unlinks the socket ONLY on a
+    # DEFINITIVE NOT_LIVE outcome inside the flock-protected critical section
+    # (server._reuse_or_clear_socket), which is the single race-safe place to
+    # do it. Removing this unconditional parent unlink closes that window.
 
     # Remove stale runtime files from dead containers (age-based, not hostname-based)
     stale_days = config.daemon.stale_file_days
@@ -551,8 +565,10 @@ def cmd_stop(args: argparse.Namespace) -> int:
     pid_path = _resolve_pid_path(args, project_path)
     socket_path = _resolve_socket_path(args, project_path)
 
-    # Read PID
-    pid = read_pid_file(str(pid_path))
+    # Read PID. verify_daemon guards against a stale PID file (after reboot /
+    # PID reuse) pointing at an unrelated live process we would otherwise
+    # SIGTERM.
+    pid = read_pid_file(str(pid_path), verify_daemon=True)
     if pid is None:
         print("Daemon not running")
         return 0
@@ -615,8 +631,10 @@ def cmd_status(args: argparse.Namespace) -> int:
     pid_path = _resolve_pid_path(args, project_path)
     socket_path = _resolve_socket_path(args, project_path)
 
-    # Read PID
-    pid = read_pid_file(str(pid_path))
+    # Read PID. verify_daemon guards against a stale PID file (after reboot /
+    # PID reuse) whose PID now belongs to an unrelated live process, which
+    # would otherwise be falsely reported as a RUNNING daemon.
+    pid = read_pid_file(str(pid_path), verify_daemon=True)
 
     if pid is None:
         print("Daemon: NOT RUNNING")
@@ -1218,8 +1236,18 @@ def cmd_restart(args: argparse.Namespace) -> int:
     # Query current mode before stopping (best-effort, ignore failures)
     pre_mode = _get_current_mode(args)
 
-    # Stop daemon
-    cmd_stop(args)
+    # Stop daemon. If stop fails the old daemon may still be alive; starting
+    # then would hit cmd_start's REUSE gate ("Daemon already running", exit 0)
+    # and restart would FALSELY report success while the OLD code keeps
+    # running. Fail fast: abort with the stop return code and never start.
+    stop_rc = cmd_stop(args)
+    if stop_rc != 0:
+        print(
+            "ERROR: failed to stop the running daemon; aborting restart so a "
+            "stale daemon is not left running undetected",
+            file=sys.stderr,
+        )
+        return stop_rc
 
     # Start daemon
     time.sleep(0.5)  # Brief delay between stop and start
@@ -1270,7 +1298,7 @@ def cmd_repair(args: argparse.Namespace) -> int:
             env=env,
             capture_output=True,
             text=True,
-            timeout=Timeout.BASH_DEFAULT,
+            timeout=_UV_SYNC_TIMEOUT_SECONDS,
         )
         if result.returncode != 0:
             print(f"ERROR: uv sync failed (exit {result.returncode})")
@@ -1302,7 +1330,7 @@ def cmd_repair(args: argparse.Namespace) -> int:
         )
         return 1
     except subprocess.TimeoutExpired:
-        print(f"ERROR: uv sync timed out after {Timeout.BASH_DEFAULT / 1000:.0f} seconds")
+        print(f"ERROR: uv sync timed out after {_UV_SYNC_TIMEOUT_SECONDS} seconds")
         return 1
 
 

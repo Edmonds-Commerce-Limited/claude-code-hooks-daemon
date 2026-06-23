@@ -14,7 +14,8 @@ import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from claude_code_hooks_daemon.daemon.cli import cmd_repair
+from claude_code_hooks_daemon.constants import Timeout
+from claude_code_hooks_daemon.daemon.cli import _UV_SYNC_TIMEOUT_SECONDS, cmd_repair
 
 
 class TestCmdRepair:
@@ -23,6 +24,42 @@ class TestCmdRepair:
     def _make_args(self, tmp_path: Path) -> argparse.Namespace:
         """Create args namespace with project_root."""
         return argparse.Namespace(project_root=tmp_path)
+
+    def test_uv_sync_timeout_is_in_seconds_not_milliseconds(self, tmp_path: Path) -> None:
+        """The timeout handed to subprocess.run must be SECONDS, not the
+        millisecond BASH_DEFAULT constant.
+
+        Regression: cmd_repair passed Timeout.BASH_DEFAULT (=120_000 ms)
+        straight into subprocess.run(timeout=...), whose unit is SECONDS, so
+        ``uv sync`` effectively never timed out (~33 hours).
+        """
+        args = self._make_args(tmp_path)
+
+        mock_sync = MagicMock()
+        mock_sync.returncode = 0
+        mock_sync.stderr = ""
+
+        mock_verify = MagicMock()
+        mock_verify.returncode = 0
+        mock_verify.stdout = "OK\n"
+
+        with (
+            patch(
+                "claude_code_hooks_daemon.daemon.cli.get_project_path",
+                return_value=tmp_path,
+            ),
+            patch("claude_code_hooks_daemon.daemon.cli.read_pid_file", return_value=None),
+            patch("subprocess.run", side_effect=[mock_sync, mock_verify]) as mock_run,
+        ):
+            result = cmd_repair(args)
+
+        assert result == 0
+        sync_call = mock_run.call_args_list[0]
+        passed_timeout = sync_call.kwargs["timeout"]
+        # Must be the named seconds constant, NOT the millisecond BASH_DEFAULT.
+        assert passed_timeout == _UV_SYNC_TIMEOUT_SECONDS
+        assert passed_timeout == Timeout.BASH_DEFAULT // 1000
+        assert passed_timeout != Timeout.BASH_DEFAULT
 
     def test_successful_repair(self, tmp_path: Path) -> None:
         """cmd_repair returns 0 on successful uv sync + verification."""
