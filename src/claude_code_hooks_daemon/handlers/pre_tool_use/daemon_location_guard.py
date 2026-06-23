@@ -7,6 +7,17 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 
+# Match a `cd` whose TARGET is the .claude/hooks-daemon/ directory (or a path
+# inside it). The target is a single token that contains no whitespace or
+# command separators, so a `cd` into a SAFE directory cannot reach across a
+# `;`/`&&`/`|` to a later reference of the config FILE. The directory boundary
+# after `hooks-daemon` is a path separator, whitespace, command separator, quote
+# or end-of-string — never a `.`, so the config files `.claude/hooks-daemon.yaml`
+# and `.claude/hooks-daemon.yaml.example` do NOT match.
+_CD_INTO_DAEMON_DIR = re.compile(
+    r"\bcd\s+[^\s;&|]*\.claude/hooks-daemon(?:/[^\s;&|]*)?(?=[\s;&|\"']|$)"
+)
+
 
 class DaemonLocationGuardHandler(Handler):
     """Prevent agents from cd-ing into .claude/hooks-daemon and running commands.
@@ -42,10 +53,7 @@ class DaemonLocationGuardHandler(Handler):
 
         command = hook_input.get("tool_input", {}).get("command", "")
 
-        # Match cd into hooks-daemon directory (relative or absolute paths)
-        cd_pattern = re.compile(r"\bcd\s+(?:[./]*|/).*?\.claude/hooks-daemon\b")
-
-        return bool(cd_pattern.search(command))
+        return bool(_CD_INTO_DAEMON_DIR.search(command))
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Block cd into hooks-daemon with helpful guidance."""

@@ -89,6 +89,51 @@ class TestDaemonLocationGuardHandler:
         }
         assert handler.matches(hook_input) is False
 
+    def test_not_matches_cd_safe_dir_then_git_add_config_file(self, handler):
+        """A cd into a SAFE dir followed by a git add of the config FILE must not block.
+
+        Regression: the config files .claude/hooks-daemon.yaml(.example) are not
+        the .claude/hooks-daemon/ directory, and a `cd /workspace` earlier in a
+        compound command must not let a later reference match.
+        """
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "cd /workspace; git add .claude/hooks-daemon.yaml.example"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_not_matches_cd_safe_dir_then_cat_config_file(self, handler):
+        """cd to a safe dir && cat the config file must not block."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "cd /workspace && cat .claude/hooks-daemon.yaml"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_not_matches_git_add_config_file_without_cd(self, handler):
+        """Referencing the config file with no cd at all must not block."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git add .claude/hooks-daemon.yaml.example"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_matches_cd_into_hooks_daemon_subdir(self, handler):
+        """cd into a subdirectory of hooks-daemon must still block."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "cd .claude/hooks-daemon/src"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_cd_with_trailing_slash(self, handler):
+        """cd into hooks-daemon/ (trailing slash) must still block."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "cd .claude/hooks-daemon/"},
+        }
+        assert handler.matches(hook_input) is True
+
     # handle() Tests
     def test_handle_blocks_cd_with_clear_message(self, handler):
         """Should block cd into hooks-daemon with helpful message."""
