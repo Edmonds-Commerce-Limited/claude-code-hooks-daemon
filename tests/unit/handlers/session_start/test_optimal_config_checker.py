@@ -266,27 +266,34 @@ class TestAutoMemoryCheck:
         return OptimalConfigCheckerHandler()
 
     def test_auto_memory_not_disabled_passes(self, handler: Any) -> None:
-        """No issue when CLAUDE_CODE_DISABLE_AUTO_MEMORY is not set."""
+        """No issue when CLAUDE_CODE_DISABLE_AUTO_MEMORY is not set.
+
+        Policy forced inactive so this isolates the auto-memory env-var branch
+        (the policy-active branch has its own test class).
+        """
         env = os.environ.copy()
         env.pop("CLAUDE_CODE_DISABLE_AUTO_MEMORY", None)
-        with patch.dict(os.environ, env, clear=True):
-            checks = handler._run_checks()
-            memory = [c for c in checks if c["name"] == "Auto Memory"]
-            assert memory[0]["passed"] is True
+        with patch.object(handler, "_untracked_memory_forbidden", return_value=False):
+            with patch.dict(os.environ, env, clear=True):
+                checks = handler._run_checks()
+                memory = [c for c in checks if c["name"] == "Auto Memory"]
+                assert memory[0]["passed"] is True
 
     def test_auto_memory_disabled_fails(self, handler: Any) -> None:
-        """Issue when auto-memory is explicitly disabled."""
-        with patch.dict(os.environ, {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}):
-            checks = handler._run_checks()
-            memory = [c for c in checks if c["name"] == "Auto Memory"]
-            assert memory[0]["passed"] is False
+        """Issue when auto-memory is explicitly disabled (policy inactive)."""
+        with patch.object(handler, "_untracked_memory_forbidden", return_value=False):
+            with patch.dict(os.environ, {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}):
+                checks = handler._run_checks()
+                memory = [c for c in checks if c["name"] == "Auto Memory"]
+                assert memory[0]["passed"] is False
 
     def test_auto_memory_zero_passes(self, handler: Any) -> None:
-        """No issue when CLAUDE_CODE_DISABLE_AUTO_MEMORY=0 (not disabled)."""
-        with patch.dict(os.environ, {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "0"}):
-            checks = handler._run_checks()
-            memory = [c for c in checks if c["name"] == "Auto Memory"]
-            assert memory[0]["passed"] is True
+        """No issue when CLAUDE_CODE_DISABLE_AUTO_MEMORY=0 (policy inactive)."""
+        with patch.object(handler, "_untracked_memory_forbidden", return_value=False):
+            with patch.dict(os.environ, {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "0"}):
+                checks = handler._run_checks()
+                memory = [c for c in checks if c["name"] == "Auto Memory"]
+                assert memory[0]["passed"] is True
 
 
 class TestAutoMemoryUnderTrackedDocsPolicy:
@@ -337,6 +344,29 @@ class TestAutoMemoryUnderTrackedDocsPolicy:
                 check = handler._check_auto_memory()
         assert check["passed"] is False
         assert "Remove or unset" in check["fix"]
+
+    def test_unset_option_reads_as_forbidden_after_default_flip(self, handler: Any) -> None:
+        """SSoT default flip (v3.24.0): an UNSET option now reads as forbidden.
+
+        Regression guard for the drift bug — _untracked_memory_forbidden must use
+        the shipped default (False) as its fallback, so an upgraded client who
+        never set the option is not nagged to re-enable memory while the daemon
+        is in fact blocking it.
+        """
+        from pathlib import Path
+        from unittest.mock import MagicMock
+
+        fake_config = MagicMock()
+        fake_config.handlers.pre_tool_use = {}  # no markdown_organization entry
+        with patch(
+            "claude_code_hooks_daemon.core.ProjectContext.config_path",
+            return_value=Path("/tmp/does-not-matter.yaml"),
+        ):
+            with patch(
+                "claude_code_hooks_daemon.config.models.Config.load_or_default",
+                return_value=fake_config,
+            ):
+                assert handler._untracked_memory_forbidden() is True
 
 
 class TestBashMaintainWorkingDirCheck:

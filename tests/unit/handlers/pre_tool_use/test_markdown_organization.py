@@ -493,9 +493,15 @@ class TestMarkdownOrganizationHandler:
         assert "hooks-daemon.yaml" in result.reason
 
     def test_matches_returns_false_for_paths_outside_project_root(
-        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+        self, write_input: dict[str, Any]
     ) -> None:
-        """Handler does NOT match writes to paths outside the project root."""
+        """Generic logic does NOT match writes to paths outside the project root.
+
+        Uses an opt-out handler (allow_untracked_claude_memory=True) so the
+        default memory policy is not in play — this isolates the generic logic.
+        """
+        handler = MarkdownOrganizationHandler()
+        handler._allow_untracked_claude_memory = True
         # Memory directory is outside project root
         write_input["tool_input"][
             "file_path"
@@ -503,23 +509,29 @@ class TestMarkdownOrganizationHandler:
         assert handler.matches(write_input) is False
 
     def test_matches_returns_false_for_claude_auto_memory(
-        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+        self, write_input: dict[str, Any]
     ) -> None:
-        """Handler does NOT match writes to Claude Code auto memory directory."""
+        """Generic logic does NOT match Claude auto memory (when policy opted out)."""
+        handler = MarkdownOrganizationHandler()
+        handler._allow_untracked_claude_memory = True
         write_input["tool_input"][
             "file_path"
         ] = "/root/.claude/projects/my-project/memory/MEMORY.md"
         assert handler.matches(write_input) is False
 
     def test_matches_returns_false_for_memory_path_with_symlink_resolving_into_project(
-        self, handler: MarkdownOrganizationHandler, write_input: dict[str, Any]
+        self, write_input: dict[str, Any]
     ) -> None:
-        """Handler allows memory writes even when symlinks resolve into project root.
+        """Memory paths are detected BEFORE resolve(), even when opted out.
 
         Regression test: /root/.claude/ can be a symlink to /workspace/.claude/ccy/,
         causing Path.resolve() to map memory paths into the project root. The handler
-        must detect auto-memory paths BEFORE resolve() to prevent false blocking.
+        must detect auto-memory paths BEFORE resolve(). With the policy opted out
+        (allow=True) that detection short-circuits to allow (matches False), proving
+        the raw-path memory check runs before resolve() maps the path in-project.
         """
+        handler = MarkdownOrganizationHandler()
+        handler._allow_untracked_claude_memory = True
         memory_path = "/root/.claude/projects/-workspace/memory/MEMORY.md"
         write_input["tool_input"]["file_path"] = memory_path
 
@@ -1977,11 +1989,12 @@ class TestPlanWriteAllowBehaviour:
 
 
 class TestUntrackedClaudeMemoryPolicy:
-    """Tests for the allow_untracked_claude_memory policy (Plan 00131).
+    """Tests for the allow_untracked_claude_memory policy (Plan 00131/00133).
 
-    Default (True) preserves today's behaviour: Claude auto-memory writes are
-    allowed. When set False, Write/Edit (and bash redirects) to Claude-memory
-    paths are BLOCKED with a specialist tracked-docs message; reads are allowed.
+    From v3.24.0 the DEFAULT is False (Plan 00133 flip): Write/Edit (and bash
+    redirects/tee) to Claude auto-memory paths are BLOCKED with a specialist
+    tracked-docs message; reads are always allowed. Setting the option True
+    opts out and restores the old allow-everything behaviour.
     """
 
     MEMORY_PATH = "/root/.claude/projects/-workspace/memory/MEMORY.md"
@@ -1989,13 +2002,21 @@ class TestUntrackedClaudeMemoryPolicy:
 
     @pytest.fixture
     def handler(self) -> MarkdownOrganizationHandler:
+        """Default handler — from v3.24.0 the forbid-memory policy is ACTIVE."""
         return MarkdownOrganizationHandler()
 
     @pytest.fixture
     def policy_handler(self) -> MarkdownOrganizationHandler:
-        """Handler with the forbid-untracked-memory policy ACTIVE."""
+        """Handler with the forbid-untracked-memory policy explicitly ACTIVE."""
         h = MarkdownOrganizationHandler()
         h._allow_untracked_claude_memory = False
+        return h
+
+    @pytest.fixture
+    def allow_handler(self) -> MarkdownOrganizationHandler:
+        """Handler that has OPTED OUT (allow_untracked_claude_memory: true)."""
+        h = MarkdownOrganizationHandler()
+        h._allow_untracked_claude_memory = True
         return h
 
     def _write(self, file_path: str) -> dict[str, Any]:
@@ -2010,16 +2031,31 @@ class TestUntrackedClaudeMemoryPolicy:
     def _bash(self, command: str) -> dict[str, Any]:
         return {"tool_name": "Bash", "tool_input": {"command": command}}
 
-    # --- default behaviour preserved (allow_untracked_claude_memory=True) ---
+    # --- new default: policy ACTIVE (allow_untracked_claude_memory=False) ---
 
-    def test_default_allows_memory_write(self, handler: MarkdownOrganizationHandler) -> None:
-        assert handler._allow_untracked_claude_memory is True
-        assert handler.matches(self._write(self.MEMORY_PATH)) is False
+    def test_default_is_false(self, handler: MarkdownOrganizationHandler) -> None:
+        assert handler._allow_untracked_claude_memory is False
 
-    def test_default_ignores_bash_redirect_to_memory(
+    def test_default_blocks_memory_write(self, handler: MarkdownOrganizationHandler) -> None:
+        assert handler.matches(self._write(self.MEMORY_PATH)) is True
+
+    def test_default_blocks_bash_redirect_to_memory(
         self, handler: MarkdownOrganizationHandler
     ) -> None:
-        assert handler.matches(self._bash(f"cat foo > {self.MEMORY_PATH}")) is False
+        assert handler.matches(self._bash(f"cat foo > {self.MEMORY_PATH}")) is True
+
+    def test_default_allows_bash_read_of_memory(self, handler: MarkdownOrganizationHandler) -> None:
+        assert handler.matches(self._bash(f"cat {self.MEMORY_PATH}")) is False
+
+    # --- opt-out (allow_untracked_claude_memory=True) restores old behaviour ---
+
+    def test_optout_allows_memory_write(self, allow_handler: MarkdownOrganizationHandler) -> None:
+        assert allow_handler.matches(self._write(self.MEMORY_PATH)) is False
+
+    def test_optout_ignores_bash_redirect_to_memory(
+        self, allow_handler: MarkdownOrganizationHandler
+    ) -> None:
+        assert allow_handler.matches(self._bash(f"cat foo > {self.MEMORY_PATH}")) is False
 
     # --- policy active: tool writes blocked ---
 

@@ -1,0 +1,11 @@
+version: "3.24.0"
+truth_changes:
+  - was: >
+      Untracked Claude auto-memory writes (~/.claude/projects/*/memory/*.md) are
+      allowed by default; durable knowledge can be saved to Claude memory.
+    now: >
+      Untracked Claude auto-memory writes are BLOCKED by default
+      (markdown_organization.allow_untracked_claude_memory: false); durable
+      knowledge must live in tracked project docs (CLAUDE.md, .claude/rules/*.md,
+      thin skills under .claude/skills/, or docs/). Reads stay allowed. Set
+      allow_untracked_claude_memory: true to opt out and restore the old default.

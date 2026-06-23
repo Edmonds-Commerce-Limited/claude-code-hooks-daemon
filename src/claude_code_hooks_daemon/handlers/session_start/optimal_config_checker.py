@@ -218,6 +218,7 @@ class OptimalConfigCheckerHandler(Handler):
             from claude_code_hooks_daemon.core import ProjectContext
             from claude_code_hooks_daemon.handlers.pre_tool_use.markdown_organization import (
                 ALLOW_UNTRACKED_CLAUDE_MEMORY_OPTION,
+                DEFAULT_ALLOW_UNTRACKED_CLAUDE_MEMORY,
             )
 
             config = Config.load_or_default(ProjectContext.config_path())
@@ -226,7 +227,14 @@ class OptimalConfigCheckerHandler(Handler):
                 options = md_org.get("options", {})
             else:
                 options = getattr(md_org, "options", {})
-            return options.get(ALLOW_UNTRACKED_CLAUDE_MEMORY_OPTION, True) is False
+            # Fallback to the shipped default (SSoT) so an unset option is read
+            # exactly as the handler treats it — no drift between block + advisory.
+            return (
+                options.get(
+                    ALLOW_UNTRACKED_CLAUDE_MEMORY_OPTION, DEFAULT_ALLOW_UNTRACKED_CLAUDE_MEMORY
+                )
+                is False
+            )
         except (RuntimeError, OSError, ValueError, AttributeError) as e:
             logger.debug("Could not determine untracked-memory policy: %s", e)
             return False

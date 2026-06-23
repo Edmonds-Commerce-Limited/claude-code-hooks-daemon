@@ -39,6 +39,12 @@ _DEPENDENCY_DIRECTORIES: Final[tuple[str, ...]] = ("vendor/", "node_modules/")
 # knowledge must live in tracked project docs (progressive disclosure). Plan 00131.
 ALLOW_UNTRACKED_CLAUDE_MEMORY_OPTION: Final[str] = "allow_untracked_claude_memory"
 
+# Shipped default for the option above. Flipped True -> False in v3.24.0 (Plan
+# 00133): untracked memory is blocked unless a project explicitly opts back in.
+# Single source of truth — the handler default AND optimal_config_checker's
+# policy-detection fallback both read this so they can never drift.
+DEFAULT_ALLOW_UNTRACKED_CLAUDE_MEMORY: Final[bool] = False
+
 # Path markers identifying a Claude Code auto-memory file
 # (e.g. ~/.claude/projects/<slug>/memory/MEMORY.md and per-fact files).
 _CLAUDE_MEMORY_PATH_MARKERS: Final[tuple[str, str]] = ("/.claude/projects/", "/memory/")
@@ -107,8 +113,10 @@ class MarkdownOrganizationHandler(Handler):
         # Additive allowed paths: layered ON TOP of built-ins OR the legacy override
         self._extra_allowed_markdown_paths: list[str] | None = None
         # Policy: when False, untracked Claude auto-memory writes are BLOCKED at the
-        # daemon layer (default True preserves today's allow behaviour). Plan 00131.
-        self._allow_untracked_claude_memory: bool = True
+        # daemon layer. Default flipped True -> False in v3.24.0 (Plan 00133): durable
+        # knowledge belongs in tracked, reviewed project docs, not per-checkout memory.
+        # Set allow_untracked_claude_memory: true to opt out and restore the old behaviour.
+        self._allow_untracked_claude_memory: bool = DEFAULT_ALLOW_UNTRACKED_CLAUDE_MEMORY
 
     def normalize_path(self, file_path: str) -> str:
         """Normalize file path to project-relative format.
