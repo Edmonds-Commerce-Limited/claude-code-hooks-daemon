@@ -996,8 +996,9 @@ Three lifecycle phases are detected from Write/Edit to `CLAUDE/Plan/<digits>-<na
 | **Progress**   | Edit to PLAN.md touching task-status icons (⬜/🔄/✅) or `## Notes & Updates` section | Confirm the recovery cron is still running (CronList); recreate if missing; keep working.                              |
 | **Completion** | `**Status**: Complete[d]` written/edited                                              | Plan complete — delete the recovery cron (CronDelete).                                                                 |
 
-Progress reminders are rate-limited by a per-plan in-memory cooldown so they
-do not spam context on every edit. Completion always advises (bypasses cooldown).
+Progress reminders are rate-limited per plan: the handler advises on the first
+progress edit and then once every few progress edits for that plan, so it does
+not spam context on every edit. Completion always advises (bypasses the interval).
 
 ### CRITICAL: recovery cron is NOT a heartbeat
 
