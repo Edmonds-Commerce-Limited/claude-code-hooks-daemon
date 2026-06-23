@@ -1,0 +1,19 @@
+version: "3.26.0"
+truth_changes:
+  - was: >
+      To create a new plan, run the deployed scaffolding script
+      `CLAUDE/Plan/mkplan.bash "descriptive-kebab-name"`. It is deployed from
+      the config single source of truth — whenever `plan_workflow.enabled` is
+      true (its default) — on BOTH install AND upgrade, so existing
+      installations receive it on the next upgrade.
+    now: >
+      To create a new plan, run the deployed scaffolding script
+      `CLAUDE/Plan/mkplan.bash "descriptive-kebab-name"` (use your configured
+      plan directory if not `CLAUDE/Plan/`). It is deployed from the config
+      single source of truth on BOTH install AND upgrade, but the plan workflow
+      is now OPT-IN: `plan_workflow.enabled` defaults to false, matching the
+      opt-in plan handlers. mkplan.bash and the `CLAUDE/Plan/` scaffold are
+      deployed only when you set `plan_workflow.enabled: true` in
+      `.claude/hooks-daemon.yaml` (a single field that also feeds the plan
+      directory to the planning handlers). Legacy per-handler
+      `track_plans_in_project` opt-in is preserved by config migration.

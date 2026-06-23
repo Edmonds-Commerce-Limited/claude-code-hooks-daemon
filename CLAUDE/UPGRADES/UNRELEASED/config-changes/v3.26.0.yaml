@@ -1,0 +1,30 @@
+version: "3.26.0"
+date: "UNRELEASED"
+breaking: false
+config_changes:
+  added: []
+  renamed: []
+  removed: []
+  changed:
+    - key: plan_workflow.enabled
+      description: >-
+        The plan_workflow.enabled MODEL DEFAULT is now false (was true). The
+        plan workflow is opt-in: a stock install no longer deploys the
+        CLAUDE/Plan/ scaffold + mkplan.bash, and the planning handlers receive
+        no plan directory, unless plan_workflow.enabled is explicitly true. This
+        makes the shipped default match the shipped (opt-in) plan handlers
+        (plan_number_helper et al. ship disabled), closing the
+        deploy-without-a-consumer gap that v3.25.0's deploy-by-default created.
+        The plan directory is governed solely by the top-level
+        plan_workflow.directory (single source of truth); the per-handler
+        track_plans_in_project option has been removed from the example config.
+      migration_note: >-
+        If you rely on the plan workflow, add a top-level `plan_workflow:` block
+        with `enabled: true` (and optionally `directory:`) to
+        .claude/hooks-daemon.yaml — one field turns on BOTH the planning
+        handlers' directory feed AND the CLAUDE/Plan/ + mkplan.bash deploy.
+        Clients who opted in the legacy way (a per-handler
+        track_plans_in_project option with no top-level plan_workflow block) are
+        unaffected: the config migration still promotes that into an enabled
+        plan_workflow, preserving their setup. The deploy is non-destructive —
+        an existing CLAUDE/Plan/ is never removed by disabling the feature.
