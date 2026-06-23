@@ -33,6 +33,41 @@ class SedBlockingMode:
     DIRECT_INVOCATION_ONLY = "direct_invocation_only"
 
 
+# Command separators that introduce a NEW, separate command (NOT a pure pipe stage).
+# When sed appears as a command head after one of these, it is being executed as its
+# own command and can modify files on disk.
+_SEPARATOR_BEFORE_NEW_COMMAND = ";|&&|\\|\\|"
+
+# Detects sed being EXECUTED as a command head: at the very start of the command, or
+# immediately after a command separator (;, &&, ||). This is sed running as its own
+# command (e.g. "grep x f; sed -i s/a/b/ f") rather than as a stdout-transforming
+# pipe stage, so it can modify files and must be blocked.
+_SED_AS_COMMAND_HEAD = re.compile(
+    rf"(?:^|{_SEPARATOR_BEFORE_NEW_COMMAND})\s*sed\b",
+    re.IGNORECASE,
+)
+
+# Detects sed invoked with an in-place / script / quiet flag (-i, -e, -n). These
+# flags appear on sed that is editing or executing programs, never on a harmless
+# mention, so any occurrence is treated as execution regardless of position.
+_SED_WITH_EXECUTION_FLAG = re.compile(
+    r"\bsed\s+-[a-z]*[ien]",
+    re.IGNORECASE,
+)
+
+# Detects sed run via xargs (e.g. "grep -rl X | xargs sed -i ..."). This is mass
+# file modification and must be blocked even though a grep precedes it.
+_SED_VIA_XARGS = re.compile(
+    r"\|\s*xargs\s+.*\bsed\b",
+    re.IGNORECASE,
+)
+
+# Detects a shell command separator (&&, ||, ;, |). Used to decide whether sed that
+# appears after a git commit is part of the commit message (no separator → safe) or a
+# separate chained command (separator present → NOT safe).
+_COMMAND_SEPARATOR = re.compile(r"[;&|]")
+
+
 class SedBlockerHandler(Handler):
     """Block sed used for file modification - Claude gets sed wrong and causes file destruction.
 
@@ -125,27 +160,22 @@ class SedBlockerHandler(Handler):
         """
         # Check if this is a git commit command with sed appearing after it
         # This handles: git commit -m "...sed..." and heredocs
-        if re.search(r"\bgit\s+commit\b", command):
-            # Find position of 'git commit'
-            git_match = re.search(r"\bgit\s+commit\b", command)
-            if git_match:
-                git_pos = git_match.start()
-                # Find position of 'sed'
-                sed_match = self._sed_pattern.search(command)
-                if sed_match:
-                    sed_pos = sed_match.start()
-                    # sed must come AFTER git commit to be part of the message
-                    if sed_pos > git_pos:
-                        return True
-
-        # Check for git add followed by git commit (command chains)
-        # git add . && git commit -m "sed" - SAFE
-        if re.search(r"\bgit\s+add\b.*&&.*\bgit\s+commit\b", command):
-            # Check if sed appears after 'git commit' in the chain
-            commit_match = re.search(r"\bgit\s+commit\b", command)
-            if commit_match:
-                command_after_commit = command[commit_match.end() :]
-                if self._sed_pattern.search(command_after_commit):
+        git_match = re.search(r"\bgit\s+commit\b", command)
+        if git_match:
+            git_pos = git_match.start()
+            # Find position of 'sed'
+            sed_match = self._sed_pattern.search(command)
+            if sed_match:
+                sed_pos = sed_match.start()
+                # sed must come AFTER git commit to be part of the message
+                if sed_pos > git_pos:
+                    # Reject if a command separator (&&, ||, ;, |) appears between
+                    # 'git commit' and sed — that means sed is a SEPARATE command
+                    # (e.g. git commit -m "msg" && sed -i s/a/b/ f.py), NOT part of
+                    # the commit message. Mirrors _is_gh_command's separator check.
+                    text_between = command[git_pos:sed_pos]
+                    if _COMMAND_SEPARATOR.search(text_between):
+                        return False
                     return True
 
         return False
@@ -193,50 +223,77 @@ class SedBlockerHandler(Handler):
 
         return False
 
+    def _executes_sed(self, command: str) -> bool:
+        """Return True if the command actually EXECUTES sed (vs merely mentioning it).
+
+        sed is treated as executed — and therefore dangerous — when it appears:
+        - as a command head (start of command, or after ;, &&, ||), regardless of any
+          grep/echo elsewhere in the command (e.g. "grep x f; sed -i s/a/b/ f");
+        - with an execution flag (-i / -e / -n) anywhere; or
+        - via xargs (e.g. "grep -rl X | xargs sed -i ...").
+
+        sed used purely as a stdout-transforming pipe stage (e.g. "cat f | sed 's/x/y/'")
+        is NOT matched here — that read-only case is judged separately.
+        """
+        return bool(
+            _SED_AS_COMMAND_HEAD.search(command)
+            or _SED_WITH_EXECUTION_FLAG.search(command)
+            or _SED_VIA_XARGS.search(command)
+        )
+
     def _is_safe_readonly_command(self, command: str) -> bool:
         """Check if command is a safe read-only operation mentioning sed.
 
         Safe commands include:
         - grep (searching for the word 'sed')
         - echo mentioning 'sed' WITHOUT actual sed command patterns
+        - read-only pipelines where sed only transforms stdout (cat f | sed 's/x/y/')
 
-        NOT safe:
-        - echo containing sed command patterns (e.g., "echo \"sed -i 's/foo/bar/g' file\"")
-        - cat | sed (piping to sed)
+        NOT safe (returns False):
+        - any command that EXECUTES sed (sed as a command head, sed -i/-e/-n, or
+          sed via xargs) — even when a grep or echo also appears in the command;
         - find -exec sed (executing sed)
-        - command chains with sed (&&, ||, ;)
+
+        The execution check runs FIRST so that destructive sed chained after a grep
+        (e.g. "grep x f; sed -i s/a/b/ f") is blocked rather than allowed by the
+        presence of grep.
         """
-        # Allow grep if it doesn't pipe into destructive sed execution.
-        # Read-only pipelines like `cat | sed 's/x/y/' | grep z` are safe.
-        # But `grep -rl X | xargs sed -i` is destructive file modification.
+        # FAIL-FAST: if sed is actually being executed, the command is never safe,
+        # regardless of any grep/echo that also appears in it.
+        if self._executes_sed(command):
+            return False
+
+        # Allow grep that searches for the word 'sed' without executing it.
+        # Read-only pipelines like `cat file | sed 's/x/y/' | grep z` are safe
+        # (the _executes_sed guard above already rejected -i / xargs / chained sed).
         if re.search(r"(^|\s|[;&|])\s*grep\s+", command):
-            # Block if grep pipes to xargs sed (file modification via xargs)
-            if re.search(r"\|\s*xargs\s+.*\bsed\b", command):
-                return False
             return True
 
-        # For echo commands, only allow if NOT containing sed command patterns
+        # For echo commands, only allow if NOT containing sed command patterns.
         if re.search(r"(^|\s|[;&|])\s*echo\s+", command):
-            # Check if echo contains actual sed command patterns (flags like -i, -e, -n)
-            # or sed substitution patterns like 's/.../'
-            has_sed_flags = bool(re.search(r"\bsed\s+-[ien]", command, re.IGNORECASE))
+            # Check for sed substitution patterns like 's/.../' inside the echoed text.
             has_sed_substitution = bool(re.search(r"\bsed\s+'s/", command, re.IGNORECASE))
             has_sed_substitution_double = bool(re.search(r'\bsed\s+"s/', command, re.IGNORECASE))
 
-            # If echo contains actual sed command patterns, it's NOT safe
-            if has_sed_flags or has_sed_substitution or has_sed_substitution_double:
+            # If echo contains actual sed command patterns, it's NOT safe.
+            if has_sed_substitution or has_sed_substitution_double:
                 return False
 
-            # Echo just mentioning the word "sed" is safe
+            # Echo just mentioning the word "sed" is safe.
             return True
 
         return False
 
     def _get_block_count(self) -> int:
-        """Get number of previous blocks by this handler."""
+        """Get number of previous blocks by this handler.
+
+        Falls back to 0 only when the data layer / history is not available
+        (AttributeError). Any other error propagates (FAIL FAST) rather than being
+        silently swallowed.
+        """
         try:
             return get_data_layer().history.count_blocks_by_handler(self.name)
-        except Exception:
+        except AttributeError:
             return 0
 
     def _terse_reason(self, context_type: str, blocked_content: str | None) -> str:

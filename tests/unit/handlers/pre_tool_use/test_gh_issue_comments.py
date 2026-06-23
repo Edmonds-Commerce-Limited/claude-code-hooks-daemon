@@ -164,6 +164,46 @@ class TestGhIssueCommentsHandler:
         }
         assert handler.matches(hook_input) is False
 
+    def test_matches_comments_in_separate_segment_after_and(
+        self, handler: GhIssueCommentsHandler
+    ) -> None:
+        """--comments in a SEPARATE chained command must NOT exempt the gh issue view."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": 'gh issue view 5 && echo "--comments"'},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_comments_in_separate_segment_after_semicolon(
+        self, handler: GhIssueCommentsHandler
+    ) -> None:
+        """--comments after a ';' separator must NOT exempt the gh issue view segment."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "gh issue view 5; echo --comments"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_json_comments_in_separate_segment(
+        self, handler: GhIssueCommentsHandler
+    ) -> None:
+        """A --json comments field in a LATER segment must not exempt the view segment."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": 'gh issue view 5 && echo "--json comments"'},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_not_matches_comments_in_same_segment_after_separator(
+        self, handler: GhIssueCommentsHandler
+    ) -> None:
+        """A second gh issue view segment that DOES include --comments is allowed."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "ls && gh issue view 5 --comments"},
+        }
+        assert handler.matches(hook_input) is False
+
     def test_not_matches_echo_with_gh_issue_view(self, handler: GhIssueCommentsHandler) -> None:
         """Should NOT match if gh issue view is in a quoted string."""
         hook_input = {

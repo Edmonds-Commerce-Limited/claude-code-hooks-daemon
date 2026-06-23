@@ -342,11 +342,14 @@ EOF
         command = "sed -i 's/foo/bar/g' file.txt && git commit -m 'message'"
         assert handler._is_git_command(command) is False
 
-    def test_is_git_command_detects_sed_command_after_commit(self, handler):
-        """_is_git_command() should detect sed command after git commit (not part of message)."""
+    def test_is_git_command_rejects_sed_command_chained_after_commit(self, handler):
+        """sed chained after git commit via a separator is a SEPARATE command, NOT safe.
+
+        Previously this returned True (treated as part of the message) — a bypass that
+        allowed destructive in-place sed to run after a commit. It must be rejected.
+        """
         command = "git add file.txt && git commit -m 'message' && sed -i 's/foo/bar/g' file.txt"
-        # This returns True because sed appears after commit, triggering line 108
-        assert handler._is_git_command(command) is True
+        assert handler._is_git_command(command) is False
 
     def test_is_git_command_rejects_git_diff_and_sed(self, handler):
         """_is_git_command() should reject git diff && sed (separate commands)."""
@@ -369,6 +372,34 @@ EOF
         command = "git add modified_by_sed.txt && git commit -m 'Update file'"
         # 'sed' in filename happens before 'git commit', so it returns False
         assert handler._is_git_command(command) is False
+
+    def test_is_git_command_rejects_sed_after_commit_and_separator(self, handler):
+        """_is_git_command() should reject sed chained after git commit via '&&'."""
+        command = 'git commit -m "msg" && sed -i s/a/b/ f.py'
+        assert handler._is_git_command(command) is False
+
+    def test_is_git_command_rejects_sed_after_commit_semicolon(self, handler):
+        """_is_git_command() should reject sed chained after git commit via ';'."""
+        command = 'git commit -m "msg"; sed -i s/a/b/ f.py'
+        assert handler._is_git_command(command) is False
+
+    def test_is_git_command_rejects_sed_after_commit_pipe(self, handler):
+        """_is_git_command() should reject sed chained after git commit via '|'."""
+        command = 'git commit -m "msg" | sed -i s/a/b/ f.py'
+        assert handler._is_git_command(command) is False
+
+    def test_is_git_command_allows_sed_in_commit_message_no_separator(self, handler):
+        """_is_git_command() should still allow sed mentioned inside the commit message."""
+        command = 'git commit -m "Fix sed blocker"'
+        assert handler._is_git_command(command) is True
+
+    def test_matches_sed_after_commit_separator_blocks(self, handler):
+        """matches() should block destructive sed chained after git commit."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": 'git commit -m "msg" && sed -i s/a/b/ f.py'},
+        }
+        assert handler.matches(hook_input) is True
 
     # _is_gh_command() Tests
     def test_is_gh_command_detects_issue_create_with_sed(self, handler):
@@ -483,6 +514,45 @@ EOF
             "| xargs sed -i 's|CLAUDE/Plans|CLAUDE/Plan|g'"
         )
         assert handler._is_safe_readonly_command(command) is False
+
+    def test_is_safe_readonly_command_rejects_sed_i_after_grep_semicolon(self, handler):
+        """Destructive sed -i chained after grep via ';' must NOT be treated as safe."""
+        command = "grep foo bar.txt; sed -i s/x/y/ f.py"
+        assert handler._is_safe_readonly_command(command) is False
+
+    def test_is_safe_readonly_command_rejects_sed_i_after_grep_and(self, handler):
+        """Destructive sed -i chained after grep via '&&' must NOT be treated as safe."""
+        command = "grep -q x f && sed -i s/a/b/ f.py"
+        assert handler._is_safe_readonly_command(command) is False
+
+    def test_is_safe_readonly_command_rejects_sed_after_grep_or(self, handler):
+        """sed executed after grep via '||' must NOT be treated as safe."""
+        command = "grep x f || sed -i s/a/b/ f.py"
+        assert handler._is_safe_readonly_command(command) is False
+
+    def test_matches_sed_i_after_grep_semicolon_blocks(self, handler):
+        """matches() should block destructive sed -i chained after grep via ';'."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "grep foo bar.txt; sed -i s/x/y/ f.py"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_sed_i_after_grep_and_blocks(self, handler):
+        """matches() should block destructive sed -i chained after grep via '&&'."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "grep -q x f && sed -i s/a/b/ f.py"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_matches_grep_searching_for_sed_word_still_allowed(self, handler):
+        """matches() should still allow grep merely searching for the word 'sed'."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "cd /workspace; grep sed file.txt"},
+        }
+        assert handler.matches(hook_input) is False
 
     def test_matches_grep_pipe_xargs_sed(self, handler):
         """matches() should block grep piped to xargs sed."""
@@ -990,10 +1060,10 @@ class TestSedBlockerProgressiveVerbosity:
         assert "Bad:" in result.reason
         assert "Good:" in result.reason
 
-    def test_data_layer_error_falls_back_to_terse(self, handler):
-        """If data layer raises exception, should fall back to terse (count=0)."""
+    def test_data_layer_unavailable_falls_back_to_terse(self, handler):
+        """If data layer/history is unavailable (AttributeError), fall back to terse."""
         mock_dl = MagicMock()
-        mock_dl.history.count_blocks_by_handler.side_effect = Exception("Data layer error")
+        mock_dl.history.count_blocks_by_handler.side_effect = AttributeError("no history")
         hook_input = {
             "tool_name": "Bash",
             "tool_input": {"command": "sed -i 's/foo/bar/g' file.txt"},
@@ -1008,6 +1078,17 @@ class TestSedBlockerProgressiveVerbosity:
         assert len(result.reason) < 200
         assert "BLOCKED" in result.reason
         assert "Edit tool" in result.reason
+
+    def test_block_count_does_not_swallow_unexpected_errors(self, handler):
+        """Unexpected errors from the data layer must propagate (FAIL FAST)."""
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.side_effect = RuntimeError("unexpected")
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.sed_blocker.get_data_layer",
+            return_value=mock_dl,
+        ):
+            with pytest.raises(RuntimeError):
+                handler._get_block_count()
 
 
 class TestSedBlockerHandlerBlockingMode:

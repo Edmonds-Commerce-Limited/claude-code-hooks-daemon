@@ -7,6 +7,65 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult, get_data_layer
 from claude_code_hooks_daemon.core.utils import get_bash_command
 
+# Generic reason used when a destructive pattern matches but warrants no
+# command-specific explanation (e.g. bare `git checkout .`).
+_GENERIC_DESTRUCTIVE_REASON = "This git command destroys uncommitted changes permanently"
+
+# SINGLE SOURCE OF TRUTH: ordered (pattern, reason) pairs consumed by BOTH matches()
+# and handle(). Order matters — handle() returns the reason of the FIRST matching
+# pattern, exactly mirroring matches()' first-hit semantics. Keeping one ordered
+# list prevents the pattern source from drifting between the two methods.
+_DESTRUCTIVE_PATTERN_REASONS: tuple[tuple[str, str], ...] = (
+    (
+        r"\bgit\s+reset\s+.*--hard\b",
+        "git reset --hard destroys all uncommitted changes permanently",
+    ),
+    (
+        r"\bgit\s+clean\s+.*-[a-z]*f",
+        "git clean -f permanently deletes untracked files",
+    ),
+    # Bare `git checkout .` discards working-tree changes; generic reason suffices.
+    (
+        r"\bgit\s+checkout\s+\.\s*(?:$|;|&&|\|)",
+        _GENERIC_DESTRUCTIVE_REASON,
+    ),
+    # Match all variants of checkout with -- and a file:
+    # git checkout -- file / git checkout HEAD -- file / git checkout main -- file
+    (
+        r"\bgit\s+checkout\s+.*--\s+\S",
+        "git checkout [REF] -- file discards all local changes to that file permanently",
+    ),
+    # git restore with file paths discards working-tree changes.
+    # Does NOT match: git restore --staged file.txt (safe - only unstages).
+    (
+        r"\bgit\s+restore\s+(?!--staged).*\S",
+        "git restore discards all local changes to files permanently",
+    ),
+    (
+        r"\bgit\s+stash\s+drop\b",
+        "git stash drop permanently destroys stashed changes",
+    ),
+    (
+        r"\bgit\s+stash\s+clear\b",
+        "git stash clear permanently destroys all stashed changes",
+    ),
+    (
+        r"\bgit\s+push\s+.*--force\b",
+        "git push --force can overwrite remote history and destroy team members' work",
+    ),
+    # Force branch deletion bypasses merge check. (?-i:) matches only uppercase -D
+    # (lowercase -d is safe, it checks merge status).
+    (
+        r"\bgit\s+branch\s+.*(?-i:-D)\b",
+        "git branch -D force-deletes a branch without checking if it has been merged",
+    ),
+    (
+        r"\bgit\s+commit\s+.*--amend\b",
+        "git commit --amend rewrites the previous commit, creating messy history "
+        "and potential data loss — create a new commit instead",
+    ),
+)
+
 
 class DestructiveGitHandler(Handler):
     """Block destructive git commands that permanently destroy data."""
@@ -17,31 +76,23 @@ class DestructiveGitHandler(Handler):
             priority=Priority.DESTRUCTIVE_GIT,
             tags=[HandlerTag.SAFETY, HandlerTag.GIT, HandlerTag.BLOCKING, HandlerTag.TERMINAL],
         )
-        self.destructive_patterns = [
-            r"\bgit\s+reset\s+.*--hard\b",
-            r"\bgit\s+clean\s+.*-[a-z]*f",
-            r"\bgit\s+checkout\s+\.\s*(?:$|;|&&|\|)",
-            # SECURITY FIX: Match all variants of checkout with -- and file
-            # Matches: git checkout -- file
-            # Matches: git checkout HEAD -- file
-            # Matches: git checkout main -- file
-            # Matches: git checkout @{upstream} -- file
-            r"\bgit\s+checkout\s+.*--\s+\S",
-            # SECURITY FIX: Match git restore with file paths (discards working tree changes)
-            # Matches: git restore file.txt
-            # Matches: git restore src/main.py
-            # Matches: git restore --worktree file.txt
-            # Does NOT match: git restore --staged file.txt (safe - only unstages)
-            r"\bgit\s+restore\s+(?!--staged).*\S",
-            r"\bgit\s+stash\s+(?:drop|clear)\b",
-            # Block force push
-            r"\bgit\s+push\s+.*--force\b",
-            # Block force branch deletion (bypasses merge check, can lose unmerged work)
-            # Uses (?-i:) to match only uppercase -D (lowercase -d is safe, checks merge status)
-            r"\bgit\s+branch\s+.*(?-i:-D)\b",
-            # Block git commit --amend (rewrites previous commit, creates messy history)
-            r"\bgit\s+commit\s+.*--amend\b",
-        ]
+        # Compile the single source-of-truth mapping once, preserving order.
+        self._pattern_reasons: tuple[tuple[re.Pattern[str], str], ...] = tuple(
+            (re.compile(pattern, re.IGNORECASE), reason)
+            for pattern, reason in _DESTRUCTIVE_PATTERN_REASONS
+        )
+
+    @property
+    def destructive_patterns(self) -> tuple[re.Pattern[str], ...]:
+        """Compiled destructive-command patterns (derived from the single mapping)."""
+        return tuple(pattern for pattern, _reason in self._pattern_reasons)
+
+    def _match_reason(self, command: str) -> str | None:
+        """Return the reason for the first matching destructive pattern, or None."""
+        for pattern, reason in self._pattern_reasons:
+            if pattern.search(command):
+                return reason
+        return None
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Check if this is a destructive git command."""
@@ -49,18 +100,18 @@ class DestructiveGitHandler(Handler):
         if not command or "git" not in command.lower():
             return False
 
-        # Check for any destructive git pattern
-        for pattern in self.destructive_patterns:
-            if re.search(pattern, command, re.IGNORECASE):
-                return True
-
-        return False
+        return self._match_reason(command) is not None
 
     def _get_block_count(self) -> int:
-        """Get number of previous blocks by this handler."""
+        """Get number of previous blocks by this handler.
+
+        Falls back to 0 only when the data layer / history is not available
+        (AttributeError). Any other error propagates (FAIL FAST) rather than being
+        silently swallowed.
+        """
         try:
             return get_data_layer().history.count_blocks_by_handler(self.name)
-        except Exception:
+        except AttributeError:
             return 0
 
     def _terse_reason(self, reason: str, command: str) -> str:
@@ -102,36 +153,9 @@ class DestructiveGitHandler(Handler):
         if not command:
             return HookResult(decision=Decision.ALLOW)
 
-        # Determine which pattern matched and provide specific reason
-        if re.search(r"\bgit\s+reset\s+.*--hard\b", command, re.IGNORECASE):
-            specific_reason = "git reset --hard destroys all uncommitted changes permanently"
-        elif re.search(r"\bgit\s+clean\s+.*-[a-z]*f", command, re.IGNORECASE):
-            specific_reason = "git clean -f permanently deletes untracked files"
-        elif re.search(r"\bgit\s+stash\s+drop\b", command, re.IGNORECASE):
-            specific_reason = "git stash drop permanently destroys stashed changes"
-        elif re.search(r"\bgit\s+stash\s+clear\b", command, re.IGNORECASE):
-            specific_reason = "git stash clear permanently destroys all stashed changes"
-        elif re.search(r"\bgit\s+checkout\s+.*--\s+\S", command, re.IGNORECASE):
-            specific_reason = (
-                "git checkout [REF] -- file discards all local changes to that file permanently"
-            )
-        elif re.search(r"\bgit\s+restore\s+(?!--staged)", command, re.IGNORECASE):
-            specific_reason = "git restore discards all local changes to files permanently"
-        elif re.search(r"\bgit\s+push\s+.*--force\b", command, re.IGNORECASE):
-            specific_reason = (
-                "git push --force can overwrite remote history and destroy team members' work"
-            )
-        elif re.search(r"\bgit\s+branch\s+.*(?-i:-D)\b", command, re.IGNORECASE):
-            specific_reason = (
-                "git branch -D force-deletes a branch without checking if it has been merged"
-            )
-        elif re.search(r"\bgit\s+commit\s+.*--amend\b", command, re.IGNORECASE):
-            specific_reason = (
-                "git commit --amend rewrites the previous commit, creating messy history "
-                "and potential data loss — create a new commit instead"
-            )
-        else:
-            specific_reason = "This git command destroys uncommitted changes permanently"
+        # Determine which pattern matched and provide its reason. Both matches() and
+        # handle() consume the same ordered mapping, so they can never drift.
+        specific_reason = self._match_reason(command) or _GENERIC_DESTRUCTIVE_REASON
 
         # Get block count and determine verbosity level
         block_count = self._get_block_count()
