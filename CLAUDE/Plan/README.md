@@ -29,6 +29,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Tooling / Dependencies
 
+- [00137: Install/Upgrade SSoT + KISS Audit & Remediation](00137-install-upgrade-ssot-kiss-audit/PLAN.md) - In Progress (findings catalogued)
+
+  - Opus audit (dispatched after the 00136 mkplan fix) scanned the install/upgrade/deployment system for structural twins of the `PLAN_WORKFLOW` bug: env-var gates orthogonal to config, install-vs-upgrade asymmetries, dual sources of truth, deploy decoupled from runtime config
+  - 8 findings catalogued (2 already fixed by 00136). Flagship remaining: **F-PROFILE** — `HANDLER_PROFILE` is an install-only env gate (twin of `PLAN_WORKFLOW`), never re-applied on upgrade, with no config field. Plus `plan_workflow.enabled` default-vs-shipped-handler drift, hardcoded Python floor, duplicated plan dir, profile-list duplication, stale venv-path summary
+  - Principle: config (`.claude/hooks-daemon.yaml`) is the single source of truth; deployment derives from it. F-PROFILE needs a user decision (seed-only vs config-stored) before build
+
 - [00136: mkplan deployment driven by config SSoT](00136-mkplan-deploy-config-ssot/PLAN.md) - In Progress
 
   - Fixes a v3.24.0 field bug (`untracked/hooks-daemon-plan-script.md`, client `client-a-infra`): `mkplan.bash` (Plan 00130) is only deployed by `install_version.sh` behind the opt-in `PLAN_WORKFLOW=yes`; the upgrade path never deploys it on either path — so every upgraded project is told by `plan_number_helper` to run a script that does not exist
