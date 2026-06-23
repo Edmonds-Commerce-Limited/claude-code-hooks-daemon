@@ -13,6 +13,31 @@ from typing import Any
 
 from claude_code_hooks_daemon.install.config_differ import ConfigDiff
 
+# A change descriptor emitted by ConfigDiffer always carries exactly these two
+# keys (the previous default value and the user's new value). Identifying a
+# change record by this exact key-set — rather than merely "'new' in record" —
+# means a user option value that happens to contain a 'new' key (or a nested
+# sub-key literally named 'new') is never mistaken for a change descriptor.
+_CHANGE_OLD_KEY = "old"
+_CHANGE_NEW_KEY = "new"
+_CHANGE_RECORD_KEYS = frozenset({_CHANGE_OLD_KEY, _CHANGE_NEW_KEY})
+
+
+def _is_change_record(value: Any) -> bool:
+    """Return True if ``value`` is a simple change descriptor ``{'old': X, 'new': Y}``.
+
+    The check requires the value to be a dict whose keys are *exactly*
+    ``{'old', 'new'}``. A user-supplied dict that merely contains a 'new' key
+    (with other keys, or without 'old') is not a change record.
+
+    Args:
+        value: Candidate value from a ConfigDiff change map.
+
+    Returns:
+        True if the value is a simple change descriptor.
+    """
+    return isinstance(value, dict) and frozenset(value.keys()) == _CHANGE_RECORD_KEYS
+
 
 @dataclass
 class MergeConflict:
@@ -218,17 +243,23 @@ class ConfigMerger:
                     continue
 
                 for option_key, change in option_changes.items():
-                    if isinstance(change, dict) and "new" in change:
-                        # Simple value change: {old: X, new: Y}
-                        handler_config[option_key] = change["new"]
+                    if _is_change_record(change):
+                        # Simple value change: {old: X, new: Y}. The new value is
+                        # applied verbatim even when it is itself a dict that
+                        # contains a 'new' key.
+                        handler_config[option_key] = change[_CHANGE_NEW_KEY]
                     elif isinstance(change, dict):
-                        # Nested dict change: {sub_key: {old: X, new: Y}}
+                        # Nested dict change: {sub_key: {old: X, new: Y}}. A
+                        # sub_key may itself be literally 'new'; classification is
+                        # per sub-record, so the whole record is never collapsed.
                         if option_key not in handler_config:
                             handler_config[option_key] = {}
                         if isinstance(handler_config[option_key], dict):
                             for sub_key, sub_change in change.items():
-                                if isinstance(sub_change, dict) and "new" in sub_change:
-                                    handler_config[option_key][sub_key] = sub_change["new"]
+                                if _is_change_record(sub_change):
+                                    handler_config[option_key][sub_key] = sub_change[
+                                        _CHANGE_NEW_KEY
+                                    ]
 
     def _apply_added_handlers(
         self,

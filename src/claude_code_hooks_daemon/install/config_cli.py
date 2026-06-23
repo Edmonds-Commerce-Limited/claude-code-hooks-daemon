@@ -15,6 +15,7 @@ import yaml
 from claude_code_hooks_daemon.install.config_differ import ConfigDiffer
 from claude_code_hooks_daemon.install.config_merger import ConfigMerger
 from claude_code_hooks_daemon.install.config_migrations import (
+    UNSET,
     format_advisory_for_llm,
     generate_migration_advisory,
 )
@@ -22,6 +23,23 @@ from claude_code_hooks_daemon.install.config_migrations import (
     list_known_versions as _list_known_versions,
 )
 from claude_code_hooks_daemon.install.config_validator import ConfigValidator
+
+
+def _json_safe_value(value: Any) -> Any:
+    """Normalise a migration-advisory value for JSON serialization.
+
+    The migrations module uses the ``UNSET`` sentinel to distinguish "no value
+    provided" from an explicit ``None``/``False``. JSON has no such sentinel, so
+    ``UNSET`` is rendered as ``null`` while every other value (including a real
+    ``False`` or ``None``) is passed through unchanged.
+
+    Args:
+        value: A possibly-``UNSET`` advisory value.
+
+    Returns:
+        ``None`` if the value is ``UNSET``, otherwise the value unchanged.
+    """
+    return None if value is UNSET else value
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -169,6 +187,11 @@ def run_check_config_migrations(
                 "description": s.description,
                 "version": s.version,
                 "example_yaml": s.example_yaml,
+                "recommended": s.recommended,
+                "dormant": s.dormant,
+                "recommended_value": _json_safe_value(s.recommended_value),
+                "current_value": _json_safe_value(s.current_value),
+                "migration_note": s.migration_note,
             }
             for s in advisory.suggestions
         ],

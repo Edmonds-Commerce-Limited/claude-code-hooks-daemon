@@ -400,3 +400,44 @@ class TestCompatibilityChecker:
         guides = checker.suggest_upgrade_guides(tmp_path)
 
         assert guides == []
+
+    def test_suggest_upgrade_guides_for_v3_major(
+        self, sample_changelog: Path, tmp_path: Path
+    ) -> None:
+        """Guides are derived from the target major, not hardcoded to v2."""
+        daemon_dir = tmp_path / "daemon"
+        upgrades_dir = daemon_dir / "CLAUDE" / "UPGRADES" / "v3"
+        upgrades_dir.mkdir(parents=True)
+
+        (upgrades_dir / "v3.1-to-v3.2").mkdir()
+        (upgrades_dir / "v3.1-to-v3.2" / "v3.1-to-v3.2.md").touch()
+        (upgrades_dir / "v3.2-to-v3.3").mkdir()
+        (upgrades_dir / "v3.2-to-v3.3" / "v3.2-to-v3.3.md").touch()
+
+        checker = CompatibilityChecker(
+            changelog_path=sample_changelog,
+            current_version="3.1.0",
+            target_version="3.3.0",
+        )
+
+        guides = checker.suggest_upgrade_guides(daemon_dir)
+
+        assert len(guides) == 2
+        assert any("v3.1-to-v3.2" in str(g) for g in guides)
+        assert any("v3.2-to-v3.3" in str(g) for g in guides)
+
+    def test_suggest_upgrade_guides_raises_on_version_without_minor(
+        self, sample_changelog: Path, tmp_path: Path
+    ) -> None:
+        """A version string lacking a minor component fails fast with a clear error."""
+        daemon_dir = tmp_path / "daemon"
+        (daemon_dir / "CLAUDE" / "UPGRADES" / "v3").mkdir(parents=True)
+
+        checker = CompatibilityChecker(
+            changelog_path=sample_changelog,
+            current_version="3",
+            target_version="3.3.0",
+        )
+
+        with pytest.raises(ValueError, match="version"):
+            checker.suggest_upgrade_guides(daemon_dir)
