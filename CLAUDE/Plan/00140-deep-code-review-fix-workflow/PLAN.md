@@ -63,17 +63,18 @@ introspect** the cron to confirm it behaves as a recovery net (not a heartbeat).
 
 ### Phase 1: Scope & launch
 
-- [ ] 🔄 Build the review work-list (subsystems × dimensions).
-- [ ] ⬜ Launch the review→verify Workflow (Opus agents, dynamic).
+- [x] ✅ Build the review work-list (13 subsystem slices).
+- [x] ✅ Launch the review→verify Workflow (`w1c05059j`, 13 Opus reviewers + adversarial Opus verify).
 
 ### Phase 2: Triage
 
-- [ ] ⬜ Collect verified findings; rank by severity; group into fix clusters.
+- [x] ✅ Collected 77 confirmed findings (`FINDINGS.md`); ranked 1 critical / 3 high / 24 medium / 49 low; grouped into disjoint-file clusters.
 
 ### Phase 3: Remediate
 
-- [ ] ⬜ Dispatch Opus fixer agents (worktree-isolated, TDD) per cluster.
-- [ ] ⬜ Merge each fix to main with QA 13/13 + daemon restart verified.
+- [x] ✅ Batch 1 (critical+high+medium, 28 findings incl. cron): 7 Opus fixers (worktree, TDD). Merged to main, QA 13/13, daemon restart RUNNING, 4 safety bypasses live-probed closed, pushed (`0cdf4a6`).
+- [ ] 🔄 Batch 2 (49 lows + new destructive_git cross-separator finding): Opus fixers in waves.
+- [ ] ⬜ Final merge of batch 2 with QA 13/13 + daemon restart.
 
 ### Phase 4: Cron dogfood & introspection
 
@@ -102,3 +103,17 @@ introspect** the cron to confirm it behaves as a recovery net (not a heartbeat).
 - Plan created as the heavy dogfood load for Plan 00139's recovery cron.
   Workflow-orchestrated (dynamic) per user direction: deep review/fix with Opus
   sub-agents for fixing. Launch follows the 00139 handler build landing on main.
+- Review workflow `w1c05059j`: 101 findings → 77 confirmed (114 agents, 9.2M
+  tokens). Persisted to `FINDINGS.md`.
+- **Batch 1 remediated & verified** (`0cdf4a6`): 7 worktree Opus fixers fixed all
+  28 critical/high/medium findings (incl. the recovery_cron cluster). Headline
+  fixes live-probed against the daemon: `grep …; sed -i` now BLOCKED (was the
+  CRITICAL mass-destruction bypass), `curl | sudo -E bash` BLOCKED, `chmod 666`
+  BLOCKED, `gh issue view … && echo "--comments"` BLOCKED. QA 13/13 (8871 tests).
+- **Real recovery event during batch 1**: a live Claude API rate-limit killed
+  6/7 fixers (the exact external stall this dogfood targets). Recovery contract
+  honoured — survivor merged, the 6 re-dispatched in waves of 3 and all passed.
+- **Cron introspection**: `e243f234` fired twice (at :23) during the run; both
+  correctly NO-OP'd (work in flight) — recover-not-heartbeat confirmed end-to-end.
+- **New finding (not in the 77)**: `destructive_git` matches `git push … --force`
+  ACROSS `;`/separators, so a benign `git push origin main; …; git worktree remove … --force` is falsely blocked. Folded into batch 2 (destructive_git).
