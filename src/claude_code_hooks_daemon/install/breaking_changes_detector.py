@@ -19,6 +19,63 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+_VERSION_SEPARATOR = "."
+_UPGRADES_RELATIVE_DIR = "CLAUDE/UPGRADES"
+_FIRST_MINOR = 0
+
+
+def parse_version(version: str) -> tuple[int, int, int]:
+    """Parse a ``MAJOR.MINOR.PATCH`` string into an integer tuple.
+
+    This is the single source of truth for version parsing in this module —
+    both range comparison and migration-hint construction use it, so a major
+    such as ``10`` is never confused with the first character ``'1'``.
+
+    Args:
+        version: Version string like ``'2.13.0'`` or ``'10.4.0'``
+
+    Returns:
+        ``(major, minor, patch)`` tuple of ints.
+
+    Raises:
+        ValueError: If the version string is not ``MAJOR.MINOR.PATCH``.
+    """
+    parts = version.split(_VERSION_SEPARATOR)
+    if len(parts) != 3:
+        raise ValueError(
+            f"Invalid version string {version!r}: expected MAJOR.MINOR.PATCH (three components)"
+        )
+    try:
+        major, minor, patch = (int(part) for part in parts)
+    except ValueError as exc:
+        raise ValueError(
+            f"Invalid version string {version!r}: components must be integers"
+        ) from exc
+    return (major, minor, patch)
+
+
+def _migration_guide_hint(version: str) -> str:
+    """Build a migration-guide reference for a version's upgrade directory.
+
+    Derives the real major from ``version`` and points at
+    ``CLAUDE/UPGRADES/v{major}/``. When the minor is greater than zero the hint
+    names the predecessor minor (``v{major}.{minor-1}-to-v{major}.{minor}``);
+    when the minor is zero there is no same-major predecessor, so the hint
+    references the major's upgrade directory directly.
+
+    Args:
+        version: Version where the change occurred (e.g. ``'3.0.0'``).
+
+    Returns:
+        Human-readable migration-guide hint string.
+    """
+    major, minor, _patch = parse_version(version)
+    upgrades_major_dir = f"{_UPGRADES_RELATIVE_DIR}/v{major}"
+    if minor > _FIRST_MINOR:
+        guide_dir = f"{upgrades_major_dir}/v{major}.{minor - 1}-to-v{major}.{minor}"
+        return f"See {guide_dir}/ for migration guide"
+    return f"See {upgrades_major_dir}/ for migration guides"
+
 
 class ChangeType(Enum):
     """Type of breaking change."""
@@ -123,7 +180,7 @@ class BreakingChangesDetector:
                         change_type=ChangeType.HANDLER_REMOVED,
                         handler_name=handler_name,
                         description=f"Handler '{handler_name}' was removed in v{current_version}",
-                        migration_hint=f"See CLAUDE/UPGRADES/v2/v{current_version[0]}.{int(current_version.split('.')[1]) - 1}-to-v{current_version}/ for migration guide",
+                        migration_hint=_migration_guide_hint(current_version),
                     )
                     self._changes.append(change)
 
@@ -171,16 +228,12 @@ class BreakingChangesDetector:
             List of breaking changes in the version range
         """
 
-        def version_tuple(v: str) -> tuple[int, int, int]:
-            parts = v.split(".")
-            return (int(parts[0]), int(parts[1]), int(parts[2]))
-
-        from_tuple = version_tuple(from_version)
-        to_tuple = version_tuple(to_version)
+        from_tuple = parse_version(from_version)
+        to_tuple = parse_version(to_version)
 
         result = []
         for change in self._changes:
-            change_tuple = version_tuple(change.version)
+            change_tuple = parse_version(change.version)
             if from_tuple <= change_tuple <= to_tuple:
                 result.append(change)
 

@@ -233,6 +233,22 @@ config_changes:
   changed: []
 """
 
+_MANIFEST_WITH_RECOMMENDED = """\
+version: "2.13.0"
+date: "2026-02-17"
+breaking: false
+config_changes:
+  added:
+    - key: handlers.post_tool_use.recovery_cron_advisor.enabled
+      description: "Opt-in failsafe recovery cron advisory"
+      recommended: true
+      dormant: true
+      recommended_value: true
+  renamed: []
+  removed: []
+  changed: []
+"""
+
 
 class TestRunCheckConfigMigrations:
     """Tests for run_check_config_migrations."""
@@ -312,6 +328,56 @@ class TestRunCheckConfigMigrations:
         assert result["has_suggestions"] is True
         assert len(result["suggestions"]) == 1
         assert result["suggestions"][0]["key"] == "daemon.enforce_single_daemon_process"
+
+    def test_json_suggestion_includes_plan_00133_fields(self, tmp_path: Path) -> None:
+        """JSON suggestions carry recommended/dormant/recommended_value/current_value.
+
+        Regression: the JSON path dropped these Plan 00133 fields that the text
+        path renders, so machine-readable consumers lost the recommended /
+        default-flip signal. UNSET must serialise as null.
+        """
+        md = tmp_path / "manifests"
+        md.mkdir()
+        self._write_manifest(md, "2.13.0", _MANIFEST_WITH_RECOMMENDED)
+        cfg = self._write_config(tmp_path, {"handlers": {}, "daemon": {}})
+
+        result = run_check_config_migrations(
+            from_version="2.12.0",
+            to_version="2.13.0",
+            user_config_path=cfg,
+            output_format="json",
+            manifests_dir=md,
+        )
+
+        assert result["has_suggestions"] is True
+        assert len(result["suggestions"]) == 1
+        suggestion = result["suggestions"][0]
+        assert suggestion["recommended"] is True
+        assert suggestion["dormant"] is True
+        assert suggestion["recommended_value"] is True
+        # The client never set the key, so current_value is unset -> null in JSON.
+        assert suggestion["current_value"] is None
+
+    def test_json_suggestion_unset_recommended_value_is_null(self, tmp_path: Path) -> None:
+        """A suggestion without a recommended_value serialises it as null, not a sentinel."""
+        md = tmp_path / "manifests"
+        md.mkdir()
+        self._write_manifest(md, "2.13.0", _MANIFEST_WITH_ADDED)
+        cfg = self._write_config(tmp_path, {"handlers": {}, "daemon": {}})
+
+        result = run_check_config_migrations(
+            from_version="2.12.0",
+            to_version="2.13.0",
+            user_config_path=cfg,
+            output_format="json",
+            manifests_dir=md,
+        )
+
+        suggestion = result["suggestions"][0]
+        assert suggestion["recommended"] is False
+        assert suggestion["dormant"] is False
+        assert suggestion["recommended_value"] is None
+        assert suggestion["current_value"] is None
 
     def test_nonexistent_config_raises_file_not_found(self, tmp_path: Path) -> None:
         md = tmp_path / "manifests"

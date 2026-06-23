@@ -59,6 +59,45 @@ def sample_changelog_no_markers(tmp_path: Path) -> Path:
     return changelog
 
 
+@pytest.fixture
+def sample_changelog_v3_zero_minor(tmp_path: Path) -> Path:
+    """CHANGELOG.md whose only removal is in a v3 release with a .0 minor.
+
+    Exercises both migration-hint defects at once: a real major != first
+    character only when major>=10 (here v3 keeps it subtle), and a minor of 0
+    that the old ``minor - 1`` arithmetic turns into a negative component.
+    """
+    changelog = tmp_path / "CHANGELOG.md"
+    changelog.write_text("""# Changelog
+
+## [3.0.0] - 2026-06-01
+
+### Removed
+<!--BREAKING: handler:legacy_handler:removed-->
+- **legacy_handler**: Removed in the v3 line
+""")
+    return changelog
+
+
+@pytest.fixture
+def sample_changelog_double_digit_major(tmp_path: Path) -> Path:
+    """CHANGELOG.md with a removal in a double-digit major version (v10).
+
+    The old ``current_version[0]`` indexing yields the first CHARACTER ('1'),
+    not the real major (10), so this fixture pins the correct-major behaviour.
+    """
+    changelog = tmp_path / "CHANGELOG.md"
+    changelog.write_text("""# Changelog
+
+## [10.4.0] - 2027-01-01
+
+### Removed
+<!--BREAKING: handler:legacy_handler:removed-->
+- **legacy_handler**: Removed in the v10 line
+""")
+    return changelog
+
+
 class TestBreakingChange:
     """Tests for BreakingChange dataclass."""
 
@@ -152,6 +191,38 @@ class TestBreakingChangesDetector:
         changes = detector.get_changes_for_handler("unknown_handler")
 
         assert len(changes) == 0
+
+    def test_migration_hint_uses_real_major_not_first_character(
+        self, sample_changelog_double_digit_major: Path
+    ) -> None:
+        """Migration hint references the real major (10), never the first char ('1')."""
+        detector = BreakingChangesDetector(sample_changelog_double_digit_major)
+        changes = detector.get_changes_for_handler("legacy_handler")
+
+        assert len(changes) == 1
+        hint = changes[0].migration_hint
+        assert hint is not None
+        # Real major is 10, predecessor minor of 4 is 3 -> v10/v10.3-to-v10.4
+        assert "CLAUDE/UPGRADES/v10/" in hint
+        assert "v10.3-to-v10.4" in hint
+        # The buggy behaviour produced a leading 'v1' from current_version[0].
+        assert "CLAUDE/UPGRADES/v1/" not in hint
+
+    def test_migration_hint_handles_zero_minor_predecessor(
+        self, sample_changelog_v3_zero_minor: Path
+    ) -> None:
+        """A .0 minor must not yield a negative predecessor component."""
+        detector = BreakingChangesDetector(sample_changelog_v3_zero_minor)
+        changes = detector.get_changes_for_handler("legacy_handler")
+
+        assert len(changes) == 1
+        hint = changes[0].migration_hint
+        assert hint is not None
+        assert "CLAUDE/UPGRADES/v3/" in hint
+        # 3.0.0 has no v3.-1; the predecessor must roll back to the prior major line.
+        assert "v3.-1" not in hint
+        assert "v2.-1" not in hint
+        assert "-1-to-" not in hint
 
     def test_get_changes_in_version_range(self, sample_changelog_with_markers: Path) -> None:
         """get_changes_in_version_range filters by version."""

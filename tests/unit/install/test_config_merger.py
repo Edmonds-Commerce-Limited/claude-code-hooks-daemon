@@ -416,3 +416,62 @@ class TestConfigMergerMerge:
         result = self.merger.merge(new_default_config=new_default, diff=diff)
         # No conflict since the handler doesn't exist in new default either
         assert result.is_clean is True
+
+    def test_nested_change_with_subkey_named_new_not_misclassified(self) -> None:
+        """A nested change whose sub-key is literally 'new' must apply per sub-key.
+
+        The differ emits a nested change as ``{option_key: {sub_key: {'old': X,
+        'new': Y}}}``. When a ``sub_key`` is itself the string ``'new'`` the
+        nested record looks like ``{'new': {'old': X, 'new': Y}}``. Regression:
+        the old code keyed on ``'new' in change`` and treated this nested record
+        as a SIMPLE change, replacing the whole ``options`` dict with the inner
+        ``{'old': X, 'new': Y}`` descriptor instead of setting
+        ``options['new'] = Y``.
+        """
+        new_default = {
+            "version": "2.0",
+            "handlers": {
+                "pre_tool_use": {
+                    "branch_policy": {
+                        "enabled": True,
+                        "priority": 40,
+                        "options": {"new": "old-branch"},
+                    }
+                }
+            },
+        }
+        diff = ConfigDiff(
+            changed_options={
+                "pre_tool_use": {
+                    "branch_policy": {
+                        "options": {"new": {"old": "old-branch", "new": "release-branch"}},
+                    }
+                }
+            }
+        )
+        result = self.merger.merge(new_default_config=new_default, diff=diff)
+        handler = result.merged_config["handlers"]["pre_tool_use"]["branch_policy"]
+        assert handler["options"] == {"new": "release-branch"}
+
+    def test_simple_change_whose_new_value_is_dict_with_new_key(self) -> None:
+        """A simple change whose new value is a dict containing 'new' applies verbatim.
+
+        The differ emits ``{option_key: {'old': X, 'new': <dict>}}`` for a
+        non-dict-to-dict change. The merged option must be the FULL new dict,
+        even when that dict itself contains a 'new' member.
+        """
+        new_value = {"new": True, "label": "x"}
+        new_default = {
+            "version": "2.0",
+            "handlers": {"pre_tool_use": {"branch_policy": {"enabled": True, "options": None}}},
+        }
+        diff = ConfigDiff(
+            changed_options={
+                "pre_tool_use": {
+                    "branch_policy": {"options": {"old": None, "new": new_value}},
+                }
+            }
+        )
+        result = self.merger.merge(new_default_config=new_default, diff=diff)
+        handler = result.merged_config["handlers"]["pre_tool_use"]["branch_policy"]
+        assert handler["options"] == new_value

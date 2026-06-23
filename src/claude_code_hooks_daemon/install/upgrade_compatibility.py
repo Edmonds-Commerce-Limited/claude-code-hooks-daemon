@@ -26,7 +26,12 @@ from claude_code_hooks_daemon.config.validator import ConfigValidator
 from claude_code_hooks_daemon.install.breaking_changes_detector import (
     BreakingChangesDetector,
     ChangeType,
+    parse_version,
 )
+
+# Directory layout for upgrade guides: CLAUDE/UPGRADES/v{major}/v{n}-to-v{n+1}/.
+_UPGRADES_DIR_NAME = "UPGRADES"
+_CLAUDE_DIR_NAME = "CLAUDE"
 
 
 class CompatibilityStatus(Enum):
@@ -337,7 +342,8 @@ class CompatibilityChecker:
         lines.append("2. Update or remove incompatible handlers from config")
         lines.append("3. Re-run upgrade after fixing config issues")
         lines.append("")
-        lines.append("Upgrade guides: CLAUDE/UPGRADES/v2/")
+        target_major, _minor, _patch = parse_version(report.target_version)
+        lines.append(f"Upgrade guides: {_CLAUDE_DIR_NAME}/{_UPGRADES_DIR_NAME}/v{target_major}/")
         lines.append("")
 
         return "\n".join(lines)
@@ -345,33 +351,39 @@ class CompatibilityChecker:
     def suggest_upgrade_guides(self, daemon_dir: Path) -> list[Path]:
         """Suggest relevant upgrade guides for version range.
 
+        Derives the major version from ``target_version`` and looks under
+        ``CLAUDE/UPGRADES/v{major}/`` for the intermediate
+        ``v{major}.{n}-to-v{major}.{n+1}`` guides between the current and target
+        minors. Version strings are validated up front via ``parse_version``,
+        which raises a descriptive ``ValueError`` on a malformed string.
+
         Args:
             daemon_dir: Path to daemon installation directory
 
         Returns:
             List of upgrade guide paths to read
-        """
-        upgrades_dir = daemon_dir / "CLAUDE" / "UPGRADES" / "v2"
 
+        Raises:
+            ValueError: If ``current_version`` or ``target_version`` is not a
+                valid ``MAJOR.MINOR.PATCH`` string.
+        """
+        _current_major, current_minor, _current_patch = parse_version(self.current_version)
+        target_major, target_minor, _target_patch = parse_version(self.target_version)
+
+        upgrades_dir = daemon_dir / _CLAUDE_DIR_NAME / _UPGRADES_DIR_NAME / f"v{target_major}"
         if not upgrades_dir.exists():
             return []
 
-        # Parse version numbers
-        current_parts = self.current_version.split(".")
-        target_parts = self.target_version.split(".")
-
-        current_minor = int(current_parts[1])
-        target_minor = int(target_parts[1])
-
         guides: list[Path] = []
 
-        # Find all intermediate upgrade guides
+        # Find all intermediate upgrade guides within the target major line.
         for minor in range(current_minor, target_minor + 1):
             next_minor = minor + 1
-            guide_dir = upgrades_dir / f"v2.{minor}-to-v2.{next_minor}"
+            guide_name = f"v{target_major}.{minor}-to-v{target_major}.{next_minor}"
+            guide_dir = upgrades_dir / guide_name
             if guide_dir.exists():
                 # Look for main guide file
-                guide_file = guide_dir / f"v2.{minor}-to-v2.{next_minor}.md"
+                guide_file = guide_dir / f"{guide_name}.md"
                 if guide_file.exists():
                     guides.append(guide_file)
 
