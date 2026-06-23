@@ -29,6 +29,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Tooling / Dependencies
 
+- [00136: mkplan deployment driven by config SSoT](00136-mkplan-deploy-config-ssot/PLAN.md) - In Progress
+
+  - Fixes a v3.24.0 field bug (`untracked/hooks-daemon-plan-script.md`, client `client-a-infra`): `mkplan.bash` (Plan 00130) is only deployed by `install_version.sh` behind the opt-in `PLAN_WORKFLOW=yes`; the upgrade path never deploys it on either path — so every upgraded project is told by `plan_number_helper` to run a script that does not exist
+  - Root cause is structural: deployment is gated by an env var orthogonal to the config SSoT (`config.plan_workflow.enabled`/`.directory`). Fix derives deployment from config via one testable Python entrypoint (`deploy_plan_workflow_if_enabled`) called identically by install + both upgrade paths, plus a deterministic acceptance gate
+
 - [00130: Plan-Scaffolding Script Distribution (`mkplan.bash`)](00130-plan-scaffolding-script-distribution/PLAN.md) - Shipped v3.23.0
 
   - Candidate `mkplan.bash` proposed for distribution into client plan folders: scaffolds the next numbered plan folder + skeleton `PLAN.md`, resolving the number from the git-anchored `hooksdaemon.latestPlanNumber` counter (Plan 00112) so humans and agents stop hand-rolling names / scanning `ls` for the next number
