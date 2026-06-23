@@ -12,17 +12,32 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Handler, HookResult, ProjectContext
 from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 
-# Runtime → (icon, label). None (host) is handled separately as desktop.
+# ANSI colours — each environment renders in a distinct colour so the runtime
+# is identifiable at a glance. Desktop is red (you are on the host); container
+# runtimes use distinct, brand-relevant-where-possible, non-semantic colours:
+# docker=blue (Docker brand), podman=magenta/purple (Podman brand), lxc=cyan
+# (no strong brand colour — kept distinct), generic=grey. (Matches the inline
+# ANSI-constant convention used by git_branch.py / model_context.py.)
+_COLOR_RED = "\033[31m"
+_COLOR_BLUE = "\033[34m"
+_COLOR_MAGENTA = "\033[35m"
+_COLOR_CYAN = "\033[36m"
+_COLOR_GREY = "\033[37m"
+_COLOR_RESET = "\033[0m"
+
+# Runtime → (icon, label, colour). None (host) is handled separately as desktop.
 _DESKTOP_ICON = "💻"
 _DESKTOP_LABEL = "desktop"
-_RUNTIME_DISPLAY: dict[str, tuple[str, str]] = {
-    "docker": ("🐳", "docker"),
-    "podman": ("📦", "podman"),
-    "generic": ("📦", "container"),
-    "lxc": ("🧊", "lxc"),
+_DESKTOP_COLOR = _COLOR_RED
+_RUNTIME_DISPLAY: dict[str, tuple[str, str, str]] = {
+    "docker": ("🐳", "docker", _COLOR_BLUE),
+    "podman": ("📦", "podman", _COLOR_MAGENTA),
+    "generic": ("📦", "container", _COLOR_GREY),
+    "lxc": ("🧊", "lxc", _COLOR_CYAN),
 }
 # Fallback for an unexpected non-empty runtime label (forward-compatible).
 _UNKNOWN_RUNTIME_ICON = "📦"
+_UNKNOWN_RUNTIME_COLOR = _COLOR_GREY
 
 
 class EnvironmentIndicatorHandler(Handler):
@@ -49,10 +64,12 @@ class EnvironmentIndicatorHandler(Handler):
         """Return the environment-indicator segment from the cached runtime."""
         runtime = ProjectContext.container_runtime()
         if runtime is None:
-            icon, label = _DESKTOP_ICON, _DESKTOP_LABEL
+            icon, label, color = _DESKTOP_ICON, _DESKTOP_LABEL, _DESKTOP_COLOR
         else:
-            icon, label = _RUNTIME_DISPLAY.get(runtime, (_UNKNOWN_RUNTIME_ICON, runtime))
-        return HookResult(context=[f"| {icon} {label}"])
+            icon, label, color = _RUNTIME_DISPLAY.get(
+                runtime, (_UNKNOWN_RUNTIME_ICON, runtime, _UNKNOWN_RUNTIME_COLOR)
+            )
+        return HookResult(context=[f"| {color}{icon} {label}{_COLOR_RESET}"])
 
     def get_claude_md(self) -> str | None:
         return None
