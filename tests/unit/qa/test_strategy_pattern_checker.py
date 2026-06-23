@@ -133,6 +133,55 @@ class SimpleHandler(Handler):
         rules = [v.rule for v in violations]
         assert "strategy_handler_language_logic" not in rules
 
+    def test_does_not_flag_registry_module_without_handler_subclass(self) -> None:
+        """A 'handler' in the filename alone must not enable handler checks.
+
+        Regression: _detect_handler_file matched any file whose name merely
+        contained the substring 'handler' (e.g. handler_registry.py), so
+        registry/helper modules that import a strategy registry and access a
+        bare '.name' were wrongly flagged with RULE_HANDLER_LANGUAGE_LOGIC.
+        """
+        source = """
+from claude_code_hooks_daemon.strategies.tdd import TddStrategyRegistry
+
+
+class StrategyRegistry:
+    def __init__(self):
+        self._registry = TddStrategyRegistry.create_default()
+
+    def lookup(self, item):
+        if item.name == "anything":
+            return item
+        return None
+"""
+        violations = check_source(source, "handler_registry.py")
+        rules = [v.rule for v in violations]
+        assert "strategy_handler_language_logic" not in rules
+
+    def test_does_not_flag_bare_name_attribute_access(self) -> None:
+        """A bare '.name' attribute access is not language-specific logic.
+
+        Regression: _contains_language_pattern treated any attribute named
+        'name' as language-specific, an extremely common attribute that
+        inflated false positives even inside genuine Handler subclasses.
+        """
+        source = """
+from claude_code_hooks_daemon.strategies.tdd import TddStrategyRegistry
+
+
+class MyHandler(Handler):
+    def __init__(self):
+        self._registry = TddStrategyRegistry.create_default()
+
+    def matches(self, hook_input):
+        if hook_input.name == "Bash":
+            return True
+        return False
+"""
+        violations = check_source(source, "handler.py")
+        rules = [v.rule for v in violations]
+        assert "strategy_handler_language_logic" not in rules
+
 
 class TestStrategyMissingAcceptanceTests:
     """Test detection of missing get_acceptance_tests in strategies."""

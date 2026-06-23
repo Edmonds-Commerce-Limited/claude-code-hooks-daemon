@@ -195,6 +195,45 @@ class TestCheckRunningDaemon:
         # PID file should be removed
         assert not pid_file.exists()
 
+    def test_permission_error_on_stop_records_warning(self, tmp_path, monkeypatch):
+        """A daemon that survives SIGTERM due to PermissionError must warn.
+
+        Regression: the PermissionError on os.kill(SIGTERM) was swallowed by a
+        bare ``pass``, so the installer proceeded over a still-running daemon
+        with no signal to the user. The graceful-stop failure must surface as a
+        warning telling the user to stop the daemon manually.
+        """
+        import signal
+
+        from claude_code_hooks_daemon.install import client_validator as cv_module
+
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        untracked_dir = project_root / ".claude" / "hooks-daemon" / "untracked"
+        untracked_dir.mkdir(parents=True)
+
+        running_pid = 4242
+        pid_file = untracked_dir / "daemon.pid"
+        pid_file.write_text(str(running_pid))
+
+        def fake_kill(pid: int, sig: int) -> None:
+            # Existence probe (signal 0) succeeds: the daemon is alive.
+            if sig == 0:
+                return
+            # The installer lacks permission to terminate it.
+            if sig == signal.SIGTERM:
+                raise PermissionError("operation not permitted")
+            return
+
+        monkeypatch.setattr(cv_module.os, "kill", fake_kill)
+
+        result = ClientInstallValidator._check_running_daemon(project_root)
+
+        assert result.passed is True
+        warnings_text = "\n".join(result.warnings)
+        assert str(running_pid) in warnings_text
+        assert "permission" in warnings_text.lower()
+
 
 class TestCheckDirectoryStructure:
     """Test _check_directory_structure validation."""

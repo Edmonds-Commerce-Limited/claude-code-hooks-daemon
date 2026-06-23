@@ -356,7 +356,12 @@ class TestConfigMergerMerge:
         assert d["default_value"] is None
 
     def test_non_dict_handler_config_in_priority_change(self) -> None:
-        """Handles non-dict handler config when applying priority changes."""
+        """Reports a conflict when the priority target handler is non-dict.
+
+        Regression: a priority customization for a handler that exists in the
+        new default but is a scalar (e.g. `handler: true` YAML shorthand) was
+        silently dropped with no signal. It must now surface as a conflict.
+        """
         new_default = {
             "version": "2.0",
             "handlers": {
@@ -369,8 +374,13 @@ class TestConfigMergerMerge:
             changed_priorities={"pre_tool_use": {"destructive_git": {"old": 10, "new": 5}}}
         )
         result = self.merger.merge(new_default_config=new_default, diff=diff)
-        # Should not crash - non-dict handler config is skipped
+        # Should not crash - non-dict handler config is reported, not applied.
         assert isinstance(result, MergeResult)
+        assert len(result.conflicts) == 1
+        conflict = result.conflicts[0]
+        assert conflict.conflict_type == "unmergeable_handler_shape"
+        assert conflict.path == "handlers.pre_tool_use.destructive_git"
+        assert conflict.user_value == 5
 
     def test_non_dict_handler_config_in_option_change(self) -> None:
         """Handles non-dict handler config when applying option changes."""

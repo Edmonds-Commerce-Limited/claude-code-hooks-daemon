@@ -64,6 +64,22 @@ LANGUAGE_PATTERNS = frozenset(
     }
 )
 
+# Base class name that marks a class as a daemon Handler. Only files defining a
+# subclass of this are treated as handler implementations for the
+# language-logic check (filename substrings like "handler_registry" are not).
+_HANDLER_BASE_CLASS_NAME = "Handler"
+
+# Attribute names that are genuinely language-specific. A bare ``.name`` is NOT
+# included — it is an extremely common attribute and matching it inflated false
+# positives. Only explicit language attributes are treated as language logic.
+_LANGUAGE_ATTRIBUTE_NAMES = frozenset({"language", "language_name"})
+
+# Receiver-name + attribute pairs that ARE language-specific even though the
+# attribute alone (``.name``) is too common to flag. ``config.name`` is the
+# language-config object's display name in the strategy pattern.
+_LANGUAGE_CONFIG_RECEIVER_NAME = "config"
+_LANGUAGE_CONFIG_ATTRIBUTE_NAME = "name"
+
 
 class StrategyPatternChecker(ast.NodeVisitor):
     """AST visitor that detects strategy pattern violations."""
@@ -77,6 +93,10 @@ class StrategyPatternChecker(ast.NodeVisitor):
         self._calls_strategy_get_acceptance_tests = False
         self._is_strategy_file = self._detect_strategy_file()
         self._is_handler_file = self._detect_handler_file()
+        # True once a class deriving from the Handler base class is seen. The
+        # language-logic check requires this so registry/helper modules whose
+        # filename merely contains "handler" are not scanned.
+        self._defines_handler_subclass = False
         self._module_constants: set[str] = set()
         self._classes_seen: list[str] = []
         self._classes_with_acceptance_tests: set[str] = set()
@@ -115,8 +135,21 @@ class StrategyPatternChecker(ast.NodeVisitor):
         old_class = self._current_class
         self._current_class = node.name
         self._classes_seen.append(node.name)
+        if self._derives_from_handler(node):
+            self._defines_handler_subclass = True
         self.generic_visit(node)
         self._current_class = old_class
+
+    @staticmethod
+    def _derives_from_handler(node: ast.ClassDef) -> bool:
+        """Return True if the class derives from the Handler base class."""
+        for base in node.bases:
+            if isinstance(base, ast.Name) and base.id == _HANDLER_BASE_CLASS_NAME:
+                return True
+            # Support qualified bases like ``core.Handler``.
+            if isinstance(base, ast.Attribute) and base.attr == _HANDLER_BASE_CLASS_NAME:
+                return True
+        return False
 
     def visit_Assign(self, node: ast.Assign) -> None:
         """Track module-level constants."""
@@ -165,8 +198,10 @@ class StrategyPatternChecker(ast.NodeVisitor):
                         if child.func.attr == "get_acceptance_tests":
                             self._calls_strategy_get_acceptance_tests = True
 
-        # Check for language-specific logic in handlers using strategies
-        if self._is_handler_file and self._uses_strategy_registry:
+        # Check for language-specific logic in handlers using strategies. Gated
+        # on the file actually defining a Handler subclass so registry/helper
+        # modules (whose filename merely contains "handler") are not scanned.
+        if self._defines_handler_subclass and self._uses_strategy_registry:
             self._check_for_language_logic(node)
 
         # Check for bare string literals in strategy files
@@ -209,7 +244,17 @@ class StrategyPatternChecker(ast.NodeVisitor):
                 if any(pattern in child.id.lower() for pattern in LANGUAGE_PATTERNS):
                     return True
             elif isinstance(child, ast.Attribute):
-                if child.attr in ("name", "language", "language_name"):
+                # A bare ``.name`` is too common to be language-specific; only
+                # explicit language attributes count.
+                if child.attr in _LANGUAGE_ATTRIBUTE_NAMES:
+                    return True
+                # ``config.name`` (the language-config display name) IS
+                # language-specific even though ``.name`` alone is not.
+                if (
+                    child.attr == _LANGUAGE_CONFIG_ATTRIBUTE_NAME
+                    and isinstance(child.value, ast.Name)
+                    and child.value.id == _LANGUAGE_CONFIG_RECEIVER_NAME
+                ):
                     return True
         return False
 

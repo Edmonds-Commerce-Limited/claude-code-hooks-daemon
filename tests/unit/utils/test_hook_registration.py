@@ -213,6 +213,36 @@ class TestValidateHookCommands:
         assert "Stop" in issues[0]
         assert "multiple" in issues[0].lower() or "2" in issues[0]
 
+    def test_non_dict_hook_entry_does_not_raise(self) -> None:
+        """A non-dict hook entry must be skipped, not crash with AttributeError.
+
+        Regression: event_hooks[0].get(...) assumed a dict; a list/str entry in
+        malformed settings.json raised AttributeError, crashing the validator
+        that is meant to diagnose the malformed config.
+        """
+        settings = _build_settings_with_all_hooks()
+        settings["hooks"]["Stop"] = ["not-a-dict"]
+        issues = validate_hook_commands(settings)
+        assert isinstance(issues, list)
+
+    def test_non_dict_inner_hook_does_not_raise(self) -> None:
+        """A non-dict inner hook entry must be skipped, not crash."""
+        settings = _build_settings_with_all_hooks()
+        settings["hooks"]["Stop"] = [{"hooks": ["not-a-dict"]}]
+        issues = validate_hook_commands(settings)
+        assert isinstance(issues, list)
+
+    def test_non_string_command_does_not_raise(self) -> None:
+        """A non-string command must be skipped, not crash on .endswith().
+
+        Regression: command.endswith(...) assumed a str; a null/number command
+        in malformed settings.json raised AttributeError.
+        """
+        settings = _build_settings_with_all_hooks()
+        settings["hooks"]["Stop"] = [{"hooks": [{"type": "command", "command": 123}]}]
+        issues = validate_hook_commands(settings)
+        assert isinstance(issues, list)
+
 
 class TestDetectLocalHooksMisplacement:
     """Tests for detect_local_hooks_misplacement().

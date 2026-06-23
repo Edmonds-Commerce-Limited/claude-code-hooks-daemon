@@ -91,7 +91,7 @@ CLAUDE/Plan/
 
 When all tasks are done:
 
-1. Update plan status to `Complete` with date
+1. Update plan status to `Complete` (cite the delivery commit hash, not a date)
 2. Move folder to `CLAUDE/Plan/Completed/NNNNN-description/`
 3. Update `README.md`: remove from Active, add to Completed, update stats
 4. Commit the move

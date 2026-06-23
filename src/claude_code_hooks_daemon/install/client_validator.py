@@ -27,6 +27,14 @@ from claude_code_hooks_daemon.utils.hook_registration import (
 
 logger = logging.getLogger(__name__)
 
+# Warning surfaced when the installer cannot terminate a still-running daemon
+# because it lacks permission to signal that process. Without this, the
+# installer would proceed over a live daemon with no visible signal.
+_DAEMON_STOP_PERMISSION_WARNING = (
+    "Could not stop daemon PID {pid}: insufficient permission; "
+    "stop it manually before installing"
+)
+
 
 class ClientValidationError(Exception):
     """Raised when client installation validation fails."""
@@ -281,8 +289,14 @@ class ClientInstallValidator:
                         except ProcessLookupError:
                             warnings.append(f"Gracefully stopped daemon (PID {pid})")
 
-                    except (ProcessLookupError, PermissionError):
-                        pass  # Process already gone or no permission
+                    except ProcessLookupError:
+                        # Process already gone between probe and signal — fine.
+                        pass
+                    except PermissionError:
+                        # The daemon survived because we lack permission to
+                        # signal it. Surface this so the user knows the install
+                        # is proceeding over a still-running daemon.
+                        warnings.append(_DAEMON_STOP_PERMISSION_WARNING.format(pid=pid))
 
                 except ProcessLookupError:
                     # Process not running - clean up stale PID file
