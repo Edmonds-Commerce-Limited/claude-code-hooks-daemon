@@ -672,3 +672,27 @@ class TestSecurityAntipatternHandler:
         }
         result = handler.handle(hook_input)
         assert result.decision == "allow"
+
+    # Finding #64: the skip-directory guard must apply to handle() too.
+    # The antipattern payload is assembled at runtime so this test file itself
+    # does not trip the live security_antipattern hook on edit.
+    def test_handle_honours_skip_directory_guard(self, handler):
+        """handle() must NOT block a file in a skip directory, mirroring matches()."""
+        payload = "<?php " + "ev" + "al($code);"
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": "/workspace/vendor/lib/auth.php",
+                "content": payload,
+            },
+        }
+        # matches() already skips this; handle() must agree even if called directly.
+        assert handler.matches(hook_input) is False
+        result = handler.handle(hook_input)
+        assert result.decision == "allow"
+
+    def test_find_all_violations_skips_directory(self, handler):
+        """_find_all_violations returns no issues for a skip-directory file."""
+        payload = "<?php " + "ev" + "al($code);"
+        issues = handler._find_all_violations(payload, "/workspace/node_modules/pkg/index.php")
+        assert issues == []

@@ -254,3 +254,36 @@ class TestWebSearchYearHandler:
         hook_input = {"tool_name": "WebSearch", "tool_input": {"query": "React 2021"}}
         result = handler.handle(hook_input)
         assert result.guidance is not None
+
+    # Finding #66: word-boundary matching avoids embedded-digit false positives.
+    def test_matches_year_embedded_in_longer_number_returns_false(self, handler):
+        """A year embedded in a longer digit run must NOT match (e.g. port 20200)."""
+        hook_input = {
+            "tool_name": "WebSearch",
+            "tool_input": {"query": "open port 20200 on the server"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_matches_year_with_trailing_digit_returns_false(self, handler):
+        """'12025' embeds 2025 but is not a standalone year — must NOT match."""
+        hook_input = {
+            "tool_name": "WebSearch",
+            "tool_input": {"query": "error code 12025 reference"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_matches_year_with_trailing_word_chars_returns_false(self, handler):
+        """'2021abc' is not a standalone year — must NOT match."""
+        hook_input = {
+            "tool_name": "WebSearch",
+            "tool_input": {"query": "commit 2021abc in the log"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_matches_standalone_year_still_matches(self, handler):
+        """A standalone old year delimited by word boundaries must still match."""
+        hook_input = {
+            "tool_name": "WebSearch",
+            "tool_input": {"query": "Python features 2020"},
+        }
+        assert handler.matches(hook_input) is True

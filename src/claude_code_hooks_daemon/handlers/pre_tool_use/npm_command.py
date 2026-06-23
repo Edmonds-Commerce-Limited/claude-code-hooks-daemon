@@ -13,6 +13,14 @@ from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.utils.guides import get_llm_command_guide_path
 from claude_code_hooks_daemon.utils.npm import has_llm_commands_in_package_json
 
+# Capture the FULL npm-run script token. Script names legitimately contain
+# letters (any case), digits, colons, underscores and hyphens (e.g.
+# "build_prod", "test123", "Build", "build:prod"). A narrower class would
+# truncate the name (e.g. "build_prod" -> "build") and drive the wrong
+# suggestion/echo. SINGLE SOURCE OF TRUTH for the npm-run match, used by both
+# matches() and handle().
+_NPM_RUN_SCRIPT_PATTERN = r"\bnpm\s+run\s+([A-Za-z0-9:_-]+)"
+
 
 class NpmCommandHandler(Handler):
     """Enforce llm: prefixed npm commands and block direct npx tool usage."""
@@ -70,7 +78,7 @@ class NpmCommandHandler(Handler):
             return True  # Block ALL piped npm/npx commands (including llm:)
 
         # Check for npm run commands
-        npm_match = re.search(r"\bnpm\s+run\s+([a-z:]+(?:-[a-z]+)*)", command)
+        npm_match = re.search(_NPM_RUN_SCRIPT_PATTERN, command)
         if npm_match:
             npm_cmd = npm_match.group(1)
             # Only match if NOT already llm: command and NOT in whitelist
@@ -116,7 +124,7 @@ class NpmCommandHandler(Handler):
             )
 
         # Check if it's npm run command
-        npm_match = re.search(r"npm\s+run\s+([a-z:]+(?:-[a-z]+)*)", command)
+        npm_match = re.search(_NPM_RUN_SCRIPT_PATTERN, command)
         if npm_match:
             npm_cmd = npm_match.group(1)
             suggested = self.SUGGESTIONS.get(npm_cmd, "llm:qa")

@@ -11,6 +11,22 @@ from claude_code_hooks_daemon.core.utils import get_bash_command
 # command-specific explanation (e.g. bare `git checkout .`).
 _GENERIC_DESTRUCTIVE_REASON = "This git command destroys uncommitted changes permanently"
 
+# Characters that separate shell sub-commands. A flag that appears AFTER one of
+# these in a compound command belongs to a DIFFERENT sub-command, so any pattern
+# that must stay within a single sub-command segment scopes its match by
+# forbidding these characters between the sub-command head and the flag.
+_SUBCOMMAND_SEPARATOR_CHARS = ";&|"
+
+# Force-push detection, scoped to the `git push` sub-command segment.
+# `[^;&|]*?` consumes only characters within the push segment (never a command
+# separator), so a non-push `--force` later in a compound command — e.g.
+# `git push origin main; git worktree remove <path> --force` — is NOT matched.
+# Within the segment, the long (`--force`, `--force-with-lease`) and short (`-f`)
+# force flags all qualify as a destructive force push.
+_GIT_PUSH_FORCE_PATTERN = (
+    rf"\bgit\s+push\b[^{_SUBCOMMAND_SEPARATOR_CHARS}]*?" r"(?:--force(?:-with-lease)?|-f)\b"
+)
+
 # SINGLE SOURCE OF TRUTH: ordered (pattern, reason) pairs consumed by BOTH matches()
 # and handle(). Order matters — handle() returns the reason of the FIRST matching
 # pattern, exactly mirroring matches()' first-hit semantics. Keeping one ordered
@@ -36,9 +52,11 @@ _DESTRUCTIVE_PATTERN_REASONS: tuple[tuple[str, str], ...] = (
         "git checkout [REF] -- file discards all local changes to that file permanently",
     ),
     # git restore with file paths discards working-tree changes.
-    # Does NOT match: git restore --staged file.txt (safe - only unstages).
+    # Does NOT match the staged-only forms (safe - they only unstage):
+    #   git restore --staged file.txt   (long flag)
+    #   git restore -S file.txt          (short flag, equivalent to --staged)
     (
-        r"\bgit\s+restore\s+(?!--staged).*\S",
+        r"\bgit\s+restore\s+(?!--staged\b)(?!-S\b).*\S",
         "git restore discards all local changes to files permanently",
     ),
     (
@@ -50,7 +68,7 @@ _DESTRUCTIVE_PATTERN_REASONS: tuple[tuple[str, str], ...] = (
         "git stash clear permanently destroys all stashed changes",
     ),
     (
-        r"\bgit\s+push\s+.*--force\b",
+        _GIT_PUSH_FORCE_PATTERN,
         "git push --force can overwrite remote history and destroy team members' work",
     ),
     # Force branch deletion bypasses merge check. (?-i:) matches only uppercase -D

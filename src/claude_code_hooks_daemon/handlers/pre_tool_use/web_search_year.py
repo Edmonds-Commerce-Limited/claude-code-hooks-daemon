@@ -1,5 +1,6 @@
 """WebSearchYearHandler - validates WebSearch queries don't use outdated years."""
 
+import re
 from datetime import datetime
 from typing import Any
 
@@ -11,6 +12,10 @@ from claude_code_hooks_daemon.constants import (
     ToolName,
 )
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+
+# First year considered an "outdated" year for a web-search query. Years from
+# this value up to (but excluding) the current year trigger the advisory.
+_OLDEST_TRACKED_YEAR = 2020
 
 
 class WebSearchYearHandler(Handler):
@@ -38,8 +43,15 @@ class WebSearchYearHandler(Handler):
         if not query:
             return False
 
-        # Check for years 2020-2024 in query
-        return any(str(year) in query for year in range(2020, self.CURRENT_YEAR))
+        # Match an outdated year only when it stands alone (word boundaries), so
+        # embedded digit runs such as "20200", "12025" or "2021abc" do NOT trigger
+        # a false positive. The alternation is built from the live year range.
+        return self._outdated_year_pattern().search(query) is not None
+
+    def _outdated_year_pattern(self) -> re.Pattern[str]:
+        """Build a word-boundary regex matching any outdated year (oldest..current-1)."""
+        years = "|".join(str(year) for year in range(_OLDEST_TRACKED_YEAR, self.CURRENT_YEAR))
+        return re.compile(rf"\b(?:{years})\b")
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Provide guidance about outdated year in WebSearch."""

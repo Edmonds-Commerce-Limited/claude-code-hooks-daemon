@@ -93,6 +93,36 @@ class TestNpmCommandHandler:
         }
         assert handler.matches(hook_input) is True
 
+    # Finding #61: capture the FULL script token (underscores, digits, mixed case)
+
+    def test_handle_captures_full_underscore_script_name(self, handler: NpmCommandHandler) -> None:
+        """A script name with an underscore must be echoed in full, not truncated."""
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "npm run build_prod"},
+        }
+        result = handler.handle(hook_input)
+        assert "npm run build_prod" in result.reason
+        # The truncated form must NOT be the blocked command.
+        assert "BLOCKED COMMAND:\n  npm run build\n" not in result.reason
+
+    def test_handle_captures_full_digit_script_name(self, handler: NpmCommandHandler) -> None:
+        """A script name with trailing digits must be echoed in full."""
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "npm run test123"},
+        }
+        result = handler.handle(hook_input)
+        assert "npm run test123" in result.reason
+
+    def test_matches_uppercase_script_name(self, handler: NpmCommandHandler) -> None:
+        """An uppercase (non-llm) script must still be matched, not silently skipped."""
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "npm run Build"},
+        }
+        assert handler.matches(hook_input) is True
+
     # Tests for matches() method - npx commands
 
     def test_matches_npx_tsc(self, handler: NpmCommandHandler) -> None:

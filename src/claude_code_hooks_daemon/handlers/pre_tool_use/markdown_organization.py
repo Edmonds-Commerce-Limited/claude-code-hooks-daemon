@@ -297,8 +297,10 @@ class MarkdownOrganizationHandler(Handler):
                 if filename.lower() not in _PLAN_ROOT_EXCLUDED_FILES:
                     return True
 
-        # Pattern 2: Legacy ~/.claude/plans/*.md (backward compatibility)
-        return bool(re.search(r"/.claude/plans/[^/]+\.md$", file_path))
+        # Pattern 2: Legacy ~/.claude/plans/*.md (backward compatibility).
+        # The dot in '.claude' is escaped so a look-alike directory such as
+        # 'Xclaude/plans/' is not misclassified as the legacy planning path.
+        return bool(re.search(r"/\.claude/plans/[^/]+\.md$", file_path))
 
     def sanitize_folder_name(self, filename: str) -> str:
         """Sanitize plan filename for use as folder name.

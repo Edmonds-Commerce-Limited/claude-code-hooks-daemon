@@ -94,20 +94,13 @@ class SecurityAntipatternHandler(Handler):
         if not file_path:
             return False
 
-        if should_skip(file_path):
-            return False
-
         content = self._get_new_content(hook_input, tool_name)
         if not content:
             return False
 
-        strategies = self._registry.get_strategies(file_path)
-        for strategy in strategies:
-            for pattern in strategy.patterns:
-                if re.search(pattern.regex, content):
-                    return True
-
-        return False
+        # Single scan path: _find_all_violations applies the skip-directory guard,
+        # so matches() and handle() can never disagree on which files are scanned.
+        return bool(self._find_all_violations(content, file_path))
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Deny write if content contains security antipatterns, allow otherwise."""
@@ -175,7 +168,14 @@ class SecurityAntipatternHandler(Handler):
         return None
 
     def _find_all_violations(self, content: str, file_path: str) -> list[SecurityPattern]:
-        """Return all matching security patterns across all applicable strategies."""
+        """Return all matching security patterns across all applicable strategies.
+
+        Files in skip directories (vendor, node_modules, test fixtures, etc.) are
+        never scanned: the skip-directory guard lives HERE so every caller
+        (matches() and handle()) applies it, even on a direct handle() call.
+        """
+        if should_skip(file_path):
+            return []
         violations: list[SecurityPattern] = []
         strategies = self._registry.get_strategies(file_path)
         for strategy in strategies:

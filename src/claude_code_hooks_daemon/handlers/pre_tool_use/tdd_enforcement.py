@@ -19,7 +19,7 @@ from claude_code_hooks_daemon.core.utils import get_file_content, get_file_path
 from claude_code_hooks_daemon.strategies.tdd import TddStrategyRegistry
 from claude_code_hooks_daemon.strategies.tdd.protocol import TddStrategy
 
-# Path mapping constants for _get_test_file_path
+# Path mapping constants for the src->tests path-mapping helpers
 _TEST_DIR = "tests"
 _TEST_UNIT_DIR = "unit"
 _SRC_DIR = "src"
@@ -187,31 +187,6 @@ class TddEnforcementHandler(Handler):
                 f"  See existing test files in tests/ for examples"
             ),
         )
-
-    def _get_test_file_path(self, source_path: str, strategy: TddStrategy) -> Path:
-        """Get the expected test file path for a source file.
-
-        DEPRECATED: Use _get_test_file_paths() (plural) for multi-path detection.
-
-        Uses strategy to compute language-correct test filename.
-        Path mapping: src/{package}/{subdir}/.../file -> tests/unit/{subdir}/.../test_file
-
-        The package directory (first dir after src/) is stripped since test directories
-        typically don't replicate the package name.
-        """
-        source_filename = Path(source_path).name
-        test_filename = strategy.compute_test_filename(source_filename)
-
-        path_parts = Path(source_path).parts
-
-        # Generic src/-based path mapping
-        if _SRC_DIR in path_parts:
-            test_path = self._map_src_to_test_path(path_parts, test_filename)
-            if test_path is not None:
-                return test_path
-
-        # Fallback for non-src/ paths (e.g., controller-based structure)
-        return self._map_fallback_test_path(source_path, path_parts, test_filename)
 
     def _get_test_file_paths(self, source_path: str, strategy: TddStrategy) -> list[Path]:
         """Get ordered list of candidate test file paths for a source file.

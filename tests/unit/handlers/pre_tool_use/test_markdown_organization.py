@@ -724,6 +724,21 @@ class TestPlanningModeIntegration:
         for path in paths:
             assert handler.is_planning_mode_write(path) is False
 
+    def test_does_not_detect_planning_mode_for_lookalike_claude_dir(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        """Finding #60: the dot in '.claude' must be escaped.
+
+        A directory whose name merely ends in 'claude' (e.g. 'Xclaude' or
+        '1claude') must NOT be treated as the legacy ~/.claude/plans/ path.
+        """
+        paths = [
+            "/home/u/Xclaude/plans/foo.md",
+            "/home/u/1claude/plans/bar.md",
+        ]
+        for path in paths:
+            assert handler.is_planning_mode_write(path) is False
+
     # ── matches() integration ──
 
     def test_matches_returns_true_for_flat_plan_write_when_feature_enabled(

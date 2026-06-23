@@ -7,6 +7,7 @@ import pytest
 
 from claude_code_hooks_daemon.handlers.pre_tool_use.tdd_enforcement import (
     _DEFAULT_TEST_LOCATIONS,
+    _SRC_DIR,
     _TEST_LOCATION_COLLOCATED,
     _TEST_LOCATION_SEPARATE,
     _TEST_LOCATION_TEST_SUBDIR,
@@ -17,8 +18,28 @@ from claude_code_hooks_daemon.strategies.tdd.go_strategy import GoTddStrategy
 from claude_code_hooks_daemon.strategies.tdd.java_strategy import JavaTddStrategy
 from claude_code_hooks_daemon.strategies.tdd.javascript_strategy import JavaScriptTddStrategy
 from claude_code_hooks_daemon.strategies.tdd.php_strategy import PhpTddStrategy
+from claude_code_hooks_daemon.strategies.tdd.protocol import TddStrategy
 from claude_code_hooks_daemon.strategies.tdd.python_strategy import PythonTddStrategy
 from claude_code_hooks_daemon.strategies.tdd.rust_strategy import RustTddStrategy
+
+
+def _primary_separate_test_path(
+    handler: TddEnforcementHandler, source_path: str, strategy: TddStrategy
+) -> Path:
+    """Compute the package-stripped (src->tests/unit) test path for a source file.
+
+    Exercises the shared mapping helpers (_map_src_to_test_path / _map_fallback_test_path)
+    that the live _get_test_file_paths() uses. Replaces direct coverage of the removed
+    deprecated _get_test_file_path() singular method (Finding #65) without losing the
+    path-mapping assertions.
+    """
+    test_filename = strategy.compute_test_filename(Path(source_path).name)
+    path_parts = Path(source_path).parts
+    if _SRC_DIR in path_parts:
+        mapped = handler._map_src_to_test_path(path_parts, test_filename)
+        if mapped is not None:
+            return mapped
+    return handler._map_fallback_test_path(source_path, path_parts, test_filename)
 
 
 class TestTddEnforcementHandler:
@@ -353,45 +374,45 @@ class TestTddEnforcementHandler:
     def test_get_test_file_path_converts_handler_to_test_filename(self, handler):
         """_get_test_file_path() should convert handler filename to test filename."""
         handler_path = "/workspace/controller/src/handlers/pre_tool_use/my_handler.py"
-        test_path = handler._get_test_file_path(handler_path, PythonTddStrategy())
+        test_path = _primary_separate_test_path(handler, handler_path, PythonTddStrategy())
         assert test_path.name == "test_my_handler.py"
 
     def test_get_test_file_path_finds_controller_directory(self, handler):
         """_get_test_file_path() should find controller directory in path."""
         handler_path = "/workspace/controller/src/handlers/pre_tool_use/my_handler.py"
-        test_path = handler._get_test_file_path(handler_path, PythonTddStrategy())
+        test_path = _primary_separate_test_path(handler, handler_path, PythonTddStrategy())
         assert "controller" in str(test_path)
         assert "tests" in str(test_path)
 
     def test_get_test_file_path_puts_test_in_tests_directory(self, handler):
         """_get_test_file_path() should put test file in tests/unit/ directory."""
         handler_path = "/workspace/controller/src/handlers/pre_tool_use/my_handler.py"
-        test_path = handler._get_test_file_path(handler_path, PythonTddStrategy())
+        test_path = _primary_separate_test_path(handler, handler_path, PythonTddStrategy())
         assert str(test_path).endswith("controller/tests/unit/pre_tool_use/test_my_handler.py")
 
     def test_get_test_file_path_handles_nested_handler_path(self, handler):
         """_get_test_file_path() should handle deeply nested handler paths."""
         handler_path = "/very/deep/path/controller/src/handlers/pre_tool_use/my_handler.py"
-        test_path = handler._get_test_file_path(handler_path, PythonTddStrategy())
+        test_path = _primary_separate_test_path(handler, handler_path, PythonTddStrategy())
         assert "controller/tests/unit/pre_tool_use/test_my_handler.py" in str(test_path)
 
     def test_get_test_file_path_handles_complex_handler_name(self, handler):
         """_get_test_file_path() should handle complex handler names."""
         handler_path = "/workspace/controller/src/handlers/pre_tool_use/my_complex_handler_v2.py"
-        test_path = handler._get_test_file_path(handler_path, PythonTddStrategy())
+        test_path = _primary_separate_test_path(handler, handler_path, PythonTddStrategy())
         assert test_path.name == "test_my_complex_handler_v2.py"
 
     def test_get_test_file_path_fallback_when_controller_not_in_path(self, handler):
         """_get_test_file_path() should use fallback when 'controller' not in path."""
         handler_path = "/workspace/project/src/handlers/pre_tool_use/my_handler.py"
-        test_path = handler._get_test_file_path(handler_path, PythonTddStrategy())
+        test_path = _primary_separate_test_path(handler, handler_path, PythonTddStrategy())
         # Should use fallback logic (parent.parent.parent)
         assert test_path.name == "test_my_handler.py"
 
     def test_get_test_file_path_returns_path_object(self, handler):
         """_get_test_file_path() should return pathlib.Path object."""
         handler_path = "/workspace/controller/src/handlers/pre_tool_use/my_handler.py"
-        test_path = handler._get_test_file_path(handler_path, PythonTddStrategy())
+        test_path = _primary_separate_test_path(handler, handler_path, PythonTddStrategy())
         assert isinstance(test_path, Path)
 
     # Integration Tests
@@ -497,7 +518,7 @@ class TestTddEnforcementHandler:
         Expected test: /workspace/tests/unit/handlers/session_start/test_yolo_container_detection.py
         """
         handler_path = "/workspace/src/claude_code_hooks_daemon/handlers/session_start/yolo_container_detection.py"
-        test_path = handler._get_test_file_path(handler_path, PythonTddStrategy())
+        test_path = _primary_separate_test_path(handler, handler_path, PythonTddStrategy())
 
         # Should construct correct test path for hooks-daemon structure
         expected = Path(
@@ -535,7 +556,7 @@ class TestTddEnforcementHandler:
         Expected test: /workspace/tests/unit/utils/test_formatting.py
         """
         handler_path = "/workspace/src/claude_code_hooks_daemon/utils/formatting.py"
-        test_path = handler._get_test_file_path(handler_path, PythonTddStrategy())
+        test_path = _primary_separate_test_path(handler, handler_path, PythonTddStrategy())
 
         # Should construct correct test path for utils structure
         expected = Path("/workspace/tests/unit/utils/test_formatting.py")
@@ -564,7 +585,7 @@ class TestTddEnforcementHandler:
     def test_get_test_file_path_controller_based_path(self, handler):
         """_get_test_file_path should handle paths containing 'controller' dir."""
         handler_path = "/workspace/controller/handlers/pre_tool_use/my_handler.py"
-        test_path = handler._get_test_file_path(handler_path, PythonTddStrategy())
+        test_path = _primary_separate_test_path(handler, handler_path, PythonTddStrategy())
         assert test_path.name == "test_my_handler.py"
         assert "controller" in str(test_path)
         assert "tests" in str(test_path)
@@ -572,7 +593,7 @@ class TestTddEnforcementHandler:
     def test_get_test_file_path_no_src_no_controller(self, handler):
         """_get_test_file_path uses fallback when neither 'src' nor 'controller' in path."""
         handler_path = "/workspace/lib/handlers/pre_tool_use/my_handler.py"
-        test_path = handler._get_test_file_path(handler_path, PythonTddStrategy())
+        test_path = _primary_separate_test_path(handler, handler_path, PythonTddStrategy())
         assert test_path.name == "test_my_handler.py"
         # Falls back to parent.parent.parent / "tests" / test_filename
         assert "tests" in str(test_path)
@@ -580,7 +601,7 @@ class TestTddEnforcementHandler:
     def test_get_test_file_path_src_with_only_package_and_file(self, handler):
         """_get_test_file_path handles src/{package}/file.py (len(after_src)==2)."""
         handler_path = "/workspace/src/mypackage/module.py"
-        test_path = handler._get_test_file_path(handler_path, PythonTddStrategy())
+        test_path = _primary_separate_test_path(handler, handler_path, PythonTddStrategy())
         expected = Path("/workspace/tests/unit/test_module.py")
         assert test_path == expected
 
@@ -790,43 +811,43 @@ class TestTddEnforcementHandler:
     def test_get_test_file_path_javascript_naming(self, handler):
         """_get_test_file_path() should use JS naming convention: basename.test.js."""
         handler_path = "/workspace/src/mypackage/utils/helpers.js"
-        test_path = handler._get_test_file_path(handler_path, JavaScriptTddStrategy())
+        test_path = _primary_separate_test_path(handler, handler_path, JavaScriptTddStrategy())
         assert test_path.name == "helpers.test.js"
 
     def test_get_test_file_path_typescript_naming(self, handler):
         """_get_test_file_path() should use TS naming convention: basename.test.ts."""
         handler_path = "/workspace/src/mypackage/utils/helpers.ts"
-        test_path = handler._get_test_file_path(handler_path, JavaScriptTddStrategy())
+        test_path = _primary_separate_test_path(handler, handler_path, JavaScriptTddStrategy())
         assert test_path.name == "helpers.test.ts"
 
     def test_get_test_file_path_tsx_naming(self, handler):
         """_get_test_file_path() should use TSX naming convention: basename.test.tsx."""
         handler_path = "/workspace/src/mypackage/components/App.tsx"
-        test_path = handler._get_test_file_path(handler_path, JavaScriptTddStrategy())
+        test_path = _primary_separate_test_path(handler, handler_path, JavaScriptTddStrategy())
         assert test_path.name == "App.test.tsx"
 
     def test_get_test_file_path_go_naming(self, handler):
         """_get_test_file_path() should use Go naming convention: basename_test.go."""
         handler_path = "/workspace/src/mypackage/pkg/server.go"
-        test_path = handler._get_test_file_path(handler_path, GoTddStrategy())
+        test_path = _primary_separate_test_path(handler, handler_path, GoTddStrategy())
         assert test_path.name == "server_test.go"
 
     def test_get_test_file_path_php_naming(self, handler):
         """_get_test_file_path() should use PHP naming convention: basenameTest.php."""
         handler_path = "/workspace/src/mypackage/Controllers/UserController.php"
-        test_path = handler._get_test_file_path(handler_path, PhpTddStrategy())
+        test_path = _primary_separate_test_path(handler, handler_path, PhpTddStrategy())
         assert test_path.name == "UserControllerTest.php"
 
     def test_get_test_file_path_rust_naming(self, handler):
         """_get_test_file_path() should use Rust naming convention: basename_test.rs."""
         handler_path = "/workspace/src/mypackage/handlers/parser.rs"
-        test_path = handler._get_test_file_path(handler_path, RustTddStrategy())
+        test_path = _primary_separate_test_path(handler, handler_path, RustTddStrategy())
         assert test_path.name == "parser_test.rs"
 
     def test_get_test_file_path_java_naming(self, handler):
         """_get_test_file_path() should use Java naming convention: basenameTest.java."""
         handler_path = "/workspace/src/mypackage/main/java/Service.java"
-        test_path = handler._get_test_file_path(handler_path, JavaTddStrategy())
+        test_path = _primary_separate_test_path(handler, handler_path, JavaTddStrategy())
         assert test_path.name == "ServiceTest.java"
 
     # handle() - Language-aware error messages

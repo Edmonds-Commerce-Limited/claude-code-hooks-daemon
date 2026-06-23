@@ -394,6 +394,38 @@ class TestQaSuppressionAcceptanceTests:
         assert len(tests) >= 11  # At least one per language
 
 
+class TestQaSuppressionRustGuidanceAccuracy:
+    """Finding #63: get_claude_md() Rust guidance must match real matching behaviour.
+
+    The matcher does a flat scan over file content and blocks BOTH item-level
+    `#[allow(...)]` and crate-level `#![allow(...)]`; it has no notion of
+    'type-level items'. The guidance must not over-promise that precision.
+    """
+
+    # Crate-level Rust allow attribute, assembled at runtime so this test file
+    # does not itself trip the live QA-suppression scan.
+    _RUST_CRATE_ALLOW = "#!" + "[" + "allow(" + "clippy::all)]"
+
+    def test_get_claude_md_does_not_claim_type_level_only(self) -> None:
+        from claude_code_hooks_daemon.handlers.pre_tool_use.qa_suppression import (
+            QaSuppressionHandler,
+        )
+
+        claude_md = QaSuppressionHandler().get_claude_md()
+        assert claude_md is not None
+        assert "type-level items" not in claude_md
+
+    def test_crate_level_rust_allow_is_blocked(self) -> None:
+        """A crate-level `#![allow(...)]` is blocked — proving guidance must say 'anywhere'."""
+        from claude_code_hooks_daemon.handlers.pre_tool_use.qa_suppression import (
+            QaSuppressionHandler,
+        )
+
+        handler = QaSuppressionHandler()
+        hook_input = _make_write_input("/workspace/src/lib.rs", self._RUST_CRATE_ALLOW)
+        assert handler.matches(hook_input) is True
+
+
 class TestQaSuppressionEdgeCases:
     """Test edge cases in matches() and handle() guard clauses."""
 

@@ -794,3 +794,102 @@ class TestDestructiveGitProgressiveVerbosity:
         ):
             with pytest.raises(RuntimeError):
                 handler._get_block_count()
+
+
+class TestDestructiveGitRestoreStagedShortFlag:
+    """Finding #55: `git restore -S` (short form of --staged) is non-destructive."""
+
+    @pytest.fixture
+    def handler(self):
+        """Create handler instance."""
+        return DestructiveGitHandler()
+
+    def test_matches_git_restore_short_staged_returns_false(self, handler):
+        """Should NOT match 'git restore -S file.txt' (short form of --staged, safe)."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git restore -S file.txt"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_match_reason_none_for_short_staged(self, handler):
+        """_match_reason() returns None for the short-staged restore form."""
+        assert handler._match_reason("git restore -S file.txt") is None
+
+    def test_matches_git_restore_short_staged_with_path(self, handler):
+        """Short '-S' flag with a path should remain safe (unstage only)."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git restore -S src/main.py"},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_matches_git_restore_worktree_still_blocked(self, handler):
+        """Sanity: destructive '--worktree' restore must still be blocked."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git restore --worktree file.txt"},
+        }
+        assert handler.matches(hook_input) is True
+
+
+class TestDestructiveGitPushForceSeparatorScoping:
+    """NEW finding: push-force detection must be scoped to the `git push` segment.
+
+    A benign compound command whose `--force` belongs to a DIFFERENT git
+    sub-command (e.g. `git worktree remove ... --force`) must not be falsely
+    blocked, while a real `git push --force` / `git push -f` must still block.
+    """
+
+    @pytest.fixture
+    def handler(self):
+        """Create handler instance."""
+        return DestructiveGitHandler()
+
+    def test_compound_push_then_worktree_remove_force_not_blocked(self, handler):
+        """`git push ...; git worktree remove <path> --force` must NOT be blocked."""
+        command = "git push origin main; git worktree remove /tmp/wt --force"
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": command}}
+        assert handler.matches(hook_input) is False
+
+    def test_worktree_remove_force_alone_not_blocked(self, handler):
+        """A standalone `git worktree remove --force` must NOT be blocked."""
+        command = "git worktree remove /tmp/wt --force"
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": command}}
+        assert handler.matches(hook_input) is False
+
+    def test_push_force_still_blocked(self, handler):
+        """A real `git push --force` must still be blocked."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git push --force origin main"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_push_short_force_flag_still_blocked(self, handler):
+        """A real `git push -f` must still be blocked."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git push -f origin main"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_push_force_in_compound_still_blocked(self, handler):
+        """`git status && git push --force` must still block on the push segment."""
+        command = "git status && git push --force origin main"
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": command}}
+        assert handler.matches(hook_input) is True
+
+    def test_push_force_with_lease_blocked(self, handler):
+        """`git push --force-with-lease` is still a force push and must block."""
+        hook_input = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git push --force-with-lease origin main"},
+        }
+        assert handler.matches(hook_input) is True
+
+    def test_match_reason_push_force_specific(self, handler):
+        """A real push --force yields the push-specific reason."""
+        reason = handler._match_reason("git push --force origin main")
+        assert reason is not None
+        assert "overwrite remote history" in reason
