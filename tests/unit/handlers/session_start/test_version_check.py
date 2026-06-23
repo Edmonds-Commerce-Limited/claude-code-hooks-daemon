@@ -227,6 +227,33 @@ def test_handle_returns_upgrade_notice_when_outdated(
     assert "2.7.0" in result.context[0]
 
 
+@patch("claude_code_hooks_daemon.handlers.session_start.version_check.__version__", "2.6.1")
+@patch("claude_code_hooks_daemon.handlers.session_start.version_check.subprocess.run")
+def test_upgrade_notice_points_to_skill_not_manual_steps(
+    mock_run: MagicMock,
+    handler: VersionCheckHandler,
+    new_session_input: dict,
+    tmp_path: Path,
+) -> None:
+    """The upgrade notice instructs using the /hooks-daemon upgrade skill, not manual curl/bash."""
+    mock_run.return_value = MagicMock(
+        returncode=0,
+        stdout="abc123\trefs/tags/v2.7.0\n",
+    )
+
+    with patch.object(handler, "_get_cache_file", return_value=tmp_path / "cache.json"):
+        result = handler.handle(new_session_input)
+
+    assert result.context is not None
+    body = "\n".join(result.context)
+    # Points to the skill
+    assert "/hooks-daemon upgrade" in body
+    # Does NOT tell the user to run the old manual steps
+    assert "/tmp/upgrade.sh" not in body
+    assert "raw.githubusercontent.com" not in body
+    assert "less " not in body
+
+
 @patch("claude_code_hooks_daemon.handlers.session_start.version_check.__version__", "2.7.0")
 @patch("claude_code_hooks_daemon.handlers.session_start.version_check.subprocess.run")
 def test_handle_returns_no_context_when_up_to_date(
