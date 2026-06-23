@@ -18,7 +18,27 @@ from pydantic import (
     model_validator,
 )
 
+from claude_code_hooks_daemon.constants import EventID
+
 logger = logging.getLogger(__name__)
+
+# Single source of truth for the hook event-type config keys handled by the
+# daemon, derived from EventID (constants/events.py). Used by HandlersConfig's
+# dependency-validation loop so the iterated event list cannot drift from the
+# declared event-type fields (Finding #30, DRY-SSoT).
+_EVENT_TYPE_CONFIG_KEYS: tuple[str, ...] = (
+    EventID.PRE_TOOL_USE.config_key,
+    EventID.POST_TOOL_USE.config_key,
+    EventID.SESSION_START.config_key,
+    EventID.SESSION_END.config_key,
+    EventID.PRE_COMPACT.config_key,
+    EventID.USER_PROMPT_SUBMIT.config_key,
+    EventID.PERMISSION_REQUEST.config_key,
+    EventID.NOTIFICATION.config_key,
+    EventID.STOP.config_key,
+    EventID.SUBAGENT_STOP.config_key,
+    EventID.STATUS_LINE.config_key,
+)
 
 
 class LogLevel(StrEnum):
@@ -95,6 +115,7 @@ class HandlersConfig(BaseModel):
     notification: dict[str, Any] = Field(default_factory=dict)
     stop: dict[str, Any] = Field(default_factory=dict)
     subagent_stop: dict[str, Any] = Field(default_factory=dict)
+    status_line: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_handler_dependencies(self) -> Self:
@@ -126,19 +147,8 @@ class HandlersConfig(BaseModel):
         # Get all discovered handler classes (flat dict keyed by class name)
         all_handlers = registry._handlers
 
-        # Check each event type
-        for event_type in [
-            "pre_tool_use",
-            "post_tool_use",
-            "session_start",
-            "session_end",
-            "pre_compact",
-            "user_prompt_submit",
-            "permission_request",
-            "notification",
-            "stop",
-            "subagent_stop",
-        ]:
+        # Check each event type (SSoT: derived from EventID, includes status_line)
+        for event_type in _EVENT_TYPE_CONFIG_KEYS:
             event_config = getattr(self, event_type, {})
             if not isinstance(event_config, dict):
                 continue

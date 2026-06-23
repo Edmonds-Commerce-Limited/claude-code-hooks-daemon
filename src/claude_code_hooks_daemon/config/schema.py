@@ -66,15 +66,26 @@ class ConfigSchema:
                     "enable_hello_world_handlers": {"type": "boolean"},
                 },
             },
+            # Finding #31: 'plugins' is an OBJECT (matching PluginsConfig in
+            # models.py and ConfigValidator._validate_plugins), not a bare
+            # array. It carries 'paths' (search paths) and 'plugins' (the list
+            # of plugin entries, each requiring 'path').
             "plugins": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "required": ["path"],
-                    "additionalProperties": True,
-                    "properties": {
-                        "path": {"type": "string"},
-                        "handlers": {"type": "array", "items": {"type": "string"}},
+                "type": "object",
+                "additionalProperties": True,
+                "properties": {
+                    "paths": {"type": "array", "items": {"type": "string"}},
+                    "plugins": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["path"],
+                            "additionalProperties": True,
+                            "properties": {
+                                "path": {"type": "string"},
+                                "handlers": {"type": "array", "items": {"type": "string"}},
+                            },
+                        },
                     },
                 },
             },

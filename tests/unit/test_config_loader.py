@@ -11,6 +11,7 @@ import pytest
 import yaml
 
 from claude_code_hooks_daemon.config.loader import ConfigLoader
+from claude_code_hooks_daemon.config.validator import ConfigValidator
 
 
 class TestConfigLoaderBasicOperations:
@@ -147,36 +148,58 @@ class TestConfigLoaderDiscovery:
 class TestConfigLoaderMerging:
     """Test configuration merging with defaults."""
 
+    def test_default_config_passes_config_validator(self) -> None:
+        """Finding #29: get_default_config() must satisfy ConfigValidator.
+
+        The default config is the fallback used by every hook entry point. It
+        must be a VALID config by the project's own validator (daemon section
+        with idle_timeout_seconds + log_level, version matching the Config model
+        default, and the handlers section present), otherwise the fallback
+        pushes the daemon into degraded mode.
+        """
+        default = ConfigLoader.get_default_config()
+
+        # validate_handler_names=False: defaults declare no handlers, so there
+        # are no names to cross-check against the registry here.
+        errors = ConfigValidator.validate(default, validate_handler_names=False)
+        assert errors == []
+
+    def test_default_config_version_matches_config_model(self) -> None:
+        """Finding #29: loader default and Config model default agree on version."""
+        from claude_code_hooks_daemon.config.models import Config
+
+        default = ConfigLoader.get_default_config()
+        assert default["version"] == Config().version
+
     def test_merge_with_defaults(self) -> None:
         """Should merge user config with default values."""
         user_config: dict[str, Any] = {
-            "version": "1.0",
+            "version": "2.0",
             "handlers": {"pre_tool_use": {"destructive_git": {"enabled": True}}},
         }
 
         merged = ConfigLoader.merge_with_defaults(user_config)
 
         # Should preserve user values
-        assert merged["version"] == "1.0"
+        assert merged["version"] == "2.0"
         assert merged["handlers"]["pre_tool_use"]["destructive_git"]["enabled"] is True
 
-        # Should add default settings
-        assert "settings" in merged
-        assert "logging_level" in merged["settings"]
-        assert "log_file" in merged["settings"]
+        # Should add default daemon section (required by ConfigValidator)
+        assert "daemon" in merged
+        assert "log_level" in merged["daemon"]
+        assert "idle_timeout_seconds" in merged["daemon"]
 
-    def test_merge_preserves_user_settings(self) -> None:
-        """Should not override user-specified settings with defaults."""
+    def test_merge_preserves_user_daemon_settings(self) -> None:
+        """Should not override user-specified daemon settings with defaults."""
         user_config: dict[str, Any] = {
-            "version": "1.0",
-            "settings": {"logging_level": "DEBUG", "log_file": "/custom/path.log"},
+            "version": "2.0",
+            "daemon": {"log_level": "DEBUG"},
         }
 
         merged = ConfigLoader.merge_with_defaults(user_config)
 
-        # User settings should be preserved
-        assert merged["settings"]["logging_level"] == "DEBUG"
-        assert merged["settings"]["log_file"] == "/custom/path.log"
+        # User daemon settings should be preserved
+        assert merged["daemon"]["log_level"] == "DEBUG"
 
     def test_merge_deep_nested_config(self) -> None:
         """Should deep merge nested configuration structures."""
@@ -199,13 +222,13 @@ class TestConfigLoaderMerging:
 
     def test_merge_with_empty_config(self) -> None:
         """Should handle empty user config by returning all defaults."""
-        user_config: dict[str, Any] = {"version": "1.0"}
+        user_config: dict[str, Any] = {"version": "2.0"}
 
         merged = ConfigLoader.merge_with_defaults(user_config)
 
         # Should have all default sections
         assert "version" in merged
-        assert "settings" in merged
+        assert "daemon" in merged
         assert "handlers" in merged
 
 

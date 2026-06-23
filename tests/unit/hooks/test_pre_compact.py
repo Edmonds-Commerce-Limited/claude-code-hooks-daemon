@@ -61,9 +61,12 @@ class TestLoadConfigSafe:
         """Returns default config when file doesn't exist."""
         config = load_config_safe(Path("/nonexistent/path.yaml"))
 
-        assert config["version"] == "1.0"
+        # Finding #29: default config version matches the Config model default.
+        # The optional 'plugins' section is intentionally omitted from defaults
+        # (validator treats it as optional; legacy consumers fall back to []).
+        assert config["version"] == "2.0"
         assert "handlers" in config
-        assert "plugins" in config
+        assert "plugins" not in config
 
     def test_returns_default_config_when_file_invalid(self, tmp_path: Path) -> None:
         """Returns default config when YAML is invalid."""
@@ -72,7 +75,8 @@ class TestLoadConfigSafe:
 
         config = load_config_safe(config_file)
 
-        assert config["version"] == "1.0"
+        # Finding #29: default config version matches the Config model default.
+        assert config["version"] == "2.0"
         assert "handlers" in config
 
 
