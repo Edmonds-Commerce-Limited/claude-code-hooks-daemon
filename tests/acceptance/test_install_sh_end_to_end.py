@@ -207,19 +207,44 @@ def _wait_for_daemon_status(
     )
 
 
+def _seed_opt_in_plan_config(project_root: Path, daemon_dir: Path) -> None:
+    """Pre-seed the project with an opted-in plan_workflow config.
+
+    Plan 00137 (F-PLANDEF) made the plan workflow opt-in: a stock install no
+    longer deploys mkplan because plan_workflow.enabled defaults False. To keep
+    the Plan 00136 regression coverage (the install/upgrade SCRIPT must call
+    deploy_plan_workflow_if_enabled on both paths), this writes a valid
+    opted-in config BEFORE install runs. install_version.sh preserves an
+    existing target config ("Config already exists, keeping existing
+    configuration"), so the deploy step reads enabled: true and must produce
+    mkplan.bash. The config is the known-valid shipped example plus an active
+    top-level plan_workflow block.
+    """
+    example = daemon_dir / ".claude" / "hooks-daemon.yaml.example"
+    target = project_root / ".claude" / "hooks-daemon.yaml"
+    opt_in_block = (
+        "\n# Plan 00137 test opt-in (overrides the commented example block above)\n"
+        "plan_workflow:\n"
+        "  enabled: true\n"
+        '  directory: "CLAUDE/Plan"\n'
+    )
+    target.write_text(example.read_text(encoding="utf-8") + opt_in_block, encoding="utf-8")
+
+
 def _assert_mkplan_deployed(project_root: Path, phase: str) -> None:
     """Plan 00136 acceptance gate — the deploy step must deliver mkplan.bash.
 
-    The example config (copied in by install/upgrade) carries no top-level
-    ``plan_workflow`` block, so ``config.plan_workflow.enabled`` defaults True
-    and the config-driven deploy step MUST write an executable
-    ``CLAUDE/Plan/mkplan.bash`` into the project. This is the regression gate
-    for the v3.24.0 field bug where the upgrade path never deployed the script
-    that ``plan_number_helper`` guidance tells agents to run (Plan 00136).
+    The fixture is pre-seeded with an opted-in plan_workflow (see
+    ``_seed_opt_in_plan_config``) because Plan 00137 made the workflow opt-in.
+    With ``plan_workflow.enabled: true`` the config-driven deploy step MUST
+    write an executable ``CLAUDE/Plan/mkplan.bash`` into the project. This is
+    the regression gate for the v3.24.0 field bug where the upgrade path never
+    deployed the script that ``plan_number_helper`` guidance tells agents to
+    run (Plan 00136).
     """
     mkplan = project_root / "CLAUDE" / "Plan" / MKPLAN_SCRIPT_NAME
     assert mkplan.is_file(), (
-        f"{phase}: config.plan_workflow.enabled defaults True, so the deploy "
+        f"{phase}: plan_workflow.enabled is true (seeded), so the deploy "
         f"step must produce {mkplan}. The plan dir contents: "
         f"{list((project_root / 'CLAUDE' / 'Plan').iterdir()) if (project_root / 'CLAUDE' / 'Plan').exists() else '(no CLAUDE/Plan dir)'}. "
         "If absent, the install/upgrade script did not call "
@@ -295,6 +320,11 @@ def test_install_sh_end_to_end_produces_running_daemon(tmp_path: Path) -> None:
         env["NO_COLOR"] = "1"
         # PROJECT_ROOT must NOT trigger the self-install-mode guard. Empty
         # tmp dir has no src/ and no pyproject.toml — that is what we want.
+
+        # Plan 00137: opt in to the plan workflow before install so the deploy
+        # step actually runs (the workflow is opt-in by default now). install
+        # preserves this pre-seeded config.
+        _seed_opt_in_plan_config(project_root, daemon_dir)
 
         # cwd=project_root is critical: the daemon-cli that install_version.sh
         # launches at Step 11 resolves project_dir from CWD when computing
@@ -439,6 +469,10 @@ def test_upgrade_version_sh_end_to_end_produces_running_daemon(tmp_path: Path) -
         env.pop("CI", None)
         env.pop("HOOKS_DAEMON_SKIP_VENV_BOOTSTRAP", None)
         env["NO_COLOR"] = "1"
+
+        # Plan 00137: opt in to the plan workflow before install so the deploy
+        # step runs on both the install and the later upgrade (opt-in default).
+        _seed_opt_in_plan_config(project_root, daemon_dir)
 
         # Step A: fresh install via Task 1.1's chain to land a working
         # baseline. This is the prerequisite state for any upgrade — a

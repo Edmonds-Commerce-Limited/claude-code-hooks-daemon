@@ -192,9 +192,7 @@ class TestProfileSeedSurvivesUpgrade:
         apply_profile(config_path, "recommended")
         return config_path
 
-    def test_seeded_handlers_preserved_through_upgrade_merge(
-        self, seeded_yaml: Path
-    ) -> None:
+    def test_seeded_handlers_preserved_through_upgrade_merge(self, seeded_yaml: Path) -> None:
         """Profile-seeded enabled:true survives upgrade against a disabled default.
 
         Simulates the upgrade path: diff the user's seeded config against the
@@ -249,9 +247,9 @@ class TestProfileHandlerListIntegrity:
 
     def test_every_profile_handler_exists_in_shipped_example(self) -> None:
         """Each profile handler name MUST be a key in the shipped example config."""
-        assert SHIPPED_EXAMPLE_CONFIG.is_file(), (
-            f"shipped example config missing: {SHIPPED_EXAMPLE_CONFIG}"
-        )
+        assert (
+            SHIPPED_EXAMPLE_CONFIG.is_file()
+        ), f"shipped example config missing: {SHIPPED_EXAMPLE_CONFIG}"
         declared = config_handler_names(SHIPPED_EXAMPLE_CONFIG.read_text())
         unknown = sorted(all_profile_handler_names() - declared)
         assert not unknown, (
