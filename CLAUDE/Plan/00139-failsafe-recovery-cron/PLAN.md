@@ -227,3 +227,24 @@ across a plan's life"), with phase detection in a tested helper.
   to confirm the recovery cron is running. `CronList` confirmed `e243f234` still
   active; continued working without waiting (recover-not-heartbeat upheld).
 - Residual polish (regex smells) deferred to the Plan 00140 deep-review pass.
+- **Phase 5 done** (commit `e5a4b83`, merged to main): the Plan 00140 deep review
+  independently re-found the cooldown bug (plus 5 more on this handler). An Opus
+  fixer fixed all six via TDD — the cooldown now uses a per-plan PROGRESS edit
+  counter (advise on 1st, then every 5th), `_STATUS_COMPLETE_RE` is anchored
+  (`…Complete[d]?\s*$`, IGNORECASE) so it no longer fires a false teardown on
+  "Status: Complete the migration…", `_TASK_STATUS_ICON_RE` deduped to the
+  documented set (⚠️ removed), detection computed once (DRY), `_progress_counts`
+  bounded at 256, and completion-via-Edit detection hardened. Daemon restarted,
+  QA 13/13.
+- **Cooldown fix verified live**: 6 consecutive progress probes for one plan →
+  advisory on #1, silent #2–#5, advisory on #6 (1st-then-every-5th). Context
+  spam eliminated.
+- **Recovery cron fired live (introspection)**: at :23 cron `e243f234` fired its
+  FAILSAFE RECOVERY CHECK. Work was in flight (the 00140 fix workflow) so it was
+  correctly handled as a NO-OP — not a heartbeat, no interruption, work
+  continued. Confirms the cron fires on schedule and the recover-not-heartbeat
+  contract holds end-to-end.
+- **Real recovery event**: the 00140 batch-1 fix workflow had 6/7 Opus fixers
+  killed by a live Claude API rate-limit (the exact external factor this feature
+  targets). Per the recovery contract, the interrupted work was resumed (the
+  survivor cron fixer merged; the 6 re-dispatched in waves of 3).
