@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
+from claude_code_hooks_daemon.config.models import Config
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_PLAN_DIR_NAME: Final[str] = "CLAUDE/Plan"
@@ -123,11 +125,16 @@ def bootstrap_plan_workflow(
     - ``README.md`` (plan index template) — skipped if it already exists
     - ``CLAUDE.md`` (lifecycle instructions) — skipped if it already exists
     - ``mkplan.bash`` (the next-plan scaffolding script) — daemon-owned tooling,
-      always (re)deployed so audit fixes reach existing installs on upgrade
+      overwritten on every run so audit fixes reach existing installs
 
     Client content (README/CLAUDE.md) is never overwritten; the daemon-owned
     ``mkplan.bash`` is overwritten on every run, matching how skill scripts and
     hook wrappers are re-deployed.
+
+    Deployment on install/upgrade is gated by config and driven through
+    :func:`deploy_plan_workflow_if_enabled` (the single decision site wired into
+    ``install_version.sh`` and both ``upgrade_version.sh`` paths). This function
+    performs the unconditional bootstrap once that gate has decided to run.
 
     Args:
         project_root: Absolute path to the project root
@@ -194,3 +201,44 @@ def _deploy_mkplan(plan_dir: Path, result: BootstrapResult) -> None:
     result.deployed_mkplan = True
     result.messages.append(f"Deployed {MKPLAN_SCRIPT_NAME} (chmod {_MKPLAN_MODE:o})")
     logger.info("Deployed %s to %s (mode %o)", MKPLAN_SCRIPT_NAME, target, _MKPLAN_MODE)
+
+
+def deploy_plan_workflow_if_enabled(
+    project_root: Path,
+    config_path: Path,
+) -> BootstrapResult:
+    """Deploy plan-workflow artifacts iff the config enables the workflow (SSoT).
+
+    The runtime config is the single source of truth for whether the plan
+    workflow is "on": when ``config.plan_workflow.enabled`` is true, the scaffold
+    and the daemon-owned ``mkplan.bash`` are (re)deployed into
+    ``config.plan_workflow.directory``; when false, this is a no-op.
+
+    This is the single deployment decision site, called identically by
+    ``install_version.sh`` and BOTH ``upgrade_version.sh`` paths (full + the
+    already-at-target fast path), so artifact deployment can never drift from the
+    config the daemon actually reads. It replaces the legacy ``PLAN_WORKFLOW=yes``
+    env-var gate, which was orthogonal to the config and never ran on upgrade —
+    the v3.24.0 field bug where ``plan_number_helper`` guidance referenced a
+    ``mkplan.bash`` that the upgrade path never deployed (Plan 00136).
+
+    Args:
+        project_root: Absolute path to the project root.
+        config_path: Path to the project's ``hooks-daemon.yaml``. A missing file
+            yields the model defaults (workflow enabled, ``CLAUDE/Plan``), so the
+            upgrade path is robust against an absent/relocated config.
+
+    Returns:
+        BootstrapResult — ``deployed_mkplan`` is False with an explanatory
+        message when the workflow is disabled in config.
+    """
+    config = Config.load_or_default(config_path)
+    plan_cfg = config.plan_workflow
+
+    if not plan_cfg.enabled:
+        result = BootstrapResult()
+        result.messages.append("Plan workflow disabled in config (deployment skipped)")
+        logger.info("Plan workflow disabled in config; skipping mkplan deployment")
+        return result
+
+    return bootstrap_plan_workflow(project_root, plan_cfg.directory)
