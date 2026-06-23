@@ -11,9 +11,9 @@ from unittest.mock import patch
 from claude_code_hooks_daemon.constants import HandlerID, Priority
 from claude_code_hooks_daemon.handlers.status_line.environment_indicator import (
     _COLOR_BLUE,
+    _COLOR_BRIGHT_MAGENTA,
     _COLOR_CYAN,
     _COLOR_GREY,
-    _COLOR_MAGENTA,
     _COLOR_RED,
     _COLOR_RESET,
     EnvironmentIndicatorHandler,
@@ -99,9 +99,10 @@ class TestEnvironmentIndicatorColours:
         segment = self._segment("docker")
         assert segment == f"| {_COLOR_BLUE}🐳 docker{_COLOR_RESET}"
 
-    def test_podman_is_magenta(self) -> None:
+    def test_podman_is_bright_magenta(self) -> None:
+        # Bright magenta (lighter purple) — readable on a black terminal.
         segment = self._segment("podman")
-        assert segment == f"| {_COLOR_MAGENTA}📦 podman{_COLOR_RESET}"
+        assert segment == f"| {_COLOR_BRIGHT_MAGENTA}📦 podman{_COLOR_RESET}"
 
     def test_generic_is_grey(self) -> None:
         segment = self._segment("generic")

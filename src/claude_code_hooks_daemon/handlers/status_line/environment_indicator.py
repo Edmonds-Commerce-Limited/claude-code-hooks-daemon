@@ -20,7 +20,9 @@ from claude_code_hooks_daemon.core.acceptance_test import AcceptanceTest
 # ANSI-constant convention used by git_branch.py / model_context.py.)
 _COLOR_RED = "\033[31m"
 _COLOR_BLUE = "\033[34m"
-_COLOR_MAGENTA = "\033[35m"
+# Bright magenta (90-series) — plain magenta (35) is too dark on a black
+# terminal; the bright variant reads as a lighter purple/pink (Podman brand).
+_COLOR_BRIGHT_MAGENTA = "\033[95m"
 _COLOR_CYAN = "\033[36m"
 _COLOR_GREY = "\033[37m"
 _COLOR_RESET = "\033[0m"
@@ -31,7 +33,7 @@ _DESKTOP_LABEL = "desktop"
 _DESKTOP_COLOR = _COLOR_RED
 _RUNTIME_DISPLAY: dict[str, tuple[str, str, str]] = {
     "docker": ("🐳", "docker", _COLOR_BLUE),
-    "podman": ("📦", "podman", _COLOR_MAGENTA),
+    "podman": ("📦", "podman", _COLOR_BRIGHT_MAGENTA),
     "generic": ("📦", "container", _COLOR_GREY),
     "lxc": ("🧊", "lxc", _COLOR_CYAN),
 }
