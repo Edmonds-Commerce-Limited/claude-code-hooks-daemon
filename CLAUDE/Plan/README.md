@@ -13,20 +13,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Safety-first / opt-in (`get_default_enabled()` → False): exact-payload allowlist, loop-guard sentinel, idle-gating, cooldown + per-session cap, tmux-presence no-op, no Stop-handler collision; see `research-note.md` + `context.md`
   - **High-stakes**: potential game-changer done well, reputation risk done badly — hostile multi-lens review required before build
 
-### Upgrade / Release Experience
-
-- [00133: Suggest Enabling New Features on Upgrade](00133-suggest-enabling-new-features-on-upgrade/PLAN.md) - Not Started
-
-  - Opt-in features (e.g. v3.23.0 memory-disable) ship **dormant** — clients get the code but never the protection because nothing promotes enabling it
-  - Investigation finding: the `config_migrations` mechanism (`config-changes/v{X.Y.Z}.yaml` + `cli check-config-migrations`) already exists for this but is **abandoned** (no v3.x manifests), **unwired** (not called from `upgrade.md`), and **informational-only** (no recommend/enable promotion)
-  - Plan = revive + strengthen (`recommended`/`dormant` flags) + backfill v3.x + wire into `upgrade.md` + add release discipline mirroring truth-changes; see `findings.md` + `context.md`
-
-- [00134: Format CLAUDE.md After Handler-Guidance Injection](00134-format-claude-md-after-injection/PLAN.md) - Not Started
-
-  - `ClaudeMdInjector` writes the `<hooksdaemon>` block into CLAUDE.md **raw**, not through the `mdformat` path that `markdown_table_formatter` runs on every `.md` edit — so the next user edit reformats the injected block and churns a spurious diff (the repeated "Auto: hooks daemon regenerated…" commits)
-  - Fix = format CLAUDE.md via the existing formatter SSOT right after injection so on-disk content is already canonical and idempotent; fail-safe fallback to raw write so daemon startup never crashes
-  - Candidate for the next release alongside 00133
-
 ### Memory / Documentation Policy
 
 - [00132: PostToolUse Progressive-Disclosure Reminder on Project-Doc Markdown Writes](00132-progressive-disclosure-md-write-reminder/PLAN.md) - Not Started (awaiting sign-off)
@@ -116,6 +102,17 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00134: Format CLAUDE.md After Handler-Guidance Injection](Completed/00134-format-claude-md-after-injection/PLAN.md) - Complete
+
+  - Extracted the mdformat+gfm transform into `utils/markdown_format.format_markdown_text` (SSoT) and pointed the `markdown_table_formatter` handler, the `format-markdown` CLI, and `ClaudeMdInjector` at it (removed two duplicate copies)
+  - The injector now formats CLAUDE.md after writing its `<hooksdaemon>` block (fail-safe; content-loss guard runs on the pre-format replace result), so a later edit no longer churns the injected block. Shipped in **v3.24.0** (commit `08e25d3`; dogfooded — first restart applied a one-time canonical reformat)
+
+- [00133: Suggest Enabling New Features on Upgrade](Completed/00133-suggest-enabling-new-features-on-upgrade/PLAN.md) - Complete
+
+  - Revived/strengthened/wired the abandoned config-changes upgrade advisory so upgrades actively recommend enabling dormant opt-in features (`recommended`/`dormant`/`recommended_value`; `changed`-value comparison; `🆕 Recommended` section; `check-config-migrations` wired into `upgrade.md` + `scripts/upgrade.sh`; v3.x backfill + `UNRELEASED/config-changes/` staging)
+  - Added `Handler.get_default_enabled()` opt-in/opt-out SSoT (concrete, drift-guarded against the template); flipped `allow_untracked_claude_memory` default `true→false` (opt-out, with `critical` post-upgrade task + truth-changes + config-changes manifest); dogfooded the policy in this repo (lessons migrated to `CLAUDE/development/LESSONS.md`)
+  - Shipped in **v3.24.0** (release commit `8248c40`, tag `v3.24.0` = `18caf51`)
 
 - [00128: Lean SessionStart — silent-when-healthy + verbose `check` command](Completed/00128-lean-session-start/PLAN.md) - Complete
 
@@ -921,12 +918,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 128
-- **Completed**: 106 (1 with reduced scope, 4 already-shipped)
+- **Total Plans Created**: 135
+- **Completed**: 108 (1 with reduced scope, 4 already-shipped)
 - **Active**: 6 (1 tooling/dependencies, 1 python-discovery, 1 question-blocker, 1 stop-quality, 2 long-running/review) + 1 in-progress build (00116 CLAUDE.md compression)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping, 00081 - superseded by 00082)
-- **Last reconciled by**: Plan 00127 (parallel-session daemon reuse + LXC detection) close-out
+- **Last reconciled by**: Plans 00133 + 00134 close-out (shipped v3.24.0)
 
 ## Quick Links
 

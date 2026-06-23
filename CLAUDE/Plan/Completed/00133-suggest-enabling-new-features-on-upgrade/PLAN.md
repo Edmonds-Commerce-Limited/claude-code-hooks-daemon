@@ -1,6 +1,6 @@
 # Plan 00133: Suggest Enabling New Features on Upgrade
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-06-22
 **Owner**: joseph
 **Priority**: High
@@ -287,4 +287,10 @@ dead code. **Date**: 2026-06-22
   Step 6 (v3.18.3→v3.19.0 precedent — no separate guide README).
 - version_check upgrade notice reworded to agent-safe skill phrasing (commit
   `ff752ac`) — skill_refs QA gate.
-- Phase 8 (verify & release) in progress.
+- Phase 8 (verify & release) — COMPLETE. Shipped in **v3.24.0** (release commit
+  `8248c40`, tag `v3.24.0` = `18caf51`). Gates: QA 13/13 (8,691 tests, 95.1%),
+  Opus doc review APPROVE, code review APPROVE (2 LOW notes fixed: get_default_enabled
+  docstring accuracy + release-note whole-file-format transparency), CLAUDE.md
+  guidance audit PASS, H-1 23/23, Step 12 = H-1 + live memory-policy probe on the
+  released code (Write/redirect→DENY, read→ALLOW) + QA smoke_test 3/3. All 4
+  bootstrap artifacts sha-verified at releases/latest/download.
