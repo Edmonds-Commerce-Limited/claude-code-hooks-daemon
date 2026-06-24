@@ -2023,6 +2023,69 @@ def cmd_check_truth_changes(args: argparse.Namespace) -> int:
     return 1 if result["has_changes"] else 0
 
 
+def cmd_harvest_background(args: argparse.Namespace) -> int:
+    """Surface runaway background processes (Plan 00142, Layer B) — never kills.
+
+    Samples ``ps``, applies resource budgets (CPU ceiling for ALL processes so
+    reparented orphans are caught; wall-TTL for tracked process groups), and
+    prints each breach with a ready-to-run ``kill -- -<pgid>`` command for the
+    AGENT to act on. The daemon performs no kill (owner steer, Decision 1).
+
+    Returns:
+        0 if no runaways, 1 if one or more breaches are surfaced, 2 on error.
+    """
+    from claude_code_hooks_daemon.core.project_context import ProjectContext
+    from claude_code_hooks_daemon.daemon.background_harvester import (
+        build_report,
+        parse_ps_output,
+        read_tracked_pgids,
+        run_ps,
+    )
+
+    _STATE_FILENAME = "background-processes.jsonl"
+    if getattr(args, "state_file", None):
+        state_file = Path(args.state_file)
+    else:
+        # Resolve the daemon's untracked dir without requiring a running daemon:
+        # initialize ProjectContext from the project config when present (mirrors
+        # cmd_start), else fall back to the self-install untracked location.
+        project_path = get_project_path(getattr(args, "project_root", None))
+        config_file = project_path / ".claude" / "hooks-daemon.yaml"
+        if not ProjectContext._initialized and config_file.exists():
+            ProjectContext.initialize(config_file)
+        if ProjectContext._initialized:
+            state_file = ProjectContext.daemon_untracked_dir() / _STATE_FILENAME
+        else:
+            state_file = project_path / "untracked" / _STATE_FILENAME
+
+    try:
+        ps_text = run_ps()
+    except (OSError, subprocess.SubprocessError) as e:
+        print(f"ERROR: could not run ps: {e}", file=sys.stderr)
+        return 2
+
+    records = parse_ps_output(ps_text)
+    tracked = read_tracked_pgids(state_file)
+    # Never flag the harvester's own process group.
+    own_pgid = os.getpgrp()
+
+    report = build_report(
+        records,
+        max_wall_seconds=args.max_wall_seconds,
+        max_cpu_percent=args.max_cpu_percent,
+        min_cpu_runtime_seconds=args.min_cpu_runtime_seconds,
+        tracked_pgids=tracked,
+        exclude_pgids=(own_pgid,),
+    )
+
+    if args.format == "json":
+        print(json.dumps(report, indent=2))
+    else:
+        print(report["text"])
+
+    return 1 if report["has_breaches"] else 0
+
+
 def cmd_release_notes(args: argparse.Namespace) -> int:
     """Show daemon release notes by version, range, latest, or list.
 
@@ -3240,6 +3303,47 @@ def main() -> int:
         help="Override truth-changes directory (for testing)",
     )
     parser_check_truth.set_defaults(func=cmd_check_truth_changes)
+
+    # harvest-background command (Plan 00142, Layer B) — detect & surface, never kill
+    parser_harvest = subparsers.add_parser(
+        "harvest-background",
+        help="Surface runaway background processes (high CPU / orphaned / over-TTL); never kills",
+    )
+    parser_harvest.add_argument(
+        "--max-wall-seconds",
+        dest="max_wall_seconds",
+        type=int,
+        default=600,
+        help="Wall-time TTL for tracked process groups (default: 600)",
+    )
+    parser_harvest.add_argument(
+        "--max-cpu-percent",
+        dest="max_cpu_percent",
+        type=float,
+        default=400.0,
+        help="Sustained %%CPU ceiling, applied to all processes (default: 400 == 4 cores)",
+    )
+    parser_harvest.add_argument(
+        "--min-cpu-runtime-seconds",
+        dest="min_cpu_runtime_seconds",
+        type=int,
+        default=60,
+        help="Minimum elapsed time before a CPU breach counts (default: 60)",
+    )
+    parser_harvest.add_argument(
+        "--state-file",
+        dest="state_file",
+        metavar="PATH",
+        default=None,
+        help="Override the tracked-process state file (default: daemon untracked dir)",
+    )
+    parser_harvest.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format: text (default) or json",
+    )
+    parser_harvest.set_defaults(func=cmd_harvest_background)
 
     # release-notes command
     parser_release_notes = subparsers.add_parser(
