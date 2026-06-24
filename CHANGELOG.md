@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.28.0] - 2026-06-24
+
+This is a **minor release** that adds a `release-notes` CLI subcommand and a `/hooks-daemon release-notes` skill route, enabling any Claude Code session to read per-version release notes on demand (Plan 00141).
+
+### Added
+
+- **`release-notes` CLI subcommand and `/hooks-daemon release-notes` skill route (Plan 00141)** — A new `$PYTHON -m claude_code_hooks_daemon.daemon.cli release-notes` command reads the per-version `RELEASES/vX.Y.Z.md` files bundled with the daemon and prints them in markdown or JSON format. Options: `--latest` (installed version, the default), `--version X.Y.Z` (specific version), `--from A --to B` (range; `--from` exclusive, `--to` inclusive), `--list` (enumerate all available versions), `--format markdown|json`. The pure module `install/release_notes.py` handles discovery and parsing; `cmd_release_notes` in `daemon/cli.py` wires it into the CLI. The `/hooks-daemon` skill exposes the subcommand as `release-notes` so any Claude Code session can run `/hooks-daemon release-notes` (or `release-notes --latest`, `release-notes --list`, etc.) without needing to know the Python path.
+
 ## [3.27.0] - 2026-06-23
 
 This is a **minor release** that ships the `recovery_cron_advisor` PostToolUse handler enabled by default (opt-out) and remediates ~78 confirmed deep-review findings across the codebase (Plan 00139 + Plan 00140).
@@ -428,6 +436,8 @@ This is a **patch release** that closes out Plan 00101 (recap-stoppage / silent-
 
 - **`RELEASING.md` Step 12.0 — H-1 gate extended to 19 combined tests (Plan 00101 Phase 7)**: H-1 acceptance suite now runs `test_diagnostic_scripts.py` (15) + `test_install_sh_end_to_end.py` (2) + `test_tool_use_error_recovery.py` (2) = 19 passed. ANY failure in any file = abort release. Documents the v3.12.0 silent-stop recurrence and the gate that prevents it returning.
 - **Plan 00101 closed (Phases 5/6/7/8 delivered post-v3.12.0)**: Plan moved to `CLAUDE/Plan/Completed/`. `CLAUDE/Plan/README.md` index updated — Active Plans count 4 → 3, Completed Plans count 90 → 91. Plan close-out section appended documenting all three phase deliverables, QA results (12/13 green), and the release vehicle decision.
+
+## [3.12.0] - 2026-05-12
 
 This is a **batch-delivery release** that closes out the Plan 00107 meta-plan — a six-wave audit-and-close of the backlog accumulated across the v3.x stability cycle. Most of the bundled plans were already shipped in prior releases or superseded by other work; their PLAN.md status records have been reconciled in this release. Two source-code changes ship in this release: a security-tightening fix to `auto_approve_reads` and a behaviour fix to `markdown_organization`'s plan-redirect path.
 
