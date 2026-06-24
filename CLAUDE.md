@@ -678,6 +678,25 @@ Worktrees are isolated branches. Cross-copying corrupts that isolation and can s
 
 **Allowed**: operations within the same worktree branch. **To merge changes**: use `git merge` or `git cherry-pick` instead.
 
+## root_recursion_guard — recursive scans rooted at / are blocked
+
+A recursive scanner whose path argument resolves to a catastrophic root location is blocked, because it walks the entire filesystem and can pin every CPU core for hours.
+
+**Blocked** (recursive scanner + dangerous root path):
+
+- `grep -r`/`-R`/`-rl`, `ugrep -r`, `rgrep`, `find`, `fd`/`fdfind`, `rg`
+- pointed at `/`, `/proc`, `/sys`, `/home`, `/root`, `~`, `$HOME`
+
+**Allowed**: the same scanners scoped to the project — `rg -l "x" /workspace`, `grep -rl "x" "$CLAUDE_PROJECT_DIR"`, `grep -rl x src/`, `find . -name y`. Non-recursive `grep x /etc/hosts` is not affected.
+
+**Note**: `... | head` does NOT bound a `-l`/`-rl` scan — a producer that matches nothing never writes, so it never receives SIGPIPE and runs to completion across the whole disk.
+
+**Escape hatch** (rare legitimate whole-disk scan):
+
+```
+MUST_SCAN_ROOT_BECAUSE="explain why"; grep -rl x /
+```
+
 ## curl_pipe_shell — never pipe curl/wget to bash/sh
 
 Piping network content directly to a shell is blocked. It executes untrusted remote code without any inspection.
