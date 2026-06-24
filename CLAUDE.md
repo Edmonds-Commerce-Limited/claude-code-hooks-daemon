@@ -998,6 +998,22 @@ After every `Write` or `Edit` of a `.md` or `.markdown` file, the content is re-
 $PYTHON -m claude_code_hooks_daemon.daemon.cli format-markdown <path>
 ```
 
+## background_process_tracker — backgrounded processes are tracked
+
+A PostToolUse advisory that fires when a Bash call backgrounds a process (`run_in_background: true`, or a `&`/`nohup`/`setsid`/`disown` command). It records the command to `background-processes.jsonl` and injects rate-limited guidance.
+
+**The daemon never kills.** It surfaces runaways; you decide.
+
+When you background a long-lived process:
+
+- Create a non-durable recurring **watchdog cron** (CronCreate, durable:false) whose prompt runs `$PYTHON -m claude_code_hooks_daemon.daemon.cli harvest-background` and acts on any runaway — this covers the idle/compaction window a tool-call hook cannot. Do NOT wait for the cron; keep working.
+- Check on demand: run `harvest-background` (exit 1 == runaways surfaced).
+- Reap a runaway by its **process group**: `kill -- -<pgid>` (not just the pid).
+- Keep a wanted long task: note `KEEP_RUNNING_BECAUSE="reason"`.
+- Delete the watchdog cron (CronDelete) when no backgrounded work remains.
+
+Advisory is rate-limited per session (default-on). Disable with `handlers.post_tool_use.background_process_tracker.enabled: false`.
+
 ## recovery_cron_advisor — failsafe recovery cron lifecycle advisory
 
 An advisory PostToolUse handler that fires across a plan's lifecycle and
@@ -1009,11 +1025,11 @@ recovery cron.
 Three lifecycle phases are detected from Write/Edit to `CLAUDE/Plan/<digits>-<name>/PLAN.md`
 (never from files inside `Completed/`) and from `mkplan.bash` Bash invocations:
 
-| Phase          | Trigger                                                                               | Guidance injected                                                                                                      |
-| -------------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| **Creation**   | New PLAN.md written, or `mkplan.bash` invoked                                         | Create a non-durable hourly cron now (CronCreate, durable:false); record the ID in the plan; do NOT wait for the cron. |
-| **Progress**   | Edit to PLAN.md touching task-status icons (⬜/🔄/✅) or `## Notes & Updates` section | Confirm the recovery cron is still running (CronList); recreate if missing; keep working.                              |
-| **Completion** | `**Status**: Complete[d]` written/edited                                              | Plan complete — delete the recovery cron (CronDelete).                                                                 |
+| Phase          | Trigger                                                                               | Guidance injected                                                                                                                                                                                                                                         |
+| -------------- | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Creation**   | New PLAN.md written, or `mkplan.bash` invoked                                         | Create a non-durable hourly cron now (CronCreate, durable:false); record the ID in the plan; do NOT wait for the cron.                                                                                                                                    |
+| **Progress**   | Edit to PLAN.md touching task-status icons (⬜/🔄/✅) or `## Notes & Updates` section | Confirm the recovery cron is still running (CronList); recreate if missing; keep working.                                                                                                                                                                 |
+| **Completion** | `**Status**: Complete[d]` written/edited                                              | Plan complete — **warns first**: deleting now leaves the still-live session with no recovery coverage. Keep the cron if any further work may happen (it is non-durable and dies on session exit); `CronDelete` only when certain the session is finished. |
 
 Progress reminders are rate-limited per plan: the handler advises on the first
 progress edit and then once every few progress edits for that plan, so it does
@@ -1043,9 +1059,11 @@ completion. If you are blocked **only** on human input, do nothing and keep
 waiting. If work is already proceeding normally, this is a **no-op** — do not
 interrupt, restart, or duplicate anything in flight. Never treat this as a
 heartbeat or pacing signal: between checks, continue at full speed until an
-external factor actually stops you — waiting for the cron is an own goal. When
-the plan is complete and no resumable work remains, delete this cron
-(CronDelete).
+external factor actually stops you — waiting for the cron is an own goal. Do
+NOT delete this cron merely because a tick finds nothing to resume: it is
+non-durable and ends automatically when the session exits, and a still-live
+session stays exposed to the next rate limit without it. Remove it (CronDelete)
+only once the session is genuinely finished with no further work.
 ```
 
 ### Configuration
@@ -1058,22 +1076,6 @@ handlers:
     recovery_cron_advisor:
       enabled: false
 ```
-
-## background_process_tracker — backgrounded processes are tracked
-
-A PostToolUse advisory that fires when a Bash call backgrounds a process (`run_in_background: true`, or a `&`/`nohup`/`setsid`/`disown` command). It records the command to `background-processes.jsonl` and injects rate-limited guidance.
-
-**The daemon never kills.** It surfaces runaways; you decide.
-
-When you background a long-lived process:
-
-- Create a non-durable recurring **watchdog cron** (CronCreate, durable:false) whose prompt runs `$PYTHON -m claude_code_hooks_daemon.daemon.cli harvest-background` and acts on any runaway — this covers the idle/compaction window a tool-call hook cannot. Do NOT wait for the cron; keep working.
-- Check on demand: run `harvest-background` (exit 1 == runaways surfaced).
-- Reap a runaway by its **process group**: `kill -- -<pgid>` (not just the pid).
-- Keep a wanted long task: note `KEEP_RUNNING_BECAUSE="reason"`.
-- Delete the watchdog cron (CronDelete) when no backgrounded work remains.
-
-Advisory is rate-limited per session (default-on). Disable with `handlers.post_tool_use.background_process_tracker.enabled: false`.
 
 ## hook_registration_checker — hooks configuration policy
 
