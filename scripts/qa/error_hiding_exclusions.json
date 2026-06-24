@@ -385,6 +385,18 @@
       "function": "_record_allocation",
       "rule": "log-and-continue",
       "reason": "Advisory handler: a git-config counter-write failure must not block plan creation. Logs the failure with a full traceback (exc_info=True) and continues \u2014 the next read re-bootstraps the counter from a filesystem scan, so the counter self-heals rather than going silently stale. Same sanctioned pattern as transcript_reader._parse."
+    },
+    {
+      "file": "daemon/background_harvester.py",
+      "function": "read_tracked_pgids",
+      "rule": "silent-continue",
+      "reason": "JSONL state-file parsing loop (Plan 00142): except json.JSONDecodeError: continue is the standard JSONL pattern \u2014 identical to transcript_reader.read_incremental and hedging_language_detector._parse_transcript. The best-effort background-process state file may contain a corrupt or partial final line; one bad line must not abort reading the remaining tracked pgids."
+    },
+    {
+      "file": "handlers/post_tool_use/background_process_tracker.py",
+      "function": "_resolve_state_file",
+      "rule": "return-none-on-error",
+      "reason": "Returns None when ProjectContext is not initialised (unit tests, or any non-daemon caller). The caller skips the best-effort state-file write when None \u2014 the rate-limited advisory is the primary function and must never crash a tool call. Same explicitly-non-fatal contract as hook_registration_checker._get_project_root (Plan 00142)."
     }
   ]
 }

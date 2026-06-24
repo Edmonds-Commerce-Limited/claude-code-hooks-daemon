@@ -227,6 +227,10 @@ handlers:
       enabled: true
       priority: 27
 
+    background_process_tracker:  # Tracks backgrounded processes; advises harvest-background + watchdog cron (never kills)
+      enabled: true              # On by default (opt-out); advisory-only and rate-limited. Set false to disable.
+      priority: 28
+
     recovery_cron_advisor:  # Advises on failsafe recovery cron lifecycle (creation, progress, completion)
       enabled: true         # On by default (opt-out); advisory-only, fires only on CLAUDE/Plan/*/PLAN.md writes. Set false to disable.
       priority: 30

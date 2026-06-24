@@ -26,10 +26,17 @@ Budget model:
 from __future__ import annotations
 
 import json
+import re
 import subprocess  # nosec B404 - used only to call the trusted system ``ps`` with fixed args
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final, Iterable
+from typing import Any, Final
+
+# A non-negative integer or simple decimal (for the %CPU column). Used to
+# validate ``ps`` columns up front so parsing skips the header/junk rows WITHOUT
+# exception-driven control flow.
+_FLOAT_RE: Final[re.Pattern[str]] = re.compile(r"\d+(?:\.\d+)?")
 
 # ``ps`` column order the CLI requests; the harvester parses exactly these.
 PS_FORMAT: Final[str] = "pid,pgid,etimes,pcpu,args"
@@ -79,18 +86,25 @@ def parse_ps_output(text: str) -> list[ProcessRecord]:
         if len(parts) < 5:
             continue
         pid_s, pgid_s, etimes_s, pcpu_s, args = parts
-        try:
-            record = ProcessRecord(
+        # Validate the numeric columns up front so the header row
+        # ("PID PGID ELAPSED %CPU COMMAND") and any junk are skipped without
+        # relying on exception-driven control flow.
+        if not (
+            pid_s.isdigit()
+            and pgid_s.isdigit()
+            and etimes_s.isdigit()
+            and _FLOAT_RE.fullmatch(pcpu_s)
+        ):
+            continue
+        records.append(
+            ProcessRecord(
                 pid=int(pid_s),
                 pgid=int(pgid_s),
                 etimes=int(etimes_s),
                 pcpu=float(pcpu_s),
                 args=args,
             )
-        except ValueError:
-            # Header row (e.g. "PID PGID ELAPSED %CPU COMMAND") or junk — skip.
-            continue
-        records.append(record)
+        )
     return records
 
 

@@ -265,6 +265,10 @@ handlers:
       enabled: true
       priority: 27
 
+    background_process_tracker:  # Tracks backgrounded processes; advises harvest-background + watchdog cron (never kills)
+      enabled: true
+      priority: 28
+
     recovery_cron_advisor:  # Advises on failsafe recovery cron lifecycle (creation, progress, completion)
       enabled: true         # Dogfooding: enabled in this repo; opt-in (false) elsewhere
       priority: 30

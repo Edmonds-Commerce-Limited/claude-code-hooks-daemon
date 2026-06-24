@@ -356,6 +356,11 @@ class HandlerID:
         config_key="recovery_cron_advisor",
         display_name="recovery-cron-advisor",
     )
+    BACKGROUND_PROCESS_TRACKER = HandlerIDMeta(
+        class_name="BackgroundProcessTrackerHandler",
+        config_key="background_process_tracker",
+        display_name="background-process-tracker",
+    )
     GLOBAL_NPM_ADVISOR = HandlerIDMeta(
         class_name="GlobalNpmAdvisorHandler",
         config_key="global_npm_advisor",

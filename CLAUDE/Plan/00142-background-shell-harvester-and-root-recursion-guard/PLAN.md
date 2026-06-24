@@ -73,14 +73,12 @@ Reference handlers:
 
 ### Phase 2: Layer B — background process tracker + watchdog advisory (PostToolUse)
 
-- [ ] ⬜ **Task 2.1**: RED — tests for `background_process_tracker`
-  - registration: detects `run_in_background: true`, trailing `&`, records PGID/command/session/start to state file
-  - watchdog advisory: injects CronCreate guidance on first registration
-- [ ] ⬜ **Task 2.2**: GREEN — implement tracker + state-file writer (use daemon untracked dir, never /tmp)
-- [ ] ⬜ **Task 2.3**: CLI subcommand `harvest-background` evaluating tracked PGIDs vs budgets, emitting breaches + `kill -- -<pgid>` (NO kill performed)
-- [ ] ⬜ **Task 2.4**: Wire constants, registration, dogfood config + template
-- [ ] ⬜ **Task 2.5**: get_claude_md() + get_acceptance_tests()
-- [ ] ⬜ **Task 2.6**: QA green, daemon restart RUNNING, commit
+- [x] ✅ **Task 2.1**: RED — tests for `background_process_tracker` (20 tests) + harvester core (15) + CLI (5)
+- [x] ✅ **Task 2.2**: GREEN — tracker handler + bounded state-file writer (daemon untracked dir, never /tmp)
+- [x] ✅ **Task 2.3**: CLI subcommand `harvest-background` — ps-based; CPU breach for all + wall-TTL for tracked pgids; emits `kill -- -<pgid>`, NO kill performed (exit 0/1/2)
+- [x] ✅ **Task 2.4**: Wire constants (HandlerID + Priority=28), dogfood yaml + template + `.yaml.example` (auto-discovery, mirrors recovery_cron_advisor)
+- [x] ✅ **Task 2.5**: get_claude_md() + get_acceptance_tests()
+- [x] ✅ **Task 2.6**: Daemon restart RUNNING; dogfooded live (backgrounded → advisory, foreground → none; harvest CLI clean/forced-breach); committed in two checkpoints (2a: harvester+CLI, 2b: tracker)
 
 ### Phase 3: Integration & docs
 

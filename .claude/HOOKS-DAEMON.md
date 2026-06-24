@@ -44,7 +44,7 @@
 | 57 | daemon_docs_guard | ADVISORY | Warn when reading from the hooks-daemon internal CLAUDE/ docs directory |
 | 60 | british_english | ADVISORY | Warn about American English spellings in content files (non-blocking) |
 
-### PostToolUse (7 handlers)
+### PostToolUse (8 handlers)
 
 | Priority | Handler | Behavior | Description |
 |----------|---------|----------|-------------|
@@ -54,6 +54,7 @@
 | 25 | lint_on_edit | NON-TERMINAL | Run language-aware lint validation on files after Write/Edit |
 | 26 | markdown_table_formatter | NON-TERMINAL | Auto-format markdown tables after Write/Edit of .md files |
 | 27 | git_hooks_executable_fixer | NON-TERMINAL | Detect git's "not set as executable" hint and fix the hooks automatically |
+| 28 | background_process_tracker | ADVISORY | Track backgrounded Bash processes and advise on watchdog/harvest (never kills) |
 | 30 | recovery_cron_advisor | ADVISORY | Advisory handler that manages failsafe recovery cron across plan lifecycle |
 
 ### SessionStart (8 handlers)

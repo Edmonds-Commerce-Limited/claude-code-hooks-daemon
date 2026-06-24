@@ -77,6 +77,9 @@ class Priority:
     # Git hooks executable fixer (Priority: 27 - adjacent to other PostToolUse fixers)
     GIT_HOOKS_EXECUTABLE_FIXER = 27
 
+    # Background-process tracker (Priority: 28 - PostToolUse advisory)
+    BACKGROUND_PROCESS_TRACKER = 28
+
     # PostToolUse advisory handlers (Priority: 30)
     RECOVERY_CRON_ADVISOR = 30
 
