@@ -453,6 +453,31 @@ class TestHandleCompletion:
         text = " ".join(result.context)
         assert "CronDelete" in text
 
+    def test_completion_warns_about_protection_gap_before_delete(
+        self, handler: RecoveryCronAdvisorHandler
+    ) -> None:
+        """Completion guidance must WARN that deleting leaves the live session
+        unprotected, and condition deletion on no further session work.
+
+        Regression (Plan 00142 dogfooding): unconditionally advising CronDelete on
+        plan completion left a still-live, rate-limit-exposed session with zero
+        recovery coverage. Completion must warn first and require certainty that
+        no further work remains before deleting.
+        """
+        hook_input = _write_input(
+            "/workspace/CLAUDE/Plan/00042-my-plan/PLAN.md",
+            "**Status**: Complete\n",
+        )
+        result = handler.handle(hook_input)
+        text = " ".join(result.context)
+        lowered = text.lower()
+        # Warns about the unprotected gap …
+        assert "keep" in lowered
+        assert "session" in lowered
+        assert ("no recovery" in lowered) or ("unprotected" in lowered) or ("coverage" in lowered)
+        # … and conditions the delete (does not advise it unconditionally).
+        assert ("only" in lowered) or ("certain" in lowered)
+
 
 # ─── Progress-interval logic ───────────────────────────────────────────────────
 

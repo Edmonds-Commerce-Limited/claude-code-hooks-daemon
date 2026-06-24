@@ -126,9 +126,11 @@ _CANONICAL_CRON_PROMPT: Final[str] = (
     "waiting. If work is already proceeding normally, this is a **no-op** — do not\n"
     "interrupt, restart, or duplicate anything in flight. Never treat this as a\n"
     "heartbeat or pacing signal: between checks, continue at full speed until an\n"
-    "external factor actually stops you — waiting for the cron is an own goal. When\n"
-    "the plan is complete and no resumable work remains, delete this cron\n"
-    "(CronDelete)."
+    "external factor actually stops you — waiting for the cron is an own goal. Do\n"
+    "NOT delete this cron merely because a tick finds nothing to resume: it is\n"
+    "non-durable and ends automatically when the session exits, and a still-live\n"
+    "session stays exposed to the next rate limit without it. Remove it (CronDelete)\n"
+    "only once the session is genuinely finished with no further work."
 )
 
 # ─── Advisory text per phase ──────────────────────────────────────────────────
@@ -156,10 +158,17 @@ _PROGRESS_GUIDANCE: Final[str] = (
 )
 
 _COMPLETION_GUIDANCE: Final[str] = (
-    "This plan is complete — delete its failsafe recovery cron so it does not\n"
-    "fire in unrelated future work:\n"
-    "  • Run CronDelete with the cron ID you recorded in the plan.\n"
-    "  • If you did not record the ID, run CronList first to locate it."
+    "This plan is complete. Decide about its failsafe recovery cron — but FIRST a\n"
+    "warning: deleting the cron now leaves THIS still-live session with NO recovery\n"
+    "coverage. If a rate limit, 5-hour usage limit, or API/network stall hits before\n"
+    "the session ends, nothing will resume you.\n"
+    "  • If ANY further work may happen this session (more tasks, follow-ups,\n"
+    "    ongoing conversation): KEEP the cron. It is non-durable — it dies\n"
+    "    automatically on session exit — and is a no-op whenever nothing is\n"
+    "    resumable, so keeping it costs nothing.\n"
+    "  • ONLY if you are certain the session is wrapping up with no further work:\n"
+    "    run CronDelete with the cron ID you recorded (CronList to locate it if\n"
+    "    unrecorded)."
 )
 
 
@@ -431,7 +440,7 @@ class RecoveryCronAdvisorHandler(Handler):
             "|-------|---------|-------------------|\n"
             "| **Creation** | New PLAN.md written, or `mkplan.bash` invoked | Create a non-durable hourly cron now (CronCreate, durable:false); record the ID in the plan; do NOT wait for the cron. |\n"
             "| **Progress** | Edit to PLAN.md touching task-status icons (⬜/🔄/✅) or `## Notes & Updates` section | Confirm the recovery cron is still running (CronList); recreate if missing; keep working. |\n"
-            "| **Completion** | `**Status**: Complete[d]` written/edited | Plan complete — delete the recovery cron (CronDelete). |\n\n"
+            "| **Completion** | `**Status**: Complete[d]` written/edited | Plan complete — **warns first**: deleting now leaves the still-live session with no recovery coverage. Keep the cron if any further work may happen (it is non-durable and dies on session exit); `CronDelete` only when certain the session is finished. |\n\n"
             "Progress reminders are rate-limited per plan: the handler advises on the first\n"
             "progress edit and then once every few progress edits for that plan, so it does\n"
             "not spam context on every edit.  Completion always advises (bypasses the interval).\n\n"

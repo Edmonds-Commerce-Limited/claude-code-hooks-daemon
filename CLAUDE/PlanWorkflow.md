@@ -412,8 +412,12 @@ actually stops you; the cron only matters once something has already gone wrong.
 - Create it non-durable (`CronCreate` `durable:false`, `recurring:true`, an
   off-:00 minute) and record the cron ID in the plan's Notes & Updates.
 - If you are blocked **only** on human input, the cron is a no-op — keep waiting.
-- On plan completion, delete the cron (`CronDelete`) so it cannot fire in
-  unrelated future work.
+- On plan completion, **do not reflexively delete the cron** — deleting it while
+  the session is still live leaves you with no recovery coverage if a rate limit
+  or usage limit hits next. Keep it whenever further work may happen this session
+  (it is non-durable and dies automatically on session exit, and is a no-op when
+  nothing is resumable). Run `CronDelete` only once you are certain the session is
+  finished with no further work.
 
 ### Step 6: Complete
 
