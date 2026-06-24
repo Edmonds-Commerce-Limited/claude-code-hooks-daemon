@@ -4,6 +4,14 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+### Safety / Resource Guards
+
+- [00142: Background-Shell Harvester & Root-Recursion Guard](00142-background-shell-harvester-and-root-recursion-guard/PLAN.md) - In Progress
+
+  - Two-layer defence from a post-incident report (`untracked/hooks-daemon-runaway-background-shell-harvester.md`): an orphaned `ugrep -rl … /` ran ~115 min at >1000% CPU, surviving a compaction
+  - **Layer A** (`root_recursion_guard`, PreToolUse blocking): blocks recursive scanners (`grep -r`, `find`, `fd`, `rg`, `ugrep`) rooted at `/`, `/proc`, `/sys`, `/home`, `/root`, `~`, `$HOME`; escape hatch `MUST_SCAN_ROOT_BECAUSE=` — **shipped & dogfooded**
+  - **Layer B** (background-shell harvester): PostToolUse tracker + watchdog-cron advisory that surfaces a runaway to the agent during idle; daemon never kills, agent resolves — in progress
+
 ### Self-Driving / Automation
 
 - [00135: Event-Driven `send-keys` Injection](00135-event-driven-send-keys-injection/PLAN.md) - **In design** (2 hostile-review rounds; launcher redesign dissolved pane-identity; awaiting ARCH-A-vs-ARCH-B decision + coexistence fix)

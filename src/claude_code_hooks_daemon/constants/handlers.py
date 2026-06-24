@@ -236,6 +236,11 @@ class HandlerID:
         config_key="git_stash",
         display_name="block-git-stash",
     )
+    ROOT_RECURSION_GUARD = HandlerIDMeta(
+        class_name="RootRecursionGuardHandler",
+        config_key="root_recursion_guard",
+        display_name="root-recursion-guard",
+    )
     # QA enforcement handlers (Priority: 30-35)
     QA_SUPPRESSION = HandlerIDMeta(
         class_name="QaSuppressionHandler",
@@ -533,6 +538,7 @@ HandlerKey = Literal[
     "current_time",
     "pipe_blocker",
     "git_stash",
+    "root_recursion_guard",
     "error_hiding_blocker",
     "security_antipattern",
     # QA enforcement handlers

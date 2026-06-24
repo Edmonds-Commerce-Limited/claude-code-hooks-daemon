@@ -18,7 +18,7 @@ class TestGetBuiltinHandlers:
         handlers = get_builtin_handlers()
 
         assert isinstance(handlers, dict)
-        assert len(handlers) == 13  # All 13 built-in handlers
+        assert len(handlers) == 14  # All 14 built-in handlers
 
     def test_contains_all_expected_handlers(self) -> None:
         """All expected handler names are present."""
@@ -27,6 +27,7 @@ class TestGetBuiltinHandlers:
         expected = [
             "destructive_git",
             "git_stash",
+            "root_recursion_guard",
             "absolute_path",
             "web_search_year",
             "british_english",
@@ -286,10 +287,10 @@ class TestMainFunction:
 
         main()
 
-        # Should register all 13 handlers (default to enabled)
+        # Should register all 14 handlers (default to enabled)
         # Only 3 are explicitly configured, others use defaults
         register_calls = mock_fc_instance.register.call_args_list
-        assert len(register_calls) == 13
+        assert len(register_calls) == 14
 
         # Check that configured handlers have custom priorities
         registered_handlers = [call[0][0] for call in register_calls]

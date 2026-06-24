@@ -45,6 +45,9 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.plan_time_estimates import (
 from claude_code_hooks_daemon.handlers.pre_tool_use.plan_workflow import (
     PlanWorkflowHandler,
 )
+from claude_code_hooks_daemon.handlers.pre_tool_use.root_recursion_guard import (
+    RootRecursionGuardHandler,
+)
 from claude_code_hooks_daemon.handlers.pre_tool_use.sed_blocker import SedBlockerHandler
 from claude_code_hooks_daemon.handlers.pre_tool_use.tdd_enforcement import (
     TddEnforcementHandler,
@@ -70,6 +73,7 @@ def get_builtin_handlers() -> dict[str, type]:
     return {
         "destructive_git": DestructiveGitHandler,
         "git_stash": GitStashHandler,
+        "root_recursion_guard": RootRecursionGuardHandler,
         "absolute_path": AbsolutePathHandler,
         "web_search_year": WebSearchYearHandler,
         "british_english": BritishEnglishHandler,

@@ -130,6 +130,7 @@ class ConfigTemplate:
             "    absolute_path: {enabled: true, priority: 12}     # Require absolute paths\n"
             "    error_hiding_blocker: {enabled: true, priority: 13}  # Block error-hiding patterns (|| true, except: pass, catch(e){})\n"
             "    security_antipattern: {enabled: true, priority: 15}  # Block hardcoded secrets and injection patterns\n"
+            "    root_recursion_guard: {enabled: true, priority: 16}  # Block recursive scans (grep -r, find, rg) rooted at / /proc /sys ~ $HOME\n"
             "    pipe_blocker: {enabled: true, priority: 15}      # Block dangerous pipe patterns\n"
             "    worktree_file_copy: {enabled: true, priority: 15}  # Prevent worktree file copies\n"
             "    dangerous_permissions: {enabled: true, priority: 15}  # Block chmod 777, chown root\n"

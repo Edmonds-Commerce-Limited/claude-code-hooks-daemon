@@ -1,10 +1,10 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-06-23 (v3.26.0) by `generate-docs`. Regenerate: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-docs`
+> Generated on 2026-06-24 (v3.28.0) by `generate-docs`. Regenerate: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-docs`
 
 ## Active Handlers
 
-### PreToolUse (34 handlers)
+### PreToolUse (35 handlers)
 
 | Priority | Handler | Behavior | Description |
 |----------|---------|----------|-------------|
@@ -14,6 +14,7 @@
 | 12 | absolute_path | BLOCKING | Require absolute paths for Read/Write/Edit tool file_path parameters |
 | 13 | error_hiding_blocker | BLOCKING | Block error-hiding patterns in code written via Write or Edit tools |
 | 14 | security_antipattern | BLOCKING | Block Write/Edit of files containing security antipatterns |
+| 15 | root_recursion_guard | BLOCKING | Block recursive scanners (grep -r, find, fd, rg, ...) rooted at ``/``/home/etc |
 | 15 | worktree_file_copy | BLOCKING | Prevent copying files between worktrees and main repo |
 | 16 | curl_pipe_shell | TERMINAL | Block curl/wget piped to shell commands |
 | 17 | pipe_blocker | BLOCKING | Block expensive commands piped to tail/head to prevent information loss |
@@ -43,7 +44,7 @@
 | 57 | daemon_docs_guard | ADVISORY | Warn when reading from the hooks-daemon internal CLAUDE/ docs directory |
 | 60 | british_english | ADVISORY | Warn about American English spellings in content files (non-blocking) |
 
-### PostToolUse (6 handlers)
+### PostToolUse (7 handlers)
 
 | Priority | Handler | Behavior | Description |
 |----------|---------|----------|-------------|
@@ -53,6 +54,7 @@
 | 25 | lint_on_edit | NON-TERMINAL | Run language-aware lint validation on files after Write/Edit |
 | 26 | markdown_table_formatter | NON-TERMINAL | Auto-format markdown tables after Write/Edit of .md files |
 | 27 | git_hooks_executable_fixer | NON-TERMINAL | Detect git's "not set as executable" hint and fix the hooks automatically |
+| 30 | recovery_cron_advisor | ADVISORY | Advisory handler that manages failsafe recovery cron across plan lifecycle |
 
 ### SessionStart (8 handlers)
 

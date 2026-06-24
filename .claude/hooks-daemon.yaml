@@ -60,6 +60,10 @@ handlers:
       enabled: true
       priority: 14
 
+    root_recursion_guard:  # Blocks recursive scans (grep -r, find, rg) rooted at / /proc /sys ~ $HOME
+      enabled: true
+      priority: 15
+
     worktree_file_copy:    # Prevents copying files between git worktrees
       enabled: true
       priority: 15

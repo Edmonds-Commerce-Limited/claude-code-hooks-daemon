@@ -54,6 +54,10 @@ handlers:
       enabled: true
       priority: 15
 
+    root_recursion_guard:  # Blocks recursive scans (grep -r, find, rg) rooted at / /proc /sys ~ $HOME
+      enabled: true
+      priority: 16
+
     pipe_blocker:          # Blocks dangerous pipe patterns in bash commands
       enabled: true
       priority: 15

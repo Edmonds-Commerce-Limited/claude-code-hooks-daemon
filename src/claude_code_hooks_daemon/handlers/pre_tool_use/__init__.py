@@ -13,6 +13,7 @@ from .npm_command import NpmCommandHandler
 from .plan_time_estimates import PlanTimeEstimatesHandler
 from .plan_workflow import PlanWorkflowHandler
 from .qa_suppression import QaSuppressionHandler
+from .root_recursion_guard import RootRecursionGuardHandler
 from .security_antipattern import SecurityAntipatternHandler
 from .sed_blocker import SedBlockerHandler
 from .tdd_enforcement import TddEnforcementHandler
@@ -35,6 +36,7 @@ __all__ = [
     "PlanTimeEstimatesHandler",
     "PlanWorkflowHandler",
     "QaSuppressionHandler",
+    "RootRecursionGuardHandler",
     "SecurityAntipatternHandler",
     "SedBlockerHandler",
     "TddEnforcementHandler",
