@@ -1,6 +1,6 @@
 # Plan 00141: `release-notes` CLI subcommand + skill route
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-06-24
 **Owner**: Claude (Opus)
 **Priority**: Medium
@@ -94,9 +94,9 @@ Exit codes: 0 success, 1 requested version not found, 2 bad args (from>to).
 
 ### Phase 5: Release
 
-- [ ] Fix `v3.12.0` CHANGELOG.md gap (within release flow).
-- [ ] No `config-changes` manifest needed — feature adds no config key (always-on CLI subcommand).
-- [ ] Run `/release` (minor) end-to-end through all blocking gates.
+- [x] Fixed `v3.12.0` CHANGELOG.md gap within the release flow.
+- [x] No `config-changes` manifest needed — feature adds no config key (always-on CLI subcommand).
+- [x] Ran `/release` (minor) end-to-end; all blocking gates passed; shipped as v3.28.0.
 
 ## Success Criteria
 
@@ -112,3 +112,10 @@ Exit codes: 0 success, 1 requested version not found, 2 bad args (from>to).
   guard the implement->audit->release loop. Delete on completion.
 - Audit verdict: release-notes discipline GOOD (91/91 tags have RELEASES files);
   lone gap = v3.12.0 missing from CHANGELOG.md (fix folded into release).
+- **Complete.** Delivered across commits `8a044fa` (feature + tests), `a995ff7`
+  (code-review fixes), `6664328` (plan/README), and released as **v3.28.0**
+  (release commit `fad2e4e`, tag `v3.28.0`). Code-review APPROVED; Opus doc review
+  flagged one range-semantics wording inaccuracy (fixed). All release gates passed:
+  QA 13/13 (8986 tests, 95.1% cov), 0 breaking changes, 0 handler files changed,
+  Step 12.0 acceptance 23/23, live CLI + handler probes correct, artifact shas
+  match manifest. Recovery cron `f4bd4799` deleted on completion.

@@ -4,10 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-### Tooling / CLI
-
-- [00141: `release-notes` CLI subcommand + skill route](00141-release-notes-subcommand/PLAN.md) - In Progress (module + CLI + skill done, QA 13/13, code-review passed; awaiting release)
-
 ### Self-Driving / Automation
 
 - [00135: Event-Driven `send-keys` Injection](00135-event-driven-send-keys-injection/PLAN.md) - **In design** (2 hostile-review rounds; launcher redesign dissolved pane-identity; awaiting ARCH-A-vs-ARCH-B decision + coexistence fix)
@@ -106,6 +102,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00141: `release-notes` CLI subcommand + skill route](Completed/00141-release-notes-subcommand/PLAN.md) - Complete
+
+  - New `release-notes` daemon CLI subcommand + `/hooks-daemon release-notes` skill route (Plan 00141). Pure module `install/release_notes.py` reads the per-version `RELEASES/vX.Y.Z.md` files (shipped with every git-checkout install — no bundling, no network) and prints notes by installed version (default), `--version`, `--latest`, `--from/--to` range (`from` exclusive, `to` inclusive), or `--list`, in markdown or `--format json`; mirrors the `check-truth-changes` sibling pattern (exit 0 found / 1 not-found / 2 bad range). An audit confirmed release-notes discipline is GOOD (91/91 tags had RELEASES files); the lone gap — `v3.12.0` missing from CHANGELOG.md — was restored during the release. Module coverage 98%+, code-review APPROVED. Shipped as **v3.28.0** (release commit `fad2e4e`, tag `v3.28.0`); commits `8a044fa`/`a995ff7`/`6664328`.
 
 - [00140: Deep Code Review & Fix (Workflow-Orchestrated)](Completed/00140-deep-code-review-fix-workflow/PLAN.md) - Complete
 
@@ -944,8 +944,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 140
-- **Completed**: 113 (1 with reduced scope, 4 already-shipped)
+- **Total Plans Created**: 141
+- **Completed**: 114 (1 with reduced scope, 4 already-shipped)
 - **Active**: 5 (1 python-discovery, 1 question-blocker, 1 stop-quality, 2 long-running/review) + 1 in-progress build (00116 CLAUDE.md compression)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping, 00081 - superseded by 00082)
