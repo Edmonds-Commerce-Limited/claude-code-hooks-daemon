@@ -89,6 +89,16 @@ class TestCmdReleaseNotes:
         assert result == 2
         assert "ERROR" in capsys.readouterr().err
 
+    def test_equal_bound_range_returns_one_not_found(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # Empty range is a clean not-found (exit 1), not an error (exit 2).
+        result = cmd_release_notes(_args(tmp_path, from_version="3.21.0", to_version="3.21.0"))
+        assert result == 1
+        out = capsys.readouterr()
+        assert "ERROR" not in out.err
+        assert "range" in out.out
+
     def test_json_output_parses_and_omits_text(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:

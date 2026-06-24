@@ -158,6 +158,28 @@ def test_run_release_notes_latest_empty_dir(tmp_path: Path) -> None:
     assert result["found"] is False
 
 
+def test_run_release_notes_list_empty_dir(tmp_path: Path) -> None:
+    result = run_release_notes(list_versions=True, releases_dir=tmp_path / "nope")
+    assert result["mode"] == "list"
+    assert result["found"] is False
+    assert "No release notes found." in result["text"]
+
+
+def test_run_release_notes_equal_range_reports_empty_range(releases_dir: Path) -> None:
+    # An equal-bound range yields no notes; the message is range-specific and
+    # does NOT reference the installed version.
+    result = run_release_notes(
+        from_version="3.21.0",
+        to_version="3.21.0",
+        current_version="3.27.0",
+        releases_dir=releases_dir,
+    )
+    assert result["mode"] == "range"
+    assert result["found"] is False
+    assert "range" in result["text"]
+    assert "3.27.0" not in result["text"]
+
+
 def test_run_release_notes_range(releases_dir: Path) -> None:
     result = run_release_notes(
         from_version="3.20.0", to_version="3.27.0", releases_dir=releases_dir

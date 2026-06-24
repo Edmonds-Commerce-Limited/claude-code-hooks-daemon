@@ -297,10 +297,12 @@ def _render_text(
         return _format_list(versions)
     if notes:
         return _format_notes(notes)
-    # Not found — give an actionable message naming the missing target.
-    target = version or current_version
+    # Not found — give an actionable message for the selection mode.
+    if mode == _MODE_RANGE:
+        return "No release notes found in the requested range."
     if mode == _MODE_LATEST:
         return "No release notes found."
+    target = version or current_version
     if target is None:
         return "No version specified and no installed version detected. Use --list."
     return f"No release notes found for v{target}. Use --list to see available versions."
