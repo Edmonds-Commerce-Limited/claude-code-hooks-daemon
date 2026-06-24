@@ -71,33 +71,31 @@ Exit codes: 0 success, 1 requested version not found, 2 bad args (from>to).
 
 ### Phase 1: TDD module
 
-- [ ] Write `tests/unit/install/test_release_notes.py` (RED): version parse, list,
-  load single (hit/miss), range (incl/excl + from>to error), latest, default
-  current_version, json + markdown formatting, missing dir.
-- [ ] Implement `install/release_notes.py` (GREEN).
-- [ ] Refactor; verify 95%+ coverage on the new module.
+- [x] Write `tests/unit/install/test_release_notes.py` (RED).
+- [x] Implement `install/release_notes.py` (GREEN).
+- [x] Refactor; module coverage 99.35%.
 
 ### Phase 2: CLI wiring
 
-- [ ] Write `tests/unit/daemon/test_cli_release_notes.py` (RED) for `cmd_release_notes`.
-- [ ] Add `cmd_release_notes` handler + `release-notes` subparser in `daemon/cli.py` (GREEN).
+- [x] Write `tests/unit/daemon/test_cli_release_notes.py` (RED) for `cmd_release_notes`.
+- [x] Add `cmd_release_notes` handler + `release-notes` subparser in `daemon/cli.py` (GREEN).
 
 ### Phase 3: Skill route + docs
 
-- [ ] Add `release-notes` to the SKILL.md `daemon-cli.sh` forward case + document it.
-- [ ] Mirror to deployed skill copy if separate (`.claude/skills/hooks-daemon`).
+- [x] Add `release-notes` to the SKILL.md `daemon-cli.sh` forward case + document it.
+- [x] No separate deployed skill copy — single source of truth under `src/`.
 
 ### Phase 4: Audit loop
 
-- [ ] `./scripts/qa/llm_qa.py all` green (13/13).
-- [ ] Daemon restart -> RUNNING.
-- [ ] code-reviewer agent pass; fix findings.
-- [ ] Live probe: `release-notes`, `--list`, `--version`, `--from/--to`, `--latest`, `--format json`.
+- [x] `./scripts/qa/llm_qa.py all` green (13/13, 8986 tests, 95.1% coverage).
+- [x] Daemon restart -> RUNNING.
+- [x] code-reviewer agent: APPROVE, no blockers; two minor items fixed.
+- [x] Live probe: `release-notes`, `--list`, `--version`, `--from/--to`, `--latest`, `--format json` all correct.
 
 ### Phase 5: Release
 
 - [ ] Fix `v3.12.0` CHANGELOG.md gap (within release flow).
-- [ ] `config-changes/vX.Y.Z.yaml` (new opt-in feature -> recommended) staged in UNRELEASED.
+- [ ] No `config-changes` manifest needed — feature adds no config key (always-on CLI subcommand).
 - [ ] Run `/release` (minor) end-to-end through all blocking gates.
 
 ## Success Criteria

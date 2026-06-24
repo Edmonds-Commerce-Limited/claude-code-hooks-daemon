@@ -4,6 +4,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+### Tooling / CLI
+
+- [00141: `release-notes` CLI subcommand + skill route](00141-release-notes-subcommand/PLAN.md) - In Progress (module + CLI + skill done, QA 13/13, code-review passed; awaiting release)
+
 ### Self-Driving / Automation
 
 - [00135: Event-Driven `send-keys` Injection](00135-event-driven-send-keys-injection/PLAN.md) - **In design** (2 hostile-review rounds; launcher redesign dissolved pane-identity; awaiting ARCH-A-vs-ARCH-B decision + coexistence fix)
