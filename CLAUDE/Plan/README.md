@@ -4,14 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-### Safety / Resource Guards
-
-- [00142: Background-Shell Harvester & Root-Recursion Guard](00142-background-shell-harvester-and-root-recursion-guard/PLAN.md) - In Progress
-
-  - Two-layer defence from a post-incident report (`untracked/hooks-daemon-runaway-background-shell-harvester.md`): an orphaned `ugrep -rl … /` ran ~115 min at >1000% CPU, surviving a compaction
-  - **Layer A** (`root_recursion_guard`, PreToolUse blocking): blocks recursive scanners (`grep -r`, `find`, `fd`, `rg`, `ugrep`) rooted at `/`, `/proc`, `/sys`, `/home`, `/root`, `~`, `$HOME`; escape hatch `MUST_SCAN_ROOT_BECAUSE=` — **shipped & dogfooded**
-  - **Layer B** (background-shell harvester): PostToolUse tracker + watchdog-cron advisory that surfaces a runaway to the agent during idle; daemon never kills, agent resolves — in progress
-
 ### Self-Driving / Automation
 
 - [00135: Event-Driven `send-keys` Injection](00135-event-driven-send-keys-injection/PLAN.md) - **In design** (2 hostile-review rounds; launcher redesign dissolved pane-identity; awaiting ARCH-A-vs-ARCH-B decision + coexistence fix)
@@ -110,6 +102,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00142: Background-Shell Harvester & Root-Recursion Guard](Completed/00142-background-shell-harvester-and-root-recursion-guard/PLAN.md) - Complete
+
+  - Two-layer defence from a post-incident report (an orphaned `ugrep -rl … /` ran ~115 min at >1000% CPU, surviving a compaction). **Layer A** — `root_recursion_guard` PreToolUse blocking handler: denies recursive scanners (`grep -r`/`-R`, `ugrep`, `rgrep`, `find`, `fd`, `rg`) rooted at `/`, `/proc`, `/sys`, `/home`, `/root`, `~`, `$HOME`, with scoped-search guidance, the `| head`-doesn't-bound-`-l` note, and a `MUST_SCAN_ROOT_BECAUSE=` escape hatch. **Layer B** — `harvest-background` CLI + pure harvester core (ps-based: CPU breach for ALL processes catches reparented orphans, wall-TTL for tracked pgids; emits `kill -- -<pgid>` but **never kills**) plus `background_process_tracker` PostToolUse advisory (default-on, rate-limited) that records backgrounded commands and steers the agent to a watchdog cron + harvest check. Owner steer honoured: daemon detects & escalates, the agent decides every kill. QA 13/13 (9076 tests, 95.0%), daemon RUNNING, both layers dogfooded live. Commits `c71780a` (Layer A), `b545ee6` (harvest CLI), `f053a35` (tracker).
 
 - [00141: `release-notes` CLI subcommand + skill route](Completed/00141-release-notes-subcommand/PLAN.md) - Complete
 
@@ -952,12 +948,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 141
-- **Completed**: 114 (1 with reduced scope, 4 already-shipped)
+- **Total Plans Created**: 142
+- **Completed**: 115 (1 with reduced scope, 4 already-shipped)
 - **Active**: 5 (1 python-discovery, 1 question-blocker, 1 stop-quality, 2 long-running/review) + 1 in-progress build (00116 CLAUDE.md compression)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping, 00081 - superseded by 00082)
-- **Last reconciled by**: Plan 00139 + 00140 close-out (failsafe recovery cron + deep review/fix)
+- **Last reconciled by**: Plan 00142 close-out (background-shell harvester + root-recursion guard)
 
 ## Quick Links
 
