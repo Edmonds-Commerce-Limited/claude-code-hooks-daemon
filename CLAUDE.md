@@ -1059,6 +1059,22 @@ handlers:
       enabled: false
 ```
 
+## background_process_tracker — backgrounded processes are tracked
+
+A PostToolUse advisory that fires when a Bash call backgrounds a process (`run_in_background: true`, or a `&`/`nohup`/`setsid`/`disown` command). It records the command to `background-processes.jsonl` and injects rate-limited guidance.
+
+**The daemon never kills.** It surfaces runaways; you decide.
+
+When you background a long-lived process:
+
+- Create a non-durable recurring **watchdog cron** (CronCreate, durable:false) whose prompt runs `$PYTHON -m claude_code_hooks_daemon.daemon.cli harvest-background` and acts on any runaway — this covers the idle/compaction window a tool-call hook cannot. Do NOT wait for the cron; keep working.
+- Check on demand: run `harvest-background` (exit 1 == runaways surfaced).
+- Reap a runaway by its **process group**: `kill -- -<pgid>` (not just the pid).
+- Keep a wanted long task: note `KEEP_RUNNING_BECAUSE="reason"`.
+- Delete the watchdog cron (CronDelete) when no backgrounded work remains.
+
+Advisory is rate-limited per session (default-on). Disable with `handlers.post_tool_use.background_process_tracker.enabled: false`.
+
 ## hook_registration_checker — hooks configuration policy
 
 On every new session this handler audits hook configuration across `.claude/settings.json` and `.claude/settings.local.json`. When it reports issues, fix them — do not ignore the warning.
