@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.29.0] - 2026-06-24
+
+This is a **minor release** that delivers a two-layer defence against runaway background processes — a blocking `root_recursion_guard` handler that prevents catastrophic recursive filesystem scans before they start, and a `background_process_tracker` PostToolUse handler + `harvest-background` CLI subcommand that surface runaway processes after they start — plus a dogfooding fix to `recovery_cron_advisor` that changes the completion-phase guidance from "delete the cron" to "warn before deleting" (Plan 00142).
+
+### Added
+
+- **`root_recursion_guard` PreToolUse blocking handler (priority 15, Plan 00142)** — Blocks recursive scanners (`grep -r`/`-R`/`-rl`, `ugrep -r`, `rgrep`, `find`, `fd`/`fdfind`, `rg`) whose path argument resolves to a catastrophic root location (`/`, `/proc`, `/sys`, `/home`, `/root`, `~`, `$HOME`). Shipped ENABLED by default (opt-out). Escape hatch: prefix the command with `MUST_SCAN_ROOT_BECAUSE="reason"` for the rare legitimate whole-disk scan. Motivating incident: an orphaned `ugrep -rl "class X" /` ran ~115 minutes at >1000% CPU and survived a context compaction with no protection.
+- **`background_process_tracker` PostToolUse advisory handler (priority 28, Plan 00142)** — Detects backgrounded Bash processes (`run_in_background: true`, `&`, `nohup`/`setsid`/`disown`), records them to a per-project JSONL state file, and injects rate-limited guidance advising the agent to create a watchdog cron and run `harvest-background`. Shipped ENABLED by default (opt-out). The daemon never kills — it only surfaces; the agent decides.
+- **`harvest-background` daemon CLI subcommand + `daemon/background_harvester.py` module (Plan 00142)** — Scans `ps` output for runaway processes: CPU-breach detection for all processes (catches reparented orphans that lost their PGID) and wall-TTL breach for tracked PGIDs. Reports breaches with `kill -- -<pgid>` remediation commands. Flags: `--max-wall-seconds 600`, `--max-cpu-percent 400.0`, `--min-cpu-runtime-seconds 60`, `--state-file`, `--format`. Exit codes: 0 = clean, 1 = breaches surfaced, 2 = ps error.
+
+### Changed
+
+- **`recovery_cron_advisor` completion-phase guidance changed to warn-before-delete** — The completion-phase message previously advised running `CronDelete` immediately when a plan was marked complete. It now warns first: deleting the cron while the session is still live leaves the session with no recovery coverage if a rate limit or usage limit hits before the session ends. The updated guidance is to keep the non-durable cron running (it dies automatically on session exit) and run `CronDelete` only once the session is genuinely finished with no further work. The canonical recovery-cron prompt is updated to match. No config changes required.
+
 ## [3.28.0] - 2026-06-24
 
 This is a **minor release** that adds a `release-notes` CLI subcommand and a `/hooks-daemon release-notes` skill route, enabling any Claude Code session to read per-version release notes on demand (Plan 00141).

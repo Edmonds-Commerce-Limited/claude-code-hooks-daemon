@@ -11,7 +11,9 @@ CLAUDE/Plan/<digits>-<name>/PLAN.md:
 On each phase the handler injects advisory context:
   - Creation:    prompt the agent to create a non-durable hourly recovery cron.
   - Progress:    remind agent to verify the cron is still running (CronList).
-  - Completion:  prompt the agent to delete the cron (CronDelete).
+  - Completion:  warn first — keep the cron while the session is still live
+                 (deleting it strands a live session with no recovery coverage);
+                 CronDelete only once the session is genuinely finished.
 
 IMPORTANT: this is a FAILSAFE RECOVERY cron, NOT a heartbeat.  The agent must
 never pace itself to the cron; work must proceed at full speed until an
@@ -297,7 +299,8 @@ class RecoveryCronAdvisorHandler(Handler):
     Fires on three lifecycle moments:
     - Plan creation  → advise agent to create a non-durable hourly recovery cron.
     - Plan progress  → remind agent to verify the cron is still running.
-    - Plan completion → prompt agent to delete the cron (CronDelete).
+    - Plan completion → warn first; keep the cron while the session is live and
+      CronDelete only once the session is genuinely finished.
 
     The recovery cron is a FAILSAFE RECOVERY mechanism, NOT a heartbeat.  The
     agent must never pace itself to the cron; work must continue at full speed
@@ -525,14 +528,16 @@ class RecoveryCronAdvisorHandler(Handler):
                 requires_main_thread=False,
             ),
             AcceptanceTest(
-                title="Plan completion: writing Status Complete triggers cron teardown",
+                title="Plan completion: writing Status Complete warns before cron teardown",
                 command=(
                     f"Use the Write tool to write to {plan_path}"
                     " with content '# Plan 00099\\n\\n**Status**: Complete'"
                 ),
                 description=(
-                    "On plan completion, advises agent to delete the recovery cron"
-                    " (CronDelete) so it does not fire in unrelated future work."
+                    "On plan completion, warns that deleting the recovery cron"
+                    " while the session is still live strands it with no recovery"
+                    " coverage; advises keeping the cron and running CronDelete"
+                    " only once the session is genuinely finished."
                 ),
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[r"CronDelete"],

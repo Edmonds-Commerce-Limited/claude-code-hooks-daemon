@@ -1,0 +1,68 @@
+version: "3.29.0"
+date: "UNRELEASED"
+breaking: false
+config_changes:
+  added:
+    - key: handlers.pre_tool_use.root_recursion_guard
+      description: >-
+        New PreToolUse BLOCKING handler (priority 15), shipped ENABLED BY DEFAULT
+        (opt-out). Blocks recursive scanners (grep -r/-R/-rl, ugrep -r, rgrep,
+        find, fd/fdfind, rg) whose path argument resolves to a catastrophic root
+        location (/, /proc, /sys, /home, /root, ~, $HOME). Prevents accidental
+        whole-filesystem scans that pin CPU for hours and survive context
+        compaction. Escape hatch: prefix the command with
+        MUST_SCAN_ROOT_BECAUSE="reason" for the rare legitimate whole-disk scan.
+        Motivating incident: an orphaned ugrep -rl scan at / ran ~115 minutes at
+        >1000% CPU with no protection.
+      example_yaml: |
+        # On by default — no action needed. To DISABLE:
+        handlers:
+          pre_tool_use:
+            root_recursion_guard:
+              enabled: false
+      migration_note: >-
+        No action required — the handler is active automatically after upgrade.
+        If you have a legitimate workflow that requires whole-filesystem recursive
+        scans, use the escape hatch (MUST_SCAN_ROOT_BECAUSE="reason") rather than
+        disabling the handler entirely. To opt out fully, set
+        handlers.pre_tool_use.root_recursion_guard.enabled: false in
+        .claude/hooks-daemon.yaml.
+    - key: handlers.post_tool_use.background_process_tracker
+      description: >-
+        New PostToolUse ADVISORY handler (priority 28), shipped ENABLED BY DEFAULT
+        (opt-out). Detects backgrounded Bash processes (run_in_background: true,
+        &, nohup/setsid/disown), records them to a per-project JSONL state file,
+        and injects rate-limited guidance advising the agent to create a watchdog
+        cron and run the new harvest-background CLI subcommand. The daemon never
+        kills processes — it only surfaces breaches; the agent decides what to do.
+        Pairs with the harvest-background subcommand for on-demand runaway
+        detection.
+      example_yaml: |
+        # On by default — no action needed. To DISABLE:
+        handlers:
+          post_tool_use:
+            background_process_tracker:
+              enabled: false
+      migration_note: >-
+        No action required — the handler is active automatically after upgrade
+        and only fires on Bash tool calls that background a process. It is
+        advisory-only (never blocks). To opt out, set
+        handlers.post_tool_use.background_process_tracker.enabled: false in
+        .claude/hooks-daemon.yaml.
+  renamed: []
+  removed: []
+  changed:
+    - key: handlers.post_tool_use.recovery_cron_advisor
+      description: >-
+        Completion-phase guidance updated from "delete the cron" to
+        "warn before deleting". When a plan is marked complete, the handler now
+        warns that deleting the non-durable recovery cron while the session is
+        still live leaves the session with no recovery coverage if a rate limit
+        or usage limit hits before the session ends. Updated guidance: keep the
+        cron running (it dies automatically on session exit) and run CronDelete
+        only once the session is genuinely finished with no further work. No
+        config changes required — this is a guidance-text change only.
+      recommended: false
+      migration_note: >-
+        No config action required. The behaviour change is in the advisory
+        message text only. Existing configurations continue to work unchanged.
