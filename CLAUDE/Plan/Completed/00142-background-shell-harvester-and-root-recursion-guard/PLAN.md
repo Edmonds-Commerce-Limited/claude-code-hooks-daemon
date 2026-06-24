@@ -1,6 +1,6 @@
 # Plan 00142: Background-Shell Harvester & Root-Recursion Guard
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-06-24
 **Owner**: Claude (Opus)
 **Priority**: High
@@ -82,9 +82,9 @@ Reference handlers:
 
 ### Phase 3: Integration & docs
 
-- [ ] ⬜ **Task 3.1**: regenerate `.claude/HOOKS-DAEMON.md` (generate-docs)
-- [ ] ⬜ **Task 3.2**: full QA + acceptance playbook spot-check
-- [ ] ⬜ **Task 3.3**: complete plan, move to Completed/, update README, delete recovery cron
+- [x] ✅ **Task 3.1**: regenerated `.claude/HOOKS-DAEMON.md` (PreToolUse 34→35, PostToolUse 7→8)
+- [x] ✅ **Task 3.2**: full QA 13/13 PASSED (9076 tests, 95.0% coverage); both layers dogfooded live against the daemon
+- [x] ✅ **Task 3.3**: plan completed, moved to Completed/, README updated, recovery cron deleted
 
 ## Technical Decisions
 
@@ -126,3 +126,14 @@ enumeration tests); skip get_rules to avoid public-contract scope creep.
 
 - Plan created. Failsafe recovery cron `0cd40325` (hourly :37, non-durable).
 - Reference patterns mapped via Explore agent; full file-touch checklist captured.
+- **Delivered in three commits:**
+  - `c71780a` — Phase 1, Layer A `root_recursion_guard` (PreToolUse blocking).
+  - `b545ee6` — Phase 2a, `harvest-background` CLI + pure harvester core.
+  - `f053a35` — Phase 2b, `background_process_tracker` (PostToolUse advisory) +
+    error_hiding fix (validation guard in `parse_ps_output`; two documented
+    exclusions matching the established JSONL / None-on-error peer patterns).
+- Final QA: 13/13 PASSED, 9076 tests, 95.0% coverage. Daemon RUNNING.
+- Dogfooded live: root scan denied (scoped/escape-hatch allowed); backgrounded
+  command → harvester advisory (foreground → none); `harvest-background` clean
+  → exit 0, forced breach → exit 1 with `kill -- -<pgid>`, zero kills performed.
+- Recovery cron `0cd40325` deleted on completion.
