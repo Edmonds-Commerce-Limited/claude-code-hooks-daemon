@@ -2023,6 +2023,56 @@ def cmd_check_truth_changes(args: argparse.Namespace) -> int:
     return 1 if result["has_changes"] else 0
 
 
+def cmd_release_notes(args: argparse.Namespace) -> int:
+    """Show daemon release notes by version, range, latest, or list.
+
+    Reads the per-version ``RELEASES/vX.Y.Z.md`` files that ship with every
+    install. With no selection flag it shows the installed version's notes.
+
+    Args:
+        args: Parsed CLI arguments with optional version, from_version,
+              to_version, list_versions, latest, format, and releases_dir.
+
+    Returns:
+        0 if notes were found, 1 if the requested notes are absent, 2 on a
+        bad version range.
+    """
+    from claude_code_hooks_daemon.install.release_notes import (
+        list_known_release_versions,
+        run_release_notes,
+    )
+    from claude_code_hooks_daemon.version import __version__
+
+    releases_dir: Path | None = (
+        Path(args.releases_dir) if getattr(args, "releases_dir", None) else None
+    )
+
+    try:
+        result = run_release_notes(
+            version=getattr(args, "version", None),
+            from_version=getattr(args, "from_version", None),
+            to_version=getattr(args, "to_version", None),
+            list_versions=getattr(args, "list_versions", False),
+            latest=getattr(args, "latest", False),
+            current_version=__version__,
+            output_format=args.format,
+            releases_dir=releases_dir,
+        )
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        known = list_known_release_versions(releases_dir=releases_dir)
+        if known:
+            print(f"Known versions: {', '.join(known)}", file=sys.stderr)
+        return 2
+
+    if args.format == "json":
+        print(json.dumps(result, indent=2))
+    else:
+        print(result.get("text", ""))
+
+    return 0 if result["found"] else 1
+
+
 def cmd_init_project_handlers(args: argparse.Namespace) -> int:
     """Scaffold project-handlers directory structure.
 
@@ -3190,6 +3240,59 @@ def main() -> int:
         help="Override truth-changes directory (for testing)",
     )
     parser_check_truth.set_defaults(func=cmd_check_truth_changes)
+
+    # release-notes command
+    parser_release_notes = subparsers.add_parser(
+        "release-notes",
+        help="Show daemon release notes (defaults to the installed version)",
+    )
+    parser_release_notes.add_argument(
+        "--version",
+        dest="version",
+        metavar="VERSION",
+        default=None,
+        help="Show notes for a specific version (e.g. 3.27.0)",
+    )
+    parser_release_notes.add_argument(
+        "--from",
+        dest="from_version",
+        metavar="VERSION",
+        default=None,
+        help="Range start, excluded (version you are upgrading from)",
+    )
+    parser_release_notes.add_argument(
+        "--to",
+        dest="to_version",
+        metavar="VERSION",
+        default=None,
+        help="Range end, included (version you are upgrading to)",
+    )
+    parser_release_notes.add_argument(
+        "--latest",
+        dest="latest",
+        action="store_true",
+        help="Show the newest available version's notes",
+    )
+    parser_release_notes.add_argument(
+        "--list",
+        dest="list_versions",
+        action="store_true",
+        help="List all versions that have release notes",
+    )
+    parser_release_notes.add_argument(
+        "--format",
+        choices=["markdown", "json"],
+        default="markdown",
+        help="Output format: markdown (default) or json",
+    )
+    parser_release_notes.add_argument(
+        "--releases-dir",
+        dest="releases_dir",
+        metavar="PATH",
+        default=None,
+        help="Override RELEASES directory (for testing)",
+    )
+    parser_release_notes.set_defaults(func=cmd_release_notes)
 
     # init-project-handlers command
     parser_init_ph = subparsers.add_parser(

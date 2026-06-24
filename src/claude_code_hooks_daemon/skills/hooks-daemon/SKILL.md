@@ -1,7 +1,7 @@
 ---
 name: hooks-daemon
 description: Manage Claude Code Hooks Daemon - install, upgrade, check health, restart, and develop project-level handlers
-argument-hint: "[install|upgrade|health|restart|check|dev-handlers|logs] [args...]"
+argument-hint: "[install|upgrade|health|restart|check|dev-handlers|logs|release-notes] [args...]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Bash, Read, Write, Edit
@@ -98,6 +98,24 @@ The report is saved to `./untracked/hooks-daemon-{description}.md` for sharing w
 
 See [report.md](report.md) for details.
 
+### Read Release Notes
+
+Show the daemon's release notes without leaving the terminal. With no flag it
+shows the notes for the version you currently have installed:
+
+```bash
+/hooks-daemon release-notes                       # installed version's notes
+/hooks-daemon release-notes --latest              # newest available version
+/hooks-daemon release-notes --version 3.27.0      # a specific version
+/hooks-daemon release-notes --from 3.20.0 --to 3.27.0   # everything you gained upgrading
+/hooks-daemon release-notes --list                # list available versions
+/hooks-daemon release-notes --version 3.27.0 --format json
+```
+
+Notes are read from the per-version `RELEASES/vX.Y.Z.md` files that ship with
+the install — no network access required. `--from` is exclusive and `--to` is
+inclusive, matching the upgrade semantics (the notes for everything you gained).
+
 ## Quick Start
 
 After editing `.claude/hooks-daemon.yaml`:
@@ -165,7 +183,7 @@ case "$SUBCOMMAND" in
         cat "$SKILL_DIR/report.md" | sed "s/\$ARGUMENTS/$*/"
         ;;
 
-    logs|status|restart|handlers|validate-config|bug-report|check)
+    logs|status|restart|handlers|validate-config|bug-report|check|release-notes)
         # Forward to daemon CLI wrapper
         bash "$SKILL_DIR/scripts/daemon-cli.sh" "$SUBCOMMAND" "$@"
         ;;
@@ -186,6 +204,7 @@ case "$SUBCOMMAND" in
         echo "  check                 Verbose environment & configuration audit"
         echo "  bug-report DESC       Generate bug report with diagnostics"
         echo "  report DESC           Investigate an issue and generate a detailed report"
+        echo "  release-notes [opts]  Show release notes (installed version by default)"
         echo ""
         echo "After editing .claude/hooks-daemon.yaml, always run: /hooks-daemon restart"
         echo ""
