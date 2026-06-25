@@ -509,6 +509,41 @@ class TestPlanNumberHelperHandler:
             hook_input
         ), f"Should NOT match (ls plan dir | grep literal substring): {command}"
 
+    def test_ignores_git_config_counter_read(
+        self, handler_enabled: PlanNumberHelperHandler
+    ) -> None:
+        """Regression (field report v3.24.0 Repro 2): the recommended counter-READ must not match.
+
+        The daemon's own guidance tells the agent that, when it only needs the number, it may
+        read the authoritative counter directly:
+
+            git config --local hooksdaemon.latestPlanNumber
+
+        That command does NOT scan the filesystem and must never be caught by this handler — the
+        handler only targets broken filesystem-scan discovery (ls/find/echo-glob/sort|tail/
+        ls|grep-numbers). Blocking the very fallback the daemon recommends would leave no
+        hook-sanctioned shell way to read the number. A field report attributed such a block to
+        this handler; the true cause was an ``ls CLAUDE/Plan/...`` scan fallback batched into the
+        same compound command. This test pins the contract so a future matcher change that keyed
+        on a ``PlanNumber``/``latestPlanNumber`` substring cannot silently re-introduce Repro 2.
+        """
+        counter_reads = [
+            "git config --local hooksdaemon.latestPlanNumber",
+            "git config hooksdaemon.latestPlanNumber",
+            # batched with the harmless probe the reporter had cancelled as collateral
+            "git config --local hooksdaemon.latestPlanNumber; [ -d untracked ] && echo yes",
+            "[ -d untracked ] || mkdir untracked; git config --local hooksdaemon.latestPlanNumber",
+        ]
+
+        for command in counter_reads:
+            hook_input = {
+                "tool_name": "Bash",
+                "tool_input": {"command": command},
+            }
+            assert not handler_enabled.matches(
+                hook_input
+            ), f"Should NOT match (recommended git-config counter read): {command}"
+
     def test_get_claude_md_names_mkplan_as_canonical(self) -> None:
         """Guidance must name mkplan.bash as the canonical create-a-plan action.
 
