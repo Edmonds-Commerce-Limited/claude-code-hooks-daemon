@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.30.0] - 2026-06-25
+
+This is a **minor release** that adds an explicit `regenerate-docs` daemon CLI command and a `/hooks-daemon regen-docs` skill subcommand for force-regenerating the daemon's generated documentation — `.claude/HOOKS-DAEMON.md` and the `CLAUDE.md` `<hooksdaemon>` guidance block — in one shot without restarting the daemon. Useful for recovering both files after a git merge/rebase conflict leaves them stale or conflict-marked.
+
+### Added
+
+- **`regenerate-docs` daemon CLI command + `/hooks-daemon regen-docs` skill subcommand** — `$PYTHON -m claude_code_hooks_daemon.daemon.cli regenerate-docs` rewrites both generated-doc artifacts from live config + handler metadata in one shot: `.claude/HOOKS-DAEMON.md` (via the existing `DocsGenerator` path) and the `<hooksdaemon>` guidance block inside the project `CLAUDE.md` (via the same `ClaudeMdInjector` the daemon runs at startup, preserving surrounding user content). Unlike `restart`, it regenerates both artifacts without bouncing the running daemon — the explicit recovery path when a git merge/rebase conflict leaves the generated docs stale or conflict-marked. The `/hooks-daemon` skill exposes it as the user-facing alias `regen-docs` (routing to the CLI `regenerate-docs`). Flags: `--include-disabled`, `--output PATH`, `--project-root PATH`.
+- **Regression test pinning the `plan_number_helper` counter-read contract** — Added `test_ignores_git_config_counter_read`, asserting the daemon-recommended `git config --local hooksdaemon.latestPlanNumber` counter-read (and batched variants) is never matched or blocked by the `plan_number_helper` handler. Closes a gap where a future broadening of the handler's matcher could silently re-introduce a false block of the very fallback the daemon's own guidance recommends.
+
+### Changed
+
+- **Internal refactor: extracted `_build_initialised_controller(config, project_path)` in `daemon/cli.py`** — Single source of truth for the per-event `handler_config` mapping plus the `controller.initialise()` call, now shared by daemon startup (`cmd_start`) and the new `cmd_regenerate_docs`. Removes a 10-event dict that would otherwise be duplicated across the two call sites and drift. No behavioural change to daemon startup.
+
 ## [3.29.0] - 2026-06-24
 
 This is a **minor release** that delivers a two-layer defence against runaway background processes — a blocking `root_recursion_guard` handler that prevents catastrophic recursive filesystem scans before they start, and a `background_process_tracker` PostToolUse handler + `harvest-background` CLI subcommand that surface runaway processes after they start — plus a dogfooding fix to `recovery_cron_advisor` that changes the completion-phase guidance from "delete the cron" to "warn before deleting" (Plan 00142).
