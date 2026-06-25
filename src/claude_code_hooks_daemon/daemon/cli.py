@@ -12,6 +12,7 @@ Provides:
 - init-config: Generate configuration template
 - generate-playbook: Generate acceptance test playbook from handler definitions
 - generate-docs: Generate .claude/HOOKS-DAEMON.md from live config and handler metadata
+- regenerate-docs: Force-regenerate HOOKS-DAEMON.md AND the CLAUDE.md <hooksdaemon> block
 - repair: Repair broken venv (runs uv sync)
 - config-diff: Compare user config against default
 - config-merge: Merge user customizations onto new default
@@ -37,7 +38,7 @@ import subprocess  # nosec B404 - subprocess used for daemon management (systemc
 import sys
 import time
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +87,9 @@ from claude_code_hooks_daemon.utils.hook_registration import (
 from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
 
 from .init_config import generate_config
+
+if TYPE_CHECKING:
+    from claude_code_hooks_daemon.daemon.controller import DaemonController
 
 # Milliseconds in one second. ``Timeout.BASH_DEFAULT`` is expressed in
 # milliseconds (see constants/timeout.py), but ``subprocess.run(timeout=...)``
@@ -463,39 +467,15 @@ def cmd_start(args: argparse.Namespace) -> int:
     os.close(devnull_fd)
 
     # Now run the daemon server
-    from claude_code_hooks_daemon.daemon.controller import DaemonController
     from claude_code_hooks_daemon.daemon.server import HooksDaemon
 
     # Load configuration
     config = Config.find_and_load(project_path)
 
-    # Create daemon controller
-    controller = DaemonController()
-    handler_config = {
-        "pre_tool_use": {k: v.model_dump() for k, v in config.handlers.pre_tool_use.items()},
-        "post_tool_use": {k: v.model_dump() for k, v in config.handlers.post_tool_use.items()},
-        "session_start": {k: v.model_dump() for k, v in config.handlers.session_start.items()},
-        "session_end": {k: v.model_dump() for k, v in config.handlers.session_end.items()},
-        "pre_compact": {k: v.model_dump() for k, v in config.handlers.pre_compact.items()},
-        "user_prompt_submit": {
-            k: v.model_dump() for k, v in config.handlers.user_prompt_submit.items()
-        },
-        "permission_request": {
-            k: v.model_dump() for k, v in config.handlers.permission_request.items()
-        },
-        "notification": {k: v.model_dump() for k, v in config.handlers.notification.items()},
-        "stop": {k: v.model_dump() for k, v in config.handlers.stop.items()},
-        "subagent_stop": {k: v.model_dump() for k, v in config.handlers.subagent_stop.items()},
-    }
-    controller.initialise(
-        handler_config,
-        workspace_root=project_path,
-        plugins_config=config.plugins,
-        project_handlers_config=config.project_handlers,
-        project_languages=config.daemon.languages,
-        pseudo_events_config=config.pseudo_events or None,
-        plan_workflow=config.plan_workflow,
-    )
+    # Create and fully initialise the daemon controller. Initialising also
+    # regenerates the CLAUDE.md <hooksdaemon> block (via the injector). Shared
+    # single source of truth with cmd_regenerate_docs.
+    controller = _build_initialised_controller(config, project_path)
 
     # Get the daemon config with proper paths
     daemon_config = config.daemon
@@ -1847,6 +1827,94 @@ def cmd_generate_docs(args: argparse.Namespace) -> int:
         return 1
 
 
+def _build_initialised_controller(config: Config, project_path: Path) -> "DaemonController":
+    """Build and fully initialise a DaemonController from a loaded config.
+
+    Single source of truth for the per-event handler_config mapping and the
+    ``initialise()`` call shared by daemon startup (``cmd_start``) and one-shot doc
+    regeneration (``cmd_regenerate_docs``). Initialising the controller registers
+    every active handler AND runs the ClaudeMdInjector, which regenerates the
+    project CLAUDE.md ``<hooksdaemon>`` block as a side effect.
+
+    Args:
+        config: Loaded daemon configuration.
+        project_path: Project root (workspace) the controller serves.
+
+    Returns:
+        The initialised DaemonController.
+    """
+    from claude_code_hooks_daemon.daemon.controller import DaemonController
+
+    controller = DaemonController()
+    handler_config = {
+        "pre_tool_use": {k: v.model_dump() for k, v in config.handlers.pre_tool_use.items()},
+        "post_tool_use": {k: v.model_dump() for k, v in config.handlers.post_tool_use.items()},
+        "session_start": {k: v.model_dump() for k, v in config.handlers.session_start.items()},
+        "session_end": {k: v.model_dump() for k, v in config.handlers.session_end.items()},
+        "pre_compact": {k: v.model_dump() for k, v in config.handlers.pre_compact.items()},
+        "user_prompt_submit": {
+            k: v.model_dump() for k, v in config.handlers.user_prompt_submit.items()
+        },
+        "permission_request": {
+            k: v.model_dump() for k, v in config.handlers.permission_request.items()
+        },
+        "notification": {k: v.model_dump() for k, v in config.handlers.notification.items()},
+        "stop": {k: v.model_dump() for k, v in config.handlers.stop.items()},
+        "subagent_stop": {k: v.model_dump() for k, v in config.handlers.subagent_stop.items()},
+    }
+    controller.initialise(
+        handler_config,
+        workspace_root=project_path,
+        plugins_config=config.plugins,
+        project_handlers_config=config.project_handlers,
+        project_languages=config.daemon.languages,
+        pseudo_events_config=config.pseudo_events or None,
+        plan_workflow=config.plan_workflow,
+    )
+    return controller
+
+
+def cmd_regenerate_docs(args: argparse.Namespace) -> int:
+    """Force-regenerate both generated-doc artifacts in one shot.
+
+    1. ``.claude/HOOKS-DAEMON.md`` — via the same DocsGenerator path as ``generate-docs``.
+    2. The ``<hooksdaemon>`` guidance block in the project ``CLAUDE.md`` — via the same
+       ClaudeMdInjector the daemon runs at startup (initialising a controller does this).
+
+    Unlike ``restart``, this regenerates both artifacts without bouncing the running
+    daemon — useful for resolving a git merge conflict that left stale or
+    conflict-marked generated content.
+
+    Args:
+        args: Command-line arguments (include_disabled, output, project_root).
+
+    Returns:
+        0 if both artifacts regenerated successfully, 1 otherwise.
+    """
+    # Step 1: HOOKS-DAEMON.md. cmd_generate_docs handles project/config resolution and
+    # prints its own status; a missing config returns 1 here and aborts before step 2.
+    docs_result = cmd_generate_docs(args)
+    if docs_result != 0:
+        return docs_result
+
+    # Step 2: the CLAUDE.md <hooksdaemon> block. Building + initialising a controller
+    # runs the injector against the live handler set (identical to daemon startup).
+    try:
+        project_path = get_project_path(getattr(args, "project_root", None))
+    except SystemExit:
+        return 1
+
+    config_path = project_path / ".claude" / "hooks-daemon.yaml"
+    try:
+        config = Config.load(config_path)
+        _build_initialised_controller(config, project_path)
+        print(f"Regenerated <hooksdaemon> block in: {project_path / 'CLAUDE.md'}")
+        return 0
+    except Exception as e:
+        print(f"ERROR: Failed to regenerate CLAUDE.md guidance: {e}", file=sys.stderr)
+        return 1
+
+
 def cmd_config_diff(args: argparse.Namespace) -> int:
     """Run config diff operation.
 
@@ -3193,6 +3261,30 @@ def main() -> int:
         help="Project root directory (default: auto-detect)",
     )
     parser_gen_docs.set_defaults(func=cmd_generate_docs)
+
+    # regenerate-docs command — force-regenerate BOTH HOOKS-DAEMON.md and the
+    # CLAUDE.md <hooksdaemon> block in one shot (no daemon restart needed).
+    parser_regen_docs = subparsers.add_parser(
+        "regenerate-docs",
+        help="Force-regenerate .claude/HOOKS-DAEMON.md and the CLAUDE.md <hooksdaemon> block",
+    )
+    parser_regen_docs.add_argument(
+        "--include-disabled",
+        action="store_true",
+        help="Include disabled handlers in HOOKS-DAEMON.md output",
+    )
+    parser_regen_docs.add_argument(
+        "--output",
+        type=str,
+        help="HOOKS-DAEMON.md output file path (default: .claude/HOOKS-DAEMON.md)",
+    )
+    parser_regen_docs.add_argument(
+        "--project-root",
+        type=Path,
+        default=None,
+        help="Project root directory (default: auto-detect)",
+    )
+    parser_regen_docs.set_defaults(func=cmd_regenerate_docs)
 
     # config-diff command
     parser_config_diff = subparsers.add_parser(

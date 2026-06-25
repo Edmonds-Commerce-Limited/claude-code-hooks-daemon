@@ -1,7 +1,7 @@
 ---
 name: hooks-daemon
 description: Manage Claude Code Hooks Daemon - install, upgrade, check health, restart, and develop project-level handlers
-argument-hint: "[install|upgrade|health|restart|check|dev-handlers|logs|release-notes] [args...]"
+argument-hint: "[install|upgrade|health|restart|check|dev-handlers|regen-docs|logs|release-notes] [args...]"
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Bash, Read, Write, Edit
@@ -47,6 +47,26 @@ See [upgrade.md](upgrade.md) for detailed upgrade documentation.
 The daemon caches config at startup — restart picks up any config or handler changes.
 
 See [restart.md](restart.md) for details.
+
+### Regenerate Generated Docs
+
+Force-regenerate the daemon's generated documentation **without restarting**:
+
+```bash
+/hooks-daemon regen-docs
+```
+
+Rewrites both generated artifacts to their canonical form in one shot:
+
+- `.claude/HOOKS-DAEMON.md` — the active-handler summary.
+- The `<hooksdaemon>` guidance block inside your project `CLAUDE.md`.
+
+This is the explicit way to recover both files after a **git merge/rebase conflict**
+left them stale or conflict-marked — run it, then stage the clean result. (A normal
+`restart` also refreshes these, but `regen-docs` does it as a one-shot with no daemon
+bounce.)
+
+See [regen-docs.md](regen-docs.md) for details.
 
 ### Check Health & Status
 
@@ -183,6 +203,11 @@ case "$SUBCOMMAND" in
         cat "$SKILL_DIR/report.md" | sed "s/\$ARGUMENTS/$*/"
         ;;
 
+    regen-docs|regenerate-docs)
+        # User-facing alias regen-docs maps to the CLI command regenerate-docs.
+        bash "$SKILL_DIR/scripts/daemon-cli.sh" regenerate-docs "$@"
+        ;;
+
     logs|status|restart|handlers|validate-config|bug-report|check|release-notes)
         # Forward to daemon CLI wrapper
         bash "$SKILL_DIR/scripts/daemon-cli.sh" "$SUBCOMMAND" "$@"
@@ -195,6 +220,7 @@ case "$SUBCOMMAND" in
         echo "Available commands:"
         echo "  install [--force]     Install daemon (fresh clone)"
         echo "  restart               Restart daemon (required after config changes)"
+        echo "  regen-docs            Force-regenerate HOOKS-DAEMON.md + CLAUDE.md block"
         echo "  health                Check daemon health and status"
         echo "  upgrade [VERSION]     Upgrade daemon to new version"
         echo "  dev-handlers          Scaffold new project handlers"
