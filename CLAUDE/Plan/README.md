@@ -4,6 +4,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+### Observability / Reliability
+
+- [00143: Loud Project-Handler Load-Failure Alert](00143-loud-project-handler-load-failure-alert/PLAN.md) - **In Progress** (surface silently-skipped project handlers via a loud session-start alert, degraded health/status/check signal, and an upgrade-time validation gate)
+
 ### Self-Driving / Automation
 
 - [00135: Event-Driven `send-keys` Injection](00135-event-driven-send-keys-injection/PLAN.md) - **In design** (2 hostile-review rounds; launcher redesign dissolved pane-identity; awaiting ARCH-A-vs-ARCH-B decision + coexistence fix)
