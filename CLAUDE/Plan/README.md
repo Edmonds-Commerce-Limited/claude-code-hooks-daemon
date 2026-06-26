@@ -4,10 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-### Observability / Reliability
-
-- [00143: Loud Project-Handler Load-Failure Alert](00143-loud-project-handler-load-failure-alert/PLAN.md) - **In Progress** (surface silently-skipped project handlers via a loud session-start alert, degraded health/status/check signal, and an upgrade-time validation gate)
-
 ### Self-Driving / Automation
 
 - [00135: Event-Driven `send-keys` Injection](00135-event-driven-send-keys-injection/PLAN.md) - **In design** (2 hostile-review rounds; launcher redesign dissolved pane-identity; awaiting ARCH-A-vs-ARCH-B decision + coexistence fix)
@@ -106,6 +102,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00143: Loud Project-Handler Load-Failure Alert](Completed/00143-loud-project-handler-load-failure-alert/PLAN.md) - Complete
+
+  - Closed a silent fail-open on the observability axis: when a project handler under `.claude/project-handlers/` fails to load (e.g. an upgrade made `get_claude_md` required and an older handler predates it), the daemon safely skips it but used to only log a line nobody reads — an agent could work a whole session believing protections were live. Now the running daemon **persists** its load failures (`project_handler_health` state file, always-rewritten so it reflects the live daemon), a new on-by-default `project_handler_load_checker` SessionStart handler injects a loud `🚨 PROJECT PROTECTION DEGRADED 🚨` alert (listing each skipped handler + reason + fix-then-restart remediation; silent when clean), `status`/`check` surface the degraded state and `health` returns a non-zero exit, and `upgrade_version.sh` Step 16.5 runs `validate-project-handlers` post-upgrade (loud, non-fatal). Verified live end-to-end. QA 13/13 (9126 tests, 95.2%), daemon RUNNING. Commits `384f353` (capture+persist), `7cac2b1` (alert), `43b8dc1` (CLI signal), `a37834d` (upgrade gate), `bf183f9` (docs/config/manifest).
 
 - [00142: Background-Shell Harvester & Root-Recursion Guard](Completed/00142-background-shell-harvester-and-root-recursion-guard/PLAN.md) - Complete
 
@@ -952,12 +952,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 142
-- **Completed**: 115 (1 with reduced scope, 4 already-shipped)
+- **Total Plans Created**: 143
+- **Completed**: 116 (1 with reduced scope, 4 already-shipped)
 - **Active**: 5 (1 python-discovery, 1 question-blocker, 1 stop-quality, 2 long-running/review) + 1 in-progress build (00116 CLAUDE.md compression)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 6 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping, 00081 - superseded by 00082)
-- **Last reconciled by**: Plan 00142 close-out (background-shell harvester + root-recursion guard)
+- **Last reconciled by**: Plan 00143 close-out (loud project-handler load-failure alert)
 
 ## Quick Links
 

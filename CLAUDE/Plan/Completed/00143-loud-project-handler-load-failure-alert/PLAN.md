@@ -124,11 +124,11 @@ path logic or JSON parsing.
 - [x] ✅ **Task 3.2**: `health` returns non-zero (and reports detail) when degraded.
 - [x] ✅ **Task 3.3**: `check` includes a project-handler-health section.
 
-### Phase 4: Upgrade-time gate
+### Phase 4: Upgrade-time gate ✅
 
-- [ ] ⬜ **Task 4.1**: Post-upgrade `validate-project-handlers` invocation in the upgrade flow;
-  loud warn (not hard-fail, to avoid bricking an upgrade) if failures detected. Test via the
-  existing acceptance/install harness where feasible.
+- [x] ✅ **Task 4.1**: `upgrade_version.sh` Step 16.5 runs `validate-project-handlers`
+  post-upgrade; loud `print_warning` (not hard-fail) with restart guidance if failures
+  detected. Contract test pins it (invoked, loud, non-fatal, restart guidance).
 
 ### Phase 5: Integration, QA, docs ✅
 
@@ -150,15 +150,21 @@ path logic or JSON parsing.
 
 ## Success Criteria
 
-- [ ] A broken project handler produces a loud session-start alert EVERY session until fixed +
+- [x] A broken project handler produces a loud session-start alert EVERY session until fixed +
   daemon restarted.
-- [ ] `status`/`health`/`check` mechanically report the degraded state.
-- [ ] Upgrade warns if it dropped a previously-working handler.
-- [ ] Silent when there are zero failures (no new noise on healthy projects).
-- [ ] All QA passes; daemon restarts RUNNING; 95%+ coverage on new code.
+- [x] `status`/`health`/`check` mechanically report the degraded state.
+- [x] Upgrade warns if it dropped a previously-working handler.
+- [x] Silent when there are zero failures (no new noise on healthy projects).
+- [x] All QA passes; daemon restarts RUNNING; 95%+ coverage on new code.
 
 ## Notes & Updates
 
 ### 2026-06-26
 
 - Plan created. Recovery cron `eb117d72` set up. Architecture mapped; design decisions recorded.
+- **Complete.** Delivered across commits `7fdee2c` (plan), `384f353` (Phase 1 — capture +
+  persist), `7cac2b1` (Phase 2 — loud SessionStart alert), `43b8dc1` (Phase 3 — CLI signal),
+  `a37834d` (Phase 4 — upgrade gate), `bf183f9` (Phase 5 — docs/config/manifest/QA). Full QA
+  13/13 PASSED (9126 tests, 95.2% coverage); daemon restart verified RUNNING. Loud alert
+  verified end-to-end against the live daemon (fires on a synthetic missing-`get_claude_md`
+  handler, clears after fix + restart).
