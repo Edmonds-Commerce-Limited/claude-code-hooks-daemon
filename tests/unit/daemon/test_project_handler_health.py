@@ -112,6 +112,44 @@ class TestClear:
         assert not health.state_file_path().exists()
 
 
+class TestReadAt:
+    """``read_load_failures_at`` reads a given untracked dir directly.
+
+    The CLI uses this to read the daemon's state deterministically without
+    depending on ProjectContext singleton initialisation.
+    """
+
+    def test_reads_state_from_explicit_dir(self, tmp_path: Path) -> None:
+        # Write via the explicit dir (no ProjectContext needed).
+        state_file = tmp_path / "project-handler-load-failures.json"
+        state_file.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "loaded_count": 2,
+                    "failed_count": 1,
+                    "failures": [
+                        {
+                            "filename": "x.py",
+                            "event_dir": "pre_tool_use",
+                            "reason": "boom",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        state = health.read_load_failures_at(tmp_path)
+        assert state.is_degraded is True
+        assert state.failed_count == 1
+        assert state.failures[0].filename == "x.py"
+
+    def test_missing_dir_reads_healthy(self, tmp_path: Path) -> None:
+        state = health.read_load_failures_at(tmp_path / "does_not_exist")
+        assert state.is_degraded is False
+
+
 class TestResilience:
     def test_corrupt_json_reads_as_healthy_with_warning(
         self, untracked_dir: Path, caplog: pytest.LogCaptureFixture

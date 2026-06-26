@@ -90,6 +90,9 @@ from .init_config import generate_config
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.daemon.controller import DaemonController
+    from claude_code_hooks_daemon.daemon.project_handler_health import (
+        ProjectHandlerHealthState,
+    )
 
 # Milliseconds in one second. ``Timeout.BASH_DEFAULT`` is expressed in
 # milliseconds (see constants/timeout.py), but ``subprocess.run(timeout=...)``
@@ -635,6 +638,15 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"Socket: {socket_path} ({'exists' if socket_exists else 'MISSING'})")
     print(f"PID file: {pid_path}")
 
+    # Project-handler protection signal (Plan 00143). Surfaced for visibility;
+    # the exit code stays liveness-based so existing "status == RUNNING" checks
+    # keep working — `health` is the command that returns a non-zero on degrade.
+    health_state = _read_project_handler_health(project_path)
+    if health_state.is_degraded:
+        print("\n🚨 PROJECT PROTECTION DEGRADED 🚨")
+        for line in _format_project_handler_health_lines(health_state):
+            print(line)
+
     if not socket_exists:
         print("\nWARNING: Daemon running but socket not found", file=sys.stderr)
         return 1
@@ -844,7 +856,17 @@ def cmd_health(args: argparse.Namespace) -> int:
             "`init-project-handlers`."
         )
 
-    return 0 if status == "healthy" else 1
+    # Project-handler protection signal (Plan 00143). Unlike hook-registration
+    # drift, this DOES drive the exit code: a skipped project handler is a
+    # silently-disabled protection, so CI / the session-start audit can detect
+    # the regression mechanically (non-zero exit).
+    health_state = _read_project_handler_health(project_path)
+    print("\nProject handlers:")
+    for line in _format_project_handler_health_lines(health_state):
+        print(line)
+
+    healthy = status == "healthy" and not health_state.is_degraded
+    return 0 if healthy else 1
 
 
 def cmd_check(args: argparse.Namespace) -> int:
@@ -920,6 +942,14 @@ def cmd_check(args: argparse.Namespace) -> int:
         print(f"  {len(warnings)} issue(s):")
         for warning in warnings:
             print(f"  ⚠️  {warning}")
+
+    # 5. Project-handler protection (Plan 00143): are any project handlers
+    # silently skipped by the running daemon?
+    print("\nProject handlers:")
+    for line in _format_project_handler_health_lines(
+        _read_project_handler_health(project_path)
+    ):
+        print(line)
 
     return 0
 
@@ -1377,6 +1407,48 @@ def _daemon_untracked_dir(project_root: Path) -> Path:
     if (project_root / "src" / "claude_code_hooks_daemon").exists():
         return project_root / "untracked"
     return project_root / ".claude" / "hooks-daemon" / "untracked"
+
+
+def _read_project_handler_health(
+    project_path: Path,
+) -> "ProjectHandlerHealthState":
+    """Read the daemon's persisted project-handler load-failure state (Plan 00143).
+
+    Resolves the state file deterministically from the project root (no
+    ProjectContext singleton dependency), so ``status`` / ``health`` / ``check``
+    can surface a degraded-protection signal whenever the running daemon skipped
+    a project handler at startup.
+    """
+    from claude_code_hooks_daemon.daemon.project_handler_health import (
+        read_load_failures_at,
+    )
+
+    return read_load_failures_at(_daemon_untracked_dir(project_path))
+
+
+def _format_project_handler_health_lines(
+    state: "ProjectHandlerHealthState",
+) -> list[str]:
+    """Format the project-handler health section shared by status/health/check.
+
+    Returns a loud degraded block when handlers failed to load, or a single
+    OK line when clean. Single source of truth so all three commands agree.
+    """
+    if not state.is_degraded:
+        return ["  OK — all project handlers loaded"]
+
+    lines = [
+        f"  DEGRADED — {state.failed_count} project handler(s) FAILED to load "
+        "and are NOT protecting this session:",
+    ]
+    for failure in state.failures:
+        lines.append(f"    ⚠️  {failure.event_dir}/{failure.filename} ({failure.reason})")
+    lines.append(
+        "  Fix the handler(s), then restart the daemon — the signal clears only "
+        "after a restart reloads them. Diagnose with: "
+        "$PYTHON -m claude_code_hooks_daemon.daemon.cli validate-project-handlers"
+    )
+    return lines
 
 
 def _enumerate_venvs(project_root: Path) -> list[dict[str, Any]]:

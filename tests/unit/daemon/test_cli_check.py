@@ -24,6 +24,7 @@ _FILEMODE_MODULE = (
 )
 _CONTAINER_MODULE = "claude_code_hooks_daemon.utils.container_detection"
 _REGISTRATION = "claude_code_hooks_daemon.daemon.cli.check_hook_registration_warnings"
+_HEALTH = "claude_code_hooks_daemon.daemon.cli._read_project_handler_health"
 
 
 def _check(name: str, passed: bool) -> dict[str, Any]:
@@ -50,16 +51,23 @@ def _patches(
     in_container: bool = False,
     filemode: str | None = "true",
     warnings: list[str] | None = None,
+    health: Any = None,
 ) -> Any:
     """Patch every external probe cmd_check relies on, for determinism."""
+    from claude_code_hooks_daemon.daemon.project_handler_health import (
+        ProjectHandlerHealthState,
+    )
+
     checks = checks if checks is not None else [_check("Agent Teams", True)]
     warnings = warnings if warnings is not None else []
+    health = health if health is not None else ProjectHandlerHealthState()
     return (
         patch(_OPT_MODULE, return_value=checks),
         patch(_FILEMODE_MODULE, return_value=filemode),
         patch(f"{_CONTAINER_MODULE}.detect_container_runtime", return_value=runtime),
         patch(f"{_CONTAINER_MODULE}.in_container", return_value=in_container),
         patch(_REGISTRATION, return_value=warnings),
+        patch(_HEALTH, return_value=health),
     )
 
 
@@ -128,6 +136,40 @@ class TestCmdCheck:
             cmd_check(_args())
         out = capsys.readouterr().out
         assert "settings.local.json has a hooks entry" in out
+
+    def test_reports_project_handler_degraded(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from claude_code_hooks_daemon.daemon.project_handler_health import (
+            ProjectHandlerHealthState,
+        )
+        from claude_code_hooks_daemon.handlers.project_loader import (
+            ProjectHandlerLoadFailure,
+        )
+
+        degraded = ProjectHandlerHealthState(
+            failures=[
+                ProjectHandlerLoadFailure(
+                    filename="phpcs_reminder.py",
+                    event_dir="post_tool_use",
+                    reason="missing get_claude_md (v2.30.0)",
+                )
+            ],
+            loaded_count=1,
+        )
+        with self._enter(_patches(health=degraded)):
+            cmd_check(_args())
+        out = capsys.readouterr().out
+        assert "DEGRADED" in out
+        assert "phpcs_reminder.py" in out
+
+    def test_reports_project_handler_ok_when_clean(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        with self._enter(_patches()):
+            cmd_check(_args())
+        out = capsys.readouterr().out
+        assert "Project handler" in out
 
     @staticmethod
     def _enter(patches: Any) -> Any:

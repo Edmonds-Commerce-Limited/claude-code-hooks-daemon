@@ -138,11 +138,30 @@ def clear_load_failures() -> None:
 def read_load_failures() -> ProjectHandlerHealthState:
     """Read the persisted health state; a missing/corrupt file reads as healthy.
 
+    Resolves the state file via the ProjectContext singleton (the daemon path).
+
     Returns:
         A :class:`ProjectHandlerHealthState`. Absence of the file means the
         running daemon loaded every project handler (or has none) — healthy.
     """
-    path = state_file_path()
+    return read_load_failures_at(ProjectContext.daemon_untracked_dir())
+
+
+def read_load_failures_at(untracked_dir: Path) -> ProjectHandlerHealthState:
+    """Read the persisted health state from an explicit untracked directory.
+
+    Lets callers (notably the CLI) resolve the daemon's state file
+    deterministically — e.g. from a project root — without depending on the
+    ProjectContext singleton being initialised for the right project.
+
+    Args:
+        untracked_dir: The daemon untracked directory to read the state from.
+
+    Returns:
+        A :class:`ProjectHandlerHealthState`; a missing/corrupt file reads as
+        healthy.
+    """
+    path = untracked_dir / _STATE_FILENAME
     if not path.exists():
         return ProjectHandlerHealthState()
 
