@@ -119,9 +119,7 @@ def write_load_failures(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     except OSError as exc:
-        logger.warning(
-            "Failed to persist project-handler health state to %s: %s", path, exc
-        )
+        logger.warning("Failed to persist project-handler health state to %s: %s", path, exc)
 
 
 def clear_load_failures() -> None:
@@ -130,9 +128,7 @@ def clear_load_failures() -> None:
     try:
         path.unlink(missing_ok=True)
     except OSError as exc:
-        logger.warning(
-            "Failed to clear project-handler health state at %s: %s", path, exc
-        )
+        logger.warning("Failed to clear project-handler health state at %s: %s", path, exc)
 
 
 def read_load_failures() -> ProjectHandlerHealthState:
@@ -168,15 +164,11 @@ def read_load_failures_at(untracked_dir: Path) -> ProjectHandlerHealthState:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, ValueError) as exc:
-        logger.warning(
-            "Failed to read project-handler health state at %s: %s", path, exc
-        )
+        logger.warning("Failed to read project-handler health state at %s: %s", path, exc)
         return ProjectHandlerHealthState()
 
     if not isinstance(data, dict):
-        logger.warning(
-            "project-handler health state at %s is not a JSON object; ignoring", path
-        )
+        logger.warning("project-handler health state at %s is not a JSON object; ignoring", path)
         return ProjectHandlerHealthState()
 
     raw_failures = data.get(_KEY_FAILURES, [])

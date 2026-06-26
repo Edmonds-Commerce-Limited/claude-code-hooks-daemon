@@ -26,9 +26,7 @@ from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 
 # Restart command surfaced in the alert and the CLAUDE.md guidance.
-_RESTART_CMD: Final[str] = (
-    "$PYTHON -m claude_code_hooks_daemon.daemon.cli restart"
-)
+_RESTART_CMD: Final[str] = "$PYTHON -m claude_code_hooks_daemon.daemon.cli restart"
 
 
 class ProjectHandlerLoadCheckerHandler(Handler):

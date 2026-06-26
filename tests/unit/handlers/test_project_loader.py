@@ -10,8 +10,8 @@ from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.handlers.project_loader import (
     ProjectHandlerDiscovery,
-    ProjectHandlerLoadFailure,
     ProjectHandlerLoader,
+    ProjectHandlerLoadFailure,
 )
 
 
@@ -470,9 +470,7 @@ class TestDiscoverHandlersWithFailures:
         assert len(discovery.handlers) >= 2
         assert discovery.failures == []
 
-    def test_broken_handlers_recorded_as_structured_failures(
-        self, error_cases_dir: Path
-    ) -> None:
+    def test_broken_handlers_recorded_as_structured_failures(self, error_cases_dir: Path) -> None:
         """Each broken handler becomes a ProjectHandlerLoadFailure with details."""
         discovery = ProjectHandlerLoader.discover_handlers_with_failures(error_cases_dir)
 
@@ -483,9 +481,7 @@ class TestDiscoverHandlersWithFailures:
             assert failure.event_dir  # non-empty event directory name
             assert failure.reason  # non-empty human-readable reason
 
-    def test_failure_reason_names_missing_method_and_version(
-        self, error_cases_dir: Path
-    ) -> None:
+    def test_failure_reason_names_missing_method_and_version(self, error_cases_dir: Path) -> None:
         """The missing-get_claude_md handler's failure reason is actionable.
 
         Regression coverage for the v2.30.0 silent-skip class: the reason must
@@ -510,9 +506,7 @@ class TestDiscoverHandlersWithFailures:
 
     def test_nonexistent_path_yields_empty_discovery(self) -> None:
         """A non-existent path returns empty handlers and empty failures."""
-        discovery = ProjectHandlerLoader.discover_handlers_with_failures(
-            Path("/nonexistent/path")
-        )
+        discovery = ProjectHandlerLoader.discover_handlers_with_failures(Path("/nonexistent/path"))
 
         assert discovery.handlers == []
         assert discovery.failures == []

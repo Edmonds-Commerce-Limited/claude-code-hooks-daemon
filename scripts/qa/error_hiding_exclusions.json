@@ -397,6 +397,24 @@
       "function": "_resolve_state_file",
       "rule": "return-none-on-error",
       "reason": "Returns None when ProjectContext is not initialised (unit tests, or any non-daemon caller). The caller skips the best-effort state-file write when None \u2014 the rate-limited advisory is the primary function and must never crash a tool call. Same explicitly-non-fatal contract as hook_registration_checker._get_project_root (Plan 00142)."
+    },
+    {
+      "file": "daemon/controller.py",
+      "function": "_persist_project_handler_health",
+      "rule": "log-and-continue",
+      "reason": "Plan 00143: persisting project-handler load failures is observability ONLY \u2014 it must never crash handler loading / daemon startup. Catches RuntimeError (e.g. ProjectContext not initialised in non-daemon callers / unit tests), logs a visible warning, and continues. The degraded-protection signal is a safety net, not a critical path; same explicitly-non-fatal contract as background_process_tracker._resolve_state_file."
+    },
+    {
+      "file": "daemon/project_handler_health.py",
+      "function": "write_load_failures",
+      "rule": "log-and-continue",
+      "reason": "Plan 00143: best-effort write of the project-handler load-failure state file under the daemon untracked dir. A filesystem error (OSError) must not crash daemon startup \u2014 logged at warning level and skipped. Same fail-open contract as the daemon/paths.py cleanup writers and gitignore_safety_checker._write_cache."
+    },
+    {
+      "file": "daemon/project_handler_health.py",
+      "function": "clear_load_failures",
+      "rule": "log-and-continue",
+      "reason": "Plan 00143: best-effort removal of the project-handler load-failure state file (clears stale degraded state when the daemon now loads cleanly). An OSError unlinking the file must not crash daemon startup \u2014 logged at warning level and skipped. Same fail-open cleanup contract as daemon/paths.py cleanup_socket / cleanup_pid_file."
     }
   ]
 }

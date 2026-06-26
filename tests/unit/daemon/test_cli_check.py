@@ -137,9 +137,7 @@ class TestCmdCheck:
         out = capsys.readouterr().out
         assert "settings.local.json has a hooks entry" in out
 
-    def test_reports_project_handler_degraded(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_reports_project_handler_degraded(self, capsys: pytest.CaptureFixture[str]) -> None:
         from claude_code_hooks_daemon.daemon.project_handler_health import (
             ProjectHandlerHealthState,
         )

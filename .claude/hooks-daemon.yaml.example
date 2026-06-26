@@ -245,6 +245,10 @@ handlers:
       enabled: true
       priority: 10
 
+    project_handler_load_checker:  # Loud alert when project handlers fail to load (Plan 00143)
+      enabled: true                 # Silent unless a project handler was skipped at startup
+      priority: 50
+
     hook_registration_checker:  # Validates hook registrations in Claude Code settings
       enabled: true             # Alerts when expected hooks are missing or misconfigured
       priority: 51

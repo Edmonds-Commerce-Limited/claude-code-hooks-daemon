@@ -946,9 +946,7 @@ def cmd_check(args: argparse.Namespace) -> int:
     # 5. Project-handler protection (Plan 00143): are any project handlers
     # silently skipped by the running daemon?
     print("\nProject handlers:")
-    for line in _format_project_handler_health_lines(
-        _read_project_handler_health(project_path)
-    ):
+    for line in _format_project_handler_health_lines(_read_project_handler_health(project_path)):
         print(line)
 
     return 0

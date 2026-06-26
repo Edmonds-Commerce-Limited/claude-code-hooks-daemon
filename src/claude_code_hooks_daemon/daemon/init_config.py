@@ -215,6 +215,7 @@ class ConfigTemplate:
             "  # SessionStart - Initialize environment\n"
             "  session_start:\n"
             "    yolo_container_detection: {enabled: true, priority: 40}  # Detect YOLO container environments\n"
+            "    project_handler_load_checker: {enabled: true, priority: 50}  # Loud alert when project handlers fail to load\n"
             "    hook_registration_checker: {enabled: true, priority: 51}  # Validate hook registrations in settings.json\n"
             "    optimal_config_checker: {enabled: true, priority: 52}  # Check Claude Code env for optimal settings\n"
             "    git_filemode_checker: {enabled: true, priority: 53}  # Warn when git core.fileMode=false\n"

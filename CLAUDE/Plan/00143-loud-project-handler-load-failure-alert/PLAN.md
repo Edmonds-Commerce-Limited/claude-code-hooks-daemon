@@ -1,6 +1,6 @@
 # Plan 00143: Loud Project-Handler Load-Failure Alert
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-06-26
 **Owner**: Claude (Opus)
 **Priority**: High
@@ -130,14 +130,23 @@ path logic or JSON parsing.
   loud warn (not hard-fail, to avoid bricking an upgrade) if failures detected. Test via the
   existing acceptance/install harness where feasible.
 
-### Phase 5: Integration, QA, docs
+### Phase 5: Integration, QA, docs ✅
 
-- [ ] ⬜ **Task 5.1**: Full QA (`./scripts/qa/llm_qa.py all`), daemon restart RUNNING.
-- [ ] ⬜ **Task 5.2**: Regenerate docs (`generate-docs`) → `.claude/HOOKS-DAEMON.md` + CLAUDE.md
-  `<hooksdaemon>` block include the new handler.
-- [ ] ⬜ **Task 5.3**: Acceptance test for the new handler in the playbook.
-- [ ] ⬜ **Task 5.4**: Config-changes manifest entry under `UNRELEASED/config-changes/`
-  (new handler, `recommended: true`) so upgrade advisory promotes it.
+- [x] ✅ **Task 5.1**: Full QA `./scripts/qa/llm_qa.py all` → 13/13 PASSED (9126 tests, 95.2%
+  coverage); daemon restart RUNNING.
+- [x] ✅ **Task 5.2**: Regenerated docs → `.claude/HOOKS-DAEMON.md` + CLAUDE.md `<hooksdaemon>`
+  block include the new handler.
+- [x] ✅ **Task 5.3**: Acceptance test provided via the handler's `get_acceptance_tests()`
+  (CONTEXT test asserting the `PROJECT PROTECTION DEGRADED` banner); picked up by the playbook
+  generator.
+- [x] ✅ **Task 5.4**: Config-changes manifest `UNRELEASED/config-changes/v3.31.0.yaml` (added
+  entry). The handler ships **on by default (opt-out)** so it is active automatically — no
+  `recommended` promotion needed (mirrors `root_recursion_guard`); the original plan's
+  `recommended: true` assumption was superseded by the on-by-default decision.
+- [x] ✅ **Also (surfaced by QA)**: added the handler to the default config template
+  (`init_config.py`) and the example config (`.claude/hooks-daemon.yaml.example`) to satisfy
+  config-coverage tests; added three justified `error_hiding_exclusions.json` entries for the
+  best-effort persistence/clear log-and-continue patterns.
 
 ## Success Criteria
 

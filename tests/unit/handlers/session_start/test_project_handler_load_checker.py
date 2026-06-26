@@ -10,8 +10,6 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import patch
 
-import pytest
-
 from claude_code_hooks_daemon.constants import HandlerTag
 from claude_code_hooks_daemon.core import Decision
 from claude_code_hooks_daemon.daemon.project_handler_health import (
@@ -22,9 +20,7 @@ from claude_code_hooks_daemon.handlers.session_start.project_handler_load_checke
     ProjectHandlerLoadCheckerHandler,
 )
 
-_READ = (
-    "claude_code_hooks_daemon.daemon.project_handler_health.read_load_failures"
-)
+_READ = "claude_code_hooks_daemon.daemon.project_handler_health.read_load_failures"
 
 
 def _degraded() -> ProjectHandlerHealthState:

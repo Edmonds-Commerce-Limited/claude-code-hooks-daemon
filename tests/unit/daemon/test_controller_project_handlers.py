@@ -435,11 +435,7 @@ class TestPersistsLoadFailures:
     @pytest.fixture
     def error_cases_dir(self) -> Path:
         """Fixtures with intentionally broken project handlers."""
-        return (
-            Path(__file__).parent.parent.parent
-            / "fixtures"
-            / "project_handlers_error_cases"
-        )
+        return Path(__file__).parent.parent.parent / "fixtures" / "project_handlers_error_cases"
 
     @pytest.fixture
     def valid_handlers_dir(self) -> Path:

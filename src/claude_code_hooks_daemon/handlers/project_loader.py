@@ -65,6 +65,7 @@ class ProjectHandlerDiscovery:
     handlers: list[tuple[EventType, Handler]] = field(default_factory=list)
     failures: list[ProjectHandlerLoadFailure] = field(default_factory=list)
 
+
 # Maps abstract method names to the daemon version that made them abstract.
 # Used to emit version-specific error messages when project handlers are found
 # to be missing required methods after an upgrade.
@@ -273,9 +274,7 @@ class ProjectHandlerLoader:
             List of (EventType, Handler) tuples for successfully loaded handlers.
             Handlers that failed to load are omitted (warning logged for each).
         """
-        return ProjectHandlerLoader.discover_handlers_with_failures(
-            project_handlers_path
-        ).handlers
+        return ProjectHandlerLoader.discover_handlers_with_failures(project_handlers_path).handlers
 
     @staticmethod
     def discover_handlers_with_failures(

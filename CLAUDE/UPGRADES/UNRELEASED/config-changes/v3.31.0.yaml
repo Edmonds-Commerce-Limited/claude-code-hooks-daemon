@@ -1,0 +1,41 @@
+version: "3.31.0"
+date: "UNRELEASED"
+breaking: false
+config_changes:
+  added:
+    - key: handlers.session_start.project_handler_load_checker
+      description: >-
+        New SessionStart ADVISORY handler (priority 50), shipped ENABLED BY
+        DEFAULT (opt-out). Closes a silent fail-open on the observability axis
+        (Plan 00143): when a project handler under .claude/project-handlers/
+        fails to load — e.g. an upgrade made a handler method like get_claude_md
+        required and an older handler does not implement it yet — the daemon
+        safely skips it, but previously only logged a line nobody reads. This
+        handler reads the load-failure state the running daemon persists at
+        startup and injects a loud "PROJECT PROTECTION DEGRADED" alert at the
+        start of every session, listing each skipped handler, its reason, and
+        the fix-then-restart remediation. It is silent when all project handlers
+        load. The same state also drives a degraded signal in
+        `status`/`check` and a non-zero exit from `health`, and the upgrade
+        script now runs `validate-project-handlers` post-upgrade and warns
+        loudly (without failing) if the upgrade dropped a previously-working
+        handler.
+      example_yaml: |
+        # On by default — no action needed. To DISABLE:
+        handlers:
+          session_start:
+            project_handler_load_checker:
+              enabled: false
+      migration_note: >-
+        No action required — the handler is active automatically after upgrade
+        and stays silent unless a project handler actually failed to load. If
+        you maintain project handlers in .claude/project-handlers/ and this
+        upgrade (or a prior one) introduced a required method they do not
+        implement, you will now see a degraded-protection alert at session
+        start: fix the handler(s), then restart the daemon to clear it. Projects
+        without project handlers are unaffected. To opt out, set
+        handlers.session_start.project_handler_load_checker.enabled: false in
+        .claude/hooks-daemon.yaml.
+  renamed: []
+  removed: []
+  changed: []
