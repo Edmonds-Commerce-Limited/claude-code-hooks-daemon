@@ -109,20 +109,20 @@ path logic or JSON parsing.
   persist via the health module on every startup (write even when empty → cleared); persists
   before the empty-handler early return. Integration tests added.
 
-### Phase 2: Loud SessionStart alert (new handler)
+### Phase 2: Loud SessionStart alert (new handler) ✅
 
-- [ ] ⬜ **Task 2.1**: Add `HandlerID.PROJECT_HANDLER_LOAD_CHECKER`, `Priority` (50, before
-  hook_registration_checker), and any tags/constants needed.
-- [ ] ⬜ **Task 2.2**: TDD new handler `session_start/project_handler_load_checker.py` — reads
+- [x] ✅ **Task 2.1**: Added `HandlerID.PROJECT_HANDLER_LOAD_CHECKER` + `Priority` (50).
+- [x] ✅ **Task 2.2**: New handler `session_start/project_handler_load_checker.py` — reads
   state, loud alert when failures, silent when clean; `get_claude_md`; `get_acceptance_tests`.
-- [ ] ⬜ **Task 2.3**: Register in built-in registry + `.claude/hooks-daemon.yaml` (dogfood).
-- [ ] ⬜ **Task 2.4**: Daemon restart + verify alert fires against a synthetic broken handler.
+- [x] ✅ **Task 2.3**: Registered in session_start package + `.claude/hooks-daemon.yaml`.
+- [x] ✅ **Task 2.4**: Daemon restart + verified alert fires against a synthetic broken handler
+  (missing-get_claude_md) and clears after removal + restart.
 
-### Phase 3: CLI degraded signal
+### Phase 3: CLI degraded signal ✅
 
-- [ ] ⬜ **Task 3.1**: TDD: `status` reports a degraded line when failures present.
-- [ ] ⬜ **Task 3.2**: TDD: `health` reports degraded / non-zero when failures present.
-- [ ] ⬜ **Task 3.3**: TDD: `check` includes a project-handler-health section.
+- [x] ✅ **Task 3.1**: `status` reports a loud DEGRADED block when failures present.
+- [x] ✅ **Task 3.2**: `health` returns non-zero (and reports detail) when degraded.
+- [x] ✅ **Task 3.3**: `check` includes a project-handler-health section.
 
 ### Phase 4: Upgrade-time gate
 

@@ -773,6 +773,32 @@ if ! run_post_install_checks "$PROJECT_ROOT" "$VENV_PYTHON" "$DAEMON_DIR" "false
 fi
 
 # ============================================================
+# Step 16.5: Project-handler load validation (Plan 00143)
+# ============================================================
+#
+# An upgrade can introduce a new REQUIRED handler method (e.g. get_claude_md,
+# abstract since v2.30.0). Older project handlers that predate it then fail to
+# load and are silently skipped — a protection regression. Surface it loudly at
+# the moment it happens, but do NOT fail the upgrade: the daemon itself is
+# healthy and skips the broken handlers safely; the user just needs to fix and
+# restart. The session-start alert + `health` exit code (Plan 00143) keep
+# nagging until they do.
+
+log_step "16.5" "Validating project handlers"
+if "$VENV_PYTHON" -m claude_code_hooks_daemon.daemon.cli validate-project-handlers; then
+    print_success "All project handlers load correctly"
+else
+    echo ""
+    print_warning "PROJECT PROTECTION DEGRADED: one or more project handlers failed to load"
+    print_warning "after this upgrade and are NOT protecting your sessions."
+    print_info "This usually means an upgrade added a required handler method an older"
+    print_info "handler does not implement yet. The daemon started fine and skipped them."
+    print_info "Fix the handler(s) above, then restart the daemon:"
+    echo "  $VENV_PYTHON -m claude_code_hooks_daemon.daemon.cli restart"
+    print_info "Until then, every new session will show a degraded-protection alert."
+fi
+
+# ============================================================
 # Step 17: Cleanup old snapshots
 # ============================================================
 
