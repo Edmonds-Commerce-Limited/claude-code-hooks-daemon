@@ -467,6 +467,14 @@ class HandlerID:
         display_name="hook-registration-checker",
     )
 
+    # Project handler load checker (SessionStart handler) — Plan 00143:
+    # loudly alert when project handlers failed to load (protection degraded)
+    PROJECT_HANDLER_LOAD_CHECKER = HandlerIDMeta(
+        class_name="ProjectHandlerLoadCheckerHandler",
+        config_key="project_handler_load_checker",
+        display_name="project-handler-load-checker",
+    )
+
     # Lint on edit (PostToolUse handler)
     LINT_ON_EDIT = HandlerIDMeta(
         class_name="LintOnEditHandler",

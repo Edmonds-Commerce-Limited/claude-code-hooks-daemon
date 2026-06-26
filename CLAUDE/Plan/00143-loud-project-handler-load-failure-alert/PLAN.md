@@ -97,16 +97,17 @@ path logic or JSON parsing.
 
 ## Tasks
 
-### Phase 1: Failure capture + persistence (data layer)
+### Phase 1: Failure capture + persistence (data layer) ✅
 
-- [ ] ⬜ **Task 1.1**: TDD `ProjectHandlerLoadFailure` + `ProjectHandlerDiscovery` dataclasses
+- [x] ✅ **Task 1.1**: `ProjectHandlerLoadFailure` + `ProjectHandlerDiscovery` dataclasses
   and `discover_handlers_with_failures()` in `project_loader.py`; `discover_handlers()`
   delegates and stays backward compatible.
-- [ ] ⬜ **Task 1.2**: TDD `daemon/project_handler_health.py` — state-file path (daemon untracked
+- [x] ✅ **Task 1.2**: `daemon/project_handler_health.py` — state-file path (daemon untracked
   dir), `write_load_failures()`, `read_load_failures()`, `clear_load_failures()`. Always
   rewrite/clear on write so the file reflects the running daemon.
-- [ ] ⬜ **Task 1.3**: Wire `controller._load_project_handlers()` to capture failures and persist
-  via the health module on every startup (write even when empty → cleared). Integration test.
+- [x] ✅ **Task 1.3**: Wired `controller._load_project_handlers()` to capture failures and
+  persist via the health module on every startup (write even when empty → cleared); persists
+  before the empty-handler early return. Integration tests added.
 
 ### Phase 2: Loud SessionStart alert (new handler)
 
