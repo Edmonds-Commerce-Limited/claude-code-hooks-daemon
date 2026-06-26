@@ -35,6 +35,7 @@ if TYPE_CHECKING:
         PluginsConfig,
         ProjectHandlersConfig,
     )
+    from claude_code_hooks_daemon.handlers.project_loader import ProjectHandlerDiscovery
 
 logger = logging.getLogger(__name__)
 
@@ -341,27 +342,40 @@ class DaemonController:
         Returns:
             Number of project handlers loaded and registered
         """
+        from claude_code_hooks_daemon.handlers.project_loader import (
+            ProjectHandlerDiscovery,
+            ProjectHandlerLoader,
+        )
+
         if not project_handlers_config.enabled:
             logger.info("Project handlers are disabled")
+            # No project handlers are active — clear any stale degraded state so
+            # a previously-failing daemon does not keep alerting after opt-out.
+            self._persist_project_handler_health(ProjectHandlerDiscovery())
             return 0
-
-        from claude_code_hooks_daemon.handlers.project_loader import ProjectHandlerLoader
 
         # Resolve path: relative paths are resolved against workspace_root
         handlers_path = Path(project_handlers_config.path)
         if not handlers_path.is_absolute():
             handlers_path = workspace_root / handlers_path
 
-        # Discover handlers from convention-based directory structure
-        discovered = ProjectHandlerLoader.discover_handlers(handlers_path)
+        # Discover handlers from convention-based directory structure, capturing
+        # both successes and structured load failures (Plan 00143).
+        discovery = ProjectHandlerLoader.discover_handlers_with_failures(handlers_path)
 
-        if not discovered:
+        # Persist the running daemon's load failures BEFORE the empty-handler
+        # early return below — when an entire event directory fails to load,
+        # discovery.handlers is empty but the failures MUST still be recorded so
+        # the loud session-start alert and degraded health signal can fire.
+        self._persist_project_handler_health(discovery)
+
+        if not discovery.handlers:
             logger.info("No project handlers discovered from %s", handlers_path)
             return 0
 
         # Register each discovered handler with the router (with conflict detection)
         registered_count = 0
-        for event_type, handler in discovered:
+        for event_type, handler in discovery.handlers:
             # Check for handler_id conflict with existing handlers in the same event type
             existing_chain = self._router.get_chain(event_type)
             existing_names = [h.name for h in existing_chain.handlers]
@@ -402,6 +416,38 @@ class DaemonController:
             handlers_path,
         )
         return registered_count
+
+    def _persist_project_handler_health(
+        self,
+        discovery: "ProjectHandlerDiscovery",
+    ) -> None:
+        """Best-effort: persist project-handler load failures (Plan 00143).
+
+        Records what the running daemon failed to load so the session-start
+        alert and the status/health/check CLI can surface a loud degraded
+        signal. This is observability only — it must NEVER crash handler
+        loading, so a misconfigured / uninitialised ProjectContext is caught
+        and logged (visibly, not swallowed) rather than propagated.
+
+        Args:
+            discovery: The discovery result whose failures (if any) to persist.
+                An empty failure list clears any stale degraded state.
+        """
+        from claude_code_hooks_daemon.daemon.project_handler_health import (
+            write_load_failures,
+        )
+
+        try:
+            write_load_failures(
+                discovery.failures,
+                loaded_count=len(discovery.handlers),
+            )
+        except RuntimeError as exc:
+            logger.warning(
+                "Could not persist project-handler health state "
+                "(observability only, load unaffected): %s",
+                exc,
+            )
 
     def _register_pseudo_events(
         self,

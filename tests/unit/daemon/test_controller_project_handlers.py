@@ -11,7 +11,38 @@ from claude_code_hooks_daemon.config.models import ProjectHandlersConfig
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
+from claude_code_hooks_daemon.core.project_context import ProjectContext
+from claude_code_hooks_daemon.daemon import project_handler_health as health
 from claude_code_hooks_daemon.daemon.controller import DaemonController
+from claude_code_hooks_daemon.handlers.project_loader import (
+    ProjectHandlerDiscovery,
+    ProjectHandlerLoadFailure,
+)
+
+# Target of the failure-aware discovery call the controller makes (Plan 00143).
+_DISCOVER = (
+    "claude_code_hooks_daemon.handlers.project_loader."
+    "ProjectHandlerLoader.discover_handlers_with_failures"
+)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_health_state(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Point project-handler health persistence at an isolated temp dir.
+
+    The controller now persists load failures on every project-handler load;
+    these direct ``_load_project_handlers`` calls would otherwise hit an
+    uninitialised ProjectContext. Isolating the untracked dir keeps the
+    persistence side-effect clean and inspectable per test.
+    """
+    health_dir = tmp_path_factory.mktemp("project_handler_health")
+    monkeypatch.setattr(
+        ProjectContext,
+        "daemon_untracked_dir",
+        classmethod(lambda cls: health_dir),
+    )
 
 
 class _StubHandler(Handler):
@@ -69,12 +100,10 @@ class TestLoadProjectHandlers:
 
         project_config = ProjectHandlersConfig(enabled=True, path=str(tmp_path))
 
-        with patch(
-            "claude_code_hooks_daemon.handlers.project_loader.ProjectHandlerLoader.discover_handlers"
-        ) as mock_discover:
-            mock_discover.return_value = [
-                (EventType.PRE_TOOL_USE, stub_handler),
-            ]
+        with patch(_DISCOVER) as mock_discover:
+            mock_discover.return_value = ProjectHandlerDiscovery(
+                handlers=[(EventType.PRE_TOOL_USE, stub_handler)]
+            )
 
             count = controller._load_project_handlers(
                 project_handlers_config=project_config,
@@ -93,10 +122,8 @@ class TestLoadProjectHandlers:
 
         project_config = ProjectHandlersConfig(enabled=True, path=".claude/project-handlers")
 
-        with patch(
-            "claude_code_hooks_daemon.handlers.project_loader.ProjectHandlerLoader.discover_handlers"
-        ) as mock_discover:
-            mock_discover.return_value = []
+        with patch(_DISCOVER) as mock_discover:
+            mock_discover.return_value = ProjectHandlerDiscovery(handlers=[])
 
             controller._load_project_handlers(
                 project_handlers_config=project_config,
@@ -114,10 +141,8 @@ class TestLoadProjectHandlers:
         abs_path = str(tmp_path / "absolute" / "handlers")
         project_config = ProjectHandlersConfig(enabled=True, path=abs_path)
 
-        with patch(
-            "claude_code_hooks_daemon.handlers.project_loader.ProjectHandlerLoader.discover_handlers"
-        ) as mock_discover:
-            mock_discover.return_value = []
+        with patch(_DISCOVER) as mock_discover:
+            mock_discover.return_value = ProjectHandlerDiscovery(handlers=[])
 
             controller._load_project_handlers(
                 project_handlers_config=project_config,
@@ -161,12 +186,10 @@ class TestConflictDetection:
 
         project_config = ProjectHandlersConfig(enabled=True, path=str(tmp_path))
 
-        with patch(
-            "claude_code_hooks_daemon.handlers.project_loader.ProjectHandlerLoader.discover_handlers"
-        ) as mock_discover:
-            mock_discover.return_value = [
-                (EventType.PRE_TOOL_USE, project_handler),
-            ]
+        with patch(_DISCOVER) as mock_discover:
+            mock_discover.return_value = ProjectHandlerDiscovery(
+                handlers=[(EventType.PRE_TOOL_USE, project_handler)]
+            )
 
             with caplog.at_level(logging.WARNING):
                 count = controller._load_project_handlers(
@@ -196,12 +219,10 @@ class TestConflictDetection:
 
         project_config = ProjectHandlersConfig(enabled=True, path=str(tmp_path))
 
-        with patch(
-            "claude_code_hooks_daemon.handlers.project_loader.ProjectHandlerLoader.discover_handlers"
-        ) as mock_discover:
-            mock_discover.return_value = [
-                (EventType.PRE_TOOL_USE, project_handler),
-            ]
+        with patch(_DISCOVER) as mock_discover:
+            mock_discover.return_value = ProjectHandlerDiscovery(
+                handlers=[(EventType.PRE_TOOL_USE, project_handler)]
+            )
 
             count = controller._load_project_handlers(
                 project_handlers_config=project_config,
@@ -225,12 +246,10 @@ class TestConflictDetection:
 
         project_config = ProjectHandlersConfig(enabled=True, path=str(tmp_path))
 
-        with patch(
-            "claude_code_hooks_daemon.handlers.project_loader.ProjectHandlerLoader.discover_handlers"
-        ) as mock_discover:
-            mock_discover.return_value = [
-                (EventType.PRE_TOOL_USE, project_handler),
-            ]
+        with patch(_DISCOVER) as mock_discover:
+            mock_discover.return_value = ProjectHandlerDiscovery(
+                handlers=[(EventType.PRE_TOOL_USE, project_handler)]
+            )
 
             with caplog.at_level(logging.WARNING):
                 count = controller._load_project_handlers(
@@ -262,12 +281,10 @@ class TestConflictDetection:
 
         project_config = ProjectHandlersConfig(enabled=True, path=str(tmp_path))
 
-        with patch(
-            "claude_code_hooks_daemon.handlers.project_loader.ProjectHandlerLoader.discover_handlers"
-        ) as mock_discover:
-            mock_discover.return_value = [
-                (EventType.PRE_TOOL_USE, project_handler),
-            ]
+        with patch(_DISCOVER) as mock_discover:
+            mock_discover.return_value = ProjectHandlerDiscovery(
+                handlers=[(EventType.PRE_TOOL_USE, project_handler)]
+            )
 
             with caplog.at_level(logging.WARNING):
                 count = controller._load_project_handlers(
@@ -296,12 +313,10 @@ class TestConflictDetection:
 
         project_config = ProjectHandlersConfig(enabled=True, path=str(tmp_path))
 
-        with patch(
-            "claude_code_hooks_daemon.handlers.project_loader.ProjectHandlerLoader.discover_handlers"
-        ) as mock_discover:
-            mock_discover.return_value = [
-                (EventType.PRE_TOOL_USE, project_handler),
-            ]
+        with patch(_DISCOVER) as mock_discover:
+            mock_discover.return_value = ProjectHandlerDiscovery(
+                handlers=[(EventType.PRE_TOOL_USE, project_handler)]
+            )
 
             count = controller._load_project_handlers(
                 project_handlers_config=project_config,
@@ -327,13 +342,13 @@ class TestConflictDetection:
 
         project_config = ProjectHandlersConfig(enabled=True, path=str(tmp_path))
 
-        with patch(
-            "claude_code_hooks_daemon.handlers.project_loader.ProjectHandlerLoader.discover_handlers"
-        ) as mock_discover:
-            mock_discover.return_value = [
-                (EventType.PRE_TOOL_USE, conflict_handler),
-                (EventType.PRE_TOOL_USE, unique_handler),
-            ]
+        with patch(_DISCOVER) as mock_discover:
+            mock_discover.return_value = ProjectHandlerDiscovery(
+                handlers=[
+                    (EventType.PRE_TOOL_USE, conflict_handler),
+                    (EventType.PRE_TOOL_USE, unique_handler),
+                ]
+            )
 
             count = controller._load_project_handlers(
                 project_handlers_config=project_config,
@@ -408,3 +423,113 @@ class TestInitialiseWithProjectHandlers:
             )
 
         mock_load.assert_not_called()
+
+
+class TestPersistsLoadFailures:
+    """The running daemon persists project-handler load failures (Plan 00143).
+
+    The persisted state is what the SessionStart alert and the
+    status/health/check CLI read to surface a loud degraded signal.
+    """
+
+    @pytest.fixture
+    def error_cases_dir(self) -> Path:
+        """Fixtures with intentionally broken project handlers."""
+        return (
+            Path(__file__).parent.parent.parent
+            / "fixtures"
+            / "project_handlers_error_cases"
+        )
+
+    @pytest.fixture
+    def valid_handlers_dir(self) -> Path:
+        """Fixtures with valid project handlers."""
+        return Path(__file__).parent.parent.parent / "fixtures" / "project_handlers"
+
+    def test_failures_are_persisted(self, error_cases_dir: Path) -> None:
+        """Broken handlers are recorded to the health state file."""
+        controller = DaemonController()
+        project_config = ProjectHandlersConfig(enabled=True, path=str(error_cases_dir))
+
+        controller._load_project_handlers(
+            project_handlers_config=project_config,
+            workspace_root=error_cases_dir,
+        )
+
+        state = health.read_load_failures()
+        assert state.is_degraded is True
+        assert state.failed_count >= 1
+        filenames = {f.filename for f in state.failures}
+        assert "missing_get_claude_md_handler.py" in filenames
+
+    def test_persisted_even_when_all_handlers_fail(self, tmp_path: Path) -> None:
+        """Failures persist despite the early-return when zero handlers load.
+
+        With every handler broken, ``discovery.handlers`` is empty and the
+        method returns 0 — but the failures must still be recorded before that
+        early return, or the degraded signal would be lost exactly when the
+        whole event directory is down.
+        """
+        pre_tool_dir = tmp_path / "pre_tool_use"
+        pre_tool_dir.mkdir()
+        (pre_tool_dir / "all_broken_handler.py").write_text("this is not valid python !!!")
+
+        controller = DaemonController()
+        project_config = ProjectHandlersConfig(enabled=True, path=str(tmp_path))
+
+        count = controller._load_project_handlers(
+            project_handlers_config=project_config,
+            workspace_root=tmp_path,
+        )
+
+        assert count == 0
+        state = health.read_load_failures()
+        assert state.is_degraded is True
+        assert "all_broken_handler.py" in {f.filename for f in state.failures}
+
+    def test_clean_load_clears_stale_state(self, valid_handlers_dir: Path) -> None:
+        """A clean load erases prior degraded state (always-rewrite)."""
+        # Pre-seed a stale failure as if a previous daemon was degraded.
+        health.write_load_failures(
+            [
+                ProjectHandlerLoadFailure(
+                    filename="old_handler.py",
+                    event_dir="pre_tool_use",
+                    reason="stale",
+                )
+            ],
+            loaded_count=0,
+        )
+        assert health.read_load_failures().is_degraded is True
+
+        controller = DaemonController()
+        project_config = ProjectHandlersConfig(enabled=True, path=str(valid_handlers_dir))
+        controller._load_project_handlers(
+            project_handlers_config=project_config,
+            workspace_root=valid_handlers_dir,
+        )
+
+        assert health.read_load_failures().is_degraded is False
+
+    def test_disabled_clears_stale_state(self, tmp_path: Path) -> None:
+        """Disabling project handlers clears any stale degraded state."""
+        health.write_load_failures(
+            [
+                ProjectHandlerLoadFailure(
+                    filename="old_handler.py",
+                    event_dir="pre_tool_use",
+                    reason="stale",
+                )
+            ],
+            loaded_count=0,
+        )
+        assert health.read_load_failures().is_degraded is True
+
+        controller = DaemonController()
+        project_config = ProjectHandlersConfig(enabled=False, path=str(tmp_path))
+        controller._load_project_handlers(
+            project_handlers_config=project_config,
+            workspace_root=tmp_path,
+        )
+
+        assert health.read_load_failures().is_degraded is False

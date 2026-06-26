@@ -8,7 +8,11 @@ import pytest
 
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler import Handler
-from claude_code_hooks_daemon.handlers.project_loader import ProjectHandlerLoader
+from claude_code_hooks_daemon.handlers.project_loader import (
+    ProjectHandlerDiscovery,
+    ProjectHandlerLoadFailure,
+    ProjectHandlerLoader,
+)
 
 
 class TestDiscoverHandlers:
@@ -430,3 +434,96 @@ class NullPriorityHandler(Handler):
             "None priority" in record.message or "default" in record.message.lower()
             for record in caplog.records
         )
+
+
+class TestDiscoverHandlersWithFailures:
+    """Test the failure-aware discovery API (Plan 00143).
+
+    ``discover_handlers_with_failures`` returns BOTH the successfully loaded
+    handlers AND structured records of every handler that failed to load, so
+    the running daemon can persist and loudly surface protection regressions
+    instead of dropping them into a log line nobody reads.
+    """
+
+    @pytest.fixture
+    def project_handlers_dir(self) -> Path:
+        """Return path to test project handler fixtures (all valid)."""
+        return Path(__file__).parent.parent.parent / "fixtures" / "project_handlers"
+
+    @pytest.fixture
+    def error_cases_dir(self) -> Path:
+        """Return path to error case fixtures (intentionally broken handlers)."""
+        return Path(__file__).parent.parent.parent / "fixtures" / "project_handlers_error_cases"
+
+    def test_returns_discovery_dataclass(self, project_handlers_dir: Path) -> None:
+        """A ProjectHandlerDiscovery with handlers + failures is returned."""
+        discovery = ProjectHandlerLoader.discover_handlers_with_failures(project_handlers_dir)
+
+        assert isinstance(discovery, ProjectHandlerDiscovery)
+        assert isinstance(discovery.handlers, list)
+        assert isinstance(discovery.failures, list)
+
+    def test_valid_handlers_have_no_failures(self, project_handlers_dir: Path) -> None:
+        """A directory of valid handlers loads cleanly with zero failures."""
+        discovery = ProjectHandlerLoader.discover_handlers_with_failures(project_handlers_dir)
+
+        assert len(discovery.handlers) >= 2
+        assert discovery.failures == []
+
+    def test_broken_handlers_recorded_as_structured_failures(
+        self, error_cases_dir: Path
+    ) -> None:
+        """Each broken handler becomes a ProjectHandlerLoadFailure with details."""
+        discovery = ProjectHandlerLoader.discover_handlers_with_failures(error_cases_dir)
+
+        assert len(discovery.failures) >= 1
+        for failure in discovery.failures:
+            assert isinstance(failure, ProjectHandlerLoadFailure)
+            assert failure.filename.endswith(".py")
+            assert failure.event_dir  # non-empty event directory name
+            assert failure.reason  # non-empty human-readable reason
+
+    def test_failure_reason_names_missing_method_and_version(
+        self, error_cases_dir: Path
+    ) -> None:
+        """The missing-get_claude_md handler's failure reason is actionable.
+
+        Regression coverage for the v2.30.0 silent-skip class: the reason must
+        name the method and the version that introduced it so the alert tells
+        the user exactly what to fix.
+        """
+        discovery = ProjectHandlerLoader.discover_handlers_with_failures(error_cases_dir)
+
+        reasons = "\n".join(f.reason for f in discovery.failures)
+        filenames = {f.filename for f in discovery.failures}
+        assert "missing_get_claude_md_handler.py" in filenames
+        assert "get_claude_md" in reasons
+        assert "2.30.0" in reasons
+
+    def test_failure_records_correct_event_dir(self, error_cases_dir: Path) -> None:
+        """The session_start syntax-error handler is recorded under session_start."""
+        discovery = ProjectHandlerLoader.discover_handlers_with_failures(error_cases_dir)
+
+        by_name = {f.filename: f for f in discovery.failures}
+        assert "syntax_error_handler.py" in by_name
+        assert by_name["syntax_error_handler.py"].event_dir == "session_start"
+
+    def test_nonexistent_path_yields_empty_discovery(self) -> None:
+        """A non-existent path returns empty handlers and empty failures."""
+        discovery = ProjectHandlerLoader.discover_handlers_with_failures(
+            Path("/nonexistent/path")
+        )
+
+        assert discovery.handlers == []
+        assert discovery.failures == []
+
+    def test_discover_handlers_delegates_to_failure_aware_api(
+        self, project_handlers_dir: Path
+    ) -> None:
+        """The backward-compatible discover_handlers returns the same handlers."""
+        legacy = ProjectHandlerLoader.discover_handlers(project_handlers_dir)
+        discovery = ProjectHandlerLoader.discover_handlers_with_failures(project_handlers_dir)
+
+        legacy_names = sorted(h.name for _, h in legacy)
+        discovery_names = sorted(h.name for _, h in discovery.handlers)
+        assert legacy_names == discovery_names

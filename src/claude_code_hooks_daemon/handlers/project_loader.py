@@ -20,6 +20,7 @@ import importlib.util
 import inspect
 import logging
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from claude_code_hooks_daemon.constants import Priority
@@ -28,6 +29,41 @@ from claude_code_hooks_daemon.core.handler import Handler
 from claude_code_hooks_daemon.handlers.registry import EVENT_TYPE_MAPPING
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class ProjectHandlerLoadFailure:
+    """A single project handler that failed to load, with actionable detail.
+
+    Captured at discovery time so the running daemon can persist and loudly
+    surface protection regressions (Plan 00143) instead of dropping them into
+    a log line nobody reads.
+
+    Attributes:
+        filename: The handler file's basename (e.g. ``vendor_reminder.py``).
+        event_dir: The event-type subdirectory it was found in (e.g.
+            ``pre_tool_use``) — tells the user which protection is now off.
+        reason: Human-readable load-failure reason (the RuntimeError message),
+            which for the v2.30.0 abstract-method class names the missing
+            method and the version that introduced it.
+    """
+
+    filename: str
+    event_dir: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class ProjectHandlerDiscovery:
+    """Result of failure-aware project handler discovery.
+
+    Attributes:
+        handlers: Successfully loaded ``(EventType, Handler)`` pairs.
+        failures: Structured records for every handler that failed to load.
+    """
+
+    handlers: list[tuple[EventType, Handler]] = field(default_factory=list)
+    failures: list[ProjectHandlerLoadFailure] = field(default_factory=list)
 
 # Maps abstract method names to the daemon version that made them abstract.
 # Used to emit version-specific error messages when project handlers are found
@@ -225,6 +261,28 @@ class ProjectHandlerLoader:
     ) -> list[tuple[EventType, Handler]]:
         """Discover project handlers from convention-based directory structure.
 
+        Backward-compatible thin wrapper over
+        :meth:`discover_handlers_with_failures` that returns only the
+        successfully loaded handlers. Existing callers that do not need the
+        failure detail keep working unchanged.
+
+        Args:
+            project_handlers_path: Path to the project handlers root directory
+
+        Returns:
+            List of (EventType, Handler) tuples for successfully loaded handlers.
+            Handlers that failed to load are omitted (warning logged for each).
+        """
+        return ProjectHandlerLoader.discover_handlers_with_failures(
+            project_handlers_path
+        ).handlers
+
+    @staticmethod
+    def discover_handlers_with_failures(
+        project_handlers_path: Path,
+    ) -> ProjectHandlerDiscovery:
+        """Discover project handlers, returning both successes AND failures.
+
         Scans event-type subdirectories (pre_tool_use/, post_tool_use/, etc.)
         for Python files containing Handler subclasses. Skips files starting
         with '_' or 'test_'.
@@ -235,19 +293,24 @@ class ProjectHandlerLoader:
         does not prevent the daemon from starting — working handlers remain
         active while the broken ones are reported for the user to fix.
 
+        Unlike :meth:`discover_handlers`, the failures are returned as
+        structured :class:`ProjectHandlerLoadFailure` records (Plan 00143) so
+        the daemon can persist them and surface a loud session-start alert
+        rather than relying on a transient log line.
+
         Args:
             project_handlers_path: Path to the project handlers root directory
 
         Returns:
-            List of (EventType, Handler) tuples for successfully loaded handlers.
-            Handlers that failed to load are omitted (warning logged for each).
+            A :class:`ProjectHandlerDiscovery` with the loaded handlers and the
+            structured load failures.
         """
         if not project_handlers_path.exists() or not project_handlers_path.is_dir():
             logger.debug("Project handlers directory does not exist: %s", project_handlers_path)
-            return []
+            return ProjectHandlerDiscovery()
 
         results: list[tuple[EventType, Handler]] = []
-        load_failures: list[str] = []
+        failures: list[ProjectHandlerLoadFailure] = []
 
         for dir_name, event_type in EVENT_TYPE_MAPPING.items():
             event_dir = project_handlers_path / dir_name
@@ -272,15 +335,21 @@ class ProjectHandlerLoader:
                         py_file.name,
                         e,
                     )
-                    load_failures.append(py_file.name)
+                    failures.append(
+                        ProjectHandlerLoadFailure(
+                            filename=py_file.name,
+                            event_dir=dir_name,
+                            reason=str(e),
+                        )
+                    )
 
-        if load_failures:
+        if failures:
             logger.warning(
                 "%d project handler(s) failed to load and were skipped: %s. "
                 "Daemon started with %d working project handler(s). "
                 "Run: $PYTHON -m claude_code_hooks_daemon.daemon.cli validate-project-handlers",
-                len(load_failures),
-                ", ".join(load_failures),
+                len(failures),
+                ", ".join(f.filename for f in failures),
                 len(results),
             )
 
@@ -289,4 +358,4 @@ class ProjectHandlerLoader:
             len(results),
             project_handlers_path,
         )
-        return results
+        return ProjectHandlerDiscovery(handlers=results, failures=failures)
