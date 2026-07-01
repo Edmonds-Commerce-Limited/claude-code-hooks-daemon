@@ -939,7 +939,12 @@ class HooksDaemon:
             hook_result = await loop.run_in_executor(None, self.controller.dispatch, hook_input)
 
             # Build response (don't wrap in "result" - to_json already returns correct format)
-            response_dict: dict[str, Any] = hook_result.to_json(event)
+            stop_hook_active = bool(
+                hook_input.get("stop_hook_active") or hook_input.get("stopHookActive")
+            )
+            response_dict: dict[str, Any] = hook_result.to_json(
+                event, stop_hook_active=stop_hook_active
+            )
             if request_id:
                 response_dict["request_id"] = request_id
             return response_dict

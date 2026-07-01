@@ -744,7 +744,11 @@ class DaemonController:
         result = self.process_event(event)
 
         # Use to_json() for Claude Code hook format, not to_response_dict()
-        return result.result.to_json(event.event_type.value)
+        hook_input_dict = event.hook_input.model_dump(by_alias=False)
+        stop_hook_active = bool(
+            hook_input_dict.get("stop_hook_active") or hook_input_dict.get("stopHookActive")
+        )
+        return result.result.to_json(event.event_type.value, stop_hook_active=stop_hook_active)
 
     def get_stats(self) -> DaemonStats:
         """Get daemon statistics.

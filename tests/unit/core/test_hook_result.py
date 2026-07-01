@@ -362,6 +362,48 @@ class TestToJsonEventName:
         output = result.to_json("Stop")
         assert output == {}
 
+    def test_to_json_stop_allow_with_context_suppressed_on_reentry(self):
+        """ALLOW-with-context must go silent once stop_hook_active=True (v3.31.0 loop bug).
+
+        Regression test for a Sev-1 shipped in v3.31.0: Claude Code treats any
+        non-empty Stop/SubagentStop hookSpecificOutput.additionalContext as
+        "continue the conversation" - confirmed via stop-events.jsonl showing
+        stop_hook_active=true on every re-fire after an ALLOW-with-context
+        response. Because hello_world_stop unconditionally contributes context
+        on every Stop event, this created an infinite loop that never
+        terminated until the session was killed. Advisory context must only
+        surface on the FIRST stop check (stop_hook_active falsy); any re-entry
+        with a non-DENY decision must produce an empty response so Claude Code
+        can actually stop.
+        """
+        result = HookResult(decision=Decision.ALLOW, context=["Advisory guidance"])
+        output = result.to_json("Stop", stop_hook_active=True)
+        assert output == {}
+
+    def test_to_json_subagent_stop_allow_with_context_suppressed_on_reentry(self):
+        """SubagentStop ALLOW-with-context must also go silent on re-entry."""
+        result = HookResult(decision=Decision.ALLOW, context=["Advisory guidance"])
+        output = result.to_json("SubagentStop", stop_hook_active=True)
+        assert output == {}
+
+    def test_to_json_stop_deny_with_context_not_suppressed_on_reentry(self):
+        """DENY must keep surfacing decision/reason/context even on re-entry.
+
+        Only non-blocking ALLOW advisories are subject to the loop-breaker -
+        a genuine DENY must never go silent, re-entry or not.
+        """
+        result = HookResult(decision=Decision.DENY, reason="Blocked", context=["Extra info"])
+        output = result.to_json("Stop", stop_hook_active=True)
+        assert output["decision"] == "block"
+        assert output["reason"] == "Blocked"
+        assert output["hookSpecificOutput"]["additionalContext"] == "Extra info"
+
+    def test_to_json_stop_allow_with_context_default_stop_hook_active_false(self):
+        """stop_hook_active defaults to False, preserving first-check behaviour."""
+        result = HookResult(decision=Decision.ALLOW, context=["Advisory guidance"])
+        output = result.to_json("Stop")
+        assert output["hookSpecificOutput"]["additionalContext"] == "Advisory guidance"
+
         # Test SessionStart format (systemMessage only, NOT hookSpecificOutput)
         result_session = HookResult(decision=Decision.ALLOW, context=["Test context"])
         output = result_session.to_json("SessionStart")

@@ -138,7 +138,7 @@ class HookResult(BaseModel):
         )
         return self
 
-    def to_json(self, event_name: str) -> dict[str, Any]:
+    def to_json(self, event_name: str, *, stop_hook_active: bool = False) -> dict[str, Any]:
         """Convert to Claude Code hook JSON format.
 
         Different event types require different response structures:
@@ -152,6 +152,11 @@ class HookResult(BaseModel):
 
         Args:
             event_name: Hook event type (PreToolUse, PostToolUse, etc.)
+            stop_hook_active: Only meaningful for Stop/SubagentStop. True when
+                the caller's hook_input signals this Stop check is itself a
+                re-entry (Claude Code re-fired Stop after a prior response).
+                Used to break the ALLOW-with-context infinite loop - see
+                ``_format_stop_response``.
 
         Returns:
             Dictionary in Claude Code hook output format
@@ -187,7 +192,7 @@ class HookResult(BaseModel):
         if event_name in ("Stop", "SubagentStop"):
             # Stop events: top-level decision for DENY, plus
             # hookSpecificOutput.additionalContext for non-blocking advisory context
-            return self._format_stop_response(event_name)
+            return self._format_stop_response(event_name, stop_hook_active)
         elif event_name == "PostToolUse":
             # PostToolUse: Top-level decision + hookSpecificOutput
             return self._format_post_tool_use_response(event_name)
@@ -257,7 +262,7 @@ class HookResult(BaseModel):
 
         return response
 
-    def _format_stop_response(self, event_name: str) -> dict[str, Any]:
+    def _format_stop_response(self, event_name: str, stop_hook_active: bool) -> dict[str, Any]:
         """Format Stop/SubagentStop response.
 
         Per Claude Code's hooks documentation, Stop and SubagentStop accept
@@ -265,17 +270,40 @@ class HookResult(BaseModel):
         feedback that continues the conversation, in addition to the
         top-level `decision`/`reason` blocking mechanism.
 
+        LOOP-BREAKER (Sev-1 shipped in v3.31.0): Claude Code treats ANY
+        non-empty additionalContext as "continue the conversation" -
+        regardless of decision - and sets stop_hook_active=true on the next
+        Stop check. Unconditional advisory handlers (e.g. hello_world_stop)
+        contribute non-empty context on every single Stop event, so once one
+        ALLOW-with-context response goes out, nothing ever makes context
+        empty again, and the daemon keeps re-triggering "continue" forever.
+        DENY is unaffected (a real block is supposed to force attention no
+        matter how many times it re-fires); only non-blocking ALLOW context
+        is subject to the one-shot rule: surface it on the first check
+        (stop_hook_active falsy), then go silent on every re-entry so Claude
+        Code can actually return control to the user.
+
         Returns:
-            Top-level decision for DENY, plus hookSpecificOutput.additionalContext
-            when context is present (regardless of decision).
+            Top-level decision for DENY (context always included), plus
+            hookSpecificOutput.additionalContext for ALLOW only on the first
+            stop check of a run (empty dict on any ALLOW re-entry).
         """
         response: dict[str, Any] = {}
 
-        # Only include decision if blocking
         if self.decision == Decision.DENY:
             response["decision"] = "block"
             if self.reason:
                 response["reason"] = self.reason
+            if self.context:
+                response["hookSpecificOutput"] = {
+                    "hookEventName": event_name,
+                    "additionalContext": "\n\n".join(self.context),
+                }
+            return response
+
+        if stop_hook_active:
+            # Non-blocking re-entry - already advised once, go silent.
+            return response
 
         if self.context:
             response["hookSpecificOutput"] = {
