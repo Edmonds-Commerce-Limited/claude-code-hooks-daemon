@@ -73,14 +73,14 @@ All status line handlers are **non-terminal** (`terminal=False`). They all retur
 
 ### Handler Execution Order
 
-| Priority | Handler                       | Config Key              | Output Example                                     | Data Source                                              |
-| -------- | ----------------------------- | ----------------------- | -------------------------------------------------- | -------------------------------------------------------- |
-| 5        | `AccountDisplayHandler`       | `account_display`       | `username \|`                                      | `~/.claude/.last-launch.conf`                            |
-| 10       | `ModelContextHandler`         | `model_context`         | `Claude Opus 4.5 \| Ctx: [colored]12.3%[/colored]` | `hook_input.model`, `hook_input.context_window`          |
-| 11       | `EnvironmentIndicatorHandler` | `environment_indicator` | `\| 💻 desktop` / `\| 🐳 docker` / `\| 📦 podman`  | `ProjectContext.container_runtime()` (cached at startup) |
-| 15       | `UsageTrackingHandler`        | `usage_tracking`        | `\| daily: 45.2% \| weekly: 23.1%`                 | `~/.claude/stats-cache.json` (DISABLED)                  |
-| 20       | `GitBranchHandler`            | `git_branch`            | `\| main`                                          | `git branch --show-current` subprocess                   |
-| 30       | `DaemonStatsHandler`          | `daemon_stats`          | `\| hook-icon 5.2m 34MB \| INFO`                   | `DaemonController.get_stats()`, `psutil`                 |
+| Priority | Handler                       | Config Key              | Output Example                                     | Data Source                                                          |
+| -------- | ----------------------------- | ----------------------- | -------------------------------------------------- | -------------------------------------------------------------------- |
+| 5        | `AccountDisplayHandler`       | `account_display`       | `username \|`                                      | `~/.claude/.last-launch.conf`                                        |
+| 10       | `ModelContextHandler`         | `model_context`         | `Claude Opus 4.5 \| Ctx: [colored]12.3%[/colored]` | `hook_input.model`, `hook_input.context_window`, `hook_input.effort` |
+| 11       | `EnvironmentIndicatorHandler` | `environment_indicator` | `\| 💻 desktop` / `\| 🐳 docker` / `\| 📦 podman`  | `ProjectContext.container_runtime()` (cached at startup)             |
+| 15       | `UsageTrackingHandler`        | `usage_tracking`        | `\| daily: 45.2% \| weekly: 23.1%`                 | `~/.claude/stats-cache.json` (DISABLED)                              |
+| 20       | `GitBranchHandler`            | `git_branch`            | `\| main`                                          | `git branch --show-current` subprocess                               |
+| 30       | `DaemonStatsHandler`          | `daemon_stats`          | `\| hook-icon 5.2m 34MB \| INFO`                   | `DaemonController.get_stats()`, `psutil`                             |
 
 ### Handler Details
 
@@ -93,16 +93,16 @@ All status line handlers are **non-terminal** (`terminal=False`). They all retur
 
 #### ModelContextHandler (Priority 10)
 
-- **Purpose**: Shows model display name and color-coded context window usage
+- **Purpose**: Shows model display name, effort-level signal bars, and color-coded context window usage
 - **Data source**: `hook_input["model"]["display_name"]` and `hook_input["context_window"]["used_percentage"]`
-- **Output format**: `{model} | Ctx: {colored_percentage}`
+- **Output format**: `{model} {effort_bars} | Ctx: {colored_percentage}`
 - **Color coding** (ANSI escape codes, traffic light system):
   - 0-40%: Green background, black text
   - 41-60%: Yellow background, black text
   - 61-80%: Orange background, black text
   - 81-100%: Red background, white text
 - **Failure mode**: Defaults to "Claude" model name, 0% usage
-- **Settings access**: reads `~/.claude/settings.json` via the shared `settings_reader.read_claude_settings()` (mtime-cached), so it does not re-parse the file each render or duplicate `ThinkingModeHandler`'s read
+- **Effort level bars**: 5-segment bar (`▌▌▌▌▌`) over the tiers `low`/`medium`/`high`/`xhigh`/`max`, one active (orange) bar per tier position, remaining bars dim grey. Sourced primarily from the LIVE `hook_input["effort"]["level"]` field Claude Code sends on every status-line request — this is the only way to see a session-only `/effort` override, since those are never written to `~/.claude/settings.json`. Falls back to `effortLevel` in settings.json (via the shared `settings_reader.read_claude_settings()`, mtime-cached, no duplicate parse with `ThinkingModeHandler`) when the live field is absent, defaulting further to `"high"` for Claude 4+ models when neither is set. An unrecognized effort string renders as the `"high"` tier's bar count rather than crashing.
 
 #### EnvironmentIndicatorHandler (Priority 11)
 

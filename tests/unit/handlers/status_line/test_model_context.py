@@ -136,28 +136,12 @@ class TestModelContextHandler:
         assert "0.0%" in result.context[0]
         assert "\033[42m" in result.context[0]
 
-    # --- Effort bars: explicit settings ---
+    # --- Effort bars: explicit settings (5-tier: low/medium/high/xhigh/max) ---
 
-    def test_explicit_medium_effort_shows_two_bars(
+    def test_explicit_low_effort_shows_one_of_five_bars(
         self, handler: ModelContextHandler, tmp_path: Path
     ) -> None:
-        """Explicitly set medium effort shows two orange bars, one dim."""
-        hook_input = {
-            "model": {"id": "claude-sonnet-4-6", "display_name": "Sonnet 4.6"},
-            "context_window": {"used_percentage": 30.0},
-        }
-        settings_file = tmp_path / "settings.json"
-        settings_file.write_text(json.dumps({"effortLevel": "medium"}))
-
-        with patch.object(handler, "_get_settings_path", return_value=settings_file):
-            result = handler.handle(hook_input)
-
-        assert "\033[38;5;208m▌▌" in result.context[0]
-
-    def test_explicit_low_effort_shows_one_bar(
-        self, handler: ModelContextHandler, tmp_path: Path
-    ) -> None:
-        """Explicitly set low effort shows one orange bar, two dim."""
+        """Explicitly set low effort shows one orange bar, four dim."""
         hook_input = {
             "model": {"id": "claude-opus-4-6", "display_name": "Opus 4.6"},
             "context_window": {"used_percentage": 30.0},
@@ -168,12 +152,28 @@ class TestModelContextHandler:
         with patch.object(handler, "_get_settings_path", return_value=settings_file):
             result = handler.handle(hook_input)
 
-        assert "\033[38;5;208m▌" in result.context[0]
+        assert "\033[38;5;208m▌\033[2;37m▌▌▌▌\033[0m" in result.context[0]
 
-    def test_explicit_high_effort_shows_three_bars(
+    def test_explicit_medium_effort_shows_two_of_five_bars(
         self, handler: ModelContextHandler, tmp_path: Path
     ) -> None:
-        """Explicitly set high effort shows all three orange bars."""
+        """Explicitly set medium effort shows two orange bars, three dim."""
+        hook_input = {
+            "model": {"id": "claude-sonnet-4-6", "display_name": "Sonnet 4.6"},
+            "context_window": {"used_percentage": 30.0},
+        }
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text(json.dumps({"effortLevel": "medium"}))
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_file):
+            result = handler.handle(hook_input)
+
+        assert "\033[38;5;208m▌▌\033[2;37m▌▌▌\033[0m" in result.context[0]
+
+    def test_explicit_high_effort_shows_three_of_five_bars(
+        self, handler: ModelContextHandler, tmp_path: Path
+    ) -> None:
+        """Explicitly set high effort shows three orange bars, two dim."""
         hook_input = {
             "model": {"id": "claude-opus-4-6", "display_name": "Opus 4.6"},
             "context_window": {"used_percentage": 30.0},
@@ -184,7 +184,184 @@ class TestModelContextHandler:
         with patch.object(handler, "_get_settings_path", return_value=settings_file):
             result = handler.handle(hook_input)
 
-        assert "\033[38;5;208m▌▌▌" in result.context[0]
+        assert "\033[38;5;208m▌▌▌\033[2;37m▌▌\033[0m" in result.context[0]
+
+    def test_explicit_xhigh_effort_shows_four_of_five_bars(
+        self, handler: ModelContextHandler, tmp_path: Path
+    ) -> None:
+        """Explicitly set xhigh effort shows four orange bars, one dim."""
+        hook_input = {
+            "model": {"id": "claude-opus-4-6", "display_name": "Opus 4.6"},
+            "context_window": {"used_percentage": 30.0},
+        }
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text(json.dumps({"effortLevel": "xhigh"}))
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_file):
+            result = handler.handle(hook_input)
+
+        assert "\033[38;5;208m▌▌▌▌\033[2;37m▌\033[0m" in result.context[0]
+
+    def test_explicit_max_effort_shows_five_of_five_bars_no_dim(
+        self, handler: ModelContextHandler, tmp_path: Path
+    ) -> None:
+        """Explicitly set max effort shows all five bars orange, none dim.
+
+        'max' is settable this-session-only via /effort (not persisted to
+        settings.json's effortLevel, whose schema only allows low/medium/
+        high/xhigh) but the live hook_input signal (tested separately below)
+        is how it actually reaches the handler in practice.
+        """
+        hook_input = {
+            "model": {"id": "claude-opus-4-6", "display_name": "Opus 4.6"},
+            "context_window": {"used_percentage": 30.0},
+        }
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text(json.dumps({"effortLevel": "max"}))
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_file):
+            result = handler.handle(hook_input)
+
+        assert "\033[38;5;208m▌▌▌▌▌\033[0m" in result.context[0]
+        assert "\033[2;37m" not in result.context[0]
+
+    # --- Effort bars: live hook_input["effort"]["level"] takes priority ---
+    # Claude Code sends the authoritative, live effort level directly on every
+    # Status event (confirmed via daemon log dogfooding: 'effort': {'level': 'max'}
+    # appears in the raw hook_input). This is the ONLY way to see session-only
+    # /effort overrides, since those are never written to settings.json.
+
+    def test_live_hook_input_effort_overrides_stale_settings_json(
+        self, handler: ModelContextHandler, tmp_path: Path
+    ) -> None:
+        """A live hook_input effort level wins over a stale settings.json value.
+
+        Regression test: switching effort via `/effort max` (this session only)
+        does NOT update ~/.claude/settings.json, so a handler that reads only
+        settings.json renders the OLD level forever. The live hook_input field
+        must be checked first.
+        """
+        hook_input = {
+            "model": {"id": "claude-opus-4-6", "display_name": "Opus 4.6"},
+            "context_window": {"used_percentage": 30.0},
+            "effort": {"level": "max"},
+        }
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text(json.dumps({"effortLevel": "low"}))
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_file):
+            result = handler.handle(hook_input)
+
+        # Live "max" wins: five bars, not the stale settings.json "low" (one bar)
+        assert "\033[38;5;208m▌▌▌▌▌\033[0m" in result.context[0]
+
+    def test_live_hook_input_effort_low_overrides_stale_settings_high(
+        self, handler: ModelContextHandler, tmp_path: Path
+    ) -> None:
+        """Live hook_input effort wins even when settings.json claims a higher tier."""
+        hook_input = {
+            "model": {"id": "claude-opus-4-6", "display_name": "Opus 4.6"},
+            "context_window": {"used_percentage": 30.0},
+            "effort": {"level": "low"},
+        }
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text(json.dumps({"effortLevel": "high"}))
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_file):
+            result = handler.handle(hook_input)
+
+        assert "\033[38;5;208m▌\033[2;37m▌▌▌▌\033[0m" in result.context[0]
+
+    def test_live_hook_input_effort_shown_even_for_unrecognized_model_id(
+        self, handler: ModelContextHandler, tmp_path: Path
+    ) -> None:
+        """Live effort field is trusted even when model_id fails the version regex.
+
+        Claude Code itself decided to send the field, so it is authoritative --
+        the handler should not second-guess it via _model_supports_effort().
+        """
+        hook_input = {
+            "model": {"id": "", "display_name": "Claude"},
+            "context_window": {"used_percentage": 30.0},
+            "effort": {"level": "high"},
+        }
+        settings_file = tmp_path / "nonexistent.json"
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_file):
+            result = handler.handle(hook_input)
+
+        assert "\033[38;5;208m▌▌▌\033[2;37m▌▌\033[0m" in result.context[0]
+
+    def test_missing_hook_input_effort_falls_back_to_settings_json(
+        self, handler: ModelContextHandler, tmp_path: Path
+    ) -> None:
+        """No 'effort' key in hook_input (older Claude Code) falls back cleanly."""
+        hook_input = {
+            "model": {"id": "claude-sonnet-4-6", "display_name": "Sonnet 4.6"},
+            "context_window": {"used_percentage": 30.0},
+        }
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text(json.dumps({"effortLevel": "medium"}))
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_file):
+            result = handler.handle(hook_input)
+
+        assert "\033[38;5;208m▌▌\033[2;37m▌▌▌\033[0m" in result.context[0]
+
+    def test_null_hook_input_effort_level_falls_back_to_settings_json(
+        self, handler: ModelContextHandler, tmp_path: Path
+    ) -> None:
+        """A present-but-null 'level' (defensive) falls back to settings.json."""
+        hook_input = {
+            "model": {"id": "claude-sonnet-4-6", "display_name": "Sonnet 4.6"},
+            "context_window": {"used_percentage": 30.0},
+            "effort": {"level": None},
+        }
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text(json.dumps({"effortLevel": "medium"}))
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_file):
+            result = handler.handle(hook_input)
+
+        assert "\033[38;5;208m▌▌\033[2;37m▌▌▌\033[0m" in result.context[0]
+
+    def test_non_dict_hook_input_effort_falls_back_to_settings_json(
+        self, handler: ModelContextHandler, tmp_path: Path
+    ) -> None:
+        """A malformed non-dict 'effort' value (defensive) doesn't crash the handler."""
+        hook_input = {
+            "model": {"id": "claude-sonnet-4-6", "display_name": "Sonnet 4.6"},
+            "context_window": {"used_percentage": 30.0},
+            "effort": "high",
+        }
+        settings_file = tmp_path / "settings.json"
+        settings_file.write_text(json.dumps({"effortLevel": "medium"}))
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_file):
+            result = handler.handle(hook_input)
+
+        assert "\033[38;5;208m▌▌\033[2;37m▌▌▌\033[0m" in result.context[0]
+
+    def test_unrecognized_live_effort_level_defaults_to_high_bars(
+        self, handler: ModelContextHandler, tmp_path: Path
+    ) -> None:
+        """An unrecognized future effort string renders as the 'high' default tier.
+
+        Forward-compat: if Claude Code ships a 6th named tier before the daemon
+        is updated, degrade to the daemon's existing default rather than crash
+        or silently show zero bars.
+        """
+        hook_input = {
+            "model": {"id": "claude-opus-4-6", "display_name": "Opus 4.6"},
+            "context_window": {"used_percentage": 30.0},
+            "effort": {"level": "super-ultra"},
+        }
+        settings_file = tmp_path / "nonexistent.json"
+
+        with patch.object(handler, "_get_settings_path", return_value=settings_file):
+            result = handler.handle(hook_input)
+
+        assert "\033[38;5;208m▌▌▌\033[2;37m▌▌\033[0m" in result.context[0]
 
     # --- Effort bars: default "high" for Claude 4+ when not in settings ---
     # (daemon default, not Claude Code default — see Bug 00088-4)
@@ -299,6 +476,10 @@ class TestModelContextHandler:
         can overwrite ~/.claude/settings.json and remove effortLevel. When this
         happens, the status line should show 'high' (daemon default), not
         'medium' (Claude Code default), because daemon users expect high effort.
+
+        Note: 'high' is the middle of five tiers (low/medium/high/xhigh/max), so
+        it renders as 3 active bars + 2 dim bars, not "zero dim bars" — that
+        assumption held back when high was the top tier, before xhigh/max existed.
         """
         hook_input = {
             "model": {"id": "claude-opus-4-6", "display_name": "Opus 4.6"},
@@ -310,10 +491,8 @@ class TestModelContextHandler:
         with patch.object(handler, "_get_settings_path", return_value=settings_file):
             result = handler.handle(hook_input)
 
-        # High effort = all three bars orange, zero dim bars
-        assert "\033[38;5;208m▌▌▌" in result.context[0]
-        # Must NOT show dim bar (that would be medium or low)
-        assert "\033[2;37m▌" not in result.context[0]
+        # High effort = 3 of 5 bars active (orange), 2 dim bars trailing
+        assert "\033[38;5;208m▌▌▌\033[2;37m▌▌" in result.context[0]
 
     def test_effort_suffix_docstring_matches_default(self, handler: ModelContextHandler) -> None:
         """_get_effort_suffix docstring must state the real default ('high'), not 'medium'.
@@ -338,7 +517,7 @@ class TestModelContextHandler:
 
         with patch.object(handler, "_get_settings_path", return_value=settings_file):
             with patch("pathlib.Path.read_text", side_effect=OSError("permission denied")):
-                result = handler._read_effort_level("claude-sonnet-4-6")
+                result = handler._read_effort_level({}, "claude-sonnet-4-6")
 
         # Claude 4+ falls back to daemon default ("high"), not None
         assert result == "high"
@@ -352,7 +531,7 @@ class TestModelContextHandler:
 
         with patch.object(handler, "_get_settings_path", return_value=settings_file):
             with patch("pathlib.Path.read_text", side_effect=OSError("permission denied")):
-                result = handler._read_effort_level("claude-3-5-sonnet-20241022")
+                result = handler._read_effort_level({}, "claude-3-5-sonnet-20241022")
 
         assert result is None
 
@@ -364,7 +543,7 @@ class TestModelContextHandler:
         settings_file.write_text("{invalid json{{")
 
         with patch.object(handler, "_get_settings_path", return_value=settings_file):
-            result = handler._read_effort_level("claude-sonnet-4-6")
+            result = handler._read_effort_level({}, "claude-sonnet-4-6")
 
         assert result == "high"
 

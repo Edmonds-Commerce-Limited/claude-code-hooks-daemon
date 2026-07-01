@@ -2,7 +2,7 @@
 
 Formats color-coded model name with effort level signal bars and context percentage:
 
-Format: 🤖 Model ▌▌▌ | ◔ XX%
+Format: 🤖 Model ▌▌▌░░ | ◔ XX%
 
 Model colors (by model type):
 - Blue: Haiku models
@@ -10,17 +10,35 @@ Model colors (by model type):
 - Orange: Opus models
 - White: Unknown/other models
 
-Effort level signal bars (shown for Claude 4+ models):
-- Low:    ▌░░  (one bar orange,  two dim grey)
-- Medium: ▌▌░  (two bars orange, one dim grey)
-- High:   ▌▌▌  (all three bars orange)
+Effort level signal bars — 5 tiers, one bar per tier out of a 5-segment bar
+(matches Claude Code's own canonical low/medium/high/xhigh/max ordering):
+- Low:    ▌░░░░  (1 bar orange,  4 dim grey)
+- Medium: ▌▌░░░  (2 bars orange, 3 dim grey)
+- High:   ▌▌▌░░  (3 bars orange, 2 dim grey)
+- Xhigh:  ▌▌▌▌░  (4 bars orange, 1 dim grey)
+- Max:    ▌▌▌▌▌  (all 5 bars orange, none dim)
 
-Matches Claude Code's own ▌▌▌ bar style - always orange active, grey inactive.
+Bars are always orange when active, dim grey when inactive.
 
 Effort level source (in priority order):
-1. effortLevel key in ~/.claude/settings.json (set explicitly via /model)
-2. Default "high" for Claude 4+ models (daemon default — optimal_config_checker enforces high)
-3. No bars for pre-4.x models (effort feature not available)
+1. hook_input["effort"]["level"] — the LIVE, authoritative value Claude Code
+   sends on every status-line request. This is the ONLY way to see a
+   session-only override (e.g. `/effort max` for "this session only"), since
+   those are never written to ~/.claude/settings.json.
+2. effortLevel key in ~/.claude/settings.json (set explicitly via /model or a
+   persisted /effort default) — fallback for older Claude Code versions whose
+   hook_input doesn't include the live field.
+3. Default "high" for Claude 4+ models (daemon default — optimal_config_checker
+   enforces high) when neither of the above is available.
+4. No bars for pre-4.x models (effort feature not available).
+
+An unrecognized effort level string (a future tier the daemon doesn't know
+about yet) degrades to the "high" tier's bar count rather than crashing or
+showing nothing.
+
+Note: `ultracode` (xhigh effort plus standing dynamic-workflow orchestration)
+is a separate boolean toggle, not a 6th rung on this ladder — and it is not
+currently present in the status-line hook_input, so it cannot be surfaced here.
 
 Context usage (quarter circle icons with color-coded percentages):
 
@@ -74,10 +92,17 @@ _EFFORT_BAR = "▌"
 # ANSI dim grey for unlit effort bars
 _EFFORT_DIM = "\033[2;37m"
 
-# Daemon default effort level when effortLevel absent from settings.
-# Claude Code defaults to "medium", but daemon users expect "high" because
-# optimal_config_checker enforces high effort. When CC overwrites the settings
-# file and removes effortLevel, we show "high" rather than misleading "medium".
+# Canonical effort tiers, lowest to highest — matches Claude Code's own
+# ordering (confirmed via the product's /effort menu: low, medium, high,
+# xhigh, max). Bar count = index + 1 out of len(_EFFORT_LEVELS_ORDERED) total
+# segments. `ultracode` is a separate boolean toggle, not a 6th tier here.
+_EFFORT_LEVELS_ORDERED = ("low", "medium", "high", "xhigh", "max")
+
+# Daemon default effort level when no effort data is available at all (absent
+# from both hook_input and settings). Claude Code itself defaults to "medium",
+# but daemon users expect "high" because optimal_config_checker enforces high
+# effort. Also used as the bar-count fallback for an unrecognized effort
+# string (e.g. a future tier the daemon doesn't know about yet).
 _EFFORT_DEFAULT = "high"
 
 # Minimum Claude major version that supports effort configuration
@@ -158,7 +183,7 @@ class ModelContextHandler(Handler):
         reset = "\033[0m"
 
         # Build model display with optional effort signal bars
-        effort_suffix = self._get_effort_suffix(model_id, reset)
+        effort_suffix = self._get_effort_suffix(hook_input, model_id, reset)
         model_part = f"🤖 {model_color}{model_display}{reset}{effort_suffix}"
 
         # Get quarter circle icon and colors based on usage threshold
@@ -172,47 +197,82 @@ class ModelContextHandler(Handler):
 
         return HookResult(context=[status])
 
-    def _get_effort_suffix(self, model_id: str, reset: str) -> str:
+    def _get_effort_suffix(self, hook_input: dict[str, Any], model_id: str, reset: str) -> str:
         """Get effort level signal bars for Claude 4+ models.
 
-        Shows three signal bars (▌▌▌) where active bars are orange, inactive dim grey.
-        Reads effortLevel from settings; defaults to "high" for Claude 4+ when unset.
+        Shows a 5-segment bar (▌▌▌▌▌) where active bars are orange, inactive dim grey.
+        Prefers the live hook_input["effort"]["level"] field; falls back to
+        effortLevel from settings. When both are absent, defaults to "high" for
+        Claude 4+ models (daemon optimal default).
 
         Args:
+            hook_input: Status event input, checked for a live "effort" field
             model_id: Model ID string (e.g. "claude-sonnet-4-6")
             reset: ANSI reset code
 
         Returns:
-            Formatted effort bars like " ▌▌▌" or empty string for unsupported models
+            Formatted effort bars like " ▌▌▌▌▌" or empty string for unsupported models
         """
-        effort_level = self._read_effort_level(model_id)
+        effort_level = self._read_effort_level(hook_input, model_id)
         if effort_level is None:
             return ""
 
-        if effort_level == "low":
-            bars = f"{_EFFORT_ACTIVE}{_EFFORT_BAR}{_EFFORT_DIM}{_EFFORT_BAR}{_EFFORT_BAR}{reset}"
-        elif effort_level == "medium":
-            bars = f"{_EFFORT_ACTIVE}{_EFFORT_BAR}{_EFFORT_BAR}{_EFFORT_DIM}{_EFFORT_BAR}{reset}"
+        return f" {self._render_effort_bars(effort_level, reset)}"
+
+    def _render_effort_bars(self, effort_level: str, reset: str) -> str:
+        """Render a 5-segment bar for the given effort level.
+
+        One bar lit per tier position in _EFFORT_LEVELS_ORDERED (low=1 ... max=5).
+        An unrecognized level degrades to _EFFORT_DEFAULT's bar count rather than
+        crashing or showing nothing, so a future tier the daemon doesn't know
+        about yet still renders something sensible.
+
+        Args:
+            effort_level: One of _EFFORT_LEVELS_ORDERED, or an unrecognized string
+            reset: ANSI reset code
+
+        Returns:
+            Formatted bar string, e.g. "▌▌▌\033[2;37m▌▌\033[0m" for "high"
+        """
+        if effort_level in _EFFORT_LEVELS_ORDERED:
+            active_count = _EFFORT_LEVELS_ORDERED.index(effort_level) + 1
         else:
-            # High (or unknown): all bars orange
-            bars = f"{_EFFORT_ACTIVE}{_EFFORT_BAR}{_EFFORT_BAR}{_EFFORT_BAR}{reset}"
+            active_count = _EFFORT_LEVELS_ORDERED.index(_EFFORT_DEFAULT) + 1
 
-        return f" {bars}"
+        total = len(_EFFORT_LEVELS_ORDERED)
+        dim_count = total - active_count
 
-    def _read_effort_level(self, model_id: str) -> str | None:
+        active = f"{_EFFORT_ACTIVE}{_EFFORT_BAR * active_count}"
+        dim = f"{_EFFORT_DIM}{_EFFORT_BAR * dim_count}" if dim_count else ""
+
+        return f"{active}{dim}{reset}"
+
+    def _read_effort_level(self, hook_input: dict[str, Any], model_id: str) -> str | None:
         """Determine effort level for the given model.
 
         Priority:
-        1. effortLevel from ~/.claude/settings.json (explicitly set via /model)
-        2. _EFFORT_DEFAULT ("high") for Claude 4+ models (daemon optimal default)
-        3. None for pre-4.x models (effort not supported)
+        1. hook_input["effort"]["level"] — the LIVE value Claude Code sends on
+           every status-line request. This is the only way to see a session-only
+           /effort override, since those are never written to settings.json.
+        2. effortLevel from ~/.claude/settings.json (explicitly set via /model,
+           or a persisted /effort default) — fallback for older Claude Code
+           versions whose hook_input doesn't include the live field.
+        3. _EFFORT_DEFAULT ("high") for Claude 4+ models (daemon optimal default)
+        4. None for pre-4.x models (effort not supported)
 
         Args:
+            hook_input: Status event input, checked for a live "effort" field
             model_id: Model ID string (e.g. "claude-sonnet-4-6")
 
         Returns:
-            Effort level string (low/medium/high) or None if not applicable
+            Effort level string (low/medium/high/xhigh/max/other) or None if not applicable
         """
+        live_effort = hook_input.get("effort")
+        if isinstance(live_effort, dict):
+            live_level = live_effort.get("level")
+            if live_level:
+                return str(live_level)
+
         settings = read_claude_settings(self._get_settings_path())
 
         level = settings.get("effortLevel")
