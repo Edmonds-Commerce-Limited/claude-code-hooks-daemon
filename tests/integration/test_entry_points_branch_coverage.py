@@ -163,7 +163,12 @@ class TestEntryPointBranchCoverage:
         assert "git repository" in output["hookSpecificOutput"]["additionalContext"].lower()
 
     def test_subagent_stop_without_config_file(self, tmp_path: Path) -> None:
-        """SubagentStop hook works without config file."""
+        """SubagentStop hook works without config file.
+
+        remind_prompt_library is enabled by default and always matches, so
+        its reminder correctly surfaces via hookSpecificOutput.additionalContext
+        (Stop/SubagentStop support that field for non-blocking advisories).
+        """
         setup_test_git_repo(tmp_path)
 
         hook_input = {
@@ -179,7 +184,8 @@ class TestEntryPointBranchCoverage:
 
         assert result.returncode == 0
         output = json.loads(result.stdout)
-        assert output == {}
+        assert output["hookSpecificOutput"]["hookEventName"] == "SubagentStop"
+        assert "Sub-agent" in output["hookSpecificOutput"]["additionalContext"]
 
     def test_pre_compact_without_config_file(self, tmp_path: Path) -> None:
         """PreCompact hook works without config file."""

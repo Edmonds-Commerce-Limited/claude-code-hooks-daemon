@@ -95,8 +95,6 @@ class ValidateEslintOnWriteHandler(Handler):
                     f"⚠️  ESLint advisory: {file_path_obj.name} written - consider adding llm:lint",
                     "No llm: commands in package.json. ESLint validation skipped.",
                     f"Full guide: {guide_path}",
-                ],
-                reason=(
                     f"⚠️  ADVISORY: Consider creating llm:lint for ESLint validation\n\n"
                     f"File written: {file_path_obj.name}\n\n"
                     f"RECOMMENDATION: Create llm:lint in package.json for automated validation\n"
@@ -107,8 +105,8 @@ class ValidateEslintOnWriteHandler(Handler):
                     f'  "llm:lint": "eslint . --format json --output-file ./var/qa/eslint-cache.json '
                     f'&& eslint . --format compact"\n\n'
                     f"Full guide: {guide_path}\n\n"
-                    f"ESLint validation skipped (no llm: commands detected in package.json)."
-                ),
+                    f"ESLint validation skipped (no llm: commands detected in package.json).",
+                ],
             )
 
         print(f"\n🔍 Running ESLint validation on {file_path_obj.name}...")

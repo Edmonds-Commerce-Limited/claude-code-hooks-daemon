@@ -227,7 +227,14 @@ class TestTaskTddAdvisorHandler:
         assert result.decision == "allow"
 
     def test_handle_reason_mentions_tdd(self, handler):
-        """handle() reason should mention TDD."""
+        """handle() context should mention TDD.
+
+        Regression test: an ALLOW decision's `reason` is silently dropped by
+        HookResult.to_json() for PreToolUse events - the guidance MUST be in
+        `context` to actually reach the user. See
+        test_handle_context_survives_pretooluse_formatting below for the
+        round-trip guard.
+        """
         hook_input = {
             "tool_name": "Task",
             "tool_input": {
@@ -237,10 +244,10 @@ class TestTaskTddAdvisorHandler:
             },
         }
         result = handler.handle(hook_input)
-        assert "TDD" in result.reason
+        assert "TDD" in "\n".join(result.context)
 
     def test_handle_reason_mentions_tests_first(self, handler):
-        """handle() reason should mention writing tests first."""
+        """handle() context should mention writing tests first."""
         hook_input = {
             "tool_name": "Task",
             "tool_input": {
@@ -250,10 +257,10 @@ class TestTaskTddAdvisorHandler:
             },
         }
         result = handler.handle(hook_input)
-        assert "test" in result.reason.lower()
+        assert "test" in "\n".join(result.context).lower()
 
     def test_handle_reason_mentions_red_green_refactor(self, handler):
-        """handle() reason should mention red-green-refactor cycle."""
+        """handle() context should mention red-green-refactor cycle."""
         hook_input = {
             "tool_name": "Task",
             "tool_input": {
@@ -263,7 +270,23 @@ class TestTaskTddAdvisorHandler:
             },
         }
         result = handler.handle(hook_input)
-        assert "red" in result.reason.lower() or "green" in result.reason.lower()
+        combined = "\n".join(result.context).lower()
+        assert "red" in combined or "green" in combined
+
+    def test_handle_context_survives_pretooluse_formatting(self, handler):
+        """The TDD guidance must actually reach the user via to_json()."""
+        hook_input = {
+            "tool_name": "Task",
+            "tool_input": {
+                "subagent_type": "general-purpose",
+                "prompt": "implement new handler",
+                "description": "Test",
+            },
+        }
+        result = handler.handle(hook_input)
+        response = result.to_json("PreToolUse")
+        additional_context = response["hookSpecificOutput"]["additionalContext"]
+        assert "TDD" in additional_context
 
     def test_handle_context_contains_tdd_reminder(self, handler):
         """handle() should inject TDD reminder in context."""
@@ -310,8 +333,8 @@ class TestTaskTddAdvisorHandler:
         # Should advise (allow)
         result = handler.handle(hook_input)
         assert result.decision == "allow"
-        assert "TDD" in result.reason
         assert len(result.context) > 0
+        assert "TDD" in "\n".join(result.context)
 
     def test_full_workflow_allows_research_task_without_advice(self, handler):
         """Complete workflow: Allow research task without TDD advice."""

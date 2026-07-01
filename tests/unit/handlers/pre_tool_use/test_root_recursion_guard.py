@@ -17,6 +17,8 @@ from claude_code_hooks_daemon.handlers.pre_tool_use.root_recursion_guard import 
     RootRecursionGuardHandler,
 )
 
+_BLOCKING_LIKE_DECISIONS = (Decision.DENY, Decision.ASK)
+
 
 def _bash(command: str) -> dict:
     return {"tool_name": "Bash", "tool_input": {"command": command}}
@@ -152,3 +154,31 @@ class TestRootRecursionGuardMetadata:
     def test_get_acceptance_tests_nonempty(self, handler):
         tests = handler.get_acceptance_tests()
         assert len(tests) > 0
+
+    def test_get_acceptance_tests_commands_actually_match_expected_decision(self, handler):
+        """Each acceptance test's command must round-trip through matches()/handle().
+
+        Regression test: the handler's own acceptance tests previously wrapped
+        their dangerous command in ``echo "..."`` (the safety idiom most other
+        blocking handlers use for raw substring-matching detection). But this
+        handler tokenizes with ``shlex`` and inspects the first real command
+        word of each shell segment, so wrapping the payload inside a quoted
+        ``echo`` argument makes ``echo`` the detected command instead of
+        ``grep``/``find`` — silently defeating detection and making the
+        acceptance test pass/fail without ever exercising the real code path.
+        """
+        for test in handler.get_acceptance_tests():
+            hook_input = {"tool_name": "Bash", "tool_input": {"command": test.command}}
+            matched = handler.matches(hook_input)
+            if test.expected_decision in _BLOCKING_LIKE_DECISIONS:
+                assert matched is True, (
+                    f"acceptance test {test.title!r} expects "
+                    f"{test.expected_decision} but command {test.command!r} "
+                    "does not match() this handler"
+                )
+            else:
+                assert matched is False, (
+                    f"acceptance test {test.title!r} expects "
+                    f"{test.expected_decision} but command {test.command!r} "
+                    "DOES match() this handler"
+                )

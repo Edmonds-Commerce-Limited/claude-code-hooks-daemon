@@ -304,7 +304,7 @@ class LspEnforcementHandler(Handler):
 
         # Determine decision based on mode
         if mode == LspEnforcementMode.ADVISORY:
-            return HookResult(decision=Decision.ALLOW, reason=reason)
+            return HookResult(decision=Decision.ALLOW, context=[reason])
 
         if mode == LspEnforcementMode.STRICT:
             return HookResult(decision=Decision.DENY, reason=reason)
@@ -313,7 +313,7 @@ class LspEnforcementHandler(Handler):
         block_count = self._get_block_count()
         if block_count == 0:
             return HookResult(decision=Decision.DENY, reason=reason)
-        return HookResult(decision=Decision.ALLOW, reason=reason)
+        return HookResult(decision=Decision.ALLOW, context=[reason])
 
     def _build_reason(self, pattern: str, suggested_op: str, lsp_available: bool) -> str:
         """Build the guidance message for the LLM."""

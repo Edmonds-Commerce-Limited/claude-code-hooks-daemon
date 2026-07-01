@@ -628,15 +628,25 @@ class TestNpmCommandHandler:
     # Tests for advisory mode (no llm: commands)
 
     def test_advisory_mode_allows_npm_run_build(self, advisory_handler: NpmCommandHandler) -> None:
-        """Advisory mode allows npm run build with advisory message."""
+        """Advisory mode allows npm run build with advisory message.
+
+        Regression test: the advisory message MUST be in `context`, not
+        `reason` - the PreToolUse response formatter only surfaces `reason`
+        for DENY/ASK decisions (see HookResult.to_json), so an ALLOW decision
+        with the message in `reason` is silently dropped and never reaches
+        the user. Asserting on `context` here (and round-tripping through
+        `to_json` in test_advisory_mode_message_survives_pretooluse_formatting
+        below) pins the real, user-visible contract.
+        """
         hook_input: dict[str, Any] = {
             "tool_name": "Bash",
             "tool_input": {"command": "npm run build"},
         }
         result = advisory_handler.handle(hook_input)
         assert result.decision == Decision.ALLOW
-        assert "ADVISORY" in result.reason
-        assert "llm:" in result.reason
+        advisory = "\n".join(result.context)
+        assert "ADVISORY" in advisory
+        assert "llm:" in advisory
 
     def test_advisory_mode_allows_npm_run_lint(self, advisory_handler: NpmCommandHandler) -> None:
         """Advisory mode allows npm run lint with advisory message."""
@@ -646,7 +656,7 @@ class TestNpmCommandHandler:
         }
         result = advisory_handler.handle(hook_input)
         assert result.decision == Decision.ALLOW
-        assert "ADVISORY" in result.reason
+        assert "ADVISORY" in "\n".join(result.context)
 
     def test_advisory_mode_allows_npx_tsc(self, advisory_handler: NpmCommandHandler) -> None:
         """Advisory mode allows npx tsc with advisory message."""
@@ -656,7 +666,7 @@ class TestNpmCommandHandler:
         }
         result = advisory_handler.handle(hook_input)
         assert result.decision == Decision.ALLOW
-        assert "ADVISORY" in result.reason
+        assert "ADVISORY" in "\n".join(result.context)
 
     def test_advisory_mode_includes_recommendation(
         self, advisory_handler: NpmCommandHandler
@@ -667,9 +677,10 @@ class TestNpmCommandHandler:
             "tool_input": {"command": "npm run test"},
         }
         result = advisory_handler.handle(hook_input)
-        assert "RECOMMENDATION" in result.reason
-        assert "llm:" in result.reason
-        assert "package.json" in result.reason
+        advisory = "\n".join(result.context)
+        assert "RECOMMENDATION" in advisory
+        assert "llm:" in advisory
+        assert "package.json" in advisory
 
     def test_advisory_mode_still_blocks_piped_commands(
         self, advisory_handler: NpmCommandHandler
@@ -692,7 +703,7 @@ class TestNpmCommandHandler:
             "tool_input": {"command": "npm run lint"},
         }
         result = advisory_handler.handle(hook_input)
-        assert "llm:lint" in result.reason
+        assert "llm:lint" in "\n".join(result.context)
 
     def test_advisory_mode_includes_guide_path(self, advisory_handler: NpmCommandHandler) -> None:
         """Advisory message includes path to LLM command wrapper guide."""
@@ -701,8 +712,30 @@ class TestNpmCommandHandler:
             "tool_input": {"command": "npm run build"},
         }
         result = advisory_handler.handle(hook_input)
-        assert "Full guide:" in result.reason
-        assert "llm-command-wrappers.md" in result.reason
+        advisory = "\n".join(result.context)
+        assert "Full guide:" in advisory
+        assert "llm-command-wrappers.md" in advisory
+
+    def test_advisory_mode_message_survives_pretooluse_formatting(
+        self, advisory_handler: NpmCommandHandler
+    ) -> None:
+        """The advisory message must actually reach the user via to_json().
+
+        This is the real regression guard: HookResult.to_json() only copies
+        `reason` into the PreToolUse response for DENY/ASK decisions, so this
+        confirms the ALLOW-decision advisory text is present in
+        `additionalContext` - not silently dropped as it was before this
+        message moved from `reason` to `context`.
+        """
+        hook_input: dict[str, Any] = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "npm run build"},
+        }
+        result = advisory_handler.handle(hook_input)
+        response = result.to_json("PreToolUse")
+        additional_context = response["hookSpecificOutput"]["additionalContext"]
+        assert "ADVISORY" in additional_context
+        assert "llm:" in additional_context
 
     # ==========================================================================
     # CLAUDE.MD GUIDANCE TESTS

@@ -185,8 +185,9 @@ class HookResult(BaseModel):
 
         # Event-specific formatting
         if event_name in ("Stop", "SubagentStop"):
-            # Stop events: Top-level decision only, NO hookSpecificOutput
-            return self._format_stop_response()
+            # Stop events: top-level decision for DENY, plus
+            # hookSpecificOutput.additionalContext for non-blocking advisory context
+            return self._format_stop_response(event_name)
         elif event_name == "PostToolUse":
             # PostToolUse: Top-level decision + hookSpecificOutput
             return self._format_post_tool_use_response(event_name)
@@ -256,11 +257,17 @@ class HookResult(BaseModel):
 
         return response
 
-    def _format_stop_response(self) -> dict[str, Any]:
+    def _format_stop_response(self, event_name: str) -> dict[str, Any]:
         """Format Stop/SubagentStop response.
 
+        Per Claude Code's hooks documentation, Stop and SubagentStop accept
+        `hookSpecificOutput.additionalContext` for non-blocking advisory
+        feedback that continues the conversation, in addition to the
+        top-level `decision`/`reason` blocking mechanism.
+
         Returns:
-            Top-level decision only (NO hookSpecificOutput)
+            Top-level decision for DENY, plus hookSpecificOutput.additionalContext
+            when context is present (regardless of decision).
         """
         response: dict[str, Any] = {}
 
@@ -269,6 +276,12 @@ class HookResult(BaseModel):
             response["decision"] = "block"
             if self.reason:
                 response["reason"] = self.reason
+
+        if self.context:
+            response["hookSpecificOutput"] = {
+                "hookEventName": event_name,
+                "additionalContext": "\n\n".join(self.context),
+            }
 
         return response
 

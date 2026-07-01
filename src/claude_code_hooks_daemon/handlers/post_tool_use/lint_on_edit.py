@@ -226,7 +226,9 @@ class LintOnEditHandler(Handler):
         except subprocess.TimeoutExpired:
             return HookResult(
                 decision=Decision.ALLOW,
-                reason=f"Lint check timed out after {Timeout.LINT_CHECK}s for {Path(file_path).name}",
+                context=[
+                    f"Lint check timed out after {Timeout.LINT_CHECK}s for {Path(file_path).name}"
+                ],
             )
 
         return None

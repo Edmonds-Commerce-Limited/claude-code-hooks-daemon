@@ -1,5 +1,7 @@
 """Comprehensive tests for GlobalNpmAdvisorHandler."""
 
+import re
+
 import pytest
 
 from claude_code_hooks_daemon.handlers.pre_tool_use.global_npm_advisor import (
@@ -237,3 +239,25 @@ class TestGlobalNpmAdvisorHandler:
             result = handler.handle(hook_input)
             assert result.decision == "allow", f"Should allow: {cmd}"
             assert result.context == [], f"Should have no advisory: {cmd}"
+
+    def test_get_acceptance_tests_message_patterns_actually_appear_in_handle_output(self, handler):
+        """Each acceptance test's expected_message_patterns must match real handle() output.
+
+        Regression test: the handler's own acceptance test previously declared
+        `expected_message_patterns=[r"global.*npm", r"local install"]`, but the
+        real advisory text built by handle() never contains the phrase "local
+        install" anywhere - the test could never have passed against the real
+        handler, only against a hand-verified transcript.
+        """
+        for test in handler.get_acceptance_tests():
+            hook_input = {
+                "tool_name": "Bash",
+                "tool_input": {"command": test.command.removeprefix("echo ").strip('"')},
+            }
+            result = handler.handle(hook_input)
+            combined = "\n".join(result.context) + (result.reason or "")
+            for pattern in test.expected_message_patterns:
+                assert re.search(pattern, combined, re.IGNORECASE), (
+                    f"acceptance test {test.title!r} expects pattern {pattern!r} "
+                    f"but it does not appear in the real handle() output: {combined!r}"
+                )

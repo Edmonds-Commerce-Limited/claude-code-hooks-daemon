@@ -67,11 +67,22 @@ POST_TOOL_USE_SCHEMA: Final[dict[str, Any]] = {
 STOP_SCHEMA: Final[dict[str, Any]] = {
     "type": "object",
     "properties": {
-        # Top-level decision field only (no hookSpecificOutput)
+        # Top-level decision field for blocking
         "decision": {"type": "string", "const": "block"},
         "reason": {"type": "string"},
+        # hookSpecificOutput.additionalContext for non-blocking advisory
+        # feedback that continues the conversation (Claude Code hooks docs)
+        "hookSpecificOutput": {
+            "type": "object",
+            "properties": {
+                "hookEventName": {"type": "string", "enum": ["Stop", "SubagentStop"]},
+                "additionalContext": {"type": "string"},
+            },
+            "required": ["hookEventName"],
+            "additionalProperties": False,
+        },
     },
-    "required": [],  # Both fields are optional
+    "required": [],  # All fields are optional
     "additionalProperties": False,
 }
 

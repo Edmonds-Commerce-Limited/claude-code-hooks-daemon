@@ -178,7 +178,12 @@ class TestHandle:
         }
         result = handler.handle(hook_input)
         assert result.decision.value == "allow"
-        assert "timed out" in (result.reason or "").lower()
+        # Regression test: an ALLOW decision's `reason` is silently dropped by
+        # HookResult.to_json() for PostToolUse events - the message MUST be
+        # in `context` to actually reach the user.
+        assert "timed out" in "\n".join(result.context).lower()
+        response = result.to_json("PostToolUse")
+        assert "timed out" in response["hookSpecificOutput"]["additionalContext"].lower()
 
     @patch("claude_code_hooks_daemon.handlers.post_tool_use.lint_on_edit.subprocess")
     def test_handle_file_not_found(

@@ -137,7 +137,7 @@ Proceeding with global install..."""
                 command='echo "npm install -g package"',
                 description="Warns about global npm installs (advisory)",
                 expected_decision=Decision.ALLOW,
-                expected_message_patterns=[r"global.*npm", r"local install"],
+                expected_message_patterns=[r"global.*npm", r"npx"],
                 safety_notes="Uses echo - safe to test",
                 test_type=TestType.ADVISORY,
                 recommended_model=RecommendedModel.SONNET,

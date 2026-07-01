@@ -145,7 +145,7 @@ class NpmCommandHandler(Handler):
             guide_path = get_llm_command_guide_path()
             return HookResult(
                 decision=Decision.ALLOW,
-                reason=(
+                context=[
                     f"⚠️  ADVISORY: Consider creating llm: prefixed npm commands\n\n"
                     f"You're using: {blocked_cmd}\n\n"
                     f"RECOMMENDATION: Create llm: wrappers in package.json for better LLM integration\n"
@@ -157,7 +157,7 @@ class NpmCommandHandler(Handler):
                     f'"<tool> --format json --output-file ./var/qa/<tool>-cache.json"\n\n'
                     f"Full guide: {guide_path}\n\n"
                     f"This command will run for now, but consider adding llm: wrappers."
-                ),
+                ],
             )
 
         # Enforcement mode: llm: commands exist in package.json

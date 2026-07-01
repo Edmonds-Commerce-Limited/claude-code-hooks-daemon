@@ -26,7 +26,7 @@ class RemindPromptLibraryHandler(Handler):
 
         return HookResult(
             decision=Decision.ALLOW,
-            reason=(
+            context=[
                 f"\n💡 Sub-agent '{agent_type}' completed.\n\n"
                 "If this prompt worked well, consider capturing it:\n"
                 "  npm run llm:prompts -- add --from-json <prompt-file>\n\n"
@@ -35,7 +35,7 @@ class RemindPromptLibraryHandler(Handler):
                 "  • Track what works (metrics)\n"
                 "  • Build institutional knowledge\n\n"
                 "📖 See: CLAUDE/PromptLibrary/README.md"
-            ),
+            ],
         )
 
     def get_claude_md(self) -> str | None:

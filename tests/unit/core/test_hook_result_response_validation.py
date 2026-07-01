@@ -96,8 +96,9 @@ class TestPostToolUseResponses:
 class TestStopResponses:
     """Test HookResult produces valid Stop responses.
 
-    EXPECTED TO FAIL: Stop requires top-level 'decision' field,
-    NO hookSpecificOutput structure.
+    Stop requires a top-level 'decision' field for blocking, and ALSO
+    supports hookSpecificOutput.additionalContext for non-blocking advisory
+    context per Claude Code's hooks documentation.
     """
 
     def test_silent_allow(self, hook_result_validator):
@@ -106,13 +107,11 @@ class TestStopResponses:
         hook_result_validator.assert_valid("Stop", result)
 
     def test_block_response(self, hook_result_validator):
-        """EXPECTED TO FAIL: Block needs top-level decision, no hookSpecificOutput."""
+        """Block needs top-level decision; no hookSpecificOutput when context is empty."""
         result = HookResult(
             decision=Decision.DENY,
             reason="Cannot stop during critical operation",
         )
-        # This will likely fail because current implementation wraps
-        # everything in hookSpecificOutput
         hook_result_validator.assert_valid("Stop", result)
 
     def test_error_response(self, hook_result_validator):
@@ -127,7 +126,7 @@ class TestStopResponses:
 class TestSubagentStopResponses:
     """Test HookResult produces valid SubagentStop responses.
 
-    EXPECTED TO FAIL: SubagentStop has same structure as Stop.
+    SubagentStop has the same response structure as Stop.
     """
 
     def test_silent_allow(self, hook_result_validator):
@@ -136,7 +135,7 @@ class TestSubagentStopResponses:
         hook_result_validator.assert_valid("SubagentStop", result)
 
     def test_block_response(self, hook_result_validator):
-        """EXPECTED TO FAIL: Block needs top-level decision, no hookSpecificOutput."""
+        """Block needs top-level decision; no hookSpecificOutput when context is empty."""
         result = HookResult(
             decision=Decision.DENY,
             reason="Subagent must complete task",
@@ -144,13 +143,11 @@ class TestSubagentStopResponses:
         hook_result_validator.assert_valid("SubagentStop", result)
 
     def test_allow_with_context(self, hook_result_validator):
-        """EXPECTED TO FAIL: Context might be wrapped incorrectly."""
+        """ALLOW with context surfaces via hookSpecificOutput.additionalContext."""
         result = HookResult(
             decision=Decision.ALLOW,
             context=["Subagent task completed"],
         )
-        # This might fail if context is put in hookSpecificOutput
-        # when it should be at top level (or not present for Stop events)
         hook_result_validator.assert_valid("SubagentStop", result)
 
 

@@ -403,7 +403,35 @@ class TestValidateEslintOnWriteHandler:
         result = handler.handle(hook_input)
 
         assert result.decision == Decision.ALLOW
-        assert "ADVISORY" in result.reason
+        # Regression test: an ALLOW decision's `reason` is silently dropped by
+        # HookResult.to_json() for PostToolUse events - the advisory MUST be
+        # in `context` to actually reach the user.
+        assert "ADVISORY" in "\n".join(result.context)
+        mock_run.assert_not_called()
+
+    @patch("subprocess.run")
+    def test_advisory_mode_message_survives_posttooluse_formatting(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
+        """The advisory message must actually reach the user via to_json()."""
+        with patch(
+            "claude_code_hooks_daemon.handlers.post_tool_use.validate_eslint_on_write.has_llm_commands_in_package_json",
+            return_value=False,
+        ):
+            handler = ValidateEslintOnWriteHandler(workspace_root=tmp_path)
+
+        test_file = tmp_path / "test.ts"
+        test_file.write_text("const x = 1;")
+
+        hook_input = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(test_file)},
+        }
+
+        result = handler.handle(hook_input)
+        response = result.to_json("PostToolUse")
+        additional_context = response["hookSpecificOutput"]["additionalContext"]
+        assert "ADVISORY" in additional_context
         mock_run.assert_not_called()
 
     @patch("subprocess.run")
@@ -426,8 +454,9 @@ class TestValidateEslintOnWriteHandler:
         result = handler.handle(hook_input)
 
         assert result.decision == Decision.ALLOW
-        assert "llm:lint" in result.reason
-        assert "package.json" in result.reason
+        advisory = "\n".join(result.context)
+        assert "llm:lint" in advisory
+        assert "package.json" in advisory
         mock_run.assert_not_called()
 
     @patch("subprocess.run")
@@ -450,8 +479,9 @@ class TestValidateEslintOnWriteHandler:
         result = handler.handle(hook_input)
 
         assert result.decision == Decision.ALLOW
-        assert "Full guide:" in result.reason
-        assert "llm-command-wrappers.md" in result.reason
+        advisory = "\n".join(result.context)
+        assert "Full guide:" in advisory
+        assert "llm-command-wrappers.md" in advisory
         mock_run.assert_not_called()
 
     @patch("subprocess.run")

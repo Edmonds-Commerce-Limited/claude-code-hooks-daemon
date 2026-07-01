@@ -199,13 +199,40 @@ class TestStopSchema:
         }
         response_validator.assert_valid("Stop", response)
 
-    def test_invalid_hook_specific_output(self, response_validator):
-        """Stop hook should NOT use hookSpecificOutput."""
+    def test_valid_hook_specific_output_with_additional_context(self, response_validator):
+        """Stop hook supports hookSpecificOutput.additionalContext for advisories.
+
+        Per Claude Code's hooks documentation, Stop and SubagentStop accept
+        hookSpecificOutput.additionalContext for non-blocking advisory
+        feedback that continues the conversation, alongside the top-level
+        decision/reason blocking mechanism.
+        """
         response = {
             "decision": "block",
             "hookSpecificOutput": {
                 "hookEventName": "Stop",
-                "additionalContext": "Not allowed",
+                "additionalContext": "Advisory guidance",
+            },
+        }
+        response_validator.assert_valid("Stop", response)
+
+    def test_invalid_hook_specific_output_wrong_event_name(self, response_validator):
+        """hookEventName must match the actual event type."""
+        response = {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "additionalContext": "Wrong event name",
+            },
+        }
+        response_validator.assert_invalid("Stop", response)
+
+    def test_invalid_hook_specific_output_extra_property(self, response_validator):
+        """hookSpecificOutput must not allow properties beyond the documented ones."""
+        response = {
+            "hookSpecificOutput": {
+                "hookEventName": "Stop",
+                "additionalContext": "Advisory guidance",
+                "permissionDecision": "allow",
             },
         }
         response_validator.assert_invalid("Stop", response)

@@ -79,7 +79,7 @@ class TaskTddAdvisorHandler(Handler):
 
         return HookResult(
             decision=Decision.ALLOW,
-            reason=(
+            context=[
                 f"💡 TDD REMINDER: Implementation Task Detected\n\n"
                 f"Agent Type: {subagent_type}\n"
                 f"Task: {prompt[:100]}{'...' if len(prompt) > 100 else ''}\n\n"
@@ -110,9 +110,7 @@ class TaskTddAdvisorHandler(Handler):
                 f"📖 REFERENCE:\n"
                 f"   • @CLAUDE/CodeLifecycle/Features.md\n"
                 f"   • @CLAUDE/PlanWorkflow.md (TDD mandatory)\n\n"
-                f"This is advisory only - proceeding with task..."
-            ),
-            context=[
+                f"This is advisory only - proceeding with task...",
                 "TDD_WORKFLOW: Test-Driven Development (RED-GREEN-REFACTOR) cycle required",
                 "TEST_FIRST: Write failing tests before implementation",
                 "QA_VERIFICATION: Run full QA suite after implementation",

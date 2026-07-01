@@ -55,8 +55,10 @@ def generate_daemon_error_response(
         "DO NOT continue work until hooks are verified working.",
     ]
 
-    # For Stop/SubagentStop events, we need deny decision to show the error
-    # (allow with context doesn't display for Stop events in Claude Code)
+    # For Stop/SubagentStop events, use deny (not allow) so the error is
+    # impossible to miss - a genuine daemon failure warrants forcing
+    # attention, even though Stop/SubagentStop also support ALLOW +
+    # hookSpecificOutput.additionalContext for non-blocking advisories.
     if event_name in ("Stop", "SubagentStop"):
         result = HookResult.deny(
             reason="Hooks daemon not running - protection not active",

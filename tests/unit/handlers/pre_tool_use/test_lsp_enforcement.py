@@ -522,6 +522,25 @@ class TestLspEnforcementHandleBlockOnce:
             result = handler.handle(hook_input)
         assert result.decision == Decision.ALLOW
 
+    def test_block_once_second_call_guidance_survives_pretooluse_formatting(
+        self, handler: Any
+    ) -> None:
+        """The subsequent-allow LSP guidance must reach the user via to_json().
+
+        Regression test: this ALLOW branch previously put the guidance in
+        `reason`, which HookResult.to_json() silently drops for PreToolUse
+        ALLOW decisions.
+        """
+        hook_input = {
+            "tool_name": "Grep",
+            "tool_input": {"pattern": "class MyHandler"},
+        }
+        with patch.object(handler, "_get_block_count", return_value=1):
+            result = handler.handle(hook_input)
+        response = result.to_json("PreToolUse")
+        additional_context = response["hookSpecificOutput"]["additionalContext"]
+        assert "LSP" in additional_context
+
     def test_block_once_third_call_still_allows(self, handler: Any) -> None:
         """Subsequent retries should continue to be allowed."""
         hook_input = {
@@ -557,15 +576,34 @@ class TestLspEnforcementHandleAdvisory:
         assert result.decision == Decision.ALLOW
 
     def test_advisory_includes_lsp_guidance(self, handler: Any) -> None:
-        """Advisory mode should include LSP guidance in reason."""
+        """Advisory mode should include LSP guidance in context (not reason).
+
+        Regression test: an ALLOW decision's `reason` is silently dropped by
+        HookResult.to_json() for PreToolUse events (only DENY/ASK surface
+        `reason`) - the guidance MUST be in `context` to actually reach the
+        user. See test_advisory_message_survives_pretooluse_formatting below
+        for the round-trip guard.
+        """
         hook_input = {
             "tool_name": "Grep",
             "tool_input": {"pattern": "class MyHandler"},
         }
         with patch.object(handler, "_get_block_count", return_value=0):
             result = handler.handle(hook_input)
-        assert result.reason is not None
-        assert "LSP" in result.reason
+        assert result.context
+        assert "LSP" in "\n".join(result.context)
+
+    def test_advisory_message_survives_pretooluse_formatting(self, handler: Any) -> None:
+        """The advisory guidance must actually reach the user via to_json()."""
+        hook_input = {
+            "tool_name": "Grep",
+            "tool_input": {"pattern": "class MyHandler"},
+        }
+        with patch.object(handler, "_get_block_count", return_value=0):
+            result = handler.handle(hook_input)
+        response = result.to_json("PreToolUse")
+        additional_context = response["hookSpecificOutput"]["additionalContext"]
+        assert "LSP" in additional_context
 
 
 class TestLspEnforcementHandleStrict:

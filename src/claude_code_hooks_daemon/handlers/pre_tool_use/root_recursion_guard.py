@@ -196,33 +196,50 @@ class RootRecursionGuardHandler(Handler):
         return [
             AcceptanceTest(
                 title="recursive grep rooted at / blocked",
-                command='echo "grep -rl \\"class X\\" /"',
+                command='false && grep -rl "class X" /',
                 description="Blocks grep -rl rooted at / — steer to a scoped search",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"BLOCKED", r"workspace", r"MUST_SCAN_ROOT_BECAUSE"],
-                safety_notes="Uses echo - the dangerous command is only a string, never run",
+                safety_notes=(
+                    "'false &&' short-circuits so grep never executes. Detection happens "
+                    "at the PreToolUse hook stage before the shell runs anything, so a "
+                    "correct deny never lets the command run; the short-circuit is a second "
+                    "layer of safety, not the mechanism relied on. NOTE: this command must "
+                    "NOT be wrapped in echo — the handler tokenizes the command with shlex "
+                    "and inspects the first real word of each shell segment, so "
+                    'echo "grep -rl ... /" makes echo the detected command and silently '
+                    "defeats detection."
+                ),
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="find rooted at / blocked",
-                command='echo "find / -type d -name phparkitect"',
+                command="false && find / -type d -name phparkitect",
                 description="Blocks find rooted at / (always recursive)",
                 expected_decision=Decision.DENY,
                 expected_message_patterns=[r"BLOCKED", r"head"],
-                safety_notes="Uses echo - the dangerous command is only a string, never run",
+                safety_notes=(
+                    "'false &&' short-circuits so find never executes. See the previous "
+                    "test's safety_notes for why this must not be wrapped in echo instead."
+                ),
                 test_type=TestType.BLOCKING,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,
             ),
             AcceptanceTest(
                 title="scoped recursive grep allowed",
-                command='echo "grep -rl \\"class X\\" /workspace"',
+                command='false && grep -rl "needle" /workspace',
                 description="Allows a recursive scan scoped to the project root",
                 expected_decision=Decision.ALLOW,
                 expected_message_patterns=[],
-                safety_notes="Uses echo - safe; scoped search must not be blocked",
+                safety_notes=(
+                    "'false &&' short-circuits so grep never executes even though this "
+                    "case is allowed by this handler. Pattern is 'needle' (not a "
+                    "class-name-shaped string) so this does not incidentally trip "
+                    "lsp_enforcement's symbol-lookup heuristic in a live end-to-end run."
+                ),
                 test_type=TestType.ADVISORY,
                 recommended_model=RecommendedModel.HAIKU,
                 requires_main_thread=False,

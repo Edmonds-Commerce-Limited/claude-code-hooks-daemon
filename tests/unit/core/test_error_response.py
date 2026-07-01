@@ -14,7 +14,13 @@ class TestGenerateDaemonErrorResponse:
     """Tests for generate_daemon_error_response function."""
 
     def test_stop_event_format(self) -> None:
-        """Stop events should use decision/reason format, not hookSpecificOutput."""
+        """Stop events use decision/reason for blocking PLUS hookSpecificOutput.
+
+        The error context (rich remediation guidance) is additionally
+        surfaced via hookSpecificOutput.additionalContext, since Stop events
+        support that field for non-blocking advisory content per Claude
+        Code's hooks documentation - it is not exclusive to the ALLOW case.
+        """
         response = generate_daemon_error_response(
             "Stop", "daemon_startup_failed", "Failed to start daemon"
         )
@@ -25,8 +31,10 @@ class TestGenerateDaemonErrorResponse:
         assert "reason" in response
         assert "not running" in response["reason"].lower()
 
-        # Should NOT have hookSpecificOutput
-        assert "hookSpecificOutput" not in response
+        # Should ALSO have hookSpecificOutput with the rich context
+        assert "hookSpecificOutput" in response
+        assert response["hookSpecificOutput"]["hookEventName"] == "Stop"
+        assert "PROTECTION NOT ACTIVE" in response["hookSpecificOutput"]["additionalContext"]
 
         # Validate against schema
         errors = validate_response("Stop", response)
@@ -43,8 +51,9 @@ class TestGenerateDaemonErrorResponse:
         assert response["decision"] == "block"
         assert "reason" in response
 
-        # Should NOT have hookSpecificOutput
-        assert "hookSpecificOutput" not in response
+        # Should ALSO have hookSpecificOutput with the rich context
+        assert "hookSpecificOutput" in response
+        assert response["hookSpecificOutput"]["hookEventName"] == "SubagentStop"
 
         # Validate against schema
         errors = validate_response("SubagentStop", response)
@@ -178,7 +187,7 @@ class TestErrorResponseCLI:
         assert "decision" in response
         assert response["decision"] == "block"
         assert "reason" in response
-        assert "hookSpecificOutput" not in response
+        assert "hookSpecificOutput" in response
 
         # Validate against schema
         errors = validate_response("Stop", response)
@@ -280,8 +289,11 @@ class TestAllEventTypes:
     @pytest.mark.parametrize(
         "event_name,should_have_hook_specific",
         [
-            ("Stop", False),
-            ("SubagentStop", False),
+            # Stop/SubagentStop additionally surface the error context via
+            # hookSpecificOutput.additionalContext, alongside the blocking
+            # decision/reason - see test_stop_event_format.
+            ("Stop", True),
+            ("SubagentStop", True),
             ("PreToolUse", True),
             ("PostToolUse", True),
             ("UserPromptSubmit", True),
@@ -297,8 +309,9 @@ class TestAllEventTypes:
     ) -> None:
         """Verify hookSpecificOutput presence based on event type.
 
-        CRITICAL: Only PreToolUse, PostToolUse, and UserPromptSubmit use hookSpecificOutput.
-        All other events use systemMessage or top-level decision fields.
+        PreToolUse, PostToolUse, UserPromptSubmit, Stop, and SubagentStop all
+        support hookSpecificOutput. SessionStart/SessionEnd/PreCompact/
+        Notification use systemMessage instead.
         """
         response = generate_daemon_error_response(event_name, "test_error", "Test details")
 

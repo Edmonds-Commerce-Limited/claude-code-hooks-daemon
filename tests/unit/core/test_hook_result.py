@@ -323,6 +323,45 @@ class TestToJsonEventName:
         assert output["decision"] == "block"
         assert "hookSpecificOutput" not in output
 
+    def test_to_json_stop_allow_with_context_surfaces_additional_context(self):
+        """Stop ALLOW decisions must surface context via hookSpecificOutput.additionalContext.
+
+        Regression test: per Claude Code's official hooks documentation,
+        Stop and SubagentStop accept `hookSpecificOutput.additionalContext`
+        for non-blocking advisory feedback that continues the conversation.
+        Several advisory Stop handlers (task_completion_checker,
+        hedging_language_detector, dismissive_language_detector,
+        remind_prompt_library) rely on this to inject guidance without
+        blocking - previously `_format_stop_response` ignored `context`
+        entirely, silently dropping their advisory messages.
+        """
+        result = HookResult(decision=Decision.ALLOW, context=["Advisory guidance"])
+        output = result.to_json("Stop")
+        assert output["hookSpecificOutput"]["hookEventName"] == "Stop"
+        assert output["hookSpecificOutput"]["additionalContext"] == "Advisory guidance"
+        assert "decision" not in output
+
+    def test_to_json_subagent_stop_allow_with_context_surfaces_additional_context(self):
+        """SubagentStop ALLOW decisions must surface context the same way as Stop."""
+        result = HookResult(decision=Decision.ALLOW, context=["Advisory guidance"])
+        output = result.to_json("SubagentStop")
+        assert output["hookSpecificOutput"]["hookEventName"] == "SubagentStop"
+        assert output["hookSpecificOutput"]["additionalContext"] == "Advisory guidance"
+
+    def test_to_json_stop_deny_with_context_includes_both(self):
+        """A Stop DENY decision with context must keep the decision/reason AND context."""
+        result = HookResult(decision=Decision.DENY, reason="Blocked", context=["Extra info"])
+        output = result.to_json("Stop")
+        assert output["decision"] == "block"
+        assert output["reason"] == "Blocked"
+        assert output["hookSpecificOutput"]["additionalContext"] == "Extra info"
+
+    def test_to_json_stop_silent_allow_no_context_stays_empty(self):
+        """A Stop ALLOW decision with no context/reason must still be a silent no-op."""
+        result = HookResult(decision=Decision.ALLOW)
+        output = result.to_json("Stop")
+        assert output == {}
+
         # Test SessionStart format (systemMessage only, NOT hookSpecificOutput)
         result_session = HookResult(decision=Decision.ALLOW, context=["Test context"])
         output = result_session.to_json("SessionStart")
