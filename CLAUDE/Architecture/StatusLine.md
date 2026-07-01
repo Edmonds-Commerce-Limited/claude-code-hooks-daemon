@@ -102,7 +102,7 @@ All status line handlers are **non-terminal** (`terminal=False`). They all retur
   - 61-80%: Orange background, black text
   - 81-100%: Red background, white text
 - **Failure mode**: Defaults to "Claude" model name, 0% usage
-- **Effort level bars**: 5-segment bar (`▌▌▌▌▌`) over the tiers `low`/`medium`/`high`/`xhigh`/`max`, one active (orange) bar per tier position, remaining bars dim grey. Sourced primarily from the LIVE `hook_input["effort"]["level"]` field Claude Code sends on every status-line request — this is the only way to see a session-only `/effort` override, since those are never written to `~/.claude/settings.json`. Falls back to `effortLevel` in settings.json (via the shared `settings_reader.read_claude_settings()`, mtime-cached, no duplicate parse with `ThinkingModeHandler`) when the live field is absent, defaulting further to `"high"` for Claude 4+ models when neither is set. An unrecognized effort string renders as the `"high"` tier's bar count rather than crashing.
+- **Effort level bars**: 5-segment bar (`▌▌▌▌▌`) over the tiers `low`/`medium`/`high`/`xhigh`/`max`, one active (orange) bar per tier position, remaining bars dim grey. Sourced primarily from the LIVE `hook_input["effort"]["level"]` field Claude Code sends on every status-line request — this is the only way to see a session-only `/effort` override, since those are never written to `~/.claude/settings.json`. Falls back to `effortLevel` in settings.json (via the shared `settings_reader.read_claude_settings()`, mtime-cached) when the live field is absent, defaulting further to `"high"` for Claude 4+ models when neither is set. An unrecognized effort string renders as the `"high"` tier's bar count rather than crashing.
 
 #### EnvironmentIndicatorHandler (Priority 11)
 

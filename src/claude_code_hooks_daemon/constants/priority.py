@@ -139,7 +139,6 @@ class Priority:
     ENVIRONMENT_INDICATOR = 4  # After repo name, before account display
     ACCOUNT_DISPLAY = 5
     MODEL_CONTEXT = 10
-    THINKING_MODE = 12
     CURRENT_TIME = 14
     USAGE_TRACKING = 15
     WORKING_DIRECTORY = 25

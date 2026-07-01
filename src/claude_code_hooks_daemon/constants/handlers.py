@@ -418,13 +418,6 @@ class HandlerID:
         display_name="status-usage-tracking",
     )
 
-    # Thinking mode status (status line)
-    THINKING_MODE = HandlerIDMeta(
-        class_name="ThinkingModeHandler",
-        config_key="thinking_mode",
-        display_name="status-thinking-mode",
-    )
-
     # Working directory status (status line)
     WORKING_DIRECTORY = HandlerIDMeta(
         class_name="WorkingDirectoryHandler",

@@ -1,8 +1,8 @@
 """Tests for the shared, mtime-cached Claude settings reader.
 
-Both ThinkingModeHandler and ModelContextHandler read ~/.claude/settings.json on
-every status-line render. This shared reader parses once and re-parses only when
-the file's mtime changes, so the status line does no redundant per-render work.
+ModelContextHandler reads ~/.claude/settings.json on every status-line render.
+This shared reader parses once and re-parses only when the file's mtime
+changes, so the status line does no redundant per-render work.
 """
 
 import json

@@ -426,10 +426,6 @@ handlers:
       enabled: true
       priority: 40
 
-    thinking_mode:  # Shows current thinking mode
-      enabled: true
-      priority: 12
-
     current_time:   # Shows current local time (24-hour format)
       enabled: true
       priority: 14

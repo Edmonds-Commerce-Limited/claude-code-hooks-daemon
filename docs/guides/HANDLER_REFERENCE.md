@@ -1405,19 +1405,6 @@ These handlers generate the terminal status line displayed by Claude Code. They 
 
 ---
 
-#### thinking_mode
-
-| Property       | Value           |
-| -------------- | --------------- |
-| **Config key** | `thinking_mode` |
-| **Priority**   | 25              |
-| **Type**       | Advisory        |
-| **Event**      | StatusLine      |
-
-**Description:** Shows the current thinking mode (On/Off) and effort level from `~/.claude/settings.json`.
-
----
-
 #### daemon_stats
 
 | Property       | Value          |

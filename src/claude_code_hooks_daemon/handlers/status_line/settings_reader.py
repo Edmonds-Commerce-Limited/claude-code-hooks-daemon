@@ -1,10 +1,10 @@
 """Shared, mtime-cached reader for ``~/.claude/settings.json``.
 
-Both :class:`ThinkingModeHandler` and :class:`ModelContextHandler` need values
-out of the user's Claude settings on every status-line render. The status line
-re-renders on every Claude Code refresh, so parsing the file each time is
-wasteful. This module parses once and re-parses only when the file's mtime
-changes — a cheap ``stat()`` per call replaces a full read + JSON parse.
+:class:`ModelContextHandler` needs values out of the user's Claude settings on
+every status-line render. The status line re-renders on every Claude Code
+refresh, so parsing the file each time is wasteful. This module parses once
+and re-parses only when the file's mtime changes — a cheap ``stat()`` per call
+replaces a full read + JSON parse.
 
 Caching is keyed by resolved path string with a single entry per path (the
 newest mtime wins), so the cache stays bounded in a long-running daemon.
