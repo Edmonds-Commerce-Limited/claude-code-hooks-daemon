@@ -921,6 +921,36 @@ If using `--json`, include `comments` in the field list instead of adding `--com
 
 If using `--json`, include `comments` in the field list instead of adding `--comments`.
 
+## plan_qa_edit — PLAN.md writes are linted in real time
+
+Every Write/Edit of a `PLAN.md` under the plan directory is checked
+against the plan QA edit-stage rules on the content the file WOULD
+have. Block-level violations (in `edit_mode: block`) deny the tool
+call with the exact remediation; fix the content and retry.
+
+**Rules that block new plan material**:
+
+- a parseable `**Status**:` line must exist (`status-line-present`)
+- the status token must be one of: Not Started, In Progress,
+  Complete, Blocked, Cancelled, Superseded, Dormant
+  (`status-enum-and-date`)
+- the header must not contradict the body — do not leave
+  `Not Started`/`In Progress` above an all-ticked task list or
+  "ALL DONE" prose; flip the status instead
+  (`header-body-coherence`)
+- use the template task grammar `- [ ] ⬜ **Task N.N**:` — not
+  ad-hoc markers like `[✓]`/`[⏳]` (`task-grammar`)
+
+**Advisory rules**: missing Created/Owner/Priority headers on new
+plans; a terminal status set while the folder is still in the plan
+root (the same commit must `git mv` it to the archive dir and
+update the README row); edits to archived plans; backticked
+`src/...` paths that no longer exist.
+
+Grandfathered plans in `plan_workflow.qa.legacy_plan_allowlist`
+only ever advise. Lint any file on demand:
+`$PYTHON -m claude_code_hooks_daemon.daemon.cli plan-qa --lint <file>`.
+
 ## plan_time_estimates — plans describe WHAT, not WHEN
 
 Writing time estimates into a `CLAUDE/Plan/*.md` file is blocked. Plans capture the work to be done, not how long it will take.
