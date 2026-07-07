@@ -268,15 +268,16 @@ README row for 00144; stats 41→42") — same self-correction pattern as
 
 ### Phase 3: Stage 1 — edit-time handler
 
-- [ ] ⬜ **Task 3.1**: Capture real Write/Edit event flow on plan files with
-  `./scripts/debug_hooks.sh` (confirm tool_input shapes for Write vs Edit vs
-  new-file-vs-existing)
-- [ ] ⬜ **Task 3.2**: TDD `plan_qa_edit` PreToolUse handler — Stage 1 checks
+- [x] ✅ **Task 3.1**: Capture real Write/Edit event flow on plan files
+  (satisfied via the established `tool_input` contract already exercised by
+  `validate_plan_number`/`markdown_organization`, then verified with live
+  daemon-socket probes of both deny and allow paths)
+- [x] ✅ **Task 3.2**: TDD `plan_qa_edit` PreToolUse handler — Stage 1 checks
   on the would-be file content (for Edit: apply old/new to current content);
   block new material, advise legacy, honour `edit_mode`
-- [ ] ⬜ **Task 3.3**: `get_claude_md()` guidance + acceptance tests;
+- [x] ✅ **Task 3.3**: `get_claude_md()` guidance + acceptance tests;
   register, restart daemon, live-test against real plan edits in this repo
-- [ ] ⬜ **Task 3.4**: QA green; checkpoint commit
+- [x] ✅ **Task 3.4**: QA green; checkpoint commit
 
 ### Phase 4: Stage 2 — commit gate (land last, warn-first)
 
@@ -399,3 +400,14 @@ README row for 00144; stats 41→42") — same self-correction pattern as
   now exits 0 clean. Dogfooding design fix: `staleness-nag` narrowed to
   In Progress plans only (Not Started is honest backlog; Blocked/Dormant
   are declared inactivity).
+- Phase 3 delivered, and dogfooding it found a REAL core daemon bug: the
+  handler chain let a later non-terminal ALLOW **overwrite an earlier
+  non-terminal DENY** (`chain.execute` set `final_result = result`
+  unconditionally), so `plan_qa_edit`'s deny at priority 44 was silently
+  washed out by `markdown_organization`'s ALLOW at 50 — a defect class
+  that could disarm ANY blocking handler that is not the last matcher.
+  Fixed with TDD in `core/chain.py`: the most restrictive decision
+  (DENY/ASK) now survives later laxer results, including a laxer terminal
+  result; 4 regression tests pin it. `plan_qa_edit` live-verified through
+  the daemon socket both ways (bad PLAN.md write denied with remediation;
+  valid write allowed with sibling advisories intact).

@@ -11,12 +11,22 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from claude_code_hooks_daemon.constants import Priority
-from claude_code_hooks_daemon.core.hook_result import HookResult
+from claude_code_hooks_daemon.core.hook_result import Decision, HookResult
 
 if TYPE_CHECKING:
     from claude_code_hooks_daemon.core.handler import Handler
 
 logger = logging.getLogger(__name__)
+
+# Decisions that restrict the tool call. Once any handler records one, later
+# laxer results (ALLOW/CONTINUE) must never overwrite it — the most
+# restrictive decision wins across the whole chain (Plan 00144).
+_RESTRICTIVE_DECISIONS: frozenset[Decision] = frozenset({Decision.DENY, Decision.ASK})
+
+
+def _is_restrictive(decision: Decision | str | None) -> bool:
+    """True when ``decision`` restricts the tool call (deny/ask)."""
+    return decision in _RESTRICTIVE_DECISIONS
 
 
 @dataclass(slots=True)
@@ -183,18 +193,36 @@ class HandlerChain:
                     result.add_handler(handler.name)
 
                     if handler.terminal:
-                        # Terminal handler - stop chain
-                        if accumulated_context:
-                            result.context = accumulated_context + result.context
+                        # Terminal handler - stop chain. The chain outcome keeps
+                        # the most RESTRICTIVE decision recorded so far: a laxer
+                        # terminal result must not wash out an earlier
+                        # non-terminal deny (Plan 00144 regression).
+                        if (
+                            final_result is not None
+                            and _is_restrictive(final_result.decision)
+                            and not _is_restrictive(result.decision)
+                        ):
+                            accumulated_context.extend(result.context)
+                            final_result.context = list(accumulated_context)
+                        else:
+                            if accumulated_context:
+                                result.context = accumulated_context + result.context
+                            final_result = result
                         for h in handlers_matched[:-1]:
-                            result.add_handler(h)
+                            final_result.add_handler(h)
                         terminated_by = handler.name
-                        final_result = result
                         break
                     else:
-                        # Non-terminal - accumulate context
+                        # Non-terminal - accumulate context. The most restrictive
+                        # decision seen so far survives later, laxer results: a
+                        # deny from a non-terminal blocking handler cannot be
+                        # silently overwritten by a later advisory ALLOW
+                        # (Plan 00144 regression: plan_qa_edit's deny at priority
+                        # 44 was lost when markdown_organization's ALLOW landed
+                        # at priority 50).
                         accumulated_context.extend(result.context)
-                        final_result = result
+                        if final_result is None or not _is_restrictive(final_result.decision):
+                            final_result = result
 
             except Exception as e:
                 logger.exception("Handler %s raised exception", handler.name)

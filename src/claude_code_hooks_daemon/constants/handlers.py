@@ -476,6 +476,14 @@ class HandlerID:
         display_name="plan-qa-sweep",
     )
 
+    # Plan QA edit lint (PreToolUse handler) — Plan 00144: Stage 1 checks on
+    # the would-be PLAN.md content at Write/Edit time
+    PLAN_QA_EDIT = HandlerIDMeta(
+        class_name="PlanQaEditHandler",
+        config_key="plan_qa_edit",
+        display_name="plan-qa-edit",
+    )
+
     # Lint on edit (PostToolUse handler)
     LINT_ON_EDIT = HandlerIDMeta(
         class_name="LintOnEditHandler",

@@ -10,6 +10,7 @@ from .gh_pr_comments import GhPrCommentsHandler
 from .git_stash import GitStashHandler
 from .markdown_organization import MarkdownOrganizationHandler
 from .npm_command import NpmCommandHandler
+from .plan_qa_edit import PlanQaEditHandler
 from .plan_time_estimates import PlanTimeEstimatesHandler
 from .plan_workflow import PlanWorkflowHandler
 from .qa_suppression import QaSuppressionHandler
@@ -33,6 +34,7 @@ __all__ = [
     "GitStashHandler",
     "MarkdownOrganizationHandler",
     "NpmCommandHandler",
+    "PlanQaEditHandler",
     "PlanTimeEstimatesHandler",
     "PlanWorkflowHandler",
     "QaSuppressionHandler",

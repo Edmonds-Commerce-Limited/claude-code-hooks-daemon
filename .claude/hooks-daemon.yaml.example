@@ -143,6 +143,10 @@ handlers:
       enabled: true
       priority: 42
 
+    plan_qa_edit:          # Stage 1 plan QA lint on PLAN.md writes (Plan 00144)
+      enabled: false       # Enable for projects using CLAUDE/Plan/; policy under plan_workflow.qa
+      priority: 44
+
     plan_time_estimates:   # Blocks time estimates in plan files
       enabled: false       # Enable for projects using CLAUDE/Plan/
       priority: 45

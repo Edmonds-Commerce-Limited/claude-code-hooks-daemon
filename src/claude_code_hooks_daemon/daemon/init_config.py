@@ -178,6 +178,7 @@ class ConfigTemplate:
             "    gh_issue_comments: {enabled: true, priority: 40}  # Require --comments on gh issue view\n"
             "    gh_pr_comments: {enabled: true, priority: 40}    # Require --comments on gh pr view\n"
             "    plan_time_estimates: {enabled: true, priority: 40}  # Block time estimates in plans\n"
+            "    plan_qa_edit: {enabled: true, priority: 44}      # Plan QA lint on PLAN.md writes\n"
             "    global_npm_advisor: {enabled: true, priority: 40}  # Advise on npm install -g (non-blocking)\n"
             "    plan_workflow: {enabled: true, priority: 45}     # Guidance when creating plans\n"
             "    task_tdd_advisor: {enabled: true, priority: 45}  # Advise on TDD workflow for Task agents (non-blocking)\n"

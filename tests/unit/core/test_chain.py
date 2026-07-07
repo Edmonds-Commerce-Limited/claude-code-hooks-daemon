@@ -421,6 +421,107 @@ class TestHandlerChain:
         assert result.result.decision == Decision.DENY
         assert result.terminated_by == "h2"
 
+    def test_non_terminal_deny_survives_later_allow(self) -> None:
+        """A non-terminal DENY must never be overwritten by a later ALLOW.
+
+        Regression (Plan 00144 dogfooding): plan_qa_edit (priority 44,
+        non-terminal) denied a bad PLAN.md write, but markdown_organization
+        (priority 50) matched afterwards and its ALLOW replaced the deny —
+        the block was silently lost. The most restrictive decision must win
+        across non-terminal handlers.
+        """
+        chain = HandlerChain()
+        denier = MockHandler(
+            "denier",
+            priority=10,
+            terminal=False,
+            result=HookResult(decision=Decision.DENY, reason="bad content", context=["dctx"]),
+        )
+        allower = MockHandler(
+            "allower",
+            priority=20,
+            terminal=False,
+            result=HookResult(decision=Decision.ALLOW, context=["actx"]),
+        )
+        chain.add(denier)
+        chain.add(allower)
+
+        result = chain.execute({"tool_name": "Write"})
+
+        assert result.result.decision == Decision.DENY
+        assert result.result.reason == "bad content"
+        # Context from BOTH handlers is still accumulated.
+        assert "dctx" in result.result.context
+        assert "actx" in result.result.context
+
+    def test_non_terminal_ask_survives_later_allow(self) -> None:
+        """ASK (restrictive) also survives a later non-terminal ALLOW."""
+        chain = HandlerChain()
+        asker = MockHandler(
+            "asker",
+            priority=10,
+            terminal=False,
+            result=HookResult(decision=Decision.ASK, reason="confirm this"),
+        )
+        allower = MockHandler("allower", priority=20, terminal=False)
+        chain.add(asker)
+        chain.add(allower)
+
+        result = chain.execute({"tool_name": "Write"})
+
+        assert result.result.decision == Decision.ASK
+
+    def test_non_terminal_deny_then_deny_keeps_first_reason(self) -> None:
+        """Two non-terminal denies: the FIRST (highest-priority) reason wins."""
+        chain = HandlerChain()
+        first = MockHandler(
+            "first",
+            priority=10,
+            terminal=False,
+            result=HookResult(decision=Decision.DENY, reason="first reason"),
+        )
+        second = MockHandler(
+            "second",
+            priority=20,
+            terminal=False,
+            result=HookResult(decision=Decision.DENY, reason="second reason"),
+        )
+        chain.add(first)
+        chain.add(second)
+
+        result = chain.execute({"tool_name": "Write"})
+
+        assert result.result.decision == Decision.DENY
+        assert result.result.reason == "first reason"
+
+    def test_non_terminal_deny_survives_later_terminal_allow(self) -> None:
+        """A later TERMINAL ALLOW still cannot wash out an earlier deny.
+
+        The terminal handler stops the chain as always, but the chain's
+        outcome keeps the most restrictive decision already recorded.
+        """
+        chain = HandlerChain()
+        denier = MockHandler(
+            "denier",
+            priority=10,
+            terminal=False,
+            result=HookResult(decision=Decision.DENY, reason="bad content"),
+        )
+        terminal_allower = MockHandler(
+            "terminal-allower",
+            priority=20,
+            terminal=True,
+            result=HookResult(decision=Decision.ALLOW, context=["tctx"]),
+        )
+        chain.add(denier)
+        chain.add(terminal_allower)
+
+        result = chain.execute({"tool_name": "Write"})
+
+        assert result.result.decision == Decision.DENY
+        assert result.result.reason == "bad content"
+        assert result.terminated_by == "terminal-allower"
+
     def test_execute_records_handler_names_in_result(self) -> None:
         """execute records handler names in HookResult."""
         chain = HandlerChain()
