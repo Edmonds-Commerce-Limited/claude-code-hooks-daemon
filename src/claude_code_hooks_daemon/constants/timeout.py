@@ -52,6 +52,7 @@ class Timeout:
     LINT_CHECK = 15  # 15 seconds (generic lint validation)
     GIT_STATUS_SHORT = 0.5  # 0.5 seconds (quick git status check)
     GIT_CONTEXT = 5  # 5 seconds (git context gathering)
+    GIT_FETCH_BACKGROUND = 30  # 30 seconds (background git fetch in status line)
     VALIDATION_CHECK = 5  # 5 seconds (installation validation subprocess)
     VERSION_CHECK = 5  # 5 seconds (git ls-remote for version check)
 

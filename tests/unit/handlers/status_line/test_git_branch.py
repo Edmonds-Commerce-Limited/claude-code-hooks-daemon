@@ -13,8 +13,15 @@ class TestGitBranchHandler:
 
     @pytest.fixture
     def handler(self) -> GitBranchHandler:
-        """Create handler instance."""
-        return GitBranchHandler()
+        """Create handler instance with auto-fetch disabled.
+
+        These tests mock ``subprocess.run`` with ``side_effect`` lists; a
+        background fetch thread consuming from the same shared mock would
+        race the main thread and make results nondeterministic.
+        """
+        handler = GitBranchHandler()
+        handler._auto_fetch = False
+        return handler
 
     def test_handler_properties(self, handler: GitBranchHandler) -> None:
         """Test handler has correct properties."""
@@ -149,7 +156,9 @@ class TestGitBranchColorCoding:
 
     @pytest.fixture
     def handler(self) -> GitBranchHandler:
-        return GitBranchHandler()
+        handler = GitBranchHandler()
+        handler._auto_fetch = False  # side_effect mocks must not race a fetch thread
+        return handler
 
     def _make_run_side_effects(
         self,
@@ -445,7 +454,9 @@ class TestGitStatusIcons:
 
     @pytest.fixture
     def handler(self) -> GitBranchHandler:
-        return GitBranchHandler()
+        handler = GitBranchHandler()
+        handler._auto_fetch = False  # side_effect mocks must not race a fetch thread
+        return handler
 
     def _make_mocks(
         self,
@@ -669,3 +680,179 @@ class TestGitStatusIcons:
         assert (
             positions["↑1"] < positions["●1"] < positions["✚1"] < positions["…1"] < positions["⚑1"]
         )
+
+
+class TestBackgroundFetch:
+    """TTL-gated background fetch keeps remote-tracking refs fresh.
+
+    Regression: the ahead/behind icons parse ``git status --porcelain=v2
+    --branch``, which compares against the LOCAL remote-tracking ref — only
+    as fresh as the last ``git fetch``. Nothing in the daemon ever fetched,
+    so ``behind`` stayed 0 forever and the status line claimed "in sync"
+    while the remote had newer commits.
+    """
+
+    _TOPLEVEL = "/repo/toplevel"
+    _CWD = "/repo/toplevel/subdir"
+
+    def test_auto_fetch_enabled_by_default(self) -> None:
+        """Fresh handler has auto-fetch on with a 5-minute interval."""
+        handler = GitBranchHandler()
+        assert handler._auto_fetch is True
+        assert handler._fetch_interval_seconds == 300
+
+    def test_first_render_starts_fetch(self) -> None:
+        """First render for a repo starts a background fetch thread."""
+        handler = GitBranchHandler()
+        with patch.object(handler, "_start_fetch_thread") as mock_start:
+            started = handler._maybe_start_background_fetch(self._TOPLEVEL, self._CWD)
+        assert started is True
+        mock_start.assert_called_once_with(self._TOPLEVEL, self._CWD)
+
+    def test_within_ttl_does_not_refetch(self) -> None:
+        """A second render inside the TTL window must not fetch again."""
+        handler = GitBranchHandler()
+        with patch.object(handler, "_start_fetch_thread") as mock_start:
+            assert handler._maybe_start_background_fetch(self._TOPLEVEL, self._CWD) is True
+            # Simulate the first fetch having completed
+            handler._fetch_inflight.discard(self._TOPLEVEL)
+            assert handler._maybe_start_background_fetch(self._TOPLEVEL, self._CWD) is False
+        assert mock_start.call_count == 1
+
+    def test_after_ttl_refetches(self) -> None:
+        """Once the TTL has elapsed (and no fetch is in flight), fetch again."""
+        handler = GitBranchHandler()
+        with patch.object(handler, "_start_fetch_thread") as mock_start:
+            assert handler._maybe_start_background_fetch(self._TOPLEVEL, self._CWD) is True
+            handler._fetch_inflight.discard(self._TOPLEVEL)
+            # Backdate the last fetch beyond the TTL
+            handler._last_fetch_started[self._TOPLEVEL] -= handler._fetch_interval_seconds + 1
+            assert handler._maybe_start_background_fetch(self._TOPLEVEL, self._CWD) is True
+        assert mock_start.call_count == 2
+
+    def test_inflight_guard_blocks_second_fetch(self) -> None:
+        """No second fetch starts while one is still running, even past TTL."""
+        handler = GitBranchHandler()
+        with patch.object(handler, "_start_fetch_thread") as mock_start:
+            assert handler._maybe_start_background_fetch(self._TOPLEVEL, self._CWD) is True
+            # Fetch still in flight; TTL expired
+            handler._last_fetch_started[self._TOPLEVEL] -= handler._fetch_interval_seconds + 1
+            assert handler._maybe_start_background_fetch(self._TOPLEVEL, self._CWD) is False
+        assert mock_start.call_count == 1
+
+    def test_disabled_never_fetches(self) -> None:
+        """auto_fetch=False (config option) disables fetching entirely."""
+        handler = GitBranchHandler()
+        handler._auto_fetch = False
+        with patch.object(handler, "_start_fetch_thread") as mock_start:
+            assert handler._maybe_start_background_fetch(self._TOPLEVEL, self._CWD) is False
+        mock_start.assert_not_called()
+
+    def test_separate_repos_fetch_independently(self) -> None:
+        """TTL/in-flight state is keyed per repo toplevel."""
+        handler = GitBranchHandler()
+        with patch.object(handler, "_start_fetch_thread") as mock_start:
+            assert handler._maybe_start_background_fetch("/repo/a", "/repo/a") is True
+            assert handler._maybe_start_background_fetch("/repo/b", "/repo/b") is True
+        assert mock_start.call_count == 2
+
+    def test_handle_triggers_fetch_for_repo(self, tmp_path: Path) -> None:
+        """handle() wires the fetch trigger with the resolved repo toplevel."""
+        handler = GitBranchHandler()
+        hook_input = {"workspace": {"current_dir": str(tmp_path)}}
+
+        mock_toplevel = MagicMock(returncode=0, stdout=b"/repo/toplevel\n")
+        mock_branch = MagicMock(stdout=b"main\n")
+        mock_symbolic_ref = MagicMock(returncode=0, stdout=b"refs/remotes/origin/main\n")
+        mock_status = MagicMock(returncode=0, stdout=b"")
+        mock_stash = MagicMock(returncode=0, stdout=b"")
+
+        with (
+            patch.object(handler, "_maybe_start_background_fetch") as mock_fetch,
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.side_effect = [
+                mock_toplevel,
+                mock_branch,
+                mock_symbolic_ref,
+                mock_status,
+                mock_stash,
+            ]
+            handler.handle(hook_input)
+
+        mock_fetch.assert_called_once_with("/repo/toplevel", str(tmp_path))
+
+    def test_run_background_fetch_invokes_git_fetch(self) -> None:
+        """The worker runs a quiet, bounded, non-interactive git fetch."""
+        from claude_code_hooks_daemon.constants import Timeout
+
+        handler = GitBranchHandler()
+        handler._fetch_inflight.add(self._TOPLEVEL)
+
+        with patch("subprocess.run") as mock_run:
+            handler._run_background_fetch(self._TOPLEVEL, self._CWD)
+
+        mock_run.assert_called_once()
+        args, kwargs = mock_run.call_args
+        assert args[0] == ["git", "fetch", "--quiet"]
+        assert kwargs["cwd"] == self._CWD
+        assert kwargs["timeout"] == Timeout.GIT_FETCH_BACKGROUND
+        assert kwargs["check"] is False
+        env = kwargs["env"]
+        assert env["GIT_TERMINAL_PROMPT"] == "0"
+        assert "BatchMode=yes" in env["GIT_SSH_COMMAND"]
+        # In-flight marker cleared so the next TTL expiry can fetch again
+        assert self._TOPLEVEL not in handler._fetch_inflight
+
+    def test_run_background_fetch_preserves_existing_ssh_command(self) -> None:
+        """A user-configured GIT_SSH_COMMAND must not be overridden."""
+        import os
+
+        handler = GitBranchHandler()
+        custom_ssh = "ssh -i /custom/key"
+
+        with (
+            patch.dict(os.environ, {"GIT_SSH_COMMAND": custom_ssh}),
+            patch("subprocess.run") as mock_run,
+        ):
+            handler._run_background_fetch(self._TOPLEVEL, self._CWD)
+
+        env = mock_run.call_args.kwargs["env"]
+        assert env["GIT_SSH_COMMAND"] == custom_ssh
+
+    def test_run_background_fetch_timeout_clears_inflight(self) -> None:
+        """A hung fetch times out, does not raise, and clears in-flight state."""
+        import subprocess
+
+        handler = GitBranchHandler()
+        handler._fetch_inflight.add(self._TOPLEVEL)
+
+        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("git", 30)):
+            handler._run_background_fetch(self._TOPLEVEL, self._CWD)
+
+        assert self._TOPLEVEL not in handler._fetch_inflight
+
+    def test_run_background_fetch_missing_git_clears_inflight(self) -> None:
+        """Missing git binary is tolerated silently (status line must survive)."""
+        handler = GitBranchHandler()
+        handler._fetch_inflight.add(self._TOPLEVEL)
+
+        with patch("subprocess.run", side_effect=FileNotFoundError("git")):
+            handler._run_background_fetch(self._TOPLEVEL, self._CWD)
+
+        assert self._TOPLEVEL not in handler._fetch_inflight
+
+    def test_start_fetch_thread_is_daemon_and_started(self) -> None:
+        """The fetch thread is a started daemon thread (never blocks shutdown)."""
+        handler = GitBranchHandler()
+
+        with patch(
+            "claude_code_hooks_daemon.handlers.status_line.git_branch.threading.Thread"
+        ) as mock_thread_cls:
+            handler._start_fetch_thread(self._TOPLEVEL, self._CWD)
+
+        _, kwargs = mock_thread_cls.call_args
+        assert kwargs["daemon"] is True
+        assert kwargs["target"] == handler._run_background_fetch
+        assert kwargs["args"] == (self._TOPLEVEL, self._CWD)
+        mock_thread_cls.return_value.start.assert_called_once()

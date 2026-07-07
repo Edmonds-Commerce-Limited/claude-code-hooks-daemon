@@ -8,7 +8,10 @@ Fails silently if not in a git repo or if git commands error.
 """
 
 import logging
+import os
 import subprocess  # nosec B404 - subprocess used for git commands only (trusted system tool)
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +46,18 @@ _PORCELAIN_XY_START = 2
 _PORCELAIN_XY_END = 4
 _BRANCH_AB_FIELD_COUNT = 2
 
+# Background fetch: the ahead/behind counts above compare against the LOCAL
+# remote-tracking ref, which is only as fresh as the last `git fetch`. A
+# long-lived daemon that never fetches would show "in sync" forever while the
+# remote moves on. Renders therefore kick a TTL-gated fetch in a daemon
+# thread — never on the render hot path, never interactive, never fatal.
+_DEFAULT_FETCH_INTERVAL_SECONDS = 300
+_GIT_TERMINAL_PROMPT_ENV = "GIT_TERMINAL_PROMPT"
+_GIT_TERMINAL_PROMPT_DISABLED = "0"
+_GIT_SSH_COMMAND_ENV = "GIT_SSH_COMMAND"
+_GIT_SSH_BATCH_MODE = "ssh -oBatchMode=yes"
+_FETCH_THREAD_NAME = "status-git-branch-fetch"
+
 
 class GitBranchHandler(Handler):
     """Show current git branch with magicmonty-style status icons if in a git repo."""
@@ -58,6 +73,14 @@ class GitBranchHandler(Handler):
         # many repos, so a single shared cache would mis-colour branches when
         # the status line re-renders for a different project/worktree.
         self._default_branch_by_repo: dict[str, str | None] = {}
+        # Background-fetch state, keyed per repo toplevel (config options
+        # `auto_fetch` / `fetch_interval_seconds` land via the registry's
+        # setattr injection and override these defaults).
+        self._auto_fetch: bool = True
+        self._fetch_interval_seconds: float = _DEFAULT_FETCH_INTERVAL_SECONDS
+        self._fetch_lock = threading.Lock()
+        self._last_fetch_started: dict[str, float] = {}
+        self._fetch_inflight: set[str] = set()
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Always run for status events."""
@@ -91,6 +114,11 @@ class GitBranchHandler(Handler):
                 return HookResult(context=[])
 
             repo_toplevel = result.stdout.decode().strip()
+
+            # Keep remote-tracking refs fresh so ahead/behind counts are
+            # honest — TTL-gated, runs in a daemon thread, never blocks
+            # this render (the NEXT render shows the updated counts).
+            self._maybe_start_background_fetch(repo_toplevel, cwd)
 
             result = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
                 ["git", "branch", "--show-current"],
@@ -129,6 +157,69 @@ class GitBranchHandler(Handler):
         if repo_toplevel not in self._default_branch_by_repo:
             self._default_branch_by_repo[repo_toplevel] = self._get_default_branch(cwd)
         return self._default_branch_by_repo[repo_toplevel]
+
+    def _maybe_start_background_fetch(self, repo_toplevel: str, cwd: str) -> bool:
+        """Start a TTL-gated background ``git fetch`` for this repo if due.
+
+        The remote-tracking refs the ahead/behind icons compare against are
+        local snapshots — without a periodic fetch a long-lived daemon shows
+        "in sync" forever. This never blocks the render: the fetch runs in a
+        daemon thread and the NEXT render picks up the refreshed counts. The
+        first render after daemon start always triggers a fetch.
+
+        Returns:
+            True when a fetch thread was started for this call.
+        """
+        if not self._auto_fetch:
+            return False
+
+        now = time.monotonic()
+        with self._fetch_lock:
+            if repo_toplevel in self._fetch_inflight:
+                return False
+            last = self._last_fetch_started.get(repo_toplevel)
+            if last is not None and (now - last) < self._fetch_interval_seconds:
+                return False
+            self._fetch_inflight.add(repo_toplevel)
+            self._last_fetch_started[repo_toplevel] = now
+
+        self._start_fetch_thread(repo_toplevel, cwd)
+        return True
+
+    def _start_fetch_thread(self, repo_toplevel: str, cwd: str) -> None:
+        """Spawn the daemon thread that performs the actual fetch."""
+        thread = threading.Thread(
+            target=self._run_background_fetch,
+            args=(repo_toplevel, cwd),
+            name=_FETCH_THREAD_NAME,
+            daemon=True,
+        )
+        thread.start()
+
+    def _run_background_fetch(self, repo_toplevel: str, cwd: str) -> None:
+        """Run ``git fetch --quiet`` non-interactively; tolerate all failures.
+
+        ``GIT_TERMINAL_PROMPT=0`` and SSH batch mode guarantee the fetch can
+        never hang waiting for credentials; offline/failed fetches are logged
+        at debug level and simply leave the counts as stale as before.
+        """
+        try:
+            env = os.environ.copy()
+            env[_GIT_TERMINAL_PROMPT_ENV] = _GIT_TERMINAL_PROMPT_DISABLED
+            env.setdefault(_GIT_SSH_COMMAND_ENV, _GIT_SSH_BATCH_MODE)
+            subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
+                ["git", "fetch", "--quiet"],
+                cwd=cwd,
+                env=env,
+                capture_output=True,
+                timeout=Timeout.GIT_FETCH_BACKGROUND,
+                check=False,
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+            logger.debug("Background git fetch failed for %s: %s", repo_toplevel, e)
+        finally:
+            with self._fetch_lock:
+                self._fetch_inflight.discard(repo_toplevel)
 
     def _get_default_branch(self, cwd: str) -> str | None:
         """Detect the default branch for the repo.

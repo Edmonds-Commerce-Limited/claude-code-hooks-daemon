@@ -420,6 +420,10 @@ handlers:
     git_branch:     # Shows current git branch if in repo
       enabled: true
       priority: 20
+      options:
+        # Keep remote-tracking refs fresh so ahead/behind icons are honest
+        auto_fetch: true
+        fetch_interval_seconds: 300
 
     git_repo_name:  # Shows git repository name
       enabled: true

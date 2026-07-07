@@ -86,6 +86,30 @@ config_changes:
       migration_note: >-
         Enable together with plan_workflow.qa. The report names each finding's
         check id and exact remediation.
+    - key: handlers.status.git_branch.options.auto_fetch
+      description: >-
+        New option (default true) fixing the status line's lying git sync
+        indicator: the ahead/behind icons compare against LOCAL
+        remote-tracking refs, which are only as fresh as the last git fetch —
+        a long-lived daemon that never fetched showed "in sync" forever while
+        the remote moved on. The handler now kicks a TTL-gated background
+        `git fetch --quiet` in a daemon thread (companion option
+        fetch_interval_seconds, default 300). Never blocks the render path,
+        never prompts for credentials (GIT_TERMINAL_PROMPT=0 + SSH batch
+        mode), and tolerates offline use silently. The first render after
+        daemon start always fetches.
+      recommended: true
+      example_yaml: |
+        handlers:
+          status:
+            git_branch:
+              enabled: true
+              options:
+                auto_fetch: true
+                fetch_interval_seconds: 300
+      migration_note: >-
+        On by default — no action needed. Set auto_fetch: false to opt out
+        (e.g. metered connections or repos with very slow remotes).
   renamed: []
   removed: []
   changed: []

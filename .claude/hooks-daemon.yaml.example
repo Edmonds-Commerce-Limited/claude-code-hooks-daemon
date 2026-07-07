@@ -358,6 +358,12 @@ handlers:
     git_branch:     # Shows current git branch if in repo
       enabled: true
       priority: 20
+      options:
+        # Keep remote-tracking refs fresh so ahead/behind icons are honest.
+        # TTL-gated background fetch in a daemon thread — never blocks the
+        # render, never prompts for credentials, tolerates being offline.
+        auto_fetch: true
+        fetch_interval_seconds: 300
 
     git_repo_name:  # Shows git repository name
       enabled: true

@@ -1515,7 +1515,24 @@ These handlers generate the terminal status line displayed by Claude Code. They 
 | **Type**       | Advisory     |
 | **Event**      | StatusLine   |
 
-**Description:** Shows the current git branch name in the status line.
+**Description:** Shows the current git branch name in the status line, with magicmonty-style status icons (↑N ahead, ↓N behind, ●N staged, ✚N changed, ✖N conflicts, …N untracked, ⚑N stashed).
+
+**Options:**
+
+| Option                   | Type | Default | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ------------------------ | ---- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `auto_fetch`             | bool | `true`  | Keep remote-tracking refs fresh with a TTL-gated background `git fetch`. The ahead/behind counts compare against LOCAL remote-tracking refs, which are only as fresh as the last fetch — without this, a long-lived daemon shows "in sync" forever while the remote moves on. The fetch runs in a daemon thread (never on the render path), non-interactively (`GIT_TERMINAL_PROMPT=0`, SSH batch mode — it can never hang on a credential prompt), and failures are silently tolerated (offline use is unaffected). |
+| `fetch_interval_seconds` | int  | `300`   | Minimum seconds between background fetches per repository. The first status-line render after daemon start always triggers a fetch.                                                                                                                                                                                                                                                                                                                                                                                  |
+
+```yaml
+handlers:
+  status:
+    git_branch:
+      enabled: true
+      options:
+        auto_fetch: true
+        fetch_interval_seconds: 300
+```
 
 ---
 

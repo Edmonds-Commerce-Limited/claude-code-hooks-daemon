@@ -297,6 +297,12 @@
       "reason": "Git branch handler: log-and-continue on subprocess failure. Status line handlers are fail-open by design \u2014 one failing element must not crash the entire status line. Already logged at debug level."
     },
     {
+      "file": "handlers/status_line/git_branch.py",
+      "function": "_run_background_fetch",
+      "rule": "log-and-continue",
+      "reason": "Background git fetch is best-effort by design: it only refreshes remote-tracking refs so ahead/behind icons are honest. Offline hosts, missing remotes, and slow networks are expected conditions \u2014 a failed fetch must leave the status line exactly as it was (counts as stale as before), never crash or retry-storm. Already logged at debug level; the finally block still clears the in-flight marker."
+    },
+    {
       "file": "handlers/status_line/model_context.py",
       "function": "_read_effort_level",
       "rule": "log-and-continue",
