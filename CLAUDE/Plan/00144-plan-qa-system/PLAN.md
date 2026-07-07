@@ -1,6 +1,6 @@
 # Plan 00144: Plan QA System — Real-Time Plan Validation & Drift Enforcement
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-07-07
 **Owner**: joseph
 **Priority**: High
@@ -176,6 +176,34 @@ configured archive dirs and `README.md` exist, and that no plan folder sits
 outside root/archive locations. Remediation text tells the agent exactly what
 to create/move.
 
+### Decision 7: mkplan template externalised to a tracked `_TEMPLATE_.md`
+
+**Context**: User side-mission (2026-07-07, approved with plan execution):
+projects should manage their own plan template while still receiving hints
+from daemon defaults. Today the PLAN.md skeleton is a heredoc hard-coded
+inside `mkplan.bash` — projects cannot customise it without forking a
+daemon-owned (overwrite-on-upgrade) script.
+**Decision**:
+
+- **New bundled asset** `install/templates/_TEMPLATE_.md` — the canonical
+  daemon default plan template, containing `{{PLAN_NUMBER}}`,
+  `{{PLAN_TITLE}}`, `{{CREATED_DATE}}`, `{{OWNER}}` placeholders.
+- **mkplan.bash** reads `{plan_dir}/_TEMPLATE_.md` when present and
+  substitutes placeholders via bash parameter expansion (no sed). When
+  absent it falls back to the built-in heredoc (script stays drop-in
+  self-contained for bare projects).
+- **Deploy/upgrade** (`bootstrap_plan_workflow`): `_TEMPLATE_.md` is
+  **create-if-missing** (client-owned content, like README/CLAUDE.md —
+  never overwritten). A daemon-owned reference snapshot
+  `{plan_dir}/.plan-template-default.md` is overwritten on every deploy;
+  before overwriting, the old snapshot is diffed against the new bundled
+  default and any changes are surfaced in `BootstrapResult.messages` so
+  the project can adopt them into its own `_TEMPLATE_.md` if wanted.
+- **plan_qa alignment**: the Stage 1 `template-metadata` check derives
+  required header fields from the project's `_TEMPLATE_.md` when present,
+  falling back to the daemon default. `PlanTree` ignores `_TEMPLATE_.md`,
+  the snapshot dotfile, and other non-plan files at the plan root.
+
 ## Handler / Surface Specification
 
 | Surface             | Event / entry                       | ID                    | Priority | Behaviour                                                                              |
@@ -264,15 +292,36 @@ README row for 00144; stats 41→42") — same self-correction pattern as
 - [ ] ⬜ **Task 4.4**: Dogfood in warn mode across real commits; when clean,
   flip THIS repo's config to `block` (separate commit)
 
-### Phase 5: Docs, dogfooding hardening, release prep
+### Phase 5: mkplan template externalisation (`_TEMPLATE_.md`)
 
-- [ ] ⬜ **Task 5.1**: Update `docs/guides/HANDLER_REFERENCE.md`,
+- [ ] ⬜ **Task 5.1**: TDD bundled default template — add
+  `install/templates/_TEMPLATE_.md` with `{{PLAN_NUMBER}}` /
+  `{{PLAN_TITLE}}` / `{{CREATED_DATE}}` / `{{OWNER}}` placeholders;
+  content matches the current mkplan heredoc skeleton
+- [ ] ⬜ **Task 5.2**: Update `install/templates/mkplan.bash` — use
+  `{plan_dir}/_TEMPLATE_.md` with bash parameter-expansion substitution
+  when present; keep the heredoc as fallback; cover both paths in
+  `tests/unit/install/` (script invoked against fixture plan dirs)
+- [ ] ⬜ **Task 5.3**: TDD `bootstrap_plan_workflow` changes —
+  create-if-missing `_TEMPLATE_.md`, always-overwrite
+  `.plan-template-default.md` snapshot, diff old snapshot vs new default
+  and surface changes in `BootstrapResult.messages`
+- [ ] ⬜ **Task 5.4**: Align plan_qa `template-metadata` check + `PlanTree`
+  scanner with project templates (read `_TEMPLATE_.md` when present;
+  ignore template/snapshot files as non-plans)
+- [ ] ⬜ **Task 5.5**: Deploy to THIS repo (run the bootstrap, commit
+  `CLAUDE/Plan/_TEMPLATE_.md`), verify mkplan uses it; QA; checkpoint
+  commit
+
+### Phase 6: Docs, dogfooding hardening, release prep
+
+- [ ] ⬜ **Task 6.1**: Update `docs/guides/HANDLER_REFERENCE.md`,
   `CLAUDE/PlanWorkflow.md` (QA section), regenerate `.claude/HOOKS-DAEMON.md`
-- [ ] ⬜ **Task 5.2**: Stage `UNRELEASED/config-changes/` manifest
+- [ ] ⬜ **Task 6.2**: Stage `UNRELEASED/config-changes/` manifest
   (`plan_workflow.qa` added, `recommended: true`) and
-  `UNRELEASED/truth-changes/` entry if any documented workflow statement
-  changed
-- [ ] ⬜ **Task 5.3**: Full acceptance playbook run for the three new
+  `UNRELEASED/truth-changes/` entries (plan template now sourced from
+  `_TEMPLATE_.md`; any other documented workflow statement that changed)
+- [ ] ⬜ **Task 6.3**: Full acceptance playbook run for the three new
   handlers; full QA; final checkpoint commit
 
 ## Dependencies
@@ -319,4 +368,8 @@ README row for 00144; stats 41→42") — same self-correction pattern as
 - Originating spec: `untracked/hooks-daemon-plan-verify-qa.md` (31-sin
   catalogue from the client-project audit; check catalogue + coverage matrix).
 - Failsafe recovery cron created: ID `8b5312b4` (hourly at :23, non-durable).
-- Awaiting user approval of the approach before Phase 1 implementation.
+- Proposal committed (`4019054`) and pushed; **user approved execution**.
+- Scope addition (user side-mission, same session): mkplan template
+  externalisation to tracked `{plan_dir}/_TEMPLATE_.md` — Decision 7 +
+  Phase 5; former docs/release phase renumbered to Phase 6.
+- Status flipped to In Progress; Phase 1 (plan_qa core) begun.
