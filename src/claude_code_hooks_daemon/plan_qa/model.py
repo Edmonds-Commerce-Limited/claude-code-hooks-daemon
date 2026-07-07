@@ -127,7 +127,7 @@ class PlanDoc:
     @classmethod
     def parse(cls, text: str) -> "PlanDoc":
         """Parse ``text`` (full PLAN.md content) into a :class:`PlanDoc`."""
-        lines = _lines_outside_fences(text)
+        lines = lines_outside_fences(text)
 
         plan_number, title = _parse_title(lines)
         status_raw = _first_field_value(lines, _STATUS_LINE_RE)
@@ -148,7 +148,7 @@ class PlanDoc:
         )
 
 
-def _lines_outside_fences(text: str) -> list[str]:
+def lines_outside_fences(text: str) -> list[str]:
     """Split ``text`` into lines, dropping everything inside fenced blocks.
 
     Fence delimiter lines themselves are also dropped. Unclosed fences swallow

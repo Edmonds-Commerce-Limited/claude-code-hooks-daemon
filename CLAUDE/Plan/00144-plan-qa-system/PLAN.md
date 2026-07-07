@@ -242,9 +242,9 @@ README row for 00144; stats 41→42") — same self-correction pattern as
 - [x] ✅ **Task 1.2**: TDD `model.py` — `PlanTree` scanner (root + configured
   archive dirs, number extraction, collision detection, misplaced-folder
   detection, structure checks)
-- [ ] ⬜ **Task 1.3**: TDD `readme_index.py` — sections, rows (number, link
+- [x] ✅ **Task 1.3**: TDD `readme_index.py` — sections, rows (number, link
   target, status text), stats table
-- [ ] ⬜ **Task 1.4**: TDD `gitfacts.py` — staged file list/diff, staged-tree
+- [x] ✅ **Task 1.4**: TDD `gitfacts.py` — staged file list/diff, staged-tree
   file reads, counter read (reuse `handlers/utils/plan_numbering.py`), folder
   last-commit dates
 - [ ] ⬜ **Task 1.5**: TDD check registry + `runner.py` + `report.py`;
