@@ -235,11 +235,11 @@ README row for 00144; stats 41→42") — same self-correction pattern as
 
 ### Phase 1: `plan_qa` core (parsers + checks + runner)
 
-- [ ] ⬜ **Task 1.1**: TDD `model.py` — `PlanDoc` parser (status line + enum +
+- [x] ✅ **Task 1.1**: TDD `model.py` — `PlanDoc` parser (status line + enum +
   terminal-date, task/checkbox/icon counts incl. legacy grammars, done-marker
   detection, template metadata) against fixtures **round-tripped through
   mdformat-gfm** (markdown_table_formatter compatibility)
-- [ ] ⬜ **Task 1.2**: TDD `model.py` — `PlanTree` scanner (root + configured
+- [x] ✅ **Task 1.2**: TDD `model.py` — `PlanTree` scanner (root + configured
   archive dirs, number extraction, collision detection, misplaced-folder
   detection, structure checks)
 - [ ] ⬜ **Task 1.3**: TDD `readme_index.py` — sections, rows (number, link
