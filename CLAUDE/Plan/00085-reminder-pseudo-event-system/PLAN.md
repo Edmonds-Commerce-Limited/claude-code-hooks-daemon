@@ -1,6 +1,6 @@
 # Plan: Reminder Pseudo-Event System with Adaptive Triggers
 
-**Status**: In Progress (deferred from v3.12.0 batch — see Wave 3 close-out note)
+**Status**: Dormant (8-phase build deferred to a future release window)
 
 ## Wave 3 close-out note (Plan 00107)
 

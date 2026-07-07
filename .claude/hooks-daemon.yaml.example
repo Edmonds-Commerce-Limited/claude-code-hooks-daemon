@@ -273,6 +273,10 @@ handlers:
       enabled: true  # Notifies on new sessions if updates available (24h cache)
       priority: 56
 
+    plan_qa_sweep:  # Plan-tree drift report at session start (Plan 00144; silent when clean)
+      enabled: true  # Policy lives under the top-level plan_workflow.qa section
+      priority: 57
+
   # PreCompact handlers (run before conversation compaction)
   pre_compact:
     transcript_archiver:  # Archives transcripts before compaction

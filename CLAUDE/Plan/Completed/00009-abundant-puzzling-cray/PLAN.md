@@ -1,5 +1,7 @@
 # Status Line Enhancement Plan
 
+**Status**: Complete
+
 ## Overview
 
 Fix critical TypeError bug and enhance status line with account display and usage tracking.

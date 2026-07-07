@@ -1,6 +1,6 @@
 # Plan 00102: Hook Executable-Bit Defense (Multi-Tier Safety Net)
 
-**Status**: In Progress
+**Status**: Dormant (only Task 5.3 remains — release-time acceptance gate, executes with the next /release)
 **Created**: 2026-04-29
 **Priority**: High
 **Recommended Executor**: Sonnet

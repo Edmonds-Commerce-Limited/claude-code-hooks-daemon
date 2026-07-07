@@ -1,5 +1,7 @@
 # Plan: Collocated Test Support for TDD Enforcement Handler
 
+**Status**: Complete
+
 ## Context
 
 The TDD enforcement handler blocks Write operations to production source files unless a corresponding test file exists. Currently, it only searches for test files in **separate test directories** (`tests/`, `tests/unit/`, fallback). It does NOT check for:

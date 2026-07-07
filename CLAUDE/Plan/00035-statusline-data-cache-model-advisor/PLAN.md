@@ -1,5 +1,7 @@
 # Plan: StatusLine Data Cache + Model-Aware Agent Team Advisor
 
+**Status**: Blocked (upstream Claude Code delegate mode fix, GitHub #23447/#25037)
+
 ## Context
 
 Plan 00032 (Sub-Agent Orchestration) needs model-awareness: advise users to switch to Opus when they're about to use agent teams. But PreToolUse events don't include model info - only StatusLine events do.

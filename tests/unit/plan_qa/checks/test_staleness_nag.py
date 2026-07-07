@@ -133,6 +133,19 @@ class TestFindings:
         context = _context(repo)
         assert CHECK.run(context) == []
 
+    def test_only_in_progress_is_nagged(self, repo: Path) -> None:
+        """Dogfooding decision (Plan 00144 Task 2.2): scope is In Progress ONLY.
+
+        Not Started is honest backlog; Blocked/Dormant are declared
+        inactivity — nagging them contradicts dormant-honesty's remediation
+        and turns the sweep into ignorable noise.
+        """
+        _make_plan(repo, "00001-backlog", "Not Started", "2026-01-01T12:00:00")
+        _make_plan(repo, "00002-blocked", "Blocked (upstream fix)", "2026-01-01T12:00:00")
+        _make_plan(repo, "00003-dormant", "Dormant (awaiting review)", "2026-01-01T12:00:00")
+        context = _context(repo)
+        assert CHECK.run(context) == []
+
     def test_ranks_most_stale_first(self, repo: Path) -> None:
         _make_plan(repo, "00001-oldest", "In Progress", "2026-01-01T12:00:00")
         _make_plan(repo, "00002-newer-stale", "In Progress", "2026-05-01T12:00:00")

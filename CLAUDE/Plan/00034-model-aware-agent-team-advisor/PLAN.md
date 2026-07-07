@@ -1,5 +1,7 @@
 # Plan: Update Plan 00032 with Model-Aware Agent Team Advisor Handler
 
+**Status**: Blocked (upstream Claude Code delegate mode fix, GitHub #23447/#25037)
+
 ## Context
 
 Plan 00032 (Sub-Agent Orchestration) needs updating to be model-aware. The key insight: Opus 4.6+ is the optimal model for agent team orchestration (spawning teammates, coordinating multi-agent workflows). Users running Sonnet or Haiku should be advised to switch to Opus for best agent team support.

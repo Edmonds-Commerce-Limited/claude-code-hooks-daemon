@@ -468,6 +468,14 @@ class HandlerID:
         display_name="project-handler-load-checker",
     )
 
+    # Plan QA sweep (SessionStart handler) — Plan 00144: whole-tree plan
+    # drift report at session start (advisory, silent when clean)
+    PLAN_QA_SWEEP = HandlerIDMeta(
+        class_name="PlanQaSweepHandler",
+        config_key="plan_qa_sweep",
+        display_name="plan-qa-sweep",
+    )
+
     # Lint on edit (PostToolUse handler)
     LINT_ON_EDIT = HandlerIDMeta(
         class_name="LintOnEditHandler",

@@ -1,6 +1,6 @@
 # Plan 00116: CLAUDE.md Token Compression via Stateful Progressive Disclosure
 
-**Status**: In Progress (Phases 1–2 complete and merged; Phase 3 pending tracker-wiring decision)
+**Status**: Dormant (Phases 1–2 complete and merged; Phase 3 blocked on the tracker-wiring decision)
 **Created**: 2026-05-29
 **Owner**: Claude (research + planning agent)
 **Priority**: High

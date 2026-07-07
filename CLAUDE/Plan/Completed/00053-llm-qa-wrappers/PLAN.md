@@ -1,5 +1,7 @@
 # Plan: LLM Command Wrappers for Project QA Tools (Dogfooding Plan 052)
 
+**Status**: Complete
+
 ## Context
 
 This project created a guide (Plan 052) explaining the LLM command wrapper pattern - minimal stdout, structured JSON to file, JQ-optimizable. The project should dogfood its own recommendations. The existing QA scripts (`scripts/qa/run_*.sh`) already produce JSON output to `untracked/qa/*.json` with a consistent schema (`summary.passed`, violation arrays, etc.). What's missing is the **minimal stdout layer** - a way to run QA with LLM-optimized output (3-5 lines per tool instead of 50+).

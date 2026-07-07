@@ -2781,6 +2781,104 @@ def cmd_format_markdown(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_plan_qa(args: argparse.Namespace) -> int:
+    """Run plan QA checks (Plan 00144): sweep, staged gate, or single-file lint.
+
+    Actions (mutually exclusive; default ``--sweep``):
+
+    - ``--sweep``: evaluate the whole plan tree (Stage 3 checks) — CI-able,
+      exit 1 on any finding.
+    - ``--check-staged``: evaluate the staged tree (Stage 2 commit-gate
+      checks) without committing.
+    - ``--lint PATH``: run the Stage 1 edit-time checks against one file's
+      current on-disk content.
+
+    Args:
+        args: Parsed CLI arguments with ``sweep``, ``check_staged``, ``lint``,
+            ``json_output`` and optional ``project_root``.
+
+    Returns:
+        0 when clean (or plan workflow / plan QA disabled in config),
+        1 when findings are reported, 2 on operational errors (missing
+        plan directory or lint target).
+    """
+    from datetime import date
+
+    from claude_code_hooks_daemon.config.models import Config
+    from claude_code_hooks_daemon.plan_qa.context import (
+        edit_context,
+        staged_context,
+        sweep_context,
+    )
+    from claude_code_hooks_daemon.plan_qa.report import format_cli_report
+    from claude_code_hooks_daemon.plan_qa.runner import run_stage
+    from claude_code_hooks_daemon.plan_qa.types import Stage
+
+    # An explicit --project-root is trusted as-is (plan QA needs a plan tree,
+    # not a validated daemon installation); otherwise auto-detect as usual.
+    override = getattr(args, "project_root", None)
+    if override is not None:
+        project_root = Path(override)
+        if not project_root.is_dir():
+            print(f"ERROR: Project root does not exist: {project_root}", file=sys.stderr)
+            return 2
+    else:
+        project_root = get_project_path(None)
+    config = Config.load_or_default(project_root / ".claude" / "hooks-daemon.yaml")
+    plan_cfg = config.plan_workflow
+    if not plan_cfg.enabled:
+        print("Plan QA: plan workflow is disabled in config — nothing to check.")
+        return 0
+    if not plan_cfg.qa.enabled:
+        print("Plan QA: disabled in config (plan_workflow.qa.enabled: false).")
+        return 0
+
+    policy = plan_cfg.qa
+    plan_dir_rel = plan_cfg.directory
+
+    try:
+        if getattr(args, "lint", None) is not None:
+            lint_path = Path(args.lint)
+            if not lint_path.is_file():
+                print(f"ERROR: Lint target does not exist: {lint_path}", file=sys.stderr)
+                return 2
+            context = edit_context(
+                project_root,
+                plan_dir_rel,
+                policy,
+                file_path=lint_path,
+                file_content=lint_path.read_text(),
+                file_exists_before=True,
+            )
+            findings = run_stage(Stage.EDIT, context)
+        elif getattr(args, "check_staged", False):
+            context = staged_context(project_root, plan_dir_rel, policy)
+            findings = run_stage(Stage.COMMIT, context)
+        else:
+            context = sweep_context(project_root, plan_dir_rel, policy, today=date.today())
+            findings = run_stage(Stage.SWEEP, context)
+    except FileNotFoundError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+
+    if getattr(args, "json_output", False):
+        payload = [
+            {
+                "check_id": finding.check_id,
+                "level": finding.level.value,
+                "message": finding.message,
+                "remediation": finding.remediation,
+                "path": finding.path,
+            }
+            for finding in findings
+        ]
+        print(json.dumps(payload, indent=2))
+    else:
+        print(format_cli_report(findings))
+
+    return 1 if findings else 0
+
+
 _BUG_REPORT_LOG_LINES = 100
 _BUG_REPORT_DIR_NAME = "bug-reports"
 _BUG_REPORT_ENV_VARS = (
@@ -3465,6 +3563,44 @@ def main() -> int:
         help="Override truth-changes directory (for testing)",
     )
     parser_check_truth.set_defaults(func=cmd_check_truth_changes)
+
+    # plan-qa command (Plan 00144) — sweep / staged gate / single-file lint
+    parser_plan_qa = subparsers.add_parser(
+        "plan-qa",
+        help="Run plan QA checks: --sweep (default, exit 1 on drift), --check-staged, --lint FILE",
+    )
+    parser_plan_qa.add_argument(
+        "--sweep",
+        action="store_true",
+        help="Evaluate the whole plan tree for drift (default action)",
+    )
+    parser_plan_qa.add_argument(
+        "--check-staged",
+        dest="check_staged",
+        action="store_true",
+        help="Evaluate the staged tree with the commit-gate checks",
+    )
+    parser_plan_qa.add_argument(
+        "--lint",
+        type=Path,
+        metavar="FILE",
+        default=None,
+        help="Run edit-time checks against one plan file's on-disk content",
+    )
+    parser_plan_qa.add_argument(
+        "--json",
+        dest="json_output",
+        action="store_true",
+        help="Emit findings as JSON",
+    )
+    parser_plan_qa.add_argument(
+        "--project-root",
+        dest="project_root",
+        metavar="PATH",
+        default=None,
+        help="Project root override (default: auto-detected)",
+    )
+    parser_plan_qa.set_defaults(func=cmd_plan_qa)
 
     # harvest-background command (Plan 00142, Layer B) — detect & surface, never kill
     parser_harvest = subparsers.add_parser(

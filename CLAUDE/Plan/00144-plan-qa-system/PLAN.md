@@ -255,15 +255,15 @@ README row for 00144; stats 41→42") — same self-correction pattern as
 
 ### Phase 2: Stage 3 — sweep CLI + SessionStart advisory
 
-- [ ] ⬜ **Task 2.1**: TDD `plan-qa` CLI subcommand (`--sweep`,
+- [x] ✅ **Task 2.1**: TDD `plan-qa` CLI subcommand (`--sweep`,
   `--check-staged`, `--lint <file>`, `--json`; exit 1 on findings)
-- [ ] ⬜ **Task 2.2**: Run `plan-qa --sweep` against THIS repo's plan tree;
+- [x] ✅ **Task 2.2**: Run `plan-qa --sweep` against THIS repo's plan tree;
   triage findings (known candidates: stray `idempotent-chasing-wadler.md` at
   plan root, legacy 3-digit `002-`/`003-` folders in Completed/, any index
   drift); fix real drift, allowlist grandfathered legacy
-- [ ] ⬜ **Task 2.3**: TDD `plan_qa_sweep` SessionStart handler (advisory,
+- [x] ✅ **Task 2.3**: TDD `plan_qa_sweep` SessionStart handler (advisory,
   rate-limited, compact report; `get_claude_md`, `get_acceptance_tests`)
-- [ ] ⬜ **Task 2.4**: Register handler (constants, default config,
+- [x] ✅ **Task 2.4**: Register handler (constants, default config,
   dogfooding config), daemon restart verification, QA, checkpoint commit
 
 ### Phase 3: Stage 1 — edit-time handler
@@ -388,3 +388,14 @@ README row for 00144; stats 41→42") — same self-correction pattern as
   deployed to THIS repo (template customised with executor/strategy
   headers — proving client ownership). Config gained an
   `extra_allowed_markdown_paths` entry for bundled template assets.
+- Phase 2 delivered: `plan-qa` CLI (sweep/check-staged/lint/json, exit 1
+  on findings), `plan_qa_sweep` SessionStart handler (live-probed through
+  the daemon socket — real drift report returned on a new session), and
+  the Task 2.2 dogfood remediation: the first real sweep found **30
+  findings (11 block)** in this repo's own tree — duplicate 00138 husk,
+  4 unindexed folders, 3 historic number collisions, stray root file,
+  ~15 wrong/missing archived status headers, stats drift — ALL fixed
+  (collisions 34/39/41 grandfathered via `collision_allowlist`); sweep
+  now exits 0 clean. Dogfooding design fix: `staleness-nag` narrowed to
+  In Progress plans only (Not Started is honest backlog; Blocked/Dormant
+  are declared inactivity).

@@ -119,6 +119,7 @@ class Priority:
     GITIGNORE_SAFETY_CHECKER = 54
     SUGGEST_STATUSLINE = 55
     VERSION_CHECK = 55
+    PLAN_QA_SWEEP = 57
 
     # Advisory handlers (Priority: 55-60)
     CRITICAL_THINKING_ADVISORY = 55

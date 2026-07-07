@@ -35,6 +35,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - User-directed design: enforce by **blocking at the daemon layer**, not by disabling Claude's own (unreliable) memory engine
   - Deferred follow-ups: a scaffolding skill (inventory docs, `@`-import audit, auto-build rules/skills) and dogfooding the policy in this repo (migrate `MEMORY.md` into tracked docs)
 
+- [00116: CLAUDE.md Token Compression via Stateful Progressive Disclosure](00116-claude-md-token-compression/PLAN.md) - In Progress (Phases 1–2 complete and merged; Phase 3 pending tracker-wiring decision)
+
+  - Compresses the always-resident CLAUDE.md via stateful progressive disclosure so handler guidance loads on demand rather than inflating every session's base context; Phases 1–2 merged, Phase 3 awaits a tracker-wiring decision
+
 ### Tooling / Dependencies
 
 - [00130: Plan-Scaffolding Script Distribution (`mkplan.bash`)](00130-plan-scaffolding-script-distribution/PLAN.md) - Shipped v3.23.0
@@ -63,7 +67,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Handler UX Adjustments
 
-- [00117: Enable ask_user_question_blocker (dogfood → default-on)](00117-ask-user-question-blocker-default-on/PLAN.md) - In Progress
+- [00117: Enable ask_user_question_blocker (dogfood → default-on)](00117-ask-user-question-blocker-default-on/PLAN.md) - Dormant (remaining: flip shipped default + regression test; awaiting scheduling)
 
   - Dogfooding alert: agent stalled twice asking tautological questions ("Should I push?"); the prefix-positive `ask_user_question_blocker` (Plan 00108 / v3.14.0) was shipped `enabled: false` so it never fired
   - Phase 1 DONE: enabled in this project's config, daemon restarted, live probe confirms unprefixed AskUserQuestion is denied with `ASKING BECAUSE:` guidance
@@ -77,19 +81,19 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Stop-Quality Stack (dependency chain)
 
-- [00085: Reminder Pseudo-Event System with Adaptive Triggers](00085-reminder-pseudo-event-system/PLAN.md) - In Progress
+- [00085: Reminder Pseudo-Event System with Adaptive Triggers](00085-reminder-pseudo-event-system/PLAN.md) - Dormant (8-phase build deferred to a future release window)
 
   - 8 phases — AdaptiveTrigger, config parsing, dispatcher, WorkflowReminderSetup, handler, constants/registration, config, verification
   - Dependency chain resolved: 00077 (Already Shipped) and 00081 (Superseded by 00082) both closed in Plan 00107 Wave 3
 
 ### Long-Running / Carry-Forward
 
-- [00100 (v3): Venv SSOT Consolidation](00100-venv-ssot-consolidation/PLAN.md) - In Progress (Residue Scope)
+- [00100 (v3): Venv SSOT Consolidation](00100-venv-ssot-consolidation/PLAN.md) - Dormant (residue scope awaits a dedicated release)
 
   - Phases 0–3.9 **shipped** in v3.9.0 / v3.10.0 / v3.11.0 (canonical SSOT resolver, `.daemon-metadata.json` writers, dead-code removal, path slug, eager upgrade cleanup, H-1 gate coverage)
   - **Residue deferred from v3.12.0** (Plan 00107 Wave 4): Phase 3.5.2–3.5.7 (bootstrap-fallback wiring), Phase 4 (flock concurrency), Phase 5 (parameterised upgrade-cycle test), Phase 6 (docs) — internally coherent and well-suited to a dedicated v3.13.0 release
 
-- [00102: Hook Executable-Bit Defense](00102-hook-exec-bit-defense/PLAN.md) - In Progress
+- [00102: Hook Executable-Bit Defense](00102-hook-exec-bit-defense/PLAN.md) - Dormant (only Task 5.3 remains — release-time acceptance gate, executes with the next /release)
 
   - Phases 1–4 complete (`bash <path>` invocation, auto-migration, self-heal, filemode checker)
   - **Task 5.3 pending**: acceptance gate at v3.12.0 release time (folded into meta plan 00107 Wave 6 `/release` execution)
@@ -591,6 +595,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Test count reduced from 15 to 14 tests, acceptance tests from 2 to 1
   - All QA checks pass, daemon loads successfully
 
+- [00055: Fix TDD Handler Path Detection — Support Multiple Test Directory Conventions](Completed/00055-tdd-handler-multi-path-detection/PLAN.md) - Complete
+
+  - TDD enforcement handler now tries multiple candidate test paths (Python `tests/unit/`, PHP PSR-4 mirror, Java `src/test/`, Go co-located, Ruby `spec/`) before blocking, eliminating false positives when a valid test exists in a non-default but conventional location
+
 - [00054: Lint-on-Edit Handler with Strategy Pattern](Completed/00054-lint-on-edit-strategy-pattern/PLAN.md) - Complete
 
   - Language-aware lint validation handler using Strategy Pattern (9 languages)
@@ -606,6 +614,14 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 - [00048: Repository Cruft Cleanup](Completed/00048-repo-cruft-cleanup/PLAN.md) - Complete
 
   - Spurious files deleted, empty plans removed, auto-named folders renamed
+
+- [00026: generate-playbook CLI (completes Plan 00025)](Completed/00026-generate-playbook-cli/PLAN.md) - Complete
+
+  - Implemented the missing `generate-playbook` CLI command that closed out Plan 00025's programmatic acceptance-testing system
+
+- [00022: System Package Safety Handlers](Completed/00022-system-package-safety-handlers/PLAN.md) - Complete
+
+  - Five safety handlers blocking dangerous system-package patterns (pip `--break-system-packages`, `sudo pip`, `curl | bash`, `chmod 777`, global npm advisory); GitHub Issue #11
 
 - [00053: LLM QA Wrapper Script](Completed/00053-llm-qa-wrappers/PLAN.md) - Complete
 
@@ -894,7 +910,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Updated all documentation with event_type requirement
   - **Completed**: 2026-02-04 (GitHub Issue #17)
 
-- [00018: Fix Container/Host Environment Switching](Completed/00018-container-host-environment-switching/PLAN-v2.md) - 🟢 Complete (2026-01-30)
+- [00018: Fix Container/Host Environment Switching](Completed/00018-container-host-environment-switching/PLAN.md) - 🟢 Complete (2026-01-30)
 
   - Decoupled hook hot path from venv Python (bash path computation, system python3 socket client)
   - Added jq-based error emission with event-specific formatting
@@ -939,11 +955,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Cancelled Plans
 
-- [00091: Hook Executable Permissions](Completed/00091-hook-executable-permissions/PLAN.md) - Cancelled
+- [00091: Hook Executable Permissions](Cancelled/00091-hook-executable-permissions/PLAN.md) - Cancelled
 
   - Superseded by [00102](00102-hook-exec-bit-defense/PLAN.md). The new plan invokes hooks via `bash <abs-path>`, which makes the executable bit irrelevant entirely — root cause goes away. `git_filemode_checker` (originally Plan 00091 Phase 2) was folded into Plan 00102 Phase 4.
 
-- [00081: Pseudo-Events & Nitpick Handler](Completed/00081-pseudo-events-nitpick-handler/PLAN.md) - Cancelled
+- [00081: Pseudo-Events & Nitpick Handler](Cancelled/00081-pseudo-events-nitpick-handler/PLAN.md) - Cancelled
 
   - Superseded by [00082](Completed/00082-pseudo-events-nitpick-handler/PLAN.md), the revised execution plan (Complete). Both plans share the same title and problem statement; this research-stage plan is preserved for history. Closed during Plan 00107 Wave 3.
 
@@ -952,7 +968,7 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Hooks cannot solve `/clear <text>` auto-execution — client-side `local-command-caveat` and no auto-submit
   - Prototype handler remains enabled (marginal value), but core goal impossible via hooks
 
-- [00044: Acceptance Testing Skill](Completed/00044-acceptance-testing-skill/PLAN.md) - Cancelled
+- [00044: Acceptance Testing Skill](Cancelled/00044-acceptance-testing-skill/PLAN.md) - Cancelled
 
   - Sub-agent acceptance testing retired in v2.10.0; main-thread testing is the standard
 
@@ -961,11 +977,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 144
-- **Completed**: 116 (1 with reduced scope, 4 already-shipped)
-- **Active**: 6 (1 plan-qa proposal, 1 python-discovery, 1 question-blocker, 1 stop-quality, 2 long-running/review) + 1 in-progress build (00116 CLAUDE.md compression)
+- **Completed**: 122 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
+- **Active**: 16 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
-- **Cancelled/Abandoned**: 6 (00036 - empty draft deleted, 00044 - approach retired, 00038 - superseded by 00045, 00087 - client-side limitation, 00073 - orphan empty folder removed during Plan 00107 housekeeping, 00081 - superseded by 00082)
-- **Last reconciled by**: Plan 00144 creation (plan QA system proposal)
+- **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102); plus draft folders deleted and no longer on disk (00036 empty draft, 00038 superseded by 00045, 00073 orphan empty folder removed during Plan 00107 housekeeping)
+- **Last reconciled by**: Plan 00144 Task 2.2 sweep remediation
 
 ## Quick Links
 

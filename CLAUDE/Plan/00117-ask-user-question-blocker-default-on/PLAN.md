@@ -1,6 +1,6 @@
 # Plan 00117: Enable ask_user_question_blocker (dogfood → default-on)
 
-**Status**: In Progress
+**Status**: Dormant (remaining: flip shipped default + regression test; awaiting scheduling)
 **Created**: 2026-05-29
 **Owner**: Claude (Opus) + user (joseph)
 **Priority**: High
