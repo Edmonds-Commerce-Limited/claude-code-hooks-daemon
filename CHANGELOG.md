@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.32.0] - 2026-07-07
+
+This is a **minor release** that adds a new plan QA system (Plan 00144): a validation core plus three enforcement surfaces — edit-time PLAN.md lint, a warn-first cross-file commit gate, and a whole-tree SessionStart drift sweep — backed by a new `plan-qa` CLI subcommand. It also externalises `mkplan.bash`'s plan template so projects can customise it without editing the daemon-owned script, and fixes a status-line bug where the git ahead/behind icons never reflected the real remote state because remote-tracking refs were never refreshed.
+
+### Added
+
+- **Plan QA system (Plan 00144)** — A new validation core (`plan_qa`: `PlanDoc` parser, `PlanTree` scanner, `ReadmeIndex` parser, `GitFacts`, and a full cross-file/single-file check catalogue) backs three new handlers and a new CLI subcommand, all governed by a single shared policy block:
+  - **`plan_qa_edit`** (PreToolUse, priority 44) — Lints the would-be content of every `PLAN.md` Write/Edit in real time: a parseable `**Status**:` header from the allowed token set is required on new material, header/body contradictions (e.g. `Not Started` above an all-ticked task list) are blocked, and template task grammar (`- [ ] ⬜ **Task N.N**:`) is enforced. Mode: `edit_mode` (default `block`).
+  - **`plan_qa_commit_gate`** (PreToolUse, priority 44) — Checks the STAGED tree against cross-file invariants on every `git commit`: index-at-birth (a new plan folder's README row must be staged in the same commit), terminal-state atomicity (a status flip to Complete/Cancelled/Superseded must carry its `git mv` into the archive dir plus the README row and statistics recount in the SAME commit), plan-number collisions, and row/folder bijection. Ships warn-first (`commit_gate_mode: warn`) — findings surface as advisory context. Commits inside nested/vendor repos or foreign worktrees are exempt.
+  - **`plan_qa_sweep`** (SessionStart, priority 57) — Injects one compact whole-tree drift report at the start of each new session (unindexed folders, stale status headers, statistics mismatches); silent when the tree is clean.
+  - **`plan-qa` CLI subcommand** — `$PYTHON -m claude_code_hooks_daemon.daemon.cli plan-qa --sweep | --check-staged | --lint <file>` (add `--json` for machine-readable output); `--sweep` exits 1 on findings (CI-able).
+  - **`plan_workflow.qa` config block** — Shared policy for all three surfaces: `edit_mode`, `commit_gate_mode`, `sweep_mode`, `completed_dir`, `cancelled_dir`, `staleness_days`, `legacy_plan_allowlist`, `collision_allowlist`, `require_terminal_date`. Legacy plans predating these rules are held to advise-only via `legacy_plan_allowlist`; historic duplicate numbers are tolerated via `collision_allowlist`.
+- **`mkplan.bash` externalised plan template (Plan 00144 Phase 5)** — `mkplan.bash` now renders the tracked, client-owned `{plan_dir}/_TEMPLATE_.md` (placeholders `{{PLAN_NUMBER}}`, `{{PLAN_TITLE}}`, `{{CREATED_DATE}}`, `{{OWNER}}`) instead of a skeleton hard-coded inside the script. The daemon seeds the file from its bundled default when missing and never overwrites it, so customisations survive upgrades; the script's built-in skeleton remains only as a fallback when no `_TEMPLATE_.md` exists.
+- **`config-changes/v3.32.0.yaml` and `truth-changes/v3.32.0.yaml` manifests** — Document the new plan QA config surface (all four new keys marked `recommended: true`) and the two workflow changes (template externalisation, mechanical plan hygiene enforcement) for the upgrade advisory.
+
+### Fixed
+
+- **Core dispatch: non-terminal `deny` decisions are no longer silently overwritten by a later handler in the chain** — Fixed as part of Plan 00144 while wiring `plan_qa_edit`/`plan_qa_commit_gate` into the PreToolUse chain; deny now wins regardless of handler ordering. Also fixed the `decided_by` footer attribution so it correctly names the handler that produced the final decision.
+- **Status line: git ahead/behind icons now reflect the real remote state** — `git_branch` (status line) compared local HEAD against local remote-tracking refs, which are only as fresh as the last manual `git fetch`. A long-lived daemon that never fetched showed "in sync" indefinitely while the remote moved on. The handler now kicks a TTL-gated background `git fetch --quiet` in a daemon thread (new options `auto_fetch`, default `true`, and `fetch_interval_seconds`, default `300`; `GIT_TERMINAL_PROMPT=0` plus SSH batch mode so it never prompts for credentials). The fetch never blocks the render path and tolerates offline use silently; the first render after daemon start always fetches. New `Timeout.GIT_FETCH_BACKGROUND=30` constant.
+
 ## [3.31.1] - 2026-07-01
 
 This is an **urgent patch release** that fixes a Sev-1 regression shipped in v3.31.0: a genuine infinite loop on Stop/SubagentStop events that could hang a live session indefinitely until killed. Anyone on v3.31.0 should upgrade immediately.

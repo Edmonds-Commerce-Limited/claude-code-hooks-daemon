@@ -1,5 +1,5 @@
 version: "3.32.0"
-date: "UNRELEASED"
+date: "2026-07-07"
 breaking: false
 config_changes:
   added:
@@ -86,7 +86,7 @@ config_changes:
       migration_note: >-
         Enable together with plan_workflow.qa. The report names each finding's
         check id and exact remediation.
-    - key: handlers.status.git_branch.options.auto_fetch
+    - key: handlers.status_line.git_branch.options.auto_fetch
       description: >-
         New option (default true) fixing the status line's lying git sync
         indicator: the ahead/behind icons compare against LOCAL
@@ -101,7 +101,7 @@ config_changes:
       recommended: true
       example_yaml: |
         handlers:
-          status:
+          status_line:
             git_branch:
               enabled: true
               options:

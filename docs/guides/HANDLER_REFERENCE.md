@@ -1526,7 +1526,7 @@ These handlers generate the terminal status line displayed by Claude Code. They 
 
 ```yaml
 handlers:
-  status:
+  status_line:
     git_branch:
       enabled: true
       options:
