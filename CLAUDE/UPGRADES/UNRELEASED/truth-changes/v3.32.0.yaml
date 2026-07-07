@@ -1,0 +1,33 @@
+version: "3.32.0"
+truth_changes:
+  - was: >
+      mkplan.bash scaffolds each new plan's PLAN.md from a skeleton template
+      hard-coded inside the script itself; customising the plan template means
+      editing the daemon-owned script (which is overwritten on every upgrade).
+    now: >
+      mkplan.bash renders the tracked, CLIENT-OWNED plan template
+      `{plan_dir}/_TEMPLATE_.md` (placeholders: {{PLAN_NUMBER}},
+      {{PLAN_TITLE}}, {{CREATED_DATE}}, {{OWNER}}). The daemon seeds the file
+      from its bundled default when missing and NEVER overwrites it —
+      customise it freely; it survives upgrades. When the daemon's own default
+      template changes between versions, the deploy surfaces a diff (via the
+      daemon-owned `.plan-template-default.md` snapshot) so you can adopt
+      upstream improvements deliberately. The script's built-in skeleton
+      remains only as a fallback when no _TEMPLATE_.md exists.
+  - was: >
+      Plan document hygiene (status headers, index rows, archive placement,
+      statistics) is enforced only by convention and periodic manual audits;
+      nothing stops a PLAN.md being written without a status header or a plan
+      being marked Complete without moving it to the archive directory.
+    now: >
+      With plan_workflow.qa enabled (Plan 00144), plan hygiene is enforced
+      mechanically at three points: PLAN.md writes are linted in real time
+      (a parseable `**Status**:` header from the allowed token set is
+      REQUIRED on new material; header/body contradictions are blocked);
+      git commits are checked warn-first for cross-file invariants (a
+      terminal status flip must carry its `git mv` to the archive dir plus
+      the README row and statistics update in the SAME commit; new plan
+      folders must be indexed at birth and numbered via the git counter);
+      and each new session reports whole-tree drift. On-demand:
+      `$PYTHON -m claude_code_hooks_daemon.daemon.cli plan-qa --sweep`
+      (exit 1 on findings, CI-able), `--check-staged`, `--lint <file>`.

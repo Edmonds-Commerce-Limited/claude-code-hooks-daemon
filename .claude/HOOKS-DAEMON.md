@@ -1,10 +1,10 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-07-01 (v3.30.0) by `generate-docs`. Regenerate: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-docs`
+> Generated on 2026-07-07 (v3.31.1) by `generate-docs`. Regenerate: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-docs`
 
 ## Active Handlers
 
-### PreToolUse (35 handlers)
+### PreToolUse (37 handlers)
 
 | Priority | Handler | Behavior | Description |
 |----------|---------|----------|-------------|
@@ -34,6 +34,8 @@
 | 40 | gh_pr_comments | BLOCKING | Ensure gh pr view commands always include --comments flag |
 | 41 | validate_plan_number | ADVISORY | Validate plan folder numbering to ensure sequential plans |
 | 42 | global_npm_advisor | NON-TERMINAL | Advise on global npm/yarn package installations |
+| 44 | plan_qa_commit_gate | NON-TERMINAL | Warn-first cross-file plan QA gate on git commit |
+| 44 | plan_qa_edit | NON-TERMINAL | Blocking/advisory edit-time lint for plan documents |
 | 45 | plan_time_estimates | ADVISORY | Block time estimates in plan documents |
 | 46 | plan_workflow | ADVISORY | Provide guidance when creating plan files |
 | 48 | plan_completion_advisor | ADVISORY | Advise when a plan is being marked as complete |
@@ -57,7 +59,7 @@
 | 28 | background_process_tracker | ADVISORY | Track backgrounded Bash processes and advise on watchdog/harvest (never kills) |
 | 30 | recovery_cron_advisor | ADVISORY | Advisory handler that manages failsafe recovery cron across plan lifecycle |
 
-### SessionStart (9 handlers)
+### SessionStart (10 handlers)
 
 | Priority | Handler | Behavior | Description |
 |----------|---------|----------|-------------|
@@ -70,6 +72,7 @@
 | 54 | gitignore_safety_checker | ADVISORY | Warn when required .claude/ paths are absent from .gitignore |
 | 55 | suggest_status_line | ADVISORY | Suggest setting up daemon-based statusline on session start |
 | 56 | version_check | ADVISORY | Check daemon version against latest GitHub release on new sessions |
+| 57 | plan_qa_sweep | ADVISORY | Advisory SessionStart sweep over the plan tree (silent when clean) |
 
 ### SessionEnd (2 handlers)
 

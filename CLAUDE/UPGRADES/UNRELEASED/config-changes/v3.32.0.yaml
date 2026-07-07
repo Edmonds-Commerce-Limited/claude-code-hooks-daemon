@@ -1,0 +1,91 @@
+version: "3.32.0"
+date: "UNRELEASED"
+breaking: false
+config_changes:
+  added:
+    - key: plan_workflow.qa
+      description: >-
+        New nested plan QA policy block (Plan 00144) governing three new
+        enforcement surfaces plus the plan-qa CLI subcommand: plan_qa_edit
+        (PreToolUse, lints the would-be PLAN.md content at Write/Edit time —
+        status header present and valid, header/body coherence, template task
+        grammar), plan_qa_commit_gate (PreToolUse on git commit, warn-first
+        cross-file checks over the STAGED tree — index-at-birth,
+        terminal-state atomicity with git mv + README row + statistics in one
+        commit, number collisions, row/folder bijection, statistics recount),
+        and plan_qa_sweep (SessionStart whole-tree drift report, silent when
+        clean). One policy object shared by all surfaces; only active when
+        plan_workflow.enabled is true.
+      recommended: true
+      example_yaml: |
+        plan_workflow:
+          enabled: true
+          directory: CLAUDE/Plan
+          qa:
+            enabled: true
+            completed_dir: Completed
+            cancelled_dir: Cancelled
+            edit_mode: block          # block | warn | off
+            commit_gate_mode: warn    # warn-first; flip to block when clean
+            sweep_mode: advise        # advise | off
+            require_terminal_date: false
+            staleness_days: 30
+            legacy_plan_allowlist: []   # plan numbers held to advise-only
+            collision_allowlist: []     # historic duplicate numbers tolerated
+      migration_note: >-
+        Run `$PYTHON -m claude_code_hooks_daemon.daemon.cli plan-qa --sweep`
+        once after enabling: the first sweep on an existing plan tree will
+        surface accumulated drift (unindexed folders, stale status headers,
+        statistics mismatches). Fix the real drift, add genuinely historic
+        plan numbers to legacy_plan_allowlist/collision_allowlist, and the
+        sweep exits 0 from then on (CI-able).
+    - key: handlers.pre_tool_use.plan_qa_edit
+      description: >-
+        New PreToolUse handler (priority 44) enabling the edit-time plan lint.
+        Follows plan_workflow gating; policy lives in plan_workflow.qa.
+      recommended: true
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            plan_qa_edit:
+              enabled: true
+              priority: 44
+      migration_note: >-
+        Enable together with plan_workflow.qa. In edit_mode: block a new
+        PLAN.md without a parseable `**Status**:` header is denied with the
+        exact remediation.
+    - key: handlers.pre_tool_use.plan_qa_commit_gate
+      description: >-
+        New PreToolUse handler (priority 44) enabling the commit-time
+        cross-file gate. Ships warn-first (commit_gate_mode: warn) — findings
+        appear as advisory context; flip to block after a clean dogfooding
+        period. Commits inside nested/vendor repos or foreign worktrees are
+        exempt.
+      recommended: true
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            plan_qa_commit_gate:
+              enabled: true
+              priority: 44
+      migration_note: >-
+        Enable together with plan_workflow.qa. Check any staged state without
+        committing via `plan-qa --check-staged`.
+    - key: handlers.session_start.plan_qa_sweep
+      description: >-
+        New SessionStart handler (priority 57) injecting one compact plan-tree
+        drift report at the start of each new session; silent when the tree is
+        clean.
+      recommended: true
+      example_yaml: |
+        handlers:
+          session_start:
+            plan_qa_sweep:
+              enabled: true
+              priority: 57
+      migration_note: >-
+        Enable together with plan_workflow.qa. The report names each finding's
+        check id and exact remediation.
+  renamed: []
+  removed: []
+  changed: []

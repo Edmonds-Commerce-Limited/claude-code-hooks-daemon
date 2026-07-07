@@ -303,6 +303,60 @@ Always include QA verification as a subtask:
 
 ---
 
+## Plan QA (automated enforcement)
+
+The daemon enforces plan-tree hygiene automatically. Most plan rot is
+cross-file (PLAN.md status ↔ folder location ↔ README row ↔ git state), so
+enforcement runs in three stages that share one check catalogue.
+
+**Stage 1 — edit-time lint** (`plan_qa_edit`, PreToolUse): every Write/Edit of
+a `PLAN.md` is linted against single-file rules on the content the file *would*
+have. New material with a missing/invalid `**Status**:` line, a header that
+contradicts an all-ticked body, or ad-hoc task markers is **blocked** with the
+exact fix (mode `edit_mode`, default `block`).
+
+**Stage 2 — commit gate** (`plan_qa_commit_gate`, PreToolUse on `git commit`):
+checks the **staged** tree against cross-file invariants -- index-at-birth (a
+new plan folder stages its README row in the same commit), terminal-state
+atomicity (a status flip to a terminal state ships the `git mv` into the
+archive dir plus the README row and statistics recount in ONE commit), number
+collisions, and row/folder bijection. Ships **warn-first** (mode
+`commit_gate_mode`, default `warn`); read the advisory findings and amend the
+commit before it lands.
+
+**Stage 3 — session sweep** (`plan_qa_sweep`, SessionStart): reports whole-tree
+drift once per new session as advisory context; never blocks (mode
+`sweep_mode`, default `advise`).
+
+### Allowed status tokens
+
+`Not Started`, `In Progress`, `Complete`, `Blocked`, `Cancelled`,
+`Superseded`, `Dormant`. Any **terminal** status (Complete, Cancelled,
+Superseded) requires the plan folder to move into the archive directory
+(`Completed/`, or `Cancelled/` where configured) in the **same commit** that
+sets the status -- alongside the README index row update and statistics
+recount.
+
+### CLI
+
+```bash
+$PYTHON -m claude_code_hooks_daemon.daemon.cli plan-qa --sweep          # whole tree; exit 1 on findings (CI-able)
+$PYTHON -m claude_code_hooks_daemon.daemon.cli plan-qa --check-staged   # staged-tree commit-gate checks
+$PYTHON -m claude_code_hooks_daemon.daemon.cli plan-qa --lint <PLAN.md> # single-file edit-stage checks
+```
+
+Add `--json` to any of these for machine-readable output.
+
+### Policy & grandfathering
+
+All policy lives in `.claude/hooks-daemon.yaml` under `plan_workflow.qa` (one
+block shared by all three surfaces and the CLI -- see
+`docs/guides/HANDLER_REFERENCE.md`). Legacy plans predating these rules are
+held to advise-only via `legacy_plan_allowlist` (plan numbers), and historic
+duplicate numbers are tolerated via `collision_allowlist`.
+
+---
+
 ## TDD Integration
 
 This project enforces Test-Driven Development. All implementation work must follow the Red-Green-Refactor cycle.

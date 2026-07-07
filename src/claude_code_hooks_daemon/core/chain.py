@@ -46,6 +46,9 @@ class ChainExecutionResult:
     handlers_matched: list[str] = field(default_factory=list)
     execution_time_ms: float = 0.0
     terminated_by: str | None = None
+    # Handler that OWNS the restrictive decision (deny/ask), when any — the
+    # correct attribution target for the "To disable:" footer (Plan 00144).
+    decided_by: str | None = None
 
 
 class HandlerChain:
@@ -175,6 +178,7 @@ class HandlerChain:
         handlers_matched: list[str] = []
         final_result: HookResult | None = None
         terminated_by: str | None = None
+        decided_by: str | None = None
 
         for handler in self.handlers:
             try:
@@ -191,6 +195,11 @@ class HandlerChain:
                     )
                     handlers_executed.append(handler.name)
                     result.add_handler(handler.name)
+
+                    # First restrictive decision wins attribution: this is the
+                    # handler the "To disable:" footer must name.
+                    if decided_by is None and _is_restrictive(result.decision):
+                        decided_by = handler.name
 
                     if handler.terminal:
                         # Terminal handler - stop chain. The chain outcome keeps
@@ -241,6 +250,8 @@ class HandlerChain:
                         error_result.context = accumulated_context + error_result.context
                     final_result = error_result
                     terminated_by = handler.name
+                    if decided_by is None:
+                        decided_by = handler.name
                     break
                 else:
                     # NON-STRICT MODE: Fail-open - log error and continue chain
@@ -272,6 +283,7 @@ class HandlerChain:
             handlers_matched=handlers_matched,
             execution_time_ms=execution_time_ms,
             terminated_by=terminated_by,
+            decided_by=decided_by,
         )
 
     def execute_legacy(self, hook_input: dict[str, Any]) -> HookResult:

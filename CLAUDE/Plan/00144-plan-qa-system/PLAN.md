@@ -307,22 +307,27 @@ README row for 00144; stats 41→42") — same self-correction pattern as
   create-if-missing `_TEMPLATE_.md`, always-overwrite
   `.plan-template-default.md` snapshot, diff old snapshot vs new default
   and surface changes in `BootstrapResult.messages`
-- [ ] ⬜ **Task 5.4**: Align plan_qa `template-metadata` check + `PlanTree`
-  scanner with project templates (read `_TEMPLATE_.md` when present;
-  ignore template/snapshot files as non-plans)
-- [ ] ⬜ **Task 5.5**: Deploy to THIS repo (run the bootstrap, commit
+- [x] ✅ **Task 5.4**: Align plan_qa `template-metadata` check + `PlanTree`
+  scanner with project templates — `PlanTree` ignores `_TEMPLATE_.md` and
+  the `.plan-template-default.md` snapshot (tested); the metadata check
+  deliberately enforces only the Created/Owner/Priority FLOOR that every
+  template variant shares (deriving per-project required headers from
+  `_TEMPLATE_.md` was rejected as YAGNI — extra project headers like this
+  repo's Executor/Strategy lines need no QA involvement, and per-project
+  derivation risks false blocks)
+- [x] ✅ **Task 5.5**: Deploy to THIS repo (run the bootstrap, commit
   `CLAUDE/Plan/_TEMPLATE_.md`), verify mkplan uses it; QA; checkpoint
   commit
 
 ### Phase 6: Docs, dogfooding hardening, release prep
 
-- [ ] ⬜ **Task 6.1**: Update `docs/guides/HANDLER_REFERENCE.md`,
+- [x] ✅ **Task 6.1**: Update `docs/guides/HANDLER_REFERENCE.md`,
   `CLAUDE/PlanWorkflow.md` (QA section), regenerate `.claude/HOOKS-DAEMON.md`
-- [ ] ⬜ **Task 6.2**: Stage `UNRELEASED/config-changes/` manifest
+- [x] ✅ **Task 6.2**: Stage `UNRELEASED/config-changes/` manifest
   (`plan_workflow.qa` added, `recommended: true`) and
   `UNRELEASED/truth-changes/` entries (plan template now sourced from
   `_TEMPLATE_.md`; any other documented workflow statement that changed)
-- [ ] ⬜ **Task 6.3**: Full acceptance playbook run for the three new
+- [x] ✅ **Task 6.3**: Full acceptance playbook run for the three new
   handlers; full QA; final checkpoint commit
 
 ## Dependencies
@@ -419,3 +424,18 @@ README row for 00144; stats 41→42") — same self-correction pattern as
   socket (matched + executed in 53ms, silent on a clean stage). Task 4.4
   (flip this repo to `block`) deliberately left open pending a clean
   dogfooding period across real commits.
+- Phase 6 delivered: HANDLER_REFERENCE.md sections for all three handlers,
+  PlanWorkflow.md "Plan QA (automated enforcement)" section, regenerated
+  `.claude/HOOKS-DAEMON.md`, staged `UNRELEASED/config-changes/v3.32.0.yaml`
+  (plan_workflow.qa + three handlers, all `recommended: true`) and
+  `UNRELEASED/truth-changes/v3.32.0.yaml` (template externalisation + plan
+  hygiene now mechanically enforced). Acceptance verified in THIS live
+  session: a real Write of a status-less PLAN.md was DENIED by the daemon
+  with the status-line-present remediation; clean-tree sweep silent; clean
+  commits pass the gate silently. That live deny also exposed and fixed a
+  second chain defect: the "To disable:" footer attributed the deny to the
+  last-executed handler — `ChainExecutionResult.decided_by` now records the
+  owning handler and the router prefers it (regression tests + live
+  re-probe confirm `handlers.pre_tool_use.plan_qa_edit` attribution).
+- Remaining open work: Task 4.4 (flip commit gate to `block` after a clean
+  warn-mode dogfooding period) — everything else in the plan is delivered.

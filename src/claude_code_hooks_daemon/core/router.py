@@ -178,10 +178,12 @@ class EventRouter:
         if result.decision not in (Decision.DENY, Decision.ASK):
             return
 
-        # Find the handler that produced the result to get its config_key
-        handler_name = execution_result.terminated_by
+        # Attribute the footer to the handler that OWNS the restrictive
+        # decision (Plan 00144: a non-terminal deny now survives later
+        # handlers, so "last executed" would name the wrong config key).
+        handler_name = execution_result.decided_by or execution_result.terminated_by
         if handler_name is None:
-            # Non-terminal handler - use last executed handler
+            # Fallback: last executed handler
             if execution_result.handlers_executed:
                 handler_name = execution_result.handlers_executed[-1]
             else:

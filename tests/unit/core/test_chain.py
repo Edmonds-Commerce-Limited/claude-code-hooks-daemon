@@ -494,6 +494,47 @@ class TestHandlerChain:
         assert result.result.decision == Decision.DENY
         assert result.result.reason == "first reason"
 
+    def test_decided_by_names_the_denying_handler(self) -> None:
+        """ChainExecutionResult.decided_by must name the handler that owns
+        the restrictive decision — NOT the last executed handler — so the
+        'To disable:' footer points users at the right config key."""
+        chain = HandlerChain()
+        denier = MockHandler(
+            "denier",
+            priority=10,
+            terminal=False,
+            result=HookResult(decision=Decision.DENY, reason="bad"),
+        )
+        allower = MockHandler("allower", priority=20, terminal=False)
+        chain.add(denier)
+        chain.add(allower)
+
+        result = chain.execute({"tool_name": "Write"})
+
+        assert result.decided_by == "denier"
+
+    def test_decided_by_set_for_terminal_denier(self) -> None:
+        chain = HandlerChain()
+        denier = MockHandler(
+            "terminal-denier",
+            priority=10,
+            terminal=True,
+            result=HookResult(decision=Decision.DENY, reason="bad"),
+        )
+        chain.add(denier)
+
+        result = chain.execute({"tool_name": "Write"})
+
+        assert result.decided_by == "terminal-denier"
+
+    def test_decided_by_none_when_nothing_restricts(self) -> None:
+        chain = HandlerChain()
+        chain.add(MockHandler("allower", priority=10, terminal=False))
+
+        result = chain.execute({"tool_name": "Write"})
+
+        assert result.decided_by is None
+
     def test_non_terminal_deny_survives_later_terminal_allow(self) -> None:
         """A later TERMINAL ALLOW still cannot wash out an earlier deny.
 
