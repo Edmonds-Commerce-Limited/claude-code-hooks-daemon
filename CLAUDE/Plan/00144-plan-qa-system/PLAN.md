@@ -281,14 +281,14 @@ README row for 00144; stats 41→42") — same self-correction pattern as
 
 ### Phase 4: Stage 2 — commit gate (land last, warn-first)
 
-- [ ] ⬜ **Task 4.1**: TDD `plan_qa_commit_gate` PreToolUse handler — matches
+- [x] ✅ **Task 4.1**: TDD `plan_qa_commit_gate` PreToolUse handler — matches
   Bash `git commit` when staged tree touches plan dir or message references
   `[Pp]lan \d{5}`; runs Stage 2 checks via `gitfacts`; `warn` renders
   advisory context, `block` denies with the diffable TODO list
-- [ ] ⬜ **Task 4.2**: Guard rails: never fire on `git commit` inside
+- [x] ✅ **Task 4.2**: Guard rails: never fire on `git commit` inside
   worktrees other than the project root's repo; bounded runtime on huge
   staged diffs; graceful no-op when plan_workflow disabled
-- [ ] ⬜ **Task 4.3**: `get_claude_md()` + acceptance tests; register with
+- [x] ✅ **Task 4.3**: `get_claude_md()` + acceptance tests; register with
   `commit_gate_mode: warn` in this repo; restart daemon; QA; checkpoint commit
 - [ ] ⬜ **Task 4.4**: Dogfood in warn mode across real commits; when clean,
   flip THIS repo's config to `block` (separate commit)
@@ -411,3 +411,11 @@ README row for 00144; stats 41→42") — same self-correction pattern as
   result; 4 regression tests pin it. `plan_qa_edit` live-verified through
   the daemon socket both ways (bad PLAN.md write denied with remediation;
   valid write allowed with sibling advisories intact).
+- Phase 4 Tasks 4.1–4.3 delivered: `plan_qa_commit_gate` (PreToolUse 44,
+  shlex-tokenised `git commit` matching so quoted prose never
+  false-positives, `-m`/`--message` extraction, foreign-repo/worktree
+  guard via `GitRepo.resolve_for(cwd)`, missing-plan-dir degradation);
+  registered warn-first in this repo, live-probed through the daemon
+  socket (matched + executed in 53ms, silent on a clean stage). Task 4.4
+  (flip this repo to `block`) deliberately left open pending a clean
+  dogfooding period across real commits.

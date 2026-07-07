@@ -484,6 +484,14 @@ class HandlerID:
         display_name="plan-qa-edit",
     )
 
+    # Plan QA commit gate (PreToolUse handler) — Plan 00144: Stage 2
+    # cross-file checks over the staged tree on git commit (warn-first)
+    PLAN_QA_COMMIT_GATE = HandlerIDMeta(
+        class_name="PlanQaCommitGateHandler",
+        config_key="plan_qa_commit_gate",
+        display_name="plan-qa-commit-gate",
+    )
+
     # Lint on edit (PostToolUse handler)
     LINT_ON_EDIT = HandlerIDMeta(
         class_name="LintOnEditHandler",

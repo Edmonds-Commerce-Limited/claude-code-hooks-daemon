@@ -147,6 +147,10 @@ handlers:
       enabled: false       # Enable for projects using CLAUDE/Plan/; policy under plan_workflow.qa
       priority: 44
 
+    plan_qa_commit_gate:   # Stage 2 cross-file plan checks on git commit (Plan 00144)
+      enabled: false       # Enable for projects using CLAUDE/Plan/; warn-first via plan_workflow.qa
+      priority: 44
+
     plan_time_estimates:   # Blocks time estimates in plan files
       enabled: false       # Enable for projects using CLAUDE/Plan/
       priority: 45
