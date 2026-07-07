@@ -1107,6 +1107,27 @@ At session start this handler reports any **project handlers** (`.claude/project
 
 The handler is silent when every project handler loads, so seeing this alert always means real action is required.
 
+## plan_qa_sweep — plan-tree drift report at session start
+
+At the start of each new session the plan directory is swept with the
+plan QA check catalogue (index/folder bijection, number collisions,
+statistics recount, archive structure, status-vs-location coherence,
+staleness). Findings are injected once as advisory context — the
+sweep never blocks.
+
+**When a drift report appears**: fix the listed findings (each names
+its exact remediation) as part of your plan housekeeping, then
+re-check with:
+
+```
+$PYTHON -m claude_code_hooks_daemon.daemon.cli plan-qa --sweep
+```
+
+The CLI exits 1 while findings remain (CI-able). Single-file lint:
+`plan-qa --lint <PLAN.md>`; staged-commit check: `plan-qa --check-staged`.
+Policy lives under `plan_workflow.qa` in `.claude/hooks-daemon.yaml`
+(archive dir names, staleness window, legacy/collision allowlists).
+
 ## auto_approve_reads — gated on bypassPermissions mode
 
 Read-only tool permission requests (`Read`, `Glob`, `Grep`) are auto-approved **only** when Claude Code reports `permission_mode == "bypassPermissions"` (YOLO mode).
