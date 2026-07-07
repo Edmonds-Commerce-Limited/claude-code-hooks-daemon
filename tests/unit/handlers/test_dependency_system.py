@@ -76,6 +76,49 @@ def test_plan_workflow_injected_into_planning_tagged_handlers() -> None:
     assert md_org._plan_workflow_docs == "CLAUDE/PlanWorkflow.md"
 
 
+def test_plan_qa_config_injected_into_planning_tagged_handlers() -> None:
+    """The nested plan_workflow.qa model rides the same PLANNING-tag injection.
+
+    Plan 00144: plan QA handlers read policy from ``_plan_qa`` rather than
+    per-handler options, so the whole three-surface policy stays one object.
+    """
+    registry = HandlerRegistry()
+    registry.discover()
+    router = EventRouter()
+
+    plan_workflow = PlanWorkflowConfig(enabled=True)
+
+    registry.register_all(
+        router,
+        config={"pre_tool_use": _make_pre_tool_use_config()},
+        plan_workflow=plan_workflow,
+    )
+
+    handlers = router.get_chain(EventType.PRE_TOOL_USE).handlers
+    plan_helper = next((h for h in handlers if h.name == "plan-number-helper"), None)
+    assert plan_helper is not None
+    assert plan_helper._plan_qa is plan_workflow.qa
+    assert plan_helper._plan_qa.edit_mode == "block"
+
+
+def test_plan_qa_config_none_when_workflow_disabled() -> None:
+    """plan_workflow.enabled False injects None for the QA policy too."""
+    registry = HandlerRegistry()
+    registry.discover()
+    router = EventRouter()
+
+    registry.register_all(
+        router,
+        config={"pre_tool_use": _make_pre_tool_use_config()},
+        plan_workflow=PlanWorkflowConfig(enabled=False),
+    )
+
+    handlers = router.get_chain(EventType.PRE_TOOL_USE).handlers
+    plan_helper = next((h for h in handlers if h.name == "plan-number-helper"), None)
+    assert plan_helper is not None
+    assert plan_helper._plan_qa is None
+
+
 def test_plan_workflow_disabled_sets_none() -> None:
     """When plan_workflow.enabled is False, handlers get None for plan attributes."""
     registry = HandlerRegistry()

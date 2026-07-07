@@ -378,6 +378,70 @@ class ProjectHandlersConfig(BaseModel):
     )
 
 
+class PlanWorkflowQaConfig(BaseModel):
+    """Configuration for the plan QA subsystem (Plan 00144).
+
+    One policy shared by all three enforcement surfaces (edit-time handler,
+    commit gate, sweep) plus the ``plan-qa`` CLI — nested here rather than
+    fragmented across per-handler options because the checks span handlers.
+
+    Attributes:
+        enabled: Master switch for all plan QA surfaces
+        completed_dir: Archive dir name for completed plans (some projects use Done)
+        cancelled_dir: Archive dir name for cancelled plans (None = cancelled
+            plans are archived in completed_dir)
+        edit_mode: Stage 1 edit-time enforcement (block | warn | off)
+        commit_gate_mode: Stage 2 git-commit gate (block | warn | off) — ships
+            as warn; flip to block after a clean dogfooding period
+        sweep_mode: Stage 3 SessionStart sweep (advise | off)
+        require_terminal_date: Require ``(YYYY-MM-DD)`` on terminal statuses
+            (off by default: git history is the source of truth for "when")
+        staleness_days: Sweep staleness-nag threshold for active plans
+        legacy_plan_allowlist: Plan numbers held to advise-only (grandfathered)
+        collision_allowlist: Historic duplicate plan numbers to tolerate
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(default=True, description="Enable plan QA checks")
+    completed_dir: str = Field(
+        default="Completed",
+        description="Archive directory name for completed plans",
+    )
+    cancelled_dir: str | None = Field(
+        default="Cancelled",
+        description="Archive directory name for cancelled plans (None = use completed_dir)",
+    )
+    edit_mode: Literal["block", "warn", "off"] = Field(
+        default="block",
+        description="Stage 1 edit-time enforcement mode",
+    )
+    commit_gate_mode: Literal["block", "warn", "off"] = Field(
+        default="warn",
+        description="Stage 2 commit-gate enforcement mode",
+    )
+    sweep_mode: Literal["advise", "off"] = Field(
+        default="advise",
+        description="Stage 3 SessionStart sweep mode",
+    )
+    require_terminal_date: bool = Field(
+        default=False,
+        description="Require (YYYY-MM-DD) qualifier on terminal statuses",
+    )
+    staleness_days: Annotated[int, Field(ge=1)] = Field(
+        default=30,
+        description="Days without a commit before an active plan is nagged as stale",
+    )
+    legacy_plan_allowlist: list[int] = Field(
+        default_factory=list,
+        description="Plan numbers held to advise-only (grandfathered legacy plans)",
+    )
+    collision_allowlist: list[int] = Field(
+        default_factory=list,
+        description="Historic duplicate plan numbers tolerated by collision checks",
+    )
+
+
 class PlanWorkflowConfig(BaseModel):
     """Configuration for plan workflow system.
 
@@ -389,6 +453,7 @@ class PlanWorkflowConfig(BaseModel):
         directory: Path to plan folder relative to workspace root
         workflow_docs: Path to workflow documentation file
         enforce_claude_code_sync: Whether to enforce plansDirectory sync
+        qa: Plan QA subsystem policy (Plan 00144)
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -412,6 +477,10 @@ class PlanWorkflowConfig(BaseModel):
     enforce_claude_code_sync: bool = Field(
         default=False,
         description="Enforce plansDirectory sync with .claude/settings.json",
+    )
+    qa: PlanWorkflowQaConfig = Field(
+        default_factory=PlanWorkflowQaConfig,
+        description="Plan QA subsystem policy (Plan 00144)",
     )
 
 

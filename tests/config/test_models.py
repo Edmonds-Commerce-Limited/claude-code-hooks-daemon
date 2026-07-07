@@ -905,6 +905,70 @@ class TestPlanWorkflowConfig:
             PlanWorkflowConfig.model_validate({"unknown_field": "value"})
 
 
+class TestPlanWorkflowQaConfig:
+    """Tests for the nested plan_workflow.qa sub-model (Plan 00144)."""
+
+    def test_defaults(self) -> None:
+        """QA sub-model defaults: enabled, edit blocks, commit gate warns, sweep advises."""
+        config = PlanWorkflowConfig()
+        assert config.qa.enabled is True
+        assert config.qa.completed_dir == "Completed"
+        assert config.qa.cancelled_dir == "Cancelled"
+        assert config.qa.edit_mode == "block"
+        assert config.qa.commit_gate_mode == "warn"
+        assert config.qa.sweep_mode == "advise"
+        assert config.qa.require_terminal_date is False
+        assert config.qa.staleness_days == 30
+        assert config.qa.legacy_plan_allowlist == []
+        assert config.qa.collision_allowlist == []
+
+    def test_custom_values_from_yaml_shape(self) -> None:
+        """QA sub-model accepts the documented YAML shape."""
+        config = PlanWorkflowConfig.model_validate(
+            {
+                "enabled": True,
+                "qa": {
+                    "enabled": True,
+                    "completed_dir": "Done",
+                    "cancelled_dir": None,
+                    "edit_mode": "warn",
+                    "commit_gate_mode": "block",
+                    "sweep_mode": "off",
+                    "require_terminal_date": True,
+                    "staleness_days": 14,
+                    "legacy_plan_allowlist": [23, 24],
+                    "collision_allowlist": [23],
+                },
+            }
+        )
+        assert config.qa.completed_dir == "Done"
+        assert config.qa.cancelled_dir is None
+        assert config.qa.edit_mode == "warn"
+        assert config.qa.commit_gate_mode == "block"
+        assert config.qa.sweep_mode == "off"
+        assert config.qa.require_terminal_date is True
+        assert config.qa.staleness_days == 14
+        assert config.qa.legacy_plan_allowlist == [23, 24]
+        assert config.qa.collision_allowlist == [23]
+
+    def test_invalid_mode_rejected(self) -> None:
+        """Mode fields only accept their documented values."""
+        with pytest.raises(ValidationError):
+            PlanWorkflowConfig.model_validate({"qa": {"edit_mode": "loud"}})
+        with pytest.raises(ValidationError):
+            PlanWorkflowConfig.model_validate({"qa": {"sweep_mode": "block"}})
+
+    def test_extra_fields_forbidden_in_qa(self) -> None:
+        """QA sub-model rejects unknown keys (typo defence)."""
+        with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+            PlanWorkflowConfig.model_validate({"qa": {"unknown": 1}})
+
+    def test_staleness_days_must_be_positive(self) -> None:
+        """staleness_days must be >= 1."""
+        with pytest.raises(ValidationError):
+            PlanWorkflowConfig.model_validate({"qa": {"staleness_days": 0}})
+
+
 class TestMigratePlanHandlerOptions:
     """Tests for Config.migrate_plan_handler_options validator."""
 

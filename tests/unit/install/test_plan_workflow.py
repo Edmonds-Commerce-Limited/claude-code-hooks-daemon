@@ -1,13 +1,18 @@
 """Tests for plan workflow bootstrapping."""
 
 import stat
+import subprocess
 from pathlib import Path
 
+from claude_code_hooks_daemon.constants.timeout import Timeout
 from claude_code_hooks_daemon.install.plan_workflow import (
     MKPLAN_SCRIPT_NAME,
+    PLAN_TEMPLATE_NAME,
+    TEMPLATE_SNAPSHOT_NAME,
     bootstrap_plan_workflow,
     deploy_plan_workflow_if_enabled,
     mkplan_template_path,
+    plan_template_default_path,
 )
 
 
@@ -162,6 +167,152 @@ class TestMkplanDeployment:
         bootstrap_plan_workflow(tmp_path)
         deployed = tmp_path / "CLAUDE" / "Plan" / MKPLAN_SCRIPT_NAME
         assert deployed.read_text() == mkplan_template_path().read_text()
+
+
+class TestPlanTemplateDeployment:
+    """Tests for the tracked plan template `_TEMPLATE_.md` (Plan 00144 Phase 5).
+
+    Projects manage their own plan template; the daemon seeds a default when
+    none exists and — via a daemon-owned snapshot of the default it last
+    deployed — surfaces upstream template changes on upgrade so the project
+    can adopt them if wanted. The project's template is NEVER overwritten.
+    """
+
+    def test_bundled_default_template_exists_with_placeholders(self) -> None:
+        """The canonical default template is bundled inside the package."""
+        template = plan_template_default_path()
+        assert template.is_file()
+        body = template.read_text()
+        for placeholder in (
+            "{{PLAN_NUMBER}}",
+            "{{PLAN_TITLE}}",
+            "{{CREATED_DATE}}",
+            "{{OWNER}}",
+        ):
+            assert placeholder in body
+        assert "**Status**: Not Started" in body
+
+    def test_creates_template_when_missing(self, tmp_path: Path) -> None:
+        """Bootstrap seeds _TEMPLATE_.md from the bundled default."""
+        result = bootstrap_plan_workflow(tmp_path)
+        deployed = tmp_path / "CLAUDE" / "Plan" / PLAN_TEMPLATE_NAME
+        assert deployed.is_file()
+        assert deployed.read_text() == plan_template_default_path().read_text()
+        assert result.created_template is True
+
+    def test_preserves_existing_template(self, tmp_path: Path) -> None:
+        """A project-customised template is client-owned: never overwritten."""
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        plan_dir.mkdir(parents=True)
+        custom = plan_dir / PLAN_TEMPLATE_NAME
+        custom.write_text("# Plan {{PLAN_NUMBER}}: {{PLAN_TITLE}}\n\ncustom body\n")
+
+        result = bootstrap_plan_workflow(tmp_path)
+
+        assert custom.read_text() == "# Plan {{PLAN_NUMBER}}: {{PLAN_TITLE}}\n\ncustom body\n"
+        assert result.created_template is False
+
+    def test_snapshot_written_and_daemon_owned(self, tmp_path: Path) -> None:
+        """The default-template snapshot is written on every bootstrap."""
+        bootstrap_plan_workflow(tmp_path)
+        snapshot = tmp_path / "CLAUDE" / "Plan" / TEMPLATE_SNAPSHOT_NAME
+        assert snapshot.is_file()
+        assert snapshot.read_text() == plan_template_default_path().read_text()
+
+    def test_stale_snapshot_surfaces_default_change(self, tmp_path: Path) -> None:
+        """Upgrade with a changed daemon default reports what changed.
+
+        Simulates: previous daemon version deployed default X (snapshot holds
+        X), project customised its template, new daemon ships default Y — the
+        bootstrap must surface the X→Y change without touching the project's
+        template.
+        """
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        plan_dir.mkdir(parents=True)
+        (plan_dir / PLAN_TEMPLATE_NAME).write_text("# project-owned template\n")
+        (plan_dir / TEMPLATE_SNAPSHOT_NAME).write_text("# old daemon default\n")
+
+        result = bootstrap_plan_workflow(tmp_path)
+
+        assert result.template_default_changed is True
+        assert any("template" in m.lower() and "changed" in m.lower() for m in result.messages)
+        # Snapshot is refreshed to the new default afterwards.
+        snapshot_text = (plan_dir / TEMPLATE_SNAPSHOT_NAME).read_text()
+        assert snapshot_text == plan_template_default_path().read_text()
+        # Project template untouched.
+        assert (plan_dir / PLAN_TEMPLATE_NAME).read_text() == "# project-owned template\n"
+
+    def test_unchanged_default_is_quiet(self, tmp_path: Path) -> None:
+        """Re-running with an up-to-date snapshot reports no template change."""
+        bootstrap_plan_workflow(tmp_path)
+        result = bootstrap_plan_workflow(tmp_path)
+        assert result.template_default_changed is False
+
+
+class TestMkplanUsesProjectTemplate:
+    """mkplan.bash renders `_TEMPLATE_.md` when present (Plan 00144 Phase 5)."""
+
+    def _scaffold_repo(self, tmp_path: Path) -> tuple[Path, Path]:
+        """Create a git repo with a deployed plan dir + mkplan script."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        subprocess.run(
+            ["git", "init", str(repo)],
+            capture_output=True,
+            check=True,
+            timeout=Timeout.GIT_CONTEXT,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo), "config", "user.name", "Template Tester"],
+            capture_output=True,
+            check=True,
+            timeout=Timeout.GIT_CONTEXT,
+        )
+        bootstrap_plan_workflow(repo)
+        plan_dir = repo / "CLAUDE" / "Plan"
+        return repo, plan_dir
+
+    def _run_mkplan(self, plan_dir: Path, name: str) -> Path:
+        """Invoke the deployed mkplan.bash and return the created plan folder."""
+        result = subprocess.run(
+            ["bash", str(plan_dir / MKPLAN_SCRIPT_NAME), name],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=Timeout.REQUEST_DEFAULT,
+        )
+        return Path(result.stdout.strip())
+
+    def test_custom_template_is_rendered_with_substitutions(self, tmp_path: Path) -> None:
+        """A project template's placeholders are substituted into PLAN.md."""
+        _, plan_dir = self._scaffold_repo(tmp_path)
+        (plan_dir / PLAN_TEMPLATE_NAME).write_text(
+            "# Plan {{PLAN_NUMBER}}: {{PLAN_TITLE}}\n\n"
+            "**Status**: Not Started\n"
+            "**Created**: {{CREATED_DATE}}\n"
+            "**Owner**: {{OWNER}}\n\n"
+            "## Custom Project Section\n"
+        )
+
+        target = self._run_mkplan(plan_dir, "widget-frobnication")
+        content = (target / "PLAN.md").read_text()
+
+        assert "# Plan 00001: widget frobnication" in content
+        assert "**Owner**: Template Tester" in content
+        assert "## Custom Project Section" in content
+        assert "{{" not in content
+
+    def test_missing_template_falls_back_to_builtin(self, tmp_path: Path) -> None:
+        """Without _TEMPLATE_.md the script scaffolds from its built-in skeleton."""
+        _, plan_dir = self._scaffold_repo(tmp_path)
+        (plan_dir / PLAN_TEMPLATE_NAME).unlink()
+
+        target = self._run_mkplan(plan_dir, "fallback-check")
+        content = (target / "PLAN.md").read_text()
+
+        assert "# Plan 00001: fallback check" in content
+        assert "**Status**: Not Started" in content
+        assert "## Success Criteria" in content
 
 
 class TestDeployPlanWorkflowIfEnabled:

@@ -5,6 +5,7 @@ and lifecycle CLAUDE.md so new projects can use structured plan-based
 development immediately after install.
 """
 
+import difflib
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -22,6 +23,17 @@ MKPLAN_SCRIPT_NAME: Final[str] = "mkplan.bash"
 # Owner rwx, group/other rx — least-privilege executable (matches deploy_skills).
 _MKPLAN_MODE: Final[int] = 0o755
 
+# Tracked, client-owned plan template consumed by mkplan.bash (Plan 00144
+# Phase 5). Seeded from the bundled default when absent; NEVER overwritten.
+PLAN_TEMPLATE_NAME: Final[str] = "_TEMPLATE_.md"
+# Daemon-owned snapshot of the default template as of the last deploy —
+# diffing it against the new bundled default surfaces upstream template
+# changes on upgrade so projects can adopt them into their own template.
+TEMPLATE_SNAPSHOT_NAME: Final[str] = ".plan-template-default.md"
+
+# Cap the surfaced diff so a heavily-reworked default cannot flood messages.
+_TEMPLATE_DIFF_MAX_LINES: Final[int] = 40
+
 
 def mkplan_template_path() -> Path:
     """Absolute path to the canonical bundled ``mkplan.bash`` template.
@@ -30,6 +42,11 @@ def mkplan_template_path() -> Path:
     installer copies it into each project's plan directory on install/upgrade.
     """
     return Path(__file__).resolve().parent / _TEMPLATES_DIR_NAME / MKPLAN_SCRIPT_NAME
+
+
+def plan_template_default_path() -> Path:
+    """Absolute path to the bundled default plan template (``_TEMPLATE_.md``)."""
+    return Path(__file__).resolve().parent / _TEMPLATES_DIR_NAME / PLAN_TEMPLATE_NAME
 
 
 _README_TEMPLATE: Final[str] = """\
@@ -110,6 +127,8 @@ class BootstrapResult:
     skipped_readme: bool = False
     skipped_claude_md: bool = False
     deployed_mkplan: bool = False
+    created_template: bool = False
+    template_default_changed: bool = False
     messages: list[str] = field(default_factory=list)
 
 
@@ -182,6 +201,9 @@ def bootstrap_plan_workflow(
     # Deploy mkplan.bash (daemon-owned: overwrite on every run + exec bit)
     _deploy_mkplan(plan_dir, result)
 
+    # Seed the client-owned plan template + refresh the daemon-owned snapshot
+    _deploy_plan_template(plan_dir, result)
+
     return result
 
 
@@ -201,6 +223,59 @@ def _deploy_mkplan(plan_dir: Path, result: BootstrapResult) -> None:
     result.deployed_mkplan = True
     result.messages.append(f"Deployed {MKPLAN_SCRIPT_NAME} (chmod {_MKPLAN_MODE:o})")
     logger.info("Deployed %s to %s (mode %o)", MKPLAN_SCRIPT_NAME, target, _MKPLAN_MODE)
+
+
+def _deploy_plan_template(plan_dir: Path, result: BootstrapResult) -> None:
+    """Seed ``_TEMPLATE_.md`` and manage the default-template snapshot.
+
+    Ownership contract (Plan 00144 Phase 5):
+
+    - ``_TEMPLATE_.md`` is CLIENT-owned: created from the bundled default
+      when absent, never overwritten — projects customise their plan
+      template freely and ``mkplan.bash`` renders it.
+    - ``.plan-template-default.md`` is DAEMON-owned: always refreshed to the
+      current bundled default. Before refreshing, a stale snapshot is diffed
+      against the new default and the change is surfaced in the result
+      messages, so a project with a customised template can adopt upstream
+      template improvements deliberately instead of silently missing them.
+    """
+    default_path = plan_template_default_path()
+    if not default_path.is_file():
+        raise FileNotFoundError(f"Bundled plan template not found: {default_path}")
+    default_text = default_path.read_text()
+
+    template_path = plan_dir / PLAN_TEMPLATE_NAME
+    if template_path.exists():
+        result.messages.append(f"{PLAN_TEMPLATE_NAME} already exists (client-owned, kept)")
+        logger.info("Keeping existing %s", template_path)
+    else:
+        template_path.write_text(default_text)
+        result.created_template = True
+        result.messages.append(f"Created {PLAN_TEMPLATE_NAME} (plan template — customise freely)")
+        logger.info("Created %s", template_path)
+
+    snapshot_path = plan_dir / TEMPLATE_SNAPSHOT_NAME
+    if snapshot_path.exists():
+        old_default = snapshot_path.read_text()
+        if old_default != default_text:
+            result.template_default_changed = True
+            diff_lines = list(
+                difflib.unified_diff(
+                    old_default.splitlines(),
+                    default_text.splitlines(),
+                    fromfile="previous daemon default",
+                    tofile="new daemon default",
+                    lineterm="",
+                )
+            )[:_TEMPLATE_DIFF_MAX_LINES]
+            result.messages.append(
+                f"The daemon's default plan template changed since the last deploy. "
+                f"Your {PLAN_TEMPLATE_NAME} is untouched — review the change and adopt "
+                f"what you want:\n" + "\n".join(diff_lines)
+            )
+            logger.info("Default plan template changed; surfaced diff to result messages")
+
+    snapshot_path.write_text(default_text)
 
 
 def deploy_plan_workflow_if_enabled(

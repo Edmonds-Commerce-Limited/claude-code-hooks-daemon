@@ -335,7 +335,9 @@ class HandlerRegistry:
                             # This overrides any handler-level options (top-level is source of truth)
                             # Uses dynamic setattr pattern (same as handler options) for type safety
                             if plan_workflow is not None and "planning" in instance.tags:
-                                plan_attrs: dict[str, str | bool | None] = {
+                                # plan_qa (Plan 00144): the nested QA policy rides the
+                                # same injection so all plan-QA surfaces share one object.
+                                plan_attrs: dict[str, object] = {
                                     "track_plans_in_project": (
                                         plan_workflow.directory if plan_workflow.enabled else None
                                     ),
@@ -348,6 +350,9 @@ class HandlerRegistry:
                                         plan_workflow.enforce_claude_code_sync
                                         if plan_workflow.enabled
                                         else False
+                                    ),
+                                    "plan_qa": (
+                                        plan_workflow.qa if plan_workflow.enabled else None
                                     ),
                                 }
                                 for attr_key, attr_val in plan_attrs.items():

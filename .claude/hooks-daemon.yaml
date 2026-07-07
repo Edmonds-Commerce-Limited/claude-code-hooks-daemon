@@ -220,6 +220,9 @@ handlers:
         extra_allowed_markdown_paths:
           - "^\\.github/.*\\.md$"      # GitHub issue/PR templates, workflow docs
           - "^BUG_REPORTING\\.md$"     # Project root doc (not a standard repo file)
+          # Daemon-bundled markdown template assets deployed into client projects
+          # (e.g. the plan _TEMPLATE_.md, Plan 00144 Phase 5) — code assets, not docs.
+          - "^src/claude_code_hooks_daemon/install/templates/.*\\.md$"
 
     # TOOL USAGE HANDLERS (Priority 50-60)
     web_search_year:       # Fixes year in web search queries (uses current year)

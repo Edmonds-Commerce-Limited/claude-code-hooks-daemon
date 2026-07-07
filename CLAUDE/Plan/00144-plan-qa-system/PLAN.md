@@ -247,11 +247,11 @@ README row for 00144; stats 41→42") — same self-correction pattern as
 - [x] ✅ **Task 1.4**: TDD `gitfacts.py` — staged file list/diff, staged-tree
   file reads, counter read (reuse `handlers/utils/plan_numbering.py`), folder
   last-commit dates
-- [ ] ⬜ **Task 1.5**: TDD check registry + `runner.py` + `report.py`;
+- [x] ✅ **Task 1.5**: TDD check registry + `runner.py` + `report.py`;
   implement the full check catalogue, each check its own module + test file
-- [ ] ⬜ **Task 1.6**: Extend `PlanWorkflowConfig` with the `qa` sub-model +
+- [x] ✅ **Task 1.6**: Extend `PlanWorkflowConfig` with the `qa` sub-model +
   registry injection + config schema tests
-- [ ] ⬜ **Task 1.7**: QA suite green; checkpoint commit
+- [x] ✅ **Task 1.7**: QA suite green; checkpoint commit
 
 ### Phase 2: Stage 3 — sweep CLI + SessionStart advisory
 
@@ -294,15 +294,15 @@ README row for 00144; stats 41→42") — same self-correction pattern as
 
 ### Phase 5: mkplan template externalisation (`_TEMPLATE_.md`)
 
-- [ ] ⬜ **Task 5.1**: TDD bundled default template — add
+- [x] ✅ **Task 5.1**: TDD bundled default template — add
   `install/templates/_TEMPLATE_.md` with `{{PLAN_NUMBER}}` /
   `{{PLAN_TITLE}}` / `{{CREATED_DATE}}` / `{{OWNER}}` placeholders;
   content matches the current mkplan heredoc skeleton
-- [ ] ⬜ **Task 5.2**: Update `install/templates/mkplan.bash` — use
+- [x] ✅ **Task 5.2**: Update `install/templates/mkplan.bash` — use
   `{plan_dir}/_TEMPLATE_.md` with bash parameter-expansion substitution
   when present; keep the heredoc as fallback; cover both paths in
   `tests/unit/install/` (script invoked against fixture plan dirs)
-- [ ] ⬜ **Task 5.3**: TDD `bootstrap_plan_workflow` changes —
+- [x] ✅ **Task 5.3**: TDD `bootstrap_plan_workflow` changes —
   create-if-missing `_TEMPLATE_.md`, always-overwrite
   `.plan-template-default.md` snapshot, diff old snapshot vs new default
   and surface changes in `BootstrapResult.messages`
@@ -373,3 +373,18 @@ README row for 00144; stats 41→42") — same self-correction pattern as
   externalisation to tracked `{plan_dir}/_TEMPLATE_.md` — Decision 7 +
   Phase 5; former docs/release phase renumbered to Phase 6.
 - Status flipped to In Progress; Phase 1 (plan_qa core) begun.
+- Tasks 1.1–1.4 delivered (`a14f81c`, `9ff64ac`): PlanDoc/PlanTree parsers,
+  ReadmeIndex, GitFacts — all proven against mdformat round-trips and this
+  repo's live plan tree.
+- Task 1.5 in flight: check framework (types/runner/report + exemplar)
+  built in-thread; remaining 20-check catalogue fanned out to four parallel
+  python-developer sub-agents (stage1 / tree / commit / sweep groups);
+  registry integration follows their completion.
+- Task 1.6 delivered: `PlanWorkflowQaConfig` sub-model + `_plan_qa`
+  registry injection for PLANNING-tagged handlers.
+- Phase 5 Tasks 5.1–5.3 delivered alongside (closely coupled to plan_qa
+  template checks): bundled `_TEMPLATE_.md`, mkplan.bash template
+  rendering with heredoc fallback, bootstrap seed/snapshot/diff logic;
+  deployed to THIS repo (template customised with executor/strategy
+  headers — proving client ownership). Config gained an
+  `extra_allowed_markdown_paths` entry for bundled template assets.
