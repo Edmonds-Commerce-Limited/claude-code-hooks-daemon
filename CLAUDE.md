@@ -921,6 +921,34 @@ If using `--json`, include `comments` in the field list instead of adding `--com
 
 If using `--json`, include `comments` in the field list instead of adding `--comments`.
 
+## plan_qa_commit_gate — cross-file plan checks at git commit
+
+Every `git commit` is checked against the STAGED tree's plan QA
+invariants. In `commit_gate_mode: warn` (the rollout default)
+violations appear as advisory context — read them and amend the
+commit content BEFORE committing; in `block` mode they deny the
+commit with a TODO list of what the commit must also contain.
+
+**The invariants**:
+
+- creating a plan folder ⇒ the SAME commit stages its README
+  index row (`index-at-birth`) and the number must come from the
+  git counter / mkplan.bash (`counter-sanity`, `no-new-collisions`)
+- flipping a plan to Complete/Cancelled/Superseded ⇒ the SAME
+  commit contains the `git mv` into the archive dir AND the README
+  row + statistics update (`terminal-state-atomic`)
+- every folder has a README row in the section matching its
+  location, and every row's link resolves
+  (`row-folder-bijection`, `stats-recount`)
+- a commit claiming `Plan NNNNN` that stages src/tests/config
+  changes should also update that plan's PLAN.md
+  (`same-commit-plan-doc`); reference plans as `Plan NNNNN:`
+  (`plan-ref-format`)
+
+Check the staged tree any time without committing:
+`$PYTHON -m claude_code_hooks_daemon.daemon.cli plan-qa --check-staged`.
+Commits inside nested/vendor repos or foreign worktrees are exempt.
+
 ## plan_qa_edit — PLAN.md writes are linted in real time
 
 Every Write/Edit of a `PLAN.md` under the plan directory is checked
