@@ -1,6 +1,6 @@
 # Plan 00135: Event-Driven `send-keys` Injection
 
-**Status**: Blocked — pending user direction (hostile review found 2 fatal flaws)
+**Status**: In Progress — architecture decided: ARCH-B (PTY supervisor), CCY-first for dogfooding. See `plan-audit-fable-1.md` and Decision G.
 **Created**: 2026-06-22
 **Owner**: joseph
 **Priority**: High
@@ -26,9 +26,13 @@
 >     (`client_activity` likely measures redraw). The only design that answers it
 >     *by construction* is **ARCH-B (a launcher-owned PTY supervisor)** that sees
 >     raw input bytes — at the cost of TUI-fidelity risk.
-> - **Status:** awaiting user decision on the architecture fork — ARCH-A
->   (conservative heuristic idle, fix all SBs) vs ARCH-B (PTY supervisor, solves
->   FATAL-2 by construction). Coexistence (SB-1) is solvable either way.
+> - **RESOLVED (2026-07-09):** third audit (`plan-audit-fable-1.md`, Fable) is the
+>   first to examine the REAL launchers (`ccy`) and finds the ARCH-A tmux world does
+>   not exist in either launch environment — decision is **ARCH-B (PTY supervisor)**,
+>   **CCY-first** for dogfooding. The ARCH-A tmux design (this document's Phases 1–4,
+>   `tmux_inject`, `send-keys`, dedicated daemon, SB-1 enforcement fix) is **shelved
+>   as the documented fallback**; the live plan of record is the slice plan in
+>   `plan-audit-fable-1.md` §5, re-ordered CCY-first. See Decision G.
 
 > Source research: `research-note.md` (do not edit). Scene-setting + the user's
 > framing: `context.md`. **This plan is written to survive a hostile multi-lens
@@ -223,7 +227,51 @@ Phase 3 adds opt-in event-driven enqueue handlers (PostCompact, `/fix`, bootstra
 — all reusing Phase 1's utility and rails. Phase 4 (optional, deferred) considers
 daemon-managed watchdog spawning only after field-proving the rails.
 
+### Decision G: Pivot to ARCH-B (PTY supervisor), CCY-first — SUPERSEDES Decisions A–F for delivery
+
+**Context**: The third audit (`plan-audit-fable-1.md`, Fable) is the first review to
+inspect the actual launchers the user runs (`ccy`). Findings that force the pivot:
+
+- **Neither real launch environment runs Claude inside tmux**, and neither ships
+  tmux in tracked IaC (audit N-1, claims #10–#11). Full `ccy` runs
+  `podman run … claude`; the thin LXC alias runs `claude` directly. ARCH-A's tmux
+  session, `$TMUX_PANE`, dedicated daemon, key-table hook and `send-keys` target an
+  environment that would have to be **built** (cross-repo) before one injection fires.
+- **Both launchers give a PTY supervisor a one-line insertion point** and raw input
+  bytes — so "is the user typing?" (SB-2) and "is it still Claude?" (SB-3, via
+  `waitpid`) are answered **by construction**, and the dedicated daemon + SB-1
+  enforcement change fall out of scope entirely.
+
+**Decision**: Adopt **ARCH-B — a thin, TDD'd PTY supervisor (`claude-supervise`)**
+that wraps the `claude` process in its own namespace; the daemon stays strictly
+**observe-only** (a status-line context sidecar). The delivery plan of record is the
+staged slice plan in `plan-audit-fable-1.md` §5.
+
+**Ordering override — CCY-first (not the audit's LXC-first)**: this repo is developed
+using `ccy` (podman), so the supervisor must run under `ccy` for dogfooding to be
+real. **Key dogfooding lever**: no fedora-desktop image change is needed to begin —
+this session already runs inside the podman container, so `claude-supervise -- claude …`
+can be exercised in-place. The `entrypoint.sh` wrap + `ccy --supervise` opt-in flag +
+CCY version bump (a fedora-desktop change, named as a cross-repo dependency) is only
+required later to make supervision the seamless default. LXC integration follows CCY.
+
+**Assumed defaults (from the audit; correct me if wrong)**: supervisor lives in
+`src/claude_code_hooks_daemon/supervise/` (installer-shipped, full QA/95% bar,
+`pty.openpty`-testable in CI); `--dry-run` is the default and `--arm` refuses without
+`--max-cost`; the allowlist is frozen to `{'/compact'}`; observability is a status-line
+armed/dry-run segment + a decision log (the tmux "watch pane" idea dies with tmux).
+
+**Date**: 2026-07-09
+
 ## Tasks
+
+> **⚠️ Tasks below (Phases 0–4) are the SHELVED ARCH-A design, retained only as the
+> documented fallback if the ARCH-B PTY spike (S-PTY) fails in a real environment.**
+> They reference files that intentionally do NOT exist yet
+> (`tests/unit/utils/test_tmux_inject.py`,
+> `tests/unit/handlers/status_line/test_tmux_context_sidecar.py`) and will not be
+> created under ARCH-B. **The live, CCY-first task plan is
+> `plan-audit-fable-1.md` §5 (Slices 0–3).**
 
 ### Phase 0: Verification & design lock-in
 
@@ -332,6 +380,19 @@ daemon-managed watchdog spawning only after field-proving the rails.
 | Whole feature too dangerous to ship          | High   | —           | Incremental, opt-in, allowlisted; hostile review gate before merge                                       |
 
 ## Notes & Updates
+
+### 2026-07-09
+
+- Third audit `plan-audit-fable-1.md` (Fable) added — first review to examine the
+  real `ccy` launchers (cloned to `untracked/repos/fedora-desktop`). Verdict
+  GO-WITH-CHANGES: pivot to **ARCH-B (PTY supervisor)**, daemon stays observe-only.
+- **User decision**: **CCY-first** (overriding the audit's LXC-first ordering) so we
+  dogfood on this repo, which is developed using `ccy`. Recorded as Decision G.
+- ARCH-A tmux design (Phases 0–4 below) shelved as documented fallback. Live plan of
+  record is `plan-audit-fable-1.md` §5, re-ordered CCY-first.
+- Next: begin Slice 1 (observe-only `context_sidecar` status-line handler, pure `src/`,
+  dogfoodable in this ccy session) and Slice 0 S-PTY spike of a minimal supervisor
+  in-container.
 
 ### 2026-06-22
 
