@@ -32,7 +32,7 @@ echo "Running ruff linter (auto-fixing)..."
 
 # Run ruff with --fix to auto-fix issues, then check remaining violations
 # Note: ruff outputs JSON natively with --output-format=json
-if venv_tool ruff check --fix src/ tests/ --output-format=json > "${OUTPUT_FILE}.raw" 2>&1; then
+if venv_tool ruff check --fix src/ tests/ .claude/ccy/claude-supervise.py --output-format=json > "${OUTPUT_FILE}.raw" 2>&1; then
     : # No violations found
 fi
 # Violations (if any) are captured as JSON in the output file for parsing below

@@ -92,7 +92,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["src"]
+source = ["src", ".claude/ccy"]
 branch = true
 # Disabled parallel mode - causes fork bomb when running pytest with --cov
 # parallel = true

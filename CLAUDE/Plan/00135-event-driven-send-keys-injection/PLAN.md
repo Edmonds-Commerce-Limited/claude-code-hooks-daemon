@@ -298,6 +298,37 @@ compact cannot wedge the machine).
 
 **Date**: 2026-07-09
 
+### Decision I: Launcher-agnostic artifact + per-launcher contract (podman + LXC)
+
+**Context**: the user runs Claude via two launchers — full podman `ccy` and a thin
+`ccy()` alias inside LXC — and both must be supported going forward. Coupling the
+supervisor to the daemon package/venv (original v0) would have blocked LXC and
+risked breaking on daemon upgrades.
+
+**Decision**: factor the system into three pieces so any launcher is a small add-on:
+
+1. **Launcher-agnostic artifact** — `.claude/ccy/claude-supervise.py`: tracked in the
+   project, **stdlib-only**, runs under any container's system `python3` (no venv, no
+   `claude_code_hooks_daemon` import). Decoupled from daemon upgrades (lives outside
+   `.claude/hooks-daemon/`).
+2. **Per-project config** — `.claude/ccy/ccy.env` (tracked): exports
+   `CCY_CLAUDE_WRAPPER` via `${VAR:-...}`.
+3. **Per-launcher contract** (~5 lines): *source `.claude/ccy/ccy.env`, then apply
+   `$CCY_CLAUDE_WRAPPER` to the `claude` invocation.*
+   - **podman `ccy`**: DONE — `entrypoint.sh` sources ccy.env + wraps (fedora-desktop
+     `e9ed32c`). Sourced in-container (sandbox), never on the host.
+   - **LXC thin alias**: TODO — the `ccy()` function must implement the same contract.
+     It already runs **inside** the LXC container (the sandbox), so sourcing ccy.env
+     there is the same in-sandbox security model. Requires: python3 present in the LXC
+     image (verify), and editing wherever the alias is defined (lxc tooling — OPEN
+     QUESTION: exact location, e.g. lxc-bash).
+
+**Why this is right**: adding a launcher = implementing the 5-line contract; the
+artifact and config are shared, tracked, and upgrade-safe. The standalone-file
+refactor is what unlocks LXC (system `python3`, no venv).
+
+**Date**: 2026-07-09
+
 ## Tasks
 
 > **⚠️ Tasks below (Phases 0–4) are the SHELVED ARCH-A design, retained only as the
@@ -418,9 +449,23 @@ compact cannot wedge the machine).
 
 ### 2026-07-09
 
+- v1 TRIGGER defined (user): inject `/compact` when the **status line goes RED** —
+  reuse the existing `model_context` red context-% tier as the threshold (not a
+  separate configurable one). The daemon status-line handler already computes the
+  colour tier; the sidecar records it and the supervisor fires the compact-and-resume
+  sequence (Decision H) on red. LXC handoff spec written to `LXC-SUPPORT.md`.
+- Supervisor DECOUPLED (user concern: daemon-upgrade fragility + LXC support):
+  rewritten as standalone stdlib-only `.claude/ccy/claude-supervise.py` — runs under
+  the container's system `python3`, NO venv, NO `claude_code_hooks_daemon` import.
+  Old `src/…/supervise/` package + `scripts/claude-supervise` shim removed; startup
+  log line added (observability); 33 tests, 100% file coverage; coverage measured via
+  `--cov=.claude/ccy` (dir, not file — importlib-loaded). Confirmed running under
+  `/usr/bin/python3`. Live proof: THIS session ran under the supervisor (PID 2). See
+  Decision I (launcher-agnostic artifact + per-launcher contract; LXC = TODO).
 - v0 `claude-supervise` built + committed (`bd40c35`): standalone transparent PTY
   supervisor (dry-run, NO injection), 28 tests, 99.42% cov. Launch shim
-  `scripts/claude-supervise` resolves the daemon venv.
+  `scripts/claude-supervise` resolves the daemon venv. (Superseded by the decoupled
+  standalone file above.)
 - Neat per-project config (replaces ad-hoc host exports): tracked
   `.claude/ccy/ccy.env` exports `CCY_CLAUDE_WRAPPER` via `${VAR:-...}`, sourced
   **in-container** by the ccy entrypoint (fedora-desktop `e9ed32c`; CCY_VERSION

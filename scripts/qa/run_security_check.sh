@@ -33,7 +33,7 @@ echo "Running Bandit security scanner..."
 # Run bandit with JSON output
 # Note: Bandit uses -f json for JSON format, -r for recursive
 # Skip ONLY test assertions (B101) - we run bandit on src/ not tests/
-if venv_tool bandit -r src/ -f json -o "${OUTPUT_FILE}.raw" -s B101 2>&1; then
+if venv_tool bandit -r src/ .claude/ccy/claude-supervise.py -f json -o "${OUTPUT_FILE}.raw" -s B101 2>&1; then
     : # No issues found
 fi
 # Issues (if any) are captured as JSON in the output file for parsing below

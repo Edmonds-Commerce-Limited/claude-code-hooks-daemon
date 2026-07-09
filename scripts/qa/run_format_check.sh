@@ -32,7 +32,7 @@ echo "Running black formatter (auto-fixing)..."
 
 # Run black to auto-format files
 # Note: black doesn't output JSON, so we parse text output
-if venv_tool black src/ tests/ 2>&1 | tee "${OUTPUT_FILE}.raw"; then
+if venv_tool black src/ tests/ .claude/ccy/claude-supervise.py 2>&1 | tee "${OUTPUT_FILE}.raw"; then
     EXIT_CODE=0
 else
     EXIT_CODE=$?

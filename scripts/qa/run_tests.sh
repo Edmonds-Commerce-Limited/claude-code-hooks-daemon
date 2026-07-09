@@ -38,6 +38,7 @@ if "${VENV_PYTHON}" -c "import pytest_json_report" 2>/dev/null; then
     # Use pytest-json-report if available
     if venv_tool pytest --json-report --json-report-file="${OUTPUT_FILE}.raw" \
               --cov=src/claude_code_hooks_daemon \
+              --cov=.claude/ccy \
               --cov-branch \
               --cov-report=term-missing:skip-covered \
               --cov-report=json:"${COVERAGE_FILE}" \
@@ -105,6 +106,7 @@ EOF
 else
     # Fallback: Parse standard pytest output
     if venv_tool pytest --cov=src/claude_code_hooks_daemon \
+              --cov=.claude/ccy \
               --cov-branch \
               --cov-report=term-missing:skip-covered \
               --cov-report=json:"${COVERAGE_FILE}" \
