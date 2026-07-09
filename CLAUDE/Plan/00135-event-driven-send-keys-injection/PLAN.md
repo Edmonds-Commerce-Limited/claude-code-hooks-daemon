@@ -418,6 +418,17 @@ compact cannot wedge the machine).
 
 ### 2026-07-09
 
+- v0 `claude-supervise` built + committed (`bd40c35`): standalone transparent PTY
+  supervisor (dry-run, NO injection), 28 tests, 99.42% cov. Launch shim
+  `scripts/claude-supervise` resolves the daemon venv.
+- Neat per-project config (replaces ad-hoc host exports): tracked
+  `.claude/ccy/ccy.env` exports `CCY_CLAUDE_WRAPPER` via `${VAR:-...}`, sourced
+  **in-container** by the ccy entrypoint (fedora-desktop `e9ed32c`; CCY_VERSION
+  3.26.0, REQUIRED_CONTAINER_VERSION 2.20 forces the rebuild). In-container
+  sourcing keeps project code out of the host. Ships dry-run supervision enabled
+  for this repo; host env / `ccy --supervise` still override.
+- Next: v1 — daemon sensors (context% + idle status-line sidecar; `compacting`
+  flag on PreCompact) + supervisor state machine (Decision H) with injection.
 - Third audit `plan-audit-fable-1.md` (Fable) added — first review to examine the
   real `ccy` launchers (cloned to `untracked/repos/fedora-desktop`). Verdict
   GO-WITH-CHANGES: pivot to **ARCH-B (PTY supervisor)**, daemon stays observe-only.
