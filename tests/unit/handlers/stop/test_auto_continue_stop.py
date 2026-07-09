@@ -1955,6 +1955,222 @@ class TestHasStopExplanationStaleTranscriptRace:
         assert result is True
 
 
+class TestHasStopExplanationStaleCompleteTailRace:
+    """Stale-tail race where the stale message is itself the LAST transcript line.
+
+    The pre-existing stale-transcript guard only retries when the tail is NOT an
+    assistant message (a new user prompt was flushed after the stale turn) or
+    when the tail has no text. It CANNOT see a stale-but-complete previous-turn
+    assistant message that is itself the last line — the window where Claude
+    Code has flushed NEITHER the new user prompt NOR the new assistant response
+    when the Stop hook fires. There get_last_assistant_message() returns the
+    PREVIOUS turn's complete text and the handler judged the wrong turn (the
+    'double STOPPING BECAUSE:' report).
+
+    Discriminator: real Claude Code stamps each transcript entry at completion,
+    so a genuine current-turn final message is ~0s old while a stale
+    previous-turn tail is seconds+ old. An old tail timestamp triggers a
+    re-read poll for the real current-turn content.
+    """
+
+    @pytest.fixture
+    def handler(self) -> AutoContinueStopHandler:
+        """Create handler instance."""
+        return AutoContinueStopHandler()
+
+    @staticmethod
+    def _entry(role: str, text: str, uuid: str, age_seconds: float) -> dict[str, Any]:
+        """Build a real-format transcript entry stamped ``age_seconds`` in the past."""
+        from datetime import UTC, datetime, timedelta
+
+        ts = (datetime.now(tz=UTC) - timedelta(seconds=age_seconds)).isoformat()
+        return {
+            "type": "message",
+            "uuid": uuid,
+            "timestamp": ts,
+            "message": {"role": role, "content": [{"type": "text", "text": text}]},
+        }
+
+    def _write(self, path: Path, entries: list[dict[str, Any]]) -> None:
+        """Write a list of transcript entries as JSONL."""
+        with path.open("w") as f:
+            for entry in entries:
+                f.write(json.dumps(entry) + "\n")
+
+    def test_stale_complete_tail_with_old_timestamp_not_accepted(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """A STALE prefixed tail (old timestamp, last line) must NOT be accepted.
+
+        The exact gap: last message IS a complete assistant message carrying
+        'STOPPING BECAUSE:' but it belongs to a PREVIOUS turn; the current turn's
+        content has not flushed. Old code returns True (the gate leaks — a
+        no-prefix current stop gets allowed). The fix polls, finds nothing newer,
+        and returns False.
+        """
+        from unittest.mock import patch
+
+        from claude_code_hooks_daemon.core.transcript_reader import TranscriptReader
+
+        path = tmp_path / "transcript.jsonl"
+        self._write(
+            path,
+            [self._entry("assistant", "STOPPING BECAUSE: previous turn done", "old-1", 60.0)],
+        )
+        reader = TranscriptReader()
+        reader.load(str(path))
+
+        with patch("claude_code_hooks_daemon.handlers.stop.auto_continue_stop.time.sleep"):
+            result = handler._has_stop_explanation(reader)
+
+        assert result is False, "Stale previous-turn STOPPING BECAUSE: must not satisfy the gate"
+
+    def test_fresh_complete_tail_with_recent_timestamp_accepted(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """A recent prefixed tail (current turn, ~0s old) is accepted immediately."""
+        from claude_code_hooks_daemon.core.transcript_reader import TranscriptReader
+
+        path = tmp_path / "transcript.jsonl"
+        self._write(
+            path,
+            [self._entry("assistant", "STOPPING BECAUSE: all done", "fresh-1", 0.2)],
+        )
+        reader = TranscriptReader()
+        reader.load(str(path))
+
+        assert handler._has_stop_explanation(reader) is True
+
+    def test_stale_no_prefix_tail_superseded_by_fresh_prefixed_message(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """False-block fix: stale no-prefix tail, real prefixed content flushes.
+
+        Initial read sees a stale (old-timestamp) no-prefix assistant message as
+        the last line — the current turn's 'STOPPING BECAUSE:' has not flushed.
+        By the time the poll reloads, the real prefixed message (fresh, new uuid)
+        has been written. The poll must adopt it and ALLOW, avoiding the
+        false-block that forces a duplicate 'STOPPING BECAUSE:'.
+        """
+        from claude_code_hooks_daemon.core.transcript_reader import TranscriptReader
+
+        path = tmp_path / "transcript.jsonl"
+        self._write(
+            path,
+            [self._entry("assistant", "Working on the final step.", "stale-1", 30.0)],
+        )
+        reader = TranscriptReader()
+        reader.load(str(path))
+
+        # The real current-turn message flushes before the poll reloads.
+        with path.open("a") as f:
+            f.write(
+                json.dumps(
+                    self._entry("assistant", "STOPPING BECAUSE: task complete", "fresh-2", 0.1)
+                )
+                + "\n"
+            )
+
+        assert handler._has_stop_explanation(reader) is True
+
+    def test_recent_no_prefix_tail_not_accepted(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """A recent no-prefix tail is a genuine unexplained stop → False (fast path)."""
+        from claude_code_hooks_daemon.core.transcript_reader import TranscriptReader
+
+        path = tmp_path / "transcript.jsonl"
+        self._write(
+            path,
+            [self._entry("assistant", "I have finished the work.", "recent-1", 0.2)],
+        )
+        reader = TranscriptReader()
+        reader.load(str(path))
+
+        assert handler._has_stop_explanation(reader) is False
+
+
+class TestMessageStalenessHelpers:
+    """Pure-function tests for the timestamp/staleness helpers."""
+
+    def test_parse_iso_timestamp_handles_z_suffix(self) -> None:
+        """A trailing 'Z' (UTC designator) parses to a tz-aware datetime."""
+        from datetime import UTC
+
+        from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
+            _parse_iso_timestamp,
+        )
+
+        parsed = _parse_iso_timestamp("2026-07-09T11:25:32.123Z")
+        assert parsed is not None
+        assert parsed.tzinfo is not None
+        assert parsed.utcoffset() == UTC.utcoffset(None)
+
+    def test_parse_iso_timestamp_handles_explicit_offset(self) -> None:
+        """An explicit offset parses without modification."""
+        from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
+            _parse_iso_timestamp,
+        )
+
+        assert _parse_iso_timestamp("2026-07-09T11:25:32+00:00") is not None
+
+    def test_parse_iso_timestamp_assumes_utc_for_naive(self) -> None:
+        """A tz-naive timestamp is assumed to be UTC (never left naive)."""
+        from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
+            _parse_iso_timestamp,
+        )
+
+        parsed = _parse_iso_timestamp("2026-07-09T11:25:32")
+        assert parsed is not None
+        assert parsed.tzinfo is not None
+
+    def test_parse_iso_timestamp_none_for_missing(self) -> None:
+        """None/empty/non-string inputs yield None."""
+        from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
+            _parse_iso_timestamp,
+        )
+
+        assert _parse_iso_timestamp(None) is None
+        assert _parse_iso_timestamp("") is None
+        assert _parse_iso_timestamp(12345) is None
+
+    def test_parse_iso_timestamp_none_for_garbage(self) -> None:
+        """An unparseable string yields None (never raises)."""
+        from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
+            _parse_iso_timestamp,
+        )
+
+        assert _parse_iso_timestamp("not-a-timestamp") is None
+
+    def test_message_age_seconds_none_without_timestamp(self) -> None:
+        """A message with no timestamp in raw has an unknowable age (None)."""
+        from datetime import UTC, datetime
+
+        from claude_code_hooks_daemon.core.transcript_reader import TranscriptMessage
+        from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
+            _message_age_seconds,
+        )
+
+        msg = TranscriptMessage(role="assistant", content="hi", raw={})
+        assert _message_age_seconds(msg, datetime.now(tz=UTC)) is None
+
+    def test_message_age_seconds_positive_for_past_timestamp(self) -> None:
+        """A past timestamp yields a positive age in seconds."""
+        from datetime import UTC, datetime, timedelta
+
+        from claude_code_hooks_daemon.core.transcript_reader import TranscriptMessage
+        from claude_code_hooks_daemon.handlers.stop.auto_continue_stop import (
+            _message_age_seconds,
+        )
+
+        now = datetime.now(tz=UTC)
+        ts = (now - timedelta(seconds=42)).isoformat()
+        msg = TranscriptMessage(role="assistant", content="hi", raw={"timestamp": ts})
+        age = _message_age_seconds(msg, now)
+        assert age is not None
+        assert 41.0 < age < 43.0
+
+
 class TestSilentStopAfterToolErrorReentryGuard:
     """Tests for Plan 00101 incident — silent stop after tool error / empty turn.
 

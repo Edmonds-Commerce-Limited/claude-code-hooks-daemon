@@ -87,6 +87,70 @@ _TOOL_ERROR_RECOVERY_REASON = (
     "genuinely impossible."
 )
 
+# Prefix an assistant message uses to signal an intentional, explained stop.
+_STOP_EXPLANATION_PREFIX = "STOPPING BECAUSE:"
+
+# Turn-freshness threshold. Real Claude Code stamps each transcript entry at
+# completion, so a genuine current-turn final assistant message is ~0s old when
+# the Stop hook fires, whereas a stale previous-turn tail (whose fresh content
+# has not flushed yet) is seconds+ old. A complete tail older than this is
+# treated as suspect and triggers a re-read poll for the real current content.
+_STALE_TAIL_THRESHOLD_SECONDS = 4.0
+
+# Poll budget used to wait for the current turn's assistant text to flush.
+_HAS_EXPLANATION_RETRY_ATTEMPTS = 6
+_HAS_EXPLANATION_RETRY_DELAY_SECONDS = 0.1
+
+
+def _parse_iso_timestamp(value: object) -> datetime | None:
+    """Parse an ISO-8601 transcript timestamp into a tz-aware datetime.
+
+    Accepts a trailing ``Z`` (UTC designator) and explicit offsets. Returns
+    None for missing/non-string/unparseable values. A tz-naive timestamp is
+    assumed to be UTC (never left naive) so age arithmetic is always valid.
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    text = value[:-1] + "+00:00" if value.endswith("Z") else value
+    parsed: datetime | None = None
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        # A malformed timestamp means "age unknown", a valid domain outcome
+        # (not a swallowed error) — surface it at debug and fall through.
+        logger.debug("Ignoring unparseable transcript timestamp: %r", value)
+        parsed = None
+    if parsed is None:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
+
+def _message_age_seconds(msg: TranscriptMessage, now: datetime) -> float | None:
+    """Return how many seconds ago ``msg`` was written, or None if unknowable.
+
+    Reads the entry-level ``timestamp`` (present in real Claude Code
+    transcripts, absent in synthetic/legacy ones). None means "cannot judge
+    staleness"; callers treat that as not-stale for backward compatibility.
+    """
+    raw = msg.raw or {}
+    written = _parse_iso_timestamp(raw.get("timestamp"))
+    if written is None:
+        return None
+    return (now - written).total_seconds()
+
+
+def _message_has_text(msg: TranscriptMessage) -> bool:
+    """Return True if the message carries any text content."""
+    return bool(msg.content) or any(
+        block.block_type == "text" and block.text for block in msg.content_blocks
+    )
+
+
+def _transcript_last_is_assistant(reader: TranscriptReader) -> bool:
+    """Return True if the most recent message in the transcript is from assistant."""
+    messages = reader.get_messages()
+    return bool(messages) and messages[-1].role == "assistant"
+
 
 class AutoContinueStopHandler(Handler):
     """Intercept Stop events and enforce explicit stop reasons or auto-continue.
@@ -376,31 +440,36 @@ class AutoContinueStopHandler(Handler):
         )
 
     def _has_stop_explanation(self, reader: TranscriptReader) -> bool:
-        """Return True if any line in last assistant message starts with 'STOPPING BECAUSE:'.
+        """Return True if the CURRENT turn's assistant message explains the stop.
 
         Checks each content block independently to avoid false negatives from block
         joining. When TranscriptReader joins multiple text blocks with ' ' (space),
         'STOPPING BECAUSE:' at the start of a later block ends up mid-line in the
         joined string and the startswith check fails. Checking per-block preserves
-        the original line boundaries.
+        the original line boundaries. Falls back to the joined content string for
+        legacy/string-format messages.
 
-        Falls back to the joined content string for legacy/string-format messages.
+        Turn-freshness — the hard part. When the Stop hook fires, Claude Code may
+        not have flushed the current turn's assistant text. Reading the transcript
+        then can return the WRONG turn's message, in one of two shapes:
 
-        Race condition handling — two cases:
-        1. Thinking-only message: Claude Code writes thinking and text as separate
-           JSONL entries. If the stop event fires before the text entry is flushed,
-           the last assistant message will be thinking-only (no text blocks).
-        2. Stale previous-turn message: Stop fires before any new assistant content
-           is written for the current turn. The transcript's last message is from the
-           USER (e.g. after a continuation prompt), so get_last_assistant_message()
-           returns the PREVIOUS turn's message — which may contain "STOPPING BECAUSE:"
-           from an earlier allowed stop, causing a false positive.
+        1. Incomplete tail: the current turn's text is not written yet (thinking
+           only, or the last entry is the user's prompt). ``complete`` is False.
+        2. Stale-but-complete tail: NEITHER the new user prompt NOR the new
+           assistant response has flushed, so the tail is the PREVIOUS turn's
+           COMPLETE message. ``complete`` is True but its entry ``timestamp`` is
+           old. This is the window that produced the "double STOPPING BECAUSE:"
+           report — the previous fix only detected shape 1.
 
-        In both cases the transcript is reloaded up to 3 times with a short delay.
-        A "fresh" message is one where the last message in the transcript IS from
-        the assistant AND has text blocks. If retries are exhausted without a fresh
-        message, we return False — cannot verify the explanation belongs to the
-        current stop event.
+        Both shapes trigger a bounded re-read poll for the real current-turn
+        content. A complete tail with a recent timestamp is trusted immediately
+        (the common case), so normal stops incur no extra latency.
+
+        Known residual: on a transcript with NO entry timestamps (synthetic/legacy
+        only — real Claude Code always stamps entries) a fully-unflushed stale tail
+        cannot be told apart from a genuine current message. The complete fix would
+        be a turn-correlation id passed on the Stop ``hook_input``, which Claude
+        Code does not currently provide.
 
         Args:
             reader: Loaded transcript reader
@@ -414,11 +483,8 @@ class AutoContinueStopHandler(Handler):
             return False
 
         def _line_starts_with_prefix(text: str) -> bool:
-            return any(line.lstrip().startswith("STOPPING BECAUSE:") for line in text.splitlines())
-
-        def _has_text_blocks(m: TranscriptMessage) -> bool:
-            return bool(m.content) or any(
-                b.block_type == "text" and b.text for b in m.content_blocks
+            return any(
+                line.lstrip().startswith(_STOP_EXPLANATION_PREFIX) for line in text.splitlines()
             )
 
         def _check_msg(m: TranscriptMessage) -> bool:
@@ -428,41 +494,71 @@ class AutoContinueStopHandler(Handler):
                         return True
             return _line_starts_with_prefix(m.content)
 
-        def _last_message_is_assistant(r: TranscriptReader) -> bool:
-            """Return True if the most recent message in the transcript is from assistant."""
-            all_msgs = r.get_messages()
-            return bool(all_msgs) and all_msgs[-1].role == "assistant"
+        # A "complete" tail is the last transcript entry AND already carries text.
+        complete = _message_has_text(msg) and _transcript_last_is_assistant(reader)
 
-        # Retry condition — either:
-        # 1. No text blocks yet (thinking-only: text not flushed yet), OR
-        # 2. Last message is not assistant (stale previous-turn message: new turn
-        #    not written yet — assistant hasn't started responding to current prompt)
-        needs_retry = not _has_text_blocks(msg) or not _last_message_is_assistant(reader)
+        # A complete tail older than the freshness threshold is a suspected stale
+        # previous-turn message (shape 2). age is None when the entry carries no
+        # timestamp — treated as not-stale for backward compatibility.
+        age = _message_age_seconds(msg, datetime.now(tz=UTC))
+        suspect_stale = complete and age is not None and age > _STALE_TAIL_THRESHOLD_SECONDS
 
-        if needs_retry:
-            found_fresh = False
-            transcript_path = getattr(reader, "_path", None)
-            if transcript_path:
-                for _ in range(3):
-                    time.sleep(0.05)
-                    retry_reader = TranscriptReader()
-                    retry_reader.load(transcript_path)
-                    retry_msg = retry_reader.get_last_assistant_message()
-                    # "Fresh" = last message IS assistant AND has text blocks
-                    if (
-                        _last_message_is_assistant(retry_reader)
-                        and retry_msg
-                        and _has_text_blocks(retry_msg)
-                    ):
-                        msg = retry_msg
-                        found_fresh = True
-                        break
+        if complete and not suspect_stale:
+            return _check_msg(msg)
 
-            if not found_fresh:
-                # Retries exhausted — cannot verify explanation belongs to current stop
-                return False
+        # Poll for the current turn's content. From a complete-but-stale tail we
+        # only accept a DIFFERENT (newer-uuid) assistant message; from an
+        # incomplete tail any complete assistant message qualifies.
+        previous_uuid = msg.uuid if complete else None
+        fresh = self._await_fresh_assistant_message(reader, previous_uuid)
+        if fresh is not None:
+            return _check_msg(fresh)
 
-        return _check_msg(msg)
+        # Nothing newer arrived within the budget — cannot verify that an
+        # explanation belongs to THIS stop, so do not satisfy the gate. A
+        # genuinely delayed stop re-fires and is re-evaluated once its fresh,
+        # recent message lands; trusting the possibly-stale tail is exactly the
+        # misread this guard exists to prevent.
+        return False
+
+    def _await_fresh_assistant_message(
+        self, reader: TranscriptReader, previous_uuid: str | None
+    ) -> TranscriptMessage | None:
+        """Poll the transcript for the current turn's complete assistant message.
+
+        Reloads the transcript up to a bounded number of times, waiting briefly
+        between reads, to let Claude Code finish flushing the current turn. A
+        candidate qualifies only when it is the last transcript entry and carries
+        text; when we began from a complete-but-stale tail it must additionally
+        have a different uuid from that stale message (i.e. genuinely newer
+        content). Returns None if no qualifying message appears within the budget.
+
+        Args:
+            reader: The reader whose transcript path is polled
+            previous_uuid: The uuid of the suspected-stale tail to supersede, or
+                None when starting from an incomplete tail (any complete message
+                qualifies)
+
+        Returns:
+            The fresh assistant message, or None if none appeared in time
+        """
+        transcript_path = getattr(reader, "_path", None)
+        if not transcript_path:
+            return None
+        for _ in range(_HAS_EXPLANATION_RETRY_ATTEMPTS):
+            time.sleep(_HAS_EXPLANATION_RETRY_DELAY_SECONDS)
+            retry_reader = TranscriptReader()
+            retry_reader.load(transcript_path)
+            candidate = retry_reader.get_last_assistant_message()
+            if candidate is None:
+                continue
+            if not (_message_has_text(candidate) and _transcript_last_is_assistant(retry_reader)):
+                continue
+            if previous_uuid is not None and candidate.uuid == previous_uuid:
+                # Same stale message still at the tail — keep waiting.
+                continue
+            return candidate
+        return None
 
     def _log_stop_event(self, hook_input: dict[str, Any], decision: Decision, reason: str) -> None:
         """Log stop event to JSONL file for debugging.
