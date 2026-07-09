@@ -263,6 +263,38 @@ armed/dry-run segment + a decision log (the tmux "watch pane" idea dies with tmu
 
 **Date**: 2026-07-09
 
+### Decision H: The flagship is a compact-AND-RESUME sequence, not a single `/compact`
+
+**Context (user correction, 2026-07-09)**: injecting `/compact` alone **kills
+execution** — after compaction the agent sits idle waiting for input and the
+autonomous run dies. The real flagship is a **sequence**: compact, wait for the
+compaction to start, wait for it to finish, then inject a `continue` nudge so the
+session resumes its work. The whole point is unattended continuity across
+context-window pressure.
+
+**Detection signals (verified in daemon source)**: Claude Code fires `PreCompact`
+when compaction **starts** (already consumed by `transcript_archiver`) and a
+`SessionStart` with `source="compact"` when it **finishes**. There is no
+`PostCompact` event.
+
+**Decision — daemon-as-sensor, supervisor-as-actuator**: the daemon writes state
+transitions to the sidecar; the PTY supervisor reads them and runs a state machine
+(no screen-scraping for the compaction edges):
+
+| Phase       | Trigger (sidecar, daemon-written)                         | Supervisor action                                |
+| ----------- | --------------------------------------------------------- | ------------------------------------------------ |
+| MONITOR     | `pct ≥ threshold` AND idle AND cooldown ok                | inject `/compact`; → AWAIT_START                 |
+| AWAIT_START | `compacting=true` (from `PreCompact`)                     | confirm compact took; never inject; → AWAIT_DONE |
+| AWAIT_DONE  | `compacting=false` + idle (`SessionStart` source=compact) | inject `continue`; → MONITOR (cooldown)          |
+
+Safety rails (allowlist, cooldown, per-session cap, loop-guard, idle-gate,
+tmux-free) all still apply at the single injection choke point. The allowlist is
+now the closed set `{'/compact', 'continue'}`. A wall-clock deadman aborts
+AWAIT_START/AWAIT_DONE if the expected transition never arrives (so a failed
+compact cannot wedge the machine).
+
+**Date**: 2026-07-09
+
 ## Tasks
 
 > **⚠️ Tasks below (Phases 0–4) are the SHELVED ARCH-A design, retained only as the
