@@ -401,6 +401,14 @@ armed/dry-run segment + a decision log (the tmux "watch pane" idea dies with tmu
   default-off `CCY_CLAUDE_WRAPPER` wrap at `entrypoint.sh` `exec "$@"` + a
   `ccy --supervise` flag. Held pending the supervisor's existence (their YAGNI) —
   seam lands with, or just before, Slice 2.
+- Seam IMPLEMENTED in the fedora-desktop clone (user directive to land it now):
+  commit `3221101` on `F44` (`entrypoint.sh` `CCY_CLAUDE_WRAPPER` wrap +
+  `--supervise` flag + env forward + CCY_VERSION 3.24.0→3.25.0). Default-off
+  verified byte-for-byte; bash `-n` + shellcheck clean (0 errors, 0 new findings).
+  Committed, NOT pushed (user pushes, then rebuilds ccy on desktop). Full
+  `qa-all.bash` deferred to host (ruff absent in this container; change is
+  bash-only). `ccy --supervise` is inert/fails-loud until `claude-supervise` is
+  vendored (Slice 2).
 - Next: Slice 1 (observe-only `context_sidecar` status-line handler, pure `src/`,
   dogfoodable in this ccy session), then Slice 2 (`claude-supervise` TDD'd,
   `--dry-run` default).
