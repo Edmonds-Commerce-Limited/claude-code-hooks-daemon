@@ -390,9 +390,20 @@ armed/dry-run segment + a decision log (the tmux "watch pane" idea dies with tmu
   dogfood on this repo, which is developed using `ccy`. Recorded as Decision G.
 - ARCH-A tmux design (Phases 0–4 below) shelved as documented fallback. Live plan of
   record is `plan-audit-fable-1.md` §5, re-ordered CCY-first.
-- Next: begin Slice 1 (observe-only `context_sidecar` status-line handler, pure `src/`,
-  dogfoodable in this ccy session) and Slice 0 S-PTY spike of a minimal supervisor
-  in-container.
+- Slice 0 S-PTY spike run in-container (podman/ccy): a minimal `pty.fork` supervisor
+  passed all mechanical rails — output passthrough on a real PTY, exit-code
+  propagation (0/42), signalled-child → 128+signo, `waitpid` liveness, termios
+  restore on every exit path — and cleanly wrapped the real `claude` binary
+  (`claude-supervise-style -- claude --version` → 2.1.205, exit 0). ARCH-B mechanics
+  confirmed viable in the real launch environment.
+- CCY integration seam raised as fedora-desktop issue #31
+  (https://github.com/LongTermSupport/fedora-desktop/issues/31): optional,
+  default-off `CCY_CLAUDE_WRAPPER` wrap at `entrypoint.sh` `exec "$@"` + a
+  `ccy --supervise` flag. Held pending the supervisor's existence (their YAGNI) —
+  seam lands with, or just before, Slice 2.
+- Next: Slice 1 (observe-only `context_sidecar` status-line handler, pure `src/`,
+  dogfoodable in this ccy session), then Slice 2 (`claude-supervise` TDD'd,
+  `--dry-run` default).
 
 ### 2026-06-22
 
