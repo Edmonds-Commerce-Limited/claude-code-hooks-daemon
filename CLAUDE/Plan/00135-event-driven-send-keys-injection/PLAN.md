@@ -267,30 +267,33 @@ armed/dry-run segment + a decision log (the tmux "watch pane" idea dies with tmu
 
 **Context (user correction, 2026-07-09)**: injecting `/compact` alone **kills
 execution** — after compaction the agent sits idle waiting for input and the
-autonomous run dies. The real flagship is a **sequence**: compact, wait for the
-compaction to start, wait for it to finish, then inject a `continue` nudge so the
-session resumes its work. The whole point is unattended continuity across
+autonomous run dies. The real flagship is a short **sequence**: inject `/compact`,
+wait until compaction is **definitely under way**, then inject a `continue` nudge.
+Per the user, a `continue` injected once compaction has started **buffers into the
+post-compact session** and the agent resumes — so we do NOT need to wait for
+compaction to finish. The whole point is unattended continuity across
 context-window pressure.
 
 **Detection signals (verified in daemon source)**: Claude Code fires `PreCompact`
-when compaction **starts** (already consumed by `transcript_archiver`) and a
-`SessionStart` with `source="compact"` when it **finishes**. There is no
-`PostCompact` event.
+when compaction **starts** (already consumed by `transcript_archiver`) — that is
+the "definitely under way" signal gating the `continue` injection. (A
+`SessionStart` with `source="compact"` fires when compaction **finishes**; there is
+no `PostCompact` event. The finish edge is now only optional — for
+observability/cooldown — not required to trigger `continue`.)
 
 **Decision — daemon-as-sensor, supervisor-as-actuator**: the daemon writes state
-transitions to the sidecar; the PTY supervisor reads them and runs a state machine
-(no screen-scraping for the compaction edges):
+transitions to the sidecar; the PTY supervisor reads them and runs a two-state
+machine (no screen-scraping for the compaction edges):
 
-| Phase       | Trigger (sidecar, daemon-written)                         | Supervisor action                                |
-| ----------- | --------------------------------------------------------- | ------------------------------------------------ |
-| MONITOR     | `pct ≥ threshold` AND idle AND cooldown ok                | inject `/compact`; → AWAIT_START                 |
-| AWAIT_START | `compacting=true` (from `PreCompact`)                     | confirm compact took; never inject; → AWAIT_DONE |
-| AWAIT_DONE  | `compacting=false` + idle (`SessionStart` source=compact) | inject `continue`; → MONITOR (cooldown)          |
+| Phase            | Trigger (sidecar, daemon-written)          | Supervisor action                                                                                        |
+| ---------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| MONITOR          | `pct ≥ threshold` AND idle AND cooldown ok | inject `/compact`; → AWAIT_COMPACTING                                                                    |
+| AWAIT_COMPACTING | `compacting=true` (from `PreCompact`)      | inject `continue` (buffers into the post-compact session, which resumes the agent); → MONITOR (cooldown) |
 
 Safety rails (allowlist, cooldown, per-session cap, loop-guard, idle-gate,
 tmux-free) all still apply at the single injection choke point. The allowlist is
 now the closed set `{'/compact', 'continue'}`. A wall-clock deadman aborts
-AWAIT_START/AWAIT_DONE if the expected transition never arrives (so a failed
+the AWAIT_COMPACTING phase if the expected transition never arrives (so a failed
 compact cannot wedge the machine).
 
 **Date**: 2026-07-09
