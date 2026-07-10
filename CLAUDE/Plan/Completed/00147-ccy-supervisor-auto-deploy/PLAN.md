@@ -1,6 +1,6 @@
 # Plan 00147: ccy Supervisor Auto-Deploy
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-07-10
 **Owner**: joseph / Claude (Opus)
 **Priority**: High
@@ -135,20 +135,21 @@ consistent pattern. Folded into Phase 4.
 
 ### Phase 6: Verify
 
-- [ ] 🔄 **Task 6.1**: Full QA (`./scripts/qa/llm_qa.py all`) green.
+- [x] ✅ **Task 6.1**: Full QA (`./scripts/qa/llm_qa.py all`) — 13/13 PASSED
+  (9763 tests, 95.5% coverage).
 - [x] ✅ **Task 6.2**: Daemon restart → RUNNING (with the new config model + dogfood flag).
 - [x] ✅ **Task 6.3**: Dogfooded the deploy here — self-install no-op:
   `deployed=False`, "Supervisor already in place (self-install; source == target)".
 
 ## Success Criteria
 
-- [ ] One tracked supervisor copy (`.claude/ccy/`); no `src/` duplicate.
-- [ ] `deploy_ccy_supervisor_if_enabled` honours the tri-state table with full
+- [x] One tracked supervisor copy (`.claude/ccy/`); no `src/` duplicate.
+- [x] `deploy_ccy_supervisor_if_enabled` honours the tri-state table with full
   coverage (incl. self-install no-op).
-- [ ] Fresh install and upgrade both deploy/refresh the supervisor when a
+- [x] Fresh install and upgrade both deploy/refresh the supervisor when a
   `.claude/ccy/` dir exists and the flag is not `false`.
-- [ ] Upgrade advisory recommends enabling the flag (config-changes manifest).
-- [ ] QA green, daemon RUNNING.
+- [x] Upgrade advisory recommends enabling the flag (config-changes manifest).
+- [x] QA green, daemon RUNNING.
 
 ## Notes & Updates
 
@@ -166,3 +167,7 @@ consistent pattern. Folded into Phase 4.
   `src/` duplicate. Superseded the initial "move into package data" approach
   (reverted). Deploy sources from `<daemon_root>/.claude/ccy/` (present in every
   git-clone install) and self-install no-ops when source==target.
+- **Delivered** to `main` in commits `ba3b822` (CcyConfig + deploy function),
+  `0396c60` (install/upgrade wiring), `0c1297a` (dogfood config + config-changes
+  manifest + docs). QA 13/13, daemon RUNNING. Ships in the next release (v3.33.0
+  config-changes manifest staged).

@@ -21,12 +21,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Safety-first / opt-in (`get_default_enabled()` → False): exact-payload allowlist, loop-guard sentinel, idle-gating, cooldown + per-session cap, tmux-presence no-op, no Stop-handler collision; see `research-note.md` + `context.md`
   - **High-stakes**: potential game-changer done well, reputation risk done badly — hostile multi-lens review required before build
 
-- [00147: ccy Supervisor Auto-Deploy](00147-ccy-supervisor-auto-deploy/PLAN.md) - In Progress (config-gated deploy of the Plan 00135 PTY supervisor into `.claude/ccy/` on install/upgrade)
-
-  - Keeps ONE tracked copy of `claude-supervise.py` at `.claude/ccy/` (pure dogfooding, no `src/` duplicate); the deploy sources from the daemon-clone's `.claude/ccy/` (present in every git-clone install) and self-install no-ops when source==target
-  - `ccy.deploy_supervisor` tri-state flag (true/false/absent): deploys/refreshes when the target's `.claude/ccy/` dir is detected and the flag is not `false`; absent = deploy + recommend enabling (config-changes `recommended: true`)
-  - Wired into `install_version.sh` + both `upgrade_version.sh` paths via a `deploy-ccy-supervisor` CLI subcommand; mirrors the `mkplan.bash` `deploy_*_if_enabled` pattern
-
 ### Memory / Documentation Policy
 
 - [00132: PostToolUse Progressive-Disclosure Reminder on Project-Doc Markdown Writes](00132-progressive-disclosure-md-write-reminder/PLAN.md) - Not Started (awaiting sign-off)
@@ -120,6 +114,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00147: ccy Supervisor Auto-Deploy](Completed/00147-ccy-supervisor-auto-deploy/PLAN.md) - Complete
+
+  - Config-gated auto-deploy of the Plan 00135 PTY supervisor (`claude-supervise.py`) into a project's `.claude/ccy/` on install/upgrade. ONE tracked copy at `.claude/ccy/` (pure dogfooding, no `src/`/package duplicate); the deploy sources from the daemon-clone's `.claude/ccy/` (present in every git-clone install) and self-install no-ops when source==target. `ccy.deploy_supervisor` tri-state flag (true=deploy / false=opt-out / absent=deploy+recommend), gated on the target's `.claude/ccy/` dir. Wired via `python -c` heredocs into `install_version.sh` + both `upgrade_version.sh` paths (mirrors the `deploy_skills` / `deploy_plan_workflow_if_enabled` convention). Ships in v3.33.0 with a config-changes manifest (`recommended: true`). Delivered `ba3b822`/`0396c60`/`0c1297a`; QA 13/13, daemon RUNNING.
 
 - [00146: Hard-block rhetorical continue questions in explained stops](Completed/00146-stop-hard-block-rhetorical-continue/PLAN.md) - Complete
 
@@ -987,8 +985,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 147 (count = `hooksdaemon.latestPlanNumber` git counter; 00145 was allocated by the counter but its folder is not present on this branch)
-- **Completed**: 123 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 17 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Completed**: 124 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
+- **Active**: 16 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102); plus draft folders deleted and no longer on disk (00036 empty draft, 00038 superseded by 00045, 00073 orphan empty folder removed during Plan 00107 housekeeping)
 - **Last reconciled by**: Plan 00144 Task 2.2 sweep remediation
