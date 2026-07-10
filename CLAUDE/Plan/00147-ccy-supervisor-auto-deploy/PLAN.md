@@ -103,20 +103,23 @@ skip the copy (already in place).
   target-dir-absent no-op, chmod 0o755, missing-source skip-with-message.
 - [x] ✅ **Task 2.2**: Implement `install/ccy_supervisor.py`.
 
-### Phase 3: CLI subcommand (TDD)
+### Phase 3: Shell wiring (superseded CLI-subcommand approach)
 
-- [ ] ⬜ **Task 3.1**: Failing tests for the `deploy-ccy-supervisor` subcommand
-  (arg parsing, daemon-root resolution, config load, exit codes).
-- [ ] ⬜ **Task 3.2**: Implement + register the subcommand in the daemon CLI.
+No CLI subcommand: the established convention for these config-gated deploys is
+a `python -c` heredoc in the install/upgrade scripts (as `deploy_skills` and
+`deploy_plan_workflow_if_enabled` do). Mirrored that instead — simpler, one
+consistent pattern. Folded into Phase 4.
 
 ### Phase 4: Wire into install + upgrade
 
-- [ ] ⬜ **Task 4.1**: Call the subcommand at the fresh-install entry
-  (`install_version.sh`, alongside `deploy_skills`).
-- [ ] ⬜ **Task 4.2**: Call it in both `upgrade_version.sh` paths (full + fast).
-- [ ] ⬜ **Task 4.3**: Integration test(s): fresh-install fixture deploys the
-  supervisor; upgrade fixture refreshes it; explicit `false` skips;
-  self-install no-op.
+- [x] ✅ **Task 4.1**: `python -c` heredoc calling
+  `deploy_ccy_supervisor_if_enabled(DAEMON_DIR, PROJECT_ROOT, TARGET_CONFIG)` at
+  the fresh-install entry (`install_version.sh` Step 14b).
+- [x] ✅ **Task 4.2**: Same heredoc in both `upgrade_version.sh` paths (full
+  Step 14b + idempotent fast path). Shellcheck clean.
+- [x] ✅ **Task 4.3**: Integration test deploying the REAL canonical supervisor
+  (repo root as daemon_root → tmp client project); fresh-install / refresh /
+  explicit-false / self-install-no-op all covered by the deploy-function tests.
 
 ### Phase 5: Release plumbing + dogfood config
 

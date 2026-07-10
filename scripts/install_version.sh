@@ -437,6 +437,31 @@ else
 fi
 
 # ============================================================
+# Step 14b: Deploy ccy PTY supervisor (config-gated — Plan 00147)
+# ============================================================
+#
+# Deploys .claude/ccy/claude-supervise.py into the project's .claude/ccy/ when
+# a .claude/ccy/ directory is present and ccy.deploy_supervisor is not false.
+# Sources the tracked script from the daemon clone ($DAEMON_DIR/.claude/ccy/).
+
+log_step "14b" "Deploying ccy supervisor (if a .claude/ccy/ project)"
+
+if "$VENV_PYTHON" -c "
+from pathlib import Path
+from claude_code_hooks_daemon.install.ccy_supervisor import deploy_ccy_supervisor_if_enabled
+
+result = deploy_ccy_supervisor_if_enabled(Path('$DAEMON_DIR'), Path('$PROJECT_ROOT'), Path('$TARGET_CONFIG'))
+for msg in result.messages:
+    print(f'  -> {msg}')
+if result.recommend_enable:
+    print('  -> TIP: set ccy.deploy_supervisor: true in .claude/hooks-daemon.yaml to keep this on')
+"; then
+    print_success "ccy supervisor deployment complete"
+else
+    print_warning "ccy supervisor deployment had issues (non-fatal)"
+fi
+
+# ============================================================
 # Step 15: Handler profile (optional, via HANDLER_PROFILE=recommended|strict)
 # ============================================================
 

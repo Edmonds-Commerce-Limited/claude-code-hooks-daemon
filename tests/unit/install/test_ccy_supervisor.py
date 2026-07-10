@@ -170,3 +170,22 @@ class TestCcySupervisorSourcePath:
         """
         repo_root = Path(__file__).resolve().parents[3]
         assert ccy_supervisor_source_path(repo_root).is_file()
+
+    def test_deploys_the_real_canonical_supervisor(self, tmp_path: Path) -> None:
+        """End-to-end: the REAL 32K supervisor deploys from this repo into a client.
+
+        Uses the actual repo root as daemon_root (as the shell wiring does) and a
+        separate tmp project as the target, so it exercises the true source file
+        and layout — not a stub.
+        """
+        repo_root = Path(__file__).resolve().parents[3]
+        project_root = tmp_path / "client"
+        (project_root / ".claude" / "ccy").mkdir(parents=True)
+        config_path = _write_config(project_root, "ccy:\n  deploy_supervisor: true\n")
+
+        result = deploy_ccy_supervisor_if_enabled(repo_root, project_root, config_path)
+
+        target = project_root / ".claude" / "ccy" / SUPERVISOR_SCRIPT_NAME
+        assert result.deployed is True
+        assert target.read_bytes() == ccy_supervisor_source_path(repo_root).read_bytes()
+        assert stat.S_IMODE(target.stat().st_mode) == 0o755

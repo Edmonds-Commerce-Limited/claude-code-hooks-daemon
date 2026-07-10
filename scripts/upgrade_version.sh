@@ -261,6 +261,23 @@ for msg in result.messages:
         print_warning "Plan workflow deployment had issues (non-fatal)"
     fi
 
+    # Plan 00147: refresh the ccy supervisor on the idempotent fast path too, so
+    # already-at-target re-runs also deliver the current claude-supervise.py.
+    if "$VENV_PYTHON" -c "
+from pathlib import Path
+from claude_code_hooks_daemon.install.ccy_supervisor import deploy_ccy_supervisor_if_enabled
+
+result = deploy_ccy_supervisor_if_enabled(Path('$DAEMON_DIR'), Path('$PROJECT_ROOT'), Path('$TARGET_CONFIG'))
+for msg in result.messages:
+    print(f'  -> {msg}')
+if result.recommend_enable:
+    print('  -> TIP: set ccy.deploy_supervisor: true in .claude/hooks-daemon.yaml to keep this on')
+"; then
+        print_success "ccy supervisor deployment complete"
+    else
+        print_warning "ccy supervisor deployment had issues (non-fatal)"
+    fi
+
     if ! restart_daemon_verified "$VENV_PYTHON"; then
         fail_fast "Daemon failed to start after idempotent upgrade"
     fi
@@ -715,6 +732,31 @@ for msg in result.messages:
     print_success "Plan workflow deployment complete"
 else
     print_warning "Plan workflow deployment had issues (non-fatal)"
+fi
+
+# ============================================================
+# Step 14b: Redeploy ccy PTY supervisor (config-gated — Plan 00147)
+# ============================================================
+#
+# Refreshes .claude/ccy/claude-supervise.py from the upgraded daemon clone when
+# a .claude/ccy/ dir is present and ccy.deploy_supervisor is not false, so ccy
+# projects always run the current supervisor after an upgrade.
+
+log_step "14b" "Deploying ccy supervisor (if a .claude/ccy/ project)"
+
+if "$VENV_PYTHON" -c "
+from pathlib import Path
+from claude_code_hooks_daemon.install.ccy_supervisor import deploy_ccy_supervisor_if_enabled
+
+result = deploy_ccy_supervisor_if_enabled(Path('$DAEMON_DIR'), Path('$PROJECT_ROOT'), Path('$TARGET_CONFIG'))
+for msg in result.messages:
+    print(f'  -> {msg}')
+if result.recommend_enable:
+    print('  -> TIP: set ccy.deploy_supervisor: true in .claude/hooks-daemon.yaml to keep this on')
+"; then
+    print_success "ccy supervisor deployment complete"
+else
+    print_warning "ccy supervisor deployment had issues (non-fatal)"
 fi
 
 # ============================================================
