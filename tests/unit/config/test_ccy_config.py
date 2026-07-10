@@ -65,15 +65,11 @@ class TestCcyConfigInRootConfig:
         assert config.ccy.deploy_supervisor is None
 
     def test_root_config_ccy_from_dict(self) -> None:
-        config = Config.model_validate(
-            {"version": "2.0", "ccy": {"deploy_supervisor": True}}
-        )
+        config = Config.model_validate({"version": "2.0", "ccy": {"deploy_supervisor": True}})
         assert config.ccy.deploy_supervisor is True
 
     def test_root_config_ccy_false_from_dict(self) -> None:
-        config = Config.model_validate(
-            {"version": "2.0", "ccy": {"deploy_supervisor": False}}
-        )
+        config = Config.model_validate({"version": "2.0", "ccy": {"deploy_supervisor": False}})
         assert config.ccy.deploy_supervisor is False
 
     def test_root_config_ccy_from_yaml(self, tmp_path: Path) -> None:

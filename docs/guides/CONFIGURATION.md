@@ -89,6 +89,32 @@ daemon:
 
 ---
 
+## ccy Container Workflow
+
+The `ccy` section configures the ccy (claude-yolo) container workflow. It
+currently holds a single flag that governs auto-deploy of the standalone PTY
+supervisor (`claude-supervise.py`) — the process that watches the daemon-written
+context sidecar and, when context goes RED while the session is idle, injects a
+real `/compact` and auto-resumes with `continue`.
+
+```yaml
+ccy:
+  deploy_supervisor: true   # true | false | (absent)
+```
+
+| Value      | Behaviour                                                                                                                                                                        |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `true`     | On install/upgrade, deploy/refresh `claude-supervise.py` into the project's `.claude/ccy/` — but only when a `.claude/ccy/` directory already exists (i.e. it is a ccy project). |
+| `false`    | Never deploy (explicit opt-out).                                                                                                                                                 |
+| _(absent)_ | Deploy anyway when a `.claude/ccy/` directory exists, and recommend setting the flag `true`. Distinguished from an explicit `false`.                                             |
+
+Projects that do not use the ccy container workflow (no `.claude/ccy/`
+directory) are unaffected — the deploy is a no-op. Deploying the script does
+**not** arm it; wiring it as `CCY_CLAUDE_WRAPPER` is the launcher's job (see the
+project's `.claude/ccy/ccy.env`).
+
+---
+
 ## Handler Configuration
 
 Handlers are grouped by the event type they respond to. Each handler has at minimum an `enabled` flag and a `priority` number.

@@ -1,0 +1,31 @@
+version: "3.33.0"
+date: "2026-07-10"
+breaking: false
+config_changes:
+  added:
+    - key: ccy.deploy_supervisor
+      description: >-
+        New tri-state flag (Plan 00147) gating auto-deploy of the standalone ccy
+        PTY supervisor (claude-supervise.py, Plan 00135) into a project's
+        .claude/ccy/ directory on install and upgrade. The supervisor watches the
+        daemon-written context sidecar and, when context goes RED and the session
+        is idle, injects a real /compact and auto-resumes with continue. true =
+        deploy/refresh when a .claude/ccy/ dir exists; false = never deploy
+        (opt-out); absent = deploy anyway when a .claude/ccy/ dir exists AND
+        recommend setting the flag true. Only affects projects that use the ccy
+        container workflow (those with a .claude/ccy/ directory); a no-op
+        everywhere else.
+      recommended: true
+      recommended_value: true
+      dormant: false
+      example_yaml: |
+        ccy:
+          deploy_supervisor: true
+      migration_note: >-
+        No action needed for non-ccy projects. For ccy projects, set true to keep
+        claude-supervise.py auto-refreshed from the daemon on every upgrade, or
+        false to opt out. Deploying the script does NOT arm it — arming it as
+        CCY_CLAUDE_WRAPPER remains the launcher's job (see .claude/ccy/ccy.env).
+  renamed: []
+  removed: []
+  changed: []

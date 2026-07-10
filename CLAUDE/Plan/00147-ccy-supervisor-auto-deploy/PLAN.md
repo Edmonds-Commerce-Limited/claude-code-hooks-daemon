@@ -123,20 +123,22 @@ consistent pattern. Folded into Phase 4.
 
 ### Phase 5: Release plumbing + dogfood config
 
-- [ ] ⬜ **Task 5.1**: Author
-  `CLAUDE/UPGRADES/UNRELEASED/config-changes/v{X.Y.Z}.yaml` with the new
+- [x] ✅ **Task 5.1**: Authored
+  `CLAUDE/UPGRADES/UNRELEASED/config-changes/v3.33.0.yaml` with the
   `ccy.deploy_supervisor` key, `recommended: true`, `recommended_value: true`,
   `dormant: false`.
-- [ ] ⬜ **Task 5.2**: Set `ccy.deploy_supervisor: true` in this repo's
-  `.claude/hooks-daemon.yaml` (dogfood).
-- [ ] ⬜ **Task 5.3**: Update generated docs / HANDLER_REFERENCE for the flag.
+- [x] ✅ **Task 5.2**: Set `ccy.deploy_supervisor: true` in this repo's
+  `.claude/hooks-daemon.yaml` (dogfood); daemon reloads it (`= True`).
+- [x] ✅ **Task 5.3**: Documented the `ccy` section in the canonical
+  `docs/guides/CONFIGURATION.md` (top-level config doc; the flag is not a handler
+  so HANDLER_REFERENCE / generate-docs do not apply).
 
 ### Phase 6: Verify
 
-- [ ] ⬜ **Task 6.1**: Full QA (`./scripts/qa/llm_qa.py all`) green.
-- [ ] ⬜ **Task 6.2**: Daemon restart → RUNNING.
-- [ ] ⬜ **Task 6.3**: Dogfood: run the CLI subcommand here, confirm it no-ops
-  cleanly (source==target) with the right message.
+- [ ] 🔄 **Task 6.1**: Full QA (`./scripts/qa/llm_qa.py all`) green.
+- [x] ✅ **Task 6.2**: Daemon restart → RUNNING (with the new config model + dogfood flag).
+- [x] ✅ **Task 6.3**: Dogfooded the deploy here — self-install no-op:
+  `deployed=False`, "Supervisor already in place (self-install; source == target)".
 
 ## Success Criteria
 

@@ -138,7 +138,9 @@ class TestDeployCcySupervisorIfEnabled:
         result = deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
 
         assert result.deployed is True
-        assert (ccy / SUPERVISOR_SCRIPT_NAME).read_text() == "#!/usr/bin/env python3\n# NEW version\n"
+        assert (
+            ccy / SUPERVISOR_SCRIPT_NAME
+        ).read_text() == "#!/usr/bin/env python3\n# NEW version\n"
 
     def test_missing_config_file_treated_as_absent_flag(self, tmp_path: Path) -> None:
         """No config file on disk → model default (None) → deploy + recommend."""

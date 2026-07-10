@@ -499,6 +499,13 @@ project_handlers:
   enabled: true
   path: .claude/project-handlers
 
+# ccy container-workflow config (Plan 00147). deploy_supervisor auto-deploys the
+# standalone PTY supervisor (.claude/ccy/claude-supervise.py) into a project's
+# .claude/ccy/ on install/upgrade. In this repo (self-install) source == target,
+# so the deploy is a no-op — the flag is set true to dogfood the enabled path.
+ccy:
+  deploy_supervisor: true
+
 # Pseudo-events: synthetic events triggered by real events with frequency control
 pseudo_events:
   nitpick:
