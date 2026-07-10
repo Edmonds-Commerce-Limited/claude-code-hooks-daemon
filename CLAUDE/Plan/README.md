@@ -21,6 +21,12 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Safety-first / opt-in (`get_default_enabled()` → False): exact-payload allowlist, loop-guard sentinel, idle-gating, cooldown + per-session cap, tmux-presence no-op, no Stop-handler collision; see `research-note.md` + `context.md`
   - **High-stakes**: potential game-changer done well, reputation risk done badly — hostile multi-lens review required before build
 
+- [00148: ccy Supervisor Arm on Deploy](00148-ccy-supervisor-arm-on-deploy/PLAN.md) - In Progress (hotfix for v3.33.0)
+
+  - v3.33.0 (Plan 00147) auto-deploys `claude-supervise.py` but never **arms** it — the deploy copies the script yet never writes the `CCY_CLAUDE_WRAPPER` export in `.claude/ccy/ccy.env` the launcher sources, so in clients the supervisor is a no-op
+  - Fix: deploy now **deploys + arms** by default — ensures an armed, path-independent (`${BASH_SOURCE[0]}`-self-locating) `CCY_CLAUDE_WRAPPER` in `ccy.env`, idempotently and respecting any pre-existing user setting; `true` and absent both arm, `false` arms nothing; self-install no-ops
+  - Ships as patch v3.33.1
+
 ### Memory / Documentation Policy
 
 - [00132: PostToolUse Progressive-Disclosure Reminder on Project-Doc Markdown Writes](00132-progressive-disclosure-md-write-reminder/PLAN.md) - Not Started (awaiting sign-off)
