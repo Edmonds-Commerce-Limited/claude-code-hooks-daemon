@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.34.2] - 2026-07-10
+
+This is a **patch release** fixing two High-severity bugs: a Stop-hook
+false-positive that forced duplicate stop explanations, and an ANSI-poisoning
+regression that left the v3.34.1 ccy supervisor permanently unable to inject.
+No breaking changes; no new config keys.
+
+### Fixed
+
+- **Stop handler wrongly denied a valid explained stop right after `/compact` (double `STOPPING BECAUSE:`)** — `auto_continue_stop`'s current-turn resolver treated any complete final message older than the 4-second staleness threshold as a suspected stale *previous* turn and polled for a newer message to supersede it. When the current turn's final message was itself the latest (routine right after a `/compact`, where it is already several seconds old by the time the Stop hook fires), no successor ever arrived, the poll returned `None`, and the handler fell through to the default branch — denying a perfectly valid `STOPPING BECAUSE:` stop as "unexplained" and forcing the agent to repeat its stop line. `_resolve_current_turn_message()` now falls back to trusting an unsuperseded complete tail instead of returning `None`; a genuine newer message is still adopted whenever one exists (leak protection preserved and tested).
+- **ccy supervisor never injected `/compact` in a real terminal — empty-input-box guard poisoned by ANSI sequences (Bug C)** — the v3.34.1 empty-box guard counted terminal-**generated** escape sequences (focus events `ESC[I`/`ESC[O`, cursor-position and device-attribute reports, mouse tracking) as typed content. Those bytes are never cleared, so a single window-focus switch left the input box modelled "non-empty" for the whole session and **every** injection tick was deferred (28 deferrals, 0 injections in the field) — the armed supervisor's core auto-`/compact`-on-red feature was inert in any focus-switching terminal. `HumanInputLine.feed()` now runs a streaming ANSI state machine that consumes whole control sequences (CSI, SS3, OSC/string, even when split across `read()` chunks) as non-content, while still counting real box content: printable keystrokes, bracketed-paste payload (`ESC[200~`…`ESC[201~`), and up/down history-recall arrows. The conservative bias is preserved — unrecognised control bytes and UTF-8 still count, and malformed sequences fall back to ground without swallowing later content.
+
 ## [3.34.1] - 2026-07-10
 
 This is a **patch release** fixing two High-severity bugs in the Plan 00135 PTY
