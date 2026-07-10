@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.34.0] - 2026-07-10
+
+This is a **minor release** that makes the v3.33.0 ccy supervisor auto-deploy
+(Plan 00148) actually work end-to-end and enforces its correct setup. v3.33.0
+deployed `claude-supervise.py` but never **armed** it, and projects with a
+blanket-`*` `.claude/ccy/.gitignore` silently ignored the deployed files, so in
+client projects the supervisor was a no-op that never reached teammates. Now the
+deploy **deploys, arms, and keeps the files trackable**, and a new SessionStart
+advisory handler detects the brick-risk states an armed-but-misconfigured
+supervisor can create. No breaking changes.
+
+### Added
+
+- **`ccy_supervisor_integrity` SessionStart handler (Plan 00148)** — When a ccy project's supervisor is **armed** (`.claude/ccy/ccy.env` exports `CCY_CLAUDE_WRAPPER` referencing `claude-supervise.py`), this advisory handler warns — never blocks — if the setup is brick-risky: the script is **missing**, **not executable**, or **git-ignored** (so it never reaches teammates and `ccy` launches break). Silent for non-ccy projects and un-armed setups. Enabled by default (opt out with `handlers.session_start.ccy_supervisor_integrity.enabled: false`).
+
+### Changed
+
+- **ccy deploy now keeps the supervisor files trackable (Plan 00148)** — After deploying/arming, `install/ccy_supervisor.py` appends whitelist exceptions (`!claude-supervise.py`, `!ccy.env`, `!.gitignore`, `!Dockerfile`) to an **existing** `.claude/ccy/.gitignore` so the common blanket `*` ignore no longer silently drops the supervisor from the repo. It does not fabricate a policy file when none exists — only the files we own are made trackable, never the rest of the project's ignore policy.
+
+### Fixed
+
+- **ccy supervisor auto-deploy did not arm `CCY_CLAUDE_WRAPPER` (Plan 00148)** — `install/ccy_supervisor.py` now writes/refreshes a self-locating, armed `CCY_CLAUDE_WRAPPER` export in `.claude/ccy/ccy.env` after deploying `claude-supervise.py`, so the supervisor introduced in v3.33.0 actually runs instead of sitting deployed-but-inert. The armed line self-locates via `${BASH_SOURCE[0]}`, so one line serves both the podman `/workspace` mount and an arbitrary LXC project dir. Arming is idempotent and skipped when the wrapper is already set (or deliberately commented out); `ccy.deploy_supervisor: false` still opts out of both deploy and arm.
+
 ## [3.33.0] - 2026-07-10
 
 This is a **minor release** delivering an event-driven compact-and-resume PTY supervisor system (Plan 00135) and its auto-deploy pipeline (Plan 00147): a standalone, stdlib-only `claude-supervise.py` watches a daemon-written context-state sidecar and, when context goes RED and the session is idle, injects a real bot-chromed `/compact` and auto-resumes with `continue` once compaction completes — closing the loop between "context is getting full" and "someone actually acts on it." The daemon becomes the sensor via three new handlers (`context_sidecar`, `context_tiers`, `compaction_signal`); a new tri-state `ccy.deploy_supervisor` config flag auto-deploys the supervisor into a project's `.claude/ccy/` on install and upgrade. Also hardens `auto_continue_stop` against rhetorical continue-questions smuggled inside explained stops and a stale previous-turn tail misjudgement, and collapses repeated nitpick advisories (dismissive/hedging language) to one per category per session.

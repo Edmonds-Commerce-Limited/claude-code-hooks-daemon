@@ -1,4 +1,4 @@
-version: "3.33.1"
+version: "3.34.0"
 truth_changes:
   - was: >
       The ccy supervisor auto-deploy (v3.33.0, ccy.deploy_supervisor) copies
@@ -7,7 +7,7 @@ truth_changes:
       install/upgrade the deployed supervisor is present but inert (it never
       wraps the claude session) until someone hand-edits ccy.env.
     now: >
-      The ccy deploy now DEPLOYS AND ARMS by default (v3.33.1). After copying
+      The ccy deploy now DEPLOYS AND ARMS by default (v3.34.0). After copying
       claude-supervise.py it ensures .claude/ccy/ccy.env exports an armed,
       self-locating CCY_CLAUDE_WRAPPER (resolves the supervisor path from
       ccy.env's own directory at source time, so one line serves both the
