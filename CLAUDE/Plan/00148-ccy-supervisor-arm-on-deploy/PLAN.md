@@ -18,10 +18,19 @@ the deploy never writes `ccy.env`, a client project's `${CCY_CLAUDE_WRAPPER:-}`
 stays empty, the launcher runs plain `claude`, and the freshly-deployed
 supervisor is inert — a complete no-op. This is a field-reported bug.
 
-This hotfix makes the deploy **deploy + arm** by default. After copying the
-script it ensures `.claude/ccy/ccy.env` exports an armed, path-independent
+This fix makes the deploy **deploy + arm** by default. After copying the script
+it ensures `.claude/ccy/ccy.env` exports an armed, path-independent
 `CCY_CLAUDE_WRAPPER`, idempotently and respecting any pre-existing user setting.
-It ships as a patch release (v3.33.1).
+
+**Scope grew during review (field feedback):** projects were also leaving the
+supervisor files git-ignored (the common ccy `.gitignore` is a blanket `*`), so
+even an armed supervisor never reached teammates. And an armed-but-broken setup
+(script missing / not executable / ignored) can brick `ccy` launches. So the fix
+also (a) makes the deploy append whitelist exceptions for our files to an
+existing `.claude/ccy/.gitignore` — without owning the rest of the project's
+ignore policy — and (b) adds a daemon SessionStart advisory handler
+(`ccy_supervisor_integrity`) that detects and warns on the brick-risk states.
+The new handler makes this a **MINOR** release (**v3.34.0**), not a patch.
 
 ## Goals
 
@@ -62,20 +71,37 @@ It ships as a patch release (v3.33.1).
   self-locating wrapper form (resolves identically here; fixes LXC fragility).
 - [x] ✅ **Task 2.2**: Updated `CcyConfig` docstring/field text and
   `docs/guides/CONFIGURATION.md` — deploy now arms by default.
-- [x] ✅ **Task 2.3**: Added `CLAUDE/UPGRADES/UNRELEASED/truth-changes/v3.33.1.yaml`
-  (the "deploy does not arm" statement became false).
+- [x] ✅ **Task 2.3**: Added the truth-change manifest (the "deploy does not arm"
+  statement became false); renamed to `v3.34.0.yaml` when the bump became MINOR.
 
-### Phase 3: Verify + release
+### Phase 3: Ensure files are tracked (field feedback)
 
-- [ ] 🔄 **Task 3.1**: `./scripts/qa/llm_qa.py all` → 13/13; daemon restart RUNNING.
-- [ ] ⬜ **Task 3.2**: `/release` patch → v3.33.1.
+- [x] ✅ **Task 3.1**: TDD — deploy appends whitelist exceptions for our files
+  (`claude-supervise.py`, `ccy.env`, `.gitignore`, `Dockerfile`) to an EXISTING
+  `.claude/ccy/.gitignore`; absent `.gitignore` left alone (not our policy to
+  own). Real-git-repo test proves `git check-ignore` no longer ignores them.
+
+### Phase 4: Daemon enforcement (field feedback)
+
+- [x] ✅ **Task 4.1**: TDD new SessionStart advisory handler
+  `ccy_supervisor_integrity` — when armed, warns if the script is missing, not
+  executable, or git-ignored (brick risk). Silent for non-ccy / un-armed. 100%
+  covered; registered (HandlerID + Priority 58 + config); daemon RUNNING; no
+  false alarm in this dogfood repo.
+
+### Phase 5: Verify + release (MINOR — v3.34.0)
+
+- [ ] 🔄 **Task 5.1**: `./scripts/qa/llm_qa.py all` → 13/13; daemon restart RUNNING.
+- [ ] ⬜ **Task 5.2**: `/release` MINOR → v3.34.0.
 
 ## Success Criteria
 
-- [ ] Deploy result reports `armed=True` for a fresh/unconfigured ccy project.
-- [ ] Existing user `CCY_CLAUDE_WRAPPER` (set or commented) is never clobbered.
-- [ ] Generated `ccy.env` sources to an absolute armed wrapper path in bash.
-- [ ] QA 13/13, daemon RUNNING, patch released.
+- [x] Deploy result reports `armed=True` for a fresh/unconfigured ccy project.
+- [x] Existing user `CCY_CLAUDE_WRAPPER` (set or commented) is never clobbered.
+- [x] Generated `ccy.env` sources to an absolute armed wrapper path in bash.
+- [x] Deploy un-ignores our files in an existing blanket-`*` `.claude/ccy/.gitignore`.
+- [x] `ccy_supervisor_integrity` warns on armed-but-broken; silent when healthy.
+- [ ] QA 13/13, daemon RUNNING, v3.34.0 released.
 
 ## Notes & Updates
 
@@ -85,3 +111,11 @@ It ships as a patch release (v3.33.1).
 - Root cause confirmed: `deploy_ccy_supervisor_if_enabled` copies the script but
   never writes `ccy.env`, so `CCY_CLAUDE_WRAPPER` is unset in clients → launcher
   runs plain `claude` → supervisor never wraps the PTY (no-op).
+- Scope grew on field feedback: (1) projects leave the supervisor files
+  git-ignored (blanket `*`) so they never reach teammates → deploy now appends
+  whitelist exceptions to an existing `.claude/ccy/.gitignore`; (2) an
+  armed-but-broken setup can brick `ccy` → new SessionStart handler
+  `ccy_supervisor_integrity` warns. New handler ⇒ MINOR bump v3.34.0.
+- Delivered so far: arm-on-deploy `78164b1`; docs/self-locating env `8bf12f5`;
+  gitignore-tracking + integrity handler `663fe75`. QA green per phase; daemon
+  RUNNING; no dogfood false alarm.

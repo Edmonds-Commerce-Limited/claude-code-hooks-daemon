@@ -25,7 +25,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
   - v3.33.0 (Plan 00147) auto-deploys `claude-supervise.py` but never **arms** it — the deploy copies the script yet never writes the `CCY_CLAUDE_WRAPPER` export in `.claude/ccy/ccy.env` the launcher sources, so in clients the supervisor is a no-op
   - Fix: deploy now **deploys + arms** by default — ensures an armed, path-independent (`${BASH_SOURCE[0]}`-self-locating) `CCY_CLAUDE_WRAPPER` in `ccy.env`, idempotently and respecting any pre-existing user setting; `true` and absent both arm, `false` arms nothing; self-install no-ops
-  - Ships as patch v3.33.1
+  - Also ensures the supervisor files are TRACKABLE (appends whitelist exceptions to an existing blanket-`*` `.claude/ccy/.gitignore`) and adds a SessionStart advisory handler `ccy_supervisor_integrity` that warns when an armed supervisor's files are missing/non-executable/git-ignored (brick risk)
+  - Ships as MINOR v3.34.0 (new handler)
 
 ### Memory / Documentation Policy
 
