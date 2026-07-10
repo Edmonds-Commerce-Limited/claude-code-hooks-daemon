@@ -468,6 +468,29 @@ definition of Decision H's "MONITOR: pct ≥ threshold" row.
 
 ## Notes & Updates
 
+### 2026-07-10 — Slice 2 live injection wired (dry-run types a real marker)
+
+- The supervisor now WIRES the decision layer into the live `supervise()` PTY
+  loop: `_forward_io` polls on a `select` timeout (`poll_seconds`), and on each
+  idle tick `_poll_once` reads the sidecar, runs the state machine, and — for a
+  non-NOOP decision — INJECTS keystrokes into the child PTY.
+- Per user steering: dry-run (default) injects a harmless VISIBLE MARKER
+  (`compact suggestion fired from supervisor (dry run mode)` + CR) so the whole
+  path is provable without a real compaction; `--arm` injects the real
+  `/compact`. Renamed the confusing `--arm` help accordingly (it was "no-op").
+- Idle gate (`_is_idle`): never inject within `idle_floor_seconds` of a
+  forwarded keystroke, so an injection never corrupts what the human is typing.
+- Robustness fix found via the live probe: an EOF stdin is always "readable", so
+  `_forward_io` now DROPS stdin from the watch set on EOF — otherwise the loop
+  spins and the poll timeout never fires.
+- **Live end-to-end proof**: ran the real supervisor (dry-run) over a child PTY
+  with a crafted red sidecar; the marker was injected AND appeared in the child's
+  terminal output. 74 supervise tests; QA 13/13.
+- Next (user idea): even in dry-run, inject a REAL `continue` when a compaction
+  is DETECTED (e.g. a manual `/compact`) — `continue` is harmless. Needs a daemon
+  PreCompact handler to set `compacting: true` on the sidecar, plus a MONITOR
+  transition that fires continue on externally-detected compaction.
+
 ### 2026-07-10 — Slice 2 (dry-run) core: sidecar reader + Decision H state machine
 
 - Added to the standalone `.claude/ccy/claude-supervise.py` (still stdlib-only,

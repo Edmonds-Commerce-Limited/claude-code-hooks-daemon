@@ -42,13 +42,27 @@ def _supervise_with_default_stdin(
     activity: object | None = None,
     stdin_fd: int | None = None,
 ) -> int:
-    """Run supervise(argv), using a real /dev/null fd for stdin by default."""
+    """Run supervise(argv), using a real /dev/null fd for stdin by default.
+
+    A very large poll interval is used so the sidecar poll tick never fires
+    during these short-lived children -- these tests exercise I/O passthrough,
+    exit codes, termios and SIGWINCH, not injection (which has its own suite).
+    """
     owned_stdin_fd: int | None = None
     if stdin_fd is None:
         owned_stdin_fd = os.open(os.devnull, os.O_RDONLY)
         stdin_fd = owned_stdin_fd
     try:
-        return int(supervise(argv, dry_run=dry_run, log=log, activity=activity, stdin_fd=stdin_fd))
+        return int(
+            supervise(
+                argv,
+                dry_run=dry_run,
+                log=log,
+                activity=activity,
+                stdin_fd=stdin_fd,
+                poll_seconds=3600.0,
+            )
+        )
     finally:
         if owned_stdin_fd is not None:
             os.close(owned_stdin_fd)
@@ -116,8 +130,8 @@ class TestSuperviseDecisionLogging:
 
         assert code == 0
         contents = log.path.read_text(encoding="utf-8")
-        assert "supervisor active (dry-run)" in contents
-        assert "transparent passthrough" in contents
+        assert "supervisor active (dry-run (injects marker))" in contents
+        assert "polling" in contents
         assert "wrapping:" in contents
 
     def test_exit_summary_logs_dry_run_and_byte_count(self, tmp_path: Path) -> None:
@@ -131,7 +145,7 @@ class TestSuperviseDecisionLogging:
 
         assert code == 0
         contents = log.path.read_text(encoding="utf-8")
-        assert "supervisor exiting (dry-run)" in contents
+        assert "supervisor exiting (dry-run (injects marker))" in contents
         assert "input bytes observed" in contents
 
     def test_armed_mode_logs_armed_label(self, tmp_path: Path) -> None:
@@ -145,7 +159,7 @@ class TestSuperviseDecisionLogging:
 
         assert code == 0
         contents = log.path.read_text(encoding="utf-8")
-        assert "armed (no-op in v0)" in contents
+        assert "ARMED (injects /compact)" in contents
 
     def test_no_log_provided_does_not_raise(self) -> None:
         code = _supervise_with_default_stdin(["bash", "-lc", "exit 0"], log=None)
@@ -243,12 +257,15 @@ class TestForwardIoSelectRetry:
         calls = {"count": 0}
 
         def _flaky_select(
-            rlist: list[int], wlist: list[int], xlist: list[int]
+            rlist: list[int],
+            wlist: list[int],
+            xlist: list[int],
+            timeout: float | None = None,
         ) -> tuple[list[int], list[int], list[int]]:
             calls["count"] += 1
             if calls["count"] == 1:
                 raise OSError(errno.EINTR, "interrupted")
-            return real_select(rlist, wlist, xlist)
+            return real_select(rlist, wlist, xlist, timeout)
 
         monkeypatch.setattr(_mod.select, "select", _flaky_select)
 
@@ -266,7 +283,10 @@ class TestForwardIoSelectRetry:
         master_read_fd, master_write_fd = os.pipe()
 
         def _broken_select(
-            rlist: list[int], wlist: list[int], xlist: list[int]
+            rlist: list[int],
+            wlist: list[int],
+            xlist: list[int],
+            timeout: float | None = None,
         ) -> tuple[list[int], list[int], list[int]]:
             raise OSError(errno.EIO, "broken")
 

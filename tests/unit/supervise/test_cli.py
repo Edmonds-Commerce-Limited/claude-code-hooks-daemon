@@ -73,8 +73,8 @@ class TestMainExecution:
         assert "MAIN_OUT" in capfd.readouterr().out
         assert log_path.exists()
 
-    def test_arm_flag_is_accepted_but_still_transparent(self, tmp_path: Path) -> None:
-        """v0: --arm is a documented no-op; behaviour is identical to dry-run."""
+    def test_arm_flag_is_accepted(self, tmp_path: Path) -> None:
+        """--arm parses and runs; the fast child exits before any poll tick fires."""
         log_path = tmp_path / "decision.log"
 
         exit_code = main(["--arm", "--log", str(log_path), "--", "bash", "-lc", "exit 0"])

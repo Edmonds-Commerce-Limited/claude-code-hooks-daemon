@@ -6,10 +6,13 @@ This file is intentionally standalone: it imports nothing from
 container's system `python3` so that upgrading (or breaking) the hooks-daemon
 venv can never take down every `ccy` launch.
 
-v0 is a transparent, dry-run PTY passthrough: it spawns the wrapped process on
-a pseudo-terminal, forwards stdin/stdout/window-resize faithfully, and
-observes input activity -- but performs NO keystroke injection. Injection and
-the state machine that decides when to inject are out of scope for v0 (v1).
+It spawns the wrapped process on a pseudo-terminal and forwards
+stdin/stdout/window-resize faithfully. On each idle poll tick it reads the
+daemon-written context sidecar and runs the Decision H state machine; when the
+context goes red (+ idle + cooldown/cap) it INJECTS a compact trigger into the
+session. In DRY-RUN (default) that injection is a harmless VISIBLE MARKER,
+proving the mechanism end-to-end without a real compaction; with ``--arm`` it
+injects the real ``/compact`` (and ``continue``).
 
 Usage:
     claude-supervise.py [--dry-run | --arm] [--log PATH] -- <child argv...>
@@ -29,7 +32,9 @@ import signal
 import struct
 import sys
 import termios
+import time
 import tty
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -109,14 +114,14 @@ class DecisionLog:
 
 
 # ---------------------------------------------------------------------------
-# Compact decision logic (Plan 00135 Slice 2, dry-run)
+# Compact decision logic (Plan 00135 Slice 2)
 #
 # The daemon writes an observe-only "context sidecar" JSON per session
 # (handlers/status_line/context_sidecar.py). This supervisor READS the freshest
-# sidecar and runs the Decision H state machine to decide when it WOULD inject
-# `/compact` (and, once compaction is under way, `continue`). In the dry-run
-# phase these decisions are LOGGED ONLY -- nothing is ever written to the child
-# PTY. Arming the actual keystroke injection is a separate, later step.
+# sidecar and runs the Decision H state machine to decide when to inject
+# `/compact` (and, once compaction is under way, `continue`). The decision here
+# is mode-agnostic; the injection layer below turns a decision into either a
+# harmless dry-run marker or the real command.
 # ---------------------------------------------------------------------------
 
 _SIDECAR_SUBDIR = "context-sidecar"
@@ -324,6 +329,84 @@ class CompactStateMachine:
         return (now - self._last_action_ts) > self._policy.await_timeout_seconds
 
 
+# ---------------------------------------------------------------------------
+# Keystroke injection (Plan 00135 Slice 2)
+#
+# In DRY-RUN (default) the supervisor types a harmless, visible MARKER string
+# into the live session when the compact trigger fires -- proving the
+# end-to-end injection path without triggering a real compaction. When ARMED
+# it types the real `/compact` (and, later, `continue`). Both go through the
+# same code path; only the payload text differs.
+# ---------------------------------------------------------------------------
+
+_DRY_RUN_COMPACT_MARKER = "compact suggestion fired from supervisor (dry run mode)"
+_DRY_RUN_CONTINUE_MARKER = "continue suggestion fired from supervisor (dry run mode)"
+_ARMED_COMPACT_PAYLOAD = "/compact"
+_ARMED_CONTINUE_PAYLOAD = "continue"
+_INJECT_SUBMIT = "\r"
+
+_DEFAULT_POLL_SECONDS = 2.0
+_DEFAULT_IDLE_FLOOR_SECONDS = 2.0
+
+
+def _resolve_payload(decision: Decision, *, dry_run: bool) -> str | None:
+    """Return the keystroke payload for a decision, or None for NOOP.
+
+    In dry-run mode the payload is a harmless, visible MARKER string so the
+    injection path can be exercised end-to-end without triggering a real
+    compaction. Armed mode injects the real slash-command / prompt.
+    """
+    if decision is Decision.WOULD_COMPACT:
+        return _DRY_RUN_COMPACT_MARKER if dry_run else _ARMED_COMPACT_PAYLOAD
+    if decision is Decision.WOULD_CONTINUE:
+        return _DRY_RUN_CONTINUE_MARKER if dry_run else _ARMED_CONTINUE_PAYLOAD
+    return None
+
+
+def _perform_injection(master_writer: Callable[[bytes], None], payload: str) -> None:
+    """Type ``payload`` into the child PTY, followed by a submit (carriage return)."""
+    master_writer((payload + _INJECT_SUBMIT).encode("utf-8"))
+
+
+def _is_idle(activity: InputActivity, *, now_monotonic: float, idle_floor_seconds: float) -> bool:
+    """True when no stdin byte has been forwarded within ``idle_floor_seconds``.
+
+    Never inject while the human is composing: an injection mid-keystroke would
+    corrupt their input. A session with no observed input yet counts as idle.
+    """
+    if activity.last_input_monotonic is None:
+        return True
+    return (now_monotonic - activity.last_input_monotonic) >= idle_floor_seconds
+
+
+def _poll_once(
+    machine: CompactStateMachine,
+    *,
+    sidecar_dir: Path,
+    now_wall: float,
+    idle: bool,
+    dry_run: bool,
+    master_writer: Callable[[bytes], None],
+    log: DecisionLog | None,
+    freshness_seconds: float,
+) -> Evaluation:
+    """One supervisor tick: read the sidecar, decide, and inject if warranted.
+
+    Reads the freshest sidecar, advances the state machine, and -- for a
+    non-NOOP decision -- injects the resolved payload (marker in dry-run, real
+    command when armed) and logs it. Returns the Evaluation so callers/tests
+    can observe the decision.
+    """
+    reading = load_freshest_sidecar(sidecar_dir, now=now_wall, freshness_seconds=freshness_seconds)
+    evaluation = machine.evaluate(reading, idle=idle, now=now_wall)
+    payload = _resolve_payload(evaluation.decision, dry_run=dry_run)
+    if payload is not None:
+        _perform_injection(master_writer, payload)
+        if log is not None:
+            log.write(f"{evaluation.decision.value}: {evaluation.reason}; injected {payload!r}")
+    return evaluation
+
+
 def _get_winsize(stdin_fd: int) -> bytes:
     """Read the controlling terminal's window size, falling back if unavailable."""
     try:
@@ -346,21 +429,49 @@ def _exit_code_from_status(status: int) -> int:
     return 1
 
 
-def _forward_io(stdin_fd: int, master_fd: int, activity: InputActivity) -> None:
-    """Select loop: forward stdin -> master, and master -> stdout."""
+def _forward_io(
+    stdin_fd: int,
+    master_fd: int,
+    activity: InputActivity,
+    *,
+    poll_seconds: float | None = None,
+    on_poll: Callable[[], None] | None = None,
+) -> None:
+    """Select loop: forward stdin -> master, master -> stdout.
+
+    When ``poll_seconds`` is set, ``select`` wakes on that interval even with no
+    I/O, and ``on_poll`` (if given) runs one supervisor tick before looping.
+    A tick never touches the forwarded I/O -- it only reads the sidecar and may
+    inject -- so transparent passthrough is unchanged when polling is disabled.
+
+    Once stdin reaches EOF it is dropped from the watch set: an EOF fd is always
+    "readable", so continuing to select on it would spin the loop and starve the
+    poll timeout. Dropping it lets timeouts (and therefore polling) resume.
+    """
+    stdin_open = True
     while True:
+        watch = [master_fd, stdin_fd] if stdin_open else [master_fd]
         try:
-            readable, _, _ = select.select([stdin_fd, master_fd], [], [])
+            readable, _, _ = select.select(watch, [], [], poll_seconds)
         except OSError as exc:
             if exc.errno == errno.EINTR:
                 continue
             raise
 
-        if stdin_fd in readable:
+        if not readable:
+            # select timed out with no I/O ready -> run one supervisor tick.
+            if on_poll is not None:
+                on_poll()
+            continue
+
+        if stdin_open and stdin_fd in readable:
             data = os.read(stdin_fd, _READ_CHUNK_SIZE)
             if data:
                 activity.record(data)
                 os.write(master_fd, data)
+            else:
+                # stdin EOF: stop watching it so poll timeouts can fire.
+                stdin_open = False
 
         if master_fd in readable:
             try:
@@ -379,21 +490,34 @@ def supervise(
     log: DecisionLog | None = None,
     activity: InputActivity | None = None,
     stdin_fd: int | None = None,
+    sidecar_dir: Path | None = None,
+    policy: CompactPolicy | None = None,
+    poll_seconds: float = _DEFAULT_POLL_SECONDS,
+    idle_floor_seconds: float = _DEFAULT_IDLE_FLOOR_SECONDS,
 ) -> int:
-    """Run `argv` under a PTY, transparently forwarding I/O.
+    """Run `argv` under a PTY, forwarding I/O and polling the context sidecar.
+
+    On each idle poll tick the supervisor reads the daemon-written context
+    sidecar and runs the Decision H state machine. When the compact trigger
+    fires (red + idle + cooldown/cap) it INJECTS a payload into the child PTY:
+    a harmless visible MARKER in dry-run (default), or the real `/compact` when
+    armed. Forwarded I/O is never altered by a tick.
 
     Args:
         argv: The child command and its arguments (argv[0] is the executable).
-        dry_run: v0 is always transparent; this only controls what is logged.
-            Injection does not exist yet in v0, so this has no behavioural
-            effect on the child beyond the logged summary.
-        log: Optional decision log to record a startup line and an on-exit
-            summary to.
+        dry_run: When True (default) inject the harmless marker; when False
+            (armed) inject the real `/compact` / `continue`.
+        log: Optional decision log for startup, injection, and exit lines.
         activity: Optional `InputActivity` to record stdin byte counts into.
             A fresh one is created internally if not supplied.
         stdin_fd: File descriptor to read supervisor input from. Defaults to
             `sys.stdin.fileno()`. Overridable so callers (and tests) can pass
             a real fd directly, bypassing wrappers that don't expose one.
+        sidecar_dir: Directory holding the daemon's context sidecars. Defaults
+            to the environment-derived `context-sidecar` dir.
+        policy: Compact state-machine policy (cooldown/cap/freshness/timeout).
+        poll_seconds: Idle poll interval for the sidecar tick.
+        idle_floor_seconds: Minimum quiet time before an injection is allowed.
 
     Returns:
         The child's exit code (or 128+signal if it died from a signal).
@@ -406,10 +530,16 @@ def supervise(
 
     activity = activity if activity is not None else InputActivity()
     stdin_fd = stdin_fd if stdin_fd is not None else sys.stdin.fileno()
-    mode = "dry-run" if dry_run else "armed (no-op in v0)"
+    sidecar_dir = sidecar_dir if sidecar_dir is not None else _default_sidecar_dir()
+    policy = policy if policy is not None else CompactPolicy()
+    machine = CompactStateMachine(policy)
+    mode = "dry-run (injects marker)" if dry_run else "ARMED (injects /compact)"
 
     if log is not None:
-        log.write(f"supervisor active ({mode}); transparent passthrough; wrapping: {argv}")
+        log.write(
+            f"supervisor active ({mode}); polling {sidecar_dir} every "
+            f"{poll_seconds}s; wrapping: {argv}"
+        )
 
     pid, master_fd = pty.fork()
     if pid == 0:  # pragma: no cover - runs in the forked child process
@@ -431,10 +561,30 @@ def supervise(
     def _on_winch(_signum: int, _frame: FrameType | None) -> None:
         _set_winsize(master_fd, stdin_fd)
 
+    def _write_master(data: bytes) -> None:
+        os.write(master_fd, data)
+
+    def _on_poll() -> None:
+        idle = _is_idle(
+            activity,
+            now_monotonic=os.times().elapsed,
+            idle_floor_seconds=idle_floor_seconds,
+        )
+        _poll_once(
+            machine,
+            sidecar_dir=sidecar_dir,
+            now_wall=time.time(),
+            idle=idle,
+            dry_run=dry_run,
+            master_writer=_write_master,
+            log=log,
+            freshness_seconds=policy.freshness_seconds,
+        )
+
     previous_handler = signal.signal(signal.SIGWINCH, _on_winch)
 
     try:
-        _forward_io(stdin_fd, master_fd, activity)
+        _forward_io(stdin_fd, master_fd, activity, poll_seconds=poll_seconds, on_poll=_on_poll)
     finally:
         signal.signal(signal.SIGWINCH, previous_handler)
         if old_termios is not None:
@@ -466,7 +616,8 @@ def _parse_supervisor_flags(argv: list[str]) -> argparse.Namespace:
 
     parser = argparse.ArgumentParser(
         prog="claude-supervise",
-        description="Transparent PTY supervisor for wrapping `claude` (v0).",
+        description="PTY supervisor for `claude` that watches the context sidecar "
+        "and injects a compact trigger when the context goes red.",
         add_help=False,
     )
     mode_group = parser.add_mutually_exclusive_group()
@@ -475,13 +626,15 @@ def _parse_supervisor_flags(argv: list[str]) -> argparse.Namespace:
         dest="dry_run",
         action="store_true",
         default=True,
-        help="Log-only observation mode (default). No behavioural effect in v0.",
+        help="Default. When the trigger fires, inject a harmless VISIBLE MARKER "
+        "into the session (proving the mechanism) instead of a real /compact.",
     )
     mode_group.add_argument(
         "--arm",
         dest="dry_run",
         action="store_false",
-        help="Documented no-op in v0 (injection does not exist yet); reserved for v1.",
+        help="Inject the REAL /compact (and continue) instead of the marker. "
+        "Use only when you want the supervisor to actually compact the session.",
     )
     parser.add_argument(
         "--log",
