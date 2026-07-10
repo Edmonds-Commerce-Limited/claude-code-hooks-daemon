@@ -468,6 +468,22 @@ definition of Decision H's "MONITOR: pct ≥ threshold" row.
 
 ## Notes & Updates
 
+### 2026-07-10 — Compaction-detected auto-continue COMPLETE (daemon side)
+
+- Added the DAEMON sensor: `handlers/pre_compact/compaction_signal.py` — an
+  opt-in PreCompact handler that atomically writes
+  `untracked/context-sidecar/<session>.compacting` (`{ts, session_id}`) whenever
+  a compaction starts (supervisor-triggered OR a manual `/compact`). Blocks
+  nothing; fail-open.
+- Enabled in this repo's config (dogfood). Full integration: HandlerID/Priority,
+  `__init__` export, config template + example + drift-guard opt-in set, docs.
+- **End-to-end proven live**: a real PreCompact event through `.claude/hooks/pre-compact`
+  wrote the `<session>.compacting` marker; the supervisor's live probe reads that
+  exact marker and injects a real `continue`. Daemon RUNNING; QA 13/13; 9735 tests.
+- The compact-AND-resume loop is now closed: red → `/compact` (armed) or marker
+  (dry-run); compaction (any source) → real `continue`. Remaining: arm `/compact`
+  in a real ccy session; LXC launcher wiring (`LXC-SUPPORT.md`).
+
 ### 2026-07-10 — Compaction-detected auto-continue (supervisor side)
 
 - User insight: `continue` is harmless (it only resumes the agent), so inject it

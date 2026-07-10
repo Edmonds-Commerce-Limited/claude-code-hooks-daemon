@@ -335,6 +335,10 @@ handlers:
       enabled: true
       priority: 10
 
+    compaction_signal:  # Dogfood: drop <session>.compacting so the supervisor auto-continues
+      enabled: true
+      priority: 20
+
   # SessionEnd handlers (run when session ends)
   session_end:
     cleanup:  # Session cleanup operations

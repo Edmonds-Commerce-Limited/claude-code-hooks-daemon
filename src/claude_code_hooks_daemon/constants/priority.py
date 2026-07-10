@@ -47,6 +47,7 @@ class Priority:
     AUTO_APPROVE_READS = 10
     VALIDATE_ESLINT_ON_WRITE = 10
     TRANSCRIPT_ARCHIVER = 10
+    COMPACTION_SIGNAL = 20  # PreCompact: drop compaction signal for the PTY supervisor
 
     DAEMON_LOCATION_GUARD = 11
 

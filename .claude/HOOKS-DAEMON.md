@@ -81,12 +81,13 @@
 | 5 | hello_world_session_end | NON-TERMINAL | Simple test handler that confirms SessionEnd hook is working |
 | 10 | cleanup | NON-TERMINAL | Clean up temporary files when session ends |
 
-### PreCompact (2 handlers)
+### PreCompact (3 handlers)
 
 | Priority | Handler | Behavior | Description |
 |----------|---------|----------|-------------|
 | 5 | hello_world_pre_compact | NON-TERMINAL | Simple test handler that confirms PreCompact hook is working |
 | 10 | transcript_archiver | NON-TERMINAL | Archive conversation transcript before compaction |
+| 20 | compaction_signal | NON-TERMINAL | Write a ``<session>.compacting`` signal on PreCompact for the supervisor |
 
 ### UserPromptSubmit (4 handlers)
 

@@ -291,6 +291,10 @@ handlers:
       enabled: false      # Enable to save conversation history
       priority: 10
 
+    compaction_signal:  # Drops <session>.compacting for the PTY supervisor (opt-in)
+      enabled: false
+      priority: 20
+
   # SessionEnd handlers (run when session ends)
   session_end:
     cleanup:  # Session cleanup operations

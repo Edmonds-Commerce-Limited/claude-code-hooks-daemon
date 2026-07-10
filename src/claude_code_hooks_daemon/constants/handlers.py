@@ -171,6 +171,11 @@ class HandlerID:
         config_key="transcript_archiver",
         display_name="transcript-archiver",
     )
+    COMPACTION_SIGNAL = HandlerIDMeta(
+        class_name="CompactionSignalHandler",
+        config_key="compaction_signal",
+        display_name="compaction-signal",
+    )
     ABSOLUTE_PATH = HandlerIDMeta(
         class_name="AbsolutePathHandler",
         config_key="absolute_path",
