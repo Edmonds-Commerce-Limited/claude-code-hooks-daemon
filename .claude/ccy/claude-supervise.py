@@ -35,7 +35,7 @@ import termios
 import time
 import tty
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -131,6 +131,15 @@ _DEFAULT_FRESHNESS_SECONDS = 30.0
 _DEFAULT_COOLDOWN_SECONDS = 300.0
 _DEFAULT_AWAIT_TIMEOUT_SECONDS = 120.0
 _DEFAULT_MAX_INJECTIONS = 20
+# How long a compaction-signal file is treated as "compaction under way".
+# Longer than the sidecar freshness because a compaction can run for a while
+# and no status line renders during it.
+_DEFAULT_COMPACTION_SIGNAL_TTL_SECONDS = 120.0
+
+# Compaction-signal files are written by the daemon's PreCompact handler as
+# ``<session>.compacting`` -- deliberately NOT ``*.json`` so they are never
+# mistaken for a context sidecar by ``load_freshest_sidecar``.
+_COMPACTION_SIGNAL_GLOB = "*.compacting"
 
 
 class Decision(enum.Enum):
@@ -171,6 +180,7 @@ class CompactPolicy:
     cooldown_seconds: float = _DEFAULT_COOLDOWN_SECONDS
     await_timeout_seconds: float = _DEFAULT_AWAIT_TIMEOUT_SECONDS
     max_injections: int = _DEFAULT_MAX_INJECTIONS
+    compaction_signal_ttl_seconds: float = _DEFAULT_COMPACTION_SIGNAL_TTL_SECONDS
 
 
 @dataclass(frozen=True)
@@ -256,17 +266,47 @@ def load_freshest_sidecar(
     )
 
 
+def load_compaction_signal(directory: Path, *, now: float, ttl_seconds: float) -> bool:
+    """True if a fresh compaction-signal file exists in ``directory``.
+
+    The daemon's PreCompact handler drops a ``<session>.compacting`` file (JSON
+    ``{"ts": ...}``) when a compaction starts -- whether the supervisor
+    triggered it or the human typed ``/compact``. A signal is "fresh" while
+    ``now - ts <= ttl_seconds``; older files are treated as a finished
+    compaction and ignored (no explicit cleanup needed).
+    """
+    if not directory.is_dir():
+        return False
+    for path in directory.glob(_COMPACTION_SIGNAL_GLOB):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        ts = _coerce_float(data.get("ts"))
+        if (now - ts) <= ttl_seconds:
+            return True
+    return False
+
+
 class CompactStateMachine:
     """Decision H compact-and-resume machine (pure; injects nothing).
+
+    Compaction detection (any state): when a compaction is under way
+    (``reading.compacting`` -- set from the daemon's PreCompact signal, whether
+    the supervisor triggered it OR the human typed ``/compact`` manually),
+    decide WOULD_CONTINUE exactly once per episode to resume the post-compact
+    session. A latch prevents re-firing while the compaction persists and
+    resets when it ends. ``continue`` is harmless, so this fires even in
+    dry-run.
 
     MONITOR: when the sidecar is fresh + red AND the session is idle AND the
     cooldown/cap allow it, decide WOULD_COMPACT and move to AWAIT_COMPACTING.
 
-    AWAIT_COMPACTING: once the sidecar reports ``compacting`` (compaction has
-    started), decide WOULD_CONTINUE and return to MONITOR (starting the
-    cooldown). If compaction never starts within ``await_timeout_seconds``,
-    give up and return to MONITOR so a missed transition cannot wedge the
-    machine forever.
+    AWAIT_COMPACTING: wait for a compaction to start (handled above). If none
+    starts within ``await_timeout_seconds``, give up and return to MONITOR so a
+    missed transition cannot wedge the machine forever.
     """
 
     def __init__(self, policy: CompactPolicy) -> None:
@@ -274,11 +314,27 @@ class CompactStateMachine:
         self.state = SupervisorState.MONITOR
         self._injections = 0
         self._last_action_ts: float | None = None
+        self._compaction_handled = False
 
     def evaluate(self, reading: SidecarReading | None, *, idle: bool, now: float) -> Evaluation:
         """Advance the machine one step and return what it WOULD do."""
+        compacting = reading is not None and reading.compacting
+        if compacting:
+            if not self._compaction_handled:
+                self._compaction_handled = True
+                self._last_action_ts = now
+                self.state = SupervisorState.MONITOR
+                return Evaluation(
+                    Decision.WOULD_CONTINUE,
+                    "compaction detected -> would inject continue",
+                )
+            # Already resumed this episode; sit tight until compaction ends.
+            return Evaluation(Decision.NOOP, "compaction in progress (already resumed)")
+
+        # No compaction under way: reset the latch and run normal logic.
+        self._compaction_handled = False
         if self.state is SupervisorState.AWAIT_COMPACTING:
-            return self._evaluate_await(reading, now=now)
+            return self._evaluate_await(now=now)
         return self._evaluate_monitor(reading, idle=idle, now=now)
 
     def _evaluate_monitor(
@@ -305,14 +361,7 @@ class CompactStateMachine:
             f"red at {reading.pct:.0f}% + idle -> would inject /compact",
         )
 
-    def _evaluate_await(self, reading: SidecarReading | None, *, now: float) -> Evaluation:
-        if reading is not None and reading.compacting:
-            self._last_action_ts = now
-            self.state = SupervisorState.MONITOR
-            return Evaluation(
-                Decision.WOULD_CONTINUE,
-                "compaction under way -> would inject continue",
-            )
+    def _evaluate_await(self, *, now: float) -> Evaluation:
         if self._await_timed_out(now):
             self.state = SupervisorState.MONITOR
             return Evaluation(Decision.NOOP, "await-compacting timed out -> back to monitor")
@@ -340,9 +389,12 @@ class CompactStateMachine:
 # ---------------------------------------------------------------------------
 
 _DRY_RUN_COMPACT_MARKER = "compact suggestion fired from supervisor (dry run mode)"
-_DRY_RUN_CONTINUE_MARKER = "continue suggestion fired from supervisor (dry run mode)"
 _ARMED_COMPACT_PAYLOAD = "/compact"
-_ARMED_CONTINUE_PAYLOAD = "continue"
+# `continue` is harmless -- it only nudges the agent to resume -- so it is
+# injected FOR REAL in both dry-run and armed modes. Detecting a compaction and
+# not resuming would defeat the purpose, and (unlike /compact) a stray
+# `continue` cannot destroy context.
+_CONTINUE_PAYLOAD = "continue"
 _INJECT_SUBMIT = "\r"
 
 _DEFAULT_POLL_SECONDS = 2.0
@@ -359,7 +411,7 @@ def _resolve_payload(decision: Decision, *, dry_run: bool) -> str | None:
     if decision is Decision.WOULD_COMPACT:
         return _DRY_RUN_COMPACT_MARKER if dry_run else _ARMED_COMPACT_PAYLOAD
     if decision is Decision.WOULD_CONTINUE:
-        return _DRY_RUN_CONTINUE_MARKER if dry_run else _ARMED_CONTINUE_PAYLOAD
+        return _CONTINUE_PAYLOAD
     return None
 
 
@@ -389,15 +441,37 @@ def _poll_once(
     master_writer: Callable[[bytes], None],
     log: DecisionLog | None,
     freshness_seconds: float,
+    compaction_signal_ttl_seconds: float = _DEFAULT_COMPACTION_SIGNAL_TTL_SECONDS,
 ) -> Evaluation:
     """One supervisor tick: read the sidecar, decide, and inject if warranted.
 
-    Reads the freshest sidecar, advances the state machine, and -- for a
-    non-NOOP decision -- injects the resolved payload (marker in dry-run, real
-    command when armed) and logs it. Returns the Evaluation so callers/tests
-    can observe the decision.
+    Reads the freshest sidecar AND the compaction signal, advances the state
+    machine, and -- for a non-NOOP decision -- injects the resolved payload
+    (a marker for a dry-run compact; the real command otherwise) and logs it.
+    Returns the Evaluation so callers/tests can observe the decision.
     """
     reading = load_freshest_sidecar(sidecar_dir, now=now_wall, freshness_seconds=freshness_seconds)
+    # A compaction stops status renders, so the context sidecar goes
+    # stale/absent during one -- the compaction signal is an independent input.
+    compacting = load_compaction_signal(
+        sidecar_dir, now=now_wall, ttl_seconds=compaction_signal_ttl_seconds
+    )
+    if compacting:
+        reading = (
+            replace(reading, compacting=True)
+            if reading is not None
+            else SidecarReading(
+                red=False,
+                tier="",
+                pct=0.0,
+                session_id="",
+                ts=now_wall,
+                seq=0,
+                writer_pid=0,
+                compacting=True,
+                stale=False,
+            )
+        )
     evaluation = machine.evaluate(reading, idle=idle, now=now_wall)
     payload = _resolve_payload(evaluation.decision, dry_run=dry_run)
     if payload is not None:
@@ -579,6 +653,7 @@ def supervise(
             master_writer=_write_master,
             log=log,
             freshness_seconds=policy.freshness_seconds,
+            compaction_signal_ttl_seconds=policy.compaction_signal_ttl_seconds,
         )
 
     previous_handler = signal.signal(signal.SIGWINCH, _on_winch)

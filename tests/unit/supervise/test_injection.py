@@ -35,9 +35,9 @@ class TestResolvePayload:
     def test_dry_run_compact_is_marker(self) -> None:
         assert _mod._resolve_payload(Decision.WOULD_COMPACT, dry_run=True) == _DRY_COMPACT
 
-    def test_dry_run_continue_is_marker(self) -> None:
-        payload = _mod._resolve_payload(Decision.WOULD_CONTINUE, dry_run=True)
-        assert "continue" in payload and "dry run" in payload
+    def test_dry_run_continue_is_real_continue(self) -> None:
+        # continue is harmless -> injected for real even in dry-run.
+        assert _mod._resolve_payload(Decision.WOULD_CONTINUE, dry_run=True) == "continue"
 
     def test_armed_compact_is_slash_compact(self) -> None:
         assert _mod._resolve_payload(Decision.WOULD_COMPACT, dry_run=False) == "/compact"
@@ -166,6 +166,79 @@ class TestPollOnce:
         contents = (tmp_path / "decision.log").read_text(encoding="utf-8")
         assert "would-compact" in contents
         assert "injected" in contents
+
+
+def _write_signal(directory: Path, name: str, *, ts: float) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"{name}.compacting").write_text(json.dumps({"ts": ts}), encoding="utf-8")
+
+
+class TestLoadCompactionSignal:
+    def test_missing_dir_is_false(self, tmp_path: Path) -> None:
+        assert _mod.load_compaction_signal(tmp_path / "no", now=1000.0, ttl_seconds=120.0) is False
+
+    def test_no_signal_is_false(self, tmp_path: Path) -> None:
+        tmp_path.mkdir(exist_ok=True)
+        assert _mod.load_compaction_signal(tmp_path, now=1000.0, ttl_seconds=120.0) is False
+
+    def test_fresh_signal_is_true(self, tmp_path: Path) -> None:
+        _write_signal(tmp_path, "s", ts=1000.0)
+        assert _mod.load_compaction_signal(tmp_path, now=1050.0, ttl_seconds=120.0) is True
+
+    def test_stale_signal_is_false(self, tmp_path: Path) -> None:
+        _write_signal(tmp_path, "s", ts=1000.0)
+        assert _mod.load_compaction_signal(tmp_path, now=1200.0, ttl_seconds=120.0) is False
+
+    def test_ignores_json_sidecars(self, tmp_path: Path) -> None:
+        # A .json context sidecar must never be read as a compaction signal.
+        tmp_path.mkdir(exist_ok=True)
+        (tmp_path / "s.json").write_text(json.dumps({"ts": 1000.0}), encoding="utf-8")
+        assert _mod.load_compaction_signal(tmp_path, now=1000.0, ttl_seconds=120.0) is False
+
+
+class TestPollOnceCompaction:
+    def test_signal_fires_continue_even_without_sidecar(self, tmp_path: Path) -> None:
+        sc = tmp_path / "sc"
+        _write_signal(sc, "s", ts=1000.0)  # signal only, no context sidecar
+        written: list[bytes] = []
+        ev = _mod._poll_once(
+            CompactStateMachine(CompactPolicy()),
+            sidecar_dir=sc,
+            now_wall=1000.0,
+            idle=True,
+            dry_run=True,
+            master_writer=written.append,
+            log=None,
+            freshness_seconds=30.0,
+            compaction_signal_ttl_seconds=120.0,
+        )
+        assert ev.decision is Decision.WOULD_CONTINUE
+        assert b"".join(written) == b"continue\r"
+
+    def test_signal_overrides_green_sidecar(self, tmp_path: Path) -> None:
+        sc = tmp_path / "sc"
+        sc.mkdir(parents=True)
+        (sc / "s.json").write_text(
+            json.dumps(
+                {"red": False, "tier": "green", "pct": 5.0, "ts": 1000.0, "session_id": "s"}
+            ),
+            encoding="utf-8",
+        )
+        _write_signal(sc, "s", ts=1000.0)
+        written: list[bytes] = []
+        ev = _mod._poll_once(
+            CompactStateMachine(CompactPolicy()),
+            sidecar_dir=sc,
+            now_wall=1000.0,
+            idle=True,
+            dry_run=True,
+            master_writer=written.append,
+            log=None,
+            freshness_seconds=30.0,
+            compaction_signal_ttl_seconds=120.0,
+        )
+        assert ev.decision is Decision.WOULD_CONTINUE
+        assert b"".join(written) == b"continue\r"
 
 
 class TestForwardIoPolling:

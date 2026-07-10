@@ -254,6 +254,43 @@ class TestAwaitCompacting:
         assert c.decision is Decision.WOULD_COMPACT  # next red round
 
 
+class TestCompactionDetection:
+    """A compaction underway (manual OR supervisor-triggered) fires continue once."""
+
+    def test_external_compaction_in_monitor_fires_continue(self) -> None:
+        sm = CompactStateMachine(CompactPolicy())
+        result = sm.evaluate(_reading(compacting=True), idle=True, now=1000.0)
+        assert result.decision is Decision.WOULD_CONTINUE
+        assert sm.state is SupervisorState.MONITOR
+
+    def test_latch_prevents_repeat_continue_while_compacting(self) -> None:
+        sm = CompactStateMachine(CompactPolicy(cooldown_seconds=0))
+        first = sm.evaluate(_reading(compacting=True), idle=True, now=1000.0)
+        second = sm.evaluate(_reading(compacting=True), idle=True, now=1001.0)
+        assert first.decision is Decision.WOULD_CONTINUE
+        assert second.decision is Decision.NOOP  # already resumed, no repeat
+
+    def test_no_compact_fired_while_compacting(self) -> None:
+        # Even red + idle must not trigger a /compact while a compaction runs.
+        sm = CompactStateMachine(CompactPolicy(cooldown_seconds=0))
+        sm.evaluate(_reading(compacting=True), idle=True, now=1000.0)  # -> continue
+        result = sm.evaluate(_reading(red=True, compacting=True), idle=True, now=1001.0)
+        assert result.decision is Decision.NOOP
+
+    def test_latch_resets_after_compaction_ends(self) -> None:
+        sm = CompactStateMachine(CompactPolicy(cooldown_seconds=0))
+        sm.evaluate(_reading(compacting=True), idle=True, now=1000.0)  # continue
+        sm.evaluate(_reading(compacting=False, red=False), idle=True, now=1001.0)  # reset
+        again = sm.evaluate(_reading(compacting=True), idle=True, now=1002.0)
+        assert again.decision is Decision.WOULD_CONTINUE
+
+    def test_compaction_detected_even_when_stale(self) -> None:
+        # Compaction stops status renders, so the reading is often stale.
+        sm = CompactStateMachine(CompactPolicy())
+        result = sm.evaluate(_reading(compacting=True, stale=True), idle=True, now=1000.0)
+        assert result.decision is Decision.WOULD_CONTINUE
+
+
 class TestEvaluationReason:
     def test_reason_is_populated(self) -> None:
         sm = CompactStateMachine(CompactPolicy())

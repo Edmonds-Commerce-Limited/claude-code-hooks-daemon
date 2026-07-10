@@ -468,6 +468,25 @@ definition of Decision H's "MONITOR: pct ≥ threshold" row.
 
 ## Notes & Updates
 
+### 2026-07-10 — Compaction-detected auto-continue (supervisor side)
+
+- User insight: `continue` is harmless (it only resumes the agent), so inject it
+  FOR REAL even in dry-run; and the supervisor should fire it whenever a
+  compaction is DETECTED — including a MANUAL `/compact` the human typed.
+- State machine: added top-level compaction detection that fires WOULD_CONTINUE
+  exactly once per episode (a latch prevents repeats; it resets when compaction
+  ends) from ANY state, even when the context sidecar is stale/absent (a
+  compaction stops status renders). `_resolve_payload` now returns the real
+  `continue` for WOULD_CONTINUE in both modes.
+- Signal transport: the supervisor reads `context-sidecar/<session>.compacting`
+  (JSON `{ts}`, deliberately NOT `*.json` so it is never read as a sidecar),
+  fresh within `compaction_signal_ttl_seconds` (default 120s).
+- Live-proven: with only a `.compacting` signal (no red sidecar), the dry-run
+  supervisor injected a real `continue` into the child PTY. 86 supervise tests;
+  QA 13/13.
+- Next: the DAEMON side — a PreCompact handler that writes the `<session>.compacting`
+  signal so a real/manual compaction actually drives this end-to-end.
+
 ### 2026-07-10 — Slice 2 live injection wired (dry-run types a real marker)
 
 - The supervisor now WIRES the decision layer into the live `supervise()` PTY
