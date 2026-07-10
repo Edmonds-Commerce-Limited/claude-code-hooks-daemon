@@ -47,6 +47,7 @@ class Handler(ABC):
     """
 
     __slots__ = (
+        "_project_exclude_paths",
         "_project_languages",
         "config_key",
         "depends_on",
@@ -59,6 +60,7 @@ class Handler(ABC):
     )
 
     _project_languages: list[str] | None
+    _project_exclude_paths: list[str] | None
 
     def __init__(
         self,

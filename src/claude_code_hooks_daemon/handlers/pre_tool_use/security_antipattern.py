@@ -26,6 +26,11 @@ from claude_code_hooks_daemon.strategies.security.protocol import SecurityPatter
 from claude_code_hooks_daemon.strategies.security.registry import (
     SecurityStrategyRegistry,
 )
+from claude_code_hooks_daemon.utils.path_exclusion import (
+    is_path_excluded,
+    merge_exclude_patterns,
+    resolve_project_root,
+)
 
 # Config key hint shown in the denial message
 _CONFIG_HINT_HANDLER = "handlers.pre_tool_use.security_antipattern"
@@ -60,6 +65,9 @@ class SecurityAntipatternHandler(Handler):
         self._registry = SecurityStrategyRegistry.create_default()
         self._languages: list[str] | None = None
         self._languages_applied: bool = False
+        # Client-configured exclude globs (Plan 00150), layered on top of the
+        # built-in should_skip() defaults; project default injected by registry.
+        self._exclude_paths: list[str] | None = None
 
     # ------------------------------------------------------------------
     # Language filter (applied lazily on first use)
@@ -174,7 +182,7 @@ class SecurityAntipatternHandler(Handler):
         never scanned: the skip-directory guard lives HERE so every caller
         (matches() and handle()) applies it, even on a direct handle() call.
         """
-        if should_skip(file_path):
+        if should_skip(file_path) or self._is_excluded(file_path):
             return []
         violations: list[SecurityPattern] = []
         strategies = self._registry.get_strategies(file_path)
@@ -183,6 +191,16 @@ class SecurityAntipatternHandler(Handler):
                 if re.search(pattern.regex, content):
                     violations.append(pattern)
         return violations
+
+    def _is_excluded(self, file_path: str) -> bool:
+        """Return True if file_path matches a client-configured exclude glob."""
+        patterns = merge_exclude_patterns(
+            getattr(self, "_project_exclude_paths", None),
+            self._exclude_paths,
+        )
+        return bool(patterns) and is_path_excluded(
+            file_path, patterns, project_root=resolve_project_root()
+        )
 
     def _format_reason(self, issues: list[SecurityPattern], file_path: str) -> str:
         """Build a human-readable denial message for matched patterns."""

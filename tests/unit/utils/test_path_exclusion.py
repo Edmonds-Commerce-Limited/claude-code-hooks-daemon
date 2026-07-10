@@ -8,7 +8,29 @@ legitimately suppresses errors) via gitignore-style globs.
 
 from __future__ import annotations
 
-from claude_code_hooks_daemon.utils.path_exclusion import is_path_excluded
+from pathlib import Path
+
+import pytest
+
+from claude_code_hooks_daemon.utils.path_exclusion import (
+    is_path_excluded,
+    merge_exclude_patterns,
+    resolve_project_root,
+)
+
+
+class TestMergeExcludePatterns:
+    def test_none_and_empty_groups_yield_empty(self) -> None:
+        assert merge_exclude_patterns(None, [], None) == []
+
+    def test_union_preserves_first_seen_order(self) -> None:
+        assert merge_exclude_patterns(["a/**", "b/**"], ["c/**"]) == ["a/**", "b/**", "c/**"]
+
+    def test_duplicates_are_removed(self) -> None:
+        assert merge_exclude_patterns(["a/**"], ["a/**", "b/**"]) == ["a/**", "b/**"]
+
+    def test_empty_pattern_strings_skipped(self) -> None:
+        assert merge_exclude_patterns(["a/**", ""], [""]) == ["a/**"]
 
 
 class TestEmptyAndNoMatch:
@@ -119,3 +141,20 @@ class TestMultiplePatterns:
     def test_no_pattern_matches(self) -> None:
         patterns = ["vendor/**", "**/fixtures/**"]
         assert is_path_excluded("/proj/src/app/main.py", patterns) is False
+
+
+class TestResolveProjectRoot:
+    def test_returns_none_when_context_uninitialised(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from claude_code_hooks_daemon.core import project_context as pc
+
+        monkeypatch.setattr(pc.ProjectContext, "_initialized", False, raising=False)
+        assert resolve_project_root() is None
+
+    def test_returns_root_when_initialised(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from claude_code_hooks_daemon.core import project_context as pc
+
+        monkeypatch.setattr(pc.ProjectContext, "_initialized", True, raising=False)
+        monkeypatch.setattr(
+            pc.ProjectContext, "project_root", classmethod(lambda cls: Path("/proj")), raising=False
+        )
+        assert resolve_project_root() == "/proj"

@@ -98,6 +98,40 @@ def _candidate_paths(file_path: str, project_root: str | os.PathLike[str] | None
     return candidates
 
 
+def merge_exclude_patterns(*groups: Sequence[str] | None) -> list[str]:
+    """Union the given pattern groups into one ordered, de-duplicated list.
+
+    Exclusion is additive: a handler's effective excludes are the union of its
+    built-in defaults, the project-level ``daemon.exclude_paths`` default, and
+    its own per-handler ``exclude_paths`` option — none overrides the others.
+    Empty/None groups and empty patterns are skipped; first-seen order is kept.
+    """
+    merged: list[str] = []
+    seen: set[str] = set()
+    for group in groups:
+        if not group:
+            continue
+        for pattern in group:
+            if pattern and pattern not in seen:
+                seen.add(pattern)
+                merged.append(pattern)
+    return merged
+
+
+def resolve_project_root() -> str | None:
+    """Best-effort absolute project root for anchored-glob matching.
+
+    Returns None when ProjectContext is not initialised (e.g. unit tests), in
+    which case only unanchored patterns match (against the raw path). Imported
+    lazily to avoid a util→core import cycle at module load.
+    """
+    from claude_code_hooks_daemon.core.project_context import ProjectContext
+
+    if not getattr(ProjectContext, "_initialized", False):
+        return None
+    return str(ProjectContext.project_root())
+
+
 def is_path_excluded(
     file_path: str,
     patterns: Sequence[str] | None,

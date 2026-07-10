@@ -161,6 +161,7 @@ class HandlerRegistry:
         config: dict[str, dict[str, dict[str, Any]]] | None = None,
         workspace_root: Path | None = None,
         project_languages: list[str] | None = None,
+        project_exclude_paths: list[str] | None = None,
         plan_workflow: Any = None,
     ) -> int:
         """Register all discovered handlers with the router.
@@ -330,6 +331,10 @@ class HandlerRegistry:
 
                             # Inject project-level language filter (via setattr like other options)
                             instance._project_languages = project_languages
+
+                            # Inject project-level path-exclusion default (Plan 00150) so the
+                            # content blockers inherit daemon.exclude_paths on top of their own.
+                            instance._project_exclude_paths = project_exclude_paths
 
                             # Inject plan_workflow config for planning-tagged handlers
                             # This overrides any handler-level options (top-level is source of truth)

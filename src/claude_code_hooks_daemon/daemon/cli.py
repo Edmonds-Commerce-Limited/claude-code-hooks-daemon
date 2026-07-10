@@ -1938,6 +1938,7 @@ def _build_initialised_controller(config: Config, project_path: Path) -> "Daemon
         plugins_config=config.plugins,
         project_handlers_config=config.project_handlers,
         project_languages=config.daemon.languages,
+        project_exclude_paths=config.daemon.exclude_paths,
         pseudo_events_config=config.pseudo_events or None,
         plan_workflow=config.plan_workflow,
     )

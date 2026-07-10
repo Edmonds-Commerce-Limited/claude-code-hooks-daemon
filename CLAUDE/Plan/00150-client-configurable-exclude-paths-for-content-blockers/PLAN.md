@@ -72,15 +72,17 @@ as its siblings, for consistency).
 
 ### Phase 2: Wire into the three handlers
 
-- [ ] ⬜ **Task 2.1**: `error_hiding_blocker` — add `exclude_paths` option + a
-  built-in default skip set; RED tests (fixture path skipped, non-fixture blocked,
-  client glob skipped) then GREEN.
-- [ ] ⬜ **Task 2.2**: `security_antipattern` — add `exclude_paths` option layered
-  on top of the existing `should_skip()` built-ins; RED then GREEN.
-- [ ] ⬜ **Task 2.3**: `qa_suppression` — add `exclude_paths` option layered on top
-  of `strategy.skip_directories`; RED then GREEN.
-- [ ] ⬜ **Task 2.4**: Project-level `exclude_paths` default inheritance — all
-  three read a shared project default when their own option is unset.
+- [x] ✅ **Task 2.1**: `error_hiding_blocker` — `exclude_paths` option +
+  `_DEFAULT_EXCLUDE_GLOBS` built-in skip set; tests (fixture/vendor skipped,
+  real source blocked, client + project globs skipped). Live-probe verified.
+- [x] ✅ **Task 2.2**: `security_antipattern` — `exclude_paths` layered onto
+  `should_skip()` inside the single `_find_all_violations` scan path; tests.
+- [x] ✅ **Task 2.3**: `qa_suppression` — `exclude_paths` layered onto
+  `strategy.skip_directories` in `matches()`; tests.
+- [x] ✅ **Task 2.4**: Project-level default `daemon.exclude_paths` → injected as
+  `_project_exclude_paths` (mirrors `daemon.languages` through config model →
+  cli → controller → registry → Handler slots); merged as a union with the
+  per-handler option via `merge_exclude_patterns`.
 
 ### Phase 3: Config, manifest, docs
 

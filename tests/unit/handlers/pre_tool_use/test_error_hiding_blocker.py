@@ -325,3 +325,30 @@ class TestErrorHidingBlockerAcceptanceTests:
         tests = handler.get_acceptance_tests()
         # At minimum we expect tests for all 5 languages (Shell, Python, JS, Go, Java)
         assert len(tests) >= 10  # 2 tests each x 5 languages
+
+
+_SHELL_HIDE = "#!/bin/bash\ncmd || true\n"
+
+
+class TestErrorHidingBlockerExcludePaths:
+    """Client-configurable exclude_paths + built-in default skips (Plan 00150)."""
+
+    def test_default_skips_test_fixtures(self, handler: ErrorHidingBlockerHandler) -> None:
+        assert handler.matches(make_write_input("/proj/tests/fixtures/x.sh", _SHELL_HIDE)) is False
+
+    def test_default_skips_vendor(self, handler: ErrorHidingBlockerHandler) -> None:
+        assert handler.matches(make_write_input("/proj/vendor/pkg/x.sh", _SHELL_HIDE)) is False
+
+    def test_real_source_still_blocked(self, handler: ErrorHidingBlockerHandler) -> None:
+        assert handler.matches(make_write_input("/proj/src/deploy.sh", _SHELL_HIDE)) is True
+
+    def test_client_exclude_path_skips(self, handler: ErrorHidingBlockerHandler) -> None:
+        handler._exclude_paths = ["samples/**"]
+        assert handler.matches(make_write_input("/proj/samples/x.sh", _SHELL_HIDE)) is False
+
+    def test_project_level_exclude_skips(self, handler: ErrorHidingBlockerHandler) -> None:
+        handler._project_exclude_paths = ["**/scratch/**"]
+        assert handler.matches(make_write_input("/proj/scratch/x.sh", _SHELL_HIDE)) is False
+
+    def test_is_excluded_false_for_normal_source(self, handler: ErrorHidingBlockerHandler) -> None:
+        assert handler._is_excluded("/proj/src/deploy.sh") is False

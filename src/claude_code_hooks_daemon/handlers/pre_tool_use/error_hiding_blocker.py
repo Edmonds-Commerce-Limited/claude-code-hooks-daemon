@@ -9,7 +9,7 @@ ErrorHidingStrategy implementations.  The handler has ZERO language awareness.
 
 import re
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Final, cast
 
 from claude_code_hooks_daemon.constants import (
     HandlerID,
@@ -27,9 +27,26 @@ from claude_code_hooks_daemon.strategies.error_hiding.protocol import (
 from claude_code_hooks_daemon.strategies.error_hiding.registry import (
     ErrorHidingStrategyRegistry,
 )
+from claude_code_hooks_daemon.utils.path_exclusion import (
+    is_path_excluded,
+    merge_exclude_patterns,
+    resolve_project_root,
+)
 
 # Config key hint shown in the denial message
 _CONFIG_HINT_HANDLER = "handlers.pre_tool_use.error_hiding_blocker"
+
+# Built-in default excludes so this handler matches its siblings' behaviour:
+# generated/vendored trees and test-fixture code (which legitimately contains
+# error-hiding patterns) are never scanned. Clients extend this via the
+# ``exclude_paths`` option and/or the project-level ``daemon.exclude_paths``.
+_DEFAULT_EXCLUDE_GLOBS: Final[tuple[str, ...]] = (
+    "**/vendor/**",
+    "**/node_modules/**",
+    "**/tests/fixtures/**",
+    "**/tests/assets/**",
+    "**/__fixtures__/**",
+)
 
 
 class ErrorHidingBlockerHandler(Handler):
@@ -63,6 +80,9 @@ class ErrorHidingBlockerHandler(Handler):
         # Set by HandlerRegistry via setattr from config options
         self._languages: list[str] | None = None
         self._languages_applied: bool = False
+        # Client-configured exclude globs (Plan 00150); project-level default is
+        # injected as _project_exclude_paths by the registry.
+        self._exclude_paths: list[str] | None = None
 
     # ------------------------------------------------------------------
     # Language filter (applied lazily on first use)
@@ -97,6 +117,9 @@ class ErrorHidingBlockerHandler(Handler):
         if not file_path:
             return False
 
+        if self._is_excluded(file_path):
+            return False
+
         strategy = self._registry.get_strategy(file_path)
         if strategy is None:
             return False
@@ -106,6 +129,15 @@ class ErrorHidingBlockerHandler(Handler):
             return False
 
         return self._find_violation(content, strategy) is not None
+
+    def _is_excluded(self, file_path: str) -> bool:
+        """Return True if file_path matches a default or client-configured exclude glob."""
+        patterns = merge_exclude_patterns(
+            _DEFAULT_EXCLUDE_GLOBS,
+            getattr(self, "_project_exclude_paths", None),
+            self._exclude_paths,
+        )
+        return is_path_excluded(file_path, patterns, project_root=resolve_project_root())
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Deny write if content contains an error-hiding pattern, allow otherwise."""

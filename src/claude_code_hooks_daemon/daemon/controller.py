@@ -149,6 +149,7 @@ class DaemonController:
         plugins_config: "PluginsConfig | None" = None,
         project_handlers_config: "ProjectHandlersConfig | None" = None,
         project_languages: list[str] | None = None,
+        project_exclude_paths: list[str] | None = None,
         pseudo_events_config: dict[str, dict[str, Any]] | None = None,
         plan_workflow: Any = None,
     ) -> None:
@@ -163,6 +164,7 @@ class DaemonController:
             plugins_config: Optional plugin configuration from hooks-daemon.yaml
             project_handlers_config: Optional project handlers configuration
             project_languages: Project-level language filter from daemon.languages config
+            project_exclude_paths: Project-level path-exclusion globs from daemon.exclude_paths
             pseudo_events_config: Optional pseudo-event configuration from hooks-daemon.yaml
             plan_workflow: Optional PlanWorkflowConfig for plan-related handlers
 
@@ -198,6 +200,7 @@ class DaemonController:
             config=handler_config,
             workspace_root=workspace_root,
             project_languages=project_languages,
+            project_exclude_paths=project_exclude_paths,
             plan_workflow=plan_workflow,
         )
 

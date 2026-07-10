@@ -696,3 +696,36 @@ class TestSecurityAntipatternHandler:
         payload = "<?php " + "ev" + "al($code);"
         issues = handler._find_all_violations(payload, "/workspace/node_modules/pkg/index.php")
         assert issues == []
+
+
+_EXCLUDE_PHP_PAYLOAD = "<?php " + "passthru" + '("ls");'
+
+
+class TestSecurityAntipatternExcludePaths:
+    """Client-configurable exclude_paths (Plan 00150)."""
+
+    def _write(self, path, content):
+        return {"tool_name": "Write", "tool_input": {"file_path": path, "content": content}}
+
+    def test_is_excluded_true_for_client_glob(self):
+        h = SecurityAntipatternHandler()
+        h._exclude_paths = ["**/fixtures/**"]
+        assert h._is_excluded("/proj/tests/fixtures/x.php") is True
+
+    def test_is_excluded_false_without_patterns(self):
+        h = SecurityAntipatternHandler()
+        assert h._is_excluded("/proj/src/app.php") is False
+
+    def test_matches_false_for_excluded_path(self):
+        h = SecurityAntipatternHandler()
+        h._exclude_paths = ["samples/**"]
+        assert h.matches(self._write("/proj/samples/x.php", _EXCLUDE_PHP_PAYLOAD)) is False
+
+    def test_real_source_still_blocked(self):
+        h = SecurityAntipatternHandler()
+        assert h.matches(self._write("/proj/src/x.php", _EXCLUDE_PHP_PAYLOAD)) is True
+
+    def test_project_level_exclude_skips(self):
+        h = SecurityAntipatternHandler()
+        h._project_exclude_paths = ["**/vendored/**"]
+        assert h.matches(self._write("/proj/vendored/x.php", _EXCLUDE_PHP_PAYLOAD)) is False

@@ -4,6 +4,7 @@ from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision
+from claude_code_hooks_daemon.handlers.pre_tool_use.qa_suppression import QaSuppressionHandler
 
 # Build suppression patterns dynamically to avoid triggering the live QA suppression hook
 # which scans file content for these exact patterns
@@ -463,3 +464,37 @@ class TestQaSuppressionEdgeCases:
         }
         result = handler.handle(hook_input)
         assert result.decision == Decision.ALLOW
+
+
+class TestQaSuppressionExcludePaths:
+    """Client-configurable exclude_paths (Plan 00150)."""
+
+    @staticmethod
+    def _handler() -> QaSuppressionHandler:
+        return QaSuppressionHandler()
+
+    def test_is_excluded_true_for_client_glob(self) -> None:
+        h = self._handler()
+        h._exclude_paths = ["**/fixtures/**"]
+        assert h._is_excluded("/proj/tests/fixtures/x.py") is True
+
+    def test_is_excluded_false_without_patterns(self) -> None:
+        h = self._handler()
+        assert h._is_excluded("/proj/src/main.py") is False
+
+    def test_matches_false_for_excluded_path_with_suppression(self) -> None:
+        h = self._handler()
+        h._exclude_paths = ["samples/**"]
+        hook_input = _make_write_input("/proj/samples/main.py", f"x = 1  {PY_TYPE_IGNORE}")
+        assert h.matches(hook_input) is False
+
+    def test_real_source_still_blocked(self) -> None:
+        h = self._handler()
+        hook_input = _make_write_input("/proj/src/main.py", f"x = 1  {PY_TYPE_IGNORE}")
+        assert h.matches(hook_input) is True
+
+    def test_project_level_exclude_skips(self) -> None:
+        h = self._handler()
+        h._project_exclude_paths = ["**/generated/**"]
+        hook_input = _make_write_input("/proj/generated/main.py", f"x = 1  {PY_TYPE_IGNORE}")
+        assert h.matches(hook_input) is False

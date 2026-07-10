@@ -25,6 +25,11 @@ from claude_code_hooks_daemon.strategies.qa_suppression import (
 from claude_code_hooks_daemon.strategies.qa_suppression.protocol import (
     QaSuppressionStrategy,
 )
+from claude_code_hooks_daemon.utils.path_exclusion import (
+    is_path_excluded,
+    merge_exclude_patterns,
+    resolve_project_root,
+)
 
 # Maximum number of issues to show in error message
 _MAX_ISSUES_SHOWN = 5
@@ -64,6 +69,9 @@ class QaSuppressionHandler(Handler):
         # Set by registry via setattr after __init__
         self._languages: list[str] | None = None
         self._languages_applied: bool = False
+        # Client-configured exclude globs (Plan 00150), layered on top of the
+        # per-language skip_directories; project default injected by registry.
+        self._exclude_paths: list[str] | None = None
 
     def _apply_language_filter(self) -> None:
         """Apply language filter to registry on first use (lazy).
@@ -120,6 +128,10 @@ class QaSuppressionHandler(Handler):
         if any(skip_dir in file_path for skip_dir in strategy.skip_directories):
             return False
 
+        # Skip client-configured / project-level exclude globs (Plan 00150).
+        if self._is_excluded(file_path):
+            return False
+
         content = self._get_content(hook_input)
         if not content:
             return False
@@ -130,6 +142,16 @@ class QaSuppressionHandler(Handler):
                 return True
 
         return False
+
+    def _is_excluded(self, file_path: str) -> bool:
+        """Return True if file_path matches a client-configured exclude glob."""
+        patterns = merge_exclude_patterns(
+            getattr(self, "_project_exclude_paths", None),
+            self._exclude_paths,
+        )
+        return bool(patterns) and is_path_excluded(
+            file_path, patterns, project_root=resolve_project_root()
+        )
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Check content for QA suppression patterns, deny if found."""

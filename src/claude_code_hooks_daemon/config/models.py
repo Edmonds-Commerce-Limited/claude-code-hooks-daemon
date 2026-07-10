@@ -536,6 +536,10 @@ class DaemonConfig(BaseModel):
         default=None,
         description="Project-level language filter. When set, only handlers for these languages are active. None = ALL languages.",
     )
+    exclude_paths: list[str] = Field(
+        default_factory=list,
+        description="Project-level glob patterns exempted from the content-scanning blockers (security_antipattern, qa_suppression, error_hiding_blocker). Gitignore-style globs (*, ?, **). Inherited by all three handlers in addition to their own exclude_paths option and built-in defaults.",
+    )
     enforce_single_daemon_process: bool = Field(
         default=False,
         description="Enforce single daemon process per project. When enabled, checks for multiple daemon processes and cleans them up. Auto-enabled in container environments. Requires process verification to prevent killing wrong processes.",
