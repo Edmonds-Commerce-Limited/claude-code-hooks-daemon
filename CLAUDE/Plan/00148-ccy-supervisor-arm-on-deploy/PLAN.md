@@ -47,27 +47,27 @@ It ships as a patch release (v3.33.1).
 
 ### Phase 1: TDD the arm-on-deploy behaviour
 
-- [ ] ⬜ **Task 1.1**: RED — add failing tests to
+- [x] ✅ **Task 1.1**: RED — added failing tests to
   `tests/unit/install/test_ccy_supervisor.py`: arms fresh `ccy.env`; appends to
   an existing `ccy.env` lacking the wrapper; leaves an existing wrapper (armed
   OR commented) untouched; `false` arms nothing; absent + `true` both arm; the
   generated line sources in bash to an absolute `claude-supervise.py --arm --`.
-- [ ] ⬜ **Task 1.2**: GREEN — extend `install/ccy_supervisor.py` with an arm
+- [x] ✅ **Task 1.2**: GREEN — extended `install/ccy_supervisor.py` with an arm
   step (`armed` field on the result; idempotent `ccy.env` writer).
-- [ ] ⬜ **Task 1.3**: REFACTOR + 95%+ coverage on the module.
+- [x] ✅ **Task 1.3**: REFACTOR + 100% coverage on the module (20 tests).
 
 ### Phase 2: Consistency + docs
 
-- [ ] ⬜ **Task 2.1**: Update the tracked dogfood `.claude/ccy/ccy.env` to the
+- [x] ✅ **Task 2.1**: Updated the tracked dogfood `.claude/ccy/ccy.env` to the
   self-locating wrapper form (resolves identically here; fixes LXC fragility).
-- [ ] ⬜ **Task 2.2**: Update `CcyConfig` docstring/field text and
+- [x] ✅ **Task 2.2**: Updated `CcyConfig` docstring/field text and
   `docs/guides/CONFIGURATION.md` — deploy now arms by default.
-- [ ] ⬜ **Task 2.3**: Add `CLAUDE/UPGRADES/UNRELEASED/truth-changes/v3.33.1.yaml`
+- [x] ✅ **Task 2.3**: Added `CLAUDE/UPGRADES/UNRELEASED/truth-changes/v3.33.1.yaml`
   (the "deploy does not arm" statement became false).
 
 ### Phase 3: Verify + release
 
-- [ ] ⬜ **Task 3.1**: `./scripts/qa/llm_qa.py all` → 13/13; daemon restart RUNNING.
+- [ ] 🔄 **Task 3.1**: `./scripts/qa/llm_qa.py all` → 13/13; daemon restart RUNNING.
 - [ ] ⬜ **Task 3.2**: `/release` patch → v3.33.1.
 
 ## Success Criteria
