@@ -134,3 +134,24 @@ class TestHedgingLanguageNitpickHandle:
         result = handler.handle(hook_input)
         # Only the second message triggers detection
         assert len(result.context) > 0
+
+
+class TestHedgingLanguageNitpickDedupe:
+    """Identical advisory lines must not be repeated (Plan 00146).
+
+    Mirrors the dismissive nitpick dedupe: at most ONE context line per
+    category, regardless of how many patterns or messages match it.
+    """
+
+    def test_same_category_across_messages_emits_one_line(self) -> None:
+        """The same category matching in several messages → one line."""
+        handler = HedgingLanguageNitpickHandler()
+        hook_input = _make_hook_input(
+            [
+                {"uuid": "u1", "content": "If I recall correctly, this uses YAML."},
+                {"uuid": "u2", "content": "If I remember correctly, it is INI."},
+                {"uuid": "u3", "content": "If I recall correctly, maybe TOML."},
+            ]
+        )
+        result = handler.handle(hook_input)
+        assert len(result.context) == 1

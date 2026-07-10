@@ -6,7 +6,11 @@ to one of five branches:
 1. QA failure: last Bash command was a QA tool and output indicates failure
    -> DENY with "fix failures and continue" message
 2. Explicit stop explanation: last assistant message starts with "STOPPING BECAUSE:"
-   -> ALLOW (Claude has given a valid reason to stop)
+   -> ALLOW (Claude has given a valid reason to stop) — UNLESS the same message
+   contains a rhetorical continue/confirmation question ("want me to build X?",
+   "should I proceed?"), in which case -> DENY with a hard get-on-with-it block
+   (Plan 00146: the prefix must not smuggle "should I continue?" past the
+   confirmation guardrail)
 2.5. tool_use_error recovery (Plan 00101 Phase 6): last tool_result has
    is_error=true and no STOPPING BECAUSE: was provided
    -> DENY with specific recovery instruction (Read the file + retry)
@@ -75,6 +79,20 @@ _EXPLAIN_OR_CONTINUE_REASON = (
     "auto-compact will handle context pressure on its own."
 )
 
+_RHETORICAL_CONTINUE_BLOCK_REASON = (
+    "HARD BLOCK — rhetorical continue question detected. Your stop message asks a "
+    "confirmation question ('should I proceed?', 'want me to build/start X?', "
+    "'would you like me to continue?') whose answer is OBVIOUS: yes — continue the "
+    "already-planned work NOW. Do not ask. Prefixing the question with "
+    "STOPPING BECAUSE: does not make it a valid stop reason; the prefix is for real "
+    "stop reasons, not for smuggling 'should I continue?' past the guardrail.\n\n"
+    "Resume the next unit of work immediately. Stop again only when the work is "
+    "genuinely finished (STOPPING BECAUSE: <real completion>) or when you face a "
+    "genuine choice you cannot resolve from context — in that case ask a concrete "
+    "either/or question (e.g. via AskUserQuestion with an ASKING BECAUSE: prefix), "
+    "never a bare 'shall I keep going?'."
+)
+
 _TOOL_ERROR_RECOVERY_REASON = (
     "TOOL ERROR RECOVERY: Your last tool_use returned a tool_use_error and "
     "you stopped without recovering. Do NOT stop after a tool error — "
@@ -89,6 +107,16 @@ _TOOL_ERROR_RECOVERY_REASON = (
 
 # Prefix an assistant message uses to signal an intentional, explained stop.
 _STOP_EXPLANATION_PREFIX = "STOPPING BECAUSE:"
+
+# Verb group shared by the rhetorical-continue confirmation patterns. These are
+# "do the next obvious unit of work" verbs — a question built on them ("want me
+# to build slice 2 next?") is tautological and must auto-continue. Deliberately
+# narrow (no bare "do"/"use") so genuine choice questions ("which of A or B
+# should we use?") are never matched.
+_CONTINUE_VERBS = (
+    r"(?:continue|proceed|start|begin|build|implement|execute|run|launch|"
+    r"tackle|keep going|go ahead|move (?:on|forward))"
+)
 
 # Turn-freshness threshold. Real Claude Code stamps each transcript entry at
 # completion, so a genuine current-turn final assistant message is ~0s old when
@@ -162,27 +190,27 @@ class AutoContinueStopHandler(Handler):
     Critical: Checks stop_hook_active to prevent infinite loops.
     """
 
-    # Confirmation patterns that indicate Claude is asking to continue
+    # Confirmation patterns that indicate Claude is asking to continue.
+    # Built on the shared _CONTINUE_VERBS group so every asker form ("should
+    # I", "want me to", "would you like me to", ...) covers the same verb set
+    # — the Plan 00146 dogfooding misses were "want me to build/start X?",
+    # which the old per-pattern verb lists did not include.
     CONFIRMATION_PATTERNS: ClassVar[list[str]] = [
-        r"would you like me to (?:continue|proceed|start|begin)",
-        r"would you like to (?:continue|proceed|start|begin)",
-        r"should I (?:continue|proceed|start|begin)",
-        r"shall I (?:continue|proceed|start|begin)",
-        r"do you want me to (?:continue|proceed|start|begin)",
-        r"may I (?:continue|proceed|start|begin)",
-        r"can I (?:continue|proceed|start|begin)",
-        r"ready (?:for me )?to (?:continue|proceed|start|begin)",
-        r"ready to (?:implement|execute|run)",
-        r"would you like me to (?:launch|execute|run)",
-        r"should I (?:launch|execute|run)",
-        r"would you like me to move (?:on|forward)",
-        r"shall we (?:continue|proceed|move on)",
+        rf"would you like me to {_CONTINUE_VERBS}",
+        rf"would you like to {_CONTINUE_VERBS}",
+        rf"should I {_CONTINUE_VERBS}",
+        rf"shall I {_CONTINUE_VERBS}",
+        rf"(?:do you )?want me to {_CONTINUE_VERBS}",
+        rf"may I {_CONTINUE_VERBS}",
+        rf"can I {_CONTINUE_VERBS}",
+        rf"ready (?:for me )?to {_CONTINUE_VERBS}",
+        rf"shall we {_CONTINUE_VERBS}",
         r"continue with (?:batch|phase|step)",
         r"would you like.+(?:batch|phase|step)",
         r"shall I proceed.+(?:batch|phase|step)",
         # Patterns ported from php-qa-ci (Phase 2 integration)
         r"let me know if you.*(?:continue|proceed)",
-        r"want me to (?:go ahead|keep going)",
+        rf"let me know if you (?:want|would like) me to {_CONTINUE_VERBS}",
         r"if you'd like.*(?:continue|proceed)",
         r"i can (?:continue|proceed) with",
     ]
@@ -310,7 +338,9 @@ class AutoContinueStopHandler(Handler):
         Branch 1 - QA failure:
             Last Bash was a QA tool AND result indicates failure -> DENY fix msg.
         Branch 2 - Explicit stop explanation:
-            Last assistant text starts with "STOPPING BECAUSE:" -> ALLOW.
+            Last assistant text starts with "STOPPING BECAUSE:" -> ALLOW,
+            unless the same message asks a rhetorical continue question
+            -> DENY hard block (Plan 00146).
         Branch 2.5 - tool_use_error recovery (Plan 00101 Phase 6):
             Last tool_result has is_error=true and no STOPPING BECAUSE: was
             given -> DENY with specific recovery instruction (Read + retry).
@@ -335,12 +365,32 @@ class AutoContinueStopHandler(Handler):
             self._log_stop_event(hook_input, Decision.DENY, _QA_FAIL_REASON)
             return result
 
-        # Branch 2: Explicit stop explanation
-        if reader and self._has_stop_explanation(reader):
-            logger.info("STOPPING BECAUSE: prefix detected - allowing stop")
-            result = HookResult(decision=Decision.ALLOW)
-            self._log_stop_event(hook_input, Decision.ALLOW, "")
-            return result
+        # Branch 2: Explicit stop explanation.
+        # Plan 00146: the confirmation-question check runs FIRST on the same
+        # freshness-resolved current-turn message — a rhetorical "want me to
+        # build slice 2 next?" must be denied even when prefixed STOPPING
+        # BECAUSE:. Previously this branch ALLOWed on the prefix alone, so the
+        # prefix acted as a bypass of the auto-continue guardrail.
+        if reader:
+            current_msg = self._resolve_current_turn_message(reader)
+            if current_msg is not None and self._message_has_stop_explanation(current_msg):
+                text = self._message_text(current_msg)
+                if self._contains_confirmation_pattern(text) and "?" in text:
+                    logger.info(
+                        "Rhetorical continue question inside STOPPING BECAUSE: stop"
+                        " - hard-blocking"
+                    )
+                    result = HookResult(
+                        decision=Decision.DENY, reason=_RHETORICAL_CONTINUE_BLOCK_REASON
+                    )
+                    self._log_stop_event(
+                        hook_input, Decision.DENY, _RHETORICAL_CONTINUE_BLOCK_REASON
+                    )
+                    return result
+                logger.info("STOPPING BECAUSE: prefix detected - allowing stop")
+                result = HookResult(decision=Decision.ALLOW)
+                self._log_stop_event(hook_input, Decision.ALLOW, "")
+                return result
 
         # Branch 2.5: tool_use_error recovery (Plan 00101 Phase 6)
         # Last tool_result has is_error=true and the agent did NOT explain.
@@ -442,12 +492,22 @@ class AutoContinueStopHandler(Handler):
     def _has_stop_explanation(self, reader: TranscriptReader) -> bool:
         """Return True if the CURRENT turn's assistant message explains the stop.
 
-        Checks each content block independently to avoid false negatives from block
-        joining. When TranscriptReader joins multiple text blocks with ' ' (space),
-        'STOPPING BECAUSE:' at the start of a later block ends up mid-line in the
-        joined string and the startswith check fails. Checking per-block preserves
-        the original line boundaries. Falls back to the joined content string for
-        legacy/string-format messages.
+        Thin wrapper over _resolve_current_turn_message() +
+        _message_has_stop_explanation(); kept for callers/tests that only need
+        the boolean answer.
+
+        Args:
+            reader: Loaded transcript reader
+
+        Returns:
+            True if any line in any text block of the CURRENT turn starts with
+            the STOPPING BECAUSE: prefix
+        """
+        msg = self._resolve_current_turn_message(reader)
+        return msg is not None and self._message_has_stop_explanation(msg)
+
+    def _resolve_current_turn_message(self, reader: TranscriptReader) -> TranscriptMessage | None:
+        """Return the CURRENT turn's assistant message, or None if unverifiable.
 
         Turn-freshness — the hard part. When the Stop hook fires, Claude Code may
         not have flushed the current turn's assistant text. Reading the transcript
@@ -471,28 +531,21 @@ class AutoContinueStopHandler(Handler):
         be a turn-correlation id passed on the Stop ``hook_input``, which Claude
         Code does not currently provide.
 
+        Returns None when nothing verifiably belonging to THIS stop arrived
+        within the poll budget — a genuinely delayed stop re-fires and is
+        re-evaluated once its fresh, recent message lands; trusting the
+        possibly-stale tail is exactly the misread this guard exists to prevent.
+
         Args:
             reader: Loaded transcript reader
 
         Returns:
-            True if any line in any text block of the CURRENT turn starts with
-            the STOPPING BECAUSE: prefix
+            The current turn's assistant message, or None if it cannot be
+            verified as belonging to this stop
         """
         msg = reader.get_last_assistant_message()
         if not msg:
-            return False
-
-        def _line_starts_with_prefix(text: str) -> bool:
-            return any(
-                line.lstrip().startswith(_STOP_EXPLANATION_PREFIX) for line in text.splitlines()
-            )
-
-        def _check_msg(m: TranscriptMessage) -> bool:
-            for block in m.content_blocks:
-                if block.block_type == "text" and block.text:
-                    if _line_starts_with_prefix(block.text):
-                        return True
-            return _line_starts_with_prefix(m.content)
+            return None
 
         # A "complete" tail is the last transcript entry AND already carries text.
         complete = _message_has_text(msg) and _transcript_last_is_assistant(reader)
@@ -504,22 +557,60 @@ class AutoContinueStopHandler(Handler):
         suspect_stale = complete and age is not None and age > _STALE_TAIL_THRESHOLD_SECONDS
 
         if complete and not suspect_stale:
-            return _check_msg(msg)
+            return msg
 
         # Poll for the current turn's content. From a complete-but-stale tail we
         # only accept a DIFFERENT (newer-uuid) assistant message; from an
         # incomplete tail any complete assistant message qualifies.
         previous_uuid = msg.uuid if complete else None
-        fresh = self._await_fresh_assistant_message(reader, previous_uuid)
-        if fresh is not None:
-            return _check_msg(fresh)
+        return self._await_fresh_assistant_message(reader, previous_uuid)
 
-        # Nothing newer arrived within the budget — cannot verify that an
-        # explanation belongs to THIS stop, so do not satisfy the gate. A
-        # genuinely delayed stop re-fires and is re-evaluated once its fresh,
-        # recent message lands; trusting the possibly-stale tail is exactly the
-        # misread this guard exists to prevent.
-        return False
+    @staticmethod
+    def _message_has_stop_explanation(msg: TranscriptMessage) -> bool:
+        """Return True if any line in the message carries the stop prefix.
+
+        Checks each content block independently to avoid false negatives from
+        block joining. When TranscriptReader joins multiple text blocks with ' '
+        (space), 'STOPPING BECAUSE:' at the start of a later block ends up
+        mid-line in the joined string and the startswith check fails. Checking
+        per-block preserves the original line boundaries. Falls back to the
+        joined content string for legacy/string-format messages.
+
+        Args:
+            msg: The resolved current-turn assistant message
+
+        Returns:
+            True if any line in any text block starts with STOPPING BECAUSE:
+        """
+
+        def _line_starts_with_prefix(text: str) -> bool:
+            return any(
+                line.lstrip().startswith(_STOP_EXPLANATION_PREFIX) for line in text.splitlines()
+            )
+
+        for block in msg.content_blocks:
+            if block.block_type == "text" and block.text:
+                if _line_starts_with_prefix(block.text):
+                    return True
+        return _line_starts_with_prefix(msg.content)
+
+    @staticmethod
+    def _message_text(msg: TranscriptMessage) -> str:
+        """Return the full text of a message, preserving block line boundaries.
+
+        Args:
+            msg: A transcript assistant message
+
+        Returns:
+            All text-block contents joined with newlines, or the joined
+            content string for legacy/string-format messages
+        """
+        texts = [
+            block.text for block in msg.content_blocks if block.block_type == "text" and block.text
+        ]
+        if texts:
+            return "\n".join(texts)
+        return msg.content
 
     def _await_fresh_assistant_message(
         self, reader: TranscriptReader, previous_uuid: str | None
@@ -649,6 +740,10 @@ class AutoContinueStopHandler(Handler):
             "**Do NOT**:\n"
             "- Stop mid-task without explanation\n"
             "- Ask confirmation questions and then stop (the hook auto-continues those)\n"
+            "- Smuggle a rhetorical continue question inside a `STOPPING BECAUSE:` "
+            "message ('STOPPING BECAUSE: slice 1 done. Want me to build slice 2?') "
+            "— this is HARD-BLOCKED; the prefix does not exempt tautological "
+            "questions. Just continue with the next unit of work\n"
             "- Use `AUTO-CONTINUE` unless you intend to keep working indefinitely\n\n"
             "**Before asking a question, evaluate it critically**:\n"
             "- Tautological/rhetorical questions with obvious answers "

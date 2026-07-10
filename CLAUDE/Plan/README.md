@@ -115,6 +115,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Completed Plans
 
+- [00146: Hard-block rhetorical continue questions in explained stops](Completed/00146-stop-hard-block-rhetorical-continue/PLAN.md) - Complete
+
+  - Dogfooding fix from live evidence: `auto_continue_stop` Branch 2 (`STOPPING BECAUSE:` -> ALLOW) short-circuited before confirmation-question detection, so rhetorical "want me to build slice 2 next?" / "Should I proceed?" stops sailed through when prefixed. The confirmation check now runs on the same freshness-resolved current-turn message INSIDE Branch 2 and hard-DENIES with a firm get-on-with-it block; the shared `_CONTINUE_VERBS` group extends coverage to start/build/implement/tackle/etc. while keeping the `?` requirement so genuine either/or choice questions still stop cleanly. Also killed the 6x advisory spam: nitpick dismissive/hedging handlers dedupe to one line per category, and the Stop-event dismissive detector suppresses back-to-back identical (session + phrase-set) advisories. Live-probed both ways against the production `.claude/hooks/stop` wrapper (block exit 2 / clean allow exit 0 / re-entry no-loop). QA 13/13, daemon RUNNING.
+
 - [00143: Loud Project-Handler Load-Failure Alert](Completed/00143-loud-project-handler-load-failure-alert/PLAN.md) - Complete
 
   - Closed a silent fail-open on the observability axis: when a project handler under `.claude/project-handlers/` fails to load (e.g. an upgrade made `get_claude_md` required and an older handler predates it), the daemon safely skips it but used to only log a line nobody reads — an agent could work a whole session believing protections were live. Now the running daemon **persists** its load failures (`project_handler_health` state file, always-rewritten so it reflects the live daemon), a new on-by-default `project_handler_load_checker` SessionStart handler injects a loud `🚨 PROJECT PROTECTION DEGRADED 🚨` alert (listing each skipped handler + reason + fix-then-restart remediation; silent when clean), `status`/`check` surface the degraded state and `health` returns a non-zero exit, and `upgrade_version.sh` Step 16.5 runs `validate-project-handlers` post-upgrade (loud, non-fatal). Verified live end-to-end. QA 13/13 (9126 tests, 95.2%), daemon RUNNING. Commits `384f353` (capture+persist), `7cac2b1` (alert), `43b8dc1` (CLI signal), `a37834d` (upgrade gate), `bf183f9` (docs/config/manifest).
@@ -976,8 +980,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 144
-- **Completed**: 122 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
+- **Total Plans Created**: 146 (count = `hooksdaemon.latestPlanNumber` git counter; 00145 was allocated by the counter but its folder is not present on this branch)
+- **Completed**: 123 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
 - **Active**: 16 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102); plus draft folders deleted and no longer on disk (00036 empty draft, 00038 superseded by 00045, 00073 orphan empty folder removed during Plan 00107 housekeeping)

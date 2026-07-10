@@ -84,19 +84,25 @@ class DismissiveLanguageNitpickHandler(Handler):
             HookResult with ALLOW decision and any findings as context
         """
         messages: list[dict[str, str]] = hook_input.get("assistant_messages", [])
-        context_lines: list[str] = []
+        # Dedupe by category (Plan 00146): one advisory line per category, no
+        # matter how many patterns or messages match it. Without this, a single
+        # 'out of scope' discussion emitted one identical line per matching
+        # pattern per message — six duplicates observed in one advisory.
+        found_categories: dict[str, None] = {}
 
         for msg in messages:
             text = msg.get("content", "")
             if not text:
                 continue
             for category, compiled in self._compiled:
-                if compiled.search(text):
-                    readable = category.replace("_", " ")
-                    context_lines.append(
-                        f"Dismissive language detected ({readable}): "
-                        f"acknowledge and offer to fix instead of deflecting"
-                    )
+                if category not in found_categories and compiled.search(text):
+                    found_categories[category] = None
+
+        context_lines = [
+            f"Dismissive language detected ({category.replace('_', ' ')}): "
+            f"acknowledge and offer to fix instead of deflecting"
+            for category in found_categories
+        ]
 
         return HookResult(decision=Decision.ALLOW, context=context_lines)
 

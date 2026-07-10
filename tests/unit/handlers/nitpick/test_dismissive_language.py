@@ -132,3 +132,56 @@ class TestDismissiveLanguageNitpickHandle:
         result = handler.handle(hook_input)
         # Only the second message triggers detection
         assert len(result.context) > 0
+
+
+class TestDismissiveLanguageNitpickDedupe:
+    """Identical advisory lines must not be repeated (Plan 00146).
+
+    Dogfooding evidence: six identical 'Dismissive language detected (out of
+    scope)' lines injected in one advisory — one per matching pattern per
+    message. The handler must emit at most ONE line per category regardless of
+    how many patterns or messages match it.
+    """
+
+    def test_multiple_patterns_same_category_emit_one_line(self) -> None:
+        """Several patterns of one category matching one message → one line."""
+        handler = DismissiveLanguageNitpickHandler()
+        hook_input = _make_hook_input(
+            [
+                {
+                    "uuid": "u1",
+                    "content": (
+                        "That is out of scope and falls outside the scope of "
+                        "this task; it is beyond the scope of the plan."
+                    ),
+                }
+            ]
+        )
+        result = handler.handle(hook_input)
+        assert len(result.context) == 1
+        assert "out of scope" in result.context[0]
+
+    def test_same_category_across_messages_emits_one_line(self) -> None:
+        """The same category matching in several messages → one line."""
+        handler = DismissiveLanguageNitpickHandler()
+        hook_input = _make_hook_input(
+            [
+                {"uuid": "u1", "content": "This is out of scope."},
+                {"uuid": "u2", "content": "That also falls outside our remit, out of scope."},
+                {"uuid": "u3", "content": "Again: out of scope."},
+            ]
+        )
+        result = handler.handle(hook_input)
+        assert len(result.context) == 1
+
+    def test_distinct_categories_emit_one_line_each(self) -> None:
+        """Two different categories → two lines, one per category."""
+        handler = DismissiveLanguageNitpickHandler()
+        hook_input = _make_hook_input(
+            [
+                {"uuid": "u1", "content": "This is a pre-existing issue."},
+                {"uuid": "u2", "content": "And that is out of scope."},
+            ]
+        )
+        result = handler.handle(hook_input)
+        assert len(result.context) == 2

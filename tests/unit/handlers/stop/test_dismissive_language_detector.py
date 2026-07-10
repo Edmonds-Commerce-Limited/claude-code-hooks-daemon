@@ -619,3 +619,73 @@ class TestDismissiveLanguageDetectorAcceptanceTests:
         for test in tests:
             assert hasattr(test, "title")
             assert test.title
+
+
+class TestDismissiveAdvisoryDedupe:
+    """The same advisory must not be re-emitted back to back (Plan 00146).
+
+    Dogfooding evidence: six identical dismissive advisories fired in one stop
+    interaction — pure context spam. After handle() emits an advisory for a
+    given (session, phrase-set) key, matches() must return False for the same
+    key until the phrase set or session changes.
+    """
+
+    @pytest.fixture
+    def handler(self) -> Any:
+        from claude_code_hooks_daemon.handlers.stop.dismissive_language_detector import (
+            DismissiveLanguageDetectorHandler,
+        )
+
+        return DismissiveLanguageDetectorHandler()
+
+    def test_identical_advisory_suppressed_after_first_emission(self, handler: Any) -> None:
+        """Same session + same phrase set: advise once, then suppress."""
+        path = _make_transcript([_assistant_message("This is a pre-existing issue")])
+        hook_input = {
+            HookInputField.TRANSCRIPT_PATH: path,
+            HookInputField.SESSION_ID: "session-1",
+        }
+        assert handler.matches(hook_input) is True
+        handler.handle(hook_input)
+        assert handler.matches(hook_input) is False
+
+    def test_changed_phrase_set_advises_again(self, handler: Any) -> None:
+        """A different phrase set in the same session advises again."""
+        first = _make_transcript([_assistant_message("This is a pre-existing issue")])
+        first_input = {
+            HookInputField.TRANSCRIPT_PATH: first,
+            HookInputField.SESSION_ID: "session-1",
+        }
+        assert handler.matches(first_input) is True
+        handler.handle(first_input)
+
+        second = _make_transcript([_assistant_message("That work is out of scope here")])
+        second_input = {
+            HookInputField.TRANSCRIPT_PATH: second,
+            HookInputField.SESSION_ID: "session-1",
+        }
+        assert handler.matches(second_input) is True
+
+    def test_new_session_advises_again(self, handler: Any) -> None:
+        """The same phrase set in a NEW session advises again."""
+        path = _make_transcript([_assistant_message("This is a pre-existing issue")])
+        first_input = {
+            HookInputField.TRANSCRIPT_PATH: path,
+            HookInputField.SESSION_ID: "session-1",
+        }
+        assert handler.matches(first_input) is True
+        handler.handle(first_input)
+
+        second_input = {
+            HookInputField.TRANSCRIPT_PATH: path,
+            HookInputField.SESSION_ID: "session-2",
+        }
+        assert handler.matches(second_input) is True
+
+    def test_missing_session_id_still_dedupes(self, handler: Any) -> None:
+        """No session_id at all: dedupe still applies (keyed on empty id)."""
+        path = _make_transcript([_assistant_message("This is a pre-existing issue")])
+        hook_input = {HookInputField.TRANSCRIPT_PATH: path}
+        assert handler.matches(hook_input) is True
+        handler.handle(hook_input)
+        assert handler.matches(hook_input) is False

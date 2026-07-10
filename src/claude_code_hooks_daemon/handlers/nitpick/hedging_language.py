@@ -83,19 +83,24 @@ class HedgingLanguageNitpickHandler(Handler):
             HookResult with ALLOW decision and any findings as context
         """
         messages: list[dict[str, str]] = hook_input.get("assistant_messages", [])
-        context_lines: list[str] = []
+        # Dedupe by category (Plan 00146): one advisory line per category, no
+        # matter how many patterns or messages match it — mirrors the
+        # dismissive nitpick handler's duplicate-spam fix.
+        found_categories: dict[str, None] = {}
 
         for msg in messages:
             text = msg.get("content", "")
             if not text:
                 continue
             for category, compiled in self._compiled:
-                if compiled.search(text):
-                    readable = category.replace("_", " ")
-                    context_lines.append(
-                        f"Hedging language detected ({readable}): "
-                        f"use tools to verify instead of guessing"
-                    )
+                if category not in found_categories and compiled.search(text):
+                    found_categories[category] = None
+
+        context_lines = [
+            f"Hedging language detected ({category.replace('_', ' ')}): "
+            f"use tools to verify instead of guessing"
+            for category in found_categories
+        ]
 
         return HookResult(decision=Decision.ALLOW, context=context_lines)
 

@@ -135,6 +135,12 @@ class DismissiveLanguageDetectorHandler(Handler):
             + self.PREMATURE_STOP_PATTERNS
         ):
             self._all_patterns.append((pattern_str, re.compile(pattern_str, re.IGNORECASE)))
+        # Dedupe state (Plan 00146): key of the last advisory emitted. Repeated
+        # Stop events carrying the SAME phrase set in the SAME session must not
+        # re-emit an identical advisory — dogfooding showed 6x duplication in
+        # one stop interaction. In-memory is sufficient: the daemon is a
+        # long-lived process and one handler instance serves the session.
+        self._last_advisory_key: tuple[str, frozenset[str]] | None = None
 
     def _get_last_assistant_message(self, transcript_path: str) -> str:
         """Read transcript and extract the last assistant message text.
@@ -152,6 +158,21 @@ class DismissiveLanguageDetectorHandler(Handler):
         if not reader:
             return ""
         return reader.get_last_assistant_text()
+
+    @staticmethod
+    def _advisory_key(hook_input: dict[str, Any], phrases: list[str]) -> tuple[str, frozenset[str]]:
+        """Build the dedupe key for an advisory emission.
+
+        Args:
+            hook_input: Hook input (session_id read; empty string when absent)
+            phrases: The matched dismissive phrase list
+
+        Returns:
+            (session_id, frozenset(phrases)) — identical key means an
+            identical advisory that must not be re-emitted
+        """
+        session_id = str(hook_input.get(HookInputField.SESSION_ID, ""))
+        return (session_id, frozenset(phrases))
 
     def _find_dismissive_phrases(self, text: str) -> list[str]:
         """Find all dismissive phrases in the given text.
@@ -196,6 +217,9 @@ class DismissiveLanguageDetectorHandler(Handler):
 
         phrases = self._find_dismissive_phrases(last_message)
         if phrases:
+            if self._advisory_key(hook_input, phrases) == self._last_advisory_key:
+                logger.debug("Duplicate dismissive advisory suppressed (same session + phrase set)")
+                return False
             logger.info(
                 "Dismissive language detected: %s",
                 ", ".join(phrases),
@@ -222,6 +246,9 @@ class DismissiveLanguageDetectorHandler(Handler):
                 phrases = self._find_dismissive_phrases(last_message)
 
         if phrases:
+            # Record the advisory key so an identical (session, phrase-set)
+            # advisory is suppressed by matches() next time (Plan 00146).
+            self._last_advisory_key = self._advisory_key(hook_input, phrases)
             phrase_list = ", ".join(f'"{p}"' for p in phrases)
             premature_readable = {p.replace(r"\b", "") for p in self.PREMATURE_STOP_PATTERNS}
             premature_stop_hit = any(p in premature_readable for p in phrases)
@@ -268,7 +295,8 @@ class DismissiveLanguageDetectorHandler(Handler):
             "## dismissive_language_detector — do not deflect or prematurely halt\n\n"
             "Stop-time advisory that fires on language patterns signalling avoidance of "
             "work. The handler does NOT block the stop, but injects context for the next "
-            "turn so the agent self-corrects.\n\n"
+            "turn so the agent self-corrects. Identical advisories (same session, same "
+            "phrase set) are emitted once, not repeated on every subsequent stop.\n\n"
             "**Avoid**:\n\n"
             "- Dismissing issues as `pre-existing`, `out of scope`, `not our problem`, "
             "  or `not relevant` to deflect work that is in fact yours.\n"

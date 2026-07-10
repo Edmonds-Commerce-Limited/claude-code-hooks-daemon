@@ -2717,3 +2717,163 @@ class TestExplainOrContinueReasonContent:
         assert (
             "AUTO-CONTINUE" in _EXPLAIN_OR_CONTINUE_REASON
         ), "Branch 4 reason must keep the AUTO-CONTINUE escape hatch."
+
+
+class TestRhetoricalContinueHardBlock:
+    """STOPPING BECAUSE: must NOT bypass confirmation-question detection.
+
+    Dogfooding regression (Plan 00146): the agent repeatedly stopped with
+    'STOPPING BECAUSE: <summary>. Want me to build slice 2 next?' — a
+    rhetorical continue question that the project explicitly forbids. Branch 2
+    (explicit stop explanation -> ALLOW) short-circuited before Branch 3's
+    confirmation-question detection ever ran, so the prefix acted as a bypass
+    of the auto-continue guardrail. The confirmation check must run on the
+    same current-turn message and win over the has-reason ALLOW.
+    """
+
+    @pytest.fixture
+    def handler(self) -> AutoContinueStopHandler:
+        """Create handler instance."""
+        return AutoContinueStopHandler()
+
+    def _write_assistant_text(self, path: Path, text: str) -> None:
+        """Write a transcript whose last entry is an assistant text message."""
+        msg = {
+            "type": "message",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": text}],
+            },
+        }
+        with path.open("w") as f:
+            f.write(json.dumps(msg) + "\n")
+
+    def _handle(self, handler: AutoContinueStopHandler, path: Path) -> HookResult:
+        hook_input: dict[str, Any] = {"transcript_path": str(path), "stop_hook_active": False}
+        return handler.handle(hook_input)
+
+    # ── rhetorical continue questions prefixed STOPPING BECAUSE: → DENY ────
+
+    def test_stopping_because_want_me_to_build_next_is_denied(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """'STOPPING BECAUSE: ... Want me to build slice 2 next?' → DENY."""
+        path = tmp_path / "t.jsonl"
+        self._write_assistant_text(
+            path,
+            "Slice 1 is complete and committed.\n\n"
+            "STOPPING BECAUSE: slice 1 done. Want me to build slice 2 next?",
+        )
+        result = self._handle(handler, path)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        assert "continue" in result.reason.lower()
+
+    def test_stopping_because_should_i_proceed_is_denied(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """'STOPPING BECAUSE: ... Should I proceed?' → DENY."""
+        path = tmp_path / "t.jsonl"
+        self._write_assistant_text(
+            path,
+            "Phase 1 finished, tests green.\n\nSTOPPING BECAUSE: phase 1 done. Should I proceed?",
+        )
+        result = self._handle(handler, path)
+        assert result.decision == Decision.DENY
+
+    def test_stopping_because_want_me_to_start_it_is_denied(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """'STOPPING BECAUSE: ... Want me to start it?' → DENY."""
+        path = tmp_path / "t.jsonl"
+        self._write_assistant_text(
+            path,
+            "The plan is written and approved.\n\nSTOPPING BECAUSE: plan ready. Want me to start it?",
+        )
+        result = self._handle(handler, path)
+        assert result.decision == Decision.DENY
+
+    def test_stopping_because_would_you_like_me_to_implement_is_denied(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """'Would you like me to implement ...?' with prefix → DENY."""
+        path = tmp_path / "t.jsonl"
+        self._write_assistant_text(
+            path,
+            "Design is agreed.\n\n"
+            "STOPPING BECAUSE: design done. Would you like me to implement it now?",
+        )
+        result = self._handle(handler, path)
+        assert result.decision == Decision.DENY
+
+    def test_block_reason_is_firm_and_forbids_asking(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """The hard-block reason must say the answer is obvious and to not ask."""
+        path = tmp_path / "t.jsonl"
+        self._write_assistant_text(
+            path, "STOPPING BECAUSE: batch complete. Want me to keep going with the next batch?"
+        )
+        result = self._handle(handler, path)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
+        reason_lower = result.reason.lower()
+        assert "obvious" in reason_lower
+        assert "do not ask" in reason_lower or "don't ask" in reason_lower
+        assert "stopping because" in reason_lower
+
+    # ── legitimate stops must remain allowed ────────────────────────────────
+
+    def test_genuine_completion_stop_still_allowed(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """A genuine work-finished stop with no question → ALLOW."""
+        path = tmp_path / "t.jsonl"
+        self._write_assistant_text(
+            path, "STOPPING BECAUSE: all tasks complete, QA passes, daemon restart verified."
+        )
+        result = self._handle(handler, path)
+        assert result.decision == Decision.ALLOW
+
+    def test_genuine_either_or_choice_question_still_allowed(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """A genuine choice question the agent cannot resolve → ALLOW.
+
+        'Which of A, B, or C ...?' is a legitimate user-input stop, not a
+        rhetorical 'should I do the obvious next thing'. It must not be
+        over-blocked by the rhetorical-continue patterns.
+        """
+        path = tmp_path / "t.jsonl"
+        self._write_assistant_text(
+            path,
+            "STOPPING BECAUSE: need user input — which of Redis, Postgres, or "
+            "SQLite do you prefer for the cache backend?",
+        )
+        result = self._handle(handler, path)
+        assert result.decision == Decision.ALLOW
+
+    def test_completion_stop_with_non_continue_question_still_allowed(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """A question unrelated to continuation does not trigger the block."""
+        path = tmp_path / "t.jsonl"
+        self._write_assistant_text(
+            path,
+            "STOPPING BECAUSE: need user input — what colour scheme do you "
+            "prefer for the dashboard?",
+        )
+        result = self._handle(handler, path)
+        assert result.decision == Decision.ALLOW
+
+    # ── unprefixed rhetorical questions keep auto-continuing (Branch 3) ─────
+
+    def test_unprefixed_want_me_to_build_still_auto_continues(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """'Want me to build slice 2 next?' WITHOUT prefix → DENY (auto-continue)."""
+        path = tmp_path / "t.jsonl"
+        self._write_assistant_text(path, "Slice 1 done. Want me to build slice 2 next?")
+        result = self._handle(handler, path)
+        assert result.decision == Decision.DENY
+        assert result.reason is not None
