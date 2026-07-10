@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.34.1] - 2026-07-10
+
+This is a **patch release** fixing two High-severity bugs in the Plan 00135 PTY
+supervisor (`.claude/ccy/claude-supervise.py`), both surfaced once v3.34.0 made
+the supervisor actually run in client projects. No breaking changes.
+
+### Fixed
+
+- **Supervisor polled the wrong context-sidecar directory in normal client installs (Plan 00149, Bug A)** — `_default_sidecar_dir()` hardcoded the self-install layout (`{project}/untracked/context-sidecar`), but the daemon writes the sidecar install-mode-aware to `daemon_untracked_dir()/context-sidecar` — which in a normal client install is `{project}/.claude/hooks-daemon/untracked/context-sidecar`. The two only coincide in the daemon's own repo, so in **every real client install** the supervisor polled a directory the daemon never wrote and its compact-trigger loop was permanently inert (armed or dry-run) — a silent no-op masked because all prior testing ran in self-install/dogfood. The supervisor now mirrors the daemon's own install-mode detection (self-install iff `{project}/src/claude_code_hooks_daemon` exists) and resolves the same directory the daemon writes to, in both modes.
+- **Supervisor could inject into a non-empty input box and submit it (Plan 00149, Bug B)** — the supervisor was observed pasting its injection (`/compact`, `continue`, or the dry-run marker) into an input box the human had partially typed into, then submitting the corrupted mix of bot and human text. It now tracks the human input-line state from the operator stdin bytes it already forwards and gates **every** injection path on that line being empty: a non-empty box defers the tick (logged `injection deferred: input box not empty`) and retries when the box is empty again — no latch, no cooldown burn, the compaction signal is kept. Supervisor-injected keystrokes bypass the input-activity recorder, so the bot's own typing can never mark the box non-empty. The model is deliberately conservative (any unrecognised byte counts as content) so a false "non-empty" only defers, while a false "empty" — the corrupting case — is avoided.
+
 ## [3.34.0] - 2026-07-10
 
 This is a **minor release** that makes the v3.33.0 ccy supervisor auto-deploy
