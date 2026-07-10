@@ -60,9 +60,14 @@ an **empty** input box. Delegated to a Fable subagent (worktree-isolated).
 
 ### Phase 2: Bug B — empty-box injection guard (Fable subagent, worktree)
 
-- [ ] 🔄 **Task 2.1**: Fable subagent implements input-line state tracking from
-  forwarded human stdin + guards every injection path; TDD; commits to worktree.
-- [ ] ⬜ **Task 2.2**: Merge the subagent's branch into main; reconcile with Bug A.
+- [x] ✅ **Task 2.1**: Fable subagent implemented `HumanInputLine` (fed from
+  forwarded human stdin; clears on Enter/Ctrl-U/Ctrl-C, pops on backspace,
+  conservatively counts anything else as content) and gates every injection path
+  by AND-ing `input_line_empty` into the machine's `idle` input (reuses existing
+  defer-and-retry busy semantics). Injected keystrokes bypass `record` so the
+  bot never marks the box non-empty. TDD `test_input_line_guard.py`.
+- [x] ✅ **Task 2.2**: Cherry-picked `b952fa3` onto main (`0a9b09b`); clean
+  auto-merge with Bug A. Combined: 127 supervise tests pass, black + mypy clean.
 
 ### Phase 3: Release v3.34.1
 
