@@ -8,6 +8,17 @@ daemon:
 
   stale_file_days: 7  # Remove daemon runtime files older than this (days)
 
+  # Path exclusion for content-scanning blockers (v3.35.0+, Plan 00150)
+  # Gitignore-style globs (*, ?, ** = zero-or-more segments) exempted from ALL
+  # three content blockers at once: security_antipattern, qa_suppression,
+  # error_hiding_blocker. Set once here; each handler inherits it on top of its
+  # own options.exclude_paths and built-in defaults. Use for QA/linting projects
+  # whose fixtures intentionally contain "bad" code. Default: [] (no exclusions).
+  # exclude_paths:
+  #   - "**/fixtures/**"
+  #   - "**/__fixtures__/**"
+  #   - "samples/**"
+
   # CI enforcement (v2.27.0+) - Controls behaviour when daemon cannot start
   # Default (false/omitted): fail open — warn once then silently passthrough
   # When true: fail closed — block all tool use and tell agent to stop

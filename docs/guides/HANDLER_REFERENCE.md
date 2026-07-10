@@ -16,6 +16,41 @@ Handlers are either **blocking** (terminal) or **advisory** (non-terminal):
 
 ---
 
+## Content-Blocker Path Exclusion (`exclude_paths`)
+
+The three content-scanning blocking handlers -- `security_antipattern`, `qa_suppression`, and `error_hiding_blocker` -- accept gitignore-style glob patterns that exempt matching files from scanning. This is the supported way for a project (e.g. a QA/linting library) to keep intentionally-"bad" fixture code out of the blockers instead of disabling a whole handler.
+
+Globs support `*` (within a segment), `?` (single char), and `**` (zero-or-more path segments). Examples: `**/fixtures/**`, `samples/**/*.py`, `tests/assets/**`.
+
+**Two levels, combined as a union:**
+
+- **Project-wide** -- `daemon.exclude_paths` (a top-level `daemon:` key). Inherited by all three handlers.
+- **Per-handler** -- `handlers.pre_tool_use.<handler>.options.exclude_paths`. Applies to that handler only.
+
+A file is exempt if it matches the union of the project-wide list, the handler's own list, and the handler's built-in defaults.
+
+**Built-in defaults** (always skipped, no config needed):
+
+- `error_hiding_blocker`: `vendor/`, `node_modules/`, `tests/fixtures/`, `tests/assets/`, `__fixtures__/` (added in v3.35.0 for parity with its siblings).
+- `security_antipattern`: `vendor/`, `node_modules/`, `tests/fixtures/`, `tests/assets/`, docs, and rule-definition dirs (via `should_skip()`).
+- `qa_suppression`: per-language vendor / build / `node_modules` directories.
+
+```yaml
+daemon:
+  exclude_paths:
+    - "**/fixtures/**"
+    - "samples/**"
+
+handlers:
+  pre_tool_use:
+    error_hiding_blocker:
+      options:
+        exclude_paths:
+          - "generated/**"
+```
+
+---
+
 ## PreToolUse Handlers
 
 These handlers run **before** Claude Code executes a tool call. They can block dangerous operations or inject advisory context.

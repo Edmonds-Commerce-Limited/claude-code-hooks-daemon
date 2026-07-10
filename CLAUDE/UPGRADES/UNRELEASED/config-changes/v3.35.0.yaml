@@ -1,0 +1,59 @@
+version: "3.35.0"
+date: "2026-07-10"
+breaking: false
+config_changes:
+  added:
+    - key: daemon.exclude_paths
+      description: >-
+        New project-level list of gitignore-style glob patterns (Plan 00150)
+        exempting files from ALL three content-scanning blocking handlers at
+        once — security_antipattern, qa_suppression, and error_hiding_blocker.
+        Set it once and every content blocker inherits it, in addition to each
+        handler's own exclude_paths option and its built-in defaults. Globs
+        support *, ?, and ** (zero-or-more path segments), e.g.
+        "**/fixtures/**", "samples/**/*.py". The motivating case is a QA or
+        linting library whose job is to contain deliberately-"bad" code samples
+        (fixtures with suppression annotations, error-hiding patterns, or
+        insecure snippets) that should not be blocked. Default: empty list (no
+        project-level exclusions), so absent config changes nothing.
+      recommended: true
+      recommended_value: null
+      dormant: false
+      example_yaml: |
+        daemon:
+          exclude_paths:
+            - "**/fixtures/**"
+            - "**/__fixtures__/**"
+            - "samples/**"
+      migration_note: >-
+        Optional. No action needed for typical application projects. If your
+        project intentionally contains files that trip the content blockers
+        (test fixtures of broken code, generated code, vendored snippets),
+        add their paths here (or per-handler via
+        handlers.pre_tool_use.<handler>.options.exclude_paths) instead of
+        disabling a whole handler. Note v3.35.0 also gives error_hiding_blocker
+        the same built-in default skips as its siblings (vendor, node_modules,
+        tests/fixtures, tests/assets), so fixture/vendored error-hiding code is
+        no longer blocked by default even without configuring exclude_paths.
+    - key: handlers.pre_tool_use.security_antipattern.options.exclude_paths
+      description: >-
+        Per-handler glob exclude list (Plan 00150) for security_antipattern,
+        layered on top of its built-in should_skip() defaults and the
+        project-level daemon.exclude_paths. Same glob syntax. Default: unset.
+      recommended: false
+      recommended_value: null
+      dormant: false
+      example_yaml: |
+        handlers:
+          pre_tool_use:
+            security_antipattern:
+              options:
+                exclude_paths:
+                  - "tests/fixtures/**"
+      migration_note: >-
+        Optional; use when only this handler should exempt certain paths.
+        The same options.exclude_paths is available on qa_suppression and
+        error_hiding_blocker.
+  renamed: []
+  removed: []
+  changed: []

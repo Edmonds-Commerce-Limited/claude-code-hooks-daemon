@@ -234,7 +234,12 @@ class QaSuppressionHandler(Handler):
             "(item-level `#[allow(...)]` and crate-level `#![allow(...)]`)\n\n"
             "**Required action**: Fix the code so QA passes without suppression. "
             "If a suppression is genuinely necessary, ask the user to add it manually — "
-            "this signals a conscious decision rather than a shortcut."
+            "this signals a conscious decision rather than a shortcut.\n\n"
+            "**Excluded paths**: per-language vendor/build/node_modules dirs are "
+            "skipped by default. Exempt more paths with glob patterns via "
+            "`handlers.pre_tool_use.qa_suppression.options.exclude_paths` or the "
+            "project-wide `daemon.exclude_paths` — use these for fixtures that must "
+            "contain suppression annotations."
         )
 
     def get_acceptance_tests(self) -> list[Any]:

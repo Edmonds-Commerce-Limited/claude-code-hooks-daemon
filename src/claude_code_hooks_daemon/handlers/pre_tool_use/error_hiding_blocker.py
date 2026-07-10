@@ -175,7 +175,13 @@ class ErrorHidingBlockerHandler(Handler):
             "- Go: `_ = err` (discarding error return values without handling)\n\n"
             "**Required action**: Handle errors explicitly — log them, return them "
             "to the caller, or propagate them. Silent error suppression masks bugs "
-            "and makes debugging impossible."
+            "and makes debugging impossible.\n\n"
+            "**Excluded paths**: vendor/, node_modules/, and test-fixture dirs "
+            "(tests/fixtures/, tests/assets/, __fixtures__/) are skipped by default. "
+            "Exempt more paths with glob patterns via "
+            "`handlers.pre_tool_use.error_hiding_blocker.options.exclude_paths` or the "
+            "project-wide `daemon.exclude_paths` — use these for fixtures of "
+            "deliberately-broken code instead of disabling the handler."
         )
 
     def get_acceptance_tests(self) -> list[Any]:

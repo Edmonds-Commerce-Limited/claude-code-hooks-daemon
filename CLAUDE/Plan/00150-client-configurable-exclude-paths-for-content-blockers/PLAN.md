@@ -86,19 +86,23 @@ as its siblings, for consistency).
 
 ### Phase 3: Config, manifest, docs
 
-- [ ] ⬜ **Task 3.1**: Register the option in config loading / schema and the
-  dogfood `.claude/hooks-daemon.yaml` + `.yaml.example`.
-- [ ] ⬜ **Task 3.2**: Add `CLAUDE/UPGRADES/UNRELEASED/config-changes/v3.35.0.yaml`
-  (`added`, `recommended: true`).
-- [ ] ⬜ **Task 3.3**: Document the option in `docs/guides/HANDLER_REFERENCE.md`
-  and each handler's `get_claude_md()`.
+- [x] ✅ **Task 3.1**: Schema field `daemon.exclude_paths` in `config/models.py`
+  (default `[]`) + commented example in `.claude/hooks-daemon.yaml.example`. The
+  dogfood `.claude/hooks-daemon.yaml` is intentionally left unset (this repo needs
+  no exclusions).
+- [x] ✅ **Task 3.2**: `CLAUDE/UPGRADES/UNRELEASED/config-changes/v3.35.0.yaml`
+  (`daemon.exclude_paths` recommended + per-handler option); validated via
+  `check-config-migrations`.
+- [x] ✅ **Task 3.3**: `docs/guides/HANDLER_REFERENCE.md` "Content-Blocker Path
+  Exclusion" section (SSOT) + `get_claude_md()` note on all three handlers.
 
 ### Phase 4: Verify
 
-- [ ] ⬜ **Task 4.1**: Full QA (`./scripts/qa/llm_qa.py all`) 13/13.
-- [ ] ⬜ **Task 4.2**: Daemon restart RUNNING; probe a fixture-path Write is
-  allowed and a real-source Write is still blocked.
-- [ ] ⬜ **Task 4.3**: Hand off to the user for the v3.35.0 release decision
+- [x] ✅ **Task 4.1**: Full QA `./scripts/qa/llm_qa.py all` — 13/13 (9902 tests,
+  95.5% coverage).
+- [x] ✅ **Task 4.2**: Daemon restart RUNNING; live socket probe — fixture-path
+  Write allowed (`{}`), real-source Write still denied by error_hiding_blocker.
+- [ ] 🔄 **Task 4.3**: Hand off to the user for the v3.35.0 release decision
   (this plan does NOT ship a release autonomously).
 
 ## Success Criteria

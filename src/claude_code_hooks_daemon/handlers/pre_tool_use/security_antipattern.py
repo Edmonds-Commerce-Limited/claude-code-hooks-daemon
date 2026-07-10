@@ -143,7 +143,11 @@ class SecurityAntipatternHandler(Handler):
             "- Weak cryptography: MD5 or SHA1 for password hashing (use bcrypt/argon2)\n"
             "- Path traversal: unvalidated user input used in file paths\n\n"
             "**Supported languages**: Python, JavaScript/TypeScript, Go, PHP, Ruby, "
-            "Java, Kotlin, C#, Rust, Swift, Dart."
+            "Java, Kotlin, C#, Rust, Swift, Dart.\n\n"
+            "**Excluded paths**: vendor/, node_modules/, and test fixtures are skipped "
+            "by default. Exempt more paths with glob patterns via "
+            "`handlers.pre_tool_use.security_antipattern.options.exclude_paths` or the "
+            "project-wide `daemon.exclude_paths`."
         )
 
     def get_acceptance_tests(self) -> list[Any]:
