@@ -1,0 +1,19 @@
+version: "3.33.1"
+truth_changes:
+  - was: >
+      The ccy supervisor auto-deploy (v3.33.0, ccy.deploy_supervisor) copies
+      claude-supervise.py into a project's .claude/ccy/ but does NOT arm it —
+      wiring it as CCY_CLAUDE_WRAPPER is the launcher's job, so on a fresh
+      install/upgrade the deployed supervisor is present but inert (it never
+      wraps the claude session) until someone hand-edits ccy.env.
+    now: >
+      The ccy deploy now DEPLOYS AND ARMS by default (v3.33.1). After copying
+      claude-supervise.py it ensures .claude/ccy/ccy.env exports an armed,
+      self-locating CCY_CLAUDE_WRAPPER (resolves the supervisor path from
+      ccy.env's own directory at source time, so one line serves both the
+      podman /workspace mount and an LXC project dir). The launcher sources
+      ccy.env and wraps claude with it, so the supervisor is live on the next
+      ccy launch with no manual step. Arming is idempotent and respects the
+      user: an existing CCY_CLAUDE_WRAPPER in ccy.env (set OR commented out to
+      disable) is left untouched. ccy.deploy_supervisor: false opts out of both
+      deploy and arm.

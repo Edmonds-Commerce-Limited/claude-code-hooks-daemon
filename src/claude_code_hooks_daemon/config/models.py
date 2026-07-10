@@ -603,20 +603,26 @@ class DaemonConfig(BaseModel):
 class CcyConfig(BaseModel):
     """Configuration for the ccy (claude-yolo) container workflow (Plan 00147).
 
-    Currently a single tri-state flag governing whether the daemon deploys the
+    A single tri-state flag governing whether the daemon deploys AND arms the
     standalone PTY supervisor (``claude-supervise.py``) into a project's
-    ``.claude/ccy/`` directory on install/upgrade.
+    ``.claude/ccy/`` directory on install/upgrade. "Arm" means writing the
+    ``CCY_CLAUDE_WRAPPER`` export into ``.claude/ccy/ccy.env`` that the ccy
+    launcher sources — without it the deployed script is inert (Plan 00148).
 
     Attributes:
-        deploy_supervisor: Tri-state deploy gate.
+        deploy_supervisor: Tri-state deploy+arm gate.
 
-            - ``True``  — deploy/refresh the supervisor when a ``.claude/ccy/``
-              directory exists in the target project.
-            - ``False`` — never deploy (explicit opt-out).
-            - ``None``  — (key absent) deploy anyway when ``.claude/ccy/`` exists
-              AND recommend setting the flag ``True`` via the config-changes
-              advisory. Deliberately ``bool | None`` so an absent key is
-              distinguishable from an explicit ``False``.
+            - ``True``  — deploy/refresh AND arm the supervisor when a
+              ``.claude/ccy/`` directory exists in the target project.
+            - ``False`` — never deploy or arm (explicit opt-out).
+            - ``None``  — (key absent) deploy AND arm anyway when ``.claude/ccy/``
+              exists, AND recommend setting the flag ``True`` via the
+              config-changes advisory. Deliberately ``bool | None`` so an absent
+              key is distinguishable from an explicit ``False``.
+
+            Arming is idempotent and respects the user: an existing
+            ``CCY_CLAUDE_WRAPPER`` in ``ccy.env`` (set OR commented out) is left
+            untouched.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -624,9 +630,9 @@ class CcyConfig(BaseModel):
     deploy_supervisor: bool | None = Field(
         default=None,
         description=(
-            "Tri-state: True = deploy/refresh the ccy PTY supervisor into "
-            ".claude/ccy/ on install/upgrade; False = never deploy; "
-            "absent (None) = deploy + recommend enabling."
+            "Tri-state: True = deploy/refresh AND arm the ccy PTY supervisor in "
+            ".claude/ccy/ on install/upgrade; False = never deploy/arm; "
+            "absent (None) = deploy + arm + recommend enabling."
         ),
     )
 
