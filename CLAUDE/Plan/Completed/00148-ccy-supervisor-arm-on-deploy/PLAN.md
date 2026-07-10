@@ -1,6 +1,6 @@
 # Plan 00148: ccy supervisor arm on deploy
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-07-10
 **Owner**: joseph
 **Priority**: High
@@ -91,8 +91,8 @@ The new handler makes this a **MINOR** release (**v3.34.0**), not a patch.
 
 ### Phase 5: Verify + release (MINOR — v3.34.0)
 
-- [ ] 🔄 **Task 5.1**: `./scripts/qa/llm_qa.py all` → 13/13; daemon restart RUNNING.
-- [ ] ⬜ **Task 5.2**: `/release` MINOR → v3.34.0.
+- [x] ✅ **Task 5.1**: `./scripts/qa/llm_qa.py all` → 13/13 (9804 tests, 95.5%); daemon RUNNING.
+- [x] ✅ **Task 5.2**: released MINOR → v3.34.0 (tag pushed, GitHub release published, artifacts consistent).
 
 ## Success Criteria
 
@@ -101,7 +101,7 @@ The new handler makes this a **MINOR** release (**v3.34.0**), not a patch.
 - [x] Generated `ccy.env` sources to an absolute armed wrapper path in bash.
 - [x] Deploy un-ignores our files in an existing blanket-`*` `.claude/ccy/.gitignore`.
 - [x] `ccy_supervisor_integrity` warns on armed-but-broken; silent when healthy.
-- [ ] QA 13/13, daemon RUNNING, v3.34.0 released.
+- [x] QA 13/13, daemon RUNNING, v3.34.0 released.
 
 ## Notes & Updates
 
@@ -116,6 +116,8 @@ The new handler makes this a **MINOR** release (**v3.34.0**), not a patch.
   whitelist exceptions to an existing `.claude/ccy/.gitignore`; (2) an
   armed-but-broken setup can brick `ccy` → new SessionStart handler
   `ccy_supervisor_integrity` warns. New handler ⇒ MINOR bump v3.34.0.
-- Delivered so far: arm-on-deploy `78164b1`; docs/self-locating env `8bf12f5`;
-  gitignore-tracking + integrity handler `663fe75`. QA green per phase; daemon
-  RUNNING; no dogfood false alarm.
+- Delivered: arm-on-deploy `78164b1`; docs/self-locating env `8bf12f5`;
+  gitignore-tracking + integrity handler `663fe75`; config registration
+  `785c913`; release `438a72e` (tag `v3.34.0`). QA 13/13 (9804 tests, 95.5%);
+  daemon RUNNING; no dogfood false alarm; GitHub release artifacts consistent.
+- **Complete.** Shipped as MINOR v3.34.0.

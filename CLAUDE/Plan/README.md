@@ -21,13 +21,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Safety-first / opt-in (`get_default_enabled()` → False): exact-payload allowlist, loop-guard sentinel, idle-gating, cooldown + per-session cap, tmux-presence no-op, no Stop-handler collision; see `research-note.md` + `context.md`
   - **High-stakes**: potential game-changer done well, reputation risk done badly — hostile multi-lens review required before build
 
-- [00148: ccy Supervisor Arm on Deploy](00148-ccy-supervisor-arm-on-deploy/PLAN.md) - In Progress (hotfix for v3.33.0)
-
-  - v3.33.0 (Plan 00147) auto-deploys `claude-supervise.py` but never **arms** it — the deploy copies the script yet never writes the `CCY_CLAUDE_WRAPPER` export in `.claude/ccy/ccy.env` the launcher sources, so in clients the supervisor is a no-op
-  - Fix: deploy now **deploys + arms** by default — ensures an armed, path-independent (`${BASH_SOURCE[0]}`-self-locating) `CCY_CLAUDE_WRAPPER` in `ccy.env`, idempotently and respecting any pre-existing user setting; `true` and absent both arm, `false` arms nothing; self-install no-ops
-  - Also ensures the supervisor files are TRACKABLE (appends whitelist exceptions to an existing blanket-`*` `.claude/ccy/.gitignore`) and adds a SessionStart advisory handler `ccy_supervisor_integrity` that warns when an armed supervisor's files are missing/non-executable/git-ignored (brick risk)
-  - Ships as MINOR v3.34.0 (new handler)
-
 ### Memory / Documentation Policy
 
 - [00132: PostToolUse Progressive-Disclosure Reminder on Project-Doc Markdown Writes](00132-progressive-disclosure-md-write-reminder/PLAN.md) - Not Started (awaiting sign-off)
@@ -121,6 +114,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00148: ccy Supervisor Arm on Deploy](Completed/00148-ccy-supervisor-arm-on-deploy/PLAN.md) - Complete
+
+  - Made the v3.33.0 ccy supervisor auto-deploy actually work end-to-end. v3.33.0 copied `claude-supervise.py` but never **armed** it (never wrote the `CCY_CLAUDE_WRAPPER` export the launcher sources), and projects with a blanket-`*` `.claude/ccy/.gitignore` silently ignored the deployed files — so in clients the supervisor was an inert no-op that never reached teammates. Now the deploy **deploys + arms** (self-locating `${BASH_SOURCE[0]}` wrapper, idempotent, respects an existing/commented wrapper), appends `!` whitelist exceptions for our files to an existing `.claude/ccy/.gitignore` (without owning the project's ignore policy), and a new `ccy_supervisor_integrity` SessionStart advisory handler warns when an armed supervisor's files are missing/non-executable/git-ignored (brick risk). Shipped MINOR v3.34.0. Delivered `78164b1`/`8bf12f5`/`663fe75`/`785c913`, release `438a72e`; QA 13/13 (9804 tests), daemon RUNNING, artifacts consistent.
 
 - [00147: ccy Supervisor Auto-Deploy](Completed/00147-ccy-supervisor-auto-deploy/PLAN.md) - Complete
 
@@ -992,8 +989,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 148 (count = `hooksdaemon.latestPlanNumber` git counter; 00145 was allocated by the counter but its folder is not present on this branch)
-- **Completed**: 124 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 17 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Completed**: 125 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
+- **Active**: 16 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102); plus draft folders deleted and no longer on disk (00036 empty draft, 00038 superseded by 00045, 00073 orphan empty folder removed during Plan 00107 housekeeping)
 - **Last reconciled by**: Plan 00144 Task 2.2 sweep remediation
