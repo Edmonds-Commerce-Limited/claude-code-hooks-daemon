@@ -290,6 +290,17 @@ class TestCompactionDetection:
         result = sm.evaluate(_reading(compacting=True, stale=True), idle=True, now=1000.0)
         assert result.decision is Decision.WOULD_CONTINUE
 
+    def test_compaction_while_busy_defers_without_latching(self) -> None:
+        # `continue` must never be typed into a busy TUI: a busy poll returns
+        # NOOP and does NOT latch, so the resume still fires on the next idle
+        # poll while the compaction signal is still live.
+        sm = CompactStateMachine(CompactPolicy())
+        busy = sm.evaluate(_reading(compacting=True), idle=False, now=1000.0)
+        assert busy.decision is Decision.NOOP
+        assert sm.state is SupervisorState.MONITOR
+        settled = sm.evaluate(_reading(compacting=True), idle=True, now=1002.0)
+        assert settled.decision is Decision.WOULD_CONTINUE
+
 
 class TestEvaluationReason:
     def test_reason_is_populated(self) -> None:

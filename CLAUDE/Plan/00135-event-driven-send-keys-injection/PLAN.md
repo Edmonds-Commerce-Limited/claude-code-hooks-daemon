@@ -468,6 +468,34 @@ definition of Decision H's "MONITOR: pct ≥ threshold" row.
 
 ## Notes & Updates
 
+### 2026-07-10 — Armed live-fire post-mortem: two real bugs fixed
+
+First real armed `/compact` fired live (decision.log 12:02:42:
+`would-compact: red at 60% + idle -> injected '/compact'`). It exposed two
+defects that the dry-run dogfood could not:
+
+1. **Compact had no bot chrome** — the armed payload was a bare `/compact`,
+   indistinguishable from a human `/compact`. Fix: `/compact` accepts freeform
+   custom instructions as its argument, so the bot chrome now rides along there:
+   `/compact 🤖 [ccy-supervisor] automated compaction — NOT human-initiated. After compacting, immediately resume and continue...`. The slash command
+   stays the first token (recognised normally); the compaction summary is now
+   visibly supervisor-initiated and the instruction reinforces the resume.
+2. **`continue` never fired** — the daemon wrote `<session>.compacting` at
+   compaction START (12:02:42), but a large-context compaction kept the session
+   busy far past the 120s signal TTL; by the first post-compaction idle poll the
+   signal was already stale (measured 485s old) so `load_compaction_signal`
+   returned nothing and the resume was dropped, leaving the session idle.
+   Fixes: (a) TTL 120s → 600s (comfortably outlasts a big compaction);
+   (b) `load_compaction_signal` returns the signal Path and `_poll_once`
+   CONSUMES (unlinks) it on a successful resume — so a generous TTL can never
+   re-fire or wedge a later compaction; (c) the continue is now idle-gated in
+   the state machine (never typed into a busy TUI; defers without latching so it
+   retries on the next idle poll).
+
+90 supervise tests; QA 13/13 (9739 tests, 95.5% cov); daemon RUNNING. The
+running supervisor is the process the session launched under, so this fix takes
+effect on the next `ccy` relaunch.
+
 ### 2026-07-10 — ARMED for real + bot-marked supervisor messages
 
 - Live dry-run dogfood succeeded first: the real supervisor wrapping a live ccy

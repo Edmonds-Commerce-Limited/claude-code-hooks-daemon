@@ -43,9 +43,16 @@ class TestResolvePayload:
         assert payload == _CONTINUE
         assert "continue" in payload
 
-    def test_armed_compact_is_bare_slash_compact(self) -> None:
-        # The real slash command must NOT be decorated or it won't be recognised.
-        assert _mod._resolve_payload(Decision.WOULD_COMPACT, dry_run=False) == "/compact"
+    def test_armed_compact_carries_bot_chrome(self) -> None:
+        # `/compact` must stay the FIRST token (so it is recognised as the slash
+        # command), but its freeform-instruction argument carries the bot chrome
+        # so the compaction is visibly supervisor-initiated, never mistaken for a
+        # human `/compact`.
+        payload = _mod._resolve_payload(Decision.WOULD_COMPACT, dry_run=False)
+        assert payload is not None
+        assert payload.startswith("/compact ")
+        assert _BOT_PREFIX in payload
+        assert "🤖" in payload
 
     def test_armed_continue_matches_dry_run(self) -> None:
         assert _mod._resolve_payload(Decision.WOULD_CONTINUE, dry_run=False) == _CONTINUE
@@ -147,7 +154,7 @@ class TestPollOnce:
         assert ev.decision is Decision.NOOP
         assert written == []
 
-    def test_armed_injects_real_slash_compact(self, tmp_path: Path) -> None:
+    def test_armed_injects_real_slash_compact_with_chrome(self, tmp_path: Path) -> None:
         self._sidecar(tmp_path / "sc", red=True)
         written: list[bytes] = []
         _mod._poll_once(
@@ -160,7 +167,12 @@ class TestPollOnce:
             log=None,
             freshness_seconds=30.0,
         )
-        assert b"".join(written) == b"/compact\r"
+        payload = b"".join(written).decode("utf-8")
+        # Slash command first (recognised), bot chrome in the instruction arg,
+        # submitted with a carriage return.
+        assert payload.startswith("/compact ")
+        assert "🤖" in payload
+        assert payload.endswith("\r")
 
     def test_injection_is_logged(self, tmp_path: Path) -> None:
         self._sidecar(tmp_path / "sc", red=True)
@@ -186,26 +198,27 @@ def _write_signal(directory: Path, name: str, *, ts: float) -> None:
 
 
 class TestLoadCompactionSignal:
-    def test_missing_dir_is_false(self, tmp_path: Path) -> None:
-        assert _mod.load_compaction_signal(tmp_path / "no", now=1000.0, ttl_seconds=120.0) is False
+    def test_missing_dir_is_none(self, tmp_path: Path) -> None:
+        assert _mod.load_compaction_signal(tmp_path / "no", now=1000.0, ttl_seconds=120.0) is None
 
-    def test_no_signal_is_false(self, tmp_path: Path) -> None:
+    def test_no_signal_is_none(self, tmp_path: Path) -> None:
         tmp_path.mkdir(exist_ok=True)
-        assert _mod.load_compaction_signal(tmp_path, now=1000.0, ttl_seconds=120.0) is False
+        assert _mod.load_compaction_signal(tmp_path, now=1000.0, ttl_seconds=120.0) is None
 
-    def test_fresh_signal_is_true(self, tmp_path: Path) -> None:
+    def test_fresh_signal_returns_path(self, tmp_path: Path) -> None:
         _write_signal(tmp_path, "s", ts=1000.0)
-        assert _mod.load_compaction_signal(tmp_path, now=1050.0, ttl_seconds=120.0) is True
+        result = _mod.load_compaction_signal(tmp_path, now=1050.0, ttl_seconds=120.0)
+        assert result == tmp_path / "s.compacting"
 
-    def test_stale_signal_is_false(self, tmp_path: Path) -> None:
+    def test_stale_signal_is_none(self, tmp_path: Path) -> None:
         _write_signal(tmp_path, "s", ts=1000.0)
-        assert _mod.load_compaction_signal(tmp_path, now=1200.0, ttl_seconds=120.0) is False
+        assert _mod.load_compaction_signal(tmp_path, now=1200.0, ttl_seconds=120.0) is None
 
     def test_ignores_json_sidecars(self, tmp_path: Path) -> None:
         # A .json context sidecar must never be read as a compaction signal.
         tmp_path.mkdir(exist_ok=True)
         (tmp_path / "s.json").write_text(json.dumps({"ts": 1000.0}), encoding="utf-8")
-        assert _mod.load_compaction_signal(tmp_path, now=1000.0, ttl_seconds=120.0) is False
+        assert _mod.load_compaction_signal(tmp_path, now=1000.0, ttl_seconds=120.0) is None
 
 
 class TestPollOnceCompaction:
@@ -251,6 +264,48 @@ class TestPollOnceCompaction:
         )
         assert ev.decision is Decision.WOULD_CONTINUE
         assert b"".join(written) == (_CONTINUE + "\r").encode("utf-8")
+
+    def test_resume_consumes_signal_file(self, tmp_path: Path) -> None:
+        # After a resume fires, the signal file is deleted so it cannot re-fire
+        # or wedge a later compaction -- this is the fix for the live failure
+        # where a lingering-but-stale signal left the session idle.
+        sc = tmp_path / "sc"
+        _write_signal(sc, "s", ts=1000.0)
+        ev = _mod._poll_once(
+            CompactStateMachine(CompactPolicy()),
+            sidecar_dir=sc,
+            now_wall=1000.0,
+            idle=True,
+            dry_run=True,
+            master_writer=lambda _b: None,
+            log=None,
+            freshness_seconds=30.0,
+            compaction_signal_ttl_seconds=120.0,
+        )
+        assert ev.decision is Decision.WOULD_CONTINUE
+        assert not (sc / "s.compacting").exists()
+
+    def test_busy_session_defers_resume_and_keeps_signal(self, tmp_path: Path) -> None:
+        # A compaction detected while the human is composing must NOT inject
+        # `continue` (it would corrupt their input); the signal is left in place
+        # to retry on the next idle poll.
+        sc = tmp_path / "sc"
+        _write_signal(sc, "s", ts=1000.0)
+        written: list[bytes] = []
+        ev = _mod._poll_once(
+            CompactStateMachine(CompactPolicy()),
+            sidecar_dir=sc,
+            now_wall=1000.0,
+            idle=False,
+            dry_run=True,
+            master_writer=written.append,
+            log=None,
+            freshness_seconds=30.0,
+            compaction_signal_ttl_seconds=120.0,
+        )
+        assert ev.decision is Decision.NOOP
+        assert written == []
+        assert (sc / "s.compacting").exists()
 
 
 class TestForwardIoPolling:

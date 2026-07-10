@@ -132,9 +132,16 @@ _DEFAULT_COOLDOWN_SECONDS = 300.0
 _DEFAULT_AWAIT_TIMEOUT_SECONDS = 120.0
 _DEFAULT_MAX_INJECTIONS = 20
 # How long a compaction-signal file is treated as "compaction under way".
-# Longer than the sidecar freshness because a compaction can run for a while
-# and no status line renders during it.
-_DEFAULT_COMPACTION_SIGNAL_TTL_SECONDS = 120.0
+# Much longer than the sidecar freshness because a large-context compaction can
+# keep the session busy (streaming output, no status render, no select-timeout
+# poll) for minutes before it goes idle. The signal is written at the START of
+# compaction; if the TTL expires before the first post-compaction idle poll, the
+# resume `continue` is never injected and the session is left idle. 120s was too
+# short and dropped the resume on big conversations (observed live: signal 485s
+# old by the first idle poll). The file is consumed on a successful resume and a
+# fresh compaction overwrites it, so a generous TTL cannot re-fire or wedge a
+# later compaction -- it only bounds how long an unconsumed signal lingers.
+_DEFAULT_COMPACTION_SIGNAL_TTL_SECONDS = 600.0
 
 # Compaction-signal files are written by the daemon's PreCompact handler as
 # ``<session>.compacting`` -- deliberately NOT ``*.json`` so they are never
@@ -266,17 +273,19 @@ def load_freshest_sidecar(
     )
 
 
-def load_compaction_signal(directory: Path, *, now: float, ttl_seconds: float) -> bool:
-    """True if a fresh compaction-signal file exists in ``directory``.
+def load_compaction_signal(directory: Path, *, now: float, ttl_seconds: float) -> Path | None:
+    """Return the path of a fresh compaction-signal file, or None.
 
     The daemon's PreCompact handler drops a ``<session>.compacting`` file (JSON
     ``{"ts": ...}``) when a compaction starts -- whether the supervisor
     triggered it or the human typed ``/compact``. A signal is "fresh" while
     ``now - ts <= ttl_seconds``; older files are treated as a finished
-    compaction and ignored (no explicit cleanup needed).
+    compaction and ignored. The path (not a bool) is returned so the caller can
+    CONSUME the file (unlink it) once it has acted on it, guaranteeing the
+    resume fires exactly once and cannot wedge a later compaction.
     """
     if not directory.is_dir():
-        return False
+        return None
     for path in directory.glob(_COMPACTION_SIGNAL_GLOB):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
@@ -286,8 +295,8 @@ def load_compaction_signal(directory: Path, *, now: float, ttl_seconds: float) -
             continue
         ts = _coerce_float(data.get("ts"))
         if (now - ts) <= ttl_seconds:
-            return True
-    return False
+            return path
+    return None
 
 
 class CompactStateMachine:
@@ -320,16 +329,24 @@ class CompactStateMachine:
         """Advance the machine one step and return what it WOULD do."""
         compacting = reading is not None and reading.compacting
         if compacting:
-            if not self._compaction_handled:
-                self._compaction_handled = True
-                self._last_action_ts = now
-                self.state = SupervisorState.MONITOR
+            if self._compaction_handled:
+                # Already resumed this episode; sit tight until compaction ends.
+                return Evaluation(Decision.NOOP, "compaction in progress (already resumed)")
+            if not idle:
+                # Never type `continue` into a busy TUI -- it would be lost or
+                # corrupt in-flight input. Do NOT latch: retry on the next idle
+                # poll so the resume still fires once the session settles.
                 return Evaluation(
-                    Decision.WOULD_CONTINUE,
-                    "compaction detected -> would inject continue",
+                    Decision.NOOP,
+                    "compaction detected but session busy -> awaiting idle to resume",
                 )
-            # Already resumed this episode; sit tight until compaction ends.
-            return Evaluation(Decision.NOOP, "compaction in progress (already resumed)")
+            self._compaction_handled = True
+            self._last_action_ts = now
+            self.state = SupervisorState.MONITOR
+            return Evaluation(
+                Decision.WOULD_CONTINUE,
+                "compaction detected -> would inject continue",
+            )
 
         # No compaction under way: reset the latch and run normal logic.
         self._compaction_handled = False
@@ -390,14 +407,22 @@ class CompactStateMachine:
 
 # All supervisor-injected PROMPTS carry this bot prefix (with an emoji) so they
 # are visibly machine-generated in the transcript and never mistaken for
-# something the human typed. The armed `/compact` is the one exception -- it is
-# a bare slash command that cannot be prefixed without breaking command
-# recognition, but a slash command already reads as non-human.
+# something the human typed.
 _BOT_PREFIX = "🤖 [ccy-supervisor]"
 _DRY_RUN_COMPACT_MARKER = (
     f"{_BOT_PREFIX} compact suggestion fired (dry-run — not a real /compact, not human input)"
 )
-_ARMED_COMPACT_PAYLOAD = "/compact"
+# The armed compact is a real `/compact`, but `/compact` accepts freeform custom
+# instructions as its argument -- so the bot chrome rides along AS those
+# instructions. The slash command is still the first token (recognised
+# normally), the compaction summary is now visibly bot-initiated (never mistaken
+# for a human `/compact`), and the instruction text tells the post-compact
+# session it was an AUTOMATED compaction that must resume -- reinforcing the
+# `continue` keystroke the supervisor injects once compaction ends.
+_ARMED_COMPACT_PAYLOAD = (
+    f"/compact {_BOT_PREFIX} automated compaction — NOT human-initiated. "
+    "After compacting, immediately resume and continue the work that was in progress."
+)
 # `continue` is harmless -- it only nudges the agent to resume -- so it is
 # injected FOR REAL in both dry-run and armed modes. Detecting a compaction and
 # not resuming would defeat the purpose, and (unlike /compact) a stray
@@ -427,6 +452,21 @@ def _resolve_payload(decision: Decision, *, dry_run: bool) -> str | None:
 def _perform_injection(master_writer: Callable[[bytes], None], payload: str) -> None:
     """Type ``payload`` into the child PTY, followed by a submit (carriage return)."""
     master_writer((payload + _INJECT_SUBMIT).encode("utf-8"))
+
+
+def _consume_signal(path: Path, log: DecisionLog | None) -> None:
+    """Delete a handled compaction-signal file so the resume fires exactly once.
+
+    Best-effort: a missing or undeletable file is harmless because the TTL will
+    eventually age it out and the ``_compaction_handled`` latch already blocks a
+    same-episode repeat. A delete failure is LOGGED (never silently swallowed)
+    so a broken untracked dir is visible.
+    """
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as exc:
+        if log is not None:
+            log.write(f"warning: could not consume compaction signal {path}: {exc}")
 
 
 def _is_idle(activity: InputActivity, *, now_monotonic: float, idle_floor_seconds: float) -> bool:
@@ -462,10 +502,10 @@ def _poll_once(
     reading = load_freshest_sidecar(sidecar_dir, now=now_wall, freshness_seconds=freshness_seconds)
     # A compaction stops status renders, so the context sidecar goes
     # stale/absent during one -- the compaction signal is an independent input.
-    compacting = load_compaction_signal(
+    signal_path = load_compaction_signal(
         sidecar_dir, now=now_wall, ttl_seconds=compaction_signal_ttl_seconds
     )
-    if compacting:
+    if signal_path is not None:
         reading = (
             replace(reading, compacting=True)
             if reading is not None
@@ -487,6 +527,10 @@ def _poll_once(
         _perform_injection(master_writer, payload)
         if log is not None:
             log.write(f"{evaluation.decision.value}: {evaluation.reason}; injected {payload!r}")
+        # Consume the signal ONLY after a resume actually fired, so a busy-gated
+        # NOOP leaves it in place to retry on the next idle poll.
+        if evaluation.decision is Decision.WOULD_CONTINUE and signal_path is not None:
+            _consume_signal(signal_path, log)
     return evaluation
 
 
