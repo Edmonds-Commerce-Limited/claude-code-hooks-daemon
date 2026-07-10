@@ -468,6 +468,21 @@ definition of Decision H's "MONITOR: pct ≥ threshold" row.
 
 ## Notes & Updates
 
+### 2026-07-10 — ARMED for real + bot-marked supervisor messages
+
+- Live dry-run dogfood succeeded first: the real supervisor wrapping a live ccy
+  session injected the marker at "red at 55% + idle" (decision.log 11:44:29) — it
+  arrived as a submitted prompt, proving the whole pipeline in production.
+- Then armed it: `ccy.env` now runs `claude-supervise.py --arm --`, so a real
+  `/compact` is injected when red+idle, and `continue` on any compaction.
+- User asked for visibly-bot messages: all supervisor-injected PROMPTS now carry
+  the `🤖 [ccy-supervisor]` prefix (dry-run marker and `continue`), so they can
+  never be confused with human typing. The armed `/compact` stays a bare slash
+  command (decorating it would break command recognition; a slash command already
+  reads as non-human).
+- 87 supervise tests; QA 13/13; armed CLI smoke passes under system python3.
+  Takes effect on the next `ccy` relaunch.
+
 ### 2026-07-10 — Compaction-detected auto-continue COMPLETE (daemon side)
 
 - Added the DAEMON sensor: `handlers/pre_compact/compaction_signal.py` — an

@@ -388,13 +388,22 @@ class CompactStateMachine:
 # same code path; only the payload text differs.
 # ---------------------------------------------------------------------------
 
-_DRY_RUN_COMPACT_MARKER = "compact suggestion fired from supervisor (dry run mode)"
+# All supervisor-injected PROMPTS carry this bot prefix (with an emoji) so they
+# are visibly machine-generated in the transcript and never mistaken for
+# something the human typed. The armed `/compact` is the one exception -- it is
+# a bare slash command that cannot be prefixed without breaking command
+# recognition, but a slash command already reads as non-human.
+_BOT_PREFIX = "🤖 [ccy-supervisor]"
+_DRY_RUN_COMPACT_MARKER = (
+    f"{_BOT_PREFIX} compact suggestion fired (dry-run — not a real /compact, not human input)"
+)
 _ARMED_COMPACT_PAYLOAD = "/compact"
 # `continue` is harmless -- it only nudges the agent to resume -- so it is
 # injected FOR REAL in both dry-run and armed modes. Detecting a compaction and
 # not resuming would defeat the purpose, and (unlike /compact) a stray
-# `continue` cannot destroy context.
-_CONTINUE_PAYLOAD = "continue"
+# `continue` cannot destroy context. It keeps the bot prefix so a post-compact
+# resume is clearly the supervisor's doing, not a human message.
+_CONTINUE_PAYLOAD = f"{_BOT_PREFIX} continue"
 _INJECT_SUBMIT = "\r"
 
 _DEFAULT_POLL_SECONDS = 2.0

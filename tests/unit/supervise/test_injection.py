@@ -24,7 +24,9 @@ CompactStateMachine = _mod.CompactStateMachine
 InputActivity = _mod.InputActivity
 DecisionLog = _mod.DecisionLog
 
-_DRY_COMPACT = "compact suggestion fired from supervisor (dry run mode)"
+_DRY_COMPACT = _mod._DRY_RUN_COMPACT_MARKER
+_CONTINUE = _mod._CONTINUE_PAYLOAD
+_BOT_PREFIX = _mod._BOT_PREFIX
 
 
 class TestResolvePayload:
@@ -37,13 +39,23 @@ class TestResolvePayload:
 
     def test_dry_run_continue_is_real_continue(self) -> None:
         # continue is harmless -> injected for real even in dry-run.
-        assert _mod._resolve_payload(Decision.WOULD_CONTINUE, dry_run=True) == "continue"
+        payload = _mod._resolve_payload(Decision.WOULD_CONTINUE, dry_run=True)
+        assert payload == _CONTINUE
+        assert "continue" in payload
 
-    def test_armed_compact_is_slash_compact(self) -> None:
+    def test_armed_compact_is_bare_slash_compact(self) -> None:
+        # The real slash command must NOT be decorated or it won't be recognised.
         assert _mod._resolve_payload(Decision.WOULD_COMPACT, dry_run=False) == "/compact"
 
-    def test_armed_continue_is_continue(self) -> None:
-        assert _mod._resolve_payload(Decision.WOULD_CONTINUE, dry_run=False) == "continue"
+    def test_armed_continue_matches_dry_run(self) -> None:
+        assert _mod._resolve_payload(Decision.WOULD_CONTINUE, dry_run=False) == _CONTINUE
+
+    def test_injected_prompts_carry_bot_marker(self) -> None:
+        # The user must be able to tell supervisor messages from their own typing.
+        assert _BOT_PREFIX in _DRY_COMPACT
+        assert "🤖" in _DRY_COMPACT
+        assert _BOT_PREFIX in _CONTINUE
+        assert "🤖" in _CONTINUE
 
 
 class TestPerformInjection:
@@ -213,7 +225,7 @@ class TestPollOnceCompaction:
             compaction_signal_ttl_seconds=120.0,
         )
         assert ev.decision is Decision.WOULD_CONTINUE
-        assert b"".join(written) == b"continue\r"
+        assert b"".join(written) == (_CONTINUE + "\r").encode("utf-8")
 
     def test_signal_overrides_green_sidecar(self, tmp_path: Path) -> None:
         sc = tmp_path / "sc"
@@ -238,7 +250,7 @@ class TestPollOnceCompaction:
             compaction_signal_ttl_seconds=120.0,
         )
         assert ev.decision is Decision.WOULD_CONTINUE
-        assert b"".join(written) == b"continue\r"
+        assert b"".join(written) == (_CONTINUE + "\r").encode("utf-8")
 
 
 class TestForwardIoPolling:
