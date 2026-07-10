@@ -1,7 +1,10 @@
-"""ccy PTY supervisor deployment for the installer (Plan 00147).
+"""ccy PTY supervisor deploy + arm for the installer (Plan 00147/00148).
 
-Deploys the standalone, stdlib-only PTY supervisor (``claude-supervise.py``,
-Plan 00135) into a project's ``.claude/ccy/`` directory on install/upgrade.
+Deploys AND arms the standalone, stdlib-only PTY supervisor
+(``claude-supervise.py``, Plan 00135) in a project's ``.claude/ccy/`` on
+install/upgrade. Deploying alone is inert — the ccy launcher only wraps
+``claude`` when ``ccy.env`` exports ``CCY_CLAUDE_WRAPPER`` — so this module also
+arms (writes that export) and keeps the supervisor files trackable.
 
 There is exactly ONE tracked copy of the script in the daemon repo, at
 ``<daemon_root>/.claude/ccy/claude-supervise.py`` (pure dogfooding — no ``src/``
@@ -11,13 +14,19 @@ daemon clone and copies it into the *target* project's ``.claude/ccy/``.
 
 Gating (``config.ccy.deploy_supervisor`` — see :class:`CcyConfig`):
 
-- ``True``  — deploy/refresh when the target ``.claude/ccy/`` dir exists.
-- ``False`` — never deploy (explicit opt-out).
-- ``None``  — (key absent) deploy anyway when the target ``.claude/ccy/`` dir
-  exists AND flag ``recommend_enable`` so callers can promote setting it ``True``.
+- ``True``  — deploy/refresh AND arm when the target ``.claude/ccy/`` dir exists.
+- ``False`` — never deploy or arm (explicit opt-out).
+- ``None``  — (key absent) deploy + arm anyway when the target ``.claude/ccy/``
+  dir exists AND flag ``recommend_enable`` so callers promote setting it ``True``.
 
-Self-install is a no-op: when ``daemon_root`` and ``project_root`` resolve to the
-same path, the source and target are the same file and the copy is skipped.
+Each deploy also (a) arms ``ccy.env`` idempotently, respecting an existing
+``CCY_CLAUDE_WRAPPER`` (set or commented out), and (b) appends whitelist
+exceptions for our files to an EXISTING ``.claude/ccy/.gitignore`` so a blanket
+``*`` ignore does not silently drop the supervisor from the repo.
+
+Self-install is a no-op for the copy: when ``daemon_root`` and ``project_root``
+resolve to the same path, the source and target are the same file (arming and
+gitignore likewise detect the already-configured tracked files and skip).
 """
 
 import logging
@@ -31,7 +40,22 @@ logger = logging.getLogger(__name__)
 
 SUPERVISOR_SCRIPT_NAME: Final[str] = "claude-supervise.py"
 CCY_ENV_NAME: Final[str] = "ccy.env"
+_DOCKERFILE_NAME: Final[str] = "Dockerfile"
+_GITIGNORE_NAME: Final[str] = ".gitignore"
 _CCY_DIR_PARTS: Final[tuple[str, str]] = (".claude", "ccy")
+
+# Files the ccy supervisor system needs COMMITTED so teammates get it. The common
+# ccy .gitignore is a blanket `*` (session data must not be committed); these
+# whitelist exceptions keep OUR files trackable. We do NOT manage the rest of the
+# project's ignore policy — we only ensure the stuff we care about is trackable.
+# `.gitignore` itself is whitelisted so the exceptions are visible in the repo;
+# the ccy `Dockerfile` (container image definition) is included as harmless.
+_CCY_TRACKED_WHITELIST: Final[tuple[str, ...]] = (
+    _GITIGNORE_NAME,
+    _DOCKERFILE_NAME,
+    CCY_ENV_NAME,
+    SUPERVISOR_SCRIPT_NAME,
+)
 # Owner rwx, group/other rx — least-privilege executable (matches deploy_skills /
 # mkplan deployment). The supervisor is exec'd directly by the ccy launcher.
 _SUPERVISOR_MODE: Final[int] = 0o755
@@ -85,6 +109,9 @@ class CcySupervisorDeployResult:
             into the target's ``ccy.env`` (i.e. actually enabled the supervisor).
             False when arming was skipped (flag off, no ccy dir, or the user
             already has a stance on ``CCY_CLAUDE_WRAPPER``).
+        gitignore_updated: True when this run added whitelist exceptions to the
+            target's ``.claude/ccy/.gitignore`` (or created it) so the supervisor
+            files are trackable rather than silently git-ignored.
         recommend_enable: True when the flag was absent (None) while the target
             is a ccy project — callers should promote setting
             ``ccy.deploy_supervisor: true``.
@@ -93,6 +120,7 @@ class CcySupervisorDeployResult:
 
     deployed: bool = False
     armed: bool = False
+    gitignore_updated: bool = False
     recommend_enable: bool = False
     messages: list[str] = field(default_factory=list)
 
@@ -169,6 +197,16 @@ def deploy_ccy_supervisor_if_enabled(
     # because the launcher only wraps `claude` when ccy.env exports the wrapper.
     result.armed, arm_message = _arm_ccy_supervisor(target_ccy_dir)
     result.messages.append(arm_message)
+
+    # Ensure the supervisor files are TRACKABLE — a blanket-ignore ccy dir would
+    # otherwise leave them git-ignored, uncommitted, and absent for teammates.
+    result.gitignore_updated, gitignore_message = _ensure_ccy_gitignore_allows(target_ccy_dir)
+    result.messages.append(gitignore_message)
+    result.messages.append(
+        "Commit .claude/ccy/{"
+        f"{_GITIGNORE_NAME},{CCY_ENV_NAME},{SUPERVISOR_SCRIPT_NAME}"
+        "} so teammates get the supervisor system"
+    )
     return result
 
 
@@ -207,3 +245,54 @@ def _arm_ccy_supervisor(target_ccy_dir: Path) -> tuple[bool, str]:
     env_path.write_text(f"{_FRESH_ENV_HEADER}{armed_block}", encoding="utf-8")
     logger.info("Created armed %s at %s", CCY_ENV_NAME, env_path)
     return True, f"Armed supervisor: created {env_path}"
+
+
+def _ensure_ccy_gitignore_allows(target_ccy_dir: Path) -> tuple[bool, str]:
+    """Ensure an EXISTING ``.claude/ccy/.gitignore`` whitelists our files.
+
+    The reported failure mode: a ccy ``.gitignore`` with a blanket ``*`` ignores
+    session data AND silently ignores the deployed ``claude-supervise.py`` /
+    armed ``ccy.env``, so they are never committed and teammates never receive
+    the supervisor. This appends any missing ``!<file>`` exceptions (git honours
+    the last matching pattern, so an appended exception wins over an earlier
+    ``*``) for OUR files only.
+
+    Scope is deliberately narrow — we do NOT own the project's ignore policy:
+
+    - ``.gitignore`` ABSENT → no-op. Our files are not locally ignored, and
+      fabricating a blanket-ignore policy file is not this repo's job.
+    - ``.gitignore`` present but missing some of our exceptions → append only the
+      missing ``!<file>`` lines (never duplicates, never rewrites user content).
+    - all our exceptions already present → leave it byte-identical.
+
+    Note: this cannot re-include files when a *parent* ``.gitignore`` excludes the
+    whole ``.claude/ccy/`` directory (git cannot re-include under an excluded
+    dir). The SessionStart integrity check surfaces that rarer brick risk.
+
+    Args:
+        target_ccy_dir: The target project's ``.claude/ccy/`` directory.
+
+    Returns:
+        ``(gitignore_updated, message)`` — ``gitignore_updated`` is True only when
+        this call appended exceptions.
+    """
+    gitignore_path = target_ccy_dir / _GITIGNORE_NAME
+
+    if not gitignore_path.is_file():
+        logger.info(
+            "No %s in %s; our files are not locally ignored", _GITIGNORE_NAME, target_ccy_dir
+        )
+        return False, f"No {_GITIGNORE_NAME} in .claude/ccy/; supervisor files not locally ignored"
+
+    content = gitignore_path.read_text(encoding="utf-8")
+    existing_lines = {line.strip() for line in content.splitlines()}
+    missing = [f"!{name}" for name in _CCY_TRACKED_WHITELIST if f"!{name}" not in existing_lines]
+    if not missing:
+        logger.info("%s already whitelists supervisor files at %s", _GITIGNORE_NAME, gitignore_path)
+        return False, f"{gitignore_path} already whitelists the supervisor files"
+
+    appended = "\n".join(missing)
+    new_content = f"{content.rstrip(chr(10))}\n{appended}\n"
+    gitignore_path.write_text(new_content, encoding="utf-8")
+    logger.info("Appended %s to %s", missing, gitignore_path)
+    return True, f"Whitelisted supervisor files in {gitignore_path}: {', '.join(missing)}"

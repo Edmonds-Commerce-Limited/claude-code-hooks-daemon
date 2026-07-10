@@ -324,6 +324,112 @@ class TestArmCcySupervisor:
         assert proc.stdout == expected
 
 
+class TestEnsureCcyFilesTracked:
+    """Deploy must ensure the supervisor files are TRACKABLE, not git-ignored.
+
+    The common ccy `.gitignore` pattern is a blanket `*` that ignores session
+    data. Without whitelist exceptions the deployed/armed ``claude-supervise.py``
+    and ``ccy.env`` land git-ignored, never get committed, and teammates cloning
+    the repo do not get the supervisor — so the system is not "properly set up".
+    The deploy whitelists the supervisor files in ``.claude/ccy/.gitignore``.
+    """
+
+    def test_absent_gitignore_is_left_alone(self, tmp_path: Path) -> None:
+        """No local .gitignore → our files are not locally ignored; we do NOT
+        fabricate a blanket-ignore policy file (not this repo's job)."""
+        daemon_root = tmp_path / "daemon"
+        project_root = tmp_path / "project"
+        _make_source(daemon_root)
+        ccy = _make_target_ccy(project_root)
+        config_path = _write_config(project_root, "ccy:\n  deploy_supervisor: true\n")
+
+        result = deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
+
+        assert result.gitignore_updated is False
+        assert not (ccy / ".gitignore").exists()
+
+    def test_appends_missing_whitelist_to_blanket_ignore(self, tmp_path: Path) -> None:
+        daemon_root = tmp_path / "daemon"
+        project_root = tmp_path / "project"
+        _make_source(daemon_root)
+        ccy = _make_target_ccy(project_root)
+        gitignore = ccy / ".gitignore"
+        gitignore.write_text("# ccy session data\n*\n")  # ignores everything, no whitelist
+        config_path = _write_config(project_root, "ccy:\n  deploy_supervisor: true\n")
+
+        result = deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
+
+        content = gitignore.read_text()
+        assert result.gitignore_updated is True
+        assert "*" in content  # original blanket ignore preserved
+        assert f"!{SUPERVISOR_SCRIPT_NAME}" in content
+        assert f"!{CCY_ENV_NAME}" in content
+
+    def test_appends_only_missing_whitelist_lines(self, tmp_path: Path) -> None:
+        daemon_root = tmp_path / "daemon"
+        project_root = tmp_path / "project"
+        _make_source(daemon_root)
+        ccy = _make_target_ccy(project_root)
+        gitignore = ccy / ".gitignore"
+        gitignore.write_text(f"*\n!.gitignore\n!{CCY_ENV_NAME}\n")  # missing the script line
+        config_path = _write_config(project_root, "ccy:\n  deploy_supervisor: true\n")
+
+        result = deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
+
+        content = gitignore.read_text()
+        assert result.gitignore_updated is True
+        assert content.count(f"!{CCY_ENV_NAME}") == 1  # not duplicated
+        assert f"!{SUPERVISOR_SCRIPT_NAME}" in content  # added
+
+    def test_leaves_gitignore_untouched_when_already_whitelisted(self, tmp_path: Path) -> None:
+        daemon_root = tmp_path / "daemon"
+        project_root = tmp_path / "project"
+        _make_source(daemon_root)
+        ccy = _make_target_ccy(project_root)
+        gitignore = ccy / ".gitignore"
+        whitelisted = f"*\n!.gitignore\n!Dockerfile\n!{CCY_ENV_NAME}\n!{SUPERVISOR_SCRIPT_NAME}\n"
+        gitignore.write_text(whitelisted)
+        config_path = _write_config(project_root, "ccy:\n  deploy_supervisor: true\n")
+
+        result = deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
+
+        assert result.gitignore_updated is False
+        assert gitignore.read_text() == whitelisted
+
+    def test_flag_false_does_not_touch_gitignore(self, tmp_path: Path) -> None:
+        daemon_root = tmp_path / "daemon"
+        project_root = tmp_path / "project"
+        _make_source(daemon_root)
+        ccy = _make_target_ccy(project_root)
+        config_path = _write_config(project_root, "ccy:\n  deploy_supervisor: false\n")
+
+        result = deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
+
+        assert result.gitignore_updated is False
+        assert not (ccy / ".gitignore").exists()
+
+    def test_whitelist_actually_untracks_files_in_a_real_git_repo(self, tmp_path: Path) -> None:
+        """End-to-end: in a real git repo with a blanket-ignore ccy dir, the
+        deployed supervisor files are NOT git-ignored afterwards."""
+        project_root = tmp_path / "project"
+        daemon_root = tmp_path / "daemon"
+        _make_source(daemon_root)
+        ccy = _make_target_ccy(project_root)
+        (ccy / ".gitignore").write_text("*\n")  # blanket ignore, the broken setup
+        config_path = _write_config(project_root, "ccy:\n  deploy_supervisor: true\n")
+
+        subprocess.run(["git", "init", "-q", str(project_root)], check=True)
+
+        deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
+
+        # git check-ignore exits 0 when the path IS ignored, 1 when it is NOT.
+        for name in (SUPERVISOR_SCRIPT_NAME, CCY_ENV_NAME):
+            check = subprocess.run(
+                ["git", "-C", str(project_root), "check-ignore", "-q", f".claude/ccy/{name}"],
+            )
+            assert check.returncode == 1, f"{name} is still git-ignored after deploy"
+
+
 class TestCcySupervisorSourcePath:
     """The source-path helper and the real canonical file."""
 

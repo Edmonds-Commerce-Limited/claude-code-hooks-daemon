@@ -123,6 +123,7 @@ class Priority:
     SUGGEST_STATUSLINE = 55
     VERSION_CHECK = 55
     PLAN_QA_SWEEP = 57
+    CCY_SUPERVISOR_INTEGRITY = 58
 
     # Advisory handlers (Priority: 55-60)
     CRITICAL_THINKING_ADVISORY = 55

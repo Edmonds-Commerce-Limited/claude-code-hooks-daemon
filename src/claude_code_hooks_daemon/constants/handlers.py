@@ -463,6 +463,15 @@ class HandlerID:
         display_name="gitignore-safety-checker",
     )
 
+    # ccy supervisor integrity checker (SessionStart handler) — Plan 00148:
+    # warn when the ccy supervisor is armed but its files are missing, not
+    # executable, or git-ignored (a brick risk for teammates)
+    CCY_SUPERVISOR_INTEGRITY = HandlerIDMeta(
+        class_name="CcySupervisorIntegrityHandler",
+        config_key="ccy_supervisor_integrity",
+        display_name="ccy-supervisor-integrity",
+    )
+
     # Hook registration checker (SessionStart handler)
     HOOK_REGISTRATION_CHECKER = HandlerIDMeta(
         class_name="HookRegistrationCheckerHandler",
