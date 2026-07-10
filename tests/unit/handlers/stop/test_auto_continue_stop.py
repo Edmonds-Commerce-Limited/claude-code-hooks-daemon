@@ -1997,19 +1997,53 @@ class TestHasStopExplanationStaleCompleteTailRace:
             for entry in entries:
                 f.write(json.dumps(entry) + "\n")
 
-    def test_stale_complete_tail_with_old_timestamp_not_accepted(
+    def test_unsuperseded_old_prefixed_tail_is_trusted(
         self, handler: AutoContinueStopHandler, tmp_path: Path
     ) -> None:
-        """A STALE prefixed tail (old timestamp, last line) must NOT be accepted.
+        """An old prefixed tail that NOTHING supersedes is the genuine current turn.
 
-        The exact gap: last message IS a complete assistant message carrying
-        'STOPPING BECAUSE:' but it belongs to a PREVIOUS turn; the current turn's
-        content has not flushed. Old code returns True (the gate leaks — a
-        no-prefix current stop gets allowed). The fix polls, finds nothing newer,
-        and returns False.
+        Regression for the reported 'double STOPPING BECAUSE:' bug. When the Stop
+        hook fires more than _STALE_TAIL_THRESHOLD_SECONDS after the current turn's
+        final message finished (routine right after a /compact), that message is a
+        complete-but-old tail. The poll finds no NEWER message — because this old
+        message IS the latest — so the handler must fall back to trusting it rather
+        than returning None and judging a valid explained stop 'unexplained'. Old
+        code returned False here and forced a duplicate STOPPING BECAUSE:; the fix
+        returns True.
         """
         from unittest.mock import patch
 
+        from claude_code_hooks_daemon.core.transcript_reader import TranscriptReader
+
+        path = tmp_path / "transcript.jsonl"
+        self._write(
+            path,
+            [self._entry("assistant", "STOPPING BECAUSE: all work complete", "old-1", 60.0)],
+        )
+        reader = TranscriptReader()
+        reader.load(str(path))
+
+        with patch("claude_code_hooks_daemon.handlers.stop.auto_continue_stop.time.sleep"):
+            result = handler._has_stop_explanation(reader)
+
+        assert result is True, (
+            "An old prefixed tail with no superseding message is the current turn "
+            "and must satisfy the gate (else a valid stop is wrongly denied)"
+        )
+
+    def test_stale_prefixed_tail_superseded_by_fresh_noprefix_message_rejected(
+        self, handler: AutoContinueStopHandler, tmp_path: Path
+    ) -> None:
+        """Leak protection preserved: a REAL newer no-prefix stop supersedes the tail.
+
+        The genuinely dangerous case the staleness guard exists for: the tail is a
+        stale PREVIOUS-turn 'STOPPING BECAUSE:' message and the CURRENT turn is a
+        silent no-prefix stop whose content flushes during the poll. The poll must
+        adopt the newer no-prefix message (different uuid) and reject, so the stale
+        prefix cannot leak an unexplained stop through. This case still returns
+        False even after the unsuperseded-tail fallback, because a genuine newer
+        message DOES exist and is adopted.
+        """
         from claude_code_hooks_daemon.core.transcript_reader import TranscriptReader
 
         path = tmp_path / "transcript.jsonl"
@@ -2020,10 +2054,14 @@ class TestHasStopExplanationStaleCompleteTailRace:
         reader = TranscriptReader()
         reader.load(str(path))
 
-        with patch("claude_code_hooks_daemon.handlers.stop.auto_continue_stop.time.sleep"):
-            result = handler._has_stop_explanation(reader)
+        # The real current-turn (unexplained) message flushes before the poll reloads.
+        with path.open("a") as f:
+            f.write(
+                json.dumps(self._entry("assistant", "I have finished up here.", "fresh-2", 0.1))
+                + "\n"
+            )
 
-        assert result is False, "Stale previous-turn STOPPING BECAUSE: must not satisfy the gate"
+        assert handler._has_stop_explanation(reader) is False
 
     def test_fresh_complete_tail_with_recent_timestamp_accepted(
         self, handler: AutoContinueStopHandler, tmp_path: Path

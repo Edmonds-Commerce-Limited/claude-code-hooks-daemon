@@ -563,7 +563,25 @@ class AutoContinueStopHandler(Handler):
         # only accept a DIFFERENT (newer-uuid) assistant message; from an
         # incomplete tail any complete assistant message qualifies.
         previous_uuid = msg.uuid if complete else None
-        return self._await_fresh_assistant_message(reader, previous_uuid)
+        fresh = self._await_fresh_assistant_message(reader, previous_uuid)
+        if fresh is not None:
+            return fresh
+
+        # Poll found no superseding message within the budget. If we started from
+        # a COMPLETE tail, trust it: a complete final message that nothing
+        # supersedes across the whole poll is overwhelmingly the genuine current
+        # turn that merely finished a few seconds before the Stop hook fired
+        # (routine right after a /compact, where the final message is already
+        # older than _STALE_TAIL_THRESHOLD_SECONDS). Returning None here judged
+        # such a message 'unexplained' and forced a duplicate STOPPING BECAUSE:
+        # (the reported double-stop bug). The residual leak — a stale prefixed
+        # tail masking a current no-prefix stop whose content never flushes in
+        # budget — is strictly rarer and self-corrects on the next re-fire, and a
+        # genuine newer message IS adopted above whenever one exists. Only a truly
+        # INCOMPLETE tail (no current-turn text at all) stays unresolved.
+        if complete:
+            return msg
+        return None
 
     @staticmethod
     def _message_has_stop_explanation(msg: TranscriptMessage) -> bool:
