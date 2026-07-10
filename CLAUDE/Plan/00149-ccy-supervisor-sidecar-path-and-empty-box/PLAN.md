@@ -50,12 +50,13 @@ an **empty** input box. Delegated to a Fable subagent (worktree-isolated).
 
 ### Phase 1: Bug A — sidecar path resolution (this thread)
 
-- [ ] 🔄 **Task 1.1**: RED — test `_default_sidecar_dir()` returns the normal-mode
-  path when `{project}/src/claude_code_hooks_daemon` is absent, and the
-  self-install path when present (via `CLAUDE_PROJECT_DIR` + tmp marker).
-- [ ] ⬜ **Task 1.2**: GREEN — mirror the daemon's `self_install_mode` detection
-  in `_default_sidecar_dir()`; return `{daemon_untracked}/context-sidecar`.
-- [ ] ⬜ **Task 1.3**: Supervisor test suite + QA green.
+- [x] ✅ **Task 1.1**: RED — added `test_sidecar_dir_resolution.py` (normal vs
+  self-install vs env-unset); 3 RED, 1 pass (self-install coincidence).
+- [x] ✅ **Task 1.2**: GREEN — `_default_sidecar_dir()` mirrors the daemon's
+  `self_install_mode` detection; returns `{daemon_untracked}/context-sidecar`.
+- [x] ✅ **Task 1.3**: 95 supervise tests pass; mypy clean; verified live —
+  dogfood → `{project}/untracked/context-sidecar` (matches daemon write), normal
+  client → `.claude/hooks-daemon/untracked/context-sidecar`. Delivered `c0e7209`.
 
 ### Phase 2: Bug B — empty-box injection guard (Fable subagent, worktree)
 
