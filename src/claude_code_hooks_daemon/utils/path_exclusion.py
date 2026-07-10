@@ -1,0 +1,127 @@
+"""Shared glob-based path exclusion for content-scanning blocking handlers.
+
+Client projects — especially QA/linting libraries whose job is to contain
+deliberately-"bad" code samples — need to exempt paths from the content
+blockers (`security_antipattern`, `qa_suppression`, `error_hiding_blocker`).
+This module provides one glob matcher those handlers share, so exclusion
+behaves identically everywhere.
+
+Glob semantics are a pragmatic gitignore-style subset (stdlib-only, no runtime
+dependency):
+
+- ``*``  matches any run of characters within a single path segment.
+- ``?``  matches exactly one character within a single path segment.
+- ``**`` matches any number of path segments (including zero), e.g.
+  ``samples/**/*.py`` matches both ``samples/x.py`` and ``samples/a/b/x.py``.
+- A leading ``/`` anchors the pattern to the project root; without it the
+  pattern may match at any directory depth.
+
+Patterns are matched against the project-relative path (when ``project_root``
+is given and the file lives under it) and against the raw path, so a handler
+may pass either an absolute or a relative ``file_path``.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+from collections.abc import Sequence
+
+# Compiled-pattern cache: the same handful of client globs are matched on every
+# Write/Edit, so translating + compiling once per pattern is worth it.
+_REGEX_CACHE: dict[str, re.Pattern[str]] = {}
+
+
+def _glob_to_regex(pattern: str) -> str:
+    """Translate a gitignore-style glob into a full-match regex string.
+
+    A leading ``/`` anchors to the (relative) path start; otherwise a
+    ``(?:.*/)?`` prefix lets the pattern match at any directory depth.
+    """
+    anchored = pattern.startswith("/")
+    body = pattern[1:] if anchored else pattern
+
+    out: list[str] = []
+    i = 0
+    n = len(body)
+    while i < n:
+        char = body[i]
+        if char == "*":
+            if i + 1 < n and body[i + 1] == "*":
+                # '**' — any number of path segments.
+                i += 2
+                if i < n and body[i] == "/":
+                    # '**/' consumes the slash so it can match zero segments.
+                    i += 1
+                    out.append("(?:[^/]+/)*")
+                else:
+                    out.append(".*")
+                continue
+            out.append("[^/]*")
+        elif char == "?":
+            out.append("[^/]")
+        elif char == "/":
+            out.append("/")
+        else:
+            out.append(re.escape(char))
+        i += 1
+
+    regex = "".join(out)
+    if not anchored:
+        regex = "(?:.*/)?" + regex
+    return regex
+
+
+def _compiled(pattern: str) -> re.Pattern[str]:
+    """Return the cached compiled full-match regex for ``pattern``."""
+    compiled = _REGEX_CACHE.get(pattern)
+    if compiled is None:
+        compiled = re.compile(_glob_to_regex(pattern))
+        _REGEX_CACHE[pattern] = compiled
+    return compiled
+
+
+def _candidate_paths(file_path: str, project_root: str | os.PathLike[str] | None) -> list[str]:
+    """Return the path strings a pattern is matched against.
+
+    Always includes the raw path with any leading slash stripped; also includes
+    the project-relative path when ``project_root`` is given and the file lives
+    under it (so leading-``/`` anchored patterns resolve against the root).
+    """
+    raw = file_path.replace("\\", "/")
+    candidates = [raw.lstrip("/")]
+    if project_root is not None:
+        root = str(project_root).replace("\\", "/")
+        rel = os.path.relpath(raw, root).replace("\\", "/")
+        if rel != ".." and not rel.startswith("../"):
+            candidates.insert(0, rel)
+    return candidates
+
+
+def is_path_excluded(
+    file_path: str,
+    patterns: Sequence[str] | None,
+    *,
+    project_root: str | os.PathLike[str] | None = None,
+) -> bool:
+    """Return True if ``file_path`` matches any exclusion glob in ``patterns``.
+
+    Args:
+        file_path: Absolute or relative path of the file being written/edited.
+        patterns: Glob patterns to exclude. ``None`` or empty never excludes.
+        project_root: Optional project root; enables project-relative and
+            leading-``/`` anchored matching.
+
+    Returns:
+        True if any pattern matches any candidate form of the path.
+    """
+    if not patterns:
+        return False
+    candidates = _candidate_paths(file_path, project_root)
+    for pattern in patterns:
+        if not pattern:
+            continue
+        compiled = _compiled(pattern)
+        if any(compiled.fullmatch(candidate) for candidate in candidates):
+            return True
+    return False

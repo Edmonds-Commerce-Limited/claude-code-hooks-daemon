@@ -60,14 +60,15 @@ as its siblings, for consistency).
 
 ### Phase 1: Shared exclusion utility (TDD)
 
-- [ ] ⬜ **Task 1.1**: Decide glob engine — check whether `pathspec` is already a
-  dependency (`uv.lock`); prefer it, else a small, tested `glob → regex`
-  translator supporting `*`, `?`, `**`, and a leading-`/` anchor.
-- [ ] ⬜ **Task 1.2**: RED — write `tests/unit/utils/test_path_exclusion.py`
-  covering `**`/segment globs, project-relative vs absolute matching, empty list,
-  and non-match cases.
-- [ ] ⬜ **Task 1.3**: GREEN — implement
-  `src/claude_code_hooks_daemon/utils/path_exclusion.py` (`is_path_excluded(file_path, patterns, *, project_root=None)`).
+- [x] ✅ **Task 1.1**: Decide glob engine — `pathspec` is a **dev-only** transitive
+  dep (via black), not runtime, so a small stdlib `glob → regex` translator is
+  used instead (no runtime dependency added).
+- [x] ✅ **Task 1.2**: RED — `tests/unit/utils/test_path_exclusion.py` (23 tests:
+  `**`/segment globs, anchored patterns, project-relative vs absolute, empty/None,
+  non-match).
+- [x] ✅ **Task 1.3**: GREEN — `src/claude_code_hooks_daemon/utils/path_exclusion.py`
+  (`is_path_excluded(file_path, patterns, *, project_root=None)`), compiled-pattern
+  cache, correct zero-or-more-segment `**`.
 
 ### Phase 2: Wire into the three handlers
 
