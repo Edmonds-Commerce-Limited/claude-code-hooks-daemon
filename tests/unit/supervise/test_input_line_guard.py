@@ -137,6 +137,109 @@ class TestHumanInputLine:
         assert line.is_empty is False
 
 
+class TestHumanInputLineAnsiControlSequences:
+    """Terminal control sequences must not poison the empty-box model.
+
+    Regression (v3.34.1): focus events, cursor/device reports and other
+    terminal-GENERATED escape sequences were counted as typed content, so a
+    single window-focus switch wedged the box 'non-empty' for the whole session
+    and the supervisor deferred every injection forever (28 deferrals, 0
+    injections in the field). Only genuine box content -- printable keystrokes,
+    bracketed-paste payload, up/down history recall -- may mark the box.
+    """
+
+    def test_focus_in_event_is_not_content(self) -> None:
+        line = HumanInputLine()
+        line.feed(b"\x1b[I")
+        assert line.is_empty is True
+
+    def test_focus_out_event_is_not_content(self) -> None:
+        line = HumanInputLine()
+        line.feed(b"\x1b[O")
+        assert line.is_empty is True
+
+    def test_repeated_focus_events_never_wedge_the_box(self) -> None:
+        line = HumanInputLine()
+        for _ in range(30):
+            line.feed(b"\x1b[I\x1b[O")
+        assert line.is_empty is True
+
+    def test_cursor_position_report_is_not_content(self) -> None:
+        line = HumanInputLine()
+        line.feed(b"\x1b[6;3R")
+        assert line.is_empty is True
+
+    def test_device_attributes_report_is_not_content(self) -> None:
+        line = HumanInputLine()
+        line.feed(b"\x1b[?1;2c")
+        assert line.is_empty is True
+
+    def test_sgr_mouse_event_is_not_content(self) -> None:
+        line = HumanInputLine()
+        line.feed(b"\x1b[<0;10;10M")
+        assert line.is_empty is True
+
+    def test_ss3_function_key_is_not_content(self) -> None:
+        line = HumanInputLine()
+        line.feed(b"\x1bOP")  # F1 via SS3
+        assert line.is_empty is True
+
+    def test_control_sequence_split_across_chunks_is_not_content(self) -> None:
+        line = HumanInputLine()
+        line.feed(b"\x1b[")
+        line.feed(b"I")
+        assert line.is_empty is True
+
+    def test_typed_content_after_focus_event_still_counts(self) -> None:
+        line = HumanInputLine()
+        line.feed(b"\x1b[I")
+        line.feed(b"hi")
+        assert line.is_empty is False
+
+    def test_focus_event_after_submit_leaves_box_empty(self) -> None:
+        # The exact field repro: submit a message, then window-focus churn.
+        line = HumanInputLine()
+        line.feed(b"done" + _ENTER)
+        line.feed(b"\x1b[I\x1b[O\x1b[I")
+        assert line.is_empty is True
+
+    def test_bracketed_paste_payload_counts_as_content(self) -> None:
+        line = HumanInputLine()
+        line.feed(b"\x1b[200~hello world\x1b[201~")
+        assert line.is_empty is False
+
+    def test_bracketed_paste_whitespace_only_stays_empty(self) -> None:
+        line = HumanInputLine()
+        line.feed(b"\x1b[200~   \t \x1b[201~")
+        assert line.is_empty is True
+
+    def test_bracketed_paste_end_then_submit_and_focus_stays_empty(self) -> None:
+        line = HumanInputLine()
+        line.feed(b"\x1b[200~pasted\x1b[201~" + _ENTER)
+        line.feed(b"\x1b[I")
+        assert line.is_empty is True
+
+    def test_bracketed_paste_split_across_chunks(self) -> None:
+        line = HumanInputLine()
+        line.feed(b"\x1b[200~payl")
+        line.feed(b"oad\x1b[20")
+        line.feed(b"1~")
+        assert line.is_empty is False
+
+    def test_up_arrow_history_recall_still_counts_as_content(self) -> None:
+        # Preserved conservative behaviour: up-arrow may recall a command into
+        # an empty box, so it must read non-empty (never inject over recalled text).
+        line = HumanInputLine()
+        line.feed(b"\x1b[A")
+        assert line.is_empty is False
+
+    def test_left_right_arrows_are_not_content(self) -> None:
+        # Cursor movement within an (empty) box adds nothing.
+        line = HumanInputLine()
+        line.feed(b"\x1b[C\x1b[D")
+        assert line.is_empty is True
+
+
 class TestInputActivityFeedsLine:
     """InputActivity.record must feed the line model (human stdin only)."""
 

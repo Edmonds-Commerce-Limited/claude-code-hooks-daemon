@@ -71,30 +71,141 @@ _LINE_BACKSPACE_BYTES = frozenset({0x08, 0x7F})
 _LINE_WHITESPACE_BYTES = frozenset({0x20, 0x09})
 
 
-class HumanInputLine:
-    """Model of the human's current input-box line, fed from forwarded stdin.
+# ANSI control-sequence parser states. Terminal-GENERATED sequences (focus
+# events ESC[I / ESC[O, cursor-position and device-attribute reports, mouse
+# tracking, SS3 function keys) arrive on stdin WITHOUT the human adding content
+# and must never mark the box non-empty. Counting their raw bytes as content
+# permanently wedged the guard (v3.34.1 field report: a single window-focus
+# switch left the box "non-empty" for the whole session -> every injection tick
+# deferred forever). The parser consumes whole control sequences as non-content,
+# with two deliberate exceptions that DO represent real box content: bracketed-
+# paste payload (between ESC[200~ and ESC[201~) and up/down history-recall arrows.
+_ST_GROUND = 0
+_ST_ESC = 1
+_ST_CSI = 2
+_ST_SS3 = 3
+_ST_STR = 4
+_ST_STR_ESC = 5
 
-    Deliberately conservative: any byte not positively recognised as a
-    clear/backspace/whitespace key (escape sequences, other control bytes,
-    UTF-8 multibyte content) counts as content. A false "non-empty" merely
-    defers an injection tick; a false "empty" would paste bot text into a
-    half-typed human message and submit it -- the failure this guard exists
-    to prevent.
+_ESC = 0x1B
+_CSI_INTRODUCER = 0x5B  # '['
+_SS3_INTRODUCER = 0x4F  # 'O'
+# ESC followed by one of these starts a string sequence terminated by ST/BEL:
+# OSC ']' , DCS 'P', SOS 'X', PM '^', APC '_'.
+_STRING_INTRODUCERS = frozenset({0x5D, 0x50, 0x58, 0x5E, 0x5F})
+_BEL = 0x07
+_ST_TERMINATOR = 0x5C  # '\' completing ESC \ (ST)
+# CSI byte ranges (ECMA-48): parameter/intermediate 0x20-0x3F, final 0x40-0x7E.
+_CSI_PARAM_MIN, _CSI_PARAM_MAX = 0x20, 0x3F
+_CSI_FINAL_MIN, _CSI_FINAL_MAX = 0x40, 0x7E
+_CSI_FINAL_TILDE = 0x7E  # '~' terminates edit/function keys and paste markers
+_CSI_ARROW_UP = 0x41  # 'A'
+_CSI_ARROW_DOWN = 0x42  # 'B'
+_PASTE_START_PARAMS = (0x32, 0x30, 0x30)  # "200"
+_PASTE_END_PARAMS = (0x32, 0x30, 0x31)  # "201"
+
+
+class HumanInputLine:
+    """ANSI-aware model of the human's input-box line, fed from forwarded stdin.
+
+    Only genuine box content marks the line non-empty: printable keystrokes,
+    bracketed-paste payload, and up/down history-recall arrows. Whole terminal
+    control sequences -- focus events, cursor/device reports, mouse tracking,
+    SS3 function keys -- are parsed and consumed WITHOUT counting their bytes,
+    because they arrive without the human adding content. Counting them was a
+    permanent poison: a single focus switch left the box "non-empty" for the
+    rest of the session and every injection tick was deferred forever.
+
+    Still conservative where it matters: any printable byte, unrecognised
+    control byte, or UTF-8 content counts, and a malformed/aborted escape
+    sequence falls back to ground without silently swallowing later content.
+    The parser is streaming -- a sequence split across read() chunks is carried
+    across feed() calls via the persisted state.
     """
 
     def __init__(self) -> None:
         self._buffer: list[int] = []
+        self._state: int = _ST_GROUND
+        self._csi_params: list[int] = []
+        self._in_paste: bool = False
 
     def feed(self, data: bytes) -> None:
         """Advance the line model with a chunk of forwarded human stdin bytes."""
         for byte in data:
-            if byte in _LINE_CLEAR_BYTES:
-                self._buffer.clear()
-            elif byte in _LINE_BACKSPACE_BYTES:
-                if self._buffer:
-                    self._buffer.pop()
-            else:
-                self._buffer.append(byte)
+            self._consume(byte)
+
+    def _consume(self, byte: int) -> None:
+        state = self._state
+        if state == _ST_GROUND:
+            self._consume_ground(byte)
+        elif state == _ST_ESC:
+            self._consume_esc(byte)
+        elif state == _ST_CSI:
+            self._consume_csi(byte)
+        elif state == _ST_SS3:
+            # SS3 is ESC O <one final byte> (function/keypad key): non-content.
+            self._state = _ST_GROUND
+        elif state == _ST_STR:
+            self._consume_str(byte)
+        else:  # _ST_STR_ESC: saw ESC inside a string sequence, want ST ('\').
+            self._state = _ST_GROUND if byte == _ST_TERMINATOR else _ST_STR
+
+    def _consume_ground(self, byte: int) -> None:
+        if byte == _ESC:
+            self._state = _ST_ESC
+            return
+        if self._in_paste:
+            # Inside bracketed paste every non-ESC byte is literal paste
+            # payload -- real box content, including embedded CR/LF.
+            self._buffer.append(byte)
+            return
+        if byte in _LINE_CLEAR_BYTES:
+            self._buffer.clear()
+        elif byte in _LINE_BACKSPACE_BYTES:
+            if self._buffer:
+                self._buffer.pop()
+        else:
+            self._buffer.append(byte)
+
+    def _consume_esc(self, byte: int) -> None:
+        if byte == _CSI_INTRODUCER:
+            self._state = _ST_CSI
+            self._csi_params = []
+        elif byte == _SS3_INTRODUCER:
+            self._state = _ST_SS3
+        elif byte in _STRING_INTRODUCERS:
+            self._state = _ST_STR
+        else:
+            # Two-char escape (e.g. ESC M) or a bare ESC: consumed, non-content.
+            self._state = _ST_GROUND
+
+    def _consume_csi(self, byte: int) -> None:
+        if _CSI_PARAM_MIN <= byte <= _CSI_PARAM_MAX:
+            self._csi_params.append(byte)
+        elif _CSI_FINAL_MIN <= byte <= _CSI_FINAL_MAX:
+            self._finish_csi(byte)
+            self._state = _ST_GROUND
+        else:
+            # Control byte mid-sequence: abort the sequence, count nothing.
+            self._state = _ST_GROUND
+
+    def _finish_csi(self, final: int) -> None:
+        params = tuple(self._csi_params)
+        if final == _CSI_FINAL_TILDE and params == _PASTE_START_PARAMS:
+            self._in_paste = True
+        elif final == _CSI_FINAL_TILDE and params == _PASTE_END_PARAMS:
+            self._in_paste = False
+        elif not params and final in (_CSI_ARROW_UP, _CSI_ARROW_DOWN):
+            # Up/Down recall history into an empty box -- conservatively content.
+            self._buffer.append(final)
+        # else: focus (I/O), cursor/device reports (R/c/n), mouse (M/m),
+        # left/right arrows (C/D) etc. -- terminal noise, never box content.
+
+    def _consume_str(self, byte: int) -> None:
+        if byte == _BEL:
+            self._state = _ST_GROUND
+        elif byte == _ESC:
+            self._state = _ST_STR_ESC
 
     @property
     def is_empty(self) -> bool:
