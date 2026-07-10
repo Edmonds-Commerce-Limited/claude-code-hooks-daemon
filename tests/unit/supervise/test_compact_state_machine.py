@@ -28,16 +28,26 @@ SupervisorState = _mod.SupervisorState
 
 
 class TestDefaultSidecarDir:
+    # Install-mode-aware resolution (Plan 00149 Bug A): a bare project (no
+    # src/claude_code_hooks_daemon) is a NORMAL client install, so the sidecar
+    # dir is .claude/hooks-daemon/untracked/context-sidecar — the daemon's real
+    # write location. Full matrix in test_sidecar_dir_resolution.py.
     def test_uses_claude_project_dir_env(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
-        assert _mod._default_sidecar_dir() == tmp_path / "untracked" / "context-sidecar"
+        assert (
+            _mod._default_sidecar_dir()
+            == tmp_path / ".claude" / "hooks-daemon" / "untracked" / "context-sidecar"
+        )
 
     def test_falls_back_to_cwd(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
         monkeypatch.chdir(tmp_path)
-        assert _mod._default_sidecar_dir() == tmp_path / "untracked" / "context-sidecar"
+        assert (
+            _mod._default_sidecar_dir()
+            == tmp_path / ".claude" / "hooks-daemon" / "untracked" / "context-sidecar"
+        )
 
 
 def _write_sidecar(

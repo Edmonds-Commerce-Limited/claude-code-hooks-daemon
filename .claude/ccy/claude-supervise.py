@@ -211,12 +211,30 @@ def _coerce_int(value: object) -> int:
 def _default_sidecar_dir() -> Path:
     """Resolve the daemon's context-sidecar directory from the environment.
 
-    Mirrors ``DecisionLog._default_path``: uses ``$CLAUDE_PROJECT_DIR`` (the
-    project root, exported by ccy in-container), falling back to the current
-    working directory when the variable is unset.
+    The daemon writes the sidecar to ``daemon_untracked_dir()/context-sidecar``,
+    whose location is INSTALL-MODE-AWARE (see ``ProjectContext``):
+
+    - normal client install: ``{project}/.claude/hooks-daemon/untracked``
+    - self-install (the daemon's own repo): ``{project}/untracked``
+
+    We must resolve the SAME directory or we poll a path the daemon never writes
+    (the v3.34.0 bug: the compact trigger was permanently inert in every normal
+    client install because this hardcoded the self-install layout). Install mode
+    is detected exactly as the daemon does: self-install iff the daemon SOURCE
+    tree ``{project}/src/claude_code_hooks_daemon`` is present at the project
+    root. This is stdlib-only (no daemon import) and stable at startup regardless
+    of whether the sidecar directory exists yet.
+
+    Uses ``$CLAUDE_PROJECT_DIR`` (the project root, exported by ccy in-container),
+    falling back to the current working directory when the variable is unset.
     """
     project_dir = Path(os.environ.get("CLAUDE_PROJECT_DIR") or Path.cwd())
-    return project_dir / "untracked" / _SIDECAR_SUBDIR
+    self_install = (project_dir / "src" / "claude_code_hooks_daemon").exists()
+    if self_install:
+        daemon_untracked = project_dir / "untracked"
+    else:
+        daemon_untracked = project_dir / ".claude" / "hooks-daemon" / "untracked"
+    return daemon_untracked / _SIDECAR_SUBDIR
 
 
 def load_freshest_sidecar(
