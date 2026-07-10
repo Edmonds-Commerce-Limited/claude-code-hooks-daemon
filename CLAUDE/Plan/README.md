@@ -6,8 +6,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Code Quality / Handler Configuration
 
-- [00150: Client-configurable exclude_paths for content-scanning blockers](00150-client-configurable-exclude-paths-for-content-blockers/PLAN.md) - In Progress (shared glob-exclusion utility → wire into security_antipattern / qa_suppression / error_hiding_blocker; project-level default; targets v3.35.0)
-
 ### Plan Workflow / QA
 
 - [00144: Plan QA System — Real-Time Plan Validation & Drift Enforcement](00144-plan-qa-system/PLAN.md) - In Progress (Phase 1 core underway; scope includes mkplan `_TEMPLATE_.md` externalisation)
@@ -118,6 +116,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00150: Client-configurable exclude_paths for content-scanning blockers](Completed/00150-client-configurable-exclude-paths-for-content-blockers/PLAN.md) - Complete (shared stdlib glob-exclusion utility wired into security_antipattern / qa_suppression / error_hiding_blocker + project-wide `daemon.exclude_paths`; error_hiding_blocker gains sibling default skips; shipped v3.35.0, commit `1c00123`)
 
 - [00149: ccy Supervisor — Sidecar Path + Empty-Box Guard](Completed/00149-ccy-supervisor-sidecar-path-and-empty-box/PLAN.md) - Complete
 
@@ -997,8 +997,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 150 (count = `hooksdaemon.latestPlanNumber` git counter; 00145 was allocated by the counter but its folder is not present on this branch)
-- **Completed**: 126 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 17 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Completed**: 127 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
+- **Active**: 16 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102); plus draft folders deleted and no longer on disk (00036 empty draft, 00038 superseded by 00045, 00073 orphan empty folder removed during Plan 00107 housekeeping)
 - **Last reconciled by**: Plan 00144 Task 2.2 sweep remediation

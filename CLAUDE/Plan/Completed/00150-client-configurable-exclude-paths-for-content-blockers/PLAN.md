@@ -1,6 +1,6 @@
 # Plan 00150: Client-configurable exclude_paths for content-scanning blockers
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-07-10
 **Owner**: joseph
 **Priority**: Medium
@@ -102,17 +102,17 @@ as its siblings, for consistency).
   95.5% coverage).
 - [x] ✅ **Task 4.2**: Daemon restart RUNNING; live socket probe — fixture-path
   Write allowed (`{}`), real-source Write still denied by error_hiding_blocker.
-- [ ] 🔄 **Task 4.3**: Hand off to the user for the v3.35.0 release decision
-  (this plan does NOT ship a release autonomously).
+- [x] ✅ **Task 4.3**: User authorised the release; shipped as v3.35.0 (release
+  commit `1c00123`), tagged and published to GitHub.
 
 ## Success Criteria
 
-- [ ] A project can add `exclude_paths` globs (per-handler and/or project-level)
+- [x] A project can add `exclude_paths` globs (per-handler and/or project-level)
   and have all three content blockers honour them.
-- [ ] `error_hiding_blocker` no longer scans vendor/node_modules/test-fixtures by
+- [x] `error_hiding_blocker` no longer scans vendor/node_modules/test-fixtures by
   default.
-- [ ] No config ⇒ no behaviour change beyond the error_hiding default skips.
-- [ ] QA 13/13, daemon restarts clean, 95%+ coverage maintained.
+- [x] No config ⇒ no behaviour change beyond the error_hiding default skips.
+- [x] QA 13/13, daemon restarts clean, 95%+ coverage maintained.
 
 ## Notes & Updates
 
@@ -122,3 +122,8 @@ as its siblings, for consistency).
 - Failsafe recovery cron: `733c0f4e` (hourly at :23, non-durable, session-only).
 - Motivation from a live user question: QA libraries need to exempt fixtures of
   deliberately-broken code and code that legitimately suppresses errors.
+- Feature delivered across commits `c66d446` (scaffold), `3b74579` (Phase 1 util),
+  `2517288` (Phase 2 handlers/plumbing), `d76ed09` (Phase 3 docs/manifest).
+- Released as **v3.35.0** (release commit `1c00123`) after explicit user
+  authorisation; QA 13/13 (9902 tests, 95.5% coverage), H-1 acceptance 23 passed.
+  Plan closed in the release housekeeping commit.
