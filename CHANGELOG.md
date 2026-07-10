@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.35.0] - 2026-07-10
+
+This is a **minor release** adding a client-configurable path-exclusion escape
+hatch to the three content-scanning blocking handlers, so projects (chiefly
+QA/linting libraries that must ship fixtures of deliberately-"bad" code) can
+exempt specific paths instead of disabling a whole handler. Fully backwards
+compatible — no config means unchanged behaviour, apart from `error_hiding_blocker`
+gaining the same sane built-in default skips (vendor, node_modules, test
+fixtures) its two siblings already had.
+
+### Added
+
+- **`exclude_paths` glob option on `security_antipattern`, `qa_suppression`, and `error_hiding_blocker`** — each handler now accepts `options.exclude_paths: [glob, …]` (gitignore-style, with correct zero-or-more-segment `**` semantics) to exempt matching Write/Edit targets from scanning. Backed by one shared stdlib-only glob→regex utility (`utils/path_exclusion.py`) with a compiled-pattern cache; no new runtime dependency.
+- **Project-level `daemon.exclude_paths` default** — set once under `daemon:` and all three content blockers inherit it (unioned with each handler's own `exclude_paths`), giving a single source of truth for "exempt these paths everywhere". Plumbed through the config model → CLI → controller → registry → `Handler` slots, mirroring the existing `daemon.languages` injection.
+
+### Changed
+
+- **`error_hiding_blocker` now skips vendor/node_modules/test-fixture dirs by default** — previously it was the only one of the three content blockers with no built-in skip set and scanned everything. It now ships the same `_DEFAULT_EXCLUDE_GLOBS` defaults as `security_antipattern` and `qa_suppression`, reducing false positives on fixture and vendored code. This is the sole behavioural change absent any config.
+
 ## [3.34.2] - 2026-07-10
 
 This is a **patch release** fixing two High-severity bugs: a Stop-hook
