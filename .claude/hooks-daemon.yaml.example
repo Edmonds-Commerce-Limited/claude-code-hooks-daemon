@@ -285,6 +285,10 @@ handlers:
       enabled: true  # Policy lives under the top-level plan_workflow.qa section
       priority: 57
 
+    ccy_supervisor_integrity:  # Warns when the ccy supervisor is armed but its files are unsafe (Plan 00148)
+      enabled: true            # Silent unless .claude/ccy/ is a ccy project with an armed ccy.env
+      priority: 58
+
   # PreCompact handlers (run before conversation compaction)
   pre_compact:
     transcript_archiver:  # Archives transcripts before compaction
