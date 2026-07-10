@@ -18,8 +18,10 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import enum
 import errno
 import fcntl
+import json
 import os
 import pty
 import select
@@ -104,6 +106,222 @@ class DecisionLog:
         timestamp = datetime.now(UTC).isoformat()
         with self._path.open("a", encoding="utf-8") as handle:
             handle.write(f"{timestamp} {message}\n")
+
+
+# ---------------------------------------------------------------------------
+# Compact decision logic (Plan 00135 Slice 2, dry-run)
+#
+# The daemon writes an observe-only "context sidecar" JSON per session
+# (handlers/status_line/context_sidecar.py). This supervisor READS the freshest
+# sidecar and runs the Decision H state machine to decide when it WOULD inject
+# `/compact` (and, once compaction is under way, `continue`). In the dry-run
+# phase these decisions are LOGGED ONLY -- nothing is ever written to the child
+# PTY. Arming the actual keystroke injection is a separate, later step.
+# ---------------------------------------------------------------------------
+
+_SIDECAR_SUBDIR = "context-sidecar"
+
+# State-machine policy defaults (seconds / counts). Conservative on purpose.
+_DEFAULT_FRESHNESS_SECONDS = 30.0
+_DEFAULT_COOLDOWN_SECONDS = 300.0
+_DEFAULT_AWAIT_TIMEOUT_SECONDS = 120.0
+_DEFAULT_MAX_INJECTIONS = 20
+
+
+class Decision(enum.Enum):
+    """What the supervisor WOULD do this evaluation (dry-run logs it)."""
+
+    NOOP = "noop"
+    WOULD_COMPACT = "would-compact"
+    WOULD_CONTINUE = "would-continue"
+
+
+class SupervisorState(enum.Enum):
+    """Two-state compact-and-resume machine (Decision H)."""
+
+    MONITOR = "monitor"
+    AWAIT_COMPACTING = "await-compacting"
+
+
+@dataclass(frozen=True)
+class SidecarReading:
+    """A parsed snapshot of the daemon-written context sidecar."""
+
+    red: bool
+    tier: str
+    pct: float
+    session_id: str
+    ts: float
+    seq: int
+    writer_pid: int
+    compacting: bool
+    stale: bool
+
+
+@dataclass(frozen=True)
+class CompactPolicy:
+    """Tunable guards for the compact state machine."""
+
+    freshness_seconds: float = _DEFAULT_FRESHNESS_SECONDS
+    cooldown_seconds: float = _DEFAULT_COOLDOWN_SECONDS
+    await_timeout_seconds: float = _DEFAULT_AWAIT_TIMEOUT_SECONDS
+    max_injections: int = _DEFAULT_MAX_INJECTIONS
+
+
+@dataclass(frozen=True)
+class Evaluation:
+    """The outcome of one state-machine evaluation."""
+
+    decision: Decision
+    reason: str
+
+
+def _coerce_float(value: object) -> float:
+    """Best-effort float coercion; non-numeric values become 0.0."""
+    return float(value) if isinstance(value, (int, float)) else 0.0
+
+
+def _coerce_int(value: object) -> int:
+    """Best-effort int coercion; non-numeric values become 0."""
+    return int(value) if isinstance(value, (int, float)) else 0
+
+
+def _default_sidecar_dir() -> Path:
+    """Resolve the daemon's context-sidecar directory from the environment.
+
+    Mirrors ``DecisionLog._default_path``: uses ``$CLAUDE_PROJECT_DIR`` (the
+    project root, exported by ccy in-container), falling back to the current
+    working directory when the variable is unset.
+    """
+    project_dir = Path(os.environ.get("CLAUDE_PROJECT_DIR") or Path.cwd())
+    return project_dir / "untracked" / _SIDECAR_SUBDIR
+
+
+def load_freshest_sidecar(
+    directory: Path, *, now: float, freshness_seconds: float
+) -> SidecarReading | None:
+    """Load the freshest (max-``ts``) sidecar JSON in ``directory``.
+
+    Returns None when the directory is absent or contains no parseable
+    sidecar. Malformed files are skipped (they may be from an older schema or
+    a foreign writer) rather than aborting the scan -- the freshest VALID
+    reading wins. ``stale`` is set when ``now - ts`` exceeds
+    ``freshness_seconds`` (the daemon has not rendered a status line recently,
+    so the session is idle or gone and must not be acted on).
+
+    Args:
+        directory: The ``context-sidecar`` directory to scan.
+        now: Current epoch time (injected for deterministic tests).
+        freshness_seconds: Age beyond which a reading is marked ``stale``.
+
+    Returns:
+        The freshest valid ``SidecarReading``, or None if none is available.
+    """
+    if not directory.is_dir():
+        return None
+
+    freshest_data = None
+    freshest_ts = float("-inf")
+    for path in directory.glob("*.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            # Unreadable or malformed sidecar -- skip and keep scanning.
+            continue
+        if not isinstance(data, dict):
+            continue
+        ts = _coerce_float(data.get("ts"))
+        if ts > freshest_ts:
+            freshest_ts = ts
+            freshest_data = data
+
+    if freshest_data is None:
+        return None
+
+    return SidecarReading(
+        red=bool(freshest_data.get("red", False)),
+        tier=str(freshest_data.get("tier", "")),
+        pct=_coerce_float(freshest_data.get("pct")),
+        session_id=str(freshest_data.get("session_id", "")),
+        ts=freshest_ts,
+        seq=_coerce_int(freshest_data.get("seq")),
+        writer_pid=_coerce_int(freshest_data.get("writer_pid")),
+        compacting=bool(freshest_data.get("compacting", False)),
+        stale=(now - freshest_ts) > freshness_seconds,
+    )
+
+
+class CompactStateMachine:
+    """Decision H compact-and-resume machine (pure; injects nothing).
+
+    MONITOR: when the sidecar is fresh + red AND the session is idle AND the
+    cooldown/cap allow it, decide WOULD_COMPACT and move to AWAIT_COMPACTING.
+
+    AWAIT_COMPACTING: once the sidecar reports ``compacting`` (compaction has
+    started), decide WOULD_CONTINUE and return to MONITOR (starting the
+    cooldown). If compaction never starts within ``await_timeout_seconds``,
+    give up and return to MONITOR so a missed transition cannot wedge the
+    machine forever.
+    """
+
+    def __init__(self, policy: CompactPolicy) -> None:
+        self._policy = policy
+        self.state = SupervisorState.MONITOR
+        self._injections = 0
+        self._last_action_ts: float | None = None
+
+    def evaluate(self, reading: SidecarReading | None, *, idle: bool, now: float) -> Evaluation:
+        """Advance the machine one step and return what it WOULD do."""
+        if self.state is SupervisorState.AWAIT_COMPACTING:
+            return self._evaluate_await(reading, now=now)
+        return self._evaluate_monitor(reading, idle=idle, now=now)
+
+    def _evaluate_monitor(
+        self, reading: SidecarReading | None, *, idle: bool, now: float
+    ) -> Evaluation:
+        if reading is None:
+            return Evaluation(Decision.NOOP, "no sidecar reading")
+        if reading.stale:
+            return Evaluation(Decision.NOOP, "sidecar stale")
+        if not reading.red:
+            return Evaluation(Decision.NOOP, f"not red (tier={reading.tier})")
+        if not idle:
+            return Evaluation(Decision.NOOP, "session busy (composing)")
+        if self._injections >= self._policy.max_injections:
+            return Evaluation(Decision.NOOP, "injection cap reached")
+        if not self._cooldown_elapsed(now):
+            return Evaluation(Decision.NOOP, "cooldown active")
+
+        self._injections += 1
+        self._last_action_ts = now
+        self.state = SupervisorState.AWAIT_COMPACTING
+        return Evaluation(
+            Decision.WOULD_COMPACT,
+            f"red at {reading.pct:.0f}% + idle -> would inject /compact",
+        )
+
+    def _evaluate_await(self, reading: SidecarReading | None, *, now: float) -> Evaluation:
+        if reading is not None and reading.compacting:
+            self._last_action_ts = now
+            self.state = SupervisorState.MONITOR
+            return Evaluation(
+                Decision.WOULD_CONTINUE,
+                "compaction under way -> would inject continue",
+            )
+        if self._await_timed_out(now):
+            self.state = SupervisorState.MONITOR
+            return Evaluation(Decision.NOOP, "await-compacting timed out -> back to monitor")
+        return Evaluation(Decision.NOOP, "awaiting compaction start")
+
+    def _cooldown_elapsed(self, now: float) -> bool:
+        if self._last_action_ts is None:
+            return True
+        return (now - self._last_action_ts) >= self._policy.cooldown_seconds
+
+    def _await_timed_out(self, now: float) -> bool:
+        if self._last_action_ts is None:
+            return False
+        return (now - self._last_action_ts) > self._policy.await_timeout_seconds
 
 
 def _get_winsize(stdin_fd: int) -> bytes:
