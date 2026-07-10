@@ -21,12 +21,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Safety-first / opt-in (`get_default_enabled()` → False): exact-payload allowlist, loop-guard sentinel, idle-gating, cooldown + per-session cap, tmux-presence no-op, no Stop-handler collision; see `research-note.md` + `context.md`
   - **High-stakes**: potential game-changer done well, reputation risk done badly — hostile multi-lens review required before build
 
-- [00149: ccy Supervisor — Sidecar Path + Empty-Box Guard](00149-ccy-supervisor-sidecar-path-and-empty-box/PLAN.md) - In Progress (v3.34.1 fixes)
-
-  - Bug A (High): the supervisor's `_default_sidecar_dir()` hardcodes the self-install layout (`{project}/untracked/context-sidecar`), but in a normal client install the daemon writes to `{project}/.claude/hooks-daemon/untracked/context-sidecar` — so the compact-trigger loop is permanently inert in every real client (masked because prior testing was all self-install). Fix mirrors the daemon's install-mode detection.
-  - Bug B (High): the supervisor pasted into a non-empty input box and submitted, corrupting the human's in-progress text — must only inject into an EMPTY box (Fable subagent, worktree-isolated)
-  - Ships as patch v3.34.1
-
 ### Memory / Documentation Policy
 
 - [00132: PostToolUse Progressive-Disclosure Reminder on Project-Doc Markdown Writes](00132-progressive-disclosure-md-write-reminder/PLAN.md) - Not Started (awaiting sign-off)
@@ -120,6 +114,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00149: ccy Supervisor — Sidecar Path + Empty-Box Guard](Completed/00149-ccy-supervisor-sidecar-path-and-empty-box/PLAN.md) - Complete
+
+  - Two High-severity supervisor bugs surfaced once v3.34.0 made the ccy supervisor run in clients. **Bug A**: `_default_sidecar_dir()` hardcoded the self-install layout, so in every normal client install the supervisor polled a dir the daemon never wrote and the compact trigger was permanently inert (masked because prior testing was all self-install) — fixed by mirroring the daemon's install-mode detection (self-install iff `{project}/src/claude_code_hooks_daemon` exists). **Bug B** (Fable subagent, worktree-isolated): the supervisor pasted into a non-empty input box and submitted, corrupting the human's in-progress text — fixed with a `HumanInputLine` model fed from forwarded stdin that gates every injection path on an empty box (conservative bias; injected keystrokes bypass the recorder). Shipped patch v3.34.1. Delivered `c0e7209` (Bug A) / `0a9b09b` (Bug B) / release `a40962a`; QA 13/13 (9840 tests), 127 supervise tests, artifacts consistent.
 
 - [00148: ccy Supervisor Arm on Deploy](Completed/00148-ccy-supervisor-arm-on-deploy/PLAN.md) - Complete
 
@@ -995,8 +993,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 149 (count = `hooksdaemon.latestPlanNumber` git counter; 00145 was allocated by the counter but its folder is not present on this branch)
-- **Completed**: 125 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 17 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Completed**: 126 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
+- **Active**: 16 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102); plus draft folders deleted and no longer on disk (00036 empty draft, 00038 superseded by 00045, 00073 orphan empty folder removed during Plan 00107 housekeeping)
 - **Last reconciled by**: Plan 00144 Task 2.2 sweep remediation

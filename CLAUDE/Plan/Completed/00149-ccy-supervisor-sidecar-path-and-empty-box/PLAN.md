@@ -1,6 +1,6 @@
 # Plan 00149: ccy supervisor — sidecar path resolution + empty-box injection guard
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-07-10
 **Owner**: joseph
 **Priority**: High
@@ -71,8 +71,8 @@ an **empty** input box. Delegated to a Fable subagent (worktree-isolated).
 
 ### Phase 3: Release v3.34.1
 
-- [ ] ⬜ **Task 3.1**: `./scripts/qa/llm_qa.py all` → 13/13; daemon restart RUNNING.
-- [ ] ⬜ **Task 3.2**: release patch → v3.34.1.
+- [x] ✅ **Task 3.1**: `./scripts/qa/llm_qa.py all` → 13/13 (9840 tests, 95.5%); daemon RUNNING.
+- [x] ✅ **Task 3.2**: released patch → v3.34.1 (tag pushed, GitHub release published, artifacts consistent).
 
 ## Success Criteria
 
@@ -81,7 +81,7 @@ an **empty** input box. Delegated to a Fable subagent (worktree-isolated).
 - [ ] Self-install resolution unchanged (dogfood still works).
 - [ ] Non-empty input box defers injection; empty box injects; human bytes vs
   supervisor-injected bytes are distinguished.
-- [ ] QA 13/13, daemon RUNNING, v3.34.1 released.
+- [x] QA 13/13, daemon RUNNING, v3.34.1 released.
 
 ## Notes & Updates
 
@@ -94,3 +94,7 @@ an **empty** input box. Delegated to a Fable subagent (worktree-isolated).
 - Bug B delegated to Fable subagent `textbox-guard` in an isolated worktree.
 - v3.34.0 already shipped the arm/track fixes (Plan 00148); v3.34.1 completes the
   supervisor so it actually observes context and injects safely.
+- Delivered: Bug A `c0e7209`; Bug B (Fable subagent, cherry-picked) `0a9b09b`;
+  release `a40962a` (tag `v3.34.1`). QA 13/13 (9840 tests, 95.5%); 127 supervise
+  tests; daemon RUNNING; GitHub release artifacts consistent.
+- **Complete.** Shipped as patch v3.34.1.
