@@ -440,11 +440,13 @@ fi
 # Step 14b: Deploy ccy PTY supervisor (config-gated — Plan 00147)
 # ============================================================
 #
-# Deploys .claude/ccy/claude-supervise.py into the project's .claude/ccy/ when
-# a .claude/ccy/ directory is present and ccy.deploy_supervisor is not false.
-# Sources the tracked script from the daemon clone ($DAEMON_DIR/.claude/ccy/).
+# Deploys AND arms .claude/ccy/claude-supervise.py in the project's .claude/ccy/
+# when a .claude/ccy/ directory is present and ccy.deploy_supervisor is not false.
+# Sources the tracked script from the daemon clone ($DAEMON_DIR/.claude/ccy/) and
+# ensures ccy.env exports CCY_CLAUDE_WRAPPER so the launcher actually wraps claude
+# (a deployed-but-unarmed supervisor is inert). An existing wrapper is left as-is.
 
-log_step "14b" "Deploying ccy supervisor (if a .claude/ccy/ project)"
+log_step "14b" "Deploying + arming ccy supervisor (if a .claude/ccy/ project)"
 
 if "$VENV_PYTHON" -c "
 from pathlib import Path

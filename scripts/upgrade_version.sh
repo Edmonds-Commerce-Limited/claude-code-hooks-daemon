@@ -261,8 +261,9 @@ for msg in result.messages:
         print_warning "Plan workflow deployment had issues (non-fatal)"
     fi
 
-    # Plan 00147: refresh the ccy supervisor on the idempotent fast path too, so
-    # already-at-target re-runs also deliver the current claude-supervise.py.
+    # Plan 00147/00148: refresh AND arm the ccy supervisor on the idempotent fast
+    # path too, so already-at-target re-runs deliver the current claude-supervise.py
+    # and ensure ccy.env exports CCY_CLAUDE_WRAPPER (an existing wrapper is kept).
     if "$VENV_PYTHON" -c "
 from pathlib import Path
 from claude_code_hooks_daemon.install.ccy_supervisor import deploy_ccy_supervisor_if_enabled
@@ -735,14 +736,16 @@ else
 fi
 
 # ============================================================
-# Step 14b: Redeploy ccy PTY supervisor (config-gated — Plan 00147)
+# Step 14b: Redeploy + arm ccy PTY supervisor (config-gated — Plan 00147/00148)
 # ============================================================
 #
-# Refreshes .claude/ccy/claude-supervise.py from the upgraded daemon clone when
-# a .claude/ccy/ dir is present and ccy.deploy_supervisor is not false, so ccy
-# projects always run the current supervisor after an upgrade.
+# Refreshes .claude/ccy/claude-supervise.py from the upgraded daemon clone AND
+# arms it (ensures ccy.env exports CCY_CLAUDE_WRAPPER) when a .claude/ccy/ dir is
+# present and ccy.deploy_supervisor is not false, so ccy projects always run the
+# current supervisor — and actually wrap claude with it — after an upgrade. An
+# existing user-set CCY_CLAUDE_WRAPPER is left untouched.
 
-log_step "14b" "Deploying ccy supervisor (if a .claude/ccy/ project)"
+log_step "14b" "Deploying + arming ccy supervisor (if a .claude/ccy/ project)"
 
 if "$VENV_PYTHON" -c "
 from pathlib import Path

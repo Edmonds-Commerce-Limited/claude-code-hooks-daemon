@@ -30,10 +30,49 @@ from claude_code_hooks_daemon.config.models import Config
 logger = logging.getLogger(__name__)
 
 SUPERVISOR_SCRIPT_NAME: Final[str] = "claude-supervise.py"
+CCY_ENV_NAME: Final[str] = "ccy.env"
 _CCY_DIR_PARTS: Final[tuple[str, str]] = (".claude", "ccy")
 # Owner rwx, group/other rx — least-privilege executable (matches deploy_skills /
 # mkplan deployment). The supervisor is exec'd directly by the ccy launcher.
 _SUPERVISOR_MODE: Final[int] = 0o755
+
+# The env var the ccy launcher sources from ccy.env and prepends to `claude`.
+# Its mere presence (set OR commented out) means the user has a stance on
+# arming, so we never overwrite it.
+_WRAPPER_EXPORT_KEY: Final[str] = "CCY_CLAUDE_WRAPPER"
+
+# Self-locating armed wrapper line. The `$(cd ... && pwd)` runs at *source* time
+# (double-quoted assignment), resolving the supervisor's absolute path from
+# ccy.env's own location — so one line serves BOTH the podman `/workspace` mount
+# and an arbitrary LXC project dir (LXC-SUPPORT.md open question #2). `--arm`
+# enables real /compact + continue injection (dry-run is the un-armed default).
+_ARMED_WRAPPER_LINE: Final[str] = (
+    'export CCY_CLAUDE_WRAPPER="${CCY_CLAUDE_WRAPPER:-'
+    '$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/'
+    f'{SUPERVISOR_SCRIPT_NAME} --arm --}}"'
+)
+
+# Comment block written immediately above the armed line (fresh file or append).
+_ARMED_WRAPPER_COMMENT: Final[str] = (
+    "# --- Plan 00135 PTY supervisor (armed by the hooks-daemon ccy deploy) ---\n"
+    "# ARMED: the supervisor watches the daemon-written context sidecar and, when\n"
+    "# the context goes RED and the session is idle, injects a REAL `/compact`; on\n"
+    "# any compaction it injects `continue` to resume. Supervisor-injected prompts\n"
+    "# are prefixed `\U0001f916 [ccy-supervisor]` so they are obviously bot messages.\n"
+    "#\n"
+    "# To DRY-RUN (harmless visible marker instead of a real /compact): drop the\n"
+    "# `--arm` below. To DISABLE entirely: comment the next line. Relaunch ccy after\n"
+    "# either change. This line is left untouched on future upgrades once present.\n"
+)
+
+# Header for a freshly-created ccy.env (no pre-existing file in the target).
+_FRESH_ENV_HEADER: Final[str] = (
+    "# ccy.env — per-project ccy environment.\n"
+    "#\n"
+    "# Sourced INSIDE the disposable ccy container by the ccy launcher, never on\n"
+    "# the host. Created by the hooks-daemon ccy supervisor deploy (Plan 00147/00148).\n"
+    "\n"
+)
 
 
 @dataclass
@@ -42,6 +81,10 @@ class CcySupervisorDeployResult:
 
     Attributes:
         deployed: True when the supervisor file was (re)written into the target.
+        armed: True when this run wrote/appended the ``CCY_CLAUDE_WRAPPER`` export
+            into the target's ``ccy.env`` (i.e. actually enabled the supervisor).
+            False when arming was skipped (flag off, no ccy dir, or the user
+            already has a stance on ``CCY_CLAUDE_WRAPPER``).
         recommend_enable: True when the flag was absent (None) while the target
             is a ccy project — callers should promote setting
             ``ccy.deploy_supervisor: true``.
@@ -49,6 +92,7 @@ class CcySupervisorDeployResult:
     """
 
     deployed: bool = False
+    armed: bool = False
     recommend_enable: bool = False
     messages: list[str] = field(default_factory=list)
 
@@ -106,17 +150,60 @@ def deploy_ccy_supervisor_if_enabled(
 
     target = target_ccy_dir / SUPERVISOR_SCRIPT_NAME
     if target.exists() and source.resolve() == target.resolve():
+        # Self-install: source and target are the same file — no copy needed. We
+        # still fall through to arming so the env is enabled uniformly.
         result.messages.append(
-            "Supervisor already in place (self-install; source == target); skipped"
+            "Supervisor already in place (self-install; source == target); no copy"
         )
         logger.info("ccy supervisor source == target (%s); no copy needed", target)
-        return result
+    else:
+        target.write_bytes(source.read_bytes())
+        target.chmod(_SUPERVISOR_MODE)
+        result.deployed = True
+        result.messages.append(
+            f"Deployed {SUPERVISOR_SCRIPT_NAME} to {target} (chmod {_SUPERVISOR_MODE:o})"
+        )
+        logger.info("Deployed %s to %s (mode %o)", SUPERVISOR_SCRIPT_NAME, target, _SUPERVISOR_MODE)
 
-    target.write_bytes(source.read_bytes())
-    target.chmod(_SUPERVISOR_MODE)
-    result.deployed = True
-    result.messages.append(
-        f"Deployed {SUPERVISOR_SCRIPT_NAME} to {target} (chmod {_SUPERVISOR_MODE:o})"
-    )
-    logger.info("Deployed %s to %s (mode %o)", SUPERVISOR_SCRIPT_NAME, target, _SUPERVISOR_MODE)
+    # Arming is the whole point: a deployed-but-unarmed supervisor is inert
+    # because the launcher only wraps `claude` when ccy.env exports the wrapper.
+    result.armed, arm_message = _arm_ccy_supervisor(target_ccy_dir)
+    result.messages.append(arm_message)
     return result
+
+
+def _arm_ccy_supervisor(target_ccy_dir: Path) -> tuple[bool, str]:
+    """Ensure ``ccy.env`` exports an armed ``CCY_CLAUDE_WRAPPER``, idempotently.
+
+    Behaviour:
+
+    - ``ccy.env`` absent → create it with a header + the armed wrapper block.
+    - ``ccy.env`` present WITHOUT the wrapper key → append the armed block.
+    - ``ccy.env`` present WITH the wrapper key (set OR commented out) → leave it
+      untouched; the user has a stance on arming and we never override it.
+
+    Args:
+        target_ccy_dir: The target project's ``.claude/ccy/`` directory.
+
+    Returns:
+        ``(armed, message)`` where ``armed`` is True only when this call wrote
+        the wrapper export.
+    """
+    env_path = target_ccy_dir / CCY_ENV_NAME
+    armed_block = f"{_ARMED_WRAPPER_COMMENT}{_ARMED_WRAPPER_LINE}\n"
+
+    if env_path.is_file():
+        content = env_path.read_text(encoding="utf-8")
+        if _WRAPPER_EXPORT_KEY in content:
+            logger.info(
+                "ccy.env already references %s at %s; left untouched", _WRAPPER_EXPORT_KEY, env_path
+            )
+            return False, f"ccy.env already configures {_WRAPPER_EXPORT_KEY}; left untouched"
+        new_content = f"{content.rstrip(chr(10))}\n\n{armed_block}"
+        env_path.write_text(new_content, encoding="utf-8")
+        logger.info("Appended armed %s to existing %s", _WRAPPER_EXPORT_KEY, env_path)
+        return True, f"Armed supervisor: appended {_WRAPPER_EXPORT_KEY} to {env_path}"
+
+    env_path.write_text(f"{_FRESH_ENV_HEADER}{armed_block}", encoding="utf-8")
+    logger.info("Created armed %s at %s", CCY_ENV_NAME, env_path)
+    return True, f"Armed supervisor: created {env_path}"

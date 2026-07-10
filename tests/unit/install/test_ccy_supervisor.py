@@ -7,13 +7,17 @@ config flag and the presence of the target ``.claude/ccy/`` directory.
 """
 
 import stat
+import subprocess
 from pathlib import Path
 
 from claude_code_hooks_daemon.install.ccy_supervisor import (
+    CCY_ENV_NAME,
     SUPERVISOR_SCRIPT_NAME,
     ccy_supervisor_source_path,
     deploy_ccy_supervisor_if_enabled,
 )
+
+_WRAPPER_KEY = "CCY_CLAUDE_WRAPPER"
 
 _SOURCE_CONTENT = "#!/usr/bin/env python3\n# canonical supervisor stub\nprint('hi')\n"
 
@@ -154,6 +158,170 @@ class TestDeployCcySupervisorIfEnabled:
 
         assert result.deployed is True
         assert result.recommend_enable is True
+
+
+class TestArmCcySupervisor:
+    """Deploy must ARM the supervisor, not just copy it (Plan 00148 hotfix).
+
+    Arming = ensure ``.claude/ccy/ccy.env`` exports ``CCY_CLAUDE_WRAPPER`` so the
+    launcher (which sources that file) actually wraps ``claude`` with the
+    supervisor. Without this the deployed script is inert.
+    """
+
+    def test_flag_true_arms_fresh_ccy_env(self, tmp_path: Path) -> None:
+        daemon_root = tmp_path / "daemon"
+        project_root = tmp_path / "project"
+        _make_source(daemon_root)
+        ccy = _make_target_ccy(project_root)
+        config_path = _write_config(project_root, "ccy:\n  deploy_supervisor: true\n")
+
+        result = deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
+
+        env_file = ccy / CCY_ENV_NAME
+        assert result.armed is True
+        assert env_file.is_file()
+        content = env_file.read_text()
+        assert _WRAPPER_KEY in content
+        assert "--arm" in content
+
+    def test_flag_absent_arms(self, tmp_path: Path) -> None:
+        daemon_root = tmp_path / "daemon"
+        project_root = tmp_path / "project"
+        _make_source(daemon_root)
+        ccy = _make_target_ccy(project_root)
+        config_path = _write_config(project_root, "version: '2.0'\n")
+
+        result = deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
+
+        assert result.armed is True
+        assert result.recommend_enable is True
+        assert (ccy / CCY_ENV_NAME).is_file()
+
+    def test_flag_false_does_not_arm(self, tmp_path: Path) -> None:
+        daemon_root = tmp_path / "daemon"
+        project_root = tmp_path / "project"
+        _make_source(daemon_root)
+        ccy = _make_target_ccy(project_root)
+        config_path = _write_config(project_root, "ccy:\n  deploy_supervisor: false\n")
+
+        result = deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
+
+        assert result.armed is False
+        assert not (ccy / CCY_ENV_NAME).exists()
+
+    def test_appends_wrapper_to_existing_env_without_wrapper(self, tmp_path: Path) -> None:
+        daemon_root = tmp_path / "daemon"
+        project_root = tmp_path / "project"
+        _make_source(daemon_root)
+        ccy = _make_target_ccy(project_root)
+        env_file = ccy / CCY_ENV_NAME
+        pre = "# existing project ccy env\nexport FOO=bar\n"
+        env_file.write_text(pre)
+        config_path = _write_config(project_root, "ccy:\n  deploy_supervisor: true\n")
+
+        result = deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
+
+        content = env_file.read_text()
+        assert result.armed is True
+        assert "export FOO=bar" in content  # original preserved
+        assert _WRAPPER_KEY in content  # armed line appended
+
+    def test_leaves_existing_wrapper_untouched(self, tmp_path: Path) -> None:
+        daemon_root = tmp_path / "daemon"
+        project_root = tmp_path / "project"
+        _make_source(daemon_root)
+        ccy = _make_target_ccy(project_root)
+        env_file = ccy / CCY_ENV_NAME
+        custom = 'export CCY_CLAUDE_WRAPPER="/custom/path/wrapper --"\n'
+        env_file.write_text(custom)
+        config_path = _write_config(project_root, "ccy:\n  deploy_supervisor: true\n")
+
+        result = deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
+
+        assert result.armed is False
+        assert env_file.read_text() == custom  # byte-identical, user choice respected
+
+    def test_leaves_commented_out_wrapper_untouched(self, tmp_path: Path) -> None:
+        """A user who commented out the wrapper to DISABLE it must stay disabled."""
+        daemon_root = tmp_path / "daemon"
+        project_root = tmp_path / "project"
+        _make_source(daemon_root)
+        ccy = _make_target_ccy(project_root)
+        env_file = ccy / CCY_ENV_NAME
+        disabled = '# export CCY_CLAUDE_WRAPPER="/x/claude-supervise.py --arm --"\n'
+        env_file.write_text(disabled)
+        config_path = _write_config(project_root, "ccy:\n  deploy_supervisor: true\n")
+
+        result = deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
+
+        assert result.armed is False
+        assert env_file.read_text() == disabled
+
+    def test_arming_is_idempotent(self, tmp_path: Path) -> None:
+        daemon_root = tmp_path / "daemon"
+        project_root = tmp_path / "project"
+        _make_source(daemon_root)
+        ccy = _make_target_ccy(project_root)
+        config_path = _write_config(project_root, "ccy:\n  deploy_supervisor: true\n")
+
+        first = deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
+        after_first = (ccy / CCY_ENV_NAME).read_text()
+        second = deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
+        after_second = (ccy / CCY_ENV_NAME).read_text()
+
+        assert first.armed is True
+        assert second.armed is False  # wrapper already present
+        assert after_first == after_second  # no duplication / drift
+
+    def test_self_install_leaves_tracked_env_untouched(self, tmp_path: Path) -> None:
+        """Self-install (source == target) with an already-armed ccy.env no-ops."""
+        root = tmp_path / "selfinstall"
+        _make_source(root)
+        ccy = root / ".claude" / "ccy"
+        env_file = ccy / CCY_ENV_NAME
+        tracked = (
+            'export CCY_CLAUDE_WRAPPER="${CCY_CLAUDE_WRAPPER:-/w/claude-supervise.py --arm --}"\n'
+        )
+        env_file.write_text(tracked)
+        config_path = _write_config(root, "ccy:\n  deploy_supervisor: true\n")
+
+        result = deploy_ccy_supervisor_if_enabled(root, root, config_path)
+
+        assert result.deployed is False  # script self-install no-op
+        assert result.armed is False  # env already configured
+        assert env_file.read_text() == tracked
+
+    def test_generated_wrapper_sources_to_absolute_supervisor_path(self, tmp_path: Path) -> None:
+        """The armed line must resolve, in bash, to an absolute armed wrapper.
+
+        Proves the self-locating ``${BASH_SOURCE[0]}`` form works regardless of
+        mount path (podman /workspace vs an arbitrary LXC project dir).
+        """
+        daemon_root = tmp_path / "daemon"
+        project_root = tmp_path / "project"
+        _make_source(daemon_root)
+        ccy = _make_target_ccy(project_root)
+        config_path = _write_config(project_root, "ccy:\n  deploy_supervisor: true\n")
+
+        deploy_ccy_supervisor_if_enabled(daemon_root, project_root, config_path)
+
+        env_file = ccy / CCY_ENV_NAME
+        # Source the generated env in bash and print the resolved wrapper. Unset
+        # CCY_CLAUDE_WRAPPER first so the ${VAR:-default} exercises the default
+        # (an ambient value — e.g. this dogfood session — would otherwise win,
+        # which is the intended host-override behaviour, not what we test here).
+        proc = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f'unset CCY_CLAUDE_WRAPPER; . "{env_file}" && printf "%s" "$CCY_CLAUDE_WRAPPER"',
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        expected = f"{ccy.resolve()}/{SUPERVISOR_SCRIPT_NAME} --arm --"
+        assert proc.stdout == expected
 
 
 class TestCcySupervisorSourcePath:
