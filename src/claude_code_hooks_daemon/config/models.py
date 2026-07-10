@@ -600,6 +600,37 @@ class DaemonConfig(BaseModel):
         return get_pid_path(workspace_root)
 
 
+class CcyConfig(BaseModel):
+    """Configuration for the ccy (claude-yolo) container workflow (Plan 00147).
+
+    Currently a single tri-state flag governing whether the daemon deploys the
+    standalone PTY supervisor (``claude-supervise.py``) into a project's
+    ``.claude/ccy/`` directory on install/upgrade.
+
+    Attributes:
+        deploy_supervisor: Tri-state deploy gate.
+
+            - ``True``  — deploy/refresh the supervisor when a ``.claude/ccy/``
+              directory exists in the target project.
+            - ``False`` — never deploy (explicit opt-out).
+            - ``None``  — (key absent) deploy anyway when ``.claude/ccy/`` exists
+              AND recommend setting the flag ``True`` via the config-changes
+              advisory. Deliberately ``bool | None`` so an absent key is
+              distinguishable from an explicit ``False``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    deploy_supervisor: bool | None = Field(
+        default=None,
+        description=(
+            "Tri-state: True = deploy/refresh the ccy PTY supervisor into "
+            ".claude/ccy/ on install/upgrade; False = never deploy; "
+            "absent (None) = deploy + recommend enabling."
+        ),
+    )
+
+
 class Config(BaseModel):
     """Root configuration model for hooks daemon.
 
@@ -609,6 +640,7 @@ class Config(BaseModel):
         handlers: Handler configurations by event type
         plugins: Plugin system configuration
         project_handlers: Project-level handler configuration
+        ccy: ccy container-workflow configuration (Plan 00147)
     """
 
     model_config = ConfigDict(extra="allow")
@@ -619,6 +651,7 @@ class Config(BaseModel):
     plugins: PluginsConfig = Field(default_factory=PluginsConfig)
     project_handlers: ProjectHandlersConfig = Field(default_factory=ProjectHandlersConfig)
     plan_workflow: PlanWorkflowConfig = Field(default_factory=PlanWorkflowConfig)
+    ccy: CcyConfig = Field(default_factory=CcyConfig)
     pseudo_events: dict[str, dict[str, Any]] = Field(
         default_factory=dict,
         description="Pseudo-event configurations keyed by pseudo-event name",

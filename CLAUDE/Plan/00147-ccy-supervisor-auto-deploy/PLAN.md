@@ -92,16 +92,16 @@ skip the copy (already in place).
 
 ### Phase 1: Config model (TDD)
 
-- [ ] ⬜ **Task 1.1**: Failing tests for `CcyConfig` + `Config.ccy`
+- [x] ✅ **Task 1.1**: Failing tests for `CcyConfig` + `Config.ccy`
   (tri-state `deploy_supervisor`, `extra="forbid"`, default absent → None).
-- [ ] ⬜ **Task 1.2**: Implement `CcyConfig` and attach `ccy` field to `Config`.
+- [x] ✅ **Task 1.2**: Implement `CcyConfig` and attach `ccy` field to `Config`.
 
 ### Phase 2: Deploy function (TDD)
 
-- [ ] ⬜ **Task 2.1**: Failing tests for `deploy_ccy_supervisor_if_enabled`
+- [x] ✅ **Task 2.1**: Failing tests for `deploy_ccy_supervisor_if_enabled`
   covering the full tri-state table, self-install no-op (source==target),
   target-dir-absent no-op, chmod 0o755, missing-source skip-with-message.
-- [ ] ⬜ **Task 2.2**: Implement `install/ccy_supervisor.py`.
+- [x] ✅ **Task 2.2**: Implement `install/ccy_supervisor.py`.
 
 ### Phase 3: CLI subcommand (TDD)
 
