@@ -8,6 +8,9 @@ and daemon health information.
 from claude_code_hooks_daemon.handlers.status_line.account_display import (
     AccountDisplayHandler,
 )
+from claude_code_hooks_daemon.handlers.status_line.context_sidecar import (
+    ContextSidecarHandler,
+)
 from claude_code_hooks_daemon.handlers.status_line.current_time import CurrentTimeHandler
 from claude_code_hooks_daemon.handlers.status_line.daemon_stats import DaemonStatsHandler
 from claude_code_hooks_daemon.handlers.status_line.environment_indicator import (
@@ -25,6 +28,7 @@ from claude_code_hooks_daemon.handlers.status_line.working_directory import (
 
 __all__ = [
     "AccountDisplayHandler",
+    "ContextSidecarHandler",
     "CurrentTimeHandler",
     "DaemonStatsHandler",
     "EnvironmentIndicatorHandler",

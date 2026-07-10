@@ -30,7 +30,7 @@ from claude_code_hooks_daemon.handlers.registry import HandlerRegistry, _get_con
 # The known opt-in (off-by-default) handlers, by config_key. Update this set
 # (and the corresponding handler override + template entry) when adding a new
 # opt-in handler.
-_EXPECTED_OPT_IN_CONFIG_KEYS = {"lsp_enforcement"}
+_EXPECTED_OPT_IN_CONFIG_KEYS = {"lsp_enforcement", "context_sidecar"}
 
 
 def _template_disabled_config_keys() -> set[str]:

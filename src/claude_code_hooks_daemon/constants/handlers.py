@@ -412,6 +412,11 @@ class HandlerID:
         config_key="model_context",
         display_name="status-model-context",
     )
+    CONTEXT_SIDECAR = HandlerIDMeta(
+        class_name="ContextSidecarHandler",
+        config_key="context_sidecar",
+        display_name="status-context-sidecar",
+    )
     USAGE_TRACKING = HandlerIDMeta(
         class_name="UsageTrackingHandler",
         config_key="usage_tracking",

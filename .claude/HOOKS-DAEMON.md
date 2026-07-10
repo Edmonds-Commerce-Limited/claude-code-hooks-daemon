@@ -1,6 +1,6 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-07-07 (v3.32.0) by `generate-docs`. Regenerate: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-docs`
+> Generated on 2026-07-10 (v3.32.0) by `generate-docs`. Regenerate: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-docs`
 
 ## Active Handlers
 
@@ -132,12 +132,13 @@
 | 10 | subagent_completion_logger | NON-TERMINAL | Log subagent completion events to a JSONL file |
 | 20 | remind_prompt_library | ADVISORY | Remind to capture successful prompts to the library |
 
-### Status (10 handlers)
+### Status (11 handlers)
 
 | Priority | Handler | Behavior | Description |
 |----------|---------|----------|-------------|
 | 10 | model_context | NON-TERMINAL | Format model name with effort level and color-coded context percentage |
 | 11 | environment_indicator | NON-TERMINAL | Show 💻 (desktop/host) or a container icon (🐳 docker / 📦 podman / 🧊 lxc) |
+| 12 | context_sidecar | NON-TERMINAL | Write an observe-only context-state sidecar for the PTY supervisor |
 | 14 | current_time | NON-TERMINAL | Display current local time in status line (24-hour format, no seconds) |
 | 20 | git_branch | NON-TERMINAL | Show current git branch with magicmonty-style status icons if in a git repo |
 | 25 | git_repo_name | NON-TERMINAL | Show git repository name at start of status line |

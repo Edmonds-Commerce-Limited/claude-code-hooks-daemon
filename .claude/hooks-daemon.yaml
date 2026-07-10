@@ -413,6 +413,13 @@ handlers:
       #   1000k_orange_pct: 30   # default: 30 (1M context models)
       #   1000k_red_pct: 40      # default: 40
 
+    context_sidecar:  # Observe-only context sidecar for the Plan 00135 PTY supervisor
+      # Dogfood: ENABLED here so this repo's ccy sessions write a live sidecar
+      # (untracked/context-sidecar/<session>.json) the supervisor can read.
+      # Shares model_context's thresholds, so `red` matches the status line.
+      enabled: true
+      priority: 12
+
     environment_indicator:  # Shows 💻 desktop / 🐳 docker / 📦 podman (cached at startup)
       enabled: true
       priority: 11

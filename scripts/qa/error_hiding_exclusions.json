@@ -315,6 +315,12 @@
       "reason": "Startup cleanup status handler: log-and-continue on OSError reading cleanup_status.json. Status line handlers are fail-open by design \u2014 one failing element must not crash the entire status line. Returns empty context on error. Already logged at debug level."
     },
     {
+      "file": "handlers/status_line/context_sidecar.py",
+      "function": "_write_sidecar",
+      "rule": "log-and-continue",
+      "reason": "Plan 00135 observe-only context sidecar: log-and-continue on RuntimeError (ProjectContext not initialised in unit tests / non-daemon callers) and OSError (untracked dir unwritable). Status line handlers are fail-open by design \u2014 a failed best-effort sidecar write must never crash the render or the dispatch. The sidecar is an advisory sensor for the PTY supervisor, not a critical path. Both errors are logged at warning level, never silently swallowed. Same fail-open contract as notification_logger.handle and startup_cleanup.handle."
+    },
+    {
       "file": "handlers/status_line/stats_cache_reader.py",
       "function": "read_stats_cache",
       "rule": "return-none-on-error",

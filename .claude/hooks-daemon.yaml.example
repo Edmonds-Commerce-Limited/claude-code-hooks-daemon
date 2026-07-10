@@ -351,6 +351,10 @@ handlers:
       enabled: true
       priority: 10
 
+    context_sidecar:  # Observe-only: writes context state for the PTY supervisor (opt-in)
+      enabled: false
+      priority: 12
+
     environment_indicator:  # Shows 💻 desktop / 🐳 docker / 📦 podman (cached at startup)
       enabled: true
       priority: 11

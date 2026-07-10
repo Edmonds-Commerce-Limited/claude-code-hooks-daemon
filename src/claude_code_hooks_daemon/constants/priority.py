@@ -142,6 +142,7 @@ class Priority:
     ENVIRONMENT_INDICATOR = 4  # After repo name, before account display
     ACCOUNT_DISPLAY = 5
     MODEL_CONTEXT = 10
+    CONTEXT_SIDECAR = 12  # Observe-only context sidecar for the PTY supervisor (opt-in)
     CURRENT_TIME = 14
     USAGE_TRACKING = 15
     WORKING_DIRECTORY = 25

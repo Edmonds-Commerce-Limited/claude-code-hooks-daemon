@@ -468,6 +468,23 @@ definition of Decision H's "MONITOR: pct ≥ threshold" row.
 
 ## Notes & Updates
 
+### 2026-07-10 — Slice 1 delivered (observe-only `context_sidecar`)
+
+- Shipped the SENSOR half of the observe-only boundary (Decision A / ARCH-B):
+  `handlers/status_line/context_sidecar.py` — a `get_default_enabled() -> False`
+  status handler that renders nothing, injects nothing, and atomically writes
+  `{schema_version, red, tier, pct, window_size, cost_usd, session_id, model_id, ts, seq, writer_pid}` to `daemon_untracked_dir()/context-sidecar/<session>.json`
+  on every status render.
+- `red` is computed via the shared `context_tiers` classifier (Decision J), so the
+  sidecar's `red` and the status-line colour are ONE source of truth. It
+  `shares_options_with` `model_context`, so any per-project threshold override
+  applies to both. The supervisor will read `red` (+ idle) and never re-threshold.
+- Dogfooded live: enabled in this repo's `.claude/hooks-daemon.yaml`. Live probes
+  confirmed 85% → status line RED + sidecar `red:true`, and 12% → green +
+  `red:false`; `writer_pid` matches the running daemon. QA 13/13, daemon RUNNING.
+- Next: Slice 2 — arm `claude-supervise` to READ this sidecar and run the
+  MONITOR → `/compact` → AWAIT_COMPACTING → `continue` loop (dry-run first).
+
 ### 2026-07-09
 
 - v1 TRIGGER defined (user): inject `/compact` when the **status line goes RED** —
