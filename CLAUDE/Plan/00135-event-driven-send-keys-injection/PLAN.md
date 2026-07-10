@@ -468,6 +468,24 @@ definition of Decision H's "MONITOR: pct ≥ threshold" row.
 
 ## Notes & Updates
 
+### 2026-07-10 — Bug #3: injected compact did not SUBMIT (decoupled Enter)
+
+Second armed live-fire (forced-red marker) fired the compact, but the injected
+`/compact 🤖 …` line **sat unsubmitted in the input box** — the trailing
+carriage return never triggered submission. Reconciliation pinned the cause: in
+the prior session a **bare** `/compact\r` submitted fine (it drove a real
+compaction), but the new **long** chromed line did not — so a single-burst
+`payload + \r` write leaves the trailing CR absorbed into the multi-line input
+box rather than read as an Enter keypress.
+
+Fix: `_perform_injection` now writes the payload, pauses
+`_SUBMIT_DELAY_SECONDS` (0.2s), then writes the submit `\r` as a **separate**
+keystroke — the standard tmux/expect/pexpect pattern (send text, then send
+Enter as its own key), so submission is reliable regardless of payload length.
+The `sleep` is injectable so unit tests don't pause. 91 supervise tests; QA
+13/13 (9740 tests); verified under the production system python3. Loads on the
+next `ccy` relaunch.
+
 ### 2026-07-10 — Armed live-fire post-mortem: two real bugs fixed
 
 First real armed `/compact` fired live (decision.log 12:02:42:

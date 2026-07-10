@@ -66,9 +66,20 @@ class TestResolvePayload:
 
 
 class TestPerformInjection:
-    def test_writes_payload_with_carriage_return(self) -> None:
+    def test_payload_and_submit_are_separate_writes(self) -> None:
+        # The submit MUST be a distinct write after a short pause: injecting
+        # `text\r` as one burst leaves the trailing CR absorbed into the
+        # multiline input box (text sits unsubmitted, observed live on a long
+        # `/compact` line). A standalone, delayed `\r` reads as a real Enter.
         written: list[bytes] = []
-        _mod._perform_injection(written.append, "hello world")
+        sleeps: list[float] = []
+        _mod._perform_injection(written.append, "hello world", sleep=sleeps.append)
+        assert written == [b"hello world", b"\r"]
+        assert sleeps == [_mod._SUBMIT_DELAY_SECONDS]
+
+    def test_full_line_still_ends_in_carriage_return(self) -> None:
+        written: list[bytes] = []
+        _mod._perform_injection(written.append, "hello world", sleep=lambda _s: None)
         assert b"".join(written) == b"hello world\r"
 
 

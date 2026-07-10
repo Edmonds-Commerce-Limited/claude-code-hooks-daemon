@@ -430,6 +430,15 @@ _ARMED_COMPACT_PAYLOAD = (
 # resume is clearly the supervisor's doing, not a human message.
 _CONTINUE_PAYLOAD = f"{_BOT_PREFIX} continue"
 _INJECT_SUBMIT = "\r"
+# The submit (Enter) is written SEPARATELY from the payload, after this pause.
+# Injecting `payload + \r` in a single burst leaves the trailing carriage
+# return absorbed into the (multi-line-capable) input box -- the text sits
+# unsubmitted -- which was observed live on a long `/compact <instructions>`
+# line (a short bare `/compact\r` had submitted fine, so length/burst is the
+# trigger). A brief pause then a standalone `\r` is registered by the TUI as a
+# real Enter and submits regardless of payload length. This mirrors how
+# tmux/expect/pexpect drive a TUI: send text, then send Enter as its own key.
+_SUBMIT_DELAY_SECONDS = 0.2
 
 _DEFAULT_POLL_SECONDS = 2.0
 _DEFAULT_IDLE_FLOOR_SECONDS = 2.0
@@ -449,9 +458,23 @@ def _resolve_payload(decision: Decision, *, dry_run: bool) -> str | None:
     return None
 
 
-def _perform_injection(master_writer: Callable[[bytes], None], payload: str) -> None:
-    """Type ``payload`` into the child PTY, followed by a submit (carriage return)."""
-    master_writer((payload + _INJECT_SUBMIT).encode("utf-8"))
+def _perform_injection(
+    master_writer: Callable[[bytes], None],
+    payload: str,
+    *,
+    sleep: Callable[[float], None] = time.sleep,
+) -> None:
+    """Type ``payload`` into the child PTY, then submit it as a SEPARATE keypress.
+
+    The submit (carriage return) is a distinct write, delayed by
+    ``_SUBMIT_DELAY_SECONDS`` from the payload, so the TUI registers a real Enter
+    instead of absorbing a trailing CR into its multi-line input box (which left
+    a long ``/compact`` line sitting unsubmitted). ``sleep`` is injectable so
+    tests do not actually pause.
+    """
+    master_writer(payload.encode("utf-8"))
+    sleep(_SUBMIT_DELAY_SECONDS)
+    master_writer(_INJECT_SUBMIT.encode("utf-8"))
 
 
 def _consume_signal(path: Path, log: DecisionLog | None) -> None:
