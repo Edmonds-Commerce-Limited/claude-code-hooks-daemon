@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.33.0] - 2026-07-10
+
+This is a **minor release** delivering an event-driven compact-and-resume PTY supervisor system (Plan 00135) and its auto-deploy pipeline (Plan 00147): a standalone, stdlib-only `claude-supervise.py` watches a daemon-written context-state sidecar and, when context goes RED and the session is idle, injects a real bot-chromed `/compact` and auto-resumes with `continue` once compaction completes — closing the loop between "context is getting full" and "someone actually acts on it." The daemon becomes the sensor via three new handlers (`context_sidecar`, `context_tiers`, `compaction_signal`); a new tri-state `ccy.deploy_supervisor` config flag auto-deploys the supervisor into a project's `.claude/ccy/` on install and upgrade. Also hardens `auto_continue_stop` against rhetorical continue-questions smuggled inside explained stops and a stale previous-turn tail misjudgement, and collapses repeated nitpick advisories (dismissive/hedging language) to one per category per session.
+
+### Added
+
+- **Event-driven compact-and-resume PTY supervisor system (Plan 00135)** — A new standalone, stdlib-only `claude-supervise.py` transparently wraps a Claude Code PTY session and implements a Decision-H state machine: it watches a context-state sidecar written by the daemon, and when context reaches the RED tier while the session is idle, it injects a bot-chromed `/compact` slash-command and, once the daemon signals compaction has completed, auto-injects `continue` to resume work with zero human intervention. The daemon acts purely as the sensor — three new handlers close the loop:
+  - **`context_sidecar`** (Status, priority 12) — Writes an observe-only context-state sidecar file consumed by the supervisor; never blocks, never mutates the session.
+  - **`context_tiers`** (shared classifier module) — Single source of truth for the green/amber/red context-tier thresholds, consumed by both the status line and the sidecar writer so tier boundaries can never drift apart.
+  - **`compaction_signal`** (PreCompact, priority 20) — Writes a `<session>.compacting` signal file the supervisor polls to detect when compaction has actually finished, so `continue` is only injected once compaction is truly done.
+  - Tracked `.claude/ccy/ccy.env` declaratively enables the supervisor per-project; the supervisor itself never runs inside a self-install daemon clone.
+- **`ccy.deploy_supervisor` tri-state auto-deploy flag (Plan 00147)** — New `install/ccy_supervisor.py` module auto-deploys `claude-supervise.py` from the daemon clone into a project's `.claude/ccy/` directory on `install.py` and both `upgrade_version.sh` paths, keeping the standalone script refreshed without manual copying. `true` = deploy/refresh whenever a `.claude/ccy/` directory exists; `false` = never deploy (opt-out); absent (default) = deploy anyway when `.claude/ccy/` exists, and the upgrade advisory recommends setting it `true`. Self-install mode always no-ops. See `CLAUDE/UPGRADES/config-changes/v3.33.0.yaml` for the full migration note.
+- **Hard-block rhetorical continue-questions in explained stops (Plan 00146)** — `auto_continue_stop`'s Branch 2 confirmation-question detection now recognises a `STOPPING BECAUSE:`-prefixed message that smuggles a rhetorical "want me to continue?"-style question (new `_CONTINUE_VERBS` list) and blocks it the same way an unprefixed tautological question is blocked — the explanation prefix no longer exempts a stop from the anti-rhetorical-question rule.
+
+### Changed
+
+- **Nitpick advisories now dedupe to one per category per session** — `nitpick/dismissive_language.py`, `nitpick/hedging_language.py`, and `stop/dismissive_language_detector.py` previously re-injected the same advisory on every matching stop/turn within a session. They now collapse repeated matches of the same phrase set to a single advisory per session, cutting redundant context noise.
+
+### Fixed
+
+- **`auto_continue_stop` misjudged a stale previous-turn tail as the current stop** — Found while building the Plan 00135 supervisor's auto-resume path: the handler could mistake leftover state from an earlier turn for the live stop event, causing an incorrect re-entry decision. Fixed with a regression test pinning the correct turn-boundary detection.
+
 ## [3.32.0] - 2026-07-07
 
 This is a **minor release** that adds a new plan QA system (Plan 00144): a validation core plus three enforcement surfaces — edit-time PLAN.md lint, a warn-first cross-file commit gate, and a whole-tree SessionStart drift sweep — backed by a new `plan-qa` CLI subcommand. It also externalises `mkplan.bash`'s plan template so projects can customise it without editing the daemon-owned script, and fixes a status-line bug where the git ahead/behind icons never reflected the real remote state because remote-tracking refs were never refreshed.
