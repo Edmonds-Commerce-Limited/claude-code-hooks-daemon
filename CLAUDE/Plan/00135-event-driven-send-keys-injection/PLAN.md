@@ -355,8 +355,8 @@ definition of Decision H's "MONITOR: pct ≥ threshold" row.
 > **⚠️ Tasks below (Phases 0–4) are the SHELVED ARCH-A design, retained only as the
 > documented fallback if the ARCH-B PTY spike (S-PTY) fails in a real environment.**
 > They reference files that intentionally do NOT exist yet
-> (`tests/unit/utils/test_tmux_inject.py`,
-> `tests/unit/handlers/status_line/test_tmux_context_sidecar.py`) and will not be
+> (tests/unit/utils/test_tmux_inject.py (shelved ARCH-A, never created),
+> tests/unit/handlers/status_line/test_tmux_context_sidecar.py (shelved ARCH-A, never created)) and will not be
 > created under ARCH-B. **The live, CCY-first task plan is
 > `plan-audit-fable-1.md` §5 (Slices 0–3).**
 
@@ -374,7 +374,7 @@ definition of Decision H's "MONITOR: pct ≥ threshold" row.
 
 ### Phase 1: Minimal safe injector utility (TDD) — the foundation
 
-- [ ] ⬜ **Task 1.1**: RED — create `tests/unit/utils/test_tmux_inject.py`
+- [ ] ⬜ **Task 1.1**: RED — create tests/unit/utils/test_tmux_inject.py (shelved ARCH-A, never created)
   covering: allowlist enforcement (reject non-member, fail-closed), tmux-presence
   no-op when `$TMUX_PANE` unset, argument-list-only invocation (no `shell=True`),
   cooldown enforcement, per-session cap enforcement, loop-guard sentinel write.
@@ -396,7 +396,7 @@ definition of Decision H's "MONITOR: pct ≥ threshold" row.
 ### Phase 2: Flagship — context sidecar + `/compact` watchdog (TDD)
 
 - [ ] ⬜ **Task 2.1**: RED —
-  `tests/unit/handlers/status_line/test_tmux_context_sidecar.py`: writes
+  tests/unit/handlers/status_line/test_tmux_context_sidecar.py (shelved ARCH-A, never created): writes
   `{pct,state,ts,session_id,pane}`; handles missing fields; `get_default_enabled`
   → `False`; never injects.
 - [ ] ⬜ **Task 2.2**: GREEN — `handlers/status_line/tmux_context_sidecar.py`
