@@ -327,7 +327,28 @@ risked breaking on daemon upgrades.
 artifact and config are shared, tracked, and upgrade-safe. The standalone-file
 refactor is what unlocks LXC (system `python3`, no venv).
 
-**Date**: 2026-07-09
+### Decision J: "Red" is defined ONCE — the status-line classifier is the SSoT
+
+**Context (user, 2026-07-10)**: the compact trigger is "status line is red", and red
+changes per model / context-window size / config (200k red = 76%, 1M red = 40%, all
+overridable). v1 must NOT carry its own `compact_at_pct` threshold — that would
+duplicate the boundary and drift from the status line.
+
+**Decision**: extract the red/tier determination currently inline in
+`model_context.py` (`_resolve_tier_thresholds` + the `used_pct >= red_pct` check) into
+ONE shared, tested classifier (e.g. `classify_context(used_pct, window_size, cfg)` →
+tier enum, and `is_red(...)`). BOTH consumers use it:
+
+- `ModelContextHandler` — for the status-line icon/colour (behaviour unchanged).
+- The v1 sidecar writer — to record `red: true|false` (NOT a raw pct the supervisor
+  re-thresholds).
+
+The supervisor reads `red` from the sidecar and triggers on it (+ idle) — zero
+threshold logic in the supervisor. Change a tier/model/config once and both the
+status line and the compact trigger follow automatically. This is the concrete
+definition of Decision H's "MONITOR: pct ≥ threshold" row.
+
+**Date**: 2026-07-10
 
 ## Tasks
 

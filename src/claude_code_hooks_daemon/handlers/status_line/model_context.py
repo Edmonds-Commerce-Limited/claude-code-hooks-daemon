@@ -77,6 +77,16 @@ from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.handlers.status_line.context_tiers import (
+    _CONTEXT_TIER_200K_ORANGE_PCT,
+    _CONTEXT_TIER_200K_RED_PCT,
+    _CONTEXT_TIER_1000K_ORANGE_PCT,
+    _CONTEXT_TIER_1000K_RED_PCT,
+    ContextTier,
+    TierConfig,
+    TierThresholds,
+    classify_context,
+)
 from claude_code_hooks_daemon.handlers.status_line.settings_reader import (
     read_claude_settings,
 )
@@ -108,22 +118,12 @@ _EFFORT_DEFAULT = "high"
 # Minimum Claude major version that supports effort configuration
 _EFFORT_MIN_MAJOR_VERSION = 4
 
-# Context threshold tiers keyed by window size in tokens.
-# Each tier defines the orange and red percentage thresholds. Yellow is derived
-# as half of orange. The handler picks the tier whose size threshold is <= the
-# actual context_window_size, falling back to the smallest (200k) tier.
-#
-# Why tighter thresholds for larger windows: at 1M tokens, 30% is already 300k
-# and 40% is 400k — an enormous payload to shuttle per API round-trip. Quality
-# degrades from noise, latency spikes, and costs balloon well before the window
-# is technically full. Tighter defaults nudge the user to compact early.
-_CONTEXT_TIER_200K_SIZE = 200_000
-_CONTEXT_TIER_200K_ORANGE_PCT = 51
-_CONTEXT_TIER_200K_RED_PCT = 76
-
-_CONTEXT_TIER_1000K_SIZE = 1_000_000
-_CONTEXT_TIER_1000K_ORANGE_PCT = 30
-_CONTEXT_TIER_1000K_RED_PCT = 40
+# Context threshold tier definitions (sizes, default orange/red percentages)
+# live in the shared claude_code_hooks_daemon.handlers.status_line.context_tiers
+# module — the single source of truth reused by both the status line and
+# future compact-trigger logic. This handler only holds the (possibly
+# config-overridden) percentage values and delegates classification to that
+# module via _build_tier_config().
 
 # Regex to extract major version from Claude 4+ model IDs
 # Matches: claude-sonnet-4-6, claude-opus-4-6, claude-haiku-4-5-20251001
@@ -327,41 +327,40 @@ class ModelContextHandler(Handler):
         Returns:
             Tuple of (icon, icon_fg_color, percentage_bg_color)
         """
-        orange_pct, red_pct = self._resolve_tier_thresholds(window_size)
-        # Yellow band starts at half of orange (e.g. 51 -> 25, 30 -> 15)
-        yellow_pct = orange_pct // 2
+        cfg = self._build_tier_config()
+        tier = classify_context(used_pct, window_size, cfg)
 
-        if used_pct < yellow_pct:
-            return "◔", "\033[32m", "\033[42m\033[30m"  # Green
-        elif used_pct < orange_pct:
-            return "◑", "\033[33m", "\033[43m\033[30m"  # Yellow
-        elif used_pct < red_pct:
-            return "◕", "\033[38;5;208m", "\033[48;5;208m\033[30m"  # Orange
+        if tier is ContextTier.GREEN:
+            return "◔", "\033[32m", "\033[42m\033[30m"
+        elif tier is ContextTier.YELLOW:
+            return "◑", "\033[33m", "\033[43m\033[30m"
+        elif tier is ContextTier.ORANGE:
+            return "◕", "\033[38;5;208m", "\033[48;5;208m\033[30m"
         else:
-            return "●", "\033[31m", "\033[41m\033[97m"  # Red
+            return "●", "\033[31m", "\033[41m\033[97m"
 
-    def _resolve_tier_thresholds(self, window_size: int) -> tuple[int, int]:
-        """Pick the context threshold tier for the given window size.
+    def _build_tier_config(self) -> TierConfig:
+        """Build a TierConfig from this handler's (possibly overridden) options.
 
-        Tiers are checked largest-first. If the window size meets or exceeds a
-        tier's size threshold, that tier's (orange, red) percentages are used.
-        Falls back to the smallest tier (200k) when window_size is unknown or
-        smaller than all configured tiers.
-
-        Adding a new tier (e.g. 2000k) only requires adding two new config
-        options and a new entry here — zero changes to the colour logic above.
-
-        Args:
-            window_size: Context window size in tokens
+        Config keys match the pattern: {size}k_orange_pct, {size}k_red_pct
+        (e.g. "1000k_orange_pct: 25" in hooks-daemon.yaml options) and are
+        applied to instance attrs in __init__. This method translates those
+        attrs into the shared context_tiers module's TierConfig so the actual
+        classification logic has a single source of truth.
 
         Returns:
-            Tuple of (orange_pct, red_pct) for the matched tier
+            TierConfig reflecting any config overrides on this instance
         """
-        # Ordered largest-first so the first match wins
-        if window_size >= _CONTEXT_TIER_1000K_SIZE:
-            return self._1000k_orange_pct, self._1000k_red_pct
-
-        return self._200k_orange_pct, self._200k_red_pct
+        return TierConfig(
+            t200k=TierThresholds(
+                orange_pct=self._200k_orange_pct,
+                red_pct=self._200k_red_pct,
+            ),
+            t1000k=TierThresholds(
+                orange_pct=self._1000k_orange_pct,
+                red_pct=self._1000k_red_pct,
+            ),
+        )
 
     def get_claude_md(self) -> str | None:
         return None

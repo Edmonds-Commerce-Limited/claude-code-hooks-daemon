@@ -40,6 +40,7 @@ def _discover_handler_modules() -> list[tuple[str, str]]:
                 "stats_cache_reader.py",
                 "settings_reader.py",
                 "api_usage_base.py",
+                "context_tiers.py",
             ):
                 continue
 
