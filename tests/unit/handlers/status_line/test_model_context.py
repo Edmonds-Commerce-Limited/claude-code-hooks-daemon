@@ -120,6 +120,8 @@ class TestModelContextHandler:
         with patch.object(handler, "_get_settings_path", return_value=Path("/nonexistent")):
             result = handler.handle(hook_input)
 
+        # The circle icon is replaced by a literal "COMPACT NOW" call to action.
+        assert "COMPACT NOW" in result.context[0]
         assert "🛑" in result.context[0]
         assert "\033[101m" in result.context[0]
 

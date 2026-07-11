@@ -343,10 +343,11 @@ class ModelContextHandler(Handler):
         elif tier is ContextTier.RED:
             return "●", "\033[31m", "\033[41m\033[97m"
         else:
-            # CRITICAL (Plan 00151): the loudest signal — 🛑 with a BRIGHT-red
-            # (\033[101m) background so it is unmistakable from the plain-red
-            # band. This is the "compact NOW" state.
-            return "🛑", "\033[1;91m", "\033[101m\033[30m"
+            # CRITICAL (Plan 00151): the loudest signal — the circle icon is
+            # REPLACED by a literal "🛑 COMPACT NOW" call to action, in bold
+            # bright-red on a BRIGHT-red (\033[101m) background so it is
+            # unmistakable from the plain-red band.
+            return "🛑 COMPACT NOW", "\033[1;91m", "\033[101m\033[30m"
 
     def _build_tier_config(self) -> TierConfig:
         """Build a TierConfig from this handler's (possibly overridden) options.
