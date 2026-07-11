@@ -65,7 +65,27 @@ class TestResolvePayload:
         assert "🤖" in _CONTINUE
 
 
+class TestResolveEscapePayload:
+    """WOULD_ESCAPE resolves to a raw ESC when armed, a marker in dry-run."""
+
+    def test_armed_escape_is_raw_esc_byte(self) -> None:
+        assert _mod._resolve_payload(Decision.WOULD_ESCAPE, dry_run=False) == _mod._ESC_PAYLOAD
+        assert _mod._resolve_payload(Decision.WOULD_ESCAPE, dry_run=False) == "\x1b"
+
+    def test_dry_run_escape_is_visible_marker(self) -> None:
+        payload = _mod._resolve_payload(Decision.WOULD_ESCAPE, dry_run=True)
+        assert payload is not None
+        assert payload != "\x1b"
+        assert _BOT_PREFIX in payload
+
+
 class TestPerformInjection:
+    def test_submit_false_writes_payload_only(self) -> None:
+        # ESC is an interrupt key, not a line: it must NOT get a trailing Enter.
+        written: list[bytes] = []
+        _mod._perform_injection(written.append, "\x1b", submit=False, sleep=lambda _s: None)
+        assert written == [b"\x1b"]
+
     def test_payload_and_submit_are_separate_writes(self) -> None:
         # The submit MUST be a distinct write after a short pause: injecting
         # `text\r` as one burst leaves the trailing CR absorbed into the
@@ -184,6 +204,58 @@ class TestPollOnce:
         assert payload.startswith("/compact ")
         assert "🤖" in payload
         assert payload.endswith("\r")
+
+    def test_human_compact_suppresses_supervisor_compact(self, tmp_path: Path) -> None:
+        # A detected human /compact must stop the supervisor injecting its own.
+        self._sidecar(tmp_path / "sc", red=True)
+        written: list[bytes] = []
+        ev = _mod._poll_once(
+            CompactStateMachine(CompactPolicy()),
+            sidecar_dir=tmp_path / "sc",
+            now_wall=1000.0,
+            idle=True,
+            dry_run=True,
+            master_writer=written.append,
+            log=None,
+            freshness_seconds=30.0,
+            human_compact_submitted=True,
+        )
+        assert ev.decision is Decision.NOOP
+        assert written == []
+
+    def test_escape_injects_raw_esc_without_submit(self, tmp_path: Path) -> None:
+        # After a supervisor /compact that never starts compacting, the ESC flush
+        # writes a bare ESC byte with NO trailing carriage return.
+        sc = tmp_path / "sc"
+        self._sidecar(sc, red=True)
+        machine = CompactStateMachine(
+            CompactPolicy(escape_after_seconds=60, await_timeout_seconds=600)
+        )
+        # Tick 1: red + idle -> inject /compact, enter AWAIT at t=1000.
+        _mod._poll_once(
+            machine,
+            sidecar_dir=sc,
+            now_wall=1000.0,
+            idle=True,
+            dry_run=False,
+            master_writer=lambda _b: None,
+            log=None,
+            freshness_seconds=30.0,
+        )
+        # Tick 2: 65s later, still no compaction -> ESC flush.
+        written: list[bytes] = []
+        ev = _mod._poll_once(
+            machine,
+            sidecar_dir=sc,
+            now_wall=1065.0,
+            idle=True,
+            dry_run=False,
+            master_writer=written.append,
+            log=None,
+            freshness_seconds=30.0,
+        )
+        assert ev.decision is Decision.WOULD_ESCAPE
+        assert b"".join(written) == b"\x1b"
 
     def test_injection_is_logged(self, tmp_path: Path) -> None:
         self._sidecar(tmp_path / "sc", red=True)

@@ -62,6 +62,7 @@ def _write_sidecar(
     seq: int = 1,
     writer_pid: int = 4242,
     compacting: bool | None = None,
+    critical: bool | None = None,
     raw: str | None = None,
 ) -> None:
     directory.mkdir(parents=True, exist_ok=True)
@@ -82,6 +83,8 @@ def _write_sidecar(
     }
     if compacting is not None:
         payload["compacting"] = compacting
+    if critical is not None:
+        payload["critical"] = critical
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
@@ -140,6 +143,18 @@ class TestLoadFreshestSidecar:
         assert reading is not None
         assert reading.compacting is True
 
+    def test_critical_defaults_false(self, tmp_path: Path) -> None:
+        _write_sidecar(tmp_path, "s", ts=1000.0)
+        reading = load_freshest_sidecar(tmp_path, now=1000.0, freshness_seconds=30)
+        assert reading is not None
+        assert reading.critical is False
+
+    def test_critical_true_when_present(self, tmp_path: Path) -> None:
+        _write_sidecar(tmp_path, "s", ts=1000.0, critical=True)
+        reading = load_freshest_sidecar(tmp_path, now=1000.0, freshness_seconds=30)
+        assert reading is not None
+        assert reading.critical is True
+
     def test_skips_malformed_and_loads_valid(self, tmp_path: Path) -> None:
         _write_sidecar(tmp_path, "broken", raw="{not json")
         _write_sidecar(tmp_path, "good", ts=1000.0, red=True)
@@ -168,6 +183,7 @@ class TestLoadFreshestSidecar:
 def _reading(**kw: object) -> object:
     defaults: dict[str, object] = {
         "red": True,
+        "critical": False,
         "tier": "red",
         "pct": 85.0,
         "session_id": "s",
@@ -310,6 +326,109 @@ class TestCompactionDetection:
         assert sm.state is SupervisorState.MONITOR
         settled = sm.evaluate(_reading(compacting=True), idle=True, now=1002.0)
         assert settled.decision is Decision.WOULD_CONTINUE
+
+
+class TestCriticalCooldownBypass:
+    """CRITICAL context bypasses the post-compact cooldown (Plan 00151)."""
+
+    def test_critical_compacts_despite_active_cooldown(self) -> None:
+        sm = CompactStateMachine(CompactPolicy(cooldown_seconds=300))
+        first = sm.evaluate(_reading(), idle=True, now=1000.0)
+        assert first.decision is Decision.WOULD_COMPACT
+        # Drive back to MONITOR via a compaction so state is not the gate.
+        sm.evaluate(_reading(compacting=True), idle=True, now=1001.0)
+        # Only 50s later (< 300s cooldown) BUT now critical -> must still compact.
+        result = sm.evaluate(_reading(critical=True), idle=True, now=1050.0)
+        assert result.decision is Decision.WOULD_COMPACT
+
+    def test_non_critical_still_respects_cooldown(self) -> None:
+        sm = CompactStateMachine(CompactPolicy(cooldown_seconds=300))
+        sm.evaluate(_reading(), idle=True, now=1000.0)
+        sm.evaluate(_reading(compacting=True), idle=True, now=1001.0)
+        result = sm.evaluate(_reading(critical=False), idle=True, now=1050.0)
+        assert result.decision is Decision.NOOP
+
+
+class TestHumanCompactDedup:
+    """A human-submitted /compact must NOT trigger a second supervisor /compact.
+
+    Claude Code aborts the duplicate ("AbortError: Compaction canceled"), so on
+    detecting a human /compact the machine enters AWAIT_COMPACTING WITHOUT
+    injecting (Plan 00151).
+    """
+
+    def test_human_compact_enters_await_without_compacting(self) -> None:
+        sm = CompactStateMachine(CompactPolicy())
+        result = sm.evaluate(_reading(), idle=True, now=1000.0, human_compact_submitted=True)
+        assert result.decision is Decision.NOOP
+        assert sm.state is SupervisorState.AWAIT_COMPACTING
+
+    def test_human_compact_suppresses_supervisor_compact_same_tick(self) -> None:
+        # Even red + idle + critical, a detected human /compact wins: no inject.
+        sm = CompactStateMachine(CompactPolicy(cooldown_seconds=0))
+        result = sm.evaluate(
+            _reading(critical=True), idle=True, now=1000.0, human_compact_submitted=True
+        )
+        assert result.decision is Decision.NOOP
+
+    def test_human_compact_still_resumes_after_compaction(self) -> None:
+        sm = CompactStateMachine(CompactPolicy())
+        sm.evaluate(_reading(), idle=True, now=1000.0, human_compact_submitted=True)  # -> AWAIT
+        result = sm.evaluate(_reading(compacting=True), idle=True, now=1005.0)
+        assert result.decision is Decision.WOULD_CONTINUE
+
+
+class TestEscapeFlush:
+    """A supervisor /compact that Claude Code queues needs an [esc] to flush it.
+
+    After injecting /compact (AWAIT_COMPACTING), if no compaction starts within
+    escape_after_seconds the machine decides WOULD_ESCAPE exactly once, so the
+    supervisor can press [esc] to interrupt the turn and run the queued command
+    (Plan 00151). Gated on idle; never fires for a human-originated compact.
+    """
+
+    def test_escape_fires_after_timeout_when_no_compaction(self) -> None:
+        sm = CompactStateMachine(CompactPolicy(escape_after_seconds=60, await_timeout_seconds=120))
+        sm.evaluate(_reading(), idle=True, now=1000.0)  # -> AWAIT at t=1000
+        # 30s later: too soon, still waiting.
+        early = sm.evaluate(_reading(compacting=False), idle=True, now=1030.0)
+        assert early.decision is Decision.NOOP
+        # 65s later: escape_after elapsed, no compaction -> flush with ESC.
+        late = sm.evaluate(_reading(compacting=False), idle=True, now=1065.0)
+        assert late.decision is Decision.WOULD_ESCAPE
+
+    def test_escape_fires_only_once(self) -> None:
+        sm = CompactStateMachine(CompactPolicy(escape_after_seconds=60, await_timeout_seconds=600))
+        sm.evaluate(_reading(), idle=True, now=1000.0)
+        first = sm.evaluate(_reading(compacting=False), idle=True, now=1065.0)
+        second = sm.evaluate(_reading(compacting=False), idle=True, now=1070.0)
+        assert first.decision is Decision.WOULD_ESCAPE
+        assert second.decision is Decision.NOOP
+
+    def test_escape_not_fired_when_busy(self) -> None:
+        sm = CompactStateMachine(CompactPolicy(escape_after_seconds=60, await_timeout_seconds=600))
+        sm.evaluate(_reading(), idle=True, now=1000.0)
+        result = sm.evaluate(_reading(compacting=False), idle=False, now=1065.0)
+        assert result.decision is Decision.NOOP
+
+    def test_escape_not_fired_for_human_compact(self) -> None:
+        # A human-originated AWAIT must not get a supervisor ESC — the human owns
+        # their own /compact flush.
+        sm = CompactStateMachine(CompactPolicy(escape_after_seconds=60, await_timeout_seconds=600))
+        sm.evaluate(_reading(), idle=True, now=1000.0, human_compact_submitted=True)
+        result = sm.evaluate(_reading(compacting=False), idle=True, now=1065.0)
+        assert result.decision is Decision.NOOP
+
+    def test_escape_latch_resets_next_episode(self) -> None:
+        sm = CompactStateMachine(
+            CompactPolicy(escape_after_seconds=60, await_timeout_seconds=600, cooldown_seconds=0)
+        )
+        sm.evaluate(_reading(), idle=True, now=1000.0)  # compact -> AWAIT
+        sm.evaluate(_reading(compacting=False), idle=True, now=1065.0)  # ESC
+        sm.evaluate(_reading(compacting=True), idle=True, now=1070.0)  # continue -> MONITOR
+        sm.evaluate(_reading(), idle=True, now=1075.0)  # compact -> AWAIT again
+        again = sm.evaluate(_reading(compacting=False), idle=True, now=1140.0)  # 65s later
+        assert again.decision is Decision.WOULD_ESCAPE
 
 
 class TestEvaluationReason:

@@ -254,9 +254,7 @@ class TestForwardIoIntervalTick:
     `poll_seconds` regardless of I/O readiness.
     """
 
-    def test_on_poll_fires_during_continuous_output(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_on_poll_fires_during_continuous_output(self, monkeypatch: pytest.MonkeyPatch) -> None:
         master_fd, stdin_fd = 991, 992
         clock = {"t": 100.0}
         monkeypatch.setattr(_mod.time, "monotonic", lambda: clock["t"])

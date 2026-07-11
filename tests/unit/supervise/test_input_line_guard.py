@@ -97,6 +97,74 @@ class TestHumanInputLine:
         line.feed(_DEL + _BACKSPACE)
         assert line.is_empty is True
 
+
+class TestHumanCompactDetection:
+    """Detect a human-submitted `/compact` from the forwarded stdin (Plan 00151).
+
+    The supervisor watches the human's submitted line so it can avoid stacking a
+    second `/compact` on top of one the human already typed (Claude Code aborts
+    the duplicate). Detection is edge-triggered and consumed exactly once.
+    """
+
+    def test_plain_compact_submit_is_detected(self) -> None:
+        line = HumanInputLine()
+        line.feed(b"/compact" + _ENTER)
+        assert line.take_compact_submitted() is True
+
+    def test_compact_with_instructions_is_detected(self) -> None:
+        line = HumanInputLine()
+        line.feed(b"/compact keep the auth work" + _ENTER)
+        assert line.take_compact_submitted() is True
+
+    def test_leading_whitespace_still_detected(self) -> None:
+        line = HumanInputLine()
+        line.feed(b"   /compact" + _ENTER)
+        assert line.take_compact_submitted() is True
+
+    def test_newline_submit_is_detected(self) -> None:
+        line = HumanInputLine()
+        line.feed(b"/compact\n")
+        assert line.take_compact_submitted() is True
+
+    def test_take_is_consumed_once(self) -> None:
+        line = HumanInputLine()
+        line.feed(b"/compact" + _ENTER)
+        assert line.take_compact_submitted() is True
+        assert line.take_compact_submitted() is False
+
+    def test_non_compact_command_not_detected(self) -> None:
+        line = HumanInputLine()
+        line.feed(b"/clear" + _ENTER)
+        assert line.take_compact_submitted() is False
+
+    def test_plain_text_not_detected(self) -> None:
+        line = HumanInputLine()
+        line.feed(b"please compact this" + _ENTER)
+        assert line.take_compact_submitted() is False
+
+    def test_ctrl_u_kill_is_not_a_submit(self) -> None:
+        # Killing the line is NOT submitting it — no compaction was requested.
+        line = HumanInputLine()
+        line.feed(b"/compact" + _CTRL_U)
+        assert line.take_compact_submitted() is False
+
+    def test_ctrl_c_discard_is_not_a_submit(self) -> None:
+        line = HumanInputLine()
+        line.feed(b"/compact" + _CTRL_C)
+        assert line.take_compact_submitted() is False
+
+    def test_unsubmitted_compact_not_detected(self) -> None:
+        # Typed but not yet submitted -> not a queued compaction.
+        line = HumanInputLine()
+        line.feed(b"/compact")
+        assert line.take_compact_submitted() is False
+
+    def test_input_activity_exposes_take(self) -> None:
+        activity = InputActivity()
+        activity.record(b"/compact" + _ENTER)
+        assert activity.take_compact_submitted() is True
+        assert activity.take_compact_submitted() is False
+
     def test_typing_after_submit_marks_non_empty_again(self) -> None:
         line = HumanInputLine()
         line.feed(b"first message" + _ENTER + b"second")
