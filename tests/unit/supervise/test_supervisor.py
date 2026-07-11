@@ -243,6 +243,55 @@ class TestExitCodeFromStatus:
         assert _exit_code_from_status(stopped_status) == 1
 
 
+class TestForwardIoIntervalTick:
+    """The supervisor tick must fire on its interval even during busy output.
+
+    Regression for Plan 00151: `on_poll` used to run ONLY on the `select`
+    timeout branch (`if not readable`). While the child streams output,
+    `master_fd` is continuously readable, so that branch never fired and the
+    compact decision was starved for the whole busy burst -- context climbed
+    past red before any evaluation happened. The tick must now run every
+    `poll_seconds` regardless of I/O readiness.
+    """
+
+    def test_on_poll_fires_during_continuous_output(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        master_fd, stdin_fd = 991, 992
+        clock = {"t": 100.0}
+        monkeypatch.setattr(_mod.time, "monotonic", lambda: clock["t"])
+
+        # Child output is ALWAYS ready -> select never times out. Each master
+        # read advances the fake clock past one poll interval, then EOF stops.
+        reads = [b"a", b"b", b"c", b""]
+
+        def _fake_read(_fd: int, _n: int) -> bytes:
+            clock["t"] += 2.0
+            return reads.pop(0)
+
+        monkeypatch.setattr(_mod.os, "read", _fake_read)
+        monkeypatch.setattr(_mod.os, "write", lambda _fd, data: len(data))
+        monkeypatch.setattr(
+            _mod.select, "select", lambda _r, _w, _x, _t=None: ([master_fd], [], [])
+        )
+
+        ticks = {"n": 0}
+
+        def _on_poll() -> None:
+            ticks["n"] += 1
+
+        _forward_io(
+            stdin_fd,
+            master_fd,
+            InputActivity(),
+            poll_seconds=2.0,
+            on_poll=_on_poll,
+        )
+
+        # Without the fix this is 0 (timeout branch never reached).
+        assert ticks["n"] >= 2
+
+
 class TestForwardIoSelectRetry:
     """Unit tests for the private select() loop helper."""
 

@@ -37,6 +37,9 @@ human keystrokes or a non-empty input box.
   colour/label.
 - At CRITICAL, the compact cooldown is bypassed so the next idle+empty-box tick
   compacts immediately. Idle-floor and empty-box guards remain enforced.
+- ESC-flush: after injecting `/compact`, if no compaction starts within
+  `escape_after_seconds` (default 60, per-project configurable), inject a single
+  `[esc]` to interrupt the turn and flush Claude Code's queued `/compact`.
 - Full TDD coverage; daemon restarts RUNNING; supervisor unit tests green.
 
 ## Non-Goals
@@ -73,9 +76,25 @@ human keystrokes or a non-empty input box.
   - [ ] ⬜ GREEN — parse `critical` from sidecar JSON; `_cooldown_elapsed` returns True when reading is critical
   - [ ] ⬜ Verify cap + await-timeout + resume paths unchanged
 
-### Phase 5: QA + daemon + integration
+### Phase 5: ESC-flush for queued /compact (user requirement)
 
-- [ ] ⬜ **Task 5.1**: `./scripts/qa/llm_qa.py all` green; daemon restart RUNNING; supervisor test module green
+Claude Code queues a `/compact` typed mid-turn and does NOT run it until the
+current turn is interrupted — the human normally presses `[esc]`. The supervisor
+must emulate that: after it injects `/compact` (enters AWAIT_COMPACTING), if no
+compaction signal appears within `escape_after_seconds` (default 60, per-project
+configurable), inject a single `ESC` (`\x1b`) to interrupt the turn and flush the
+queued command. This is distinct from — and shorter than — the existing
+`await_timeout_seconds` (120s) that gives up back to MONITOR.
+
+- [ ] ⬜ **Task 5.1**: RED — in AWAIT_COMPACTING, once `escape_after_seconds` elapses with no compaction, decide `WOULD_ESCAPE` exactly once (latched); still gated on idle + empty-box (never ESC over human typing)
+  - [ ] ⬜ GREEN — add `Decision.WOULD_ESCAPE`, `_escape_sent` latch, `escape_after_seconds` to `CompactPolicy`; `_resolve_payload` returns the ESC byte for WOULD_ESCAPE (both dry-run and armed — ESC is harmless)
+  - [ ] ⬜ Injection writes bare `\x1b` with NO submit `\r` (it is an interrupt key, not a line)
+  - [ ] ⬜ Latch resets when compaction starts or the machine returns to MONITOR, so it can re-fire on the next episode
+  - [ ] ⬜ Reason logged so the decision log shows the ESC escalation
+
+### Phase 6: QA + daemon + integration
+
+- [ ] ⬜ **Task 6.1**: `./scripts/qa/llm_qa.py all` green; daemon restart RUNNING; supervisor test module green
 
 ## Success Criteria
 

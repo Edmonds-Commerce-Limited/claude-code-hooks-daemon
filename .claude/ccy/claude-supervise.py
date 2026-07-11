@@ -809,21 +809,48 @@ def _forward_io(
     Once stdin reaches EOF it is dropped from the watch set: an EOF fd is always
     "readable", so continuing to select on it would spin the loop and starve the
     poll timeout. Dropping it lets timeouts (and therefore polling) resume.
+
+    The supervisor tick fires on a MONOTONIC interval, not on the ``select``
+    timeout branch. A busy child streams output continuously, so ``master_fd``
+    is readable on almost every ``select`` call and the timeout branch would
+    never run -- starving the compact decision for the whole busy burst (Plan
+    00151: context climbed past red before any evaluation). Tracking the next
+    tick deadline and running ``on_poll`` whenever it is due -- readable or not
+    -- evaluates the decision every ``poll_seconds`` regardless of how busy the
+    thread is; resetting the deadline after each run throttles it to one tick
+    per interval.
     """
     stdin_open = True
+    # tick_interval is the monotonic period between supervisor ticks; it is
+    # None (polling disabled) only when a caller omits poll_seconds/on_poll.
+    tick_interval = poll_seconds if (poll_seconds is not None and on_poll is not None) else None
+    next_tick = time.monotonic() + tick_interval if tick_interval is not None else None
     while True:
         watch = [master_fd, stdin_fd] if stdin_open else [master_fd]
+        if tick_interval is not None and next_tick is not None:
+            timeout: float | None = max(0.0, next_tick - time.monotonic())
+        else:
+            timeout = poll_seconds
         try:
-            readable, _, _ = select.select(watch, [], [], poll_seconds)
+            readable, _, _ = select.select(watch, [], [], timeout)
         except OSError as exc:
             if exc.errno == errno.EINTR:
                 continue
             raise
 
+        # Run the supervisor tick whenever its interval has elapsed -- even if
+        # the child is mid-stream and select keeps returning readable.
+        if (
+            tick_interval is not None
+            and next_tick is not None
+            and on_poll is not None
+            and time.monotonic() >= next_tick
+        ):
+            on_poll()
+            next_tick = time.monotonic() + tick_interval
+
         if not readable:
-            # select timed out with no I/O ready -> run one supervisor tick.
-            if on_poll is not None:
-                on_poll()
+            # select timed out with no I/O ready -> nothing to forward.
             continue
 
         if stdin_open and stdin_fd in readable:
