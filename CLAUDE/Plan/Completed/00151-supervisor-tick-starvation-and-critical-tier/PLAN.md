@@ -1,6 +1,6 @@
 # Plan 00151: supervisor tick starvation and critical tier
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-07-11
 **Owner**: joseph
 **Priority**: Medium
@@ -71,7 +71,7 @@ human keystrokes or a non-empty input box.
 - [x] ✅ **Task 5.1 (ESC-flush)**: `Decision.WOULD_ESCAPE` + `escape_after_seconds` (default 60 < await 120); once-latched, idle-gated, suppressed for human-originated awaits; raw `\x1b` injected with NO submit (armed) / visible marker (dry-run).
 - [x] ✅ **Task 5.2 (human /compact dedup)**: `HumanInputLine.take_compact_submitted()` detects a submitted `/compact` from forwarded stdin (Enter only, not Ctrl-U/C); machine enters AWAIT without injecting so no duplicate `/compact` (which Claude Code aborts). Still resumes via the compaction signal.
 
-### Phase 6: ccy deploy consistency (user concern #2) — ⬜ TODO
+### Phase 6: ccy deploy consistency (user concern #2) — ✅ DONE
 
 On upgrade the supervisor is deployed/armed, but `ccy.deploy_supervisor` may be
 `false` (explicit opt-out) while the armed supervisor is physically present.
@@ -79,11 +79,11 @@ On upgrade the supervisor is deployed/armed, but `ccy.deploy_supervisor` may be
 refreshes the deployed script on future upgrades → clients run a stale
 supervisor forever. Surface this contradictory state.
 
-- [ ] ⬜ **Task 6.1**: `ccy_supervisor_integrity` (SessionStart) warns when the supervisor is armed+present but `deploy_supervisor is False` (present-but-opted-out ⇒ upgrades won't refresh it; recommend setting `true`).
+- [x] ✅ **Task 6.1**: `ccy_supervisor_integrity` (SessionStart) warns when the supervisor is armed+present but `deploy_supervisor is False`. Absent (`None`) still deploys, so it is not flagged.
 
-### Phase 7: QA + daemon + integration — ⬜ TODO
+### Phase 7: QA + daemon + integration — ✅ DONE
 
-- [ ] ⬜ **Task 7.1**: `./scripts/qa/llm_qa.py all` green; daemon restart RUNNING; full supervisor + status-line test modules green.
+- [x] ✅ **Task 7.1**: `./scripts/qa/llm_qa.py all` = 13/13 PASSED (9954 tests, 95.5% coverage); daemon restart RUNNING; supervise (172) + status-line (301) + integrity (29) modules green.
 
 ## Success Criteria
 
@@ -92,8 +92,8 @@ supervisor forever. Surface this contradictory state.
 - [x] Critical bypasses cooldown; idle-floor + empty-box guards intact
 - [x] ESC-flush emulates the `[esc]` needed to run a queued `/compact`
 - [x] Human `/compact` no longer double-compacted by the supervisor
-- [ ] ccy deploy/present inconsistency surfaced
-- [ ] All QA checks pass; daemon RUNNING after restart
+- [x] ccy deploy/present inconsistency surfaced
+- [x] All QA checks pass; daemon RUNNING after restart
 
 ## Notes & Updates
 
@@ -107,7 +107,11 @@ supervisor forever. Surface this contradictory state.
 - User follow-ups folded in: (a) ESC-flush for queued `/compact`; (b) `🛑 COMPACT NOW` status text at critical; (c) 1000k critical at 60%; (d) supervisor must not
   double-compact when a human `/compact` is queued; (e) ccy deploy/present
   consistency (Phase 6).
-- Delivery commits: Phase 1 tick starvation; Phase 2-4 CRITICAL classifier+
-  sidecar+status; COMPACT NOW status; Phase 5 supervisor (critical bypass, ESC-
-  flush, human dedup).
-- Failsafe recovery cron: `8c48954e` (hourly at :37, non-durable).
+- Delivery commits: `029772d` Phase 1 tick starvation; `09ba2d7` Phase 2-4
+  CRITICAL classifier+sidecar+status; `df679a0` COMPACT NOW status; `ccc7e74`
+  Phase 5 supervisor (critical bypass, ESC-flush, human dedup); `6633792`
+  Phase 6 deploy-consistency warning; completion commit for the archive move.
+- Phase 7 verification: `llm_qa.py all` = 13/13 PASSED (9954 tests, 95.5%
+  coverage); daemon restart RUNNING.
+- Failsafe recovery cron: `8c48954e` (hourly at :37, non-durable) — kept while
+  the session is live (dies on session exit).

@@ -16,8 +16,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Self-Driving / Automation
 
-- [00151: Supervisor tick starvation + CRITICAL tier](00151-supervisor-tick-starvation-and-critical-tier/PLAN.md) - In Progress (fix `on_poll` starvation during child output streaming; add CRITICAL tier above red in sidecar + status line; critical bypasses compact cooldown, idle/empty-box guards preserved)
-
 - [00135: Event-Driven `send-keys` Injection](00135-event-driven-send-keys-injection/PLAN.md) - **In design** (2 hostile-review rounds; launcher redesign dissolved pane-identity; awaiting ARCH-A-vs-ARCH-B decision + coexistence fix)
 
   - Hooks run as children of Claude Code and inherit `$TMUX_PANE`, so any daemon hook event (or a context-threshold watchdog) can `tmux send-keys` a **slash command / prompt** back into the live, watchable session — flagship use case: auto-`/compact` at a custom threshold; also PostCompact re-orientation, `/fix` on failing tests, session bootstrap
@@ -118,6 +116,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00151: Supervisor tick starvation + CRITICAL tier](Completed/00151-supervisor-tick-starvation-and-critical-tier/PLAN.md) - Complete (fixed ccy supervisor `on_poll` starvation during child output streaming so context can no longer climb past red unchecked; added a CRITICAL tier above red — 200k ≥90%, 1000k ≥60% — surfaced as a sidecar `critical` flag + a `🛑 COMPACT NOW` status-line call-to-action; supervisor bypasses the compact cooldown at critical, injects `[esc]` to flush a queued `/compact`, and defers to a human-submitted `/compact` instead of double-compacting; `ccy_supervisor_integrity` warns when armed+present but `deploy_supervisor: false`. Commits `029772d`/`09ba2d7`/`df679a0`/`ccc7e74`/`6633792`)
 
 - [00150: Client-configurable exclude_paths for content-scanning blockers](Completed/00150-client-configurable-exclude-paths-for-content-blockers/PLAN.md) - Complete (shared stdlib glob-exclusion utility wired into security_antipattern / qa_suppression / error_hiding_blocker + project-wide `daemon.exclude_paths`; error_hiding_blocker gains sibling default skips; shipped v3.35.0, commit `1c00123`)
 
@@ -999,8 +999,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 150 (count = `hooksdaemon.latestPlanNumber` git counter; 00145 was allocated by the counter but its folder is not present on this branch)
-- **Completed**: 127 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 17 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Completed**: 128 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
+- **Active**: 16 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102); plus draft folders deleted and no longer on disk (00036 empty draft, 00038 superseded by 00045, 00073 orphan empty folder removed during Plan 00107 housekeeping)
 - **Last reconciled by**: Plan 00144 Task 2.2 sweep remediation
