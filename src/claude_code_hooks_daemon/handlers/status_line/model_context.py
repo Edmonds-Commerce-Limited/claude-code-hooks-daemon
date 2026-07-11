@@ -78,8 +78,10 @@ from typing import Any
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.handlers.status_line.context_tiers import (
+    _CONTEXT_TIER_200K_CRITICAL_PCT,
     _CONTEXT_TIER_200K_ORANGE_PCT,
     _CONTEXT_TIER_200K_RED_PCT,
+    _CONTEXT_TIER_1000K_CRITICAL_PCT,
     _CONTEXT_TIER_1000K_ORANGE_PCT,
     _CONTEXT_TIER_1000K_RED_PCT,
     ContextTier,
@@ -146,8 +148,10 @@ class ModelContextHandler(Handler):
         # e.g. "1000k_orange_pct: 25" in hooks-daemon.yaml options.
         self._200k_orange_pct: int = _CONTEXT_TIER_200K_ORANGE_PCT
         self._200k_red_pct: int = _CONTEXT_TIER_200K_RED_PCT
+        self._200k_critical_pct: int = _CONTEXT_TIER_200K_CRITICAL_PCT
         self._1000k_orange_pct: int = _CONTEXT_TIER_1000K_ORANGE_PCT
         self._1000k_red_pct: int = _CONTEXT_TIER_1000K_RED_PCT
+        self._1000k_critical_pct: int = _CONTEXT_TIER_1000K_CRITICAL_PCT
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Always run for status events."""
@@ -336,8 +340,13 @@ class ModelContextHandler(Handler):
             return "◑", "\033[33m", "\033[43m\033[30m"
         elif tier is ContextTier.ORANGE:
             return "◕", "\033[38;5;208m", "\033[48;5;208m\033[30m"
-        else:
+        elif tier is ContextTier.RED:
             return "●", "\033[31m", "\033[41m\033[97m"
+        else:
+            # CRITICAL (Plan 00151): the loudest signal — 🛑 with a BRIGHT-red
+            # (\033[101m) background so it is unmistakable from the plain-red
+            # band. This is the "compact NOW" state.
+            return "🛑", "\033[1;91m", "\033[101m\033[30m"
 
     def _build_tier_config(self) -> TierConfig:
         """Build a TierConfig from this handler's (possibly overridden) options.
@@ -355,10 +364,12 @@ class ModelContextHandler(Handler):
             t200k=TierThresholds(
                 orange_pct=self._200k_orange_pct,
                 red_pct=self._200k_red_pct,
+                critical_pct=self._200k_critical_pct,
             ),
             t1000k=TierThresholds(
                 orange_pct=self._1000k_orange_pct,
                 red_pct=self._1000k_red_pct,
+                critical_pct=self._1000k_critical_pct,
             ),
         )
 

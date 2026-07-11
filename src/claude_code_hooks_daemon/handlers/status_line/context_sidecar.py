@@ -38,13 +38,16 @@ from claude_code_hooks_daemon.constants.protocol import HookInputField
 from claude_code_hooks_daemon.core import Handler, HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.handlers.status_line.context_tiers import (
+    _CONTEXT_TIER_200K_CRITICAL_PCT,
     _CONTEXT_TIER_200K_ORANGE_PCT,
     _CONTEXT_TIER_200K_RED_PCT,
+    _CONTEXT_TIER_1000K_CRITICAL_PCT,
     _CONTEXT_TIER_1000K_ORANGE_PCT,
     _CONTEXT_TIER_1000K_RED_PCT,
     TierConfig,
     TierThresholds,
     classify_context,
+    is_critical,
     is_red,
 )
 
@@ -84,8 +87,10 @@ class ContextSidecarHandler(Handler):
         # "red" is defined by exactly the same numbers the status line uses.
         self._200k_orange_pct: int = _CONTEXT_TIER_200K_ORANGE_PCT
         self._200k_red_pct: int = _CONTEXT_TIER_200K_RED_PCT
+        self._200k_critical_pct: int = _CONTEXT_TIER_200K_CRITICAL_PCT
         self._1000k_orange_pct: int = _CONTEXT_TIER_1000K_ORANGE_PCT
         self._1000k_red_pct: int = _CONTEXT_TIER_1000K_RED_PCT
+        self._1000k_critical_pct: int = _CONTEXT_TIER_1000K_CRITICAL_PCT
         # Monotonic per-writer sequence number. Resets to 0 when the daemon
         # restarts (new writer_pid); readers pair it with writer_pid + ts to
         # detect a fresh writer rather than treating a reset as staleness.
@@ -124,6 +129,7 @@ class ContextSidecarHandler(Handler):
         payload = {
             "schema_version": _SCHEMA_VERSION,
             "red": is_red(used_pct, window_size, cfg),
+            "critical": is_critical(used_pct, window_size, cfg),
             "tier": tier.value,
             "pct": used_pct,
             "window_size": window_size,
@@ -196,10 +202,12 @@ class ContextSidecarHandler(Handler):
             t200k=TierThresholds(
                 orange_pct=self._200k_orange_pct,
                 red_pct=self._200k_red_pct,
+                critical_pct=self._200k_critical_pct,
             ),
             t1000k=TierThresholds(
                 orange_pct=self._1000k_orange_pct,
                 red_pct=self._1000k_red_pct,
+                critical_pct=self._1000k_critical_pct,
             ),
         )
 

@@ -137,6 +137,33 @@ class TestContextSidecarHandler:
         assert data["red"] is True
         assert data["tier"] == "red"
 
+    # ---- handle: the `critical` escalation signal (Plan 00151) ----------
+
+    def test_critical_pct_is_critical_at_200k(self, handler: ContextSidecarHandler) -> None:
+        handler.handle(_hook_input(used_pct=95.0, window_size=200_000, session_id="s"))
+        data = self._read_sidecar("s")
+        assert data["critical"] is True
+        # Still red: critical is the band ABOVE red, so the compact trigger holds.
+        assert data["red"] is True
+        assert data["tier"] == "critical"
+
+    def test_red_but_not_critical_at_200k(self, handler: ContextSidecarHandler) -> None:
+        handler.handle(_hook_input(used_pct=80.0, window_size=200_000, session_id="s"))
+        data = self._read_sidecar("s")
+        assert data["critical"] is False
+        assert data["red"] is True
+
+    def test_critical_defaults_false_when_low(self, handler: ContextSidecarHandler) -> None:
+        handler.handle(_hook_input(used_pct=10.0, window_size=200_000, session_id="s"))
+        assert self._read_sidecar("s")["critical"] is False
+
+    def test_critical_respects_config_override(self, handler: ContextSidecarHandler) -> None:
+        # Lower the 200k critical threshold (as shares_options_with would from
+        # config). Kept above the red threshold (76) so critical stays reachable.
+        handler._200k_critical_pct = 85
+        handler.handle(_hook_input(used_pct=88.0, window_size=200_000, session_id="s"))
+        assert self._read_sidecar("s")["critical"] is True
+
     def test_red_respects_window_tier(self, handler: ContextSidecarHandler) -> None:
         # 40% is RED for a 1M window but only ORANGE for a 200k window.
         handler.handle(_hook_input(used_pct=40.0, window_size=1_000_000, session_id="big"))

@@ -12,9 +12,11 @@ import dataclasses
 import pytest
 
 from claude_code_hooks_daemon.handlers.status_line.context_tiers import (
+    _CONTEXT_TIER_200K_CRITICAL_PCT,
     _CONTEXT_TIER_200K_ORANGE_PCT,
     _CONTEXT_TIER_200K_RED_PCT,
     _CONTEXT_TIER_200K_SIZE,
+    _CONTEXT_TIER_1000K_CRITICAL_PCT,
     _CONTEXT_TIER_1000K_ORANGE_PCT,
     _CONTEXT_TIER_1000K_RED_PCT,
     _CONTEXT_TIER_1000K_SIZE,
@@ -22,6 +24,7 @@ from claude_code_hooks_daemon.handlers.status_line.context_tiers import (
     TierConfig,
     TierThresholds,
     classify_context,
+    is_critical,
     is_red,
     resolve_tier_thresholds,
 )
@@ -51,6 +54,12 @@ class TestDefaultConfig:
         cfg = TierConfig.default()
         assert cfg.t1000k.orange_pct == _CONTEXT_TIER_1000K_ORANGE_PCT
         assert cfg.t1000k.red_pct == _CONTEXT_TIER_1000K_RED_PCT
+
+    def test_default_config_matches_critical_constants(self) -> None:
+        """Default tiers carry the canonical CRITICAL thresholds (Plan 00151)."""
+        cfg = TierConfig.default()
+        assert cfg.t200k.critical_pct == _CONTEXT_TIER_200K_CRITICAL_PCT
+        assert cfg.t1000k.critical_pct == _CONTEXT_TIER_1000K_CRITICAL_PCT
 
 
 class TestResolveTierThresholds:
@@ -117,9 +126,17 @@ class TestClassifyContext200k:
         cfg = TierConfig.default()
         assert classify_context(76.0, _CONTEXT_TIER_200K_SIZE, cfg) is ContextTier.RED
 
-    def test_99_percent_is_red(self) -> None:
+    def test_89_percent_is_red(self) -> None:
         cfg = TierConfig.default()
-        assert classify_context(99.0, _CONTEXT_TIER_200K_SIZE, cfg) is ContextTier.RED
+        assert classify_context(89.0, _CONTEXT_TIER_200K_SIZE, cfg) is ContextTier.RED
+
+    def test_90_percent_is_critical(self) -> None:
+        cfg = TierConfig.default()
+        assert classify_context(90.0, _CONTEXT_TIER_200K_SIZE, cfg) is ContextTier.CRITICAL
+
+    def test_99_percent_is_critical(self) -> None:
+        cfg = TierConfig.default()
+        assert classify_context(99.0, _CONTEXT_TIER_200K_SIZE, cfg) is ContextTier.CRITICAL
 
 
 class TestClassifyContext1000k:
@@ -148,6 +165,14 @@ class TestClassifyContext1000k:
     def test_40_percent_is_red(self) -> None:
         cfg = TierConfig.default()
         assert classify_context(40.0, _CONTEXT_TIER_1000K_SIZE, cfg) is ContextTier.RED
+
+    def test_59_percent_is_red(self) -> None:
+        cfg = TierConfig.default()
+        assert classify_context(59.0, _CONTEXT_TIER_1000K_SIZE, cfg) is ContextTier.RED
+
+    def test_60_percent_is_critical(self) -> None:
+        cfg = TierConfig.default()
+        assert classify_context(60.0, _CONTEXT_TIER_1000K_SIZE, cfg) is ContextTier.CRITICAL
 
 
 class TestClassifyContextConfigOverride:
@@ -200,3 +225,56 @@ class TestIsRed:
         )
         assert is_red(59.0, _CONTEXT_TIER_200K_SIZE, cfg) is False
         assert is_red(60.0, _CONTEXT_TIER_200K_SIZE, cfg) is True
+
+    def test_is_red_stays_true_in_critical_band(self) -> None:
+        """CRITICAL is 'red or worse': is_red MUST remain True at/above critical.
+
+        The sidecar's `red` flag drives the supervisor's compact trigger, so a
+        critical percentage must still read as red or compaction would silently
+        stop firing above the critical threshold (Plan 00151).
+        """
+        cfg = TierConfig.default()
+        assert is_red(90.0, _CONTEXT_TIER_200K_SIZE, cfg) is True
+        assert is_red(99.0, _CONTEXT_TIER_200K_SIZE, cfg) is True
+        assert is_red(60.0, _CONTEXT_TIER_1000K_SIZE, cfg) is True
+
+
+class TestIsCritical:
+    """Truth table for the is_critical helper (Plan 00151)."""
+
+    def test_is_critical_true_at_200k_boundary(self) -> None:
+        cfg = TierConfig.default()
+        assert is_critical(90.0, _CONTEXT_TIER_200K_SIZE, cfg) is True
+
+    def test_is_critical_false_just_below_200k_boundary(self) -> None:
+        cfg = TierConfig.default()
+        assert is_critical(89.0, _CONTEXT_TIER_200K_SIZE, cfg) is False
+
+    def test_is_critical_true_at_1000k_boundary(self) -> None:
+        cfg = TierConfig.default()
+        assert is_critical(60.0, _CONTEXT_TIER_1000K_SIZE, cfg) is True
+
+    def test_is_critical_false_just_below_1000k_boundary(self) -> None:
+        cfg = TierConfig.default()
+        assert is_critical(59.0, _CONTEXT_TIER_1000K_SIZE, cfg) is False
+
+    def test_is_critical_false_in_red_band(self) -> None:
+        cfg = TierConfig.default()
+        assert is_critical(80.0, _CONTEXT_TIER_200K_SIZE, cfg) is False
+
+    def test_is_critical_false_for_green(self) -> None:
+        cfg = TierConfig.default()
+        assert is_critical(0.0, _CONTEXT_TIER_200K_SIZE, cfg) is False
+
+    def test_is_critical_with_custom_config(self) -> None:
+        """is_critical respects a custom critical_pct."""
+        cfg = TierConfig(
+            t200k=TierThresholds(orange_pct=40, red_pct=60, critical_pct=80),
+            t1000k=TierThresholds(
+                orange_pct=_CONTEXT_TIER_1000K_ORANGE_PCT,
+                red_pct=_CONTEXT_TIER_1000K_RED_PCT,
+                critical_pct=_CONTEXT_TIER_1000K_CRITICAL_PCT,
+            ),
+        )
+        assert is_critical(79.0, _CONTEXT_TIER_200K_SIZE, cfg) is False
+        assert is_critical(80.0, _CONTEXT_TIER_200K_SIZE, cfg) is True

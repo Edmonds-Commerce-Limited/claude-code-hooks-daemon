@@ -14,15 +14,25 @@ represent enormous absolute token counts.
 - Green (0-24%)
 - Yellow (25-50%)
 - Orange (51-75%)
-- Red (76-100%)
+- Red (76-89%)
+- Critical (90-100%)
 
 1000k thresholds (Opus-1M — tighter because 400k+ tokens is already huge):
 - Green (0-14%)
 - Yellow (15-29%)
 - Orange (30-39%)
-- Red (40-100%)
+- Red (40-59%)
+- Critical (60-100%)
 
 Yellow is always derived as half of the orange threshold (integer division).
+
+CRITICAL (Plan 00151) is a distinct top band ABOVE red. It exists so the
+status line can shout a "compact NOW" signal and the compact supervisor can act
+more aggressively (bypassing its cooldown) once context is dangerously high.
+Crucially, CRITICAL is still "red or worse": ``is_red`` returns True across BOTH
+the red and critical bands, because the sidecar's ``red`` flag drives the
+supervisor's compact trigger and must not go False just because the percentage
+climbed past the critical threshold.
 """
 
 import enum
@@ -34,13 +44,21 @@ from dataclasses import dataclass
 _CONTEXT_TIER_200K_SIZE = 200_000
 _CONTEXT_TIER_200K_ORANGE_PCT = 51
 _CONTEXT_TIER_200K_RED_PCT = 76
+_CONTEXT_TIER_200K_CRITICAL_PCT = 90
 
 _CONTEXT_TIER_1000K_SIZE = 1_000_000
 _CONTEXT_TIER_1000K_ORANGE_PCT = 30
 _CONTEXT_TIER_1000K_RED_PCT = 40
+_CONTEXT_TIER_1000K_CRITICAL_PCT = 60
 
 # Yellow band starts at half of orange (e.g. orange=51 -> yellow=25).
 _YELLOW_DIVISOR = 2
+
+# Fallback CRITICAL threshold for a TierThresholds constructed WITHOUT an
+# explicit critical_pct (back-compat for callers predating Plan 00151). The
+# canonical per-size defaults come from TierConfig.default(); this only guards
+# bare TierThresholds(orange_pct=..., red_pct=...) construction.
+_DEFAULT_CRITICAL_PCT = _CONTEXT_TIER_200K_CRITICAL_PCT
 
 
 class ContextTier(enum.Enum):
@@ -50,14 +68,21 @@ class ContextTier(enum.Enum):
     YELLOW = "yellow"
     ORANGE = "orange"
     RED = "red"
+    CRITICAL = "critical"
 
 
 @dataclass(frozen=True)
 class TierThresholds:
-    """Orange and red percentage thresholds for a single context-size tier."""
+    """Orange, red and critical percentage thresholds for one context-size tier.
+
+    ``critical_pct`` (Plan 00151) is the start of the CRITICAL band above red.
+    It defaults so pre-existing ``TierThresholds(orange_pct=..., red_pct=...)``
+    construction keeps working; callers that care pass it explicitly.
+    """
 
     orange_pct: int
     red_pct: int
+    critical_pct: int = _DEFAULT_CRITICAL_PCT
 
 
 @dataclass(frozen=True)
@@ -80,10 +105,12 @@ class TierConfig:
             t200k=TierThresholds(
                 orange_pct=_CONTEXT_TIER_200K_ORANGE_PCT,
                 red_pct=_CONTEXT_TIER_200K_RED_PCT,
+                critical_pct=_CONTEXT_TIER_200K_CRITICAL_PCT,
             ),
             t1000k=TierThresholds(
                 orange_pct=_CONTEXT_TIER_1000K_ORANGE_PCT,
                 red_pct=_CONTEXT_TIER_1000K_RED_PCT,
+                critical_pct=_CONTEXT_TIER_1000K_CRITICAL_PCT,
             ),
         )
 
@@ -129,14 +156,19 @@ def classify_context(used_pct: float, window_size: int, cfg: TierConfig) -> Cont
         return ContextTier.YELLOW
     if used_pct < thresholds.red_pct:
         return ContextTier.ORANGE
-    return ContextTier.RED
+    if used_pct < thresholds.critical_pct:
+        return ContextTier.RED
+    return ContextTier.CRITICAL
 
 
 def is_red(used_pct: float, window_size: int, cfg: TierConfig) -> bool:
-    """Return True if the given usage percentage classifies as RED.
+    """Return True if the usage percentage is RED **or worse** (critical).
 
-    Convenience wrapper for callers (e.g. compact-trigger logic) that only
-    care about the red/not-red boolean, not the full tier.
+    Convenience wrapper for callers (e.g. the compact-trigger supervisor) that
+    only care about the red-or-above boolean. CRITICAL is deliberately included:
+    it is the band ABOVE red, so a critical percentage is still "red" for the
+    purpose of the sidecar's trigger flag — otherwise compaction would stop
+    firing once context climbed past the critical threshold (Plan 00151).
 
     Args:
         used_pct: Context usage percentage (0-100)
@@ -144,6 +176,27 @@ def is_red(used_pct: float, window_size: int, cfg: TierConfig) -> bool:
         cfg: Threshold configuration to classify against
 
     Returns:
-        True if classify_context(...) resolves to ContextTier.RED
+        True if classify_context(...) resolves to RED or CRITICAL
     """
-    return classify_context(used_pct, window_size, cfg) is ContextTier.RED
+    return classify_context(used_pct, window_size, cfg) in (
+        ContextTier.RED,
+        ContextTier.CRITICAL,
+    )
+
+
+def is_critical(used_pct: float, window_size: int, cfg: TierConfig) -> bool:
+    """Return True if the usage percentage classifies as CRITICAL (Plan 00151).
+
+    CRITICAL is the top band above red. The compact supervisor uses this to act
+    more aggressively (bypassing its post-compact cooldown) and the status line
+    uses it to render the loudest "compact NOW" signal.
+
+    Args:
+        used_pct: Context usage percentage (0-100)
+        window_size: Context window size in tokens (e.g. 200000, 1000000)
+        cfg: Threshold configuration to classify against
+
+    Returns:
+        True if classify_context(...) resolves to ContextTier.CRITICAL
+    """
+    return classify_context(used_pct, window_size, cfg) is ContextTier.CRITICAL

@@ -95,16 +95,33 @@ class TestModelContextHandler:
         assert "\033[48;5;208m" in result.context[0]
 
     def test_color_coding_red(self, handler: ModelContextHandler) -> None:
-        """Test red color for critical usage (81-100%)."""
+        """Test red color for the red band (76-89% at 200k)."""
         hook_input = {
             "model": {"id": "", "display_name": "Claude"},
-            "context_window": {"used_percentage": 90.0},
+            "context_window": {"used_percentage": 80.0},
         }
 
         with patch.object(handler, "_get_settings_path", return_value=Path("/nonexistent")):
             result = handler.handle(hook_input)
 
         assert "\033[41m" in result.context[0]
+
+    def test_color_coding_critical(self, handler: ModelContextHandler) -> None:
+        """CRITICAL (>=90% at 200k) renders a distinct loud signal (Plan 00151).
+
+        It must NOT look like plain red: a bright-red background and the 🛑 icon
+        so the "compact NOW" state is unmistakable in the status line.
+        """
+        hook_input = {
+            "model": {"id": "", "display_name": "Claude"},
+            "context_window": {"used_percentage": 95.0},
+        }
+
+        with patch.object(handler, "_get_settings_path", return_value=Path("/nonexistent")):
+            result = handler.handle(hook_input)
+
+        assert "🛑" in result.context[0]
+        assert "\033[101m" in result.context[0]
 
     def test_color_reset_included(self, handler: ModelContextHandler) -> None:
         """Test that ANSI reset code is included."""
