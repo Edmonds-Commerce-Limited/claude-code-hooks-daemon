@@ -1199,6 +1199,7 @@ At session start this handler checks a ccy project (`.claude/ccy/`) whose superv
 - **`claude-supervise.py` missing** → the launcher's `exec` fails. Redeploy via a daemon upgrade or restore from git.
 - **not executable** → `chmod +x .claude/ccy/claude-supervise.py`.
 - **git-ignored** → it won't be committed; teammates get a broken supervisor. Add a `!claude-supervise.py` / `!ccy.env` whitelist line to `.claude/ccy/.gitignore` and commit the files.
+- **`ccy.deploy_supervisor: false` while armed+present** → the installer skips deploy on `false`, so upgrades never refresh `claude-supervise.py` and the project runs an increasingly stale supervisor. Set it to `true` (or disarm `CCY_CLAUDE_WRAPPER` if you truly want it off).
 
 When you see this alert, fix the listed item(s) and commit the ccy files so the supervisor works for everyone.
 
