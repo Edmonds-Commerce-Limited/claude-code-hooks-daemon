@@ -16,6 +16,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Self-Driving / Automation
 
+- [00151: Supervisor tick starvation + CRITICAL tier](00151-supervisor-tick-starvation-and-critical-tier/PLAN.md) - In Progress (fix `on_poll` starvation during child output streaming; add CRITICAL tier above red in sidecar + status line; critical bypasses compact cooldown, idle/empty-box guards preserved)
+
 - [00135: Event-Driven `send-keys` Injection](00135-event-driven-send-keys-injection/PLAN.md) - **In design** (2 hostile-review rounds; launcher redesign dissolved pane-identity; awaiting ARCH-A-vs-ARCH-B decision + coexistence fix)
 
   - Hooks run as children of Claude Code and inherit `$TMUX_PANE`, so any daemon hook event (or a context-threshold watchdog) can `tmux send-keys` a **slash command / prompt** back into the live, watchable session — flagship use case: auto-`/compact` at a custom threshold; also PostCompact re-orientation, `/fix` on failing tests, session bootstrap
