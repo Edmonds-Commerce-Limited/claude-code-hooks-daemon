@@ -182,6 +182,59 @@ class TestHandle:
         assert _run(handler, None).context == []
 
 
+class TestDeployConsistency:
+    """Armed+present but ccy.deploy_supervisor=false ⇒ upgrades won't refresh it."""
+
+    @pytest.fixture
+    def handler(self) -> CcySupervisorIntegrityHandler:
+        return CcySupervisorIntegrityHandler()
+
+    def _write_config(self, project_root: Path, value: str) -> None:
+        cfg = project_root / ".claude" / "hooks-daemon.yaml"
+        cfg.parent.mkdir(parents=True, exist_ok=True)
+        cfg.write_text(f"ccy:\n  deploy_supervisor: {value}\n", encoding="utf-8")
+
+    def _arm_and_deploy(self, tmp_path: Path) -> None:
+        ccy = _make_ccy(tmp_path)
+        (ccy / "ccy.env").write_text(_ARMED_ENV)
+        _write_script(ccy, executable=True)
+
+    def test_deploy_false_while_armed_warns(
+        self, handler: CcySupervisorIntegrityHandler, tmp_path: Path
+    ) -> None:
+        self._arm_and_deploy(tmp_path)
+        self._write_config(tmp_path, "false")
+        result = _run(handler, tmp_path)
+        text = "\n".join(result.context)
+        assert result.context != []
+        assert "deploy_supervisor" in text
+
+    def test_deploy_true_while_armed_is_silent(
+        self, handler: CcySupervisorIntegrityHandler, tmp_path: Path
+    ) -> None:
+        self._arm_and_deploy(tmp_path)
+        self._write_config(tmp_path, "true")
+        assert _run(handler, tmp_path).context == []
+
+    def test_deploy_absent_while_armed_is_silent(
+        self, handler: CcySupervisorIntegrityHandler, tmp_path: Path
+    ) -> None:
+        # No config key set → None deploys+recommends, not an inconsistency.
+        self._arm_and_deploy(tmp_path)
+        assert _run(handler, tmp_path).context == []
+
+    def test_deploy_check_helper_true_for_false(
+        self, handler: CcySupervisorIntegrityHandler, tmp_path: Path
+    ) -> None:
+        self._write_config(tmp_path, "false")
+        assert handler._deploy_explicitly_disabled(tmp_path) is True
+
+    def test_deploy_check_helper_false_when_no_config(
+        self, handler: CcySupervisorIntegrityHandler, tmp_path: Path
+    ) -> None:
+        assert handler._deploy_explicitly_disabled(tmp_path) is False
+
+
 class TestGitIgnoredHelper:
     @pytest.fixture
     def handler(self) -> CcySupervisorIntegrityHandler:

@@ -15,6 +15,7 @@ import subprocess  # nosec B404 - git invoked with a fixed, trusted argument lis
 from pathlib import Path
 from typing import Any
 
+from claude_code_hooks_daemon.config.models import Config
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult
 from claude_code_hooks_daemon.core.project_context import ProjectContext
@@ -24,6 +25,7 @@ logger = logging.getLogger(__name__)
 _CCY_DIR_PARTS: tuple[str, str] = (".claude", "ccy")
 _SUPERVISOR_SCRIPT_NAME = "claude-supervise.py"
 _CCY_ENV_NAME = "ccy.env"
+_CONFIG_REL_PARTS: tuple[str, str] = (".claude", "hooks-daemon.yaml")
 _WRAPPER_EXPORT_KEY = "CCY_CLAUDE_WRAPPER"
 _COMMENT_PREFIX = "#"
 _GIT_CHECK_IGNORE_TIMEOUT_SECONDS = 5
@@ -112,12 +114,39 @@ class CcySupervisorIntegrityHandler(Handler):
             return False
         return result.returncode == _GIT_IGNORED_RETURNCODE
 
+    def _deploy_explicitly_disabled(self, project_root: Path) -> bool:
+        """True only when ``ccy.deploy_supervisor`` is explicitly ``false`` in config.
+
+        An absent key (``None``) still deploys+arms on upgrade, so it is NOT an
+        inconsistency. Only an explicit ``false`` contradicts an armed, present
+        supervisor: the installer returns early on ``false`` and will never
+        refresh ``claude-supervise.py`` again, leaving the project on a stale
+        supervisor. A missing/unparseable config never raises a false alarm.
+        """
+        config_path = project_root.joinpath(*_CONFIG_REL_PARTS)
+        try:
+            config = Config.load_or_default(config_path)
+        except (OSError, ValueError) as exc:
+            logger.debug("Could not load config for ccy deploy check: %s", exc)
+            return False
+        return config.ccy.deploy_supervisor is False
+
     def _find_problems(self, project_root: Path, ccy_dir: Path) -> list[str]:
         """Return a list of brick-risk problem descriptions (empty when healthy)."""
         problems: list[str] = []
         script = ccy_dir / _SUPERVISOR_SCRIPT_NAME
         script_rel = f"{_CCY_DIR_PARTS[0]}/{_CCY_DIR_PARTS[1]}/{_SUPERVISOR_SCRIPT_NAME}"
         env_rel = f"{_CCY_DIR_PARTS[0]}/{_CCY_DIR_PARTS[1]}/{_CCY_ENV_NAME}"
+        config_rel = f"{_CONFIG_REL_PARTS[0]}/{_CONFIG_REL_PARTS[1]}"
+
+        if self._deploy_explicitly_disabled(project_root):
+            problems.append(
+                f"ccy.deploy_supervisor is FALSE in {config_rel}, but the supervisor is "
+                "armed and present — the installer skips deploy on `false`, so daemon "
+                "upgrades will NEVER refresh claude-supervise.py and this project will "
+                "run an increasingly stale supervisor. Fix: set ccy.deploy_supervisor: "
+                "true (or, if you truly want it off, disarm CCY_CLAUDE_WRAPPER in ccy.env)."
+            )
 
         if not script.is_file():
             problems.append(
@@ -190,7 +219,11 @@ class CcySupervisorIntegrityHandler(Handler):
             "- **not executable** → `chmod +x .claude/ccy/claude-supervise.py`.\n"
             "- **git-ignored** → it won't be committed; teammates get a broken supervisor. "
             "Add a `!claude-supervise.py` / `!ccy.env` whitelist line to "
-            "`.claude/ccy/.gitignore` and commit the files.\n\n"
+            "`.claude/ccy/.gitignore` and commit the files.\n"
+            "- **`ccy.deploy_supervisor: false` while armed+present** → the installer "
+            "skips deploy on `false`, so upgrades never refresh `claude-supervise.py` and "
+            "the project runs an increasingly stale supervisor. Set it to `true` (or "
+            "disarm `CCY_CLAUDE_WRAPPER` if you truly want it off).\n\n"
             "When you see this alert, fix the listed item(s) and commit the ccy files so "
             "the supervisor works for everyone."
         )
