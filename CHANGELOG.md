@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.36.0] - 2026-07-11
+
+This is a **minor release** hardening the ccy PTY supervisor's auto-`/compact`
+behaviour on busy threads and adding a **CRITICAL** context tier above red. The
+headline fix is the root cause of context climbing unbounded on active sessions:
+the injection tick was starved during continuous I/O and never evaluated the
+context poll, so no tier — however high — was ever acted on mid-burst. Alongside
+the fix, a new CRITICAL tier drives more aggressive compaction (cooldown bypass),
+surfaces a literal `COMPACT NOW` call-to-action in the status line, and the
+supervisor gains an ESC-flush fallback plus human-`/compact` de-duplication. All
+backwards compatible; no new `hooks-daemon.yaml` config keys.
+
+### Fixed
+
+- **Supervisor tick starvation on busy threads** — the `/compact` injection tick only ran when `select()` timed out, so during a continuous busy burst (steady master-fd output) the context poll was never evaluated and context climbed unbounded past red. The forwarding loop now schedules ticks on a monotonic fixed interval independent of I/O activity, so the poll fires on cadence and red/critical context is actually acted on mid-burst. This is the true root cause behind "the supervisor seems hesitant to inject the compact on busy threads".
+- **Supervisor double-fired `/compact` over a queued human `/compact`** — when a human had already typed `/compact` (queued but not yet fired), the supervisor's own injection raced it and triggered Claude Code's `AbortError: Compaction canceled`. The state machine now detects a submitted human `/compact` and transitions to AWAIT without injecting, deferring entirely to the human's compaction.
+
+### Added
+
+- **CRITICAL context tier above red** — a new highest tier in the shared classifier (`context_tiers.py`), the context sidecar, and the status line. Thresholds: 200k-window critical at 90%, 1000k-window critical at 60%. `is_red()` now covers RED **and** CRITICAL so all red-gated behaviour still triggers, with `is_critical()` added for the stricter gate.
+- **Status line `COMPACT NOW` call-to-action at critical** — at the CRITICAL tier the status line renders a literal `🛑 COMPACT NOW` (bright, inverted) in place of the coloured circle icon, so an over-full context is impossible to miss.
+- **Critical-tier cooldown bypass** — at CRITICAL the supervisor injects `/compact` even inside the post-injection cooldown window, compacting more aggressively exactly when context is dangerously high. Non-critical tiers keep the existing cooldown.
+- **ESC-flush fallback for a stuck `/compact`** — Claude Code sometimes queues an injected `/compact` without firing it (only an `[esc]` keypress flushes it). After injecting, if the compact is still queued and unfired for `escape_after_seconds` (default 60s), the supervisor sends a single `[esc]` to flush it, once.
+- **`ccy_supervisor_integrity` warns on `deploy_supervisor: false` while armed+present** — when the supervisor is armed and deployed but `ccy.deploy_supervisor` is explicitly `false`, the installer skips deploy on upgrade and the project silently runs an increasingly stale supervisor. The SessionStart advisory now flags this inconsistency with the fix (set it `true`, or disarm `CCY_CLAUDE_WRAPPER`). An absent key still deploys and is not flagged.
+
 ## [3.35.0] - 2026-07-10
 
 This is a **minor release** adding a client-configurable path-exclusion escape
