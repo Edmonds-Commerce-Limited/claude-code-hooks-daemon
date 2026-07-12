@@ -121,7 +121,14 @@ class TestIsIdle:
 
 class TestPollOnce:
     def _sidecar(
-        self, directory: Path, *, red: bool, ts: float = 1000.0, compacting: bool | None = None
+        self,
+        directory: Path,
+        *,
+        red: bool,
+        ts: float = 1000.0,
+        compacting: bool | None = None,
+        critical: bool | None = None,
+        compact_urgent: bool | None = None,
     ) -> None:
         directory.mkdir(parents=True, exist_ok=True)
         payload: dict[str, object] = {
@@ -135,6 +142,10 @@ class TestPollOnce:
         }
         if compacting is not None:
             payload["compacting"] = compacting
+        if critical is not None:
+            payload["critical"] = critical
+        if compact_urgent is not None:
+            payload["compact_urgent"] = compact_urgent
         (directory / "s.json").write_text(json.dumps(payload), encoding="utf-8")
 
     def test_red_idle_injects_marker(self, tmp_path: Path) -> None:
@@ -225,9 +236,10 @@ class TestPollOnce:
 
     def test_escape_injects_raw_esc_without_submit(self, tmp_path: Path) -> None:
         # After a supervisor /compact that never starts compacting, the ESC flush
-        # writes a bare ESC byte with NO trailing carriage return.
+        # writes a bare ESC byte with NO trailing carriage return. Plan 00152
+        # reserves the ESC flush for CRITICAL, so the sidecar is critical.
         sc = tmp_path / "sc"
-        self._sidecar(sc, red=True)
+        self._sidecar(sc, red=True, critical=True)
         machine = CompactStateMachine(
             CompactPolicy(escape_after_seconds=60, await_timeout_seconds=600)
         )

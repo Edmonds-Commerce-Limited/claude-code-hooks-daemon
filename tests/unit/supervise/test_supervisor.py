@@ -29,9 +29,11 @@ if TYPE_CHECKING:
 _mod = load_supervisor_module()
 DecisionLog = _mod.DecisionLog
 InputActivity = _mod.InputActivity
+OutputActivity = _mod.OutputActivity
 supervise = _mod.supervise
 _exit_code_from_status = _mod._exit_code_from_status
 _forward_io = _mod._forward_io
+_is_work_idle = _mod._is_work_idle
 
 
 def _supervise_with_default_stdin(
@@ -114,6 +116,72 @@ class TestSuperviseInputAccounting:
         assert code == 0
         assert activity.bytes_seen == len(b"hello")
         assert activity.last_input_monotonic is not None
+
+
+class TestOutputActivity:
+    """Child->stdout output timing feeds the work-idle signal (Plan 00152)."""
+
+    def test_record_counts_bytes_and_sets_timestamp(self) -> None:
+        oa = OutputActivity()
+        assert oa.bytes_seen == 0
+        assert oa.last_output_monotonic is None
+        oa.record(b"streaming tokens")
+        assert oa.bytes_seen == len(b"streaming tokens")
+        assert oa.last_output_monotonic is not None
+
+    def test_record_accumulates(self) -> None:
+        oa = OutputActivity()
+        oa.record(b"aaa")
+        oa.record(b"bb")
+        assert oa.bytes_seen == 5
+
+
+class TestIsWorkIdle:
+    """`_is_work_idle` distinguishes a streaming turn from a settled lull."""
+
+    def test_no_output_yet_is_idle(self) -> None:
+        oa = OutputActivity()
+        assert _is_work_idle(oa, now_monotonic=100.0, work_settle_seconds=3.0) is True
+
+    def test_recent_output_is_not_idle(self) -> None:
+        oa = OutputActivity()
+        oa.last_output_monotonic = 100.0
+        # 1s since last output (< 3s settle) -> still busy.
+        assert _is_work_idle(oa, now_monotonic=101.0, work_settle_seconds=3.0) is False
+
+    def test_settled_output_is_idle(self) -> None:
+        oa = OutputActivity()
+        oa.last_output_monotonic = 100.0
+        # 4s since last output (>= 3s settle) -> settled.
+        assert _is_work_idle(oa, now_monotonic=104.0, work_settle_seconds=3.0) is True
+
+    def test_boundary_is_idle(self) -> None:
+        oa = OutputActivity()
+        oa.last_output_monotonic = 100.0
+        assert _is_work_idle(oa, now_monotonic=103.0, work_settle_seconds=3.0) is True
+
+
+class TestForwardIoRecordsOutput:
+    """`_forward_io` records child output into the supervised OutputActivity."""
+
+    def test_child_output_is_recorded(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        master_fd, stdin_fd = 981, 982
+        reads = [b"hello ", b"world", b""]
+
+        def _fake_read(_fd: int, _n: int) -> bytes:
+            return reads.pop(0)
+
+        monkeypatch.setattr(_mod.os, "read", _fake_read)
+        monkeypatch.setattr(_mod.os, "write", lambda _fd, data: len(data))
+        monkeypatch.setattr(
+            _mod.select, "select", lambda _r, _w, _x, _t=None: ([master_fd], [], [])
+        )
+
+        output_activity = OutputActivity()
+        _forward_io(stdin_fd, master_fd, InputActivity(), output_activity=output_activity)
+
+        assert output_activity.bytes_seen == len(b"hello world")
+        assert output_activity.last_output_monotonic is not None
 
 
 class TestSuperviseDecisionLogging:

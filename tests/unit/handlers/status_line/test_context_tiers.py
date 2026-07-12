@@ -24,6 +24,8 @@ from claude_code_hooks_daemon.handlers.status_line.context_tiers import (
     TierConfig,
     TierThresholds,
     classify_context,
+    compact_urgency_pct,
+    is_compact_urgent,
     is_critical,
     is_red,
     resolve_tier_thresholds,
@@ -237,6 +239,73 @@ class TestIsRed:
         assert is_red(90.0, _CONTEXT_TIER_200K_SIZE, cfg) is True
         assert is_red(99.0, _CONTEXT_TIER_200K_SIZE, cfg) is True
         assert is_red(60.0, _CONTEXT_TIER_1000K_SIZE, cfg) is True
+
+
+class TestCompactUrgencyPct:
+    """The compact-urgency midpoint sits between red and critical (Plan 00152).
+
+    The ccy supervisor treats ``[red, midpoint)`` as the *patient* red band and
+    ``[midpoint, critical)`` as the *prompt* band; the midpoint is the integer
+    mean of red and critical so it is a pure function of the two thresholds.
+    """
+
+    def test_200k_midpoint_is_mean_of_red_and_critical(self) -> None:
+        thresholds = TierThresholds(orange_pct=51, red_pct=76, critical_pct=90)
+        assert compact_urgency_pct(thresholds) == 83
+
+    def test_1000k_midpoint_is_mean_of_red_and_critical(self) -> None:
+        thresholds = TierThresholds(orange_pct=30, red_pct=40, critical_pct=60)
+        assert compact_urgency_pct(thresholds) == 50
+
+    def test_midpoint_uses_integer_division(self) -> None:
+        # red=76, critical=91 -> 167 // 2 = 83 (not 83.5).
+        thresholds = TierThresholds(orange_pct=51, red_pct=76, critical_pct=91)
+        assert compact_urgency_pct(thresholds) == 83
+
+
+class TestIsCompactUrgent:
+    """Truth table for the is_compact_urgent helper (Plan 00152)."""
+
+    def test_below_midpoint_in_red_band_is_not_urgent(self) -> None:
+        cfg = TierConfig.default()
+        # 76-82% at 200k is RED but below the 83% midpoint -> patient band.
+        assert is_compact_urgent(76.0, _CONTEXT_TIER_200K_SIZE, cfg) is False
+        assert is_compact_urgent(82.0, _CONTEXT_TIER_200K_SIZE, cfg) is False
+
+    def test_at_midpoint_is_urgent(self) -> None:
+        cfg = TierConfig.default()
+        assert is_compact_urgent(83.0, _CONTEXT_TIER_200K_SIZE, cfg) is True
+
+    def test_upper_red_band_is_urgent(self) -> None:
+        cfg = TierConfig.default()
+        assert is_compact_urgent(89.0, _CONTEXT_TIER_200K_SIZE, cfg) is True
+
+    def test_critical_implies_urgent(self) -> None:
+        cfg = TierConfig.default()
+        assert is_compact_urgent(90.0, _CONTEXT_TIER_200K_SIZE, cfg) is True
+        assert is_compact_urgent(99.0, _CONTEXT_TIER_200K_SIZE, cfg) is True
+
+    def test_green_is_not_urgent(self) -> None:
+        cfg = TierConfig.default()
+        assert is_compact_urgent(0.0, _CONTEXT_TIER_200K_SIZE, cfg) is False
+
+    def test_1000k_midpoint_boundary(self) -> None:
+        cfg = TierConfig.default()
+        assert is_compact_urgent(49.0, _CONTEXT_TIER_1000K_SIZE, cfg) is False
+        assert is_compact_urgent(50.0, _CONTEXT_TIER_1000K_SIZE, cfg) is True
+
+    def test_with_custom_config(self) -> None:
+        # red=60, critical=80 -> midpoint 70.
+        cfg = TierConfig(
+            t200k=TierThresholds(orange_pct=40, red_pct=60, critical_pct=80),
+            t1000k=TierThresholds(
+                orange_pct=_CONTEXT_TIER_1000K_ORANGE_PCT,
+                red_pct=_CONTEXT_TIER_1000K_RED_PCT,
+                critical_pct=_CONTEXT_TIER_1000K_CRITICAL_PCT,
+            ),
+        )
+        assert is_compact_urgent(69.0, _CONTEXT_TIER_200K_SIZE, cfg) is False
+        assert is_compact_urgent(70.0, _CONTEXT_TIER_200K_SIZE, cfg) is True
 
 
 class TestIsCritical:

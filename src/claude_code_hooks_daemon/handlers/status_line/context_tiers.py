@@ -54,6 +54,12 @@ _CONTEXT_TIER_1000K_CRITICAL_PCT = 60
 # Yellow band starts at half of orange (e.g. orange=51 -> yellow=25).
 _YELLOW_DIVISOR = 2
 
+# The compact-urgency midpoint is the integer mean of red and critical
+# (e.g. red=76, critical=90 -> 83). Below it the ccy supervisor stays PATIENT
+# in the red band (waits for the turn to settle before compacting); at/above it
+# the supervisor compacts PROMPTLY even mid-turn (Plan 00152).
+_COMPACT_URGENCY_DIVISOR = 2
+
 # Fallback CRITICAL threshold for a TierThresholds constructed WITHOUT an
 # explicit critical_pct (back-compat for callers predating Plan 00151). The
 # canonical per-size defaults come from TierConfig.default(); this only guards
@@ -200,3 +206,41 @@ def is_critical(used_pct: float, window_size: int, cfg: TierConfig) -> bool:
         True if classify_context(...) resolves to ContextTier.CRITICAL
     """
     return classify_context(used_pct, window_size, cfg) is ContextTier.CRITICAL
+
+
+def compact_urgency_pct(thresholds: TierThresholds) -> int:
+    """Return the compact-urgency midpoint between red and critical (Plan 00152).
+
+    The midpoint is the integer mean of ``red_pct`` and ``critical_pct``
+    (e.g. red=76, critical=90 -> 83). It splits the "red or worse" region into a
+    lower PATIENT band ``[red, midpoint)`` and an upper PROMPT band
+    ``[midpoint, critical)`` for the ccy supervisor's graduated compaction.
+
+    Args:
+        thresholds: The resolved per-window-size tier thresholds.
+
+    Returns:
+        The midpoint percentage (integer).
+    """
+    return (thresholds.red_pct + thresholds.critical_pct) // _COMPACT_URGENCY_DIVISOR
+
+
+def is_compact_urgent(used_pct: float, window_size: int, cfg: TierConfig) -> bool:
+    """Return True when usage is at/above the compact-urgency midpoint (Plan 00152).
+
+    This is the signal the ccy supervisor uses to leave its PATIENT red band and
+    compact PROMPTLY even while the child is streaming output. It is deliberately
+    a superset of CRITICAL: any critical percentage is also compact-urgent,
+    because critical always acts promptly.
+
+    Args:
+        used_pct: Context usage percentage (0-100)
+        window_size: Context window size in tokens (e.g. 200000, 1000000)
+        cfg: Threshold configuration to classify against
+
+    Returns:
+        True if ``used_pct`` is at or above ``compact_urgency_pct`` for the
+        resolved tier.
+    """
+    thresholds = resolve_tier_thresholds(window_size, cfg)
+    return used_pct >= compact_urgency_pct(thresholds)

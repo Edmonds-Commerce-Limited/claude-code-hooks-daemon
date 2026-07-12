@@ -63,6 +63,7 @@ def _write_sidecar(
     writer_pid: int = 4242,
     compacting: bool | None = None,
     critical: bool | None = None,
+    compact_urgent: bool | None = None,
     raw: str | None = None,
 ) -> None:
     directory.mkdir(parents=True, exist_ok=True)
@@ -85,6 +86,8 @@ def _write_sidecar(
         payload["compacting"] = compacting
     if critical is not None:
         payload["critical"] = critical
+    if compact_urgent is not None:
+        payload["compact_urgent"] = compact_urgent
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
@@ -155,6 +158,18 @@ class TestLoadFreshestSidecar:
         assert reading is not None
         assert reading.critical is True
 
+    def test_compact_urgent_defaults_false(self, tmp_path: Path) -> None:
+        _write_sidecar(tmp_path, "s", ts=1000.0)
+        reading = load_freshest_sidecar(tmp_path, now=1000.0, freshness_seconds=30)
+        assert reading is not None
+        assert reading.compact_urgent is False
+
+    def test_compact_urgent_true_when_present(self, tmp_path: Path) -> None:
+        _write_sidecar(tmp_path, "s", ts=1000.0, compact_urgent=True)
+        reading = load_freshest_sidecar(tmp_path, now=1000.0, freshness_seconds=30)
+        assert reading is not None
+        assert reading.compact_urgent is True
+
     def test_skips_malformed_and_loads_valid(self, tmp_path: Path) -> None:
         _write_sidecar(tmp_path, "broken", raw="{not json")
         _write_sidecar(tmp_path, "good", ts=1000.0, red=True)
@@ -181,9 +196,13 @@ class TestLoadFreshestSidecar:
 
 
 def _reading(**kw: object) -> object:
+    # Default pct=85.0 sits in the ELEVATED band (>= the 83% midpoint at 200k),
+    # so compact_urgent defaults True to match. Patient-band tests pass
+    # compact_urgent=False (with a lower pct) explicitly.
     defaults: dict[str, object] = {
         "red": True,
         "critical": False,
+        "compact_urgent": True,
         "tier": "red",
         "pct": 85.0,
         "session_id": "s",
@@ -240,6 +259,57 @@ class TestMonitor:
         sm.evaluate(_reading(), idle=True, now=1000.0)
         sm.evaluate(_reading(compacting=True), idle=True, now=1001.0)  # -> MONITOR
         result = sm.evaluate(_reading(), idle=True, now=1100.0)  # only 99s later
+        assert result.decision is Decision.NOOP
+
+
+class TestGraduatedBands:
+    """Plan 00152 graduated compaction bands keyed on compact_urgent/critical.
+
+    LOWER red band (red, not urgent): PATIENT -- defers /compact while the child
+    is streaming (work_idle False), compacts once it settles (work_idle True).
+    ELEVATED band (compact_urgent) and CRITICAL: compact PROMPTLY even mid-turn.
+    """
+
+    def test_lower_red_band_defers_while_work_busy(self) -> None:
+        sm = CompactStateMachine(CompactPolicy())
+        result = sm.evaluate(
+            _reading(compact_urgent=False, pct=78.0), idle=True, work_idle=False, now=1000.0
+        )
+        assert result.decision is Decision.NOOP
+        assert sm.state is SupervisorState.MONITOR
+
+    def test_lower_red_band_compacts_when_work_settled(self) -> None:
+        sm = CompactStateMachine(CompactPolicy())
+        result = sm.evaluate(
+            _reading(compact_urgent=False, pct=78.0), idle=True, work_idle=True, now=1000.0
+        )
+        assert result.decision is Decision.WOULD_COMPACT
+        assert sm.state is SupervisorState.AWAIT_COMPACTING
+
+    def test_elevated_band_compacts_despite_work_busy(self) -> None:
+        sm = CompactStateMachine(CompactPolicy())
+        result = sm.evaluate(
+            _reading(compact_urgent=True, pct=85.0), idle=True, work_idle=False, now=1000.0
+        )
+        assert result.decision is Decision.WOULD_COMPACT
+
+    def test_critical_compacts_despite_work_busy(self) -> None:
+        # critical implies urgent even if compact_urgent flag is False.
+        sm = CompactStateMachine(CompactPolicy())
+        result = sm.evaluate(
+            _reading(critical=True, compact_urgent=False, pct=95.0),
+            idle=True,
+            work_idle=False,
+            now=1000.0,
+        )
+        assert result.decision is Decision.WOULD_COMPACT
+
+    def test_lower_red_band_still_blocked_by_keystroke_idle(self) -> None:
+        # work_idle True but human is composing (idle False) -> still NOOP.
+        sm = CompactStateMachine(CompactPolicy())
+        result = sm.evaluate(
+            _reading(compact_urgent=False, pct=78.0), idle=False, work_idle=True, now=1000.0
+        )
         assert result.decision is Decision.NOOP
 
 
@@ -384,50 +454,72 @@ class TestEscapeFlush:
     After injecting /compact (AWAIT_COMPACTING), if no compaction starts within
     escape_after_seconds the machine decides WOULD_ESCAPE exactly once, so the
     supervisor can press [esc] to interrupt the turn and run the queued command
-    (Plan 00151). Gated on idle; never fires for a human-originated compact.
+    (Plan 00151). Plan 00152 RESERVES the ESC flush for CRITICAL: it fires only
+    when the compaction was critical-driven (latched at inject) OR the live
+    reading is currently critical. Gated on idle; never for a human compact.
     """
 
-    def test_escape_fires_after_timeout_when_no_compaction(self) -> None:
+    def test_escape_fires_after_timeout_when_critical(self) -> None:
         sm = CompactStateMachine(CompactPolicy(escape_after_seconds=60, await_timeout_seconds=120))
-        sm.evaluate(_reading(), idle=True, now=1000.0)  # -> AWAIT at t=1000
+        sm.evaluate(_reading(critical=True), idle=True, now=1000.0)  # -> AWAIT at t=1000
         # 30s later: too soon, still waiting.
-        early = sm.evaluate(_reading(compacting=False), idle=True, now=1030.0)
+        early = sm.evaluate(_reading(critical=True, compacting=False), idle=True, now=1030.0)
         assert early.decision is Decision.NOOP
         # 65s later: escape_after elapsed, no compaction -> flush with ESC.
-        late = sm.evaluate(_reading(compacting=False), idle=True, now=1065.0)
+        late = sm.evaluate(_reading(critical=True, compacting=False), idle=True, now=1065.0)
         assert late.decision is Decision.WOULD_ESCAPE
+
+    def test_escape_not_fired_for_elevated_non_critical_compact(self) -> None:
+        # An ELEVATED-band (urgent but not critical) compaction must NOT get an
+        # ESC flush -- it waits for the turn to end naturally (Plan 00152).
+        sm = CompactStateMachine(CompactPolicy(escape_after_seconds=60, await_timeout_seconds=600))
+        sm.evaluate(_reading(critical=False, compact_urgent=True), idle=True, now=1000.0)
+        result = sm.evaluate(
+            _reading(critical=False, compact_urgent=True, compacting=False), idle=True, now=1065.0
+        )
+        assert result.decision is Decision.NOOP
+
+    def test_escape_fires_when_reading_goes_critical_during_await(self) -> None:
+        # Injected while merely elevated, but the context climbs to critical
+        # during the await -> the live-critical reading enables the ESC flush.
+        sm = CompactStateMachine(CompactPolicy(escape_after_seconds=60, await_timeout_seconds=600))
+        sm.evaluate(_reading(critical=False, compact_urgent=True), idle=True, now=1000.0)
+        result = sm.evaluate(_reading(critical=True, compacting=False), idle=True, now=1065.0)
+        assert result.decision is Decision.WOULD_ESCAPE
 
     def test_escape_fires_only_once(self) -> None:
         sm = CompactStateMachine(CompactPolicy(escape_after_seconds=60, await_timeout_seconds=600))
-        sm.evaluate(_reading(), idle=True, now=1000.0)
-        first = sm.evaluate(_reading(compacting=False), idle=True, now=1065.0)
-        second = sm.evaluate(_reading(compacting=False), idle=True, now=1070.0)
+        sm.evaluate(_reading(critical=True), idle=True, now=1000.0)
+        first = sm.evaluate(_reading(critical=True, compacting=False), idle=True, now=1065.0)
+        second = sm.evaluate(_reading(critical=True, compacting=False), idle=True, now=1070.0)
         assert first.decision is Decision.WOULD_ESCAPE
         assert second.decision is Decision.NOOP
 
     def test_escape_not_fired_when_busy(self) -> None:
         sm = CompactStateMachine(CompactPolicy(escape_after_seconds=60, await_timeout_seconds=600))
-        sm.evaluate(_reading(), idle=True, now=1000.0)
-        result = sm.evaluate(_reading(compacting=False), idle=False, now=1065.0)
+        sm.evaluate(_reading(critical=True), idle=True, now=1000.0)
+        result = sm.evaluate(_reading(critical=True, compacting=False), idle=False, now=1065.0)
         assert result.decision is Decision.NOOP
 
     def test_escape_not_fired_for_human_compact(self) -> None:
         # A human-originated AWAIT must not get a supervisor ESC — the human owns
-        # their own /compact flush.
+        # their own /compact flush (even if the context is critical).
         sm = CompactStateMachine(CompactPolicy(escape_after_seconds=60, await_timeout_seconds=600))
-        sm.evaluate(_reading(), idle=True, now=1000.0, human_compact_submitted=True)
-        result = sm.evaluate(_reading(compacting=False), idle=True, now=1065.0)
+        sm.evaluate(_reading(critical=True), idle=True, now=1000.0, human_compact_submitted=True)
+        result = sm.evaluate(_reading(critical=True, compacting=False), idle=True, now=1065.0)
         assert result.decision is Decision.NOOP
 
     def test_escape_latch_resets_next_episode(self) -> None:
         sm = CompactStateMachine(
             CompactPolicy(escape_after_seconds=60, await_timeout_seconds=600, cooldown_seconds=0)
         )
-        sm.evaluate(_reading(), idle=True, now=1000.0)  # compact -> AWAIT
-        sm.evaluate(_reading(compacting=False), idle=True, now=1065.0)  # ESC
+        sm.evaluate(_reading(critical=True), idle=True, now=1000.0)  # compact -> AWAIT
+        sm.evaluate(_reading(critical=True, compacting=False), idle=True, now=1065.0)  # ESC
         sm.evaluate(_reading(compacting=True), idle=True, now=1070.0)  # continue -> MONITOR
-        sm.evaluate(_reading(), idle=True, now=1075.0)  # compact -> AWAIT again
-        again = sm.evaluate(_reading(compacting=False), idle=True, now=1140.0)  # 65s later
+        sm.evaluate(_reading(critical=True), idle=True, now=1075.0)  # compact -> AWAIT again
+        again = sm.evaluate(
+            _reading(critical=True, compacting=False), idle=True, now=1140.0
+        )  # 65s later
         assert again.decision is Decision.WOULD_ESCAPE
 
 

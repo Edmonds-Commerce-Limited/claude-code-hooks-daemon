@@ -262,6 +262,28 @@ class InputActivity:
         return self.line.take_compact_submitted()
 
 
+@dataclass
+class OutputActivity:
+    """Tracks child->stdout output timing to tell 'work in progress' from 'settled'.
+
+    Plan 00152: while a turn is generating, the child streams output almost
+    continuously; between turns the output falls quiet. Recording the last
+    output timestamp lets the supervisor derive a ``work_idle`` signal so the
+    LOWER red band can wait for the turn to settle before compacting (restoring
+    the pre-Plan-00151 "blocked whilst things were happening" behaviour).
+    Supervisor-injected keystrokes go to the PTY master, never here, so an
+    injection never marks the child "busy".
+    """
+
+    bytes_seen: int = 0
+    last_output_monotonic: float | None = None
+
+    def record(self, data: bytes) -> None:
+        """Record a chunk of child output that was forwarded to stdout."""
+        self.bytes_seen += len(data)
+        self.last_output_monotonic = os.times().elapsed
+
+
 class DecisionLog:
     """Append-only, timestamped log file for supervisor decisions/observations.
 
@@ -359,6 +381,12 @@ _COMPACTION_SIGNAL_GLOB = "*.compacting"
 _REASON_BUSY_COMPOSING = "session busy (composing)"
 _REASON_BUSY_AWAIT_RESUME = "compaction detected but session busy -> awaiting idle to resume"
 _INJECTION_GATED_REASONS = frozenset({_REASON_BUSY_COMPOSING, _REASON_BUSY_AWAIT_RESUME})
+# Plan 00152: in the LOWER red band (red but below the compact-urgency midpoint)
+# the supervisor is PATIENT -- it defers /compact until the child output has
+# settled (work_idle), so an in-progress turn is never interrupted. This
+# restores the pre-Plan-00151 "blocked whilst things were happening" behaviour
+# for the red band only; the elevated + critical bands still act promptly.
+_REASON_RED_WORK_IN_PROGRESS = "red (patient band) but work in progress -> deferring until settled"
 _DEFERRED_LOG_PREFIX = "injection deferred: input box not empty"
 
 
@@ -380,10 +408,18 @@ class SupervisorState(enum.Enum):
 
 @dataclass(frozen=True)
 class SidecarReading:
-    """A parsed snapshot of the daemon-written context sidecar."""
+    """A parsed snapshot of the daemon-written context sidecar.
+
+    ``compact_urgent`` (Plan 00152) is the midpoint band between red and
+    critical: the supervisor stays PATIENT in the lower red band (waits for the
+    child to settle before compacting) and acts PROMPTLY once the context is
+    compact-urgent (or critical) even while the child is streaming. Defaults
+    False for older sidecars that predate the field.
+    """
 
     red: bool
     critical: bool
+    compact_urgent: bool
     tier: str
     pct: float
     session_id: str
@@ -497,6 +533,7 @@ def load_freshest_sidecar(
     return SidecarReading(
         red=bool(freshest_data.get("red", False)),
         critical=bool(freshest_data.get("critical", False)),
+        compact_urgent=bool(freshest_data.get("compact_urgent", False)),
         tier=str(freshest_data.get("tier", "")),
         pct=_coerce_float(freshest_data.get("pct")),
         session_id=str(freshest_data.get("session_id", "")),
@@ -546,19 +583,28 @@ class CompactStateMachine:
     dry-run.
 
     MONITOR: when the sidecar is fresh + red AND the session is idle AND the
-    cap allows it, decide WOULD_COMPACT and move to AWAIT_COMPACTING. The
-    post-compact cooldown gates a non-critical repeat, but CRITICAL context
-    (``reading.critical``) bypasses it so a dangerously-high context compacts on
-    the very next idle tick (Plan 00151). A detected HUMAN ``/compact``
-    (``human_compact_submitted``) instead moves to AWAIT_COMPACTING WITHOUT
-    injecting, so the supervisor never stacks a duplicate compaction.
+    cap allows it, decide WOULD_COMPACT and move to AWAIT_COMPACTING. Plan 00152
+    splits "red or worse" into graduated bands: in the LOWER red band
+    (``reading.red`` but NOT ``reading.compact_urgent``) the machine is PATIENT
+    -- it defers the compaction while ``work_idle`` is False so an in-progress
+    turn is never interrupted (restoring the pre-Plan-00151 behaviour). In the
+    ELEVATED band (``reading.compact_urgent``) and at CRITICAL it compacts
+    PROMPTLY even while the child streams. The post-compact cooldown gates a
+    non-critical repeat, but CRITICAL context (``reading.critical``) bypasses it
+    so a dangerously-high context compacts on the very next idle tick (Plan
+    00151). A detected HUMAN ``/compact`` (``human_compact_submitted``) instead
+    moves to AWAIT_COMPACTING WITHOUT injecting, so the supervisor never stacks a
+    duplicate compaction.
 
     AWAIT_COMPACTING: wait for a compaction to start (handled above). If none
     starts within ``escape_after_seconds``, decide WOULD_ESCAPE ONCE so the
     supervisor can inject ``[esc]`` to flush a ``/compact`` that Claude Code
-    queued behind the in-flight turn (never for a human-originated await). If
-    none starts within the longer ``await_timeout_seconds``, give up and return
-    to MONITOR so a missed transition cannot wedge the machine forever.
+    queued behind the in-flight turn. Per Plan 00152 the ESC flush is reserved
+    for CRITICAL: it fires only when the compaction was CRITICAL-driven (latched
+    at inject time) OR the live reading is currently critical -- never for an
+    elevated-band compact and never for a human-originated await. If none starts
+    within the longer ``await_timeout_seconds``, give up and return to MONITOR so
+    a missed transition cannot wedge the machine forever.
     """
 
     def __init__(self, policy: CompactPolicy) -> None:
@@ -572,6 +618,9 @@ class CompactStateMachine:
         # True when the current AWAIT was entered by a HUMAN /compact (not the
         # supervisor's own inject) -- suppresses the supervisor ESC flush.
         self._await_is_human = False
+        # True when the compaction that opened the current AWAIT was
+        # CRITICAL-driven -- gates the ESC flush to critical only (Plan 00152).
+        self._await_escalate = False
 
     def evaluate(
         self,
@@ -580,6 +629,7 @@ class CompactStateMachine:
         idle: bool,
         now: float,
         human_compact_submitted: bool = False,
+        work_idle: bool = True,
     ) -> Evaluation:
         """Advance the machine one step and return what it WOULD do.
 
@@ -588,6 +638,10 @@ class CompactStateMachine:
         so the supervisor never stacks a second ``/compact`` on top of the
         human's (Claude Code aborts the duplicate). It still resumes afterwards
         via the normal compaction-signal path.
+
+        ``work_idle`` (Plan 00152) is True when the child has produced no output
+        recently (the turn has settled). It only gates the LOWER red band: an
+        elevated-band or critical reading compacts regardless of ``work_idle``.
         """
         compacting = reading is not None and reading.compacting
         if compacting:
@@ -621,11 +675,11 @@ class CompactStateMachine:
             )
 
         if self.state is SupervisorState.AWAIT_COMPACTING:
-            return self._evaluate_await(idle=idle, now=now)
-        return self._evaluate_monitor(reading, idle=idle, now=now)
+            return self._evaluate_await(reading, idle=idle, now=now)
+        return self._evaluate_monitor(reading, idle=idle, work_idle=work_idle, now=now)
 
     def _evaluate_monitor(
-        self, reading: SidecarReading | None, *, idle: bool, now: float
+        self, reading: SidecarReading | None, *, idle: bool, work_idle: bool, now: float
     ) -> Evaluation:
         if reading is None:
             return Evaluation(Decision.NOOP, "no sidecar reading")
@@ -635,6 +689,13 @@ class CompactStateMachine:
             return Evaluation(Decision.NOOP, f"not red (tier={reading.tier})")
         if not idle:
             return Evaluation(Decision.NOOP, _REASON_BUSY_COMPOSING)
+        # Plan 00152 graduated bands: critical is always urgent. In the LOWER red
+        # band (red but not urgent) stay PATIENT -- defer until the child output
+        # has settled -- so an in-progress turn is never interrupted. The
+        # elevated + critical bands act promptly even while the child streams.
+        urgent = reading.compact_urgent or reading.critical
+        if not urgent and not work_idle:
+            return Evaluation(Decision.NOOP, _REASON_RED_WORK_IN_PROGRESS)
         if self._injections >= self._policy.max_injections:
             return Evaluation(Decision.NOOP, "injection cap reached")
         # CRITICAL bypasses the cooldown so a dangerously-high context compacts
@@ -644,39 +705,58 @@ class CompactStateMachine:
 
         self._injections += 1
         self._last_action_ts = now
-        self._enter_await(is_human=False)
-        urgency = "CRITICAL" if reading.critical else "red"
+        # Latch the ESC-flush escalation to critical: only a critical-driven
+        # compaction is allowed to interrupt the turn with [esc] (Plan 00152).
+        self._enter_await(is_human=False, escalate=reading.critical)
+        urgency = "CRITICAL" if reading.critical else ("urgent" if urgent else "red")
         return Evaluation(
             Decision.WOULD_COMPACT,
             f"{urgency} at {reading.pct:.0f}% + idle -> would inject /compact",
         )
 
-    def _evaluate_await(self, *, idle: bool, now: float) -> Evaluation:
+    def _evaluate_await(
+        self, reading: SidecarReading | None, *, idle: bool, now: float
+    ) -> Evaluation:
         if self._await_timed_out(now):
             self._enter_monitor()
             return Evaluation(Decision.NOOP, "await-compacting timed out -> back to monitor")
         # ESC-flush: a supervisor /compact that Claude Code queued behind the
-        # in-flight turn needs an [esc] to run. Fire once, only when idle, and
-        # never for a human-originated compaction.
-        if not self._await_is_human and not self._escape_sent and idle and self._escape_due(now):
+        # in-flight turn needs an [esc] to run. Reserved for CRITICAL (Plan
+        # 00152): fire only when the compaction was critical-driven OR the live
+        # reading is currently critical, once, when idle, never for a human await.
+        live_critical = reading is not None and not reading.stale and reading.critical
+        escalate = self._await_escalate or live_critical
+        if (
+            not self._await_is_human
+            and escalate
+            and not self._escape_sent
+            and idle
+            and self._escape_due(now)
+        ):
             self._escape_sent = True
             return Evaluation(
                 Decision.WOULD_ESCAPE,
-                "compaction not started -> would inject [esc] to flush queued /compact",
+                "critical compaction not started -> would inject [esc] to flush queued /compact",
             )
         return Evaluation(Decision.NOOP, "awaiting compaction start")
 
-    def _enter_await(self, *, is_human: bool) -> None:
-        """Enter AWAIT_COMPACTING, resetting the per-episode ESC-flush latch."""
+    def _enter_await(self, *, is_human: bool, escalate: bool = False) -> None:
+        """Enter AWAIT_COMPACTING, resetting the per-episode ESC-flush latch.
+
+        ``escalate`` records whether this compaction was CRITICAL-driven, which
+        gates the supervisor ESC flush to critical only (Plan 00152).
+        """
         self.state = SupervisorState.AWAIT_COMPACTING
         self._escape_sent = False
         self._await_is_human = is_human
+        self._await_escalate = escalate
 
     def _enter_monitor(self) -> None:
         """Return to MONITOR, clearing per-episode AWAIT bookkeeping."""
         self.state = SupervisorState.MONITOR
         self._escape_sent = False
         self._await_is_human = False
+        self._await_escalate = False
 
     def _cooldown_elapsed(self, now: float, *, critical: bool = False) -> bool:
         if critical:
@@ -751,6 +831,12 @@ _SUBMIT_DELAY_SECONDS = 0.2
 
 _DEFAULT_POLL_SECONDS = 2.0
 _DEFAULT_IDLE_FLOOR_SECONDS = 2.0
+# Plan 00152: the LOWER red band waits for the child to be quiet this long before
+# compacting. It must exceed the poll interval so a full quiet tick has to pass
+# with no child output -- faithfully mirroring the pre-Plan-00151 behaviour where
+# the tick only ran on a clear `select` timeout (a genuine lull). Between-turn
+# lulls easily exceed this; an actively streaming turn never does.
+_DEFAULT_WORK_SETTLE_SECONDS = 3.0
 
 
 def _resolve_payload(decision: Decision, *, dry_run: bool) -> str | None:
@@ -820,6 +906,20 @@ def _is_idle(activity: InputActivity, *, now_monotonic: float, idle_floor_second
     return (now_monotonic - activity.last_input_monotonic) >= idle_floor_seconds
 
 
+def _is_work_idle(
+    output_activity: OutputActivity, *, now_monotonic: float, work_settle_seconds: float
+) -> bool:
+    """True when the child has produced no output within ``work_settle_seconds``.
+
+    Plan 00152: distinguishes an actively-streaming turn (recent output -> NOT
+    work-idle) from a settled session (a lull -> work-idle). A child that has
+    produced no output at all yet counts as settled.
+    """
+    if output_activity.last_output_monotonic is None:
+        return True
+    return (now_monotonic - output_activity.last_output_monotonic) >= work_settle_seconds
+
+
 def _poll_once(
     machine: CompactStateMachine,
     *,
@@ -833,6 +933,7 @@ def _poll_once(
     compaction_signal_ttl_seconds: float = _DEFAULT_COMPACTION_SIGNAL_TTL_SECONDS,
     input_line_empty: bool = True,
     human_compact_submitted: bool = False,
+    work_idle: bool = True,
 ) -> Evaluation:
     """One supervisor tick: read the sidecar, decide, and inject if warranted.
 
@@ -853,6 +954,9 @@ def _poll_once(
     ``human_compact_submitted`` is the edge signal that the human just submitted
     a ``/compact``; it makes the machine await the compaction instead of
     injecting its own, so the supervisor never stacks a duplicate compaction.
+
+    ``work_idle`` (Plan 00152) is True when the child output has settled; it
+    only gates the LOWER red band (elevated/critical readings compact promptly).
     """
     reading = load_freshest_sidecar(sidecar_dir, now=now_wall, freshness_seconds=freshness_seconds)
     # A compaction stops status renders, so the context sidecar goes
@@ -867,6 +971,7 @@ def _poll_once(
             else SidecarReading(
                 red=False,
                 critical=False,
+                compact_urgent=False,
                 tier="",
                 pct=0.0,
                 session_id="",
@@ -887,6 +992,7 @@ def _poll_once(
         idle=can_inject,
         now=now_wall,
         human_compact_submitted=human_compact_submitted,
+        work_idle=work_idle,
     )
     payload = _resolve_payload(evaluation.decision, dry_run=dry_run)
     if payload is not None:
@@ -942,6 +1048,7 @@ def _forward_io(
     *,
     poll_seconds: float | None = None,
     on_poll: Callable[[], None] | None = None,
+    output_activity: OutputActivity | None = None,
 ) -> None:
     """Select loop: forward stdin -> master, master -> stdout.
 
@@ -1013,6 +1120,10 @@ def _forward_io(
                 output = b""
             if not output:
                 return
+            if output_activity is not None:
+                # Record child output timing so the supervisor can tell an
+                # actively-streaming turn from a settled lull (Plan 00152).
+                output_activity.record(output)
             os.write(sys.stdout.fileno(), output)
 
 
@@ -1027,6 +1138,7 @@ def supervise(
     policy: CompactPolicy | None = None,
     poll_seconds: float = _DEFAULT_POLL_SECONDS,
     idle_floor_seconds: float = _DEFAULT_IDLE_FLOOR_SECONDS,
+    work_settle_seconds: float = _DEFAULT_WORK_SETTLE_SECONDS,
 ) -> int:
     """Run `argv` under a PTY, forwarding I/O and polling the context sidecar.
 
@@ -1054,6 +1166,9 @@ def supervise(
         policy: Compact state-machine policy (cooldown/cap/freshness/timeout).
         poll_seconds: Idle poll interval for the sidecar tick.
         idle_floor_seconds: Minimum quiet time before an injection is allowed.
+        work_settle_seconds: Minimum quiet time on the CHILD output before the
+            lower red band is allowed to compact (Plan 00152). The elevated and
+            critical bands ignore it and compact promptly.
 
     Returns:
         The child's exit code (or 128+signal if it died from a signal).
@@ -1065,6 +1180,7 @@ def supervise(
         raise ValueError("supervise() requires a non-empty argv")
 
     activity = activity if activity is not None else InputActivity()
+    output_activity = OutputActivity()
     stdin_fd = stdin_fd if stdin_fd is not None else sys.stdin.fileno()
     sidecar_dir = sidecar_dir if sidecar_dir is not None else _default_sidecar_dir()
     policy = policy if policy is not None else CompactPolicy()
@@ -1101,10 +1217,17 @@ def supervise(
         os.write(master_fd, data)
 
     def _on_poll() -> None:
+        now_monotonic = os.times().elapsed
         idle = _is_idle(
             activity,
-            now_monotonic=os.times().elapsed,
+            now_monotonic=now_monotonic,
             idle_floor_seconds=idle_floor_seconds,
+        )
+        # Child-output lull: gates only the LOWER red band (Plan 00152).
+        work_idle = _is_work_idle(
+            output_activity,
+            now_monotonic=now_monotonic,
+            work_settle_seconds=work_settle_seconds,
         )
         # Consume the human-/compact edge exactly once per tick so a human
         # compaction defers the supervisor's own, never suppresses it forever.
@@ -1121,12 +1244,20 @@ def supervise(
             compaction_signal_ttl_seconds=policy.compaction_signal_ttl_seconds,
             input_line_empty=activity.line.is_empty,
             human_compact_submitted=human_compact,
+            work_idle=work_idle,
         )
 
     previous_handler = signal.signal(signal.SIGWINCH, _on_winch)
 
     try:
-        _forward_io(stdin_fd, master_fd, activity, poll_seconds=poll_seconds, on_poll=_on_poll)
+        _forward_io(
+            stdin_fd,
+            master_fd,
+            activity,
+            poll_seconds=poll_seconds,
+            on_poll=_on_poll,
+            output_activity=output_activity,
+        )
     finally:
         signal.signal(signal.SIGWINCH, previous_handler)
         if old_termios is not None:

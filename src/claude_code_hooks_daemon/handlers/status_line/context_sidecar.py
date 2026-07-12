@@ -47,6 +47,7 @@ from claude_code_hooks_daemon.handlers.status_line.context_tiers import (
     TierConfig,
     TierThresholds,
     classify_context,
+    is_compact_urgent,
     is_critical,
     is_red,
 )
@@ -130,6 +131,7 @@ class ContextSidecarHandler(Handler):
             "schema_version": _SCHEMA_VERSION,
             "red": is_red(used_pct, window_size, cfg),
             "critical": is_critical(used_pct, window_size, cfg),
+            "compact_urgent": is_compact_urgent(used_pct, window_size, cfg),
             "tier": tier.value,
             "pct": used_pct,
             "window_size": window_size,

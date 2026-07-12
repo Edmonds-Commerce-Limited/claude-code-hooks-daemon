@@ -66,28 +66,28 @@ thresholds:
 
 ### Phase 1: context_tiers midpoint band (SSOT)
 
-- [ ] ⬜ **Task 1.1**: RED — add failing tests to
+- [x] ✅ **Task 1.1**: RED — add failing tests to
   `tests/unit/handlers/status_line/test_context_tiers.py` for
   `compact_urgency_pct(thresholds)` and `is_compact_urgent(pct, window, cfg)`
   (200k midpoint 83; 1000k midpoint 50; critical implies urgent; below midpoint
   not urgent).
-- [ ] ⬜ **Task 1.2**: GREEN — implement `compact_urgency_pct` +
+- [x] ✅ **Task 1.2**: GREEN — implement `compact_urgency_pct` +
   `is_compact_urgent` in `context_tiers.py`.
 
 ### Phase 2: sidecar emits compact_urgent
 
-- [ ] ⬜ **Task 2.1**: RED — extend sidecar handler tests to assert the payload
+- [x] ✅ **Task 2.1**: RED — extend sidecar handler tests to assert the payload
   carries `compact_urgent`.
-- [ ] ⬜ **Task 2.2**: GREEN — emit `compact_urgent` in
+- [x] ✅ **Task 2.2**: GREEN — emit `compact_urgent` in
   `context_sidecar.py` payload via `is_compact_urgent`.
 
 ### Phase 3: supervisor SidecarReading + machine bands
 
-- [ ] ⬜ **Task 3.1**: RED — tests: `SidecarReading.compact_urgent` loaded
+- [x] ✅ **Task 3.1**: RED — tests: `SidecarReading.compact_urgent` loaded
   (defaults False when absent); red-band `/compact` deferred when `work_idle`
   False; elevated band compacts despite `work_idle` False; ESC only for a
   critical-driven await.
-- [ ] ⬜ **Task 3.2**: GREEN — add `compact_urgent` to `SidecarReading` +
+- [x] ✅ **Task 3.2**: GREEN — add `compact_urgent` to `SidecarReading` +
   `load_freshest_sidecar`; thread `work_idle` through `evaluate` /
   `_evaluate_monitor` (defer non-urgent red when not work-idle;
   `urgent = compact_urgent or critical`); latch `escalate` on inject and gate
@@ -95,18 +95,21 @@ thresholds:
 
 ### Phase 4: child-output tracking + wiring
 
-- [ ] ⬜ **Task 4.1**: RED — tests for `OutputActivity.record`, `_is_work_idle`,
+- [x] ✅ **Task 4.1**: RED — tests for `OutputActivity.record`, `_is_work_idle`,
   and `_poll_once` passing `work_idle` into the machine.
-- [ ] ⬜ **Task 4.2**: GREEN — add `OutputActivity`, record master→stdout bytes
+- [x] ✅ **Task 4.2**: GREEN — add `OutputActivity`, record master→stdout bytes
   in `_forward_io`, compute `work_idle` in `_on_poll`, thread through
   `_poll_once`; add `work_settle_seconds` policy/param.
 
 ### Phase 5: integration, QA, dogfood
 
-- [ ] ⬜ **Task 5.1**: Run full QA: `./scripts/qa/run_all.sh`.
-- [ ] ⬜ **Task 5.2**: Restart daemon, verify RUNNING (sidecar change is in the
-  daemon); regenerate docs if handler summary changed.
-- [ ] ⬜ **Task 5.3**: Config-changes / truth-changes manifests if warranted.
+- [x] ✅ **Task 5.1**: Run full QA (`./scripts/qa/llm_qa.py all`) — 13/13 PASSED,
+  9989 tests, coverage 95.5%.
+- [x] ✅ **Task 5.2**: Restart daemon, verify RUNNING (sidecar change is in the
+  daemon); no handler-summary change so no docs regen needed.
+- [x] ✅ **Task 5.3**: No client-facing config key added (sidecar `compact_urgent`
+  is internal; supervisor behaviour change needs no truth-change — no project doc
+  asserts supervisor compaction timing).
 
 ## Success Criteria
 

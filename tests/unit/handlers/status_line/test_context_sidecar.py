@@ -164,6 +164,31 @@ class TestContextSidecarHandler:
         handler.handle(_hook_input(used_pct=88.0, window_size=200_000, session_id="s"))
         assert self._read_sidecar("s")["critical"] is True
 
+    # ---- handle: the `compact_urgent` midpoint signal (Plan 00152) ------
+
+    def test_compact_urgent_true_in_upper_red_band(self, handler: ContextSidecarHandler) -> None:
+        # 85% at 200k is red AND at/above the 83% midpoint -> compact-urgent.
+        handler.handle(_hook_input(used_pct=85.0, window_size=200_000, session_id="s"))
+        data = self._read_sidecar("s")
+        assert data["compact_urgent"] is True
+        assert data["red"] is True
+        assert data["critical"] is False
+
+    def test_compact_urgent_false_in_lower_red_band(self, handler: ContextSidecarHandler) -> None:
+        # 78% at 200k is red but below the 83% midpoint -> patient band.
+        handler.handle(_hook_input(used_pct=78.0, window_size=200_000, session_id="s"))
+        data = self._read_sidecar("s")
+        assert data["compact_urgent"] is False
+        assert data["red"] is True
+
+    def test_compact_urgent_true_when_critical(self, handler: ContextSidecarHandler) -> None:
+        handler.handle(_hook_input(used_pct=95.0, window_size=200_000, session_id="s"))
+        assert self._read_sidecar("s")["compact_urgent"] is True
+
+    def test_compact_urgent_defaults_false_when_low(self, handler: ContextSidecarHandler) -> None:
+        handler.handle(_hook_input(used_pct=10.0, window_size=200_000, session_id="s"))
+        assert self._read_sidecar("s")["compact_urgent"] is False
+
     def test_red_respects_window_tier(self, handler: ContextSidecarHandler) -> None:
         # 40% is RED for a 1M window but only ORANGE for a 200k window.
         handler.handle(_hook_input(used_pct=40.0, window_size=1_000_000, session_id="big"))

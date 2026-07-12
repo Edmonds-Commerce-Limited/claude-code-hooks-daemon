@@ -329,6 +329,11 @@ def _write_sidecar(directory: Path, *, red: bool, ts: float = 1000.0) -> None:
         json.dumps(
             {
                 "red": red,
+                # These box-guard tests want an injection PENDING whenever red so
+                # the empty/non-empty input box is the sole gate under test. Mark
+                # a red sidecar compact_urgent (Plan 00152 elevated band) so it
+                # fires promptly regardless of child-output work-idle timing.
+                "compact_urgent": red,
                 "tier": "red" if red else "green",
                 "pct": 90.0,
                 "session_id": "s",
