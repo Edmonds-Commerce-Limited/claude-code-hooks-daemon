@@ -81,13 +81,24 @@ behaviour is unchanged, and the daemon-restart + full QA gates must stay green.
   live status render verified (`⎇ feature/performance-tuning ✚3`). Reconciled
   the drift-proof `error_hiding` exclusion (function `handle` → `_render_git_context`).
 
-### Phase 3: legacy one-shot entry cleanup
+### Phase 3: legacy one-shot entry cleanup ✅ (delete — user decision)
 
-- [ ] ⬜ **Task 3.1**: Confirm the crash and whether the one-shot path is still
-  referenced anywhere (hooks wrappers, docs, tests). Decide fix-vs-delete.
-- [ ] ⬜ **Task 3.2**: Apply the decision with tests (fix the schema call, or
-  remove the dead path and any references) — no silent behaviour change.
-- [ ] ⬜ **Task 3.3**: Full QA + daemon restart RUNNING.
+- [x] ✅ **Task 3.1**: Confirmed. The one-shot `hooks/*.py` package is OFF the
+  production path (bash wrapper → `ensure_daemon` → socket → daemon), reachable
+  only via the `claude-hooks-daemon` console entry point. Drifted (14 of ~37
+  handlers) and genuinely broken (iterates the `{paths, plugins}` mapping and
+  passes a `str` to `PluginLoader.load_handlers_from_config`). No src (non-test)
+  code depends on it — only stale comments in `process_verification.py`.
+- [x] ✅ **Task 3.2**: User chose **delete the standalone package**. Removed the
+  whole `src/.../hooks/` package (10 modules + `__init__`), the
+  `claude-hooks-daemon` `[project.scripts]` entry, and all one-shot tests
+  (`tests/unit/hooks/`, `test_hooks_pre_tool_use.py`,
+  `test_hello_world_integration.py`, `tests/integration/test_entry_point*.py`) —
+  24 files. Refreshed the stale `hooks.*` comments in `process_verification.py`
+  (its daemon-ID heuristic keys off `daemon.cli`, unaffected). Reinstalled
+  editable so the console script is gone.
+- [x] ✅ **Task 3.3**: Full QA 13/13 (9781 tests, coverage 95.6% — up from 95.5%);
+  daemon RUNNING; production hook path (bash→socket→daemon) unchanged.
 
 ### Phase 4: measure & record
 
