@@ -56,21 +56,21 @@ copies cannot drift.
 
 ### Phase 1: T2 — drop jq from the transport
 
-- [ ] ⬜ **Task 1.1**: RED — extend transport tests to assert `send_request_stdin`
+- [x] ✅ **Task 1.1**: RED — extend transport tests to assert `send_request_stdin`
   wraps raw stdin `hook_input` into `{event, hook_input}` given an event-name arg,
   injects `hook_event_name` for Status, and preserves control chars.
-- [ ] ⬜ **Task 1.2**: GREEN — rewrite `send_request_stdin` in `init.sh` to take an
+- [x] ✅ **Task 1.2**: GREEN — rewrite `send_request_stdin` in `init.sh` to take an
   event-name argv, parse stdin, build the request in Python, and (Status mode)
   extract `.text`/`.error` with the existing fallback text.
-- [ ] ⬜ **Task 1.3**: Update `forward_stop_event` to stop calling `jq` (pass the
+- [x] ✅ **Task 1.3**: Update `forward_stop_event` to stop calling `jq` (pass the
   event name to `send_request_stdin`).
-- [ ] ⬜ **Task 1.4**: Update `install.py` `create_forwarder_script` +
+- [x] ✅ **Task 1.4**: Update `install.py` `create_forwarder_script` +
   `create_status_line_script` templates to the jq-free form.
-- [ ] ⬜ **Task 1.5**: Regenerate deployed `.claude/hooks/*` + `.claude/init.sh`;
-  `test_dogfooding_hook_scripts.py` green.
-- [ ] ⬜ **Task 1.6**: Full QA; restart daemon (RUNNING); run forwarder acceptance
-  gates (`test_stop_hook_hard_block.py`, install/e2e); live-probe each event via
-  `nc`/wrapper stdin. Commit.
+- [x] ✅ **Task 1.5**: Regenerate deployed `.claude/hooks/*` (`.claude/init.sh` is a
+  symlink to the edited root `init.sh`); `test_dogfooding_hook_scripts.py` green.
+- [x] ✅ **Task 1.6**: Full QA 13/13; restart daemon (RUNNING); forwarder acceptance
+  gates (`test_stop_hook_hard_block.py`, dogfooding, CI-passthrough) green;
+  live-probed pre-tool-use (allow + deny) and status-line against the real daemon.
 
 ### Phase 2: T3 — slim init.sh hot path
 
@@ -106,7 +106,14 @@ copies cannot drift.
 
 - Plan scaffolded for Wave 2 (T2 + T3) on branch `feature/performance-tuning`.
 - Failsafe recovery cron `219a8c62` created (non-durable, hourly at :37).
-- Source-of-truth map confirmed: `init.sh` (root, deployed identically to
-  `.claude/init.sh`); `install.py` `create_forwarder_script` (line ~234) +
-  `create_status_line_script` (line ~316) generate the wrappers; deployed copies
-  held in sync by `tests/integration/test_dogfooding_hook_scripts.py`.
+- Source-of-truth map confirmed: `init.sh` (root; `.claude/init.sh` is a SYMLINK
+  to it, so one edit updates both); `install.py` `create_forwarder_script`
+  (line ~234) + `create_status_line_script` (line ~316) generate the wrappers;
+  deployed copies held in sync by `tests/integration/test_dogfooding_hook_scripts.py`.
+- **T2 landed (Phase 1)**: all three `send_request_stdin` definitions + the eight
+  standard wrappers + status-line + `forward_stop_event` are jq-free. Wrapping and
+  status `.text`/`.error` extraction moved into the existing `python3` transport;
+  event name passes via argv (a hardcoded literal), payload stays on stdin. New
+  guard suite `tests/integration/test_forwarder_jq_free.py` (33 tests) drives the
+  real wrappers with a broken-`jq` shim on PATH. Full QA 13/13, 9814 tests,
+  coverage 95.6%. Committed on branch `feature/performance-tuning`.

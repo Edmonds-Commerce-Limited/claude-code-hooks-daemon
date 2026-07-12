@@ -742,19 +742,16 @@ ensure_daemon() {
         fi
 
         # First call: return one-time advisory context so agent sees the warning once
+        # Plan 00156: jq-free. The event name arrives as $1 (the wrapper passes
+        # it); the hook_input payload on stdin is drained (this advisory is a
+        # fixed template with no user-derived content).
         # shellcheck disable=SC2317
         send_request_stdin() {
-            local input
-            input=$(cat)
-            local event_name
-            event_name=$(echo "$input" | python3 -c "import sys,json; print(json.loads(sys.stdin.read()).get('event','Unknown'))" 2>/dev/null || echo "Unknown")
-            if command -v jq >/dev/null; then
-                jq -n --arg event "$event_name" \
-                    --arg context "HOOKS DAEMON: Not installed in CI environment. Safety handlers are INACTIVE. All operations allowed without validation. This warning appears once." \
-                    '{"hookSpecificOutput": {"hookEventName": $event, "additionalContext": $context}}'
-            else
-                echo '{}'
-            fi
+            local event_name="${1:-Unknown}"
+            cat > /dev/null
+            printf '{"hookSpecificOutput": {"hookEventName": "%s", "additionalContext": "%s"}}\n' \
+                "$event_name" \
+                "HOOKS DAEMON: Not installed in CI environment. Safety handlers are INACTIVE. All operations allowed without validation. This warning appears once."
         }
         export -f send_request_stdin
         return 0
@@ -785,13 +782,25 @@ ensure_daemon() {
 #   echo '{"key":"value"}' | send_request_stdin
 #
 send_request_stdin() {
-    # Use system python3 for reliable JSON transport - no venv dependency
-    # Only uses stdlib: socket, sys, json (no venv packages needed)
-    # CRITICAL: On error, outputs valid JSON to stdout (not stderr) so agent sees it
+    # Plan 00156 (T2): jq-free transport. The event name arrives as $1; the raw
+    # hook_input payload arrives on stdin. This inline python3 — already spawned
+    # as the transport — wraps it into {"event": $1, "hook_input": <stdin>}
+    # itself, eliminating the per-event jq spawn. $2 optionally selects a
+    # response mode: "status" extracts .text/.error for the status line.
+    #
+    # CRITICAL: the payload passes via stdin (never argv) so control characters
+    # are preserved; only the hardcoded event-name literal moves to argv.
+    # CRITICAL: On error, outputs valid JSON to stdout (not stderr) so agent sees it.
+    # Only uses stdlib: socket, sys, json (no venv packages needed).
+    local event_name="${1:-Unknown}"
+    local response_mode="${2:-}"
     python3 -c "
 import json
 import socket
 import sys
+
+event_name = sys.argv[1] if len(sys.argv) > 1 else 'Unknown'
+response_mode = sys.argv[2] if len(sys.argv) > 2 else ''
 
 def emit_error_json(event_name, error_type, error_details):
     '''Output valid hook error response to stdout.
@@ -835,20 +844,47 @@ def emit_error_json(event_name, error_type, error_details):
         }
     print(json.dumps(response))
 
-# Read JSON from stdin (preserves all control characters)
-request = sys.stdin.read()
+def fail(error_type, error_details):
+    '''Report a transport failure. For the status line the daemon is already
+    up (the wrapper gates on ensure_daemon), so a mid-render socket failure
+    degrades to the same 'NO STATUS DATA' the old jq -r fallback produced;
+    every other event fails open (or blocks, for Stop) via emit_error_json.'''
+    if response_mode == 'status':
+        print('⚠️ NO STATUS DATA')
+    else:
+        emit_error_json(event_name, error_type, error_details)
+    sys.exit(0)
 
-# Try to extract event name from request for better error messages
-event_name = 'Unknown'
+def render_status(output):
+    '''Replicate the old status-line jq -r fallback (.error / .text / no-data).'''
+    try:
+        data = json.loads(output)
+    except Exception:
+        return '⚠️ NO STATUS DATA'
+    if isinstance(data, dict) and data.get('error'):
+        return '⚠️ ERROR: ' + str(data['error'])
+    if isinstance(data, dict) and data.get('text'):
+        return data['text']
+    return '⚠️ NO STATUS DATA'
+
+# Read the raw hook_input payload from stdin (preserves control characters).
+raw = sys.stdin.read()
+
+# Parse it so we can wrap it ourselves (jq used to do this). Claude Code always
+# sends a JSON object; a parse failure is a real error, handled explicitly.
 try:
-    req_data = json.loads(request)
-    event_name = req_data.get('event', 'Unknown')
-except Exception:
-    pass
+    hook_input = json.loads(raw)
+except Exception as exc:
+    fail('invalid_hook_input',
+        f'Hook input was not valid JSON: {type(exc).__name__}: {exc}')
 
-# Add newline if not present (daemon expects newline-terminated JSON)
-if not request.endswith('\n'):
-    request += '\n'
+# Status line injects its own event name into the payload (parity with the old
+# jq '. + {hook_event_name: \"Status\"}').
+if event_name == 'Status' and isinstance(hook_input, dict):
+    hook_input['hook_event_name'] = 'Status'
+
+# Wrap into the daemon request envelope; newline-terminated as the daemon expects.
+request = json.dumps({'event': event_name, 'hook_input': hook_input}) + '\n'
 
 socket_path = '$SOCKET_PATH'
 
@@ -870,32 +906,30 @@ try:
 
     # Output response (strip trailing newline for clean output)
     output = response.decode('utf-8').rstrip('\n')
-    print(output)
+    if response_mode == 'status':
+        print(render_status(output))
+    else:
+        print(output)
     sys.exit(0)
 
 except socket.timeout:
-    emit_error_json(event_name, 'socket_timeout',
+    fail('socket_timeout',
         f'Socket timeout (30s) connecting to daemon at {socket_path}. '
         'Daemon may be hung or overloaded.')
-    sys.exit(0)  # Exit 0 so Claude processes the JSON response
 
 except FileNotFoundError:
-    emit_error_json(event_name, 'socket_not_found',
+    fail('socket_not_found',
         f'Daemon socket not found at {socket_path}. '
         'Daemon may not be running or socket was deleted.')
-    sys.exit(0)
 
 except ConnectionRefusedError:
-    emit_error_json(event_name, 'connection_refused',
+    fail('connection_refused',
         f'Daemon refusing connections at {socket_path}. '
         'Daemon may be shutting down or in error state.')
-    sys.exit(0)
 
 except Exception as e:
-    emit_error_json(event_name, type(e).__name__,
-        f'{type(e).__name__}: {e}')
-    sys.exit(0)
-"
+    fail(type(e).__name__, f'{type(e).__name__}: {e}')
+" "$event_name" "$response_mode"
     return $?
 }
 
@@ -943,21 +977,30 @@ forward_stop_event() {
     # shellcheck disable=SC2064  # intentional early-binding of file path
     trap "rm -f '$response_file'" EXIT
 
-    jq -c --arg event "$event_name" '{event: $event, hook_input: .}' \
-        | send_request_stdin > "$response_file"
+    # Plan 00156 (T2): jq-free. send_request_stdin wraps the raw stdin hook_input
+    # into {event, hook_input} itself; python3 (already the transport dependency)
+    # translates decision=block into exit 2 + reason on stderr. The reason may
+    # contain control characters, so it is printed straight from python rather
+    # than round-tripped through a shell variable.
+    send_request_stdin "$event_name" > "$response_file"
     cat "$response_file"
 
-    local decision
-    decision="$(jq -r '.decision // ""' < "$response_file" 2>/dev/null || echo "")"
-    if [ "$decision" = "block" ]; then
-        local reason
-        reason="$(jq -r '.reason // ""' < "$response_file" 2>/dev/null || echo "")"
-        if [ -n "$reason" ]; then
-            printf '%s\n' "$reason" >&2
-        fi
-        return 2
-    fi
-    return 0
+    python3 -c "
+import json
+import sys
+try:
+    with open(sys.argv[1]) as fh:
+        data = json.load(fh)
+except Exception:
+    sys.exit(0)  # unparseable/empty response -> allow stop (matches old jq // '')
+if isinstance(data, dict) and data.get('decision') == 'block':
+    reason = data.get('reason') or ''
+    if reason:
+        print(reason, file=sys.stderr)
+    sys.exit(2)
+sys.exit(0)
+" "$response_file"
+    return $?
 }
 
 # Export functions for use by forwarder scripts
