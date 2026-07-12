@@ -117,10 +117,28 @@ saving is the p50 `jq` spawn cost the wrapper no longer pays.
 Behaviour is byte-identical: the request envelope, the Stop exit-2 contract, the
 status-line fallback text, and the CI/daemon-down error responses are all
 preserved and pinned by tests. jq remains a dependency only for
-`emit_hook_error`'s pure-error path. After T2/T3 the irreducible per-event floor
-is ~2 ms bash + ~19-21 ms CPython interpreter start for the transport — the point
-where the (policy-free) compiled-forwarder conversation from Plan 00154 would
-legitimately begin, and still not yet justified.
+`emit_hook_error`'s pure-error path.
+
+**Measured end-to-end (post-Wave-2 verification).** Re-ran the Plan 00154
+`bench_forwarder.sh` harness against the production wrappers (60 iterations, same
+box). p50, times the real `.claude/hooks/*` exactly as Claude Code invokes them:
+
+| Scenario                    | Baseline (00154) | Post-Wave-2 (measured p50) | Delta          |
+| --------------------------- | ---------------- | -------------------------- | -------------- |
+| `pre-tool-use` event, e2e   | ~45 ms           | 32.1 ms                    | ~−13 ms (~29%) |
+| `status-line` render, e2e   | ~64 ms           | 33.0 ms                    | ~−31 ms (~48%) |
+| `init.sh` source floor      | ~13.2 ms         | 11.3 ms                    | ~−2 ms (T3)    |
+| `jq` spawn floor (removed)  | ~22-24 ms        | 19.0 ms                    | no longer paid |
+| `python3` transport floor   | ~19-21 ms        | 18.2 ms                    | irreducible    |
+| 1 MB Write event (scanners) | —                | 71.2 ms                    | T5 territory   |
+
+The realised event win (~13 ms) is less than the raw jq spawn cost because the
+old pipeline overlapped jq with bash/python startup — exactly as Plan 00154
+predicted (arithmetic ~28-33 ms; measured 32.1 ms). The status line, which spawned
+jq twice, nearly halved. After T2/T3 the irreducible per-event floor is ~2 ms
+bash + ~18 ms CPython interpreter start for the transport — the point where the
+(policy-free) compiled-forwarder conversation from Plan 00154 would legitimately
+begin, and still not yet justified (no budget violation remains).
 
 ## Reproduce
 
