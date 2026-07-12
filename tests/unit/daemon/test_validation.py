@@ -12,6 +12,7 @@ import pytest
 
 from claude_code_hooks_daemon.daemon.validation import (
     InstallationError,
+    _clear_repo_detection_cache,
     check_for_nested_installation,
     is_hooks_daemon_repo,
     is_inside_daemon_directory,
@@ -86,6 +87,82 @@ class TestIsHooksDaemonRepo:
                 stdout="https://github.com/Example/Claude-Code-Hooks-Daemon.git\n",
             )
             assert is_hooks_daemon_repo(tmp_path) is True
+
+
+class TestIsHooksDaemonRepoCaching:
+    """Tests for the memoisation of is_hooks_daemon_repo (Plan 00155 T1).
+
+    daemon_restart_verifier calls is_hooks_daemon_repo on every Bash
+    PreToolUse; the git-remote fork is ~75% of the Bash-event daemon-side
+    cost. The remote cannot change under a running daemon, so the result is
+    memoised per directory — one fork per daemon lifetime, not one per event.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clear_cache(self) -> None:
+        """Reset the module cache so call-count assertions are deterministic."""
+        _clear_repo_detection_cache()
+
+    def test_repeated_calls_fork_git_only_once(self, tmp_path: Path) -> None:
+        """Same directory: git remote is resolved once, then served from cache."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="https://github.com/example/claude-code-hooks-daemon.git\n",
+            )
+            first = is_hooks_daemon_repo(tmp_path)
+            second = is_hooks_daemon_repo(tmp_path)
+            third = is_hooks_daemon_repo(tmp_path)
+
+        assert first is True
+        assert second is True
+        assert third is True
+        assert mock_run.call_count == 1
+
+    def test_negative_result_is_also_cached(self, tmp_path: Path) -> None:
+        """A False result is memoised too (not just True)."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="https://github.com/example/some-other-repo.git\n",
+            )
+            first = is_hooks_daemon_repo(tmp_path)
+            second = is_hooks_daemon_repo(tmp_path)
+
+        assert first is False
+        assert second is False
+        assert mock_run.call_count == 1
+
+    def test_distinct_directories_cached_separately(self, tmp_path: Path) -> None:
+        """Different directories each get their own cache entry (one fork each)."""
+        repo_a = tmp_path / "a"
+        repo_b = tmp_path / "b"
+        repo_a.mkdir()
+        repo_b.mkdir()
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="https://github.com/example/claude-code-hooks-daemon.git\n",
+            )
+            is_hooks_daemon_repo(repo_a)
+            is_hooks_daemon_repo(repo_a)
+            is_hooks_daemon_repo(repo_b)
+            is_hooks_daemon_repo(repo_b)
+
+        assert mock_run.call_count == 2
+
+    def test_clear_cache_forces_re_resolution(self, tmp_path: Path) -> None:
+        """Clearing the cache (e.g. between tests) re-forks on the next call."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="https://github.com/example/claude-code-hooks-daemon.git\n",
+            )
+            is_hooks_daemon_repo(tmp_path)
+            _clear_repo_detection_cache()
+            is_hooks_daemon_repo(tmp_path)
+
+        assert mock_run.call_count == 2
 
 
 class TestLoadConfigSafe:

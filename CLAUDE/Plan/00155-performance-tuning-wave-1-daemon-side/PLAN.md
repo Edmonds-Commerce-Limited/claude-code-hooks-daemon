@@ -50,18 +50,18 @@ behaviour is unchanged, and the daemon-restart + full QA gates must stay green.
 
 ## Tasks
 
-### Phase 1: T1 — cache is_hooks_daemon_repo
+### Phase 1: T1 — cache is_hooks_daemon_repo ✅
 
-- [ ] ⬜ **Task 1.1**: RED — failing test asserting `is_hooks_daemon_repo`
+- [x] ✅ **Task 1.1**: RED — failing test asserting `is_hooks_daemon_repo`
   resolves the git remote at most once per workspace root across repeated calls
   (spy/patch the subprocess boundary; assert call count).
-- [ ] ⬜ **Task 1.2**: GREEN — memoise per resolved workspace root (module-level
-  cache keyed by path; named constant for any sentinel). One fork per daemon
-  lifetime.
-- [ ] ⬜ **Task 1.3**: Verify behaviour unchanged for the positive and negative
-  detection cases; verify a distinct workspace root is cached separately.
-- [ ] ⬜ **Task 1.4**: Full QA + daemon restart RUNNING; live probe that a Bash
-  PreToolUse still dispatches correctly.
+- [x] ✅ **Task 1.2**: GREEN — memoise per directory (module-level
+  `_REPO_DETECTION_CACHE` dict; detection extracted to `_detect_hooks_daemon_repo`,
+  cleared via `_clear_repo_detection_cache`). One fork per daemon lifetime.
+- [x] ✅ **Task 1.3**: Verified behaviour unchanged for positive and negative
+  detection cases; distinct directories cached separately; False also cached.
+- [x] ✅ **Task 1.4**: Full QA 13/13 (9993 tests, 95.5% cov); daemon restart
+  RUNNING. No handler decision behaviour changed.
 
 ### Phase 2: T4 — status-line git subprocess reduction
 
