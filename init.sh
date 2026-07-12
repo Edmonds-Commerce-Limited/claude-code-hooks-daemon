@@ -318,9 +318,12 @@ _get_hostname_suffix() {
         hostname="localhost"
     fi
 
-    # Sanitize hostname for filesystem safety: lowercase, no spaces
-    local sanitized
-    sanitized=$(echo "$hostname" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
+    # Sanitize hostname for filesystem safety: lowercase, no spaces. The
+    # space->hyphen pass uses bash parameter expansion (no process spawn); the
+    # lowercase pass stays on tr for bash 3.2 compatibility (macOS ships no
+    # ${var,,}). One tr spawn instead of two, and no echo pipeline (Plan 00156 T3).
+    local sanitized="${hostname// /-}"
+    sanitized=$(tr '[:upper:]' '[:lower:]' <<< "$sanitized")
     echo "-${sanitized}"
 }
 
@@ -392,8 +395,9 @@ _exec_bit_selfheal() {
 # Use HOOKS_DAEMON_ROOT_DIR (set by .env in self-install, defaults to .claude/hooks-daemon)
 _untracked_dir="${HOOKS_DAEMON_ROOT_DIR}/untracked"
 
-# Create untracked directory if it doesn't exist
-mkdir -p "$_untracked_dir"
+# Create untracked directory if it doesn't exist. Guarded so the common
+# (dir-exists) path skips the mkdir process spawn on every event (Plan 00156 T3).
+[[ -d "$_untracked_dir" ]] || mkdir -p "$_untracked_dir"
 
 # Plan 00102 Phase 3 (Tier 3a): defensively restore +x on sibling hook
 # wrappers if dropped (core.fileMode=false, IDE rewrite, tarball transfer).

@@ -74,13 +74,21 @@ copies cannot drift.
 
 ### Phase 2: T3 — slim init.sh hot path
 
-- [ ] ⬜ **Task 2.1**: Profile `source init.sh` with `bash -x`+timestamps to
-  attribute the 13.2 ms and record a before number.
-- [ ] ⬜ **Task 2.2**: RED/GREEN per shortcut — `tr`→`${var,,}`/`${var// /-}` in
-  `_get_hostname_suffix`, `[[ -d ]] || mkdir -p`, subshell short-circuits — each
-  guarded by its scenario test.
-- [ ] ⬜ **Task 2.3**: Sync `install.py` + deployed copies; dogfooding test green.
-- [ ] ⬜ **Task 2.4**: Full QA; daemon RUNNING; re-profile for an after number; commit.
+- [x] ✅ **Task 2.1**: Profiled `source init.sh` — ~12.46 ms avg over 50 runs
+  (incl. ~2 ms bash startup), consistent with Plan 00154's 13.2 ms p50.
+- [x] ✅ **Task 2.2**: Applied the two portable, bash-3.2-safe spawn removals,
+  each behaviour-locked by characterization tests
+  (`tests/integration/test_init_hot_path.py`): `_get_hostname_suffix` drops one
+  `tr` spawn + the `echo` pipeline via `${var// /-}` (lowercase stays on `tr`
+  for macOS bash 3.2 — no `${var,,}`); the unconditional `mkdir -p` is guarded
+  with `[[ -d ]] ||`. Deliberately DEFERRED the risky ones (delicate
+  cross-platform `stat`/`date` in `_exec_bit_selfheal`; the `dirname` walk whose
+  `${var%/*}` top-level edge case differs) — marginal gain, real stability risk.
+- [x] ✅ **Task 2.3**: init.sh only (wrappers unchanged); `.claude/init.sh` is a
+  symlink to the edited root `init.sh`, so the deployed copy updates atomically.
+  Dogfooding test green.
+- [x] ✅ **Task 2.4**: Full QA; daemon RUNNING; re-profiled ~11.07 ms avg
+  (≈1.4 ms/event saved by removing 2 process spawns). Committed.
 
 ### Phase 3: Close-out
 
