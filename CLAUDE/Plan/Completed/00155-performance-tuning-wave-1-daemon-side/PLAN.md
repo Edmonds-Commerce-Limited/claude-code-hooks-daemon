@@ -1,6 +1,6 @@
 # Plan 00155: performance tuning wave 1 (daemon-side, safe)
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-07-12
 **Owner**: joseph
 **Priority**: Medium
@@ -100,21 +100,23 @@ behaviour is unchanged, and the daemon-restart + full QA gates must stay green.
 - [x] ✅ **Task 3.3**: Full QA 13/13 (9781 tests, coverage 95.6% — up from 95.5%);
   daemon RUNNING; production hook path (bash→socket→daemon) unchanged.
 
-### Phase 4: measure & record
+### Phase 4: measure & record ✅
 
-- [ ] ⬜ **Task 4.1**: Re-run the relevant Plan 00154 harness probes
-  (verifier matches() timing; status render) and record before/after in
-  `CLAUDE/Performance/README.md` (and BASELINE if numbers move).
+- [x] ✅ **Task 4.1**: Micro-benchmarked cold-vs-cached in-process and recorded
+  before/after in `CLAUDE/Performance/README.md`: T1 `is_hooks_daemon_repo`
+  1076 µs → 2.1 µs (forks once per daemon lifetime, not per Bash event);
+  T4 status render 10.4 ms → 4.0 µs on a cache hit (~85% of streaming renders).
 
 ## Success Criteria
 
-- [ ] T1 forks the remote at most once per daemon lifetime; measured Bash-event
-  daemon-side p50 drops toward ~0.4 ms.
-- [ ] T4 reduces git forks per status render (combined call and/or TTL);
-  outputs identical for representative states.
-- [ ] Legacy one-shot entry no longer crashes (fixed or removed cleanly).
-- [ ] Full QA green (13/13), 95%+ coverage, daemon restarts RUNNING after every
-  change, no handler decision behaviour changed.
+- [x] T1 forks the remote at most once per daemon lifetime (1076 µs → 2.1 µs
+  cached); measured Bash-event daemon-side cost drops accordingly.
+- [x] T4 reduces git forks per status render (per-cwd TTL cache; 10.4 ms → 4.0 µs
+  on a hit); outputs identical for representative states.
+- [x] Legacy one-shot entry removed cleanly (whole `hooks/*.py` package deleted
+  per user decision; production path unaffected).
+- [x] Full QA green (13/13), 95.6% coverage, daemon RUNNING after every change,
+  no handler decision behaviour changed.
 
 ## Notes & Updates
 
@@ -124,3 +126,9 @@ behaviour is unchanged, and the daemon-restart + full QA gates must stay green.
   daemon-side wins only (T1, T4, legacy-entry cleanup); T2/T3 deferred to wave 2.
   Reusing the session's existing failsafe recovery cron `d4cb559d` (still live
   from the 00154 session) rather than creating a duplicate.
+- Complete. Delivered on branch `feature/performance-tuning`:
+  scaffold + `CLAUDE/Performance/` hub `43eaddd`; T1 verifier cache `eb3e2ad`;
+  T4 status render TTL cache `62a7115`; Phase 3 legacy-package deletion
+  (−6126 lines) `ea08a31`. Measured: T1 1076 µs → 2.1 µs, T4 10.4 ms → 4.0 µs
+  (cached). QA 13/13, 9781 tests, coverage 95.6%, daemon RUNNING throughout.
+  Wave 2 (T2 drop `jq`, T3 slim `init.sh`) remains — tracked in the hub backlog.

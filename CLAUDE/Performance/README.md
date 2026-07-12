@@ -62,9 +62,9 @@ Ordered by measured impact. Full detail + magnitudes:
 
 | ID  | Change                                                         | Expected                        | Risk                    | Status                                           | Plan  |
 | --- | -------------------------------------------------------------- | ------------------------------- | ----------------------- | ------------------------------------------------ | ----- |
-| T1  | Cache `is_hooks_daemon_repo` (stop per-Bash `git remote` fork) | −1.4 ms/Bash event              | near-zero               | In progress                                      | 00155 |
-| T4  | Status-line git: combined call + short TTL cache               | render 15.8 → ~5 ms (CPU churn) | low                     | In progress                                      | 00155 |
-| —   | Delete/fix broken legacy one-shot `hooks/pre_tool_use.py`      | correctness                     | low                     | In progress                                      | 00155 |
+| T1  | Cache `is_hooks_daemon_repo` (stop per-Bash `git remote` fork) | −1.4 ms/Bash event              | near-zero               | Landed (1076→2.1 µs)                             | 00155 |
+| T4  | Status-line git: short per-cwd TTL cache                       | render 10.4 ms → ~4 µs (cached) | low                     | Landed                                           | 00155 |
+| —   | Delete broken legacy one-shot `hooks/*.py` package             | correctness                     | low                     | Landed (deleted)                                 | 00155 |
 | T2  | Drop `jq` from hook wrappers (transport does JSON wrap/unwrap) | −22 ms/event                    | medium (transport)      | Deferred → wave 2                                | —     |
 | T3  | Slim `init.sh` hot path (subshells, mkdir, tr pipelines)       | est. −5-8 ms/event              | medium (edge cases)     | Deferred → wave 2                                | —     |
 | T5  | Single-pass/combined-alternation content scanning              | est. 2-5× on ≥100 KB writes     | medium                  | Deferred (only if large writes common)           | —     |
@@ -73,18 +73,28 @@ Ordered by measured impact. Full detail + magnitudes:
 
 ## Waves
 
-- **Wave 1 — [Plan 00155](../Plan/00155-performance-tuning-wave-1-daemon-side/PLAN.md)** (in progress):
-  T1 + T4 + legacy-entry cleanup. Pure-Python, daemon-side, no transport-contract
-  risk, fully unit-testable.
+- **Wave 1 — [Plan 00155](../Plan/Completed/00155-performance-tuning-wave-1-daemon-side/PLAN.md)** (landed):
+  T1 + T4 + legacy-entry deletion. Pure-Python, daemon-side, no transport-contract
+  risk, fully unit-testable. Measured results below.
 - **Wave 2 — TBD**: T2 (drop `jq`) + T3 (slim `init.sh`). Touch the safety-critical
   transport; require the forwarder acceptance gates + control-character review.
 
 ## Measured results (before → after)
 
 Populated as waves land. Re-run the Plan 00154 harness on the same box for
-comparability.
+comparability. (Micro-benchmarks below measured in-process on the same box;
+`p50`, cold = cache cleared each iteration, cached = warm hit.)
 
-_(none recorded yet — Wave 1 in progress)_
+### Wave 1 (Plan 00155)
+
+| Change                    | Cold (before)                 | Cached (after) | Effect                                                                                                                                                               |
+| ------------------------- | ----------------------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| T1 `is_hooks_daemon_repo` | ~1076 µs (forks `git remote`) | ~2.1 µs        | forks once per daemon lifetime instead of once per **Bash event** → ~1.07 ms saved per Bash event after the first                                                    |
+| T4 status git render      | ~10.4 ms (~4 git forks)       | ~4.0 µs        | under output streaming (~every 300 ms, TTL 2 s) ~85% of renders hit cache → ~10 ms of git-fork CPU churn saved per hit (async render — battery/fan win, not latency) |
+
+Both are safe daemon-side wins: no transport-contract change, handler decision
+behaviour unchanged, QA 13/13, coverage 95.6%. The larger typical-event win
+(dropping `jq`, T2) is Wave 2.
 
 ## Reproduce
 

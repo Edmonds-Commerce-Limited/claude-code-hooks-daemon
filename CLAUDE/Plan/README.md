@@ -4,10 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-### Performance
-
-- [00155: Performance Tuning Wave 1 (daemon-side, safe)](00155-performance-tuning-wave-1-daemon-side/PLAN.md) - In Progress (`Themes: performance`; first implementation wave off Plan 00154 research — pure-Python daemon-side wins only, no transport-contract risk: T1 cache `is_hooks_daemon_repo` so `daemon_restart_verifier` stops forking `git remote` per Bash event, T4 status-line git combined-call + TTL cache, plus fixing/removing the broken legacy one-shot `hooks/pre_tool_use.py`. T2 `jq` removal + T3 `init.sh` slimming deferred to wave 2. Hub: `CLAUDE/Performance/`)
-
 ### Code Quality / Handler Configuration
 
 ### Plan Workflow / QA
@@ -115,6 +111,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00155: Performance Tuning Wave 1 (daemon-side, safe)](Completed/00155-performance-tuning-wave-1-daemon-side/PLAN.md) - Complete (`Themes: performance`; first implementation wave off Plan 00154 — pure-Python daemon-side wins, no transport-contract risk. T1: memoised `is_hooks_daemon_repo` so `daemon_restart_verifier` forks `git remote` once per daemon lifetime not per Bash event (1076→2.1 µs). T4: short per-cwd TTL cache for the status-line git render (10.4 ms→4.0 µs on a hit, cutting ~4 git forks/render under streaming). Also deleted the drifted, off-production-path legacy one-shot `hooks/*.py` package (−6126 lines) per user decision. QA 13/13, coverage 95.6%. New `CLAUDE/Performance/` hub. Commits `43eaddd`/`eb3e2ad`/`62a7115`/`ea08a31`. Wave 2 = T2 drop `jq` + T3 slim `init.sh`)
 
 - [00154: Daemon Performance — Rust vs Python Research](Completed/00154-daemon-performance-rust-vs-python-research/PLAN.md) - Complete (research-only, delegated to a Fable agent; five write-ups + reproducible benchmark harness/results in-folder. Headline: the daemon is already lightweight — ~85 ms/tool-call against multi-second turns, ~51 MB RSS, no user-visible cost. Full Rust rewrite = **never** (≤4% end-to-end ceiling, pays with the project's auditability); PyO3 core = never; a policy-free transport forwarder is the only Rust increment that could ever pay, and **not yet** (half its win is free by dropping `jq`). Hands back no-rewrite tuning wins T1–T4 to drive future dev. Delivered with plan closure)
 
@@ -1004,8 +1002,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 155 (count = `hooksdaemon.latestPlanNumber` git counter; 00145 was allocated by the counter but its folder is not present on this branch)
-- **Completed**: 131 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 17 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Completed**: 132 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
+- **Active**: 16 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102); plus draft folders deleted and no longer on disk (00036 empty draft, 00038 superseded by 00045, 00073 orphan empty folder removed during Plan 00107 housekeeping)
 - **Last reconciled by**: Plan 00144 Task 2.2 sweep remediation
