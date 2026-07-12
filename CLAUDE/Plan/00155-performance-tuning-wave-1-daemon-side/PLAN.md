@@ -63,16 +63,23 @@ behaviour is unchanged, and the daemon-restart + full QA gates must stay green.
 - [x] ✅ **Task 1.4**: Full QA 13/13 (9993 tests, 95.5% cov); daemon restart
   RUNNING. No handler decision behaviour changed.
 
-### Phase 2: T4 — status-line git subprocess reduction
+### Phase 2: T4 — status-line git subprocess reduction ✅
 
-- [ ] ⬜ **Task 2.1**: RED — characterise current `git_branch.py` fork behaviour
-  in tests (which git calls, how many) so the reduction is provably equivalent.
-- [ ] ⬜ **Task 2.2**: GREEN — combine into fewer git calls and/or add a short
-  TTL cache keyed by repo toplevel (named-constant TTL), following the
-  handler's existing default-branch/TTL cache pattern.
-- [ ] ⬜ **Task 2.3**: Prove branch name, ahead/behind, dirty, and stash-count
-  outputs are unchanged for representative repo states.
-- [ ] ⬜ **Task 2.4**: Full QA + daemon restart; live status render sanity check.
+- [x] ✅ **Task 2.1**: RED — characterised render fork behaviour in tests
+  (4 new `TestGitBranchRenderCache` tests: cache-hit-within-TTL, cwd-keyed
+  isolation, TTL=0 disables, expiry re-renders).
+- [x] ✅ **Task 2.2**: GREEN — added a short per-cwd render TTL cache
+  (`_DEFAULT_RENDER_TTL_SECONDS = 2.0`, config-injectable `render_ttl_seconds`);
+  extracted the render body into `_render_git_context`, `handle()` now wraps it
+  with `_cached_render`/`_store_render`. Serves streaming renders from cache,
+  cutting ~4 git forks per hit.
+- [x] ✅ **Task 2.3**: Output proven unchanged — existing colour/icon/ahead-behind/
+  stash tests all pass through the cache-miss path; cache hit returns the same
+  context list. Updated `test_default_branch_detection_cached` to disable the
+  render cache so it still isolates default-branch memoisation.
+- [x] ✅ **Task 2.4**: Full QA 13/13 (9997 tests, 95.5% cov); daemon RUNNING;
+  live status render verified (`⎇ feature/performance-tuning ✚3`). Reconciled
+  the drift-proof `error_hiding` exclusion (function `handle` → `_render_git_context`).
 
 ### Phase 3: legacy one-shot entry cleanup
 
