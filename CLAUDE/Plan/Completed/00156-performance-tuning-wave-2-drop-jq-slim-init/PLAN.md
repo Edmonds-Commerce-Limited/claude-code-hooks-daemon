@@ -1,6 +1,6 @@
 # Plan 00156: Performance Tuning Wave 2 — drop jq, slim init.sh
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-07-12
 **Owner**: joseph
 **Priority**: Medium
@@ -92,10 +92,12 @@ copies cannot drift.
 
 ### Phase 3: Close-out
 
-- [ ] ⬜ **Task 3.1**: Update `CLAUDE/Performance/README.md` backlog (T2/T3 → Landed)
-  - measured-results table; update `BASELINE.md` if re-measured.
-- [ ] ⬜ **Task 3.2**: Plan completion checklist (status→Complete, git mv to
-  Completed/, README row + stats, single atomic commit).
+- [x] ✅ **Task 3.1**: Updated `CLAUDE/Performance/README.md` backlog (T2/T3 →
+  Landed, plan 00156), Wave 2 measured-results table, and Waves section.
+  `BASELINE.md` kept as the Plan 00154 canonical baseline; Wave 2 deltas live in
+  the hub's measured-results table.
+- [x] ✅ **Task 3.2**: Plan completion checklist — status→Complete, git mv to
+  Completed/, README row + stats, single atomic commit.
 
 ## Success Criteria
 
@@ -125,3 +127,13 @@ copies cannot drift.
   guard suite `tests/integration/test_forwarder_jq_free.py` (33 tests) drives the
   real wrappers with a broken-`jq` shim on PATH. Full QA 13/13, 9814 tests,
   coverage 95.6%. Committed on branch `feature/performance-tuning`.
+- **T3 landed (Phase 2)**: `init.sh` source dropped ~12.46 → ~11.07 ms avg
+  (~1.4 ms/event) by guarding `mkdir -p` and removing one `tr` spawn from
+  `_get_hostname_suffix`. Characterization tests
+  `tests/integration/test_init_hot_path.py` lock the behaviour. Full QA 13/13,
+  9822 tests, coverage 95.6%.
+- **Delivery commits** (branch `feature/performance-tuning`): scaffold `83f5f91`,
+  T2 `b88d424`, T3 `c4fff5b`, close-out (this commit). Wave 2 net: ~−22 ms on
+  every latency-path event (jq removed) + ~−1.4 ms/event (init.sh slim), with
+  handler decisions, the request envelope, the Stop exit-2 contract, and the
+  status-line/error responses all behaviourally unchanged.

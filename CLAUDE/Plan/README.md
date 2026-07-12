@@ -4,10 +4,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
-### Performance
-
-- [00156: Performance Tuning Wave 2 — drop `jq`, slim `init.sh`](00156-performance-tuning-wave-2-drop-jq-slim-init/PLAN.md) - In Progress (`Themes: performance`; Wave 2 off Plan 00154. T2: eliminate `jq` from every forwarder wrapper by moving JSON wrap/unwrap into the existing `python3` transport (~−22 ms/event); T3: slim the `init.sh` hot path (~−5-8 ms). Safety-critical transport — JSON-never-through-shell invariant preserved, dogfooding test keeps deployed copies in sync, forwarder acceptance gates + live probes required)
-
 ### Code Quality / Handler Configuration
 
 ### Plan Workflow / QA
@@ -115,6 +111,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00156: Performance Tuning Wave 2 — drop `jq`, slim `init.sh`](Completed/00156-performance-tuning-wave-2-drop-jq-slim-init/PLAN.md) - Complete (`Themes: performance`; Wave 2 off Plan 00154, the forwarder-side wins. T2: eliminated `jq` from every hook wrapper — the per-event JSON wrap (and status-line's wrap+unwrap) moved into the `python3` transport each wrapper already spawns, saving ~22-24 ms/event; all three `send_request_stdin` definitions + `forward_stop_event` are jq-free (jq remains only in `emit_hook_error`). T3: portable, bash-3.2-safe slim of the `init.sh` hot path (guarded `mkdir`, one fewer `tr` spawn in the hostname suffix) — ~12.46→11.07 ms/source (~1.4 ms/event); riskier `stat`/`date`/`dirname` swaps deliberately deferred. Payload stays on stdin (control-char safe); only the hardcoded event-name literal moved to argv. Request envelope, Stop exit-2 contract, status-line fallback, and CI/daemon-down error responses all byte-preserved and pinned by a new 33-test jq-free forwarder guard suite (broken-`jq` shim on PATH) + init.sh characterization tests; dogfooding/CI-passthrough/stop-hard-block gates + live probes green. QA 13/13, 9822 tests, coverage 95.6%. Commits `83f5f91`/`b88d424`/`c4fff5b`)
 
 - [00155: Performance Tuning Wave 1 (daemon-side, safe)](Completed/00155-performance-tuning-wave-1-daemon-side/PLAN.md) - Complete (`Themes: performance`; first implementation wave off Plan 00154 — pure-Python daemon-side wins, no transport-contract risk. T1: memoised `is_hooks_daemon_repo` so `daemon_restart_verifier` forks `git remote` once per daemon lifetime not per Bash event (1076→2.1 µs). T4: short per-cwd TTL cache for the status-line git render (10.4 ms→4.0 µs on a hit, cutting ~4 git forks/render under streaming). Also deleted the drifted, off-production-path legacy one-shot `hooks/*.py` package (−6126 lines) per user decision. QA 13/13, coverage 95.6%. New `CLAUDE/Performance/` hub. Commits `43eaddd`/`eb3e2ad`/`62a7115`/`ea08a31`. Wave 2 = T2 drop `jq` + T3 slim `init.sh`)
 
@@ -1006,8 +1004,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 156 (count = `hooksdaemon.latestPlanNumber` git counter; 00145 was allocated by the counter but its folder is not present on this branch)
-- **Completed**: 132 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 17 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Completed**: 133 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
+- **Active**: 16 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102); plus draft folders deleted and no longer on disk (00036 empty draft, 00038 superseded by 00045, 00073 orphan empty folder removed during Plan 00107 housekeeping)
 - **Last reconciled by**: Plan 00144 Task 2.2 sweep remediation

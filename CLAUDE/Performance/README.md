@@ -65,8 +65,8 @@ Ordered by measured impact. Full detail + magnitudes:
 | T1  | Cache `is_hooks_daemon_repo` (stop per-Bash `git remote` fork) | −1.4 ms/Bash event              | near-zero               | Landed (1076→2.1 µs)                             | 00155 |
 | T4  | Status-line git: short per-cwd TTL cache                       | render 10.4 ms → ~4 µs (cached) | low                     | Landed                                           | 00155 |
 | —   | Delete broken legacy one-shot `hooks/*.py` package             | correctness                     | low                     | Landed (deleted)                                 | 00155 |
-| T2  | Drop `jq` from hook wrappers (transport does JSON wrap/unwrap) | −22 ms/event                    | medium (transport)      | Deferred → wave 2                                | —     |
-| T3  | Slim `init.sh` hot path (subshells, mkdir, tr pipelines)       | est. −5-8 ms/event              | medium (edge cases)     | Deferred → wave 2                                | —     |
+| T2  | Drop `jq` from hook wrappers (transport does JSON wrap/unwrap) | −22 ms/event                    | medium (transport)      | Landed (jq-free transport)                       | 00156 |
+| T3  | Slim `init.sh` hot path (subshells, mkdir, tr pipelines)       | est. −5-8 ms/event              | medium (edge cases)     | Landed (portable tier, ~1.4 ms/event)            | 00156 |
 | T5  | Single-pass/combined-alternation content scanning              | est. 2-5× on ≥100 KB writes     | medium                  | Deferred (only if large writes common)           | —     |
 | T6  | `orjson` socket encode/decode                                  | −1-3 ms at MB payloads only     | low (adds compiled dep) | Not recommended                                  | —     |
 | —   | Compiled transport forwarder (Rust, policy-free)               | 45 → ~3-5 ms                    | high (distribution)     | Never, until free wins land + budget still fails | —     |
@@ -76,8 +76,15 @@ Ordered by measured impact. Full detail + magnitudes:
 - **Wave 1 — [Plan 00155](../Plan/Completed/00155-performance-tuning-wave-1-daemon-side/PLAN.md)** (landed):
   T1 + T4 + legacy-entry deletion. Pure-Python, daemon-side, no transport-contract
   risk, fully unit-testable. Measured results below.
-- **Wave 2 — TBD**: T2 (drop `jq`) + T3 (slim `init.sh`). Touch the safety-critical
-  transport; require the forwarder acceptance gates + control-character review.
+- **Wave 2 — [Plan 00156](../Plan/00156-performance-tuning-wave-2-drop-jq-slim-init/PLAN.md)** (landed):
+  T2 (drop `jq` — the per-event JSON wrap/unwrap moves into the `python3`
+  transport every wrapper already spawns) + T3 (portable tier of the `init.sh`
+  slim: guarded `mkdir`, one fewer `tr` spawn in the hostname suffix). Touches
+  the safety-critical transport; pinned by a new jq-free forwarder guard suite
+  (33 tests, broken-`jq` shim on PATH) + init.sh characterization tests, the
+  dogfooding/CI-passthrough/stop-hard-block gates, and live probes. The riskier
+  T3 spawns (cross-platform `stat`/`date`, the `dirname` walk) were deliberately
+  left — marginal gain, real stability risk. Measured results below.
 
 ## Measured results (before → after)
 
@@ -94,7 +101,26 @@ comparability. (Micro-benchmarks below measured in-process on the same box;
 
 Both are safe daemon-side wins: no transport-contract change, handler decision
 behaviour unchanged, QA 13/13, coverage 95.6%. The larger typical-event win
-(dropping `jq`, T2) is Wave 2.
+(dropping `jq`, T2) landed in Wave 2 below.
+
+### Wave 2 (Plan 00156)
+
+Forwarder-side wins. All numbers measured on the same box; the event-level jq
+saving is the p50 `jq` spawn cost the wrapper no longer pays.
+
+| Change                         | Before                         | After                      | Effect                                                                                                                    |
+| ------------------------------ | ------------------------------ | -------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| T2 drop `jq` (standard event)  | 1 `jq` spawn/event (~22-24 ms) | 0 (python transport wraps) | ~−22 ms on every latency-path event; the wrap/unwrap now costs µs inside the `python3` process the wrapper already spawns |
+| T2 drop `jq` (status line)     | 2 `jq` spawns (wrap + unwrap)  | 0                          | ~−44-48 ms of jq off the async status render (battery/fan, stacks with Wave 1 T4's TTL cache)                             |
+| T3 slim `init.sh` (per source) | ~12.46 ms avg                  | ~11.07 ms avg              | ~−1.4 ms/event — guarded `mkdir` + one fewer `tr` spawn in the hostname suffix (portable, bash-3.2-safe tier only)        |
+
+Behaviour is byte-identical: the request envelope, the Stop exit-2 contract, the
+status-line fallback text, and the CI/daemon-down error responses are all
+preserved and pinned by tests. jq remains a dependency only for
+`emit_hook_error`'s pure-error path. After T2/T3 the irreducible per-event floor
+is ~2 ms bash + ~19-21 ms CPython interpreter start for the transport — the point
+where the (policy-free) compiled-forwarder conversation from Plan 00154 would
+legitimately begin, and still not yet justified.
 
 ## Reproduce
 
