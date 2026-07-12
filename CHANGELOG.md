@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.37.0] - 2026-07-12
+
+This is a **minor release** refining the ccy PTY supervisor's auto-`/compact`
+behaviour into a graduated, three-band escalation and adding an additive
+plan-QA allowlist for legitimate non-plan files at the plan root. v3.36.0 made
+the supervisor inject `/compact` promptly on red — good for keeping context
+bounded, but it could interrupt an in-progress turn. This release restores the
+old "wait for a lull" politeness at the red band while keeping prompt injection
+and the ESC-flush for the more urgent bands. All backwards compatible; one new
+opt-in `hooks-daemon.yaml` key (`plan_workflow.qa.extra_root_files`, default
+empty = no behaviour change).
+
+### Added
+
+- **Graduated supervisor compaction bands** (Plan 00152) — the supervisor now
+  escalates its `/compact` response in three bands keyed on context depth
+  instead of firing identically across the whole red range:
+  - **Red band `[red, midpoint)`** — *patient*: waits for the child's output to
+    settle (a `work_idle` quiet window, default 3s) before injecting `/compact`,
+    restoring the pre-v3.36.0 "blocked whilst things were happening" behaviour so
+    an active turn is never interrupted mid-burst.
+  - **Elevated band `[midpoint, critical)`** — prompt injection: injects
+    `/compact` immediately even mid-turn (the v3.36.0 behaviour), where midpoint
+    is `(red + critical) // 2` (200k-window 83%, 1000k-window 50%).
+  - **Critical band** — injects `/compact` **and** retains the ESC-key flush
+    fallback, now reserved for the critical tier only.
+- **`compact_urgent` midpoint band in the shared classifier** — `context_tiers.py`
+  gains `compact_urgency_pct()` / `is_compact_urgent()` (single source of truth
+  for the midpoint), surfaced through the context sidecar as `compact_urgent` so
+  the supervisor reads the band rather than recomputing thresholds.
+- **`plan_workflow.qa.extra_root_files`** (Plan 00153) — a new additive allowlist
+  of extra non-plan filenames permitted at the plan root, layered on top of the
+  built-in accepted set (`README.md`, `CLAUDE.md`, `mkplan.bash`, `_TEMPLATE_.md`).
+  List a legitimately-placed non-plan file (the motivating case is a sourced
+  `_planlib.bash` helper shared by plan orchestrator scripts) so the
+  structure-archive-dirs plan-QA check no longer reports it as a stray file on
+  every session start and commit. Matching is by exact filename; default empty
+  list, so absent config nothing changes.
+
+### Changed
+
+- **Supervisor child-output activity tracking** — the forwarding loop now records
+  master-fd output activity (`OutputActivity`) and computes a `work_idle` signal
+  so the patient red band can defer injection until the child has been quiet for
+  the settle window. The ESC-flush is now gated on the critical tier rather than
+  firing across the red range.
+
 ## [3.36.0] - 2026-07-11
 
 This is a **minor release** hardening the ccy PTY supervisor's auto-`/compact`
