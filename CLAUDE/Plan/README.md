@@ -4,6 +4,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+### Performance
+
+- [00155: Performance Tuning Wave 1 (daemon-side, safe)](00155-performance-tuning-wave-1-daemon-side/PLAN.md) - In Progress (`Themes: performance`; first implementation wave off Plan 00154 research — pure-Python daemon-side wins only, no transport-contract risk: T1 cache `is_hooks_daemon_repo` so `daemon_restart_verifier` stops forking `git remote` per Bash event, T4 status-line git combined-call + TTL cache, plus fixing/removing the broken legacy one-shot `hooks/pre_tool_use.py`. T2 `jq` removal + T3 `init.sh` slimming deferred to wave 2. Hub: `CLAUDE/Performance/`)
+
 ### Code Quality / Handler Configuration
 
 ### Plan Workflow / QA
@@ -999,9 +1003,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 154 (count = `hooksdaemon.latestPlanNumber` git counter; 00145 was allocated by the counter but its folder is not present on this branch)
+- **Total Plans Created**: 155 (count = `hooksdaemon.latestPlanNumber` git counter; 00145 was allocated by the counter but its folder is not present on this branch)
 - **Completed**: 131 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 16 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 17 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102); plus draft folders deleted and no longer on disk (00036 empty draft, 00038 superseded by 00045, 00073 orphan empty folder removed during Plan 00107 housekeeping)
 - **Last reconciled by**: Plan 00144 Task 2.2 sweep remediation
