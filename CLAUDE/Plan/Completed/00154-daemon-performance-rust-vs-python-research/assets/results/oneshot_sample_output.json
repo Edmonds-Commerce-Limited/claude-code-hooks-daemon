@@ -1,0 +1,12 @@
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/workspace/src/claude_code_hooks_daemon/hooks/pre_tool_use.py", line 180, in <module>
+    main()
+  File "/workspace/src/claude_code_hooks_daemon/hooks/pre_tool_use.py", line 171, in main
+    handlers = PluginLoader.load_handlers_from_config(plugin)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/src/claude_code_hooks_daemon/plugins/loader.py", line 345, in load_handlers_from_config
+    if not plugin_config.get("enabled", False):
+           ^^^^^^^^^^^^^^^^^
+AttributeError: 'str' object has no attribute 'get'

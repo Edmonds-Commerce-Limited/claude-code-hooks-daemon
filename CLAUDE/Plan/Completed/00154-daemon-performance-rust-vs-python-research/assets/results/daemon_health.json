@@ -1,0 +1,39 @@
+{
+ "result": {
+  "status": "healthy",
+  "initialised": true,
+  "stats": {
+   "start_time": "2026-07-12T13:10:14.942516",
+   "uptime_seconds": 1062.71,
+   "requests_processed": 2515,
+   "requests_by_event": {
+    "PostToolUse": 328,
+    "Status": 339,
+    "PreToolUse": 1490,
+    "Stop": 228,
+    "SubagentStop": 4,
+    "Notification": 1,
+    "UserPromptSubmit": 123,
+    "PreCompact": 1,
+    "SessionStart": 1
+   },
+   "avg_processing_time_ms": 8.39,
+   "errors": 0,
+   "last_request_time": "2026-07-12T13:27:57.590669"
+  },
+  "handlers": {
+   "PreToolUse": 38,
+   "PostToolUse": 8,
+   "SessionStart": 12,
+   "SessionEnd": 2,
+   "PreCompact": 3,
+   "UserPromptSubmit": 4,
+   "PermissionRequest": 2,
+   "Notification": 2,
+   "Stop": 6,
+   "SubagentStop": 3,
+   "Status": 11
+  },
+  "mode": "default"
+ }
+}

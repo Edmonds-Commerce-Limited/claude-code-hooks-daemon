@@ -1,0 +1,26 @@
+Process 26974: untracked/venv-py311-66bbc57c/bin/python -m claude_code_hooks_daemon.daemon.cli restart
+Python v3.11.2 (/usr/bin/python3.11)
+
+Thread 26974 (idle): "MainThread"
+    select (selectors.py:468)
+    _run_once (asyncio/base_events.py:1884)
+    run_forever (asyncio/base_events.py:607)
+    run_until_complete (asyncio/base_events.py:640)
+    run (asyncio/runners.py:118)
+    run (asyncio/runners.py:190)
+    cmd_start (claude_code_hooks_daemon/daemon/cli.py:513)
+    cmd_restart (claude_code_hooks_daemon/daemon/cli.py:1267)
+    main (claude_code_hooks_daemon/daemon/cli.py:3775)
+    <module> (claude_code_hooks_daemon/daemon/cli.py:3779)
+    _run_code (<frozen runpy>:88)
+    _run_module_as_main (<frozen runpy>:198)
+Thread 27016 (idle): "asyncio_0"
+    _worker (concurrent/futures/thread.py:81)
+    run (threading.py:975)
+    _bootstrap_inner (threading.py:1038)
+    _bootstrap (threading.py:995)
+Thread 46481 (idle): "asyncio_1"
+    _worker (concurrent/futures/thread.py:81)
+    run (threading.py:975)
+    _bootstrap_inner (threading.py:1038)
+    _bootstrap (threading.py:995)

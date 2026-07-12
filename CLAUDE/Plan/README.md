@@ -18,15 +18,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00135: Event-Driven `send-keys` Injection](00135-event-driven-send-keys-injection/PLAN.md) - **In design**
 
-### Research / Performance
-
-- [00154: Daemon Performance — Rust vs Python Research](00154-daemon-performance-rust-vs-python-research/PLAN.md) - In Progress (research-only: quantify per-event latency/memory of the all-Python daemon, catalogue no-rewrite Python tuning wins, and honestly weigh a Rust move — raw performance vs loss of client-side introspectability; delegated to a Fable research agent writing all artifacts into the plan folder) (2 hostile-review rounds; launcher redesign dissolved pane-identity; awaiting ARCH-A-vs-ARCH-B decision + coexistence fix)
-
-  - Hooks run as children of Claude Code and inherit `$TMUX_PANE`, so any daemon hook event (or a context-threshold watchdog) can `tmux send-keys` a **slash command / prompt** back into the live, watchable session — flagship use case: auto-`/compact` at a custom threshold; also PostCompact re-orientation, `/fix` on failing tests, session bootstrap
-  - Architecture: status-line handler writes a pct/idle sidecar (reuses the payload the daemon already receives), a single `tmux_inject` choke-point utility, and a user-launched watchdog in its own observable pane; handlers enqueue intents, never type directly
-  - Safety-first / opt-in (`get_default_enabled()` → False): exact-payload allowlist, loop-guard sentinel, idle-gating, cooldown + per-session cap, tmux-presence no-op, no Stop-handler collision; see `research-note.md` + `context.md`
-  - **High-stakes**: potential game-changer done well, reputation risk done badly — hostile multi-lens review required before build
-
 ### Memory / Documentation Policy
 
 - [00132: PostToolUse Progressive-Disclosure Reminder on Project-Doc Markdown Writes](00132-progressive-disclosure-md-write-reminder/PLAN.md) - Not Started (awaiting sign-off)
@@ -120,6 +111,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00154: Daemon Performance — Rust vs Python Research](Completed/00154-daemon-performance-rust-vs-python-research/PLAN.md) - Complete (research-only, delegated to a Fable agent; five write-ups + reproducible benchmark harness/results in-folder. Headline: the daemon is already lightweight — ~85 ms/tool-call against multi-second turns, ~51 MB RSS, no user-visible cost. Full Rust rewrite = **never** (≤4% end-to-end ceiling, pays with the project's auditability); PyO3 core = never; a policy-free transport forwarder is the only Rust increment that could ever pay, and **not yet** (half its win is free by dropping `jq`). Hands back no-rewrite tuning wins T1–T4 to drive future dev. Delivered with plan closure)
 
 - [00153: Plan-QA Extensible Root Files](Completed/00153-plan-qa-extensible-root-files/PLAN.md) - Complete (additive `plan_workflow.qa.extra_root_files` allowlist threaded through `QaPolicy` → `PlanTree.scan` so clients can permit a legitimate non-plan file such as a sourced `_planlib.bash` at the plan root without the permanent stray-file advisory; default empty = zero behaviour change; docs + config-changes manifest `v3.37.0.yaml`. Commit `df9262b`)
 
@@ -1007,8 +1000,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 154 (count = `hooksdaemon.latestPlanNumber` git counter; 00145 was allocated by the counter but its folder is not present on this branch)
-- **Completed**: 130 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 17 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Completed**: 131 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
+- **Active**: 16 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102); plus draft folders deleted and no longer on disk (00036 empty draft, 00038 superseded by 00045, 00073 orphan empty folder removed during Plan 00107 housekeeping)
 - **Last reconciled by**: Plan 00144 Task 2.2 sweep remediation

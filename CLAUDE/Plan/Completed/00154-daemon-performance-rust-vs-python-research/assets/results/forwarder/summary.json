@@ -1,0 +1,65 @@
+{
+  "floor_bash_init_source": {
+    "n": 50,
+    "min_ms": 11.305,
+    "p50_ms": 13.163,
+    "p95_ms": 15.15,
+    "p99_ms": 16.172,
+    "max_ms": 16.172,
+    "mean_ms": 13.384
+  },
+  "floor_bash_spawn": {
+    "n": 50,
+    "min_ms": 1.893,
+    "p50_ms": 2.171,
+    "p95_ms": 2.476,
+    "p99_ms": 2.49,
+    "max_ms": 2.49,
+    "mean_ms": 2.17
+  },
+  "floor_jq_spawn": {
+    "n": 50,
+    "min_ms": 21.572,
+    "p50_ms": 23.983,
+    "p95_ms": 29.332,
+    "p99_ms": 32.243,
+    "max_ms": 32.243,
+    "mean_ms": 24.78
+  },
+  "floor_python3_spawn": {
+    "n": 50,
+    "min_ms": 16.388,
+    "p50_ms": 20.915,
+    "p95_ms": 26.205,
+    "p99_ms": 33.511,
+    "max_ms": 33.511,
+    "mean_ms": 21.384
+  },
+  "wrapper_pre_tool_use": {
+    "n": 50,
+    "min_ms": 41.457,
+    "p50_ms": 45.369,
+    "p95_ms": 51.072,
+    "p99_ms": 52.76,
+    "max_ms": 52.76,
+    "mean_ms": 45.884
+  },
+  "wrapper_pre_tool_use_1m": {
+    "n": 50,
+    "min_ms": 102.1,
+    "p50_ms": 114.381,
+    "p95_ms": 145.551,
+    "p99_ms": 155.465,
+    "max_ms": 155.465,
+    "mean_ms": 118.325
+  },
+  "wrapper_status_line": {
+    "n": 50,
+    "min_ms": 56.632,
+    "p50_ms": 61.657,
+    "p95_ms": 73.83,
+    "p99_ms": 84.308,
+    "max_ms": 84.308,
+    "mean_ms": 64.327
+  }
+}

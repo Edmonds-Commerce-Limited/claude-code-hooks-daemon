@@ -1,0 +1,164 @@
+{
+  "socket": "/workspace/untracked/daemon-9b2a67613048.sock",
+  "session_id": "bench-00154-1783862742",
+  "timestamp": "2026-07-12T13:25:42",
+  "events": {
+    "system_health": {
+      "n": 200,
+      "min_ms": 0.111,
+      "p50_ms": 0.124,
+      "p90_ms": 0.219,
+      "p95_ms": 0.247,
+      "p99_ms": 0.397,
+      "max_ms": 0.864,
+      "mean_ms": 0.153,
+      "request_bytes": 57,
+      "response_bytes": 676,
+      "response_keys": [
+        "result"
+      ]
+    },
+    "pre_bash_safe": {
+      "n": 200,
+      "min_ms": 1.089,
+      "p50_ms": 1.829,
+      "p90_ms": 1.963,
+      "p95_ms": 2.026,
+      "p99_ms": 2.83,
+      "max_ms": 26.225,
+      "mean_ms": 1.935,
+      "request_bytes": 261,
+      "response_bytes": 3,
+      "response_keys": []
+    },
+    "pre_bash_denied_early": {
+      "n": 200,
+      "min_ms": 0.282,
+      "p50_ms": 0.321,
+      "p90_ms": 0.466,
+      "p95_ms": 0.495,
+      "p99_ms": 0.631,
+      "max_ms": 1.074,
+      "mean_ms": 0.355,
+      "request_bytes": 267,
+      "response_bytes": 1016,
+      "response_keys": [
+        "hookSpecificOutput"
+      ]
+    },
+    "pre_write_test_1k": {
+      "n": 200,
+      "min_ms": 0.328,
+      "p50_ms": 0.495,
+      "p90_ms": 0.714,
+      "p95_ms": 0.772,
+      "p99_ms": 0.873,
+      "max_ms": 1.036,
+      "mean_ms": 0.515,
+      "request_bytes": 1396,
+      "response_bytes": 3,
+      "response_keys": []
+    },
+    "pre_write_test_10k": {
+      "n": 200,
+      "min_ms": 0.637,
+      "p50_ms": 0.732,
+      "p90_ms": 0.871,
+      "p95_ms": 0.94,
+      "p99_ms": 1.28,
+      "max_ms": 1.36,
+      "mean_ms": 0.766,
+      "request_bytes": 10796,
+      "response_bytes": 3,
+      "response_keys": []
+    },
+    "pre_write_test_100k": {
+      "n": 200,
+      "min_ms": 3.936,
+      "p50_ms": 4.652,
+      "p90_ms": 5.993,
+      "p95_ms": 7.606,
+      "p99_ms": 8.176,
+      "max_ms": 8.353,
+      "mean_ms": 4.917,
+      "request_bytes": 104592,
+      "response_bytes": 3,
+      "response_keys": []
+    },
+    "pre_write_test_1m": {
+      "n": 200,
+      "min_ms": 37.254,
+      "p50_ms": 40.349,
+      "p90_ms": 47.388,
+      "p95_ms": 52.093,
+      "p99_ms": 55.512,
+      "max_ms": 56.429,
+      "mean_ms": 41.714,
+      "request_bytes": 1041232,
+      "response_bytes": 3,
+      "response_keys": []
+    },
+    "post_bash": {
+      "n": 200,
+      "min_ms": 0.314,
+      "p50_ms": 0.383,
+      "p90_ms": 0.453,
+      "p95_ms": 0.549,
+      "p99_ms": 0.713,
+      "max_ms": 15.697,
+      "mean_ms": 0.472,
+      "request_bytes": 344,
+      "response_bytes": 119,
+      "response_keys": [
+        "hookSpecificOutput"
+      ]
+    },
+    "user_prompt_submit": {
+      "n": 100,
+      "min_ms": 8.482,
+      "p50_ms": 11.347,
+      "p90_ms": 14.397,
+      "p95_ms": 15.322,
+      "p99_ms": 16.354,
+      "max_ms": 17.38,
+      "mean_ms": 11.562,
+      "request_bytes": 247,
+      "response_bytes": 1090,
+      "response_keys": [
+        "hookSpecificOutput"
+      ]
+    },
+    "stop": {
+      "n": 200,
+      "min_ms": 0.489,
+      "p50_ms": 0.61,
+      "p90_ms": 0.748,
+      "p95_ms": 0.833,
+      "p99_ms": 0.918,
+      "max_ms": 1.168,
+      "mean_ms": 0.627,
+      "request_bytes": 207,
+      "response_bytes": 962,
+      "response_keys": [
+        "decision",
+        "hookSpecificOutput",
+        "reason"
+      ]
+    },
+    "status_line": {
+      "n": 100,
+      "min_ms": 12.911,
+      "p50_ms": 15.748,
+      "p90_ms": 18.911,
+      "p95_ms": 19.468,
+      "p99_ms": 20.638,
+      "max_ms": 20.873,
+      "mean_ms": 16.065,
+      "request_bytes": 258,
+      "response_bytes": 490,
+      "response_keys": [
+        "text"
+      ]
+    }
+  }
+}

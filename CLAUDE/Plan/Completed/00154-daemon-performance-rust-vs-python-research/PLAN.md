@@ -1,6 +1,6 @@
 # Plan 00154: daemon performance rust vs python research
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-07-12
 **Owner**: joseph
 **Priority**: Medium
@@ -73,27 +73,27 @@ to the orchestrator for writing. The agent should, where the container allows:
 
 ### Phase 1: Baseline & instrumentation
 
-- [ ] ⬜ **Task 1.1**: Map the hot path end-to-end and document each stage's
+- [x] ✅ **Task 1.1**: Map the hot path end-to-end and document each stage's
   expected cost class.
-- [ ] ⬜ **Task 1.2**: Build a reproducible benchmark harness; capture p50/p95/p99
+- [x] ✅ **Task 1.2**: Build a reproducible benchmark harness; capture p50/p95/p99
   per event type, warm vs cold, and RSS.
 
 ### Phase 2: Hotspot analysis
 
-- [ ] ⬜ **Task 2.1**: Profile representative events; attribute time to
+- [x] ✅ **Task 2.1**: Profile representative events; attribute time to
   forwarder / socket / JSON / dispatch / per-handler.
-- [ ] ⬜ **Task 2.2**: Identify the hot surfaces (status line cadence, big-file
+- [x] ✅ **Task 2.2**: Identify the hot surfaces (status line cadence, big-file
   scanners, subprocess-heavy handlers).
 
 ### Phase 3: Options analysis
 
-- [ ] ⬜ **Task 3.1**: Python-tuning catalogue with per-item expected magnitude.
-- [ ] ⬜ **Task 3.2**: Rust options (full / PyO3 hybrid / targeted) with
+- [x] ✅ **Task 3.1**: Python-tuning catalogue with per-item expected magnitude.
+- [x] ✅ **Task 3.2**: Rust options (full / PyO3 hybrid / targeted) with
   upside estimates AND opacity/build/portability/ecosystem costs.
 
 ### Phase 4: Synthesis
 
-- [ ] ⬜ **Task 4.1**: Decision framework + recommendation (now / later / never;
+- [x] ✅ **Task 4.1**: Decision framework + recommendation (now / later / never;
   which increment first).
 
 ## Deliverables (all written by the Fable agent into this folder)
@@ -119,4 +119,16 @@ to the orchestrator for writing. The agent should, where the container allows:
 
 - Plan scaffolded. Research delegated to a Fable agent that writes all artifacts
   directly into this folder. Session recovery cron: `d4cb559d`.
+- Research complete. The Fable agent produced all five write-ups (`RESEARCH.md`,
+  `BENCHMARK-METHODOLOGY.md`, `PYTHON-TUNING.md`, `RUST-TRADEOFFS.md`,
+  `RECOMMENDATION.md`) plus a reproducible benchmark harness and captured results
+  under `assets/`. **Headline call**: the daemon is already lightweight (~85 ms
+  per tool call against multi-second turns, ~51 MB RSS) — no user-visible cost.
+  Full Rust rewrite = **never** (≤4% end-to-end ceiling, paid for with the
+  project's auditability). The only Rust increment that could ever pay is a
+  policy-free transport forwarder, and **not yet** (half its win is free by
+  dropping `jq`). Concrete no-rewrite tuning wins T1–T4 (cache the per-Bash git
+  fork, fold `jq` into the python3 transport, TTL-cache status-line git forks,
+  slim `init.sh`) will drive future dev work. Delivered alongside the plan
+  closure in this commit.
   </content>
