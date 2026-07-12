@@ -8,6 +8,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Plan Workflow / QA
 
+- [00153: Plan-QA Extensible Root Files](00153-plan-qa-extensible-root-files/PLAN.md) - In Progress (additive `plan_workflow.qa.extra_root_files` knob so clients can allowlist legitimate non-plan files at the plan root, e.g. a sourced `_planlib.bash`; default empty = zero behaviour change)
+
 - [00144: Plan QA System — Real-Time Plan Validation & Drift Enforcement](00144-plan-qa-system/PLAN.md) - In Progress (Phase 1 core underway; scope includes mkplan `_TEMPLATE_.md` externalisation)
 
   - Pure `plan_qa` core (PlanTree/PlanDoc/ReadmeIndex parsers + declarative check registry) consumed by three surfaces: edit-time PreToolUse lint, `git commit` cross-file gate (warn→block ratchet), and whole-tree sweep (SessionStart advisory + `plan-qa` CLI, CI-able)
@@ -15,6 +17,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Config under `plan_workflow.qa`; grandfathering for legacy plans; spec provenance: `untracked/hooks-daemon-plan-verify-qa.md` (31-sin audit catalogue)
 
 ### Self-Driving / Automation
+
+- [00152: Supervisor Graduated Compaction Bands](00152-supervisor-graduated-compaction-bands/PLAN.md) - In Progress (three context bands: red `[red,mid)` = patient/wait-for-child-to-settle before `/compact`, restoring pre-00151 "blocked whilst busy"; elevated `[mid,critical)` = prompt injection even mid-turn; critical = prompt injection + ESC flush; adds a `compact_urgent` midpoint band to `context_tiers`/sidecar + child-output `work_idle` tracking)
 
 - [00135: Event-Driven `send-keys` Injection](00135-event-driven-send-keys-injection/PLAN.md) - **In design** (2 hostile-review rounds; launcher redesign dissolved pane-identity; awaiting ARCH-A-vs-ARCH-B decision + coexistence fix)
 
