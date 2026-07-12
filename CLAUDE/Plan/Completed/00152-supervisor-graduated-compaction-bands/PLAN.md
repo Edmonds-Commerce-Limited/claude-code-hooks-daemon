@@ -1,6 +1,6 @@
 # Plan 00152: supervisor graduated compaction bands
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-07-12
 **Owner**: joseph
 **Priority**: Medium
@@ -113,11 +113,11 @@ thresholds:
 
 ## Success Criteria
 
-- [ ] Red-band `/compact` waits for the child to settle (no mid-turn interrupt).
-- [ ] Elevated band injects `/compact` promptly even mid-turn.
-- [ ] Critical band injects `/compact` and escalates with ESC.
-- [ ] All existing supervisor/sidecar/tier tests still pass; coverage ≥ 95%.
-- [ ] Full QA passes; daemon restarts RUNNING.
+- [x] Red-band `/compact` waits for the child to settle (no mid-turn interrupt).
+- [x] Elevated band injects `/compact` promptly even mid-turn.
+- [x] Critical band injects `/compact` and escalates with ESC.
+- [x] All existing supervisor/sidecar/tier tests still pass; coverage ≥ 95%.
+- [x] Full QA passes; daemon restarts RUNNING.
 
 ## Notes & Updates
 
@@ -125,5 +125,6 @@ thresholds:
 
 - Plan scaffolded.
 - Failsafe recovery cron: `d4cb559d` (hourly at :37, non-durable).
-  </content>
-  </invoke>
+- Delivered in commit `9a0a4b4`. Full QA 13/13, 9989 tests, coverage 95.5%;
+  daemon restart verified RUNNING; band classification verified live
+  (78% patient / 85% elevated / 95% critical).

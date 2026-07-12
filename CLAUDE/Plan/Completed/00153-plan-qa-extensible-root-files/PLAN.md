@@ -1,6 +1,6 @@
 # Plan 00153: plan qa extensible root files
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-07-12
 **Owner**: joseph
 **Priority**: Low
@@ -73,14 +73,15 @@ originating upstream request.
 
 ## Success Criteria
 
-- [ ] A configured `extra_root_files` entry suppresses the stray-file advisory for
+- [x] A configured `extra_root_files` entry suppresses the stray-file advisory for
   that exact filename only.
-- [ ] Empty/absent config = byte-identical behaviour to today.
-- [ ] All plan-QA tests pass; coverage ≥ 95%; full QA passes; daemon RUNNING.
+- [x] Empty/absent config = byte-identical behaviour to today.
+- [x] All plan-QA tests pass; coverage ≥ 95%; full QA passes; daemon RUNNING.
 
 ## Notes & Updates
 
 ### 2026-07-12
 
 - Plan scaffolded from `untracked/hooks-daemon-plan-scripts.md` (option A).
-  </content>
+- Delivered in commit `df9262b`. Full QA 13/13, coverage 95.5%; daemon restart
+  verified RUNNING; `plan-qa --sweep` clean.
