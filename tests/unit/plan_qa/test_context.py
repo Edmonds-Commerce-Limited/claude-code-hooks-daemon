@@ -30,6 +30,7 @@ class _Policy:
     staleness_days: int = 30
     legacy_plan_allowlist: tuple[int, ...] = ()
     collision_allowlist: tuple[int, ...] = ()
+    extra_root_files: tuple[str, ...] = ()
 
 
 def _scaffold(tmp_path: Path) -> Path:
@@ -86,6 +87,30 @@ class TestSweepContext:
         assert context.staleness_days == 7
         assert context.legacy_plan_allowlist == frozenset({23, 24})
         assert context.collision_allowlist == frozenset({23})
+
+    def test_extra_root_files_threaded_into_scan(self, tmp_path: Path) -> None:
+        # A configured extra_root_files entry must suppress the stray-file
+        # classification for that exact filename (Plan 00153).
+        root = _scaffold(tmp_path)
+        (root / "CLAUDE/Plan/_planlib.bash").write_text("# sourced helper\n")
+        # Without the allowlist it is a stray file.
+        without = sweep_context(
+            project_root=root,
+            plan_dir_rel="CLAUDE/Plan",
+            policy=_Policy(),
+            today=date(2026, 7, 7),
+        )
+        assert without.tree is not None
+        assert any(p.name == "_planlib.bash" for p in without.tree.stray_files)
+        # With the allowlist it is accepted.
+        with_allow = sweep_context(
+            project_root=root,
+            plan_dir_rel="CLAUDE/Plan",
+            policy=_Policy(extra_root_files=("_planlib.bash",)),
+            today=date(2026, 7, 7),
+        )
+        assert with_allow.tree is not None
+        assert all(p.name != "_planlib.bash" for p in with_allow.tree.stray_files)
 
     def test_missing_readme_yields_none_readme(self, tmp_path: Path) -> None:
         root = _scaffold(tmp_path)

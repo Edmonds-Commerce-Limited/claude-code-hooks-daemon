@@ -1,0 +1,31 @@
+version: "3.37.0"
+date: "2026-07-12"
+breaking: false
+config_changes:
+  added:
+    - key: plan_workflow.qa.extra_root_files
+      description: >-
+        New additive allowlist (Plan 00153) of extra non-plan filenames permitted
+        at the plan root, layered on top of the built-in accepted set
+        (README.md, CLAUDE.md, mkplan.bash, _TEMPLATE_.md). List a legitimately
+        placed non-plan file here so the structure-archive-dirs plan-QA check does
+        not report it as a stray file on every session start and commit. The
+        motivating case is a sourced shell library such as _planlib.bash shared by
+        plan orchestrator scripts. Matching is by exact filename. Default: empty
+        list, so absent config changes nothing.
+      recommended: false
+      recommended_value: null
+      dormant: false
+      example_yaml: |
+        plan_workflow:
+          qa:
+            extra_root_files:
+              - "_planlib.bash"
+      migration_note: >-
+        Optional. No action needed for typical projects. Add an entry only if you
+        intentionally keep a non-plan file (e.g. a sourced _planlib.bash helper) at
+        the plan root and want to silence its permanent stray-file advisory without
+        disabling the whole plan_qa_sweep handler.
+  renamed: []
+  removed: []
+  changed: []

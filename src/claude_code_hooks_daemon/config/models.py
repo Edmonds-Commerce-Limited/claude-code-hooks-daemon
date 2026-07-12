@@ -399,6 +399,11 @@ class PlanWorkflowQaConfig(BaseModel):
         staleness_days: Sweep staleness-nag threshold for active plans
         legacy_plan_allowlist: Plan numbers held to advise-only (grandfathered)
         collision_allowlist: Historic duplicate plan numbers to tolerate
+        extra_root_files: Extra non-plan filenames permitted at the plan root,
+            layered ADDITIVELY on top of the built-in accepted set
+            ({README.md, CLAUDE.md, mkplan.bash, _TEMPLATE_.md}); default empty
+            = today's behaviour. Use for a legitimately-placed shared file such
+            as a sourced ``_planlib.bash`` shell library.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -439,6 +444,13 @@ class PlanWorkflowQaConfig(BaseModel):
     collision_allowlist: list[int] = Field(
         default_factory=list,
         description="Historic duplicate plan numbers tolerated by collision checks",
+    )
+    extra_root_files: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Extra non-plan filenames allowed at the plan root, in addition to the "
+            "built-in {README.md, CLAUDE.md, mkplan.bash, _TEMPLATE_.md}"
+        ),
     )
 
 

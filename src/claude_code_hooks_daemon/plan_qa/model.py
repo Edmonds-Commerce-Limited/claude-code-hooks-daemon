@@ -22,6 +22,7 @@ markdown_table_formatter rewrites every written markdown file.
 
 import re
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -331,8 +332,15 @@ class PlanTree:
         root: Path,
         completed_dir: str = DEFAULT_COMPLETED_DIR,
         cancelled_dir: str | None = DEFAULT_CANCELLED_DIR,
+        extra_root_files: Sequence[str] = (),
     ) -> "PlanTree":
         """Scan ``root`` for plan folders, archive dirs, and stray files.
+
+        ``extra_root_files`` (Plan 00153) is an ADDITIVE allowlist layered on top
+        of the built-in :data:`_EXPECTED_ROOT_FILES`: a client can permit a
+        legitimately-placed non-plan file (e.g. a sourced ``_planlib.bash``) at
+        the plan root so it is not reported as stray. Default empty = today's
+        behaviour.
 
         Raises:
             FileNotFoundError: when ``root`` is not a directory (FAIL FAST —
@@ -342,6 +350,7 @@ class PlanTree:
         if not root.is_dir():
             raise FileNotFoundError(f"Plan directory does not exist: {root}")
 
+        accepted_root_files = _EXPECTED_ROOT_FILES | frozenset(extra_root_files)
         folders: list[PlanFolder] = []
         stray_files: list[Path] = []
 
@@ -349,7 +358,7 @@ class PlanTree:
             if entry.name.startswith(_HIDDEN_PREFIX):
                 continue
             if not entry.is_dir():
-                if entry.name not in _EXPECTED_ROOT_FILES:
+                if entry.name not in accepted_root_files:
                     stray_files.append(entry)
                 continue
             if _PLAN_FOLDER_RE.match(entry.name):

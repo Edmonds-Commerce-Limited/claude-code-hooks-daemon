@@ -50,25 +50,26 @@ originating upstream request.
 
 ### Phase 1: config model
 
-- [ ] ⬜ **Task 1.1**: RED — test `PlanWorkflowQaConfig` accepts/defaults
+- [x] ✅ **Task 1.1**: RED — test `PlanWorkflowQaConfig` accepts/defaults
   `extra_root_files` (default `[]`).
-- [ ] ⬜ **Task 1.2**: GREEN — add the field to `config/models.py`.
+- [x] ✅ **Task 1.2**: GREEN — add the field to `config/models.py`.
 
 ### Phase 2: policy + scan threading
 
-- [ ] ⬜ **Task 2.1**: RED — tests: `PlanTree.scan(..., extra_root_files=("_planlib.bash",))`
+- [x] ✅ **Task 2.1**: RED — tests: `PlanTree.scan(..., extra_root_files=("_planlib.bash",))`
   does NOT flag that file as stray; still flags a genuinely stray file; default
   (no extra) unchanged. Plus `QaPolicy`/`CheckContext` carry the field.
-- [ ] ⬜ **Task 2.2**: GREEN — add `extra_root_files` to the `QaPolicy` protocol,
+- [x] ✅ **Task 2.2**: GREEN — add `extra_root_files` to the `QaPolicy` protocol,
   thread it through the `CheckContext` builders in `plan_qa/context.py`, and union
   it into the stray-file classification in `PlanTree.scan()`.
 
 ### Phase 3: docs, QA, dogfood
 
-- [ ] ⬜ **Task 3.1**: Document `extra_root_files` in
-  `docs/guides/HANDLER_REFERENCE.md` (and config-changes manifest if warranted).
-- [ ] ⬜ **Task 3.2**: Run full QA: `./scripts/qa/run_all.sh`.
-- [ ] ⬜ **Task 3.3**: Restart daemon, verify RUNNING; `plan-qa --sweep` clean.
+- [x] ✅ **Task 3.1**: Document `extra_root_files` in
+  `docs/guides/HANDLER_REFERENCE.md`; staged config-changes manifest
+  `CLAUDE/UPGRADES/UNRELEASED/config-changes/v3.37.0.yaml`.
+- [ ] 🔄 **Task 3.2**: Run full QA (`./scripts/qa/llm_qa.py all`).
+- [x] ✅ **Task 3.3**: Restart daemon, verify RUNNING; `plan-qa --sweep` clean.
 
 ## Success Criteria
 

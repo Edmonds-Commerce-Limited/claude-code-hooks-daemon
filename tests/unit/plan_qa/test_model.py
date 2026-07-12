@@ -386,6 +386,25 @@ class TestPlanTreeScan:
         tree = PlanTree.scan(plan_root)
         assert tree.stray_files == ()
 
+    def test_extra_root_files_are_not_stray(self, plan_root: Path) -> None:
+        # Plan 00153: an additive allowlist entry suppresses that exact file.
+        (plan_root / "_planlib.bash").write_text("# sourced helper\n")
+        tree = PlanTree.scan(plan_root, extra_root_files=("_planlib.bash",))
+        assert tree.stray_files == ()
+
+    def test_extra_root_files_only_allow_named_file(self, plan_root: Path) -> None:
+        # The allowlist is exact: an unrelated stray file is still flagged.
+        (plan_root / "_planlib.bash").write_text("# sourced helper\n")
+        (plan_root / "orphan-notes.md").write_text("scratch\n")
+        tree = PlanTree.scan(plan_root, extra_root_files=("_planlib.bash",))
+        assert [path.name for path in tree.stray_files] == ["orphan-notes.md"]
+
+    def test_extra_root_files_defaults_empty_unchanged(self, plan_root: Path) -> None:
+        # Default (no extra) = today's behaviour: the file is a stray.
+        (plan_root / "_planlib.bash").write_text("# sourced helper\n")
+        tree = PlanTree.scan(plan_root)
+        assert [path.name for path in tree.stray_files] == ["_planlib.bash"]
+
     def test_plan_folders_in_other_subdir_flagged_as_other(self, plan_root: Path) -> None:
         _write_plan(plan_root / "archive", 9, "old-thing", "Complete")
         tree = PlanTree.scan(plan_root)

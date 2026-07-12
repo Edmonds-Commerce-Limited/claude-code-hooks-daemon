@@ -46,6 +46,9 @@ class QaPolicy(Protocol):
     @property
     def collision_allowlist(self) -> Sequence[int]: ...
 
+    @property
+    def extra_root_files(self) -> Sequence[str]: ...
+
 
 def _tree_and_readme(
     project_root: Path,
@@ -63,6 +66,7 @@ def _tree_and_readme(
         plan_dir,
         completed_dir=policy.completed_dir,
         cancelled_dir=policy.cancelled_dir,
+        extra_root_files=policy.extra_root_files,
     )
     readme_path = plan_dir / README_FILENAME
     readme = ReadmeIndex.parse(readme_path.read_text()) if readme_path.is_file() else None

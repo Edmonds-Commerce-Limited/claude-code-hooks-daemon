@@ -921,6 +921,14 @@ class TestPlanWorkflowQaConfig:
         assert config.qa.staleness_days == 30
         assert config.qa.legacy_plan_allowlist == []
         assert config.qa.collision_allowlist == []
+        assert config.qa.extra_root_files == []
+
+    def test_extra_root_files_accepted(self) -> None:
+        """QA sub-model accepts an additive extra_root_files allowlist (Plan 00153)."""
+        config = PlanWorkflowConfig.model_validate(
+            {"qa": {"extra_root_files": ["_planlib.bash", "_shared.sh"]}}
+        )
+        assert config.qa.extra_root_files == ["_planlib.bash", "_shared.sh"]
 
     def test_custom_values_from_yaml_shape(self) -> None:
         """QA sub-model accepts the documented YAML shape."""

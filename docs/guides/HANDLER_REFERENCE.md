@@ -787,7 +787,16 @@ plan_workflow:
     staleness_days: 30           # nag active plans with no commit in N days
     legacy_plan_allowlist: []    # plan numbers held to advise-only (grandfathered)
     collision_allowlist: []      # historic duplicate plan numbers to tolerate
+    extra_root_files: []         # extra non-plan filenames allowed at the plan root
 ```
+
+`extra_root_files` is an ADDITIVE allowlist layered on top of the built-in
+accepted set (`README.md`, `CLAUDE.md`, `mkplan.bash`, `_TEMPLATE_.md`): list any
+legitimately-placed non-plan file at the plan root here so the
+`structure-archive-dirs` check does not report it as a stray file. Typical use is
+a sourced shell library such as `_planlib.bash` shared by plan orchestrator
+scripts. Matching is by exact filename; the default empty list is byte-identical
+to prior behaviour.
 
 The handler itself is enabled/prioritised in the usual place:
 
