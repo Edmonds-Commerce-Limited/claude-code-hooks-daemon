@@ -4,6 +4,10 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Active Plans
 
+### Performance
+
+- [00156: Performance Tuning Wave 2 — drop `jq`, slim `init.sh`](00156-performance-tuning-wave-2-drop-jq-slim-init/PLAN.md) - In Progress (`Themes: performance`; Wave 2 off Plan 00154. T2: eliminate `jq` from every forwarder wrapper by moving JSON wrap/unwrap into the existing `python3` transport (~−22 ms/event); T3: slim the `init.sh` hot path (~−5-8 ms). Safety-critical transport — JSON-never-through-shell invariant preserved, dogfooding test keeps deployed copies in sync, forwarder acceptance gates + live probes required)
+
 ### Code Quality / Handler Configuration
 
 ### Plan Workflow / QA
@@ -1001,9 +1005,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 155 (count = `hooksdaemon.latestPlanNumber` git counter; 00145 was allocated by the counter but its folder is not present on this branch)
+- **Total Plans Created**: 156 (count = `hooksdaemon.latestPlanNumber` git counter; 00145 was allocated by the counter but its folder is not present on this branch)
 - **Completed**: 132 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 16 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 17 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102); plus draft folders deleted and no longer on disk (00036 empty draft, 00038 superseded by 00045, 00073 orphan empty folder removed during Plan 00107 housekeeping)
 - **Last reconciled by**: Plan 00144 Task 2.2 sweep remediation
