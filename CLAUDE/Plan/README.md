@@ -16,7 +16,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Self-Driving / Automation
 
-- [00135: Event-Driven `send-keys` Injection](00135-event-driven-send-keys-injection/PLAN.md) - **In design** (2 hostile-review rounds; launcher redesign dissolved pane-identity; awaiting ARCH-A-vs-ARCH-B decision + coexistence fix)
+- [00135: Event-Driven `send-keys` Injection](00135-event-driven-send-keys-injection/PLAN.md) - **In design**
+
+### Research / Performance
+
+- [00154: Daemon Performance — Rust vs Python Research](00154-daemon-performance-rust-vs-python-research/PLAN.md) - In Progress (research-only: quantify per-event latency/memory of the all-Python daemon, catalogue no-rewrite Python tuning wins, and honestly weigh a Rust move — raw performance vs loss of client-side introspectability; delegated to a Fable research agent writing all artifacts into the plan folder) (2 hostile-review rounds; launcher redesign dissolved pane-identity; awaiting ARCH-A-vs-ARCH-B decision + coexistence fix)
 
   - Hooks run as children of Claude Code and inherit `$TMUX_PANE`, so any daemon hook event (or a context-threshold watchdog) can `tmux send-keys` a **slash command / prompt** back into the live, watchable session — flagship use case: auto-`/compact` at a custom threshold; also PostCompact re-orientation, `/fix` on failing tests, session bootstrap
   - Architecture: status-line handler writes a pct/idle sidecar (reuses the payload the daemon already receives), a single `tmux_inject` choke-point utility, and a user-launched watchdog in its own observable pane; handlers enqueue intents, never type directly
