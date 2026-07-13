@@ -140,14 +140,25 @@ official docs, **the docs win** and are recorded here.
 - [x] ✅ **Task 1.5**: Disambiguate Task-tool subagents (panel rows) vs background-agent
   sessions (own bar) — the actual cause of the bar-vs-no-bar symptom (Confirmed Truth #4).
 
-### Phase 1b: Dogfooding instrumentation — payload capture toggle (DONE)
+### Phase 1b: Dogfooding instrumentation — payload capture (DONE, redesigned)
 
-- [x] ✅ **Task 1b.1**: Add `CLAUDE_HOOKS_CAPTURE_DIR` opt-in capture to the shared
-  `send_request_stdin` transport in `init.sh` (off by default, all events, fail-safe).
-- [x] ✅ **Task 1b.2**: Tests in `tests/integration/test_forwarder_jq_free.py` (disabled
-  by default, writes raw JSONL, appends, transport preserved, Status filename).
-- [x] ✅ **Task 1b.3**: Document the toggle in `CLAUDE/DEBUGGING_HOOKS.md`; live-verify
-  on/off; daemon restart RUNNING.
+Initial attempt (commit `aaa552c`) put capture in the forwarder behind the
+`CLAUDE_HOOKS_CAPTURE_DIR` env var. **Superseded** on user feedback: the forwarder
+is dumb transport, the toggle belongs in the *tracked* daemon config, and a
+*daemon* restart (never a Claude Code relaunch) should apply it. Reimplemented
+daemon-side:
+
+- [x] ✅ **Task 1b.1**: `daemon.payload_capture` config (`enabled`/`dir`/`events`) in
+  `config/models.py`; daemon-side capture in `daemon/payload_capture.py` (pure helpers)
+  wired into `server._process_request` via `_capture_payload_best_effort` (fail-open,
+  skips `_system`, warns-not-swallows on write failure).
+- [x] ✅ **Task 1b.2**: Reverted the forwarder env-var capture in `init.sh` + its tests;
+  new unit tests `tests/unit/daemon/test_payload_capture.py` (9 cases: disabled, writes
+  JSONL, `_system` skipped, events filter, append, filename sanitisation, dir resolve).
+- [x] ✅ **Task 1b.3**: Enabled it in tracked `.claude/hooks-daemon.yaml`
+  (`events: [Status]`) and **live-verified**: daemon restart → a Status event was
+  captured to `untracked/payload-capture/Status.jsonl` with the correct `session_id`,
+  no Claude Code relaunch. Docs updated (`CLAUDE/DEBUGGING_HOOKS.md`); QA 13/13.
 
 ### Phase 2: Design the `subagentStatusLine` surface (Not Started)
 

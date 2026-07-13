@@ -46,43 +46,53 @@ Example output:
 2026-01-27 04:37:34,040 [INFO] === END BOUNDARY ===
 ```
 
-## Raw Payload Capture (`CLAUDE_HOOKS_CAPTURE_DIR`)
+## Raw Payload Capture (`daemon.payload_capture`)
 
 `scripts/debug_hooks.sh` shows what the daemon *did* with an event. When you instead
-need the **exact JSON Claude Code sent** — every field, verbatim — set the
-`CLAUDE_HOOKS_CAPTURE_DIR` environment variable. The shared forwarder transport
-(`send_request_stdin` in `init.sh`) then appends each raw hook payload, one JSON
-object per line, to `<dir>/<event_name>.jsonl`.
+need the **exact JSON Claude Code sent** — every field, verbatim — enable
+**daemon-side payload capture**. The forwarder is dumb transport; the daemon receives
+every `{event, hook_input}` envelope, so capture lives there, is driven by the tracked
+`hooks-daemon.yaml` config, and is applied by a **daemon restart** — never a Claude
+Code relaunch.
+
+```yaml
+# .claude/hooks-daemon.yaml
+daemon:
+  payload_capture:
+    enabled: true      # off by default
+    dir: null          # null = <daemon untracked>/payload-capture
+    events:            # empty list = all events
+      - Status         # scope to just status-line renders
+```
 
 ```bash
-# Enable: point at any writable directory (unset = disabled, the default).
-export CLAUDE_HOOKS_CAPTURE_DIR="$PWD/untracked/hook-capture"
+# Apply the config (restart the daemon — NOT Claude Code):
+$PYTHON -m claude_code_hooks_daemon.daemon.cli restart
 
-# ...work in Claude Code (or replay a payload through a wrapper)...
+# ...work in Claude Code; the daemon appends each payload as one JSON line...
 
 # Inspect what was sent for a given event:
-cat untracked/hook-capture/Status.jsonl        # one status render per line
-cat untracked/hook-capture/PreToolUse.jsonl
-
-# Disable again:
-unset CLAUDE_HOOKS_CAPTURE_DIR
+cat untracked/payload-capture/Status.jsonl        # one status render per line
 ```
 
 **Properties**:
 
-- **Off by default, zero overhead** — the capture branch is skipped entirely when the
-  variable is unset or empty.
-- **Every event type** — status line, PreToolUse, PostToolUse, etc. all funnel through
-  the same transport, so each lands in its own `<event_name>.jsonl`.
-- **Non-invasive** — capture never alters the payload or the daemon response; a capture
-  write failure is reported on stderr and the hook proceeds normally.
+- **Off by default** — ships dormant (`enabled: false`); a downstream project opts in.
+- **Any event type** — every event funnels through the daemon, so each lands in its
+  own `<event_name>.jsonl`; the `events` allow-list scopes capture (empty = all).
+- **Config-driven, restart-applied** — toggled in the tracked config and picked up by a
+  daemon restart. No environment side-channel, no Claude Code relaunch.
+- **Non-invasive** — capture never alters the payload or the daemon response; the
+  `_system` control channel is never captured; a write failure is logged (not silently
+  swallowed) and dispatch proceeds normally.
 
 **Primary use case — agent-thread identity**: capturing the `Status` event reveals the
 `session_id` / `transcript_path` behind each status-line render. Because a **background
-agent** is a full independent session (its own `session_id`) while a **Task-tool
-subagent** shares the parent session and renders only an agent-panel row
+agent** is a full independent session (its own `session_id`, its own bar) while a
+**Task-tool subagent** shares the parent session and renders only an agent-panel row
 (`subagentStatusLine`), the capture file is how you empirically confirm *which* thread
-triggered a bar and *whose* identity it carried.
+triggered a bar and *whose* identity it carried — multiple sessions on one host/project
+share one daemon, so the daemon sees every session's Status renders.
 
 ## Workflow: From Scenario to Handler
 

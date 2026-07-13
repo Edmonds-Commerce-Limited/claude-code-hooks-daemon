@@ -496,6 +496,38 @@ class PlanWorkflowConfig(BaseModel):
     )
 
 
+class PayloadCaptureConfig(BaseModel):
+    """Configuration for daemon-side hook-payload capture (Plan 00158).
+
+    A dogfooding aid: when enabled, the daemon appends the raw ``hook_input`` it
+    receives for each event to ``<dir>/<event>.jsonl``. It is toggled here (in
+    the tracked config) and applied by a daemon restart — never a Claude Code
+    relaunch, since the forwarder is dumb transport and the daemon sees every
+    payload.
+
+    Attributes:
+        enabled: Master toggle. Default False so the feature ships dormant.
+        dir: Directory for capture files. None = ``<untracked>/payload-capture``.
+        events: Optional allow-list of event names (e.g. ``["Status"]``). Empty
+            = capture every event.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    enabled: bool = Field(
+        default=False,
+        description="Capture raw hook payloads to <dir>/<event>.jsonl for dogfooding",
+    )
+    dir: str | None = Field(
+        default=None,
+        description="Capture directory. None = <daemon untracked>/payload-capture",
+    )
+    events: list[str] = Field(
+        default_factory=list,
+        description="Only capture these event names (e.g. ['Status']). Empty = all events.",
+    )
+
+
 class DaemonConfig(BaseModel):
     """Configuration for the daemon server.
 
@@ -543,6 +575,10 @@ class DaemonConfig(BaseModel):
     input_validation: InputValidationConfig = Field(
         default_factory=InputValidationConfig,
         description="Input validation configuration",
+    )
+    payload_capture: PayloadCaptureConfig = Field(
+        default_factory=PayloadCaptureConfig,
+        description="Dogfooding: daemon-side raw hook-payload capture configuration",
     )
     languages: list[str] | None = Field(
         default=None,

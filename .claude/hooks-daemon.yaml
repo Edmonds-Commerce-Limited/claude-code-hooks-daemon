@@ -21,6 +21,17 @@ daemon:
     strict_mode: true          # Fail-closed: return errors on validation failures
     log_validation_errors: true
 
+  # Payload capture (Plan 00158) - dogfooding aid. When enabled the daemon appends
+  # the raw hook_input it receives to <untracked>/payload-capture/<event>.jsonl.
+  # Applied by a daemon restart (never a Claude Code relaunch). Dogfooded ON here,
+  # scoped to Status so we can inspect the session_id behind each status-line
+  # render (background-agent bar vs Task-tool subagent row). Ships OFF by default.
+  payload_capture:
+    enabled: true              # dogfooding: capture is live in this repo
+    dir: null                  # null = <daemon untracked>/payload-capture
+    events:                    # empty list = all events; scoped to Status here
+      - Status
+
 # Built-in handler configuration
 # Handlers run in priority order (lower number = earlier execution)
 # Priority ranges: 5=test, 10-20=safety, 25-45=workflow, 50-60=tool usage

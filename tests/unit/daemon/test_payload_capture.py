@@ -1,0 +1,121 @@
+"""Unit tests for daemon-side hook-payload capture (Plan 00158).
+
+The daemon receives every ``{event, hook_input}`` envelope, so payload capture
+for dogfooding lives here — not in the dumb forwarder. It is config-driven
+(tracked ``hooks-daemon.yaml``) and applied by a daemon restart; no Claude Code
+relaunch is ever needed.
+
+These tests pin the pure capture helpers (primitives in, no pydantic/context
+coupling) so the behaviour is verifiable in isolation.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from claude_code_hooks_daemon.daemon.payload_capture import (
+    capture_payload,
+    resolve_capture_dir,
+)
+
+
+def _read_lines(path: Path) -> list[str]:
+    return path.read_text(encoding="utf-8").splitlines()
+
+
+def test_disabled_writes_nothing(tmp_path: Path) -> None:
+    result = capture_payload(
+        enabled=False,
+        events=[],
+        capture_dir=tmp_path,
+        event="Status",
+        hook_input={"session_id": "abc"},
+    )
+    assert result is None
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_enabled_writes_event_jsonl(tmp_path: Path) -> None:
+    hook_input = {"session_id": "abc", "model": {"id": "opus"}}
+    result = capture_payload(
+        enabled=True,
+        events=[],
+        capture_dir=tmp_path / "cap",
+        event="Status",
+        hook_input=hook_input,
+    )
+    assert result == tmp_path / "cap" / "Status.jsonl"
+    lines = _read_lines(result)
+    assert len(lines) == 1
+    assert json.loads(lines[0]) == hook_input
+
+
+def test_system_event_is_never_captured(tmp_path: Path) -> None:
+    result = capture_payload(
+        enabled=True,
+        events=[],
+        capture_dir=tmp_path,
+        event="_system",
+        hook_input={"command": "status"},
+    )
+    assert result is None
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_events_filter_skips_unlisted_event(tmp_path: Path) -> None:
+    result = capture_payload(
+        enabled=True,
+        events=["Status"],
+        capture_dir=tmp_path,
+        event="PreToolUse",
+        hook_input={"tool_name": "Bash"},
+    )
+    assert result is None
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_events_filter_allows_listed_event(tmp_path: Path) -> None:
+    result = capture_payload(
+        enabled=True,
+        events=["Status"],
+        capture_dir=tmp_path,
+        event="Status",
+        hook_input={"session_id": "abc"},
+    )
+    assert result is not None
+    assert result.name == "Status.jsonl"
+
+
+def test_appends_across_calls(tmp_path: Path) -> None:
+    for i in range(3):
+        capture_payload(
+            enabled=True,
+            events=[],
+            capture_dir=tmp_path,
+            event="Status",
+            hook_input={"n": i},
+        )
+    assert len(_read_lines(tmp_path / "Status.jsonl")) == 3
+
+
+def test_event_name_is_sanitised_for_filename(tmp_path: Path) -> None:
+    result = capture_payload(
+        enabled=True,
+        events=[],
+        capture_dir=tmp_path,
+        event="weird/../name",
+        hook_input={},
+    )
+    assert result is not None
+    # No path separators survive into the filename.
+    assert result.parent == tmp_path
+    assert "/" not in result.name
+
+
+def test_resolve_capture_dir_defaults_to_untracked(tmp_path: Path) -> None:
+    assert resolve_capture_dir(None, tmp_path) == tmp_path / "payload-capture"
+
+
+def test_resolve_capture_dir_uses_configured_dir(tmp_path: Path) -> None:
+    assert resolve_capture_dir(str(tmp_path / "custom"), tmp_path) == tmp_path / "custom"

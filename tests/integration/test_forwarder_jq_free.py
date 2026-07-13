@@ -122,19 +122,11 @@ def _run_wrapper(
     pid_path: Path,
     *,
     strip_jq: bool = False,
-    capture_dir: Path | None = None,
 ) -> subprocess.CompletedProcess[bytes]:
     """Invoke a deployed wrapper against a fake live daemon socket."""
     env = os.environ.copy()
     env["CLAUDE_HOOKS_SOCKET_PATH"] = str(sock_path)
     env["CLAUDE_HOOKS_PID_PATH"] = str(pid_path)
-    # Plan 00158 payload capture toggle. Only set when a test opts in; otherwise
-    # explicitly clear any ambient value so "disabled by default" tests are honest
-    # even if the outer environment happens to export it.
-    if capture_dir is not None:
-        env["CLAUDE_HOOKS_CAPTURE_DIR"] = str(capture_dir)
-    else:
-        env.pop("CLAUDE_HOOKS_CAPTURE_DIR", None)
     if strip_jq:
         shim_dir = _make_broken_jq_dir(pid_path.parent)
         env["PATH"] = shim_dir + os.pathsep + env.get("PATH", "")
@@ -472,99 +464,6 @@ def test_status_line_transport_failure_emits_stderr_diagnostic(
     assert result.returncode == 0, result.stderr.decode()
     assert result.stdout.decode().strip() == "⚠️ NO STATUS DATA"
     assert "HOOKS DAEMON ERROR" in result.stderr.decode()
-
-
-# ---------------------------------------------------------------------------
-# 8. Opt-in payload capture for dogfooding (Plan 00158)
-#
-# `CLAUDE_HOOKS_CAPTURE_DIR` teed every raw hook payload to
-# `<dir>/<event_name>.jsonl` so the exact JSON Claude Code sends per event /
-# agent thread can be inspected. Unset (the default) is a strict no-op. Capture
-# must never disturb the transport contract exercised above.
-# ---------------------------------------------------------------------------
-
-
-def test_payload_capture_disabled_by_default(
-    sock_path: Path, live_pid_file: Path, tmp_path: Path
-) -> None:
-    """With CLAUDE_HOOKS_CAPTURE_DIR unset, nothing is written (zero overhead)."""
-    cap = tmp_path / "capture"  # deliberately NOT passed as capture_dir
-    server = _RecordingSocketServer(sock_path, b"{}\n")
-    server.start()
-
-    result = _run_wrapper(
-        "pre-tool-use", json.dumps({"tool_name": "Bash"}).encode(), sock_path, live_pid_file
-    )
-    server.join()
-
-    assert result.returncode == 0, result.stderr.decode()
-    assert not cap.exists(), "capture dir must not be created when the toggle is unset"
-
-
-def test_payload_capture_writes_raw_payload_and_preserves_transport(
-    sock_path: Path, live_pid_file: Path, tmp_path: Path
-) -> None:
-    """When enabled, the raw payload is appended AND the wrapped request still ships."""
-    cap = tmp_path / "capture"
-    hook_input = {"tool_name": "Bash", "tool_input": {"command": "ls"}}
-    server = _RecordingSocketServer(sock_path, b"{}\n")
-    server.start()
-
-    result = _run_wrapper(
-        "pre-tool-use", json.dumps(hook_input).encode(), sock_path, live_pid_file, capture_dir=cap
-    )
-    server.join()
-
-    assert result.returncode == 0, result.stderr.decode()
-    # Transport contract intact: the daemon still received the wrapped request.
-    assert server.received is not None
-    assert json.loads(server.received)["hook_input"] == hook_input
-    # Capture recorded the RAW payload as exactly one JSONL line under <Event>.jsonl.
-    cap_file = cap / "PreToolUse.jsonl"
-    assert cap_file.exists(), "expected capture file PreToolUse.jsonl"
-    lines = cap_file.read_text().splitlines()
-    assert len(lines) == 1
-    assert json.loads(lines[0]) == hook_input
-
-
-def test_payload_capture_appends_across_invocations(
-    sock_path: Path, live_pid_file: Path, tmp_path: Path
-) -> None:
-    """Repeated events append to the same per-event JSONL file (one line each)."""
-    cap = tmp_path / "capture"
-    payload = json.dumps({"tool_name": "Bash"}).encode()
-
-    for _ in range(3):
-        if sock_path.exists():
-            sock_path.unlink()
-        server = _RecordingSocketServer(sock_path, b"{}\n")
-        server.start()
-        result = _run_wrapper("pre-tool-use", payload, sock_path, live_pid_file, capture_dir=cap)
-        server.join()
-        assert result.returncode == 0, result.stderr.decode()
-
-    assert len((cap / "PreToolUse.jsonl").read_text().splitlines()) == 3
-
-
-def test_payload_capture_status_event_uses_status_filename(
-    sock_path: Path, live_pid_file: Path, tmp_path: Path
-) -> None:
-    """The status-line wrapper captures under Status.jsonl (per-event file naming)."""
-    cap = tmp_path / "capture"
-    server = _RecordingSocketServer(sock_path, b'{"text":"ok"}\n')
-    server.start()
-
-    result = _run_wrapper(
-        "status-line",
-        json.dumps({"model": {"display_name": "Opus"}}).encode(),
-        sock_path,
-        live_pid_file,
-        capture_dir=cap,
-    )
-    server.join()
-
-    assert result.returncode == 0, result.stderr.decode()
-    assert (cap / "Status.jsonl").exists(), "status event must capture to Status.jsonl"
 
 
 def test_precondition_jq_is_installed() -> None:

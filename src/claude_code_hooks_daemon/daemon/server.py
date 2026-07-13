@@ -28,8 +28,10 @@ from claude_code_hooks_daemon.constants.modes import DaemonMode, ModeConstant
 from claude_code_hooks_daemon.constants.protocol import SocketLimit
 from claude_code_hooks_daemon.core.hook_result import HookResult
 from claude_code_hooks_daemon.core.input_schemas import get_input_schema
+from claude_code_hooks_daemon.core.project_context import ProjectContext
 from claude_code_hooks_daemon.daemon.config import DaemonConfig
 from claude_code_hooks_daemon.daemon.memory_log_handler import MemoryLogHandler
+from claude_code_hooks_daemon.daemon.payload_capture import capture_payload, resolve_capture_dir
 from claude_code_hooks_daemon.utils.strict_mode import handle_tier2_error
 
 # Global memory log handler - accessible for log queries
@@ -860,6 +862,32 @@ class HooksDaemon:
             writer.close()
             await writer.wait_closed()
 
+    def _capture_payload_best_effort(self, event: str, hook_input: dict[str, Any]) -> None:
+        """Capture the raw hook payload when dogfooding capture is enabled.
+
+        Plan 00158. Fail-open by design: payload capture is a dogfooding aid, so a
+        capture failure must NEVER break hook dispatch (which carries safety-critical
+        handlers). OSError (unwritable dir) and RuntimeError (ProjectContext not
+        initialised in non-daemon callers / unit tests) are logged at warning level —
+        never silently swallowed — and dispatch continues. Same sanctioned fail-open
+        contract as context_sidecar._write_sidecar and compaction_signal._write_signal.
+        """
+        capture_cfg = self.config.payload_capture
+        if not capture_cfg.enabled:
+            return
+        try:
+            capture_payload(
+                enabled=True,
+                events=capture_cfg.events,
+                capture_dir=resolve_capture_dir(
+                    capture_cfg.dir, ProjectContext.daemon_untracked_dir()
+                ),
+                event=event,
+                hook_input=hook_input,
+            )
+        except (OSError, RuntimeError) as exc:
+            logger.warning("Payload capture failed for %s: %s", event, exc)
+
     async def _process_request(self, request_data: str) -> dict[str, Any]:
         """Process incoming hook request.
 
@@ -900,6 +928,9 @@ class HooksDaemon:
         # Handle system events (logs, status, health, handlers)
         if event == "_system":
             return self._handle_system_request(hook_input, request_id)
+
+        # Plan 00158: opt-in daemon-side payload capture for dogfooding.
+        self._capture_payload_best_effort(event, hook_input)
 
         # INPUT VALIDATION - Validate hook_input structure before dispatch
         if self._should_validate_input():

@@ -177,6 +177,12 @@
       "reason": "Stale PID file check: log-and-continue when reading/parsing stale PID file. Already logged. Daemon startup should continue even if stale PID file is unreadable."
     },
     {
+      "file": "daemon/server.py",
+      "function": "_capture_payload_best_effort",
+      "rule": "log-and-continue",
+      "reason": "Plan 00158 dogfooding payload capture: log-and-continue on OSError (untracked dir unwritable) / RuntimeError (ProjectContext not initialised in non-daemon callers). Capture is an opt-in debug aid and must NEVER break hook dispatch, which carries safety-critical handlers. Logged at warning level, never silently swallowed. Same sanctioned fail-open contract as context_sidecar._write_sidecar and compaction_signal._write_signal."
+    },
+    {
       "file": "daemon/validation.py",
       "function": "load_config_safe",
       "rule": "return-none-on-error",
