@@ -59,10 +59,10 @@ Key files:
 
 - `.claude/ccy/claude-supervise.py` — the standalone supervisor (self-install
   canonical; the ccy deploy copies it verbatim — `install/ccy_supervisor.py`).
-- `src/.../handlers/status_line/context_sidecar.py` — sensor (writes sidecars).
-- `src/.../handlers/pre_compact/compaction_signal.py` — writes `.compacting`.
-- `src/.../handlers/status_line/thread_registry.py` — Plan 00158, the newer
-  per-session-keyed, atomic-write registry (the model to emulate).
+- `src/claude_code_hooks_daemon/handlers/status_line/context_sidecar.py` — sensor (writes sidecars).
+- `src/claude_code_hooks_daemon/handlers/pre_compact/compaction_signal.py` — writes `.compacting`.
+- `src/claude_code_hooks_daemon/handlers/status_line/thread_registry.py` — Plan 00158,
+  the newer per-session-keyed, atomic-write registry (the model to emulate).
 - Plan 00135 (`SPIKES.md`, `HOSTILE-REVIEW-1.md` flagged multi-session).
 
 Verified constraints: refreshInterval = 10s; supervisor freshness = 30s; poll =
@@ -89,16 +89,21 @@ before shipping Phase 2.
 
 ### Phase 1: Dead-file reaping (independent, ship first)
 
-- [ ] 🔄 ⬜ **Task 1.1**: RED — tests for a pure reaper: given a dir with fresh +
+- [x] ✅ **Task 1.1**: RED — tests for a pure reaper: given a dir with fresh +
   stale `*.json` and `*.compacting`, reap only those older than a TTL; never reap
-  the freshest; tolerate unlink races (OSError); report reaps.
-- [ ] ⬜ **Task 1.2**: GREEN — implement `reap_stale_sidecars(dir, now, ttl)` in
-  `claude-supervise.py`; call once per poll tick (bounded, cheap).
-- [ ] ⬜ **Task 1.3**: Choose reaping TTL (distinct from freshness; must be >>
-  refreshInterval so a briefly-idle foreground is never reaped). Named constant.
-- [ ] ⬜ **Task 1.4**: Evaluate a daemon-side SessionEnd reaper (closed session's
-  files go immediately, not only on TTL). Implement if clean.
-- [ ] ⬜ **Task 1.5**: QA green, daemon restart RUNNING, commit.
+  the freshest; tolerate unlink races (OSError); report reaps. (9 tests, RED confirmed.)
+- [x] ✅ **Task 1.2**: GREEN — `reap_stale_sidecars(dir, now, ttl)` in
+  `claude-supervise.py`, called once per `_poll_once` tick; TTL threaded via
+  `CompactPolicy.reap_ttl_seconds`. 198 supervise tests pass; mypy --strict clean.
+- [x] ✅ **Task 1.3**: TTL = `_DEFAULT_REAP_TTL_SECONDS = 1800.0` (30 min) —
+  ≥ compaction-signal TTL (600s) and ≫ freshness (30s) / refreshInterval (10s),
+  so a live/idle-foreground session (renders every 10s) is never a reap candidate.
+- [x] ✅ **Task 1.4**: Evaluated → **deferred** (Decision 3). Supervisor reaper
+  bounds the dir robustly (every 2s, all cases incl. crash); a SessionEnd reaper
+  would need a THIRD local copy of the `context-sidecar` subdir + safe-stem
+  constants (context_sidecar.py + compaction_signal.py already each have one),
+  tipping into a DRY-smell that warrants a shared helper — a separate refactor.
+- [ ] 🔄 **Task 1.5**: QA green, daemon restart RUNNING, commit.
 
 ### Phase 2: Explicit foreground identity
 
@@ -129,6 +134,23 @@ decoupled from the spike-gated foreground mechanism.
 ### Decision 2: Foreground mechanism is spike-gated
 
 Recorded after Task 2.0 completes.
+
+### Decision 3: SessionEnd immediate-reap deferred (not built in Phase 1)
+
+**Context**: A daemon-side SessionEnd handler could delete the ending session's
+own `{stem}.json` / `{stem}.compacting` immediately, rather than waiting for the
+supervisor's TTL sweep, and would clear the "always-spared freshest" residue.
+**Options**: (a) extend the existing `cleanup` SessionEnd handler; (b) new
+handler; (c) defer.
+**Decision**: Defer (c). The supervisor reaper already bounds the dir robustly
+every 2s across all cases (including crash/kill, which SessionEnd does NOT
+cover). The only residue is a single spared-freshest file — harmless and
+regenerated on the owner's next render. Building it now would add a THIRD local
+copy of the `context-sidecar` subdir + safe-stem constants
+(`context_sidecar.py` and `compaction_signal.py` each already carry their own),
+which tips the DRY smell into "extract a shared helper" — a broader refactor of
+released handlers better tracked on its own. Revisit alongside that refactor.
+**Date**: 2026-07-13
 
 ## Success Criteria
 

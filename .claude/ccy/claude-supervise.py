@@ -374,6 +374,17 @@ _DEFAULT_COMPACTION_SIGNAL_TTL_SECONDS = 600.0
 # mistaken for a context sidecar by ``load_freshest_sidecar``.
 _COMPACTION_SIGNAL_GLOB = "*.compacting"
 
+# Nothing else deletes per-session sidecars/signals: every session writes its own
+# ``{session}.json`` (and, on compaction, ``{session}.compacting``) into the ONE
+# shared context-sidecar dir, and a closed/backgrounded session's file lingers
+# forever (a live dir was observed holding 17 files, most dead for days). The
+# supervisor reaps files whose mtime is older than this TTL each tick. It is set
+# WELL beyond both the sidecar freshness window and the compaction-signal TTL, so
+# a file this old is definitively from a closed session and can never still be
+# actionable -- reaping it cannot race a live decision.
+_DEFAULT_REAP_TTL_SECONDS = 1800.0
+_CONTEXT_SIDECAR_GLOB = "*.json"
+
 
 # NOOP reasons that mean "an injection is pending but gated on the session
 # being safe to type into". `_poll_once` uses these to log a deferral when
@@ -440,6 +451,7 @@ class CompactPolicy:
     max_injections: int = _DEFAULT_MAX_INJECTIONS
     compaction_signal_ttl_seconds: float = _DEFAULT_COMPACTION_SIGNAL_TTL_SECONDS
     escape_after_seconds: float = _DEFAULT_ESCAPE_AFTER_SECONDS
+    reap_ttl_seconds: float = _DEFAULT_REAP_TTL_SECONDS
 
 
 @dataclass(frozen=True)
@@ -569,6 +581,72 @@ def load_compaction_signal(directory: Path, *, now: float, ttl_seconds: float) -
         if (now - ts) <= ttl_seconds:
             return path
     return None
+
+
+def reap_stale_sidecars(
+    directory: Path,
+    *,
+    now: float,
+    ttl_seconds: float = _DEFAULT_REAP_TTL_SECONDS,
+    log: DecisionLog | None = None,
+) -> list[Path]:
+    """Delete dead context-sidecar / compaction-signal files older than the TTL.
+
+    Reaps both ``*.json`` sidecars and ``*.compacting`` signals whose FILE MTIME
+    is older than ``ttl_seconds``. Mtime (not the JSON ``ts``) is used so a
+    malformed, truncated, or foreign file is reaped uniformly without a parse --
+    a dead file is a dead file. The single newest-mtime ``*.json`` is ALWAYS
+    spared, so the supervisor's current reading source is never removed even when
+    every session is dead (a bounded residue of one file). Because ``ttl_seconds``
+    is far larger than the freshness and compaction-signal windows, a file this
+    old can never still be actionable, so reaping cannot race a live decision.
+
+    Atomic-write temp files (``.{stem}.{pid}.tmp``) and any non-sidecar file (the
+    supervisor's own ``decision.log``) are never matched by the globs and so are
+    left untouched. Unlink races (the file vanished since it was stat'd) and stat
+    failures are tolerated -- reaping is best-effort hygiene, never fatal; a real
+    unlink error is logged, never silently swallowed.
+    """
+    if not directory.is_dir():
+        return []
+
+    entries: list[tuple[Path, float]] = []
+    for path in list(directory.glob(_CONTEXT_SIDECAR_GLOB)) + list(
+        directory.glob(_COMPACTION_SIGNAL_GLOB)
+    ):
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            # Vanished or unreadable between glob and stat -- nothing to reap.
+            continue
+        entries.append((path, mtime))
+
+    # Spare the freshest sidecar (the supervisor's current reading source) so it
+    # is never reaped, even if every session is dead and it too is past the TTL.
+    newest_json: Path | None = None
+    newest_mtime = float("-inf")
+    for path, mtime in entries:
+        if path.suffix == ".json" and mtime > newest_mtime:
+            newest_mtime = mtime
+            newest_json = path
+
+    reaped: list[Path] = []
+    for path, mtime in entries:
+        if path == newest_json:
+            continue
+        if (now - mtime) <= ttl_seconds:
+            continue
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as exc:
+            if log is not None:
+                log.write(f"warning: could not reap stale file {path}: {exc}")
+            continue
+        reaped.append(path)
+
+    if reaped and log is not None:
+        log.write(f"reaped {len(reaped)} stale sidecar/signal file(s)")
+    return reaped
 
 
 class CompactStateMachine:
@@ -944,8 +1022,9 @@ def _poll_once(
     input_line_empty: bool = True,
     human_compact_submitted: bool = False,
     work_idle: bool = True,
+    reap_ttl_seconds: float = _DEFAULT_REAP_TTL_SECONDS,
 ) -> Evaluation:
-    """One supervisor tick: read the sidecar, decide, and inject if warranted.
+    """One supervisor tick: reap dead files, read the sidecar, decide, inject.
 
     Reads the freshest sidecar AND the compaction signal, advances the state
     machine, and -- for a non-NOOP decision -- injects the resolved payload
@@ -967,7 +1046,13 @@ def _poll_once(
 
     ``work_idle`` (Plan 00152) is True when the child output has settled; it
     only gates the LOWER red band (elevated/critical readings compact promptly).
+
+    ``reap_ttl_seconds`` (Plan 00160) bounds the shared sidecar dir: dead
+    ``{session}.json`` / ``{session}.compacting`` files from closed sessions are
+    reaped each tick. The freshest sidecar is always spared, so reaping never
+    removes the reading source resolved just below.
     """
+    reap_stale_sidecars(sidecar_dir, now=now_wall, ttl_seconds=reap_ttl_seconds, log=log)
     reading = load_freshest_sidecar(sidecar_dir, now=now_wall, freshness_seconds=freshness_seconds)
     # A compaction stops status renders, so the context sidecar goes
     # stale/absent during one -- the compaction signal is an independent input.
@@ -1255,6 +1340,7 @@ def supervise(
             input_line_empty=activity.line.is_empty,
             human_compact_submitted=human_compact,
             work_idle=work_idle,
+            reap_ttl_seconds=policy.reap_ttl_seconds,
         )
 
     previous_handler = signal.signal(signal.SIGWINCH, _on_winch)
