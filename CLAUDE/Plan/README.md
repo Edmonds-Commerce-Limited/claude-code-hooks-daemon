@@ -28,6 +28,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00135: Event-Driven `send-keys` Injection](00135-event-driven-send-keys-injection/PLAN.md) - **In design**
 
+- [00160: Supervisor Foreground Identity & Dead-File Reaping](00160-supervisor-foreground-identity-and-reaping/PLAN.md) - In Progress (00135 follow-up: reap dead sidecars/signals + bind the supervisor to the foreground session so `/compact` only ever targets the focused Agent-View thread; background-thread looping is out of scope)
+
 ### Memory / Documentation Policy
 
 - [00132: PostToolUse Progressive-Disclosure Reminder on Project-Doc Markdown Writes](00132-progressive-disclosure-md-write-reminder/PLAN.md) - Not Started (awaiting sign-off)
