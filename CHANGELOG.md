@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.38.0] - 2026-07-13
+
+This is a **minor release** delivering a daemon performance-tuning wave
+(Plans 00154-00156): research into whether a Rust rewrite would beat a
+tuned Python daemon (conclusion: stay on Python), several hot-path wins on
+the daemon and bash-forwarder side, and removal of dead code. No breaking
+changes, no new opt-in config keys, no changed defaults.
+
+### Added
+
+- **`CLAUDE/Performance/` documentation hub (Plan 00154)** — research
+  comparing a potential Rust daemon rewrite against tuning the existing
+  Python daemon, baseline measurements, benchmark methodology, and the
+  recommendation to stay on a tuned Python implementation. Documentation
+  and benchmarks only — no runtime behaviour change.
+- **Short-TTL render cache for the status-line git-branch segment (Plan
+  00155, T4)** — `handlers/status_line/git_branch.py` now caches its
+  rendered segment for a short TTL so a burst of status-line renders in
+  quick succession does not re-run `git` on every render.
+
+### Changed
+
+- **`is_hooks_daemon_repo` is memoised (Plan 00155, T1)** — previously
+  forked a `git` subprocess on every Bash tool call to determine whether
+  the current repo is the daemon's own self-install checkout; now computed
+  once and cached.
+- **Hook transport no longer requires `jq` (Plan 00156, T2)** — `init.sh`'s
+  forwarder now encodes the `{event, hook_input}` payload sent to the
+  daemon via a small `python3 -c` encoder (event name via argv, payload on
+  stdin — control-character safe) instead of shelling out to `jq`. `jq` is
+  no longer a dependency of the hot hook-dispatch path.
+- **`init.sh` hot path slimmed (Plan 00156, T3)** — the portable-bash tier
+  of the hook forwarder was trimmed to reduce per-invocation overhead.
+- **`emit_hook_error`'s jq-less fallback hardened (Plan 00156, Fable review
+  F1-F7 follow-up)** — the error-reporting fallback path now encodes its
+  JSON via `python3`/`json.dumps` with values passed through argv (no shell
+  injection, valid JSON even for adversarial hook input) and mirrors the
+  `jq` path's decision policy: Stop/SubagentStop fail **closed**
+  (`decision: block`), all other events fail **open**. Also adds a
+  payload-specific advisory for malformed hook input reassuring the agent
+  the daemon is likely healthy and should not be restarted, and a stderr
+  diagnostic when the status-line transport itself fails.
+
+### Removed (internal cleanup — no user-facing change)
+
+- **Legacy one-shot hook entry-point package deleted (Plan 00155, Phase
+  3)** — `src/claude_code_hooks_daemon/hooks/*.py` (`pre_tool_use.py`,
+  `post_tool_use.py`, `session_start.py`, etc.) and their tests were
+  removed, along with the now-dangling `[project.scripts] claude-hooks-daemon` console-script entry in `pyproject.toml`. This
+  package was dead code superseded by the socket-daemon architecture years
+  ago. **The live hook path is unchanged**: bash wrappers still talk to the
+  Unix-socket daemon, which still dispatches through `FrontController`, and
+  the daemon CLI (`python -m claude_code_hooks_daemon.daemon.cli ...`) is
+  untouched. No capability is removed, no config changes, no upgrade
+  action required.
+
 ## [3.37.0] - 2026-07-12
 
 This is a **minor release** refining the ccy PTY supervisor's auto-`/compact`
