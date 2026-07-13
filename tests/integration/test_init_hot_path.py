@@ -66,7 +66,6 @@ def test_hostname_suffix_sanitization(hostname: str, expected: str) -> None:
 def test_hostname_suffix_fallback_is_sanitized() -> None:
     """With no HOSTNAME the suffix still starts with '-' and has no spaces/upper."""
     env = {k: v for k, v in os.environ.items() if k != "HOSTNAME"}
-    env.pop("HOSTNAME", None)
     proc = subprocess.run(
         ["bash", "-c", f'source "{_INIT_SH}" >/dev/null 2>&1\n_get_hostname_suffix'],
         capture_output=True,
@@ -83,17 +82,69 @@ def test_hostname_suffix_fallback_is_sanitized() -> None:
     assert body == body.lower()
 
 
-def test_untracked_dir_exists_after_source() -> None:
-    """After sourcing, the resolved untracked dir exists.
+def _sandbox_project(tmp_path: Path, root_subdir: str) -> Path:
+    """Build a throwaway project that sources a copy of the real init.sh.
 
-    The mkdir is guarded with ``[[ -d ]] || mkdir -p`` so the common path skips
-    the spawn; this invariant proves the guard still guarantees the directory is
-    present (the daemon writes its socket/PID there). The real self-install
-    ``hooks-daemon.env`` pins ``HOOKS_DAEMON_ROOT_DIR`` to the project, so we
-    read the resolved ``_untracked_dir`` rather than overriding the root.
+    Layout: ``<proj>/.claude/init.sh`` (copy) + ``<proj>/.claude/hooks-daemon.env``
+    pinning ``HOOKS_DAEMON_ROOT_DIR`` to ``<proj>/<root_subdir>``. The project has
+    no ``.git``, so the hooks-daemon-repo self-install guard is skipped and the
+    source runs cleanly to the ``mkdir`` on the hot path. Returns the project dir.
     """
-    result = _source_and_run('printf "%s" "$_untracked_dir"', {})
+    proj = tmp_path / "proj"
+    claude_dir = proj / ".claude"
+    claude_dir.mkdir(parents=True)
+    (claude_dir / "init.sh").write_text(_INIT_SH.read_text())
+    (claude_dir / "hooks-daemon.env").write_text(
+        f'export HOOKS_DAEMON_ROOT_DIR="$PROJECT_PATH/{root_subdir}"\n'
+    )
+    return proj
+
+
+def test_untracked_dir_created_when_absent(tmp_path: Path) -> None:
+    """Sourcing creates the untracked dir when it does not yet exist.
+
+    Exercises the *creation* half of the ``[[ -d ]] || mkdir -p`` guard (Plan
+    00156 T3) — the branch the previous smoke test never reached because the real
+    repo's untracked dir always exists. The sandbox root exists but its
+    ``untracked/`` subdir does not, so the guard must spawn the mkdir.
+    """
+    root_subdir = "fresh-root"
+    proj = _sandbox_project(tmp_path, root_subdir)
+    untracked = proj / root_subdir / "untracked"
+    (proj / root_subdir).mkdir()  # root exists; untracked/ deliberately absent
+    assert not untracked.exists(), "precondition: untracked dir must be absent"
+
+    env = os.environ.copy()
+    env.pop("HOOKS_DAEMON_ROOT_DIR", None)  # let the sandbox .env set it
+    result = subprocess.run(
+        ["bash", "-c", f'source "{proj / ".claude" / "init.sh"}" >/dev/null 2>&1'],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=_SOURCE_TIMEOUT_SECONDS,
+    )
+
     assert result.returncode == 0, result.stderr
-    resolved = result.stdout.strip()
-    assert resolved, "init.sh did not resolve _untracked_dir"
-    assert Path(resolved).is_dir(), f"untracked dir missing after source: {resolved}"
+    assert untracked.is_dir(), f"guard did not create untracked dir: {untracked}"
+
+
+@pytest.mark.parametrize("mode", ["default", "status"])
+def test_passthrough_override_handles_status_mode(mode: str) -> None:
+    """The CI passthrough override renders a status fallback, not a raw JSON blob.
+
+    Review finding 2: ``send_request_stdin "Status" "status"`` under passthrough
+    mode must degrade to ``⚠️ NO STATUS DATA`` (matching the old ``jq -r``
+    fallback), while a normal event still gets the silent ``{}`` passthrough.
+    """
+    snippet = "_enter_passthrough_mode\n" + (
+        'echo "{}" | send_request_stdin "Status" "status"'
+        if mode == "status"
+        else 'echo "{}" | send_request_stdin "PreToolUse"'
+    )
+    result = _source_and_run(snippet, {})
+    assert result.returncode == 0, result.stderr
+    out = result.stdout.strip()
+    if mode == "status":
+        assert out == "⚠️ NO STATUS DATA", out
+    else:
+        assert out == "{}", out

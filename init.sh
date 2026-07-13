@@ -102,7 +102,9 @@ emit_hook_error() {
             "Then inform the user if the issue persists.")
     fi
 
-    # Event-specific JSON formatting using jq (already a dependency)
+    # Event-specific JSON formatting. jq is used only on this pure-error path
+    # (the hot-path transport is jq-free since Plan 00156); a jq-less fallback
+    # follows below for hosts without it.
     # Stop/SubagentStop: top-level decision only (deny to show error)
     # Other events: hookSpecificOutput with context (fail-open allow)
     if command -v jq &>/dev/null; then
@@ -683,7 +685,13 @@ _enter_passthrough_mode() {
     # shellcheck disable=SC2317
     send_request_stdin() {
         cat > /dev/null
-        echo '{}'
+        # Status line ($2 == "status"): render the fallback text, not a raw JSON
+        # blob (Plan 00156 review finding 2). Other events: silent {} passthrough.
+        if [[ "${2:-}" == "status" ]]; then
+            echo '⚠️ NO STATUS DATA'
+        else
+            echo '{}'
+        fi
     }
     export -f send_request_stdin
 }
@@ -753,6 +761,12 @@ ensure_daemon() {
         send_request_stdin() {
             local event_name="${1:-Unknown}"
             cat > /dev/null
+            # Status line ($2 == "status"): render the fallback text, not a raw
+            # JSON blob (Plan 00156 review finding 2).
+            if [[ "${2:-}" == "status" ]]; then
+                echo '⚠️ NO STATUS DATA'
+                return 0
+            fi
             printf '{"hookSpecificOutput": {"hookEventName": "%s", "additionalContext": "%s"}}\n' \
                 "$event_name" \
                 "HOOKS DAEMON: Not installed in CI environment. Safety handlers are INACTIVE. All operations allowed without validation. This warning appears once."
@@ -814,22 +828,37 @@ def emit_error_json(event_name, error_type, error_details):
     '''
     print(f'HOOKS DAEMON ERROR [{error_type}]: {error_details}', file=sys.stderr)
 
-    context_lines = [
-        'HOOKS DAEMON: Not currently running',
-        '',
-        f'Error: {error_type} - {error_details}',
-        '',
-        'Hook safety handlers are inactive until the daemon is restarted.',
-        'If you are in the middle of an upgrade, this is expected and temporary.',
-        '',
-        'TO FIX (usually takes a few seconds):',
-        'Use the hooks-daemon skill to restart the daemon.',
-        'Then use the hooks-daemon skill to verify health.',
-        'Invoke via Skill tool with skill=hooks-daemon and args=restart or args=health.',
-        '',
-        'If restart fails, use the hooks-daemon skill to check logs (args=logs).',
-        'Then inform the user if the issue persists.',
-    ]
+    if error_type == 'invalid_hook_input':
+        # A malformed payload never reached the socket, so the daemon state is
+        # unknown and almost certainly fine. Do NOT frame this as daemon-down or
+        # tell the agent to restart (Plan 00156 review finding 1) — a restart
+        # 'fixes' nothing. This is a caller/Claude-Code payload problem.
+        context_lines = [
+            'HOOKS DAEMON: Received a malformed hook payload',
+            '',
+            f'Error: {error_type} - {error_details}',
+            '',
+            'The hook input was not valid JSON, so no handler validated it.',
+            'The daemon itself is likely healthy — do NOT restart it.',
+            'If this recurs, capture the exact hook input and report it.',
+        ]
+    else:
+        context_lines = [
+            'HOOKS DAEMON: Not currently running',
+            '',
+            f'Error: {error_type} - {error_details}',
+            '',
+            'Hook safety handlers are inactive until the daemon is restarted.',
+            'If you are in the middle of an upgrade, this is expected and temporary.',
+            '',
+            'TO FIX (usually takes a few seconds):',
+            'Use the hooks-daemon skill to restart the daemon.',
+            'Then use the hooks-daemon skill to verify health.',
+            'Invoke via Skill tool with skill=hooks-daemon and args=restart or args=health.',
+            '',
+            'If restart fails, use the hooks-daemon skill to check logs (args=logs).',
+            'Then inform the user if the issue persists.',
+        ]
     context = chr(10).join(context_lines)
 
     # Stop/SubagentStop: top-level decision only (deny to show error)
@@ -854,6 +883,10 @@ def fail(error_type, error_details):
     degrades to the same 'NO STATUS DATA' the old jq -r fallback produced;
     every other event fails open (or blocks, for Stop) via emit_error_json.'''
     if response_mode == 'status':
+        # Render the fallback the old jq -r produced, but still surface the
+        # diagnostic on stderr — no silent error suppression (Plan 00156 review
+        # finding 3). (The non-status path logs stderr inside emit_error_json.)
+        print(f'HOOKS DAEMON ERROR [{error_type}]: {error_details}', file=sys.stderr)
         print('⚠️ NO STATUS DATA')
     else:
         emit_error_json(event_name, error_type, error_details)
@@ -950,7 +983,8 @@ except Exception as e:
 # stay one-liners and the JSON-to-exit-code mapping lives in one place.
 #
 # Behaviour:
-#   1. Pipe stdin JSON → jq wrap → send_request_stdin
+#   1. Pass stdin JSON to send_request_stdin, which wraps it into
+#      {event, hook_input} itself (jq-free since Plan 00156 T2).
 #   2. Capture daemon response, echo to stdout (back-compat for agent JSON
 #      visibility + existing test invariants).
 #   3. Parse `.decision`:

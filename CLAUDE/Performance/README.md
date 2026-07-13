@@ -114,10 +114,15 @@ saving is the p50 `jq` spawn cost the wrapper no longer pays.
 | T2 drop `jq` (status line)     | 2 `jq` spawns (wrap + unwrap)  | 0                          | ~−44-48 ms of jq off the async status render (battery/fan, stacks with Wave 1 T4's TTL cache)                             |
 | T3 slim `init.sh` (per source) | ~12.46 ms avg                  | ~11.07 ms avg              | ~−1.4 ms/event — guarded `mkdir` + one fewer `tr` spawn in the hostname suffix (portable, bash-3.2-safe tier only)        |
 
-Behaviour is byte-identical: the request envelope, the Stop exit-2 contract, the
-status-line fallback text, and the CI/daemon-down error responses are all
-preserved and pinned by tests. jq remains a dependency only for
-`emit_hook_error`'s pure-error path.
+Behaviour is preserved on every path that fires in practice: the request
+envelope, the Stop exit-2 contract, the status-line fallback text, and the
+CI/daemon-down error responses are all pinned by tests. jq remains a dependency
+only for `emit_hook_error`'s pure-error path. The **one** intentional divergence
+is a malformed (non-JSON) hook payload — which Claude Code never actually sends:
+the old `jq` wrap exited 4, the new transport exits 0 with a payload-specific
+advisory (non-Stop) or `decision: block` → exit 2 (Stop, fails closed). Both old
+and new fail open for non-Stop, so it is not a block→allow regression; it is now
+covered by dedicated tests (Plan 00156 review, findings 1 & 5).
 
 **Measured end-to-end (post-Wave-2 verification).** Re-ran the Plan 00154
 `bench_forwarder.sh` harness against the production wrappers (60 iterations, same

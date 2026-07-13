@@ -133,7 +133,35 @@ copies cannot drift.
   `tests/integration/test_init_hot_path.py` lock the behaviour. Full QA 13/13,
   9822 tests, coverage 95.6%.
 - **Delivery commits** (branch `feature/performance-tuning`): scaffold `83f5f91`,
-  T2 `b88d424`, T3 `c4fff5b`, close-out (this commit). Wave 2 net: ~−22 ms on
-  every latency-path event (jq removed) + ~−1.4 ms/event (init.sh slim), with
-  handler decisions, the request envelope, the Stop exit-2 contract, and the
-  status-line/error responses all behaviourally unchanged.
+  T2 `b88d424`, T3 `c4fff5b`, close-out `8c45d42`, measured-hub `24331e1`. Wave 2
+  net: ~−22 ms on every latency-path event (jq removed) + ~−1.4 ms/event (init.sh
+  slim), with handler decisions, the request envelope, the Stop exit-2 contract,
+  and the status-line/error responses all behaviourally unchanged.
+
+### 2026-07-13 — Independent review + fixes
+
+- **Fable code review** (`code-reviewer` agent, Fable model) run over the Wave 2
+  diff; captured verbatim in `REVIEW-fable-wave2.md`. Verdict **APPROVE WITH
+  NITS**, 7 findings (5 MINOR, 2 NIT), none blocking. Transport rewrite confirmed
+  correct on payload fidelity, Stop contract, injection surface, and bash-3.2
+  portability.
+- **Fixes applied** (TDD, QA 13/13, daemon restart RUNNING):
+  - F1 — `invalid_hook_input` now gets a payload-specific advisory that does NOT
+    tell the agent to restart the daemon (the daemon is fine; the payload was bad).
+  - F2 — both CI-passthrough `send_request_stdin` overrides render `⚠️ NO STATUS DATA` in status mode instead of leaking a raw JSON blob to the status line.
+  - F3 — the status-mode `fail()` branch re-emits the `HOOKS DAEMON ERROR` stderr
+    diagnostic (no silent error suppression).
+  - F4 — new `test_untracked_dir_created_when_absent` exercises the mkdir-when-
+    absent branch of the T3 guard in a sandbox project (the old test only ever hit
+    dir-exists).
+  - F5 — new tests pin the one changed behaviour: malformed payload → non-Stop
+    fails open (exit 0, advisory), Stop fails closed (exit 2).
+  - F6 — the tautological `test_precondition_jq_is_installed` is now an honest
+    skip marker.
+  - F7 — stale `jq`-referencing comments in `init.sh` corrected; dead `env.pop`
+    line removed.
+  - Documentation: the "byte-identical" claim in `CLAUDE/Performance/README.md` is
+    corrected to note the single intentional malformed-payload divergence.
+  - Out of scope (per review): the pre-existing unescaped `$error_details`
+    interpolation in `emit_hook_error`'s jq-less fallback (`init.sh` ~line 142) —
+    flagged as a follow-up ticket, not a Wave 2 regression.

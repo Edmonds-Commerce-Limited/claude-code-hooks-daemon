@@ -377,7 +377,80 @@ def test_stop_allow_exits_0(
     assert result.returncode == 0, result.stderr.decode()
 
 
-@pytest.mark.skipif(shutil.which("jq") is None, reason="jq not installed on this host")
+# ---------------------------------------------------------------------------
+# 7. Malformed-payload behaviour (Plan 00156 review, findings 1 & 5)
+#
+# json.loads is the one branch whose behaviour diverges from the old jq path:
+# a non-JSON stdin payload. Non-Stop events fail OPEN (advisory context, exit 0);
+# Stop/SubagentStop fail CLOSED (decision=block -> exit 2). Both are pinned here
+# so the divergence can never silently regress into a block->allow safety hole.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("strip_jq", [False, True], ids=["with-jq", "no-jq"])
+def test_malformed_payload_standard_wrapper_fails_open(
+    strip_jq: bool, sock_path: Path, live_pid_file: Path
+) -> None:
+    """A non-JSON payload on a normal event exits 0 with advisory context.
+
+    The parse fails before the socket is touched, so no server is needed. The
+    context must flag the invalid payload and must NOT tell the agent the daemon
+    is down / to restart it (review finding 1) — the daemon is fine.
+    """
+    result = _run_wrapper(
+        "pre-tool-use", b"not json {", sock_path, live_pid_file, strip_jq=strip_jq
+    )
+
+    assert result.returncode == 0, result.stderr.decode()
+    response = json.loads(result.stdout.decode())
+    context = response["hookSpecificOutput"]["additionalContext"]
+    assert "invalid_hook_input" in context or "not valid JSON" in context
+    assert "Not currently running" not in context
+    assert "restart the daemon" not in context.lower()
+
+
+@pytest.mark.parametrize("strip_jq", [False, True], ids=["with-jq", "no-jq"])
+@pytest.mark.parametrize("wrapper", ["stop", "subagent-stop"])
+def test_malformed_payload_stop_wrapper_fails_closed(
+    wrapper: str, strip_jq: bool, sock_path: Path, live_pid_file: Path
+) -> None:
+    """A non-JSON payload on a Stop event fails CLOSED: exit 2 (hard re-entry).
+
+    Load-bearing safety property: a garbled Stop payload must never let the agent
+    stop silently — it degrades to the same block the daemon-down path produces.
+    """
+    result = _run_wrapper(wrapper, b"not json {", sock_path, live_pid_file, strip_jq=strip_jq)
+
+    assert result.returncode == 2, f"expected fail-closed exit 2, got {result.returncode}"
+
+
+@pytest.mark.parametrize("strip_jq", [False, True], ids=["with-jq", "no-jq"])
+def test_status_line_transport_failure_emits_stderr_diagnostic(
+    strip_jq: bool, tmp_path: Path, live_pid_file: Path
+) -> None:
+    """A mid-render socket failure still renders the fallback AND logs to stderr.
+
+    Review finding 3: the status branch of fail() must not silently swallow the
+    diagnostic (project "no silent error suppression" standard). The pid file is
+    live (ensure_daemon proceeds) but the socket does not exist, so the transport
+    raises FileNotFoundError inside send_request_stdin.
+    """
+    missing_sock = tmp_path / "no-such-daemon.sock"  # never created -> connect fails
+    result = _run_wrapper(
+        "status-line", b'{"model":{}}', missing_sock, live_pid_file, strip_jq=strip_jq
+    )
+
+    assert result.returncode == 0, result.stderr.decode()
+    assert result.stdout.decode().strip() == "⚠️ NO STATUS DATA"
+    assert "HOOKS DAEMON ERROR" in result.stderr.decode()
+
+
 def test_precondition_jq_is_installed() -> None:
-    """The with-jq parametrisations are meaningful only when jq exists."""
-    assert shutil.which("jq") is not None
+    """Visibility marker for the with-jq parametrisations.
+
+    Not a behaviour assertion — the with-jq/no-jq matrix above already exercises
+    both paths. This skips (rather than passing silently) when jq is absent so the
+    test report surfaces that the with-jq parametrisations did not run.
+    """
+    if shutil.which("jq") is None:
+        pytest.skip("jq not installed — with-jq parametrisations were skipped")
