@@ -141,10 +141,41 @@ emit_hook_error() {
             fi
         fi
     else
-        # Fallback if jq not available (should not happen - jq is required)
-        cat <<FALLBACK_EOF
-{"hookSpecificOutput":{"hookEventName":"$event_name","additionalContext":"HOOKS DAEMON ERROR: $error_type - $error_details"}}
-FALLBACK_EOF
+        # Fallback when jq is absent. Plan 00156 removed jq from the hot-path
+        # transport, so a genuinely jq-less host is now plausible and this path
+        # can really fire. Encode with python3 (already the transport dependency,
+        # so a host without it cannot send any hook request anyway): every value
+        # passes via argv, so json.dumps escapes quotes/newlines/backslashes and
+        # they can neither break the JSON document nor inject into the source.
+        # Mirrors the jq branch's policy exactly — Stop/SubagentStop fail CLOSED
+        # (decision=block); other events fail open with context.
+        python3 -c '
+import json
+import sys
+
+event_name, context_msg, ci_enforced, not_installed = sys.argv[1:5]
+stop_events = ("Stop", "SubagentStop")
+
+if ci_enforced == "true":
+    if event_name == "PreToolUse":
+        resp = {"decision": "deny", "reason": context_msg}
+    elif event_name in stop_events:
+        resp = {"decision": "block", "reason": "Hooks daemon REQUIRED (ci_enabled: true) but not installed"}
+    else:
+        resp = {"hookSpecificOutput": {"hookEventName": event_name, "additionalContext": context_msg}}
+elif not_installed == "true":
+    if event_name in stop_events:
+        resp = {"decision": "block", "reason": "Hooks daemon not installed - protection not active"}
+    else:
+        resp = {"hookSpecificOutput": {"hookEventName": event_name, "additionalContext": context_msg}}
+else:
+    if event_name in stop_events:
+        resp = {"decision": "block", "reason": "Hooks daemon not running - protection not active"}
+    else:
+        resp = {"hookSpecificOutput": {"hookEventName": event_name, "additionalContext": context_msg}}
+
+print(json.dumps(resp))
+' "$event_name" "$context_msg" "$_HOOKS_DAEMON_CI_ENFORCED" "$_HOOKS_DAEMON_NOT_INSTALLED"
     fi
 }
 
