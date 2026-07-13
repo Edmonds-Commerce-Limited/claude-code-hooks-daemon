@@ -16,8 +16,9 @@ logger = logging.getLogger(__name__)
 
 # The CLI module that, given a launch subcommand, becomes the daemon server.
 # Matching requires this exact module token PLUS a launch subcommand (below) so
-# that transient CLI helpers (status/stop/logs/...) and hook forwarders
-# (claude_code_hooks_daemon.hooks.*) are never mistaken for a daemon server.
+# that transient CLI helpers (status/stop/logs/...) and the per-event hook
+# forwarders (the bash wrappers' python3 socket transport) are never mistaken
+# for a daemon server.
 _DAEMON_CLI_MODULE = "claude_code_hooks_daemon.daemon.cli"
 
 # The ONLY subcommands that daemonize. Daemonization (os.fork ×2, os.setsid,
@@ -235,7 +236,7 @@ def _is_daemon_server_process(cmdline: list[str] | None) -> bool:
 
     - transient CLI helpers (``status``, ``stop``, ``logs``, ``health``,
       ``repair``, ``check-truth-changes``, ``generate-docs``, ``validate-*``, …)
-    - hook forwarders (``claude_code_hooks_daemon.hooks.*``)
+    - the per-event hook forwarders (the bash wrappers' python3 socket transport)
     - a bare ``cli`` invocation with no subcommand
 
     none of which are daemon servers and so must never be terminated by

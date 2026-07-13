@@ -20,18 +20,29 @@ class InstallationError(Exception):
     pass
 
 
-def is_hooks_daemon_repo(directory: Path) -> bool:
-    """Check if directory is the hooks-daemon repository by git remote.
+# Memoisation for is_hooks_daemon_repo (Plan 00155 T1). The result forks
+# `git remote get-url origin`, which daemon_restart_verifier would otherwise
+# run on EVERY Bash PreToolUse event (~1.4 ms p50, ~75% of the Bash-event
+# daemon-side cost). A repo's origin URL cannot change under a running daemon
+# in any way that matters, so the answer is cached per directory — one fork per
+# daemon lifetime instead of one per event. A stale entry would require someone
+# re-pointing `origin` mid-daemon; a restart heals it (see _clear cache below).
+_REPO_DETECTION_CACHE: dict[Path, bool] = {}
 
-    Uses git remote URL as source of truth rather than magic path detection.
-    This correctly identifies the hooks-daemon repo even if cloned with a
-    different directory name.
 
-    Args:
-        directory: Directory to check
+def _clear_repo_detection_cache() -> None:
+    """Empty the is_hooks_daemon_repo memoisation cache.
 
-    Returns:
-        True if directory is the hooks-daemon repository
+    Used by tests for isolation; also available if a caller ever needs to force
+    re-resolution (e.g. after deliberately re-pointing the git remote).
+    """
+    _REPO_DETECTION_CACHE.clear()
+
+
+def _detect_hooks_daemon_repo(directory: Path) -> bool:
+    """Fork git to determine whether ``directory`` is the hooks-daemon repo.
+
+    This is the uncached implementation; ``is_hooks_daemon_repo`` memoises it.
     """
     try:
         result = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
@@ -51,6 +62,32 @@ def is_hooks_daemon_repo(directory: Path) -> bool:
         return any(pattern in remote_url for pattern in hooks_daemon_patterns)
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return False
+
+
+def is_hooks_daemon_repo(directory: Path) -> bool:
+    """Check if directory is the hooks-daemon repository by git remote.
+
+    Uses git remote URL as source of truth rather than magic path detection.
+    This correctly identifies the hooks-daemon repo even if cloned with a
+    different directory name.
+
+    The result is memoised per ``directory`` (Plan 00155 T1) so hot callers
+    such as daemon_restart_verifier fork git at most once per daemon lifetime
+    rather than once per Bash event. Call ``_clear_repo_detection_cache`` to
+    force re-resolution.
+
+    Args:
+        directory: Directory to check
+
+    Returns:
+        True if directory is the hooks-daemon repository
+    """
+    cached = _REPO_DETECTION_CACHE.get(directory)
+    if cached is not None:
+        return cached
+    result = _detect_hooks_daemon_repo(directory)
+    _REPO_DETECTION_CACHE[directory] = result
+    return result
 
 
 def load_config_safe(project_root: Path) -> dict[str, Any] | None:

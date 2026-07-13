@@ -51,9 +51,6 @@ dev = [
     "deptry>=0.20",
 ]
 
-[project.scripts]
-claude-hooks-daemon = "claude_code_hooks_daemon.hooks.pre_tool_use:main"
-
 [project.urls]
 Homepage = "https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon"
 Documentation = "https://github.com/Edmonds-Commerce-Limited/claude-code-hooks-daemon/blob/main/README.md"

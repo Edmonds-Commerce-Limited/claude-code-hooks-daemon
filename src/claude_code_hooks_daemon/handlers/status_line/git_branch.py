@@ -52,6 +52,14 @@ _BRANCH_AB_FIELD_COUNT = 2
 # remote moves on. Renders therefore kick a TTL-gated fetch in a daemon
 # thread — never on the render hot path, never interactive, never fatal.
 _DEFAULT_FETCH_INTERVAL_SECONDS = 300
+
+# Render TTL cache (Plan 00155 T4). Each render forks ~4 git processes; under
+# output streaming the status line re-renders every ~300 ms. Serving renders
+# from a short per-cwd cache cuts that fork churn with at most TTL-bounded
+# staleness. The render is asynchronous, so this is a CPU/battery win, not a
+# latency win. TTL <= 0 disables the cache entirely.
+_DEFAULT_RENDER_TTL_SECONDS = 2.0
+
 _GIT_TERMINAL_PROMPT_ENV = "GIT_TERMINAL_PROMPT"
 _GIT_TERMINAL_PROMPT_DISABLED = "0"
 _GIT_SSH_COMMAND_ENV = "GIT_SSH_COMMAND"
@@ -81,6 +89,11 @@ class GitBranchHandler(Handler):
         self._fetch_lock = threading.Lock()
         self._last_fetch_started: dict[str, float] = {}
         self._fetch_inflight: set[str] = set()
+        # Render TTL cache keyed by cwd: cwd -> (monotonic timestamp, context).
+        # Config option `render_ttl_seconds` lands via the registry's setattr
+        # injection and overrides this default.
+        self._render_ttl_seconds: float = _DEFAULT_RENDER_TTL_SECONDS
+        self._render_cache: dict[str, tuple[float, list[str]]] = {}
 
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Always run for status events."""
@@ -88,6 +101,11 @@ class GitBranchHandler(Handler):
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         """Get current git branch with status icons and format for status line.
+
+        Renders are served from a short per-cwd TTL cache (Plan 00155 T4) so a
+        stream of rapid status renders does not fork ~4 git processes each time.
+        A cache miss computes the render via :meth:`_render_git_context` and
+        stores it; staleness is bounded by ``_render_ttl_seconds``.
 
         Args:
             hook_input: Status event input with workspace data
@@ -101,6 +119,41 @@ class GitBranchHandler(Handler):
         if not cwd or not Path(cwd).exists():
             return HookResult(context=[])
 
+        cached = self._cached_render(cwd)
+        if cached is not None:
+            return HookResult(context=cached)
+
+        context = self._render_git_context(cwd)
+        self._store_render(cwd, context)
+        return HookResult(context=context)
+
+    def _cached_render(self, cwd: str) -> list[str] | None:
+        """Return the cached render for ``cwd`` if still within the TTL, else None.
+
+        A TTL of <= 0 disables caching (always a miss).
+        """
+        if self._render_ttl_seconds <= 0:
+            return None
+        entry = self._render_cache.get(cwd)
+        if entry is None:
+            return None
+        cached_at, context = entry
+        if (time.monotonic() - cached_at) >= self._render_ttl_seconds:
+            return None
+        return context
+
+    def _store_render(self, cwd: str, context: list[str]) -> None:
+        """Cache a freshly computed render for ``cwd`` (no-op when caching is disabled)."""
+        if self._render_ttl_seconds <= 0:
+            return
+        self._render_cache[cwd] = (time.monotonic(), context)
+
+    def _render_git_context(self, cwd: str) -> list[str]:
+        """Compute the git branch + icons context for ``cwd`` (uncached).
+
+        Returns a single-element context list, or an empty list when ``cwd`` is
+        not a git repo or any git command fails.
+        """
         try:
             result = subprocess.run(  # nosec B603 B607 - git is trusted system tool, no user input
                 ["git", "rev-parse", "--show-toplevel"],
@@ -111,7 +164,7 @@ class GitBranchHandler(Handler):
             )
 
             if result.returncode != 0:
-                return HookResult(context=[])
+                return []
 
             repo_toplevel = result.stdout.decode().strip()
 
@@ -138,14 +191,14 @@ class GitBranchHandler(Handler):
                 else:
                     color = _COLOR_ORANGE
                 icons = self._format_git_status_icons(cwd)
-                return HookResult(context=[f"| ⎇ {color}{branch}{_COLOR_RESET}{icons}"])
+                return [f"| ⎇ {color}{branch}{_COLOR_RESET}{icons}"]
 
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as e:
             logger.debug("Failed to get git branch: %s", e)
         except Exception as e:
             logger.error("Unexpected error in git branch handler: %s", e, exc_info=True)
 
-        return HookResult(context=[])
+        return []
 
     def _resolve_default_branch(self, repo_toplevel: str, cwd: str) -> str | None:
         """Return the cached default branch for a repo, detecting it once per repo.

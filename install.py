@@ -299,9 +299,12 @@ if ! ensure_daemon; then
     exit 0  # Exit 0 so Claude processes the JSON response
 fi
 
-# Pipe directly from stdin through jq to daemon - no shell variable storage
-# send_request_stdin handles socket errors internally and outputs JSON on failure
-jq -c '{{event: "{event_name}", hook_input: .}}' | send_request_stdin
+# Plan 00156: no jq. send_request_stdin wraps the raw stdin hook_input into
+# {{event, hook_input}} itself (the python3 transport it already spawns). The
+# payload stays on stdin — control-character safe; only the hardcoded event-name
+# literal is passed as an argument.
+# send_request_stdin handles socket errors internally and outputs JSON on failure.
+send_request_stdin "{event_name}"
 """
 
     hook_file.write_text(hook_content)
@@ -346,18 +349,11 @@ if ! ensure_daemon; then
     exit 1
 fi
 
-# Pipe JSON directly through socket
-# Add hook_event_name to input, then wrap in standard request format
-# Note: Status event returns {"text": "..."} directly
-jq -c '. + {hook_event_name: "Status"} | {event: "Status", hook_input: .}' | send_request_stdin | jq -r '
-  if .error then
-    "⚠️ ERROR: " + .error
-  elif .text then
-    .text
-  else
-    "⚠️ NO STATUS DATA"
-  end
-'
+# Plan 00156: no jq. send_request_stdin (status mode) injects
+# hook_event_name=Status into the payload, wraps it into the request envelope,
+# and extracts .text/.error from the daemon response with the same fallback the
+# old `jq -r` produced. Status event returns {"text": "..."} directly.
+send_request_stdin "Status" "status"
 """
 
     hook_file.write_text(hook_content)

@@ -1,0 +1,134 @@
+# Plan 00155: performance tuning wave 1 (daemon-side, safe)
+
+**Status**: Complete
+**Created**: 2026-07-12
+**Owner**: joseph
+**Priority**: Medium
+**Themes**: performance
+**Recommended Executor**: Sonnet
+**Execution Strategy**: Single-Threaded (small, sequential, TDD)
+
+## Overview
+
+First implementation wave off the back of the Plan 00154 performance research.
+This wave takes only the **pure-Python, daemon-side** tuning wins that carry no
+forwarder-contract or distribution risk — the changes that cannot regress the
+safety-critical hook transport and are fully unit-testable. The larger win
+(dropping `jq` from the wrappers, T2) and the `init.sh` slimming (T3) touch the
+transport and are deliberately deferred to a later, more heavily gated wave.
+
+Grounding evidence: [Plan 00154 RESEARCH.md](../Completed/00154-daemon-performance-rust-vs-python-research/RESEARCH.md),
+tuning catalogue [PYTHON-TUNING.md](../Completed/00154-daemon-performance-rust-vs-python-research/PYTHON-TUNING.md).
+Durable hub: [CLAUDE/Performance/README.md](../../Performance/README.md).
+
+Prime directive (from the user): **meaningful performance improvements without
+any loss of functionality or stability.** Every change ships with tests proving
+behaviour is unchanged, and the daemon-restart + full QA gates must stay green.
+
+## Goals
+
+- **T1** — memoise `is_hooks_daemon_repo` so `daemon_restart_verifier` stops
+  forking `git remote get-url origin` on every Bash event (measured ~1.4 ms p50
+  per Bash command; ~75% of the Bash-event daemon-side cost).
+- **T4** — cut the status-line git subprocess churn: one combined
+  `git status --porcelain=v2 --branch` call and/or a short TTL cache keyed by
+  repo toplevel, so streaming renders (~every 300 ms) don't fork ~5 git
+  processes each time. CPU-churn win (battery/fan), not a latency win.
+- **Cleanup** — resolve the legacy one-shot entry
+  `src/claude_code_hooks_daemon/hooks/pre_tool_use.py` that crashes against the
+  current plugins config schema (a `str` is passed to
+  `PluginLoader.load_handlers_from_config`). Dead-or-broken either way.
+
+## Non-Goals
+
+- No `jq` removal (T2), no `init.sh` slimming (T3) — deferred to wave 2; they
+  touch the transport contract and need the forwarder acceptance gates.
+- No content-scanner rework (T5) — only worth it if large writes are shown to be
+  common; not demonstrated.
+- No new compiled dependencies (orjson T6), no Rust.
+- No behaviour changes to any handler's block/allow decisions.
+
+## Tasks
+
+### Phase 1: T1 — cache is_hooks_daemon_repo ✅
+
+- [x] ✅ **Task 1.1**: RED — failing test asserting `is_hooks_daemon_repo`
+  resolves the git remote at most once per workspace root across repeated calls
+  (spy/patch the subprocess boundary; assert call count).
+- [x] ✅ **Task 1.2**: GREEN — memoise per directory (module-level
+  `_REPO_DETECTION_CACHE` dict; detection extracted to `_detect_hooks_daemon_repo`,
+  cleared via `_clear_repo_detection_cache`). One fork per daemon lifetime.
+- [x] ✅ **Task 1.3**: Verified behaviour unchanged for positive and negative
+  detection cases; distinct directories cached separately; False also cached.
+- [x] ✅ **Task 1.4**: Full QA 13/13 (9993 tests, 95.5% cov); daemon restart
+  RUNNING. No handler decision behaviour changed.
+
+### Phase 2: T4 — status-line git subprocess reduction ✅
+
+- [x] ✅ **Task 2.1**: RED — characterised render fork behaviour in tests
+  (4 new `TestGitBranchRenderCache` tests: cache-hit-within-TTL, cwd-keyed
+  isolation, TTL=0 disables, expiry re-renders).
+- [x] ✅ **Task 2.2**: GREEN — added a short per-cwd render TTL cache
+  (`_DEFAULT_RENDER_TTL_SECONDS = 2.0`, config-injectable `render_ttl_seconds`);
+  extracted the render body into `_render_git_context`, `handle()` now wraps it
+  with `_cached_render`/`_store_render`. Serves streaming renders from cache,
+  cutting ~4 git forks per hit.
+- [x] ✅ **Task 2.3**: Output proven unchanged — existing colour/icon/ahead-behind/
+  stash tests all pass through the cache-miss path; cache hit returns the same
+  context list. Updated `test_default_branch_detection_cached` to disable the
+  render cache so it still isolates default-branch memoisation.
+- [x] ✅ **Task 2.4**: Full QA 13/13 (9997 tests, 95.5% cov); daemon RUNNING;
+  live status render verified (`⎇ feature/performance-tuning ✚3`). Reconciled
+  the drift-proof `error_hiding` exclusion (function `handle` → `_render_git_context`).
+
+### Phase 3: legacy one-shot entry cleanup ✅ (delete — user decision)
+
+- [x] ✅ **Task 3.1**: Confirmed. The one-shot `hooks/*.py` package is OFF the
+  production path (bash wrapper → `ensure_daemon` → socket → daemon), reachable
+  only via the `claude-hooks-daemon` console entry point. Drifted (14 of ~37
+  handlers) and genuinely broken (iterates the `{paths, plugins}` mapping and
+  passes a `str` to `PluginLoader.load_handlers_from_config`). No src (non-test)
+  code depends on it — only stale comments in `process_verification.py`.
+- [x] ✅ **Task 3.2**: User chose **delete the standalone package**. Removed the
+  whole `src/.../hooks/` package (10 modules + `__init__`), the
+  `claude-hooks-daemon` `[project.scripts]` entry, and all one-shot tests
+  (`tests/unit/hooks/`, `test_hooks_pre_tool_use.py`,
+  `test_hello_world_integration.py`, `tests/integration/test_entry_point*.py`) —
+  24 files. Refreshed the stale `hooks.*` comments in `process_verification.py`
+  (its daemon-ID heuristic keys off `daemon.cli`, unaffected). Reinstalled
+  editable so the console script is gone.
+- [x] ✅ **Task 3.3**: Full QA 13/13 (9781 tests, coverage 95.6% — up from 95.5%);
+  daemon RUNNING; production hook path (bash→socket→daemon) unchanged.
+
+### Phase 4: measure & record ✅
+
+- [x] ✅ **Task 4.1**: Micro-benchmarked cold-vs-cached in-process and recorded
+  before/after in `CLAUDE/Performance/README.md`: T1 `is_hooks_daemon_repo`
+  1076 µs → 2.1 µs (forks once per daemon lifetime, not per Bash event);
+  T4 status render 10.4 ms → 4.0 µs on a cache hit (~85% of streaming renders).
+
+## Success Criteria
+
+- [x] T1 forks the remote at most once per daemon lifetime (1076 µs → 2.1 µs
+  cached); measured Bash-event daemon-side cost drops accordingly.
+- [x] T4 reduces git forks per status render (per-cwd TTL cache; 10.4 ms → 4.0 µs
+  on a hit); outputs identical for representative states.
+- [x] Legacy one-shot entry removed cleanly (whole `hooks/*.py` package deleted
+  per user decision; production path unaffected).
+- [x] Full QA green (13/13), 95.6% coverage, daemon RUNNING after every change,
+  no handler decision behaviour changed.
+
+## Notes & Updates
+
+### 2026-07-12
+
+- Plan scaffolded on branch `feature/performance-tuning`. Wave 1 = safe
+  daemon-side wins only (T1, T4, legacy-entry cleanup); T2/T3 deferred to wave 2.
+  Reusing the session's existing failsafe recovery cron `d4cb559d` (still live
+  from the 00154 session) rather than creating a duplicate.
+- Complete. Delivered on branch `feature/performance-tuning`:
+  scaffold + `CLAUDE/Performance/` hub `43eaddd`; T1 verifier cache `eb3e2ad`;
+  T4 status render TTL cache `62a7115`; Phase 3 legacy-package deletion
+  (−6126 lines) `ea08a31`. Measured: T1 1076 µs → 2.1 µs, T4 10.4 ms → 4.0 µs
+  (cached). QA 13/13, 9781 tests, coverage 95.6%, daemon RUNNING throughout.
+  Wave 2 (T2 drop `jq`, T3 slim `init.sh`) remains — tracked in the hub backlog.

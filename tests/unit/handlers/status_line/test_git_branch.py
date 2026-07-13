@@ -357,6 +357,10 @@ class TestGitBranchColorCoding:
         Call sequence per handle(): rev-parse, branch --show-current, [symbolic-ref
         on first call only], git status --porcelain=v2, git stash list.
         """
+        # Isolate default-branch caching from the render TTL cache (Plan 00155
+        # T4): disable the render cache so the second handle() re-forks and this
+        # test observes the per-repo default-branch memoisation on its own.
+        handler._render_ttl_seconds = 0
         hook_input = {"workspace": {"current_dir": str(tmp_path)}}
         toplevel_stdout = str(tmp_path).encode() + b"\n"
 
@@ -856,3 +860,100 @@ class TestBackgroundFetch:
         assert kwargs["target"] == handler._run_background_fetch
         assert kwargs["args"] == (self._TOPLEVEL, self._CWD)
         mock_thread_cls.return_value.start.assert_called_once()
+
+
+class TestGitBranchRenderCache:
+    """Tests for the short-TTL render cache (Plan 00155 T4).
+
+    Status renders arrive every ~300 ms under output streaming; each render
+    forks ~4 git processes. A short TTL cache keyed by cwd serves most renders
+    from cache with at most TTL-bounded staleness — a CPU/battery win, as the
+    render is asynchronous and not on any latency path.
+    """
+
+    @pytest.fixture
+    def handler(self) -> GitBranchHandler:
+        """Handler with auto-fetch off so the mocked side_effect list is stable."""
+        handler = GitBranchHandler()
+        handler._auto_fetch = False
+        return handler
+
+    @staticmethod
+    def _clean_render_mocks() -> list[MagicMock]:
+        """Five mocks for one full clean render.
+
+        Order: rev-parse --show-toplevel, branch --show-current, symbolic-ref
+        (default-branch detection), status --porcelain=v2, stash list.
+        """
+        toplevel = MagicMock(returncode=0, stdout=b"/repo\n")
+        branch = MagicMock(returncode=0, stdout=b"main\n")
+        symbolic_ref = MagicMock(returncode=0, stdout=b"refs/remotes/origin/main\n")
+        status = MagicMock(returncode=0, stdout=b"")
+        stash = MagicMock(returncode=0, stdout=b"")
+        return [toplevel, branch, symbolic_ref, status, stash]
+
+    def test_second_render_within_ttl_served_from_cache(
+        self, handler: GitBranchHandler, tmp_path: Path
+    ) -> None:
+        """A second render for the same cwd within the TTL forks no git processes."""
+        hook_input = {"workspace": {"current_dir": str(tmp_path)}}
+        with patch("subprocess.run") as mock_run:
+            # Two renders' worth of mocks; a working cache consumes only the first.
+            mock_run.side_effect = self._clean_render_mocks() + self._clean_render_mocks()
+            first = handler.handle(hook_input)
+            forks_after_first = mock_run.call_count
+            second = handler.handle(hook_input)
+            forks_after_second = mock_run.call_count
+
+        assert first.context == second.context
+        assert forks_after_first == 5  # full render: toplevel, branch, symbolic-ref, status, stash
+        assert forks_after_second == forks_after_first  # second render added zero git forks
+
+    def test_distinct_cwd_each_render(self, handler: GitBranchHandler, tmp_path: Path) -> None:
+        """Cache is keyed by cwd: a different directory is not served from another's entry."""
+        repo_a = tmp_path / "a"
+        repo_b = tmp_path / "b"
+        repo_a.mkdir()
+        repo_b.mkdir()
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = self._clean_render_mocks() + self._clean_render_mocks()
+            handler.handle({"workspace": {"current_dir": str(repo_a)}})
+            forks_after_a = mock_run.call_count
+            handler.handle({"workspace": {"current_dir": str(repo_b)}})
+            forks_after_b = mock_run.call_count
+
+        # Two distinct cache entries, and repo_b forked rather than reusing repo_a's render.
+        assert set(handler._render_cache) == {str(repo_a), str(repo_b)}
+        assert forks_after_b > forks_after_a
+
+    def test_ttl_zero_disables_cache(self, handler: GitBranchHandler, tmp_path: Path) -> None:
+        """Setting the render TTL to 0 disables caching (every render re-runs, nothing stored)."""
+        handler._render_ttl_seconds = 0
+        hook_input = {"workspace": {"current_dir": str(tmp_path)}}
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = self._clean_render_mocks() + self._clean_render_mocks()
+            handler.handle(hook_input)
+            forks_after_first = mock_run.call_count
+            handler.handle(hook_input)
+            forks_after_second = mock_run.call_count
+
+        assert forks_after_second > forks_after_first  # second render executed (not cached)
+        assert handler._render_cache == {}  # disabled cache stores nothing
+
+    def test_expired_ttl_re_renders(self, handler: GitBranchHandler, tmp_path: Path) -> None:
+        """Once the TTL elapses, the next render re-forks and refreshes the cache."""
+        hook_input = {"workspace": {"current_dir": str(tmp_path)}}
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = self._clean_render_mocks() + self._clean_render_mocks()
+            handler.handle(hook_input)
+            forks_after_first = mock_run.call_count
+            # Age the cache entry past the TTL without sleeping.
+            cached_at, context = handler._render_cache[str(tmp_path)]
+            handler._render_cache[str(tmp_path)] = (
+                cached_at - (handler._render_ttl_seconds + 1.0),
+                context,
+            )
+            handler.handle(hook_input)
+            forks_after_second = mock_run.call_count
+
+        assert forks_after_second > forks_after_first  # expiry forced a re-render
