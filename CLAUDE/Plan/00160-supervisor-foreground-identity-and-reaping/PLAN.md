@@ -103,7 +103,8 @@ before shipping Phase 2.
   would need a THIRD local copy of the `context-sidecar` subdir + safe-stem
   constants (context_sidecar.py + compaction_signal.py already each have one),
   tipping into a DRY-smell that warrants a shared helper — a separate refactor.
-- [ ] 🔄 **Task 1.5**: QA green, daemon restart RUNNING, commit.
+- [x] ✅ **Task 1.5**: QA 13/13 green (9901 tests, 95.6% cov), daemon restart
+  RUNNING, committed as `2094d76b`. **Phase 1 complete.**
 
 ### Phase 2: Explicit foreground identity
 
@@ -131,9 +132,31 @@ before shipping Phase 2.
 decoupled from the spike-gated foreground mechanism.
 **Decision**: Phase 1 lands and commits on its own before Phase 2's spike.
 
-### Decision 2: Foreground mechanism is spike-gated
+### Decision 2: Foreground mechanism is spike-gated — premise now in question
 
-Recorded after Task 2.0 completes.
+**Finding (during Phase 1, awaiting live spike confirmation)**: the
+"marker-in-painted-statusline" redesign may give NO advantage over a guarded
+freshest-sidecar. The sidecar WRITE and the status-line PAINT are driven by the
+SAME Claude Code `statusLine` invocation: the daemon's Status handler both writes
+`{session}.json` AND returns the `statusLineLeft/Right` that gets painted. So a
+marker parsed from the PTY carries the same freshness as the sidecar (both update
+on the same event; between invocations the painted marker is cached-stale, same
+as the sidecar). Under the VERIFIED model-b (only the foreground renders), the
+freshest sidecar already IS the foreground, and the only switch-over window — the
+gap between the human pressing the switch key and Claude Code invoking statusLine
+for the new thread — is identical for both mechanisms (neither has updated yet).
+
+**Therefore the likely-correct "explicit foreground" mechanism is a GUARDED
+freshest-sidecar**, not an ANSI-paint parser: act only when one sidecar is
+unambiguously freshest (fresher than the runner-up by a margin covering the
+switch settle), else defer one tick; reaping (Phase 1) keeps the field clean.
+This is far simpler and less fragile than screen-scraping the PTY.
+
+**Task 2.0 spike must confirm** whether Claude Code ever repaints the foreground
+status line with FRESHER thread identity than the sidecar reflects (e.g. repaints
+on switch BEFORE re-invoking the hook). If it does not (expected), the marker
+approach is pointless. Bring this to the user before building either way — do NOT
+silently substitute the guarded-freshest approach for the chosen redesign.
 
 ### Decision 3: SessionEnd immediate-reap deferred (not built in Phase 1)
 
@@ -175,3 +198,9 @@ released handlers better tracked on its own. Revisit alongside that refactor.
 - Plan created. Failsafe recovery cron: **a8af59d9** (hourly at :37, non-durable).
 - Scope confirmed by user: **full redesign** (explicit foreground identity) +
   **dead-file reaping**. Background-thread looping is future / out-of-scope.
+- **Phase 1 shipped** (`2094d76b`): per-tick reaper, 11 tests, QA 13/13, live
+  17→1. Reaped sidecars self-heal on the owner's next render.
+- **Phase 2 gate**: surfaced Decision 2 finding — the marker-parse redesign
+  likely has no advantage over a guarded freshest-sidecar (paint ≡ sidecar
+  write, same event). Paused for user input before building Phase 2; Task 2.0
+  spike needs a live 2-thread Agent-View experiment to confirm.
