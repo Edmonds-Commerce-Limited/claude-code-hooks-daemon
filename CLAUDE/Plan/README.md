@@ -12,6 +12,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Scopes daemon support for `subagentStatusLine` (per-thread agent-panel rows) plus a `statusLine` `refreshInterval` so the bar stays live while background agents run
   - Confirmed live: main bar payload carries NO agent-thread identity (always renders main session); we wire only `statusLine` today
 
+- [00159: Status Writers Thread-Safe Tmp Naming](00159-status-writers-thread-safe-tmp-naming/PLAN.md) - Not Started (v3.39.0 code-review follow-up: the four `.{stem}.{pid}.tmp` atomic writers key on PID not thread — harmless today, hardening only)
+
 ### Code Quality / Handler Configuration
 
 ### Plan Workflow / QA
