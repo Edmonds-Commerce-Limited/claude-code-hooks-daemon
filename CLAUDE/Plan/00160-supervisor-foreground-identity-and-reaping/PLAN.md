@@ -106,17 +106,26 @@ before shipping Phase 2.
 - [x] ✅ **Task 1.5**: QA 13/13 green (9901 tests, 95.6% cov), daemon restart
   RUNNING, committed as `2094d76b`. **Phase 1 complete.**
 
-### Phase 2: Explicit foreground identity
+### Phase 2: Explicit foreground identity (guarded freshest-sidecar)
 
-- [ ] ⬜ **Task 2.0 (SPIKE)**: Verify whether a status-line marker carrying
-  `session_id` reaches the supervisor's PTY output stream intact and invisibly.
-  Live ccy experiment (document steps; may need the human to run it).
-- [ ] ⬜ **Task 2.1**: Choose mechanism (marker-parse vs foreground-pointer +
-  margin guard) and record Decision 2 below.
-- [ ] ⬜ **Task 2.2**: RED tests for the chosen foreground resolver.
-- [ ] ⬜ **Task 2.3**: GREEN implement; supervisor acts only on the resolved
-  foreground session's sidecar.
-- [ ] ⬜ **Task 2.4**: QA, daemon restart, live verify in a 2-thread Agent View.
+- [x] ✅ **Task 2.0/2.1**: Mechanism chosen = **guarded freshest-sidecar** (user
+  approved the recommendation). The marker-parse spike is moot per Decision 2:
+  paint ≡ sidecar-write (same statusLine invocation), so a marker carries no
+  fresher foreground info than the sidecar. No live spike needed.
+- [x] ✅ **Task 2.2**: RED tests — `test_foreground_sidecar.py` (9 tests) for the
+  resolver, `TestForegroundAmbiguityGate` (5 tests) for the machine gate, and two
+  `_poll_once` integration tests (ambiguous defers / unambiguous injects).
+- [x] ✅ **Task 2.3**: GREEN — `load_foreground_sidecar()` returns
+  `(freshest_reading, ambiguous)`; ambiguous ⇔ a second still-fresh sidecar's ts
+  is within `_DEFAULT_FOREGROUND_MARGIN_SECONDS` (10s) of the freshest.
+  `CompactStateMachine.evaluate(..., foreground_ambiguous=)` defers ONLY the
+  compact path (resume/AWAIT untouched). `load_freshest_sidecar` refactored to
+  share one `_scan_sidecars` pass (DRY, behaviour-preserving — 198 prior tests
+  still green). Margin threaded via `CompactPolicy.foreground_margin_seconds`.
+  216 supervise tests pass; mypy --strict clean.
+- [ ] 🔄 **Task 2.4**: QA green, daemon restart RUNNING, commit. Live verify in a
+  real 2-thread Agent View is a follow-up (needs an interactive session; the
+  logic is unit-proven and the running supervisor is old code until relaunch).
 
 ### Phase 3: Defensive signal scoping
 

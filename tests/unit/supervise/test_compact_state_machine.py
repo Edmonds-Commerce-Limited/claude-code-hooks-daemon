@@ -262,6 +262,50 @@ class TestMonitor:
         assert result.decision is Decision.NOOP
 
 
+class TestForegroundAmbiguityGate:
+    """Plan 00160: a red reading defers compaction while the foreground thread is
+    ambiguous (a recent Agent-View thread switch), so /compact never targets the
+    wrong thread. The gate only touches the compact path; resume/AWAIT are
+    unaffected."""
+
+    def test_red_idle_but_ambiguous_defers(self) -> None:
+        sm = CompactStateMachine(CompactPolicy())
+        result = sm.evaluate(_reading(), idle=True, now=1000.0, foreground_ambiguous=True)
+        assert result.decision is Decision.NOOP
+        assert result.reason == _mod._REASON_FOREGROUND_AMBIGUOUS
+        assert sm.state is SupervisorState.MONITOR  # did not enter AWAIT
+
+    def test_ambiguous_defers_then_compacts_when_resolved(self) -> None:
+        sm = CompactStateMachine(CompactPolicy())
+        deferred = sm.evaluate(_reading(), idle=True, now=1000.0, foreground_ambiguous=True)
+        assert deferred.decision is Decision.NOOP
+        # Next tick the backgrounded sidecar has aged out -> unambiguous -> compact.
+        resolved = sm.evaluate(_reading(), idle=True, now=1002.0, foreground_ambiguous=False)
+        assert resolved.decision is Decision.WOULD_COMPACT
+
+    def test_not_red_ambiguous_is_plain_noop(self) -> None:
+        """Ambiguity only matters for a would-be compaction (a red reading)."""
+        sm = CompactStateMachine(CompactPolicy())
+        result = sm.evaluate(
+            _reading(red=False, tier="green"), idle=True, now=1000.0, foreground_ambiguous=True
+        )
+        assert result.decision is Decision.NOOP
+
+    def test_ambiguous_does_not_block_resume(self) -> None:
+        """A compaction under way still resumes even if the sidecar looks ambiguous."""
+        sm = CompactStateMachine(CompactPolicy())
+        result = sm.evaluate(
+            _reading(compacting=True), idle=True, now=1000.0, foreground_ambiguous=True
+        )
+        assert result.decision is Decision.WOULD_CONTINUE
+
+    def test_ambiguous_defaults_false(self) -> None:
+        """Omitting the flag preserves the pre-Plan-00160 behaviour (compact)."""
+        sm = CompactStateMachine(CompactPolicy())
+        result = sm.evaluate(_reading(), idle=True, now=1000.0)
+        assert result.decision is Decision.WOULD_COMPACT
+
+
 class TestGraduatedBands:
     """Plan 00152 graduated compaction bands keyed on compact_urgent/critical.
 

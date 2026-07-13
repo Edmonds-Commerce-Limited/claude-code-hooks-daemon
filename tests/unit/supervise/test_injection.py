@@ -180,6 +180,59 @@ class TestPollOnce:
         assert ev.decision is Decision.NOOP
         assert written == []
 
+    def _red_sidecar_named(self, directory: Path, name: str, ts: float) -> None:
+        directory.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "red": True,
+            "tier": "red",
+            "pct": 85.0,
+            "compact_urgent": True,
+            "session_id": name,
+            "ts": ts,
+            "seq": 1,
+            "writer_pid": 1,
+        }
+        (directory / f"{name}.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    def test_ambiguous_foreground_defers_injection(self, tmp_path: Path) -> None:
+        """Two fresh red sidecars within the margin (a thread switch) -> no inject."""
+        sc = tmp_path / "sc"
+        self._red_sidecar_named(sc, "newfg", ts=1000.0)
+        self._red_sidecar_named(sc, "oldfg", ts=999.0)  # 1s apart, within 10s margin
+        written: list[bytes] = []
+        ev = _mod._poll_once(
+            CompactStateMachine(CompactPolicy()),
+            sidecar_dir=sc,
+            now_wall=1000.0,
+            idle=True,
+            dry_run=True,
+            master_writer=written.append,
+            log=None,
+            freshness_seconds=30.0,
+        )
+        assert ev.decision is Decision.NOOP
+        assert ev.reason == _mod._REASON_FOREGROUND_AMBIGUOUS
+        assert written == []
+
+    def test_unambiguous_foreground_injects(self, tmp_path: Path) -> None:
+        """Freshest red sidecar clearly leads (backgrounded one aged out) -> inject."""
+        sc = tmp_path / "sc"
+        self._red_sidecar_named(sc, "fg", ts=1000.0)
+        self._red_sidecar_named(sc, "old", ts=985.0)  # 15s back, beyond the 10s margin
+        written: list[bytes] = []
+        ev = _mod._poll_once(
+            CompactStateMachine(CompactPolicy()),
+            sidecar_dir=sc,
+            now_wall=1000.0,
+            idle=True,
+            dry_run=True,
+            master_writer=written.append,
+            log=None,
+            freshness_seconds=30.0,
+        )
+        assert ev.decision is Decision.WOULD_COMPACT
+        assert written != []
+
     def test_busy_no_injection(self, tmp_path: Path) -> None:
         self._sidecar(tmp_path / "sc", red=True)
         written: list[bytes] = []

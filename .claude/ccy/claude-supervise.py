@@ -348,6 +348,17 @@ _SIDECAR_SUBDIR = "context-sidecar"
 
 # State-machine policy defaults (seconds / counts). Conservative on purpose.
 _DEFAULT_FRESHNESS_SECONDS = 30.0
+# Plan 00160: the supervisor drives ONE PTY and injects into whatever Agent-View
+# thread is FOREGROUND. Only the foreground thread renders its statusLine, so the
+# freshest sidecar is normally the foreground -- EXCEPT in the brief window right
+# after a thread switch, when the just-backgrounded thread's sidecar is still
+# fresh and could momentarily be the freshest. When a SECOND still-fresh sidecar's
+# ts is within this margin of the freshest, the foreground is AMBIGUOUS and a
+# compaction is deferred (it would risk compacting the wrong thread). Sized at
+# roughly one status refresh interval: a live foreground re-renders every interval
+# so it reliably pulls this far ahead of a non-rendering backgrounded thread,
+# self-resolving the ambiguity within a tick or two.
+_DEFAULT_FOREGROUND_MARGIN_SECONDS = 10.0
 _DEFAULT_COOLDOWN_SECONDS = 300.0
 _DEFAULT_AWAIT_TIMEOUT_SECONDS = 120.0
 _DEFAULT_MAX_INJECTIONS = 20
@@ -392,6 +403,10 @@ _CONTEXT_SIDECAR_GLOB = "*.json"
 _REASON_BUSY_COMPOSING = "session busy (composing)"
 _REASON_BUSY_AWAIT_RESUME = "compaction detected but session busy -> awaiting idle to resume"
 _INJECTION_GATED_REASONS = frozenset({_REASON_BUSY_COMPOSING, _REASON_BUSY_AWAIT_RESUME})
+# Plan 00160: a would-be compaction is deferred because the foreground thread
+# cannot be told apart from a just-backgrounded one this tick (two still-fresh
+# sidecars within the margin). Self-resolves as the backgrounded sidecar ages out.
+_REASON_FOREGROUND_AMBIGUOUS = "foreground ambiguous (recent thread switch) -> deferring compact"
 # Plan 00152: in the LOWER red band (red but below the compact-urgency midpoint)
 # the supervisor is PATIENT -- it defers /compact until the child output has
 # settled (work_idle), so an in-progress turn is never interrupted. This
@@ -452,6 +467,7 @@ class CompactPolicy:
     compaction_signal_ttl_seconds: float = _DEFAULT_COMPACTION_SIGNAL_TTL_SECONDS
     escape_after_seconds: float = _DEFAULT_ESCAPE_AFTER_SECONDS
     reap_ttl_seconds: float = _DEFAULT_REAP_TTL_SECONDS
+    foreground_margin_seconds: float = _DEFAULT_FOREGROUND_MARGIN_SECONDS
 
 
 @dataclass(frozen=True)
@@ -521,39 +537,89 @@ def load_freshest_sidecar(
     Returns:
         The freshest valid ``SidecarReading``, or None if none is available.
     """
-    if not directory.is_dir():
+    scanned = _scan_sidecars(directory)
+    if not scanned:
         return None
+    data, ts = max(scanned, key=lambda pair: pair[1])
+    return _build_sidecar_reading(data, ts, now=now, freshness_seconds=freshness_seconds)
 
-    freshest_data = None
-    freshest_ts = float("-inf")
-    for path in directory.glob("*.json"):
+
+def load_foreground_sidecar(
+    directory: Path,
+    *,
+    now: float,
+    freshness_seconds: float,
+    margin_seconds: float = _DEFAULT_FOREGROUND_MARGIN_SECONDS,
+) -> tuple[SidecarReading | None, bool]:
+    """Return ``(freshest_reading, foreground_ambiguous)``.
+
+    ``freshest_reading`` is identical to what ``load_freshest_sidecar`` returns.
+    ``foreground_ambiguous`` is True when a SECOND, still-fresh sidecar's ``ts``
+    is within ``margin_seconds`` of the freshest -- a thread-switch window where
+    the just-backgrounded thread cannot be told apart from the new foreground, so
+    the caller MUST defer a compaction (it would risk compacting the wrong
+    thread). Only NON-stale runner-ups count: under the verified
+    only-the-foreground-renders model a backgrounded thread stops rendering and
+    ages to stale within one freshness window, dropping out of contention -- so
+    ambiguity is transient and self-resolves as the foreground pulls ahead.
+
+    Ambiguity is always False when the freshest reading is stale or absent (there
+    is no live foreground to be ambiguous about; the caller NOOPs on staleness
+    anyway).
+    """
+    scanned = _scan_sidecars(directory)
+    if not scanned:
+        return None, False
+    scanned.sort(key=lambda pair: pair[1], reverse=True)
+    data, ts = scanned[0]
+    reading = _build_sidecar_reading(data, ts, now=now, freshness_seconds=freshness_seconds)
+
+    ambiguous = False
+    if not reading.stale and len(scanned) > 1:
+        runner_ts = scanned[1][1]
+        runner_fresh = (now - runner_ts) <= freshness_seconds
+        if runner_fresh and (ts - runner_ts) < margin_seconds:
+            ambiguous = True
+    return reading, ambiguous
+
+
+def _scan_sidecars(directory: Path) -> list[tuple[dict[str, object], float]]:
+    """Parse every ``*.json`` sidecar in ``directory`` into ``(data, ts)`` pairs.
+
+    Single source of truth for the sidecar scan shared by ``load_freshest_sidecar``
+    and ``load_foreground_sidecar``. Unreadable, malformed, or non-object files are
+    skipped (older schema or a foreign writer) rather than aborting the scan.
+    """
+    if not directory.is_dir():
+        return []
+    results: list[tuple[dict[str, object], float]] = []
+    for path in directory.glob(_CONTEXT_SIDECAR_GLOB):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            # Unreadable or malformed sidecar -- skip and keep scanning.
             continue
         if not isinstance(data, dict):
             continue
-        ts = _coerce_float(data.get("ts"))
-        if ts > freshest_ts:
-            freshest_ts = ts
-            freshest_data = data
+        results.append((data, _coerce_float(data.get("ts"))))
+    return results
 
-    if freshest_data is None:
-        return None
 
+def _build_sidecar_reading(
+    data: dict[str, object], ts: float, *, now: float, freshness_seconds: float
+) -> SidecarReading:
+    """Build a ``SidecarReading`` from parsed sidecar ``data`` and its ``ts``."""
     return SidecarReading(
-        red=bool(freshest_data.get("red", False)),
-        critical=bool(freshest_data.get("critical", False)),
-        compact_urgent=bool(freshest_data.get("compact_urgent", False)),
-        tier=str(freshest_data.get("tier", "")),
-        pct=_coerce_float(freshest_data.get("pct")),
-        session_id=str(freshest_data.get("session_id", "")),
-        ts=freshest_ts,
-        seq=_coerce_int(freshest_data.get("seq")),
-        writer_pid=_coerce_int(freshest_data.get("writer_pid")),
-        compacting=bool(freshest_data.get("compacting", False)),
-        stale=(now - freshest_ts) > freshness_seconds,
+        red=bool(data.get("red", False)),
+        critical=bool(data.get("critical", False)),
+        compact_urgent=bool(data.get("compact_urgent", False)),
+        tier=str(data.get("tier", "")),
+        pct=_coerce_float(data.get("pct")),
+        session_id=str(data.get("session_id", "")),
+        ts=ts,
+        seq=_coerce_int(data.get("seq")),
+        writer_pid=_coerce_int(data.get("writer_pid")),
+        compacting=bool(data.get("compacting", False)),
+        stale=(now - ts) > freshness_seconds,
     )
 
 
@@ -708,8 +774,15 @@ class CompactStateMachine:
         now: float,
         human_compact_submitted: bool = False,
         work_idle: bool = True,
+        foreground_ambiguous: bool = False,
     ) -> Evaluation:
         """Advance the machine one step and return what it WOULD do.
+
+        ``foreground_ambiguous`` (Plan 00160) is True when the freshest sidecar
+        cannot be confidently attributed to the FOREGROUND thread this tick (a
+        recent Agent-View thread switch left two still-fresh sidecars). It gates
+        ONLY the compact path -- a would-be `/compact` is deferred so it never
+        targets the wrong thread -- and never affects resume/AWAIT.
 
         ``human_compact_submitted`` is an edge signal: the human just submitted a
         ``/compact``. The machine then enters AWAIT_COMPACTING WITHOUT injecting,
@@ -764,10 +837,22 @@ class CompactStateMachine:
 
         if self.state is SupervisorState.AWAIT_COMPACTING:
             return self._evaluate_await(reading, idle=idle, now=now)
-        return self._evaluate_monitor(reading, idle=idle, work_idle=work_idle, now=now)
+        return self._evaluate_monitor(
+            reading,
+            idle=idle,
+            work_idle=work_idle,
+            now=now,
+            foreground_ambiguous=foreground_ambiguous,
+        )
 
     def _evaluate_monitor(
-        self, reading: SidecarReading | None, *, idle: bool, work_idle: bool, now: float
+        self,
+        reading: SidecarReading | None,
+        *,
+        idle: bool,
+        work_idle: bool,
+        now: float,
+        foreground_ambiguous: bool = False,
     ) -> Evaluation:
         if reading is None:
             return Evaluation(Decision.NOOP, "no sidecar reading")
@@ -775,6 +860,11 @@ class CompactStateMachine:
             return Evaluation(Decision.NOOP, "sidecar stale")
         if not reading.red:
             return Evaluation(Decision.NOOP, f"not red (tier={reading.tier})")
+        # Plan 00160: defer a would-be compaction while the foreground thread is
+        # ambiguous (recent thread switch) -- injecting now could compact the
+        # wrong Agent-View thread. Self-resolves as the backgrounded sidecar ages.
+        if foreground_ambiguous:
+            return Evaluation(Decision.NOOP, _REASON_FOREGROUND_AMBIGUOUS)
         if not idle:
             return Evaluation(Decision.NOOP, _REASON_BUSY_COMPOSING)
         # Plan 00152 graduated bands: critical is always urgent. In the LOWER red
@@ -1023,6 +1113,7 @@ def _poll_once(
     human_compact_submitted: bool = False,
     work_idle: bool = True,
     reap_ttl_seconds: float = _DEFAULT_REAP_TTL_SECONDS,
+    foreground_margin_seconds: float = _DEFAULT_FOREGROUND_MARGIN_SECONDS,
 ) -> Evaluation:
     """One supervisor tick: reap dead files, read the sidecar, decide, inject.
 
@@ -1053,7 +1144,15 @@ def _poll_once(
     removes the reading source resolved just below.
     """
     reap_stale_sidecars(sidecar_dir, now=now_wall, ttl_seconds=reap_ttl_seconds, log=log)
-    reading = load_freshest_sidecar(sidecar_dir, now=now_wall, freshness_seconds=freshness_seconds)
+    # Plan 00160: resolve the FOREGROUND sidecar and whether it is ambiguous (a
+    # recent Agent-View thread switch left two still-fresh sidecars). Ambiguity
+    # gates only the compact path in the machine below.
+    reading, foreground_ambiguous = load_foreground_sidecar(
+        sidecar_dir,
+        now=now_wall,
+        freshness_seconds=freshness_seconds,
+        margin_seconds=foreground_margin_seconds,
+    )
     # A compaction stops status renders, so the context sidecar goes
     # stale/absent during one -- the compaction signal is an independent input.
     signal_path = load_compaction_signal(
@@ -1088,6 +1187,7 @@ def _poll_once(
         now=now_wall,
         human_compact_submitted=human_compact_submitted,
         work_idle=work_idle,
+        foreground_ambiguous=foreground_ambiguous,
     )
     payload = _resolve_payload(evaluation.decision, dry_run=dry_run)
     if payload is not None:
@@ -1341,6 +1441,7 @@ def supervise(
             human_compact_submitted=human_compact,
             work_idle=work_idle,
             reap_ttl_seconds=policy.reap_ttl_seconds,
+            foreground_margin_seconds=policy.foreground_margin_seconds,
         )
 
     previous_handler = signal.signal(signal.SIGWINCH, _on_winch)
