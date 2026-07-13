@@ -72,6 +72,10 @@ class TestMultithreadIndicatorHandler:
     def test_init_priority(self, handler: MultithreadIndicatorHandler) -> None:
         assert handler.priority == Priority.MULTITHREAD_INDICATOR
 
+    def test_priority_renders_before_repo_name(self, handler: MultithreadIndicatorHandler) -> None:
+        # The indicator is the FIRST status segment, ahead of the repo name.
+        assert handler.priority < Priority.GIT_REPO_NAME
+
     def test_is_non_terminal(self, handler: MultithreadIndicatorHandler) -> None:
         assert handler.terminal is False
 
@@ -97,10 +101,33 @@ class TestMultithreadIndicatorHandler:
         assert entry["session_id"] == "sess-a"
         assert entry["session_name"] == "thread A"
 
-    def test_captures_agent_type_when_present(self, handler: MultithreadIndicatorHandler) -> None:
-        handler.handle(_hook_input(session_id="sess-a", agent_type="code-reviewer"))
-        entry = json.loads((self._registry_dir() / "sess-a.json").read_text(encoding="utf-8"))
-        assert entry["agent_type"] == "code-reviewer"
+    def test_agent_or_spare_session_writes_no_heartbeat_and_is_silent(
+        self, handler: MultithreadIndicatorHandler
+    ) -> None:
+        # A session launched as an agent / a pre-warmed spare carries agent_type
+        # (payload also has agent={"name": ...}, no session_name). It is NOT a
+        # navigable top-level thread, so it must neither heartbeat nor render —
+        # otherwise it inflates the real sessions' 🧵 count (the "1/2 with one
+        # thread" bug).
+        result = handler.handle(_hook_input(session_id="spare-1", agent_type="claude"))
+        assert result.context == []
+        assert not (self._registry_dir() / "spare-1.json").exists()
+
+    def test_empty_agent_type_is_treated_as_a_real_session(
+        self, handler: MultithreadIndicatorHandler
+    ) -> None:
+        # A falsy agent_type ("" or missing) is a genuine top-level session.
+        handler.handle(_hook_input(session_id="sess-a", session_name="thread A", agent_type=""))
+        assert (self._registry_dir() / "sess-a.json").exists()
+
+    def test_agent_session_does_not_count_toward_a_real_session(
+        self, handler: MultithreadIndicatorHandler, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A live agent/spare must not make a lone real session render "1/2".
+        _freeze_now(monkeypatch, handler, 1000.0)
+        handler.handle(_hook_input(session_id="spare-1", agent_type="claude"))
+        result = handler.handle(_hook_input(session_id="sess-a", session_name="thread A"))
+        assert result.context == []
 
     # ---- render behaviour -----------------------------------------------
 

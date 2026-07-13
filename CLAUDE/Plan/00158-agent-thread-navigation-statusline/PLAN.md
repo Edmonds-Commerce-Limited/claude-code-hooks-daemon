@@ -414,3 +414,20 @@ accurate AND fixes the "bar goes stale/absent while idle on a background agent" 
   sibling before the sibling aged out. Daemon restarted RUNNING after every code change.
   Phases 2 & 4 (the `subagentStatusLine` per-thread ROW surface, and its release
   truth-changes/config-changes manifests) remain **Not Started** — a separate larger surface.
+- **FOLLOW-UP FIXES (user feedback) — moved to first + spare over-count fixed**:
+  - *"Showing 🧵 1/2 but only 1 thread"* — root-caused empirically via payload capture:
+    Claude Code keeps **pre-warmed background "spare" PTY hosts** (`--bg-spare` / `bg-pty-host`
+    in `ps`) ready to be claimed. A spare renders `statusLine` (warming) but is NOT a
+    navigable thread. Its payload is distinguishable: `agent={"name":"claude"}`,
+    `agent_type="claude"`, and **no** `session_name`/`prompt_id`/`rate_limits` — whereas a
+    real interactive thread (incl. this backgrounded+forked one) reports `agent=null`,
+    `agent_type=None`, and carries those fields. Fix: the handler now **skips any session
+    with a truthy `agent_type`** (no heartbeat, no render), so an unclaimed spare can never
+    inflate a real session's count. Live-verified: a spare payload writes no heartbeat and
+    shows no 🧵; the lone real session correctly shows nothing.
+  - *"Move it to the first item"* — dropped the priority from 13 to **2** (before
+    `git_repo_name` at 3). No render-format change was needed: the Status join
+    (`hook_result.py`) strips each fragment's outer `|` and re-joins with `|`, so a
+    reorder is separator-safe by design. Live-verified: with two real sessions the bar
+    renders `🧵 2/2 | 📁 repo | …` (🧵 leads). New src files stay at **100% coverage**;
+    QA green; daemon restarted RUNNING.
