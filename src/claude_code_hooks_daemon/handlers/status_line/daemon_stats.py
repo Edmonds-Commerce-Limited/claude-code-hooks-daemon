@@ -39,6 +39,16 @@ class DaemonStatsHandler(Handler):
             tags=[HandlerTag.STATUS, HandlerTag.DAEMON, HandlerTag.HEALTH, HandlerTag.NON_TERMINAL],
         )
 
+    def get_default_enabled(self) -> bool:
+        """Opt-in: off by default.
+
+        The daemon health line (uptime, memory, last error, log level) is
+        developer-facing diagnostics that are not useful to normal users, so it
+        ships disabled and is enabled only by explicit config. The daemon-upgrade
+        notifier (``version_check``) is a SEPARATE handler and stays on by default.
+        """
+        return False
+
     def matches(self, hook_input: dict[str, Any]) -> bool:
         """Always run for status events."""
         return True

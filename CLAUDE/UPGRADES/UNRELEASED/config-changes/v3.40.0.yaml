@@ -1,0 +1,26 @@
+version: "3.40.0"
+date: "2026-07-13"
+breaking: false
+config_changes:
+  added: []
+  renamed: []
+  removed: []
+  changed:
+    - key: handlers.status_line.daemon_stats
+      description: >-
+        The daemon health status-line element (uptime, memory usage, last error,
+        log level) now defaults to DISABLED. These are developer-facing
+        diagnostics that are not useful to normal users, so daemon_stats is now an
+        opt-in handler (get_default_enabled() -> False) and the install template
+        ships it enabled: false. The daemon-UPGRADE notifier is a SEPARATE handler
+        (version_check, SessionStart) and remains enabled by default -- upgrade
+        notifications are unaffected. Existing configs are not rewritten on
+        upgrade: a project whose .claude/hooks-daemon.yaml already has
+        daemon_stats enabled: true keeps the health line; only fresh installs and
+        configs that inherited the old default now get it off.
+      migration_note: >-
+        No action needed for most users. If you relied on the daemon health line
+        via the old default and want to keep it, add
+        handlers.status_line.daemon_stats.enabled: true to your
+        .claude/hooks-daemon.yaml. To adopt the new default, remove your explicit
+        daemon_stats enabled: true (or set it to false).

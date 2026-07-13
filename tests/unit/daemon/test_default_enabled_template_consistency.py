@@ -30,7 +30,12 @@ from claude_code_hooks_daemon.handlers.registry import HandlerRegistry, _get_con
 # The known opt-in (off-by-default) handlers, by config_key. Update this set
 # (and the corresponding handler override + template entry) when adding a new
 # opt-in handler.
-_EXPECTED_OPT_IN_CONFIG_KEYS = {"lsp_enforcement", "context_sidecar", "compaction_signal"}
+_EXPECTED_OPT_IN_CONFIG_KEYS = {
+    "lsp_enforcement",
+    "context_sidecar",
+    "compaction_signal",
+    "daemon_stats",
+}
 
 
 def _template_disabled_config_keys() -> set[str]:
@@ -70,6 +75,18 @@ class TestDefaultEnabledTemplateConsistency:
             LspEnforcementHandler.get_default_enabled(
                 LspEnforcementHandler.__new__(LspEnforcementHandler)
             )
+            is False
+        )
+
+    def test_daemon_stats_is_opt_in(self) -> None:
+        """daemon_stats (uptime/memory/log-level) is off by default -- not useful
+        to normal users; the daemon-upgrade notifier (version_check) stays on."""
+        from claude_code_hooks_daemon.handlers.status_line.daemon_stats import (
+            DaemonStatsHandler,
+        )
+
+        assert (
+            DaemonStatsHandler.get_default_enabled(DaemonStatsHandler.__new__(DaemonStatsHandler))
             is False
         )
 
