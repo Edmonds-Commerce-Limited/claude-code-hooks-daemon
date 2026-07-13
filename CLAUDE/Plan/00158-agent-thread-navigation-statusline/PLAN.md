@@ -191,6 +191,41 @@ daemon-side:
   surfaces) and a `config-changes` entry (`subagentStatusLine` + `refreshInterval`,
   `recommended: true`) for the next release.
 
+### Phase 5: Thread-safety audit under concurrent sessions (DONE — verdict recorded)
+
+Motivated by the user's concern that recent perf memoisation must be safe now that
+multiple background sessions hit ONE shared daemon. Handed off by Thread B with an
+interim (and, it turns out, mistaken) premise. Verdict recorded as Confirmed Truth #6.
+
+- [x] ✅ **Task 5.1**: Trace the dispatch path — found handler dispatch runs via
+  `await loop.run_in_executor(None, controller.process_request, …)` (`server.py:958-970`),
+  i.e. the default MULTI-threaded pool, so concurrent sessions DO run handlers on
+  parallel OS threads. (Corrects Thread B's "single event loop → synchronous → safe".)
+- [x] ✅ **Task 5.2**: Assess corruption risk — none: CPython's GIL makes the module
+  caches' individual dict/list ops atomic, `functools.lru_cache` is internally locked,
+  and the named caches (`git_branch` cwd cache, `settings_reader` mtime cache,
+  `stats_cache_reader`) are keyed correctly → at worst redundant compute under a race.
+- [x] ✅ **Task 5.3**: Assess cross-session contamination — the status bar render is safe
+  (handlers read the per-event `hook_input`, empirically 12% vs 33%). The only shared
+  mutable per-session global, `get_data_layer().session` (updated on EVERY StatusLine
+  event, `controller.py:673`), has **no production reader** (grep: only a docstring
+  example) → latent trap, not a live bug.
+
+### Phase 6: "🧵 Y/X" multithread indicator status handler (Not Started)
+
+From Thread B's working prototype (`untracked/multithread_yofx_proto.py`). Shows the
+focused thread's stable rank among live sibling threads sharing the daemon.
+
+- [ ] ⬜ **Task 6.1**: RED — unit tests for the pure count/rank logic (single session →
+  no segment; N live → `🧵 Y/X`; stale-pruned; stable Y by `first_seen`).
+- [ ] ⬜ **Task 6.2**: GREEN — per-session heartbeat registry under
+  `daemon_untracked_dir()/thread-registry/<safe_session_id>.json`, written atomically
+  (tmp + `os.replace`, mirroring `context_sidecar`; MUST key by `session_id`, never the
+  global SessionState — see Truth #6). Prune by freshness window; render only when X>1.
+- [ ] ⬜ **Task 6.3**: Depends on Phase 3's `refreshInterval` — idle background threads
+  stop emitting Status, so without a timer the count under-reports (Thread B saw each
+  thread "alone" at a 120s window). Set window ≥ a small multiple of `refreshInterval`.
+
 ## Success Criteria
 
 - [ ] The `statusLine` / `subagentStatusLine` contract is documented from the primary
@@ -299,3 +334,39 @@ daemon-side:
   Status render wrote no new line). Thread B released via the messaging file and closed
   by the user. Capture files remain under `untracked/payload-capture/` for reference.
   Re-enable anytime by flipping the flag + daemon restart (no Claude Code relaunch).
+- **`agent` / `agent_type` payload fields discovered (Truth #1 amended)**: the
+  captured `Status.jsonl` now carries top-level `agent` and `agent_type` keys.
+  Thread B reported these as a way to tell a background thread apart — but that
+  framing is **wrong**, and the capture disproves it: BOTH of Thread A's session
+  ids, including the *backgrounded* one (`2b651a46`), captured `agent_type: null`.
+  So `agent_type` flags **"this session was launched as an explicit agent"**
+  (`--agent NAME` / an Agent-View-created thread), NOT "background vs. main". A
+  backgrounded main thread stays `agent_type: null`. Correction to Truth #1: the
+  main `statusLine` payload still carries **no field that distinguishes which
+  Agent-View thread is focused** among plain (non-agent) threads — `agent`/
+  `agent_type` only separate *named-agent* threads from plain ones. This is why a
+  reliable multi-thread indicator (Phase 6 🧵 Y/X) must be built from a
+  daemon-side per-session registry, not from any single payload field.
+- **Confirmed Truth #6 — thread-safety audit verdict (Phase 5, DONE)**: Thread B
+  raised a "single event loop → all dispatch is synchronous → inherently safe"
+  premise and flagged possible races for any new per-session feature. Audited the
+  real code and the premise is **wrong in its reasoning but right in its
+  conclusion, with one caveat**:
+  - **Dispatch IS concurrent, not synchronous.** `server.py` offloads every
+    request via `result = await loop.run_in_executor(None, self.controller.process_request, request)`
+    (the default `None` executor = a multi-threaded `ThreadPoolExecutor`). Parallel
+    sessions sharing one daemon therefore run handler chains on **different OS
+    threads simultaneously**. Thread B's "single-threaded" claim is false.
+  - **No live corruption bug today.** Per-event handlers read only their own
+    `hook_input` and write per-key artifacts; CPython's GIL makes the dict/list
+    ops atomic and `lru_cache` is internally locked. The status-bar render is safe
+    because it is a pure function of the per-event payload.
+  - **Latent trap:** `controller.py` updates a **global** `get_data_layer().session`
+    on *every* Status event (`update_from_status_event`). A grep found **no
+    production reader** of that global state — so it is currently harmless — but it
+    is a shared-mutable-singleton that WOULD corrupt under concurrent multi-session
+    Status events if a reader were ever added.
+  - **Verdict / mandate for Phase 6:** no fix required now; but any new
+    per-session feature (the 🧵 Y/X registry) MUST key every artifact by
+    `session_id` and write atomically (`tmp` + `os.replace`) — never lean on the
+    global SessionState. Recorded as a hard constraint on Task 6.2.
