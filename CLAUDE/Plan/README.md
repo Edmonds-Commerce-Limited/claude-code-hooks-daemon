@@ -6,6 +6,11 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Code Quality / Handler Configuration
 
+- [00157: Review Followups — Perf Wave](00157-review-followups-perf-wave/PLAN.md) - Not Started
+
+  - Captures the non-blocking nits from the v3.38.0 release Code Review Gate (dead `pgrep` line in `daemon_control.sh`, cosmetic reason string in `init.sh`'s `emit_hook_error`, two directory-bounded caches) and Guidance Audit so no review value is lost as tech debt
+  - Fix immediately after v3.38.0 ships to close the loop without destabilising the in-flight release; also proposes moving review + fix earlier in the release cycle (before the QA/acceptance gates)
+
 ### Plan Workflow / QA
 
 - [00144: Plan QA System — Real-Time Plan Validation & Drift Enforcement](00144-plan-qa-system/PLAN.md) - In Progress (Phase 1 core underway; scope includes mkplan `_TEMPLATE_.md` externalisation)
