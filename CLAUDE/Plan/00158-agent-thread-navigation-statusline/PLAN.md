@@ -294,3 +294,8 @@ daemon-side:
   * **Cross-thread file coordination works**: the two sessions (which cannot message each
     other) coordinated entirely through the shared `bg-thread-debug-messaging.md`
     (append via `cat >>`, not Read/Edit, to avoid concurrent-write conflicts).
+- **Post-experiment close-out**: capture flipped back to the shipped default
+  (`daemon.payload_capture.enabled: false`) and daemon restarted — confirmed OFF (a
+  Status render wrote no new line). Thread B released via the messaging file and closed
+  by the user. Capture files remain under `untracked/payload-capture/` for reference.
+  Re-enable anytime by flipping the flag + daemon restart (no Claude Code relaunch).

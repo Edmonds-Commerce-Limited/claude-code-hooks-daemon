@@ -27,9 +27,9 @@ daemon:
   # scoped to Status so we can inspect the session_id behind each status-line
   # render (background-agent bar vs Task-tool subagent row). Ships OFF by default.
   payload_capture:
-    enabled: true              # dogfooding: capture is live in this repo
+    enabled: false             # off (shipped default); flip to true + restart daemon to dogfood
     dir: null                  # null = <daemon untracked>/payload-capture
-    events:                    # empty list = all events; scoped to Status here
+    events:                    # empty list = all events; scope e.g. to [Status]
       - Status
 
 # Built-in handler configuration
