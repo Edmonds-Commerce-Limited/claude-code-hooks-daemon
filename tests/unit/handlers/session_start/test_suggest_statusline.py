@@ -74,6 +74,20 @@ class TestSuggestStatusLineHandler:
         assert '"type": "command"' in context_text
         assert '"command": ".claude/hooks/status-line"' in context_text
 
+    def test_suggestion_includes_refresh_interval(self, handler: SuggestStatusLineHandler) -> None:
+        """The example config recommends refreshInterval and explains why.
+
+        Plan 00158 Phase 3: without a timer the status line freezes while the
+        session is idle, so the clock stalls and the multithread indicator
+        (🧵 Y/X) under-counts idle sibling threads.
+        """
+        result = handler.handle({})
+
+        context_text = "\n".join(result.context)
+        assert '"refreshInterval"' in context_text
+        assert "refreshInterval" in context_text
+        assert "🧵" in context_text
+
     def test_suggestion_describes_features(self, handler: SuggestStatusLineHandler) -> None:
         """Test suggestion describes what status line shows."""
         result = handler.handle({})

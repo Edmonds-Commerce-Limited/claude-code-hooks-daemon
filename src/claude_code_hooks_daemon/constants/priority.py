@@ -145,6 +145,7 @@ class Priority:
     ACCOUNT_DISPLAY = 5
     MODEL_CONTEXT = 10
     CONTEXT_SIDECAR = 12  # Observe-only context sidecar for the PTY supervisor (opt-in)
+    MULTITHREAD_INDICATOR = 13  # "🧵 Y/X" — this thread's rank among live Agent-View threads
     CURRENT_TIME = 14
     USAGE_TRACKING = 15
     WORKING_DIRECTORY = 25

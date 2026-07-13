@@ -211,20 +211,48 @@ interim (and, it turns out, mistaken) premise. Verdict recorded as Confirmed Tru
   event, `controller.py:673`), has **no production reader** (grep: only a docstring
   example) → latent trap, not a live bug.
 
-### Phase 6: "🧵 Y/X" multithread indicator status handler (Not Started)
+### Phase 6: "🧵 Y/X" multithread indicator status handler (DONE — live-verified)
 
 From Thread B's working prototype (`untracked/multithread_yofx_proto.py`). Shows the
 focused thread's stable rank among live sibling threads sharing the daemon.
 
-- [ ] ⬜ **Task 6.1**: RED — unit tests for the pure count/rank logic (single session →
-  no segment; N live → `🧵 Y/X`; stale-pruned; stable Y by `first_seen`).
-- [ ] ⬜ **Task 6.2**: GREEN — per-session heartbeat registry under
-  `daemon_untracked_dir()/thread-registry/<safe_session_id>.json`, written atomically
-  (tmp + `os.replace`, mirroring `context_sidecar`; MUST key by `session_id`, never the
-  global SessionState — see Truth #6). Prune by freshness window; render only when X>1.
-- [ ] ⬜ **Task 6.3**: Depends on Phase 3's `refreshInterval` — idle background threads
-  stop emitting Status, so without a timer the count under-reports (Thread B saw each
-  thread "alone" at a 120s window). Set window ≥ a small multiple of `refreshInterval`.
+- [x] ✅ **Task 6.1**: RED — pure count/rank helpers unit-tested in
+  `tests/unit/handlers/status_line/test_thread_registry.py` (17 cases: stem safety,
+  first_seen preservation, atomic write leaves no tmp, stale prune, window boundary,
+  garbled-file skip, single→"", stable rank by first_seen, tie-break, unknown→"").
+- [x] ✅ **Task 6.2**: GREEN — pure registry in
+  `src/claude_code_hooks_daemon/handlers/status_line/thread_registry.py` +
+  `MultithreadIndicatorHandler` (`multithread_indicator.py`, priority 13, default-ON
+  opt-out — silent when X≤1). Per-session heartbeat under
+  `daemon_untracked_dir()/thread-registry/<safe_session_id>.json`, atomic
+  (tmp + `os.replace`), keyed by `session_id` NEVER the global SessionState (Truth #6);
+  fail-open on `RuntimeError`/`OSError`. Handler tests
+  (`test_multithread_indicator.py`, 15 cases). Registered across HandlerID/HandlerKey/
+  Priority + `status_line/__init__.py`; drift-guard test still green (opt-out ⇒ no
+  template entry). Docs regenerated (`.claude/HOOKS-DAEMON.md` → Status 12 handlers).
+- [x] ✅ **Task 6.3**: Freshness window `_FRESH_WINDOW_S = 45.0` = 4.5× the installed
+  `refreshInterval` (10s, delivered below) so an idle background thread keeps pinging on
+  the timer and is never falsely pruned, while a genuinely-closed thread ages out within
+  one window.
+- [x] ✅ **Task 6.4 (live dogfood)**: With capture off and the daemon restarted, feeding a
+  synthetic second Status session through the live `.claude/hooks/status-line` rendered
+  the REAL bar as `… | 🧵 2/2 | …` — this session (`2b651a46…`) + the synthetic sibling,
+  both counted from `untracked/thread-registry/`. Confirms the feature works end-to-end
+  against the running daemon, not just in unit tests.
+
+### Phase 3b: `refreshInterval` on the emitted `statusLine` (DONE)
+
+Split out of Task 3.3 and delivered independently of the (still-unstarted)
+`subagentStatusLine` surface, because it is the prerequisite that keeps Phase 6's count
+accurate AND fixes the "bar goes stale/absent while idle on a background agent" symptom.
+
+- [x] ✅ Verified the field against the primary source
+  (<https://code.claude.com/docs/en/statusline>): `refreshInterval` is an integer in
+  **seconds**, minimum 1, re-running the command on a timer in addition to events.
+- [x] ✅ Added `"refreshInterval": 10` to the dogfood `.claude/settings.json` statusLine
+  block, and to the `suggest_statusline` handler's recommended snippet + rationale
+  (constant `_RECOMMENDED_REFRESH_INTERVAL_S`), with a new test asserting the suggestion
+  includes it and explains the 🧵 idle-under-count motivation.
 
 ## Success Criteria
 
@@ -370,3 +398,19 @@ focused thread's stable rank among live sibling threads sharing the daemon.
     per-session feature (the 🧵 Y/X registry) MUST key every artifact by
     `session_id` and write atomically (`tmp` + `os.replace`) — never lean on the
     global SessionState. Recorded as a hard constraint on Task 6.2.
+- **DELIVERED — Phase 6 (🧵 Y/X indicator) + Phase 3b (`refreshInterval`)**: shipped
+  the `MultithreadIndicatorHandler` (status priority 13, default-ON/opt-out, silent when
+  X≤1) backed by the pure `thread_registry` helpers (atomic per-`session_id` heartbeat,
+  stale-prune, stable rank by `first_seen`). Honoured the Truth #6 mandate: every artifact
+  is keyed by `session_id` and written `tmp`+`os.replace`, never via the global
+  SessionState. Added `"refreshInterval": 10` to the dogfood `.claude/settings.json` and
+  the `suggest_statusline` recommendation (verified against the primary source: integer
+  seconds, min 1). Registered across HandlerID/HandlerKey/Priority + `status_line/__init__`,
+  the dogfood + example configs, and the handler-instantiation exemption list; docs
+  regenerated. New/updated tests: `test_thread_registry.py` (19), `test_multithread_indicator.py`
+  (16), plus a `suggest_statusline` case — both new src files at **100% coverage**.
+  Authoritative QA (`llm_qa.py`) green: lint/format/type/magic/error_hiding 0.
+  **Live-verified**: the real bar rendered `… | 🧵 2/2 | …` for this session + a synthetic
+  sibling before the sibling aged out. Daemon restarted RUNNING after every code change.
+  Phases 2 & 4 (the `subagentStatusLine` per-thread ROW surface, and its release
+  truth-changes/config-changes manifests) remain **Not Started** — a separate larger surface.

@@ -471,6 +471,10 @@ handlers:
       enabled: true
       priority: 40
 
+    multithread_indicator:  # Shows "🧵 Y/X" — this thread's rank among live Agent-View threads
+      enabled: true
+      priority: 13
+
     current_time:   # Shows current local time (24-hour format)
       enabled: true
       priority: 14

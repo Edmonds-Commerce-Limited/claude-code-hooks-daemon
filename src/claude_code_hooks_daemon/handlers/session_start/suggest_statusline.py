@@ -11,6 +11,15 @@ from typing import Any
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, HookInputField, Priority
 from claude_code_hooks_daemon.core import Decision, Handler, HookResult, ProjectContext
 
+# Recommended statusLine.refreshInterval (seconds). Claude Code re-runs the
+# status command on this timer in ADDITION to event-driven updates. The status
+# line goes quiet when the session is idle — e.g. while a coordinator waits on a
+# background agent — so without a timer the clock freezes and the multithread
+# indicator (🧵 Y/X) under-counts idle sibling threads whose heartbeats have gone
+# stale. 10s keeps both live at negligible cost (a cached daemon socket call).
+# Docs: https://code.claude.com/docs/en/statusline (minimum is 1).
+_RECOMMENDED_REFRESH_INTERVAL_S = 10
+
 
 class SuggestStatusLineHandler(Handler):
     """Suggest setting up daemon-based statusline on session start."""
@@ -104,12 +113,20 @@ class SuggestStatusLineHandler(Handler):
                 "{",
                 '  "statusLine": {',
                 '    "type": "command",',
-                '    "command": ".claude/hooks/status-line"',
+                '    "command": ".claude/hooks/status-line",',
+                f'    "refreshInterval": {_RECOMMENDED_REFRESH_INTERVAL_S}',
                 "  }",
                 "}",
                 "```",
                 "",
                 "The status line shows: model name, context usage %, git branch, and daemon health.",
+                "",
+                (
+                    f"`refreshInterval` ({_RECOMMENDED_REFRESH_INTERVAL_S}s) re-runs the status "
+                    "line on a timer as well as on events, so the clock stays current and the "
+                    "multithread indicator (🧵 Y/X) keeps counting live threads even while the "
+                    "session is idle waiting on a background agent."
+                ),
             ]
         )
 

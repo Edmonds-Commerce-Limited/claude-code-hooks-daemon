@@ -221,6 +221,11 @@ class HandlerID:
         config_key="current_time",
         display_name="status-current-time",
     )
+    MULTITHREAD_INDICATOR = HandlerIDMeta(
+        class_name="MultithreadIndicatorHandler",
+        config_key="multithread_indicator",
+        display_name="status-multithread-indicator",
+    )
     PIPE_BLOCKER = HandlerIDMeta(
         class_name="PipeBlockerHandler",
         config_key="pipe_blocker",
@@ -585,6 +590,7 @@ HandlerKey = Literal[
     "git_context_injector",
     "git_branch",
     "current_time",
+    "multithread_indicator",
     "pipe_blocker",
     "git_stash",
     "root_recursion_guard",

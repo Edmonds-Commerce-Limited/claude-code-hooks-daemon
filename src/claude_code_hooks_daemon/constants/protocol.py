@@ -58,6 +58,7 @@ class HookInputField:
     PROMPT = "prompt"
 
     # Session fields
+    SESSION_NAME = "session_name"
     SESSION_METADATA = "session_metadata"
     SESSION_STATISTICS = "session_statistics"
 
