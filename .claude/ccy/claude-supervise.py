@@ -648,10 +648,20 @@ class CompactStateMachine:
             if self._compaction_handled:
                 # Already resumed this episode; sit tight until compaction ends.
                 return Evaluation(Decision.NOOP, "compaction in progress (already resumed)")
-            if not idle:
+            if not idle or not work_idle:
                 # Never type `continue` into a busy TUI -- it would be lost or
-                # corrupt in-flight input. Do NOT latch: retry on the next idle
-                # poll so the resume still fires once the session settles.
+                # corrupt in-flight input. TWO ways the TUI is busy:
+                #   * not idle      -- a human keystroke / non-empty input box.
+                #   * not work_idle -- the child is still STREAMING (Plan 00152).
+                # The second is the critical one for AUTOMATED compaction: the
+                # `.compacting` signal is written at compaction START and the
+                # human types nothing, so `idle` stays True the whole time. Only
+                # `work_idle` tells us the compaction summary has stopped
+                # streaming and we are back at the real post-compaction prompt.
+                # Gating on it stops the resume from firing mid-compaction and
+                # being dropped (the "compact injected, continue lost" bug). Do
+                # NOT latch: retry each poll so the resume still fires once the
+                # session settles.
                 return Evaluation(Decision.NOOP, _REASON_BUSY_AWAIT_RESUME)
             self._compaction_handled = True
             self._last_action_ts = now

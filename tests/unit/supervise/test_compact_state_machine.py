@@ -397,6 +397,21 @@ class TestCompactionDetection:
         settled = sm.evaluate(_reading(compacting=True), idle=True, now=1002.0)
         assert settled.decision is Decision.WOULD_CONTINUE
 
+    def test_compaction_while_work_streaming_defers_without_latching(self) -> None:
+        # The `.compacting` signal is written at compaction START. During an
+        # AUTOMATED compaction the human types nothing (idle True), but the
+        # compaction summary is still STREAMING to the child (work_idle False).
+        # Firing `continue` now types it into a busy, mid-compaction TUI where
+        # it is dropped -- the "compact injected, continue lost" bug. The resume
+        # must defer on work_idle too, WITHOUT latching, then fire exactly once
+        # the output settles (work_idle True) at the real post-compaction prompt.
+        sm = CompactStateMachine(CompactPolicy())
+        streaming = sm.evaluate(_reading(compacting=True), idle=True, work_idle=False, now=1000.0)
+        assert streaming.decision is Decision.NOOP
+        assert sm.state is SupervisorState.MONITOR
+        settled = sm.evaluate(_reading(compacting=True), idle=True, work_idle=True, now=1002.0)
+        assert settled.decision is Decision.WOULD_CONTINUE
+
 
 class TestCriticalCooldownBypass:
     """CRITICAL context bypasses the post-compact cooldown (Plan 00151)."""
