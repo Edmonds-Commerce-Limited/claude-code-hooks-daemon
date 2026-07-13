@@ -257,13 +257,20 @@ daemon-side:
     (`subagentStatusLine`, unimplemented). Earlier plan prose that lumped background
     agents in with subagents is superseded by this entry.
 - **DELIVERED (dogfooding tooling requested by user)**: a toggleable raw-payload
-  capture. Setting `CLAUDE_HOOKS_CAPTURE_DIR=<dir>` makes the shared forwarder
-  transport (`send_request_stdin` in `init.sh`) append every raw hook payload, one
-  JSON per line, to `<dir>/<event_name>.jsonl`. Unset (default) = strict no-op, zero
-  overhead; capture never disturbs the transport (proven by the existing 45-test
-  forwarder contract suite still green + 4 new capture tests). This is the instrument
-  to **empirically** confirm Truth #4 — a background-agent bar will capture a `Status`
-  payload with a *different* `session_id` than the main session. Implemented in root
-  `init.sh` (= `.claude/init.sh`, same inode); tests in
-  `tests/integration/test_forwarder_jq_free.py`; documented in
-  `CLAUDE/DEBUGGING_HOOKS.md`. Daemon restart RUNNING; live-verified on/off.
+  capture, **daemon-side and config-driven** (`daemon.payload_capture` in the tracked
+  `hooks-daemon.yaml`; `enabled`/`dir`/`events`). Applied by a **daemon restart** —
+  never a Claude Code relaunch — because the forwarder is dumb transport and the daemon
+  receives every `{event, hook_input}`. Off by default. Implemented in
+  `daemon/payload_capture.py` (pure helpers) + `server._capture_payload_best_effort`
+  (fail-open); unit tests in `tests/unit/daemon/test_payload_capture.py`; docs in
+  `CLAUDE/DEBUGGING_HOOKS.md`. The earlier forwarder/env-var attempt (commit `aaa552c`)
+  was superseded and reverted (commit `09b35b6`). This is the instrument to
+  **empirically** confirm Truth #4 — a background agent's bar captures a `Status`
+  payload with a *different* `session_id` than the main session.
+- **LIVE EXPERIMENT in progress**: capture dogfooded ON here (`events: [Status]`). The
+  user is running the two-thread test — background THIS session (Thread A,
+  `b2b6dcb4-…`), start a new background thread (Thread B), and confirm B's Status
+  renders land in `untracked/payload-capture/Status.jsonl` with a distinct
+  `session_id`. Cross-thread coordination via `untracked/bg-thread-debug-messaging.md`
+  (both files are untracked/gitignored). Pre-experiment baseline: 43 captured Status
+  renders, all Thread A's session_id.
