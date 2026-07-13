@@ -92,6 +92,13 @@ class GitBranchHandler(Handler):
         # Render TTL cache keyed by cwd: cwd -> (monotonic timestamp, context).
         # Config option `render_ttl_seconds` lands via the registry's setattr
         # injection and overrides this default.
+        #
+        # Plan 00157 (review follow-up): like the sibling per-repo dicts above,
+        # this grows one entry per distinct cwd the daemon renders for — a small,
+        # directory-bounded key space in practice (a handful of project roots /
+        # worktrees per daemon lifetime), cleared wholesale on daemon restart. An
+        # LRU bound would be premature complexity (YAGNI) for that key space;
+        # unbounded-per-directory growth is an accepted, documented trade-off.
         self._render_ttl_seconds: float = _DEFAULT_RENDER_TTL_SECONDS
         self._render_cache: dict[str, tuple[float, list[str]]] = {}
 

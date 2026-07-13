@@ -425,6 +425,27 @@ def test_malformed_payload_stop_wrapper_fails_closed(
 
 
 @pytest.mark.parametrize("strip_jq", [False, True], ids=["with-jq", "no-jq"])
+@pytest.mark.parametrize("wrapper", ["stop", "subagent-stop"])
+def test_malformed_payload_stop_reason_is_accurate(
+    wrapper: str, strip_jq: bool, sock_path: Path, live_pid_file: Path
+) -> None:
+    """A malformed Stop payload fails closed, but the block reason must be honest.
+
+    The parse fails client-side before the socket is touched, so the daemon is
+    almost certainly healthy. The old reason claimed 'Hooks daemon not running'
+    (Plan 00157 review follow-up) — cosmetically wrong for this case. The reason
+    must describe the malformed payload, not a phantom daemon-down. It surfaces on
+    stderr: forward_stop_event prints .reason before exiting 2.
+    """
+    result = _run_wrapper(wrapper, b"not json {", sock_path, live_pid_file, strip_jq=strip_jq)
+
+    assert result.returncode == 2, f"expected fail-closed exit 2, got {result.returncode}"
+    stderr = result.stderr.decode().lower()
+    assert "not running" not in stderr, stderr
+    assert "malformed" in stderr, stderr
+
+
+@pytest.mark.parametrize("strip_jq", [False, True], ids=["with-jq", "no-jq"])
 def test_status_line_transport_failure_emits_stderr_diagnostic(
     strip_jq: bool, tmp_path: Path, live_pid_file: Path
 ) -> None:

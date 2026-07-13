@@ -26,14 +26,18 @@ fi
 # `pgrep -f "claude-hooks-daemon\|claude_code_hooks_daemon"`. The `\|`
 # alternation is a GNU regex extension; BSD `pgrep` (macOS) treats it
 # literally and never matches a real daemon, so the restart recovery retry
-# silently no-ops on macOS. Use two separate `pgrep -f` invocations instead —
-# portable across GNU and BSD.
+# silently no-ops on macOS. Match the module path with a single `pgrep -f`
+# (no GNU alternation) — portable across GNU and BSD.
+#
+# Plan 00157: the daemon always runs as `python -m claude_code_hooks_daemon...`,
+# so the module path is the only pattern that can match. The legacy hyphenated
+# `claude-hooks-daemon` console-script name (removed in v3.38.0 / Plan 00155)
+# never appeared in the real daemon's argv, so its pgrep was dead code — dropped.
 #
 # Returns:
 #   0 if a daemon process is found, 1 otherwise
 #
 _daemon_process_exists() {
-    pgrep -f "claude-hooks-daemon" > /dev/null && return 0
     pgrep -f "claude_code_hooks_daemon" > /dev/null && return 0
     return 1
 }
