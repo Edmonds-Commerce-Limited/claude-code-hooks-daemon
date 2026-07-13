@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.39.0] - 2026-07-13
+
+This is a **minor release** delivering the multithread status-line indicator
+(Plan 00158): a new `🧵 Y/X` status segment showing the current thread's
+stable rank among the live Claude Code sessions sharing one daemon (Agent
+View background threads), plus a toggleable payload-capture debugging
+mechanism used to dogfood it. Also includes Plan 00157 review followups.
+No breaking changes, no new required config keys.
+
+### Added
+
+- **`🧵 Y/X` multithread indicator status-line handler (Plan 00158)** — new
+  `MultithreadIndicatorHandler` renders the current thread's stable rank (`Y`)
+  among the live sessions (`X`) sharing one daemon, as the FIRST status-line
+  segment (priority 2). It is default-ON but SILENT when only one session is
+  live, so single-thread users never see it. Backed by a pure
+  `thread_registry` module: per-session heartbeat keyed by `session_id`,
+  atomic tmp+`os.replace` writes, stale-session pruning, and stable ranking
+  by first-seen order. Excludes Claude Code's pre-warmed background "spare"
+  PTY hosts and agent/subagent sessions (any session with a truthy
+  `agent_type`) so they never inflate the count.
+- **`refreshInterval: 10` added to the recommended/dogfood `statusLine`
+  settings (Plan 00158)** — keeps the status bar live and the multithread
+  count accurate while idle on a background agent.
+- **New `session_name` protocol field (Plan 00158)** — surfaces the Claude
+  Code session name where available for status-line and diagnostic use.
+- **Toggleable daemon-side `daemon.payload_capture` debug mechanism (Plan
+  00158)** — config-driven, off by default; captures raw hook payloads to
+  disk for debugging the Agent View / status-line contract. Used to dogfood
+  the multithread indicator above; disabled again once the feature shipped.
+
+### Changed
+
+- **Plan 00157 followups** — v3.38.0 review followups merged, including
+  minor fixes to the `git_branch` status-line handler.
+
+### Fixed
+
+- Minor fixes identified during the Plan 00157 v3.38.0 review (see Plan
+  00157 for details).
+
 ## [3.38.0] - 2026-07-13
 
 This is a **minor release** delivering a daemon performance-tuning wave
