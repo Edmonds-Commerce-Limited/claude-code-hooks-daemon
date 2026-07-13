@@ -149,9 +149,10 @@ is dumb transport, the toggle belongs in the *tracked* daemon config, and a
 daemon-side:
 
 - [x] ✅ **Task 1b.1**: `daemon.payload_capture` config (`enabled`/`dir`/`events`) in
-  `config/models.py`; daemon-side capture in `daemon/payload_capture.py` (pure helpers)
-  wired into `server._process_request` via `_capture_payload_best_effort` (fail-open,
-  skips `_system`, warns-not-swallows on write failure).
+  `src/claude_code_hooks_daemon/config/models.py`; daemon-side capture in
+  `src/claude_code_hooks_daemon/daemon/payload_capture.py` (pure helpers) wired into
+  `server._process_request` via `_capture_payload_best_effort` (fail-open, skips
+  `_system`, warns-not-swallows on write failure).
 - [x] ✅ **Task 1b.2**: Reverted the forwarder env-var capture in `init.sh` + its tests;
   new unit tests `tests/unit/daemon/test_payload_capture.py` (9 cases: disabled, writes
   JSONL, `_system` skipped, events filter, append, filename sanitisation, dir resolve).
@@ -274,3 +275,22 @@ daemon-side:
   `session_id`. Cross-thread coordination via `untracked/bg-thread-debug-messaging.md`
   (both files are untracked/gitignored). Pre-experiment baseline: 43 captured Status
   renders, all Thread A's session_id.
+- **CONFIRMED TRUTH #5 (live two-thread experiment — DONE)**: ran Thread A (backgrounded)
+  - Thread B (new background thread) concurrently. Results, from `Status.jsonl` + both
+    agents + human observation:
+  * **Distinct sessions, one daemon**: capture accumulated ≥4 distinct `session_id`s
+    (Thread A pre-bg `b2b6dcb4`, A post-bg `2b651a46` = its job id, Thread B `c8031d41`,
+    plus transients), all `cwd=/workspace`, all written to the SAME `Status.jsonl` →
+    background threads are full independent sessions sharing one daemon. Backgrounding a
+    thread gives it its own session identity (this thread's renders moved from `b2b6dcb4`
+    to its job id `2b651a46`).
+  * **The bar is per-focused-thread**: viewing Thread B, the human saw the bottom bar at
+    **12%** (== `c8031d41`'s captured `used_percentage`); viewing Thread A, **~33%**
+    (== `2b651a46`'s captured 34%). 12% ≠ 33%, each matching that thread's OWN captured
+    data → each background thread renders its own `statusLine` bar with its own session's
+    data. This resolves the original "whose data is the bar showing?" — it's the
+    **currently-focused** thread's. The "some threads show no bar" case is Task-tool
+    subagents (shared session → agent-panel row only, no bar).
+  * **Cross-thread file coordination works**: the two sessions (which cannot message each
+    other) coordinated entirely through the shared `bg-thread-debug-messaging.md`
+    (append via `cat >>`, not Read/Edit, to avoid concurrent-write conflicts).
