@@ -40,6 +40,28 @@
 
 Agents cannot spawn nested agents. Main Claude orchestrates by invoking agents sequentially.
 
+## 🚨 Review Early, Never Drop Findings (Plan 00157)
+
+The Code Review Gate (Step 10) and CLAUDE.md Guidance Audit (Step 11) currently
+run **after** the QA (Step 8) and just **before** the Acceptance gate (Step 12).
+That ordering has a cost: any fix applied to a review finding forces a full
+FAIL-FAST restart of the QA + acceptance gates (code changes can regress earlier
+tests). So **blocking** findings are expensive to fix in place, and there is
+pressure to defer **non-blocking** findings — which risks losing review value as
+silent tech debt.
+
+Two non-negotiable rules close that gap:
+
+1. **Prefer reviewing early.** When practical, run the code review + guidance
+   audit against the diff *before* the QA/acceptance gates, so findings can be
+   fixed and re-verified in one pass rather than triggering a downstream
+   FAIL-FAST re-run.
+2. **Never drop a finding.** Every review finding is either (a) fixed before the
+   release ships, or (b) captured as a tracked MUST-FIX item in a follow-up plan
+   (`CLAUDE/Plan/NNNNN-*`) with file:line, severity, and remediation, and fixed
+   **immediately after** the release to close the loop. A review whose findings
+   evaporate into scrollback is wasted work.
+
 ## 🚨 Absolute Paths Only (NON-NEGOTIABLE)
 
 **Every command in the release flow MUST use absolute paths. NEVER `cd` into a subdirectory.**

@@ -6,11 +6,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ### Code Quality / Handler Configuration
 
-- [00157: Review Followups — Perf Wave](00157-review-followups-perf-wave/PLAN.md) - Not Started
-
-  - Captures the non-blocking nits from the v3.38.0 release Code Review Gate (dead `pgrep` line in `daemon_control.sh`, cosmetic reason string in `init.sh`'s `emit_hook_error`, two directory-bounded caches) and Guidance Audit so no review value is lost as tech debt
-  - Fix immediately after v3.38.0 ships to close the loop without destabilising the in-flight release; also proposes moving review + fix earlier in the release cycle (before the QA/acceptance gates)
-
 ### Plan Workflow / QA
 
 - [00144: Plan QA System — Real-Time Plan Validation & Drift Enforcement](00144-plan-qa-system/PLAN.md) - In Progress (Phase 1 core underway; scope includes mkplan `_TEMPLATE_.md` externalisation)
@@ -116,6 +111,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00157: Review Followups — Perf Wave](Completed/00157-review-followups-perf-wave/PLAN.md) - Complete (closes the loop on the v3.38.0 release-review findings so no review value is lost as tech debt. Fixed immediately after v3.38.0 shipped: removed a dead `pgrep` line in `daemon_control.sh` (the hyphenated console-script name never matched the real underscore module-path daemon after v3.38.0 removed the console entry); corrected `init.sh`'s `emit_error_json` Stop reason so a malformed-Stop-payload reports "daemon likely healthy; do not restart" instead of "daemon not running", still failing CLOSED (RED→GREEN `test_malformed_payload_stop_reason_is_accurate`); documented the two directory-bounded caches (`git_branch.py`/`validation.py`) as an accepted YAGNI trade-off; confirmed the 8 advisory-handler `None` guidances as intentional; added a "Review Early, Never Drop Findings" section to `RELEASING.md`. QA 13/13, 9841 tests, coverage 95.6%; daemon restart RUNNING)
 
 - [00156: Performance Tuning Wave 2 — drop `jq`, slim `init.sh`](Completed/00156-performance-tuning-wave-2-drop-jq-slim-init/PLAN.md) - Complete (`Themes: performance`; Wave 2 off Plan 00154, the forwarder-side wins. T2: eliminated `jq` from every hook wrapper — the per-event JSON wrap (and status-line's wrap+unwrap) moved into the `python3` transport each wrapper already spawns, saving ~22-24 ms/event; all three `send_request_stdin` definitions + `forward_stop_event` are jq-free (jq remains only in `emit_hook_error`). T3: portable, bash-3.2-safe slim of the `init.sh` hot path (guarded `mkdir`, one fewer `tr` spawn in the hostname suffix) — ~12.46→11.07 ms/source (~1.4 ms/event); riskier `stat`/`date`/`dirname` swaps deliberately deferred. Payload stays on stdin (control-char safe); only the hardcoded event-name literal moved to argv. Request envelope, Stop exit-2 contract, status-line fallback, and CI/daemon-down error responses all byte-preserved and pinned by a new 33-test jq-free forwarder guard suite (broken-`jq` shim on PATH) + init.sh characterization tests; dogfooding/CI-passthrough/stop-hard-block gates + live probes green. QA 13/13, 9822 tests, coverage 95.6%. Commits `83f5f91`/`b88d424`/`c4fff5b`)
 
@@ -1009,8 +1006,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 157 (count = `hooksdaemon.latestPlanNumber` git counter; 00145 was allocated by the counter but its folder is not present on this branch)
-- **Completed**: 133 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 17 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Completed**: 134 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
+- **Active**: 16 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102); plus draft folders deleted and no longer on disk (00036 empty draft, 00038 superseded by 00045, 00073 orphan empty folder removed during Plan 00107 housekeeping)
 - **Last reconciled by**: Plan 00144 Task 2.2 sweep remediation
