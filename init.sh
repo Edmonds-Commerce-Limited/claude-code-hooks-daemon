@@ -845,6 +845,7 @@ send_request_stdin() {
     local response_mode="${2:-}"
     python3 -c "
 import json
+import os
 import socket
 import sys
 
@@ -946,6 +947,26 @@ def render_status(output):
 
 # Read the raw hook_input payload from stdin (preserves control characters).
 raw = sys.stdin.read()
+
+# Plan 00158: opt-in payload capture for dogfooding. Set CLAUDE_HOOKS_CAPTURE_DIR
+# to a writable directory and every hook payload is appended verbatim (one raw
+# JSON object per line) to <dir>/<event_name>.jsonl. Unset/empty (the default) is
+# a no-op with zero overhead. This is the instrument for inspecting exactly what
+# Claude Code sends per hook event / agent thread — e.g. which threads trigger a
+# Status render and what session identity each carries.
+_capture_dir = os.environ.get('CLAUDE_HOOKS_CAPTURE_DIR', '').strip()
+if _capture_dir:
+    try:
+        os.makedirs(_capture_dir, exist_ok=True)
+        _safe_event = ''.join(c if (c.isalnum() or c in '-_') else '_' for c in event_name)
+        with open(os.path.join(_capture_dir, _safe_event + '.jsonl'), 'a', encoding='utf-8') as _cap:
+            _cap.write(raw if raw.endswith(chr(10)) else raw + chr(10))
+    except OSError as _cap_exc:
+        # Best-effort: never break the hook transport if capture fails, but do NOT
+        # suppress silently — surface the reason on stderr so the operator knows
+        # capture did not record this payload.
+        print('HOOKS DAEMON: payload capture failed: '
+              + type(_cap_exc).__name__ + ': ' + str(_cap_exc), file=sys.stderr)
 
 # Parse it so we can wrap it ourselves (jq used to do this). Claude Code always
 # sends a JSON object; a parse failure is a real error, handled explicitly.

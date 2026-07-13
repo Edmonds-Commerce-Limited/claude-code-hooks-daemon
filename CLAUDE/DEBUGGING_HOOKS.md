@@ -46,6 +46,44 @@ Example output:
 2026-01-27 04:37:34,040 [INFO] === END BOUNDARY ===
 ```
 
+## Raw Payload Capture (`CLAUDE_HOOKS_CAPTURE_DIR`)
+
+`scripts/debug_hooks.sh` shows what the daemon *did* with an event. When you instead
+need the **exact JSON Claude Code sent** — every field, verbatim — set the
+`CLAUDE_HOOKS_CAPTURE_DIR` environment variable. The shared forwarder transport
+(`send_request_stdin` in `init.sh`) then appends each raw hook payload, one JSON
+object per line, to `<dir>/<event_name>.jsonl`.
+
+```bash
+# Enable: point at any writable directory (unset = disabled, the default).
+export CLAUDE_HOOKS_CAPTURE_DIR="$PWD/untracked/hook-capture"
+
+# ...work in Claude Code (or replay a payload through a wrapper)...
+
+# Inspect what was sent for a given event:
+cat untracked/hook-capture/Status.jsonl        # one status render per line
+cat untracked/hook-capture/PreToolUse.jsonl
+
+# Disable again:
+unset CLAUDE_HOOKS_CAPTURE_DIR
+```
+
+**Properties**:
+
+- **Off by default, zero overhead** — the capture branch is skipped entirely when the
+  variable is unset or empty.
+- **Every event type** — status line, PreToolUse, PostToolUse, etc. all funnel through
+  the same transport, so each lands in its own `<event_name>.jsonl`.
+- **Non-invasive** — capture never alters the payload or the daemon response; a capture
+  write failure is reported on stderr and the hook proceeds normally.
+
+**Primary use case — agent-thread identity**: capturing the `Status` event reveals the
+`session_id` / `transcript_path` behind each status-line render. Because a **background
+agent** is a full independent session (its own `session_id`) while a **Task-tool
+subagent** shares the parent session and renders only an agent-panel row
+(`subagentStatusLine`), the capture file is how you empirically confirm *which* thread
+triggered a bar and *whose* identity it carried.
+
 ## Workflow: From Scenario to Handler
 
 ### Step 1: Identify Scenario

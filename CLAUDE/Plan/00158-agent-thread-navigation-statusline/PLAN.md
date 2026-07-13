@@ -34,12 +34,15 @@ official docs, **the docs win** and are recorded here.
 
 ### A. Agent View (multi-agent thread navigation)
 
-- Lets the user **arrow-key between agent threads** in a single session (main thread
-  - background agents / Task-tool / Agent-tool subagents). Threads render in an
-    **agent panel** below the prompt; background agents can run in isolated git worktrees.
+- Lets the user **arrow-key between threads** in a single view. Two *distinct* thread
+  kinds share this view (see Confirmed Truth #4 for the full split):
+  - **Task-tool subagents** — workers inside the current session, rendered as **rows**
+    in the agent panel (`subagentStatusLine`); no bottom bar.
+  - **Background agents** — full independent sessions (`/background`, `claude --bg`),
+    each with its own `session_id`/transcript, rendered with the **full bottom
+    `statusLine` bar** when attached; may run in isolated git worktrees.
 - Ships in current stable Claude Code (research-preview from the v2.1.139 line; this
-  session runs v2.1.207, which has it). Dispatch is via the Task/Agent tools,
-  `/background`, or `claude --bg`.
+  session runs v2.1.207, which has it).
 
 ### B. Main `statusLine` (the bottom bar)
 
@@ -134,6 +137,17 @@ official docs, **the docs win** and are recorded here.
 - [x] ✅ **Task 1.3**: Map our Status handler wiring + fields consumed (Confirmed Truth #3).
 - [x] ✅ **Task 1.4**: Verify the `statusLine`/`subagentStatusLine` contract against the
   official docs primary source; reconcile against the research-agent summary.
+- [x] ✅ **Task 1.5**: Disambiguate Task-tool subagents (panel rows) vs background-agent
+  sessions (own bar) — the actual cause of the bar-vs-no-bar symptom (Confirmed Truth #4).
+
+### Phase 1b: Dogfooding instrumentation — payload capture toggle (DONE)
+
+- [x] ✅ **Task 1b.1**: Add `CLAUDE_HOOKS_CAPTURE_DIR` opt-in capture to the shared
+  `send_request_stdin` transport in `init.sh` (off by default, all events, fail-safe).
+- [x] ✅ **Task 1b.2**: Tests in `tests/integration/test_forwarder_jq_free.py` (disabled
+  by default, writes raw JSONL, appends, transport preserved, Status filename).
+- [x] ✅ **Task 1b.3**: Document the toggle in `CLAUDE/DEBUGGING_HOOKS.md`; live-verify
+  on/off; daemon restart RUNNING.
 
 ### Phase 2: Design the `subagentStatusLine` surface (Not Started)
 
@@ -216,3 +230,29 @@ official docs, **the docs win** and are recorded here.
   Notably `context_sidecar` keys state by `session_id`, and `disclosure_tracker`
   keys per-agent by `transcript_path` (not the shared `session_id`) — relevant if a
   future subagent status line needs per-thread state.
+- **CONFIRMED TRUTH #4 (corrects an earlier conflation)**: "subagent" and the
+  directly-created "agent thread" are **two different mechanisms**, and this — not a
+  daemon bug — is why *some threads show a bar and some show only a row*:
+  - **Task-tool subagent** — a worker *inside* one session; shares the parent's
+    `session_id`/transcript; surfaces as a **row** in the agent panel governed by
+    `subagentStatusLine` (or the built-in `name · description · token count` default).
+    **No bottom bar.**
+  - **Background agent** (docs: "background session" / "session in agent view";
+    `/background`, `claude --bg`) — a **full independent session** with its **own**
+    `session_id`/transcript; when attached it renders the **full bottom `statusLine`
+    bar**, same as any session.
+    So the daemon already drives the bar for every background-agent session (each is just
+    another session hitting our `statusLine`); the gap is only the subagent *rows*
+    (`subagentStatusLine`, unimplemented). Earlier plan prose that lumped background
+    agents in with subagents is superseded by this entry.
+- **DELIVERED (dogfooding tooling requested by user)**: a toggleable raw-payload
+  capture. Setting `CLAUDE_HOOKS_CAPTURE_DIR=<dir>` makes the shared forwarder
+  transport (`send_request_stdin` in `init.sh`) append every raw hook payload, one
+  JSON per line, to `<dir>/<event_name>.jsonl`. Unset (default) = strict no-op, zero
+  overhead; capture never disturbs the transport (proven by the existing 45-test
+  forwarder contract suite still green + 4 new capture tests). This is the instrument
+  to **empirically** confirm Truth #4 — a background-agent bar will capture a `Status`
+  payload with a *different* `session_id` than the main session. Implemented in root
+  `init.sh` (= `.claude/init.sh`, same inode); tests in
+  `tests/integration/test_forwarder_jq_free.py`; documented in
+  `CLAUDE/DEBUGGING_HOOKS.md`. Daemon restart RUNNING; live-verified on/off.
