@@ -150,22 +150,23 @@ folder: `BRAINSTORM-datamodel.md` (data model & lifecycle) and
 
 ### Phase 2: Reference doc + template reconciliation
 
-- [ ] ⬜ **Task 2.1**: Write `CLAUDE/PlanJournalling.md` (British double-l,
-  canonical) per the BRAINSTORM-datamodel §6 TOC: purpose
-  (PLAN.md vs JOURNAL), layout, entry grammar, append-only discipline,
-  lifecycle touchpoints table, Notes & Updates migration, good-vs-noise
-  worked examples, and an explicit **POLICY (daemon-enforced, with the exact
-  `plan_workflow.qa.journal.*` knob) vs CONVENTION (client-tunable)** split.
-  Framed as copy-and-customise for client projects.
+- [x] ✅ **Task 2.1**: Wrote `CLAUDE/PlanJournalling.md` (British double-l):
+  purpose (PLAN.md vs JOURNAL), layout, entry grammar, append-only discipline,
+  good-vs-noise worked examples, lifecycle touchpoints table, Notes & Updates
+  migration, and the explicit **POLICY (daemon-enforced knobs) vs CONVENTION
+  (client-tunable)** split. Framed as copy-and-customise.
 - [ ] ⬜ **Task 2.2**: Reconcile `_TEMPLATE_.md` — replace `## Notes & Updates`
   with a curated `## Delivery & Milestones` stub (milestone lines + delivery
   commit hashes). Update `CLAUDE/PlanWorkflow.md`, `CLAUDE/Plan/CLAUDE.md`,
   and the completion checklist so "cite delivery commit hashes" points at the
   new section; verify no plan_qa check asserts a Notes & Updates section.
   Legacy plans keep theirs untouched.
-- [ ] ⬜ **Task 2.3**: Docs — `docs/guides/HANDLER_REFERENCE.md` journal
-  options; `get_claude_md()` updates for the three plan_qa surfaces so the
-  injected guidance mentions journal advisories; regenerate docs.
+- [x] ✅ **Task 2.3**: Docs — added the `journal` sub-block + journal-checks
+  paragraph to `docs/guides/HANDLER_REFERENCE.md` (links to
+  `CLAUDE/PlanJournalling.md`); `plan_qa_edit.get_claude_md()` and
+  `markdown_table_formatter.get_claude_md()` now mention the journal
+  advisories / exemption (shipped in the Phase 1 commit); `generate-docs`
+  run — no CLAUDE.md/HOOKS-DAEMON.md drift (injected guidance is runtime-only).
 
 ### Phase 3: Commit-gate coupling + ratchet review (post-dogfood)
 

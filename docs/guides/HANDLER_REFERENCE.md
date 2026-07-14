@@ -788,6 +788,13 @@ plan_workflow:
     legacy_plan_allowlist: []    # plan numbers held to advise-only (grandfathered)
     collision_allowlist: []      # historic duplicate plan numbers to tolerate
     extra_root_files: []         # extra non-plan filenames allowed at the plan root
+    journal:                     # per-plan journalling (Plan 00163)
+      enabled: true              # master switch for all journal checks
+      mode: advise               # advise | block | off (only naming honours block)
+      dir_name: JOURNAL           # journal sub-directory name inside a plan folder
+      freshness_days: 3          # nag a plan whose newest day-file is older than N days
+      enforce_on_completion: false
+      grandfather_before: 0      # plans below this number are never nagged for a JOURNAL/
 ```
 
 `extra_root_files` is an ADDITIVE allowlist layered on top of the built-in
@@ -797,6 +804,19 @@ legitimately-placed non-plan file at the plan root here so the
 a sourced shell library such as `_planlib.bash` shared by plan orchestrator
 scripts. Matching is by exact filename; the default empty list is byte-identical
 to prior behaviour.
+
+The `journal` sub-block governs per-plan journalling (Plan 00163): each plan
+folder may carry a `JOURNAL/` of append-only `NNNNN-Journal-YY-MM-DD.md`
+day-files, scaffolded by `mkplan.bash`. Four checks ride the existing plan QA
+surfaces (no new handler) and all ship ADVISE: `journal-dayfile-naming` +
+`journal-append-only` (edit stage) and `journal-folder-present` +
+`journal-freshness` (sweep stage). Only `journal-dayfile-naming` may ratchet to
+BLOCK via `mode: block`; the rest are advisory forever. Set `grandfather_before`
+to the plan number at which your project adopted journalling so pre-existing
+journal-less plans are never nagged (no backfill), and `freshness_days` to nag a
+quiet `JOURNAL/` sooner than the 30-day plan staleness window. See
+[CLAUDE/PlanJournalling.md](../../CLAUDE/PlanJournalling.md) for the entry
+grammar, append-only discipline, and the POLICY-vs-CONVENTION split.
 
 The handler itself is enabled/prioritised in the usual place:
 
