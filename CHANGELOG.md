@@ -7,6 +7,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.40.0] - 2026-07-14
+
+This is a **minor release** delivering **first-class plan journalling** (Plan
+00163): every plan folder can carry a `JOURNAL/` of append-only, per-day
+`NNNNN-Journal-YY-MM-DD.md` files — a chronological activity log (findings,
+decisions, dead-ends, hand-off state) complementary to `PLAN.md`. The daemon
+supports it through the existing plan_qa surfaces (no new handler, no new
+event), all advise-first, and it ships enabled-by-default with the template and
+reference doc deployed to client projects. Also ships the opt-in
+`idle_housekeeping_advisory` beta handler (Plan 00161), makes `daemon_stats`
+opt-in, wires the previously-dead `enable_hello_world_handlers` flag (Plan
+00162), and supervisor/robustness fixes (Plan 00160). No breaking changes.
+
+### Added
+
+- **First-class plan journalling (Plan 00163)** — a per-plan `JOURNAL/`
+  subfolder of append-only, per-day `NNNNN-Journal-YY-MM-DD.md` files, the
+  canonical plan activity log complementary to `PLAN.md`. Six advise-first
+  checks ride the three existing plan_qa surfaces: `journal-dayfile-naming` and
+  `journal-append-only` (edit stage), `journal-folder-present` and
+  `journal-freshness` (sweep stage), and `journal-entry-with-progress` and
+  `journal-completion-entry` (commit gate). Only `journal-dayfile-naming` can
+  ever ratchet to block. `mkplan.bash` scaffolds `JOURNAL/` plus a seeded day-1
+  file; install/upgrade seeds a client-owned `_JOURNAL_TEMPLATE_.md` (the
+  marker that gates that scaffolding) and a `PlanJournalling.md` reference.
+  Config under `plan_workflow.qa.journal.*` (`enabled`, `mode`, `dir_name`,
+  `freshness_days`, `enforce_on_completion`, `grandfather_before`). Enabled by
+  default; completed/legacy plans are never nagged (the presence check is
+  In-Progress-only) and new plans are born with a journal.
+- **`idle_housekeeping_advisory` beta handler (Plan 00161)** — opt-in (OFF by
+  default) `UserPromptSubmit` handler that, after repeated no-op
+  failsafe-recovery ticks on a demonstrably idle session, suggests a bounded
+  REPORT-ONLY housekeeping mode: dispatch specialist sub-agents that run
+  read-only audits and write shareable markdown reports (default
+  `untracked/reports/`). Never auto-fixes or auto-commits; yields instantly to
+  real work. Options: `noop_threshold`, `max_passes_per_session`,
+  `reports_dir`, `custom_guidance_doc`, `custom_guidance_mode`.
+
+### Changed
+
+- **`daemon_stats` status-line element now opt-in (OFF by default)** — the
+  daemon-health line (uptime, memory, last error, log level) is a
+  developer-facing diagnostic, so it now defaults disabled. The separate
+  `version_check` upgrade notifier is unaffected. Existing configs that
+  explicitly enable it keep the line.
+- **`daemon.enable_hello_world_handlers` flag now wired (Plan 00162)** — the
+  flag (default false) previously gated nothing, so the 10 `hello_world` test
+  handlers loaded in every project and injected `✅ <event> hook system active`
+  context (which on `Stop` cost an extra idle turn). They now load only when the
+  flag is opted in. Observable effect after upgrade: those confirmation messages
+  stop appearing.
+- **Plan template: `## Notes & Updates` → `## Delivery & Milestones` (Plan
+  00163)** — the free-form diary stream moves to `JOURNAL/`; `PLAN.md` keeps a
+  thin curated milestone/commit-hash stub. Existing plans are never rewritten.
+
+### Fixed
+
+- **`markdown_organization` misdetected daemon-owned template/snapshot files as
+  plans** — writing a dot/underscore-prefixed daemon-owned file (e.g. the
+  `.plan-template-default.md` snapshot) was mistaken for a Claude Code plan-mode
+  save, scaffolding a bogus plan folder and bumping the plan counter.
+  Dot/underscore-prefixed files are now excluded.
+- **Supervisor foreground-identity and dead-file reaping (Plan 00160)** — the
+  ccy supervisor now guards compaction on the foreground thread and reaps dead
+  sidecar/signal files each tick; resume gates on `work_idle` so the post-compact
+  continue is not dropped.
+- **Plan README `Active` statistic drift** — recounted (17 → 19).
+
 ## [3.39.0] - 2026-07-13
 
 This is a **minor release** delivering the multithread status-line indicator

@@ -1,5 +1,5 @@
 version: "3.40.0"
-date: "2026-07-13"
+date: "2026-07-14"
 breaking: false
 config_changes:
   added:
@@ -53,8 +53,9 @@ config_changes:
         the pre-journalling ones wholesale by setting
         plan_workflow.qa.journal.grandfather_before to one-past your current
         highest plan number (run: git config --local hooksdaemon.latestPlanNumber,
-        add 1). See CLAUDE/PlanJournalling.md (seeded into your plan dir) for the
-        entry grammar and the POLICY-vs-CONVENTION split.
+        add 1). See CLAUDE/PlanJournalling.md (seeded alongside your plan
+        directory on upgrade) for the entry grammar and the
+        POLICY-vs-CONVENTION split.
   renamed: []
   removed: []
   changed:

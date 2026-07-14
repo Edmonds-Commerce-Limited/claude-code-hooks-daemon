@@ -14,5 +14,5 @@ truth_changes:
       "## Delivery & Milestones" instead of "## Notes & Updates", and
       mkplan.bash scaffolds a JOURNAL/ with a seeded day-1 file. Existing plans
       are never rewritten; only new plans get the new structure. See
-      CLAUDE/PlanJournalling.md (seeded into your plan dir on upgrade) for the
-      entry grammar and append-only discipline.
+      CLAUDE/PlanJournalling.md (seeded alongside your plan directory on
+      upgrade) for the entry grammar and append-only discipline.
