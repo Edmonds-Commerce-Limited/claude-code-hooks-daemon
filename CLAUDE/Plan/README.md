@@ -14,10 +14,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00159: Status Writers Thread-Safe Tmp Naming](00159-status-writers-thread-safe-tmp-naming/PLAN.md) - Not Started (v3.39.0 code-review follow-up: the four `.{stem}.{pid}.tmp` atomic writers key on PID not thread — harmless today, hardening only)
 
-### ccy Supervisor / Upgrade
-
-- [00164: Supervisor lifecycle and upgrade clarity](00164-supervisor-lifecycle-and-upgrade-clarity/PLAN.md) - In Progress (four fixes shipped in one release: (1) client upgrades wrongly print "already at version" + skip the full-upgrade path because Layer 1 checks out the tag before Layer 2's git-ref idempotency check; (2) ccy supervisor startup banner + spinner; (3) stale running-supervisor detection after an upgrade delivers a new `claude-supervise.py`; (4) split the supervisor into a thin PTY host + a restartable policy-worker subprocess for hot reload)
-
 ### Code Quality / Handler Configuration
 
 - [00161: Idle Housekeeping Mode](00161-idle-housekeeping-mode/PLAN.md) - In Progress (Phase 1 brainstorm delivered: turn repeated no-op failsafe-recovery ticks into a bounded, report-first housekeeping mode dispatched to specialist sub-agents; awaiting Phase 2 build)
@@ -137,6 +133,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00164: Supervisor lifecycle and upgrade clarity](Completed/00164-supervisor-lifecycle-and-upgrade-clarity/PLAN.md) - Complete (shipped as **v3.41.0** (MINOR), all 7 phases in one release. (1) truthful upgrade transition messaging — client upgrades read the venv `.daemon-version` stamp so they report the real installed→target instead of always "already at version X" (reviving the DEAD Layer-2 full-upgrade path is a tracked follow-up); (2) ccy supervisor startup banner + spinner (opt-out `CLAUDE_SUPERVISE_NO_BANNER`, blank-line padded); (3) stale running-supervisor detection — `ccy_supervisor_integrity` compares running vs on-disk source fingerprint and advises a ccy restart; (4) restartable policy-worker split — decision logic hot-reloads in a `--worker` subprocess without disturbing the wrapped `claude`, with the HOST holding the single authoritative `CompactStateMachine` state so a worker stall can't double-inject `/compact` (release code-review hardening); (5) compact-injection loop fix — never re-inject a queued `/compact`, fire `[esc]` repeatedly (capped at `max_escapes`) to flush it; (6) `echd-capture` output helper recommended by `pipe_blocker`. QA 13/13, 10099 tests, 95.3% cov. Delivery `cf118f4d`/`c3fdbf36`/`3bb1b670`/`fabb01d5`/`9f992270`/`93a58121`, tag `v3.41.0`)
 
 - [00157: Review Followups — Perf Wave](Completed/00157-review-followups-perf-wave/PLAN.md) - Complete (closes the loop on the v3.38.0 release-review findings so no review value is lost as tech debt. Fixed immediately after v3.38.0 shipped: removed a dead `pgrep` line in `daemon_control.sh` (the hyphenated console-script name never matched the real underscore module-path daemon after v3.38.0 removed the console entry); corrected `init.sh`'s `emit_error_json` Stop reason so a malformed-Stop-payload reports "daemon likely healthy; do not restart" instead of "daemon not running", still failing CLOSED (RED→GREEN `test_malformed_payload_stop_reason_is_accurate`); documented the two directory-bounded caches (`git_branch.py`/`validation.py`) as an accepted YAGNI trade-off; confirmed the 8 advisory-handler `None` guidances as intentional; added a "Review Early, Never Drop Findings" section to `RELEASING.md`. QA 13/13, 9841 tests, coverage 95.6%; daemon restart RUNNING)
 
@@ -1032,8 +1030,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 164 (count = `hooksdaemon.latestPlanNumber` git counter; 00145 was allocated by the counter but its folder is not present on this branch)
-- **Completed**: 134 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 23 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Completed**: 135 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
+- **Active**: 22 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102); plus draft folders deleted and no longer on disk (00036 empty draft, 00038 superseded by 00045, 00073 orphan empty folder removed during Plan 00107 housekeeping)
 - **Last reconciled by**: Plan 00144 Task 2.2 sweep remediation

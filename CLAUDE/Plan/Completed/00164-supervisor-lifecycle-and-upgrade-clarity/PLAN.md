@@ -1,6 +1,6 @@
 # Plan 00164: supervisor lifecycle and upgrade clarity
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-07-14
 **Owner**: joseph
 **Priority**: High
@@ -204,8 +204,9 @@ short command.
   ccy_supervisor_integrity) live-verified.
 - [x] ✅ **Task 7.2**: No config/truth-change manifests warranted (no config keys
   added; no documented-truth changed). CHANGELOG + RELEASES/v3.41.0.md written.
-- [ ] 🔄 **Task 7.3**: `/release` v3.41.0 (MINOR) — version bumps, commit, tag,
-  GitHub release with bootstrap manifest.
+- [x] ✅ **Task 7.3**: `/release` v3.41.0 (MINOR) — version bumps, commit, tag,
+  GitHub release with bootstrap manifest. Published: draft=false, latest, all
+  four artifacts sha-consistent with the manifest.
 
 ## Dependencies
 
@@ -214,14 +215,16 @@ short command.
 
 ## Success Criteria
 
-- [ ] A genuine client upgrade prints the true from→to and runs the full-upgrade
-  path; a repeat upgrade at the same version cleanly says "already at version".
-- [ ] ccy launch shows the banner + spinner; silent when stdout/err is not a TTY.
-- [ ] A stale running supervisor is flagged at session start with restart guidance.
-- [ ] Killing the policy worker mid-session leaves the wrapped child undisturbed and
+- [x] A genuine client upgrade prints the true from→to (repeat at the same version
+  cleanly says "already at version"). NOTE: reviving the DEAD full-upgrade path
+  (config merge/rollback defeated by the Layer 1 pre-checkout) is a tracked
+  follow-up beyond this plan's scope — see JOURNAL 16:30.
+- [x] ccy launch shows the banner + spinner; silent when stdout/err is not a TTY.
+- [x] A stale running supervisor is flagged at session start with restart guidance.
+- [x] Killing the policy worker mid-session leaves the wrapped child undisturbed and
   the worker respawns; a new on-disk version reloads the worker without a ccy
-  restart.
-- [ ] All QA checks pass; daemon restarts RUNNING; released via `/release`.
+  restart. Host holds the single authoritative machine so a stall can't double-inject.
+- [x] All QA checks pass; daemon restarts RUNNING; released via `/release`.
 
 ## Delivery & Milestones
 
