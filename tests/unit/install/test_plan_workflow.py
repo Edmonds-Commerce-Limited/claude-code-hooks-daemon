@@ -435,19 +435,24 @@ class TestJournalAssetDeployment:
         assert (plan_dir / JOURNAL_TEMPLATE_NAME).read_text() == "# custom journal template\n"
         assert result.created_journal_template is False
 
-    def test_deploys_journalling_doc_when_missing(self, tmp_path: Path) -> None:
+    def test_deploys_journalling_doc_to_plan_dir_parent_when_missing(self, tmp_path: Path) -> None:
+        # The reference doc lands in the plan dir's PARENT (CLAUDE/), NOT the
+        # plan root — the plan root only accepts _EXPECTED_ROOT_FILES, so a doc
+        # there would be flagged as a stray by the sweep.
         result = bootstrap_plan_workflow(tmp_path)
-        deployed = tmp_path / "CLAUDE" / "Plan" / PLAN_JOURNALLING_DOC_NAME
+        deployed = tmp_path / "CLAUDE" / PLAN_JOURNALLING_DOC_NAME
         assert deployed.is_file()
         assert deployed.read_text() == plan_journalling_doc_path().read_text()
         assert result.created_journalling_doc is True
+        # Must NOT be seeded into the plan root (regression: stray-file flag).
+        assert not (tmp_path / "CLAUDE" / "Plan" / PLAN_JOURNALLING_DOC_NAME).exists()
 
     def test_preserves_existing_journalling_doc(self, tmp_path: Path) -> None:
-        plan_dir = tmp_path / "CLAUDE" / "Plan"
-        plan_dir.mkdir(parents=True)
-        (plan_dir / PLAN_JOURNALLING_DOC_NAME).write_text("# customised reference\n")
+        parent_dir = tmp_path / "CLAUDE"
+        parent_dir.mkdir(parents=True)
+        (parent_dir / PLAN_JOURNALLING_DOC_NAME).write_text("# customised reference\n")
         result = bootstrap_plan_workflow(tmp_path)
-        assert (plan_dir / PLAN_JOURNALLING_DOC_NAME).read_text() == "# customised reference\n"
+        assert (parent_dir / PLAN_JOURNALLING_DOC_NAME).read_text() == "# customised reference\n"
         assert result.created_journalling_doc is False
 
     def test_journal_assets_deployed_via_enabled_config(self, tmp_path: Path) -> None:
@@ -458,7 +463,7 @@ class TestJournalAssetDeployment:
         deploy_plan_workflow_if_enabled(tmp_path, config_path)
         plan_dir = tmp_path / "CLAUDE" / "Plan"
         assert (plan_dir / JOURNAL_TEMPLATE_NAME).is_file()
-        assert (plan_dir / PLAN_JOURNALLING_DOC_NAME).is_file()
+        assert (plan_dir.parent / PLAN_JOURNALLING_DOC_NAME).is_file()
 
     def test_no_journal_assets_when_disabled(self, tmp_path: Path) -> None:
         config_dir = tmp_path / ".claude"
@@ -468,7 +473,7 @@ class TestJournalAssetDeployment:
         deploy_plan_workflow_if_enabled(tmp_path, config_path)
         plan_dir = tmp_path / "CLAUDE" / "Plan"
         assert not (plan_dir / JOURNAL_TEMPLATE_NAME).exists()
-        assert not (plan_dir / PLAN_JOURNALLING_DOC_NAME).exists()
+        assert not (plan_dir.parent / PLAN_JOURNALLING_DOC_NAME).exists()
 
 
 class TestMissingBundledAssetsFailFast:

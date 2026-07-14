@@ -201,14 +201,18 @@ check is In-Progress-only). No opt-in gate, no auto-stamp machinery —
 simplicity via the existing In-Progress scoping.
 
 - [x] ✅ **Task 4.1**: Deploy — `bootstrap_plan_workflow` seeds
-  `_JOURNAL_TEMPLATE_.md` (client-owned, never overwritten — its presence is
-  the "this project journals" marker that gates mkplan scaffolding) and
-  `PlanJournalling.md` (client-owned reference, never overwritten) into the
-  plan dir, alongside the existing mkplan/`_TEMPLATE_` deploy. Bundled
-  `install/templates/PlanJournalling.md` kept byte-identical to this repo's
-  `CLAUDE/PlanJournalling.md` (SSoT test). `journal.enabled` stays default
-  true; `grandfather_before` default 0 is safe because the presence nudge is
-  In-Progress-only + mkplan scaffolds every new plan.
+  `_JOURNAL_TEMPLATE_.md` into the plan dir (client-owned, never overwritten —
+  its presence is the "this project journals" marker that gates mkplan
+  scaffolding; it is a listed `_EXPECTED_ROOT_FILES` member) and
+  `PlanJournalling.md` (client-owned reference, never overwritten) alongside
+  the plan dir at its parent, e.g. `CLAUDE/PlanJournalling.md` — NOT the plan
+  root, which only accepts `_EXPECTED_ROOT_FILES` and whose sweep would else
+  flag the reference as a stray (code-review finding). This mirrors this repo's
+  own dogfood layout exactly. Bundled `install/templates/PlanJournalling.md`
+  kept byte-identical to this repo's `CLAUDE/PlanJournalling.md` (SSoT test).
+  `journal.enabled` stays default true; `grandfather_before` default 0 is safe
+  because the presence nudge is In-Progress-only + mkplan scaffolds every new
+  plan.
 - [x] ✅ **Task 4.2**: Release plumbing — extended `config-changes/v3.40.0.yaml`
   with the `plan_workflow.qa.journal` addition (recommended: true, with the
   grandfather/opt-in migration guidance) and wrote `truth-changes/v3.40.0.yaml`

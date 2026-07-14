@@ -255,7 +255,13 @@ def _deploy_journal_assets(plan_dir: Path, result: BootstrapResult) -> None:
     doc_src = plan_journalling_doc_path()
     if not doc_src.is_file():
         raise FileNotFoundError(f"Bundled journalling reference not found: {doc_src}")
-    doc_target = plan_dir / PLAN_JOURNALLING_DOC_NAME
+    # The reference doc is deployed to the plan dir's PARENT (e.g. CLAUDE/ for a
+    # CLAUDE/Plan/ layout), NOT the plan root — the plan root only accepts a
+    # fixed set of files (``_EXPECTED_ROOT_FILES``) and the SessionStart sweep
+    # would otherwise flag this reference as a stray file every session. This
+    # mirrors this repo's own dogfood layout (CLAUDE/PlanJournalling.md) and
+    # keeps every doc reference to ``CLAUDE/PlanJournalling.md`` accurate.
+    doc_target = plan_dir.parent / PLAN_JOURNALLING_DOC_NAME
     if doc_target.exists():
         result.messages.append(f"{PLAN_JOURNALLING_DOC_NAME} already exists (client-owned, kept)")
         logger.info("Keeping existing %s", doc_target)
