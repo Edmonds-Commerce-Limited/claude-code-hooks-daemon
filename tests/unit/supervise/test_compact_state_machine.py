@@ -510,16 +510,17 @@ class TestHumanCompactDedup:
 class TestEscapeFlush:
     """A supervisor /compact that Claude Code queues needs an [esc] to flush it.
 
-    After injecting /compact (AWAIT_COMPACTING), if no compaction starts within
-    escape_after_seconds the machine decides WOULD_ESCAPE exactly once, so the
-    supervisor can press [esc] to interrupt the turn and run the queued command
-    (Plan 00151). Plan 00152 RESERVES the ESC flush for CRITICAL: it fires only
-    when the compaction was critical-driven (latched at inject) OR the live
-    reading is currently critical. Gated on idle; never for a human compact.
+    Plan 00164 dogfooding fix: after injecting /compact (AWAIT_COMPACTING), if no
+    compaction starts the machine fires WOULD_ESCAPE REPEATEDLY (every
+    escape_after_seconds, up to max_escapes) to interrupt the turn so the queued
+    /compact runs — for ANY band, not just critical (superseding Plan 00152's
+    critical-only gate: a queued /compact that stalls must be flushable or it
+    loops re-injecting). It NEVER re-injects /compact while one is queued. Gated
+    on idle; never for a human compact (the human owns their own flush).
     """
 
-    def test_escape_fires_after_timeout_when_critical(self) -> None:
-        sm = CompactStateMachine(CompactPolicy(escape_after_seconds=60, await_timeout_seconds=120))
+    def test_escape_fires_after_interval_for_critical(self) -> None:
+        sm = CompactStateMachine(CompactPolicy(escape_after_seconds=60, await_timeout_seconds=600))
         sm.evaluate(_reading(critical=True), idle=True, now=1000.0)  # -> AWAIT at t=1000
         # 30s later: too soon, still waiting.
         early = sm.evaluate(_reading(critical=True, compacting=False), idle=True, now=1030.0)
@@ -528,31 +529,52 @@ class TestEscapeFlush:
         late = sm.evaluate(_reading(critical=True, compacting=False), idle=True, now=1065.0)
         assert late.decision is Decision.WOULD_ESCAPE
 
-    def test_escape_not_fired_for_elevated_non_critical_compact(self) -> None:
-        # An ELEVATED-band (urgent but not critical) compaction must NOT get an
-        # ESC flush -- it waits for the turn to end naturally (Plan 00152).
+    def test_escape_fires_for_elevated_non_critical_compact(self) -> None:
+        # Plan 00164: an ELEVATED-band (urgent, not critical) queued /compact that
+        # stalls MUST get flushed too — else it loops re-injecting (the 4x-compact
+        # dogfooding bug). This inverts the old Plan 00152 critical-only behaviour.
         sm = CompactStateMachine(CompactPolicy(escape_after_seconds=60, await_timeout_seconds=600))
         sm.evaluate(_reading(critical=False, compact_urgent=True), idle=True, now=1000.0)
         result = sm.evaluate(
             _reading(critical=False, compact_urgent=True, compacting=False), idle=True, now=1065.0
         )
-        assert result.decision is Decision.NOOP
-
-    def test_escape_fires_when_reading_goes_critical_during_await(self) -> None:
-        # Injected while merely elevated, but the context climbs to critical
-        # during the await -> the live-critical reading enables the ESC flush.
-        sm = CompactStateMachine(CompactPolicy(escape_after_seconds=60, await_timeout_seconds=600))
-        sm.evaluate(_reading(critical=False, compact_urgent=True), idle=True, now=1000.0)
-        result = sm.evaluate(_reading(critical=True, compacting=False), idle=True, now=1065.0)
         assert result.decision is Decision.WOULD_ESCAPE
 
-    def test_escape_fires_only_once(self) -> None:
-        sm = CompactStateMachine(CompactPolicy(escape_after_seconds=60, await_timeout_seconds=600))
+    def test_escape_refires_until_compaction(self) -> None:
+        # "fire escape until it does" — repeated ESC at escape_after intervals.
+        sm = CompactStateMachine(
+            CompactPolicy(escape_after_seconds=60, await_timeout_seconds=600, max_escapes=5)
+        )
         sm.evaluate(_reading(critical=True), idle=True, now=1000.0)
         first = sm.evaluate(_reading(critical=True, compacting=False), idle=True, now=1065.0)
-        second = sm.evaluate(_reading(critical=True, compacting=False), idle=True, now=1070.0)
+        # A full escape_after AFTER the first ESC re-armed the interval.
+        second = sm.evaluate(_reading(critical=True, compacting=False), idle=True, now=1130.0)
         assert first.decision is Decision.WOULD_ESCAPE
-        assert second.decision is Decision.NOOP
+        assert second.decision is Decision.WOULD_ESCAPE
+
+    def test_escape_stops_after_max_escapes(self) -> None:
+        sm = CompactStateMachine(
+            CompactPolicy(escape_after_seconds=60, await_timeout_seconds=100000, max_escapes=2)
+        )
+        sm.evaluate(_reading(critical=True), idle=True, now=1000.0)
+        e1 = sm.evaluate(_reading(critical=True, compacting=False), idle=True, now=1065.0)
+        e2 = sm.evaluate(_reading(critical=True, compacting=False), idle=True, now=1130.0)
+        gave_up = sm.evaluate(_reading(critical=True, compacting=False), idle=True, now=1200.0)
+        assert e1.decision is Decision.WOULD_ESCAPE
+        assert e2.decision is Decision.WOULD_ESCAPE
+        assert gave_up.decision is Decision.NOOP
+        assert sm.state is SupervisorState.MONITOR
+
+    def test_never_reinjects_compact_while_queued(self) -> None:
+        # The dogfooding bug: while a supervisor /compact is queued (AWAIT), the
+        # machine must NEVER inject another /compact — only ESC-flush or wait.
+        sm = CompactStateMachine(CompactPolicy(escape_after_seconds=60, await_timeout_seconds=600))
+        first = sm.evaluate(_reading(critical=True), idle=True, now=1000.0)
+        assert first.decision is Decision.WOULD_COMPACT
+        for t in (1005.0, 1010.0, 1020.0, 1050.0):
+            r = sm.evaluate(_reading(critical=True, compacting=False), idle=True, now=t)
+            assert r.decision is not Decision.WOULD_COMPACT
+            assert sm.state is SupervisorState.AWAIT_COMPACTING
 
     def test_escape_not_fired_when_busy(self) -> None:
         sm = CompactStateMachine(CompactPolicy(escape_after_seconds=60, await_timeout_seconds=600))
@@ -562,13 +584,13 @@ class TestEscapeFlush:
 
     def test_escape_not_fired_for_human_compact(self) -> None:
         # A human-originated AWAIT must not get a supervisor ESC — the human owns
-        # their own /compact flush (even if the context is critical).
+        # their own /compact flush.
         sm = CompactStateMachine(CompactPolicy(escape_after_seconds=60, await_timeout_seconds=600))
         sm.evaluate(_reading(critical=True), idle=True, now=1000.0, human_compact_submitted=True)
         result = sm.evaluate(_reading(critical=True, compacting=False), idle=True, now=1065.0)
         assert result.decision is Decision.NOOP
 
-    def test_escape_latch_resets_next_episode(self) -> None:
+    def test_escape_counter_resets_next_episode(self) -> None:
         sm = CompactStateMachine(
             CompactPolicy(escape_after_seconds=60, await_timeout_seconds=600, cooldown_seconds=0)
         )

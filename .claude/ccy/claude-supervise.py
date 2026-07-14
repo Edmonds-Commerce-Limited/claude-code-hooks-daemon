@@ -504,10 +504,14 @@ _DEFAULT_AWAIT_TIMEOUT_SECONDS = 120.0
 _DEFAULT_MAX_INJECTIONS = 20
 # After injecting `/compact`, Claude Code may QUEUE it behind the in-flight turn
 # and not run it until the turn is interrupted (the human normally presses
-# [esc]). If no compaction starts within this window, the supervisor injects a
-# single [esc] to flush the queued command. Must be < await_timeout so the ESC
-# fires before the machine gives up and returns to MONITOR (Plan 00151).
+# [esc]). If no compaction starts within this window, the supervisor injects an
+# [esc] to flush the queued command — and RE-FIRES every window until the
+# compaction starts or `max_escapes` is reached (Plan 00164 dogfooding fix).
 _DEFAULT_ESCAPE_AFTER_SECONDS = 60.0
+# Cap on the repeated [esc] flushes for one queued /compact. Plan 00164: the
+# supervisor keeps pressing [esc] ("until it does") but must eventually give up
+# so a genuinely-wedged session returns to MONITOR rather than escaping forever.
+_DEFAULT_MAX_ESCAPES = 5
 # How long a compaction-signal file is treated as "compaction under way".
 # Much longer than the sidecar freshness because a large-context compaction can
 # keep the session busy (streaming output, no status render, no select-timeout
@@ -604,6 +608,7 @@ class CompactPolicy:
     cooldown_seconds: float = _DEFAULT_COOLDOWN_SECONDS
     await_timeout_seconds: float = _DEFAULT_AWAIT_TIMEOUT_SECONDS
     max_injections: int = _DEFAULT_MAX_INJECTIONS
+    max_escapes: int = _DEFAULT_MAX_ESCAPES
     compaction_signal_ttl_seconds: float = _DEFAULT_COMPACTION_SIGNAL_TTL_SECONDS
     escape_after_seconds: float = _DEFAULT_ESCAPE_AFTER_SECONDS
     reap_ttl_seconds: float = _DEFAULT_REAP_TTL_SECONDS
@@ -988,15 +993,18 @@ class CompactStateMachine:
     moves to AWAIT_COMPACTING WITHOUT injecting, so the supervisor never stacks a
     duplicate compaction.
 
-    AWAIT_COMPACTING: wait for a compaction to start (handled above). If none
-    starts within ``escape_after_seconds``, decide WOULD_ESCAPE ONCE so the
-    supervisor can inject ``[esc]`` to flush a ``/compact`` that Claude Code
-    queued behind the in-flight turn. Per Plan 00152 the ESC flush is reserved
-    for CRITICAL: it fires only when the compaction was CRITICAL-driven (latched
-    at inject time) OR the live reading is currently critical -- never for an
-    elevated-band compact and never for a human-originated await. If none starts
-    within the longer ``await_timeout_seconds``, give up and return to MONITOR so
-    a missed transition cannot wedge the machine forever.
+    AWAIT_COMPACTING: wait for a compaction to start (handled above). The machine
+    NEVER re-injects a second ``/compact`` here -- a queued one only needs
+    flushing. If none starts within ``escape_after_seconds``, decide WOULD_ESCAPE
+    so the supervisor injects ``[esc]`` to flush the ``/compact`` that Claude Code
+    queued behind the in-flight turn, and it REPEATS that at each
+    ``escape_after_seconds`` interval ("fire escape until it does") for ANY band
+    -- superseding Plan 00152's critical-only gate, because a stalled queued
+    ``/compact`` must be flushable or the monitor loops re-injecting it (the 4x
+    dogfooding bug, Plan 00164). ESC is gated on ``idle`` and never fires for a
+    human-originated await (the human owns their own flush). After ``max_escapes``
+    ESCs with no compaction, OR after the longer ``await_timeout_seconds``, give
+    up and return to MONITOR so a missed transition cannot wedge the machine.
     """
 
     def __init__(self, policy: CompactPolicy) -> None:
@@ -1005,14 +1013,13 @@ class CompactStateMachine:
         self._injections = 0
         self._last_action_ts: float | None = None
         self._compaction_handled = False
-        # ESC-flush bookkeeping for the current AWAIT_COMPACTING episode.
-        self._escape_sent = False
+        # ESC-flush bookkeeping for the current AWAIT_COMPACTING episode: how many
+        # [esc] we have already injected to flush the queued /compact. Capped at
+        # policy.max_escapes, then we give up and return to MONITOR (Plan 00164).
+        self._escapes_sent = 0
         # True when the current AWAIT was entered by a HUMAN /compact (not the
         # supervisor's own inject) -- suppresses the supervisor ESC flush.
         self._await_is_human = False
-        # True when the compaction that opened the current AWAIT was
-        # CRITICAL-driven -- gates the ESC flush to critical only (Plan 00152).
-        self._await_escalate = False
 
     def evaluate(
         self,
@@ -1084,7 +1091,7 @@ class CompactStateMachine:
             )
 
         if self.state is SupervisorState.AWAIT_COMPACTING:
-            return self._evaluate_await(reading, idle=idle, now=now)
+            return self._evaluate_await(idle=idle, now=now)
         return self._evaluate_monitor(
             reading,
             idle=idle,
@@ -1131,58 +1138,58 @@ class CompactStateMachine:
 
         self._injections += 1
         self._last_action_ts = now
-        # Latch the ESC-flush escalation to critical: only a critical-driven
-        # compaction is allowed to interrupt the turn with [esc] (Plan 00152).
-        self._enter_await(is_human=False, escalate=reading.critical)
+        # Enter AWAIT: from here the queued /compact is flushed with [esc] if it
+        # stalls -- for ANY band, not just critical (Plan 00164 supersedes the
+        # Plan 00152 critical-only gate: a stalled queued /compact MUST be
+        # flushable or the machine loops re-injecting it).
+        self._enter_await(is_human=False)
         urgency = "CRITICAL" if reading.critical else ("urgent" if urgent else "red")
         return Evaluation(
             Decision.WOULD_COMPACT,
             f"{urgency} at {reading.pct:.0f}% + idle -> would inject /compact",
         )
 
-    def _evaluate_await(
-        self, reading: SidecarReading | None, *, idle: bool, now: float
-    ) -> Evaluation:
+    def _evaluate_await(self, *, idle: bool, now: float) -> Evaluation:
         if self._await_timed_out(now):
             self._enter_monitor()
             return Evaluation(Decision.NOOP, "await-compacting timed out -> back to monitor")
-        # ESC-flush: a supervisor /compact that Claude Code queued behind the
-        # in-flight turn needs an [esc] to run. Reserved for CRITICAL (Plan
-        # 00152): fire only when the compaction was critical-driven OR the live
-        # reading is currently critical, once, when idle, never for a human await.
-        live_critical = reading is not None and not reading.stale and reading.critical
-        escalate = self._await_escalate or live_critical
-        if (
-            not self._await_is_human
-            and escalate
-            and not self._escape_sent
-            and idle
-            and self._escape_due(now)
-        ):
-            self._escape_sent = True
+        # A human-originated AWAIT never gets a supervisor ESC -- the human owns
+        # flushing their own queued /compact.
+        if self._await_is_human:
+            return Evaluation(Decision.NOOP, "awaiting human compaction start")
+        # ESC-flush (Plan 00164): a supervisor /compact that Claude Code queued
+        # behind the in-flight turn needs an [esc] to run, so we NEVER re-inject a
+        # second /compact -- we fire [esc] REPEATEDLY at escape_after intervals
+        # ("fire escape until it does") for ANY band, re-arming the interval each
+        # time, until compaction starts or max_escapes is reached. After that we
+        # give up and return to MONITOR so a missed transition cannot wedge us.
+        if idle and self._escape_due(now):
+            if self._escapes_sent >= self._policy.max_escapes:
+                self._enter_monitor()
+                return Evaluation(
+                    Decision.NOOP,
+                    "max escapes reached, compaction never started -> back to monitor",
+                )
+            self._escapes_sent += 1
+            self._last_action_ts = now
             return Evaluation(
                 Decision.WOULD_ESCAPE,
-                "critical compaction not started -> would inject [esc] to flush queued /compact",
+                f"queued /compact stalled -> would inject [esc] to flush "
+                f"({self._escapes_sent}/{self._policy.max_escapes})",
             )
         return Evaluation(Decision.NOOP, "awaiting compaction start")
 
-    def _enter_await(self, *, is_human: bool, escalate: bool = False) -> None:
-        """Enter AWAIT_COMPACTING, resetting the per-episode ESC-flush latch.
-
-        ``escalate`` records whether this compaction was CRITICAL-driven, which
-        gates the supervisor ESC flush to critical only (Plan 00152).
-        """
+    def _enter_await(self, *, is_human: bool) -> None:
+        """Enter AWAIT_COMPACTING, resetting the per-episode ESC-flush counter."""
         self.state = SupervisorState.AWAIT_COMPACTING
-        self._escape_sent = False
+        self._escapes_sent = 0
         self._await_is_human = is_human
-        self._await_escalate = escalate
 
     def _enter_monitor(self) -> None:
         """Return to MONITOR, clearing per-episode AWAIT bookkeeping."""
         self.state = SupervisorState.MONITOR
-        self._escape_sent = False
+        self._escapes_sent = 0
         self._await_is_human = False
-        self._await_escalate = False
 
     def _cooldown_elapsed(self, now: float, *, critical: bool = False) -> bool:
         if critical:
