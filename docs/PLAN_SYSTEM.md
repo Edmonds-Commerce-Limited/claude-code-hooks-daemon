@@ -403,7 +403,10 @@ Every `PLAN.md` follows this structure:
 
 **Timeline**: Target dates (estimates, not commitments)
 
-**Notes & Updates**: Running log of progress and changes
+**Delivery & Milestones**: Curated milestones + delivery commit hashes. The
+blow-by-blow running log of progress lives in the plan's `JOURNAL/` (append-only
+per-day files) — see [CLAUDE/PlanJournalling.md](../CLAUDE/PlanJournalling.md).
+(Legacy plans may still carry a `## Notes & Updates` section; it is not rewritten.)
 
 ---
 

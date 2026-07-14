@@ -56,7 +56,7 @@ If a plan is reviewed and superseded:
 
 When all tasks are done and QA passes:
 
-1. **Update plan status** to `Complete` (NO completion date — git is the source of truth for "when"; cite the delivery commit hash(es) in the "Notes & Updates" section instead). See @CLAUDE/PlanWorkflow.md "Plan Completion Checklist".
+1. **Update plan status** to `Complete` (NO completion date — git is the source of truth for "when"; cite the delivery commit hash(es) in the "Delivery & Milestones" section instead). See @CLAUDE/PlanWorkflow.md "Plan Completion Checklist".
 2. **Move folder** to `CLAUDE/Plan/Completed/NNNNN-description/`
 3. **Update `README.md`**:
    - Remove from **Active Plans**

@@ -142,11 +142,12 @@ folder: `BRAINSTORM-datamodel.md` (data model & lifecycle) and
   grammar crib header. NOTE: the `markdown_table_formatter` JOURNAL/ exemption
   is deferred to the append-only-check task (T1.4) where the byte-invariant
   actually matters — no journal has tables yet.
-- [ ] ⬜ **Task 1.9**: Dogfood — journalled THIS plan in
-  `JOURNAL/00163-Journal-26-07-14.md` from this session (done). PENDING:
-  live-verify mkplan scaffolds on a scratch plan and that edit-stage advisories
-  fire on a bad name / non-append rewrite and the sweep stays silent for
-  grandfathered plans — needs the checks (T1.4/T1.6) first.
+- [x] ✅ **Task 1.9**: Dogfood — THIS plan is journalled in
+  `JOURNAL/00163-Journal-26-07-14.md` (grows as work lands). Live-verified
+  against the running daemon: a bad journal name fires `journal-dayfile-naming`
+  and an earlier-history rewrite fires `journal-append-only` (probed via the
+  `pre-tool-use` wrapper); `plan-qa --sweep` stays silent for the grandfathered
+  legacy plans and for 00163's own fresh journal.
 
 ### Phase 2: Reference doc + template reconciliation
 
@@ -155,12 +156,16 @@ folder: `BRAINSTORM-datamodel.md` (data model & lifecycle) and
   good-vs-noise worked examples, lifecycle touchpoints table, Notes & Updates
   migration, and the explicit **POLICY (daemon-enforced knobs) vs CONVENTION
   (client-tunable)** split. Framed as copy-and-customise.
-- [ ] ⬜ **Task 2.2**: Reconcile `_TEMPLATE_.md` — replace `## Notes & Updates`
-  with a curated `## Delivery & Milestones` stub (milestone lines + delivery
-  commit hashes). Update `CLAUDE/PlanWorkflow.md`, `CLAUDE/Plan/CLAUDE.md`,
-  and the completion checklist so "cite delivery commit hashes" points at the
-  new section; verify no plan_qa check asserts a Notes & Updates section.
-  Legacy plans keep theirs untouched.
+- [x] ✅ **Task 2.2**: Reconciled the template — `## Notes & Updates` →
+  curated `## Delivery & Milestones` stub across the bundled
+  `_TEMPLATE_.md`, this repo's dogfood `_TEMPLATE_.md`, and the daemon-owned
+  snapshot `.plan-template-default.md` (kept byte-identical to the bundled
+  default). Updated `CLAUDE/PlanWorkflow.md` (template example + completion
+  checklist + cron-ID note → JOURNAL) and `CLAUDE/Plan/CLAUDE.md` completion
+  checklist to cite delivery hashes in `Delivery & Milestones`. Confirmed no
+  plan_qa check asserts a Notes & Updates section; legacy plan bodies untouched.
+  Surfaced + fixed a dogfooding bug in the same stroke (see Delivery &
+  Milestones): writing the hidden snapshot was misdetected as a new plan.
 - [x] ✅ **Task 2.3**: Docs — added the `journal` sub-block + journal-checks
   paragraph to `docs/guides/HANDLER_REFERENCE.md` (links to
   `CLAUDE/PlanJournalling.md`); `plan_qa_edit.get_claude_md()` and

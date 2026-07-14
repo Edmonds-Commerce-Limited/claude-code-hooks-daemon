@@ -208,13 +208,12 @@ Refer to detailed info in supporting docs as required
 - Phase 2: [Date range]
 - Target Completion: YYYY-MM-DD
 
-## Notes & Updates
+## Delivery & Milestones
 
-### YYYY-MM-DD
-- Update or note about progress/changes
+<!-- Curated milestones + delivery commit hashes (git is the SSoT for "when").
+     The blow-by-blow activity log lives in JOURNAL/ — see CLAUDE/PlanJournalling.md. -->
 
-### YYYY-MM-DD
-- Another update
+- Milestone reached at <commit-hash>
 ```
 
 ---
@@ -464,7 +463,8 @@ an artificial throttle. Work proceeds at full speed until an external factor
 actually stops you; the cron only matters once something has already gone wrong.
 
 - Create it non-durable (`CronCreate` `durable:false`, `recurring:true`, an
-  off-:00 minute) and record the cron ID in the plan's Notes & Updates.
+  off-:00 minute) and record the cron ID in the plan's JOURNAL (the activity
+  log; the `Delivery & Milestones` stub is for milestones + commit hashes).
 - If you are blocked **only** on human input, the cron is a no-op — keep waiting.
 - On plan completion, **do not reflexively delete the cron** — deleting it while
   the session is still live leaves you with no recovery coverage if a rate limit
@@ -479,8 +479,8 @@ actually stops you; the cron only matters once something has already gone wrong.
 2. Verify all success criteria met
 3. Mark all tasks as ✅
 4. Mark plan status as Complete
-5. Record the delivery commit hash(es) in the plan's "Notes & Updates" section
-   (NOT a completion date — git is the source of truth for "when")
+5. Record the delivery commit hash(es) in the plan's "Delivery & Milestones"
+   section (NOT a completion date — git is the source of truth for "when")
 6. Document any lessons learned
 7. **Follow the Plan Completion Checklist below**
 
@@ -488,7 +488,7 @@ actually stops you; the cron only matters once something has already gone wrong.
 
 When a plan is complete, follow these steps to properly close it out. Skipping steps leads to stale plan indexes and orphaned folders.
 
-1. **Update PLAN.md status**: Change `**Status**:` to `Complete`. Do NOT add a completion date — git history is authoritative for "when". Cite the delivery commit hash(es) in the "Notes & Updates" section instead.
+1. **Update PLAN.md status**: Change `**Status**:` to `Complete`. Do NOT add a completion date — git history is authoritative for "when". Cite the delivery commit hash(es) in the "Delivery & Milestones" section instead.
 2. **Mark all tasks**: Change `- [ ]` to `- [x]` for all completed tasks in the plan
 3. **Move to Completed folder**: Relocate the plan directory into the archive
    ```bash
