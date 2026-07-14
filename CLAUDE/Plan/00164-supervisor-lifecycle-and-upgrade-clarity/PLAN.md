@@ -126,24 +126,29 @@ clients in one release is a regression risk out of proportion to a messaging fix
 
 ### Phase 4: Restartable policy-worker split (hot reload)
 
-- [ ] ⬜ **Task 4.1**: Design the host↔worker protocol (line-delimited JSON over a
-  pipe: host streams sidecar-tick facts + input-line state; worker replies
-  inject/defer decisions) and record it in this plan. No behaviour change.
-- [ ] ⬜ **Task 4.2**: Add failing tests for the worker entry point (given tick
-  facts, returns the same decisions the in-process state machine does today) and
-  for host↔worker framing/round-trip.
-- [ ] ⬜ **Task 4.3**: Extract decision logic (`CompactStateMachine`, `_poll_once`
-  and pure helpers) behind a worker entry point that runs as a subprocess of the
-  same file (`claude-supervise.py --worker`), keeping stdlib-only + standalone.
-- [ ] ⬜ **Task 4.4**: Make the PTY host spawn/supervise the worker, forward tick
-  facts, apply returned decisions, and respawn the worker on death — with a
-  fallback to in-process decisions if the worker cannot start (never break a
-  session).
-- [ ] ⬜ **Task 4.5**: Reload trigger — host detects the on-disk supervisor version
-  changed (Phase 3 marker) and respawns the worker from the new code without
-  touching `claude`; log the reload.
-- [ ] ⬜ **Task 4.6**: QA green; live PTY smoke test that a worker restart does not
-  disturb the wrapped child; daemon restart.
+- [x] ✅ **Task 4.1**: Protocol = line-delimited JSON over pipes — host→worker
+  `TickFacts` (now_wall, idle, input_line_empty, human_compact_submitted,
+  work_idle); worker→host `TickOutcome` (decision, reason, payload, submit,
+  consume_signal_path, deferred_log). The host always performs the injection and
+  consumes the signal (so a failed PTY write never loses a resume).
+- [x] ✅ **Task 4.2**: Failing tests (`test_policy_worker.py`) — serialization
+  round-trips, `run_worker` emits one outcome per tick, and worker outcome ==
+  in-process `decide_once` (behaviour identity across a restart).
+- [x] ✅ **Task 4.3**: Refactored `_poll_once` into pure `decide_once` (decision, no
+  PTY) + `_apply_decision` (host injection) — regression-safe (the 228 decision
+  tests still pass). `run_worker` + `--worker` dispatch in `main()` run the SAME
+  `decide_once` in a subprocess; stdlib-only + standalone preserved.
+- [x] ✅ **Task 4.4**: `PolicyWorker` host client + `_make_worker_decider`; the PTY
+  host prefers the worker and falls back to `_poll_once` in-process on ANY worker
+  failure (None reply) — a tick is never dropped. `_make_policy_worker` honours
+  `CLAUDE_SUPERVISE_NO_WORKER`.
+- [x] ✅ **Task 4.5**: `PolicyWorker.reload_if_stale` respawns the worker from the
+  new on-disk code when the source fingerprint changes (throttled per tick),
+  without touching `claude`.
+- [x] ✅ **Task 4.6**: 15 worker tests incl. live PTY integration — a real worker
+  drives `supervise()` with clean passthrough, and thrashing the worker (restart
+  every tick) leaves the wrapped child undisturbed. 276 suite tests pass; mypy +
+  QA lint clean.
 
 ### Phase 6: Output-capture helper (`echd-capture`)
 

@@ -31,6 +31,7 @@ import pty
 import select
 import signal
 import struct
+import subprocess  # nosec B404 - spawns ONLY `python3 <self> --worker`, a fixed argv, never a shell
 import sys
 import termios
 import threading
@@ -44,6 +45,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from types import FrameType
+    from typing import TextIO
 
 # Supervisor version. Kept in lockstep with the daemon version at release time
 # (see CLAUDE/development/RELEASING.md). Display-only for the banner and the
@@ -69,6 +71,20 @@ _USAGE = "Usage: claude-supervise.py [--dry-run | --arm] [--log PATH] -- <child 
 # them). The banner is also skipped whenever stderr is not a TTY (piped output,
 # the test suite, non-interactive launches).
 _NO_BANNER_ENV = "CLAUDE_SUPERVISE_NO_BANNER"
+
+# Policy-worker split (Plan 00164 Phase 4). The host spawns `python3 <self>
+# --worker` and streams TickFacts to it; the worker runs the decision logic and
+# streams TickOutcomes back. A host-side restart of the worker hot-reloads the
+# decision code without touching the PTY/child. Set the opt-out env to force the
+# in-process path (the same code runs either way — the worker just isolates it).
+_WORKER_FLAG = "--worker"
+_NO_WORKER_ENV = "CLAUDE_SUPERVISE_NO_WORKER"
+# A hung worker must never stall the PTY host: its reply is awaited at most this
+# long, after which the host falls back to an in-process decision for that tick.
+_WORKER_READ_TIMEOUT_SECONDS = 2.0
+# How often the host re-checks the on-disk supervisor fingerprint to hot-reload
+# the worker (cheap mtime pre-check gates the hash).
+_WORKER_RELOAD_CHECK_SECONDS = 5.0
 
 # Braille spinner frames for the brief pre-fork "starting up" flourish.
 _SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
@@ -600,6 +616,40 @@ class Evaluation:
 
     decision: Decision
     reason: str
+
+
+@dataclass(frozen=True)
+class TickFacts:
+    """The per-tick inputs only the PTY HOST knows (Plan 00164 Phase 4).
+
+    The host tracks these from the forwarded I/O and clock; the policy worker
+    (which owns the state machine and reads the sidecars) is told them each tick.
+    Serialised host→worker as JSON.
+    """
+
+    now_wall: float
+    idle: bool
+    input_line_empty: bool
+    human_compact_submitted: bool
+    work_idle: bool
+
+
+@dataclass(frozen=True)
+class TickOutcome:
+    """The decision produced by one tick — what the HOST should DO (Phase 4).
+
+    Pure data: the worker (or the in-process fallback) decides; the host injects.
+    ``payload is None`` means NOOP. ``consume_signal_path`` is the compaction
+    signal to delete AFTER a successful resume injection (kept out of the worker
+    so a failed PTY write never loses the resume). Serialised worker→host as JSON.
+    """
+
+    decision_value: str
+    reason: str
+    payload: str | None
+    submit: bool
+    consume_signal_path: str | None
+    deferred_log: str | None
 
 
 def _coerce_float(value: object) -> float:
@@ -1296,6 +1346,128 @@ def _is_work_idle(
     return (now_monotonic - output_activity.last_output_monotonic) >= work_settle_seconds
 
 
+def decide_once(
+    machine: CompactStateMachine,
+    *,
+    sidecar_dir: Path,
+    facts: TickFacts,
+    dry_run: bool,
+    freshness_seconds: float,
+    log: DecisionLog | None = None,
+    compaction_signal_ttl_seconds: float = _DEFAULT_COMPACTION_SIGNAL_TTL_SECONDS,
+    reap_ttl_seconds: float = _DEFAULT_REAP_TTL_SECONDS,
+    foreground_margin_seconds: float = _DEFAULT_FOREGROUND_MARGIN_SECONDS,
+) -> TickOutcome:
+    """Decide what to inject this tick WITHOUT touching the PTY (Plan 00164 P4).
+
+    This is the whole 'brain': reap dead files, read the foreground sidecar and
+    compaction signal, advance the state machine, and resolve the payload. It
+    performs NO injection — the host (or the in-process fallback) applies the
+    returned :class:`TickOutcome`. Because it is pure w.r.t. the PTY, it runs
+    IDENTICALLY in the policy-worker subprocess and in-process, so a worker
+    restart cannot change behaviour. ``log`` is used only for reap diagnostics.
+
+    See ``_poll_once`` for the semantics of the individual :class:`TickFacts`
+    (empty-input-box guard, human-compact edge, work-idle band gating, reaping).
+    """
+    reap_stale_sidecars(sidecar_dir, now=facts.now_wall, ttl_seconds=reap_ttl_seconds, log=log)
+    # Plan 00160: resolve the FOREGROUND sidecar and whether it is ambiguous (a
+    # recent Agent-View thread switch left two still-fresh sidecars). Ambiguity
+    # gates only the compact path in the machine below.
+    reading, foreground_ambiguous = load_foreground_sidecar(
+        sidecar_dir,
+        now=facts.now_wall,
+        freshness_seconds=freshness_seconds,
+        margin_seconds=foreground_margin_seconds,
+    )
+    # A compaction stops status renders, so the context sidecar goes
+    # stale/absent during one -- the compaction signal is an independent input.
+    signal_path = load_compaction_signal(
+        sidecar_dir, now=facts.now_wall, ttl_seconds=compaction_signal_ttl_seconds
+    )
+    if signal_path is not None:
+        reading = (
+            replace(reading, compacting=True)
+            if reading is not None
+            else SidecarReading(
+                red=False,
+                critical=False,
+                compact_urgent=False,
+                tier="",
+                pct=0.0,
+                session_id="",
+                ts=facts.now_wall,
+                seq=0,
+                writer_pid=0,
+                compacting=True,
+                stale=False,
+            )
+        )
+    # Empty-input-box guard: the machine only ever decides to inject when its
+    # `idle` input is True, so AND-ing the box state into `idle` guards every
+    # injection path without new machine states -- the busy branches already
+    # defer-and-retry correctly (no latch, no cooldown, signal kept).
+    can_inject = facts.idle and facts.input_line_empty
+    evaluation = machine.evaluate(
+        reading,
+        idle=can_inject,
+        now=facts.now_wall,
+        human_compact_submitted=facts.human_compact_submitted,
+        work_idle=facts.work_idle,
+        foreground_ambiguous=foreground_ambiguous,
+    )
+    payload = _resolve_payload(evaluation.decision, dry_run=dry_run)
+    # The raw ESC is an interrupt key, not a line -- inject it WITHOUT a trailing
+    # Enter. Every other payload (compact / continue / markers) is a line.
+    submit = not (evaluation.decision is Decision.WOULD_ESCAPE and not dry_run)
+    # Consume the signal ONLY after a resume actually fired (the host does the
+    # consuming, so a failed PTY write never loses the resume).
+    consume_signal_path = (
+        str(signal_path)
+        if evaluation.decision is Decision.WOULD_CONTINUE and signal_path is not None
+        else None
+    )
+    deferred_log = None
+    if (
+        payload is None
+        and facts.idle
+        and not facts.input_line_empty
+        and evaluation.reason in _INJECTION_GATED_REASONS
+    ):
+        deferred_log = f"{_DEFERRED_LOG_PREFIX} ({evaluation.reason})"
+    return TickOutcome(
+        decision_value=evaluation.decision.value,
+        reason=evaluation.reason,
+        payload=payload,
+        submit=submit,
+        consume_signal_path=consume_signal_path,
+        deferred_log=deferred_log,
+    )
+
+
+def _apply_decision(
+    outcome: TickOutcome,
+    *,
+    master_writer: Callable[[bytes], None],
+    log: DecisionLog | None,
+) -> None:
+    """Perform a :class:`TickOutcome` on the PTY (host side, Plan 00164 P4).
+
+    Injects the payload (if any), logs it, and consumes the compaction signal
+    only AFTER a successful resume injection — mirroring the original inline
+    behaviour of ``_poll_once`` exactly.
+    """
+    if outcome.payload is not None:
+        _perform_injection(master_writer, outcome.payload, submit=outcome.submit)
+        if log is not None:
+            log.write(f"{outcome.decision_value}: {outcome.reason}; injected {outcome.payload!r}")
+        if outcome.consume_signal_path is not None:
+            _consume_signal(Path(outcome.consume_signal_path), log)
+    elif log is not None and outcome.deferred_log is not None:
+        # An injection was pending and the NON-EMPTY INPUT BOX was the sole gate.
+        log.write(outcome.deferred_log)
+
+
 def _poll_once(
     machine: CompactStateMachine,
     *,
@@ -1313,103 +1485,246 @@ def _poll_once(
     reap_ttl_seconds: float = _DEFAULT_REAP_TTL_SECONDS,
     foreground_margin_seconds: float = _DEFAULT_FOREGROUND_MARGIN_SECONDS,
 ) -> Evaluation:
-    """One supervisor tick: reap dead files, read the sidecar, decide, inject.
+    """One in-process supervisor tick: decide (``decide_once``) then inject.
 
-    Reads the freshest sidecar AND the compaction signal, advances the state
-    machine, and -- for a non-NOOP decision -- injects the resolved payload
-    (a marker for a dry-run compact; the real command otherwise) and logs it.
-    Returns the Evaluation so callers/tests can observe the decision.
-
-    ``input_line_empty`` is the empty-input-box guard: when False (the human
-    has non-whitespace text sitting in the input box), NO injection may fire
-    on this tick -- pasting into and submitting a half-typed human message is
-    data corruption. The gate is applied to the machine's ``idle`` input, so
-    every injection path (armed ``/compact``, ``continue``, dry-run marker,
-    ESC flush) defers via the machine's existing busy semantics: no latch, no
-    cooldown, the compaction signal stays in place, and the injection retries
-    on the next tick with an empty box.
-
-    ``human_compact_submitted`` is the edge signal that the human just submitted
-    a ``/compact``; it makes the machine await the compaction instead of
-    injecting its own, so the supervisor never stacks a duplicate compaction.
-
-    ``work_idle`` (Plan 00152) is True when the child output has settled; it
-    only gates the LOWER red band (elevated/critical readings compact promptly).
-
-    ``reap_ttl_seconds`` (Plan 00160) bounds the shared sidecar dir: dead
-    ``{session}.json`` / ``{session}.compacting`` files from closed sessions are
-    reaped each tick. The freshest sidecar is always spared, so reaping never
-    removes the reading source resolved just below.
+    Retained as the in-process fast path AND the fallback used when the policy
+    worker cannot run (Plan 00164 Phase 4). Behaviour is unchanged: it delegates
+    the decision to ``decide_once`` and the injection to ``_apply_decision``.
     """
-    reap_stale_sidecars(sidecar_dir, now=now_wall, ttl_seconds=reap_ttl_seconds, log=log)
-    # Plan 00160: resolve the FOREGROUND sidecar and whether it is ambiguous (a
-    # recent Agent-View thread switch left two still-fresh sidecars). Ambiguity
-    # gates only the compact path in the machine below.
-    reading, foreground_ambiguous = load_foreground_sidecar(
-        sidecar_dir,
-        now=now_wall,
-        freshness_seconds=freshness_seconds,
-        margin_seconds=foreground_margin_seconds,
-    )
-    # A compaction stops status renders, so the context sidecar goes
-    # stale/absent during one -- the compaction signal is an independent input.
-    signal_path = load_compaction_signal(
-        sidecar_dir, now=now_wall, ttl_seconds=compaction_signal_ttl_seconds
-    )
-    if signal_path is not None:
-        reading = (
-            replace(reading, compacting=True)
-            if reading is not None
-            else SidecarReading(
-                red=False,
-                critical=False,
-                compact_urgent=False,
-                tier="",
-                pct=0.0,
-                session_id="",
-                ts=now_wall,
-                seq=0,
-                writer_pid=0,
-                compacting=True,
-                stale=False,
-            )
-        )
-    # Empty-input-box guard: the machine only ever decides to inject when its
-    # `idle` input is True, so AND-ing the box state into `idle` guards every
-    # injection path without new machine states -- the busy branches already
-    # defer-and-retry correctly (no latch, no cooldown, signal kept).
-    can_inject = idle and input_line_empty
-    evaluation = machine.evaluate(
-        reading,
-        idle=can_inject,
-        now=now_wall,
+    facts = TickFacts(
+        now_wall=now_wall,
+        idle=idle,
+        input_line_empty=input_line_empty,
         human_compact_submitted=human_compact_submitted,
         work_idle=work_idle,
-        foreground_ambiguous=foreground_ambiguous,
     )
-    payload = _resolve_payload(evaluation.decision, dry_run=dry_run)
-    if payload is not None:
-        # The raw ESC is an interrupt key, not a line -- inject it WITHOUT a
-        # trailing Enter. Every other payload (compact / continue / markers) is
-        # a line and submits normally.
-        submit = not (evaluation.decision is Decision.WOULD_ESCAPE and not dry_run)
-        _perform_injection(master_writer, payload, submit=submit)
-        if log is not None:
-            log.write(f"{evaluation.decision.value}: {evaluation.reason}; injected {payload!r}")
-        # Consume the signal ONLY after a resume actually fired, so a busy-gated
-        # NOOP leaves it in place to retry on the next idle poll.
-        if evaluation.decision is Decision.WOULD_CONTINUE and signal_path is not None:
-            _consume_signal(signal_path, log)
-    elif (
-        log is not None
-        and idle
-        and not input_line_empty
-        and evaluation.reason in _INJECTION_GATED_REASONS
-    ):
-        # An injection was pending and the NON-EMPTY INPUT BOX was the sole
-        # gate (keystrokes were idle) -- record the skip.
-        log.write(f"{_DEFERRED_LOG_PREFIX} ({evaluation.reason})")
-    return evaluation
+    outcome = decide_once(
+        machine,
+        sidecar_dir=sidecar_dir,
+        facts=facts,
+        dry_run=dry_run,
+        log=log,
+        freshness_seconds=freshness_seconds,
+        compaction_signal_ttl_seconds=compaction_signal_ttl_seconds,
+        reap_ttl_seconds=reap_ttl_seconds,
+        foreground_margin_seconds=foreground_margin_seconds,
+    )
+    _apply_decision(outcome, master_writer=master_writer, log=log)
+    return Evaluation(decision=Decision(outcome.decision_value), reason=outcome.reason)
+
+
+# ---------------------------------------------------------------------------
+# Policy-worker split (Plan 00164 Phase 4)
+#
+# The decision logic (decide_once + the state machine) runs in a restartable
+# `--worker` subprocess so it can be hot-reloaded from a freshly-deployed
+# claude-supervise.py WITHOUT restarting the PTY host that owns `claude`. Host
+# and worker exchange line-delimited JSON: host -> worker TickFacts, worker ->
+# host TickOutcome. Anything that goes wrong with the worker falls back to an
+# identical in-process decision, so the supervised session is never at risk.
+# ---------------------------------------------------------------------------
+
+
+def _facts_to_json(facts: TickFacts) -> str:
+    return json.dumps(
+        {
+            "now_wall": facts.now_wall,
+            "idle": facts.idle,
+            "input_line_empty": facts.input_line_empty,
+            "human_compact_submitted": facts.human_compact_submitted,
+            "work_idle": facts.work_idle,
+        }
+    )
+
+
+def _facts_from_json(line: str) -> TickFacts:
+    data = json.loads(line)
+    return TickFacts(
+        now_wall=float(data["now_wall"]),
+        idle=bool(data["idle"]),
+        input_line_empty=bool(data["input_line_empty"]),
+        human_compact_submitted=bool(data["human_compact_submitted"]),
+        work_idle=bool(data["work_idle"]),
+    )
+
+
+def _outcome_to_json(outcome: TickOutcome) -> str:
+    return json.dumps(
+        {
+            "decision_value": outcome.decision_value,
+            "reason": outcome.reason,
+            "payload": outcome.payload,
+            "submit": outcome.submit,
+            "consume_signal_path": outcome.consume_signal_path,
+            "deferred_log": outcome.deferred_log,
+        }
+    )
+
+
+def _outcome_from_json(line: str) -> TickOutcome:
+    data = json.loads(line)
+    return TickOutcome(
+        decision_value=str(data["decision_value"]),
+        reason=str(data["reason"]),
+        payload=data["payload"],
+        submit=bool(data["submit"]),
+        consume_signal_path=data["consume_signal_path"],
+        deferred_log=data["deferred_log"],
+    )
+
+
+def run_worker(
+    in_stream: TextIO,
+    out_stream: TextIO,
+    *,
+    dry_run: bool,
+    sidecar_dir: Path,
+    policy: CompactPolicy,
+) -> int:
+    """Policy-worker loop: read TickFacts lines, emit TickOutcome lines.
+
+    Owns the ``CompactStateMachine`` so a host-side restart of this subprocess
+    reloads the decision code (this whole 'brain') without disturbing the PTY
+    host. Blocks on ``in_stream``; a closed pipe (host gone / EOF) ends the loop
+    and returns 0. A malformed line is skipped (logged to stderr), never fatal.
+    """
+    machine = CompactStateMachine(policy)
+    for raw in in_stream:
+        line = raw.strip()
+        if not line:
+            continue
+        try:
+            facts = _facts_from_json(line)
+        except (ValueError, KeyError) as exc:
+            sys.stderr.write(f"claude-supervise worker: bad tick line: {exc}\n")
+            continue
+        outcome = decide_once(
+            machine,
+            sidecar_dir=sidecar_dir,
+            facts=facts,
+            dry_run=dry_run,
+            freshness_seconds=policy.freshness_seconds,
+            compaction_signal_ttl_seconds=policy.compaction_signal_ttl_seconds,
+            reap_ttl_seconds=policy.reap_ttl_seconds,
+            foreground_margin_seconds=policy.foreground_margin_seconds,
+        )
+        out_stream.write(_outcome_to_json(outcome) + "\n")
+        out_stream.flush()
+    return 0
+
+
+class PolicyWorker:
+    """Host-side client for the restartable policy-worker subprocess (Phase 4).
+
+    ``decide(facts)`` returns the worker's TickOutcome, or ``None`` on ANY
+    problem (worker not started, dead, slow, or a malformed reply) so the host
+    can fall back to an in-process decision. ``reload_if_stale()`` respawns the
+    worker from the current on-disk code when the supervisor file changes.
+    """
+
+    def __init__(
+        self,
+        self_path: Path,
+        *,
+        dry_run: bool,
+        read_timeout: float = _WORKER_READ_TIMEOUT_SECONDS,
+    ) -> None:
+        self._self_path = self_path
+        self._dry_run = dry_run
+        self._read_timeout = read_timeout
+        self._proc: subprocess.Popen[str] | None = None
+        self._source_fingerprint = self._current_fingerprint()
+
+    def _current_fingerprint(self) -> str | None:
+        """Best-effort source hash of the on-disk supervisor (None on error)."""
+        try:
+            return compute_source_hash(self._self_path)
+        except OSError:
+            return None
+
+    def start(self) -> bool:
+        """Spawn the worker subprocess. Returns True on success."""
+        argv = [sys.executable, str(self._self_path), _WORKER_FLAG]
+        if not self._dry_run:
+            argv.append("--arm")
+        try:
+            # SECURITY: fixed argv (python + this script + flags), never a shell.
+            self._proc = subprocess.Popen(  # nosec B603 - trusted fixed argv, no shell
+                argv,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+            )
+        except OSError as exc:
+            sys.stderr.write(f"claude-supervise: could not start policy worker: {exc}\n")
+            self._proc = None
+            return False
+        self._source_fingerprint = self._current_fingerprint()
+        return self._proc.stdin is not None and self._proc.stdout is not None
+
+    def alive(self) -> bool:
+        return self._proc is not None and self._proc.poll() is None
+
+    def decide(self, facts: TickFacts) -> TickOutcome | None:
+        """Ask the worker for a decision; None on any failure (host falls back)."""
+        proc = self._proc
+        if proc is None or proc.stdin is None or proc.stdout is None or proc.poll() is not None:
+            return None
+        try:
+            proc.stdin.write(_facts_to_json(facts) + "\n")
+            proc.stdin.flush()
+        except (OSError, ValueError):
+            return None
+        # Bounded wait: a hung worker must not stall the PTY host for a whole tick.
+        ready, _, _ = select.select([proc.stdout], [], [], self._read_timeout)
+        if not ready:
+            return None
+        try:
+            line = proc.stdout.readline()
+        except (OSError, ValueError):
+            return None
+        if not line:
+            return None
+        try:
+            return _outcome_from_json(line)
+        except (ValueError, KeyError):
+            return None
+
+    def reload_if_stale(self) -> bool:
+        """Respawn the worker if the on-disk supervisor code has changed.
+
+        Returns True when a reload happened. The PTY host is untouched — only the
+        decision subprocess is swapped for one running the new code.
+        """
+        current = self._current_fingerprint()
+        if current is not None and current != self._source_fingerprint:
+            return self.restart()
+        return False
+
+    def restart(self) -> bool:
+        self.close()
+        return self.start()
+
+    def close(self) -> None:
+        proc = self._proc
+        self._proc = None
+        if proc is None:
+            return
+        for stream in (proc.stdin, proc.stdout):
+            if stream is None:
+                continue
+            try:
+                stream.close()
+            except OSError as exc:
+                sys.stderr.write(f"claude-supervise: worker stream close failed: {exc}\n")
+        try:
+            proc.terminate()
+            proc.wait(timeout=1.0)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        except OSError as exc:
+            sys.stderr.write(f"claude-supervise: worker terminate failed: {exc}\n")
 
 
 def _get_winsize(stdin_fd: int) -> bytes:
@@ -1532,6 +1847,7 @@ def supervise(
     poll_seconds: float = _DEFAULT_POLL_SECONDS,
     idle_floor_seconds: float = _DEFAULT_IDLE_FLOOR_SECONDS,
     work_settle_seconds: float = _DEFAULT_WORK_SETTLE_SECONDS,
+    decider: Callable[[TickFacts], TickOutcome | None] | None = None,
 ) -> int:
     """Run `argv` under a PTY, forwarding I/O and polling the context sidecar.
 
@@ -1641,22 +1957,40 @@ def supervise(
         # Consume the human-/compact edge exactly once per tick so a human
         # compaction defers the supervisor's own, never suppresses it forever.
         human_compact = activity.take_compact_submitted()
-        _poll_once(
-            machine,
-            sidecar_dir=sidecar_dir,
-            now_wall=time.time(),
-            idle=idle,
-            dry_run=dry_run,
-            master_writer=_write_master,
-            log=log,
-            freshness_seconds=policy.freshness_seconds,
-            compaction_signal_ttl_seconds=policy.compaction_signal_ttl_seconds,
-            input_line_empty=activity.line.is_empty,
-            human_compact_submitted=human_compact,
-            work_idle=work_idle,
-            reap_ttl_seconds=policy.reap_ttl_seconds,
-            foreground_margin_seconds=policy.foreground_margin_seconds,
-        )
+        # Plan 00164 Phase 4: prefer the restartable policy worker; on ANY worker
+        # failure (decider returns None) fall back to the identical in-process
+        # path so a tick is never dropped. The host always performs the injection.
+        now_wall = time.time()
+        outcome = None
+        if decider is not None:
+            outcome = decider(
+                TickFacts(
+                    now_wall=now_wall,
+                    idle=idle,
+                    input_line_empty=activity.line.is_empty,
+                    human_compact_submitted=human_compact,
+                    work_idle=work_idle,
+                )
+            )
+        if outcome is not None:
+            _apply_decision(outcome, master_writer=_write_master, log=log)
+        else:
+            _poll_once(
+                machine,
+                sidecar_dir=sidecar_dir,
+                now_wall=now_wall,
+                idle=idle,
+                dry_run=dry_run,
+                master_writer=_write_master,
+                log=log,
+                freshness_seconds=policy.freshness_seconds,
+                compaction_signal_ttl_seconds=policy.compaction_signal_ttl_seconds,
+                input_line_empty=activity.line.is_empty,
+                human_compact_submitted=human_compact,
+                work_idle=work_idle,
+                reap_ttl_seconds=policy.reap_ttl_seconds,
+                foreground_margin_seconds=policy.foreground_margin_seconds,
+            )
 
     previous_handler = signal.signal(signal.SIGWINCH, _on_winch)
 
@@ -1748,6 +2082,17 @@ def main(argv: list[str] | None = None) -> int:
     """
     argv = argv if argv is not None else sys.argv[1:]
 
+    # Policy-worker mode (Plan 00164 Phase 4): no child argv — read TickFacts
+    # from stdin, write TickOutcomes to stdout. The host spawns this.
+    if _WORKER_FLAG in argv:
+        return run_worker(
+            sys.stdin,
+            sys.stdout,
+            dry_run="--arm" not in argv,
+            sidecar_dir=_default_sidecar_dir(),
+            policy=CompactPolicy(),
+        )
+
     child_argv = _split_child_argv(argv)
     if child_argv is None:
         sys.stderr.write(_USAGE)
@@ -1768,10 +2113,46 @@ def main(argv: list[str] | None = None) -> int:
         pid=os.getpid(),
         started_at=time.time(),
     )
+
+    # Run the decision logic in a restartable worker subprocess (Plan 00164
+    # Phase 4) so it can hot-reload from a freshly-deployed supervisor without
+    # disturbing this PTY host. Worker failure is invisible — the host falls back
+    # to an identical in-process decision — so the session is never at risk.
+    worker = _make_policy_worker(flags.dry_run)
+    decider = _make_worker_decider(worker) if worker is not None else None
     try:
-        return supervise(child_argv, dry_run=flags.dry_run, log=log)
+        return supervise(child_argv, dry_run=flags.dry_run, log=log, decider=decider)
     finally:
+        if worker is not None:
+            worker.close()
         remove_supervisor_status(untracked_dir)
+
+
+def _make_policy_worker(dry_run: bool) -> PolicyWorker | None:
+    """Create + start the policy worker, or None (in-process) when opted out /
+    unstartable. Never raises — a worker problem must not break a launch."""
+    if os.environ.get(_NO_WORKER_ENV):
+        return None
+    worker = PolicyWorker(_SELF_PATH, dry_run=dry_run)
+    if not worker.start():
+        return None
+    return worker
+
+
+def _make_worker_decider(worker: PolicyWorker) -> Callable[[TickFacts], TickOutcome | None]:
+    """Return a per-tick decider that hot-reloads the worker on code change and
+    asks it to decide, returning None on any failure so the host falls back."""
+    last_reload_check = [0.0]
+
+    def _decide(facts: TickFacts) -> TickOutcome | None:
+        if facts.now_wall - last_reload_check[0] >= _WORKER_RELOAD_CHECK_SECONDS:
+            last_reload_check[0] = facts.now_wall
+            worker.reload_if_stale()
+        if not worker.alive():
+            worker.restart()
+        return worker.decide(facts)
+
+    return _decide
 
 
 if __name__ == "__main__":
