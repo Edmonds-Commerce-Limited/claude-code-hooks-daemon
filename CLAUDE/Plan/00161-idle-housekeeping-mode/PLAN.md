@@ -63,25 +63,34 @@ genuinely idle-stop.
   session's transcript + the repo, writing `BRAINSTORM.md` (detection mechanism,
   ranked housekeeping catalogue, safety guardrails, handler design sketch, open
   questions, MVP slice).
-- [ ] ⬜ **Task 1.2**: Review the brainstorm with the user; pick the detection
-  rule, the initial task catalogue, and the MVP slice.
+- [x] ✅ **Task 1.2**: Reviewed the brainstorm with the user; decisions captured
+  (sub-agent dispatch, threshold 2, hello_world deprecation, beta/opt-in,
+  report-only markdown files) — see Technical Decisions.
 
-### Phase 2: MVP Implementation (TDD) — sub-agent-dispatch architecture
+### Phase 2: Beta MVP Implementation (TDD) — opt-in, report-only, markdown reports
 
-- [ ] ⬜ **Task 2.0**: Debug-first — confirm with `./scripts/debug_hooks.sh`
-  whether a cron-originated prompt raises UserPromptSubmit (BRAINSTORM §E.9). If
-  not, fall back to the Stop-handler host (§A.2 Option A).
+- [x] ✅ **Task 2.0**: Debug-confirmed a cron-originated prompt DOES raise
+  UserPromptSubmit (observed directly this session: every failsafe-recovery tick
+  arrives with a `UserPromptSubmit hook additional context` line). The
+  UserPromptSubmit host (BRAINSTORM §A.2 Option B) is viable; no fallback needed.
 - [ ] ⬜ **Task 2.1**: TDD the `idle_housekeeping_advisor` detector — matches the
   canonical `FAILSAFE RECOVERY CHECK` marker, transcript-tail no-op counter
-  (threshold 2), guards S3/S6, pass-cap sidecar (RED → GREEN → REFACTOR).
+  (threshold 2), guards (pending AskUserQuestion / real-user-prompt /
+  interleaved tool_use), pass-cap sidecar (RED → GREEN → REFACTOR).
 - [ ] ⬜ **Task 2.2**: Guidance injects an instruction to **fire specialist
   housekeeping sub-agent(s)** (protecting main-thread context) that run scoped,
-  report-first audits and return concise findings — NOT an inline checklist the
-  main thread executes itself.
-- [ ] ⬜ **Task 2.3**: Wire config options (enable/disable, `noop_threshold`
-  default 2, `max_passes_per_session`, task allowlist, report-only mode);
-  `get_claude_md()`; acceptance tests; full QA; daemon restart RUNNING; dogfood
-  in-repo (opt-in default off).
+  report-first audits and each write a **shareable markdown report file**.
+- [ ] ⬜ **Task 2.3**: Reports mechanism — reports are markdown files written to
+  an untracked reports directory (`untracked/reports/` by convention, gitignored,
+  no size limit); add the dir to `extra_allowed_markdown_paths` so the
+  markdown_organization handler permits them; dogfood-enable in this repo.
+- [ ] ⬜ **Task 2.4**: Ship a how-to-create-reports guide (`docs/guides/…`)
+  covering the report structure and the three sharing channels (agent-to-agent,
+  Slack/colleague, GitHub issue for the public).
+- [ ] ⬜ **Task 2.5**: Config options (`get_default_enabled() → False` — opt-in
+  beta, OFF by default; `noop_threshold` default 2; `max_passes_per_session`;
+  `reports_dir`); `get_claude_md()`; acceptance tests; `config-changes` manifest
+  entry (recommended: leave OFF — beta); full QA; daemon restart RUNNING.
 
 ## Technical Decisions
 
@@ -109,6 +118,32 @@ burn). **Decision** (user, 2026-07-14): these are debug/dogfooding confirmations
 — deprecate/hide them from normal projects (default-disabled), keep enabled in
 THIS repo for dogfooding/debugging. Tracked in its own plan (see README index);
 this also removes the field-side doubled-stop independent of the housekeeping MVP.
+
+### Decision 4: Ship as opt-in BETA, off by default, report-only
+
+**Decision** (user, 2026-07-14): the handler ships in a **beta** stage — ready
+for release but **off by default** (`get_default_enabled() → False`), with docs
+suggesting users leave it off unless they want to try it. When enabled, it is
+strictly **report-only**: it surfaces issues/suggestions, it does NOT
+auto-mutate or auto-commit. (This resolves BRAINSTORM §E.2 — the MVP is
+report-only; the Tier-M auto-fix mode is a deliberate later increment.)
+
+### Decision 5: Reports are shareable markdown files (no size limit)
+
+**Decision** (user, 2026-07-14): housekeeping (and reports generally) produce
+**markdown report files**, not just in-context summaries. Markdown files are
+chosen deliberately to encourage verbose, detailed reports that can embed
+transcripts, logs, and code snippets with **no particular size limit**. Each
+report is written to an untracked reports directory (`untracked/reports/` by
+convention — gitignored, permitted via `extra_allowed_markdown_paths`) so it can
+be shared through three channels:
+
+- **Agent-to-agent** (direct dogfooding hand-off),
+- **Colleague share** via Slack/etc.,
+- **GitHub issue** for the general public.
+
+A how-to-create-reports guide ships alongside so the format and sharing channels
+are documented for users.
 
 ## Success Criteria
 
