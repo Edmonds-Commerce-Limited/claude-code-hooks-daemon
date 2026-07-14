@@ -981,6 +981,13 @@ root (the same commit must `git mv` it to the archive dir and
 update the README row); edits to archived plans; backticked
 `src/...` paths that no longer exist.
 
+**Journal day-files** (`JOURNAL/NNNNN-Journal-YY-MM-DD.md`) are also
+linted (all ADVISE): the name must match the grammar and the
+enclosing plan number with a today/yesterday date
+(`journal-dayfile-naming`), and edits must APPEND — never rewrite or
+remove earlier entries (`journal-append-only`). Corrections are new
+dated entries at the bottom, not edits to old ones.
+
 Grandfathered plans in `plan_workflow.qa.legacy_plan_allowlist`
 only ever advise. Lint any file on demand:
 `$PYTHON -m claude_code_hooks_daemon.daemon.cli plan-qa --lint <file>`.
