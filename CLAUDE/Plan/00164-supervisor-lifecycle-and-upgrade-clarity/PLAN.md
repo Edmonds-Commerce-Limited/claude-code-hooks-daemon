@@ -150,6 +150,22 @@ clients in one release is a regression risk out of proportion to a messaging fix
   every tick) leaves the wrapped child undisturbed. 276 suite tests pass; mypy +
   QA lint clean.
 
+### Phase 5: Compact-injection loop fix (live dogfooding)
+
+Surfaced while running this plan under ccy: the supervisor injected `/compact`
+4–5 times and Claude Code queued+ignored every one. The AWAIT ESC flush fired
+ONCE and only for the CRITICAL band, so an elevated-band queued `/compact` never
+got an `[esc]`, the await timed out to MONITOR, and MONITOR re-injected — a loop.
+
+- [x] ✅ **Task 5.1**: Failing `TestEscapeFlush` — ESC fires for ANY band, refires
+  at `escape_after` intervals, caps at `max_escapes` → MONITOR, never re-injects
+  `/compact` while queued, skips human awaits + busy ticks, counter resets per
+  episode.
+- [x] ✅ **Task 5.2**: Rewrote `CompactStateMachine.AWAIT_COMPACTING` — repeated
+  `[esc]` ("fire escape until it does"), new `CompactPolicy.max_escapes` (default
+  5), `_escapes_sent` counter replacing `_escape_sent`/`_await_escalate`. 59
+  state-machine + 277 supervise/integrity tests pass; full QA 13/13 green.
+
 ### Phase 6: Output-capture helper (`echd-capture`)
 
 Agents defeat the `pipe_blocker` with pointless theatre — capturing full output to
@@ -201,3 +217,6 @@ short command.
      "when"). Blow-by-blow log lives in JOURNAL/. -->
 
 - Plan created at 00163 follow-on; execution starting on Phase 1.
+- Phase 4 (restartable policy-worker split) delivered at `cf118f4d`.
+- Phase 5 (compact-injection loop → repeated ESC flush) delivered at `c3fdbf36`.
+- QA-gate fixes (capture-corruption + return-none-on-error) at `3bb1b670`.
