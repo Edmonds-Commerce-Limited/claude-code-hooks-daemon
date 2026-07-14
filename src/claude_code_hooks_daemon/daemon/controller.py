@@ -202,6 +202,9 @@ class DaemonController:
             project_languages=project_languages,
             project_exclude_paths=project_exclude_paths,
             plan_workflow=plan_workflow,
+            enable_hello_world_handlers=(
+                self._config.enable_hello_world_handlers if self._config else False
+            ),
         )
 
         logger.info("Registered %d built-in handlers", count)

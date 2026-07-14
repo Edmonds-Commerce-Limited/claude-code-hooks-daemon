@@ -1,6 +1,6 @@
 # Hooks Daemon - Active Configuration
 
-> Generated on 2026-07-13 (v3.39.0) by `generate-docs`. Regenerate: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-docs`
+> Generated on 2026-07-14 (v3.39.0) by `generate-docs`. Regenerate: `$PYTHON -m claude_code_hooks_daemon.daemon.cli generate-docs`
 
 ## Active Handlers
 
@@ -46,11 +46,10 @@
 | 57 | daemon_docs_guard | ADVISORY | Warn when reading from the hooks-daemon internal CLAUDE/ docs directory |
 | 60 | british_english | ADVISORY | Warn about American English spellings in content files (non-blocking) |
 
-### PostToolUse (8 handlers)
+### PostToolUse (7 handlers)
 
 | Priority | Handler | Behavior | Description |
 |----------|---------|----------|-------------|
-| 5 | hello_world_post_tool_use | NON-TERMINAL | Simple test handler that confirms PostToolUse hook is working |
 | 10 | bash_error_detector | ADVISORY | Detect errors and warnings in Bash command output |
 | 20 | validate_eslint_on_write | ADVISORY | Run ESLint validation on TypeScript/TSX files after write |
 | 25 | lint_on_edit | NON-TERMINAL | Run language-aware lint validation on files after Write/Edit |
@@ -59,11 +58,10 @@
 | 28 | background_process_tracker | ADVISORY | Track backgrounded Bash processes and advise on watchdog/harvest (never kills) |
 | 30 | recovery_cron_advisor | ADVISORY | Advisory handler that manages failsafe recovery cron across plan lifecycle |
 
-### SessionStart (11 handlers)
+### SessionStart (10 handlers)
 
 | Priority | Handler | Behavior | Description |
 |----------|---------|----------|-------------|
-| 5 | hello_world_session_start | NON-TERMINAL | Simple test handler that confirms SessionStart hook is working |
 | 10 | yolo_container_detection | ADVISORY | Detects YOLO container environments using precise OS-level container markers |
 | 50 | project_handler_load_checker | ADVISORY | Loudly alert at session start when project handlers failed to load |
 | 51 | hook_registration_checker | ADVISORY | Validate hook registrations in Claude Code settings on session start |
@@ -75,50 +73,43 @@
 | 57 | plan_qa_sweep | ADVISORY | Advisory SessionStart sweep over the plan tree (silent when clean) |
 | 58 | ccy_supervisor_integrity | ADVISORY | Advisory: warn when the ccy supervisor is armed but its files are unsafe |
 
-### SessionEnd (2 handlers)
+### SessionEnd (1 handler)
 
 | Priority | Handler | Behavior | Description |
 |----------|---------|----------|-------------|
-| 5 | hello_world_session_end | NON-TERMINAL | Simple test handler that confirms SessionEnd hook is working |
 | 10 | cleanup | NON-TERMINAL | Clean up temporary files when session ends |
 
-### PreCompact (3 handlers)
+### PreCompact (2 handlers)
 
 | Priority | Handler | Behavior | Description |
 |----------|---------|----------|-------------|
-| 5 | hello_world_pre_compact | NON-TERMINAL | Simple test handler that confirms PreCompact hook is working |
 | 10 | transcript_archiver | NON-TERMINAL | Archive conversation transcript before compaction |
 | 20 | compaction_signal | NON-TERMINAL | Write a ``<session>.compacting`` signal on PreCompact for the supervisor |
 
-### UserPromptSubmit (4 handlers)
+### UserPromptSubmit (3 handlers)
 
 | Priority | Handler | Behavior | Description |
 |----------|---------|----------|-------------|
-| 5 | hello_world_user_prompt_submit | NON-TERMINAL | Simple test handler that confirms UserPromptSubmit hook is working |
 | 10 | git_context_injector | CONTEXT | Inject current git status as context when user submits a prompt |
 | 54 | post_clear_auto_execute | ADVISORY | Inject execution guidance on the first prompt of a new session |
 | 55 | critical_thinking_advisory | ADVISORY | Periodically inject advisory context encouraging critical evaluation |
 
-### PermissionRequest (2 handlers)
+### PermissionRequest (1 handler)
 
 | Priority | Handler | Behavior | Description |
 |----------|---------|----------|-------------|
-| 5 | hello_world_permission_request | NON-TERMINAL | Simple test handler that confirms PermissionRequest hook is working |
 | 10 | auto_approve_reads | TERMINAL | Auto-approve read-only tool permission requests |
 
-### Notification (2 handlers)
+### Notification (1 handler)
 
 | Priority | Handler | Behavior | Description |
 |----------|---------|----------|-------------|
-| 5 | hello_world_notification | NON-TERMINAL | Simple test handler that confirms Notification hook is working |
 | 10 | notification_logger | NON-TERMINAL | Log all notification events to a JSONL file |
 
-### Stop (8 handlers)
+### Stop (6 handlers)
 
 | Priority | Handler | Behavior | Description |
 |----------|---------|----------|-------------|
-| 5 | hello_world_stop | NON-TERMINAL | Simple test handler that confirms Stop hook is working |
-| 5 | hello_world_subagent_stop | NON-TERMINAL | Simple test handler that confirms SubagentStop hook is working |
 | 10 | auto_continue_stop | TERMINAL | Intercept Stop events and enforce explicit stop reasons or auto-continue |
 | 20 | task_completion_checker | ADVISORY | Remind agent to verify task completion before stopping |
 | 30 | hedging_language_detector | ADVISORY | Detect hedging language that signals guessing instead of researching |
@@ -126,11 +117,10 @@
 | 100 | remind_prompt_library | ADVISORY | Remind to capture successful prompts to the library |
 | 100 | subagent_completion_logger | NON-TERMINAL | Log subagent completion events to a JSONL file |
 
-### SubagentStop (3 handlers)
+### SubagentStop (2 handlers)
 
 | Priority | Handler | Behavior | Description |
 |----------|---------|----------|-------------|
-| 5 | hello_world_subagent_stop | NON-TERMINAL | Simple test handler that confirms SubagentStop hook is working |
 | 10 | subagent_completion_logger | NON-TERMINAL | Log subagent completion events to a JSONL file |
 | 20 | remind_prompt_library | ADVISORY | Remind to capture successful prompts to the library |
 

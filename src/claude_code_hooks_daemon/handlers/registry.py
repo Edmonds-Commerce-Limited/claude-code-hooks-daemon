@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from claude_code_hooks_daemon.constants import ConfigKey
 from claude_code_hooks_daemon.constants.handlers import HandlerID
+from claude_code_hooks_daemon.constants.tags import HandlerTag
 from claude_code_hooks_daemon.core.event import EventType
 from claude_code_hooks_daemon.core.handler import Handler
 
@@ -163,6 +164,7 @@ class HandlerRegistry:
         project_languages: list[str] | None = None,
         project_exclude_paths: list[str] | None = None,
         plan_workflow: Any = None,
+        enable_hello_world_handlers: bool = False,
     ) -> int:
         """Register all discovered handlers with the router.
 
@@ -176,6 +178,14 @@ class HandlerRegistry:
             workspace_root: Optional workspace root path for handlers
             project_languages: Project-level language filter from daemon.languages config
             plan_workflow: Optional PlanWorkflowConfig for plan-related handlers
+            enable_hello_world_handlers: When False (the default, matching
+                ``DaemonConfig.enable_hello_world_handlers``), the
+                ``HandlerTag.TEST`` hello_world confirmation handlers are NOT
+                registered. Set True (from ``daemon.enable_hello_world_handlers``)
+                to load them for on-demand hook-system debugging. Plan 00162: this
+                flag was previously dead — the test handlers loaded everywhere,
+                injecting ``✅ <event> hook system active`` on every event and
+                doubling idle Stop turns.
 
         Returns:
             Number of handlers registered
@@ -288,6 +298,21 @@ class HandlerRegistry:
                             # Instantiate and register
                             # Handler subclasses override __init__ with no args
                             instance = attr()
+
+                            # Global test-handler gate (Plan 00162): the
+                            # hello_world confirmation handlers only load when
+                            # daemon.enable_hello_world_handlers is true. Default
+                            # off hides the "✅ <event> hook system active"
+                            # injection (and the Stop-event doubled turn it
+                            # causes) from normal projects; flip the flag to
+                            # restore them for hook-system debugging.
+                            if not enable_hello_world_handlers and HandlerTag.TEST in instance.tags:
+                                logger.debug(
+                                    "Handler %s skipped - test handlers disabled "
+                                    "(daemon.enable_hello_world_handlers is false)",
+                                    attr.__name__,
+                                )
+                                continue
 
                             # Tag-based filtering
                             if enable_tags and not any(tag in instance.tags for tag in enable_tags):

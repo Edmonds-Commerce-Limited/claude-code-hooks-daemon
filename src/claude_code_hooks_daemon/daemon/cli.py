@@ -1874,6 +1874,7 @@ def cmd_generate_docs(args: argparse.Namespace) -> int:
             registry=registry,
             plugins=plugins,
             project_handlers=project_handlers_list,
+            enable_hello_world_handlers=config.daemon.enable_hello_world_handlers,
         )
 
         include_disabled = getattr(args, "include_disabled", False)

@@ -10,10 +10,12 @@
 ## Overview
 
 The `daemon.enable_hello_world_handlers` global flag is **dead code**. It is
-defined in the config schema (`config/schema.py`), the config model with
-`default=False` (`config/models.py:567`), the install template which writes
-`enable_hello_world_handlers: false` (`daemon/init_config.py:49,111`), and a
-named constant (`constants/config.py:57`). Every one of the 10 `hello_world`
+defined in the config schema (`src/claude_code_hooks_daemon/config/schema.py`),
+the config model with `default=False`
+(`src/claude_code_hooks_daemon/config/models.py`), the install template which
+writes `enable_hello_world_handlers: false`
+(`src/claude_code_hooks_daemon/daemon/init_config.py`), and a named constant
+(`src/claude_code_hooks_daemon/constants/config.py`). Every one of the 10 `hello_world`
 handlers (one per event type) carries the docstring line
 "Controlled by global config: daemon.enable_hello_world_handlers". **But no
 loader, router, or FrontController code consumes the flag.** The handlers are
@@ -58,26 +60,37 @@ actively debugging the hook system.
 
 ### Phase 1: TDD the flag wiring
 
-- [ ] ⬜ **Task 1.1**: Confirm the consumer gap and the exact enablement path
-  (where per-handler `enabled` and `get_default_enabled()` are resolved into the
-  dispatch set) so the flag is gated at the correct single choke point.
-- [ ] ⬜ **Task 1.2**: RED — test that with `enable_hello_world_handlers: false`
-  no `HandlerTag.TEST` handler is in the active dispatch set for any event, and
-  with `true` they all are.
-- [ ] ⬜ **Task 1.3**: GREEN — wire the flag at the resolved choke point; keep
-  the per-handler `enabled` semantics intact (flag is an AND-gate over TEST
-  handlers). REFACTOR.
+- [x] ✅ **Task 1.1**: Confirmed the consumer gap — the flag is defined in
+  schema/model/template/constant and every hello_world docstring, but no loader
+  code reads it. The choke point is `HandlerRegistry.register_all` pass 2
+  (per-handler `enabled` at line 279; tag filters at 292).
+- [x] ✅ **Task 1.2**: RED — added registry tests asserting default-off gates all
+  `HandlerTag.TEST` handlers and `enable_hello_world_handlers=True` restores them.
+- [x] ✅ **Task 1.3**: GREEN — added `enable_hello_world_handlers` param to
+  `register_all` (default False), gating TEST handlers alongside the existing tag
+  filters; `DaemonController.initialise` passes `self._config.enable_hello_world_handlers`.
 
 ### Phase 2: Reconcile config, docs, tests
 
-- [ ] ⬜ **Task 2.1**: Update the 10 handler docstrings if wording drifts; update
-  generated `.claude/HOOKS-DAEMON.md` via `generate-docs` (test handlers should
-  no longer list as active here, since this repo's flag is false).
-- [ ] ⬜ **Task 2.2**: Fix any acceptance/dogfooding tests that assumed the test
-  handlers were unconditionally active; add a `config-changes` manifest entry if
-  the observable default changes for clients.
-- [ ] ⬜ **Task 2.3**: Full QA (`./scripts/qa/llm_qa.py all`); daemon restart
-  RUNNING; verify `✅ Stop hook system active` no longer injected on stop here.
+- [x] ✅ **Task 2.1**: Regenerated `.claude/HOOKS-DAEMON.md` — the 10 test
+  handlers are gone from the active list. Threaded the flag through `DocsGenerator`
+  (it enumerated all discovered handlers with the same blind spot) so the doc
+  reflects the daemon's real active set. Handler docstrings already say
+  "Controlled by global config: daemon.enable_hello_world_handlers" — now TRUE, no
+  change needed.
+- [x] ✅ **Task 2.2**: Fixed the 2 tests that assumed test handlers were always
+  active (`test_daemon_smoke.test_daemon_processes_pre_tool_use_hook` → asserts the
+  benign no-op shape; `test_controller.test_process_request` → enables the canary
+  explicitly). Added a `config-changes/v3.40.0.yaml` entry documenting the flag now
+  takes effect.
+- [x] ✅ **Task 2.3**: Full QA 13/13 (9923 passed, 95.6% cov); daemon restarted
+  RUNNING; live-probed the Stop hook — `✅ Stop hook system active` injection is
+  gone (only the `auto_continue_stop` block remains).
+
+### Phase 3: Release
+
+- [ ] ⬜ **Task 3.1**: Ship in the next release (changes are unreleased); then
+  close the plan (git mv to Completed/, README move + stats).
 
 ## Success Criteria
 
@@ -98,3 +111,7 @@ actively debugging the hook system.
   false. See Plan 00161 Decision 3.
 - Failsafe recovery cron for this session: `a8af59d9` (`:37` hourly,
   non-durable). Reused — not duplicated.
+- Implementation delivered: `register_all` + `DaemonController` gate (registry
+  choke point), `DocsGenerator` + `generate-docs` CLI gate, 2 test fixes, doc
+  regen, config-changes manifest. QA 13/13 (9923 passed, 95.6%); daemon RUNNING;
+  Stop-hook injection confirmed gone by live probe. Unreleased — Phase 3 ships it.

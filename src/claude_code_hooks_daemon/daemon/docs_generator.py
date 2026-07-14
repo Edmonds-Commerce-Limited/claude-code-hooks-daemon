@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from claude_code_hooks_daemon.constants import ConfigKey
+from claude_code_hooks_daemon.constants.tags import HandlerTag
 from claude_code_hooks_daemon.handlers.registry import EVENT_TYPE_MAPPING
 
 if TYPE_CHECKING:
@@ -39,7 +40,13 @@ CollectedHandler = tuple[str, str, str, int, str, str, bool]
 class DocsGenerator:
     """Generate .claude/HOOKS-DAEMON.md from live config and handler metadata."""
 
-    __slots__ = ("_config", "_plugins", "_project_handlers", "_registry")
+    __slots__ = (
+        "_config",
+        "_enable_hello_world_handlers",
+        "_plugins",
+        "_project_handlers",
+        "_registry",
+    )
 
     def __init__(
         self,
@@ -47,6 +54,7 @@ class DocsGenerator:
         registry: HandlerRegistry,
         plugins: list[Any] | None = None,
         project_handlers: list[Any] | None = None,
+        enable_hello_world_handlers: bool = False,
     ) -> None:
         """Initialize docs generator.
 
@@ -55,11 +63,16 @@ class DocsGenerator:
             registry: Handler registry with discovered handlers
             plugins: Optional list of plugin handler instances
             project_handlers: Optional list of project handler instances
+            enable_hello_world_handlers: When False (default, matching
+                ``DaemonConfig.enable_hello_world_handlers``), ``HandlerTag.TEST``
+                handlers are reported as disabled so the generated doc reflects the
+                daemon's real active set (Plan 00162 — the flag gates them at load).
         """
         self._config = config
         self._registry = registry
         self._plugins = plugins or []
         self._project_handlers = project_handlers or []
+        self._enable_hello_world_handlers = enable_hello_world_handlers
 
     def generate_markdown(self, include_disabled: bool = False) -> str:
         """Generate documentation markdown from live config and handlers.
@@ -230,6 +243,16 @@ class DocsGenerator:
 
                 try:
                     instance = handler_class()
+
+                    # Test-handler gate (Plan 00162): hello_world handlers are
+                    # only active when daemon.enable_hello_world_handlers is true.
+                    # Report them as disabled otherwise so the doc matches the
+                    # daemon's real active set.
+                    if HandlerTag.TEST in instance.tags and not self._enable_hello_world_handlers:
+                        is_enabled = False
+                        if not include_disabled:
+                            continue
+
                     priority = handler_config.get(ConfigKey.PRIORITY, instance.priority)
                     behavior = self._detect_behavior(instance)
                     description = self._get_description(handler_class)

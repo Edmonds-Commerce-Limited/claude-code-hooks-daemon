@@ -297,10 +297,12 @@ class TestDaemonSmoke:
 
         response = send_hook_event(socket_path, hook_input)
 
-        # Should succeed (no handlers match simple echo)
+        # A benign echo matches no real handler, and the hello_world canary is
+        # off by default now (Plan 00162), so the daemon returns a benign no-op
+        # response (no block, no error) rather than injected context.
         assert isinstance(response, dict), "Response should be a dictionary"
-        # Response has hookSpecificOutput with the result
-        assert "hookSpecificOutput" in response or response == {}
+        assert "error" not in response, f"benign command must not error: {response}"
+        assert response.get("decision") != "block", f"benign command must not block: {response}"
 
     def test_daemon_blocks_destructive_git_command(self, daemon_process: dict[str, Any]) -> None:
         """Daemon blocks destructive git commands via handlers."""

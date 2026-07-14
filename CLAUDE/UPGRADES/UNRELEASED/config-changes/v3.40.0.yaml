@@ -24,3 +24,20 @@ config_changes:
         handlers.status_line.daemon_stats.enabled: true to your
         .claude/hooks-daemon.yaml. To adopt the new default, remove your explicit
         daemon_stats enabled: true (or set it to false).
+    - key: daemon.enable_hello_world_handlers
+      description: >-
+        The daemon.enable_hello_world_handlers flag now actually gates the
+        hello_world test handlers. Previously the flag was defined (default
+        false) and documented on every hello_world handler, but no loader code
+        consumed it, so the 10 test handlers loaded in EVERY project regardless.
+        They injected "✅ <event> hook system active" context on every hook
+        event, and on Stop that extra context made Claude Code grant another
+        turn -- doubling idle turns. With the flag wired (default false), the
+        test handlers no longer load unless you opt in. Observable effect after
+        upgrade: the "✅ ... hook system active" confirmation messages stop
+        appearing (expected -- they were debug output leaking from a dead flag).
+      migration_note: >-
+        No action needed. The confirmation messages were never meant to be on by
+        default. To restore them for hook-system debugging, set
+        daemon.enable_hello_world_handlers: true in your
+        .claude/hooks-daemon.yaml, then restart the daemon and run generate-docs.

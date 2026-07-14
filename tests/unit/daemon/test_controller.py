@@ -309,8 +309,18 @@ class TestDaemonController:
         assert result.result.decision.value in ["allow", "deny", "block", "error"]
         assert result.execution_time_ms >= 0
 
-    def test_process_request(self, controller: DaemonController, workspace_root: Path) -> None:
-        """Process request parses and routes event."""
+    def test_process_request(self, workspace_root: Path) -> None:
+        """Process request parses and routes event.
+
+        Uses the hello_world canary (enable_hello_world_handlers=True) to prove
+        handler output flows through routing. The canary is off by default now
+        (Plan 00162), so a benign 'ls' would otherwise route to no handler and
+        return a valid no-op response; enabling it keeps the strong
+        output-present assertion and exercises the flag through the controller.
+        """
+        from claude_code_hooks_daemon.config.models import DaemonConfig
+
+        controller = DaemonController(config=DaemonConfig(enable_hello_world_handlers=True))
         # Pre-initialize controller
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
@@ -332,7 +342,7 @@ class TestDaemonController:
         response = controller.process_request(request_data)
 
         assert isinstance(response, dict)
-        # Response should be a valid hook response dict
+        # Response should be a valid hook response dict (canary produced output)
         assert "result" in response or "hookSpecificOutput" in response or "decision" in response
 
     def test_process_request_invalid_data(
