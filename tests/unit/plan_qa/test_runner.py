@@ -108,6 +108,8 @@ class TestRegistryCatalogue:
             "terminal-state-atomic",
             "same-commit-plan-doc",
             "plan-ref-format",
+            "journal-entry-with-progress",
+            "journal-completion-entry",
             # Sweep-only
             "staleness-nag",
             "dormant-honesty",
@@ -123,8 +125,8 @@ class TestRegistryCatalogue:
         by_stage = {stage: [spec for spec in registry if spec.stage == stage] for stage in Stage}
         # 8 original + 2 journal EDIT checks (Plan 00163)
         assert len(by_stage[Stage.EDIT]) == 10
-        # 5 commit-only + 5 dual tree checks
-        assert len(by_stage[Stage.COMMIT]) == 10
+        # 5 commit-only + 5 dual tree checks + 2 journal COMMIT checks (Plan 00163)
+        assert len(by_stage[Stage.COMMIT]) == 12
         # 3 sweep-only + 5 dual tree checks + 2 journal SWEEP checks (Plan 00163)
         assert len(by_stage[Stage.SWEEP]) == 10
 
@@ -155,6 +157,8 @@ class TestRegistryCatalogue:
             "journal-append-only",
             "journal-folder-present",
             "journal-freshness",
+            "journal-entry-with-progress",
+            "journal-completion-entry",
         }
         for spec in all_checks():
             if spec.check_id in post_audit_no_sins:

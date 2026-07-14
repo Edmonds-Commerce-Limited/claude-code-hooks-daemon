@@ -17,7 +17,9 @@ from claude_code_hooks_daemon.plan_qa.checks import (
     header_body_coherence,
     index_at_birth,
     journal_append_only,
+    journal_completion_entry,
     journal_dayfile_naming,
+    journal_entry_with_progress,
     journal_folder_present,
     journal_freshness,
     location_status_coherence,
@@ -65,6 +67,8 @@ def all_checks() -> tuple[CheckSpec, ...]:
         terminal_state_atomic.CHECK,
         same_commit_plan_doc.CHECK,
         plan_ref_format.CHECK,
+        journal_entry_with_progress.CHECK,
+        journal_completion_entry.CHECK,
         # Stage 3 — sweep-only checks
         staleness_nag.CHECK,
         dormant_honesty.CHECK,

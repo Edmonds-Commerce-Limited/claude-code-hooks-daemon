@@ -175,11 +175,16 @@ folder: `BRAINSTORM-datamodel.md` (data model & lifecycle) and
 
 ### Phase 3: Commit-gate coupling + ratchet review (post-dogfood)
 
-- [ ] ⬜ **Task 3.1**: COMMIT checks — `journal-entry-with-progress` (commit
-  changes a plan's PLAN.md tasks but stages nothing under that plan's
-  `JOURNAL/`) and `journal-completion-entry` (terminal status flip without a
-  closing journal entry staged), both ADVISE, via
-  `GitFacts.staged_paths_under()`; honour `enforce_on_completion`.
+- [x] ✅ **Task 3.1**: COMMIT checks — `journal-entry-with-progress` (staged
+  PLAN.md task-counts differ from HEAD but no A/M journal change staged under
+  that plan's `JOURNAL/`) and `journal-completion-entry` (terminal-status flip
+  with no closing entry staged; opt-in behind `enforce_on_completion`, default
+  off). Both ADVISE, grandfathered by `journal_grandfather_before`. Shared
+  helper `has_staged_journal_entry` counts only Added/Modified files or a
+  rename whose content grew — a bare `staged_paths_under()` membership test
+  would be fooled by the archive `git mv` renaming existing day-files along.
+  Registered as COMMIT-only checks (catalogue 10→12); commit-gate guidance
+  updated. Both modules 100% covered.
 - [ ] ⬜ **Task 3.2**: Ratchet review — after a clean dogfood period, decide
   with the user whether `journal-dayfile-naming` escalates to BLOCK under
   `mode: block`; presence/freshness/append-only stay ADVISE forever. Record

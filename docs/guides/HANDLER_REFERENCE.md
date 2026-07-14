@@ -807,14 +807,20 @@ to prior behaviour.
 
 The `journal` sub-block governs per-plan journalling (Plan 00163): each plan
 folder may carry a `JOURNAL/` of append-only `NNNNN-Journal-YY-MM-DD.md`
-day-files, scaffolded by `mkplan.bash`. Four checks ride the existing plan QA
+day-files, scaffolded by `mkplan.bash`. Six checks ride the existing plan QA
 surfaces (no new handler) and all ship ADVISE: `journal-dayfile-naming` +
-`journal-append-only` (edit stage) and `journal-folder-present` +
-`journal-freshness` (sweep stage). Only `journal-dayfile-naming` may ratchet to
-BLOCK via `mode: block`; the rest are advisory forever. Set `grandfather_before`
-to the plan number at which your project adopted journalling so pre-existing
-journal-less plans are never nagged (no backfill), and `freshness_days` to nag a
-quiet `JOURNAL/` sooner than the 30-day plan staleness window. See
+`journal-append-only` (edit stage), `journal-folder-present` +
+`journal-freshness` (sweep stage), and `journal-entry-with-progress` +
+`journal-completion-entry` (commit stage). `journal-entry-with-progress`
+advises when a commit changes a plan's PLAN.md tasks but stages no journal
+entry; `journal-completion-entry` advises when a commit flips a plan to a
+terminal status without a closing journal entry — the latter is OPT-IN,
+firing only when `enforce_on_completion: true`. Only `journal-dayfile-naming`
+may ratchet to BLOCK via `mode: block`; the rest are advisory forever. Set
+`grandfather_before` to the plan number at which your project adopted
+journalling so pre-existing journal-less plans are never nagged (no backfill),
+and `freshness_days` to nag a quiet `JOURNAL/` sooner than the 30-day plan
+staleness window. See
 [CLAUDE/PlanJournalling.md](../../CLAUDE/PlanJournalling.md) for the entry
 grammar, append-only discipline, and the POLICY-vs-CONVENTION split.
 

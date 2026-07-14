@@ -134,3 +134,69 @@ def journal_level(context: CheckContext) -> Level:
 def journalling_active(context: CheckContext) -> bool:
     """Whether journal checks should run at all under the current policy."""
     return context.journal_enabled and context.journal_mode != _JOURNAL_MODE_OFF
+
+
+# --- COMMIT-stage journal helpers (Plan 00163 Phase 3) --------------------
+
+_PLAN_MD_SUFFIX: Final[str] = "/" + PLAN_DOC_FILENAME
+_COMMIT_ADD_STATUS: Final[str] = "A"
+_COMMIT_MODIFY_STATUS: Final[str] = "M"
+_COMMIT_RENAME_PREFIX: Final[str] = "R"
+
+
+def staged_plan_md_folder(path: str, plan_dir_rel: str) -> str | None:
+    """Repo-relative plan FOLDER for a staged ``PLAN.md`` path, else ``None``.
+
+    ``None`` means the path is not a ``PLAN.md`` under the configured plan
+    directory — a documented no-match, not an error.
+    """
+    prefix = plan_dir_rel.rstrip("/") + "/"
+    if not path.startswith(prefix) or not path.endswith(_PLAN_MD_SUFFIX):
+        return None
+    return path[: -len(_PLAN_MD_SUFFIX)]
+
+
+def plan_number_for_folder(folder: str) -> int | None:
+    """Plan number parsed from the last path component of ``folder``."""
+    match = _PLAN_FOLDER_NUMBER_RE.match(folder.rsplit("/", 1)[-1])
+    return int(match.group(1)) if match else None
+
+
+def journal_in_commit_scope(context: CheckContext, plan_number: int | None) -> bool:
+    """Whether COMMIT journal checks apply to this plan under current policy.
+
+    Journalling must be active AND the plan numbered at or above the
+    grandfather threshold — legacy plans that never carried a ``JOURNAL/`` are
+    never nagged at commit time (Plan 00163 Decision 7).
+    """
+    if not journalling_active(context):
+        return False
+    return plan_number is not None and plan_number >= context.journal_grandfather_before
+
+
+def has_staged_journal_entry(context: CheckContext, folder: str) -> bool:
+    """Whether a real (new or appended) journal entry is staged under ``folder``.
+
+    A pure ``git mv`` of the plan folder into the archive renames existing
+    day-files without changing their content; those renames are NOT new
+    entries and must not satisfy the coupling. Only an Added file, a Modified
+    file, or a rename whose staged content actually differs from its HEAD
+    counterpart counts — which is why a bare
+    :meth:`GitFacts.staged_paths_under` membership test is insufficient for the
+    completion coupling (the moved files always match the prefix).
+    """
+    gitfacts = context.gitfacts
+    if gitfacts is None:
+        return False
+    prefix = f"{folder}/{context.journal_dir_name}/"
+    for change in gitfacts.staged_changes():
+        if not change.path.startswith(prefix):
+            continue
+        if change.status in (_COMMIT_ADD_STATUS, _COMMIT_MODIFY_STATUS):
+            return True
+        if change.status.startswith(_COMMIT_RENAME_PREFIX):
+            staged_text = gitfacts.staged_file_text(change.path)
+            head_text = gitfacts.head_file_text(change.old_path or change.path)
+            if staged_text is not None and staged_text != head_text:
+                return True
+    return False
