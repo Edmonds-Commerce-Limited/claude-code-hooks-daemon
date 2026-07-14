@@ -165,6 +165,14 @@ got an `[esc]`, the await timed out to MONITOR, and MONITOR re-injected — a lo
   `[esc]` ("fire escape until it does"), new `CompactPolicy.max_escapes` (default
   5), `_escapes_sent` counter replacing `_escape_sent`/`_await_escalate`. 59
   state-machine + 277 supervise/integrity tests pass; full QA 13/13 green.
+- [x] ✅ **Task 5.3** (release code-review hardening): the Phase 4 host/worker
+  split ran TWO divergent `CompactStateMachine`s — the host fallback (fired on a
+  worker `select` timeout, not just a crash) could inject a DUPLICATE `/compact`.
+  Fixed by making the HOST the single authoritative machine: it ships its state
+  into each tick (`TickFacts.machine_state`), the worker decides on it and returns
+  the post-tick state (`TickOutcome.machine_state`), the host adopts it; the
+  fallback mutates the same machine. Added `export_state`/`import_state` + codecs +
+  5 tests. Delivered `9f992270`.
 
 ### Phase 6: Output-capture helper (`echd-capture`)
 
@@ -191,9 +199,13 @@ short command.
 
 ### Phase 7: Release
 
-- [ ] ⬜ **Task 7.1**: Full QA suite green (`./scripts/qa/run_all.sh`).
-- [ ] ⬜ **Task 7.2**: Config/truth-change manifests if warranted; changelog inputs.
-- [ ] ⬜ **Task 7.3**: Run `/release` — single release shipping all changes.
+- [x] ✅ **Task 7.1**: Full QA suite green (13/13, 10099 tests, 95.3% cov) +
+  23 deterministic acceptance tests pass; changed-handler surface (pipe_blocker,
+  ccy_supervisor_integrity) live-verified.
+- [x] ✅ **Task 7.2**: No config/truth-change manifests warranted (no config keys
+  added; no documented-truth changed). CHANGELOG + RELEASES/v3.41.0.md written.
+- [ ] 🔄 **Task 7.3**: `/release` v3.41.0 (MINOR) — version bumps, commit, tag,
+  GitHub release with bootstrap manifest.
 
 ## Dependencies
 
@@ -220,3 +232,7 @@ short command.
 - Phase 4 (restartable policy-worker split) delivered at `cf118f4d`.
 - Phase 5 (compact-injection loop → repeated ESC flush) delivered at `c3fdbf36`.
 - QA-gate fixes (capture-corruption + return-none-on-error) at `3bb1b670`.
+- Phase 2 banner padding (dogfooding feedback) at `fabb01d5`.
+- Phase 4 hardening (single authoritative machine state; duplicate-compact fix
+  from the release code-review gate) at `9f992270`.
+- Released as v3.41.0 (MINOR) — see the Release commit + tag.

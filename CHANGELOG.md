@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.41.0] - 2026-07-14
+
+This is a **minor release** delivering ccy supervisor lifecycle and upgrade
+clarity improvements (Plan 00164): a startup banner + spinner, stale-supervisor
+detection, a restartable policy-worker split for hot-reloading supervisor
+decision logic, truthful upgrade transition messaging, and a fix for the
+supervisor compact-injection loop repeatedly re-queuing ignored `/compact`s.
+Also ships the `echd-capture` output-capture helper referenced by the
+`pipe_blocker` handler's guidance.
+
+### Added
+
+- ccy supervisor startup banner + spinner shown on launch, with an opt-out
+  (`CLAUDE_SUPERVISE_NO_BANNER`) and automatic skip when stderr is not a TTY
+  (Plan 00164 Phase 2).
+- Stale running-supervisor detection: `ccy_supervisor_integrity` now compares
+  the running supervisor's source fingerprint against the on-disk file and
+  advises restarting ccy when a daemon upgrade shipped a newer supervisor
+  (Plan 00164 Phase 3).
+- Restartable policy-worker split: the ccy supervisor's decision logic now
+  runs in a separate `--worker` subprocess that hot-reloads on a fingerprint
+  change without disturbing the wrapped `claude` PTY session, with a bounded
+  read timeout and an in-process fallback; opt-out via
+  `CLAUDE_SUPERVISE_NO_WORKER` (Plan 00164 Phase 4).
+- `scripts/echd-capture` — pipe a command's output through it to capture the
+  full output to a file while printing only a bounded tail (or `--head N`)
+  preview plus the capture file path; the `pipe_blocker` handler now
+  recommends it as the preferred alternative to piping into `tail`/`head`
+  (Plan 00164 Phase 6).
+
+### Changed
+
+- Upgrade messaging is now truthful: client upgrades report the real
+  installed→target version transition read from the venv's
+  `.daemon-version` stamp, instead of unconditionally claiming "already at
+  version X" (Plan 00164 Phase 1).
+
+### Fixed
+
+- Supervisor compact-injection loop: the supervisor no longer re-injects a
+  `/compact` while one is already queued (which produced 4-5 stacked ignored
+  compactions in the field). It now fires `[esc]` repeatedly at 60-second
+  intervals for any red-context band, capped at `CompactPolicy.max_escapes`,
+  to flush the queued compaction (Plan 00164 Phase 5).
+- `upgrade_transition.sh` helper output capture corruption from multiple
+  competing `printf` calls, consolidated to a single terminal printf.
+- `ccy_supervisor_integrity._read_supervisor_status` now returns an empty
+  dict (a falsy "no supervisor advertised" default) instead of `None` when
+  the status file is absent or unreadable, removing a return-none-on-error
+  shape flagged by the error-hiding QA audit.
+- Policy-worker split: the PTY host now holds the single authoritative
+  compaction state machine, ships it to the worker each tick, and adopts the
+  worker's returned state — so a worker stall, restart, or hot-reload can no
+  longer leave the in-process fallback running on stale state and injecting a
+  duplicate `/compact` (Plan 00164 Phase 4).
+
 ## [3.40.0] - 2026-07-14
 
 This is a **minor release** delivering **first-class plan journalling** (Plan
