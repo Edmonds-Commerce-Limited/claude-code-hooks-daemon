@@ -59,7 +59,7 @@ genuinely idle-stop.
 
 ### Phase 1: Brainstorm & Design (divergent)
 
-- [ ] ⬜ **Task 1.1**: Fable brainstorm agent explores the problem using this
+- [x] ✅ **Task 1.1**: Fable brainstorm agent explored the problem using this
   session's transcript + the repo, writing `BRAINSTORM.md` (detection mechanism,
   ranked housekeeping catalogue, safety guardrails, handler design sketch, open
   questions, MVP slice).
@@ -91,5 +91,19 @@ genuinely idle-stop.
 - Failsafe recovery cron already live for this session: `a8af59d9`
   (`:37` hourly, non-durable). Reused — not duplicated.
 - Phase 1 brainstorm delegated to a Fable sub-agent (transcript + repo as
-  source); output lands at
-  `CLAUDE/Plan/00161-idle-housekeeping-mode/BRAINSTORM.md`.
+  source); output at
+  `CLAUDE/Plan/00161-idle-housekeeping-mode/BRAINSTORM.md`. Delivered Task 1.1.
+- Brainstorm headline: recommend a **UserPromptSubmit advisory** handler
+  (`idle_housekeeping_advisor`, ~priority 56, opt-in) that matches the canonical
+  `FAILSAFE RECOVERY CHECK` marker, uses the **transcript tail as the no-op
+  counter** (threshold 2), guards on pending-AskUserQuestion / real-user-prompt,
+  and injects a **report-only, hard-capped** housekeeping checklist. Three-tier
+  action boundary (Report / do+commit-under-daemon-gate / never-unattended);
+  pass-cap + finding-dedupe + instant-yield anti-loop rules.
+- Incidental dogfooding finding (own follow-up candidate): `hello_world_stop`
+  injects context on **every** Stop, which makes Claude Code grant another turn —
+  so each idle tick cost **two** stops (19 ticks → 38 turns). Rate-limiting or
+  blanking that injection halves idle burn independently of this plan.
+- Phase 1 awaiting user steer on the open questions (threshold 2 vs 3;
+  report-only vs auto-commit for plan-qa/generate-docs; whether to fix the
+  doubled-stop here or separately; multithread lock). See BRAINSTORM.md §E.
