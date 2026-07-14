@@ -9,8 +9,11 @@ advisory surfaces those states loudly so the project is set up properly; it
 never blocks. Non-ccy projects and un-armed setups are silent no-ops.
 """
 
+import hashlib
+import json
 import logging
 import os
+import re
 import subprocess  # nosec B404 - git invoked with a fixed, trusted argument list only
 from pathlib import Path
 from typing import Any
@@ -32,6 +35,21 @@ _GIT_CHECK_IGNORE_TIMEOUT_SECONDS = 5
 _RESUME_TRANSCRIPT_MIN_BYTES = 100
 # git check-ignore exits 0 when the path IS ignored, 1 when it is NOT.
 _GIT_IGNORED_RETURNCODE = 0
+
+# Stale-supervisor detection (Plan 00164 Phase 3). The running supervisor writes
+# its identity here; we compare it against the on-disk claude-supervise.py.
+_SUPERVISE_SUBDIR = "supervise"
+_SUPERVISOR_STATUS_FILENAME = "supervisor-status.json"
+# Untracked runtime dir relative to the project root, per install mode. Mirrors
+# ProjectContext.daemon_untracked_dir() / the supervisor's _daemon_untracked_dir.
+_SELF_INSTALL_MARKER_PARTS: tuple[str, str] = ("src", "claude_code_hooks_daemon")
+_SELF_INSTALL_UNTRACKED_PARTS: tuple[str, ...] = ("untracked",)
+_NORMAL_UNTRACKED_PARTS: tuple[str, ...] = (".claude", "hooks-daemon", "untracked")
+# Length of the sha256 hex prefix used as the source fingerprint. MUST match the
+# supervisor's compute_source_hash (claude-supervise.py) or every launch reads
+# as stale. Cross-process contract; the algorithm is trivial and stable.
+_SOURCE_HASH_HEX_LEN = 12
+_VERSION_RE = re.compile(r"""__version__\s*=\s*["']([^"']+)["']""")
 
 
 class CcySupervisorIntegrityHandler(Handler):
@@ -131,6 +149,112 @@ class CcySupervisorIntegrityHandler(Handler):
             return False
         return config.ccy.deploy_supervisor is False
 
+    # ------------------------------------------------------------------
+    # Stale-supervisor detection (Plan 00164 Phase 3)
+    # ------------------------------------------------------------------
+
+    def _daemon_untracked_dir(self, project_root: Path) -> Path:
+        """Resolve the daemon untracked dir (install-mode-aware) from the root.
+
+        Mirrors the supervisor's ``_daemon_untracked_dir`` so both agree on where
+        the status file lives, without importing ProjectContext (this handler is
+        often invoked with a fallback cwd root).
+        """
+        if project_root.joinpath(*_SELF_INSTALL_MARKER_PARTS).exists():
+            return project_root.joinpath(*_SELF_INSTALL_UNTRACKED_PARTS)
+        return project_root.joinpath(*_NORMAL_UNTRACKED_PARTS)
+
+    def _hash_supervisor_source(self, path: Path) -> str:
+        """Short sha256 fingerprint of ``path`` — MUST match the supervisor's."""
+        digest = hashlib.sha256(path.read_bytes(), usedforsecurity=False)
+        return digest.hexdigest()[:_SOURCE_HASH_HEX_LEN]
+
+    def _pid_alive(self, pid: object) -> bool:
+        """Return True iff ``pid`` is a live process we can see.
+
+        ``os.kill(pid, 0)`` raises ESRCH when the process is gone and EPERM when
+        it exists but is owned by another user (still alive). Non-int / invalid
+        pids are treated as not-alive.
+        """
+        if not isinstance(pid, int) or pid <= 0:
+            return False
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        except OSError as exc:
+            logger.debug("pid liveness check failed for %s: %s", pid, exc)
+            return False
+        return True
+
+    def _read_supervisor_status(self, project_root: Path) -> dict[str, Any] | None:
+        """Read the running supervisor's status file, or None if absent/invalid."""
+        status_path = (
+            self._daemon_untracked_dir(project_root)
+            / _SUPERVISE_SUBDIR
+            / _SUPERVISOR_STATUS_FILENAME
+        )
+        if not status_path.is_file():
+            return None
+        try:
+            data = json.loads(status_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            logger.debug("Could not read supervisor status %s: %s", status_path, exc)
+            return None
+        return data if isinstance(data, dict) else None
+
+    def _parse_ondisk_version(self, script: Path) -> str:
+        """Extract ``__version__`` from the on-disk supervisor (``?`` if absent)."""
+        try:
+            match = _VERSION_RE.search(script.read_text(encoding="utf-8"))
+        except OSError as exc:
+            logger.debug("Could not read supervisor for version parse: %s", exc)
+            return "?"
+        return match.group(1) if match else "?"
+
+    def _check_supervisor_staleness(self, project_root: Path, ccy_dir: Path) -> list[str]:
+        """Return advisory lines when the RUNNING supervisor is behind on-disk.
+
+        Silent (empty list) unless: the script exists, a status file names a
+        LIVE supervisor process, and that process's recorded source fingerprint
+        differs from the on-disk script. Using a content fingerprint (not just
+        the version string) means a dev edit between releases is caught too.
+        """
+        script = ccy_dir / _SUPERVISOR_SCRIPT_NAME
+        if not script.is_file():
+            return []  # missing script is handled by _find_problems
+
+        status = self._read_supervisor_status(project_root)
+        if status is None:
+            return []  # no supervisor has advertised itself
+
+        if not self._pid_alive(status.get("pid")):
+            return []  # advertised supervisor is not running — not a staleness concern
+
+        running_hash = status.get("source_hash")
+        if not isinstance(running_hash, str) or not running_hash:
+            return []  # pre-Phase-3 supervisor with no fingerprint; nothing to compare
+
+        ondisk_hash = self._hash_supervisor_source(script)
+        if running_hash == ondisk_hash:
+            return []  # up to date
+
+        running_version = status.get("version", "?")
+        ondisk_version = self._parse_ondisk_version(script)
+        return [
+            "🔄 CCY SUPERVISOR OUTDATED — restart ccy to load the new supervisor",
+            "",
+            f"The running ccy supervisor is v{running_version} (source {running_hash}), but a "
+            f"NEWER supervisor is on disk: v{ondisk_version} (source {ondisk_hash}). A daemon "
+            "upgrade replaced claude-supervise.py, but the live process keeps running the old "
+            "code until ccy is relaunched.",
+            "",
+            "Fix: exit this ccy session and start a new one so the wrapper re-execs the updated "
+            "supervisor. (Nothing is broken meanwhile — the old supervisor keeps working.)",
+        ]
+
     def _find_problems(self, project_root: Path, ccy_dir: Path) -> list[str]:
         """Return a list of brick-risk problem descriptions (empty when healthy)."""
         problems: list[str] = []
@@ -190,21 +314,30 @@ class CcySupervisorIntegrityHandler(Handler):
             return HookResult(decision=Decision.ALLOW, context=[])
 
         problems = self._find_problems(project_root, ccy_dir)
-        if not problems:
-            return HookResult(decision=Decision.ALLOW, context=[])
+        stale_lines = self._check_supervisor_staleness(project_root, ccy_dir)
 
-        context = [
-            "🚨 CCY SUPERVISOR MISCONFIGURED — armed but not properly set up",
-            "",
-            "The ccy supervisor is ARMED (ccy.env exports CCY_CLAUDE_WRAPPER), but:",
-            "",
-        ]
-        context += [f"  ❌ {problem}" for problem in problems]
-        context += [
-            "",
-            "An armed-but-broken supervisor can brick ccy launches for this project "
-            "and for teammates. Fix the above, then commit the ccy files.",
-        ]
+        context: list[str] = []
+        if problems:
+            context += [
+                "🚨 CCY SUPERVISOR MISCONFIGURED — armed but not properly set up",
+                "",
+                "The ccy supervisor is ARMED (ccy.env exports CCY_CLAUDE_WRAPPER), but:",
+                "",
+            ]
+            context += [f"  ❌ {problem}" for problem in problems]
+            context += [
+                "",
+                "An armed-but-broken supervisor can brick ccy launches for this project "
+                "and for teammates. Fix the above, then commit the ccy files.",
+            ]
+
+        if stale_lines:
+            if context:
+                context.append("")
+            context += stale_lines
+
+        if not context:
+            return HookResult(decision=Decision.ALLOW, context=[])
         return HookResult(decision=Decision.ALLOW, context=context)
 
     def get_claude_md(self) -> str | None:
@@ -224,6 +357,11 @@ class CcySupervisorIntegrityHandler(Handler):
             "skips deploy on `false`, so upgrades never refresh `claude-supervise.py` and "
             "the project runs an increasingly stale supervisor. Set it to `true` (or "
             "disarm `CCY_CLAUDE_WRAPPER` if you truly want it off).\n\n"
+            "It also detects a **stale running supervisor** (Plan 00164): when a daemon "
+            "upgrade has put a NEWER `claude-supervise.py` on disk than the live process "
+            "(compared by source fingerprint, not just version), it advises restarting ccy "
+            "so the wrapper re-execs the updated supervisor. Nothing is broken meanwhile — "
+            "the old supervisor keeps working until the session is relaunched.\n\n"
             "When you see this alert, fix the listed item(s) and commit the ccy files so "
             "the supervisor works for everyone."
         )

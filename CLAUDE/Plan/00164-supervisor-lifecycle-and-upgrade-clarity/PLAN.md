@@ -109,15 +109,20 @@ clients in one release is a regression risk out of proportion to a messaging fix
 
 ### Phase 3: Stale-supervisor detection
 
-- [ ] ⬜ **Task 3.1**: Add failing tests — running supervisor advertises its version
-  to a known runtime location; a SessionStart advisory warns when the on-disk
-  supervisor version is newer than the running one (and is silent otherwise).
-- [ ] ⬜ **Task 3.2**: Running supervisor writes a small `supervisor-status` runtime
-  file (pid + version + started-at) on start; remove/ignore on exit.
-- [ ] ⬜ **Task 3.3**: Extend the ccy supervisor advisory (SessionStart) to compare
-  on-disk `claude-supervise.py` `__version__` vs the running status file and emit a
-  clear "running supervisor is stale — restart ccy to load vX.Y.Z" advisory.
-- [ ] ⬜ **Task 3.4**: `get_claude_md()` guidance updated; QA green; daemon restart.
+- [x] ✅ **Task 3.1**: Failing tests — supervisor status helpers
+  (`test_supervisor_status.py`) + SessionStart staleness advisory
+  (`TestStaleness` in `test_ccy_supervisor_integrity.py`).
+- [x] ✅ **Task 3.2**: Supervisor writes `supervise/supervisor-status.json` (pid +
+  version + source content hash + started-at) in `main()` and removes it on exit;
+  `compute_source_hash` fingerprints the running script; `_daemon_untracked_dir`
+  factored so daemon + supervisor agree on the location.
+- [x] ✅ **Task 3.3**: Extended the ccy integrity handler — compares the running
+  supervisor's source fingerprint (from the status file, gated on a LIVE pid)
+  against the on-disk `claude-supervise.py`; emits a "restart ccy to load the new
+  supervisor vX.Y.Z" advisory when they differ. Fingerprint (not just version)
+  catches dev edits between releases; dead-pid status never false-alarms.
+- [x] ✅ **Task 3.4**: `get_claude_md()` documents the staleness advisory; 33 handler
+  tests + 6 status tests pass; mypy clean; QA lint passes; daemon restarted RUNNING.
 
 ### Phase 4: Restartable policy-worker split (hot reload)
 

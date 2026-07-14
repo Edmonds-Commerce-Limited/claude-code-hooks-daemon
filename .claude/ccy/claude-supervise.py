@@ -24,6 +24,7 @@ import argparse
 import enum
 import errno
 import fcntl
+import hashlib
 import json
 import os
 import pty
@@ -50,10 +51,17 @@ if TYPE_CHECKING:
 # hash of THIS file so it is correct even between version bumps.
 __version__ = "3.40.0"
 
+# Absolute path to THIS running script — hashed for staleness detection so the
+# daemon can tell when the on-disk supervisor differs from the running one.
+_SELF_PATH = Path(__file__).resolve()
+
 _READ_CHUNK_SIZE = 4096
 _FALLBACK_WINSIZE = struct.pack("HHHH", 24, 80, 0, 0)
 _LOG_SUBDIRECTORY = "supervise"
 _LOG_FILENAME = "decision.log"
+# Runtime identity file the running supervisor writes for staleness detection
+# (Plan 00164 Phase 3). Lives in the same 'supervise' subdir as the decision log.
+_SUPERVISOR_STATUS_FILENAME = "supervisor-status.json"
 
 _USAGE = "Usage: claude-supervise.py [--dry-run | --arm] [--log PATH] -- <child argv...>\n"
 
@@ -164,6 +172,7 @@ class _StartupSpinner:
         except (OSError, ValueError):
             return False
         return True
+
 
 # ---------------------------------------------------------------------------
 # Human input-line tracking (empty-input-box injection guard)
@@ -623,13 +632,87 @@ def _default_sidecar_dir() -> Path:
     Uses ``$CLAUDE_PROJECT_DIR`` (the project root, exported by ccy in-container),
     falling back to the current working directory when the variable is unset.
     """
+    return _daemon_untracked_dir() / _SIDECAR_SUBDIR
+
+
+def _daemon_untracked_dir() -> Path:
+    """Resolve the daemon's untracked runtime dir (install-mode-aware).
+
+    Mirrors ``ProjectContext.daemon_untracked_dir()`` without importing the
+    daemon: self-install iff the daemon SOURCE tree is present at the project
+    root. Used for both the context-sidecar dir and the supervisor status file,
+    so the daemon (which writes/reads via ProjectContext) and the standalone
+    supervisor always agree on one location.
+    """
     project_dir = Path(os.environ.get("CLAUDE_PROJECT_DIR") or Path.cwd())
     self_install = (project_dir / "src" / "claude_code_hooks_daemon").exists()
     if self_install:
-        daemon_untracked = project_dir / "untracked"
-    else:
-        daemon_untracked = project_dir / ".claude" / "hooks-daemon" / "untracked"
-    return daemon_untracked / _SIDECAR_SUBDIR
+        return project_dir / "untracked"
+    return project_dir / ".claude" / "hooks-daemon" / "untracked"
+
+
+def compute_source_hash(path: Path) -> str:
+    """Return a short sha256 hex digest of ``path``'s bytes (staleness key).
+
+    Detects when the on-disk supervisor differs from the running one,
+    independent of whether ``__version__`` was bumped. Not security-sensitive —
+    a content fingerprint only (hence ``usedforsecurity=False``).
+    """
+    digest = hashlib.sha256(path.read_bytes(), usedforsecurity=False)
+    return digest.hexdigest()[:12]
+
+
+def _supervisor_status_path(untracked_dir: Path) -> Path:
+    """Path to the supervisor status file under the shared 'supervise' subdir."""
+    return untracked_dir / _LOG_SUBDIRECTORY / _SUPERVISOR_STATUS_FILENAME
+
+
+def write_supervisor_status(
+    untracked_dir: Path,
+    *,
+    version: str,
+    source_hash: str,
+    pid: int,
+    started_at: float,
+) -> Path | None:
+    """Atomically write the running supervisor's identity for staleness checks.
+
+    Records ``version`` + ``source_hash`` (of the running script) + ``pid`` +
+    ``started_at`` so a SessionStart advisory can compare the on-disk supervisor
+    against the running one. Best-effort: a write failure is reported to stderr
+    and returns None rather than disturbing the supervised session.
+
+    Returns:
+        The status file path on success, or None on failure.
+    """
+    status_path = _supervisor_status_path(untracked_dir)
+    payload = {
+        "version": version,
+        "source_hash": source_hash,
+        "pid": pid,
+        "started_at": started_at,
+    }
+    try:
+        status_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = status_path.parent / f".{_SUPERVISOR_STATUS_FILENAME}.{pid}.tmp"
+        tmp_path.write_text(json.dumps(payload), encoding="utf-8")
+        tmp_path.replace(status_path)
+    except OSError as exc:
+        sys.stderr.write(f"claude-supervise: could not write status file: {exc}\n")
+        return None
+    return status_path
+
+
+def remove_supervisor_status(untracked_dir: Path) -> None:
+    """Remove the supervisor status file if present (idempotent, best-effort).
+
+    Called on exit so a clean shutdown leaves no stale identity behind. Any
+    OSError is reported to stderr, never silently swallowed.
+    """
+    try:
+        _supervisor_status_path(untracked_dir).unlink(missing_ok=True)
+    except OSError as exc:
+        sys.stderr.write(f"claude-supervise: could not remove status file: {exc}\n")
 
 
 def load_freshest_sidecar(
@@ -1673,7 +1756,22 @@ def main(argv: list[str] | None = None) -> int:
     flags = _parse_supervisor_flags(argv)
     log = _resolve_decision_log(flags.log_path)
 
-    return supervise(child_argv, dry_run=flags.dry_run, log=log)
+    # Advertise this running supervisor's identity (version + source hash) so a
+    # SessionStart advisory can detect when an upgrade has left a NEWER
+    # supervisor on disk than the one still running (Plan 00164 Phase 3). The
+    # status is removed on exit so a clean shutdown leaves nothing stale behind.
+    untracked_dir = _daemon_untracked_dir()
+    write_supervisor_status(
+        untracked_dir,
+        version=__version__,
+        source_hash=compute_source_hash(_SELF_PATH),
+        pid=os.getpid(),
+        started_at=time.time(),
+    )
+    try:
+        return supervise(child_argv, dry_run=flags.dry_run, log=log)
+    finally:
+        remove_supervisor_status(untracked_dir)
 
 
 if __name__ == "__main__":

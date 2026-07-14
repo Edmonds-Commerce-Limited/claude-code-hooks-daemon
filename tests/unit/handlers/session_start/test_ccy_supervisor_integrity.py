@@ -6,6 +6,8 @@ SessionStart advisory handler that warns when the ccy supervisor is ARMED
 missing, not executable, or git-ignored (so teammates never receive it).
 """
 
+import json
+import os
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -310,3 +312,91 @@ class TestMetadata:
         tests = handler.get_acceptance_tests()
         assert isinstance(tests, list)
         assert len(tests) >= 1
+
+
+# ── Stale running-supervisor detection (Plan 00164 Phase 3) ──────────────────
+
+
+_VERSIONED_SCRIPT = '#!/usr/bin/env python3\n__version__ = "{version}"\nprint("supervise")\n'
+
+
+def _write_versioned_script(ccy: Path, *, version: str, body: str = "") -> Path:
+    script = ccy / "claude-supervise.py"
+    script.write_text(_VERSIONED_SCRIPT.format(version=version) + body)
+    script.chmod(0o755)
+    return script
+
+
+def _untracked_supervise_dir(project_root: Path) -> Path:
+    # Mirrors the handler's install-mode-aware resolution for a non-self-install
+    # fixture project (no src/ tree at the root).
+    return project_root / ".claude" / "hooks-daemon" / "untracked" / "supervise"
+
+
+def _write_status(project_root: Path, *, version: str, source_hash: str, pid: int) -> Path:
+    d = _untracked_supervise_dir(project_root)
+    d.mkdir(parents=True, exist_ok=True)
+    status = d / "supervisor-status.json"
+    status.write_text(
+        json.dumps({"version": version, "source_hash": source_hash, "pid": pid, "started_at": 0.0})
+    )
+    return status
+
+
+class TestStaleness:
+    @pytest.fixture
+    def handler(self) -> CcySupervisorIntegrityHandler:
+        return CcySupervisorIntegrityHandler()
+
+    def _arm(self, tmp_path: Path, *, version: str = "3.40.0") -> Path:
+        ccy = _make_ccy(tmp_path)
+        (ccy / "ccy.env").write_text(_ARMED_ENV)
+        _write_versioned_script(ccy, version=version)
+        return ccy
+
+    def test_no_status_file_is_silent(
+        self, handler: CcySupervisorIntegrityHandler, tmp_path: Path
+    ) -> None:
+        """Armed + healthy but no supervisor advertised → no staleness noise."""
+        self._arm(tmp_path)
+        assert _run(handler, tmp_path).context == []
+
+    def test_matching_hash_is_silent(
+        self, handler: CcySupervisorIntegrityHandler, tmp_path: Path
+    ) -> None:
+        ccy = self._arm(tmp_path, version="3.40.0")
+        script = ccy / "claude-supervise.py"
+        _write_status(
+            tmp_path,
+            version="3.40.0",
+            source_hash=handler._hash_supervisor_source(script),
+            pid=os.getpid(),
+        )
+        assert _run(handler, tmp_path).context == []
+
+    def test_stale_running_supervisor_warns_restart_ccy(
+        self, handler: CcySupervisorIntegrityHandler, tmp_path: Path
+    ) -> None:
+        """On-disk supervisor differs from the running one (alive) → advise restart."""
+        self._arm(tmp_path, version="3.41.0")  # on disk = newer
+        _write_status(
+            tmp_path,
+            version="3.40.0",  # running = older
+            source_hash="deadbeefcafe",  # different from on-disk
+            pid=os.getpid(),  # alive
+        )
+        text = "\n".join(_run(handler, tmp_path).context).lower()
+        assert text != ""
+        assert "restart" in text and "ccy" in text
+        assert "3.40.0" in text  # running version
+        assert "3.41.0" in text  # on-disk version
+
+    def test_dead_pid_is_silent(
+        self, handler: CcySupervisorIntegrityHandler, tmp_path: Path
+    ) -> None:
+        """A stale status file for a supervisor that is no longer running must
+        not raise a false alarm."""
+        self._arm(tmp_path, version="3.41.0")
+        _write_status(tmp_path, version="3.40.0", source_hash="deadbeefcafe", pid=os.getpid())
+        with patch.object(handler, "_pid_alive", return_value=False):
+            assert _run(handler, tmp_path).context == []
