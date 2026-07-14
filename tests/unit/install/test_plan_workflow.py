@@ -315,6 +315,79 @@ class TestMkplanUsesProjectTemplate:
         assert "## Success Criteria" in content
 
 
+class TestMkplanScaffoldsJournal:
+    """mkplan.bash scaffolds JOURNAL/ when _JOURNAL_TEMPLATE_.md is present (Plan 00163)."""
+
+    _JOURNAL_TEMPLATE_NAME = "_JOURNAL_TEMPLATE_.md"
+
+    def _scaffold_repo(self, tmp_path: Path) -> tuple[Path, Path]:
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        subprocess.run(
+            ["git", "init", str(repo)],
+            capture_output=True,
+            check=True,
+            timeout=Timeout.GIT_CONTEXT,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo), "config", "user.name", "Journal Tester"],
+            capture_output=True,
+            check=True,
+            timeout=Timeout.GIT_CONTEXT,
+        )
+        bootstrap_plan_workflow(repo)
+        return repo, repo / "CLAUDE" / "Plan"
+
+    def _run_mkplan(self, plan_dir: Path, name: str) -> Path:
+        result = subprocess.run(
+            ["bash", str(plan_dir / MKPLAN_SCRIPT_NAME), name],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=Timeout.REQUEST_DEFAULT,
+        )
+        return Path(result.stdout.strip())
+
+    def test_scaffolds_journal_when_template_present(self, tmp_path: Path) -> None:
+        """A _JOURNAL_TEMPLATE_.md triggers JOURNAL/NNNNN-Journal-YY-MM-DD.md creation."""
+        _, plan_dir = self._scaffold_repo(tmp_path)
+        (plan_dir / self._JOURNAL_TEMPLATE_NAME).write_text(
+            "# Plan {{PLAN_NUMBER}} — Journal {{DATE}}\n\n"
+            "## {{TIME}} · action · — — scaffolded\n"
+            "By {{OWNER}} on plan {{PLAN_NUMBER}}.\n"
+        )
+
+        target = self._run_mkplan(plan_dir, "journalled-plan")
+
+        journal_dir = target / "JOURNAL"
+        assert journal_dir.is_dir(), "JOURNAL/ folder should be scaffolded"
+        day_files = list(journal_dir.glob("00001-Journal-*.md"))
+        assert len(day_files) == 1, f"expected one day-file, got {day_files}"
+
+        name = day_files[0].name
+        # NNNNN-Journal-YY-MM-DD.md
+        assert name.startswith("00001-Journal-") and name.endswith(".md")
+        date_part = name[len("00001-Journal-") : -len(".md")]
+        chunks = date_part.split("-")
+        assert len(chunks) == 3 and all(len(c) == 2 and c.isdigit() for c in chunks), name
+
+        content = day_files[0].read_text()
+        assert "# Plan 00001 — Journal" in content
+        assert "By Journal Tester on plan 00001." in content
+        assert "{{" not in content
+
+    def test_no_journal_when_template_absent(self, tmp_path: Path) -> None:
+        """Without _JOURNAL_TEMPLATE_.md, plans are created journal-less (gated)."""
+        _, plan_dir = self._scaffold_repo(tmp_path)
+        template = plan_dir / self._JOURNAL_TEMPLATE_NAME
+        if template.exists():
+            template.unlink()
+
+        target = self._run_mkplan(plan_dir, "unjournalled-plan")
+
+        assert not (target / "JOURNAL").exists(), "no JOURNAL/ without the template marker"
+
+
 class TestDeployPlanWorkflowIfEnabled:
     """Tests for config-SSoT-driven deployment (Plan 00136).
 

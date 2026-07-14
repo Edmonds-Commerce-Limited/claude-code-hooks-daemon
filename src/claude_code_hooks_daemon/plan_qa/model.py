@@ -297,6 +297,7 @@ _EXPECTED_ROOT_FILES: Final[frozenset[str]] = frozenset(
         "CLAUDE.md",
         "mkplan.bash",
         "_TEMPLATE_.md",
+        "_JOURNAL_TEMPLATE_.md",  # Plan 00163: per-plan journalling scaffold template.
     }
 )
 

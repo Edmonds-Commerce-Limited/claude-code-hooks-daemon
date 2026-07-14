@@ -134,22 +134,22 @@ folder: `BRAINSTORM-datamodel.md` (data model & lifecycle) and
   `plan_qa/checks/journal_freshness.py` (In Progress plan WITH a `JOURNAL/`
   whose newest day-file name is older than `freshness_days` — filename-based,
   never git dates, so uncommitted journals count). Both ADVISE, SWEEP stage.
-- [ ] ⬜ **Task 1.7**: `mkplan.bash` — after PLAN.md scaffold, create
-  `JOURNAL/` + `NNNNN-Journal-$(date +%y-%m-%d).md`, rendering a
-  project-owned `_JOURNAL_TEMPLATE_.md` when present (same placeholder subs:
-  `{{PLAN_NUMBER}}`, `{{DATE}}`, `{{OWNER}}`), else a built-in skeleton whose
-  seed `action` entry doubles as a worked grammar example. Scaffolding gated
-  so journal-less projects get clean plans (presence of
-  `_JOURNAL_TEMPLATE_.md` as the marker).
-- [ ] ⬜ **Task 1.8**: Ship `CLAUDE/Plan/_JOURNAL_TEMPLATE_.md` in this repo
-  (seed entry + grammar crib header) and exempt `JOURNAL/` day-files from
-  `markdown_table_formatter` so the append-only prefix invariant stays sound
-  (byte-stable journals).
-- [ ] ⬜ **Task 1.9**: Dogfood — journal THIS plan in
-  `JOURNAL/00163-Journal-<today>.md` from the first implementation session;
-  verify live: mkplan scaffolds on a scratch plan, edit-stage advisories fire
-  on a bad name and a non-append rewrite, sweep stays silent for
-  grandfathered plans. Full QA + daemon restart RUNNING.
+- [x] ✅ **Task 1.7**: `mkplan.bash` (bundle + deployed, byte-identical,
+  shellcheck clean) scaffolds `JOURNAL/` + `NNNNN-Journal-$(date +%y-%m-%d).md`
+  after PLAN.md, rendering `_JOURNAL_TEMPLATE_.md` (`{{PLAN_NUMBER}}`,
+  `{{PLAN_TITLE}}`, `{{DATE}}`, `{{TIME}}`, `{{OWNER}}`). Gated on the
+  template's presence so journal-less projects get clean plans (Decision 10).
+  Two tests in `test_plan_workflow.py` (present→scaffolds; absent→gated).
+- [x] ✅ **Task 1.8**: Shipped `_JOURNAL_TEMPLATE_.md` (bundle
+  `src/claude_code_hooks_daemon/install/templates/` + dogfood `CLAUDE/Plan/`), seed `action` entry +
+  grammar crib header. NOTE: the `markdown_table_formatter` JOURNAL/ exemption
+  is deferred to the append-only-check task (T1.4) where the byte-invariant
+  actually matters — no journal has tables yet.
+- [ ] ⬜ **Task 1.9**: Dogfood — journalled THIS plan in
+  `JOURNAL/00163-Journal-26-07-14.md` from this session (done). PENDING:
+  live-verify mkplan scaffolds on a scratch plan and that edit-stage advisories
+  fire on a bad name / non-append rewrite and the sweep stays silent for
+  grandfathered plans — needs the checks (T1.4/T1.6) first.
 
 ### Phase 2: Reference doc + template reconciliation
 
