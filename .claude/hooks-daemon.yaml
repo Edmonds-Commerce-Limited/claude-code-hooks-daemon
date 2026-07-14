@@ -384,6 +384,17 @@ handlers:
       enabled: true
       priority: 55
 
+    idle_housekeeping_advisory:  # BETA (Plan 00161): report-first idle housekeeping.
+      # Off by default upstream; dogfood-enabled here. After 2 consecutive no-op
+      # failsafe-recovery ticks, suggests dispatching housekeeping sub-agents that
+      # write shareable markdown reports (untracked/reports/). Report-only.
+      enabled: true
+      priority: 56
+      options:
+        noop_threshold: 2
+        max_passes_per_session: 1
+        reports_dir: "untracked/reports"
+
     # auto_continue:  # Auto-continues on 'continue' keyword
     #   enabled: false # Optional - enable for auto-continue behavior
     #   priority: 20

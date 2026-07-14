@@ -383,6 +383,11 @@ class HandlerID:
         config_key="critical_thinking_advisory",
         display_name="critical-thinking-advisory",
     )
+    IDLE_HOUSEKEEPING_ADVISORY = HandlerIDMeta(
+        class_name="IdleHousekeepingAdvisoryHandler",
+        config_key="idle_housekeeping_advisory",
+        display_name="idle-housekeeping-advisory",
+    )
     BRITISH_ENGLISH = HandlerIDMeta(
         class_name="BritishEnglishHandler",
         config_key="british_english",

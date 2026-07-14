@@ -127,6 +127,7 @@ class Priority:
 
     # Advisory handlers (Priority: 55-60)
     CRITICAL_THINKING_ADVISORY = 55
+    IDLE_HOUSEKEEPING_ADVISORY = 56
     NITPICK_DISMISSIVE = 10
     NITPICK_HEDGING = 20
     DAEMON_DOCS_GUARD = 57

@@ -86,13 +86,14 @@
 | 10 | transcript_archiver | NON-TERMINAL | Archive conversation transcript before compaction |
 | 20 | compaction_signal | NON-TERMINAL | Write a ``<session>.compacting`` signal on PreCompact for the supervisor |
 
-### UserPromptSubmit (3 handlers)
+### UserPromptSubmit (4 handlers)
 
 | Priority | Handler | Behavior | Description |
 |----------|---------|----------|-------------|
 | 10 | git_context_injector | CONTEXT | Inject current git status as context when user submits a prompt |
 | 54 | post_clear_auto_execute | ADVISORY | Inject execution guidance on the first prompt of a new session |
 | 55 | critical_thinking_advisory | ADVISORY | Periodically inject advisory context encouraging critical evaluation |
+| 56 | idle_housekeeping_advisory | ADVISORY | After N consecutive no-op recovery ticks, advise a report-first |
 
 ### PermissionRequest (1 handler)
 

@@ -35,6 +35,7 @@ _EXPECTED_OPT_IN_CONFIG_KEYS = {
     "context_sidecar",
     "compaction_signal",
     "daemon_stats",
+    "idle_housekeeping_advisory",
 }
 
 

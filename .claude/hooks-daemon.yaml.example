@@ -336,6 +336,10 @@ handlers:
       enabled: false              # Enable for critical thinking nudges on substantial prompts
       priority: 55
 
+    idle_housekeeping_advisory:  # BETA: report-first idle housekeeping (Plan 00161)
+      enabled: false             # Opt-in beta - leave off unless trying it. See docs/guides/CREATING_REPORTS.md
+      priority: 56
+
   # Other hook events
   permission_request:
     auto_approve_reads:  # Auto-approves read-only file operations

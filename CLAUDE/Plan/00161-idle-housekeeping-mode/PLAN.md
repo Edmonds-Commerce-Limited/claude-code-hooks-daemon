@@ -145,6 +145,21 @@ be shared through three channels:
 A how-to-create-reports guide ships alongside so the format and sharing channels
 are documented for users.
 
+### Decision 6: `hooks-daemon-` prefix for all deployed skills/agents/commands
+
+**Context** (user, 2026-07-14): the daemon will actively deploy skills/agents
+into client projects and needs to manage/clean them up cleanly as they change.
+**Decision**: every daemon-deployed artifact under `.claude/{skills,agents,commands}/`
+is named with the canonical prefix **`hooks-daemon-`** (matching the existing
+`hooks-daemon` skill and the `hooksdaemon.*` git-config namespace). The installer
+enumerates `.claude/{skills,agents,commands}/hooks-daemon-*` to reconcile against
+the currently-bundled set and remove stale artifacts on upgrade — no per-file
+manifest needed, and client-authored artifacts (any other name) are never
+touched. Short alias `hd-` is a fallback only if invocation verbosity bites; keep
+ONE canonical prefix. The MVP handler dispatches generic sub-agents (no deployed
+agent yet); this convention governs the deployment mechanism when it lands
+(likely a follow-up plan).
+
 ## Success Criteria
 
 - [ ] A robust detection rule that never trips while the user is waiting, mid-plan,

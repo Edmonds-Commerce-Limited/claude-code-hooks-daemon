@@ -213,6 +213,7 @@ class ConfigTemplate:
             "  # UserPromptSubmit - Context injection before processing\n"
             "  user_prompt_submit:\n"
             "    git_context_injector: {enabled: true, priority: 20}  # Inject git context into prompts\n"
+            "    idle_housekeeping_advisory: {enabled: false, priority: 56}  # Report-first idle housekeeping (beta, opt-in)\n"
             "\n"
             "  # SessionStart - Initialize environment\n"
             "  session_start:\n"

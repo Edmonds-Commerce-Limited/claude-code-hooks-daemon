@@ -2,7 +2,24 @@ version: "3.40.0"
 date: "2026-07-13"
 breaking: false
 config_changes:
-  added: []
+  added:
+    - key: handlers.user_prompt_submit.idle_housekeeping_advisory
+      recommended: false
+      description: >-
+        NEW beta handler (opt-in, OFF by default). When enabled, it watches for
+        repeated no-op failsafe-recovery ticks and, once the session is
+        demonstrably idle-and-caught-up, injects HOUSEKEEPING MODE guidance:
+        dispatch specialist housekeeping sub-agents that run read-only audits and
+        write shareable markdown report files (default untracked/reports/). It is
+        strictly REPORT-ONLY -- it never auto-fixes or auto-commits -- and yields
+        instantly to real work. Options: noop_threshold (default 2),
+        max_passes_per_session (default 1), reports_dir (default untracked/reports).
+      migration_note: >-
+        Beta -- leave it OFF unless you want to try it. To enable, add
+        handlers.user_prompt_submit.idle_housekeeping_advisory.enabled: true to
+        your .claude/hooks-daemon.yaml and restart the daemon. See
+        docs/guides/CREATING_REPORTS.md for the report format and sharing
+        channels (agent-to-agent, Slack, GitHub issue).
   renamed: []
   removed: []
   changed:
