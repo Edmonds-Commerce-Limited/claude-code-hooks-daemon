@@ -1052,23 +1052,6 @@ Content inside markdown code blocks is exempt from validation.
 
 When a git command prints `hint: The '...' hook was ignored because it's not set as executable`, this handler automatically `chmod +x`s every non-`.sample` file in the repository's hooks directory (resolved via `git rev-parse --git-path hooks`, so worktrees and `core.hooksPath` are handled). Execute bits are added with least privilege (only where read is already granted). It never blocks the command and reports which hooks it fixed via advisory context. `.sample` files and already-executable hooks are left untouched.
 
-## markdown_table_formatter — markdown tables are auto-aligned
-
-After every `Write` or `Edit` of a `.md` or `.markdown` file, the content is re-formatted via `mdformat + mdformat-gfm` so that table pipes are aligned and column widths are consistent. The handler is non-terminal and advisory — it never blocks, it just rewrites the file on disk.
-
-**What changes:**
-
-- Table pipes are aligned vertically and delimiter rows widened to match cell widths.
-- Ordered lists keep consecutive numbering (`1.` `2.` `3.`).
-- `---` thematic breaks are preserved (mdformat's 70-underscore default is post-processed back).
-- Asterisks in table cells are escaped (`*` → `\*`) as required by GFM.
-
-**Ad-hoc formatting of existing files:**
-
-```
-$PYTHON -m claude_code_hooks_daemon.daemon.cli format-markdown <path>
-```
-
 ## background_process_tracker — backgrounded processes are tracked
 
 A PostToolUse advisory that fires when a Bash call backgrounds a process (`run_in_background: true`, or a `&`/`nohup`/`setsid`/`disown` command). It records the command to `background-processes.jsonl` and injects rate-limited guidance.
@@ -1146,6 +1129,25 @@ handlers:
   post_tool_use:
     recovery_cron_advisor:
       enabled: false
+```
+
+## markdown_table_formatter — markdown tables are auto-aligned
+
+After every `Write` or `Edit` of a `.md` or `.markdown` file, the content is re-formatted via `mdformat + mdformat-gfm` so that table pipes are aligned and column widths are consistent. The handler is non-terminal and advisory — it never blocks, it just rewrites the file on disk.
+
+**What changes:**
+
+- Table pipes are aligned vertically and delimiter rows widened to match cell widths.
+- Ordered lists keep consecutive numbering (`1.` `2.` `3.`).
+- `---` thematic breaks are preserved (mdformat's 70-underscore default is post-processed back).
+- Asterisks in table cells are escaped (`*` → `\*`) as required by GFM.
+
+**Exempt:** journal day-files (`JOURNAL/NNNNN-Journal-YY-MM-DD.md`, Plan 00163) are NEVER reformatted — they are an append-only, byte-stable log and rewriting them would trip the `journal-append-only` check.
+
+**Ad-hoc formatting of existing files:**
+
+```
+$PYTHON -m claude_code_hooks_daemon.daemon.cli format-markdown <path>
 ```
 
 ## hook_registration_checker — hooks configuration policy
