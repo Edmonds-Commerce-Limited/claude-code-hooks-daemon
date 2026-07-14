@@ -56,6 +56,8 @@ source "$INSTALL_LIB_DIR/daemon_control.sh"
 source "$INSTALL_LIB_DIR/rollback.sh"
 # shellcheck source=install/config_preserve.sh
 source "$INSTALL_LIB_DIR/config_preserve.sh"
+# shellcheck source=install/upgrade_transition.sh
+source "$INSTALL_LIB_DIR/upgrade_transition.sh"
 
 # ============================================================
 # Argument parsing
@@ -95,6 +97,19 @@ fi
 VENV_PYTHON="$(resolve_existing_venv_python "$DAEMON_DIR")" || VENV_PYTHON=""
 if [ -z "$VENV_PYTHON" ]; then
     print_info "No existing venv found — Step 7 will bootstrap a fresh one via ensure_venv."
+fi
+
+# Plan 00164 Phase 1: the TRUE "from" version for user-facing messaging is the
+# EXISTING venv's `.daemon-version` stamp — the version the venv was actually
+# built/verified against — read BEFORE ensure_venv rebuilds it. Layer 1 has
+# already checked out the target tag, so the git ref / pyproject version can be
+# AHEAD of what the venv was really built from (the reported "git at v3.40.0 but
+# venv stamped v3.38.0" case). Empty when there is no existing stamped venv
+# (fresh install / pre-stamp build) — the transition helpers treat empty as
+# "installing".
+INSTALLED_VERSION=""
+if [ -n "$VENV_PYTHON" ]; then
+    INSTALLED_VERSION="$(get_venv_version "$(dirname "$(dirname "$VENV_PYTHON")")")"
 fi
 EXAMPLE_CONFIG="$DAEMON_DIR/.claude/hooks-daemon.yaml.example"
 SETTINGS_JSON_SOURCE="$DAEMON_DIR/.claude/settings.json"
@@ -193,9 +208,17 @@ ROLLBACK_REF=$(git -C "$DAEMON_DIR" describe --tags --exact-match 2>/dev/null ||
 print_info "Current version: $CURRENT_VERSION"
 print_info "Current git ref: ${ROLLBACK_REF:-unknown}"
 
-# Check if already at target version
+# Idempotent deployment path.
+#
+# Plan 00164 Phase 1: Layer 1 (upgrade.sh) ALWAYS checks out the target tag
+# before invoking this script, so `ROLLBACK_REF` (git describe --exact-match)
+# always equals `$TARGET_VERSION` here — this branch is the effective single
+# deployment path for every client upgrade. The message therefore must describe
+# the TRUE transition of the actually-built venv (INSTALLED_VERSION, the venv
+# stamp) → target, NOT the always-equal git ref. This is the fix for the
+# misleading "Already at version X" that fired even on a genuine version jump.
 if [ "$ROLLBACK_REF" = "$TARGET_VERSION" ]; then
-    print_success "Already at version $TARGET_VERSION"
+    print_success "$(upgrade_transition_headline "$INSTALLED_VERSION" "$TARGET_VERSION")"
     print_info "Running idempotent deployment steps to ensure files are current..."
 
     # Plan 00099: ensure_venv uses a fingerprint-keyed venv path so concurrent
@@ -287,7 +310,7 @@ if result.recommend_enable:
         fail_fast "Post-install verification failed after idempotent upgrade"
     fi
 
-    print_success "Upgrade verification complete"
+    print_success "$(upgrade_transition_summary "$INSTALLED_VERSION" "$TARGET_VERSION")"
     exit 0
 fi
 

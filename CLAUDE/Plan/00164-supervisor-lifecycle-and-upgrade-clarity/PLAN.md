@@ -79,17 +79,23 @@ preserve that property: host and worker both run under the container `python3`.
 
 ### Phase 1: Upgrade clarity (the "already upgraded" fix)
 
-- [ ] ⬜ **Task 1.1**: Add failing tests capturing the bug — Layer 2 must take the
-  full-upgrade path when the installed/from version differs from target, and only
-  the idempotent path on a true no-op; "Already at version" must not print on a
-  genuine jump.
-- [ ] ⬜ **Task 1.2**: Pass Layer 1's captured `FROM_VERSION` into Layer 2 and base
-  the idempotency decision + messaging on from-vs-target (and venv-stamp health),
-  not the post-checkout git ref.
-- [ ] ⬜ **Task 1.3**: Clarify all upgrade output so a refresh vs a true no-op vs a
-  real jump are each unambiguous; verify the full-upgrade path (config
-  preservation) runs on a real jump.
-- [ ] ⬜ **Task 1.4**: QA + shellcheck + targeted upgrade tests green; daemon restart.
+- [x] ✅ **Task 1.1**: Add failing tests for a source-safe transition helper that
+  describes the TRUE installed→target transition (`test_upgrade_transition_messages.py`).
+- [x] ✅ **Task 1.2**: Add `scripts/install/upgrade_transition.sh` (pure, source-safe
+  headline/summary helpers keyed on the venv `.daemon-version` stamp vs target).
+- [x] ✅ **Task 1.3**: Wire it into `upgrade_version.sh` — capture `INSTALLED_VERSION`
+  from the existing venv stamp BEFORE `ensure_venv`, and replace the misleading
+  unconditional "Already at version $TARGET" headline + completion line.
+- [x] ✅ **Task 1.4**: shellcheck clean; transition tests + all 39 upgrade
+  integration tests green.
+
+**Decision (scope)**: the idempotent deploy block is the effective single path
+(Layer 1 always pre-checks-out the tag), so the fix makes ITS messaging truthful
+rather than reviving the never-run-in-prod full-upgrade path below it. Reviving
+that path (config-preservation baseline + rollback ref are both defeated by
+Layer 1's pre-checkout) is a real but separate, risk-managed follow-up — noted
+here honestly, not deflected — because activating never-run code across all
+clients in one release is a regression risk out of proportion to a messaging fix.
 
 ### Phase 2: Supervisor startup banner + version marker
 
@@ -133,11 +139,29 @@ preserve that property: host and worker both run under the container `python3`.
 - [ ] ⬜ **Task 4.6**: QA green; live PTY smoke test that a worker restart does not
   disturb the wrapped child; daemon restart.
 
-### Phase 5: Release
+### Phase 6: Output-capture helper (`echd-capture`)
 
-- [ ] ⬜ **Task 5.1**: Full QA suite green (`./scripts/qa/run_all.sh`).
-- [ ] ⬜ **Task 5.2**: Config/truth-change manifests if warranted; changelog inputs.
-- [ ] ⬜ **Task 5.3**: Run `/release` — single release shipping all four changes.
+Agents defeat the `pipe_blocker` with pointless theatre — capturing full output to
+a file and then echoing ALL of it to stdout anyway (net token bloat). Ship a
+first-class helper so the intended "capture full, read a slice" workflow is one
+short command.
+
+- [ ] ⬜ **Task 6.1**: Add failing tests — piping into the helper tees the FULL
+  output to a capture file and prints only a bounded tail preview + the absolute
+  capture path; exit status of the upstream pipeline is preserved; `--head`/N args.
+- [ ] ⬜ **Task 6.2**: Implement `echd-capture` (portable, dependency-light): reads
+  stdin, tees to a capture file under the project untracked dir (fallback
+  `mktemp`), prints the last N lines (default) or `--head N`, then the full path.
+- [ ] ⬜ **Task 6.3**: Whitelist the helper in `pipe_blocker` and rewrite its block
+  message to RECOMMEND `... | echd-capture N` instead of the temp-file dance.
+- [ ] ⬜ **Task 6.4**: Deploy the helper to client projects (install/upgrade) and
+  document it; QA green; daemon restart.
+
+### Phase 7: Release
+
+- [ ] ⬜ **Task 7.1**: Full QA suite green (`./scripts/qa/run_all.sh`).
+- [ ] ⬜ **Task 7.2**: Config/truth-change manifests if warranted; changelog inputs.
+- [ ] ⬜ **Task 7.3**: Run `/release` — single release shipping all changes.
 
 ## Dependencies
 
