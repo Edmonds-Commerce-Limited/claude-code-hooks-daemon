@@ -719,16 +719,22 @@ bash /tmp/script.sh         # execute if safe
 
 Commands piped to `tail` or `head` are **blocked** — piping truncates output and causes information loss.
 
-**Use a temp file instead:**
+**Do NOT do the theatre** of capturing output to a file and then echoing the WHOLE file to stdout — that defeats the point and just bloats tokens.
+
+**Preferred — `echd-capture`**: capture the FULL output, see only a preview.
 
 ```bash
-# WRONG — blocked:
+# WRONG — blocked (and truncates):
 pytest tests/ 2>&1 | tail -20
 
-# RIGHT — redirect to temp file:
-pytest tests/ > /tmp/pytest_out.txt 2>&1
-# Then read selectively if needed
+# RIGHT — full capture, bounded preview + path to the rest:
+set -o pipefail
+pytest tests/ 2>&1 | echd-capture 20
+# prints the last 20 lines + '(full output: /…/command-output-….txt)'.
+# Use --head N for the first N lines. pipefail keeps pytest's exit code visible.
 ```
+
+**Alternative** (no pipe): `pytest tests/ > /tmp/out.txt 2>&1` then read selectively.
 
 **Allowed** (whitelisted): `grep`, `rg`, `awk`, `sed`, `jq`, `ls`, `cat`, `git log`, `git tag`, `git branch`, and other cheap filtering commands.
 
