@@ -31,6 +31,55 @@ def unknown_input() -> dict:
     }
 
 
+# ── echd-capture recommendation (Plan 00164 Phase 6) ─────────────────────────
+
+
+class TestEchdCaptureRecommendation:
+    """Every block message must recommend `echd-capture` so agents stop the
+    pointless 'capture to file then echo it all to stdout' theatre."""
+
+    def _handle(self, handler: PipeBlockerHandler, hook_input: dict, count: int) -> str:
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = count
+        with patch(
+            "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
+            return_value=mock_dl,
+        ):
+            reason = handler.handle(hook_input).reason
+        assert reason is not None
+        return reason
+
+    def test_verbose_blacklisted_recommends_echd_capture(
+        self, handler: PipeBlockerHandler, blacklisted_input: dict
+    ) -> None:
+        reason = self._handle(handler, blacklisted_input, 0)
+        assert "echd-capture" in reason
+        assert "pipefail" in reason
+
+    def test_terse_blacklisted_recommends_echd_capture(
+        self, handler: PipeBlockerHandler, blacklisted_input: dict
+    ) -> None:
+        assert "echd-capture" in self._handle(handler, blacklisted_input, 3)
+
+    def test_verbose_unknown_recommends_echd_capture(
+        self, handler: PipeBlockerHandler, unknown_input: dict
+    ) -> None:
+        reason = self._handle(handler, unknown_input, 0)
+        assert "echd-capture" in reason
+        assert "pipefail" in reason
+
+    def test_terse_unknown_recommends_echd_capture(
+        self, handler: PipeBlockerHandler, unknown_input: dict
+    ) -> None:
+        assert "echd-capture" in self._handle(handler, unknown_input, 3)
+
+    def test_claude_md_documents_echd_capture(self, handler: PipeBlockerHandler) -> None:
+        guidance = handler.get_claude_md()
+        assert guidance is not None
+        assert "echd-capture" in guidance
+        assert "pipefail" in guidance
+
+
 # ── _get_block_count() ────────────────────────────────────────────────────────
 
 

@@ -1,0 +1,108 @@
+#!/bin/bash
+#
+# echd-capture - capture full piped output, show only a bounded preview.
+# Plan 00164 Phase 6 (Claude Code Hooks Daemon).
+#
+# The pipe_blocker forbids `cmd | tail`/`cmd | head` because truncating an
+# expensive command's output loses data. Agents work around it with pointless
+# theatre — redirecting to a file and then echoing the WHOLE file to stdout
+# anyway — which is net token bloat.
+#
+# This helper does the intended thing in one short command: it reads stdin,
+# tees the FULL stream to a capture file, and prints only a bounded PREVIEW
+# (the last N lines by default, or the first N with --head) followed by the
+# absolute path to the full capture for follow-up reading.
+#
+# Usage:
+#   set -o pipefail            # so a failing producer still surfaces its exit
+#   <command> 2>&1 | echd-capture [N] [--head|--tail] [--all] [--label NAME]
+#
+#   N            preview line count (default 20)
+#   --tail       preview the LAST N lines (default)
+#   --head       preview the FIRST N lines
+#   --all        capture only; print the whole stream as the preview
+#   --label NAME include NAME in the capture filename (safe chars only)
+#
+# Exit status: echd-capture exits 0 on success. Because a pipeline returns the
+# LAST stage's status, use `set -o pipefail` so the upstream command's non-zero
+# exit still propagates (the harness then shows the real failure).
+#
+# Capture directory precedence:
+#   1. $ECHD_CAPTURE_DIR                      (explicit override)
+#   2. $CLAUDE_PROJECT_DIR/untracked/captures (inside a daemon project)
+#   3. ${TMPDIR:-/tmp}/echd-captures          (last resort)
+
+set -uo pipefail
+
+_PREVIEW_LINES=20
+_MODE="tail"
+_LABEL=""
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --head) _MODE="head"; shift ;;
+        --tail) _MODE="tail"; shift ;;
+        --all) _MODE="all"; shift ;;
+        --label)
+            _LABEL="$2"
+            shift 2
+            ;;
+        -h | --help)
+            grep '^#' "$0" | cut -c3-
+            exit 0
+            ;;
+        '' | *[!0-9]*)
+            echo "echd-capture: unknown argument: $1" >&2
+            exit 2
+            ;;
+        *)
+            _PREVIEW_LINES="$1"
+            shift
+            ;;
+    esac
+done
+
+# Resolve the capture directory (see precedence in the header comment).
+if [ -n "${ECHD_CAPTURE_DIR:-}" ]; then
+    _dir="$ECHD_CAPTURE_DIR"
+elif [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then
+    _dir="$CLAUDE_PROJECT_DIR/untracked/captures"
+else
+    _dir="${TMPDIR:-/tmp}/echd-captures"
+fi
+mkdir -p "$_dir"
+
+# Filesystem-safe label (alnum, dash, underscore only).
+_safe_label=""
+if [ -n "$_LABEL" ]; then
+    _safe_label="$(printf '%s' "$_LABEL" | tr -c 'A-Za-z0-9_-' '_')-"
+fi
+
+# Unique capture filename. `date +%s` + PID keep it collision-free without any
+# randomness source. The `command-output-` stem is what the preview footer and
+# tooling look for.
+_stamp="$(date +%s 2>/dev/null || echo 0)"
+_capture="$_dir/command-output-${_safe_label}${_stamp}-$$.txt"
+
+# Tee the FULL stream to the capture file while counting nothing here (we count
+# from the file afterwards, so the preview and totals are always consistent).
+cat > "$_capture"
+
+_total_lines="$(wc -l < "$_capture" | tr -d '[:space:]')"
+_total_bytes="$(wc -c < "$_capture" | tr -d '[:space:]')"
+
+# Emit the bounded preview.
+case "$_MODE" in
+    head) head -n "$_PREVIEW_LINES" "$_capture" ;;
+    all) cat "$_capture" ;;
+    *) tail -n "$_PREVIEW_LINES" "$_capture" ;;
+esac
+
+# Footer: how much was shown vs captured, and where the full output lives.
+if [ "$_MODE" = "all" ] || [ "$_total_lines" -le "$_PREVIEW_LINES" ]; then
+    _shown="all $_total_lines"
+else
+    _shown="$_MODE $_PREVIEW_LINES of $_total_lines"
+fi
+printf '\n--- echd-capture: showing %s lines (%s bytes total) ---\n' "$_shown" "$_total_bytes"
+printf '(full output: %s)\n' "$_capture"

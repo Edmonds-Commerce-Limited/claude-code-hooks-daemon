@@ -29,7 +29,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 TRANSITION_LIB = REPO_ROOT / "scripts" / "install" / "upgrade_transition.sh"
 UPGRADE_VERSION_SH = REPO_ROOT / "scripts" / "upgrade_version.sh"
 
-_HARNESS = "set -euo pipefail\nsource \"$1\"\n$2 \"$3\" \"$4\"\n"
+_HARNESS = 'set -euo pipefail\nsource "$1"\n$2 "$3" "$4"\n'
 
 
 def _run(func: str, installed: str, target: str) -> str:

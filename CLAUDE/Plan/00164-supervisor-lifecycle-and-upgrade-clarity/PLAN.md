@@ -146,16 +146,21 @@ a file and then echoing ALL of it to stdout anyway (net token bloat). Ship a
 first-class helper so the intended "capture full, read a slice" workflow is one
 short command.
 
-- [ ] ⬜ **Task 6.1**: Add failing tests — piping into the helper tees the FULL
-  output to a capture file and prints only a bounded tail preview + the absolute
-  capture path; exit status of the upstream pipeline is preserved; `--head`/N args.
-- [ ] ⬜ **Task 6.2**: Implement `echd-capture` (portable, dependency-light): reads
-  stdin, tees to a capture file under the project untracked dir (fallback
-  `mktemp`), prints the last N lines (default) or `--head N`, then the full path.
-- [ ] ⬜ **Task 6.3**: Whitelist the helper in `pipe_blocker` and rewrite its block
-  message to RECOMMEND `... | echd-capture N` instead of the temp-file dance.
-- [ ] ⬜ **Task 6.4**: Deploy the helper to client projects (install/upgrade) and
-  document it; QA green; daemon restart.
+- [x] ✅ **Task 6.1**: Failing tests (`test_echd_capture.py`) — helper tees FULL
+  output to a capture file, prints a bounded tail/`--head` preview + absolute
+  capture path; `set -o pipefail` preserves the producer's exit status.
+- [x] ✅ **Task 6.2**: Implemented `scripts/echd-capture` (portable bash): tees stdin
+  to a capture file (`$ECHD_CAPTURE_DIR` → `$CLAUDE_PROJECT_DIR/untracked/captures`
+  → `${TMPDIR}/echd-captures`), prints N-line tail (default 20) / `--head N` /
+  `--all`, footer with counts + full path. shellcheck clean, +x (100755) tracked.
+- [x] ✅ **Task 6.3**: `pipe_blocker` block messages (verbose + terse, blacklisted +
+  unknown) and `get_claude_md` now lead with `echd-capture`, resolving the helper's
+  ABSOLUTE path from the daemon dir so the recommended command works from any cwd;
+  temp-file demoted to secondary. 5 new tests; all 177 pipe_blocker tests green.
+- [x] ✅ **Task 6.4**: Deployment = repo inclusion (client installs get
+  `.claude/hooks-daemon/scripts/echd-capture` via the git clone); the block message
+  points at the resolved absolute path so no PATH setup is required. Documented via
+  `get_claude_md`. Daemon restarted RUNNING; live probe shows the resolved path.
 
 ### Phase 7: Release
 

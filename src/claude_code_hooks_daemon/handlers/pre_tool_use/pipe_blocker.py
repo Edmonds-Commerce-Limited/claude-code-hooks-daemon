@@ -29,6 +29,13 @@ _CONFIG_HINT_EXTRA_WHITELIST = "extra_whitelist"
 _CONFIG_HINT_HANDLER = "handlers.pre_tool_use.pipe_blocker"
 _CONFIG_YAML_KEY = "pipe_blocker"
 
+# Default preview line count suggested in the echd-capture recommendation.
+_ECHD_CAPTURE_DEFAULT_LINES = 20
+# Name of the deployed capture helper (Plan 00164 Phase 6) and its location
+# relative to the daemon dir (parent of the untracked runtime dir).
+_ECHD_CAPTURE_NAME = "echd-capture"
+_ECHD_CAPTURE_REL_PARTS = ("scripts", _ECHD_CAPTURE_NAME)
+
 
 class PipeBlockerHandler(Handler):
     """Block expensive commands piped to tail/head to prevent information loss.
@@ -226,6 +233,53 @@ class PipeBlockerHandler(Handler):
                 return True
         return False
 
+    def _capture_helper_invocation(self) -> str:
+        """Return the recommended ``echd-capture`` invocation.
+
+        Resolved to the deployed helper's ABSOLUTE path (from the daemon dir —
+        the parent of the untracked runtime dir) so the recommended command
+        works from any cwd. Falls back to the bare name when ProjectContext is
+        not initialised or the helper is not present.
+        """
+        from claude_code_hooks_daemon.core.project_context import ProjectContext
+
+        try:
+            helper = ProjectContext.daemon_untracked_dir().parent.joinpath(*_ECHD_CAPTURE_REL_PARTS)
+        except RuntimeError:
+            return _ECHD_CAPTURE_NAME
+        if helper.exists():
+            return str(helper)
+        return _ECHD_CAPTURE_NAME
+
+    def _echd_capture_recommendation(self, source_segment: str) -> str:
+        """Verbose ``echd-capture`` recommendation block.
+
+        This is the PRIMARY alternative — it captures the FULL output and prints
+        only a bounded preview + the capture path, replacing the pointless
+        "redirect to a file then echo it all to stdout" theatre agents fall into.
+        """
+        helper = self._capture_helper_invocation()
+        source = source_segment or "command"
+        return (
+            f"✅ RECOMMENDED ALTERNATIVE — capture full output, preview a slice "
+            f"({_ECHD_CAPTURE_NAME}):\n\n"
+            f"  set -o pipefail\n"
+            f"  {source} 2>&1 | {helper} {_ECHD_CAPTURE_DEFAULT_LINES}\n\n"
+            f"  → prints the last {_ECHD_CAPTURE_DEFAULT_LINES} lines AND the path to the "
+            f"FULL capture for follow-up.\n"
+            f"    Use `--head N` for the first N lines. `set -o pipefail` keeps "
+            f"{source}'s own exit status visible.\n"
+        )
+
+    def _echd_capture_terse(self, source_segment: str) -> str:
+        """One-line ``echd-capture`` recommendation for terse (repeat) blocks."""
+        helper = self._capture_helper_invocation()
+        source = source_segment or "command"
+        return (
+            f"Capture full + preview: set -o pipefail; "
+            f"{source} 2>&1 | {helper} {_ECHD_CAPTURE_DEFAULT_LINES}\n"
+        )
+
     def _get_block_count(self) -> int:
         """Get number of previous blocks by this handler."""
         try:
@@ -244,15 +298,13 @@ class PipeBlockerHandler(Handler):
             f"  • If needed data isn't in those N truncated lines, the ENTIRE\n"
             f"    expensive command must be re-run\n"
             f"  • This wastes time and resources\n\n"
-            f"✅ RECOMMENDED ALTERNATIVE:\n"
-            f"  Redirect to temp file, capture exit code, then inspect selectively:\n\n"
+            f"{self._echd_capture_recommendation(source_segment)}\n"
+            f"  Or, without a pipe — redirect to a temp file and capture the exit code:\n\n"
             f'  TEMP_FILE="/tmp/output_$$.txt"\n'
             f"  {source_segment or 'command'} > \"$TEMP_FILE\" 2>&1\n"
             f"  EXIT_CODE=$?\n"
             f'  if [ $EXIT_CODE -eq 0 ]; then echo "Completed OK"; '
             f'else echo "Completed with errors (exit code: $EXIT_CODE) - check $TEMP_FILE"; fi\n\n'
-            f"  # Agent sees 'Completed OK' → no need to read the file\n"
-            f"  # Agent sees 'Completed with errors' → read $TEMP_FILE to diagnose\n\n"
             f"To disable: {_CONFIG_HINT_HANDLER}  (set enabled: false)"
         )
 
@@ -262,12 +314,9 @@ class PipeBlockerHandler(Handler):
         return (
             f"BLOCKED: Pipe to tail/head — {source_name} is expensive\n\n"
             f"COMMAND: {command}\n\n"
-            f"Use temp file:\n"
-            f'  TEMP_FILE="/tmp/output_$$.txt"\n'
-            f"  {source_segment or 'command'} > \"$TEMP_FILE\" 2>&1\n"
-            f"  EXIT_CODE=$?\n"
-            f'  if [ $EXIT_CODE -eq 0 ]; then echo "Completed OK"; '
-            f'else echo "Completed with errors (exit code: $EXIT_CODE) - check $TEMP_FILE"; fi\n\n'
+            f"{self._echd_capture_terse(source_segment)}"
+            f"Or a temp file: "
+            f'TEMP_FILE="/tmp/output_$$.txt"; {source_segment or "command"} > "$TEMP_FILE" 2>&1\n\n'
             f"To disable: {_CONFIG_HINT_HANDLER}  (set enabled: false)"
         )
 
@@ -284,16 +333,14 @@ class PipeBlockerHandler(Handler):
             f"    {_CONFIG_YAML_KEY}:\n"
             f"      {_CONFIG_HINT_EXTRA_WHITELIST}:\n"
             f'        - "^{source_name}\\\\b"\n\n'
-            f"  • If it IS expensive, use a temp file instead\n\n"
-            f"✅ RECOMMENDED ALTERNATIVE:\n"
-            f"  Redirect to temp file, capture exit code, then inspect selectively:\n\n"
+            f"  • If it IS expensive, capture it with the helper below\n\n"
+            f"{self._echd_capture_recommendation(source_segment)}\n"
+            f"  Or, without a pipe — redirect to a temp file and capture the exit code:\n\n"
             f'  TEMP_FILE="/tmp/output_$$.txt"\n'
             f"  {source_segment or 'command'} > \"$TEMP_FILE\" 2>&1\n"
             f"  EXIT_CODE=$?\n"
             f'  if [ $EXIT_CODE -eq 0 ]; then echo "Completed OK"; '
             f'else echo "Completed with errors (exit code: $EXIT_CODE) - check $TEMP_FILE"; fi\n\n'
-            f"  # Agent sees 'Completed OK' → no need to read the file\n"
-            f"  # Agent sees 'Completed with errors' → read $TEMP_FILE to diagnose\n\n"
             f"INFO: WHITELISTED COMMANDS (piping is OK):\n"
             f"  Commands that already filter output: grep, rg, awk, sed, jq, ls, cat, etc.\n\n"
             f"  Example: grep error /var/log/syslog | tail -n 20  (allowed)\n\n"
@@ -310,12 +357,9 @@ class PipeBlockerHandler(Handler):
             f"  {_CONFIG_YAML_KEY}:\n"
             f"    {_CONFIG_HINT_EXTRA_WHITELIST}:\n"
             f'      - "^{source_name}\\\\b"\n\n'
-            f"Or use temp file:\n"
-            f'  TEMP_FILE="/tmp/output_$$.txt"\n'
-            f"  {source_segment or 'command'} > \"$TEMP_FILE\" 2>&1\n"
-            f"  EXIT_CODE=$?\n"
-            f'  if [ $EXIT_CODE -eq 0 ]; then echo "Completed OK"; '
-            f'else echo "Completed with errors (exit code: $EXIT_CODE) - check $TEMP_FILE"; fi\n\n'
+            f"{self._echd_capture_terse(source_segment)}"
+            f"Or a temp file: "
+            f'TEMP_FILE="/tmp/output_$$.txt"; {source_segment or "command"} > "$TEMP_FILE" 2>&1\n\n'
             f"To disable: {_CONFIG_HINT_HANDLER}  (set enabled: false)"
         )
 
@@ -345,14 +389,19 @@ class PipeBlockerHandler(Handler):
             "### Pipe Blocker\n\n"
             "Commands piped to `tail` or `head` are **blocked** — piping truncates output "
             "and causes information loss.\n\n"
-            "**Use a temp file instead:**\n\n"
+            "**Do NOT do the theatre** of capturing output to a file and then echoing the "
+            "WHOLE file to stdout — that defeats the point and just bloats tokens.\n\n"
+            "**Preferred — `echd-capture`**: capture the FULL output, see only a preview.\n\n"
             "```bash\n"
-            "# WRONG — blocked:\n"
+            "# WRONG — blocked (and truncates):\n"
             "pytest tests/ 2>&1 | tail -20\n\n"
-            "# RIGHT — redirect to temp file:\n"
-            "pytest tests/ > /tmp/pytest_out.txt 2>&1\n"
-            "# Then read selectively if needed\n"
+            "# RIGHT — full capture, bounded preview + path to the rest:\n"
+            "set -o pipefail\n"
+            "pytest tests/ 2>&1 | echd-capture 20\n"
+            "# prints the last 20 lines + '(full output: /…/command-output-….txt)'.\n"
+            "# Use --head N for the first N lines. pipefail keeps pytest's exit code visible.\n"
             "```\n\n"
+            "**Alternative** (no pipe): `pytest tests/ > /tmp/out.txt 2>&1` then read selectively.\n\n"
             "**Allowed** (whitelisted): `grep`, `rg`, `awk`, `sed`, `jq`, `ls`, `cat`, "
             "`git log`, `git tag`, `git branch`, and other cheap filtering commands.\n\n"
             "**Add to whitelist** (if safe to pipe): set `extra_whitelist` in "
