@@ -1917,7 +1917,10 @@ def supervise(
     # it never coexists with the wrapped process's output.
     spinner: _StartupSpinner | None = None
     if _should_show_banner(sys.stderr):
-        sys.stderr.write(render_startup_banner(version=__version__, armed=not dry_run) + "\n")
+        # Blank lines above and below set the banner apart from whatever the
+        # terminal was showing, so the startup notice reads as a distinct block.
+        banner = render_startup_banner(version=__version__, armed=not dry_run)
+        sys.stderr.write("\n\n" + banner + "\n\n")
         sys.stderr.flush()
         spinner = _StartupSpinner(sys.stderr)
         spinner.start()
