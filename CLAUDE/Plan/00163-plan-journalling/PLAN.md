@@ -190,17 +190,45 @@ folder: `BRAINSTORM-datamodel.md` (data model & lifecycle) and
   `mode: block`; presence/freshness/append-only stay ADVISE forever. Record
   the outcome here as a Technical Decision.
 
-### Phase 4: Client rollout
+### Phase 4: Client rollout (ENABLED-BY-DEFAULT, user decision 2026-07-14)
 
-- [ ] ⬜ **Task 4.1**: Deploy — installer/upgrade seeds `_JOURNAL_TEMPLATE_.md`
-  (never overwrites) and `CLAUDE/PlanJournalling.md` alongside the existing
-  `deploy_plan_workflow_if_enabled` path (mkplan already deploys there);
-  decide default-on vs opt-in for clients with the user (open question 1).
-- [ ] ⬜ **Task 4.2**: Release plumbing — `config-changes` manifest for
-  `plan_workflow.qa.journal.*` (recommended: true), `truth-changes` entry for
-  the Notes & Updates → Delivery & Milestones convention shift, acceptance
-  tests via `get_acceptance_tests()` on the touched surfaces, playbook
-  regeneration, full QA, release via `/release`.
+**Decision (user, Decision 11)**: journalling ships **enabled by default** and
+**fully deployed** to client projects. New plans/projects are fully journalled
+(mkplan scaffolds `JOURNAL/`); existing in-progress plans get the advise-only
+recommend-opt-in nudge and the agent excludes any it wants via
+`grandfather_before`. Completed/legacy plans are never touched (the presence
+check is In-Progress-only). No opt-in gate, no auto-stamp machinery —
+simplicity via the existing In-Progress scoping.
+
+- [x] ✅ **Task 4.1**: Deploy — `bootstrap_plan_workflow` seeds
+  `_JOURNAL_TEMPLATE_.md` (client-owned, never overwritten — its presence is
+  the "this project journals" marker that gates mkplan scaffolding) and
+  `PlanJournalling.md` (client-owned reference, never overwritten) into the
+  plan dir, alongside the existing mkplan/`_TEMPLATE_` deploy. Bundled
+  `install/templates/PlanJournalling.md` kept byte-identical to this repo's
+  `CLAUDE/PlanJournalling.md` (SSoT test). `journal.enabled` stays default
+  true; `grandfather_before` default 0 is safe because the presence nudge is
+  In-Progress-only + mkplan scaffolds every new plan.
+- [x] ✅ **Task 4.2**: Release plumbing — extended `config-changes/v3.40.0.yaml`
+  with the `plan_workflow.qa.journal` addition (recommended: true, with the
+  grandfather/opt-in migration guidance) and wrote `truth-changes/v3.40.0.yaml`
+  for the Notes & Updates → Delivery & Milestones convention shift. Deploy is
+  unit-covered (plan_workflow.py 100%). Remaining: the `/release` pipeline
+  itself (version bump, changelog, notes, gate suite, tag, publish) is in
+  flight as the v3.40.0 release.
+
+### Decision 11: Enabled-by-default, deploy-driven, In-Progress-scoped nudge
+
+The user's rollout call (2026-07-14): journalling is ON by default and fully
+deployed. The "only affect new plans/projects" guarantee is met WITHOUT
+per-client config surgery or an auto-stamp git key, because the
+`journal-folder-present` nudge already only fires for **In-Progress** plans and
+`mkplan` scaffolds a `JOURNAL/` into every new plan (once the now-deployed
+`_JOURNAL_TEMPLATE_.md` is present). So: completed/legacy plans → never nagged;
+new plans → born with a journal; a client's handful of active in-progress plans
+→ a gentle advise-only recommend-opt-in, excludable per-project via
+`grandfather_before`. This is the simplest design that satisfies every stated
+requirement; the auto-stamp alternative was rejected as over-engineering.
 
 ## Technical Decisions
 

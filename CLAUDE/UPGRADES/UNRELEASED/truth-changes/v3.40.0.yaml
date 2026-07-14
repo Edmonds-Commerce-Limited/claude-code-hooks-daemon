@@ -1,0 +1,18 @@
+version: "3.40.0"
+truth_changes:
+  - was: >
+      A plan's blow-by-blow activity stream (findings, dead-ends, in-flight
+      decisions, hand-off state) is captured informally in a free-form
+      "## Notes & Updates" section at the bottom of PLAN.md, and the plan
+      template scaffolds that section.
+    now: >
+      Plan journalling is a first-class feature (v3.40.0). The blow-by-blow
+      stream moves to a per-plan JOURNAL/ of append-only, per-day
+      NNNNN-Journal-YY-MM-DD.md files; PLAN.md keeps only a thin curated
+      "## Delivery & Milestones" stub (milestones + delivery commit hashes).
+      The bundled plan template (_TEMPLATE_.md) now scaffolds
+      "## Delivery & Milestones" instead of "## Notes & Updates", and
+      mkplan.bash scaffolds a JOURNAL/ with a seeded day-1 file. Existing plans
+      are never rewritten; only new plans get the new structure. See
+      CLAUDE/PlanJournalling.md (seeded into your plan dir on upgrade) for the
+      entry grammar and append-only discipline.

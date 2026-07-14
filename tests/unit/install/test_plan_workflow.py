@@ -4,14 +4,21 @@ import stat
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from claude_code_hooks_daemon.constants.timeout import Timeout
+from claude_code_hooks_daemon.install import plan_workflow as _plan_workflow_module
 from claude_code_hooks_daemon.install.plan_workflow import (
+    JOURNAL_TEMPLATE_NAME,
     MKPLAN_SCRIPT_NAME,
+    PLAN_JOURNALLING_DOC_NAME,
     PLAN_TEMPLATE_NAME,
     TEMPLATE_SNAPSHOT_NAME,
     bootstrap_plan_workflow,
     deploy_plan_workflow_if_enabled,
+    journal_template_path,
     mkplan_template_path,
+    plan_journalling_doc_path,
     plan_template_default_path,
 )
 
@@ -386,6 +393,115 @@ class TestMkplanScaffoldsJournal:
         target = self._run_mkplan(plan_dir, "unjournalled-plan")
 
         assert not (target / "JOURNAL").exists(), "no JOURNAL/ without the template marker"
+
+
+class TestJournalAssetDeployment:
+    """bootstrap seeds journal assets so client projects journal by default.
+
+    Plan 00163 Phase 4 (Decision 11): journalling ships enabled-by-default and
+    fully deployed. Both assets are CLIENT-owned (created when absent, never
+    overwritten): ``_JOURNAL_TEMPLATE_.md`` (its presence is the marker that
+    gates mkplan's JOURNAL/ scaffolding) and ``PlanJournalling.md`` (the
+    copy-and-customise reference doc).
+    """
+
+    def test_bundled_journal_template_exists(self) -> None:
+        template = journal_template_path()
+        assert template.is_file()
+        assert "{{PLAN_NUMBER}}" in template.read_text()
+
+    def test_bundled_journalling_doc_exists(self) -> None:
+        doc = plan_journalling_doc_path()
+        assert doc.is_file()
+
+    def test_bundled_journalling_doc_matches_repo_canonical(self) -> None:
+        """SSoT: the bundled reference is byte-identical to this repo's own copy."""
+        repo_root = Path(__file__).resolve().parents[3]
+        canonical = repo_root / "CLAUDE" / PLAN_JOURNALLING_DOC_NAME
+        assert plan_journalling_doc_path().read_text() == canonical.read_text()
+
+    def test_deploys_journal_template_when_missing(self, tmp_path: Path) -> None:
+        result = bootstrap_plan_workflow(tmp_path)
+        deployed = tmp_path / "CLAUDE" / "Plan" / JOURNAL_TEMPLATE_NAME
+        assert deployed.is_file()
+        assert deployed.read_text() == journal_template_path().read_text()
+        assert result.created_journal_template is True
+
+    def test_preserves_existing_journal_template(self, tmp_path: Path) -> None:
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        plan_dir.mkdir(parents=True)
+        (plan_dir / JOURNAL_TEMPLATE_NAME).write_text("# custom journal template\n")
+        result = bootstrap_plan_workflow(tmp_path)
+        assert (plan_dir / JOURNAL_TEMPLATE_NAME).read_text() == "# custom journal template\n"
+        assert result.created_journal_template is False
+
+    def test_deploys_journalling_doc_when_missing(self, tmp_path: Path) -> None:
+        result = bootstrap_plan_workflow(tmp_path)
+        deployed = tmp_path / "CLAUDE" / "Plan" / PLAN_JOURNALLING_DOC_NAME
+        assert deployed.is_file()
+        assert deployed.read_text() == plan_journalling_doc_path().read_text()
+        assert result.created_journalling_doc is True
+
+    def test_preserves_existing_journalling_doc(self, tmp_path: Path) -> None:
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        plan_dir.mkdir(parents=True)
+        (plan_dir / PLAN_JOURNALLING_DOC_NAME).write_text("# customised reference\n")
+        result = bootstrap_plan_workflow(tmp_path)
+        assert (plan_dir / PLAN_JOURNALLING_DOC_NAME).read_text() == "# customised reference\n"
+        assert result.created_journalling_doc is False
+
+    def test_journal_assets_deployed_via_enabled_config(self, tmp_path: Path) -> None:
+        config_dir = tmp_path / ".claude"
+        config_dir.mkdir(parents=True)
+        config_path = config_dir / "hooks-daemon.yaml"
+        config_path.write_text("plan_workflow:\n  enabled: true\n")
+        deploy_plan_workflow_if_enabled(tmp_path, config_path)
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        assert (plan_dir / JOURNAL_TEMPLATE_NAME).is_file()
+        assert (plan_dir / PLAN_JOURNALLING_DOC_NAME).is_file()
+
+    def test_no_journal_assets_when_disabled(self, tmp_path: Path) -> None:
+        config_dir = tmp_path / ".claude"
+        config_dir.mkdir(parents=True)
+        config_path = config_dir / "hooks-daemon.yaml"
+        config_path.write_text("plan_workflow:\n  enabled: false\n")
+        deploy_plan_workflow_if_enabled(tmp_path, config_path)
+        plan_dir = tmp_path / "CLAUDE" / "Plan"
+        assert not (plan_dir / JOURNAL_TEMPLATE_NAME).exists()
+        assert not (plan_dir / PLAN_JOURNALLING_DOC_NAME).exists()
+
+
+class TestMissingBundledAssetsFailFast:
+    """Every bundled deploy source is required — a missing one FAILS FAST.
+
+    These guard the packaging contract: if the wheel/sdist ever ships without
+    one of the bundled templates, bootstrap must raise loudly rather than
+    silently produce a half-scaffolded plan directory.
+    """
+
+    @pytest.mark.parametrize(
+        ("helper_name", "match"),
+        [
+            ("mkplan_template_path", "plan-scaffolding script"),
+            ("plan_template_default_path", "plan template"),
+            ("journal_template_path", "journal template"),
+            ("plan_journalling_doc_path", "journalling reference"),
+        ],
+    )
+    def test_missing_bundled_source_raises(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        helper_name: str,
+        match: str,
+    ) -> None:
+        monkeypatch.setattr(
+            _plan_workflow_module,
+            helper_name,
+            lambda: tmp_path / "does-not-exist.md",
+        )
+        with pytest.raises(FileNotFoundError, match=match):
+            bootstrap_plan_workflow(tmp_path)
 
 
 class TestDeployPlanWorkflowIfEnabled:

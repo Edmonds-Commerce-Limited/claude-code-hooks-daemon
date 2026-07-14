@@ -34,6 +34,13 @@ TEMPLATE_SNAPSHOT_NAME: Final[str] = ".plan-template-default.md"
 # Cap the surfaced diff so a heavily-reworked default cannot flood messages.
 _TEMPLATE_DIFF_MAX_LINES: Final[int] = 40
 
+# Journal assets (Plan 00163 Phase 4). Both are CLIENT-owned — seeded from the
+# bundle when absent, NEVER overwritten. The presence of ``_JOURNAL_TEMPLATE_.md``
+# is the "this project journals" marker that gates mkplan.bash's JOURNAL/
+# scaffolding; ``PlanJournalling.md`` is the copy-and-customise reference doc.
+JOURNAL_TEMPLATE_NAME: Final[str] = "_JOURNAL_TEMPLATE_.md"
+PLAN_JOURNALLING_DOC_NAME: Final[str] = "PlanJournalling.md"
+
 
 def mkplan_template_path() -> Path:
     """Absolute path to the canonical bundled ``mkplan.bash`` template.
@@ -47,6 +54,16 @@ def mkplan_template_path() -> Path:
 def plan_template_default_path() -> Path:
     """Absolute path to the bundled default plan template (``_TEMPLATE_.md``)."""
     return Path(__file__).resolve().parent / _TEMPLATES_DIR_NAME / PLAN_TEMPLATE_NAME
+
+
+def journal_template_path() -> Path:
+    """Absolute path to the bundled ``_JOURNAL_TEMPLATE_.md`` (Plan 00163)."""
+    return Path(__file__).resolve().parent / _TEMPLATES_DIR_NAME / JOURNAL_TEMPLATE_NAME
+
+
+def plan_journalling_doc_path() -> Path:
+    """Absolute path to the bundled ``PlanJournalling.md`` reference (Plan 00163)."""
+    return Path(__file__).resolve().parent / _TEMPLATES_DIR_NAME / PLAN_JOURNALLING_DOC_NAME
 
 
 _README_TEMPLATE: Final[str] = """\
@@ -129,6 +146,8 @@ class BootstrapResult:
     deployed_mkplan: bool = False
     created_template: bool = False
     template_default_changed: bool = False
+    created_journal_template: bool = False
+    created_journalling_doc: bool = False
     messages: list[str] = field(default_factory=list)
 
 
@@ -204,7 +223,49 @@ def bootstrap_plan_workflow(
     # Seed the client-owned plan template + refresh the daemon-owned snapshot
     _deploy_plan_template(plan_dir, result)
 
+    # Seed the client-owned journal assets (enabled-by-default rollout)
+    _deploy_journal_assets(plan_dir, result)
+
     return result
+
+
+def _deploy_journal_assets(plan_dir: Path, result: BootstrapResult) -> None:
+    """Seed the client-owned journal template + reference doc (Plan 00163 P4).
+
+    Both are CLIENT-owned — created from the bundle when absent, never
+    overwritten. ``_JOURNAL_TEMPLATE_.md``'s presence is the marker that gates
+    ``mkplan.bash``'s ``JOURNAL/`` scaffolding, so seeding it turns journalling
+    on for new plans by default (Decision 11); ``PlanJournalling.md`` gives the
+    copy-and-customise entry-grammar reference. A project that removes either
+    file keeps it removed across upgrades — the seed only ever fills a gap.
+    """
+    template_src = journal_template_path()
+    if not template_src.is_file():
+        raise FileNotFoundError(f"Bundled journal template not found: {template_src}")
+    template_target = plan_dir / JOURNAL_TEMPLATE_NAME
+    if template_target.exists():
+        result.messages.append(f"{JOURNAL_TEMPLATE_NAME} already exists (client-owned, kept)")
+        logger.info("Keeping existing %s", template_target)
+    else:
+        template_target.write_text(template_src.read_text())
+        result.created_journal_template = True
+        result.messages.append(f"Created {JOURNAL_TEMPLATE_NAME} (journal day-file template)")
+        logger.info("Created %s", template_target)
+
+    doc_src = plan_journalling_doc_path()
+    if not doc_src.is_file():
+        raise FileNotFoundError(f"Bundled journalling reference not found: {doc_src}")
+    doc_target = plan_dir / PLAN_JOURNALLING_DOC_NAME
+    if doc_target.exists():
+        result.messages.append(f"{PLAN_JOURNALLING_DOC_NAME} already exists (client-owned, kept)")
+        logger.info("Keeping existing %s", doc_target)
+    else:
+        doc_target.write_text(doc_src.read_text())
+        result.created_journalling_doc = True
+        result.messages.append(
+            f"Created {PLAN_JOURNALLING_DOC_NAME} (journalling reference — customise freely)"
+        )
+        logger.info("Created %s", doc_target)
 
 
 def _deploy_mkplan(plan_dir: Path, result: BootstrapResult) -> None:

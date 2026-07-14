@@ -25,6 +25,36 @@ config_changes:
         your .claude/hooks-daemon.yaml and restart the daemon. See
         docs/guides/CREATING_REPORTS.md for the report format and sharing
         channels (agent-to-agent, Slack, GitHub issue).
+    - key: plan_workflow.qa.journal
+      recommended: true
+      description: >-
+        NEW first-class plan journalling (ON by default when plan_workflow is
+        enabled). Every plan folder may carry a JOURNAL/ of append-only,
+        per-day NNNNN-Journal-YY-MM-DD.md files -- a chronological activity log
+        (findings, decisions, dead-ends, hand-off state) complementary to
+        PLAN.md. The daemon supports it through the existing plan_qa surfaces
+        (no new handler): edit-time day-file-naming + append-only lint,
+        SessionStart presence/freshness nudges, and commit-gate progress/
+        completion coupling -- ALL advise-only (only day-file-naming can ever
+        ratchet to block). mkplan.bash now scaffolds JOURNAL/ plus a seeded
+        day-1 file, and install/upgrade seeds a client-owned _JOURNAL_TEMPLATE_.md
+        (the "this project journals" marker that gates that scaffolding) and a
+        PlanJournalling.md reference. Options under plan_workflow.qa.journal:
+        enabled (default true), mode (advise [default] | block | off; only
+        day-file-naming honours block), dir_name (default JOURNAL),
+        freshness_days (default 3), enforce_on_completion (default false), and
+        grandfather_before (default 0).
+      migration_note: >-
+        No action needed to adopt -- once you upgrade, new plans are born with a
+        JOURNAL/ and completed/legacy plans are never touched (the presence
+        nudge is In-Progress-only). Your handful of ACTIVE in-progress plans
+        will get an advise-only "add a JOURNAL/" nudge each session: opt one in
+        by adding a JOURNAL/NNNNN-Journal-YY-MM-DD.md (recommended), or exclude
+        the pre-journalling ones wholesale by setting
+        plan_workflow.qa.journal.grandfather_before to one-past your current
+        highest plan number (run: git config --local hooksdaemon.latestPlanNumber,
+        add 1). See CLAUDE/PlanJournalling.md (seeded into your plan dir) for the
+        entry grammar and the POLICY-vs-CONVENTION split.
   renamed: []
   removed: []
   changed:
