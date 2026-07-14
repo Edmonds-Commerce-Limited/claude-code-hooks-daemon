@@ -189,21 +189,26 @@ class CcySupervisorIntegrityHandler(Handler):
             return False
         return True
 
-    def _read_supervisor_status(self, project_root: Path) -> dict[str, Any] | None:
-        """Read the running supervisor's status file, or None if absent/invalid."""
+    def _read_supervisor_status(self, project_root: Path) -> dict[str, Any]:
+        """Read the running supervisor's status file.
+
+        Returns an EMPTY dict when the file is absent or unreadable/invalid — a
+        typed default the caller treats as "no supervisor advertised" (an empty
+        dict is falsy), rather than conflating absence with an error via None.
+        """
         status_path = (
             self._daemon_untracked_dir(project_root)
             / _SUPERVISE_SUBDIR
             / _SUPERVISOR_STATUS_FILENAME
         )
         if not status_path.is_file():
-            return None
+            return {}
         try:
             data = json.loads(status_path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             logger.debug("Could not read supervisor status %s: %s", status_path, exc)
-            return None
-        return data if isinstance(data, dict) else None
+            return {}
+        return data if isinstance(data, dict) else {}
 
     def _parse_ondisk_version(self, script: Path) -> str:
         """Extract ``__version__`` from the on-disk supervisor (``?`` if absent)."""
@@ -227,7 +232,7 @@ class CcySupervisorIntegrityHandler(Handler):
             return []  # missing script is handled by _find_problems
 
         status = self._read_supervisor_status(project_root)
-        if status is None:
+        if not status:
             return []  # no supervisor has advertised itself
 
         if not self._pid_alive(status.get("pid")):

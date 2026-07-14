@@ -34,34 +34,37 @@ _upgrade_transition_normalise() {
 }
 
 # upgrade_transition_headline <installed_version> <target_version>
-# The line printed at the START of the deployment block.
+# The line printed at the START of the deployment block. Built into a single
+# variable and emitted with ONE terminal printf so a $(...) capture is never
+# corrupted (capture-corruption audit).
 upgrade_transition_headline() {
-    local installed target
+    local installed target line
     installed="$(_upgrade_transition_normalise "${1:-}")"
     target="$(_upgrade_transition_normalise "${2:-}")"
 
     if [ -z "$installed" ]; then
-        printf 'Installing %s' "$target"
+        line="Installing $target"
     elif [ "$installed" = "$target" ]; then
-        printf 'Already at %s — re-running deployment to refresh installed files' "$target"
+        line="Already at $target — re-running deployment to refresh installed files"
     else
-        printf 'Refreshing installed version: %s → %s (rebuilding venv + redeploying)' \
-            "$installed" "$target"
+        line="Refreshing installed version: $installed → $target (rebuilding venv + redeploying)"
     fi
+    printf '%s' "$line"
 }
 
 # upgrade_transition_summary <installed_version> <target_version>
-# The line printed at the END on success.
+# The line printed at the END on success. Single terminal printf (see above).
 upgrade_transition_summary() {
-    local installed target
+    local installed target line
     installed="$(_upgrade_transition_normalise "${1:-}")"
     target="$(_upgrade_transition_normalise "${2:-}")"
 
     if [ -z "$installed" ]; then
-        printf 'Installed %s' "$target"
+        line="Installed $target"
     elif [ "$installed" = "$target" ]; then
-        printf 'Re-verified %s (no version change)' "$target"
+        line="Re-verified $target (no version change)"
     else
-        printf 'Upgraded %s → %s' "$installed" "$target"
+        line="Upgraded $installed → $target"
     fi
+    printf '%s' "$line"
 }
