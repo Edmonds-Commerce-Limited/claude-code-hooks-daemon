@@ -666,6 +666,26 @@ class TestPlanningModeIntegration:
         assert handler.is_planning_mode_write("CLAUDE/Plan/README.md") is False
         assert handler.is_planning_mode_write("/workspace/CLAUDE/Plan/readme.md") is False
 
+    def test_does_not_detect_daemon_owned_dot_and_underscore_files(
+        self, handler: MarkdownOrganizationHandler
+    ) -> None:
+        """Daemon-owned template/snapshot files are NEVER plan-mode saves.
+
+        Regression: writing the hidden template snapshot
+        ``.plan-template-default.md`` (which contains ``**Status**:`` because it
+        IS a plan template) was misdetected as a new plan, scaffolding a bogus
+        numbered folder and bumping the plan counter. Dot- and underscore-
+        prefixed files in the plan root are daemon-owned, not user plan saves.
+        """
+        handler._track_plans_in_project = "CLAUDE/Plan"
+        for path in (
+            "CLAUDE/Plan/.plan-template-default.md",
+            "/workspace/CLAUDE/Plan/.plan-template-default.md",
+            "CLAUDE/Plan/_TEMPLATE_.md",
+            "CLAUDE/Plan/_JOURNAL_TEMPLATE_.md",
+        ):
+            assert handler.is_planning_mode_write(path) is False, f"Should NOT detect: {path}"
+
     def test_does_not_detect_numbered_subfolder_files(
         self, handler: MarkdownOrganizationHandler
     ) -> None:

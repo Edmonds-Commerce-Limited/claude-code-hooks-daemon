@@ -29,6 +29,12 @@ _PLAN_SUBDIRECTORIES: Final[tuple[str, ...]] = ("completed", "cancelled", "archi
 # Files in the plan directory root that are NOT plan files (excluded from interception)
 _PLAN_ROOT_EXCLUDED_FILES: Final[frozenset[str]] = frozenset({"readme"})
 
+# Basename prefixes marking a daemon-owned, non-plan file at the plan root:
+# hidden snapshots ('.plan-template-default.md') and template files
+# ('_TEMPLATE_.md', '_JOURNAL_TEMPLATE_.md'). A real Claude Code plan-mode save
+# is never dot- or underscore-prefixed, so these must never scaffold a plan.
+_DAEMON_OWNED_PLAN_FILE_PREFIXES: Final[tuple[str, ...]] = (".", "_")
+
 # Third-party dependency directories that act as implicit monorepos.
 # Each top-level package inside these is treated as a sub-project —
 # normal markdown organization rules apply within each package root.
@@ -267,6 +273,17 @@ class MarkdownOrganizationHandler(Handler):
 
         return None
 
+    @staticmethod
+    def _is_daemon_owned_plan_file(filename: str) -> bool:
+        """True for a dot-/underscore-prefixed daemon-owned file (never a plan).
+
+        Guards the plan-scaffolding path against the daemon's own template
+        snapshot (``.plan-template-default.md``) and template files
+        (``_TEMPLATE_.md``, ``_JOURNAL_TEMPLATE_.md``), whose plan-like content
+        would otherwise be misread as a user plan-mode save.
+        """
+        return filename.startswith(_DAEMON_OWNED_PLAN_FILE_PREFIXES)
+
     def is_planning_mode_write(self, file_path: str) -> bool:
         """Check if this is a planning mode write to intercept.
 
@@ -294,6 +311,8 @@ class MarkdownOrganizationHandler(Handler):
             match = re.match(pattern, normalized, re.IGNORECASE)
             if match:
                 filename = match.group(1)
+                if self._is_daemon_owned_plan_file(filename):
+                    return False
                 if filename.lower() not in _PLAN_ROOT_EXCLUDED_FILES:
                     return True
 
