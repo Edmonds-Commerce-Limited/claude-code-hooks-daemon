@@ -32,6 +32,7 @@ import signal
 import struct
 import sys
 import termios
+import threading
 import time
 import tty
 from collections.abc import Callable
@@ -43,12 +44,126 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from types import FrameType
 
+# Supervisor version. Kept in lockstep with the daemon version at release time
+# (see CLAUDE/development/RELEASING.md). Display-only for the banner and the
+# runtime status file; staleness detection (Plan 00164 Phase 3) uses a content
+# hash of THIS file so it is correct even between version bumps.
+__version__ = "3.40.0"
+
 _READ_CHUNK_SIZE = 4096
 _FALLBACK_WINSIZE = struct.pack("HHHH", 24, 80, 0, 0)
 _LOG_SUBDIRECTORY = "supervise"
 _LOG_FILENAME = "decision.log"
 
 _USAGE = "Usage: claude-supervise.py [--dry-run | --arm] [--log PATH] -- <child argv...>\n"
+
+# Opt-out env var for the startup banner + spinner (any non-empty value silences
+# them). The banner is also skipped whenever stderr is not a TTY (piped output,
+# the test suite, non-interactive launches).
+_NO_BANNER_ENV = "CLAUDE_SUPERVISE_NO_BANNER"
+
+# Braille spinner frames for the brief pre-fork "starting up" flourish.
+_SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+_SPINNER_INTERVAL_SECONDS = 0.08
+_BANNER_RULE = "━" * 46
+
+
+def render_startup_banner(*, version: str, armed: bool) -> str:
+    """Return the multi-line ECHD ccy supervisor startup banner.
+
+    Pure and deterministic: it takes the version + mode and returns text. The
+    caller decides whether and where to print it (see ``_should_show_banner``),
+    so this stays trivially testable. Left-aligned content under a top/bottom
+    rule avoids fragile right-border alignment across variable version/mode
+    widths.
+
+    Args:
+        version: Supervisor version string (e.g. ``"3.40.0"``).
+        armed: True when the supervisor injects a real ``/compact`` (armed);
+            False for the harmless dry-run marker.
+
+    Returns:
+        The banner as a multi-line string (no trailing newline).
+    """
+    mode = (
+        "ARMED — injects a real /compact when the context goes red"
+        if armed
+        else "dry-run — injects a harmless visible marker only"
+    )
+    return "\n".join(
+        (
+            f"┏━ ECHD ⟐ ccy Supervisor {_BANNER_RULE[24:]}",
+            f"┃  v{version}  ·  wrapping claude on a PTY",
+            f"┃  {mode}",
+            "┗━ starting up ⏳",
+        )
+    )
+
+
+def _should_show_banner(stream: object, env: dict[str, str] | None = None) -> bool:
+    """Return True iff the startup banner/spinner should be shown on ``stream``.
+
+    Shown only for an interactive launch: ``stream`` must be a TTY and the
+    opt-out env var must be unset. A non-tty stream (piped output, the test
+    harness, a non-interactive launch) is always silent.
+    """
+    resolved_env = env if env is not None else dict(os.environ)
+    if resolved_env.get(_NO_BANNER_ENV):
+        return False
+    isatty = getattr(stream, "isatty", None)
+    return bool(callable(isatty) and isatty())
+
+
+class _StartupSpinner:
+    """A brief 'starting up' spinner on a background thread.
+
+    It runs ONLY between the banner and the PTY fork and is always stopped —
+    with its line cleared — before the wrapped child takes over the terminal, so
+    it never coexists with the child's output. Any write error (closed/redirected
+    stream) silently ends the animation; the spinner is cosmetic and must never
+    affect the supervised session.
+    """
+
+    def __init__(self, stream: object, *, label: str = "starting claude") -> None:
+        self._stream = stream
+        self._label = label
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        index = 0
+        while not self._stop.is_set():
+            frame = _SPINNER_FRAMES[index % len(_SPINNER_FRAMES)]
+            if not self._write(f"\r  {frame} {self._label}… "):
+                return
+            index += 1
+            self._stop.wait(_SPINNER_INTERVAL_SECONDS)
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=1.0)
+            self._thread = None
+        # Clear the spinner line so the child starts on a clean row.
+        self._write("\r" + " " * (len(self._label) + 12) + "\r")
+
+    def _write(self, text: str) -> bool:
+        """Best-effort write+flush; return False if the stream is unusable."""
+        write = getattr(self._stream, "write", None)
+        flush = getattr(self._stream, "flush", None)
+        if not callable(write):
+            return False
+        try:
+            write(text)
+            if callable(flush):
+                flush()
+        except (OSError, ValueError):
+            return False
+        return True
 
 # ---------------------------------------------------------------------------
 # Human input-line tracking (empty-input-box injection guard)
@@ -1388,6 +1503,19 @@ def supervise(
             f"{poll_seconds}s; wrapping: {argv}"
         )
 
+    # Startup banner + spinner (Plan 00164 Phase 2): give the launching ccy
+    # session immediate, informative feedback during the perceptible start-up
+    # lull. Both go to stderr and are gated on an interactive TTY, so piped/
+    # non-interactive launches and the test suite stay silent. The spinner is
+    # stopped (line cleared) right after the fork, BEFORE the child paints, so
+    # it never coexists with the wrapped process's output.
+    spinner: _StartupSpinner | None = None
+    if _should_show_banner(sys.stderr):
+        sys.stderr.write(render_startup_banner(version=__version__, armed=not dry_run) + "\n")
+        sys.stderr.flush()
+        spinner = _StartupSpinner(sys.stderr)
+        spinner.start()
+
     pid, master_fd = pty.fork()
     if pid == 0:  # pragma: no cover - runs in the forked child process
         # SECURITY: no shell involved -- argv is passed directly to execvp as
@@ -1396,6 +1524,9 @@ def supervise(
         # process (e.g. `claude`) on the child side of the PTY.
         os.execvp(argv[0], argv)  # nosec B606
         os._exit(127)  # unreachable on success
+
+    if spinner is not None:
+        spinner.stop()
 
     _set_winsize(master_fd, stdin_fd)
 

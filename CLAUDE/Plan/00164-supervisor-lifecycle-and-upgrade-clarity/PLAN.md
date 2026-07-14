@@ -99,12 +99,13 @@ clients in one release is a regression risk out of proportion to a messaging fix
 
 ### Phase 2: Supervisor startup banner + version marker
 
-- [ ] ⬜ **Task 2.1**: Add failing tests for a `__version__` constant and a
-  banner-rendering function (deterministic, no-TTY-safe, honours a no-banner env).
-- [ ] ⬜ **Task 2.2**: Add `__version__` to `claude-supervise.py` kept in lockstep
-  with the daemon version, and render the ASCII banner + spinner to stderr during
-  the startup lull (before/around the PTY fork), TTY-aware and silent when piped.
-- [ ] ⬜ **Task 2.3**: QA green; manual visual check of the banner.
+- [x] ✅ **Task 2.1**: Failing tests (`test_supervisor_banner.py`) for `__version__`,
+  `render_startup_banner` (deterministic), and `_should_show_banner` TTY/opt-out gate.
+- [x] ✅ **Task 2.2**: Added `__version__ = "3.40.0"` (lockstep at release), a pure
+  `render_startup_banner`, a TTY/env `_should_show_banner` gate, and a
+  `_StartupSpinner` (daemon thread) — banner printed + spinner started before the
+  PTY fork and stopped/cleared immediately after, so it never overlaps the child.
+- [x] ✅ **Task 2.3**: 222 supervise tests pass; mypy clean; banner visually verified.
 
 ### Phase 3: Stale-supervisor detection
 
