@@ -7,6 +7,7 @@ specialist housekeeping sub-agents that produce shareable markdown reports.
 Beta: opt-in (off by default), report-only.
 """
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
@@ -227,3 +228,75 @@ class TestHandle:
         result = handler.handle({"prompt": _TICK, "session_id": "s"})
         assert result.decision == Decision.ALLOW
         assert not result.context
+
+
+class TestCustomGuidanceDoc:
+    """Projects can point the handler at a custom guidance doc (additive/replace)."""
+
+    _MESSAGES = [
+        _user(_TICK),
+        _assistant_text("stop"),
+        _user(_TICK),
+        _assistant_text("stop"),
+    ]
+
+    def _fire(self, handler: IdleHousekeepingAdvisoryHandler) -> str:
+        result = _handle_with_messages(
+            handler,
+            {"prompt": _TICK, "session_id": "s", "transcript_path": "/tmp/t.jsonl"},
+            self._MESSAGES,
+        )
+        assert result.context
+        return " ".join(result.context)
+
+    def test_default_when_no_custom_doc(self) -> None:
+        handler = IdleHousekeepingAdvisoryHandler()
+        blob = self._fire(handler)
+        assert "HOUSEKEEPING MODE" in blob
+
+    def test_additive_appends_custom_doc(self, tmp_path: Path) -> None:
+        doc = tmp_path / "housekeeping.md"
+        doc.write_text("PROJECT-SPECIFIC: also run the widget audit.")
+        handler = IdleHousekeepingAdvisoryHandler()
+        handler._custom_guidance_doc = str(doc)
+        handler._custom_guidance_mode = "additive"
+
+        blob = self._fire(handler)
+        assert "HOUSEKEEPING MODE" in blob  # default retained
+        assert "PROJECT-SPECIFIC: also run the widget audit." in blob  # custom appended
+
+    def test_replace_uses_only_custom_doc(self, tmp_path: Path) -> None:
+        doc = tmp_path / "housekeeping.md"
+        doc.write_text("ONLY DO THIS: run the widget audit and report.")
+        handler = IdleHousekeepingAdvisoryHandler()
+        handler._custom_guidance_doc = str(doc)
+        handler._custom_guidance_mode = "replace"
+
+        blob = self._fire(handler)
+        assert "ONLY DO THIS: run the widget audit and report." in blob
+        # The default's dispatch-subagents wording is gone in replace mode.
+        assert "specialist housekeeping SUB-AGENTS" not in blob
+
+    def test_missing_custom_doc_falls_back_to_default(self, tmp_path: Path) -> None:
+        handler = IdleHousekeepingAdvisoryHandler()
+        handler._custom_guidance_doc = str(tmp_path / "does-not-exist.md")
+        handler._custom_guidance_mode = "replace"
+
+        blob = self._fire(handler)
+        assert "HOUSEKEEPING MODE" in blob  # fail-safe: default guidance
+
+    def test_relative_path_resolved_against_project_root(self, tmp_path: Path) -> None:
+        doc = tmp_path / "docs" / "hk.md"
+        doc.parent.mkdir()
+        doc.write_text("REL PATH GUIDANCE")
+        handler = IdleHousekeepingAdvisoryHandler()
+        handler._custom_guidance_doc = "docs/hk.md"
+        handler._custom_guidance_mode = "replace"
+
+        with patch(
+            "claude_code_hooks_daemon.handlers.user_prompt_submit."
+            "idle_housekeeping_advisor.ProjectContext"
+        ) as mock_pc:
+            mock_pc.project_root.return_value = tmp_path
+            blob = self._fire(handler)
+        assert "REL PATH GUIDANCE" in blob

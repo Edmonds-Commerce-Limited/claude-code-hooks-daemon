@@ -17,10 +17,11 @@ GitHub issue.
 """
 
 import logging
+from pathlib import Path
 from typing import Any, Final
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
-from claude_code_hooks_daemon.core import Decision, Handler, HookResult
+from claude_code_hooks_daemon.core import Decision, Handler, HookResult, ProjectContext
 from claude_code_hooks_daemon.core.transcript_reader import TranscriptMessage, TranscriptReader
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,11 @@ _RECOVERY_MARKER: Final[str] = "FAILSAFE RECOVERY CHECK"
 _DEFAULT_NOOP_THRESHOLD: Final[int] = 2
 _DEFAULT_MAX_PASSES_PER_SESSION: Final[int] = 1
 _DEFAULT_REPORTS_DIR: Final[str] = "untracked/reports"
+
+# Custom project guidance (Plan 00161): a project may point the handler at its own
+# housekeeping doc, either ADDED to the default guidance or REPLACING it entirely.
+_DEFAULT_CUSTOM_GUIDANCE_MODE: Final[str] = "additive"
+_MODE_REPLACE: Final[str] = "replace"
 
 # Bound the per-session pass-count map so a long-lived daemon cannot leak memory
 # across many sessions.
@@ -95,6 +101,9 @@ class IdleHousekeepingAdvisoryHandler(Handler):
         self._noop_threshold: int = _DEFAULT_NOOP_THRESHOLD
         self._max_passes_per_session: int = _DEFAULT_MAX_PASSES_PER_SESSION
         self._reports_dir: str = _DEFAULT_REPORTS_DIR
+        # Optional project-defined guidance doc + how it combines with the default.
+        self._custom_guidance_doc: str = ""
+        self._custom_guidance_mode: str = _DEFAULT_CUSTOM_GUIDANCE_MODE
         # Per-session housekeeping-pass counter (in-memory; resets on daemon
         # restart, which is acceptable for a bounded beta safety-net feature).
         self._passes_by_session: dict[str, int] = {}
@@ -158,7 +167,46 @@ class IdleHousekeepingAdvisoryHandler(Handler):
         self._passes_by_session[session_id] = self._passes_by_session.get(session_id, 0) + 1
 
     def _build_guidance(self) -> str:
-        """The housekeeping-mode guidance injected on the tripping tick."""
+        """Compose the injected guidance from the default and any project doc.
+
+        A project may set ``custom_guidance_doc`` to a markdown file (absolute,
+        or relative to the project root). ``custom_guidance_mode: replace`` uses
+        ONLY that doc; ``additive`` (default) appends it to the built-in
+        guidance. A configured-but-unreadable doc fails safe to the default.
+        """
+        default = self._default_guidance()
+        custom = self._load_custom_guidance()
+        if custom is None:
+            return default
+        if self._custom_guidance_mode == _MODE_REPLACE:
+            return custom
+        return (
+            f"{default}\n\n---\n\nPROJECT-SPECIFIC HOUSEKEEPING GUIDANCE "
+            f"(from {self._custom_guidance_doc}):\n{custom}"
+        )
+
+    def _load_custom_guidance(self) -> str | None:
+        """Read the project's custom guidance doc, or None if unset/absent.
+
+        Uses precondition checks (not try/except-return) so the common "unset"
+        and "file absent" cases degrade cleanly to the default guidance, while a
+        genuine read error (permissions, bad encoding) fails fast into the
+        daemon's per-handler fail-open rather than being silently swallowed.
+        """
+        raw = (self._custom_guidance_doc or "").strip()
+        if not raw:
+            return None
+        path = Path(raw)
+        if not path.is_absolute():
+            path = ProjectContext.project_root() / path
+        if not path.is_file():
+            logger.debug("housekeeping: custom guidance doc not found: %s", path)
+            return None
+        text = path.read_text(encoding="utf-8").strip()
+        return text or None
+
+    def _default_guidance(self) -> str:
+        """The built-in housekeeping-mode guidance."""
         return (
             "🧹 HOUSEKEEPING MODE (idle detected — repeated no-op recovery ticks).\n"
             "The session is caught up: clean tree, nothing to resume, several "
@@ -198,7 +246,9 @@ class IdleHousekeepingAdvisoryHandler(Handler):
             "REPORT-ONLY — never auto-fix or auto-commit — and strictly lower priority "
             "than real work (a real user prompt aborts it). Off by default; enable via "
             "`handlers.user_prompt_submit.idle_housekeeping_advisory.enabled: true`. "
-            "See docs/guides/CREATING_REPORTS.md."
+            "A project can point it at its own doc via the `custom_guidance_doc` option "
+            "(`custom_guidance_mode: additive` appends it to the default, `replace` uses "
+            "only the project doc). See docs/guides/CREATING_REPORTS.md."
         )
 
     def get_acceptance_tests(self) -> list[Any]:

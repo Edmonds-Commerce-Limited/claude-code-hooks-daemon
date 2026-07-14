@@ -160,6 +160,18 @@ ONE canonical prefix. The MVP handler dispatches generic sub-agents (no deployed
 agent yet); this convention governs the deployment mechanism when it lands
 (likely a follow-up plan).
 
+### Decision 7: Projects can supply a custom housekeeping guidance doc
+
+**Context** (user, 2026-07-14): projects need to fine-tune the noop-tick
+housekeeping actions to their own repo. **Decision**: two handler options —
+`custom_guidance_doc` (path to a project-owned markdown doc, absolute or
+project-relative; empty = none) and `custom_guidance_mode` (`additive`
+[default] appends the project doc to the built-in guidance; `replace` uses ONLY
+the project doc). A configured-but-unreadable doc fails safe to the default
+guidance, so the agent is never left with no guidance. Lets a client augment or
+fully replace the daemon's default idle-housekeeping behaviour without touching
+daemon code. Delivered on the beta handler.
+
 ## Success Criteria
 
 - [ ] A robust detection rule that never trips while the user is waiting, mid-plan,

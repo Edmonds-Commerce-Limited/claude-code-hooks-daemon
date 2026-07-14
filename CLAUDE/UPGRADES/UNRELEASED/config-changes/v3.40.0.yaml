@@ -13,7 +13,12 @@ config_changes:
         write shareable markdown report files (default untracked/reports/). It is
         strictly REPORT-ONLY -- it never auto-fixes or auto-commits -- and yields
         instantly to real work. Options: noop_threshold (default 2),
-        max_passes_per_session (default 1), reports_dir (default untracked/reports).
+        max_passes_per_session (default 1), reports_dir (default untracked/reports),
+        custom_guidance_doc (path to a project-owned housekeeping doc, absolute or
+        project-relative; empty = none) and custom_guidance_mode
+        (additive [default] appends the project doc to the built-in guidance;
+        replace uses only the project doc). A configured-but-unreadable doc fails
+        safe to the default guidance.
       migration_note: >-
         Beta -- leave it OFF unless you want to try it. To enable, add
         handlers.user_prompt_submit.idle_housekeeping_advisory.enabled: true to
