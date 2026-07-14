@@ -5,6 +5,7 @@ markdown_table_formatter rewrites every written ``.md`` file. Key fixtures
 are therefore asserted both raw and after ``format_markdown_text`` round-trip.
 """
 
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,7 @@ from claude_code_hooks_daemon.plan_qa.model import (
     PlanLocation,
     PlanStatus,
     PlanTree,
+    parse_journal_dayfile_name,
 )
 from claude_code_hooks_daemon.utils.markdown_format import format_markdown_text
 
@@ -398,6 +400,105 @@ class TestPlanTreeScan:
         (plan_root / "orphan-notes.md").write_text("scratch\n")
         tree = PlanTree.scan(plan_root, extra_root_files=("_planlib.bash",))
         assert [path.name for path in tree.stray_files] == ["orphan-notes.md"]
+
+
+class TestParseJournalDayfileName:
+    """Plan 00163: the day-file name parser (regex match vs calendar validity)."""
+
+    def test_well_formed_name(self) -> None:
+        parsed = parse_journal_dayfile_name("00163-Journal-26-07-14.md")
+        assert parsed is not None
+        assert parsed.number == 163
+        assert parsed.year == 2026
+        assert parsed.month == 7
+        assert parsed.day == 14
+        assert parsed.is_valid_date is True
+        assert parsed.date == date(2026, 7, 14)
+
+    def test_non_matching_name_is_none(self) -> None:
+        assert parse_journal_dayfile_name("notes.md") is None
+        assert parse_journal_dayfile_name("00163-Journal-2026-07-14.md") is None  # 4-digit year
+        assert parse_journal_dayfile_name("00163-journal-26-07-14.md") is None  # lower-case
+
+    def test_matches_pattern_but_impossible_date(self) -> None:
+        # The name matches the grammar, so parsing succeeds, but the calendar
+        # date is impossible — is_valid_date reports it without raising.
+        parsed = parse_journal_dayfile_name("00163-Journal-26-13-45.md")
+        assert parsed is not None
+        assert parsed.is_valid_date is False
+
+    def test_february_leap_day_validity(self) -> None:
+        leap = parse_journal_dayfile_name("00001-Journal-24-02-29.md")
+        non_leap = parse_journal_dayfile_name("00001-Journal-26-02-29.md")
+        assert leap is not None and leap.is_valid_date is True  # 2024 is a leap year
+        assert non_leap is not None and non_leap.is_valid_date is False  # 2026 is not
+
+
+def _write_journal_day(
+    plan_folder: Path, number: int, yy_mm_dd: str, dir_name: str = "JOURNAL"
+) -> Path:
+    """Create ``plan_folder/JOURNAL/NNNNN-Journal-YY-MM-DD.md``."""
+    journal_dir = plan_folder / dir_name
+    journal_dir.mkdir(exist_ok=True)
+    day_file = journal_dir / f"{number:05d}-Journal-{yy_mm_dd}.md"
+    day_file.write_text(f"# Plan {number:05d} — Journal {yy_mm_dd}\n\n## 09:00 · action · —\n\nx\n")
+    return day_file
+
+
+class TestPlanFolderJournal:
+    """Plan 00163: PlanFolder.has_journal / latest_journal_date (filename parse only)."""
+
+    @pytest.fixture
+    def plan_root(self, tmp_path: Path) -> Path:
+        root = tmp_path / "CLAUDE" / "Plan"
+        root.mkdir(parents=True)
+        return root
+
+    def test_no_journal_dir(self, plan_root: Path) -> None:
+        _write_plan(plan_root, 163, "journalling", "In Progress")
+        folder = PlanTree.scan(plan_root).folders[0]
+        assert folder.has_journal is False
+        assert folder.latest_journal_date is None
+
+    def test_empty_journal_dir_is_present_but_dateless(self, plan_root: Path) -> None:
+        plan_folder = _write_plan(plan_root, 163, "journalling", "In Progress")
+        (plan_folder / "JOURNAL").mkdir()
+        folder = PlanTree.scan(plan_root).folders[0]
+        assert folder.has_journal is True
+        assert folder.latest_journal_date is None
+
+    def test_single_day_file_parsed(self, plan_root: Path) -> None:
+        plan_folder = _write_plan(plan_root, 163, "journalling", "In Progress")
+        _write_journal_day(plan_folder, 163, "26-07-14")
+        folder = PlanTree.scan(plan_root).folders[0]
+        assert folder.has_journal is True
+        assert folder.latest_journal_date == date(2026, 7, 14)
+
+    def test_latest_of_several_day_files(self, plan_root: Path) -> None:
+        plan_folder = _write_plan(plan_root, 163, "journalling", "In Progress")
+        _write_journal_day(plan_folder, 163, "26-07-12")
+        _write_journal_day(plan_folder, 163, "26-07-14")
+        _write_journal_day(plan_folder, 163, "26-07-13")
+        folder = PlanTree.scan(plan_root).folders[0]
+        assert folder.latest_journal_date == date(2026, 7, 14)
+
+    def test_malformed_day_files_ignored(self, plan_root: Path) -> None:
+        plan_folder = _write_plan(plan_root, 163, "journalling", "In Progress")
+        journal_dir = plan_folder / "JOURNAL"
+        journal_dir.mkdir()
+        (journal_dir / "notes.md").write_text("stray\n")
+        (journal_dir / "00163-Journal-2026-07-14.md").write_text("wrong year width\n")
+        (journal_dir / "00163-Journal-26-13-45.md").write_text("impossible date\n")
+        folder = PlanTree.scan(plan_root).folders[0]
+        assert folder.has_journal is True
+        assert folder.latest_journal_date is None
+
+    def test_custom_journal_dir_name(self, plan_root: Path) -> None:
+        plan_folder = _write_plan(plan_root, 163, "journalling", "In Progress")
+        _write_journal_day(plan_folder, 163, "26-07-14", dir_name="LOG")
+        folder = PlanTree.scan(plan_root, journal_dir_name="LOG").folders[0]
+        assert folder.has_journal is True
+        assert folder.latest_journal_date == date(2026, 7, 14)
 
     def test_extra_root_files_defaults_empty_unchanged(self, plan_root: Path) -> None:
         # Default (no extra) = today's behaviour: the file is a stray.

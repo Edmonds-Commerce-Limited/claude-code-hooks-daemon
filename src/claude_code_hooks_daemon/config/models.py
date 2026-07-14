@@ -378,6 +378,53 @@ class ProjectHandlersConfig(BaseModel):
     )
 
 
+class PlanWorkflowQaJournalConfig(BaseModel):
+    """Per-plan journalling policy (Plan 00163).
+
+    Nested under ``plan_workflow.qa.journal``. Journalling rides the existing
+    three plan_qa surfaces (edit / commit / sweep) rather than a new handler,
+    so its knobs live beside the rest of the plan QA policy. Every journal
+    check ships ADVISE; only ``journal-dayfile-naming`` may ever ratchet to
+    block via ``mode: block`` after a clean dogfood period.
+
+    Attributes:
+        enabled: Master switch for all journal checks
+        mode: Enforcement mode for journal checks (advise | block | off) —
+            ships as advise; only naming honours block
+        dir_name: Journal sub-directory name inside a plan folder
+        freshness_days: Sweep nag threshold for a plan whose newest day-file
+            is older than this (deliberately shorter than plan staleness_days)
+        enforce_on_completion: Whether a terminal status flip should advise a
+            closing journal entry (Phase 3 commit coupling)
+        grandfather_before: Plans numbered below this are never nagged to grow
+            a JOURNAL/ (no backfill); model default 0, set to 163 in this repo
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(default=True, description="Enable journal checks")
+    mode: Literal["advise", "block", "off"] = Field(
+        default="advise",
+        description="Journal check enforcement mode (only naming honours block)",
+    )
+    dir_name: str = Field(
+        default="JOURNAL",
+        description="Journal sub-directory name inside each plan folder",
+    )
+    freshness_days: Annotated[int, Field(ge=1)] = Field(
+        default=3,
+        description="Days before a plan with a JOURNAL/ is nagged as stale-journalled",
+    )
+    enforce_on_completion: bool = Field(
+        default=False,
+        description="Advise a closing journal entry on terminal status flips",
+    )
+    grandfather_before: Annotated[int, Field(ge=0)] = Field(
+        default=0,
+        description="Plans numbered below this are never nagged to grow a JOURNAL/",
+    )
+
+
 class PlanWorkflowQaConfig(BaseModel):
     """Configuration for the plan QA subsystem (Plan 00144).
 
@@ -451,6 +498,10 @@ class PlanWorkflowQaConfig(BaseModel):
             "Extra non-plan filenames allowed at the plan root, in addition to the "
             "built-in {README.md, CLAUDE.md, mkplan.bash, _TEMPLATE_.md}"
         ),
+    )
+    journal: PlanWorkflowQaJournalConfig = Field(
+        default_factory=PlanWorkflowQaJournalConfig,
+        description="Per-plan journalling policy (Plan 00163)",
     )
 
 

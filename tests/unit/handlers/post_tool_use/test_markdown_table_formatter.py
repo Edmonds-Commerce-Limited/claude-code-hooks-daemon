@@ -127,6 +127,34 @@ class TestMatches:
         }
         assert handler.matches(hook_input) is False
 
+    def test_does_not_match_journal_dayfile(
+        self, handler: MarkdownTableFormatterHandler, tmp_path: Path
+    ) -> None:
+        # Plan 00163: journal day-files are append-only and byte-stable; the
+        # formatter must NOT rewrite them (would trip the append-only check).
+        journal = tmp_path / "00163-x" / "JOURNAL"
+        journal.mkdir(parents=True)
+        test_file = journal / "00163-Journal-26-07-14.md"
+        test_file.write_text("# Journal\n\n## 09:00 · action · —\n\nx\n")
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(test_file)},
+        }
+        assert handler.matches(hook_input) is False
+
+    def test_still_matches_plan_md_beside_journal(
+        self, handler: MarkdownTableFormatterHandler, tmp_path: Path
+    ) -> None:
+        # A normal PLAN.md is still formatted — only the journal grammar is exempt.
+        test_file = tmp_path / "00163-x" / "PLAN.md"
+        test_file.parent.mkdir(parents=True)
+        test_file.write_text("# Plan 00163: x\n")
+        hook_input: dict[str, Any] = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(test_file)},
+        }
+        assert handler.matches(hook_input) is True
+
     def test_does_not_match_missing_file_path(self, handler: MarkdownTableFormatterHandler) -> None:
         hook_input: dict[str, Any] = {
             "tool_name": "Write",

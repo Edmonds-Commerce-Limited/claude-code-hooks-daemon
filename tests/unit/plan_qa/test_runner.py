@@ -94,6 +94,8 @@ class TestRegistryCatalogue:
             "terminal-placement-hint",
             "archive-immutability",
             "path-existence",
+            "journal-dayfile-naming",
+            "journal-append-only",
             # Cross-file tree checks (dual COMMIT+SWEEP registration)
             "no-new-collisions",
             "row-folder-bijection",
@@ -110,6 +112,8 @@ class TestRegistryCatalogue:
             "staleness-nag",
             "dormant-honesty",
             "claim-spotcheck-queue",
+            "journal-folder-present",
+            "journal-freshness",
         }
 
     def test_stage_counts(self) -> None:
@@ -117,11 +121,12 @@ class TestRegistryCatalogue:
 
         registry = all_checks()
         by_stage = {stage: [spec for spec in registry if spec.stage == stage] for stage in Stage}
-        assert len(by_stage[Stage.EDIT]) == 8
+        # 8 original + 2 journal EDIT checks (Plan 00163)
+        assert len(by_stage[Stage.EDIT]) == 10
         # 5 commit-only + 5 dual tree checks
         assert len(by_stage[Stage.COMMIT]) == 10
-        # 3 sweep-only + 5 dual tree checks
-        assert len(by_stage[Stage.SWEEP]) == 8
+        # 3 sweep-only + 5 dual tree checks + 2 journal SWEEP checks (Plan 00163)
+        assert len(by_stage[Stage.SWEEP]) == 10
 
     def test_dual_stage_checks_share_run_function(self) -> None:
         from claude_code_hooks_daemon.plan_qa.checks import all_checks
@@ -142,5 +147,17 @@ class TestRegistryCatalogue:
     def test_every_spec_declares_sins(self) -> None:
         from claude_code_hooks_daemon.plan_qa.checks import all_checks
 
+        # Journal checks (Plan 00163) are a post-audit feature category — they
+        # defend journalling hygiene, not one of the original 31-sin audit
+        # findings, so they legitimately carry no `sins` provenance.
+        post_audit_no_sins = {
+            "journal-dayfile-naming",
+            "journal-append-only",
+            "journal-folder-present",
+            "journal-freshness",
+        }
         for spec in all_checks():
+            if spec.check_id in post_audit_no_sins:
+                assert spec.sins == (), f"{spec.check_id} should declare no sins"
+                continue
             assert spec.sins, f"{spec.check_id} declares no sins"

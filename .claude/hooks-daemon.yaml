@@ -524,6 +524,17 @@ plan_workflow:
     # Historic pre-counter number collisions (both claimants archived) —
     # tolerated for ever; new collisions still block.
     collision_allowlist: [34, 39, 41]
+    # Per-plan journalling (Plan 00163). All checks ship ADVISE; grandfather at
+    # 163 (the plan that introduces journalling) so the ~160 legacy journal-less
+    # plans are never nagged. freshness_days 3 nags a quiet JOURNAL/ sooner than
+    # the 30-day plan staleness window.
+    journal:
+      enabled: true
+      mode: advise
+      dir_name: JOURNAL
+      freshness_days: 3
+      enforce_on_completion: false
+      grandfather_before: 163
 
 project_handlers:
   enabled: true

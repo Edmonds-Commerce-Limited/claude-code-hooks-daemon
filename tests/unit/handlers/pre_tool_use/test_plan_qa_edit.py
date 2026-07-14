@@ -115,6 +115,63 @@ class TestMatches:
         target = tmp_path / _PLAN_DIR_REL / "00042-widget" / "PLAN.md"
         assert handler.matches(_write_input(target, "x")) is False
 
+    def test_matches_journal_dayfile(self, tmp_path: Path) -> None:
+        # Plan 00163: journal day-files are lintable plan artifacts too.
+        target = tmp_path / _PLAN_DIR_REL / "00163-x" / "JOURNAL" / "00163-Journal-26-07-14.md"
+        assert _handler().matches(_write_input(target, "x")) is True
+
+    def test_journal_dayfile_skipped_when_journal_disabled(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.config.models import PlanWorkflowQaJournalConfig
+
+        policy = PlanWorkflowQaConfig(journal=PlanWorkflowQaJournalConfig(enabled=False))
+        target = tmp_path / _PLAN_DIR_REL / "00163-x" / "JOURNAL" / "00163-Journal-26-07-14.md"
+        assert _handler(policy=policy).matches(_write_input(target, "x")) is False
+
+    def test_journal_dayfile_skipped_when_journal_mode_off(self, tmp_path: Path) -> None:
+        from claude_code_hooks_daemon.config.models import PlanWorkflowQaJournalConfig
+
+        policy = PlanWorkflowQaConfig(journal=PlanWorkflowQaJournalConfig(mode="off"))
+        target = tmp_path / _PLAN_DIR_REL / "00163-x" / "JOURNAL" / "00163-Journal-26-07-14.md"
+        assert _handler(policy=policy).matches(_write_input(target, "x")) is False
+
+
+class TestHandleJournal:
+    """Plan 00163: journal day-file edit linting through the handler."""
+
+    def _journal_file(self, tmp_path: Path, name: str = "00163-Journal-26-07-14.md") -> Path:
+        journal = tmp_path / _PLAN_DIR_REL / "00163-x" / "JOURNAL"
+        journal.mkdir(parents=True)
+        return journal / name
+
+    def test_new_journal_with_bad_name_advises(self, tmp_path: Path) -> None:
+        target = self._journal_file(tmp_path, "my-journal.md")
+        with _patched_root(tmp_path):
+            result = _handler().handle(_write_input(target, "# journal\n"))
+        assert result.decision == Decision.ALLOW
+        assert result.context
+        assert "journal-dayfile-naming" in " ".join(result.context)
+
+    def test_pure_append_is_silent(self, tmp_path: Path) -> None:
+        target = self._journal_file(tmp_path)
+        before = "# Journal\n\n## 09:00 · action · —\n\nfirst\n"
+        target.write_text(before)
+        after = before + "\n## 10:00 · finding · —\n\nsecond\n"
+        with _patched_root(tmp_path):
+            result = _handler().handle(_write_input(target, after))
+        assert result.decision == Decision.ALLOW
+        assert not result.context
+
+    def test_history_rewrite_advises(self, tmp_path: Path) -> None:
+        target = self._journal_file(tmp_path)
+        before = "# Journal\n\n## 09:00 · action · —\n\nfirst\n"
+        target.write_text(before)
+        rewritten = before.replace("first", "EDITED first")
+        with _patched_root(tmp_path):
+            result = _handler().handle(_write_input(target, rewritten))
+        assert result.decision == Decision.ALLOW
+        assert result.context
+        assert "journal-append-only" in " ".join(result.context)
+
 
 class TestHandleWrite:
     def test_valid_new_plan_allows_silently(self, tmp_path: Path) -> None:

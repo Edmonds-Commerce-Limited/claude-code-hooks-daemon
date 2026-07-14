@@ -12,6 +12,7 @@ invariants only (cross-file invariants belong to the commit gate and sweep).
 """
 
 import logging
+from datetime import date
 from pathlib import Path
 from typing import Any, Final
 
@@ -37,6 +38,9 @@ _FIELD_NEW_STRING: Final[str] = "new_string"
 _FIELD_REPLACE_ALL: Final[str] = "replace_all"
 
 _SINGLE_REPLACEMENT: Final[int] = 1
+
+_MARKDOWN_SUFFIX: Final[str] = ".md"
+_JOURNAL_MODE_OFF: Final[str] = "off"
 
 
 class PlanQaEditHandler(Handler):
@@ -68,9 +72,24 @@ class PlanQaEditHandler(Handler):
             return False
 
         file_path = hook_input.get(HookInputField.TOOL_INPUT, {}).get(_FIELD_FILE_PATH, "")
-        if not file_path or Path(file_path).name != PLAN_DOC_FILENAME:
+        if not file_path or f"/{plan_dir_rel}/" not in file_path:
             return False
-        return f"/{plan_dir_rel}/" in file_path
+        return self._is_lintable_plan_file(file_path, policy)
+
+    def _is_lintable_plan_file(self, file_path: str, policy: Any) -> bool:
+        """True for a PLAN.md OR a journal day-file under a plan folder.
+
+        Journal files are ``*.md`` directly inside a ``{journal_dir_name}/``
+        directory (Plan 00163); the per-check target resolvers do the precise
+        folder-structure validation, so this stays a cheap string gate.
+        """
+        path = Path(file_path)
+        if path.name == PLAN_DOC_FILENAME:
+            return True
+        journal = getattr(policy, "journal", None)
+        if journal is None or not journal.enabled or journal.mode == _JOURNAL_MODE_OFF:
+            return False
+        return path.suffix == _MARKDOWN_SUFFIX and path.parent.name == journal.dir_name
 
     def handle(self, hook_input: dict[str, Any]) -> HookResult:
         tool_input = hook_input.get(HookInputField.TOOL_INPUT, {})
@@ -83,6 +102,7 @@ class PlanQaEditHandler(Handler):
             # itself will fail with its own error — nothing to lint.
             return HookResult(decision=Decision.ALLOW, context=[])
 
+        content_before = file_path.read_text(encoding="utf-8") if exists_before else None
         context = edit_context(
             project_root=ProjectContext.project_root(),
             plan_dir_rel=str(self._track_plans_in_project),
@@ -90,6 +110,8 @@ class PlanQaEditHandler(Handler):
             file_path=file_path,
             file_content=content,
             file_exists_before=exists_before,
+            file_content_before=content_before,
+            today=date.today(),
         )
         findings = run_stage(Stage.EDIT, context)
         if not findings:
@@ -154,6 +176,13 @@ class PlanQaEditHandler(Handler):
             "root (the same commit must `git mv` it to the archive dir and\n"
             "update the README row); edits to archived plans; backticked\n"
             "`src/...` paths that no longer exist.\n"
+            "\n"
+            "**Journal day-files** (`JOURNAL/NNNNN-Journal-YY-MM-DD.md`) are also\n"
+            "linted (all ADVISE): the name must match the grammar and the\n"
+            "enclosing plan number with a today/yesterday date\n"
+            "(`journal-dayfile-naming`), and edits must APPEND — never rewrite or\n"
+            "remove earlier entries (`journal-append-only`). Corrections are new\n"
+            "dated entries at the bottom, not edits to old ones.\n"
             "\n"
             "Grandfathered plans in `plan_workflow.qa.legacy_plan_allowlist`\n"
             "only ever advise. Lint any file on demand:\n"

@@ -101,39 +101,36 @@ folder: `BRAINSTORM-datamodel.md` (data model & lifecycle) and
 
 ### Phase 1: Minimal dogfoodable slice (all ADVISE mode)
 
-- [ ] ⬜ **Task 1.1**: Config — add nested `journal` block to
-  `PlanWorkflowQaConfig` (`src/claude_code_hooks_daemon/config/models.py`): `enabled` (default true),
-  `mode: advise|block|off` (default `advise`), `dir_name` (default
-  `JOURNAL`), `freshness_days` (default 3), `enforce_on_completion`
-  (default false), `grandfather_before` (default 163 for this repo's config;
-  model default 0). Thread the knobs into `CheckContext` as plain values via
-  the `QaPolicy` Protocol (TDD; zero rule logic in handlers).
-- [ ] ⬜ **Task 1.2**: Model — extend `PlanFolder` (`plan_qa/model.py`) with
-  `has_journal: bool` and `latest_journal_date: date | None`, parsed in the
-  folder loader by scanning `JOURNAL/` for `NNNNN-Journal-YY-MM-DD.md` names
-  (filename parse only, no file reads — journals may be large).
-- [ ] ⬜ **Task 1.3**: Context — add `file_content_before: str | None` to
-  `CheckContext`; `plan_qa_edit` threads the pre-edit on-disk content it
-  already reads inside `_would_be_content()` so the append-only check stays
-  pure.
-- [ ] ⬜ **Task 1.4**: EDIT checks — new modules
-  `plan_qa/checks/journal_dayfile_naming.py` and
-  `plan_qa/checks/journal_append_only.py`, registered in `all_checks()`.
-  Naming: basename must be `NNNNN-Journal-YY-MM-DD.md` with NNNNN matching
-  the enclosing plan and the date today-or-yesterday (midnight rollover).
-  Append-only: prefix test on trailing-newline-normalised before/after
-  (new file → OK; `after.startswith(before)` → OK; shrink → "truncation";
-  else → "rewrites earlier history"). Both ADVISE.
-- [ ] ⬜ **Task 1.5**: Extend `plan_qa_edit.matches()` from PLAN.md-only to
-  "plan artifact under the plan dir" (PLAN.md OR `{dir_name}/*.md` inside a
-  `NNNNN-*` folder), with each check self-selecting its target. Keep it ONE
-  handler — do not duplicate the would-be-content reconstruction.
-- [ ] ⬜ **Task 1.6**: SWEEP checks — new modules
-  `plan_qa/checks/journal_folder_present.py` (In Progress plan with number
-  ≥ `grandfather_before` and no `JOURNAL/`) and
-  `plan_qa/checks/journal_freshness.py` (In Progress plan WITH a `JOURNAL/`
-  whose newest day-file name is older than `freshness_days` — filename-based,
-  never git dates, so uncommitted journals count). Both ADVISE, SWEEP stage.
+- [x] ✅ **Task 1.1**: Config — nested `journal` block on
+  `PlanWorkflowQaConfig` (`PlanWorkflowQaJournalConfig`: `enabled`/`mode`/
+  `dir_name`/`freshness_days`/`enforce_on_completion`/`grandfather_before`)
+  threaded into `CheckContext` via one typed `_with_journal` helper
+  (`dataclasses.replace` — no suppression). `JournalPolicy` Protocol added.
+  This repo's config sets `grandfather_before: 163`.
+- [x] ✅ **Task 1.2**: Model — `PlanFolder.has_journal` +
+  `latest_journal_date` (filename parse only) via `parse_journal_dayfile_name`
+  (`JournalDayfileName` splits regex-match from calendar validity —
+  `is_valid_date` uses stdlib `calendar`, NOT a caught ValueError, so
+  error_hiding stays clean). `journal_dir_name` threaded through `scan`.
+- [x] ✅ **Task 1.3**: Context — added `file_content_before: str | None` and
+  `today` to `CheckContext` / the EDIT builder; `plan_qa_edit` threads the
+  pre-edit on-disk content so the append-only check stays pure.
+- [x] ✅ **Task 1.4**: EDIT checks — `journal_dayfile_naming` (ADVISE,
+  ratchet-able to BLOCK via `mode: block`) and `journal_append_only` (ADVISE
+  forever), registered in `all_checks()`. Naming validates grammar +
+  number-match + today/yesterday; append-only is the trailing-newline
+  prefix test (creation/append OK; shrink → truncation; else → rewrite).
+- [x] ✅ **Task 1.5**: `plan_qa_edit.matches()` broadened from PLAN.md-only to
+  also lint `{dir_name}/*.md` journal day-files; `handle()` threads
+  `file_content_before` + `today`. Checks self-select via `journal_edit_target`.
+  ONE handler, no duplicated would-be-content reconstruction. Also exempted
+  journal day-files from `markdown_table_formatter` (Decision 6) so the live
+  append-only check is not tripped by the formatter.
+- [x] ✅ **Task 1.6**: SWEEP checks — `journal_folder_present` (In Progress,
+  number ≥ `grandfather_before`, no `JOURNAL/`) and `journal_freshness`
+  (In Progress WITH a `JOURNAL/` whose newest day-file name is older than
+  `freshness_days`, filename-based). Both ADVISE. Verified `plan-qa --sweep`
+  reports ZERO journal findings in this repo (legacy plans grandfathered).
 - [x] ✅ **Task 1.7**: `mkplan.bash` (bundle + deployed, byte-identical,
   shellcheck clean) scaffolds `JOURNAL/` + `NNNNN-Journal-$(date +%y-%m-%d).md`
   after PLAN.md, rendering `_JOURNAL_TEMPLATE_.md` (`{{PLAN_NUMBER}}`,

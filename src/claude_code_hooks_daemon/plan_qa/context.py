@@ -15,6 +15,7 @@ Surface cost profile:
 """
 
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 from typing import Protocol
@@ -23,6 +24,28 @@ from claude_code_hooks_daemon.plan_qa.gitfacts import GitFacts
 from claude_code_hooks_daemon.plan_qa.model import README_FILENAME, PlanTree
 from claude_code_hooks_daemon.plan_qa.readme_index import ReadmeIndex
 from claude_code_hooks_daemon.plan_qa.types import CheckContext
+
+
+class JournalPolicy(Protocol):
+    """Structural view of the journal policy (mirrors PlanWorkflowQaJournalConfig)."""
+
+    @property
+    def enabled(self) -> bool: ...
+
+    @property
+    def mode(self) -> str: ...
+
+    @property
+    def dir_name(self) -> str: ...
+
+    @property
+    def freshness_days(self) -> int: ...
+
+    @property
+    def enforce_on_completion(self) -> bool: ...
+
+    @property
+    def grandfather_before(self) -> int: ...
 
 
 class QaPolicy(Protocol):
@@ -49,6 +72,9 @@ class QaPolicy(Protocol):
     @property
     def extra_root_files(self) -> Sequence[str]: ...
 
+    @property
+    def journal(self) -> JournalPolicy: ...
+
 
 def _tree_and_readme(
     project_root: Path,
@@ -73,6 +99,25 @@ def _tree_and_readme(
     return tree, readme
 
 
+def _with_journal(context: CheckContext, policy: QaPolicy) -> CheckContext:
+    """Stamp the flattened journal policy (Plan 00163) onto a built context.
+
+    Kept as one typed helper so all three surfaces thread the six journal
+    knobs identically without repetition — ``dataclasses.replace`` type-checks
+    each field, so no suppression is needed.
+    """
+    journal = policy.journal
+    return replace(
+        context,
+        journal_enabled=journal.enabled,
+        journal_mode=journal.mode,
+        journal_dir_name=journal.dir_name,
+        journal_freshness_days=journal.freshness_days,
+        journal_enforce_on_completion=journal.enforce_on_completion,
+        journal_grandfather_before=journal.grandfather_before,
+    )
+
+
 def sweep_context(
     project_root: Path,
     plan_dir_rel: str,
@@ -81,19 +126,22 @@ def sweep_context(
 ) -> CheckContext:
     """Build the Stage 3 (SWEEP) context: full tree + readme + git facts."""
     tree, readme = _tree_and_readme(project_root, plan_dir_rel, policy)
-    return CheckContext(
-        project_root=project_root,
-        plan_dir_rel=plan_dir_rel,
-        completed_dir=policy.completed_dir,
-        cancelled_dir=policy.cancelled_dir,
-        require_terminal_date=policy.require_terminal_date,
-        staleness_days=policy.staleness_days,
-        legacy_plan_allowlist=frozenset(policy.legacy_plan_allowlist),
-        collision_allowlist=frozenset(policy.collision_allowlist),
-        tree=tree,
-        readme=readme,
-        gitfacts=GitFacts(project_root),
-        today=today,
+    return _with_journal(
+        CheckContext(
+            project_root=project_root,
+            plan_dir_rel=plan_dir_rel,
+            completed_dir=policy.completed_dir,
+            cancelled_dir=policy.cancelled_dir,
+            require_terminal_date=policy.require_terminal_date,
+            staleness_days=policy.staleness_days,
+            legacy_plan_allowlist=frozenset(policy.legacy_plan_allowlist),
+            collision_allowlist=frozenset(policy.collision_allowlist),
+            tree=tree,
+            readme=readme,
+            gitfacts=GitFacts(project_root),
+            today=today,
+        ),
+        policy,
     )
 
 
@@ -105,19 +153,22 @@ def staged_context(
 ) -> CheckContext:
     """Build the Stage 2 (COMMIT) context: staged git facts + tree views."""
     tree, readme = _tree_and_readme(project_root, plan_dir_rel, policy)
-    return CheckContext(
-        project_root=project_root,
-        plan_dir_rel=plan_dir_rel,
-        completed_dir=policy.completed_dir,
-        cancelled_dir=policy.cancelled_dir,
-        require_terminal_date=policy.require_terminal_date,
-        staleness_days=policy.staleness_days,
-        legacy_plan_allowlist=frozenset(policy.legacy_plan_allowlist),
-        collision_allowlist=frozenset(policy.collision_allowlist),
-        tree=tree,
-        readme=readme,
-        gitfacts=GitFacts(project_root),
-        commit_message=commit_message,
+    return _with_journal(
+        CheckContext(
+            project_root=project_root,
+            plan_dir_rel=plan_dir_rel,
+            completed_dir=policy.completed_dir,
+            cancelled_dir=policy.cancelled_dir,
+            require_terminal_date=policy.require_terminal_date,
+            staleness_days=policy.staleness_days,
+            legacy_plan_allowlist=frozenset(policy.legacy_plan_allowlist),
+            collision_allowlist=frozenset(policy.collision_allowlist),
+            tree=tree,
+            readme=readme,
+            gitfacts=GitFacts(project_root),
+            commit_message=commit_message,
+        ),
+        policy,
     )
 
 
@@ -128,18 +179,31 @@ def edit_context(
     file_path: Path,
     file_content: str,
     file_exists_before: bool,
+    file_content_before: str | None = None,
+    today: date | None = None,
 ) -> CheckContext:
-    """Build the Stage 1 (EDIT) context: would-be file content only."""
-    return CheckContext(
-        project_root=project_root,
-        plan_dir_rel=plan_dir_rel,
-        completed_dir=policy.completed_dir,
-        cancelled_dir=policy.cancelled_dir,
-        require_terminal_date=policy.require_terminal_date,
-        staleness_days=policy.staleness_days,
-        legacy_plan_allowlist=frozenset(policy.legacy_plan_allowlist),
-        collision_allowlist=frozenset(policy.collision_allowlist),
-        file_path=file_path,
-        file_content=file_content,
-        file_exists_before=file_exists_before,
+    """Build the Stage 1 (EDIT) context: would-be file content only.
+
+    ``file_content_before`` (Plan 00163) is the pre-edit on-disk content the
+    surface already read; the append-only journal check consults it so it
+    stays a pure function. ``None`` for a creation. ``today`` is supplied by
+    the (impure) handler so the day-file-naming check stays deterministic.
+    """
+    return _with_journal(
+        CheckContext(
+            project_root=project_root,
+            plan_dir_rel=plan_dir_rel,
+            completed_dir=policy.completed_dir,
+            cancelled_dir=policy.cancelled_dir,
+            require_terminal_date=policy.require_terminal_date,
+            staleness_days=policy.staleness_days,
+            legacy_plan_allowlist=frozenset(policy.legacy_plan_allowlist),
+            collision_allowlist=frozenset(policy.collision_allowlist),
+            file_path=file_path,
+            file_content=file_content,
+            file_exists_before=file_exists_before,
+            file_content_before=file_content_before,
+            today=today,
+        ),
+        policy,
     )

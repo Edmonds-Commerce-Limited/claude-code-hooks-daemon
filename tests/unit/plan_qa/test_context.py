@@ -1,7 +1,7 @@
 """Tests for plan_qa.context — CheckContext builders for the three surfaces."""
 
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
@@ -14,6 +14,18 @@ from claude_code_hooks_daemon.plan_qa.context import (
     sweep_context,
 )
 from claude_code_hooks_daemon.plan_qa.types import Level
+
+
+@dataclass(frozen=True)
+class _Journal:
+    """Duck-typed stand-in for PlanWorkflowQaJournalConfig (Plan 00163)."""
+
+    enabled: bool = True
+    mode: str = "advise"
+    dir_name: str = "JOURNAL"
+    freshness_days: int = 3
+    enforce_on_completion: bool = False
+    grandfather_before: int = 0
 
 
 @dataclass(frozen=True)
@@ -31,6 +43,7 @@ class _Policy:
     legacy_plan_allowlist: tuple[int, ...] = ()
     collision_allowlist: tuple[int, ...] = ()
     extra_root_files: tuple[str, ...] = ()
+    journal: _Journal = field(default_factory=_Journal)
 
 
 def _scaffold(tmp_path: Path) -> Path:
@@ -169,6 +182,40 @@ class TestEditContext:
         # Edit contexts stay cheap: no tree scan, no git subprocess.
         assert context.tree is None
         assert context.gitfacts is None
+
+    def test_carries_file_content_before(self, tmp_path: Path) -> None:
+        # Plan 00163: the append-only journal check needs the pre-edit content.
+        root = _scaffold(tmp_path)
+        target = root / "CLAUDE/Plan/00163-j/JOURNAL/00163-Journal-26-07-14.md"
+        context = edit_context(
+            project_root=root,
+            plan_dir_rel="CLAUDE/Plan",
+            policy=_Policy(),
+            file_path=target,
+            file_content="prior\nnew\n",
+            file_exists_before=True,
+            file_content_before="prior\n",
+        )
+        assert context.file_content_before == "prior\n"
+
+    def test_journal_policy_threaded(self, tmp_path: Path) -> None:
+        # Plan 00163: journal knobs reach every surface as flat values.
+        root = _scaffold(tmp_path)
+        policy = _Policy(
+            journal=_Journal(mode="block", dir_name="LOG", freshness_days=7, grandfather_before=163)
+        )
+        context = edit_context(
+            project_root=root,
+            plan_dir_rel="CLAUDE/Plan",
+            policy=policy,
+            file_path=root / "CLAUDE/Plan/00163-j/PLAN.md",
+            file_content="# Plan 00163: j\n",
+            file_exists_before=False,
+        )
+        assert context.journal_mode == "block"
+        assert context.journal_dir_name == "LOG"
+        assert context.journal_freshness_days == 7
+        assert context.journal_grandfather_before == 163
 
     def test_level_type_reexport_sanity(self) -> None:
         # Guard against accidental enum drift between surfaces.

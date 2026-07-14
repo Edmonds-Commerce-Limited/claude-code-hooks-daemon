@@ -20,13 +20,17 @@ The parser MUST tolerate mdformat-gfm output because the daemon's
 markdown_table_formatter rewrites every written markdown file.
 """
 
+import calendar
 import re
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import date
 from enum import Enum
 from pathlib import Path
 from typing import Final
+
+from claude_code_hooks_daemon.plan_qa.types import DEFAULT_JOURNAL_DIR_NAME
 
 
 class PlanStatus(str, Enum):
@@ -287,6 +291,14 @@ README_FILENAME: Final[str] = "README.md"
 # hyphen and a LETTER (so date-named dirs like 2026-01-12 are never plans).
 _PLAN_FOLDER_RE: Final[re.Pattern[str]] = re.compile(r"^(\d{1,5})-[a-zA-Z]")
 
+# Journal day-file grammar (Plan 00163): ``NNNNN-Journal-YY-MM-DD.md``. The
+# two-digit year is deliberate (Decision 1) — the journal filename parser owns
+# its own pattern rather than reusing plan_qa's 4-digit date regex.
+_JOURNAL_DAYFILE_RE: Final[re.Pattern[str]] = re.compile(
+    r"^(\d{1,5})-Journal-(\d{2})-(\d{2})-(\d{2})\.md$"
+)
+_JOURNAL_YEAR_BASE: Final[int] = 2000
+
 _HIDDEN_PREFIX: Final[str] = "."
 
 # Non-plan files that legitimately live at the plan root; anything else is a
@@ -302,6 +314,80 @@ _EXPECTED_ROOT_FILES: Final[frozenset[str]] = frozenset(
 )
 
 
+_MONTHS_IN_YEAR: Final[int] = 12
+
+
+def _is_valid_calendar_date(year: int, month: int, day: int) -> bool:
+    """True when (year, month, day) is a real calendar date — never raises.
+
+    ``calendar.monthrange`` is leap-aware but raises on an out-of-range month,
+    so the month is range-checked first (precondition, not catch-and-swallow).
+    """
+    if not 1 <= month <= _MONTHS_IN_YEAR:
+        return False
+    _, days_in_month = calendar.monthrange(year, month)
+    return 1 <= day <= days_in_month
+
+
+@dataclass(frozen=True)
+class JournalDayfileName:
+    """The parts parsed from a ``NNNNN-Journal-YY-MM-DD.md`` name (Plan 00163)."""
+
+    number: int
+    year: int
+    month: int
+    day: int
+
+    @property
+    def is_valid_date(self) -> bool:
+        """Whether the YY-MM-DD components form a real calendar date."""
+        return _is_valid_calendar_date(self.year, self.month, self.day)
+
+    @property
+    def date(self) -> date:
+        """The calendar date — only meaningful when :attr:`is_valid_date`."""
+        return date(self.year, self.month, self.day)
+
+
+def parse_journal_dayfile_name(filename: str) -> JournalDayfileName | None:
+    """Parse ``NNNNN-Journal-YY-MM-DD.md`` into its parts, or ``None``.
+
+    Filename parse only (Plan 00163) — journals may be large and are never
+    read for the model. ``None`` means the name does not match the day-file
+    grammar at all (a classification, not an error); calendar validity of the
+    parsed components is a separate question answered by
+    :attr:`JournalDayfileName.is_valid_date`.
+    """
+    match = _JOURNAL_DAYFILE_RE.match(filename)
+    if match is None:
+        return None
+    number, yy, mm, dd = match.groups()
+    return JournalDayfileName(
+        number=int(number),
+        year=_JOURNAL_YEAR_BASE + int(yy),
+        month=int(mm),
+        day=int(dd),
+    )
+
+
+def _scan_journal(plan_folder: Path, journal_dir_name: str) -> tuple[bool, date | None]:
+    """Return ``(has_journal, latest_journal_date)`` for one plan folder.
+
+    ``has_journal`` is True when the journal directory exists at all;
+    ``latest_journal_date`` is the newest well-formed day-file date, or
+    ``None`` when the directory is empty or holds only malformed names.
+    """
+    journal_dir = plan_folder / journal_dir_name
+    if not journal_dir.is_dir():
+        return False, None
+    dates = [
+        parsed.date
+        for entry in journal_dir.iterdir()
+        if (parsed := parse_journal_dayfile_name(entry.name)) is not None and parsed.is_valid_date
+    ]
+    return True, (max(dates) if dates else None)
+
+
 @dataclass(frozen=True)
 class PlanFolder:
     """One ``NNNNN-name/`` plan folder discovered by :meth:`PlanTree.scan`."""
@@ -312,6 +398,8 @@ class PlanFolder:
     location: PlanLocation
     has_plan_md: bool
     doc: PlanDoc | None
+    has_journal: bool = False
+    latest_journal_date: date | None = None
 
 
 @dataclass(frozen=True)
@@ -334,6 +422,7 @@ class PlanTree:
         completed_dir: str = DEFAULT_COMPLETED_DIR,
         cancelled_dir: str | None = DEFAULT_CANCELLED_DIR,
         extra_root_files: Sequence[str] = (),
+        journal_dir_name: str = DEFAULT_JOURNAL_DIR_NAME,
     ) -> "PlanTree":
         """Scan ``root`` for plan folders, archive dirs, and stray files.
 
@@ -363,13 +452,13 @@ class PlanTree:
                     stray_files.append(entry)
                 continue
             if _PLAN_FOLDER_RE.match(entry.name):
-                folders.append(_load_plan_folder(entry, PlanLocation.ROOT))
+                folders.append(_load_plan_folder(entry, PlanLocation.ROOT, journal_dir_name))
             elif entry.name == completed_dir:
-                _collect_plan_folders(entry, PlanLocation.COMPLETED, folders)
+                _collect_plan_folders(entry, PlanLocation.COMPLETED, folders, journal_dir_name)
             elif cancelled_dir is not None and entry.name == cancelled_dir:
-                _collect_plan_folders(entry, PlanLocation.CANCELLED, folders)
+                _collect_plan_folders(entry, PlanLocation.CANCELLED, folders, journal_dir_name)
             else:
-                _collect_plan_folders(entry, PlanLocation.OTHER, folders)
+                _collect_plan_folders(entry, PlanLocation.OTHER, folders, journal_dir_name)
 
         return cls(
             root=root,
@@ -390,13 +479,18 @@ class PlanTree:
         return {number: claimants for number, claimants in by_number.items() if len(claimants) > 1}
 
 
-def _load_plan_folder(path: Path, location: PlanLocation) -> PlanFolder:
+def _load_plan_folder(
+    path: Path,
+    location: PlanLocation,
+    journal_dir_name: str = DEFAULT_JOURNAL_DIR_NAME,
+) -> PlanFolder:
     """Build a :class:`PlanFolder`, parsing its PLAN.md when present."""
     match = _PLAN_FOLDER_RE.match(path.name)
     if match is None:  # pragma: no cover - callers pre-filter on the pattern
         raise ValueError(f"Not a plan folder name: {path.name}")
     plan_md = path / PLAN_DOC_FILENAME
     has_plan_md = plan_md.is_file()
+    has_journal, latest_journal_date = _scan_journal(path, journal_dir_name)
     return PlanFolder(
         path=path,
         name=path.name,
@@ -404,6 +498,8 @@ def _load_plan_folder(path: Path, location: PlanLocation) -> PlanFolder:
         location=location,
         has_plan_md=has_plan_md,
         doc=PlanDoc.parse(plan_md.read_text()) if has_plan_md else None,
+        has_journal=has_journal,
+        latest_journal_date=latest_journal_date,
     )
 
 
@@ -411,6 +507,7 @@ def _collect_plan_folders(
     directory: Path,
     location: PlanLocation,
     accumulator: list[PlanFolder],
+    journal_dir_name: str = DEFAULT_JOURNAL_DIR_NAME,
 ) -> None:
     """Recursively collect plan folders under an organisational directory.
 
@@ -423,6 +520,6 @@ def _collect_plan_folders(
         if not entry.is_dir() or entry.name.startswith(_HIDDEN_PREFIX):
             continue
         if _PLAN_FOLDER_RE.match(entry.name):
-            accumulator.append(_load_plan_folder(entry, location))
+            accumulator.append(_load_plan_folder(entry, location, journal_dir_name))
         else:
-            _collect_plan_folders(entry, location, accumulator)
+            _collect_plan_folders(entry, location, accumulator, journal_dir_name)

@@ -39,6 +39,12 @@ DEFAULT_STALENESS_DAYS: Final[int] = 30
 DEFAULT_COMPLETED_DIR_NAME: Final[str] = "Completed"
 DEFAULT_CANCELLED_DIR_NAME: Final[str] = "Cancelled"
 
+# Journal policy defaults (Plan 00163). The daemon config model overrides these
+# via QaPolicy; the package-level defaults keep plan_qa usable standalone.
+DEFAULT_JOURNAL_DIR_NAME: Final[str] = "JOURNAL"
+DEFAULT_JOURNAL_FRESHNESS_DAYS: Final[int] = 3
+DEFAULT_JOURNAL_MODE: Final[str] = "advise"
+
 
 @dataclass(frozen=True)
 class Finding:
@@ -73,10 +79,22 @@ class CheckContext:
     legacy_plan_allowlist: frozenset[int] = field(default_factory=frozenset)
     collision_allowlist: frozenset[int] = field(default_factory=frozenset)
 
+    # Journal policy (Plan 00163; mirrors plan_workflow.qa.journal.*).
+    journal_enabled: bool = True
+    journal_mode: str = DEFAULT_JOURNAL_MODE
+    journal_dir_name: str = DEFAULT_JOURNAL_DIR_NAME
+    journal_freshness_days: int = DEFAULT_JOURNAL_FRESHNESS_DAYS
+    journal_enforce_on_completion: bool = False
+    journal_grandfather_before: int = 0
+
     # Stage 1 (EDIT): the file being written and its would-be content.
     file_path: Path | None = None
     file_content: str | None = None
     file_exists_before: bool | None = None
+    # Pre-edit on-disk content (Plan 00163): threaded by plan_qa_edit so the
+    # append-only journal check stays a pure function. ``None`` when the file
+    # did not exist before (a creation) or the surface did not supply it.
+    file_content_before: str | None = None
 
     # Stage 2 (COMMIT).
     gitfacts: "GitFacts | None" = None

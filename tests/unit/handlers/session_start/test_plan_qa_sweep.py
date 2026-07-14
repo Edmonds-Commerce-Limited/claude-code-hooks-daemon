@@ -27,6 +27,9 @@ def _scaffold(tmp_path: Path) -> Path:
     (folder / "PLAN.md").write_text(
         "# Plan 00001: first\n\n**Status**: In Progress\n\n- [ ] ⬜ **Task 1.1**: x\n"
     )
+    # A JOURNAL/ dir keeps the tree clean under the Plan 00163 journal checks
+    # (has_journal → folder-present passes; no dated file → freshness skips).
+    (folder / "JOURNAL").mkdir()
     (plan_dir / "README.md").write_text(
         "# Plans Index\n\n## Active Plans\n\n"
         "- [00001: first](00001-first/PLAN.md) - In Progress\n"

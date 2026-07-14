@@ -16,6 +16,10 @@ from claude_code_hooks_daemon.plan_qa.checks import (
     dormant_honesty,
     header_body_coherence,
     index_at_birth,
+    journal_append_only,
+    journal_dayfile_naming,
+    journal_folder_present,
+    journal_freshness,
     location_status_coherence,
     no_new_collisions,
     path_existence,
@@ -47,6 +51,8 @@ def all_checks() -> tuple[CheckSpec, ...]:
         terminal_placement_hint.CHECK,
         archive_immutability.CHECK,
         path_existence.CHECK,
+        journal_dayfile_naming.CHECK,
+        journal_append_only.CHECK,
         # Cross-file tree checks — dual COMMIT + SWEEP registration
         *no_new_collisions.CHECKS,
         *row_folder_bijection.CHECKS,
@@ -63,4 +69,6 @@ def all_checks() -> tuple[CheckSpec, ...]:
         staleness_nag.CHECK,
         dormant_honesty.CHECK,
         claim_spotcheck_queue.CHECK,
+        journal_folder_present.CHECK,
+        journal_freshness.CHECK,
     )
