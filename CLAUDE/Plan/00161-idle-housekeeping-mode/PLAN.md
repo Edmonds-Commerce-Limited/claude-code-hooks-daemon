@@ -66,12 +66,49 @@ genuinely idle-stop.
 - [ ] ⬜ **Task 1.2**: Review the brainstorm with the user; pick the detection
   rule, the initial task catalogue, and the MVP slice.
 
-### Phase 2: MVP Implementation (TDD) — pending Phase 1 approval
+### Phase 2: MVP Implementation (TDD) — sub-agent-dispatch architecture
 
-- [ ] ⬜ **Task 2.1**: TDD the no-op-tick detector + housekeeping-guidance
-  injection as a handler (RED → GREEN → REFACTOR), report-only first.
-- [ ] ⬜ **Task 2.2**: Wire config options (enable/disable, threshold, task
-  allowlist, report-only mode); full QA; daemon restart RUNNING; dogfood in-repo.
+- [ ] ⬜ **Task 2.0**: Debug-first — confirm with `./scripts/debug_hooks.sh`
+  whether a cron-originated prompt raises UserPromptSubmit (BRAINSTORM §E.9). If
+  not, fall back to the Stop-handler host (§A.2 Option A).
+- [ ] ⬜ **Task 2.1**: TDD the `idle_housekeeping_advisor` detector — matches the
+  canonical `FAILSAFE RECOVERY CHECK` marker, transcript-tail no-op counter
+  (threshold 2), guards S3/S6, pass-cap sidecar (RED → GREEN → REFACTOR).
+- [ ] ⬜ **Task 2.2**: Guidance injects an instruction to **fire specialist
+  housekeeping sub-agent(s)** (protecting main-thread context) that run scoped,
+  report-first audits and return concise findings — NOT an inline checklist the
+  main thread executes itself.
+- [ ] ⬜ **Task 2.3**: Wire config options (enable/disable, `noop_threshold`
+  default 2, `max_passes_per_session`, task allowlist, report-only mode);
+  `get_claude_md()`; acceptance tests; full QA; daemon restart RUNNING; dogfood
+  in-repo (opt-in default off).
+
+## Technical Decisions
+
+### Decision 1: Housekeeping runs via specialist sub-agents, not inline
+
+**Context**: The brainstorm MVP had the main thread execute a checklist inline.
+**Decision** (user, 2026-07-14): housekeeping is delivered by **specialist
+housekeeping sub-agents** the main thread fires. This protects main-thread
+context (audits don't bloat it) and uses focused specialists that return concise
+summaries. The advisory handler's role is to detect the idle condition and inject
+guidance to *dispatch* those sub-agents — the main thread orchestrates, agents do
+the work. Report-first still holds; any mutation/commit remains gated per the
+three-tier boundary (BRAINSTORM §C).
+
+### Decision 2: No-op threshold default = 2
+
+**Decision** (user, 2026-07-14): trip at 2 consecutive no-op ticks
+(config-overridable `noop_threshold`).
+
+### Decision 3: Root-cause the doubled-stop via hello_world deprecation
+
+**Context**: `hello_world_*` handlers inject `✅ <event> hook system active` on
+every event; on Stop this makes Claude Code grant another turn (doubled idle
+burn). **Decision** (user, 2026-07-14): these are debug/dogfooding confirmations
+— deprecate/hide them from normal projects (default-disabled), keep enabled in
+THIS repo for dogfooding/debugging. Tracked in its own plan (see README index);
+this also removes the field-side doubled-stop independent of the housekeeping MVP.
 
 ## Success Criteria
 
