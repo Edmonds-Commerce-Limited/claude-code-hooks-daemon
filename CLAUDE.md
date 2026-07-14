@@ -950,6 +950,12 @@ commit with a TODO list of what the commit must also contain.
   changes should also update that plan's PLAN.md
   (`same-commit-plan-doc`); reference plans as `Plan NNNNN:`
   (`plan-ref-format`)
+- (advise-only, Plan 00163) a commit that changes a plan's PLAN.md
+  tasks should stage a `JOURNAL/` entry recording what changed
+  (`journal-entry-with-progress`); a terminal-status flip should
+  stage a closing journal entry when
+  `plan_workflow.qa.journal.enforce_on_completion` is on
+  (`journal-completion-entry`)
 
 Check the staged tree any time without committing:
 `$PYTHON -m claude_code_hooks_daemon.daemon.cli plan-qa --check-staged`.
