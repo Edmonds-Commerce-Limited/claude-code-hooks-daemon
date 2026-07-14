@@ -51,7 +51,7 @@ if TYPE_CHECKING:
 # (see CLAUDE/development/RELEASING.md). Display-only for the banner and the
 # runtime status file; staleness detection (Plan 00164 Phase 3) uses a content
 # hash of THIS file so it is correct even between version bumps.
-__version__ = "3.40.0"
+__version__ = "3.41.0"
 
 # Absolute path to THIS running script — hashed for staleness detection so the
 # daemon can tell when the on-disk supervisor differs from the running one.
@@ -102,7 +102,7 @@ def render_startup_banner(*, version: str, armed: bool) -> str:
     widths.
 
     Args:
-        version: Supervisor version string (e.g. ``"3.40.0"``).
+        version: Supervisor version string (e.g. ``"3.41.0"``).
         armed: True when the supervisor injects a real ``/compact`` (armed);
             False for the harmless dry-run marker.
 
@@ -637,6 +637,10 @@ class TickFacts:
     input_line_empty: bool
     human_compact_submitted: bool
     work_idle: bool
+    # The host's authoritative CompactStateMachine state for this tick (Plan
+    # 00164 Phase 4 fix). The worker loads it before deciding so it never runs on
+    # divergent state; None on the in-process path (the machine is already live).
+    machine_state: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -655,6 +659,9 @@ class TickOutcome:
     submit: bool
     consume_signal_path: str | None
     deferred_log: str | None
+    # The machine state AFTER this tick (Plan 00164 Phase 4 fix). The host adopts
+    # it as the new authoritative state so the next fallback tick cannot diverge.
+    machine_state: dict[str, object] | None = None
 
 
 def _coerce_float(value: object) -> float:
@@ -1020,6 +1027,43 @@ class CompactStateMachine:
         # True when the current AWAIT was entered by a HUMAN /compact (not the
         # supervisor's own inject) -- suppresses the supervisor ESC flush.
         self._await_is_human = False
+
+    def export_state(self) -> dict[str, object]:
+        """Serialise the mutable per-episode state (Plan 00164 Phase 4 fix).
+
+        The HOST holds the single authoritative machine; it ships this state to
+        the policy worker each tick and adopts the worker's returned state, so the
+        worker and the in-process fallback can never diverge (which previously let
+        a worker stall inject a duplicate ``/compact``). Excludes ``_policy``,
+        which is fixed configuration reconstructed on both sides.
+        """
+        return {
+            "state": self.state.value,
+            "injections": self._injections,
+            "last_action_ts": self._last_action_ts,
+            "compaction_handled": self._compaction_handled,
+            "escapes_sent": self._escapes_sent,
+            "await_is_human": self._await_is_human,
+        }
+
+    def import_state(self, state: dict[str, object]) -> None:
+        """Overwrite the mutable state from an :meth:`export_state` payload.
+
+        Missing keys keep the current value so an older/newer peer stays safe.
+        """
+        if "state" in state:
+            self.state = SupervisorState(str(state["state"]))
+        if "injections" in state:
+            self._injections = _coerce_int(state["injections"])
+        if "last_action_ts" in state:
+            raw = state["last_action_ts"]
+            self._last_action_ts = None if raw is None else _coerce_float(raw)
+        if "compaction_handled" in state:
+            self._compaction_handled = bool(state["compaction_handled"])
+        if "escapes_sent" in state:
+            self._escapes_sent = _coerce_int(state["escapes_sent"])
+        if "await_is_human" in state:
+            self._await_is_human = bool(state["await_is_human"])
 
     def evaluate(
         self,
@@ -1415,6 +1459,11 @@ def decide_once(
     # injection path without new machine states -- the busy branches already
     # defer-and-retry correctly (no latch, no cooldown, signal kept).
     can_inject = facts.idle and facts.input_line_empty
+    # Plan 00164 Phase 4 fix: adopt the host's authoritative machine state before
+    # deciding so the worker never runs on divergent state. None on the in-process
+    # path (the passed machine is already the live authoritative one).
+    if facts.machine_state is not None:
+        machine.import_state(facts.machine_state)
     evaluation = machine.evaluate(
         reading,
         idle=can_inject,
@@ -1449,6 +1498,7 @@ def decide_once(
         submit=submit,
         consume_signal_path=consume_signal_path,
         deferred_log=deferred_log,
+        machine_state=machine.export_state(),
     )
 
 
@@ -1540,6 +1590,7 @@ def _facts_to_json(facts: TickFacts) -> str:
             "input_line_empty": facts.input_line_empty,
             "human_compact_submitted": facts.human_compact_submitted,
             "work_idle": facts.work_idle,
+            "machine_state": facts.machine_state,
         }
     )
 
@@ -1552,6 +1603,7 @@ def _facts_from_json(line: str) -> TickFacts:
         input_line_empty=bool(data["input_line_empty"]),
         human_compact_submitted=bool(data["human_compact_submitted"]),
         work_idle=bool(data["work_idle"]),
+        machine_state=data.get("machine_state"),
     )
 
 
@@ -1564,6 +1616,7 @@ def _outcome_to_json(outcome: TickOutcome) -> str:
             "submit": outcome.submit,
             "consume_signal_path": outcome.consume_signal_path,
             "deferred_log": outcome.deferred_log,
+            "machine_state": outcome.machine_state,
         }
     )
 
@@ -1577,6 +1630,7 @@ def _outcome_from_json(line: str) -> TickOutcome:
         submit=bool(data["submit"]),
         consume_signal_path=data["consume_signal_path"],
         deferred_log=data["deferred_log"],
+        machine_state=data.get("machine_state"),
     )
 
 
@@ -1980,10 +2034,18 @@ def supervise(
                     input_line_empty=activity.line.is_empty,
                     human_compact_submitted=human_compact,
                     work_idle=work_idle,
+                    # Ship the host's authoritative machine state so the worker
+                    # decides on it -- never on divergent worker-local state.
+                    machine_state=machine.export_state(),
                 )
             )
         if outcome is not None:
             _apply_decision(outcome, master_writer=_write_master, log=log)
+            # Adopt the worker's post-tick state so `machine` remains the single
+            # source of truth; a later in-process fallback tick then cannot
+            # diverge and inject a duplicate /compact (Plan 00164 Phase 4 fix).
+            if outcome.machine_state is not None:
+                machine.import_state(outcome.machine_state)
         else:
             _poll_once(
                 machine,

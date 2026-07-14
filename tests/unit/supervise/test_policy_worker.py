@@ -10,6 +10,7 @@ anything that goes wrong falls back to an identical in-process decision.
 from __future__ import annotations
 
 import io
+import json
 import os
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
@@ -286,3 +287,146 @@ class TestWorkerIntegration:
             worker.close()
         assert code == 0
         assert "STILL_HERE" in capfd.readouterr().out
+
+
+# ── Single-authoritative machine state (Plan 00164 duplicate-compact fix) ─────
+#
+# The host holds the ONE authoritative CompactStateMachine. It carries that
+# state INTO each tick (TickFacts.machine_state) and ADOPTS the post-tick state
+# the worker returns (TickOutcome.machine_state). Without this, the host's
+# in-process fallback machine keeps stale MONITOR state while the worker handles
+# ticks, so a worker stall right after a /compact lets the host inject a DUPLICATE
+# /compact — the very bug class this release fixes.
+
+
+def _urgent_sidecar_payload(now: float) -> dict[str, object]:
+    return {
+        "red": True,
+        "critical": True,
+        "compact_urgent": True,
+        "tier": "critical",
+        "pct": 96.0,
+        "session_id": "fg",
+        "ts": now,
+        "seq": 1,
+        "writer_pid": 1,
+        "compacting": False,
+    }
+
+
+def _write_urgent_sidecar(sidecar_dir: Path, *, now: float) -> None:
+    sidecar_dir.mkdir(parents=True, exist_ok=True)
+    (sidecar_dir / "fg.json").write_text(json.dumps(_urgent_sidecar_payload(now)), encoding="utf-8")
+
+
+def test_machine_state_export_import_roundtrip() -> None:
+    policy = _mod.CompactPolicy()
+    reading = _mod.SidecarReading(
+        red=True,
+        critical=True,
+        compact_urgent=True,
+        tier="critical",
+        pct=95.0,
+        session_id="s",
+        ts=1000.0,
+        seq=1,
+        writer_pid=1,
+        compacting=False,
+        stale=False,
+    )
+    src = _mod.CompactStateMachine(policy)
+    src.evaluate(reading, idle=True, now=1000.0)  # -> AWAIT_COMPACTING
+    state = src.export_state()
+
+    dst = _mod.CompactStateMachine(policy)
+    dst.import_state(state)
+    assert dst.state is _mod.SupervisorState.AWAIT_COMPACTING
+    assert dst.export_state() == state
+
+
+def test_facts_json_roundtrip_carries_machine_state() -> None:
+    state = _mod.CompactStateMachine(_mod.CompactPolicy()).export_state()
+    facts = _mod.TickFacts(
+        now_wall=1.5,
+        idle=True,
+        input_line_empty=True,
+        human_compact_submitted=False,
+        work_idle=True,
+        machine_state=state,
+    )
+    assert _mod._facts_from_json(_mod._facts_to_json(facts)) == facts
+
+
+def test_decide_once_returns_post_tick_machine_state(tmp_path: Path) -> None:
+    sidecar_dir = tmp_path / "context-sidecar"
+    _write_urgent_sidecar(sidecar_dir, now=1000.0)
+    policy = _mod.CompactPolicy()
+    outcome = _mod.decide_once(
+        _mod.CompactStateMachine(policy),
+        sidecar_dir=sidecar_dir,
+        facts=_idle_facts(1000.0),
+        dry_run=True,
+        freshness_seconds=policy.freshness_seconds,
+    )
+    assert outcome.decision_value == _mod.Decision.WOULD_COMPACT.value
+    assert outcome.machine_state is not None
+    assert outcome.machine_state["state"] == _mod.SupervisorState.AWAIT_COMPACTING.value
+
+
+def test_host_adopting_worker_state_prevents_duplicate_compact(tmp_path: Path) -> None:
+    """Regression (Plan 00164): a worker stall right after a /compact must not let
+    the host fallback machine inject a SECOND /compact. Because the host carries
+    its authoritative state into the tick, a fallback tick seeded with the
+    post-compact state sees AWAIT_COMPACTING, not a fresh MONITOR — so it never
+    re-compacts."""
+    sidecar_dir = tmp_path / "context-sidecar"
+    _write_urgent_sidecar(sidecar_dir, now=1000.0)
+    policy = _mod.CompactPolicy()
+
+    # Tick 1: the worker decides -> WOULD_COMPACT and returns its new state.
+    worker_machine = _mod.CompactStateMachine(policy)
+    first = _mod.decide_once(
+        worker_machine,
+        sidecar_dir=sidecar_dir,
+        facts=_idle_facts(1000.0),
+        dry_run=True,
+        freshness_seconds=policy.freshness_seconds,
+    )
+    assert first.decision_value == _mod.Decision.WOULD_COMPACT.value
+
+    # Tick 2: the worker STALLS; the host falls back to a SEPARATE fresh machine
+    # but seeds it with the authoritative state carried in facts.machine_state.
+    fallback_machine = _mod.CompactStateMachine(policy)
+    facts2 = _mod.TickFacts(
+        now_wall=1001.0,
+        idle=True,
+        input_line_empty=True,
+        human_compact_submitted=False,
+        work_idle=True,
+        machine_state=first.machine_state,
+    )
+    second = _mod.decide_once(
+        fallback_machine,
+        sidecar_dir=sidecar_dir,
+        facts=facts2,
+        dry_run=True,
+        freshness_seconds=policy.freshness_seconds,
+    )
+    assert second.decision_value != _mod.Decision.WOULD_COMPACT.value
+
+
+def test_fresh_fallback_without_shared_state_would_double_compact(tmp_path: Path) -> None:
+    """Guardrail proving the above test is meaningful: a fresh machine given the
+    SAME facts WITHOUT the carried state does compact — i.e. the divergence is
+    real and the shared state is what prevents it."""
+    sidecar_dir = tmp_path / "context-sidecar"
+    _write_urgent_sidecar(sidecar_dir, now=1000.0)
+    policy = _mod.CompactPolicy()
+    outcome = _mod.decide_once(
+        _mod.CompactStateMachine(policy),
+        sidecar_dir=sidecar_dir,
+        facts=_idle_facts(1001.0),  # no machine_state carried
+        dry_run=True,
+        freshness_seconds=policy.freshness_seconds,
+    )
+    assert outcome.decision_value == _mod.Decision.WOULD_COMPACT.value
