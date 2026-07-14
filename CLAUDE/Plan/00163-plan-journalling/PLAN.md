@@ -391,6 +391,22 @@ project journals" marker for mkplan.
 | Two diaries (Notes & Updates + JOURNAL) drift                       | Medium | Medium      | Template retires Notes & Updates for a milestone stub (Decision 3)                      |
 | Hot-path cost in `plan_qa_edit` for large journal files             | Low    | Low         | Single-file checks only; model scan is filename-parse-only; no whole-tree reads at edit |
 
+## Delivery & Milestones
+
+<!-- Milestones + delivery commit hashes; git is the SSoT for "when". The
+     blow-by-blow log lives in JOURNAL/00163-Journal-*.md. -->
+
+- Phases 1–4 (all journalling feature work) shipped in the **v3.40.0** release
+  (tag `v3.40.0`, remote `6db5653`), delivered by:
+  - `a352585f` — Phase 3 Task 3.1: COMMIT-stage journal coupling checks
+  - `b3ae183b` — Phase 2 Task 2.2: retire Notes & Updates for Delivery & Milestones
+  - `3e76b5c2` — Phase 4: enabled-by-default client rollout (deploy + manifests)
+  - `22daf00a` — Phase 4 fix: deploy PlanJournalling.md to plan-dir parent (code-review finding)
+  - `6dd22162` — Release v3.40.0 (version bump, changelog, notes, manifest moves)
+- Remaining: **Task 3.2** (ratchet review) — a deferred post-dogfood decision
+  to make WITH the user on whether `journal-dayfile-naming` escalates to BLOCK.
+  Plan stays **In Progress** until that decision lands.
+
 ## Notes & Updates
 
 ### 2026-07-14
