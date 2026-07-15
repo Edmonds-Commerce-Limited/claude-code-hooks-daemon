@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from install import (
     InstallationError,
     _load_config_safe,
+    _project_root_is_daemon_repo,
     _validate_not_nested,
     find_project_root,
     is_hooks_daemon_repo,
@@ -116,26 +117,78 @@ class TestValidateNotNested:
         # Should not raise - .claude dir inside hooks-daemon repo is fine
         _validate_not_nested(tmp_path)
 
-    def test_raises_for_hooks_daemon_marker_without_config(self, tmp_path: Path) -> None:
-        """Test raises for hooks-daemon marker without self_install_mode."""
-        hooks_daemon_src = tmp_path / ".claude" / "hooks-daemon" / "src"
-        hooks_daemon_src.mkdir(parents=True)
+    def test_allows_consumer_clone_of_daemon_marker(self, tmp_path: Path) -> None:
+        """Regression (Issue #3): a consumer project that cloned the daemon into
+        .claude/hooks-daemon/ (creating .claude/hooks-daemon/src) is a NORMAL
+        install, not a nested one. It must NOT raise even without
+        self_install_mode - this is the documented manual-install layout.
+        """
+        (tmp_path / ".claude" / "hooks-daemon" / "src").mkdir(parents=True)
+        (tmp_path / "pyproject.toml").write_text('[project]\nname = "some-consumer-app"\n')
+
+        # Should NOT raise - the daemon clone under .claude/ is a dependency
+        _validate_not_nested(tmp_path)
+
+    def test_allows_consumer_clone_without_project_pyproject(self, tmp_path: Path) -> None:
+        """Regression (Issue #3): consumer with the daemon clone marker but no
+        pyproject.toml at project root must also be allowed."""
+        (tmp_path / ".claude" / "hooks-daemon" / "src").mkdir(parents=True)
+
+        # Should NOT raise
+        _validate_not_nested(tmp_path)
+
+    def test_raises_when_project_root_is_daemon_repo_without_config(
+        self, tmp_path: Path
+    ) -> None:
+        """Installing with project_root == the daemon repo itself (pyproject names
+        the daemon package) and no self_install_mode must fail fast."""
+        (tmp_path / "pyproject.toml").write_text(
+            '[project]\nname = "claude-code-hooks-daemon"\n'
+        )
+        (tmp_path / "src").mkdir()
 
         with pytest.raises(InstallationError) as exc_info:
             _validate_not_nested(tmp_path)
 
-        assert "inside an existing hooks-daemon installation" in str(exc_info.value)
+        assert "hooks-daemon repository itself" in str(exc_info.value)
 
-    def test_allows_hooks_daemon_marker_with_self_install(self, tmp_path: Path) -> None:
-        """Test allows hooks-daemon marker when self_install_mode is enabled."""
-        hooks_daemon_src = tmp_path / ".claude" / "hooks-daemon" / "src"
-        hooks_daemon_src.mkdir(parents=True)
-
-        config_file = tmp_path / ".claude" / "hooks-daemon.yaml"
-        config_file.write_text("daemon:\n  self_install_mode: true\n")
+    def test_allows_daemon_repo_with_self_install_mode(self, tmp_path: Path) -> None:
+        """The daemon repo itself is allowed when self_install_mode is enabled."""
+        (tmp_path / "pyproject.toml").write_text(
+            '[project]\nname = "claude-code-hooks-daemon"\n'
+        )
+        (tmp_path / ".claude").mkdir()
+        (tmp_path / ".claude" / "hooks-daemon.yaml").write_text(
+            "daemon:\n  self_install_mode: true\n"
+        )
 
         # Should not raise
         _validate_not_nested(tmp_path)
+
+
+class TestProjectRootIsDaemonRepo:
+    """Tests for _project_root_is_daemon_repo (offline daemon-repo detection)."""
+
+    def test_true_when_pyproject_names_the_package(self, tmp_path: Path) -> None:
+        """True when pyproject.toml declares this daemon package as its name."""
+        (tmp_path / "pyproject.toml").write_text(
+            '[project]\nname = "claude-code-hooks-daemon"\nversion = "1.0.0"\n'
+        )
+        assert _project_root_is_daemon_repo(tmp_path) is True
+
+    def test_false_for_other_package(self, tmp_path: Path) -> None:
+        """False for a consumer project whose pyproject names a different package."""
+        (tmp_path / "pyproject.toml").write_text('[project]\nname = "other-app"\n')
+        assert _project_root_is_daemon_repo(tmp_path) is False
+
+    def test_false_when_no_pyproject(self, tmp_path: Path) -> None:
+        """False when there is no pyproject.toml at project root."""
+        assert _project_root_is_daemon_repo(tmp_path) is False
+
+    def test_false_for_malformed_toml(self, tmp_path: Path) -> None:
+        """False (not a crash) when pyproject.toml is malformed."""
+        (tmp_path / "pyproject.toml").write_text("this is [ not valid toml")
+        assert _project_root_is_daemon_repo(tmp_path) is False
 
     def test_allows_clean_directory(self, tmp_path: Path) -> None:
         """Test allows clean directory without issues."""

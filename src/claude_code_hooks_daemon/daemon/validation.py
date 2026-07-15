@@ -6,12 +6,19 @@ the hooks-daemon repository. Used by both install.py and daemon/cli.py.
 
 import logging
 import subprocess  # nosec B404 - subprocess used for git commands only (trusted system tool)
+import tomllib
 from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.constants import ConfigKey, Timeout
 
 logger = logging.getLogger(__name__)
+
+# The [project].name this repository declares in its own pyproject.toml. Used as
+# an offline signal for "project_root IS the hooks-daemon repo itself" so the
+# installer can distinguish that from a consumer project that merely cloned the
+# daemon into .claude/hooks-daemon/ as a dependency (Issue #3).
+_DAEMON_PACKAGE_NAME = "claude-code-hooks-daemon"
 
 
 class InstallationError(Exception):
@@ -90,6 +97,38 @@ def is_hooks_daemon_repo(directory: Path) -> bool:
     return result
 
 
+def project_root_is_daemon_repo(project_root: Path) -> bool:
+    """Return True if ``project_root`` itself is the hooks-daemon repository.
+
+    Detected offline via ``pyproject.toml`` ``[project].name`` matching this
+    package, so it works without a git remote. This is the correct signal for
+    "the install target IS the daemon repo" (the self-install case) and, crucially,
+    does NOT fire for a consumer project that merely cloned the daemon into
+    ``.claude/hooks-daemon/`` as a dependency — the documented manual-install
+    layout, which creates ``.claude/hooks-daemon/src`` at the *consumer's* root
+    (Issue #3).
+
+    Args:
+        project_root: Directory to check.
+
+    Returns:
+        True if ``project_root/pyproject.toml`` declares the daemon package.
+    """
+    pyproject = project_root / "pyproject.toml"
+    if not pyproject.is_file():
+        return False
+    try:
+        with pyproject.open("rb") as fh:
+            data = tomllib.load(fh)
+    except (OSError, tomllib.TOMLDecodeError) as e:
+        logger.debug("Failed to parse %s for daemon-repo detection: %s", pyproject, e)
+        return False
+    project_table = data.get("project")
+    if not isinstance(project_table, dict):
+        return False
+    return project_table.get("name") == _DAEMON_PACKAGE_NAME
+
+
 def load_config_safe(project_root: Path) -> dict[str, Any] | None:
     """Safely load config file without raising exceptions.
 
@@ -135,10 +174,14 @@ def validate_not_nested(project_root: Path) -> None:
     if nested_error:
         raise InstallationError(nested_error)
 
-    # Check if we're inside an existing hooks-daemon directory
-    hooks_daemon_marker = project_root / ".claude" / "hooks-daemon" / "src"
-    if hooks_daemon_marker.exists():
-        # Check for self_install_mode in the outer project's config
+    # Fail fast only if project_root ITSELF is the hooks-daemon repo being
+    # installed without self_install_mode. A consumer project that merely cloned
+    # the daemon into .claude/hooks-daemon/ (the documented manual-install
+    # layout, which creates .claude/hooks-daemon/src at the consumer root) is NOT
+    # this case and must be allowed through — previously this over-broad marker
+    # check blocked every legitimate manual install (Issue #3).
+    if project_root_is_daemon_repo(project_root):
+        # Check for self_install_mode in the repo's own config
         config = load_config_safe(project_root)
         if config:
             daemon_config = config.get(ConfigKey.DAEMON, {})
@@ -146,8 +189,7 @@ def validate_not_nested(project_root: Path) -> None:
                 return  # Self-install mode enabled, allow
 
         raise InstallationError(
-            f"Cannot install: appears to be inside an existing hooks-daemon installation.\n"
-            f"Found daemon source at: {hooks_daemon_marker}\n"
+            f"Cannot install: {project_root} is the hooks-daemon repository itself.\n"
             f"To develop on hooks-daemon itself, set 'self_install_mode: true' in config."
         )
 
