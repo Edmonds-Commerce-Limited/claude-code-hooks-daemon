@@ -39,6 +39,12 @@ _DAEMON_HOOK_BASENAMES=(
     status-line
 )
 
+# Relative path (within the daemon dir — the git clone/checkout, NOT the
+# project's own .claude/) to the echd-capture output-capture helper the
+# pipe_blocker handler recommends. Single source of truth mirrored by
+# _ECHD_CAPTURE_REL_PARTS in pipe_blocker.py.
+_ECHD_CAPTURE_REL_PATH="scripts/echd-capture"
+
 #
 # list_deployed_hook_paths() - Emit paths of installer-owned hook entrypoints
 #
@@ -263,6 +269,51 @@ set_hook_permissions() {
 }
 
 #
+# ensure_echd_capture_executable() - Ensure the echd-capture helper is executable
+#
+# The pipe_blocker handler recommends `daemon_dir/scripts/echd-capture` (an
+# ABSOLUTE path resolved by PipeBlockerHandler._resolve_echd_capture_path) as
+# the alternative to piping expensive commands into tail/head. The script is
+# vendored inside the daemon's own git checkout, so it is already present at
+# `daemon_dir/scripts/echd-capture` after any clone/checkout — but the exec
+# bit tracked by git can be lost the same way hook wrappers can (e.g. client
+# repo/checkout with `core.fileMode=false`). Explicitly chmod it here,
+# mirroring set_hook_permissions, so the recommended command always works
+# regardless of how the exec bit travelled.
+#
+# Args:
+#   $1 - daemon_dir: Path to daemon installation directory
+#
+# Returns:
+#   Exit code 0 on success (missing helper is non-fatal — older daemon
+#   versions predating the helper simply have nothing to chmod), 1 if a
+#   present helper's chmod call fails.
+#
+ensure_echd_capture_executable() {
+    local daemon_dir="$1"
+
+    if [ -z "$daemon_dir" ]; then
+        print_error "ensure_echd_capture_executable: daemon_dir required"
+        return 1
+    fi
+
+    local helper="$daemon_dir/$_ECHD_CAPTURE_REL_PATH"
+
+    if [ ! -f "$helper" ]; then
+        print_verbose "echd-capture helper not present (older daemon checkout), skipping"
+        return 0
+    fi
+
+    if ! chmod +x "$helper"; then
+        print_error "Failed to set executable on echd-capture helper: $helper"
+        return 1
+    fi
+
+    print_verbose "Set executable on echd-capture helper: $helper"
+    return 0
+}
+
+#
 # git_force_executable() - Force executable bit in git index
 #
 # Uses `git update-index --chmod=+x` to ensure hook scripts are stored
@@ -392,6 +443,12 @@ deploy_all_hooks() {
     # Running set_hook_permissions unconditionally is idempotent and cheap.
     if ! set_hook_permissions "$project_root"; then
         print_warning "Failed to set hook permissions — hooks may not fire"
+    fi
+
+    # Ensure the echd-capture helper (recommended by pipe_blocker) is
+    # executable — same rationale as set_hook_permissions above.
+    if ! ensure_echd_capture_executable "$daemon_dir"; then
+        print_warning "Failed to set echd-capture helper permissions — recommended command may fail"
     fi
 
     # Force executable bit in git index (both install modes benefit from this)

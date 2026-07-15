@@ -1,10 +1,14 @@
 """Tests for PipeBlockerHandler progressive verbosity."""
 
+import os
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker import PipeBlockerHandler
+
+_PROJECT_CONTEXT_PATH = "claude_code_hooks_daemon.core.project_context.ProjectContext"
 
 
 @pytest.fixture
@@ -34,50 +38,161 @@ def unknown_input() -> dict:
 # ── echd-capture recommendation (Plan 00164 Phase 6) ─────────────────────────
 
 
-class TestEchdCaptureRecommendation:
-    """Every block message must recommend `echd-capture` so agents stop the
-    pointless 'capture to file then echo it all to stdout' theatre."""
+def _deploy_fake_helper(daemon_dir: Path, executable: bool = True) -> Path:
+    """Create a fake ``scripts/echd-capture`` under ``daemon_dir``."""
+    helper_dir = daemon_dir / "scripts"
+    helper_dir.mkdir(parents=True, exist_ok=True)
+    helper = helper_dir / "echd-capture"
+    helper.write_text("#!/bin/bash\necho fake\n")
+    helper.chmod(0o755 if executable else 0o644)
+    return helper
 
-    def _handle(self, handler: PipeBlockerHandler, hook_input: dict, count: int) -> str:
+
+class TestEchdCaptureRecommendation:
+    """Every block message must recommend `echd-capture` (when resolvable) so
+    agents stop the pointless 'capture to file then echo it all to stdout'
+    theatre — and must NEVER recommend a bare, possibly not-on-PATH
+    `echd-capture` token when the helper cannot be found."""
+
+    def _handle(
+        self,
+        handler: PipeBlockerHandler,
+        hook_input: dict,
+        count: int,
+        daemon_dir: Path | None = None,
+    ) -> str:
         mock_dl = MagicMock()
         mock_dl.history.count_blocks_by_handler.return_value = count
         with patch(
             "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
             return_value=mock_dl,
         ):
-            reason = handler.handle(hook_input).reason
+            if daemon_dir is not None:
+                with patch(f"{_PROJECT_CONTEXT_PATH}.daemon_untracked_dir") as mock_dut:
+                    mock_dut.return_value = daemon_dir / "untracked"
+                    reason = handler.handle(hook_input).reason
+            else:
+                # No ProjectContext deployment mocked — simulates the helper
+                # being unresolvable (not initialised / not found anywhere).
+                with patch(
+                    f"{_PROJECT_CONTEXT_PATH}.daemon_untracked_dir",
+                    side_effect=RuntimeError("not initialised"),
+                ):
+                    reason = handler.handle(hook_input).reason
         assert reason is not None
         return reason
 
     def test_verbose_blacklisted_recommends_echd_capture(
-        self, handler: PipeBlockerHandler, blacklisted_input: dict
+        self, handler: PipeBlockerHandler, blacklisted_input: dict, tmp_path: Path
     ) -> None:
-        reason = self._handle(handler, blacklisted_input, 0)
+        _deploy_fake_helper(tmp_path)
+        reason = self._handle(handler, blacklisted_input, 0, daemon_dir=tmp_path)
         assert "echd-capture" in reason
+        assert str(tmp_path / "scripts" / "echd-capture") in reason
         assert "pipefail" in reason
 
     def test_terse_blacklisted_recommends_echd_capture(
-        self, handler: PipeBlockerHandler, blacklisted_input: dict
+        self, handler: PipeBlockerHandler, blacklisted_input: dict, tmp_path: Path
     ) -> None:
-        assert "echd-capture" in self._handle(handler, blacklisted_input, 3)
+        _deploy_fake_helper(tmp_path)
+        assert "echd-capture" in self._handle(handler, blacklisted_input, 3, daemon_dir=tmp_path)
 
     def test_verbose_unknown_recommends_echd_capture(
-        self, handler: PipeBlockerHandler, unknown_input: dict
+        self, handler: PipeBlockerHandler, unknown_input: dict, tmp_path: Path
     ) -> None:
-        reason = self._handle(handler, unknown_input, 0)
+        _deploy_fake_helper(tmp_path)
+        reason = self._handle(handler, unknown_input, 0, daemon_dir=tmp_path)
         assert "echd-capture" in reason
         assert "pipefail" in reason
 
     def test_terse_unknown_recommends_echd_capture(
-        self, handler: PipeBlockerHandler, unknown_input: dict
+        self, handler: PipeBlockerHandler, unknown_input: dict, tmp_path: Path
     ) -> None:
-        assert "echd-capture" in self._handle(handler, unknown_input, 3)
+        _deploy_fake_helper(tmp_path)
+        assert "echd-capture" in self._handle(handler, unknown_input, 3, daemon_dir=tmp_path)
 
     def test_claude_md_documents_echd_capture(self, handler: PipeBlockerHandler) -> None:
         guidance = handler.get_claude_md()
         assert guidance is not None
         assert "echd-capture" in guidance
         assert "pipefail" in guidance
+
+
+class TestEchdCaptureResolution:
+    """Resolver contract (dogfooding bug fix): resolve an ABSOLUTE deployed
+    path when present, self-heal a missing exec bit, and NEVER fall back to
+    a bare (not-on-PATH) command name."""
+
+    def test_resolves_absolute_path_in_simulated_client_install(
+        self, handler: PipeBlockerHandler, tmp_path: Path
+    ) -> None:
+        """Simulated client-install layout: {project}/.claude/hooks-daemon/scripts/echd-capture."""
+        project_root = tmp_path / "client-project"
+        daemon_dir = project_root / ".claude" / "hooks-daemon"
+        helper = _deploy_fake_helper(daemon_dir)
+
+        with patch(f"{_PROJECT_CONTEXT_PATH}.daemon_untracked_dir") as mock_dut:
+            mock_dut.return_value = daemon_dir / "untracked"
+            resolved = handler._capture_helper_invocation()
+
+        assert resolved == str(helper)
+
+    def test_self_heals_missing_executable_bit(
+        self, handler: PipeBlockerHandler, tmp_path: Path
+    ) -> None:
+        """A deployed helper that lost its exec bit (e.g. core.fileMode=false
+        checkout) is chmod'd back to executable rather than falling back."""
+        helper = _deploy_fake_helper(tmp_path, executable=False)
+        assert not os.access(helper, os.X_OK)
+
+        with patch(f"{_PROJECT_CONTEXT_PATH}.daemon_untracked_dir") as mock_dut:
+            mock_dut.return_value = tmp_path / "untracked"
+            resolved = handler._capture_helper_invocation()
+
+        assert resolved == str(helper)
+        assert os.access(helper, os.X_OK)
+
+    def test_returns_none_when_project_context_not_initialised(
+        self, handler: PipeBlockerHandler
+    ) -> None:
+        with patch(
+            f"{_PROJECT_CONTEXT_PATH}.daemon_untracked_dir",
+            side_effect=RuntimeError("not initialised"),
+        ):
+            assert handler._capture_helper_invocation() is None
+
+    def test_returns_none_when_helper_missing_everywhere(
+        self, handler: PipeBlockerHandler, tmp_path: Path
+    ) -> None:
+        """Helper genuinely absent (no scripts/echd-capture deployed at all)."""
+        with patch(f"{_PROJECT_CONTEXT_PATH}.daemon_untracked_dir") as mock_dut:
+            mock_dut.return_value = tmp_path / "untracked"
+            assert handler._capture_helper_invocation() is None
+
+    def test_never_recommends_bare_echd_capture_token_when_unresolved(
+        self, handler: PipeBlockerHandler, blacklisted_input: dict
+    ) -> None:
+        """When the helper cannot be resolved anywhere, the block message must
+        fall back to the temp-file redirect and must NOT present a bare
+        `echd-capture` as a runnable command."""
+        mock_dl = MagicMock()
+        mock_dl.history.count_blocks_by_handler.return_value = 0
+        with (
+            patch(
+                "claude_code_hooks_daemon.handlers.pre_tool_use.pipe_blocker.get_data_layer",
+                return_value=mock_dl,
+            ),
+            patch(
+                f"{_PROJECT_CONTEXT_PATH}.daemon_untracked_dir",
+                side_effect=RuntimeError("not initialised"),
+            ),
+        ):
+            reason = handler.handle(blacklisted_input).reason
+
+        assert reason is not None
+        assert "echd-capture" not in reason
+        assert "TEMP_FILE" in reason
+        assert "RECOMMENDED ALTERNATIVE" in reason
 
 
 # ── _get_block_count() ────────────────────────────────────────────────────────

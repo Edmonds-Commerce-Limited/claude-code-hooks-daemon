@@ -439,6 +439,12 @@
       "function": "clear_load_failures",
       "rule": "log-and-continue",
       "reason": "Plan 00143: best-effort removal of the project-handler load-failure state file (clears stale degraded state when the daemon now loads cleanly). An OSError unlinking the file must not crash daemon startup \u2014 logged at warning level and skipped. Same fail-open cleanup contract as daemon/paths.py cleanup_socket / cleanup_pid_file."
+    },
+    {
+      "file": "handlers/pre_tool_use/pipe_blocker.py",
+      "function": "_resolve_echd_capture_path",
+      "rule": "log-and-continue",
+      "reason": "Best-effort self-heal of the echd-capture helper's executable bit (e.g. a client checkout with git core.fileMode=false). A chmod OSError is logged at warning level, never swallowed, and the resolver degrades to returning None so the caller falls back to the temp-file guidance rather than crashing a pipe-block message. Same fail-open contract as handlers/status_line/context_sidecar.py \u2014 recommending a capture helper is advisory, never a critical path."
     }
   ]
 }

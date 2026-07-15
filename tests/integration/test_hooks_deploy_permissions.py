@@ -122,6 +122,66 @@ class TestDeployAllHooksSetsPermsInSelfInstall:
         )
 
 
+class TestEnsureEchdCaptureExecutable:
+    """Dogfooding bug fix: the echd-capture helper recommended by pipe_blocker
+    must be made executable during install/upgrade regardless of how the
+    exec bit travelled (e.g. a client checkout with core.fileMode=false).
+    """
+
+    def _seed_helper(self, daemon_dir: Path, executable: bool) -> Path:
+        helper_dir = daemon_dir / "scripts"
+        helper_dir.mkdir(parents=True, exist_ok=True)
+        helper = helper_dir / "echd-capture"
+        helper.write_text("#!/bin/bash\necho fake\n")
+        helper.chmod(0o755 if executable else 0o644)
+        return helper
+
+    def test_makes_non_executable_helper_executable(self, tmp_path: Path) -> None:
+        daemon_dir = tmp_path / "daemon"
+        helper = self._seed_helper(daemon_dir, executable=False)
+
+        result = _run_bash(f'ensure_echd_capture_executable "{daemon_dir}"')
+
+        assert result.returncode == 0, f"stderr={result.stderr!r}"
+        mode = helper.stat().st_mode & 0o777
+        assert mode == 0o755, f"expected 0o755, got {oct(mode)}"
+
+    def test_missing_helper_is_non_fatal(self, tmp_path: Path) -> None:
+        daemon_dir = tmp_path / "daemon-without-helper"
+        daemon_dir.mkdir(parents=True)
+
+        result = _run_bash(f'ensure_echd_capture_executable "{daemon_dir}"')
+
+        assert result.returncode == 0, f"stderr={result.stderr!r}"
+
+    def test_deploy_all_hooks_ensures_echd_capture_executable(self, tmp_path: Path) -> None:
+        """deploy_all_hooks must invoke ensure_echd_capture_executable so the
+        helper is fixed up as part of the standard install/upgrade path."""
+        project_root = tmp_path / "project"
+        daemon_dir = project_root  # self-install: daemon_dir == project_root
+        hooks_dir = project_root / ".claude" / "hooks"
+        wrapper = hooks_dir / "pre-tool-use"
+        hooks_dir.mkdir(parents=True)
+        wrapper.write_text("#!/bin/bash\necho hi\n")
+        wrapper.chmod(0o644)
+
+        init_src = project_root / "init.sh"
+        init_src.write_text("#!/bin/bash\n")
+        init_src.chmod(0o755)
+
+        helper = self._seed_helper(daemon_dir, executable=False)
+
+        script = textwrap.dedent(f"""\
+            deploy_all_hooks "{project_root}" "{daemon_dir}" "self-install" \
+                >/tmp/deploy_all_hooks_echd_out.txt 2>&1 || true
+            """)
+        result = _run_bash(script)
+        assert result.returncode == 0, f"stderr={result.stderr!r}"
+
+        mode = helper.stat().st_mode & 0o777
+        assert mode == 0o755, f"expected deploy_all_hooks to chmod helper to 0o755; got {oct(mode)}"
+
+
 class TestGitIndexForceExecutableNoRegression:
     """Positive smoke test: git_force_executable still runs silently outside a repo.
 

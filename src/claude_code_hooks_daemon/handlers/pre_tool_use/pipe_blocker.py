@@ -10,7 +10,10 @@ PipeBlockerStrategy implementations registered in PipeBlockerStrategyRegistry.
 The handler itself has ZERO language awareness.
 """
 
+import logging
+import os
 import re
+from pathlib import Path
 from typing import Any
 
 from claude_code_hooks_daemon.constants import HandlerID, HandlerTag, Priority
@@ -23,6 +26,8 @@ from claude_code_hooks_daemon.core import (
 from claude_code_hooks_daemon.core.utils import get_bash_command
 from claude_code_hooks_daemon.strategies.pipe_blocker.common import UNIVERSAL_WHITELIST_PATTERNS
 from claude_code_hooks_daemon.strategies.pipe_blocker.registry import PipeBlockerStrategyRegistry
+
+logger = logging.getLogger(__name__)
 
 # Config key hints shown in unknown-command message
 _CONFIG_HINT_EXTRA_WHITELIST = "extra_whitelist"
@@ -233,33 +238,98 @@ class PipeBlockerHandler(Handler):
                 return True
         return False
 
-    def _capture_helper_invocation(self) -> str:
-        """Return the recommended ``echd-capture`` invocation.
+    def _resolve_echd_capture_path(self) -> Path | None:
+        """Resolve the deployed ``echd-capture`` helper to an absolute path.
 
-        Resolved to the deployed helper's ABSOLUTE path (from the daemon dir —
-        the parent of the untracked runtime dir) so the recommended command
-        works from any cwd. Falls back to the bare name when ProjectContext is
-        not initialised or the helper is not present.
+        Looks under the daemon dir (the parent of the untracked runtime dir),
+        which resolves correctly for BOTH install modes:
+          - Self-install (dogfooding): {project_root}/scripts/echd-capture
+          - Normal client install: {project_root}/.claude/hooks-daemon/scripts/echd-capture
+
+        If the helper exists but lost its executable bit (e.g. a client
+        checkout with ``git core.fileMode=false``), self-heal by chmod'ing it —
+        this is the daemon's own vendored script, so fixing its permissions in
+        place is safe and expected.
+
+        Returns:
+            Absolute path to a present AND executable helper, or ``None`` if
+            it cannot be found/made executable anywhere plausible.
         """
         from claude_code_hooks_daemon.core.project_context import ProjectContext
 
+        daemon_dir: Path | None
         try:
-            helper = ProjectContext.daemon_untracked_dir().parent.joinpath(*_ECHD_CAPTURE_REL_PARTS)
+            daemon_dir = ProjectContext.daemon_untracked_dir().parent
         except RuntimeError:
-            return _ECHD_CAPTURE_NAME
-        if helper.exists():
-            return str(helper)
-        return _ECHD_CAPTURE_NAME
+            # ProjectContext not initialised (default-config / standalone
+            # entry point / unit tests). This is an expected branch, not an
+            # error: the caller falls back to the temp-file guidance whenever
+            # no helper path can be resolved.
+            daemon_dir = None
+        if daemon_dir is None:
+            return None
+
+        helper = daemon_dir.joinpath(*_ECHD_CAPTURE_REL_PARTS)
+        if not helper.is_file():
+            return None
+
+        if not os.access(helper, os.X_OK):
+            # Self-heal a lost exec bit (e.g. a client checkout with
+            # git core.fileMode=false). A chmod failure is logged, never
+            # swallowed, and degrades to the temp-file guidance below rather
+            # than crashing a block message.
+            try:
+                helper.chmod(0o755)
+            except OSError as exc:
+                logger.warning(
+                    "Could not restore exec bit on echd-capture helper %s: %s", helper, exc
+                )
+            if not os.access(helper, os.X_OK):
+                return None
+
+        return helper
+
+    def _capture_helper_invocation(self) -> str | None:
+        """Return the recommended ``echd-capture`` invocation, or None if unresolved.
+
+        Resolved to the deployed helper's ABSOLUTE path so the recommended
+        command works from any cwd. Returns ``None`` (never the bare command
+        name) when the helper cannot be found — a bare ``echd-capture`` is not
+        on PATH in client installs and would fail if run as suggested.
+        """
+        helper = self._resolve_echd_capture_path()
+        return str(helper) if helper is not None else None
+
+    def _temp_file_block(self, source_segment: str) -> str:
+        """Shell snippet: redirect to a temp file and report the exit code."""
+        source = source_segment or "command"
+        return (
+            f'  TEMP_FILE="/tmp/output_$$.txt"\n'
+            f'  {source} > "$TEMP_FILE" 2>&1\n'
+            f"  EXIT_CODE=$?\n"
+            f'  if [ $EXIT_CODE -eq 0 ]; then echo "Completed OK"; '
+            f'else echo "Completed with errors (exit code: $EXIT_CODE) - check $TEMP_FILE"; fi\n'
+        )
 
     def _echd_capture_recommendation(self, source_segment: str) -> str:
-        """Verbose ``echd-capture`` recommendation block.
+        """Verbose recommendation block: ``echd-capture`` when resolvable,
+        otherwise the always-works temp-file redirect (never a bare, possibly
+        not-on-PATH ``echd-capture`` command).
 
-        This is the PRIMARY alternative — it captures the FULL output and prints
-        only a bounded preview + the capture path, replacing the pointless
-        "redirect to a file then echo it all to stdout" theatre agents fall into.
+        When resolvable, this is the PRIMARY alternative — it captures the
+        FULL output and prints only a bounded preview + the capture path,
+        replacing the pointless "redirect to a file then echo it all to
+        stdout" theatre agents fall into.
         """
         helper = self._capture_helper_invocation()
         source = source_segment or "command"
+
+        if helper is None:
+            return (
+                f"✅ RECOMMENDED ALTERNATIVE — redirect to a temp file and capture "
+                f"the exit code:\n\n{self._temp_file_block(source_segment)}"
+            )
+
         return (
             f"✅ RECOMMENDED ALTERNATIVE — capture full output, preview a slice "
             f"({_ECHD_CAPTURE_NAME}):\n\n"
@@ -268,13 +338,24 @@ class PipeBlockerHandler(Handler):
             f"  → prints the last {_ECHD_CAPTURE_DEFAULT_LINES} lines AND the path to the "
             f"FULL capture for follow-up.\n"
             f"    Use `--head N` for the first N lines. `set -o pipefail` keeps "
-            f"{source}'s own exit status visible.\n"
+            f"{source}'s own exit status visible.\n\n"
+            f"  Or, without a pipe — redirect to a temp file and capture the exit code:\n\n"
+            f"{self._temp_file_block(source_segment)}"
         )
 
     def _echd_capture_terse(self, source_segment: str) -> str:
-        """One-line ``echd-capture`` recommendation for terse (repeat) blocks."""
+        """One-line recommendation for terse (repeat) blocks.
+
+        Falls back to the temp-file redirect (never a bare ``echd-capture``
+        token) when the helper cannot be resolved.
+        """
         helper = self._capture_helper_invocation()
         source = source_segment or "command"
+        if helper is None:
+            return (
+                f'Redirect to a temp file: TEMP_FILE="/tmp/output_$$.txt"; '
+                f'{source} > "$TEMP_FILE" 2>&1\n'
+            )
         return (
             f"Capture full + preview: set -o pipefail; "
             f"{source} 2>&1 | {helper} {_ECHD_CAPTURE_DEFAULT_LINES}\n"
@@ -299,12 +380,6 @@ class PipeBlockerHandler(Handler):
             f"    expensive command must be re-run\n"
             f"  • This wastes time and resources\n\n"
             f"{self._echd_capture_recommendation(source_segment)}\n"
-            f"  Or, without a pipe — redirect to a temp file and capture the exit code:\n\n"
-            f'  TEMP_FILE="/tmp/output_$$.txt"\n'
-            f"  {source_segment or 'command'} > \"$TEMP_FILE\" 2>&1\n"
-            f"  EXIT_CODE=$?\n"
-            f'  if [ $EXIT_CODE -eq 0 ]; then echo "Completed OK"; '
-            f'else echo "Completed with errors (exit code: $EXIT_CODE) - check $TEMP_FILE"; fi\n\n'
             f"To disable: {_CONFIG_HINT_HANDLER}  (set enabled: false)"
         )
 
@@ -314,9 +389,7 @@ class PipeBlockerHandler(Handler):
         return (
             f"BLOCKED: Pipe to tail/head — {source_name} is expensive\n\n"
             f"COMMAND: {command}\n\n"
-            f"{self._echd_capture_terse(source_segment)}"
-            f"Or a temp file: "
-            f'TEMP_FILE="/tmp/output_$$.txt"; {source_segment or "command"} > "$TEMP_FILE" 2>&1\n\n'
+            f"{self._echd_capture_terse(source_segment)}\n"
             f"To disable: {_CONFIG_HINT_HANDLER}  (set enabled: false)"
         )
 
@@ -335,12 +408,6 @@ class PipeBlockerHandler(Handler):
             f'        - "^{source_name}\\\\b"\n\n'
             f"  • If it IS expensive, capture it with the helper below\n\n"
             f"{self._echd_capture_recommendation(source_segment)}\n"
-            f"  Or, without a pipe — redirect to a temp file and capture the exit code:\n\n"
-            f'  TEMP_FILE="/tmp/output_$$.txt"\n'
-            f"  {source_segment or 'command'} > \"$TEMP_FILE\" 2>&1\n"
-            f"  EXIT_CODE=$?\n"
-            f'  if [ $EXIT_CODE -eq 0 ]; then echo "Completed OK"; '
-            f'else echo "Completed with errors (exit code: $EXIT_CODE) - check $TEMP_FILE"; fi\n\n'
             f"INFO: WHITELISTED COMMANDS (piping is OK):\n"
             f"  Commands that already filter output: grep, rg, awk, sed, jq, ls, cat, etc.\n\n"
             f"  Example: grep error /var/log/syslog | tail -n 20  (allowed)\n\n"
@@ -357,9 +424,7 @@ class PipeBlockerHandler(Handler):
             f"  {_CONFIG_YAML_KEY}:\n"
             f"    {_CONFIG_HINT_EXTRA_WHITELIST}:\n"
             f'      - "^{source_name}\\\\b"\n\n'
-            f"{self._echd_capture_terse(source_segment)}"
-            f"Or a temp file: "
-            f'TEMP_FILE="/tmp/output_$$.txt"; {source_segment or "command"} > "$TEMP_FILE" 2>&1\n\n'
+            f"{self._echd_capture_terse(source_segment)}\n"
             f"To disable: {_CONFIG_HINT_HANDLER}  (set enabled: false)"
         )
 
