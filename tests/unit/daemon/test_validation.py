@@ -241,14 +241,10 @@ class TestValidateNotNested:
         # Should NOT raise
         validate_not_nested(tmp_path)
 
-    def test_raises_when_project_root_is_daemon_repo_without_config(
-        self, tmp_path: Path
-    ) -> None:
+    def test_raises_when_project_root_is_daemon_repo_without_config(self, tmp_path: Path) -> None:
         """Installing with project_root == the daemon repo itself (pyproject names
         the daemon package) and no self_install_mode must fail fast."""
-        (tmp_path / "pyproject.toml").write_text(
-            '[project]\nname = "claude-code-hooks-daemon"\n'
-        )
+        (tmp_path / "pyproject.toml").write_text('[project]\nname = "claude-code-hooks-daemon"\n')
         (tmp_path / "src").mkdir()
 
         with pytest.raises(InstallationError) as exc_info:
@@ -258,9 +254,7 @@ class TestValidateNotNested:
 
     def test_allows_daemon_repo_with_self_install_mode(self, tmp_path: Path) -> None:
         """The daemon repo itself is allowed when self_install_mode is enabled."""
-        (tmp_path / "pyproject.toml").write_text(
-            '[project]\nname = "claude-code-hooks-daemon"\n'
-        )
+        (tmp_path / "pyproject.toml").write_text('[project]\nname = "claude-code-hooks-daemon"\n')
         (tmp_path / ".claude").mkdir()
         (tmp_path / ".claude" / "hooks-daemon.yaml").write_text(
             "daemon:\n  self_install_mode: true\n"
