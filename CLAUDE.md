@@ -138,6 +138,26 @@ $PYTHON -m claude_code_hooks_daemon.daemon.cli status
 
 ---
 
+## ⚠️ CRITICAL: Report Handling (NON-NEGOTIABLE)
+
+**Reports never linger in `untracked/`.** Bug reports, audit reports, and
+investigation write-ups dropped into `untracked/` are transient — leaving them
+there lets stale analysis rot silently and pile up. Every report has exactly
+two fates:
+
+1. **Clean it up** — once the work it describes is done (fixed, committed,
+   pushed), delete the report. Git history + regression tests + commit messages
+   are the durable record.
+2. **Track it properly** — if the report has lasting reference value, move it
+   into the **relevant plan folder** (`CLAUDE/Plan/NNNNN-*/`) as a supporting
+   doc and commit it, so it lives in tracked source, not scratch space.
+
+Do NOT leave a report sitting in `untracked/` after acting on it. When in
+doubt, prefer tracking it in a plan folder over deletion — but never leave it
+in limbo.
+
+---
+
 ## ⚠️ CRITICAL: Code Lifecycle (READ BEFORE MAKING CHANGES)
 
 **MANDATORY**: Read these documents BEFORE implementing changes:
