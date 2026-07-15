@@ -17,6 +17,49 @@ if [ -z "${OUTPUT_SH_LOADED+x}" ]; then
     source "$INSTALL_LIB_DIR/output.sh"
 fi
 
+# Canonical hook entrypoint basenames the installer deploys to .claude/hooks/.
+# Single source of truth for which files the installer OWNS and may mark
+# executable. Permission functions must restrict themselves to these names so
+# they never touch pre-existing non-hook files (docs like CLAUDE.md/README.md,
+# or another tool's hooks) that happen to sit alongside them — force-chmod'ing
+# those produced content-free git mode-bit noise on every reinstall (Issue #4).
+# Mirrors the daemon_hooks map + status-line in install.py and the daemon's own
+# .claude/hooks/ directory.
+_DAEMON_HOOK_BASENAMES=(
+    pre-tool-use
+    post-tool-use
+    session-start
+    permission-request
+    notification
+    user-prompt-submit
+    stop
+    subagent-stop
+    pre-compact
+    session-end
+    status-line
+)
+
+#
+# list_deployed_hook_paths() - Emit paths of installer-owned hook entrypoints
+#
+# Prints (one per line) the absolute path of each canonical hook entrypoint
+# that actually exists as a regular file in the given hooks directory. Used to
+# scope permission changes to files the installer manages (Issue #4).
+#
+# Args:
+#   $1 - hooks_dir: Path to the project's .claude/hooks directory
+#
+list_deployed_hook_paths() {
+    local hooks_dir="$1"
+    local name path
+    for name in "${_DAEMON_HOOK_BASENAMES[@]}"; do
+        path="$hooks_dir/$name"
+        if [ -f "$path" ]; then
+            printf '%s\n' "$path"
+        fi
+    done
+}
+
 #
 # deploy_hook_scripts() - Deploy hook forwarder scripts to project
 #
@@ -172,9 +215,10 @@ set_hook_permissions() {
 
     print_verbose "Setting executable permissions on hook scripts..."
 
-    # Find all regular files (not symlinks) in hooks directory
+    # Only the installer-owned hook entrypoints — never pre-existing non-hook
+    # files (docs, other tools' hooks) that share the directory (Issue #4).
     local hook_files
-    hook_files=$(find "$hooks_dir" -maxdepth 1 -type f ! -name ".*")
+    hook_files=$(list_deployed_hook_paths "$hooks_dir")
 
     if [ -z "$hook_files" ]; then
         print_verbose "No hook files found to set permissions"
@@ -249,10 +293,12 @@ git_force_executable() {
     local init_script="$project_root/.claude/init.sh"
     local forced_count=0
 
-    # Force executable on hook scripts
+    # Force executable on hook scripts — installer-owned entrypoints only, so
+    # pre-existing non-hook files sharing the directory keep their tree mode
+    # instead of being force-marked 100755 in the index (Issue #4).
     if [ -d "$hooks_dir" ]; then
         local hook_files
-        hook_files=$(find "$hooks_dir" -maxdepth 1 -type f ! -name ".*")
+        hook_files=$(list_deployed_hook_paths "$hooks_dir")
 
         for hook_file in $hook_files; do
             local rel_path

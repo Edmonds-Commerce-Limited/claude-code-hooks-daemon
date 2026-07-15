@@ -134,3 +134,74 @@ class TestGitIndexForceExecutableNoRegression:
         project_root.mkdir()
         result = _run_bash(f'git_force_executable "{project_root}"')
         assert result.returncode == 0, f"stderr={result.stderr!r}"
+
+
+class TestSetHookPermissionsSkipsNonHookFiles:
+    """Issue #4: the installer must only chmod its own hook entrypoints, not
+    pre-existing non-hook files (docs, another project's hooks) that happen to
+    sit in .claude/hooks/. Marking docs executable is cosmetic git noise that
+    re-fires on every reinstall/upgrade.
+    """
+
+    def test_does_not_chmod_markdown_docs(self, tmp_path: Path) -> None:
+        project_root = tmp_path / "project"
+        hooks_dir = project_root / ".claude" / "hooks"
+        # A canonical hook the installer owns
+        wrapper = _seed_non_executable_wrapper(hooks_dir, "pre-tool-use")
+        # Pre-existing non-hook docs from an unrelated deployment
+        doc = hooks_dir / "CLAUDE.md"
+        doc.write_text("# not a script\n")
+        doc.chmod(0o644)
+        readme = hooks_dir / "README.md"
+        readme.write_text("# readme\n")
+        readme.chmod(0o644)
+
+        result = _run_bash(f'set_hook_permissions "{project_root}"')
+        assert result.returncode == 0, f"stderr={result.stderr!r}"
+
+        # The real hook became executable ...
+        assert (wrapper.stat().st_mode & 0o777) == 0o755
+        # ... but the docs were left untouched.
+        assert (doc.stat().st_mode & 0o777) == 0o644, "CLAUDE.md must not be chmod +x"
+        assert (readme.stat().st_mode & 0o777) == 0o644, "README.md must not be chmod +x"
+
+
+class TestGitForceExecutableSkipsNonHookFiles:
+    """Issue #4: git_force_executable must only force the exec bit on its own
+    hook entrypoints in the git index, not pre-existing docs sitting alongside.
+    """
+
+    def test_does_not_force_executable_on_markdown(self, tmp_path: Path) -> None:
+        project_root = tmp_path / "repo"
+        hooks_dir = project_root / ".claude" / "hooks"
+        hooks_dir.mkdir(parents=True)
+        wrapper = hooks_dir / "pre-tool-use"
+        wrapper.write_text("#!/bin/bash\necho hi\n")
+        wrapper.chmod(0o644)
+        doc = hooks_dir / "CLAUDE.md"
+        doc.write_text("# doc\n")
+        doc.chmod(0o644)
+
+        subprocess.run(["git", "init", "-q", str(project_root)], check=True)
+        subprocess.run(["git", "-C", str(project_root), "add", "-A"], check=True)
+
+        result = _run_bash(f'git_force_executable "{project_root}"')
+        assert result.returncode == 0, f"stderr={result.stderr!r}"
+
+        ls = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(project_root),
+                "ls-files",
+                "-s",
+                ".claude/hooks/pre-tool-use",
+                ".claude/hooks/CLAUDE.md",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        modes = {line.split("\t")[1]: line.split()[0] for line in ls.stdout.splitlines()}
+        assert modes[".claude/hooks/pre-tool-use"] == "100755", "hook must be forced executable"
+        assert modes[".claude/hooks/CLAUDE.md"] == "100644", "doc must NOT be forced executable"
