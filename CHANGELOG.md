@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.41.1] - 2026-07-15
+
+This is a **patch release** fixing the `pipe_blocker` handler's `echd-capture`
+recommendation so it always resolves to a runnable path in client installs,
+plus two installer permission-safety fixes.
+
+### Fixed
+
+- `pipe_blocker` now recommends a resolvable, absolute deployed path to
+  `echd-capture` (self-healing a lost exec bit via `chmod`, logged on
+  failure) instead of a bare command name that could be missing from PATH in
+  client installs; falls back to the always-works temp-file redirect when the
+  helper cannot be resolved at all. `hooks_deploy.sh` now ensures the
+  vendored helper is executable at deploy time (mirrors
+  `set_hook_permissions`; handles `core.fileMode=false` checkouts). The
+  injected CLAUDE.md pipe-blocker guidance was aligned to match — it now
+  directs users to the absolute helper path from the block message rather
+  than a bare `echd-capture` command that may not be on PATH.
+- Installer only marks its own hook entrypoints executable, instead of
+  touching unrelated files during install (Issue #4).
+- Fixed a nested-install-check false positive that blocked consumer projects
+  performing a manual install (Issue #3).
+
+### Changed
+
+- Internal: black formatting normalisation of pre-existing long lines and
+  regression test line splits touched by the Issue #3/#4 fixes.
+- Docs: codified the report-handling standing rule (reports in `untracked/`
+  must be cleaned up or tracked into a plan folder, never left in limbo) in
+  `CLAUDE.md`.
+- Plan 00164 (ccy supervisor lifecycle + upgrade clarity) and Plan 00165
+  (install permission bug fixes) marked Complete and archived.
+- Plan 00166 opened to investigate supervisor multi-terminal session
+  isolation (root cause + hypotheses only; no shipped code in this release).
+
 ## [3.41.0] - 2026-07-14
 
 This is a **minor release** delivering ccy supervisor lifecycle and upgrade
