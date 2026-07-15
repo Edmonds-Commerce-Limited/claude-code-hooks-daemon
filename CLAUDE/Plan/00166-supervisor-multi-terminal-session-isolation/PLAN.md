@@ -153,16 +153,18 @@ JSON for anything linking it to its parent.
 
 ### Phase 2: Confirm identity binding is available (feasibility)
 
-- [ ] ⬜ **Task 2.1**: Prove H4: resolve the child Claude PID's open transcript
-  `.jsonl` under `~/.claude/projects/<slug>/` from the supervisor's vantage
-  and confirm it yields the correct main session id.
-- [ ] ⬜ **Task 2.2**: Determine family-discovery mechanism: check whether the
-  main Claude process holds Agent-View / subagent transcripts open, and
-  inspect hook payloads / subagent sidecars for a parent/root session link
-  (resolves H5 — fd-based family vs daemon-stamped `root_session_id`).
-- [ ] ⬜ **Task 2.3**: Decide the identity source (Technical Decision 1) and
-  record it, with the fallback behaviour when identity cannot be resolved
-  (must FAIL SAFE — act on nothing rather than act on a foreign session).
+- [x] ✅ **Task 2.1**: H4 DISPROVEN by live `/proc` probe — claude keeps NO
+  `.jsonl` transcript open; no process in the container holds any transcript
+  open, so the fd→transcript route is not viable (JOURNAL 14:10).
+- [x] ✅ **Task 2.2**: Family-discovery mechanism found — `CLAUDE_CODE_SESSION_ID`
+  is present in claude's DESCENDANT process environs (learnable + cacheable).
+  Each `ccy` terminal is a separate container/PID namespace, so the env scan
+  surfaces ONLY the local family; foreign sessions leak only via the shared
+  on-disk surfaces the actuator must filter. Daemon-stamped `root_session_id`
+  (H5) is NOT required for the minimal fix.
+- [x] ✅ **Task 2.3**: Decision 1 recorded below — learn+cache own session-id set
+  from container process env; filter the shared dir to own ids; FAIL SAFE (act
+  on nothing) until the id is learned.
 
 ### Phase 3: Implement identity-scoped matching (TDD)
 
@@ -199,11 +201,26 @@ transcript fd under the projects dir; (B) walking Claude descendants' environ
 for `CLAUDE_CODE_SESSION_ID`; (C) a daemon-stamped `root_session_id` in each
 sidecar.
 
-**Options Considered**: to be finalised after Phase 2 evidence. Leaning A for
-the main session id (stable, cheap, no daemon change) + C for family discovery
-if the main process does not hold subagent transcripts open.
+**Options Considered** (Phase 2 live-probe evidence, JOURNAL 14:10):
+(A) child's open transcript fd — **DISPROVEN**: claude keeps no transcript open,
+no process holds any `.jsonl` open. Not viable.
+(C) daemon-stamped `root_session_id` — not required for the minimal fix; deferred
+as a possible later refinement for precise Agent-View family grouping.
+(B) walk Claude descendants' `CLAUDE_CODE_SESSION_ID` — **WORKS**: present in
+claude's child processes, learnable + cacheable. Each `ccy` terminal is a
+separate container/PID namespace, so an env scan surfaces only the local
+family; the probe saw A's `7ef60468` but never B's `e7247afe`.
 
-**Decision**: TBD (Task 2.3). Must fail safe: unknown identity => act on nothing.
+**Decision**: Adopt **(B)**. The supervisor learns its own session-id SET by
+scanning its container's process environs for `CLAUDE_CODE_SESSION_ID`, CACHES
+it (ids are stable per claude process), and filters the shared sidecar/signal
+dir to act only on files whose `session_id` ∈ that set. FAIL SAFE: until the
+main id is learned, act on NOTHING (never resume/compact off an unidentified
+signal). Open sub-fork for Phase 3 (needs a steer): precise direct-child
+subtree scan vs namespace-broad "every id in my container is mine" — leaning
+namespace-broad with a documented `--pid=host` caveat + the existing
+`CLAUDE_HOOKS_*` socket-isolation escape hatch.
+**Date**: 2026-07-15
 **Date**: TBD
 
 ## Success Criteria
