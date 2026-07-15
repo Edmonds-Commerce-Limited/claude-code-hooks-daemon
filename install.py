@@ -615,10 +615,18 @@ def create_settings_json(project_root: Path, force: bool = False) -> None:
         },
         "hooks": {
             "PreToolUse": [
-                {"hooks": [{"type": "command", "command": _hook_cmd("pre-tool-use"), "timeout": 60}]}
+                {
+                    "hooks": [
+                        {"type": "command", "command": _hook_cmd("pre-tool-use"), "timeout": 60}
+                    ]
+                }
             ],
             "PostToolUse": [
-                {"hooks": [{"type": "command", "command": _hook_cmd("post-tool-use"), "timeout": 60}]}
+                {
+                    "hooks": [
+                        {"type": "command", "command": _hook_cmd("post-tool-use"), "timeout": 60}
+                    ]
+                }
             ],
             "SessionStart": [
                 {"hooks": [{"type": "command", "command": _hook_cmd("session-start")}]}
@@ -1305,7 +1313,9 @@ def main() -> int:
 
         # Display errors and fail if any
         if not validation_result.passed:
-            print(f"\n❌ Pre-installation validation failed with {len(validation_result.errors)} error(s):\n")
+            print(
+                f"\n❌ Pre-installation validation failed with {len(validation_result.errors)} error(s):\n"
+            )
             for error in validation_result.errors:
                 print(f"❌ {error}\n")
             print("Installation aborted. Please fix the issues above and try again.")
@@ -1390,7 +1400,7 @@ def main() -> int:
         if not self_install:
             print("\n🔍 Running post-installation verification...")
             # Import validator only when needed (already imported in pre-install)
-            if 'ClientInstallValidator' not in locals():
+            if "ClientInstallValidator" not in locals():
                 sys.path.insert(0, str(Path(__file__).parent / "src"))
                 from claude_code_hooks_daemon.install import ClientInstallValidator
 
@@ -1402,7 +1412,9 @@ def main() -> int:
 
             # Display errors and fail if any
             if not validation_result.passed:
-                print(f"\n❌ Post-installation validation failed with {len(validation_result.errors)} error(s):\n")
+                print(
+                    f"\n❌ Post-installation validation failed with {len(validation_result.errors)} error(s):\n"
+                )
                 for error in validation_result.errors:
                     print(f"❌ {error}\n")
                 print("\n⚠️  Installation files were created but validation failed.")
