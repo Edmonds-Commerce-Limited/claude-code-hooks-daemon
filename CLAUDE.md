@@ -741,20 +741,21 @@ Commands piped to `tail` or `head` are **blocked** — piping truncates output a
 
 **Do NOT do the theatre** of capturing output to a file and then echoing the WHOLE file to stdout — that defeats the point and just bloats tokens.
 
-**Preferred — `echd-capture`**: capture the FULL output, see only a preview.
+**Preferred — `echd-capture`**: capture the FULL output, see only a preview. When the block fires it prints the exact invocation to use — an ABSOLUTE path to the deployed helper, not a bare name — so copy the path from the block message (the helper is not guaranteed to be on `PATH`). If no helper path can be resolved, the block recommends the temp-file redirect below instead.
 
 ```bash
 # WRONG — blocked (and truncates):
 pytest tests/ 2>&1 | tail -20
 
-# RIGHT — full capture, bounded preview + path to the rest:
+# RIGHT — full capture, bounded preview + path to the rest. Use the ABSOLUTE
+# echd-capture path from the block message (shown here as /…/scripts/echd-capture):
 set -o pipefail
-pytest tests/ 2>&1 | echd-capture 20
+pytest tests/ 2>&1 | /…/scripts/echd-capture 20
 # prints the last 20 lines + '(full output: /…/command-output-….txt)'.
 # Use --head N for the first N lines. pipefail keeps pytest's exit code visible.
 ```
 
-**Alternative** (no pipe): `pytest tests/ > /tmp/out.txt 2>&1` then read selectively.
+**Always-works alternative** (no helper, no pipe): `pytest tests/ > /tmp/out.txt 2>&1` then read the file selectively.
 
 **Allowed** (whitelisted): `grep`, `rg`, `awk`, `sed`, `jq`, `ls`, `cat`, `git log`, `git tag`, `git branch`, and other cheap filtering commands.
 
