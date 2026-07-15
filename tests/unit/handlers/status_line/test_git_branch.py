@@ -957,3 +957,142 @@ class TestGitBranchRenderCache:
             forks_after_second = mock_run.call_count
 
         assert forks_after_second > forks_after_first  # expiry forced a re-render
+
+
+class TestWorktreeIndicator:
+    """Tests for the linked-worktree tree icon in the git status segment.
+
+    A git *linked* worktree (``git worktree add``) has a top-level ``.git``
+    FILE pointing at ``<main>/.git/worktrees/<name>``; the main worktree has a
+    ``.git`` DIRECTORY, and a submodule's ``.git`` file points at
+    ``.../modules/<name>``. Detection is filesystem-only so it adds no
+    subprocess call to the render hot path (the render still forks exactly 5
+    git processes).
+    """
+
+    _TREE = "🌳"
+    _PINK = "\033[38;5;205m"
+    _GREEN = "\033[32m"
+
+    @pytest.fixture
+    def handler(self) -> GitBranchHandler:
+        handler = GitBranchHandler()
+        handler._auto_fetch = False  # side_effect mocks must not race a fetch thread
+        return handler
+
+    @staticmethod
+    def _render_mocks(toplevel: Path) -> list[MagicMock]:
+        """Standard 5-call render chain with a REAL toplevel path.
+
+        The toplevel must be a real path so the filesystem worktree probe reads
+        ``<toplevel>/.git``. Order: rev-parse --show-toplevel, branch
+        --show-current, symbolic-ref, status --porcelain=v2, stash list.
+        """
+        top = MagicMock(returncode=0, stdout=str(toplevel).encode() + b"\n")
+        branch = MagicMock(stdout=b"main\n")
+        symbolic_ref = MagicMock(returncode=0, stdout=b"refs/remotes/origin/main\n")
+        status = MagicMock(returncode=0, stdout=b"")
+        stash = MagicMock(returncode=0, stdout=b"")
+        return [top, branch, symbolic_ref, status, stash]
+
+    def test_linked_worktree_shows_tree_icon(
+        self, handler: GitBranchHandler, tmp_path: Path
+    ) -> None:
+        """A linked worktree (``.git`` file -> worktrees/) renders the tree icon."""
+        (tmp_path / ".git").write_text("gitdir: /main/.git/worktrees/feature\n", encoding="utf-8")
+        hook_input = {"workspace": {"current_dir": str(tmp_path)}}
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = self._render_mocks(tmp_path)
+            result = handler.handle(hook_input)
+        assert self._TREE in result.context[0]
+
+    def test_main_worktree_omits_tree_icon(self, handler: GitBranchHandler, tmp_path: Path) -> None:
+        """The main worktree (``.git`` directory) renders no tree icon."""
+        (tmp_path / ".git").mkdir()
+        hook_input = {"workspace": {"current_dir": str(tmp_path)}}
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = self._render_mocks(tmp_path)
+            result = handler.handle(hook_input)
+        assert self._TREE not in result.context[0]
+
+    def test_submodule_omits_tree_icon(self, handler: GitBranchHandler, tmp_path: Path) -> None:
+        """A submodule (``.git`` file -> modules/) is not a worktree; no icon."""
+        (tmp_path / ".git").write_text("gitdir: /main/.git/modules/libfoo\n", encoding="utf-8")
+        hook_input = {"workspace": {"current_dir": str(tmp_path)}}
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = self._render_mocks(tmp_path)
+            result = handler.handle(hook_input)
+        assert self._TREE not in result.context[0]
+
+    def test_no_git_entry_omits_tree_icon(self, handler: GitBranchHandler, tmp_path: Path) -> None:
+        """No ``.git`` entry at all -> no tree icon (render still succeeds)."""
+        hook_input = {"workspace": {"current_dir": str(tmp_path)}}
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = self._render_mocks(tmp_path)
+            result = handler.handle(hook_input)
+        assert self._TREE not in result.context[0]
+
+    def test_worktree_detection_adds_no_subprocess_call(
+        self, handler: GitBranchHandler, tmp_path: Path
+    ) -> None:
+        """Detection is filesystem-only: the render forks exactly 5 git processes."""
+        (tmp_path / ".git").write_text("gitdir: /main/.git/worktrees/feature\n", encoding="utf-8")
+        hook_input = {"workspace": {"current_dir": str(tmp_path)}}
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = self._render_mocks(tmp_path)
+            handler.handle(hook_input)
+        assert mock_run.call_count == 5
+
+    def test_is_linked_worktree_true_for_worktree_file(
+        self, handler: GitBranchHandler, tmp_path: Path
+    ) -> None:
+        (tmp_path / ".git").write_text("gitdir: /m/.git/worktrees/x\n", encoding="utf-8")
+        assert handler._is_linked_worktree(str(tmp_path)) is True
+
+    def test_is_linked_worktree_false_for_git_dir(
+        self, handler: GitBranchHandler, tmp_path: Path
+    ) -> None:
+        (tmp_path / ".git").mkdir()
+        assert handler._is_linked_worktree(str(tmp_path)) is False
+
+    def test_is_linked_worktree_false_for_submodule(
+        self, handler: GitBranchHandler, tmp_path: Path
+    ) -> None:
+        (tmp_path / ".git").write_text("gitdir: /m/.git/modules/x\n", encoding="utf-8")
+        assert handler._is_linked_worktree(str(tmp_path)) is False
+
+    def test_is_linked_worktree_false_when_missing(
+        self, handler: GitBranchHandler, tmp_path: Path
+    ) -> None:
+        assert handler._is_linked_worktree(str(tmp_path)) is False
+
+    def test_is_linked_worktree_false_on_non_string(self, handler: GitBranchHandler) -> None:
+        """A non-str toplevel (e.g. a bare mock under other tests) fails safe to False."""
+        assert handler._is_linked_worktree(MagicMock()) is False
+
+    def test_worktree_branch_is_pink(self, handler: GitBranchHandler, tmp_path: Path) -> None:
+        """In a worktree the branch name is pink, overriding the default-branch green.
+
+        ``_render_mocks`` puts the checkout on ``main`` with ``origin/HEAD`` ->
+        ``main``, which would normally colour the branch green. Inside a
+        worktree the pink worktree colour must win instead.
+        """
+        (tmp_path / ".git").write_text("gitdir: /main/.git/worktrees/feature\n", encoding="utf-8")
+        hook_input = {"workspace": {"current_dir": str(tmp_path)}}
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = self._render_mocks(tmp_path)
+            result = handler.handle(hook_input)
+        rendered = result.context[0]
+        assert self._PINK in rendered
+        assert self._GREEN not in rendered
+
+    def test_main_worktree_branch_not_pink(self, handler: GitBranchHandler, tmp_path: Path) -> None:
+        """The main worktree keeps its normal colour (green here), never pink."""
+        (tmp_path / ".git").mkdir()
+        hook_input = {"workspace": {"current_dir": str(tmp_path)}}
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = self._render_mocks(tmp_path)
+            result = handler.handle(hook_input)
+        rendered = result.context[0]
+        assert self._PINK not in rendered
+        assert self._GREEN in rendered

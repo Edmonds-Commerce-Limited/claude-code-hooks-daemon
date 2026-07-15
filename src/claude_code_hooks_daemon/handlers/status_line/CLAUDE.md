@@ -13,7 +13,7 @@ This directory contains all handlers for the `status_line` hook event type. Thes
 | `account_display.py`       | `AccountDisplayHandler`       | 5        | Reads Claude account username from `~/.claude/.last-launch.conf`                                                          |
 | `model_context.py`         | `ModelContextHandler`         | 10       | Formats color-coded model name (blue=Haiku, green=Sonnet, orange=Opus), 5-tier effort signal bars, and context percentage |
 | `usage_tracking.py`        | `UsageTrackingHandler`        | 15       | Daily/weekly token usage percentages (currently disabled - needs rework)                                                  |
-| `git_branch.py`            | `GitBranchHandler`            | 20       | Shows current git branch name                                                                                             |
+| `git_branch.py`            | `GitBranchHandler`            | 20       | Shows current git branch name (pink name + 🌳 when inside a linked worktree)                                              |
 | `daemon_stats.py`          | `DaemonStatsHandler`          | 30       | Shows daemon uptime, memory usage, log level, and error count                                                             |
 
 ## Supporting Modules

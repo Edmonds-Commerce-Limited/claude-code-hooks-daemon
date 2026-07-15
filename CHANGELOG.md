@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.42.0] - 2026-07-15
+
+This is a **minor release** adding a status-line worktree indicator (a tree icon
+in the git status section when the working directory is inside a linked git
+worktree) and hardening the ccy PTY supervisor
+(`.claude/ccy/claude-supervise.py`) so multiple `ccy` terminals in one repo no
+longer cross-inject, and so the supervisor can never flood a live Claude session
+with its own error output. (Plan 00166)
+
+### Added
+
+- **Status-line worktree indicator.** The `git_branch` status handler now
+  detects when the working directory is inside a git *linked worktree* (created
+  via `git worktree add`) and signals it two ways: the branch name is coloured
+  pink (overriding the usual green/orange/grey default-branch colour) and a
+  tree icon (🌳) is appended to the git status segment. The main worktree and
+  submodules are unaffected. Detection is filesystem-only — it reads the
+  worktree's `.git` file rather than forking git — so it adds zero subprocess
+  calls to the status-line render hot path.
+
+### Fixed
+
+- **Cross-terminal compaction injection.** Two `ccy` terminals in the same repo
+  share one bind-mounted `untracked/context-sidecar/` directory but run in
+  separate containers/PID namespaces. The supervisor "actuator" previously
+  matched compaction signals and foreground sidecars by freshness (first fresh
+  file wins), never by session identity — so a compaction in terminal B could
+  make terminal A resume off B's signal, injecting a stray `continue` into the
+  wrong Claude PTY. The actuator now resolves its own session identity from
+  `/proc/<pid>/environ` (`CLAUDE_CODE_SESSION_ID`, namespace-scoped) and filters
+  every signal/sidecar read to sessions it actually owns. Fail-safe: an empty
+  own-session set acts on nothing rather than guessing. Verified with a live
+  two-terminal dogfood (B compacts, A stays clean).
+
+### Changed
+
+- **Policy-worker error safety net — the supervisor never floods the PTY.** The
+  policy worker's stderr is now redirected to a file
+  (`untracked/.../claude-supervise-worker.err.log`), never the inherited
+  terminal, and a single tick's exception (or a host/worker version skew after a
+  hot-reload) can no longer kill the worker or leak a traceback to the live
+  session: it is caught, the traceback is written to that file, and a safe NOOP
+  tick is emitted so the host still gets a reply. Applies to
+  `PolicyWorker.start` (Popen `stderr`), the `--worker` entrypoint
+  (self-redirect on start), and the per-tick guard in `run_worker`.
+
 ## [3.41.1] - 2026-07-15
 
 This is a **patch release** fixing the `pipe_blocker` handler's `echd-capture`

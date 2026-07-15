@@ -26,6 +26,7 @@ _COLOR_YELLOW = "\033[33m"
 _COLOR_CYAN = "\033[36m"
 _COLOR_GREY = "\033[37m"
 _COLOR_ORANGE = "\033[38;5;208m"
+_COLOR_PINK = "\033[38;5;205m"
 _COLOR_RESET = "\033[0m"
 
 _ICON_AHEAD = "↑"
@@ -35,6 +36,15 @@ _ICON_CHANGED = "✚"
 _ICON_CONFLICTS = "✖"
 _ICON_UNTRACKED = "…"
 _ICON_STASHED = "⚑"
+_ICON_WORKTREE = "🌳"
+
+# Linked-worktree detection (filesystem-only, no subprocess on the render path).
+# A linked worktree's top-level ``.git`` is a FILE containing
+# ``gitdir: <main>/.git/worktrees/<name>``; the main worktree has a ``.git``
+# DIRECTORY, and a submodule's ``.git`` file points at ``.../modules/<name>``.
+_GIT_DIR_ENTRY = ".git"
+_GIT_FILE_GITDIR_PREFIX = "gitdir:"
+_WORKTREE_GITDIR_MARKER = "/worktrees/"
 
 _PORCELAIN_BRANCH_AB_PREFIX = "# branch.ab "
 _PORCELAIN_UNTRACKED_PREFIX = "? "
@@ -190,15 +200,23 @@ class GitBranchHandler(Handler):
 
             branch = result.stdout.decode().strip()
             if branch:
+                # A linked worktree recolours the branch pink and appends a tree
+                # icon, regardless of default-branch status. Resolve the default
+                # branch first regardless (keeps the per-repo cache warm and the
+                # git-call sequence stable) so only the colour choice diverges.
                 default_branch = self._resolve_default_branch(repo_toplevel, cwd)
-                if default_branch is None:
+                is_worktree = self._is_linked_worktree(repo_toplevel)
+                if is_worktree:
+                    color = _COLOR_PINK
+                elif default_branch is None:
                     color = _COLOR_GREY
                 elif branch == default_branch:
                     color = _COLOR_GREEN
                 else:
                     color = _COLOR_ORANGE
                 icons = self._format_git_status_icons(cwd)
-                return [f"| ⎇ {color}{branch}{_COLOR_RESET}{icons}"]
+                worktree_suffix = f" {_ICON_WORKTREE}" if is_worktree else ""
+                return [f"| ⎇ {color}{branch}{_COLOR_RESET}{icons}{worktree_suffix}"]
 
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as e:
             logger.debug("Failed to get git branch: %s", e)
@@ -206,6 +224,36 @@ class GitBranchHandler(Handler):
             logger.error("Unexpected error in git branch handler: %s", e, exc_info=True)
 
         return []
+
+    def _is_linked_worktree(self, repo_toplevel: str) -> bool:
+        """Return True when ``repo_toplevel`` is a git *linked* worktree.
+
+        Git stores a linked worktree (created via ``git worktree add``) with a
+        top-level ``.git`` FILE whose ``gitdir:`` line points into
+        ``<main>/.git/worktrees/<name>``. The main worktree has a ``.git``
+        DIRECTORY, and a submodule's ``.git`` file points at
+        ``.../modules/<name>`` instead — so matching the ``/worktrees/`` marker
+        in the gitdir target distinguishes a worktree from both.
+
+        This is a filesystem probe (``.git`` stat + a small text read), never a
+        subprocess, so it adds nothing to the render's git-fork budget. Any
+        failure (missing/unreadable ``.git``, a non-str toplevel under a mocked
+        render) fails safe to ``False`` — the status line must never crash.
+        """
+        try:
+            git_path = Path(repo_toplevel) / _GIT_DIR_ENTRY
+            if not git_path.is_file():
+                return False
+            content = git_path.read_text(encoding="utf-8", errors="replace")
+        except (OSError, ValueError, TypeError) as e:
+            logger.debug("Worktree detection failed for %r: %s", repo_toplevel, e)
+            return False
+        for line in content.splitlines():
+            stripped = line.strip()
+            if stripped.startswith(_GIT_FILE_GITDIR_PREFIX):
+                target = stripped[len(_GIT_FILE_GITDIR_PREFIX) :].strip()
+                return _WORKTREE_GITDIR_MARKER in target
+        return False
 
     def _resolve_default_branch(self, repo_toplevel: str, cwd: str) -> str | None:
         """Return the cached default branch for a repo, detecting it once per repo.
