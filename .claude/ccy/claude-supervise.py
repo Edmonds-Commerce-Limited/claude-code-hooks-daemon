@@ -36,6 +36,7 @@ import sys
 import termios
 import threading
 import time
+import traceback
 import tty
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
@@ -799,6 +800,76 @@ def _daemon_untracked_dir() -> Path:
     if self_install:
         return project_dir / "untracked"
     return project_dir / ".claude" / "hooks-daemon" / "untracked"
+
+
+_WORKER_ERROR_LOG_NAME = "claude-supervise-worker.err.log"
+
+
+def worker_error_log_path() -> Path:
+    """Absolute path of the supervisor worker's error log (never the PTY).
+
+    The policy worker runs as a subprocess whose stderr MUST NOT reach the
+    inherited terminal — a per-tick exception would otherwise flood the live
+    Claude session with tracebacks. All worker diagnostics land in this file.
+    """
+    return _daemon_untracked_dir() / _WORKER_ERROR_LOG_NAME
+
+
+def open_worker_error_log() -> TextIO | None:
+    """Open the worker error log for appending; None if it cannot be opened.
+
+    Used as the worker subprocess's ``stderr`` so nothing it emits — including
+    an uncaught interpreter traceback — can reach the inherited PTY. Callers
+    fall back to ``os.devnull`` when this returns None; the worker's stderr is
+    NEVER left inheriting the terminal.
+    """
+    try:
+        path = worker_error_log_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path.open("a", encoding="utf-8", buffering=1)
+    except OSError:
+        # Cannot open the log — the caller redirects to os.devnull instead. We
+        # return a sentinel (None), never the terminal. This is not swallowing:
+        # the failure changes the caller's redirect target, it does not hide it.
+        return None
+
+
+def append_worker_error(message: str) -> None:
+    """Append a timestamped diagnostic to the worker error log (last resort).
+
+    Best-effort file logging that must itself NEVER raise or write to the PTY —
+    it is the safety net's own logger, so a failure here has nowhere left to go
+    and is intentionally dropped (see error_hiding exclusion).
+    """
+    stamp = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        with worker_error_log_path().open("a", encoding="utf-8") as handle:
+            handle.write(f"[{stamp}] {message}\n")
+    except OSError:
+        # Deliberate last-resort drop: the error logger cannot log its own
+        # failure anywhere safe (writing to stderr would flood the PTY, which
+        # is the very bug this safety net exists to prevent).
+        return
+
+
+def _redirect_worker_stderr_to_log() -> None:
+    """Point the worker process's stderr (fd 2 + ``sys.stderr``) at the log file.
+
+    Guarantees the worker can never write to an inherited terminal even if it is
+    launched directly. Best-effort: if the log cannot be opened, stderr is left
+    as the host already configured it (the Popen redirect), never forced onto a
+    tty by this function.
+    """
+    stream = open_worker_error_log()
+    if stream is None:
+        return
+    try:
+        os.dup2(stream.fileno(), sys.stderr.fileno())
+    except (OSError, ValueError) as exc:
+        # fileno() unavailable or dup2 failed: record it, then fall through to
+        # swap the Python-level handle only -- still never a terminal.
+        append_worker_error(f"stderr dup2 failed, using handle swap: {exc}")
+    sys.stderr = stream
 
 
 def compute_source_hash(path: Path) -> str:
@@ -1791,22 +1862,49 @@ def run_worker(
         try:
             facts = _facts_from_json(line)
         except (ValueError, KeyError) as exc:
-            sys.stderr.write(f"claude-supervise worker: bad tick line: {exc}\n")
+            append_worker_error(f"bad tick line: {exc}")
             continue
-        outcome = decide_once(
-            machine,
-            sidecar_dir=sidecar_dir,
-            facts=facts,
-            dry_run=dry_run,
-            freshness_seconds=policy.freshness_seconds,
-            compaction_signal_ttl_seconds=policy.compaction_signal_ttl_seconds,
-            reap_ttl_seconds=policy.reap_ttl_seconds,
-            foreground_margin_seconds=policy.foreground_margin_seconds,
-            own_sessions=cached_own_session_ids(),  # Plan 00166: only our own sessions
-        )
+        try:
+            outcome = decide_once(
+                machine,
+                sidecar_dir=sidecar_dir,
+                facts=facts,
+                dry_run=dry_run,
+                freshness_seconds=policy.freshness_seconds,
+                compaction_signal_ttl_seconds=policy.compaction_signal_ttl_seconds,
+                reap_ttl_seconds=policy.reap_ttl_seconds,
+                foreground_margin_seconds=policy.foreground_margin_seconds,
+                own_sessions=cached_own_session_ids(),  # Plan 00166: only our own sessions
+            )
+        except Exception:
+            # SAFETY NET: a single tick's exception must not kill the worker
+            # (the host would respawn it and the crash would repeat every tick,
+            # flooding the PTY with tracebacks). Log the full traceback to the
+            # error FILE, emit a safe NOOP so the host still gets a reply, and
+            # carry on with the next tick. This is a deliberate broad catch --
+            # the whole purpose is to contain ANY unexpected decision failure.
+            append_worker_error("decide_once failed:\n" + traceback.format_exc())
+            outcome = _worker_error_noop()
         out_stream.write(_outcome_to_json(outcome) + "\n")
         out_stream.flush()
     return 0
+
+
+def _worker_error_noop() -> TickOutcome:
+    """A do-nothing TickOutcome emitted when a worker tick raised.
+
+    ``machine_state=None`` leaves the host's authoritative state untouched, so a
+    transient tick error never advances or corrupts the compaction state.
+    """
+    return TickOutcome(
+        decision_value=Decision.NOOP.value,
+        reason="worker tick error (see worker error log)",
+        payload=None,
+        submit=True,
+        consume_signal_path=None,
+        deferred_log=None,
+        machine_state=None,
+    )
 
 
 class PolicyWorker:
@@ -1829,6 +1927,7 @@ class PolicyWorker:
         self._dry_run = dry_run
         self._read_timeout = read_timeout
         self._proc: subprocess.Popen[str] | None = None
+        self._err_stream: TextIO | None = None
         self._source_fingerprint = self._current_fingerprint()
 
     def _current_fingerprint(self) -> str | None:
@@ -1843,17 +1942,26 @@ class PolicyWorker:
         argv = [sys.executable, str(self._self_path), _WORKER_FLAG]
         if not self._dry_run:
             argv.append("--arm")
+        # The worker's stderr MUST go to a file (or /dev/null), NEVER the PTY the
+        # host inherited: an uncaught per-tick traceback would otherwise flood
+        # the live Claude session. Open the error log; fall back to devnull.
+        self._err_stream = open_worker_error_log()
+        err_target: TextIO | int = (
+            self._err_stream if self._err_stream is not None else subprocess.DEVNULL
+        )
         try:
             # SECURITY: fixed argv (python + this script + flags), never a shell.
             self._proc = subprocess.Popen(  # nosec B603 - trusted fixed argv, no shell
                 argv,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
+                stderr=err_target,
                 text=True,
                 bufsize=1,
             )
         except OSError as exc:
-            sys.stderr.write(f"claude-supervise: could not start policy worker: {exc}\n")
+            append_worker_error(f"could not start policy worker: {exc}")
+            self._close_err_stream()
             self._proc = None
             return False
         self._source_fingerprint = self._current_fingerprint()
@@ -1902,10 +2010,22 @@ class PolicyWorker:
         self.close()
         return self.start()
 
+    def _close_err_stream(self) -> None:
+        """Close the worker's error-log stream handle if the host opened one."""
+        stream = self._err_stream
+        self._err_stream = None
+        if stream is None:
+            return
+        try:
+            stream.close()
+        except OSError as exc:
+            append_worker_error(f"worker error-log close failed: {exc}")
+
     def close(self) -> None:
         proc = self._proc
         self._proc = None
         if proc is None:
+            self._close_err_stream()
             return
         for stream in (proc.stdin, proc.stdout):
             if stream is None:
@@ -1913,14 +2033,15 @@ class PolicyWorker:
             try:
                 stream.close()
             except OSError as exc:
-                sys.stderr.write(f"claude-supervise: worker stream close failed: {exc}\n")
+                append_worker_error(f"worker stream close failed: {exc}")
         try:
             proc.terminate()
             proc.wait(timeout=1.0)
         except subprocess.TimeoutExpired:
             proc.kill()
         except OSError as exc:
-            sys.stderr.write(f"claude-supervise: worker terminate failed: {exc}\n")
+            append_worker_error(f"worker terminate failed: {exc}")
+        self._close_err_stream()
 
 
 def _get_winsize(stdin_fd: int) -> bytes:
@@ -2293,6 +2414,11 @@ def main(argv: list[str] | None = None) -> int:
     # Policy-worker mode (Plan 00164 Phase 4): no child argv — read TickFacts
     # from stdin, write TickOutcomes to stdout. The host spawns this.
     if _WORKER_FLAG in argv:
+        # Defence in depth: guarantee the worker's stderr is a FILE, never a
+        # terminal, regardless of how it was launched (the host already sets
+        # this via Popen, but a direct/manual `--worker` run must not flood a
+        # tty either). See Plan 00166.
+        _redirect_worker_stderr_to_log()
         return run_worker(
             sys.stdin,
             sys.stdout,

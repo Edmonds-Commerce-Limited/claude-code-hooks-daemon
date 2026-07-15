@@ -201,6 +201,32 @@ JSON for anything linking it to its parent.
   the pre-fix code until re-exec) — user can do this at leisure; the fix is
   deterministically proven.
 
+### Phase 5: Worker error safety net (flood containment)
+
+Triggered by a live dogfooding incident: live-editing the shared supervisor
+file left a brief window where the worker's `main()` called
+`_redirect_worker_stderr_to_log()` before it was defined, so every worker the
+OLD host respawned `NameError`'d and flooded BOTH PTYs (the host inherits the
+worker's stderr and restarts a dead worker every tick). See JOURNAL 16:45.
+
+- [x] ✅ **Task 5.1**: Route ALL worker diagnostics to a FILE, never the PTY —
+  `worker_error_log_path` / `open_worker_error_log` / `append_worker_error`
+  (`untracked/claude-supervise-worker.err.log`); `open_*` → None falls back to
+  `subprocess.DEVNULL`, never the inherited terminal.
+- [x] ✅ **Task 5.2**: `PolicyWorker.start` passes `stderr=<log|DEVNULL>` to
+  Popen and closes the handle in `close()`; host-side worker-lifecycle noise
+  rerouted from `sys.stderr` to the error log.
+- [x] ✅ **Task 5.3**: `_redirect_worker_stderr_to_log` — the worker's first
+  action in `--worker` mode dup2's fd 2 onto the log so it self-contains even
+  under an OLD host (defence in depth).
+- [x] ✅ **Task 5.4**: `run_worker` per-tick `except Exception` guard → traceback
+  to FILE + safe `_worker_error_noop()` so a bad tick never kills the worker
+  (no crash-loop) and the host still gets a reply.
+- [x] ✅ **Task 5.5**: Regression tests in
+  `tests/unit/supervise/test_worker_error_safety_net.py` (9): survives raising
+  `decide_once`, zero stderr leak, bad-tick logged-not-stderr, start never
+  inherits stderr, DEVNULL fallback. mypy clean; 278 supervise tests pass.
+
 ## Technical Decisions
 
 ### Decision 1: Source of the supervisor's session-family identity
