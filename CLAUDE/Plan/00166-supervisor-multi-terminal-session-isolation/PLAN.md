@@ -139,17 +139,15 @@ JSON for anything linking it to its parent.
 
 ### Phase 1: Reproduce via dogfooding (two live terminals)
 
-- [ ] ⬜ **Task 1.1**: With the user, start a SECOND `ccy` session in this repo
-  in a separate terminal so two supervisors run against the shared sidecar
-  dir. Record both session ids from `untracked/context-sidecar/*.json`.
-- [ ] ⬜ **Task 1.2**: Instrument observation without interfering: tail the
-  supervisor decision log(s) and list `untracked/context-sidecar/` before,
-  during, and after a compaction. Identify each supervisor's PID and its
-  Claude child PID.
-- [ ] ⬜ **Task 1.3**: Trigger a compaction in terminal A (manual `/compact` or
-  drive context high) and observe whether terminal B injects `continue`.
-  Capture the decision-log lines that show B acting on A's signal. This
-  confirms H1/H2/H3.
+- [x] ✅ **Task 1.1**: Two `ccy` terminals started (A=`7ef60468`, B=`e7247afe`)
+  against the shared sidecar dir; both session ids recorded (JOURNAL 13:30).
+- [x] ✅ **Task 1.2**: Process topology captured — supervisor pid + Claude child
+  pid per terminal; shared `context-sidecar/` listed before/during/after a
+  compaction (JOURNAL 13:30).
+- [x] ✅ **Task 1.3**: Compaction triggered in B; daemon wrote
+  `e7247afe.compacting` into the ONE shared dir; deterministic module-level
+  proof showed terminal A's `load_compaction_signal()` returns B's foreign
+  signal with no session filter — confirms H1/H2/H3 (JOURNAL 13:30).
 
 ### Phase 2: Confirm identity binding is available (feasibility)
 
@@ -168,27 +166,40 @@ JSON for anything linking it to its parent.
 
 ### Phase 3: Implement identity-scoped matching (TDD)
 
-- [ ] ⬜ **Task 3.1**: Write failing tests: `load_compaction_signal`,
+- [x] ✅ **Task 3.1**: Failing tests written first (RED) in
+  `tests/unit/supervise/test_session_identity.py` — `load_compaction_signal`,
   `load_foreground_sidecar`, and `_scan_sidecars` must ignore sidecars /
-  signals whose session id is not in the supervisor's family set. Include a
-  two-instance fixture (foreign session freshest + foreign `.compacting`).
-- [ ] ⬜ **Task 3.2**: Add a session-family resolver to the supervisor
-  (child-pid → session family) with a fail-safe empty-set default and
-  caching (fd/transcript lookups are not free per tick).
-- [ ] ⬜ **Task 3.3**: Thread the family filter through the three match sites so
-  only in-family files are considered; keep the Plan 00160 foreground
-  disambiguation operating WITHIN the family.
-- [ ] ⬜ **Task 3.4**: If H5 holds, add the minimal daemon-side `root_session_id`
-  stamp to the sidecar/signal writers (sensor) plus its unit tests; keep all
-  existing fields unchanged.
+  signals whose session id ∉ the own-session set. Two-instance fixtures
+  included (foreign session freshest + foreign `.compacting`).
+- [x] ✅ **Task 3.2**: Added the namespace-broad resolver to the supervisor:
+  `_session_ids_from_environ`, `resolve_own_session_ids` (scans `/proc/<pid>/environ`
+  for `CLAUDE_CODE_SESSION_ID`), and `cached_own_session_ids` (union-accumulates,
+  stable per claude process). Fail-safe empty set = act on nothing. Production
+  callers `run_worker` and the main loop `_poll_once` resolve it once per tick.
+- [x] ✅ **Task 3.3**: Threaded `own_sessions` through all THREE match sites
+  (`_scan_sidecars`, `load_foreground_sidecar`, `load_compaction_signal`) and
+  `decide_once`/`_poll_once` via `_session_in_scope` (None = no filter, keeps
+  the Plan 00160 within-family foreground disambiguation untouched).
+- [x] ❌ **Task 3.4**: NOT NEEDED — Decision 1 (option B, namespace-broad) makes
+  the daemon-side `root_session_id` stamp (H5) unnecessary: each `ccy` terminal
+  is its own container/PID namespace, so the env scan already excludes foreign
+  sessions. No sensor change required. Deferred as a possible later refinement
+  only if a `--pid=host` shared-namespace deployment ever needs precise grouping.
 
 ### Phase 4: Verify, QA, dogfood again
 
-- [ ] ⬜ **Task 4.1**: Run full QA (`./scripts/qa/run_all.sh`) and restart the
-  daemon; verify RUNNING.
-- [ ] ⬜ **Task 4.2**: Re-run the Phase 1 two-terminal dogfood; confirm a
-  compaction in A no longer injects into B, and that within-instance
-  Agent-View compaction/resume still works.
+- [x] ✅ **Task 4.1**: Full QA green — `./scripts/qa/llm_qa.py all` → 13/13
+  PASSED (mypy covers `claude-supervise.py`; tests 10142 passed, coverage
+  95.3%; error_hiding 0). Daemon restarted and verified RUNNING (pid 163442).
+- [x] ✅ **Task 4.2**: Deterministic live proof against REAL `/proc` + real
+  filter logic (JOURNAL entry) — `cached_own_session_ids()` returns `{7ef60468}`
+  only (never B's `e7247afe`); with the own filter A's `load_compaction_signal`
+  returns `None` for B's fresh `e7247afe.compacting` (bug fixed) while still
+  returning A's own signal (no regression). A full two-terminal live re-dogfood
+  additionally requires relaunching BOTH `ccy` terminals so their running
+  supervisors pick up the new `claude-supervise.py` (the live supervisors run
+  the pre-fix code until re-exec) — user can do this at leisure; the fix is
+  deterministically proven.
 
 ## Technical Decisions
 
@@ -211,17 +222,20 @@ claude's child processes, learnable + cacheable. Each `ccy` terminal is a
 separate container/PID namespace, so an env scan surfaces only the local
 family; the probe saw A's `7ef60468` but never B's `e7247afe`.
 
-**Decision**: Adopt **(B)**. The supervisor learns its own session-id SET by
-scanning its container's process environs for `CLAUDE_CODE_SESSION_ID`, CACHES
-it (ids are stable per claude process), and filters the shared sidecar/signal
-dir to act only on files whose `session_id` ∈ that set. FAIL SAFE: until the
-main id is learned, act on NOTHING (never resume/compact off an unidentified
-signal). Open sub-fork for Phase 3 (needs a steer): precise direct-child
-subtree scan vs namespace-broad "every id in my container is mine" — leaning
-namespace-broad with a documented `--pid=host` caveat + the existing
-`CLAUDE_HOOKS_*` socket-isolation escape hatch.
+**Decision**: Adopt **(B)**, **namespace-broad** variant (user steer). The
+supervisor learns its own session-id SET by scanning its container's process
+environs (`/proc/<pid>/environ`) for `CLAUDE_CODE_SESSION_ID` — treating EVERY
+id found in its own PID namespace as "mine" — CACHES it (ids are stable per
+claude process; the set only grows), and filters the shared sidecar/signal dir
+to act only on files whose `session_id` ∈ that set. FAIL SAFE: an empty/unknown
+set means act on NOTHING (never resume/compact off an unidentified signal). This
+is correct under the one-container-per-terminal deployment `ccy` uses; it is
+over-broad only if a deployment shares a PID namespace across terminals (e.g.
+`--pid=host`), for which the `CLAUDE_HOOKS_SOCKET_PATH` / `_PID_PATH` /
+`_LOG_PATH` socket-isolation escape hatch remains available. The precise
+direct-child subtree variant was rejected: subagents reparent to pid 1 (tini)
+and would be missed, whereas the namespace-broad scan catches the whole family.
 **Date**: 2026-07-15
-**Date**: TBD
 
 ## Success Criteria
 

@@ -541,6 +541,94 @@ _DEFAULT_REAP_TTL_SECONDS = 1800.0
 _CONTEXT_SIDECAR_GLOB = "*.json"
 
 
+# ---------------------------------------------------------------------------
+# Own-session identity (Plan 00166): namespace-broad session-id filtering.
+#
+# Two `ccy` terminals in the SAME repo share ONE context-sidecar dir (a
+# bind-mounted `untracked/`), but each runs in its OWN container / PID
+# namespace. Without a filter, this supervisor reads the freshest sidecar and
+# the first `*.compacting` signal in the shared dir REGARDLESS of which session
+# wrote them -- so a compaction in terminal B makes terminal A's supervisor
+# inject `continue` into A's PTY (the reported cross-injection bug).
+#
+# Fix (Decision 1, option B): a session id reachable in the supervisor's OWN
+# PID namespace belongs to the supervisor's own Claude instance -- a foreign
+# terminal is a separate container and never appears here. So we learn the
+# own-session-id SET by scanning the container's process environs for
+# `CLAUDE_CODE_SESSION_ID`, then act ONLY on sidecars/signals in that set. Fail
+# safe: an empty (not-yet-learned / non-Linux) set means act on NOTHING.
+#
+# Caveat: under a shared PID namespace (e.g. `podman run --pid=host`) the scan
+# could see a sibling terminal's ids. For that deployment give the session its
+# own runtime via CLAUDE_HOOKS_SOCKET_PATH / _PID_PATH / _LOG_PATH.
+# ---------------------------------------------------------------------------
+
+_PROC_ROOT = "/proc"
+_SESSION_ENV_PREFIX = b"CLAUDE_CODE_SESSION_ID="
+
+# Accumulated own-session ids. Union-only: ids are stable per Claude process
+# and only ever come from this process's own namespace, so growth never admits
+# a foreign terminal. Keeps ids learned during active work available on later
+# idle ticks (when no descendant currently exposes the env var).
+_own_session_ids_cache: set[str] = set()
+
+
+def _session_ids_from_environ(environ: bytes) -> set[str]:
+    """Extract ``CLAUDE_CODE_SESSION_ID`` value(s) from a NUL-delimited environ."""
+    found: set[str] = set()
+    for entry in environ.split(b"\x00"):
+        if entry.startswith(_SESSION_ENV_PREFIX):
+            value = entry[len(_SESSION_ENV_PREFIX) :].decode("utf-8", "replace").strip()
+            if value:
+                found.add(value)
+    return found
+
+
+def _read_proc_environ(environ_path: Path) -> bytes:
+    """Read a ``/proc/<pid>/environ`` blob; empty bytes if the process vanished."""
+    try:
+        return environ_path.read_bytes()
+    except OSError:
+        # The process exited between listdir and read, or its environ is
+        # unreadable -- it simply contributes no session id. Not an error.
+        return b""
+
+
+def resolve_own_session_ids(proc_root: Path | None = None) -> frozenset[str]:
+    """Scan this container's process environs for ``CLAUDE_CODE_SESSION_ID``.
+
+    Returns every session id found in the supervisor's OWN PID namespace
+    (namespace-broad identity, Plan 00166). Empty on a host without ``/proc``
+    so the caller fails safe.
+    """
+    root = proc_root if proc_root is not None else Path(_PROC_ROOT)
+    if not root.is_dir():
+        return frozenset()
+    found: set[str] = set()
+    for entry in root.iterdir():
+        if entry.name.isdigit():
+            found |= _session_ids_from_environ(_read_proc_environ(entry / "environ"))
+    return frozenset(found)
+
+
+def cached_own_session_ids(proc_root: Path | None = None) -> frozenset[str]:
+    """Union-accumulate and return the supervisor's own-session-id set."""
+    _own_session_ids_cache.update(resolve_own_session_ids(proc_root))
+    return frozenset(_own_session_ids_cache)
+
+
+def _session_in_scope(session_id: object, own_sessions: frozenset[str] | None) -> bool:
+    """True if ``session_id`` should be acted on given the own-session filter.
+
+    ``own_sessions is None`` disables filtering (legacy / unit-test callers).
+    A provided set (even empty) filters: only ids in the set are in scope, so an
+    empty set puts NOTHING in scope -- the fail-safe when identity is unknown.
+    """
+    if own_sessions is None:
+        return True
+    return isinstance(session_id, str) and session_id in own_sessions
+
+
 # NOOP reasons that mean "an injection is pending but gated on the session
 # being safe to type into". `_poll_once` uses these to log a deferral when
 # the gate was the non-empty input box rather than keystroke activity.
@@ -778,7 +866,11 @@ def remove_supervisor_status(untracked_dir: Path) -> None:
 
 
 def load_freshest_sidecar(
-    directory: Path, *, now: float, freshness_seconds: float
+    directory: Path,
+    *,
+    now: float,
+    freshness_seconds: float,
+    own_sessions: frozenset[str] | None = None,
 ) -> SidecarReading | None:
     """Load the freshest (max-``ts``) sidecar JSON in ``directory``.
 
@@ -797,7 +889,7 @@ def load_freshest_sidecar(
     Returns:
         The freshest valid ``SidecarReading``, or None if none is available.
     """
-    scanned = _scan_sidecars(directory)
+    scanned = _scan_sidecars(directory, own_sessions=own_sessions)
     if not scanned:
         return None
     data, ts = max(scanned, key=lambda pair: pair[1])
@@ -810,6 +902,7 @@ def load_foreground_sidecar(
     now: float,
     freshness_seconds: float,
     margin_seconds: float = _DEFAULT_FOREGROUND_MARGIN_SECONDS,
+    own_sessions: frozenset[str] | None = None,
 ) -> tuple[SidecarReading | None, bool]:
     """Return ``(freshest_reading, foreground_ambiguous)``.
 
@@ -827,7 +920,7 @@ def load_foreground_sidecar(
     is no live foreground to be ambiguous about; the caller NOOPs on staleness
     anyway).
     """
-    scanned = _scan_sidecars(directory)
+    scanned = _scan_sidecars(directory, own_sessions=own_sessions)
     if not scanned:
         return None, False
     scanned.sort(key=lambda pair: pair[1], reverse=True)
@@ -843,12 +936,19 @@ def load_foreground_sidecar(
     return reading, ambiguous
 
 
-def _scan_sidecars(directory: Path) -> list[tuple[dict[str, object], float]]:
+def _scan_sidecars(
+    directory: Path, own_sessions: frozenset[str] | None = None
+) -> list[tuple[dict[str, object], float]]:
     """Parse every ``*.json`` sidecar in ``directory`` into ``(data, ts)`` pairs.
 
     Single source of truth for the sidecar scan shared by ``load_freshest_sidecar``
     and ``load_foreground_sidecar``. Unreadable, malformed, or non-object files are
     skipped (older schema or a foreign writer) rather than aborting the scan.
+
+    ``own_sessions`` (Plan 00166): when provided, sidecars whose ``session_id`` is
+    NOT in the set are skipped, so a foreign terminal's sidecar in the shared dir
+    can never be read as this supervisor's foreground. ``None`` disables the
+    filter (legacy / unit-test callers).
     """
     if not directory.is_dir():
         return []
@@ -859,6 +959,8 @@ def _scan_sidecars(directory: Path) -> list[tuple[dict[str, object], float]]:
         except (OSError, ValueError):
             continue
         if not isinstance(data, dict):
+            continue
+        if not _session_in_scope(data.get("session_id"), own_sessions):
             continue
         results.append((data, _coerce_float(data.get("ts"))))
     return results
@@ -883,16 +985,27 @@ def _build_sidecar_reading(
     )
 
 
-def load_compaction_signal(directory: Path, *, now: float, ttl_seconds: float) -> Path | None:
+def load_compaction_signal(
+    directory: Path,
+    *,
+    now: float,
+    ttl_seconds: float,
+    own_sessions: frozenset[str] | None = None,
+) -> Path | None:
     """Return the path of a fresh compaction-signal file, or None.
 
     The daemon's PreCompact handler drops a ``<session>.compacting`` file (JSON
-    ``{"ts": ...}``) when a compaction starts -- whether the supervisor
-    triggered it or the human typed ``/compact``. A signal is "fresh" while
-    ``now - ts <= ttl_seconds``; older files are treated as a finished
+    ``{"ts": ..., "session_id": ...}``) when a compaction starts -- whether the
+    supervisor triggered it or the human typed ``/compact``. A signal is "fresh"
+    while ``now - ts <= ttl_seconds``; older files are treated as a finished
     compaction and ignored. The path (not a bool) is returned so the caller can
     CONSUME the file (unlink it) once it has acted on it, guaranteeing the
     resume fires exactly once and cannot wedge a later compaction.
+
+    ``own_sessions`` (Plan 00166): when provided, a signal whose ``session_id``
+    is NOT in the set is skipped -- this is what stops terminal A's supervisor
+    resuming off terminal B's compaction in the shared dir. ``None`` disables
+    the filter (legacy / unit-test callers).
     """
     if not directory.is_dir():
         return None
@@ -902,6 +1015,8 @@ def load_compaction_signal(directory: Path, *, now: float, ttl_seconds: float) -
         except (OSError, ValueError):
             continue
         if not isinstance(data, dict):
+            continue
+        if not _session_in_scope(data.get("session_id"), own_sessions):
             continue
         ts = _coerce_float(data.get("ts"))
         if (now - ts) <= ttl_seconds:
@@ -1408,6 +1523,7 @@ def decide_once(
     compaction_signal_ttl_seconds: float = _DEFAULT_COMPACTION_SIGNAL_TTL_SECONDS,
     reap_ttl_seconds: float = _DEFAULT_REAP_TTL_SECONDS,
     foreground_margin_seconds: float = _DEFAULT_FOREGROUND_MARGIN_SECONDS,
+    own_sessions: frozenset[str] | None = None,
 ) -> TickOutcome:
     """Decide what to inject this tick WITHOUT touching the PTY (Plan 00164 P4).
 
@@ -1418,23 +1534,37 @@ def decide_once(
     IDENTICALLY in the policy-worker subprocess and in-process, so a worker
     restart cannot change behaviour. ``log`` is used only for reap diagnostics.
 
+    ``own_sessions`` (Plan 00166): the set of session ids belonging to THIS
+    supervisor's own Claude instance. Sidecars and compaction signals from any
+    other session in the shared dir are ignored, so a compaction in one terminal
+    never drives an injection into another. ``None`` disables the filter (the
+    legacy behaviour, used by unit tests); the production callers resolve the
+    set via :func:`cached_own_session_ids` and pass it. The empty set fails safe
+    (act on nothing).
+
     See ``_poll_once`` for the semantics of the individual :class:`TickFacts`
     (empty-input-box guard, human-compact edge, work-idle band gating, reaping).
     """
     reap_stale_sidecars(sidecar_dir, now=facts.now_wall, ttl_seconds=reap_ttl_seconds, log=log)
     # Plan 00160: resolve the FOREGROUND sidecar and whether it is ambiguous (a
     # recent Agent-View thread switch left two still-fresh sidecars). Ambiguity
-    # gates only the compact path in the machine below.
+    # gates only the compact path in the machine below. Plan 00166: scoped to
+    # this instance's own sessions so a foreign terminal's sidecar is invisible.
     reading, foreground_ambiguous = load_foreground_sidecar(
         sidecar_dir,
         now=facts.now_wall,
         freshness_seconds=freshness_seconds,
         margin_seconds=foreground_margin_seconds,
+        own_sessions=own_sessions,
     )
     # A compaction stops status renders, so the context sidecar goes
     # stale/absent during one -- the compaction signal is an independent input.
+    # Plan 00166: only this instance's own compaction signal counts.
     signal_path = load_compaction_signal(
-        sidecar_dir, now=facts.now_wall, ttl_seconds=compaction_signal_ttl_seconds
+        sidecar_dir,
+        now=facts.now_wall,
+        ttl_seconds=compaction_signal_ttl_seconds,
+        own_sessions=own_sessions,
     )
     if signal_path is not None:
         reading = (
@@ -1541,12 +1671,15 @@ def _poll_once(
     work_idle: bool = True,
     reap_ttl_seconds: float = _DEFAULT_REAP_TTL_SECONDS,
     foreground_margin_seconds: float = _DEFAULT_FOREGROUND_MARGIN_SECONDS,
+    own_sessions: frozenset[str] | None = None,
 ) -> Evaluation:
     """One in-process supervisor tick: decide (``decide_once``) then inject.
 
     Retained as the in-process fast path AND the fallback used when the policy
     worker cannot run (Plan 00164 Phase 4). Behaviour is unchanged: it delegates
     the decision to ``decide_once`` and the injection to ``_apply_decision``.
+    ``own_sessions`` (Plan 00166) is passed straight through to ``decide_once``
+    (``None`` = no own-session filter; the production loop resolves and passes it).
     """
     facts = TickFacts(
         now_wall=now_wall,
@@ -1565,6 +1698,7 @@ def _poll_once(
         compaction_signal_ttl_seconds=compaction_signal_ttl_seconds,
         reap_ttl_seconds=reap_ttl_seconds,
         foreground_margin_seconds=foreground_margin_seconds,
+        own_sessions=own_sessions,
     )
     _apply_decision(outcome, master_writer=master_writer, log=log)
     return Evaluation(decision=Decision(outcome.decision_value), reason=outcome.reason)
@@ -1668,6 +1802,7 @@ def run_worker(
             compaction_signal_ttl_seconds=policy.compaction_signal_ttl_seconds,
             reap_ttl_seconds=policy.reap_ttl_seconds,
             foreground_margin_seconds=policy.foreground_margin_seconds,
+            own_sessions=cached_own_session_ids(),  # Plan 00166: only our own sessions
         )
         out_stream.write(_outcome_to_json(outcome) + "\n")
         out_stream.flush()
@@ -2062,6 +2197,7 @@ def supervise(
                 work_idle=work_idle,
                 reap_ttl_seconds=policy.reap_ttl_seconds,
                 foreground_margin_seconds=policy.foreground_margin_seconds,
+                own_sessions=cached_own_session_ids(),  # Plan 00166: only our own sessions
             )
 
     previous_handler = signal.signal(signal.SIGWINCH, _on_winch)

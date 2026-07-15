@@ -25,6 +25,8 @@ from tests.unit.supervise._load import load_supervisor_module
 if TYPE_CHECKING:
     from pathlib import Path
 
+    import pytest
+
 _mod = load_supervisor_module()
 Decision = _mod.Decision
 CompactPolicy = _mod.CompactPolicy
@@ -624,8 +626,12 @@ class TestInjectedBytesDoNotCountAsHumanInput:
 class TestSuperviseWiresInputBoxGuard:
     """End-to-end: supervise() must gate real injections on the tracked line."""
 
-    def _run(self, tmp_path: Path, stdin_payload: bytes) -> str:
+    def _run(self, tmp_path: Path, stdin_payload: bytes, monkeypatch: pytest.MonkeyPatch) -> str:
         sidecar_dir = tmp_path / "sc"
+        # Plan 00166: the real supervise() loop scopes to its own container's
+        # session ids; pin the resolver to the test sidecar's session ("s") so
+        # this input-box-guard test is deterministic and env-independent.
+        monkeypatch.setattr(_mod, "cached_own_session_ids", lambda *a, **k: frozenset({"s"}))
         _write_sidecar(sidecar_dir, red=True, ts=time.time())
         log = DecisionLog(tmp_path / "decision.log")
         read_fd, write_fd = os.pipe()
@@ -647,11 +653,15 @@ class TestSuperviseWiresInputBoxGuard:
         assert code == 0
         return (tmp_path / "decision.log").read_text(encoding="utf-8")
 
-    def test_partially_typed_message_defers_injection(self, tmp_path: Path) -> None:
-        contents = self._run(tmp_path, b"half typed human message")
+    def test_partially_typed_message_defers_injection(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        contents = self._run(tmp_path, b"half typed human message", monkeypatch)
         assert _DEFERRED in contents
         assert "; injected " not in contents
 
-    def test_submitted_message_leaves_box_empty_and_injection_fires(self, tmp_path: Path) -> None:
-        contents = self._run(tmp_path, b"finished human message\r")
+    def test_submitted_message_leaves_box_empty_and_injection_fires(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        contents = self._run(tmp_path, b"finished human message\r", monkeypatch)
         assert "; injected " in contents
