@@ -30,6 +30,7 @@ import sys
 import tomllib
 from pathlib import Path
 from datetime import datetime
+from typing import Any
 
 # The [project].name this repository declares in its own pyproject.toml. Used as
 # an offline signal for "project_root IS the hooks-daemon repo itself" so the
@@ -268,6 +269,49 @@ def backup_existing_hooks(project_root: Path) -> None:
 
 
 _STOP_EVENT_NAMES = ("Stop", "SubagentStop")
+
+# Single source of truth for install.py: bash_key -> JSON event name for every
+# daemon forwarder hook (StatusLine excluded — it uses the custom status-line
+# script + top-level statusLine settings key). create_all_hooks() generates a
+# forwarder per entry; create_settings_json() registers each one. Adding a
+# newly-wired event (Plan 00170) is a single append here. Mirrors the daemon's
+# own .claude/hooks/ directory and EventID wired catalogue.
+_DAEMON_FORWARDER_HOOKS: dict[str, str] = {
+    "pre-tool-use": "PreToolUse",
+    "post-tool-use": "PostToolUse",
+    "session-start": "SessionStart",
+    "permission-request": "PermissionRequest",
+    "notification": "Notification",
+    "user-prompt-submit": "UserPromptSubmit",
+    "stop": "Stop",
+    "subagent-stop": "SubagentStop",
+    "pre-compact": "PreCompact",
+    "session-end": "SessionEnd",
+    # Plan 00170: zero-handler-passthrough events (wired for coverage; no
+    # built-in handler — client projects may attach their own).
+    "setup": "Setup",
+    "permission-denied": "PermissionDenied",
+    "cwd-changed": "CwdChanged",
+    "worktree-create": "WorktreeCreate",
+    "worktree-remove": "WorktreeRemove",
+    "user-prompt-expansion": "UserPromptExpansion",
+    "post-tool-use-failure": "PostToolUseFailure",
+    "post-tool-batch": "PostToolBatch",
+    "subagent-start": "SubagentStart",
+    "task-created": "TaskCreated",
+    "task-completed": "TaskCompleted",
+    "stop-failure": "StopFailure",
+    "teammate-idle": "TeammateIdle",
+    "instructions-loaded": "InstructionsLoaded",
+    "config-change": "ConfigChange",
+    "file-changed": "FileChanged",
+    "post-compact": "PostCompact",
+    "elicitation": "Elicitation",
+    "elicitation-result": "ElicitationResult",
+}
+
+# Forwarders that carry an explicit per-invocation timeout in settings.json.
+_HOOKS_WITH_TIMEOUT: frozenset[str] = frozenset({"pre-tool-use", "post-tool-use"})
 
 
 def create_forwarder_script(hooks_dir: Path, hook_name: str, event_name: str) -> None:
@@ -555,29 +599,9 @@ def create_all_hooks(hooks_dir: Path) -> list[Path]:
     """
     print("\n📝 Creating hook forwarder scripts...")
 
-    # All hooks now use daemon forwarder pattern
-    daemon_hooks = {
-        "pre-tool-use": "PreToolUse",
-        "post-tool-use": "PostToolUse",
-        "session-start": "SessionStart",
-        "permission-request": "PermissionRequest",
-        "notification": "Notification",
-        "user-prompt-submit": "UserPromptSubmit",
-        "stop": "Stop",
-        "subagent-stop": "SubagentStop",
-        "pre-compact": "PreCompact",
-        "session-end": "SessionEnd",
-        # Plan 00170: zero-handler-passthrough events (wired for coverage; no
-        # built-in handler — client projects may attach their own).
-        "setup": "Setup",
-        "permission-denied": "PermissionDenied",
-        "cwd-changed": "CwdChanged",
-        "worktree-create": "WorktreeCreate",
-        "worktree-remove": "WorktreeRemove",
-    }
-
+    # All hooks now use daemon forwarder pattern (SSoT: _DAEMON_FORWARDER_HOOKS)
     hook_files = []
-    for hook_name, event_name in daemon_hooks.items():
+    for hook_name, event_name in _DAEMON_FORWARDER_HOOKS.items():
         hook_file = create_forwarder_script(hooks_dir, hook_name, event_name)
         hook_files.append(hook_file)
         print(f"   ✅ {hook_name}")
@@ -615,59 +639,22 @@ def create_settings_json(project_root: Path, force: bool = False) -> None:
     def _hook_cmd(bash_key: str) -> str:
         return f'bash "$CLAUDE_PROJECT_DIR"/.claude/hooks/{bash_key}'
 
+    # Derive every hook registration from the single forwarder SSoT so a
+    # newly-wired event needs no edit here (Plan 00170). PreToolUse/PostToolUse
+    # carry an explicit timeout; all others use the default.
+    hooks_section: dict[str, Any] = {}
+    for bash_key, json_key in _DAEMON_FORWARDER_HOOKS.items():
+        command: dict[str, Any] = {"type": "command", "command": _hook_cmd(bash_key)}
+        if bash_key in _HOOKS_WITH_TIMEOUT:
+            command["timeout"] = 60
+        hooks_section[json_key] = [{"hooks": [command]}]
+
     settings = {
         "statusLine": {
             "type": "command",
             "command": '"$CLAUDE_PROJECT_DIR"/.claude/hooks/status-line',
         },
-        "hooks": {
-            "PreToolUse": [
-                {
-                    "hooks": [
-                        {"type": "command", "command": _hook_cmd("pre-tool-use"), "timeout": 60}
-                    ]
-                }
-            ],
-            "PostToolUse": [
-                {
-                    "hooks": [
-                        {"type": "command", "command": _hook_cmd("post-tool-use"), "timeout": 60}
-                    ]
-                }
-            ],
-            "SessionStart": [
-                {"hooks": [{"type": "command", "command": _hook_cmd("session-start")}]}
-            ],
-            "Notification": [
-                {"hooks": [{"type": "command", "command": _hook_cmd("notification")}]}
-            ],
-            "PermissionRequest": [
-                {"hooks": [{"type": "command", "command": _hook_cmd("permission-request")}]}
-            ],
-            "PreCompact": [{"hooks": [{"type": "command", "command": _hook_cmd("pre-compact")}]}],
-            "SessionEnd": [{"hooks": [{"type": "command", "command": _hook_cmd("session-end")}]}],
-            "Stop": [{"hooks": [{"type": "command", "command": _hook_cmd("stop")}]}],
-            "SubagentStop": [
-                {"hooks": [{"type": "command", "command": _hook_cmd("subagent-stop")}]}
-            ],
-            "UserPromptSubmit": [
-                {"hooks": [{"type": "command", "command": _hook_cmd("user-prompt-submit")}]}
-            ],
-            # Plan 00170: zero-handler-passthrough events (wired for coverage).
-            "Setup": [{"hooks": [{"type": "command", "command": _hook_cmd("setup")}]}],
-            "PermissionDenied": [
-                {"hooks": [{"type": "command", "command": _hook_cmd("permission-denied")}]}
-            ],
-            "CwdChanged": [
-                {"hooks": [{"type": "command", "command": _hook_cmd("cwd-changed")}]}
-            ],
-            "WorktreeCreate": [
-                {"hooks": [{"type": "command", "command": _hook_cmd("worktree-create")}]}
-            ],
-            "WorktreeRemove": [
-                {"hooks": [{"type": "command", "command": _hook_cmd("worktree-remove")}]}
-            ],
-        },
+        "hooks": hooks_section,
     }
 
     settings_file.write_text(json.dumps(settings, indent=2) + "\n")
@@ -920,6 +907,20 @@ def create_project_handler_structure(project_root: Path) -> None:
         "cwd_changed",
         "worktree_create",
         "worktree_remove",
+        "user_prompt_expansion",
+        "post_tool_use_failure",
+        "post_tool_batch",
+        "subagent_start",
+        "task_created",
+        "task_completed",
+        "stop_failure",
+        "teammate_idle",
+        "instructions_loaded",
+        "config_change",
+        "file_changed",
+        "post_compact",
+        "elicitation",
+        "elicitation_result",
     ]
 
     # Create main README

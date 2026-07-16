@@ -45,6 +45,20 @@ EVENT_TYPE_MAPPING: dict[str, EventType] = {
     "cwd_changed": EventType.CWD_CHANGED,
     "worktree_create": EventType.WORKTREE_CREATE,
     "worktree_remove": EventType.WORKTREE_REMOVE,
+    "user_prompt_expansion": EventType.USER_PROMPT_EXPANSION,
+    "post_tool_use_failure": EventType.POST_TOOL_USE_FAILURE,
+    "post_tool_batch": EventType.POST_TOOL_BATCH,
+    "subagent_start": EventType.SUBAGENT_START,
+    "task_created": EventType.TASK_CREATED,
+    "task_completed": EventType.TASK_COMPLETED,
+    "stop_failure": EventType.STOP_FAILURE,
+    "teammate_idle": EventType.TEAMMATE_IDLE,
+    "instructions_loaded": EventType.INSTRUCTIONS_LOADED,
+    "config_change": EventType.CONFIG_CHANGE,
+    "file_changed": EventType.FILE_CHANGED,
+    "post_compact": EventType.POST_COMPACT,
+    "elicitation": EventType.ELICITATION,
+    "elicitation_result": EventType.ELICITATION_RESULT,
 }
 
 

@@ -186,7 +186,6 @@ class EventID:
         json_key="UserPromptExpansion",
         can_block=True,
         category="prompt",
-        wired=False,
     )
 
     PERMISSION_DENIED = EventIDMeta(
@@ -205,7 +204,6 @@ class EventID:
         json_key="PostToolUseFailure",
         can_block=True,
         category="tool",
-        wired=False,
     )
 
     POST_TOOL_BATCH = EventIDMeta(
@@ -215,7 +213,6 @@ class EventID:
         json_key="PostToolBatch",
         can_block=True,
         category="tool",
-        wired=False,
     )
 
     MESSAGE_DISPLAY = EventIDMeta(
@@ -235,7 +232,6 @@ class EventID:
         json_key="SubagentStart",
         can_block=False,
         category="subagent",
-        wired=False,
     )
 
     TASK_CREATED = EventIDMeta(
@@ -245,7 +241,6 @@ class EventID:
         json_key="TaskCreated",
         can_block=True,
         category="task",
-        wired=False,
     )
 
     TASK_COMPLETED = EventIDMeta(
@@ -255,7 +250,6 @@ class EventID:
         json_key="TaskCompleted",
         can_block=True,
         category="task",
-        wired=False,
     )
 
     STOP_FAILURE = EventIDMeta(
@@ -265,7 +259,6 @@ class EventID:
         json_key="StopFailure",
         can_block=False,
         category="stop",
-        wired=False,
     )
 
     TEAMMATE_IDLE = EventIDMeta(
@@ -275,7 +268,6 @@ class EventID:
         json_key="TeammateIdle",
         can_block=True,
         category="team",
-        wired=False,
     )
 
     INSTRUCTIONS_LOADED = EventIDMeta(
@@ -285,7 +277,6 @@ class EventID:
         json_key="InstructionsLoaded",
         can_block=False,
         category="instructions",
-        wired=False,
     )
 
     CONFIG_CHANGE = EventIDMeta(
@@ -295,7 +286,6 @@ class EventID:
         json_key="ConfigChange",
         can_block=True,
         category="config",
-        wired=False,
     )
 
     CWD_CHANGED = EventIDMeta(
@@ -314,7 +304,6 @@ class EventID:
         json_key="FileChanged",
         can_block=False,
         category="file",
-        wired=False,
     )
 
     WORKTREE_CREATE = EventIDMeta(
@@ -342,7 +331,6 @@ class EventID:
         json_key="PostCompact",
         can_block=False,
         category="compaction",
-        wired=False,
     )
 
     ELICITATION = EventIDMeta(
@@ -352,7 +340,6 @@ class EventID:
         json_key="Elicitation",
         can_block=True,
         category="mcp",
-        wired=False,
     )
 
     ELICITATION_RESULT = EventIDMeta(
@@ -362,7 +349,6 @@ class EventID:
         json_key="ElicitationResult",
         can_block=True,
         category="mcp",
-        wired=False,
     )
 
 

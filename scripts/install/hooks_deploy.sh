@@ -43,6 +43,20 @@ _DAEMON_HOOK_BASENAMES=(
     cwd-changed
     worktree-create
     worktree-remove
+    user-prompt-expansion
+    post-tool-use-failure
+    post-tool-batch
+    subagent-start
+    task-created
+    task-completed
+    stop-failure
+    teammate-idle
+    instructions-loaded
+    config-change
+    file-changed
+    post-compact
+    elicitation
+    elicitation-result
 )
 
 # Relative path (within the daemon dir — the git clone/checkout, NOT the

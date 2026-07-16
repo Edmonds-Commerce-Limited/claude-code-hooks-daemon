@@ -243,10 +243,11 @@ new registrations.
   completeness gate's schema-presence assertions.
 - [ ] 🔄 **Task 3.2**: Wire the remaining events with fail-open passthrough
   (forwarders, installer, settings, schemas). Completeness gate burns down
-  `EXPECTED_UNWIRED`. **Batch 1 (never-fires, 5) done** — Setup,
-  PermissionDenied, CwdChanged, WorktreeCreate, WorktreeRemove wired; live-probed
-  `{}`; `EXPECTED_UNWIRED` 20→15. Remaining: Phase 3c mid batch (14) + 3d
-  MessageDisplay (1).
+  `EXPECTED_UNWIRED`. **Batch 1 (never-fires, 5) + Batch 2 (mid, 14) done** —
+  19 of 20 wired end-to-end and live-probed `{}`; `EXPECTED_UNWIRED` 20→1.
+  install.py settings/forwarders now derive from one SSoT list
+  (`_DAEMON_FORWARDER_HOOKS`). Remaining: **MessageDisplay** (Phase 3d,
+  high-frequency).
 - [ ] ⬜ **Task 3.3**: Because passthrough is uniform (`allow`→`{}`) and we ship
   no built-in handler for any newly-wired event, the "blocking batch" collapses
   into Task 3.2 — `can_block` is metadata only until a client (or a Phase-5

@@ -410,6 +410,20 @@ _exec_bit_selfheal() {
         cwd-changed
         worktree-create
         worktree-remove
+        user-prompt-expansion
+        post-tool-use-failure
+        post-tool-batch
+        subagent-start
+        task-created
+        task-completed
+        stop-failure
+        teammate-idle
+        instructions-loaded
+        config-change
+        file-changed
+        post-compact
+        elicitation
+        elicitation-result
     )
     local h
     for h in "${hooks[@]}"; do

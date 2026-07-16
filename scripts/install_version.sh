@@ -59,6 +59,13 @@ source "$INSTALL_LIB_DIR/daemon_control.sh"
 # generate_settings_json() - Generate settings.json from scratch
 #
 # Fallback for when the daemon repo doesn't include a settings.json file.
+# Every current daemon version ships .claude/settings.json, so real installs
+# take the copy path above (SETTINGS_JSON_SOURCE) and this fallback is only
+# reached for pre-settings.json daemon versions. It is therefore best-effort:
+# it registers the long-standing core hooks and is NOT kept in lockstep with the
+# full Plan 00170 wired set (the authoritative source is the daemon's own
+# .claude/settings.json, which the copy path deploys). See _DAEMON_FORWARDER_HOOKS
+# in install.py for the SSoT.
 #
 # Args:
 #   $1 - project_root: Path to project root

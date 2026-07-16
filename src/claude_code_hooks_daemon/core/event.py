@@ -34,6 +34,20 @@ class EventType(StrEnum):
     CWD_CHANGED = "CwdChanged"
     WORKTREE_CREATE = "WorktreeCreate"
     WORKTREE_REMOVE = "WorktreeRemove"
+    USER_PROMPT_EXPANSION = "UserPromptExpansion"
+    POST_TOOL_USE_FAILURE = "PostToolUseFailure"
+    POST_TOOL_BATCH = "PostToolBatch"
+    SUBAGENT_START = "SubagentStart"
+    TASK_CREATED = "TaskCreated"
+    TASK_COMPLETED = "TaskCompleted"
+    STOP_FAILURE = "StopFailure"
+    TEAMMATE_IDLE = "TeammateIdle"
+    INSTRUCTIONS_LOADED = "InstructionsLoaded"
+    CONFIG_CHANGE = "ConfigChange"
+    FILE_CHANGED = "FileChanged"
+    POST_COMPACT = "PostCompact"
+    ELICITATION = "Elicitation"
+    ELICITATION_RESULT = "ElicitationResult"
 
     @classmethod
     def from_string(cls, value: str) -> "EventType":
