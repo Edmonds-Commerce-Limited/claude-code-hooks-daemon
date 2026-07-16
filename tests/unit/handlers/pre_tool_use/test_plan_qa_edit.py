@@ -6,6 +6,7 @@ checked against the edit-stage plan QA catalogue on the WOULD-BE content
 violations in ``edit_mode: block``; advises otherwise.
 """
 
+from datetime import date
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -138,7 +139,13 @@ class TestMatches:
 class TestHandleJournal:
     """Plan 00163: journal day-file edit linting through the handler."""
 
-    def _journal_file(self, tmp_path: Path, name: str = "00163-Journal-26-07-14.md") -> Path:
+    def _journal_file(self, tmp_path: Path, name: str | None = None) -> Path:
+        # Default to TODAY's date so the journal-dayfile-naming check (which
+        # only accepts today/yesterday) never trips on a stale hardcoded date —
+        # a hardcoded date here is a time-bomb that fails the day after it ages
+        # out of the tolerance window.
+        if name is None:
+            name = f"00163-Journal-{date.today():%y-%m-%d}.md"
         journal = tmp_path / _PLAN_DIR_REL / "00163-x" / "JOURNAL"
         journal.mkdir(parents=True)
         return journal / name
