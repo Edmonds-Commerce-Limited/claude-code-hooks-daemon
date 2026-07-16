@@ -481,8 +481,16 @@ handlers:
       priority: 28
 
     daemon_stats:   # Shows daemon uptime, memory, log level
+      # Dev-repo exception (Plan 00167): the health line is useful here.
+      # Client projects should generally leave this off — the upgrade
+      # prompt no longer depends on it (see upgrade_notifier below).
       enabled: true
       priority: 30
+
+    upgrade_notifier:  # Shows "📦 vX → vY" when a newer daemon version is available
+      # On by default; renders NOTHING unless an upgrade is genuinely available.
+      enabled: true
+      priority: 32
 
     account_display: # Shows account information
       enabled: true

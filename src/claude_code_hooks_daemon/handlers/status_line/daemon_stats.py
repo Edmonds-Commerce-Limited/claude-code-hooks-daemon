@@ -4,7 +4,6 @@ Shows daemon health metrics: uptime, memory usage, log level, and error count.
 Fails silently if stats cannot be retrieved to avoid breaking the status line.
 """
 
-import json
 import logging
 from types import ModuleType
 from typing import Any
@@ -14,7 +13,6 @@ from claude_code_hooks_daemon.core import (
     Decision,
     Handler,
     HookResult,
-    ProjectContext,
     get_data_layer,
 )
 from claude_code_hooks_daemon.daemon.controller import get_controller
@@ -108,30 +106,6 @@ class DaemonStatsHandler(Handler):
                     parts.append(f": 🛡️ {block_count} blocks")
             except Exception as e:
                 logger.debug("Failed to get block count: %s", e)
-
-            # Upgrade indicator — only shown when an upgrade is available
-            try:
-                cache_file = ProjectContext.daemon_untracked_dir() / "version_check_cache.json"
-                if cache_file.exists():
-                    cache_data = json.loads(cache_file.read_text())
-                    if cache_data.get("is_outdated"):
-                        from claude_code_hooks_daemon.version import __version__
-
-                        cached_version = cache_data.get("current_version", "")
-                        latest = cache_data.get("latest_version", "")
-                        # Defense-in-depth: ignore stale cache from before upgrade
-                        if cached_version and cached_version != __version__:
-                            logger.debug(
-                                "Ignoring stale version cache: cached=%s actual=%s",
-                                cached_version,
-                                __version__,
-                            )
-                        elif latest and cached_version:
-                            parts.append(f": 📦 v{cached_version} → v{latest}")
-                        elif latest:
-                            parts.append(f": 📦 upgrade → v{latest}")
-            except Exception as e:
-                logger.debug("Failed to read version cache: %s", e)
 
         except Exception as e:
             logger.debug(f"Failed to get daemon stats: {e}")

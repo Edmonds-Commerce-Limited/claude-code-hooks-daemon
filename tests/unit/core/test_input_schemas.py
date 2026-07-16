@@ -490,6 +490,29 @@ class TestStatusLineValidation:
         errors = validate_input("Status", hook_input)
         assert errors == []
 
+    def test_status_line_with_terminal_size_fields(self):
+        """Status Line schema accepts terminal_columns/terminal_lines (Plan 00167)."""
+        hook_input = {
+            "hook_event_name": "Status",
+            "terminal_columns": 120,
+            "terminal_lines": 40,
+        }
+
+        errors = validate_input("Status", hook_input)
+        assert errors == [], f"Schema should accept terminal size fields. Errors: {errors}"
+        assert is_valid_input("Status", hook_input)
+
+    def test_status_line_without_terminal_size_fields(self):
+        """Status Line schema still validates when terminal size fields are absent
+        (older Claude Code clients that predate COLUMNS/LINES forwarding)."""
+        hook_input = {
+            "hook_event_name": "Status",
+        }
+
+        errors = validate_input("Status", hook_input)
+        assert errors == []
+        assert is_valid_input("Status", hook_input)
+
 
 class TestUnknownEventType:
     """Test behavior with unknown event types."""

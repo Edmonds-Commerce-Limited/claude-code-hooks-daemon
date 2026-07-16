@@ -442,6 +442,11 @@ class HandlerID:
         config_key="usage_tracking",
         display_name="status-usage-tracking",
     )
+    UPGRADE_NOTIFIER = HandlerIDMeta(
+        class_name="UpgradeNotifierHandler",
+        config_key="upgrade_notifier",
+        display_name="status-upgrade-notifier",
+    )
 
     # Working directory status (status line)
     WORKING_DIRECTORY = HandlerIDMeta(

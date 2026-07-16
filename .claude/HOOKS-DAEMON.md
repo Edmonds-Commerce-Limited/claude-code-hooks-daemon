@@ -125,7 +125,7 @@
 | 10 | subagent_completion_logger | NON-TERMINAL | Log subagent completion events to a JSONL file |
 | 20 | remind_prompt_library | ADVISORY | Remind to capture successful prompts to the library |
 
-### Status (13 handlers)
+### Status (14 handlers)
 
 | Priority | Handler | Behavior | Description |
 |----------|---------|----------|-------------|
@@ -140,6 +140,7 @@
 | 25 | working_directory | NON-TERMINAL | Display working directory when it differs from project root |
 | 28 | startup_cleanup | NON-TERMINAL | Show 🧹 briefly after daemon startup to indicate stale-file cleanup ran |
 | 30 | daemon_stats | NON-TERMINAL | Show daemon health: uptime, memory, last error, log level |
+| 32 | upgrade_notifier | NON-TERMINAL | Show a daemon-upgrade-available indicator on the status line |
 | 40 | account_display | NON-TERMINAL | Display Claude account username in status line |
 | 60 | usage_tracking | NON-TERMINAL | Display daily and weekly token usage percentages |
 

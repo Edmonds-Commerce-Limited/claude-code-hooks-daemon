@@ -1,0 +1,51 @@
+version: "3.43.0"
+date: "2026-07-16"
+breaking: false
+config_changes:
+  added:
+    - key: handlers.status_line.upgrade_notifier
+      recommended: true
+      recommended_value: true
+      description: >-
+        NEW on-by-default status-line handler carrying the daemon-upgrade
+        prompt. It shows a "📦 vX → vY" segment whenever a newer daemon version
+        is available, reading the same version_check_cache.json the SessionStart
+        version_check handler writes. It renders NOTHING unless an upgrade is
+        genuinely available for the version currently running (and it ignores a
+        stale cache written before an in-place upgrade), so it is safe on by
+        default. Extracted (Plan 00167) from daemon_stats.py, where the upgrade
+        arrow used to live -- previously the ONLY way to see the upgrade prompt
+        was to enable the full developer health line (uptime/memory/log-level/
+        errors), which defaults OFF. Splitting them means every client keeps the
+        valuable upgrade prompt while the noisy diagnostics stay off. Priority 32
+        (right after daemon_stats' 30) so the arrow renders in the same trailing
+        area of the status line.
+      migration_note: >-
+        No action needed to adopt -- upgrade_notifier is on by default and only
+        appears when an upgrade is actually available. If you had explicitly
+        enabled daemon_stats ONLY to see the "📦" upgrade arrow, you can now turn
+        daemon_stats back off (see the daemon_stats change below): the upgrade
+        prompt no longer depends on it. To opt out of the upgrade indicator
+        entirely, set handlers.status_line.upgrade_notifier.enabled: false.
+  renamed: []
+  removed: []
+  changed:
+    - key: handlers.status_line.daemon_stats
+      recommended: true
+      recommended_value: false
+      description: >-
+        daemon_stats no longer renders the "📦 vX → vY" upgrade arrow -- that
+        indicator moved to its own on-by-default upgrade_notifier handler (see
+        above). daemon_stats now shows ONLY the developer health line (uptime,
+        memory, log level, error/block counts). Its default is unchanged
+        (get_default_enabled() -> False; it was already flipped off-by-default in
+        v3.40.0). This entry exists to nudge the specific clients who enabled
+        daemon_stats purely for the upgrade arrow: that reason is gone, so they
+        should turn it back off. Existing configs are not rewritten on upgrade.
+      migration_note: >-
+        If you set handlers.status_line.daemon_stats.enabled: true only to see
+        the upgrade "📦" arrow, remove that override (or set it to false) now --
+        the upgrade prompt is carried by upgrade_notifier, which is on by default.
+        Keep daemon_stats enabled only if you actually want the developer health
+        line (uptime/memory/log-level/errors). This repo (the daemon's own dev
+        repo) deliberately keeps daemon_stats enabled as a dev-repo exception.

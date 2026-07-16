@@ -258,6 +258,11 @@ STATUS_LINE_INPUT_SCHEMA: Final[dict[str, Any]] = {
             },
         },
         "cost": {"type": "object"},
+        # Forwarded by the init.sh transport from the wrapper's own COLUMNS/LINES
+        # environment (the daemon process does not inherit them) - Plan 00167.
+        # Optional/nullable: absent on Claude Code clients predating COLUMNS/LINES.
+        "terminal_columns": {"type": ["integer", "null"]},
+        "terminal_lines": {"type": ["integer", "null"]},
     },
     "additionalProperties": True,
 }

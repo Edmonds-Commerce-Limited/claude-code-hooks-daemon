@@ -413,6 +413,11 @@ handlers:
       enabled: true
       priority: 30
 
+    upgrade_notifier:  # Shows "📦 vX → vY" when a newer daemon version is available
+      # On by default; renders NOTHING unless an upgrade is genuinely available.
+      enabled: true
+      priority: 32
+
     account_display: # Shows account information
       enabled: true
       priority: 40

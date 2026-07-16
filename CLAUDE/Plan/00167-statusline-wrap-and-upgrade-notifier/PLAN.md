@@ -1,6 +1,6 @@
 # Plan 00167: statusline wrap and upgrade notifier
 
-**Status**: Not Started
+**Status**: In Progress
 **Created**: 2026-07-16
 **Owner**: joseph
 **Priority**: Medium
@@ -102,16 +102,19 @@ this plan forwards explicitly.
 
 ### Phase 1: Forward terminal size into the Status payload
 
-- [ ] ⬜ **Task 1.1**: Inject `COLUMNS`/`LINES` from `os.environ` into the Status
+- [x] ✅ **Task 1.1**: Inject `COLUMNS`/`LINES` from `os.environ` into the Status
   `hook_input` inside `init.sh` `send_request_stdin` (Status branch), as
   integer fields (e.g. `terminal_columns`, `terminal_lines`), omitting them
-  when unset or non-numeric so behaviour degrades cleanly on older clients.
-- [ ] ⬜ **Task 1.2**: Extend `STATUS_LINE_INPUT_SCHEMA` in `input_schemas.py`
+  when unset or non-numeric so behaviour degrades cleanly on older clients. DONE
+  — `init.sh` `send_request_stdin` Status branch forwards both (skips non-digit).
+- [x] ✅ **Task 1.2**: Extend `STATUS_LINE_INPUT_SCHEMA` in `input_schemas.py`
   to declare the new integer fields (nullable/optional) and add coverage in
-  the input-schema tests.
-- [ ] ⬜ **Task 1.3**: Verify end-to-end that the daemon receives the width by
+  the input-schema tests. DONE — `terminal_columns`/`terminal_lines` as
+  `["integer","null"]`; 2 new tests in `test_input_schemas.py`.
+- [x] ✅ **Task 1.3**: Verify end-to-end that the daemon receives the width by
   probing the live socket with a crafted Status payload and confirming a
-  handler can read it.
+  handler can read it. DONE — the Phase 2 live probe (`COLUMNS=36` → 5 wrapped
+  rows) exercises the full transport → schema → `HookInput` → `to_json` path.
 
 ### Phase 2: Wrap the assembled status line
 
@@ -138,28 +141,44 @@ this plan forwards explicitly.
 
 ### Phase 3: Extract the upgrade notifier
 
-- [ ] ⬜ **Task 3.1**: Write failing tests for a new `UpgradeNotifierHandler`
+- [x] ✅ **Task 3.1**: Write failing tests for a new `UpgradeNotifierHandler`
   (status_line) that reads `version_check_cache.json` and emits
   `📦 vX → vY` only when an upgrade is available and the cache is not stale,
-  reproducing the existing `daemon_stats` logic exactly.
-- [ ] ⬜ **Task 3.2**: Implement `upgrade_notifier.py` with `get_default_enabled`
-  returning `True`; add its `HandlerID`/`Priority` constants and register it.
-- [ ] ⬜ **Task 3.3**: Remove the upgrade-indicator block from `daemon_stats.py`
+  reproducing the existing `daemon_stats` logic exactly. DONE —
+  `test_upgrade_notifier.py` (12 tests, handler at 100% coverage).
+- [x] ✅ **Task 3.2**: Implement `upgrade_notifier.py` with `get_default_enabled`
+  returning `True`; add its `HandlerID`/`Priority` constants and register it. DONE
+  — `HandlerID.UPGRADE_NOTIFIER`, `Priority.UPGRADE_NOTIFIER = 32`, `__init__`
+  export, yaml entry; loads at priority 32 (verified in `.claude/HOOKS-DAEMON.md`).
+- [x] ✅ **Task 3.3**: Remove the upgrade-indicator block from `daemon_stats.py`
   (lines 112-134) so health stats and the upgrade prompt no longer overlap;
-  update `daemon_stats` tests accordingly.
+  update `daemon_stats` tests accordingly. DONE — block + now-unused
+  `json`/`ProjectContext` imports removed; the 4 upgrade-arrow tests moved to
+  `test_upgrade_notifier.py`.
 
 ### Phase 4: Client rollout messaging
 
-- [ ] ⬜ **Task 4.1**: Add a `CLAUDE/UPGRADES/UNRELEASED/config-changes/v{X.Y.Z}.yaml`
+- [x] ✅ **Task 4.1**: Add a `CLAUDE/UPGRADES/UNRELEASED/config-changes/v{X.Y.Z}.yaml`
   entry recording `upgrade_notifier` (added, on by default) AND a
   `recommended: true` note that clients disable `daemon_stats` if they enabled
-  it, so the upgrade advisory actively promotes the change.
-- [ ] ⬜ **Task 4.2**: Add post-upgrade guidance (and a `truth-changes/` entry if
+  it, so the upgrade advisory actively promotes the change. DONE —
+  `config-changes/v3.43.0.yaml`: `added` upgrade_notifier (`recommended: true`,
+  `recommended_value: true`) + `changed` daemon_stats (`recommended: true`,
+  `recommended_value: false`) so the default-flip advisory fires for any client
+  holding `daemon_stats: true`.
+- [x] ✅ **Task 4.2**: Add post-upgrade guidance (and a `truth-changes/` entry if
   a documented truth changed) telling upgrading projects the upgrade prompt is
-  now its own handler and `daemon_stats` can be turned off.
-- [ ] ⬜ **Task 4.3**: Keep `daemon_stats` ENABLED in THIS repo's
+  now its own handler and `daemon_stats` can be turned off. DONE — the
+  `recommended` config-changes entries ARE the post-upgrade guidance surface
+  (`check-config-migrations` promotes them on upgrade); each carries a
+  `migration_note`. No `truth-changes/` entry: no client-facing doc asserted the
+  `📦` arrow lived in `daemon_stats` (the status_line table describes daemon_stats
+  as uptime/memory/log/errors only), so no documented truth was invalidated.
+- [x] ✅ **Task 4.3**: Keep `daemon_stats` ENABLED in THIS repo's
   `.claude/hooks-daemon.yaml` (dev-repo exception) and confirm `upgrade_notifier`
-  is enabled; regenerate `.claude/HOOKS-DAEMON.md`.
+  is enabled; regenerate `.claude/HOOKS-DAEMON.md`. DONE — `daemon_stats`
+  stays `enabled: true` (annotated as the dev-repo exception), `upgrade_notifier`
+  `enabled: true`; `HOOKS-DAEMON.md` regenerated (upgrade_notifier at priority 32).
 
 ### Phase 5: Docs and verification
 

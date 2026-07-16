@@ -2,11 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 import pytest
 
@@ -362,139 +358,6 @@ class TestDaemonStatsHandler:
         block_parts = [p for p in result.context if "blocks" in p]
         assert len(block_parts) == 0
 
-    def test_handle_shows_upgrade_indicator_when_outdated(
-        self, handler: DaemonStatsHandler, tmp_path: Path
-    ) -> None:
-        """Shows upgrade indicator with colon prefix when version cache reports outdated."""
-        import json
-
-        from claude_code_hooks_daemon.version import __version__
-
-        cache_file = tmp_path / "version_check_cache.json"
-        cache_file.write_text(
-            json.dumps(
-                {
-                    "cached_at": 9999999999.0,
-                    "current_version": __version__,
-                    "latest_version": "99.0.0",
-                    "is_outdated": True,
-                }
-            )
-        )
-
-        mock_stats = MagicMock()
-        mock_stats.uptime_seconds = 60.0
-        mock_stats.errors = 0
-        mock_controller = MagicMock()
-        mock_controller.get_stats.return_value = mock_stats
-
-        with (
-            patch(
-                "claude_code_hooks_daemon.handlers.status_line.daemon_stats.get_controller",
-                return_value=mock_controller,
-            ),
-            patch("claude_code_hooks_daemon.handlers.status_line.daemon_stats.psutil", None),
-            patch(
-                "claude_code_hooks_daemon.handlers.status_line.daemon_stats.ProjectContext.daemon_untracked_dir",
-                return_value=tmp_path,
-            ),
-            patch("logging.getLogger") as mock_logger,
-        ):
-            mock_logger.return_value.level = 20
-            result = handler.handle({})
-
-        upgrade_parts = [p for p in result.context if "📦" in p]
-        assert len(upgrade_parts) == 1
-        assert __version__ in upgrade_parts[0]  # Current version shown
-        assert "99.0.0" in upgrade_parts[0]  # Upgrade version shown
-        assert "→" in upgrade_parts[0]  # Arrow indicating upgrade direction
-        assert upgrade_parts[0].startswith(":")
-
-    def test_handle_ignores_stale_version_cache_after_upgrade(
-        self, handler: DaemonStatsHandler, tmp_path: Path
-    ) -> None:
-        """Regression: stale cache from old version should be ignored after upgrade."""
-        import json
-
-        cache_file = tmp_path / "version_check_cache.json"
-        cache_file.write_text(
-            json.dumps(
-                {
-                    "cached_at": 9999999999.0,
-                    "current_version": "1.0.0",
-                    "latest_version": "2.0.0",
-                    "is_outdated": True,
-                }
-            )
-        )
-
-        mock_stats = MagicMock()
-        mock_stats.uptime_seconds = 60.0
-        mock_stats.errors = 0
-        mock_controller = MagicMock()
-        mock_controller.get_stats.return_value = mock_stats
-
-        with (
-            patch(
-                "claude_code_hooks_daemon.handlers.status_line.daemon_stats.get_controller",
-                return_value=mock_controller,
-            ),
-            patch("claude_code_hooks_daemon.handlers.status_line.daemon_stats.psutil", None),
-            patch(
-                "claude_code_hooks_daemon.handlers.status_line.daemon_stats.ProjectContext.daemon_untracked_dir",
-                return_value=tmp_path,
-            ),
-            patch("logging.getLogger") as mock_logger,
-        ):
-            mock_logger.return_value.level = 20
-            result = handler.handle({})
-
-        # Stale cache (current_version != __version__) should be ignored
-        upgrade_parts = [p for p in result.context if "📦" in p]
-        assert len(upgrade_parts) == 0
-
-    def test_handle_hides_upgrade_indicator_when_up_to_date(
-        self, handler: DaemonStatsHandler, tmp_path: Path
-    ) -> None:
-        """Hides upgrade indicator when version cache reports up to date."""
-        import json
-
-        cache_file = tmp_path / "version_check_cache.json"
-        cache_file.write_text(
-            json.dumps(
-                {
-                    "cached_at": 9999999999.0,
-                    "current_version": "2.15.0",
-                    "latest_version": "2.15.0",
-                    "is_outdated": False,
-                }
-            )
-        )
-
-        mock_stats = MagicMock()
-        mock_stats.uptime_seconds = 60.0
-        mock_stats.errors = 0
-        mock_controller = MagicMock()
-        mock_controller.get_stats.return_value = mock_stats
-
-        with (
-            patch(
-                "claude_code_hooks_daemon.handlers.status_line.daemon_stats.get_controller",
-                return_value=mock_controller,
-            ),
-            patch("claude_code_hooks_daemon.handlers.status_line.daemon_stats.psutil", None),
-            patch(
-                "claude_code_hooks_daemon.handlers.status_line.daemon_stats.ProjectContext.daemon_untracked_dir",
-                return_value=tmp_path,
-            ),
-            patch("logging.getLogger") as mock_logger,
-        ):
-            mock_logger.return_value.level = 20
-            result = handler.handle({})
-
-        upgrade_parts = [p for p in result.context if "📦" in p]
-        assert len(upgrade_parts) == 0
-
     def test_handle_psutil_oserror_silent_fail(self, handler: DaemonStatsHandler) -> None:
         """Test continues when psutil.Process().memory_info() raises OSError."""
         mock_stats = MagicMock()
@@ -528,31 +391,3 @@ class TestDaemonStatsHandler:
         assert result.decision == "allow"
         assert len(result.context) >= 1
         assert "MB" not in result.context[0]
-
-    def test_handle_hides_upgrade_indicator_when_no_cache(
-        self, handler: DaemonStatsHandler, tmp_path: Path
-    ) -> None:
-        """Hides upgrade indicator when no version cache file exists."""
-        mock_stats = MagicMock()
-        mock_stats.uptime_seconds = 60.0
-        mock_stats.errors = 0
-        mock_controller = MagicMock()
-        mock_controller.get_stats.return_value = mock_stats
-
-        with (
-            patch(
-                "claude_code_hooks_daemon.handlers.status_line.daemon_stats.get_controller",
-                return_value=mock_controller,
-            ),
-            patch("claude_code_hooks_daemon.handlers.status_line.daemon_stats.psutil", None),
-            patch(
-                "claude_code_hooks_daemon.handlers.status_line.daemon_stats.ProjectContext.daemon_untracked_dir",
-                return_value=tmp_path,
-            ),
-            patch("logging.getLogger") as mock_logger,
-        ):
-            mock_logger.return_value.level = 20
-            result = handler.handle({})
-
-        upgrade_parts = [p for p in result.context if "📦" in p]
-        assert len(upgrade_parts) == 0

@@ -89,6 +89,10 @@ class Priority:
     VALIDATE_PLAN_NUMBER = 30
     PLAN_NUMBER_HELPER = 30
     DAEMON_STATS = 30
+    # Extracted from DAEMON_STATS (Plan 00167) so the upgrade prompt reaches
+    # every client on-by-default, independent of the off-by-default dev health
+    # line. Sits right after it so the arrow renders in the same trailing area.
+    UPGRADE_NOTIFIER = 32
 
     MARKDOWN_ORGANIZATION = 35
 

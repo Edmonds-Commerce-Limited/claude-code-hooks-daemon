@@ -845,6 +845,7 @@ send_request_stdin() {
     local response_mode="${2:-}"
     python3 -c "
 import json
+import os
 import socket
 import sys
 
@@ -959,6 +960,14 @@ except Exception as exc:
 # jq '. + {hook_event_name: \"Status\"}').
 if event_name == 'Status' and isinstance(hook_input, dict):
     hook_input['hook_event_name'] = 'Status'
+    # Forward the terminal size from THIS wrapper process's environment (Plan
+    # 00167) - the daemon is a separate long-running process and never
+    # inherits COLUMNS/LINES. Omit entirely when unset/non-numeric so older
+    # Claude Code clients (<2.1.153, which sends no COLUMNS) degrade cleanly.
+    for _src, _dst in (('COLUMNS', 'terminal_columns'), ('LINES', 'terminal_lines')):
+        _v = os.environ.get(_src)
+        if _v is not None and _v.strip().isdigit():
+            hook_input[_dst] = int(_v)
 
 # Wrap into the daemon request envelope; newline-terminated as the daemon expects.
 request = json.dumps({'event': event_name, 'hook_input': hook_input}) + '\n'
