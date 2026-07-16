@@ -27,8 +27,9 @@ def _build_settings_with_all_hooks() -> dict:
     hooks: dict = {}
     for event_id in _all_event_ids():
         json_key = event_id.json_key
-        # StatusLine is not in the hooks section
-        if json_key == "StatusLine":
+        # StatusLine is not in the hooks section; catalogued-but-unwired events
+        # (Plan 00170 burn-down) have no forwarder/registration yet.
+        if json_key == "StatusLine" or not event_id.wired:
             continue
         hooks[json_key] = [
             {
@@ -45,11 +46,19 @@ def _build_settings_with_all_hooks() -> dict:
 
 
 class TestHookEventsConstant:
-    """Verify HOOK_EVENTS_IN_SETTINGS matches EventID (minus StatusLine)."""
+    """Verify HOOK_EVENTS_IN_SETTINGS matches the WIRED EventID set (minus StatusLine)."""
 
     def test_matches_event_id_excluding_status_line(self) -> None:
-        """HOOK_EVENTS_IN_SETTINGS must include all EventID json_keys except StatusLine."""
-        expected_keys = {eid.json_key for eid in _all_event_ids() if eid.json_key != "StatusLine"}
+        """HOOK_EVENTS_IN_SETTINGS must include all WIRED EventID json_keys except StatusLine.
+
+        Catalogued-but-unwired events (Plan 00170 burn-down) are deliberately
+        excluded: they have no forwarder or settings registration yet, so
+        requiring them here would make hook_registration_checker flag a missing
+        hook that does not exist.
+        """
+        expected_keys = {
+            eid.json_key for eid in _all_event_ids() if eid.wired and eid.json_key != "StatusLine"
+        }
         assert set(HOOK_EVENTS_IN_SETTINGS.keys()) == expected_keys
 
     def test_bash_keys_match_event_id(self) -> None:

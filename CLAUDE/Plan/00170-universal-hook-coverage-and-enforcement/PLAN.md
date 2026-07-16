@@ -16,10 +16,10 @@ project to attach a handler to it.** That is a raison-d'être bug, not a nice-to
 
 Ground truth (2026-07-16): the official spec
 ([code.claude.com/docs/en/hooks](https://code.claude.com/docs/en/hooks)) documents
-**31 hook events**. The daemon wires **10** of them (`constants/events.py`:
+**30 hook events**. The daemon wires **10** of them (`constants/events.py`:
 PreToolUse, PostToolUse, SessionStart, SessionEnd, Stop, SubagentStop,
 UserPromptSubmit, PreCompact, Notification, PermissionRequest — plus the separate
-StatusLine surface). **~21 documented events are unwired** (see §Coverage Gap).
+StatusLine surface). **20 documented events are unwired** (see §Coverage Gap).
 
 This plan establishes a durable principle and the machinery to enforce it:
 
@@ -92,7 +92,7 @@ Wired (10 documented + StatusLine): SessionStart, UserPromptSubmit, PreToolUse,
 PermissionRequest, PostToolUse, Notification, SubagentStop, Stop, PreCompact,
 SessionEnd.
 
-**Unwired (21):**
+**Unwired (20):**
 
 | Event                 | Can block?        | Notes / first-use idea                                  |
 | --------------------- | ----------------- | ------------------------------------------------------- |
@@ -207,18 +207,26 @@ new registrations.
 
 ### Phase 1: Canonical registry (SSoT)
 
-- [ ] ⬜ **Task 1.1**: Enumerate all 31 events into `EventID` with metadata
-  (`can_block`, `category`, `response_contract`, `spec_version`,
-  `ships_builtin_handler`). TDD: registry-shape tests first.
+- [x] ✅ **Task 1.1**: Enumerate all 30 events into `EventID` with metadata
+  (`can_block`, `category`, `wired`). Done: `EventIDMeta` gained
+  `can_block`/`category`/`wired`; all 30 Claude Code events + StatusLine are
+  catalogued (20 as `wired=False` burn-down). `_build_hook_events_map` filters
+  `wired` so unwired events do not leak into the settings-registration
+  requirement. (`response_contract`/`spec_version` deferred — not needed for the
+  passthrough increment.)
 - [ ] ⬜ **Task 1.2**: Decide the forwarder strategy (per-event generated vs single
   parameterised dispatcher) — investigate settings command-arg support first
   (Decision 1).
 
 ### Phase 2: Completeness enforcement gate (TDD)
 
-- [ ] ⬜ **Task 2.1**: Write the completeness test (forwarder/installer/settings/
-  router/schema/passthrough per event + orphan check). RED against today's gap.
-- [ ] ⬜ **Task 2.2**: Wire it into `scripts/qa/` as a blocking check.
+- [x] ✅ **Task 2.1**: `tests/integration/test_hook_coverage_completeness.py` —
+  cross-locks EventID ↔ EventType ↔ forwarders ↔ settings ↔ input/response
+  schemas, guards the catalogue against Claude Code drift
+  (`CLAUDE_CODE_HOOK_EVENTS`), and tracks the burn-down (`EXPECTED_UNWIRED`). 11
+  assertions, all green.
+- [x] ✅ **Task 2.2**: It is a pytest, so it runs inside `run_tests.sh` — part of
+  the blocking QA gate (`llm_qa.py all`). No separate registry entry needed.
 
 ### Phase 3: Zero-handler passthrough + wiring
 
@@ -262,7 +270,7 @@ command-arg support and forwarder-generation in the installer.
 
 ## Success Criteria
 
-- [ ] `EventID` registry enumerates all 31 documented events with metadata.
+- [x] `EventID` registry enumerates all 30 documented events with metadata.
 - [ ] Completeness gate FAILS on any unwired/orphaned event and PASSES only at full
   coverage; wired into QA.
 - [ ] Every documented event is forwarded + dispatchable with safe zero-handler
@@ -279,3 +287,7 @@ command-arg support and forwarder-generation in the installer.
 
 - Plan scaffolded; recovery coverage via the session's existing cron `4c8c64ca`
   (Plan 00169) — no duplicate cron created.
+- Phase 1–2 delivered: canonical 30-event `EventID` catalogue + metadata +
+  completeness enforcement gate (`test_hook_coverage_completeness.py`). QA 13/13
+  (10249 tests, MyPy clean), daemon RUNNING. 20 events remain on the
+  `EXPECTED_UNWIRED` burn-down for Phase 3.

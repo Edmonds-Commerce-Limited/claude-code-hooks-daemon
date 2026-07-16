@@ -32,7 +32,14 @@ _DAEMON_WRAPPER_FRAGMENT = "/.claude/hooks/"
 
 
 def _build_hook_events_map() -> dict[str, str]:
-    """Build mapping of json_key -> bash_key for all hookable event types.
+    """Build mapping of json_key -> bash_key for all WIRED hookable event types.
+
+    Only ``wired=True`` events are included: catalogued-but-not-yet-wired events
+    (Plan 00170 burn-down) have no forwarder or settings registration yet, so
+    requiring them here would make ``hook_registration_checker`` flag a missing
+    registration for a hook that deliberately does not exist yet. StatusLine is
+    excluded because it registers under the top-level ``statusLine`` key rather
+    than the ``hooks`` section.
 
     Returns:
         Dict mapping PascalCase json_key to kebab-case bash_key
@@ -40,7 +47,7 @@ def _build_hook_events_map() -> dict[str, str]:
     result: dict[str, str] = {}
     for name in dir(EventID):
         attr = getattr(EventID, name)
-        if isinstance(attr, EventIDMeta) and attr.json_key != _STATUS_LINE_JSON_KEY:
+        if isinstance(attr, EventIDMeta) and attr.wired and attr.json_key != _STATUS_LINE_JSON_KEY:
             result[attr.json_key] = attr.bash_key
     return result
 
