@@ -96,7 +96,7 @@ Agent proposes bump with justification. Manual override accepted.
 
 ### 3. Version Update
 
-Updates version in: `pyproject.toml`, `version.py`, `README.md` (badge), `CLAUDE.md`.
+Updates version in: `pyproject.toml`, `version.py`, `README.md` (badge), `CLAUDE.md`, and `.claude/ccy/claude-supervise.py` (the standalone supervisor's hardcoded `__version__`, kept in lockstep — enforced by `tests/unit/supervise/test_compaction_gap_repro.py::TestSupervisorVersionMatchesDaemon`, which FAILS the QA gate if the supervisor version drifts from `version.py`).
 
 Also updates README.md stats: test count badge+body, handler count, event type count from `.claude/HOOKS-DAEMON.md`.
 

@@ -106,23 +106,41 @@ exactly which gate blocked."
 
 ### Phase 2: Deterministic reproduction of each hypothesis
 
-- [ ] ⬜ **Task 2.1**: Repro H1 — a backgrounded thread's stale sidecar at
+- [x] ✅ **Task 2.1**: Repro H1 — a backgrounded thread's stale sidecar at
   critical yields NOOP "sidecar stale" (unit test over `load_foreground_sidecar`
-  - monitor).
-- [ ] ⬜ **Task 2.2**: Repro H2 — critical + `idle=False` (streaming) and
-  critical + non-empty input box both yield NOOP (unit test over the monitor
-  gate at line 1353 and the empty-input-box guard).
-- [ ] ⬜ **Task 2.3**: Repro H3 — empty `own_sessions` filters out a valid
-  red sidecar → NOOP "no sidecar reading" (unit test over `decide_once` with
-  `own_sessions=frozenset()`).
+  - monitor). DONE — `test_compaction_gap_repro.py::TestH1...`: a 60s-old
+    critical sidecar (past freshness, within reap TTL) NOOPs "sidecar stale" AND
+    Phase 1 logs `noop: sidecar stale`.
+- [x] ✅ **Task 2.2**: Repro H2 — the empty-input-box guard defers even a
+  critical compaction (BY DESIGN — never corrupt the human's input), now logged
+  as a deferral; and the "streaming blocks critical" theory is DISPROVEN
+  (critical bypasses `work_idle`, still compacts). DONE — `TestH2...` two tests.
+- [x] ✅ **Task 2.3**: Repro H3 — empty `own_sessions` filters out a valid
+  red sidecar → NOOP "no sidecar reading" (unit test over `_poll_once`/
+  `decide_once` with `own_sessions=frozenset()`), now logged; the in-scope
+  contrast compacts. DONE — `TestH3...` two tests.
 
 ### Phase 3: Fix the confirmed root cause
 
-- [ ] ⬜ **Task 3.1**: Based on Phase 2, fix the confirmed cause with TDD. For H1
-  (background-thread gap) design a safe coverage path or an explicit, logged
-  "background thread not covered" signal so it is never silent.
-- [ ] ⬜ **Task 3.2**: Fix the `__version__` bump-miss (3.41.0 → current) so the
+- [x] ✅ **Task 3.1**: Based on Phase 2, address the confirmed causes. DONE (in
+  scope): all three ranked failure modes are now **non-silent** — Phase 1 logs
+  the exact blocking gate for each (H1 `noop: sidecar stale`, H2 deferral, H3
+  `noop: no sidecar reading`, plus cap/cooldown). Fully *closing* the
+  background-thread coverage gap (H1) is an explicit **non-goal** (the
+  supervisor drives ONE PTY and only the foreground thread renders — reworking
+  the multi-thread feed is Plan 00158); H2 (input-box) and H3 (empty own-set)
+  are correct fail-safe behaviours, not bugs. Per **Decision 1** (observability
+  before a speculative fix), a definitive single-cause fix for the specific
+  field report is deliberately deferred until a live red session's `decision.log`
+  names the gate (Phase 5 Task 5.3) — we do NOT speculatively "fix" an
+  unconfirmed cause. The concrete, actionable defect found (the version
+  bump-miss) is fixed in 3.2.
+- [x] ✅ **Task 3.2**: Fix the `__version__` bump-miss (3.41.0 → 3.42.0) so the
   running supervisor and `supervisor-status.json` report the honest version.
+  DONE — bumped, AND locked to `version.py` by
+  `test_compaction_gap_repro.py::TestSupervisorVersionMatchesDaemon` (fails the
+  QA gate on any future drift), AND `RELEASING.md` Step 3 now lists
+  `claude-supervise.py` in the version-bump set so releases update it proactively.
 
 ### Phase 4: Supervisor active/armed status-line indicator
 
