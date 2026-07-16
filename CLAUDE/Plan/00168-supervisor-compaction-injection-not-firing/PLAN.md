@@ -113,13 +113,32 @@ exactly which gate blocked."
 - [ ] ⬜ **Task 3.2**: Fix the `__version__` bump-miss (3.41.0 → current) so the
   running supervisor and `supervisor-status.json` report the honest version.
 
-### Phase 4: Verify
+### Phase 4: Supervisor active/armed status-line indicator
 
-- [ ] ⬜ **Task 4.1**: Run `./scripts/qa/run_all.sh`, restart the daemon and the
+At-a-glance visibility that the safety net is on — complements the Phase 1
+observability. Self-contained status-line handler; needs NO supervisor change.
+
+- [ ] ⬜ **Task 4.1**: TDD a new `supervisor_indicator` status-line handler that
+  reads `{daemon_untracked}/supervise/supervisor-status.json` → `pid`, checks
+  liveness (`os.kill(pid, 0)`; EPERM == alive) and reads `/proc/<pid>/cmdline`
+  as a pid-reuse guard (`claude-supervise` substring) + armed detection
+  (`--arm`). Renders `🛡️🟢` (active+armed), `🛡️🟡` (active+dry-run), `🛡️🟠`
+  (not active). Fail-safe: any error → NOT_ACTIVE, never breaks the line.
+  Detection contract verified live 2026-07-16.
+- [ ] ⬜ **Task 4.2**: Priority 13 (adjacent to the context section:
+  model_context=10, context_sidecar=12); OFF by default (opt-in — non-ccy
+  clients would otherwise see a permanent orange icon); enabled in THIS repo.
+  Register HandlerID/Priority, export, config + example config, regenerate docs.
+
+### Phase 5: Verify
+
+- [ ] ⬜ **Task 5.1**: Run `./scripts/qa/run_all.sh`, restart the daemon and the
   supervisor, and confirm both RUNNING.
-- [ ] ⬜ **Task 4.2**: Live dogfood — drive a session to red/critical and confirm
-  an automated `/compact` fires (or that `decision.log` names the exact gate when
-  it intentionally defers).
+- [ ] ⬜ **Task 5.2**: Live dogfood the indicator — confirm `🛡️🟢` shows while the
+  supervisor is armed+running, and `🛡️🟠` when it is stopped.
+- [ ] ⬜ **Task 5.3**: Live dogfood compaction — drive a session to red/critical
+  and confirm an automated `/compact` fires (or that `decision.log` names the
+  exact gate when it intentionally defers).
 
 ## Technical Decisions
 
