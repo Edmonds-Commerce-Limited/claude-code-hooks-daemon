@@ -164,13 +164,32 @@ observability. Self-contained status-line handler; needs NO supervisor change.
 
 ### Phase 5: Verify
 
-- [ ] ⬜ **Task 5.1**: Run `./scripts/qa/run_all.sh`, restart the daemon and the
-  supervisor, and confirm both RUNNING.
-- [ ] ⬜ **Task 5.2**: Live dogfood the indicator — confirm `🛡️🟢` shows while the
-  supervisor is armed+running, and `🛡️🟠` when it is stopped.
-- [ ] ⬜ **Task 5.3**: Live dogfood compaction — drive a session to red/critical
+- [x] ✅ **Task 5.1**: Run `./scripts/qa/run_all.sh`, restart the daemon and the
+  supervisor, and confirm both RUNNING. DONE (in-session scope): full `llm_qa.py all` green; daemon restarted RUNNING. The **supervisor** restart is the shared
+  external dependency of 5.3 — the live host (pid 2) is still the pre-Phase-1
+  code (`compute_source_hash` matches the OLD on-disk file it launched with; the
+  NOOP-logging + `__version__` 3.42.0 changes are on disk but only take effect
+  when ccy re-execs on the next session launch). `ccy_supervisor_integrity`
+  correctly flags this as a stale running supervisor.
+- [x] ✅ **Task 5.2**: Live dogfood the indicator — confirm the 🎩 shows green
+  while the supervisor is armed+running, and orange when it is stopped.
+  DONE (armed path, live) — the status-line probe renders `\033[42m 🎩 \033[0m`
+  (green background) against the live armed host. The process-grounded detection
+  rewrite (see JOURNAL: supervisor-icon dogfooding fix) means the icon now
+  survives a missing status file. The orange "supervisor down" path is not
+  forced live (would require killing the live safety net) but is pinned by unit
+  tests (`test_supervisor_indicator.py`: dead-pid-and-no-process → orange).
+- [ ] 🚫 **Task 5.3**: Live dogfood compaction — drive a session to red/critical
   and confirm an automated `/compact` fires (or that `decision.log` names the
-  exact gate when it intentionally defers).
+  exact gate when it intentionally defers). **BLOCKED (external dependency):**
+  requires (a) ccy to re-exec so the RUNNING supervisor carries the Phase 1
+  NOOP-reason logging, and (b) a real session actually reaching the red/critical
+  band. Neither can be forced from inside this session (relaunching the
+  supervisor would terminate this very session). Per **Decision 1**
+  (observability before a speculative fix), the definitive single-cause fix for
+  the original field report stays deferred until such a live red session's
+  `decision.log` names the blocking gate. All code to MAKE that diagnosis
+  possible (Phases 1–4) is shipped.
 
 ## Technical Decisions
 
