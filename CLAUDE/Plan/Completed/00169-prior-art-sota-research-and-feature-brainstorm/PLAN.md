@@ -1,6 +1,6 @@
 # Plan 00169: Prior-Art / SOTA Research and Feature Brainstorm
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-07-16
 **Owner**: joseph
 **Priority**: Medium
@@ -70,48 +70,53 @@ CLI subcommands, or supervisor behaviours.
 
 ### Phase 1: Parallel External Research (fan-out)
 
-- [ ] 🔄 **Task 1.1**: Community Claude Code hooks prior art — awesome-claude-code
+- [x] ✅ **Task 1.1**: Community Claude Code hooks prior art — awesome-claude-code
   lists, popular hook repos/gists, blog posts on hook patterns. Capture the
   concrete hook ideas people actually build.
-- [ ] ⬜ **Task 1.2**: Adjacent agentic-CLI guardrails — Codex CLI, Gemini CLI,
+- [x] ✅ **Task 1.2**: Adjacent agentic-CLI guardrails — Codex CLI, Gemini CLI,
   Aider, opencode, Continue, Cursor/Windsurf rules & permission models. How
   do they gate dangerous actions, enforce workflow, and scope tool access.
-- [ ] ⬜ **Task 1.3**: SOTA policy / guardrail engines & agent-safety — OPA/Rego,
+- [x] ✅ **Task 1.3**: SOTA policy / guardrail engines & agent-safety — OPA/Rego,
   sandboxing (seatbelt/landlock/bubblewrap), permission brokers, secret
   scanners, LLM-guardrail frameworks (NeMo Guardrails, Llama Guard, etc.).
-- [ ] ⬜ **Task 1.4**: SOTA agent observability / telemetry / eval — OpenTelemetry
+- [x] ✅ **Task 1.4**: SOTA agent observability / telemetry / eval — OpenTelemetry
   GenAI, LangSmith/Langfuse-style tracing, session analytics, prompt/response
   capture, cost/usage dashboards — what's transferable to a local hooks daemon.
-- [ ] ⬜ **Task 1.5**: Context / compaction / long-running-agent management &
+- [x] ✅ **Task 1.5**: Context / compaction / long-running-agent management &
   multi-agent orchestration safety — memory systems, context budgeting,
   checkpoint/resume, orchestration guardrails.
 
 ### Phase 2: Synthesis & Gap Analysis
 
-- [ ] ⬜ **Task 2.1**: Merge agent findings into `RESEARCH-FINDINGS.md`
+- [x] ✅ **Task 2.1**: Merge agent findings into `RESEARCH-FINDINGS.md`
   (deduped, sourced, one section per research angle).
-- [ ] ⬜ **Task 2.2**: Build `GAP-ANALYSIS.md` — table mapping each external idea
+- [x] ✅ **Task 2.2**: Build `GAP-ANALYSIS.md` — table mapping each external idea
   to have / partial / missing against our handler set.
 
 ### Phase 3: Brainstorm & Ranked Backlog
 
-- [ ] ⬜ **Task 3.1**: Write `FEATURE-BACKLOG.md` — ranked candidate features with
+- [x] ✅ **Task 3.1**: Write `FEATURE-BACKLOG.md` — ranked candidate features with
   short briefs (problem, sketch, fit, effort signal, novelty), including
   blue-sky ideas.
-- [ ] ⬜ **Task 3.2**: Recommend the top few to graduate into their own plans;
+- [x] ✅ **Task 3.2**: Recommend the top few to graduate into their own plans;
   note which are quick wins vs. large.
 
 ## Success Criteria
 
-- [ ] Five research angles covered with sourced findings (URLs captured).
-- [ ] `RESEARCH-FINDINGS.md`, `GAP-ANALYSIS.md`, `FEATURE-BACKLOG.md` committed
+- [x] Five research angles covered with sourced findings (URLs captured).
+- [x] `RESEARCH-FINDINGS.md`, `GAP-ANALYSIS.md`, `FEATURE-BACKLOG.md` committed
   under this plan folder.
-- [ ] Backlog contains a ranked list with at least a handful of genuinely novel
+- [x] Backlog contains a ranked list with at least a handful of genuinely novel
   ideas plus clear have/partial/missing mapping.
-- [ ] Top recommendations flagged for graduation into future plans.
+- [x] Top recommendations flagged for graduation into future plans.
 
 ## Delivery & Milestones
 
 <!-- Curated milestones + delivery commit hashes only (git is SSoT for "when"). -->
 
-- Plan scaffolded and recovery cron armed (cron `4c8c64ca`).
+- Plan scaffolded and recovery cron armed (cron `4c8c64ca`) — commit `92f3936b`.
+- Dossier delivered: `RESEARCH-FINDINGS.md`, `GAP-ANALYSIS.md`,
+  `FEATURE-BACKLOG.md` (five research angles synthesised; ~27 candidate features
+  ranked; top graduation wave = F1 secret-blocker, F2 guardrail-block analytics,
+  F3 StopFailure recovery, F4 updatedInput auto-fix, F5 protect-tests; flagship
+  bet F8 OS-sandbox mode).
