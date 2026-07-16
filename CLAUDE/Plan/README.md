@@ -14,6 +14,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00159: Status Writers Thread-Safe Tmp Naming](00159-status-writers-thread-safe-tmp-naming/PLAN.md) - Not Started (v3.39.0 code-review follow-up: the four `.{stem}.{pid}.tmp` atomic writers key on PID not thread — harmless today, hardening only)
 
+- [00167: Statusline Wrap & Upgrade Notifier](00167-statusline-wrap-and-upgrade-notifier/PLAN.md) - Not Started (wrap the status line onto multiple rows on narrow terminals by forwarding `COLUMNS`/`LINES` from the wrapper env into the Status payload; extract the `📦` upgrade arrow out of `daemon_stats` into an on-by-default `upgrade_notifier` handler so health stats can be dropped while keeping the upgrade prompt; documents that no cron data reaches the status line and catalogues unused Status-input fields)
+
 ### Code Quality / Handler Configuration
 
 - [00161: Idle Housekeeping Mode](00161-idle-housekeeping-mode/PLAN.md) - In Progress (Phase 1 brainstorm delivered: turn repeated no-op failsafe-recovery ticks into a bounded, report-first housekeeping mode dispatched to specialist sub-agents; awaiting Phase 2 build)
@@ -1033,9 +1035,9 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 ## Plan Statistics
 
-- **Total Plans Created**: 166 (count = `hooksdaemon.latestPlanNumber` git counter; 00145 was allocated by the counter but its folder is not present on this branch)
+- **Total Plans Created**: 167 (count = `hooksdaemon.latestPlanNumber` git counter; 00145 was allocated by the counter but its folder is not present on this branch)
 - **Completed**: 136 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 23 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Active**: 24 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102); plus draft folders deleted and no longer on disk (00036 empty draft, 00038 superseded by 00045, 00073 orphan empty folder removed during Plan 00107 housekeeping)
 - **Last reconciled by**: Plan 00144 Task 2.2 sweep remediation
