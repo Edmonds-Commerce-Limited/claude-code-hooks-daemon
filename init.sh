@@ -405,6 +405,11 @@ _exec_bit_selfheal() {
         notification
         pre-compact
         permission-request
+        setup
+        permission-denied
+        cwd-changed
+        worktree-create
+        worktree-remove
     )
     local h
     for h in "${hooks[@]}"; do

@@ -175,6 +175,56 @@ generate_settings_json() {
           }
         ]
       }
+    ],
+    "Setup": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/setup"
+          }
+        ]
+      }
+    ],
+    "PermissionDenied": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/permission-denied"
+          }
+        ]
+      }
+    ],
+    "CwdChanged": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/cwd-changed"
+          }
+        ]
+      }
+    ],
+    "WorktreeCreate": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/worktree-create"
+          }
+        ]
+      }
+    ],
+    "WorktreeRemove": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/worktree-remove"
+          }
+        ]
+      }
     ]
   }
 }

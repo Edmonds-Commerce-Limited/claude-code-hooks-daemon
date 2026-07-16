@@ -89,9 +89,7 @@ _STATUS_EVENTTYPE_VALUE = "Status"
 # wires every Claude Code hook event and the final-coverage assertion locks it.
 EXPECTED_UNWIRED: frozenset[str] = frozenset(
     {
-        "Setup",
         "UserPromptExpansion",
-        "PermissionDenied",
         "PostToolUseFailure",
         "PostToolBatch",
         "MessageDisplay",
@@ -102,10 +100,7 @@ EXPECTED_UNWIRED: frozenset[str] = frozenset(
         "TeammateIdle",
         "InstructionsLoaded",
         "ConfigChange",
-        "CwdChanged",
         "FileChanged",
-        "WorktreeCreate",
-        "WorktreeRemove",
         "PostCompact",
         "Elicitation",
         "ElicitationResult",

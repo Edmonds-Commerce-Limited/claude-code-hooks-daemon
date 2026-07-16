@@ -26,19 +26,31 @@ class TestConfigValidatorConstants:
     """Tests for ConfigValidator class constants."""
 
     def test_valid_event_types(self) -> None:
-        """VALID_EVENT_TYPES should contain all 11 event types."""
-        assert len(ConfigValidator.VALID_EVENT_TYPES) == 11
-        assert "pre_tool_use" in ConfigValidator.VALID_EVENT_TYPES
-        assert "post_tool_use" in ConfigValidator.VALID_EVENT_TYPES
-        assert "permission_request" in ConfigValidator.VALID_EVENT_TYPES
-        assert "notification" in ConfigValidator.VALID_EVENT_TYPES
-        assert "user_prompt_submit" in ConfigValidator.VALID_EVENT_TYPES
-        assert "session_start" in ConfigValidator.VALID_EVENT_TYPES
-        assert "session_end" in ConfigValidator.VALID_EVENT_TYPES
-        assert "stop" in ConfigValidator.VALID_EVENT_TYPES
-        assert "subagent_stop" in ConfigValidator.VALID_EVENT_TYPES
-        assert "pre_compact" in ConfigValidator.VALID_EVENT_TYPES
-        assert "status_line" in ConfigValidator.VALID_EVENT_TYPES
+        """VALID_EVENT_TYPES must equal the WIRED EventID config keys (SSoT).
+
+        Derived rather than hardcoded so it tracks Plan 00170's growing wired set
+        without per-event edits — a client may declare handlers for any wired
+        event. The original 11 wired event types must always remain present.
+        """
+        from claude_code_hooks_daemon.constants import wired_event_metas
+
+        expected = {meta.config_key for meta in wired_event_metas()}
+        assert ConfigValidator.VALID_EVENT_TYPES == expected
+
+        for key in (
+            "pre_tool_use",
+            "post_tool_use",
+            "permission_request",
+            "notification",
+            "user_prompt_submit",
+            "session_start",
+            "session_end",
+            "stop",
+            "subagent_stop",
+            "pre_compact",
+            "status_line",
+        ):
+            assert key in ConfigValidator.VALID_EVENT_TYPES
 
     def test_valid_log_levels(self) -> None:
         """VALID_LOG_LEVELS should be derived from the LogLevel enum."""

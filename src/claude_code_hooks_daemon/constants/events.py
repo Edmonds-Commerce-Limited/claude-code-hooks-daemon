@@ -177,7 +177,6 @@ class EventID:
         json_key="Setup",
         can_block=False,
         category="session",
-        wired=False,
     )
 
     USER_PROMPT_EXPANSION = EventIDMeta(
@@ -197,7 +196,6 @@ class EventID:
         json_key="PermissionDenied",
         can_block=False,
         category="permission",
-        wired=False,
     )
 
     POST_TOOL_USE_FAILURE = EventIDMeta(
@@ -307,7 +305,6 @@ class EventID:
         json_key="CwdChanged",
         can_block=False,
         category="session",
-        wired=False,
     )
 
     FILE_CHANGED = EventIDMeta(
@@ -327,7 +324,6 @@ class EventID:
         json_key="WorktreeCreate",
         can_block=True,
         category="worktree",
-        wired=False,
     )
 
     WORKTREE_REMOVE = EventIDMeta(
@@ -337,7 +333,6 @@ class EventID:
         json_key="WorktreeRemove",
         can_block=False,
         category="worktree",
-        wired=False,
     )
 
     POST_COMPACT = EventIDMeta(

@@ -26,6 +26,14 @@ class EventType(StrEnum):
     STOP = "Stop"
     SUBAGENT_STOP = "SubagentStop"
     STATUS_LINE = "Status"
+    # Plan 00170: events wired for zero-handler passthrough (no built-in handler
+    # yet — client projects may attach handlers). Kept in lockstep with the
+    # wired EventID catalogue by test_hook_coverage_completeness.
+    SETUP = "Setup"
+    PERMISSION_DENIED = "PermissionDenied"
+    CWD_CHANGED = "CwdChanged"
+    WORKTREE_CREATE = "WorktreeCreate"
+    WORKTREE_REMOVE = "WorktreeRemove"
 
     @classmethod
     def from_string(cls, value: str) -> "EventType":

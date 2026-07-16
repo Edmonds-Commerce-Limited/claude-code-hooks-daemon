@@ -241,10 +241,17 @@ new registrations.
   returns `HookResult.allow()` (`chain.py:263`) and the permissive response
   schema accepts `{}`; no per-contract router change needed. Locked by the
   completeness gate's schema-presence assertions.
-- [ ] ⬜ **Task 3.2**: Wire the **forward-only** batch (§G) — forwarders, installer,
-  settings, schemas. Completeness gate goes GREEN for those.
-- [ ] ⬜ **Task 3.3**: Wire the **blocking** batch (§G) with safe defaults +
-  per-event acceptance tests.
+- [ ] 🔄 **Task 3.2**: Wire the remaining events with fail-open passthrough
+  (forwarders, installer, settings, schemas). Completeness gate burns down
+  `EXPECTED_UNWIRED`. **Batch 1 (never-fires, 5) done** — Setup,
+  PermissionDenied, CwdChanged, WorktreeCreate, WorktreeRemove wired; live-probed
+  `{}`; `EXPECTED_UNWIRED` 20→15. Remaining: Phase 3c mid batch (14) + 3d
+  MessageDisplay (1).
+- [ ] ⬜ **Task 3.3**: Because passthrough is uniform (`allow`→`{}`) and we ship
+  no built-in handler for any newly-wired event, the "blocking batch" collapses
+  into Task 3.2 — `can_block` is metadata only until a client (or a Phase-5
+  triage) adds a handler. Per-event acceptance tests fold into the live-probe
+  step of each batch.
 
 ### Phase 4: Drift detection + onboarding
 

@@ -567,6 +567,13 @@ def create_all_hooks(hooks_dir: Path) -> list[Path]:
         "subagent-stop": "SubagentStop",
         "pre-compact": "PreCompact",
         "session-end": "SessionEnd",
+        # Plan 00170: zero-handler-passthrough events (wired for coverage; no
+        # built-in handler — client projects may attach their own).
+        "setup": "Setup",
+        "permission-denied": "PermissionDenied",
+        "cwd-changed": "CwdChanged",
+        "worktree-create": "WorktreeCreate",
+        "worktree-remove": "WorktreeRemove",
     }
 
     hook_files = []
@@ -645,6 +652,20 @@ def create_settings_json(project_root: Path, force: bool = False) -> None:
             ],
             "UserPromptSubmit": [
                 {"hooks": [{"type": "command", "command": _hook_cmd("user-prompt-submit")}]}
+            ],
+            # Plan 00170: zero-handler-passthrough events (wired for coverage).
+            "Setup": [{"hooks": [{"type": "command", "command": _hook_cmd("setup")}]}],
+            "PermissionDenied": [
+                {"hooks": [{"type": "command", "command": _hook_cmd("permission-denied")}]}
+            ],
+            "CwdChanged": [
+                {"hooks": [{"type": "command", "command": _hook_cmd("cwd-changed")}]}
+            ],
+            "WorktreeCreate": [
+                {"hooks": [{"type": "command", "command": _hook_cmd("worktree-create")}]}
+            ],
+            "WorktreeRemove": [
+                {"hooks": [{"type": "command", "command": _hook_cmd("worktree-remove")}]}
             ],
         },
     }
@@ -880,7 +901,9 @@ def create_project_handler_structure(project_root: Path) -> None:
     handlers_root = project_root / ".claude" / "hooks" / "handlers"
     handlers_root.mkdir(parents=True, exist_ok=True)
 
-    # Hook events (10 total)
+    # Hook events. Clients may attach project handlers to any wired event —
+    # including the Plan 00170 zero-handler-passthrough events for which the
+    # daemon ships no built-in handler.
     hook_events = [
         "pre_tool_use",
         "post_tool_use",
@@ -892,6 +915,11 @@ def create_project_handler_structure(project_root: Path) -> None:
         "stop",
         "subagent_stop",
         "pre_compact",
+        "setup",
+        "permission_denied",
+        "cwd_changed",
+        "worktree_create",
+        "worktree_remove",
     ]
 
     # Create main README

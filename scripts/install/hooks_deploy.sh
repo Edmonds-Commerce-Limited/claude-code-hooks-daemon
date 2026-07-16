@@ -37,6 +37,12 @@ _DAEMON_HOOK_BASENAMES=(
     pre-compact
     session-end
     status-line
+    # Plan 00170: zero-handler-passthrough events (wired for coverage).
+    setup
+    permission-denied
+    cwd-changed
+    worktree-create
+    worktree-remove
 )
 
 # Relative path (within the daemon dir — the git clone/checkout, NOT the

@@ -13,8 +13,23 @@ class TestEventType:
     """Tests for EventType enum."""
 
     def test_all_event_types_exist(self) -> None:
-        """All expected event types should be defined."""
+        """EventType values must equal the WIRED EventID catalogue (SSoT).
+
+        Derived so it tracks Plan 00170's growing wired set without per-event
+        edits. StatusLine carries dual-naming: its EventID json_key is
+        "StatusLine" but its dispatch value is "Status". The core set must always
+        be present.
+        """
+        from claude_code_hooks_daemon.constants import wired_event_metas
+
         expected_types = {
+            "Status" if meta.json_key == "StatusLine" else meta.json_key
+            for meta in wired_event_metas()
+        }
+        actual_types = {et.value for et in EventType}
+        assert actual_types == expected_types
+
+        for value in (
             "PreToolUse",
             "PostToolUse",
             "SessionStart",
@@ -25,10 +40,9 @@ class TestEventType:
             "Notification",
             "Stop",
             "SubagentStop",
-            "Status",  # STATUS_LINE event type
-        }
-        actual_types = {et.value for et in EventType}
-        assert actual_types == expected_types
+            "Status",
+        ):
+            assert value in actual_types
 
     def test_from_string_exact_match(self) -> None:
         """from_string should handle exact matches."""

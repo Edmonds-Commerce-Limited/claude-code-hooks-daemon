@@ -22,7 +22,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Mapping from directory name to EventType
+# Mapping from directory name to EventType. Every dispatchable EventType must be
+# present so a client can drop a handler dir for it (discovery skips entries with
+# no on-disk dir via is_dir guards). Plan 00170 zero-handler-passthrough events
+# have no built-in dir yet — they are wired for coverage, not because we ship a
+# handler.
 EVENT_TYPE_MAPPING: dict[str, EventType] = {
     "pre_tool_use": EventType.PRE_TOOL_USE,
     "post_tool_use": EventType.POST_TOOL_USE,
@@ -35,6 +39,12 @@ EVENT_TYPE_MAPPING: dict[str, EventType] = {
     "stop": EventType.STOP,
     "subagent_stop": EventType.SUBAGENT_STOP,
     "status_line": EventType.STATUS_LINE,
+    # Plan 00170: wired zero-handler-passthrough events (no built-in dir yet).
+    "setup": EventType.SETUP,
+    "permission_denied": EventType.PERMISSION_DENIED,
+    "cwd_changed": EventType.CWD_CHANGED,
+    "worktree_create": EventType.WORKTREE_CREATE,
+    "worktree_remove": EventType.WORKTREE_REMOVE,
 }
 
 
