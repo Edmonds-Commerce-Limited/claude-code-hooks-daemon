@@ -297,6 +297,12 @@
       "reason": "Daemon stats handler: log-and-continue on individual stat collection failures. Status line handlers are fail-open \u2014 one stat failing must not crash the entire status line. Already logged."
     },
     {
+      "file": "handlers/status_line/upgrade_notifier.py",
+      "function": "_detect_upgrade_segment",
+      "rule": "return-none-on-error",
+      "reason": "Upgrade notifier reads a best-effort version-check cache file: an OSError/ValueError on read (missing/malformed JSON) means no reliable upgrade signal, so returning None (render nothing) is the correct fallback, not error hiding. Status line handlers are fail-open by design; the outer handle() also wraps this call so any other exception fails safe too."
+    },
+    {
       "file": "handlers/status_line/git_branch.py",
       "function": "_render_git_context",
       "rule": "log-and-continue",
@@ -337,6 +343,24 @@
       "function": "read_stats_cache",
       "rule": "return-none-on-error",
       "reason": "Stats cache reader: returns None when cache file missing or unparseable. Status line callers handle None by omitting the stats section. Status line must never crash the terminal display."
+    },
+    {
+      "file": "handlers/status_line/supervisor_indicator.py",
+      "function": "_scan_for_supervisor",
+      "rule": "return-none-on-error",
+      "reason": "Supervisor indicator /proc scan: returns None when /proc is unreadable (OSError). An unreadable /proc means the supervisor cannot be discovered by process, so the caller falls back to the status-file presence check. Status line handlers are fail-open by design — a scan failure must never crash the render. Already logged at debug level."
+    },
+    {
+      "file": "handlers/status_line/supervisor_indicator.py",
+      "function": "_read_status",
+      "rule": "return-none-on-error",
+      "reason": "Supervisor indicator status-file reader: returns None when the status file is missing or unparseable (OSError/ValueError). The caller treats None as 'no usable status pid' and falls back to the /proc scan. Status line handlers are fail-open by design; the status file is best-effort. Already logged at debug level."
+    },
+    {
+      "file": "handlers/status_line/supervisor_indicator.py",
+      "function": "_read_cmdline",
+      "rule": "return-none-on-error",
+      "reason": "Supervisor indicator cmdline reader: returns None when /proc/{pid}/cmdline is unreadable (process gone between listing and read, or permission). None means the pid is not confirmable as the supervisor, so the caller skips it. Status line handlers are fail-open by design. Already logged at debug level."
     },
     {
       "file": "handlers/stop/auto_continue_stop.py",

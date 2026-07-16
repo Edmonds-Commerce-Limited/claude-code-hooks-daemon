@@ -14,18 +14,22 @@ via the ANSI *background* (which does render behind the glyph) — one icon, no
 second glyph.
 
 The "not configured" state renders NOTHING so the handler is safe to enable by
-default: a project that never runs the ccy supervisor has no status file and
-therefore shows no icon, while a project whose supervisor died leaves its
-status file behind and gets the orange alarm.
+default: a project that never runs the ccy supervisor shows no icon, while a
+project whose supervisor died (a status file left behind, no live process) gets
+the orange alarm.
 
-Detection reads the supervisor's own status file rather than probing live
-processes each render. The (pid, armed) identity it resolves is IMMUTABLE for
-the lifetime of a given supervisor process, so it is MEMOISED after the first
-successful resolution: subsequent renders do only a cheap ``os.kill(pid, 0)``
-liveness probe instead of re-reading the (multi-kB) ``/proc/<pid>/cmdline``
-every ~1-2s. A crash still flips to orange because the liveness probe runs
-every render; when the cached supervisor dies the cache is dropped and the next
-render re-resolves (picking up a replacement supervisor if one started).
+Detection is grounded in the live PROCESS, not merely the status file — the
+supervisor's status file was observed going missing while the supervisor was
+still running (``claude-supervise.py --arm``), which used to make the icon
+vanish even though the safety net was on. Resolution therefore: (1) trust the
+status file when it names a live supervisor pid, else (2) scan ``/proc`` for a
+live ``claude-supervise`` process, else (3) fall back to orange/none based on
+whether a status file is present at all. The resolved (pid, armed) identity is
+IMMUTABLE for the lifetime of a supervisor process, so it is MEMOISED: later
+renders do only a cheap ``os.kill(pid, 0)`` liveness probe instead of the
+status-file read or the ``/proc`` scan. A crash still flips to orange because
+the liveness probe runs every render; when the cached supervisor dies the cache
+is dropped and the next render re-resolves (picking up a replacement).
 
 ANY unexpected failure fails safe to NO segment — this handler must never raise
 and never break the status line (mirrors the fail-silent pattern used by
@@ -58,6 +62,10 @@ _STATUS_FILENAME = "supervisor-status.json"
 # launched armed.
 _SUPERVISOR_CMDLINE_MARKER = "claude-supervise"
 _SUPERVISOR_ARM_FLAG = "--arm"
+# The supervisor runs a `--worker` decision subprocess alongside the host. Both
+# carry the cmdline marker; when scanning /proc we prefer the HOST (whose pid is
+# stable) and fall back to the worker only if the host is not matched.
+_SUPERVISOR_WORKER_FLAG = "--worker"
 
 # The top hat — the "Fat Controller" overseeing/directing the session. A single
 # glyph; state is carried by the ANSI BACKGROUND colour behind it (foreground
@@ -161,29 +169,77 @@ class SupervisorIndicatorHandler(Handler):
         return self._resolve_state()
 
     def _resolve_state(self) -> _SupervisorState:
-        """Full resolution: read status file + cmdline, memoising on success."""
-        status = self._read_status(self._status_file_path())
-        if status is None:
-            # No status file at all -> supervisor not configured (render nothing).
-            # A present-but-unreadable file is treated as NOT_ACTIVE below.
-            if not self._status_file_path().exists():
-                return _SupervisorState.NOT_CONFIGURED
-            return _SupervisorState.NOT_ACTIVE
+        """Full resolution, memoising the identity on success.
 
-        pid = status.get("pid")
-        if not isinstance(pid, int) or not self._pid_alive(pid):
-            return _SupervisorState.NOT_ACTIVE
+        Ground truth is "is an armed supervisor PROCESS running", not "does a
+        status file exist": the supervisor's status file can go missing while
+        the supervisor is very much alive (observed live — the icon vanished
+        while ``claude-supervise.py --arm`` was still running). So:
 
-        cmdline = self._read_cmdline(pid)
-        if cmdline is None or _SUPERVISOR_CMDLINE_MARKER not in cmdline:
-            # Unreadable, or the pid was reused by an unrelated process.
-            return _SupervisorState.NOT_ACTIVE
+        1. Fast, precise: if the status file names a LIVE supervisor pid, use it.
+        2. Fallback: scan ``/proc`` for a live ``claude-supervise`` process, so a
+           missing/stale status file never hides an active safety net.
+        3. Otherwise decide "down" vs "never configured" from whether a status
+           file is present at all (keeps the handler silent for non-ccy projects).
+        """
+        status_path = self._status_file_path()
+        status_present = status_path.exists()
+        status = self._read_status(status_path)
 
-        armed = _SUPERVISOR_ARM_FLAG in cmdline
-        # Memoise the immutable identity for the fast path.
+        # 1. Status file names a live, genuine supervisor -> use it directly.
+        if status is not None:
+            pid = status.get("pid")
+            if isinstance(pid, int) and self._pid_alive(pid):
+                cmdline = self._read_cmdline(pid)
+                if cmdline is not None and _SUPERVISOR_CMDLINE_MARKER in cmdline:
+                    return self._activate(pid, _SUPERVISOR_ARM_FLAG in cmdline)
+
+        # 2. No usable status-file pid -> discover the supervisor by process.
+        found = self._scan_for_supervisor()
+        if found is not None:
+            return self._activate(found[0], found[1])
+
+        # 3. Nothing live. Orange alarm if a supervisor was configured (status
+        #    file present) but is down; otherwise render nothing (never configured).
+        return _SupervisorState.NOT_ACTIVE if status_present else _SupervisorState.NOT_CONFIGURED
+
+    def _activate(self, pid: int, armed: bool) -> _SupervisorState:
+        """Memoise a resolved supervisor identity and return its active state."""
         self._cached_pid = pid
         self._cached_armed = armed
         return _SupervisorState.ACTIVE_ARMED if armed else _SupervisorState.ACTIVE_DRYRUN
+
+    def _scan_for_supervisor(self) -> tuple[int, bool] | None:
+        """Find a live ``claude-supervise`` process by scanning ``/proc``.
+
+        Returns ``(pid, armed)`` for the supervisor HOST when found (preferred
+        over the ``--worker`` child, whose pid churns on worker restarts), or the
+        worker as a fallback, or None if no supervisor process is running. Only
+        runs on a cache miss (a missing status file, or a dead cached pid), so
+        the per-render cost stays the cheap ``os.kill`` liveness probe. Never
+        raises — an unreadable ``/proc`` yields None (fail-safe to no segment).
+        """
+        proc_root = Path("/proc")
+        try:
+            entries = list(proc_root.iterdir())
+        except OSError as e:
+            logger.debug("Failed to scan /proc for supervisor: %s", e)
+            return None
+
+        worker_match: tuple[int, bool] | None = None
+        for entry in entries:
+            if not entry.name.isdigit():
+                continue
+            pid = int(entry.name)
+            cmdline = self._read_cmdline(pid)
+            if cmdline is None or _SUPERVISOR_CMDLINE_MARKER not in cmdline:
+                continue
+            armed = _SUPERVISOR_ARM_FLAG in cmdline
+            if _SUPERVISOR_WORKER_FLAG not in cmdline:
+                return (pid, armed)  # the host is authoritative; stop here
+            if worker_match is None:
+                worker_match = (pid, armed)
+        return worker_match
 
     def _status_file_path(self) -> Path:
         """Return the path to the supervisor's status file."""
