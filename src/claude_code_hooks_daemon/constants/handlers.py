@@ -432,6 +432,11 @@ class HandlerID:
         config_key="context_sidecar",
         display_name="status-context-sidecar",
     )
+    SUPERVISOR_INDICATOR = HandlerIDMeta(
+        class_name="SupervisorIndicatorHandler",
+        config_key="supervisor_indicator",
+        display_name="status-supervisor-indicator",
+    )
     USAGE_TRACKING = HandlerIDMeta(
         class_name="UsageTrackingHandler",
         config_key="usage_tracking",

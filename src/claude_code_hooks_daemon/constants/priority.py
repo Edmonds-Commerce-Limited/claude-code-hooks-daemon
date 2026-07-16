@@ -147,6 +147,7 @@ class Priority:
     ACCOUNT_DISPLAY = 5
     MODEL_CONTEXT = 10
     CONTEXT_SIDECAR = 12  # Observe-only context sidecar for the PTY supervisor (opt-in)
+    SUPERVISOR_INDICATOR = 13  # ccy PTY supervisor armed/dryrun/inactive shield (opt-in)
     CURRENT_TIME = 14
     USAGE_TRACKING = 15
     WORKING_DIRECTORY = 25

@@ -22,6 +22,9 @@ from claude_code_hooks_daemon.handlers.status_line.model_context import ModelCon
 from claude_code_hooks_daemon.handlers.status_line.multithread_indicator import (
     MultithreadIndicatorHandler,
 )
+from claude_code_hooks_daemon.handlers.status_line.supervisor_indicator import (
+    SupervisorIndicatorHandler,
+)
 from claude_code_hooks_daemon.handlers.status_line.usage_tracking import (
     UsageTrackingHandler,
 )
@@ -39,6 +42,7 @@ __all__ = [
     "GitRepoNameHandler",
     "ModelContextHandler",
     "MultithreadIndicatorHandler",
+    "SupervisorIndicatorHandler",
     "UsageTrackingHandler",
     "WorkingDirectoryHandler",
 ]

@@ -454,6 +454,12 @@ handlers:
       enabled: true
       priority: 11
 
+    supervisor_indicator:  # Top hat 🎩 w/ bg colour: green armed / yellow dry-run / orange down (ccy supervisor)
+      # On by default (renders nothing when no supervisor is configured).
+      # Explicitly enabled here for this repo's always-armed ccy sessions.
+      enabled: true
+      priority: 13
+
     git_branch:     # Shows current git branch if in repo
       enabled: true
       priority: 20
