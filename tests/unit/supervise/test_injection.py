@@ -340,6 +340,111 @@ class TestPollOnce:
         assert "injected" in contents
 
 
+class TestPollOnceNoopLogging:
+    """Plan 00168 Phase 1: every NOOP tick records WHY it did nothing.
+
+    A red-but-not-compacting session previously left ZERO trace of which gate
+    blocked (``_apply_decision`` only logged actual injections). These tests
+    pin the new deduped NOOP-reason logging: the gate is named, the observed
+    context band is annotated, and an unchanged reason never floods the log.
+    """
+
+    def _sidecar(
+        self,
+        directory: Path,
+        *,
+        red: bool,
+        tier: str,
+        critical: bool = False,
+        compact_urgent: bool = False,
+        ts: float = 1000.0,
+    ) -> None:
+        directory.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "red": red,
+            "tier": tier,
+            "pct": 85.0 if red else 5.0,
+            "critical": critical,
+            "compact_urgent": compact_urgent,
+            "session_id": "s",
+            "ts": ts,
+            "seq": 1,
+            "writer_pid": 1,
+        }
+        (directory / "s.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    def _poll(self, sc: Path, log: object, *, idle: bool) -> None:
+        _mod._poll_once(
+            CompactStateMachine(CompactPolicy()),
+            sidecar_dir=sc,
+            now_wall=1000.0,
+            idle=idle,
+            dry_run=True,
+            master_writer=lambda _b: None,
+            log=log,
+            freshness_seconds=30.0,
+        )
+
+    def test_benign_green_noop_is_silent(self, tmp_path: Path) -> None:
+        # A positively not-red, non-stale context is the common idle tick with
+        # nothing to do -- it carries no diagnostic value, so the log stays empty
+        # (the blind-spot gates below are what DO get recorded).
+        sc = tmp_path / "sc"
+        self._sidecar(sc, red=False, tier="green")
+        log_path = tmp_path / "decision.log"
+        self._poll(sc, DecisionLog(log_path), idle=True)
+        assert not log_path.exists()
+
+    def test_consecutive_identical_gate_noop_is_deduped(self, tmp_path: Path) -> None:
+        # A red context gated on a busy TUI, held for several ticks, logs ONCE.
+        sc = tmp_path / "sc"
+        self._sidecar(sc, red=True, tier="red")
+        log = DecisionLog(tmp_path / "decision.log")
+        for _ in range(4):
+            self._poll(sc, log, idle=False)
+        lines = (tmp_path / "decision.log").read_text(encoding="utf-8").splitlines()
+        assert len(lines) == 1
+
+    def test_red_busy_noop_names_gate_and_red_band(self, tmp_path: Path) -> None:
+        # Red context + a busy TUI (idle=False) -> gated on "session busy"; the
+        # log must record the gate AND that the context was already red.
+        sc = tmp_path / "sc"
+        self._sidecar(sc, red=True, tier="red")
+        log = DecisionLog(tmp_path / "decision.log")
+        self._poll(sc, log, idle=False)
+        contents = (tmp_path / "decision.log").read_text(encoding="utf-8")
+        assert "noop:" in contents
+        assert _mod._REASON_BUSY_COMPOSING in contents
+        assert "[red]" in contents
+
+    def test_critical_busy_noop_annotates_critical_band(self, tmp_path: Path) -> None:
+        sc = tmp_path / "sc"
+        self._sidecar(sc, red=True, tier="critical", critical=True)
+        log = DecisionLog(tmp_path / "decision.log")
+        self._poll(sc, log, idle=False)
+        contents = (tmp_path / "decision.log").read_text(encoding="utf-8")
+        assert "[critical]" in contents
+
+    def test_no_sidecar_noop_is_logged(self, tmp_path: Path) -> None:
+        # H1/H3 signature: the sidecar is absent/filtered, so the supervisor sees
+        # no reading. This MUST leave a trace (deduped) rather than nothing.
+        sc = tmp_path / "sc"
+        sc.mkdir(parents=True)
+        log = DecisionLog(tmp_path / "decision.log")
+        self._poll(sc, log, idle=True)
+        contents = (tmp_path / "decision.log").read_text(encoding="utf-8")
+        assert "noop: no sidecar reading" in contents
+
+    def test_injection_is_not_logged_as_noop(self, tmp_path: Path) -> None:
+        sc = tmp_path / "sc"
+        self._sidecar(sc, red=True, tier="red")
+        log = DecisionLog(tmp_path / "decision.log")
+        self._poll(sc, log, idle=True)
+        contents = (tmp_path / "decision.log").read_text(encoding="utf-8")
+        assert "would-compact" in contents
+        assert "noop:" not in contents
+
+
 def _write_signal(directory: Path, name: str, *, ts: float) -> None:
     directory.mkdir(parents=True, exist_ok=True)
     (directory / f"{name}.compacting").write_text(json.dumps({"ts": ts}), encoding="utf-8")

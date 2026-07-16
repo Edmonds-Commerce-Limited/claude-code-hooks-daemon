@@ -73,6 +73,39 @@ def test_outcome_json_roundtrip_full() -> None:
     assert _mod._outcome_from_json(_mod._outcome_to_json(outcome)) == outcome
 
 
+def test_outcome_json_roundtrip_carries_noop_reason_log() -> None:
+    # Plan 00168 Phase 1: the worker's NOOP-reason diagnostic must survive the
+    # worker->host wire so the host's DecisionLog can record it.
+    outcome = _mod.TickOutcome(
+        decision_value="NOOP",
+        reason="cooldown active",
+        payload=None,
+        submit=True,
+        consume_signal_path=None,
+        deferred_log=None,
+        noop_reason_log="noop: cooldown active [critical]",
+    )
+    restored = _mod._outcome_from_json(_mod._outcome_to_json(outcome))
+    assert restored == outcome
+    assert restored.noop_reason_log == "noop: cooldown active [critical]"
+
+
+def test_outcome_from_json_defaults_missing_noop_reason_log_to_none() -> None:
+    # Backward-compat: an older worker's JSON without the new key must decode.
+    line = json.dumps(
+        {
+            "decision_value": "NOOP",
+            "reason": "r",
+            "payload": None,
+            "submit": True,
+            "consume_signal_path": None,
+            "deferred_log": None,
+            "machine_state": None,
+        }
+    )
+    assert _mod._outcome_from_json(line).noop_reason_log is None
+
+
 # ── run_worker() in-process (no subprocess) ──────────────────────────────────
 
 

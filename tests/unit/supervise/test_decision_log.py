@@ -64,6 +64,50 @@ class TestDecisionLogExplicitPath:
             DecisionLog(log_path)
 
 
+class TestDecisionLogNoopDedup:
+    """`write_noop` records NOOP-reason lines but suppresses a CONSECUTIVE repeat.
+
+    Plan 00168 Phase 1: the supervisor must record WHY a tick did nothing (the
+    gate that blocked) so a red-but-not-compacting session is diagnosable from
+    ``decision.log`` alone -- but deduplicated on the message so an unchanged
+    gate held for minutes never floods the log every ~1-2s tick.
+    """
+
+    def test_write_noop_records_the_reason(self, tmp_path: Path) -> None:
+        log = DecisionLog(tmp_path / "decision.log")
+        log.write_noop("noop: cooldown active [critical]")
+        contents = (tmp_path / "decision.log").read_text(encoding="utf-8")
+        assert "noop: cooldown active [critical]" in contents
+
+    def test_consecutive_identical_noop_is_written_once(self, tmp_path: Path) -> None:
+        log = DecisionLog(tmp_path / "decision.log")
+        for _ in range(5):
+            log.write_noop("noop: sidecar stale")
+        lines = (tmp_path / "decision.log").read_text(encoding="utf-8").splitlines()
+        assert len(lines) == 1
+
+    def test_changed_noop_reason_is_written(self, tmp_path: Path) -> None:
+        log = DecisionLog(tmp_path / "decision.log")
+        log.write_noop("noop: not red (tier=green)")
+        log.write_noop("noop: not red (tier=green)")
+        log.write_noop("noop: cooldown active [red]")
+        lines = (tmp_path / "decision.log").read_text(encoding="utf-8").splitlines()
+        assert len(lines) == 2
+        assert lines[0].endswith("noop: not red (tier=green)")
+        assert lines[1].endswith("noop: cooldown active [red]")
+
+    def test_write_resets_dedup_so_following_identical_noop_relogs(self, tmp_path: Path) -> None:
+        # A real action (injection / deferral / reap) between two identical NOOPs
+        # must NOT be swallowed: the second NOOP re-logs so the log stays a
+        # faithful transition record.
+        log = DecisionLog(tmp_path / "decision.log")
+        log.write_noop("noop: injection cap reached [critical]")
+        log.write("would-compact: ...; injected '/compact'")
+        log.write_noop("noop: injection cap reached [critical]")
+        lines = (tmp_path / "decision.log").read_text(encoding="utf-8").splitlines()
+        assert len(lines) == 3
+
+
 class TestDecisionLogDefaultPath:
     """Tests using the default (environment-derived) path."""
 

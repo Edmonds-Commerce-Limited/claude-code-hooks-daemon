@@ -85,13 +85,24 @@ exactly which gate blocked."
 
 ### Phase 1: Observability first (make NOOP ticks self-explaining)
 
-- [ ] ⬜ **Task 1.1**: Write failing tests for rate-limited NOOP-reason logging:
+- [x] ✅ **Task 1.1**: Write failing tests for rate-limited NOOP-reason logging:
   when the sidecar is red/critical but the tick decides NOOP, `decision.log` must
   record the gate that blocked (stale / not-in-scope / not-idle / input-box /
   cooldown / cap / foreground-ambiguous), deduplicated so it never floods.
-- [ ] ⬜ **Task 1.2**: Implement the rate-limited NOOP-reason log in the tick
-  path (host + policy-worker) without changing decisions; restart the supervisor
-  and confirm a live red session now logs WHY it did not compact.
+  DONE — `DecisionLog.write_noop` dedup tests (test_decision_log.py), `_poll_once`
+  NOOP-logging tests (test_injection.py: red-busy gate, critical band, no-sidecar,
+  benign-green silent, injection-not-noop), and worker-wire roundtrip
+  (test_policy_worker.py).
+- [x] ✅ **Task 1.2**: Implement the rate-limited NOOP-reason log in the tick
+  path (host + policy-worker) without changing decisions. DONE — `TickOutcome`
+  gains `noop_reason_log` (wired through `_outcome_to_json`/`_from_json`);
+  `decide_once` sets it for every NOOP gate EXCEPT the benign positively-not-red
+  steady state (so a green idle session's log stays empty, but the H1 "sidecar
+  stale" / H3 "no sidecar reading" blind-spots ARE recorded); `_apply_decision`
+  writes it via `DecisionLog.write_noop`, deduped on the low-cardinality message
+  (`noop: <reason> [band]`) so an unchanged gate logs once. Decision-preserving
+  (pure logging). Live-restart confirmation of a red session is folded into
+  Phase 5 Task 5.3 (needs a session relaunch to re-exec the supervisor).
 
 ### Phase 2: Deterministic reproduction of each hypothesis
 

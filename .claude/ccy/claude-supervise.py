@@ -449,6 +449,12 @@ class DecisionLog:
         """
         self._path = path if path is not None else self._default_path()
         self._path.parent.mkdir(parents=True, exist_ok=True)
+        # Dedup state for `write_noop` (Plan 00168 Phase 1): the last NOOP-reason
+        # message written, so a gate held unchanged for minutes logs ONCE rather
+        # than flooding the log every ~1-2s idle tick. Any real `write` (an
+        # injection / deferral / reap / lifecycle line) resets it so the next
+        # NOOP re-logs and the file stays a faithful transition record.
+        self._last_noop_message: str | None = None
 
     @staticmethod
     def _default_path() -> Path:
@@ -472,6 +478,33 @@ class DecisionLog:
         timestamp = datetime.now(UTC).isoformat()
         with self._path.open("a", encoding="utf-8") as handle:
             handle.write(f"{timestamp} {message}\n")
+        # A real action line breaks the NOOP-dedup run: the next identical NOOP
+        # reason must re-log (it describes a fresh post-action observation).
+        self._last_noop_message = None
+
+    def write_noop(self, message: str) -> None:
+        """Append a NOOP-reason line, suppressing a CONSECUTIVE identical repeat.
+
+        Plan 00168 Phase 1 observability: the supervisor records WHY each idle
+        tick did nothing (the gate that blocked -- ``sidecar stale`` /
+        ``cooldown active`` / ``not idle`` / ``no sidecar reading`` / ...), so a
+        red-but-not-compacting session is diagnosable from the log alone. The
+        message is low-cardinality (the reason plus a coarse context band, never
+        a per-tick pct), so deduping on the exact message keeps a steady gate to
+        a single line while still logging every gate TRANSITION.
+
+        Args:
+            message: The NOOP-reason line to record if it differs from the last.
+
+        Raises:
+            OSError: If the file cannot be written (never swallowed).
+        """
+        if message == self._last_noop_message:
+            return
+        timestamp = datetime.now(UTC).isoformat()
+        with self._path.open("a", encoding="utf-8") as handle:
+            handle.write(f"{timestamp} {message}\n")
+        self._last_noop_message = message
 
 
 # ---------------------------------------------------------------------------
@@ -647,6 +680,10 @@ _REASON_FOREGROUND_AMBIGUOUS = "foreground ambiguous (recent thread switch) -> d
 # for the red band only; the elevated + critical bands still act promptly.
 _REASON_RED_WORK_IN_PROGRESS = "red (patient band) but work in progress -> deferring until settled"
 _DEFERRED_LOG_PREFIX = "injection deferred: input box not empty"
+# Plan 00168 Phase 1: prefix for the deduped NOOP-reason diagnostic. Every idle
+# tick that decides NOOP records `<prefix>: <reason>[ band]` so a
+# red-but-not-compacting session names its blocking gate in `decision.log`.
+_NOOP_LOG_PREFIX = "noop"
 
 
 class Decision(enum.Enum):
@@ -751,6 +788,11 @@ class TickOutcome:
     # The machine state AFTER this tick (Plan 00164 Phase 4 fix). The host adopts
     # it as the new authoritative state so the next fallback tick cannot diverge.
     machine_state: dict[str, object] | None = None
+    # Plan 00168 Phase 1: a deduped NOOP-reason diagnostic (`noop: <reason>[
+    # band]`) the host writes to `decision.log` via `DecisionLog.write_noop`.
+    # Set only for NOOP ticks NOT already covered by `deferred_log`. None on
+    # action ticks. Kept out of the state machine (host-side dedup owns volume).
+    noop_reason_log: str | None = None
 
 
 def _coerce_float(value: object) -> float:
@@ -1583,6 +1625,37 @@ def _is_work_idle(
     return (now_monotonic - output_activity.last_output_monotonic) >= work_settle_seconds
 
 
+def _is_benign_not_red(reading: SidecarReading | None) -> bool:
+    """True when the supervisor POSITIVELY sees a not-red, non-stale context.
+
+    This is the overwhelmingly common idle tick -- the context is genuinely
+    fine and there is nothing to do. Its NOOP carries no diagnostic value, so
+    Plan 00168 Phase 1 stays SILENT on it (keeping a green idle session's
+    decision.log empty). Every OTHER NOOP gate IS logged -- crucially the
+    ``reading is None`` (no sidecar / filtered out) and ``reading.stale`` cases,
+    which are the blind-spots (H3 / H1) a red-but-not-compacting report needs.
+    """
+    return reading is not None and not reading.stale and not reading.red
+
+
+def _noop_band_suffix(reading: SidecarReading | None) -> str:
+    """A coarse ' [band]' suffix for a NOOP-reason line (Plan 00168 Phase 1).
+
+    Annotates the observed context severity when it is known and not already
+    stated by the reason itself. Deliberately low-cardinality (band, never a
+    per-tick pct) so ``DecisionLog.write_noop`` dedup keeps a steady gate to one
+    line. Empty when there is no reading, the reading is stale, or the context
+    is not red (those cases the reason string already describes fully).
+    """
+    if reading is None or reading.stale or not reading.red:
+        return ""
+    if reading.critical:
+        return " [critical]"
+    if reading.compact_urgent:
+        return " [urgent]"
+    return " [red]"
+
+
 def decide_once(
     machine: CompactStateMachine,
     *,
@@ -1692,6 +1765,18 @@ def decide_once(
         and evaluation.reason in _INJECTION_GATED_REASONS
     ):
         deferred_log = f"{_DEFERRED_LOG_PREFIX} ({evaluation.reason})"
+    # Plan 00168 Phase 1: for every OTHER NOOP tick (not the input-box deferral
+    # above, which already logs), emit a deduped NOOP-reason diagnostic naming
+    # the gate + observed band. This makes a red-but-not-compacting session
+    # self-explaining in decision.log. Decision-preserving: pure logging.
+    noop_reason_log = None
+    if (
+        payload is None
+        and deferred_log is None
+        and evaluation.decision is Decision.NOOP
+        and not _is_benign_not_red(reading)
+    ):
+        noop_reason_log = f"{_NOOP_LOG_PREFIX}: {evaluation.reason}{_noop_band_suffix(reading)}"
     return TickOutcome(
         decision_value=evaluation.decision.value,
         reason=evaluation.reason,
@@ -1700,6 +1785,7 @@ def decide_once(
         consume_signal_path=consume_signal_path,
         deferred_log=deferred_log,
         machine_state=machine.export_state(),
+        noop_reason_log=noop_reason_log,
     )
 
 
@@ -1724,6 +1810,10 @@ def _apply_decision(
     elif log is not None and outcome.deferred_log is not None:
         # An injection was pending and the NON-EMPTY INPUT BOX was the sole gate.
         log.write(outcome.deferred_log)
+    elif log is not None and outcome.noop_reason_log is not None:
+        # Plan 00168 Phase 1: record WHY this idle tick did nothing (deduped, so
+        # an unchanged gate never floods). Makes red-but-not-compacting visible.
+        log.write_noop(outcome.noop_reason_log)
 
 
 def _poll_once(
@@ -1822,6 +1912,7 @@ def _outcome_to_json(outcome: TickOutcome) -> str:
             "consume_signal_path": outcome.consume_signal_path,
             "deferred_log": outcome.deferred_log,
             "machine_state": outcome.machine_state,
+            "noop_reason_log": outcome.noop_reason_log,
         }
     )
 
@@ -1836,6 +1927,7 @@ def _outcome_from_json(line: str) -> TickOutcome:
         consume_signal_path=data["consume_signal_path"],
         deferred_log=data["deferred_log"],
         machine_state=data.get("machine_state"),
+        noop_reason_log=data.get("noop_reason_log"),
     )
 
 
