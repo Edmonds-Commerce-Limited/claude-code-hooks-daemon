@@ -1,6 +1,6 @@
 # Plan 00167: statusline wrap and upgrade notifier
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-07-16
 **Owner**: joseph
 **Priority**: Medium
@@ -182,13 +182,22 @@ this plan forwards explicitly.
 
 ### Phase 5: Docs and verification
 
-- [ ] ⬜ **Task 5.1**: Update `handlers/status_line/CLAUDE.md` and
+- [x] ✅ **Task 5.1**: Update `handlers/status_line/CLAUDE.md` and
   `CLAUDE/Architecture/StatusLine.md` for the new handler, the wrap behaviour,
   and the forwarded width fields; record the cron answer (on-disk feasibility)
-  and the unused-field inventory in the architecture doc.
-- [ ] ⬜ **Task 5.2**: Run `./scripts/qa/run_all.sh`, restart the daemon, and
+  and the unused-field inventory in the architecture doc. DONE — StatusLine.md
+  gains a "Terminal-width-aware wrapping" subsection (transport + wrap +
+  display-width), an `UpgradeNotifierHandler` detail block + table row, a
+  daemon_stats "arrow removed / OFF by default" note, and a "Status Input Fields"
+  section (used-vs-unused inventory + the "crons feasible from disk" answer).
+  status_line/CLAUDE.md gains the upgrade_notifier row + a wrap note.
+- [x] ✅ **Task 5.2**: Run `./scripts/qa/run_all.sh`, restart the daemon, and
   verify `Status: RUNNING`; dogfood the wrapped status line and the
-  upgrade-notifier separation.
+  upgrade-notifier separation. DONE — full `llm_qa.py all` green; daemon restarted
+  RUNNING (upgrade_notifier at priority 32). Live dogfood: `COLUMNS=40` wraps to
+  5 rows at `|` boundaries (nothing lost, green 🎩 present, NO `📦` in the
+  daemon_stats health line — confirming the extraction), `COLUMNS=220` stays one
+  row.
 
 ## Dependencies
 
@@ -258,3 +267,7 @@ client that enabled `daemon_stats` to disable it. **Date**: 2026-07-16
      JOURNAL/00167-Journal-YY-MM-DD.md — see CLAUDE/PlanJournalling.md. -->
 
 - Plan drafted from status-line investigation (research 2026-07-16).
+- Phase 2 (width-aware wrapping) delivered at `f77af9a5`.
+- Phase 1+3+4 (terminal-size transport, upgrade_notifier extraction, rollout
+  messaging) delivered at `a608c08c`.
+- Phase 5 (docs) + plan completion delivered at the completion commit.

@@ -14,8 +14,6 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 
 - [00159: Status Writers Thread-Safe Tmp Naming](00159-status-writers-thread-safe-tmp-naming/PLAN.md) - Not Started (v3.39.0 code-review follow-up: the four `.{stem}.{pid}.tmp` atomic writers key on PID not thread — harmless today, hardening only)
 
-- [00167: Statusline Wrap & Upgrade Notifier](00167-statusline-wrap-and-upgrade-notifier/PLAN.md) - Not Started (wrap the status line onto multiple rows on narrow terminals by forwarding `COLUMNS`/`LINES` from the wrapper env into the Status payload; extract the `📦` upgrade arrow out of `daemon_stats` into an on-by-default `upgrade_notifier` handler so health stats can be dropped while keeping the upgrade prompt; documents that cron/self-wake state IS persisted on disk under `~/.claude/jobs/` even though it's absent from the Status input, and catalogues unused Status-input fields)
-
 - [00168: Supervisor Compaction Injection Not Firing](00168-supervisor-compaction-injection-not-firing/PLAN.md) - In Progress (high-value: user reports the ccy supervisor stopped auto-`/compact`-ing at COMPACT NOW; live diagnostic verified the supervisor armed+running, not stale, session-isolation working single-session — ruled those out; top suspect is foreground-only injection leaving backgrounded Agent-View threads uncovered; ships NOOP-reason observability FIRST so silent gates become diagnosable, then deterministic repro + fix)
 
 ### Code Quality / Handler Configuration
@@ -139,6 +137,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
   - Depends on Plan 00032 orchestration infrastructure
 
 ## Completed Plans
+
+- [00167: Statusline Wrap & Upgrade Notifier](Completed/00167-statusline-wrap-and-upgrade-notifier/PLAN.md) - Complete (the status line now wraps onto multiple rows on narrow terminals instead of dropping right-hand segments off the edge. Phase 2: `hook_result.py` `to_json` gains a width-aware wrap — `_wrap_status_parts` greedily first-fit-packs the normalised segments into rows ≤ width at `|` boundaries (Claude Code renders one row per `\n`), `_display_width` measures ANSI-stripped display width (East-Asian wide = 2, combining/format = 0); width absent ⇒ single-line join (backwards-compatible). Phase 1: the daemon can't inherit the client's `COLUMNS`/`LINES`, so the jq-free `init.sh` transport forwards them into the Status payload as `terminal_columns`/`terminal_lines` (schema `["integer","null"]`), threaded through `to_json` from all three call sites. Phase 3: extracted the `📦 vX → vY` upgrade arrow out of the off-by-default `daemon_stats` into a new on-by-default `upgrade_notifier` handler (priority 32) so every client keeps the upgrade prompt while the developer health line stays off. Phase 4: `config-changes/v3.43.0.yaml` promotes upgrade_notifier and nudges clients to disable `daemon_stats` if they enabled it; `daemon_stats` kept enabled here as a dev-repo exception. Phase 5: `Architecture/StatusLine.md` + `status_line/CLAUDE.md` document the wrap, the width fields, the new handler, the unused-Status-field inventory, and the "crons feasible from disk, not in the payload" answer. Live-dogfooded: `COLUMNS=40` → 5 wrapped rows (nothing lost), `COLUMNS=220` → 1 row. QA 13/13, 10238 tests, 95.3% cov. Delivery `f77af9a5`/`a608c08c` + completion commit)
 
 - [00165: Install Permission Bug Fixes](Completed/00165-install-permission-bug-fixes/PLAN.md) - Complete (two upstream install-path bugs surfaced by a php-qa-ci field report, fixed here TDD-first. Issue #3: `validate_not_nested` blocked EVERY documented consumer manual install because it keyed on `.claude/hooks-daemon/src` — which the `git clone … .claude/hooks-daemon` step creates by construction; replaced with `project_root_is_daemon_repo()` offline detection via `pyproject.toml [project].name`, applied to both `daemon/validation.py` and standalone `install.py`. Issue #4: `set_hook_permissions`/`git_force_executable` force-chmod'd every file in `.claude/hooks/` including pre-existing docs (`CLAUDE.md`/`README.md`), producing content-free git mode-bit noise on every reinstall; scoped both to a single canonical `_DAEMON_HOOK_BASENAMES` list via a new `list_deployed_hook_paths` helper. Original field report preserved in-folder for reference. QA 13/13, 10114 tests, 95.3% cov. Delivery `81337862`/`ad31e4e2`/`a88d9969`/`dcb6553c`)
 
@@ -1038,8 +1038,8 @@ This directory contains implementation plans for the Claude Code Hooks Daemon pr
 ## Plan Statistics
 
 - **Total Plans Created**: 168 (count = `hooksdaemon.latestPlanNumber` git counter; 00145 was allocated by the counter but its folder is not present on this branch)
-- **Completed**: 136 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
-- **Active**: 25 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
+- **Completed**: 137 (includes 1 reduced-scope plan and 4 found already-shipped when audited; count = `Completed/` folders)
+- **Active**: 24 (count = root `NNNNN-*` plan folders; includes the 3 upstream-blocked on-hold plans below and several dormant plans awaiting a scheduling/release window)
 - **On Hold**: 3 (blocked by upstream Claude Code delegate mode fix)
 - **Cancelled/Abandoned**: 4 on disk (count = `Cancelled/` folders: 00044 approach retired, 00081 superseded by 00082, 00087 client-side limitation, 00091 superseded by 00102); plus draft folders deleted and no longer on disk (00036 empty draft, 00038 superseded by 00045, 00073 orphan empty folder removed during Plan 00107 housekeeping)
 - **Last reconciled by**: Plan 00144 Task 2.2 sweep remediation
