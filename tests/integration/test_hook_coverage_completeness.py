@@ -85,13 +85,14 @@ _STATUS_EVENTTYPE_VALUE = "Status"
 
 # Burn-down list (Plan 00170): documented events not yet wired end-to-end.
 # Each entry MUST have ``wired=False`` in EventID. As an event is wired, remove
-# it from BOTH places in the same change. When this set is empty, the daemon
-# wires every Claude Code hook event and the final-coverage assertion locks it.
-EXPECTED_UNWIRED: frozenset[str] = frozenset(
-    {
-        "MessageDisplay",
-    }
-)
+# it from BOTH places in the same change.
+#
+# FULLY BURNED DOWN: this set is now empty — the daemon wires EVERY Claude Code
+# hook event. It stays empty unless Claude Code ships a NEW event; in that case
+# catalogue it in EventID + CLAUDE_CODE_HOOK_EVENTS and, if it cannot be wired in
+# the same change, add its json_key here to acknowledge the gap (the burn-down
+# test then forces it to be tracked, never silently unwired).
+EXPECTED_UNWIRED: frozenset[str] = frozenset()
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _HOOKS_DIR = _REPO_ROOT / ".claude" / "hooks"

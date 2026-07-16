@@ -241,18 +241,18 @@ new registrations.
   returns `HookResult.allow()` (`chain.py:263`) and the permissive response
   schema accepts `{}`; no per-contract router change needed. Locked by the
   completeness gate's schema-presence assertions.
-- [ ] 🔄 **Task 3.2**: Wire the remaining events with fail-open passthrough
-  (forwarders, installer, settings, schemas). Completeness gate burns down
-  `EXPECTED_UNWIRED`. **Batch 1 (never-fires, 5) + Batch 2 (mid, 14) done** —
-  19 of 20 wired end-to-end and live-probed `{}`; `EXPECTED_UNWIRED` 20→1.
-  install.py settings/forwarders now derive from one SSoT list
-  (`_DAEMON_FORWARDER_HOOKS`). Remaining: **MessageDisplay** (Phase 3d,
-  high-frequency).
-- [ ] ⬜ **Task 3.3**: Because passthrough is uniform (`allow`→`{}`) and we ship
-  no built-in handler for any newly-wired event, the "blocking batch" collapses
-  into Task 3.2 — `can_block` is metadata only until a client (or a Phase-5
-  triage) adds a handler. Per-event acceptance tests fold into the live-probe
-  step of each batch.
+- [x] ✅ **Task 3.2**: Wire the remaining events with fail-open passthrough
+  (forwarders, installer, settings, schemas). **DONE — all 20 wired end-to-end
+  and live-probed `{}`; `EXPECTED_UNWIRED` 20→0.** Full coverage: catalogue 31 =
+  wired 31; 30 hook events registered in settings.json + StatusLine. install.py
+  settings/forwarders derive from one SSoT list (`_DAEMON_FORWARDER_HOOKS`).
+  Commits: `ba88b5b6` (batch 1, 5), `34d8597f` (batch 2, 14), + this batch
+  (MessageDisplay).
+- [x] ✅ **Task 3.3**: Collapsed into Task 3.2. Passthrough is uniform
+  (`allow`→`{}`) and we ship no built-in handler for any newly-wired event, so
+  there is no separate "blocking batch" — `can_block` is metadata only until a
+  client (or a Phase-5 triage) adds a handler. Per-event acceptance tests folded
+  into the live-probe step of each batch (every forwarder probed `{}`).
 
 ### Phase 4: Drift detection + onboarding
 

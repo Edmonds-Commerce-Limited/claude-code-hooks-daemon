@@ -59,6 +59,7 @@ EVENT_TYPE_MAPPING: dict[str, EventType] = {
     "post_compact": EventType.POST_COMPACT,
     "elicitation": EventType.ELICITATION,
     "elicitation_result": EventType.ELICITATION_RESULT,
+    "message_display": EventType.MESSAGE_DISPLAY,
 }
 
 

@@ -308,6 +308,7 @@ _DAEMON_FORWARDER_HOOKS: dict[str, str] = {
     "post-compact": "PostCompact",
     "elicitation": "Elicitation",
     "elicitation-result": "ElicitationResult",
+    "message-display": "MessageDisplay",
 }
 
 # Forwarders that carry an explicit per-invocation timeout in settings.json.
@@ -921,6 +922,7 @@ def create_project_handler_structure(project_root: Path) -> None:
         "post_compact",
         "elicitation",
         "elicitation_result",
+        "message_display",
     ]
 
     # Create main README

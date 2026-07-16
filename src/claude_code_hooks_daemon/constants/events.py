@@ -163,11 +163,14 @@ class EventID:
     )
 
     # -----------------------------------------------------------------------
-    # Catalogued-but-not-yet-wired events (Plan 00170 burn-down, wired=False).
-    # Present so the daemon KNOWS every Claude Code hook event exists and the
-    # completeness gate can enforce coverage. As each is wired end-to-end, flip
-    # wired=True and remove it from the test's EXPECTED_UNWIRED set in the same
-    # change. Source of truth: https://code.claude.com/docs/en/hooks
+    # Events catalogued by Plan 00170. As of the Phase 3 burn-down these are ALL
+    # wired end-to-end (forwarder + settings + dispatch + schemas), same as the
+    # block above — the daemon ships no built-in handler for them, but every one
+    # is a fail-open passthrough a client project can attach a handler to. A
+    # newly discovered Claude Code event is added here; if it cannot be wired in
+    # the same change, set wired=False AND add its json_key to the completeness
+    # test's EXPECTED_UNWIRED so the gap is tracked, never silent.
+    # Source of truth: https://code.claude.com/docs/en/hooks
     # -----------------------------------------------------------------------
 
     SETUP = EventIDMeta(
@@ -222,7 +225,6 @@ class EventID:
         json_key="MessageDisplay",
         can_block=False,
         category="display",
-        wired=False,
     )
 
     SUBAGENT_START = EventIDMeta(

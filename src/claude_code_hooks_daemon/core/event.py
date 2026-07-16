@@ -48,6 +48,7 @@ class EventType(StrEnum):
     POST_COMPACT = "PostCompact"
     ELICITATION = "Elicitation"
     ELICITATION_RESULT = "ElicitationResult"
+    MESSAGE_DISPLAY = "MessageDisplay"
 
     @classmethod
     def from_string(cls, value: str) -> "EventType":

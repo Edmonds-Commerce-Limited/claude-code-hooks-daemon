@@ -424,6 +424,7 @@ _exec_bit_selfheal() {
         post-compact
         elicitation
         elicitation-result
+        message-display
     )
     local h
     for h in "${hooks[@]}"; do

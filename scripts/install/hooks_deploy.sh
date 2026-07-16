@@ -57,6 +57,7 @@ _DAEMON_HOOK_BASENAMES=(
     post-compact
     elicitation
     elicitation-result
+    message-display
 )
 
 # Relative path (within the daemon dir — the git clone/checkout, NOT the
